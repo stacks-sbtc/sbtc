@@ -218,6 +218,9 @@ pub trait DbRead {
         &self,
     ) -> impl Future<Output = Result<Option<model::EncryptedDkgShares>, Error>> + Send;
 
+    /// Returns the number of DKG shares entries in the database.
+    fn get_encrypted_dkg_shares_count(&self) -> impl Future<Output = Result<u32, Error>> + Send;
+
     /// Return the latest rotate-keys transaction confirmed by the given `chain-tip`.
     fn get_last_key_rotation(
         &self,
@@ -338,7 +341,7 @@ pub trait DbRead {
     fn will_sign_bitcoin_tx_sighash(
         &self,
         sighash: &model::SigHash,
-    ) -> impl Future<Output = Result<Option<bool>, Error>> + Send;
+    ) -> impl Future<Output = Result<Option<(bool, PublicKeyXOnly)>, Error>> + Send;
 }
 
 /// Represents the ability to write data to the signer storage.

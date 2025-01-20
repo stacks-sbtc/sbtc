@@ -810,7 +810,15 @@ impl StacksClient {
             // The first block in the GET /v3/tenures/<block-id> response
             // is always the block related to the given <block-id>. But we
             // already have that block, so we can skip adding it again.
-            debug_assert_eq!(blocks.first().map(|b| b.block_id()), Some(last_block_id));
+
+            match blocks.first().map(|b| b.block_id()) {
+                Some(received_id) if received_id == last_block_id => {}
+                Some(received_id) => {
+                    return Err(Error::GetTenureRawMismatch(received_id, last_block_id))
+                }
+                None => return Err(Error::EmptyStacksTenure),
+            }
+
             tenure_blocks.extend(blocks.into_iter().skip(1))
         }
 
@@ -1418,7 +1426,6 @@ mod tests {
     use crate::stacks::wallet::get_full_tx_size;
     use crate::storage::in_memory::Store;
     use crate::storage::DbWrite;
-    use crate::testing::storage::DATABASE_NUM;
 
     use clarity::types::Address;
     use clarity::vm::types::{
@@ -1432,7 +1439,6 @@ mod tests {
 
     use super::*;
     use std::io::Read;
-    use std::sync::atomic::Ordering;
 
     fn generate_wallet(num_keys: u16, signatures_required: u16) -> SignerWallet {
         let network_kind = NetworkKind::Regtest;
@@ -1448,8 +1454,7 @@ mod tests {
     #[ignore = "This is an integration test that hasn't been setup for CI yet"]
     #[test(tokio::test)]
     async fn fetch_unknown_ancestors_works() {
-        let db_num = DATABASE_NUM.fetch_add(1, Ordering::SeqCst);
-        let db = crate::testing::storage::new_test_database(db_num, true).await;
+        let db = crate::testing::storage::new_test_database().await;
 
         let settings = Settings::new_from_default_config().unwrap();
         // This is an integration test that will read from the config, which provides

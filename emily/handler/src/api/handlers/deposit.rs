@@ -1,5 +1,6 @@
 //! Handlers for Deposit endpoints.
 use crate::api::models::common::Status;
+use crate::api::models::deposit::requests::BasicPaginationQuery;
 use crate::api::models::deposit::responses::{
     GetDepositsForTransactionResponse, UpdateDepositsResponse,
 };
@@ -7,9 +8,6 @@ use crate::database::entries::StatusEntry;
 use stacks_common::codec::StacksMessageCodec as _;
 use tracing::{debug, instrument};
 use warp::reply::{json, with_status, Reply};
-
-use bitcoin::ScriptBuf;
-use warp::http::StatusCode;
 
 use crate::api::models::deposit::{Deposit, DepositInfo};
 use crate::api::models::{
@@ -26,6 +24,8 @@ use crate::database::entries::deposit::{
     DepositEntry, DepositEntryKey, DepositEvent, DepositParametersEntry,
     ValidatedUpdateDepositsRequest,
 };
+use bitcoin::ScriptBuf;
+use warp::http::StatusCode;
 
 /// Get deposit handler.
 #[utoipa::path(
@@ -187,6 +187,58 @@ pub async fn get_deposits(
         .map_or_else(Reply::into_response, Reply::into_response)
 }
 
+/// Get deposits by recipient handler.
+#[utoipa::path(
+    get,
+    operation_id = "getDepositsForRecipient",
+    path = "/deposit/recipient/{recipient}",
+    params(
+        ("recipient" = String, Path, description = "the status to search by when getting all deposits."),
+        ("nextToken" = Option<String>, Query, description = "the next token value from the previous return of this api call."),
+        ("pageSize" = Option<i32>, Query, description = "the maximum number of items in the response list.")
+    ),
+    tag = "deposit",
+    responses(
+        (status = 200, description = "Deposits retrieved successfully", body = GetDepositsResponse),
+        (status = 400, description = "Invalid request body", body = ErrorResponse),
+        (status = 404, description = "Address not found", body = ErrorResponse),
+        (status = 405, description = "Method not allowed", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    )
+)]
+#[instrument(skip(context))]
+pub async fn get_deposits_for_recipient(
+    context: EmilyContext,
+    recipient: String,
+    query: BasicPaginationQuery,
+) -> impl warp::reply::Reply {
+    debug!("In get deposits for recipient");
+    // Internal handler so `?` can be used correctly while still returning a reply.
+    async fn handler(
+        context: EmilyContext,
+        recipient: String,
+        query: BasicPaginationQuery,
+    ) -> Result<impl warp::reply::Reply, Error> {
+        let (entries, next_token) = accessors::get_deposit_entries_by_recipient(
+            &context,
+            &recipient,
+            query.next_token,
+            query.page_size,
+        )
+        .await?;
+        // Convert data into resource types.
+        let deposits: Vec<DepositInfo> = entries.into_iter().map(|entry| entry.into()).collect();
+        // Create response.
+        let response = GetDepositsResponse { deposits, next_token };
+        // Respond.
+        Ok(with_status(json(&response), StatusCode::OK))
+    }
+    // Handle and respond.
+    handler(context, recipient, query)
+        .await
+        .map_or_else(Reply::into_response, Reply::into_response)
+}
+
 /// Create deposit handler.
 #[utoipa::path(
     post,
@@ -199,6 +251,7 @@ pub async fn get_deposits(
         (status = 400, description = "Invalid request body", body = ErrorResponse),
         (status = 404, description = "Address not found", body = ErrorResponse),
         (status = 405, description = "Method not allowed", body = ErrorResponse),
+        (status = 409, description = "Duplicate request", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
@@ -218,8 +271,33 @@ pub async fn create_deposit(
         api_state.error_if_reorganizing()?;
 
         let chaintip = api_state.chaintip();
-        let stacks_block_hash: String = chaintip.key.hash;
-        let stacks_block_height: u64 = chaintip.key.height;
+        let mut stacks_block_hash: String = chaintip.key.hash;
+        let mut stacks_block_height: u64 = chaintip.key.height;
+
+        // Check if deposit with such txid and outindex already exists.
+        let entry = accessors::get_deposit_entry(
+            &context,
+            &DepositEntryKey {
+                bitcoin_txid: body.bitcoin_txid.clone(),
+                bitcoin_tx_output_index: body.bitcoin_tx_output_index,
+            },
+        )
+        .await;
+        // Reject if we already have a deposit with the same txid and output index and it is NOT pending or reprocessing.
+        match entry {
+            Ok(deposit) => {
+                if deposit.status != Status::Pending && deposit.status != Status::Reprocessing {
+                    return Err(Error::Conflict);
+                } else {
+                    // If the deposit is pending or reprocessing, we should keep height and hash same as in the old deposit
+                    stacks_block_hash = deposit.last_update_block_hash;
+                    stacks_block_height = deposit.last_update_height;
+                }
+            }
+            Err(Error::NotFound) => {}
+            Err(e) => return Err(e),
+        }
+
         let status = Status::Pending;
 
         // Get parameters from scripts.

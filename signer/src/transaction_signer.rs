@@ -6,7 +6,6 @@
 //! For more details, see the [`TxSignerEventLoop`] documentation.
 
 use std::collections::BTreeSet;
-use std::collections::HashMap;
 use std::time::Duration;
 
 use crate::bitcoin::validation::BitcoinTxContext;
@@ -21,6 +20,7 @@ use crate::ecdsa::SignEcdsa as _;
 use crate::error::Error;
 use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
+use crate::keys::PublicKeyXOnly;
 use crate::message;
 use crate::message::BitcoinPreSignAck;
 use crate::message::StacksTransactionSignRequest;
@@ -35,13 +35,16 @@ use crate::stacks::contracts::StacksTx;
 use crate::stacks::wallet::MultisigTx;
 use crate::stacks::wallet::SignerWallet;
 use crate::storage::model;
+use crate::storage::model::SigHash;
 use crate::storage::DbRead;
 use crate::storage::DbWrite as _;
 use crate::wsts_state_machine::SignerStateMachine;
+use crate::wsts_state_machine::StateMachineId;
 
-use bitcoin::hashes::Hash;
+use bitcoin::hashes::Hash as _;
 use bitcoin::TapSighash;
 use futures::StreamExt;
+use lru::LruCache;
 use wsts::net::DkgEnd;
 use wsts::net::DkgStatus;
 use wsts::net::Message as WstsNetMessage;
@@ -126,7 +129,7 @@ pub struct TxSignerEventLoop<Context, Network, Rng> {
     ///
     /// - For DKG rounds, TxID should be the ID of the transaction that
     ///   defined the signer set.
-    pub wsts_state_machines: HashMap<bitcoin::Txid, SignerStateMachine>,
+    pub wsts_state_machines: LruCache<StateMachineId, SignerStateMachine>,
     /// The threshold for the signer
     pub threshold: u32,
     /// How many bitcoin blocks back from the chain tip the signer will look for requests.
@@ -136,6 +139,18 @@ pub struct TxSignerEventLoop<Context, Network, Rng> {
     /// The time the signer should pause for after receiving a DKG begin message
     /// before relaying to give the other signers time to catch up.
     pub dkg_begin_pause: Option<Duration>,
+}
+
+/// This struct represents a signature hash and the public key that locks
+/// it.
+///
+/// The struct is only created when the signer has validated the bitcoin
+/// transaction and has agreed to sign the sighash.
+struct AcceptedSigHash {
+    /// The signature hash to be signed.
+    sighash: SigHash,
+    /// The public key that is used to lock the above signature hash.
+    public_key: PublicKeyXOnly,
 }
 
 /// This function defines which messages this event loop is interested
@@ -413,7 +428,9 @@ where
         let multi_sig = MultisigTx::new_tx(&request.contract_tx, &wallet, request.tx_fee);
         let txid = multi_sig.tx().txid();
 
-        debug_assert_eq!(txid, request.txid);
+        if txid != request.txid {
+            return Err(Error::SignerCoordinatorTxidMismatch(txid, request.txid));
+        }
 
         let signature = crate::signature::sign_stacks_tx(multi_sig.tx(), &self.signer_private_key);
 
@@ -482,8 +499,9 @@ where
         Ok(())
     }
 
+    /// Process WSTS messages
     #[tracing::instrument(skip_all, fields(txid = %msg.txid))]
-    async fn handle_wsts_message(
+    pub async fn handle_wsts_message(
         &mut self,
         msg: &message::WstsMessage,
         bitcoin_chain_tip: &model::BitcoinBlockHash,
@@ -499,16 +517,9 @@ where
                     return Ok(());
                 }
 
-                let dkg_shares = self
-                    .context
-                    .get_storage()
-                    .get_latest_encrypted_dkg_shares()
-                    .await?;
-
-                if dkg_shares.is_some() {
-                    tracing::warn!("we do not support running DKG more than once");
-                    return Err(Error::DkgHasAlreadyRun);
-                }
+                // Assert that DKG should be allowed to proceed given the current state
+                // and configuration.
+                assert_allow_dkg_begin(&self.context, bitcoin_chain_tip).await?;
 
                 let signer_public_keys = self.get_signer_public_keys(bitcoin_chain_tip).await?;
 
@@ -517,7 +528,8 @@ where
                     self.threshold,
                     self.signer_private_key,
                 )?;
-                self.wsts_state_machines.insert(msg.txid, state_machine);
+                let id = StateMachineId::from(bitcoin_chain_tip);
+                self.wsts_state_machines.put(id, state_machine);
 
                 if let Some(pause) = self.dkg_begin_pause {
                     // Let's give the others some slack
@@ -527,7 +539,8 @@ where
                     tokio::time::sleep(pause).await;
                 }
 
-                self.relay_message(msg.txid, &msg.inner, bitcoin_chain_tip)
+                let id = StateMachineId::from(bitcoin_chain_tip);
+                self.relay_message(id, msg.txid, &msg.inner, bitcoin_chain_tip)
                     .await?;
             }
             WstsNetMessage::DkgPrivateBegin(_) => {
@@ -537,7 +550,8 @@ where
                     return Ok(());
                 }
 
-                self.relay_message(msg.txid, &msg.inner, bitcoin_chain_tip)
+                let id = StateMachineId::from(bitcoin_chain_tip);
+                self.relay_message(id, msg.txid, &msg.inner, bitcoin_chain_tip)
                     .await?;
             }
             WstsNetMessage::DkgPublicShares(dkg_public_shares) => {
@@ -545,20 +559,9 @@ where
                     signer_id = %dkg_public_shares.signer_id,
                     "handling DkgPublicShares",
                 );
-                let public_keys = match self.wsts_state_machines.get(&msg.txid) {
-                    Some(state_machine) => &state_machine.public_keys,
-                    None => return Err(Error::MissingStateMachine),
-                };
-                let signer_public_key = match public_keys.signers.get(&dkg_public_shares.signer_id)
-                {
-                    Some(key) => PublicKey::from(key),
-                    None => return Err(Error::MissingPublicKey),
-                };
-
-                if signer_public_key != msg_public_key {
-                    return Err(Error::InvalidSignature);
-                }
-                self.relay_message(msg.txid, &msg.inner, bitcoin_chain_tip)
+                let id = StateMachineId::from(bitcoin_chain_tip);
+                self.validate_sender(&id, dkg_public_shares.signer_id, &msg_public_key)?;
+                self.relay_message(id, msg.txid, &msg.inner, bitcoin_chain_tip)
                     .await?;
             }
             WstsNetMessage::DkgPrivateShares(dkg_private_shares) => {
@@ -566,20 +569,9 @@ where
                     signer_id = %dkg_private_shares.signer_id,
                     "handling DkgPrivateShares"
                 );
-                let public_keys = match self.wsts_state_machines.get(&msg.txid) {
-                    Some(state_machine) => &state_machine.public_keys,
-                    None => return Err(Error::MissingStateMachine),
-                };
-                let signer_public_key = match public_keys.signers.get(&dkg_private_shares.signer_id)
-                {
-                    Some(key) => PublicKey::from(key),
-                    None => return Err(Error::MissingPublicKey),
-                };
-
-                if signer_public_key != msg_public_key {
-                    return Err(Error::InvalidSignature);
-                }
-                self.relay_message(msg.txid, &msg.inner, bitcoin_chain_tip)
+                let id = StateMachineId::from(bitcoin_chain_tip);
+                self.validate_sender(&id, dkg_private_shares.signer_id, &msg_public_key)?;
+                self.relay_message(id, msg.txid, &msg.inner, bitcoin_chain_tip)
                     .await?;
             }
             WstsNetMessage::DkgEndBegin(_) => {
@@ -588,17 +580,10 @@ where
                     tracing::warn!("received coordinator message from non-coordinator signer");
                     return Ok(());
                 }
-                self.relay_message(msg.txid, &msg.inner, bitcoin_chain_tip)
+                let id = StateMachineId::from(bitcoin_chain_tip);
+                self.relay_message(id, msg.txid, &msg.inner, bitcoin_chain_tip)
                     .await?;
             }
-            // Clippy complains about how we could refactor this to use the
-            // `std::collections::hash_map::Entry` type here to make things
-            // more idiomatic. The issue with that approach is that it
-            // requires a mutable reference of the `wsts_state_machines`
-            // self to be taken at the same time as an immutable reference.
-            // The compiler will complain about this, so we silence the
-            // warning.
-            #[allow(clippy::map_entry)]
             WstsNetMessage::NonceRequest(request) => {
                 tracing::info!("handling NonceRequest");
                 if !chain_tip_report.sender_is_coordinator {
@@ -607,11 +592,11 @@ where
                 }
 
                 let db = self.context.get_storage();
-                let sig_hash = &request.message;
-                let validation_outcome = Self::validate_bitcoin_sign_request(&db, sig_hash).await;
+                let accepted_sighash =
+                    Self::validate_bitcoin_sign_request(&db, &request.message).await;
 
-                let validation_status = match &validation_outcome {
-                    Ok(()) => "success",
+                let validation_status = match &accepted_sighash {
+                    Ok(_) => "success",
                     Err(Error::SigHashConversion(_)) => "improper-sighash",
                     Err(Error::UnknownSigHash(_)) => "unknown-sighash",
                     Err(Error::InvalidSigHash(_)) => "invalid-sighash",
@@ -626,22 +611,19 @@ where
                 )
                 .increment(1);
 
-                if !self.wsts_state_machines.contains_key(&msg.txid) {
-                    let (maybe_aggregate_key, _) = self
-                        .get_signer_set_and_aggregate_key(bitcoin_chain_tip)
-                        .await?;
+                let accepted_sighash = accepted_sighash?;
+                let id = accepted_sighash.sighash.into();
 
-                    let state_machine = SignerStateMachine::load(
-                        &db,
-                        maybe_aggregate_key.ok_or(Error::NoDkgShares)?,
-                        self.threshold,
-                        self.signer_private_key,
-                    )
-                    .await?;
+                let state_machine = SignerStateMachine::load(
+                    &db,
+                    accepted_sighash.public_key,
+                    self.threshold,
+                    self.signer_private_key,
+                )
+                .await?;
 
-                    self.wsts_state_machines.insert(msg.txid, state_machine);
-                }
-                self.relay_message(msg.txid, &msg.inner, bitcoin_chain_tip)
+                self.wsts_state_machines.put(id, state_machine);
+                self.relay_message(id, msg.txid, &msg.inner, bitcoin_chain_tip)
                     .await?;
             }
             WstsNetMessage::SignatureShareRequest(request) => {
@@ -652,14 +634,22 @@ where
                 }
 
                 let db = self.context.get_storage();
-                Self::validate_bitcoin_sign_request(&db, &request.message).await?;
-                self.relay_message(msg.txid, &msg.inner, bitcoin_chain_tip)
-                    .await?;
+                let accepted_sighash =
+                    Self::validate_bitcoin_sign_request(&db, &request.message).await?;
+
+                let id = accepted_sighash.sighash.into();
+                let response = self
+                    .relay_message(id, msg.txid, &msg.inner, bitcoin_chain_tip)
+                    .await;
+
+                self.wsts_state_machines.pop(&id);
+                response?;
             }
             WstsNetMessage::DkgEnd(dkg_end) => {
                 match &dkg_end.status {
                     DkgStatus::Success => {
                         tracing::info!(
+                            sender_public_key = %msg_public_key,
                             signer_id = %dkg_end.signer_id,
                             "handling DkgEnd success from signer"
                         );
@@ -667,6 +657,7 @@ where
                     DkgStatus::Failure(fail) => {
                         // TODO(#414): handle DKG failure
                         tracing::info!(
+                            sender_public_key = %msg_public_key,
                             signer_id = %dkg_end.signer_id,
                             reason = ?fail,
                             "handling DkgEnd failure",
@@ -682,16 +673,80 @@ where
         Ok(())
     }
 
+    /// This function is used to verify that the sender in the message
+    /// matches the signer in the corresponding state machine.
+    fn validate_sender(
+        &mut self,
+        id: &StateMachineId,
+        signer_id: u32,
+        sender_public_key: &PublicKey,
+    ) -> Result<(), Error> {
+        let public_keys = match self.wsts_state_machines.get(id) {
+            Some(state_machine) => &state_machine.public_keys,
+            None => return Err(Error::MissingStateMachine),
+        };
+
+        let wsts_public_key = public_keys
+            .signers
+            .get(&signer_id)
+            .map(PublicKey::from)
+            .ok_or(Error::MissingPublicKey)?;
+
+        if &wsts_public_key != sender_public_key {
+            let sender = Box::new(*sender_public_key);
+            let wsts = Box::new(wsts_public_key);
+            return Err(Error::PublicKeyMismatch { wsts, sender });
+        }
+
+        Ok(())
+    }
+
+    /// Check whether we will sign the message, which is supposed to be a
+    /// bitcoin sighash
+    async fn validate_bitcoin_sign_request<D>(db: &D, msg: &[u8]) -> Result<AcceptedSigHash, Error>
+    where
+        D: DbRead,
+    {
+        let sighash = TapSighash::from_slice(msg)
+            .map_err(Error::SigHashConversion)?
+            .into();
+
+        match db.will_sign_bitcoin_tx_sighash(&sighash).await? {
+            Some((true, public_key)) => Ok(AcceptedSigHash { public_key, sighash }),
+            Some((false, _)) => Err(Error::InvalidSigHash(sighash)),
+            None => Err(Error::UnknownSigHash(sighash)),
+        }
+    }
+
+    #[tracing::instrument(skip(self))]
+    async fn store_dkg_shares(&mut self, id: &StateMachineId) -> Result<(), Error> {
+        let state_machine = self
+            .wsts_state_machines
+            .get(id)
+            .ok_or(Error::MissingStateMachine)?;
+
+        let encrypted_dkg_shares = state_machine.get_encrypted_dkg_shares(&mut self.rng)?;
+
+        tracing::debug!("storing DKG shares");
+        self.context
+            .get_storage_mut()
+            .write_encrypted_dkg_shares(&encrypted_dkg_shares)
+            .await?;
+
+        Ok(())
+    }
+
     #[tracing::instrument(skip_all)]
     async fn relay_message(
         &mut self,
+        id: StateMachineId,
         txid: bitcoin::Txid,
         msg: &WstsNetMessage,
         bitcoin_chain_tip: &model::BitcoinBlockHash,
     ) -> Result<(), Error> {
-        let Some(state_machine) = self.wsts_state_machines.get_mut(&txid) else {
+        let Some(state_machine) = self.wsts_state_machines.get_mut(&id) else {
             tracing::warn!("missing signing round");
-            return Ok(());
+            return Err(Error::MissingStateMachine);
         };
 
         let outbound_messages = state_machine.process(msg).map_err(Error::Wsts)?;
@@ -709,47 +764,13 @@ where
             // whether it has truly received all relevant messages from its
             // peers.
             if let WstsNetMessage::DkgEnd(DkgEnd { status: DkgStatus::Success, .. }) = outbound {
-                self.store_dkg_shares(&txid).await?;
+                self.store_dkg_shares(&id).await?;
+                self.wsts_state_machines.pop(&id);
             }
             let msg = message::WstsMessage { txid, inner: outbound };
 
             self.send_message(msg, bitcoin_chain_tip).await?;
         }
-
-        Ok(())
-    }
-
-    /// Check whether we will sign the message, which is supposed to be a
-    /// bitcoin sighash
-    async fn validate_bitcoin_sign_request<D>(db: &D, message: &[u8]) -> Result<(), Error>
-    where
-        D: DbRead,
-    {
-        let sighash = TapSighash::from_slice(message)
-            .map_err(Error::SigHashConversion)?
-            .into();
-
-        match db.will_sign_bitcoin_tx_sighash(&sighash).await? {
-            Some(true) => Ok(()),
-            Some(false) => Err(Error::InvalidSigHash(sighash)),
-            None => Err(Error::UnknownSigHash(sighash)),
-        }
-    }
-
-    #[tracing::instrument(skip(self))]
-    async fn store_dkg_shares(&mut self, txid: &bitcoin::Txid) -> Result<(), Error> {
-        let state_machine = self
-            .wsts_state_machines
-            .get(txid)
-            .ok_or(Error::MissingStateMachine)?;
-
-        let encrypted_dkg_shares = state_machine.get_encrypted_dkg_shares(&mut self.rng)?;
-
-        tracing::debug!("storing DKG shares");
-        self.context
-            .get_storage_mut()
-            .write_encrypted_dkg_shares(&encrypted_dkg_shares)
-            .await?;
 
         Ok(())
     }
@@ -846,22 +867,98 @@ where
     }
 }
 
+/// Asserts whether a `DkgBegin` WSTS message should be allowed to proceed
+/// based on the current state of the signer and the DKG configuration.
+async fn assert_allow_dkg_begin(
+    context: &impl Context,
+    bitcoin_chain_tip: &model::BitcoinBlockHash,
+) -> Result<(), Error> {
+    let storage = context.get_storage();
+    let config = context.config();
+
+    // Get the bitcoin block at the chain tip so that we know the height
+    let bitcoin_chain_tip_block = storage
+        .get_bitcoin_block(bitcoin_chain_tip)
+        .await?
+        .ok_or(Error::NoChainTip)?;
+
+    // Get the number of DKG shares that have been stored
+    let dkg_shares_entry_count = storage.get_encrypted_dkg_shares_count().await?;
+
+    // Get DKG configuration parameters
+    let dkg_min_bitcoin_block_height = config.signer.dkg_min_bitcoin_block_height;
+    let dkg_target_rounds = config.signer.dkg_target_rounds;
+
+    // Determine the action based on the DKG shares count and the rerun height (if configured)
+    match (
+        dkg_shares_entry_count,
+        dkg_target_rounds,
+        dkg_min_bitcoin_block_height,
+    ) {
+        (0, _, _) => {
+            tracing::info!(
+                ?dkg_min_bitcoin_block_height,
+                %dkg_target_rounds,
+                "no DKG shares exist; proceeding with DKG"
+            );
+        }
+        (current, target, Some(dkg_min_height)) => {
+            if current >= target.get() {
+                tracing::warn!(
+                    ?dkg_min_bitcoin_block_height,
+                    %dkg_target_rounds,
+                    dkg_current_rounds = %dkg_shares_entry_count,
+                    "The target number of DKG shares has been reached; aborting"
+                );
+                return Err(Error::DkgHasAlreadyRun);
+            }
+            if bitcoin_chain_tip_block.block_height < dkg_min_height.get() {
+                tracing::warn!(
+                    ?dkg_min_bitcoin_block_height,
+                    %dkg_target_rounds,
+                    dkg_current_rounds = %dkg_shares_entry_count,
+                    "bitcoin chain tip is below the minimum height for DKG rerun; aborting"
+                );
+                return Err(Error::DkgHasAlreadyRun);
+            }
+            tracing::info!(
+                ?dkg_min_bitcoin_block_height,
+                %dkg_target_rounds,
+                dkg_current_rounds = %dkg_shares_entry_count,
+                "DKG rerun height has been met and we are below the target number of rounds; proceeding with DKG"
+            );
+        }
+        // Note that we account for all (0, _, _) cases above (i.e. first DKG round)
+        (_, _, None) => {
+            tracing::warn!(
+                ?dkg_min_bitcoin_block_height,
+                %dkg_target_rounds,
+                dkg_current_rounds = %dkg_shares_entry_count,
+                "attempt to run multiple DKGs without a configured re-run height; aborting"
+            );
+            return Err(Error::DkgHasAlreadyRun);
+        }
+    }
+
+    Ok(())
+}
+
 /// Relevant information for validating incoming messages
 /// relating to a particular chain tip.
 #[derive(Debug, Clone, Copy)]
-struct MsgChainTipReport {
+pub struct MsgChainTipReport {
     /// Whether the sender of the incoming message is the coordinator for this chain tip.
-    sender_is_coordinator: bool,
+    pub sender_is_coordinator: bool,
     /// The status of the chain tip relative to the signers' perspective.
-    chain_tip_status: ChainTipStatus,
+    pub chain_tip_status: ChainTipStatus,
     /// The bitcoin chain tip.
-    chain_tip: model::BitcoinBlockHash,
+    pub chain_tip: model::BitcoinBlockHash,
 }
 
 /// The status of a chain tip relative to the known blocks in the signer database.
 #[derive(Debug, Clone, Copy, strum::Display)]
 #[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
-enum ChainTipStatus {
+pub enum ChainTipStatus {
     /// The chain tip is the tip of the canonical fork.
     Canonical,
     /// The chain tip is for a known block, but is not the canonical chain tip.
@@ -872,12 +969,23 @@ enum ChainTipStatus {
 
 #[cfg(test)]
 mod tests {
+    use std::num::{NonZeroU32, NonZeroU64, NonZeroUsize};
+
+    use bitcoin::Txid;
+    use fake::{Fake, Faker};
+    use network::InMemoryNetwork;
+    use test_case::test_case;
+
     use crate::bitcoin::MockBitcoinInteract;
+    use crate::context::Context;
     use crate::emily_client::MockEmilyInteract;
     use crate::stacks::api::MockStacksInteract;
     use crate::storage::in_memory::SharedStore;
+    use crate::storage::{model, DbWrite};
     use crate::testing;
     use crate::testing::context::*;
+
+    use super::*;
 
     fn test_environment() -> testing::transaction_signer::TestEnvironment<
         TestContext<
@@ -916,5 +1024,129 @@ mod tests {
         test_environment()
             .assert_should_be_able_to_participate_in_dkg()
             .await;
+    }
+
+    #[test_case(0, None, 1, 100, true; "first DKG allowed without min height")]
+    #[test_case(0, Some(100), 1, 5, true; "first DKG allowed regardless of min height")]
+    #[test_case(1, None, 2, 100, false; "subsequent DKG not allowed without min height")]
+    #[test_case(1, Some(101), 1, 100, false; "subsequent DKG not allowed with current height lower than min height")]
+    #[test_case(1, Some(100), 1, 100, false; "subsequent DKG not allowed when target rounds reached")]
+    #[test_case(1, Some(100), 2, 100, true; "subsequent DKG allowed when target rounds not reached and min height met")]
+    #[test_log::test(tokio::test)]
+    async fn test_assert_allow_dkg_begin(
+        dkg_rounds_current: u32,
+        dkg_min_bitcoin_block_height: Option<u64>,
+        dkg_target_rounds: u32,
+        chain_tip_height: u64,
+        should_allow: bool,
+    ) {
+        let context = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .modify_settings(|s| {
+                s.signer.dkg_min_bitcoin_block_height =
+                    dkg_min_bitcoin_block_height.map(NonZeroU64::new).flatten();
+                s.signer.dkg_target_rounds = NonZeroU32::new(dkg_target_rounds).unwrap();
+            })
+            .build();
+
+        let storage = context.get_storage_mut();
+
+        // Write `dkg_shares` entries for the `current` number of rounds, simulating
+        // the signer having participated in that many successful DKG rounds.
+        for _ in 0..dkg_rounds_current {
+            storage
+                .write_encrypted_dkg_shares(&Faker.fake())
+                .await
+                .unwrap();
+        }
+
+        // Dummy chain tip hash which will be used to fetch the block height
+        let bitcoin_chain_tip: model::BitcoinBlockHash = Faker.fake();
+
+        // Write a bitcoin block at the given height, simulating the chain tip.
+        storage
+            .write_bitcoin_block(&model::BitcoinBlock {
+                block_height: chain_tip_height,
+                parent_hash: Faker.fake(),
+                block_hash: bitcoin_chain_tip,
+            })
+            .await
+            .unwrap();
+
+        // Test the case
+        let result = assert_allow_dkg_begin(&context, &bitcoin_chain_tip).await;
+
+        // Assert the result
+        match should_allow {
+            true => assert!(result.is_ok()),
+            false => assert!(matches!(result, Err(Error::DkgHasAlreadyRun))),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_handle_wsts_message_asserts_dkg_begin() {
+        let context = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .build();
+
+        let storage = context.get_storage_mut();
+        let network = InMemoryNetwork::new();
+
+        // Write 1 DKG shares entry to the database, simulating that DKG has
+        // successfully run once.
+        storage
+            .write_encrypted_dkg_shares(&Faker.fake())
+            .await
+            .unwrap();
+
+        // Dummy chain tip hash which will be used to fetch the block height.
+        let bitcoin_chain_tip: model::BitcoinBlockHash = Faker.fake();
+
+        // Write a bitcoin block at the given height, simulating the chain tip.
+        storage
+            .write_bitcoin_block(&model::BitcoinBlock {
+                block_height: 100,
+                parent_hash: Faker.fake(),
+                block_hash: bitcoin_chain_tip,
+            })
+            .await
+            .unwrap();
+
+        // Create our signer instance.
+        let mut signer = TxSignerEventLoop {
+            context,
+            network: network.connect(),
+            signer_private_key: PrivateKey::new(&mut rand::rngs::OsRng),
+            context_window: 1,
+            wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
+            threshold: 1,
+            rng: rand::rngs::OsRng,
+            dkg_begin_pause: None,
+        };
+
+        // Create a DkgBegin message to be handled by the signer.
+        let msg = message::WstsMessage {
+            txid: Txid::all_zeros(),
+            inner: WstsNetMessage::DkgBegin(wsts::net::DkgBegin { dkg_id: 0 }),
+        };
+
+        // Create a chain tip report for the message.
+        let chain_tip_report = MsgChainTipReport {
+            sender_is_coordinator: true,
+            chain_tip_status: ChainTipStatus::Canonical,
+            chain_tip: bitcoin_chain_tip,
+        };
+
+        // Attempt to handle the DkgBegin message. This should fail using the
+        // default settings, as the default settings allow only one DKG round.
+        let result = signer
+            .handle_wsts_message(&msg, &bitcoin_chain_tip, Faker.fake(), &chain_tip_report)
+            .await;
+
+        // Assert that the DkgBegin message was not allowed to proceed and
+        // that we receive the expected error.
+        assert!(matches!(result, Err(Error::DkgHasAlreadyRun)));
     }
 }
