@@ -1,0 +1,50 @@
+[package]
+name = "wsts"
+version = "10.0.0"
+edition = "2021"
+authors = ["Joey Yandle <xoloki@gmail.com>"]
+license = "Apache-2.0"
+description = "Weighted Schnorr Threshold Signatures, based on FROST"
+readme = "README.md"
+repository = "https://github.com/Trust-Machines/wsts/"
+keywords = ["cryptography", "crypto", "frost"]
+categories = ["cryptography"]
+
+[features]
+default = ["with_p256k1_bindgen"]
+with_p256k1_bindgen = ["p256k1/with_bindgen"]
+
+[dependencies]
+aes-gcm = "0.10"
+bs58 = "0.5"
+hashbrown = { version = "0.14", features = ["serde"] }
+hex = "0.4.3"
+num-traits = "0.2"
+polynomial = { version = "0.2.5", features = ["serde"] }
+primitive-types = "0.12"
+rand_core = "0.6"
+p256k1 = { version = "7.1", default-features = false }
+serde = { version = "1.0", features = ["derive"] }
+sha2 = "0.10"
+thiserror = "1.0"
+tracing = "0.1.37"
+tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
+
+[dev-dependencies]
+criterion = "0.5.1"
+
+[[bench]]
+name = "v1_bench"
+harness = false
+
+[[bench]]
+name = "v2_bench"
+harness = false
+
+[lib]
+path = "src/lib.rs"    # The source file of the target.
+crate-type = ["lib"]   # The crate types to generate.
+
+[[bin]]
+name = "wsts"
+path = "src/main.rs"
