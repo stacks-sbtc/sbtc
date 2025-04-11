@@ -41,7 +41,7 @@ enum LogOutputFormat {
 
 /// Command line arguments for the signer.
 #[derive(Debug, Parser)]
-#[clap(name = "sBTC Signer")]
+#[clap(name = "sBTC Signer", subcommand_required = false)]
 struct SignerArgs {
     /// Optional path to the configuration file. If not provided, it is expected
     /// that all parameters are provided via environment variables.
@@ -55,6 +55,21 @@ struct SignerArgs {
 
     #[clap(short = 'o', long = "output-format", default_value = "pretty")]
     output_format: Option<LogOutputFormat>,
+
+    #[clap(subcommand)]
+    command: Option<SignerCommand>,
+}
+
+#[derive(Debug, clap::Subcommand)]
+pub enum SignerCommand {
+    #[clap(name = "run")]
+    Run,
+
+    #[clap(name = "backup")]
+    Backup,
+
+    #[clap(name = "restore")]
+    Restore,
 }
 
 #[tokio::main]
