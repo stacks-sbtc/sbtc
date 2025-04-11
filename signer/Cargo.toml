@@ -67,6 +67,7 @@ mockall = { workspace = true, optional = true }
 tonic-build.workspace = true
 
 [dev-dependencies]
+assert_matches.workspace = true
 bitcoincore-rpc.workspace = true
 mockito.workspace = true
 more-asserts.workspace = true

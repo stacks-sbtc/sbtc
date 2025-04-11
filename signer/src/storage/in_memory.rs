@@ -597,6 +597,18 @@ impl super::DbRead for SharedStore {
             .contains_key(&block_id.into()))
     }
 
+    async fn get_all_encrypted_dkg_shares(&self) -> Result<Vec<model::EncryptedDkgShares>, Error> {
+        let shares = self
+            .lock()
+            .await
+            .encrypted_dkg_shares
+            .values()
+            .map(|(_, shares)| shares.clone())
+            .collect::<Vec<_>>();
+
+        Ok(shares)
+    }
+
     async fn get_encrypted_dkg_shares<X>(
         &self,
         aggregate_key: X,

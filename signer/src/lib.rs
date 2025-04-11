@@ -7,6 +7,7 @@
 )]
 
 pub mod api;
+pub mod backups;
 pub mod bitcoin;
 pub mod block_observer;
 pub mod blocklist_client;

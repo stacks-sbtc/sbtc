@@ -1836,6 +1836,29 @@ impl super::DbRead for PgStore {
         .map_err(Error::SqlxQuery)
     }
 
+    async fn get_all_encrypted_dkg_shares(&self) -> Result<Vec<model::EncryptedDkgShares>, Error> {
+        sqlx::query_as::<_, model::EncryptedDkgShares>(
+            r#"
+            SELECT
+                aggregate_key
+              , tweaked_aggregate_key
+              , script_pubkey
+              , encrypted_private_shares
+              , public_shares
+              , signer_set_public_keys
+              , signature_share_threshold
+              , dkg_shares_status
+              , started_at_bitcoin_block_hash
+              , started_at_bitcoin_block_height
+            FROM sbtc_signer.dkg_shares
+            ORDER BY created_at ASC;
+            "#,
+        )
+        .fetch_all(&self.0)
+        .await
+        .map_err(Error::SqlxQuery)
+    }
+
     async fn get_encrypted_dkg_shares<X>(
         &self,
         aggregate_key: X,

@@ -32,7 +32,6 @@ wsts = { git = "https://github.com/Trust-Machines/wsts", rev = "11e2316aa0edf996
 
 # Crates.io
 aquamarine = { version = "0.6.0", default-features = false }
-assert_matches = { version = "1.5.0", default-features = false }
 aws-config = { version = "1.5.15", default-features = false, features = ["rustls", "rt-tokio"] }
 aws_lambda_events = { version = "0.16.0", default-features = false }
 aws-sdk-dynamodb = { version = "1.62.0", default-features = false }
@@ -91,6 +90,7 @@ axum = { version = "0.8.1", default-features = false, features = ["http1", "json
 tracing-subscriber = { version = "0.3.19", default-features = false, features = ["env-filter", "fmt", "json", "time", "ansi"] }
 
 # Crates used only for testing
+assert_matches = { version = "1.5.0", default-features = false }
 fake = { version = "3.1.0", default-features = false, features = ["derive", "time"] }
 mockall = { version = "0.13.1", default-features = false }
 mockito = { version = "1.6.1", default-features = false }

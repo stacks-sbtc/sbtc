@@ -262,6 +262,11 @@ pub trait DbRead {
         block_id: StacksBlockId,
     ) -> impl Future<Output = Result<bool, Error>> + Send;
 
+    /// Fetches all DKG shares entries from the database.
+    fn get_all_encrypted_dkg_shares(
+        &self,
+    ) -> impl Future<Output = Result<Vec<model::EncryptedDkgShares>, Error>> + Send;
+
     /// Return the applicable DKG shares for the
     /// given aggregate key
     fn get_encrypted_dkg_shares<X>(

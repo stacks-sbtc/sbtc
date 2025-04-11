@@ -2,7 +2,7 @@ use std::env;
 
 fn main() {
     set_up_build_info();
-    // compile_protos();
+    compile_protos();
 }
 
 pub fn set_up_build_info() {
@@ -50,6 +50,7 @@ pub fn compile_protos() {
         "protobufs/stacks/signer/v1/decisions.proto",
         "protobufs/stacks/signer/v1/requests.proto",
         "protobufs/stacks/signer/v1/messages.proto",
+        "protobufs/sbtc/signer/v1/backups.proto",
     ]
     .map(|path| workingdir.join(path));
 

@@ -21,6 +21,14 @@ use crate::wsts_state_machine::StateMachineId;
 /// Top-level signer error
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// An error occurred while attempting to back up the signer state.
+    #[error(transparent)]
+    SignerBackup(#[from] crate::backups::BackupError),
+
+    /// An error occurred while attempting to restore the signer state from a backup.
+    #[error(transparent)]
+    SignerRestore(#[from] crate::backups::RestoreError),
+
     /// The length of bytes to write to an OP_RETURN output exceeds the maximum allowed size.
     #[error("OP_RETURN output size limit exceeded: {size} bytes, max allowed: {max_size} bytes")]
     OpReturnSizeLimitExceeded {
