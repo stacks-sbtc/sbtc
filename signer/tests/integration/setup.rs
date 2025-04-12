@@ -292,7 +292,6 @@ impl TestSweepSetup {
             block_hash: self.deposit_block_hash.into(),
         };
 
-        db.write_transaction(&deposit_tx).await.unwrap();
         db.write_bitcoin_transaction(&bitcoin_tx_ref).await.unwrap();
     }
     /// Store the transaction that swept the deposit into the signers' UTXO
@@ -309,7 +308,6 @@ impl TestSweepSetup {
             block_hash: sweep_tx.block_hash.into(),
         };
 
-        db.write_transaction(&sweep_tx).await.unwrap();
         db.write_bitcoin_transaction(&bitcoin_tx_ref).await.unwrap();
 
         let mut signer_script_pubkeys = HashSet::new();
@@ -485,13 +483,6 @@ pub async fn fill_signers_utxo<R: rand::RngCore + ?Sized>(
 
     // Write the Bitcoin block and transaction to the database.
     db.write_bitcoin_block(&bitcoin_block).await.unwrap();
-    db.write_transaction(&model::Transaction {
-        txid: *signer_utxo_txid.as_byte_array(),
-        tx_type: model::TransactionType::SbtcTransaction,
-        block_hash: bitcoin_block.block_hash.into_bytes(),
-    })
-    .await
-    .unwrap();
     db.write_bitcoin_transaction(&model::BitcoinTxRef {
         block_hash: bitcoin_block.block_hash.into(),
         txid: signer_utxo_txid.into(),
@@ -527,13 +518,6 @@ pub async fn fill_signers_utxo<R: rand::RngCore + ?Sized>(
 
     // Write the Bitcoin block and transaction to the database.
     db.write_bitcoin_block(&bitcoin_block).await.unwrap();
-    db.write_transaction(&model::Transaction {
-        txid: *signer_utxo_txid.as_byte_array(),
-        tx_type: model::TransactionType::SbtcTransaction,
-        block_hash: bitcoin_block.block_hash.into_bytes(),
-    })
-    .await
-    .unwrap();
     db.write_bitcoin_transaction(&model::BitcoinTxRef {
         block_hash: bitcoin_block.block_hash.into(),
         txid: signer_utxo_txid.into(),
@@ -1005,7 +989,6 @@ impl TestSweepSetup2 {
                 block_hash: self.deposit_block_hash.into(),
             };
 
-            db.write_transaction(&deposit_tx).await.unwrap();
             db.write_bitcoin_transaction(&bitcoin_tx_ref).await.unwrap();
         }
     }
@@ -1097,7 +1080,6 @@ impl TestSweepSetup2 {
             parent_hash: sweep.parent_hash,
         };
         db.write_bitcoin_block(&block).await.unwrap();
-        db.write_transaction(&sweep_tx).await.unwrap();
         db.write_bitcoin_transaction(&bitcoin_tx_ref).await.unwrap();
 
         let mut signer_script_pubkeys = HashSet::new();

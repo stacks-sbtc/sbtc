@@ -36,7 +36,6 @@ use crate::metrics::Metrics;
 use crate::stacks::api::GetNakamotoStartHeight as _;
 use crate::stacks::api::StacksInteract;
 use crate::stacks::api::TenureBlocks;
-use crate::storage;
 use crate::storage::DbRead;
 use crate::storage::DbWrite;
 use crate::storage::model;
@@ -499,14 +498,6 @@ impl<C: Context, B> BlockObserver<C, B> {
     /// This function also extracts sBTC Stacks transactions from the given
     /// blocks and stores them into the database.
     async fn write_stacks_blocks(&self, tenures: &[TenureBlocks]) -> Result<(), Error> {
-        let deployer = &self.context.config().signer.deployer;
-        let txs = tenures
-            .iter()
-            .flat_map(|tenure| {
-                storage::postgres::extract_relevant_transactions(tenure.blocks(), deployer)
-            })
-            .collect::<Vec<_>>();
-
         let headers = tenures
             .iter()
             .flat_map(TenureBlocks::as_stacks_blocks)
@@ -514,7 +505,6 @@ impl<C: Context, B> BlockObserver<C, B> {
 
         let storage = self.context.get_storage_mut();
         storage.write_stacks_block_headers(headers).await?;
-        storage.write_stacks_transactions(txs).await?;
         Ok(())
     }
 

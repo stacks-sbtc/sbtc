@@ -128,10 +128,6 @@ impl TestRotateKeySetup {
 
     /// Store rotate key tx.
     pub async fn store_rotate_keys(&self, db: &PgStore) {
-        db.write_stacks_transactions(vec![self.raw_tx.clone()])
-            .await
-            .unwrap();
-
         let aggregate_key: PublicKey = self.aggregate_key();
         let address = StacksPrincipal::from(clarity::vm::types::PrincipalData::from(
             self.wallet.address().clone(),

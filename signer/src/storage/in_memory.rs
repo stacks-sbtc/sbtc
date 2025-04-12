@@ -1087,7 +1087,6 @@ impl super::DbWrite for SharedStore {
 
     async fn write_bitcoin_transactions(&self, txs: Vec<model::Transaction>) -> Result<(), Error> {
         for tx in txs {
-            self.write_transaction(&tx).await?;
             let bitcoin_transaction = model::BitcoinTxRef {
                 txid: tx.txid.into(),
                 block_hash: tx.block_hash.into(),
@@ -1192,15 +1191,6 @@ impl super::DbWrite for SharedStore {
         Ok(())
     }
 
-    async fn write_transaction(&self, transaction: &model::Transaction) -> Result<(), Error> {
-        self.lock()
-            .await
-            .raw_transactions
-            .insert(transaction.txid, transaction.clone());
-
-        Ok(())
-    }
-
     async fn write_bitcoin_transaction(
         &self,
         bitcoin_transaction: &model::BitcoinTxRef,
@@ -1218,43 +1208,6 @@ impl super::DbWrite for SharedStore {
             .entry(bitcoin_transaction.txid)
             .or_default()
             .push(bitcoin_transaction.block_hash);
-
-        Ok(())
-    }
-
-    async fn write_stacks_transaction(
-        &self,
-        stacks_transaction: &model::StacksTransaction,
-    ) -> Result<(), Error> {
-        let mut store = self.lock().await;
-
-        store
-            .stacks_block_to_transactions
-            .entry(stacks_transaction.block_hash)
-            .or_default()
-            .push(stacks_transaction.txid);
-
-        store
-            .stacks_transactions_to_blocks
-            .entry(stacks_transaction.txid)
-            .or_default()
-            .push(stacks_transaction.block_hash);
-
-        Ok(())
-    }
-
-    async fn write_stacks_transactions(
-        &self,
-        stacks_transactions: Vec<model::Transaction>,
-    ) -> Result<(), Error> {
-        for tx in stacks_transactions {
-            self.write_transaction(&tx).await?;
-            let stacks_transaction = model::StacksTransaction {
-                txid: tx.txid.into(),
-                block_hash: tx.block_hash.into(),
-            };
-            self.write_stacks_transaction(&stacks_transaction).await?;
-        }
 
         Ok(())
     }

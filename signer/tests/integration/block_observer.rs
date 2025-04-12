@@ -949,18 +949,7 @@ async fn get_signer_public_keys_and_aggregate_key_falls_back() {
 
     let mut rotate_keys: KeyRotationEvent = Faker.fake_with_rng(&mut rng);
     rotate_keys.block_hash = stacks_chain_tip.block_hash;
-    let transaction = model::Transaction {
-        txid: rotate_keys.txid.into_bytes(),
-        tx_type: model::TransactionType::RotateKeys,
-        block_hash: stacks_chain_tip.block_hash.into_bytes(),
-    };
-    let tx = model::StacksTransaction {
-        txid: rotate_keys.txid,
-        block_hash: stacks_chain_tip.block_hash,
-    };
 
-    db.write_transaction(&transaction).await.unwrap();
-    db.write_stacks_transaction(&tx).await.unwrap();
     db.write_rotate_keys_transaction(&rotate_keys)
         .await
         .unwrap();
@@ -1151,18 +1140,7 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
 
     let mut rotate_keys: KeyRotationEvent = Faker.fake_with_rng(&mut rng);
     rotate_keys.block_hash = stacks_block.block_hash;
-    let transaction = model::Transaction {
-        txid: rotate_keys.txid.into_bytes(),
-        tx_type: model::TransactionType::RotateKeys,
-        block_hash: stacks_block.block_hash.into_bytes(),
-    };
-    let tx = model::StacksTransaction {
-        txid: rotate_keys.txid,
-        block_hash: stacks_block.block_hash,
-    };
 
-    db.write_transaction(&transaction).await.unwrap();
-    db.write_stacks_transaction(&tx).await.unwrap();
     db.write_rotate_keys_transaction(&rotate_keys)
         .await
         .unwrap();

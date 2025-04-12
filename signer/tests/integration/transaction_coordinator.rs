@@ -219,7 +219,6 @@ where
         block_hash: (*block_hash).into(),
     };
 
-    ctx.get_storage_mut().write_transaction(&tx).await.unwrap();
     ctx.get_storage_mut()
         .write_bitcoin_transaction(&bitcoin_transaction)
         .await
@@ -2767,13 +2766,6 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
 
     // Write the Bitcoin block and transaction to the database.
     db.write_bitcoin_block(&bitcoin_block).await.unwrap();
-    db.write_transaction(&model::Transaction {
-        txid: *signer_utxo_txid.as_byte_array(),
-        tx_type: model::TransactionType::SbtcTransaction,
-        block_hash: bitcoin_block.block_hash.into_bytes(),
-    })
-    .await
-    .unwrap();
     db.write_bitcoin_transaction(&model::BitcoinTxRef {
         block_hash: bitcoin_block.block_hash.into(),
         txid: signer_utxo_txid.into(),
@@ -2890,14 +2882,6 @@ async fn test_get_btc_state_with_available_sweep_transactions_and_rbf() {
         block_height: 1,
         block_hash: signer_utxo_block_hash.into(),
         parent_hash: BlockHash::all_zeros().into(),
-    })
-    .await
-    .unwrap();
-
-    db.write_transaction(&model::Transaction {
-        txid: signer_utxo_txid.to_byte_array(),
-        tx_type: model::TransactionType::SbtcTransaction,
-        block_hash: signer_utxo_block_hash.to_byte_array(),
     })
     .await
     .unwrap();

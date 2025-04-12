@@ -485,16 +485,6 @@ impl SignerSet {
             .expect("no stacks chain tip");
 
         let txid: model::StacksTxId = fake::Faker.fake_with_rng(rng);
-        let stacks_transaction = model::StacksTransaction {
-            txid,
-            block_hash: stacks_chain_tip.block_hash,
-        };
-
-        let transaction = model::Transaction {
-            txid: txid.to_bytes(),
-            tx_type: model::TransactionType::RotateKeys,
-            block_hash: stacks_chain_tip.block_hash.to_bytes(),
-        };
         let address = StacksPrincipal::from(PrincipalData::from(
             StacksAddress::from_public_keys(
                 C32_ADDRESS_VERSION_TESTNET_MULTISIG,
@@ -516,16 +506,6 @@ impl SignerSet {
             signer_set: self.signer_keys(),
             signatures_required: self.signers.len() as u16,
         };
-
-        storage
-            .write_transaction(&transaction)
-            .await
-            .expect("failed to write transaction");
-
-        storage
-            .write_stacks_transaction(&stacks_transaction)
-            .await
-            .expect("failed to write stacks transaction");
 
         storage
             .write_rotate_keys_transaction(&rotate_keys_tx)

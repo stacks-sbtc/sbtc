@@ -453,7 +453,6 @@ mod tests {
     use crate::stacks::contracts::AsContractCall;
     use crate::stacks::contracts::ReqContext;
     use crate::storage::DbWrite;
-    use crate::storage::model;
     use crate::storage::model::KeyRotationEvent;
     use crate::storage::model::StacksPrincipal;
     use crate::testing::context::ConfigureMockedClients;
@@ -722,12 +721,6 @@ mod tests {
             PublicKey::combine_keys(&config.bootstrap_signing_set()).unwrap();
         assert_eq!(wallet0.aggregate_key, bootstrap_aggregate_key);
 
-        let tx = model::StacksTransaction {
-            txid: rotate_keys.txid,
-            block_hash: stacks_chain_tip,
-        };
-
-        db.write_stacks_transaction(&tx).await.unwrap();
         db.write_rotate_keys_transaction(&rotate_keys)
             .await
             .unwrap();

@@ -336,54 +336,6 @@ impl PgStore {
         &self.0
     }
 
-    async fn write_transactions(
-        &self,
-        txs: Vec<model::Transaction>,
-    ) -> Result<model::TransactionIds, Error> {
-        if txs.is_empty() {
-            return Ok(model::TransactionIds {
-                tx_ids: Vec::new(),
-                block_hashes: Vec::new(),
-            });
-        }
-
-        let mut tx_ids = Vec::with_capacity(txs.len());
-        let mut tx_types = Vec::with_capacity(txs.len());
-        let mut block_hashes = Vec::with_capacity(txs.len());
-
-        for tx in txs {
-            tx_ids.push(tx.txid);
-            tx_types.push(tx.tx_type.to_string());
-            block_hashes.push(tx.block_hash)
-        }
-
-        sqlx::query(
-            r#"
-            WITH tx_ids AS (
-                SELECT ROW_NUMBER() OVER (), txid
-                FROM UNNEST($1::bytea[]) AS txid
-            )
-            , transaction_types AS (
-                SELECT ROW_NUMBER() OVER (), tx_type::sbtc_signer.transaction_type
-                FROM UNNEST($2::VARCHAR[]) AS tx_type
-            )
-            INSERT INTO sbtc_signer.transactions (txid, tx_type)
-            SELECT
-                txid
-              , tx_type
-            FROM tx_ids
-            JOIN transaction_types USING (row_number)
-            ON CONFLICT DO NOTHING"#,
-        )
-        .bind(&tx_ids)
-        .bind(tx_types)
-        .execute(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(model::TransactionIds { tx_ids, block_hashes })
-    }
-
     async fn get_utxo(
         &self,
         chain_tip: &model::BitcoinBlockHash,
@@ -2869,24 +2821,6 @@ impl super::DbWrite for PgStore {
         Ok(())
     }
 
-    async fn write_transaction(&self, transaction: &model::Transaction) -> Result<(), Error> {
-        sqlx::query(
-            "INSERT INTO sbtc_signer.transactions
-              ( txid
-              , tx_type
-              )
-            VALUES ($1, $2)
-            ON CONFLICT DO NOTHING",
-        )
-        .bind(transaction.txid)
-        .bind(transaction.tx_type)
-        .execute(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(())
-    }
-
     async fn write_bitcoin_transaction(&self, tx_ref: &model::BitcoinTxRef) -> Result<(), Error> {
         sqlx::query(
             "INSERT INTO sbtc_signer.bitcoin_transactions (txid, block_hash)
@@ -2903,10 +2837,18 @@ impl super::DbWrite for PgStore {
     }
 
     async fn write_bitcoin_transactions(&self, txs: Vec<model::Transaction>) -> Result<(), Error> {
-        let summary = self.write_transactions(txs).await?;
-        if summary.tx_ids.is_empty() {
+        if txs.is_empty() {
             return Ok(());
         }
+
+        let mut tx_ids = Vec::with_capacity(txs.len());
+        let mut block_hashes = Vec::with_capacity(txs.len());
+
+        for tx in txs {
+            tx_ids.push(tx.txid);
+            block_hashes.push(tx.block_hash)
+        }
+
         sqlx::query(
             r#"
             WITH tx_ids AS (
@@ -2925,59 +2867,8 @@ impl super::DbWrite for PgStore {
             JOIN block_ids USING (row_number)
             ON CONFLICT DO NOTHING"#,
         )
-        .bind(&summary.tx_ids)
-        .bind(&summary.block_hashes)
-        .execute(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(())
-    }
-
-    async fn write_stacks_transaction(
-        &self,
-        stacks_transaction: &model::StacksTransaction,
-    ) -> Result<(), Error> {
-        sqlx::query(
-            "INSERT INTO sbtc_signer.stacks_transactions (txid, block_hash)
-            VALUES ($1, $2)
-            ON CONFLICT DO NOTHING",
-        )
-        .bind(stacks_transaction.txid)
-        .bind(stacks_transaction.block_hash)
-        .execute(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(())
-    }
-
-    async fn write_stacks_transactions(&self, txs: Vec<model::Transaction>) -> Result<(), Error> {
-        let summary = self.write_transactions(txs).await?;
-        if summary.tx_ids.is_empty() {
-            return Ok(());
-        }
-
-        sqlx::query(
-            r#"
-            WITH tx_ids AS (
-                SELECT ROW_NUMBER() OVER (), txid
-                FROM UNNEST($1::bytea[]) AS txid
-            )
-            , block_ids AS (
-                SELECT ROW_NUMBER() OVER (), block_id
-                FROM UNNEST($2::bytea[]) AS block_id
-            )
-            INSERT INTO sbtc_signer.stacks_transactions (txid, block_hash)
-            SELECT
-                txid
-              , block_id
-            FROM tx_ids
-            JOIN block_ids USING (row_number)
-            ON CONFLICT DO NOTHING"#,
-        )
-        .bind(&summary.tx_ids)
-        .bind(&summary.block_hashes)
+        .bind(&tx_ids)
+        .bind(&block_hashes)
         .execute(&self.0)
         .await
         .map_err(Error::SqlxQuery)?;
