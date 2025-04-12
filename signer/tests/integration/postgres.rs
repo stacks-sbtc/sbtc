@@ -1013,7 +1013,7 @@ async fn writing_transactions_postgres() {
     let store = testing::storage::new_test_database().await;
     let num_rows = 12;
     let mut rng = get_rng();
-    let mut txs: Vec<model::Transaction> =
+    let mut txs: Vec<model::BitcoinTxRef> =
         std::iter::repeat_with(|| fake::Faker.fake_with_rng(&mut rng))
             .take(num_rows)
             .collect();
@@ -1022,7 +1022,7 @@ async fn writing_transactions_postgres() {
     let block_hash = bitcoin::BlockHash::from_byte_array([1; 32]);
 
     txs.iter_mut().for_each(|tx| {
-        tx.block_hash = block_hash.to_byte_array();
+        tx.block_hash = block_hash.into();
     });
 
     let db_block = model::BitcoinBlock {
@@ -5752,10 +5752,9 @@ async fn compute_withdrawn_total_gets_all_amounts_in_chain() {
             ..Faker.fake_with_rng(&mut rng)
         };
 
-        let tx = model::Transaction {
-            txid: output.txid.into_bytes(),
-            tx_type: model::TransactionType::SbtcTransaction,
-            block_hash: block.block_hash.into_bytes(),
+        let tx = model::BitcoinTxRef {
+            txid: output.txid,
+            block_hash: block.block_hash,
         };
         db.write_bitcoin_transactions(vec![tx]).await.unwrap();
         db.write_tx_output(&output).await.unwrap();
@@ -5843,10 +5842,9 @@ async fn compute_withdrawn_total_ignores_withdrawals_not_identified_blockchain()
         ..Faker.fake_with_rng(&mut rng)
     };
 
-    let tx = model::Transaction {
-        txid: output1.txid.into_bytes(),
-        tx_type: model::TransactionType::SbtcTransaction,
-        block_hash: bitcoin_chain_tip.block_hash.into_bytes(),
+    let tx = model::BitcoinTxRef {
+        txid: output1.txid,
+        block_hash: bitcoin_chain_tip.block_hash,
     };
     db.write_bitcoin_transactions(vec![tx]).await.unwrap();
     db.write_tx_output(&output1).await.unwrap();
@@ -5864,10 +5862,9 @@ async fn compute_withdrawn_total_ignores_withdrawals_not_identified_blockchain()
         ..Faker.fake_with_rng(&mut rng)
     };
 
-    let tx = model::Transaction {
-        txid: output2.txid.into_bytes(),
-        tx_type: model::TransactionType::SbtcTransaction,
-        block_hash: another_block.block_hash.into_bytes(),
+    let tx = model::BitcoinTxRef {
+        txid: output2.txid,
+        block_hash: another_block.block_hash,
     };
     db.write_bitcoin_block(&another_block).await.unwrap();
     db.write_bitcoin_transactions(vec![tx]).await.unwrap();

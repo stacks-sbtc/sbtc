@@ -482,7 +482,7 @@ pub trait DbWrite {
     /// Write the bitcoin transactions to the data store.
     fn write_bitcoin_transactions(
         &self,
-        txs: Vec<model::Transaction>,
+        txs: Vec<model::BitcoinTxRef>,
     ) -> impl Future<Output = Result<(), Error>> + Send;
 
     /// Write the stacks block ids and their parent block ids.
