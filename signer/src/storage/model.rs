@@ -550,10 +550,7 @@ pub struct KeyRotationEvent {
     pub block_hash: StacksBlockHash,
     /// The address that deployed the contract.
     pub address: StacksPrincipal,
-    /// The aggregate key for these shares.
-    ///
-    /// TODO(511): maybe make the aggregate key private. Set it using the
-    /// `signer_set`, ensuring that it cannot drift from the given keys.
+    /// The aggregate key for of the DKG run associated with this event.
     pub aggregate_key: PublicKey,
     /// The public keys of the signers.
     pub signer_set: Vec<PublicKey>,
