@@ -69,7 +69,7 @@ use crate::storage::model::CompletedDepositEvent;
 use crate::storage::model::DkgSharesStatus;
 use crate::storage::model::EncryptedDkgShares;
 use crate::storage::model::QualifiedRequestId;
-use crate::storage::model::RotateKeysTransaction;
+use crate::storage::model::KeyRotationEvent;
 use crate::storage::model::ScriptPubKey;
 use crate::storage::model::SigHash;
 use crate::storage::model::StacksBlockHash;
@@ -381,7 +381,7 @@ pub struct SignerSetConfig {
     pub signatures_required: u16,
 }
 
-impl fake::Dummy<SignerSetConfig> for RotateKeysTransaction {
+impl fake::Dummy<SignerSetConfig> for KeyRotationEvent {
     fn dummy_with_rng<R: Rng + ?Sized>(config: &SignerSetConfig, rng: &mut R) -> Self {
         let signer_set: Vec<PublicKey> = std::iter::repeat_with(|| fake::Faker.fake_with_rng(rng))
             .take(config.num_keys as usize)
@@ -400,7 +400,7 @@ impl fake::Dummy<SignerSetConfig> for RotateKeysTransaction {
             .expect("failed to create StacksAddress"),
         ));
 
-        RotateKeysTransaction {
+        KeyRotationEvent {
             txid: fake::Faker.fake_with_rng(rng),
             block_hash: fake::Faker.fake_with_rng(rng),
             address,
