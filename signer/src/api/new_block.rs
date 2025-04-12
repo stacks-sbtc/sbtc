@@ -17,10 +17,8 @@ use crate::metrics::Metrics;
 use crate::metrics::STACKS_BLOCKCHAIN;
 use crate::storage::DbWrite;
 use crate::storage::model::CompletedDepositEvent;
-use crate::storage::model::KeyRotationEvent;
 use crate::storage::model::RotateKeysTransaction;
 use crate::storage::model::StacksBlock;
-use crate::storage::model::StacksTxId;
 use crate::storage::model::WithdrawalAcceptEvent;
 use crate::storage::model::WithdrawalRejectEvent;
 use crate::storage::model::WithdrawalRequest;
@@ -155,7 +153,7 @@ pub async fn new_block_handler(state: State<ApiState<impl Context>>, body: Strin
                 handle_withdrawal_create(&api.ctx, event.into()).await
             }
             Ok(RegistryEvent::KeyRotation(event)) => {
-                handle_key_rotation(&api.ctx, event.into(), tx_info.txid.into()).await
+                handle_key_rotation(&api.ctx, event.into()).await
             }
             Err(error) => {
                 tracing::error!(%error, %txid, "got an error when transforming the event ClarityValue");
@@ -281,25 +279,16 @@ async fn handle_withdrawal_reject(
 }
 
 #[tracing::instrument(skip_all, fields(
-    %stacks_txid,
-    address = %event.new_address.to_string(),
-    aggregate_key = %event.new_aggregate_pubkey
+    stacks_txid = %event.txid,
+    address = %event.address,
+    aggregate_key = %event.aggregate_key
 ))]
 async fn handle_key_rotation(
     ctx: &impl Context,
-    event: KeyRotationEvent,
-    stacks_txid: StacksTxId,
+    event: RotateKeysTransaction,
 ) -> Result<(), Error> {
-    let key_rotation_tx = RotateKeysTransaction {
-        txid: stacks_txid,
-        address: event.new_address,
-        aggregate_key: event.new_aggregate_pubkey,
-        signer_set: event.new_keys,
-        signatures_required: event.new_signature_threshold,
-    };
-
     ctx.get_storage_mut()
-        .write_rotate_keys_transaction(&key_rotation_tx)
+        .write_rotate_keys_transaction(&event)
         .await?;
 
     tracing::debug!(topic = "key-rotation", "handled stacks event");
@@ -319,6 +308,7 @@ mod tests {
     use clarity::vm::types::PrincipalData;
     use fake::Fake;
     use rand::rngs::OsRng;
+    use sbtc::events::KeyRotationEvent;
     use secp256k1::SECP256K1;
     use stacks_common::types::chainstate::StacksBlockId;
     use test_case::test_case;
@@ -328,6 +318,7 @@ mod tests {
     use crate::storage::in_memory::Store;
     use crate::storage::model::DepositRequest;
     use crate::storage::model::StacksPrincipal;
+    use crate::storage::model::StacksTxId;
     use crate::testing::context::*;
     use crate::testing::get_rng;
     use crate::testing::storage::model::TestData;
@@ -672,6 +663,8 @@ mod tests {
 
         let txid: StacksTxId = fake::Faker.fake_with_rng(&mut OsRng);
         let event = KeyRotationEvent {
+            txid: sbtc::events::StacksTxid(txid.into_bytes()),
+            block_id: StacksBlockId(fake::Faker.fake_with_rng(&mut OsRng)),
             new_aggregate_pubkey: SECP256K1.generate_keypair(&mut OsRng).1.into(),
             new_keys: (0..3)
                 .map(|_| SECP256K1.generate_keypair(&mut OsRng).1.into())
@@ -680,7 +673,7 @@ mod tests {
             new_signature_threshold: 3,
         };
 
-        let res = handle_key_rotation(&ctx, event, txid).await;
+        let res = handle_key_rotation(&ctx, event.into()).await;
 
         assert!(res.is_ok());
         let db = db.lock().await;

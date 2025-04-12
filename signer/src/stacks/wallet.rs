@@ -700,6 +700,7 @@ mod tests {
         // Let's store the key information about this wallet into the database
         let rotate_keys = RotateKeysTransaction {
             txid: fake::Faker.fake_with_rng(&mut rng),
+            block_hash: fake::Faker.fake_with_rng(&mut rng),
             address: StacksPrincipal::from(clarity::vm::types::PrincipalData::from(
                 wallet1.address().clone(),
             )),

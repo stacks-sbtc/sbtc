@@ -510,6 +510,7 @@ impl SignerSet {
         ));
         let rotate_keys_tx = model::RotateKeysTransaction {
             aggregate_key: shares.aggregate_key,
+            block_hash: stacks_chain_tip.block_hash,
             address,
             txid,
             signer_set: self.signer_keys(),
