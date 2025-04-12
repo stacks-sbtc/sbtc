@@ -550,9 +550,10 @@ pub struct KeyRotationEvent {
     pub block_hash: StacksBlockHash,
     /// The address that deployed the contract.
     pub address: StacksPrincipal,
-    /// The aggregate key for of the DKG run associated with this event.
+    /// The aggregate key of the DKG run associated with this event.
     pub aggregate_key: PublicKey,
-    /// The public keys of the signers.
+    /// The public keys of the signers who participated in DKG round
+    /// associated with this event.
     pub signer_set: Vec<PublicKey>,
     /// The number of signatures required for the multi-sig wallet.
     #[sqlx(try_from = "i32")]
