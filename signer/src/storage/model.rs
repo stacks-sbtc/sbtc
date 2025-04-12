@@ -545,6 +545,9 @@ pub struct EncryptedDkgShares {
 pub struct RotateKeysTransaction {
     /// Transaction ID.
     pub txid: StacksTxId,
+    /// The Stacks block ID of the block that includes the transaction
+    /// associated with this withdrawal request.
+    pub block_hash: StacksBlockHash,
     /// The address that deployed the contract.
     pub address: StacksPrincipal,
     /// The aggregate key for these shares.
@@ -999,6 +1002,12 @@ impl Deref for StacksPrincipal {
     }
 }
 
+impl std::fmt::Display for StacksPrincipal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 impl std::str::FromStr for StacksPrincipal {
     type Err = Error;
     fn from_str(literal: &str) -> Result<Self, Self::Err> {
@@ -1231,30 +1240,17 @@ impl From<sbtc::events::WithdrawalCreateEvent> for WithdrawalRequest {
     }
 }
 
-impl From<sbtc::events::KeyRotationEvent> for KeyRotationEvent {
-    fn from(sbtc_event: sbtc::events::KeyRotationEvent) -> KeyRotationEvent {
-        KeyRotationEvent {
-            new_keys: sbtc_event.new_keys.into_iter().map(Into::into).collect(),
-            new_address: sbtc_event.new_address.into(),
-            new_aggregate_pubkey: sbtc_event.new_aggregate_pubkey.into(),
-            new_signature_threshold: sbtc_event.new_signature_threshold,
+impl From<sbtc::events::KeyRotationEvent> for RotateKeysTransaction {
+    fn from(sbtc_event: sbtc::events::KeyRotationEvent) -> RotateKeysTransaction {
+        RotateKeysTransaction {
+            txid: sbtc_event.txid.into(),
+            block_hash: sbtc_event.block_id.into(),
+            signer_set: sbtc_event.new_keys.into_iter().map(Into::into).collect(),
+            address: sbtc_event.new_address.into(),
+            aggregate_key: sbtc_event.new_aggregate_pubkey.into(),
+            signatures_required: sbtc_event.new_signature_threshold,
         }
     }
-}
-
-/// This is the event that is emitted from the `rotate-keys`
-/// public function in the sbtc-registry smart contract.
-#[derive(Debug, Clone)]
-pub struct KeyRotationEvent {
-    /// The new set of public keys for all known signers during this
-    /// PoX cycle.
-    pub new_keys: Vec<PublicKey>,
-    /// The address that deployed the contract.
-    pub new_address: StacksPrincipal,
-    /// The new aggregate key created by combining the above public keys.
-    pub new_aggregate_pubkey: PublicKey,
-    /// The number of signatures required for the multi-sig wallet.
-    pub new_signature_threshold: u16,
 }
 
 /// This is the event that is emitted from the `create-withdrawal-request`
