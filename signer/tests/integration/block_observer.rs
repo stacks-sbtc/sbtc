@@ -1149,7 +1149,8 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
 
     db.write_stacks_block(&stacks_block).await.unwrap();
 
-    let rotate_keys: KeyRotationEvent = Faker.fake_with_rng(&mut rng);
+    let mut rotate_keys: KeyRotationEvent = Faker.fake_with_rng(&mut rng);
+    rotate_keys.block_hash = stacks_block.block_hash;
     let transaction = model::Transaction {
         txid: rotate_keys.txid.into_bytes(),
         tx_type: model::TransactionType::RotateKeys,
