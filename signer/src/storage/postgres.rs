@@ -1946,12 +1946,12 @@ impl super::DbRead for PgStore {
     async fn get_last_key_rotation(
         &self,
         chain_tip: &model::BitcoinBlockHash,
-    ) -> Result<Option<model::RotateKeysTransaction>, Error> {
+    ) -> Result<Option<model::KeyRotationEvent>, Error> {
         let Some(stacks_chain_tip) = self.get_stacks_chain_tip(chain_tip).await? else {
             return Ok(None);
         };
 
-        sqlx::query_as::<_, model::RotateKeysTransaction>(
+        sqlx::query_as::<_, model::KeyRotationEvent>(
             r#"
             WITH RECURSIVE stacks_blocks AS (
                 SELECT
@@ -3090,7 +3090,7 @@ impl super::DbWrite for PgStore {
 
     async fn write_rotate_keys_transaction(
         &self,
-        key_rotation: &model::RotateKeysTransaction,
+        key_rotation: &model::KeyRotationEvent,
     ) -> Result<(), Error> {
         sqlx::query(
             r#"

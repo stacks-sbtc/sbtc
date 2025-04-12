@@ -17,7 +17,7 @@ use crate::metrics::Metrics;
 use crate::metrics::STACKS_BLOCKCHAIN;
 use crate::storage::DbWrite;
 use crate::storage::model::CompletedDepositEvent;
-use crate::storage::model::RotateKeysTransaction;
+use crate::storage::model::KeyRotationEvent;
 use crate::storage::model::StacksBlock;
 use crate::storage::model::WithdrawalAcceptEvent;
 use crate::storage::model::WithdrawalRejectEvent;
@@ -285,7 +285,7 @@ async fn handle_withdrawal_reject(
 ))]
 async fn handle_key_rotation(
     ctx: &impl Context,
-    event: RotateKeysTransaction,
+    event: KeyRotationEvent,
 ) -> Result<(), Error> {
     ctx.get_storage_mut()
         .write_rotate_keys_transaction(&event)

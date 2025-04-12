@@ -542,7 +542,7 @@ pub struct EncryptedDkgShares {
 /// Persisted public DKG shares from other signers
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
-pub struct RotateKeysTransaction {
+pub struct KeyRotationEvent {
     /// Transaction ID.
     pub txid: StacksTxId,
     /// The Stacks block ID of the block that includes the transaction
@@ -1240,9 +1240,9 @@ impl From<sbtc::events::WithdrawalCreateEvent> for WithdrawalRequest {
     }
 }
 
-impl From<sbtc::events::KeyRotationEvent> for RotateKeysTransaction {
-    fn from(sbtc_event: sbtc::events::KeyRotationEvent) -> RotateKeysTransaction {
-        RotateKeysTransaction {
+impl From<sbtc::events::KeyRotationEvent> for KeyRotationEvent {
+    fn from(sbtc_event: sbtc::events::KeyRotationEvent) -> KeyRotationEvent {
+        KeyRotationEvent {
             txid: sbtc_event.txid.into(),
             block_hash: sbtc_event.block_id.into(),
             signer_set: sbtc_event.new_keys.into_iter().map(Into::into).collect(),
