@@ -10,7 +10,7 @@ WITH block_hashes AS (
 )
 UPDATE sbtc_signer.rotate_keys_transactions
 SET block_hash = block_hashes.block_hash
-FROM block_hashes
+FROM block_hashes;
 
 -- Make the new column `NOT NULL` now that they should all have a value.
 ALTER TABLE sbtc_signer.rotate_keys_transactions
