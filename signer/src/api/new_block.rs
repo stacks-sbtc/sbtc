@@ -283,10 +283,7 @@ async fn handle_withdrawal_reject(
     address = %event.address,
     aggregate_key = %event.aggregate_key
 ))]
-async fn handle_key_rotation(
-    ctx: &impl Context,
-    event: KeyRotationEvent,
-) -> Result<(), Error> {
+async fn handle_key_rotation(ctx: &impl Context, event: KeyRotationEvent) -> Result<(), Error> {
     ctx.get_storage_mut()
         .write_rotate_keys_transaction(&event)
         .await?;
