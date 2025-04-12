@@ -1,6 +1,8 @@
 ALTER TABLE sbtc_signer.rotate_keys_transactions
 ADD COLUMN block_hash BYTEA;
 
+-- At the time that this query was executed, all rotate keys transaction
+-- events are associated with one stacks blocks.
 WITH block_hashes AS (
     SELECT st.block_hash
     FROM sbtc_signer.rotate_keys_transactions AS rkt
