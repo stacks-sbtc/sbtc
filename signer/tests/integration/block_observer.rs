@@ -947,7 +947,8 @@ async fn get_signer_public_keys_and_aggregate_key_falls_back() {
     // tables...
     let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
 
-    let rotate_keys: KeyRotationEvent = Faker.fake_with_rng(&mut rng);
+    let mut rotate_keys: KeyRotationEvent = Faker.fake_with_rng(&mut rng);
+    rotate_keys.block_hash = stacks_chain_tip.block_hash;
     let transaction = model::Transaction {
         txid: rotate_keys.txid.into_bytes(),
         tx_type: model::TransactionType::RotateKeys,
