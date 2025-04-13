@@ -1063,15 +1063,9 @@ impl TestSweepSetup2 {
     pub async fn store_sweep_tx(&self, db: &PgStore) {
         let sweep = self.sweep_tx_info.as_ref().expect("no sweep tx info set");
 
-        let sweep_tx = model::Transaction {
-            txid: sweep.tx_info.txid.to_byte_array(),
-            tx_type: model::TransactionType::SbtcTransaction,
-            block_hash: sweep.block_hash.to_byte_array(),
-        };
-
         let bitcoin_tx_ref = BitcoinTxRef {
-            txid: sweep_tx.txid.into(),
-            block_hash: sweep_tx.block_hash.into(),
+            txid: sweep.tx_info.txid.into(),
+            block_hash: sweep.block_hash.into(),
         };
 
         let block = BitcoinBlock {
