@@ -1,6 +1,7 @@
 //! Test utilities for the transaction coordinator
 
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -36,6 +37,7 @@ use crate::storage::model::StacksTxId;
 use crate::storage::model::ToLittleEndianOrder as _;
 use crate::testing;
 use crate::testing::storage::DbReadTestExt as _;
+use crate::testing::storage::model::TestBitcoinTxInfo;
 use crate::testing::storage::model::TestData;
 use crate::testing::wsts::SignerSet;
 use crate::transaction_coordinator;
@@ -43,12 +45,14 @@ use crate::transaction_coordinator::TxCoordinatorEventLoop;
 use crate::transaction_coordinator::coordinator_public_key;
 use bitcoin::hashes::Hash as _;
 
+use bitcoin::Amount;
 use blockstack_lib::chainstate::stacks::TransactionContractCall;
 use blockstack_lib::chainstate::stacks::TransactionPayload;
 use blockstack_lib::net::api::getcontractsrc::ContractSrcResponse;
 use clarity::vm::Value;
 use clarity::vm::types::BuffData;
 use clarity::vm::types::SequenceData;
+use fake::Dummy;
 use fake::Fake as _;
 use fake::Faker;
 use rand::SeedableRng;
@@ -204,10 +208,21 @@ where
             }],
             ..EMPTY_BITCOIN_TX
         };
-        test_data.push_bitcoin_txs(
-            &bitcoin_chain_tip,
-            vec![(model::TransactionType::SbtcTransaction, tx_1.clone())],
-        );
+        // test_data.push_bitcoin_txs(
+        //     &bitcoin_chain_tip,
+        //     vec![(model::TransactionType::SbtcTransaction, tx_1.clone())],
+        // );
+        let signer_script_pubkeys = [aggregate_key.signers_script_pubkey()]
+            .into_iter()
+            .collect();
+        let txs = TestBitcoinTxInfo {
+            tx: tx_1.clone(),
+            prevouts: vec![bitcoin::TxOut {
+                value: bitcoin::Amount::from_sat(1000),
+                script_pubkey: aggregate_key.signers_script_pubkey(),
+            }],
+        };
+        test_data.push_bitcoin_txs2(&bitcoin_chain_tip, vec![txs], &signer_script_pubkeys);
         test_data.remove(original_test_data);
         self.write_test_data(&test_data).await;
 
@@ -941,11 +956,14 @@ where
             &self.test_model_parameters,
             Some(&bitcoin_chain_tip),
         );
+
+        let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
+        let tx_info = TestBitcoinTxInfo {
+            tx: tx.clone(),
+            prevouts: Vec::new(),
+        };
+        test_data.push_bitcoin_txs2(&block_ref, vec![tx_info], &signer_script_pubkeys);
         test_data.push(block);
-        test_data.push_bitcoin_txs(
-            &block_ref,
-            vec![(model::TransactionType::SbtcTransaction, tx.clone())],
-        );
 
         let expected = SignerUtxo {
             outpoint: bitcoin::OutPoint::new(tx.compute_txid(), 0),
@@ -1002,7 +1020,9 @@ where
             test_data_rc.borrow_mut().push(block);
             block_ref
         };
+        let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
         let push_utxo = |block_ref, sat_amt| {
+            // TODO should have an input
             let tx = bitcoin::Transaction {
                 output: vec![bitcoin::TxOut {
                     value: bitcoin::Amount::from_sat(sat_amt),
@@ -1010,9 +1030,14 @@ where
                 }],
                 ..EMPTY_BITCOIN_TX
             };
-            test_data_rc.borrow_mut().push_bitcoin_txs(
+            let tx_info = TestBitcoinTxInfo {
+                tx: tx.clone(),
+                prevouts: Vec::new(),
+            };
+            test_data_rc.borrow_mut().push_bitcoin_txs2(
                 block_ref,
-                vec![(model::TransactionType::SbtcTransaction, tx.clone())],
+                vec![tx_info],
+                &signer_script_pubkeys,
             );
             tx
         };
@@ -1120,6 +1145,7 @@ where
                         txid: tx_1.compute_txid(),
                         vout: 0,
                     },
+                    sequence: bitcoin::Sequence::ZERO,
                     ..Default::default()
                 },
                 bitcoin::TxIn {
@@ -1127,6 +1153,7 @@ where
                         txid: tx_2.compute_txid(),
                         vout: 0,
                     },
+                    sequence: bitcoin::Sequence::ZERO,
                     ..Default::default()
                 },
             ],
@@ -1142,15 +1169,42 @@ where
             &self.test_model_parameters,
             Some(&bitcoin_chain_tip),
         );
-        test_data.push(block);
-        test_data.push_bitcoin_txs(
-            &block_ref,
-            vec![
-                (model::TransactionType::SbtcTransaction, tx_1.clone()),
-                (model::TransactionType::SbtcTransaction, tx_3.clone()),
-                (model::TransactionType::SbtcTransaction, tx_2.clone()),
+
+        let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
+        let tx_info_1 = TestBitcoinTxInfo {
+            tx: tx_1.clone(),
+            prevouts: vec![bitcoin::TxOut {
+                value: bitcoin::Amount::from_sat(1000),
+                script_pubkey: aggregate_key.signers_script_pubkey(),
+            }],
+        };
+        let tx_info_2 = TestBitcoinTxInfo {
+            tx: tx_2.clone(),
+            prevouts: vec![bitcoin::TxOut {
+                value: bitcoin::Amount::from_sat(2000),
+                script_pubkey: aggregate_key.signers_script_pubkey(),
+            }],
+        };
+        let tx_info_3 = TestBitcoinTxInfo {
+            tx: tx_3.clone(),
+            prevouts: vec![
+                bitcoin::TxOut {
+                    value: bitcoin::Amount::from_sat(3000),
+                    script_pubkey: aggregate_key.signers_script_pubkey(),
+                },
+                bitcoin::TxOut {
+                    value: bitcoin::Amount::from_sat(4000),
+                    script_pubkey: bitcoin::ScriptBuf::new(),
+                },
             ],
+        };
+        test_data.push_bitcoin_txs2(
+            &block_ref,
+            vec![tx_info_1, tx_info_2, tx_info_3],
+            &signer_script_pubkeys,
         );
+
+        test_data.push(block);
 
         let expected = SignerUtxo {
             outpoint: bitcoin::OutPoint::new(tx_3.compute_txid(), 0),
@@ -1211,13 +1265,27 @@ where
                 value: bitcoin::Amount::from_sat(0xA1),
                 script_pubkey: aggregate_key.signers_script_pubkey(),
             }],
+            input: vec![bitcoin::TxIn {
+                previous_output: bitcoin::OutPoint {
+                    txid: model::BitcoinTxId::dummy_with_rng(&fake::Faker, &mut rng).into(),
+                    vout: 0,
+                },
+                sequence: bitcoin::Sequence::ZERO,
+                ..Default::default()
+            }],
             ..EMPTY_BITCOIN_TX
         };
+        // model::BitcoinTxId::dummy_with_rng(&fake::Faker, &mut rng).into()
+        let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
+        let tx_info = TestBitcoinTxInfo {
+            tx: tx_a1.clone(),
+            prevouts: vec![bitcoin::TxOut {
+                value: Amount::from_sat(0xA1),
+                script_pubkey: aggregate_key.signers_script_pubkey(),
+            }],
+        };
+        test_data.push_bitcoin_txs2(&block_a1, vec![tx_info], &signer_script_pubkeys);
         test_data.push(block);
-        test_data.push_bitcoin_txs(
-            &block_a1,
-            vec![(model::TransactionType::SbtcTransaction, tx_a1.clone())],
-        );
 
         let (block, block_a2) = test_data.new_block(
             &mut rng,
@@ -1232,11 +1300,12 @@ where
             }],
             ..EMPTY_BITCOIN_TX
         };
+        let tx_info = TestBitcoinTxInfo {
+            tx: tx_a2.clone(),
+            prevouts: Vec::new(),
+        };
+        test_data.push_bitcoin_txs2(&block_a2, vec![tx_info], &signer_script_pubkeys);
         test_data.push(block);
-        test_data.push_bitcoin_txs(
-            &block_a2,
-            vec![(model::TransactionType::Donation, tx_a2.clone())],
-        );
 
         let (block, block_b1) = test_data.new_block(
             &mut rng,
@@ -1251,11 +1320,12 @@ where
             }],
             ..EMPTY_BITCOIN_TX
         };
+        let tx_info = TestBitcoinTxInfo {
+            tx: tx_b1.clone(),
+            prevouts: Vec::new(),
+        };
+        test_data.push_bitcoin_txs2(&block_b1, vec![tx_info], &signer_script_pubkeys);
         test_data.push(block);
-        test_data.push_bitcoin_txs(
-            &block_b1,
-            vec![(model::TransactionType::Donation, tx_b1.clone())],
-        );
 
         test_data.remove(original_test_data);
         self.write_test_data(&test_data).await;

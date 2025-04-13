@@ -154,7 +154,7 @@ impl Store {
                 .into_iter()
                 .map(|prevout| bitcoin::TxIn {
                     previous_output: bitcoin::OutPoint {
-                        txid: prevout.txid.into(),
+                        txid: prevout.prevout_txid.into(),
                         vout: prevout.prevout_output_index,
                     },
                     script_sig: bitcoin::ScriptBuf::new(),
@@ -190,11 +190,14 @@ impl Store {
 
                 let mut sbtc_txs = txs
                     .iter()
-                    .filter_map(|tx| self.raw_transactions.get(&tx.into_bytes()))
-                    .filter(|sbtc_tx| sbtc_tx.tx_type == model::TransactionType::Donation)
-                    .filter_map(|tx| {
-                        let txid = model::BitcoinTxId::from(tx.txid);
-                        self.reconstruct_transaction(&txid)
+                    .filter_map(|txid| {
+                        let outputs = self.bitcoin_outputs.get(txid)?;
+
+                        outputs
+                            .iter()
+                            .any(|output| output.output_type == model::TxOutputType::Donation)
+                            .then_some(outputs.first()?.txid)
+                            .and_then(|txid| self.reconstruct_transaction(&txid))
                     })
                     .filter(|tx| {
                         tx.output
@@ -715,11 +718,14 @@ impl super::DbRead for SharedStore {
 
                 let mut sbtc_txs = txs
                     .iter()
-                    .filter_map(|tx| store.raw_transactions.get(&tx.into_bytes()))
-                    .filter(|sbtc_tx| sbtc_tx.tx_type == model::TransactionType::SbtcTransaction)
-                    .filter_map(|tx| {
-                        let txid = model::BitcoinTxId::from(tx.txid);
-                        store.reconstruct_transaction(&txid)
+                    .filter_map(|txid| {
+                        let outputs = store.bitcoin_outputs.get(txid)?;
+
+                        outputs
+                            .iter()
+                            .any(|output| output.output_type == model::TxOutputType::SignersOutput)
+                            .then_some(outputs.first()?.txid)
+                            .and_then(|txid| store.reconstruct_transaction(&txid))
                     })
                     .filter(|tx| {
                         tx.output
