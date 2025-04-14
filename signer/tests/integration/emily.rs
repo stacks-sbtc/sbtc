@@ -14,7 +14,6 @@ use bitcoin::block::Version;
 use bitcoin::consensus::encode::serialize_hex;
 use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc_json::Utxo;
-use fake::Dummy as _;
 use fake::Fake as _;
 use futures::future::join_all;
 use signer::testing::storage::model::TestBitcoinTxInfo;
@@ -198,14 +197,7 @@ async fn deposit_flow() {
             value: bitcoin::Amount::from_sat(1_337_000_000_000),
             script_pubkey: aggregate_key.signers_script_pubkey(),
         }],
-        input: vec![bitcoin::TxIn {
-            previous_output: bitcoin::OutPoint {
-                txid: model::BitcoinTxId::dummy_with_rng(&fake::Faker, &mut rng).into(),
-                vout: 0,
-            },
-            sequence: bitcoin::Sequence::ZERO,
-            ..Default::default()
-        }],
+        input: vec![TestBitcoinTxInfo::random_prevout(&mut rng)],
     };
     let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
     let txs = TestBitcoinTxInfo {

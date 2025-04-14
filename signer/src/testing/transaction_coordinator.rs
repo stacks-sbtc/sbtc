@@ -52,7 +52,6 @@ use blockstack_lib::net::api::getcontractsrc::ContractSrcResponse;
 use clarity::vm::Value;
 use clarity::vm::types::BuffData;
 use clarity::vm::types::SequenceData;
-use fake::Dummy;
 use fake::Fake as _;
 use fake::Faker;
 use rand::SeedableRng;
@@ -506,14 +505,7 @@ where
                 value: bitcoin::Amount::from_sat(1_337_000_000_000),
                 script_pubkey: aggregate_key.signers_script_pubkey(),
             }],
-            input: vec![bitcoin::TxIn {
-                previous_output: bitcoin::OutPoint {
-                    txid: model::BitcoinTxId::dummy_with_rng(&fake::Faker, &mut rng).into(),
-                    vout: 0,
-                },
-                sequence: bitcoin::Sequence::ZERO,
-                ..Default::default()
-            }],
+            input: vec![TestBitcoinTxInfo::random_prevout(&mut rng)],
             ..EMPTY_BITCOIN_TX
         };
         let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
@@ -1024,10 +1016,10 @@ where
         let original_test_data = test_data.clone();
 
         let test_data_rc = RefCell::new(test_data);
+        let rng_rc = RefCell::new(rng);
         let push_block = |parent| {
-            let mut rng2 = rng.clone();
             let (block, block_ref) = test_data_rc.borrow_mut().new_block(
-                &mut rng2,
+                &mut *rng_rc.borrow_mut(),
                 &signer_set.signer_keys(),
                 &self.test_model_parameters,
                 Some(parent),
@@ -1039,13 +1031,12 @@ where
         let push_utxo = |block_ref, sat_amt| {
             // These are sweep transactions, so they need inputs so that
             // they get labeled as such.
-            let mut rng2 = rng.clone();
             let tx = bitcoin::Transaction {
                 output: vec![bitcoin::TxOut {
                     value: bitcoin::Amount::from_sat(sat_amt),
                     script_pubkey: aggregate_key.signers_script_pubkey(),
                 }],
-                input: vec![TestBitcoinTxInfo::random_prevout(&mut rng2)],
+                input: vec![TestBitcoinTxInfo::random_prevout(&mut *rng_rc.borrow_mut())],
                 ..EMPTY_BITCOIN_TX
             };
             let tx_info = TestBitcoinTxInfo {
