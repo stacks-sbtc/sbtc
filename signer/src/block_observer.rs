@@ -90,6 +90,10 @@ impl DepositRequestValidator for CreateDepositRequest {
             return Ok(None);
         };
 
+        if response.tx.is_coinbase() {
+            return Err(Error::BitcoinTxCoinbase(self.outpoint.txid));
+        }
+
         // The `get_tx_info` call here should not return None, we know that
         // it has been included in a block.
         let Some(tx_info) = client.get_tx_info(&self.outpoint.txid, &block_hash).await? else {
@@ -436,11 +440,16 @@ impl<C: Context, B> BlockObserver<C, B> {
                 continue;
             }
 
+            let txid = tx.compute_txid();
+            if tx.is_coinbase() {
+                tracing::warn!(%txid, "ignoring coinbase tx when extracting sbtc transaction");
+                continue;
+            }
+
             // This function is called after we have received a
             // notification of a bitcoin block, and we are iterating
             // through all of the transactions within that block. This
             // means the `get_tx_info` call below should not fail.
-            let txid = tx.compute_txid();
             let tx_info = btc_rpc
                 .get_tx_info(&txid, &block_hash)
                 .await?
@@ -723,7 +732,6 @@ mod tests {
     use fake::Fake;
     use model::BitcoinTxId;
     use model::ScriptPubKey;
-    use rand::SeedableRng;
     use test_log::test;
 
     use crate::bitcoin::rpc::GetTxResponse;
@@ -734,12 +742,13 @@ mod tests {
     use crate::storage::model::DkgSharesStatus;
     use crate::testing::block_observer::TestHarness;
     use crate::testing::context::*;
+    use crate::testing::get_rng;
 
     use super::*;
 
     #[test(tokio::test)]
     async fn should_be_able_to_extract_bitcoin_blocks_given_a_block_header_stream() {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let storage = storage::in_memory::Store::new_shared();
         let test_harness = TestHarness::generate(&mut rng, 20, 0..5);
         let min_height = test_harness.min_block_height();
@@ -789,7 +798,7 @@ mod tests {
     /// pass validation and have been confirmed.
     #[tokio::test]
     async fn validated_confirmed_deposits_get_added_to_state() {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let mut test_harness = TestHarness::generate(&mut rng, 20, 0..5);
         // We want the test harness to fetch a block from our
         // "bitcoin-core", which in this case is the test harness. So we
@@ -918,7 +927,7 @@ mod tests {
     /// deposit requests into "storage".
     #[tokio::test]
     async fn extract_deposit_requests_stores_validated_deposits() {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(365);
+        let mut rng = get_rng();
         let mut test_harness = TestHarness::generate(&mut rng, 20, 0..5);
 
         // We want the test harness to fetch a block from our
@@ -1007,7 +1016,7 @@ mod tests {
     /// bitcoin block that match one of those `scriptPubkey`s.
     #[tokio::test]
     async fn sbtc_transactions_get_stored() {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let mut test_harness = TestHarness::generate(&mut rng, 20, 0..5);
 
         let block_hash = BlockHash::from_byte_array([1u8; 32]);
