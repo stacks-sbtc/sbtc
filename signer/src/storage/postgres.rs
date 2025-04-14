@@ -1749,7 +1749,7 @@ impl super::DbRead for PgStore {
         .bind(chain_tip.block_hash)
         .bind(i32::from(context_window))
         .bind(stacks_chain_tip.block_hash)
-        .bind(i64::try_from(*expiration_height).map_err(Error::ConversionDatabaseInt)?)
+        .bind(i64::try_from(expiration_height).map_err(Error::ConversionDatabaseInt)?)
         .fetch_all(&self.0)
         .await
         .map_err(Error::SqlxQuery)
@@ -2172,7 +2172,7 @@ impl super::DbRead for PgStore {
         .bind(chain_tip.block_hash)
         .bind(block_ref.block_hash)
         .bind(i64::try_from(height_diff).map_err(Error::ConversionDatabaseInt)?)
-        .bind(i64::try_from(*block_ref.block_height).map_err(Error::ConversionDatabaseInt)?)
+        .bind(i64::try_from(block_ref.block_height).map_err(Error::ConversionDatabaseInt)?)
         .fetch_one(&self.0)
         .await
         .map_err(Error::SqlxQuery)
@@ -2645,7 +2645,7 @@ impl super::DbWrite for PgStore {
             ON CONFLICT DO NOTHING",
         )
         .bind(block.block_hash)
-        .bind(i64::try_from(*block.block_height).map_err(Error::ConversionDatabaseInt)?)
+        .bind(i64::try_from(block.block_height).map_err(Error::ConversionDatabaseInt)?)
         .bind(block.parent_hash)
         .execute(&self.0)
         .await
@@ -2666,7 +2666,7 @@ impl super::DbWrite for PgStore {
             ON CONFLICT DO NOTHING",
         )
         .bind(block.block_hash)
-        .bind(i64::try_from(*block.block_height).map_err(Error::ConversionDatabaseInt)?)
+        .bind(i64::try_from(block.block_height).map_err(Error::ConversionDatabaseInt)?)
         .bind(block.parent_hash)
         .bind(block.bitcoin_anchor)
         .execute(&self.0)
@@ -2844,7 +2844,7 @@ impl super::DbWrite for PgStore {
         .bind(i64::try_from(request.amount).map_err(Error::ConversionDatabaseInt)?)
         .bind(i64::try_from(request.max_fee).map_err(Error::ConversionDatabaseInt)?)
         .bind(&request.sender_address)
-        .bind(i64::try_from(*request.bitcoin_block_height).map_err(Error::ConversionDatabaseInt)?)
+        .bind(i64::try_from(request.bitcoin_block_height).map_err(Error::ConversionDatabaseInt)?)
         .execute(&self.0)
         .await
         .map_err(Error::SqlxQuery)?;
@@ -3042,7 +3042,7 @@ impl super::DbWrite for PgStore {
             block_ids.push(block.block_hash);
             parent_block_ids.push(block.parent_hash);
             let block_height =
-                i64::try_from(*block.block_height).map_err(Error::ConversionDatabaseInt)?;
+                i64::try_from(block.block_height).map_err(Error::ConversionDatabaseInt)?;
             chain_lengths.push(block_height);
             bitcoin_anchors.push(block.bitcoin_anchor);
         }
@@ -3093,7 +3093,7 @@ impl super::DbWrite for PgStore {
         shares: &model::EncryptedDkgShares,
     ) -> Result<(), Error> {
         let started_at_bitcoin_block_height =
-            i64::try_from(*shares.started_at_bitcoin_block_height)
+            i64::try_from(shares.started_at_bitcoin_block_height)
                 .map_err(Error::ConversionDatabaseInt)?;
 
         sqlx::query(
@@ -3182,7 +3182,7 @@ impl super::DbWrite for PgStore {
         .bind(event.outpoint.txid.to_byte_array())
         .bind(i64::from(event.outpoint.vout))
         .bind(event.sweep_block_hash.to_byte_array())
-        .bind(i64::try_from(*event.sweep_block_height).map_err(Error::ConversionDatabaseInt)?)
+        .bind(i64::try_from(event.sweep_block_height).map_err(Error::ConversionDatabaseInt)?)
         .bind(event.sweep_txid.to_byte_array())
         .execute(&self.0)
         .await
@@ -3219,7 +3219,7 @@ impl super::DbWrite for PgStore {
         .bind(i64::from(event.outpoint.vout))
         .bind(i64::try_from(event.fee).map_err(Error::ConversionDatabaseInt)?)
         .bind(event.sweep_block_hash.to_byte_array())
-        .bind(i64::try_from(*event.sweep_block_height).map_err(Error::ConversionDatabaseInt)?)
+        .bind(i64::try_from(event.sweep_block_height).map_err(Error::ConversionDatabaseInt)?)
         .bind(event.sweep_txid.to_byte_array())
         .execute(&self.0)
         .await
