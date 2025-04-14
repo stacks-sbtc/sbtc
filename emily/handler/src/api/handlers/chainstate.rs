@@ -107,8 +107,7 @@ pub async fn set_chainstate(context: EmilyContext, body: Chainstate) -> impl war
     ) -> Result<impl warp::reply::Reply, Error> {
         // Convert body to the correct type.
         let chainstate: Chainstate = body;
-        let can_reorg = true;
-        add_chainstate_entry_or_reorg(&context, can_reorg, &chainstate).await?;
+        add_chainstate_entry_or_reorg(&context, &chainstate).await?;
         // Respond.
         Ok(with_status(json(&chainstate), StatusCode::CREATED))
     }
@@ -151,8 +150,7 @@ pub async fn update_chainstate(
     ) -> Result<impl warp::reply::Reply, Error> {
         // Convert body to the correct type.
         let chainstate: Chainstate = body;
-        let can_reorg = true;
-        add_chainstate_entry_or_reorg(&context, can_reorg, &chainstate).await?;
+        add_chainstate_entry_or_reorg(&context, &chainstate).await?;
         // Respond.
         Ok(with_status(json(&chainstate), StatusCode::CREATED))
     }
@@ -169,7 +167,6 @@ pub async fn update_chainstate(
 /// TODO(TBD): Consider moving this logic into database accessor structures.
 pub async fn add_chainstate_entry_or_reorg(
     context: &EmilyContext,
-    can_reorg: bool,
     chainstate: &Chainstate,
 ) -> Result<(), Error> {
     // Get chainstate as entry.
@@ -177,7 +174,6 @@ pub async fn add_chainstate_entry_or_reorg(
     debug!("Attempting to add chainstate: {entry:?}");
     match accessors::add_chainstate_entry_with_retry(context, &entry, 15).await {
         Err(Error::InconsistentState(Inconsistency::Chainstates(conflicting_chainstates))) => {
-            if can_reorg {
                 info!("Inconsistent chainstate found; attempting reorg for {entry:?}");
                 let execute_reorg_request = ExecuteReorgRequest {
                     canonical_tip: chainstate.clone(),
@@ -187,10 +183,6 @@ pub async fn add_chainstate_entry_or_reorg(
                 execute_reorg_handler(context, execute_reorg_request)
                     .await
                     .inspect_err(|e| warn!("Failed executing reorg with error {}", e))?;
-            // Log error.
-            } else {
-                debug!("Inconsistent chainstate found for {entry:?} but we pretend it's okay.");
-            }
         }
         e @ Err(_) => return e,
         _ => {}
