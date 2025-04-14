@@ -1564,33 +1564,13 @@ impl StacksBlockHeight {
 
 /// Bitcoin block height
 #[derive(
-    Debug,
-    Default,
-    Clone,
-    Copy,
-    Hash,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
+    Debug, Default, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
 )]
 #[serde(transparent)]
 pub struct BitcoinBlockHeight(u64);
 /// Stacks block height
 #[derive(
-    Debug,
-    Default,
-    Clone,
-    Copy,
-    Hash,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
+    Debug, Default, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
 )]
 #[serde(transparent)]
 pub struct StacksBlockHeight(u64);
