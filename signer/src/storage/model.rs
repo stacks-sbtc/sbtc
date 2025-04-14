@@ -533,7 +533,6 @@ pub struct EncryptedDkgShares {
     pub started_at_bitcoin_block_hash: BitcoinBlockHash,
     /// The block height of the chain tip of the canonical bitcoin blockchain
     /// when the DKG round associated with these shares started.
-    #[cfg_attr(feature = "testing", dummy(faker = "0..i64::MAX as u64"))]
     pub started_at_bitcoin_block_height: BitcoinBlockHeight,
 }
 
