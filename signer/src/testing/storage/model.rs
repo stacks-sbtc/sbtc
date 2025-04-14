@@ -2,8 +2,8 @@
 
 use std::collections::HashSet;
 
-use bitcoin::hashes::Hash as _;
 use bitcoin::ScriptBuf;
+use bitcoin::hashes::Hash as _;
 use fake::Dummy as _;
 use fake::Fake;
 

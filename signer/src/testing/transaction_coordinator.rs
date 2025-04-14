@@ -208,11 +208,11 @@ where
             ..EMPTY_BITCOIN_TX
         };
         let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
-        let txs = TestBitcoinTxInfo {
+        let tx_info = TestBitcoinTxInfo {
             tx: tx_1.clone(),
             prevouts: Vec::new(),
         };
-        test_data.push_bitcoin_txs(&bitcoin_chain_tip, vec![txs], &signer_script_pubkeys);
+        test_data.push_bitcoin_txs(&bitcoin_chain_tip, vec![tx_info], &signer_script_pubkeys);
         test_data.remove(original_test_data);
         self.write_test_data(&test_data).await;
 
@@ -356,14 +356,14 @@ where
             ..EMPTY_BITCOIN_TX
         };
         let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
-        let txs = TestBitcoinTxInfo {
+        let tx_info = TestBitcoinTxInfo {
             tx: tx_1.clone(),
             prevouts: vec![bitcoin::TxOut {
                 value: bitcoin::Amount::from_sat(1000),
                 script_pubkey: aggregate_key.signers_script_pubkey(),
             }],
         };
-        test_data.push_bitcoin_txs(&bitcoin_chain_tip, vec![txs], &signer_script_pubkeys);
+        test_data.push_bitcoin_txs(&bitcoin_chain_tip, vec![tx_info], &signer_script_pubkeys);
 
         test_data.remove(original_test_data);
         self.write_test_data(&test_data).await;
@@ -509,14 +509,14 @@ where
             ..EMPTY_BITCOIN_TX
         };
         let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
-        let txs = TestBitcoinTxInfo {
+        let tx_info = TestBitcoinTxInfo {
             tx: tx_1.clone(),
             prevouts: vec![bitcoin::TxOut {
                 value: bitcoin::Amount::from_sat(1000),
                 script_pubkey: aggregate_key.signers_script_pubkey(),
             }],
         };
-        test_data.push_bitcoin_txs(&bitcoin_chain_tip, vec![txs], &signer_script_pubkeys);
+        test_data.push_bitcoin_txs(&bitcoin_chain_tip, vec![tx_info], &signer_script_pubkeys);
 
         test_data.remove(original_test_data);
         self.write_test_data(&test_data).await;
