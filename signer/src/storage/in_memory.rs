@@ -58,9 +58,6 @@ pub struct Store {
     /// Withdraw signers
     pub withdrawal_request_to_signers: HashMap<WithdrawalRequestPk, Vec<model::WithdrawalSigner>>,
 
-    /// Raw transaction data
-    pub raw_transactions: HashMap<[u8; 32], model::Transaction>,
-
     /// Bitcoin blocks to transactions
     pub bitcoin_block_to_transactions: HashMap<model::BitcoinBlockHash, Vec<model::BitcoinTxId>>,
 

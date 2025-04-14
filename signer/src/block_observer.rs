@@ -982,14 +982,6 @@ mod tests {
                 .get(&db_outpoint.0)
                 .is_some()
         );
-        assert_eq!(
-            storage
-                .raw_transactions
-                .get(db_outpoint.0.as_byte_array())
-                .unwrap()
-                .tx_type,
-            model::TransactionType::DepositRequest
-        );
     }
 
     /// Test that `BlockObserver::extract_sbtc_transactions` takes the

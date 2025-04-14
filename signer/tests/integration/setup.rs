@@ -5,7 +5,6 @@ use std::ops::Deref;
 use bitcoin::AddressType;
 use bitcoin::Amount;
 use bitcoin::OutPoint;
-use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc::Client;
 use bitcoincore_rpc::RpcApi as _;
 use blockstack_lib::types::chainstate::StacksAddress;
@@ -281,14 +280,8 @@ impl TestSweepSetup {
 
     /// Store the deposit transaction into the database
     pub async fn store_deposit_tx(&self, db: &PgStore) {
-        let deposit_tx = model::Transaction {
-            txid: self.deposit_tx_info.txid.to_byte_array(),
-            tx_type: model::TransactionType::SbtcTransaction,
-            block_hash: self.deposit_block_hash.to_byte_array(),
-        };
-
         let bitcoin_tx_ref = BitcoinTxRef {
-            txid: deposit_tx.txid.into(),
+            txid: self.deposit_tx_info.txid.into(),
             block_hash: self.deposit_block_hash.into(),
         };
 
@@ -297,15 +290,9 @@ impl TestSweepSetup {
     /// Store the transaction that swept the deposit into the signers' UTXO
     /// into the database
     pub async fn store_sweep_tx(&self, db: &PgStore) {
-        let sweep_tx = model::Transaction {
-            txid: self.sweep_tx_info.txid.to_byte_array(),
-            tx_type: model::TransactionType::SbtcTransaction,
-            block_hash: self.sweep_block_hash.to_byte_array(),
-        };
-
         let bitcoin_tx_ref = BitcoinTxRef {
-            txid: sweep_tx.txid.into(),
-            block_hash: sweep_tx.block_hash.into(),
+            txid: self.sweep_tx_info.txid.into(),
+            block_hash: self.sweep_block_hash.into(),
         };
 
         db.write_bitcoin_transaction(&bitcoin_tx_ref).await.unwrap();
@@ -978,14 +965,8 @@ impl TestSweepSetup2 {
     /// Store the deposit transaction into the database
     pub async fn store_deposit_txs(&self, db: &PgStore) {
         for (_, _, tx_info) in self.deposits.iter() {
-            let deposit_tx = model::Transaction {
-                txid: tx_info.txid.to_byte_array(),
-                tx_type: model::TransactionType::SbtcTransaction,
-                block_hash: self.deposit_block_hash.to_byte_array(),
-            };
-
             let bitcoin_tx_ref = BitcoinTxRef {
-                txid: deposit_tx.txid.into(),
+                txid: tx_info.txid.into(),
                 block_hash: self.deposit_block_hash.into(),
             };
 

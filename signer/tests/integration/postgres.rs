@@ -5994,13 +5994,8 @@ mod get_pending_accepted_withdrawal_requests {
     ) -> BitcoinTxId {
         // Simulate a sweep transaction on the canonical chain which will
         // include the withdrawal request.
-        let transaction = model::Transaction {
-            txid: Faker.fake(),
-            block_hash: at_bitcoin_block.into_bytes(),
-            tx_type: model::TransactionType::SbtcTransaction,
-        };
         let bitcoin_sweep_tx = model::BitcoinTxRef {
-            txid: transaction.txid.into(),
+            txid: Faker.fake(),
             block_hash: *at_bitcoin_block,
         };
         db.write_bitcoin_transaction(&bitcoin_sweep_tx)
@@ -6021,7 +6016,7 @@ mod get_pending_accepted_withdrawal_requests {
         .await
         .expect("failed to write bitcoin withdrawal output");
 
-        transaction.txid.into()
+        bitcoin_sweep_tx.txid
     }
 
     /// Asserts that when there are no withdrawal requests, we return an empty

@@ -94,9 +94,6 @@ pub struct TestData {
     /// Connection between bitcoin blocks and transactions
     pub bitcoin_transactions: Vec<model::BitcoinTxRef>,
 
-    /// Connection between bitcoin blocks and transactions
-    pub stacks_transactions: Vec<model::StacksTransaction>,
-
     /// Deposit signers
     pub deposit_signers: Vec<model::DepositSigner>,
 
@@ -178,7 +175,6 @@ impl TestData {
                 withdraw_requests: withdraw_data.withdraw_requests,
                 withdraw_signers: withdraw_data.withdraw_signers,
                 bitcoin_transactions: deposit_data.bitcoin_transactions,
-                stacks_transactions: withdraw_data.stacks_transactions,
                 tx_outputs: Vec::new(),
                 tx_prevouts: Vec::new(),
             },
@@ -196,8 +192,6 @@ impl TestData {
         self.withdraw_signers.extend(new_data.withdraw_signers);
         self.bitcoin_transactions
             .extend(new_data.bitcoin_transactions);
-        self.stacks_transactions
-            .extend(new_data.stacks_transactions);
         self.tx_outputs.extend(new_data.tx_outputs);
         self.tx_prevouts.extend(new_data.tx_prevouts);
     }
@@ -211,7 +205,6 @@ impl TestData {
         vec_diff(&mut self.withdraw_requests, &other.withdraw_requests);
         vec_diff(&mut self.withdraw_signers, &other.withdraw_signers);
         vec_diff(&mut self.bitcoin_transactions, &other.bitcoin_transactions);
-        vec_diff(&mut self.stacks_transactions, &other.stacks_transactions);
         vec_diff(&mut self.tx_outputs, &other.tx_outputs);
         vec_diff(&mut self.tx_prevouts, &other.tx_prevouts);
     }
@@ -455,8 +448,6 @@ impl DepositData {
 struct WithdrawData {
     pub withdraw_requests: Vec<model::WithdrawalRequest>,
     pub withdraw_signers: Vec<model::WithdrawalSigner>,
-    pub transactions: Vec<model::Transaction>,
-    pub stacks_transactions: Vec<model::StacksTransaction>,
 }
 
 impl WithdrawData {
@@ -494,14 +485,6 @@ impl WithdrawData {
                     withdraw_request.recipient = fake::Faker.fake_with_rng(rng);
                     withdraw_request.bitcoin_block_height = bitcoin_block.block_height;
 
-                    let mut raw_transaction: model::Transaction = fake::Faker.fake_with_rng(rng);
-                    raw_transaction.tx_type = model::TransactionType::WithdrawRequest;
-
-                    let stacks_transaction = model::StacksTransaction {
-                        txid: raw_transaction.txid.into(),
-                        block_hash: stacks_block_hash,
-                    };
-
                     let withdraw_signers: Vec<_> = signer_keys
                         .iter()
                         .take(num_signers_per_request)
@@ -515,11 +498,7 @@ impl WithdrawData {
                         })
                         .collect();
 
-                    withdraw_requests
-                        .stacks_transactions
-                        .push(stacks_transaction);
                     withdraw_requests.withdraw_requests.push(withdraw_request);
-                    withdraw_requests.transactions.push(raw_transaction);
                     withdraw_requests.withdraw_signers.extend(withdraw_signers);
 
                     (withdraw_requests, next_withdraw_request_id + 1)

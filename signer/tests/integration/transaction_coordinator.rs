@@ -208,14 +208,8 @@ where
         }],
     };
 
-    let tx = model::Transaction {
-        txid: tx.compute_txid().to_byte_array(),
-        tx_type: model::TransactionType::Donation,
-        block_hash: *block_hash.as_byte_array(),
-    };
-
     let bitcoin_transaction = model::BitcoinTxRef {
-        txid: tx.txid.into(),
+        txid: tx.compute_txid().into(),
         block_hash: (*block_hash).into(),
     };
 
