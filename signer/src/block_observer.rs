@@ -90,6 +90,10 @@ impl DepositRequestValidator for CreateDepositRequest {
             return Ok(None);
         };
 
+        if response.tx.is_coinbase() {
+            return Err(Error::BitcoinTxCoinbase(self.outpoint.txid));
+        }
+
         // The `get_tx_info` call here should not return None, we know that
         // it has been included in a block.
         let Some(tx_info) = client.get_tx_info(&self.outpoint.txid, &block_hash).await? else {
@@ -217,6 +221,7 @@ impl<C: Context, B> BlockObserver<C, B> {
     #[tracing::instrument(skip_all)]
     pub async fn load_requests(&self, requests: &[CreateDepositRequest]) -> Result<(), Error> {
         let mut deposit_requests = Vec::new();
+        let mut deposit_request_txs = Vec::new();
         let bitcoin_client = self.context.get_bitcoin_client();
         let is_mainnet = self.context.config().signer.network.is_mainnet();
 
@@ -228,24 +233,25 @@ impl<C: Context, B> BlockObserver<C, B> {
 
             // We log the error above, so we just need to extract the
             // deposit now.
-            let deposit_status = match deposit {
-                Ok(Some(deposit)) => {
-                    deposit_requests.push(deposit);
-                    "success"
-                }
-                Ok(None) => "unconfirmed",
-                Err(_) => "failed",
+            Metrics::increment_deposit_total(&deposit);
+            let Ok(Some(deposit)) = deposit else { continue };
+
+            self.process_bitcoin_blocks_until(deposit.tx_info.block_hash)
+                .await?;
+
+            let tx = model::Transaction {
+                txid: deposit.tx_info.txid.to_byte_array(),
+                tx_type: model::TransactionType::DepositRequest,
+                block_hash: deposit.tx_info.block_hash.to_byte_array(),
             };
 
-            metrics::counter!(
-                Metrics::DepositRequestsTotal,
-                "blockchain" => BITCOIN_BLOCKCHAIN,
-                "status" => deposit_status,
-            )
-            .increment(1);
+            deposit_requests.push(model::DepositRequest::from(deposit));
+            deposit_request_txs.push(tx);
         }
 
-        self.store_deposit_requests(deposit_requests).await?;
+        let db = self.context.get_storage_mut();
+        db.write_bitcoin_transactions(deposit_request_txs).await?;
+        db.write_deposit_requests(deposit_requests).await?;
 
         tracing::debug!("finished processing deposit requests");
         Ok(())
@@ -393,50 +399,6 @@ impl<C: Context, B> BlockObserver<C, B> {
         Ok(())
     }
 
-    /// For each of the deposit requests, persist the corresponding
-    /// transaction and the parsed deposit info into the database.
-    ///
-    /// This function does three things:
-    /// 1. For all deposit requests, check to see if there are bitcoin
-    ///    blocks that we do not have in our database.
-    /// 2. If we do not have a record of the bitcoin block then write it
-    ///    to the database.
-    /// 3. Write the deposit transaction and the extracted deposit info
-    ///    into the database.
-    async fn store_deposit_requests(&self, requests: Vec<Deposit>) -> Result<(), Error> {
-        // We need to check to see if we have a record of the bitcoin block
-        // that contains the deposit request in our database. If we don't
-        // then write them to our database.
-        for deposit in requests.iter() {
-            self.process_bitcoin_blocks_until(deposit.tx_info.block_hash)
-                .await?;
-        }
-
-        // Okay now we write the deposit requests and the transactions to
-        // the database.
-        let (deposit_requests, deposit_request_txs) = requests
-            .into_iter()
-            .map(|deposit| {
-                let tx = model::Transaction {
-                    txid: deposit.tx_info.txid.to_byte_array(),
-                    tx: bitcoin::consensus::serialize(&deposit.tx_info.tx),
-                    tx_type: model::TransactionType::DepositRequest,
-                    block_hash: deposit.tx_info.block_hash.to_byte_array(),
-                };
-
-                (model::DepositRequest::from(deposit), tx)
-            })
-            .collect::<Vec<_>>()
-            .into_iter()
-            .unzip();
-
-        let db = self.context.get_storage_mut();
-        db.write_bitcoin_transactions(deposit_request_txs).await?;
-        db.write_deposit_requests(deposit_requests).await?;
-
-        Ok(())
-    }
-
     /// Extract all BTC transactions from the block where one of the UTXOs
     /// can be spent by the signers.
     ///
@@ -478,11 +440,16 @@ impl<C: Context, B> BlockObserver<C, B> {
                 continue;
             }
 
+            let txid = tx.compute_txid();
+            if tx.is_coinbase() {
+                tracing::warn!(%txid, "ignoring coinbase tx when extracting sbtc transaction");
+                continue;
+            }
+
             // This function is called after we have received a
             // notification of a bitcoin block, and we are iterating
             // through all of the transactions within that block. This
             // means the `get_tx_info` call below should not fail.
-            let txid = tx.compute_txid();
             let tx_info = btc_rpc
                 .get_tx_info(&txid, &block_hash)
                 .await?
@@ -498,7 +465,6 @@ impl<C: Context, B> BlockObserver<C, B> {
             let txid = tx.compute_txid();
             sbtc_txs.push(model::Transaction {
                 txid: txid.to_byte_array(),
-                tx: bitcoin::consensus::serialize(&tx),
                 tx_type,
                 block_hash: block_hash.to_byte_array(),
             });
@@ -766,7 +732,6 @@ mod tests {
     use fake::Fake;
     use model::BitcoinTxId;
     use model::ScriptPubKey;
-    use rand::SeedableRng;
     use test_log::test;
 
     use crate::bitcoin::rpc::GetTxResponse;
@@ -777,12 +742,13 @@ mod tests {
     use crate::storage::model::DkgSharesStatus;
     use crate::testing::block_observer::TestHarness;
     use crate::testing::context::*;
+    use crate::testing::get_rng;
 
     use super::*;
 
     #[test(tokio::test)]
     async fn should_be_able_to_extract_bitcoin_blocks_given_a_block_header_stream() {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let storage = storage::in_memory::Store::new_shared();
         let test_harness = TestHarness::generate(&mut rng, 20, 0..5);
         let min_height = test_harness.min_block_height();
@@ -832,7 +798,7 @@ mod tests {
     /// pass validation and have been confirmed.
     #[tokio::test]
     async fn validated_confirmed_deposits_get_added_to_state() {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let mut test_harness = TestHarness::generate(&mut rng, 20, 0..5);
         // We want the test harness to fetch a block from our
         // "bitcoin-core", which in this case is the test harness. So we
@@ -961,7 +927,7 @@ mod tests {
     /// deposit requests into "storage".
     #[tokio::test]
     async fn extract_deposit_requests_stores_validated_deposits() {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(365);
+        let mut rng = get_rng();
         let mut test_harness = TestHarness::generate(&mut rng, 20, 0..5);
 
         // We want the test harness to fetch a block from our
@@ -1050,7 +1016,7 @@ mod tests {
     /// bitcoin block that match one of those `scriptPubkey`s.
     #[tokio::test]
     async fn sbtc_transactions_get_stored() {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let mut test_harness = TestHarness::generate(&mut rng, 20, 0..5);
 
         let block_hash = BlockHash::from_byte_array([1u8; 32]);

@@ -13,7 +13,6 @@ use bitcoin::AddressType;
 use bitcoin::Amount;
 use bitcoin::BlockHash;
 use bitcoin::Transaction;
-use bitcoin::consensus::Encodable as _;
 use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc::RpcApi as _;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
@@ -35,7 +34,6 @@ use fake::Faker;
 use futures::StreamExt as _;
 use lru::LruCache;
 use mockito;
-use rand::SeedableRng as _;
 use rand::rngs::OsRng;
 use reqwest;
 use sbtc::testing::regtest;
@@ -52,6 +50,7 @@ use signer::context::RequestDeciderEvent;
 use signer::message::Payload;
 use signer::network::MessageTransfer;
 use signer::storage::model::WithdrawalTxOutput;
+use signer::testing::get_rng;
 use testing_emily_client::apis::chainstate_api;
 use testing_emily_client::apis::testing_api;
 use testing_emily_client::apis::withdrawal_api;
@@ -75,7 +74,6 @@ use signer::stacks::contracts::SmartContract;
 use signer::storage::DbRead;
 use signer::storage::DbWrite;
 use signer::storage::model::BitcoinBlockHash;
-use signer::storage::model::BitcoinTx;
 use signer::storage::model::BitcoinTxSigHash;
 use signer::storage::model::DkgSharesStatus;
 use signer::storage::model::StacksTxId;
@@ -210,12 +208,8 @@ where
         }],
     };
 
-    let mut tx_bytes = Vec::new();
-    tx.consensus_encode(&mut tx_bytes).unwrap();
-
     let tx = model::Transaction {
         txid: tx.compute_txid().to_byte_array(),
-        tx: tx_bytes,
         tx_type: model::TransactionType::Donation,
         block_hash: *block_hash.as_byte_array(),
     };
@@ -455,7 +449,7 @@ fn mock_recover_and_deploy_all_contracts_after_failure(
 #[test(tokio::test)]
 async fn process_complete_deposit() {
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
     let setup = TestSweepSetup::new_setup(&rpc, &faucet, 1_000_000, &mut rng);
 
@@ -668,7 +662,7 @@ async fn deploy_smart_contracts_coordinator<F>(
     F: FnOnce(u64, Sender<StacksTransaction>) -> Box<dyn FnOnce(&mut MockStacksInteract)>,
 {
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
 
     let num_messages = smart_contracts.len();
 
@@ -842,7 +836,7 @@ async fn deploy_smart_contracts_coordinator<F>(
 /// from the [`testing::wallet::regtest_bootstrap_wallet`] function.
 #[test(tokio::test)]
 async fn run_dkg_from_scratch() {
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (signer_wallet, signer_key_pairs): (_, [Keypair; 3]) =
         testing::wallet::regtest_bootstrap_wallet();
 
@@ -1069,7 +1063,7 @@ async fn run_dkg_from_scratch() {
 /// that allows for multiple DKG rounds.
 #[test(tokio::test)]
 async fn run_subsequent_dkg() {
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (signer_wallet, signer_key_pairs): (_, [Keypair; 3]) =
         testing::wallet::regtest_bootstrap_wallet();
 
@@ -1718,11 +1712,12 @@ async fn sign_bitcoin_transaction() {
     assert_eq!(&tx_info.tx.output[0].script_pubkey, &script_pub_key);
 
     // Lastly we check that out database has the sweep transaction
-    let tx = sqlx::query_scalar::<_, BitcoinTx>(
+    let script_pubkey = sqlx::query_scalar::<_, model::ScriptPubKey>(
         r#"
-        SELECT tx
-        FROM sbtc_signer.transactions
+        SELECT script_pubkey
+        FROM sbtc_signer.bitcoin_tx_outputs
         WHERE txid = $1
+          AND output_type = 'signers_output'
         "#,
     )
     .bind(txid.to_byte_array())
@@ -1730,9 +1725,8 @@ async fn sign_bitcoin_transaction() {
     .await
     .unwrap();
 
-    let script = tx.output[0].script_pubkey.clone().into();
     for (_, db, _, _) in signers {
-        assert!(db.is_signer_script_pub_key(&script).await.unwrap());
+        assert!(db.is_signer_script_pub_key(&script_pubkey).await.unwrap());
         testing::storage::drop_db(db).await;
     }
 }
@@ -2132,11 +2126,12 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     // Now we check that each database has the sweep transaction and is
     // recognized as a signer script_pubkey.
     for (_, db, _, _) in signers.iter() {
-        let tx = sqlx::query_scalar::<_, BitcoinTx>(
+        let script_pubkey = sqlx::query_scalar::<_, model::ScriptPubKey>(
             r#"
-            SELECT tx
-            FROM sbtc_signer.transactions
+            SELECT script_pubkey
+            FROM sbtc_signer.bitcoin_tx_outputs
             WHERE txid = $1
+              AND output_type = 'signers_output'
             "#,
         )
         .bind(txid.to_byte_array())
@@ -2144,8 +2139,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
         .await
         .unwrap();
 
-        let script = tx.output[0].script_pubkey.clone().into();
-        assert!(db.is_signer_script_pub_key(&script).await.unwrap());
+        assert!(db.is_signer_script_pub_key(&script_pubkey).await.unwrap());
     }
 
     // =========================================================================
@@ -2365,11 +2359,12 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
 
     for (_, db, _, _) in signers {
         // Lastly we check that our database has the sweep transaction
-        let tx = sqlx::query_scalar::<_, BitcoinTx>(
+        let script_pubkey = sqlx::query_scalar::<_, model::ScriptPubKey>(
             r#"
-            SELECT tx
-            FROM sbtc_signer.transactions
+            SELECT script_pubkey
+            FROM sbtc_signer.bitcoin_tx_outputs
             WHERE txid = $1
+              AND output_type = 'signers_output'
             "#,
         )
         .bind(txid.to_byte_array())
@@ -2377,8 +2372,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
         .await
         .unwrap();
 
-        let script = tx.output[0].script_pubkey.clone().into();
-        assert!(db.is_signer_script_pub_key(&script).await.unwrap());
+        assert!(db.is_signer_script_pub_key(&script_pubkey).await.unwrap());
         testing::storage::drop_db(db).await;
     }
 }
@@ -2697,7 +2691,7 @@ async fn wait_for_signers(signers: &[(IntegrationTestContext, PgStore, &Keypair,
 /// the `last_fees` field should be `None`.
 #[test(tokio::test)]
 async fn test_get_btc_state_with_no_available_sweep_transactions() {
-    let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+    let mut rng = get_rng();
 
     let db = testing::storage::new_test_database().await;
 
@@ -2757,10 +2751,6 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
         },
     );
     let signer_utxo_txid = signer_utxo_tx.compute_txid();
-    let mut signer_utxo_encoded = Vec::new();
-    signer_utxo_tx
-        .consensus_encode(&mut signer_utxo_encoded)
-        .unwrap();
 
     let utxo_input = model::TxPrevout {
         txid: signer_utxo_txid.into(),
@@ -2779,7 +2769,6 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
     db.write_bitcoin_block(&bitcoin_block).await.unwrap();
     db.write_transaction(&model::Transaction {
         txid: *signer_utxo_txid.as_byte_array(),
-        tx: signer_utxo_encoded,
         tx_type: model::TransactionType::SbtcTransaction,
         block_hash: bitcoin_block.block_hash.into_bytes(),
     })
@@ -2832,7 +2821,7 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
 /// packages available, simulating the case where there has been an RBF.
 #[test(tokio::test)]
 async fn test_get_btc_state_with_available_sweep_transactions_and_rbf() {
-    let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+    let mut rng = get_rng();
 
     let db = testing::storage::new_test_database().await;
 
@@ -2883,12 +2872,6 @@ async fn test_get_btc_state_with_available_sweep_transactions_and_rbf() {
     let signer_utxo_tx = client.get_tx(&outpoint.txid).unwrap().unwrap();
     let signer_utxo_txid = signer_utxo_tx.tx.compute_txid();
 
-    let mut signer_utxo_tx_encoded = Vec::new();
-    signer_utxo_tx
-        .tx
-        .consensus_encode(&mut signer_utxo_tx_encoded)
-        .unwrap();
-
     let utxo_input = model::TxPrevout {
         txid: signer_utxo_txid.into(),
         prevout_type: model::TxPrevoutType::SignersInput,
@@ -2913,7 +2896,6 @@ async fn test_get_btc_state_with_available_sweep_transactions_and_rbf() {
 
     db.write_transaction(&model::Transaction {
         txid: signer_utxo_txid.to_byte_array(),
-        tx: signer_utxo_tx_encoded,
         tx_type: model::TransactionType::SbtcTransaction,
         block_hash: signer_utxo_block_hash.to_byte_array(),
     })
@@ -3122,7 +3104,7 @@ fn create_test_setup(
 #[tokio::test]
 async fn test_conservative_initial_sbtc_limits() {
     let (rpc, faucet) = regtest::initialize_blockchain();
-    let mut rng = rand::rngs::StdRng::seed_from_u64(56);
+    let mut rng = get_rng();
 
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let signatures_required: u16 = 2;
@@ -3946,11 +3928,12 @@ async fn sign_bitcoin_transaction_withdrawals() {
     assert_eq!(tx_info.tx.output[2].value.to_sat(), withdrawal_amount);
 
     // We check that our database has the sweep transaction
-    let tx = sqlx::query_scalar::<_, BitcoinTx>(
+    let script_pubkey = sqlx::query_scalar::<_, model::ScriptPubKey>(
         r#"
-        SELECT tx
-        FROM sbtc_signer.transactions
+        SELECT script_pubkey
+        FROM sbtc_signer.bitcoin_tx_outputs
         WHERE txid = $1
+          AND output_type = 'signers_output'
         "#,
     )
     .bind(txid.to_byte_array())
@@ -3974,9 +3957,8 @@ async fn sign_bitcoin_transaction_withdrawals() {
     assert_eq!(withdrawal_output.output_index, 2);
     assert_eq!(withdrawal_output.request_id, withdrawal_request.request_id);
 
-    let script = tx.output[0].script_pubkey.clone().into();
     for (_, db, _, _) in signers {
-        assert!(db.is_signer_script_pub_key(&script).await.unwrap());
+        assert!(db.is_signer_script_pub_key(&script_pubkey).await.unwrap());
         testing::storage::drop_db(db).await;
     }
 }
@@ -3987,7 +3969,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
 #[tokio::test]
 async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let mut context = TestContext::builder()
