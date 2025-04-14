@@ -1,9 +1,7 @@
 //! A module with structs that interact with the Stacks API.
 
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::future::Future;
-use std::sync::OnceLock;
 use std::time::Duration;
 
 use bitcoin::Amount;
@@ -46,9 +44,7 @@ use crate::keys::PublicKey;
 use crate::storage::DbRead;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::StacksBlock;
-use crate::storage::model::StacksTxId;
 use crate::storage::model::ToLittleEndianOrder as _;
-use crate::storage::model::TransactionType;
 use crate::util::ApiFallbackClient;
 
 use super::contracts::AsTxPayload;
@@ -284,59 +280,6 @@ impl GetNakamotoStartHeight for RPCPoxInfoData {
     }
 }
 
-const CONTRACT_NAMES: [&str; 4] = [
-    // The name of the Stacks smart contract used for minting sBTC after a
-    // successful transaction moving BTC under the signers' control.
-    "sbtc-deposit",
-    // The name of the Stacks smart contract for recording or registering
-    // successfully completed withdrawal and deposit requests.
-    "sbtc-registry",
-    // The name of the Stacks sBTC smart contract used by the signers for
-    // managing the signer set and the associated keys for a PoX cycle.
-    "sbtc-bootstrap-signers",
-    // The name of the Stacks smart contract used for withdrawing sBTC as
-    // BTC on chain.
-    "sbtc-withdrawal",
-];
-
-#[rustfmt::skip]
-const CONTRACT_FUNCTION_NAMES: [(&str, TransactionType); 5] = [
-    ("initiate-withdrawal-request", TransactionType::WithdrawRequest),
-    ("complete-deposit-wrapper", TransactionType::DepositAccept),
-    ("accept-withdrawal-request", TransactionType::WithdrawAccept),
-    ("reject-withdrawal-request", TransactionType::WithdrawReject),
-    ("rotate-keys-wrapper", TransactionType::RotateKeys),
-];
-
-/// Returns the mapping between functions in a contract call and the
-/// transaction type.
-fn contract_transaction_kinds() -> &'static HashMap<&'static str, TransactionType> {
-    static CONTRACT_FUNCTION_NAME_MAPPING: OnceLock<HashMap<&str, TransactionType>> =
-        OnceLock::new();
-
-    CONTRACT_FUNCTION_NAME_MAPPING.get_or_init(|| CONTRACT_FUNCTION_NAMES.into_iter().collect())
-}
-
-/// This function extracts the signer relevant sBTC related transactions
-/// from the given blocks.
-///
-/// Here the deployer is the address that deployed the sBTC smart
-/// contracts.
-fn to_tx_summary(tx: &StacksTransaction, deployer: &StacksAddress) -> Option<StacksTxRef> {
-    let transaction_kinds = contract_transaction_kinds();
-    match &tx.payload {
-        TransactionPayload::ContractCall(x)
-            if CONTRACT_NAMES.contains(&x.contract_name.as_str()) && &x.address == deployer =>
-        {
-            Some(StacksTxRef {
-                txid: tx.txid().into(),
-                tx_type: *transaction_kinds.get(&x.function_name.as_str())?,
-            })
-        }
-        _ => None,
-    }
-}
-
 /// This struct represents a non-empty subset of the Stacks blocks that
 /// were created during a tenure.
 #[derive(Debug)]
@@ -382,99 +325,55 @@ impl TenureBlocks {
     pub fn into_blocks(self) -> Vec<NakamotoBlock> {
         self.blocks
     }
-
-    /// Return an iterator of Stacks blocks included in this object.
-    pub fn as_stacks_blocks(&self) -> impl Iterator<Item = StacksBlock> + '_ {
-        let bitcoin_anchor = &self.anchor_block_hash;
-        self.blocks
-            .iter()
-            .map(|block| StacksBlock::from_nakamoto_block(block, bitcoin_anchor))
-    }
-
-    /// Convert to a slimmed down version of the TenureBlocks.
-    pub fn as_tenure_summary(self, deployer: &StacksAddress) -> TenureSummary {
-        let blocks = self
-            .blocks
-            .into_iter()
-            .map(|block| NakamotoBlockSummary {
-                header: block.header.into(),
-                txs: block
-                    .txs
-                    .iter()
-                    .filter_map(|tx| to_tx_summary(tx, deployer))
-                    .collect(),
-            })
-            .collect();
-        TenureSummary {
-            blocks,
-            anchor_block_hash: self.anchor_block_hash,
-            anchor_block_height: self.anchor_block_height,
-        }
-    }
 }
 
 /// A slimmed down [`NakamotoBlockHeader`]
 #[derive(Debug, Clone, PartialEq)]
 pub struct StacksBlockHeader {
-    /// The total number of StacksBlock and NakamotoBlocks preceding
-    /// this block in this block's history.
+    /// The total number of StacksBlocks and NakamotoBlocks preceding this
+    /// block in this block's history.
     pub block_height: u64,
-    /// The consensus hash of the burnchain block that selected this tenure.  The consensus hash
-    /// uniquely identifies this tenure, including across all Bitcoin forks.
-    pub consensus_hash: ConsensusHash,
-    /// The index block hash of the immediate parent of this block.
-    /// This is the hash of the parent block's hash and consensus hash.
+    /// The identifier for a block. It is the hash of the this block's
+    /// header hash and the block's consensus hash.
     pub block_id: StacksBlockId,
-    /// The index block hash of the immediate parent of this block.
-    /// This is the hash of the parent block's hash and consensus hash.
+    /// The index block hash of the immediate parent of this block. This is
+    /// the hash of the parent block's hash and consensus hash.
     pub parent_block_id: StacksBlockId,
-    /// A Unix time timestamp of when this block was mined, according to the miner.
-    /// For the signers to consider a block valid, this timestamp must be:
-    ///  * Greater than the timestamp of its parent block
-    ///  * At most 15 seconds into the future
-    pub timestamp: u64,
 }
 
 impl From<NakamotoBlockHeader> for StacksBlockHeader {
     fn from(value: NakamotoBlockHeader) -> Self {
         StacksBlockHeader {
             block_height: value.chain_length,
-            consensus_hash: value.consensus_hash,
             block_id: value.block_id(),
             parent_block_id: value.parent_block_id,
-            timestamp: value.timestamp,
         }
     }
 }
 
-/// This is a slimmed down nakamoto block, that contains only the
-/// information relevant for an sbtc signer.
-#[derive(Debug, Clone, PartialEq)]
-pub struct StacksTxRef {
-    /// The transaction ID
-    pub txid: StacksTxId,
-    /// The type of transaction
-    pub tx_type: TransactionType,
+impl From<TenureBlocks> for TenureHeaders {
+    fn from(value: TenureBlocks) -> Self {
+        let headers = value
+            .blocks
+            .into_iter()
+            .map(|block| StacksBlockHeader::from(block.header))
+            .collect();
+
+        TenureHeaders {
+            headers,
+            anchor_block_hash: value.anchor_block_hash,
+            anchor_block_height: value.anchor_block_height,
+        }
+    }
 }
 
-/// This is a slimmed down nakamoto block, that contains only the
-/// information relevant for an sbtc signer.
-#[derive(Debug, Clone, PartialEq)]
-pub struct NakamotoBlockSummary {
-    /// The header for this Stacks block.
-    pub header: StacksBlockHeader,
-    /// The collection of sbtc transactions that were included in this
-    /// block.
-    pub txs: Vec<StacksTxRef>,
-}
-
-/// This struct represents a non-empty subset of the Stacks blocks that
-/// were created during a tenure.
+/// This struct represents a non-empty subset of the Stacks block headers
+/// that were created during a tenure.
 #[derive(Debug)]
-pub struct TenureSummary {
-    /// The subset of Stacks blocks that were created during a tenure. This
-    /// is always non-empty.
-    pub blocks: Vec<NakamotoBlockSummary>,
+pub struct TenureHeaders {
+    /// The subset of Stacks block headers that of Nakamoto blocks that
+    /// were created during a tenure. This is always non-empty.
+    headers: Vec<StacksBlockHeader>,
     /// The bitcoin block that this tenure builds off of.
     pub anchor_block_hash: BitcoinBlockHash,
     /// The height of the bitcoin block associated with the above block
@@ -482,14 +381,27 @@ pub struct TenureSummary {
     pub anchor_block_height: u64,
 }
 
-impl TenureSummary {
-    /// Get all the blocks contained in this object.
+impl TenureHeaders {
+    /// Get all the headers contained in this object.
     ///
     /// # Note
     ///
-    /// The struct doesn't need to contain all the blocks in a tenure.
-    pub fn blocks(&self) -> &[NakamotoBlockSummary] {
-        &self.blocks
+    /// * The returned slice is nonempty.
+    /// * The struct doesn't need to contain all the headers of stacks
+    ///   blocks in a tenure.
+    pub fn headers(&self) -> &[StacksBlockHeader] {
+        &self.headers
+    }
+
+    /// Return an iterator of Stacks blocks included in this object.
+    pub fn as_stacks_blocks(self) -> impl Iterator<Item = StacksBlock> {
+        let bitcoin_anchor = self.anchor_block_hash;
+        self.headers.into_iter().map(move |header| StacksBlock {
+            block_hash: header.block_id.into(),
+            block_height: header.block_height,
+            parent_hash: header.parent_block_id.into(),
+            bitcoin_anchor,
+        })
     }
 }
 
@@ -1282,66 +1194,19 @@ pub async fn fetch_unknown_ancestors<S, D>(
     stacks: &S,
     db: &D,
     block_id: StacksBlockId,
-) -> Result<Vec<TenureBlocks>, Error>
-where
-    S: StacksInteract,
-    D: DbRead + Send + Sync,
-{
-    let mut blocks = vec![stacks.get_tenure(block_id).await?];
-    let pox_info = stacks.get_pox_info().await?;
-    let nakamoto_start_height = pox_info
-        .nakamoto_start_height()
-        .ok_or(Error::MissingNakamotoStartHeight)?;
-
-    while let Some(tenure) = blocks.last() {
-        // We won't get anymore Nakamoto blocks before this point, so
-        // time to stop.
-        if tenure.anchor_block_height <= nakamoto_start_height {
-            tracing::debug!(
-                %nakamoto_start_height,
-                last_chain_length = %tenure.anchor_block_height,
-                "all Nakamoto blocks fetched; stopping"
-            );
-            break;
-        }
-        // Tenure blocks are always non-empty, and this invariant is upheld
-        // by the type. So no need to worry about the early break.
-        let Some(block) = tenure.blocks().last() else {
-            break;
-        };
-        // We've seen this parent already, so time to stop.
-        if db.stacks_block_exists(block.header.parent_block_id).await? {
-            tracing::debug!("parent block known in the database");
-            break;
-        }
-        // There are more blocks to fetch, so let's get them.
-        let tenure_blocks = stacks.get_tenure(block.header.parent_block_id).await?;
-        blocks.push(tenure_blocks);
-    }
-
-    Ok(blocks)
-}
-
-/// Fetch all Nakamoto blocks that are not already stored in the
-/// datastore.
-pub async fn fetch_unknown_ancestors2<S, D>(
-    stacks: &S,
-    db: &D,
-    block_id: StacksBlockId,
-    deployer: &StacksAddress,
-) -> Result<Vec<TenureSummary>, Error>
+) -> Result<Vec<TenureHeaders>, Error>
 where
     S: StacksInteract,
     D: DbRead + Send + Sync,
 {
     let starting_tenure = stacks.get_tenure(block_id).await?;
-    let mut blocks = vec![starting_tenure.as_tenure_summary(deployer)];
+    let mut headers: Vec<TenureHeaders> = vec![starting_tenure.into()];
     let pox_info = stacks.get_pox_info().await?;
     let nakamoto_start_height = pox_info
         .nakamoto_start_height()
         .ok_or(Error::MissingNakamotoStartHeight)?;
 
-    while let Some(tenure) = blocks.last() {
+    while let Some(tenure) = headers.last() {
         // We won't get anymore Nakamoto blocks before this point, so
         // time to stop.
         if tenure.anchor_block_height <= nakamoto_start_height {
@@ -1354,20 +1219,20 @@ where
         }
         // Tenure blocks are always non-empty, and this invariant is upheld
         // by the type. So no need to worry about the early break.
-        let Some(block) = tenure.blocks().last() else {
+        let Some(header) = tenure.headers().last() else {
             break;
         };
         // We've seen this parent already, so time to stop.
-        if db.stacks_block_exists(block.header.parent_block_id).await? {
+        if db.stacks_block_exists(header.parent_block_id).await? {
             tracing::debug!("parent block known in the database");
             break;
         }
         // There are more blocks to fetch, so let's get them.
-        let tenure_blocks = stacks.get_tenure(block.header.parent_block_id).await?;
-        blocks.push(tenure_blocks.as_tenure_summary(deployer));
+        let tenure_blocks = stacks.get_tenure(header.parent_block_id).await?;
+        headers.push(tenure_blocks.into());
     }
 
-    Ok(blocks)
+    Ok(headers)
 }
 
 /// A deserializer for Clarity's [`Value`] type that deserializes a hex-encoded
@@ -1872,8 +1737,8 @@ mod tests {
 
         let blocks = tenures.unwrap();
         let headers = blocks
-            .iter()
-            .flat_map(TenureBlocks::as_stacks_blocks)
+            .into_iter()
+            .flat_map(TenureHeaders::as_stacks_blocks)
             .collect::<Vec<_>>();
         db.write_stacks_block_headers(headers).await.unwrap();
 
