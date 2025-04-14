@@ -418,7 +418,7 @@ pub async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is
         .unwrap();
     let chain_tip = BitcoinBlockRef {
         block_hash: block_header.hash.into(),
-        block_height: (block_header.height).into(),
+        block_height: block_header.height.into(),
     };
 
     // Store the necessary data for passing validation
