@@ -3092,9 +3092,8 @@ impl super::DbWrite for PgStore {
         &self,
         shares: &model::EncryptedDkgShares,
     ) -> Result<(), Error> {
-        let started_at_bitcoin_block_height =
-            i64::try_from(shares.started_at_bitcoin_block_height)
-                .map_err(Error::ConversionDatabaseInt)?;
+        let started_at_bitcoin_block_height = i64::try_from(shares.started_at_bitcoin_block_height)
+            .map_err(Error::ConversionDatabaseInt)?;
 
         sqlx::query(
             r#"
