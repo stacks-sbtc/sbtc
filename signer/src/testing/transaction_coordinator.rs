@@ -1282,7 +1282,6 @@ where
             input: vec![TestBitcoinTxInfo::random_prevout(&mut rng)],
             ..EMPTY_BITCOIN_TX
         };
-        // model::BitcoinTxId::dummy_with_rng(&fake::Faker, &mut rng).into()
         let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
         let tx_info = TestBitcoinTxInfo {
             tx: tx_a1.clone(),
