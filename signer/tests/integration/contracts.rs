@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -29,16 +28,13 @@ use signer::testing::wallet::ContractCallWrapper;
 use signer::util::ApiFallbackClient;
 use tokio::sync::OnceCell;
 
-use signer::stacks;
 use signer::stacks::api::FeePriority;
 use signer::stacks::api::StacksClient;
 use signer::stacks::api::SubmitTxResponse;
 use signer::stacks::contracts::CompleteDepositV1;
 use signer::stacks::wallet::MultisigTx;
-use signer::storage::in_memory::Store;
 use signer::storage::model::QualifiedRequestId;
 use signer::storage::model::StacksBlockHash;
-use signer::storage::postgres;
 use signer::testing;
 use signer::testing::wallet::InitiateWithdrawalRequest;
 
@@ -205,40 +201,7 @@ async fn complete_deposit_wrapper_tx_accepted<T: AsContractCall>(contract: Contr
     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
     let txid = signer.sign_and_submit(&contract).await;
-
-    // The submitted transaction tends to linger in the mempool for quite
-    // some time before being confirmed in a Nakamoto block (best guess is
-    // 5-10 minutes). It's not clear why this is the case.
-    if true {
-        println!("{}", txid);
-        return;
-    }
-
-    let client = stacks_client();
-
-    // We need a block id
-    let info = client.get_tenure_info().await.unwrap();
-    let storage = Store::new_shared();
-
-    let tenures = stacks::api::fetch_unknown_ancestors(&client, &storage, info.tip_block_id)
-        .await
-        .unwrap();
-
-    let blocks = tenures
-        .into_iter()
-        .flat_map(|tenure| tenure.into_blocks())
-        .collect::<Vec<_>>();
-
-    let transactions = postgres::extract_relevant_transactions(&blocks, &signer.wallet.address());
-    assert!(!transactions.is_empty());
-
-    let txids = transactions
-        .iter()
-        .map(|stx| blockstack_lib::burnchains::Txid::from_bytes(&stx.txid))
-        .collect::<Option<HashSet<_>>>()
-        .unwrap();
-
-    assert!(txids.contains(&txid));
+    println!("{txid}");
 }
 
 #[ignore = "This is an integration test that requires a stacks-node to work"]

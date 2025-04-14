@@ -467,7 +467,7 @@ mod tests {
         let txid = test_data.bitcoin_transactions[0].txid;
         let bitcoin_block = &test_data.bitcoin_blocks[0];
         let stacks_chaintip = &test_data.stacks_blocks[0];
-        let stacks_txid = test_data.stacks_transactions[0].txid;
+        let stacks_txid = fake::Faker.fake_with_rng(&mut rng);
 
         let mut deposit_request: DepositRequest = fake::Faker.fake_with_rng(&mut rng);
         deposit_request.txid = txid.into();
@@ -480,12 +480,12 @@ mod tests {
 
         let event = CompletedDepositEvent {
             outpoint: deposit_request.outpoint(),
-            txid: stacks_txid.into(),
-            block_id: stacks_chaintip.block_hash.into(),
+            txid: stacks_txid,
+            block_id: stacks_chaintip.block_hash,
             amount: deposit_request.amount - btc_fee,
-            sweep_block_hash: bitcoin_block.block_hash.into(),
+            sweep_block_hash: bitcoin_block.block_hash,
             sweep_block_height: bitcoin_block.block_height,
-            sweep_txid: txid.into(),
+            sweep_txid: txid,
         };
         let res = handle_completed_deposit(&ctx, event).await;
         assert!(res.is_ok());
@@ -524,18 +524,18 @@ mod tests {
         let test_data = TestData::generate(&mut rng, &[], &test_params);
 
         let txid = test_data.bitcoin_transactions[0].txid;
-        let stacks_tx = &test_data.stacks_transactions[0];
+        let stacks_block = &test_data.stacks_blocks[0];
         let bitcoin_block = &test_data.bitcoin_blocks[0];
 
         let request_id = 1;
         let event = WithdrawalAcceptEvent {
             request_id,
             outpoint: OutPoint { txid: *txid, vout: 0 },
-            txid: stacks_tx.txid.into(),
-            block_id: stacks_tx.block_hash.into(),
+            txid: fake::Faker.fake_with_rng(&mut rng),
+            block_id: stacks_block.block_hash,
             fee: 1,
             signer_bitmap: BitArray::<_>::ZERO,
-            sweep_block_hash: bitcoin_block.block_hash.into(),
+            sweep_block_hash: bitcoin_block.block_hash,
             sweep_block_height: bitcoin_block.block_height,
             sweep_txid: txid.into(),
         };
@@ -572,17 +572,16 @@ mod tests {
         let db = ctx.inner_storage();
         let test_data = TestData::generate(&mut rng, &[], &test_params);
 
-        let stacks_first_tx = &test_data.stacks_transactions[0];
         let stacks_first_block = &test_data.stacks_blocks[0];
 
         let request_id = 1;
         let event = WithdrawalRequest {
             request_id,
-            block_hash: stacks_first_tx.block_hash.into(),
+            block_hash: stacks_first_block.block_hash,
             amount: 100,
             max_fee: 1,
             recipient: fake::Faker.fake_with_rng(&mut rng),
-            txid: stacks_first_tx.txid,
+            txid: fake::Faker.fake_with_rng(&mut rng),
             sender_address: PrincipalData::Standard(StandardPrincipalData::transient()).into(),
             bitcoin_block_height: test_data.bitcoin_blocks[0].block_height,
         };
@@ -632,8 +631,8 @@ mod tests {
         let request_id = 1;
         let event = WithdrawalRejectEvent {
             request_id,
-            block_id: stacks_chaintip.block_hash.into(),
-            txid: test_data.stacks_transactions[0].txid,
+            block_id: stacks_chaintip.block_hash,
+            txid: fake::Faker.fake_with_rng(&mut rng),
             signer_bitmap: BitArray::<_>::ZERO,
         };
 
