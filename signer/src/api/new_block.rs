@@ -315,7 +315,6 @@ mod tests {
     use crate::storage::in_memory::Store;
     use crate::storage::model::DepositRequest;
     use crate::storage::model::StacksPrincipal;
-    use crate::storage::model::StacksTxId;
     use crate::testing::context::*;
     use crate::testing::get_rng;
     use crate::testing::storage::model::TestData;
@@ -658,10 +657,10 @@ mod tests {
 
         let db = ctx.inner_storage();
 
-        let txid: StacksTxId = fake::Faker.fake_with_rng(&mut OsRng);
+        let block_id: StacksBlockId = StacksBlockId(fake::Faker.fake_with_rng(&mut OsRng));
         let event = KeyRotationEvent {
-            txid: sbtc::events::StacksTxid(txid.into_bytes()),
-            block_id: StacksBlockId(fake::Faker.fake_with_rng(&mut OsRng)),
+            txid: sbtc::events::StacksTxid(fake::Faker.fake_with_rng(&mut OsRng)),
+            block_id,
             new_aggregate_pubkey: SECP256K1.generate_keypair(&mut OsRng).1.into(),
             new_keys: (0..3)
                 .map(|_| SECP256K1.generate_keypair(&mut OsRng).1.into())
@@ -675,7 +674,7 @@ mod tests {
         assert!(res.is_ok());
         let db = db.lock().await;
         assert_eq!(db.rotate_keys_transactions.len(), 1);
-        assert!(db.rotate_keys_transactions.get(&txid).is_some());
+        assert!(db.rotate_keys_transactions.get(&block_id.into()).is_some());
     }
 
     #[test_case(EVENT_OBSERVER_BODY_LIMIT, true; "event within limit")]
