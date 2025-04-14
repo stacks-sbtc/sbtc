@@ -2,7 +2,6 @@
 
 use std::collections::HashSet;
 
-use bitcoin::hashes::Hash as _;
 use bitcoin::ScriptBuf;
 use fake::Dummy as _;
 use fake::Fake;
@@ -232,59 +231,6 @@ impl TestData {
 
     /// Push bitcoin txs to a specific bitcoin block
     pub fn push_bitcoin_txs(
-        &mut self,
-        block: &BitcoinBlockRef,
-        sbtc_txs: Vec<(model::TransactionType, bitcoin::Transaction)>,
-    ) {
-        let mut bitcoin_transactions = vec![];
-        let mut transactions = vec![];
-        let mut tx_outputs = Vec::new();
-
-        for (tx_type, tx) in sbtc_txs {
-            let model_tx = model::Transaction {
-                txid: tx.compute_txid().to_byte_array(),
-                tx_type,
-                block_hash: block.block_hash.into_bytes(),
-            };
-
-            let bitcoin_transaction = model::BitcoinTxRef {
-                txid: model_tx.txid.into(),
-                block_hash: block.block_hash,
-            };
-
-            transactions.push(model_tx);
-            bitcoin_transactions.push(bitcoin_transaction);
-
-            let output_type = match tx_type {
-                model::TransactionType::SbtcTransaction => model::TxOutputType::SignersOutput,
-                model::TransactionType::Donation => model::TxOutputType::Donation,
-                _ => continue,
-            };
-
-            if let Some(tx_out) = tx.output.first() {
-                // In our tests we always happen to put the first output as
-                // the signers UTXO, even if it is a donation.
-                let tx_output = model::TxOutput {
-                    txid: tx.compute_txid().into(),
-                    output_index: 0,
-                    script_pubkey: tx_out.script_pubkey.clone().into(),
-                    amount: tx_out.value.to_sat(),
-                    output_type,
-                };
-                tx_outputs.push(tx_output);
-            }
-        }
-
-        self.push(Self {
-            bitcoin_transactions,
-            transactions,
-            tx_outputs,
-            ..Self::default()
-        });
-    }
-
-    /// Push bitcoin txs to a specific bitcoin block
-    pub fn push_bitcoin_txs2(
         &mut self,
         block: &BitcoinBlockRef,
         txs: Vec<TestBitcoinTxInfo>,
