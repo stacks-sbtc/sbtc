@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 
+use bitcoin::hashes::Hash as _;
 use bitcoin::ScriptBuf;
 use fake::Dummy as _;
 use fake::Fake;
@@ -237,15 +238,22 @@ impl TestData {
         signer_script_pubkeys: &HashSet<ScriptBuf>,
     ) {
         let mut bitcoin_transactions = vec![];
+        let mut transactions = vec![];
         let mut tx_outputs = Vec::new();
         let mut tx_prevouts = Vec::new();
 
         for tx_info in txs {
+            let model_tx = model::Transaction {
+                txid: tx_info.tx.compute_txid().to_byte_array(),
+                tx_type: model::TransactionType::Donation,
+                block_hash: block.block_hash.into_bytes(),
+            };
             let bitcoin_transaction = model::BitcoinTxRef {
                 txid: tx_info.tx.compute_txid().into(),
                 block_hash: block.block_hash,
             };
 
+            transactions.push(model_tx);
             bitcoin_transactions.push(bitcoin_transaction);
 
             for tx_output in tx_info.to_tx_outputs(signer_script_pubkeys) {
@@ -259,6 +267,7 @@ impl TestData {
 
         self.push(Self {
             bitcoin_transactions,
+            transactions,
             tx_outputs,
             tx_prevouts,
             ..Self::default()

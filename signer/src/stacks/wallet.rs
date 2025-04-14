@@ -724,7 +724,7 @@ mod tests {
 
         let tx = model::StacksTransaction {
             txid: rotate_keys.txid,
-            block_hash: stacks_chain_tip.block_hash,
+            block_hash: stacks_chain_tip,
         };
 
         db.write_stacks_transaction(&tx).await.unwrap();
