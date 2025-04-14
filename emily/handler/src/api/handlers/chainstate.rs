@@ -174,15 +174,15 @@ pub async fn add_chainstate_entry_or_reorg(
     debug!("Attempting to add chainstate: {entry:?}");
     match accessors::add_chainstate_entry_with_retry(context, &entry, 15).await {
         Err(Error::InconsistentState(Inconsistency::Chainstates(conflicting_chainstates))) => {
-                info!("Inconsistent chainstate found; attempting reorg for {entry:?}");
-                let execute_reorg_request = ExecuteReorgRequest {
-                    canonical_tip: chainstate.clone(),
-                    conflicting_chainstates,
-                };
-                // Execute the reorg.
-                execute_reorg_handler(context, execute_reorg_request)
-                    .await
-                    .inspect_err(|e| warn!("Failed executing reorg with error {}", e))?;
+            info!("Inconsistent chainstate found; attempting reorg for {entry:?}");
+            let execute_reorg_request = ExecuteReorgRequest {
+                canonical_tip: chainstate.clone(),
+                conflicting_chainstates,
+            };
+            // Execute the reorg.
+            execute_reorg_handler(context, execute_reorg_request)
+                .await
+                .inspect_err(|e| warn!("Failed executing reorg with error {}", e))?;
         }
         e @ Err(_) => return e,
         _ => {}

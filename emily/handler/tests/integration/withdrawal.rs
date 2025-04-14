@@ -644,17 +644,16 @@ async fn update_withdrawals_is_forbidden_for_signer(
     }
 }
 
-#[test_case(Status::Pending, Status::Accepted, false; "pending_to_accepted")]
-#[test_case(Status::Pending, Status::Pending, false; "pending_to_pending")]
-#[test_case(Status::Pending, Status::Reprocessing, false; "pending_to_reprocessing")]
-#[test_case(Status::Pending, Status::Confirmed, false; "pending_to_confirmed")]
-#[test_case(Status::Pending, Status::Failed, false; "pending_to_failed")]
-#[test_case(Status::Confirmed, Status::Pending, false; "confirmed_to_pending")]
+#[test_case(Status::Pending, Status::Accepted; "pending_to_accepted")]
+#[test_case(Status::Pending, Status::Pending; "pending_to_pending")]
+#[test_case(Status::Pending, Status::Reprocessing; "pending_to_reprocessing")]
+#[test_case(Status::Pending, Status::Confirmed; "pending_to_confirmed")]
+#[test_case(Status::Pending, Status::Failed; "pending_to_failed")]
+#[test_case(Status::Confirmed, Status::Pending; "confirmed_to_pending")]
 #[tokio::test]
-async fn update_withdrawals_is_forbidden_for_sidecar(
+async fn update_withdrawals_is_not_forbidden_for_sidecar(
     previous_status: Status,
     new_status: Status,
-    is_forbidden: bool,
 ) {
     // the testing configuration has privileged access to all endpoints.
     let testing_configuration = clean_setup().await;
@@ -748,32 +747,12 @@ async fn update_withdrawals_is_forbidden_for_sidecar(
     )
     .await;
 
-    if is_forbidden {
-        assert!(response.is_err());
-
-        match response.unwrap_err() {
-            testing_emily_client::apis::Error::ResponseError(ResponseContent {
-                status, ..
-            }) => {
-                assert_eq!(status, 403);
-            }
-
-            e => panic!("Expected a 403 error, got {:#?}", e),
-        }
-
-        let response = apis::withdrawal_api::get_withdrawal(&user_configuration, request_id)
-            .await
-            .expect("Received an error after making a valid get withdrawal api call.");
-        assert_eq!(response.request_id, request_id);
-        assert_eq!(response.status, previous_status);
-    } else {
-        assert!(response.is_ok());
-        let response = response.unwrap();
-        let withdrawal = response
-            .withdrawals
-            .first()
-            .expect("No withdrawal in response");
-        assert_eq!(withdrawal.request_id, request_id);
-        assert_eq!(withdrawal.status, new_status);
-    }
+    assert!(response.is_ok());
+    let response = response.unwrap();
+    let withdrawal = response
+        .withdrawals
+        .first()
+        .expect("No withdrawal in response");
+    assert_eq!(withdrawal.request_id, request_id);
+    assert_eq!(withdrawal.status, new_status);
 }

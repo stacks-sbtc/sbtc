@@ -1045,18 +1045,14 @@ async fn update_deposits_is_forbidden_for_signer(
     }
 }
 
-#[test_case(Status::Pending, Status::Accepted, false; "pending_to_accepted")]
-#[test_case(Status::Pending, Status::Pending, false; "pending_to_pending")]
-#[test_case(Status::Pending, Status::Reprocessing, false; "pending_to_reprocessing")]
-#[test_case(Status::Pending, Status::Confirmed, false; "pending_to_confirmed")]
-#[test_case(Status::Pending, Status::Failed, false; "pending_to_failed")]
-#[test_case(Status::Confirmed, Status::Pending, false; "confirmed_to_pending")]
+#[test_case(Status::Pending, Status::Accepted; "pending_to_accepted")]
+#[test_case(Status::Pending, Status::Pending; "pending_to_pending")]
+#[test_case(Status::Pending, Status::Reprocessing; "pending_to_reprocessing")]
+#[test_case(Status::Pending, Status::Confirmed; "pending_to_confirmed")]
+#[test_case(Status::Pending, Status::Failed; "pending_to_failed")]
+#[test_case(Status::Confirmed, Status::Pending; "confirmed_to_pending")]
 #[tokio::test]
-async fn update_deposits_is_forbidden_for_sidecar(
-    previous_status: Status,
-    new_status: Status,
-    is_forbidden: bool,
-) {
+async fn update_deposits_is_not_forbidden_for_sidecar(previous_status: Status, new_status: Status) {
     // the testing configuration has privileged access to all endpoints.
     let testing_configuration = clean_setup().await;
 
@@ -1148,32 +1144,9 @@ async fn update_deposits_is_forbidden_for_sidecar(
     )
     .await;
 
-    if is_forbidden {
-        assert!(response.is_err());
-        match response.unwrap_err() {
-            testing_emily_client::apis::Error::ResponseError(ResponseContent {
-                status, ..
-            }) => {
-                assert_eq!(status, 403);
-            }
-
-            e => panic!("Expected a 403 error, got {:#?}", e),
-        }
-
-        let response = apis::deposit_api::get_deposit(
-            &user_configuration,
-            &bitcoin_txid,
-            &bitcoin_tx_output_index.to_string(),
-        )
-        .await
-        .expect("Received an error after making a valid get deposit api call.");
-        assert_eq!(response.bitcoin_txid, bitcoin_txid);
-        assert_eq!(response.status, previous_status);
-    } else {
-        assert!(response.is_ok());
-        let response = response.unwrap();
-        let deposit = response.deposits.first().expect("No deposit in response");
-        assert_eq!(deposit.bitcoin_txid, bitcoin_txid);
-        assert_eq!(deposit.status, new_status);
-    }
+    assert!(response.is_ok());
+    let response = response.unwrap();
+    let deposit = response.deposits.first().expect("No deposit in response");
+    assert_eq!(deposit.bitcoin_txid, bitcoin_txid);
+    assert_eq!(deposit.status, new_status);
 }
