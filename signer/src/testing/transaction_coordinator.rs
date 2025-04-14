@@ -211,10 +211,7 @@ where
         let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
         let txs = TestBitcoinTxInfo {
             tx: tx_1.clone(),
-            prevouts: vec![bitcoin::TxOut {
-                value: bitcoin::Amount::from_sat(1000),
-                script_pubkey: aggregate_key.signers_script_pubkey(),
-            }],
+            prevouts: Vec::new(),
         };
         test_data.push_bitcoin_txs(&bitcoin_chain_tip, vec![txs], &signer_script_pubkeys);
         test_data.remove(original_test_data);
@@ -356,14 +353,7 @@ where
                 value: bitcoin::Amount::from_sat(1_337_000_000_000),
                 script_pubkey: aggregate_key.signers_script_pubkey(),
             }],
-            input: vec![bitcoin::TxIn {
-                previous_output: bitcoin::OutPoint {
-                    txid: model::BitcoinTxId::dummy_with_rng(&fake::Faker, &mut rng).into(),
-                    vout: 0,
-                },
-                sequence: bitcoin::Sequence::ZERO,
-                ..Default::default()
-            }],
+            input: vec![TestBitcoinTxInfo::random_prevout(&mut rng)],
             ..EMPTY_BITCOIN_TX
         };
         let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
@@ -967,6 +957,7 @@ where
                 value: bitcoin::Amount::from_sat(42),
                 script_pubkey: aggregate_key.signers_script_pubkey(),
             }],
+            input: vec![TestBitcoinTxInfo::random_prevout(&mut rng)],
             ..EMPTY_BITCOIN_TX
         };
 
@@ -980,7 +971,10 @@ where
         let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
         let tx_info = TestBitcoinTxInfo {
             tx: tx.clone(),
-            prevouts: Vec::new(),
+            prevouts: vec![bitcoin::TxOut {
+                value: bitcoin::Amount::from_sat(1000),
+                script_pubkey: aggregate_key.signers_script_pubkey(),
+            }],
         };
         test_data.push_bitcoin_txs(&block_ref, vec![tx_info], &signer_script_pubkeys);
         test_data.push(block);
@@ -1030,9 +1024,10 @@ where
         let original_test_data = test_data.clone();
 
         let test_data_rc = RefCell::new(test_data);
-        let mut push_block = |parent| {
+        let push_block = |parent| {
+            let mut rng2 = rng.clone();
             let (block, block_ref) = test_data_rc.borrow_mut().new_block(
-                &mut rng,
+                &mut rng2,
                 &signer_set.signer_keys(),
                 &self.test_model_parameters,
                 Some(parent),
@@ -1042,17 +1037,23 @@ where
         };
         let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
         let push_utxo = |block_ref, sat_amt| {
-            // TODO should have an input
+            // These are sweep transactions, so they need inputs so that
+            // they get labeled as such.
+            let mut rng2 = rng.clone();
             let tx = bitcoin::Transaction {
                 output: vec![bitcoin::TxOut {
                     value: bitcoin::Amount::from_sat(sat_amt),
                     script_pubkey: aggregate_key.signers_script_pubkey(),
                 }],
+                input: vec![TestBitcoinTxInfo::random_prevout(&mut rng2)],
                 ..EMPTY_BITCOIN_TX
             };
             let tx_info = TestBitcoinTxInfo {
                 tx: tx.clone(),
-                prevouts: Vec::new(),
+                prevouts: vec![bitcoin::TxOut {
+                    value: bitcoin::Amount::from_sat(1000),
+                    script_pubkey: aggregate_key.signers_script_pubkey(),
+                }],
             };
             test_data_rc.borrow_mut().push_bitcoin_txs(
                 block_ref,
@@ -1149,6 +1150,7 @@ where
                 value: bitcoin::Amount::from_sat(1),
                 script_pubkey: aggregate_key.signers_script_pubkey(),
             }],
+            input: vec![TestBitcoinTxInfo::random_prevout(&mut rng)],
             ..EMPTY_BITCOIN_TX
         };
         let tx_2 = bitcoin::Transaction {
@@ -1156,6 +1158,7 @@ where
                 value: bitcoin::Amount::from_sat(2),
                 script_pubkey: aggregate_key.signers_script_pubkey(),
             }],
+            input: vec![TestBitcoinTxInfo::random_prevout(&mut rng)],
             ..EMPTY_BITCOIN_TX
         };
         let tx_3 = bitcoin::Transaction {
@@ -1285,14 +1288,7 @@ where
                 value: bitcoin::Amount::from_sat(0xA1),
                 script_pubkey: aggregate_key.signers_script_pubkey(),
             }],
-            input: vec![bitcoin::TxIn {
-                previous_output: bitcoin::OutPoint {
-                    txid: model::BitcoinTxId::dummy_with_rng(&fake::Faker, &mut rng).into(),
-                    vout: 0,
-                },
-                sequence: bitcoin::Sequence::ZERO,
-                ..Default::default()
-            }],
+            input: vec![TestBitcoinTxInfo::random_prevout(&mut rng)],
             ..EMPTY_BITCOIN_TX
         };
         // model::BitcoinTxId::dummy_with_rng(&fake::Faker, &mut rng).into()
@@ -1313,6 +1309,9 @@ where
             &self.test_model_parameters,
             Some(&block_a1),
         );
+        // This is a donation. It should be labeled as such since the first
+        // input (which doesn't exist), is not locked by the signers
+        // scriptPubKey.
         let tx_a2 = bitcoin::Transaction {
             output: vec![bitcoin::TxOut {
                 value: bitcoin::Amount::from_sat(0xA2),
@@ -1333,6 +1332,7 @@ where
             &self.test_model_parameters,
             Some(&bitcoin_chain_tip),
         );
+        // This is a donation as well
         let tx_b1 = bitcoin::Transaction {
             output: vec![bitcoin::TxOut {
                 value: bitcoin::Amount::from_sat(0xB1),

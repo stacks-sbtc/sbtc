@@ -4,6 +4,7 @@ use std::collections::HashSet;
 
 use bitcoin::hashes::Hash as _;
 use bitcoin::ScriptBuf;
+use fake::Dummy as _;
 use fake::Fake;
 
 use crate::bitcoin::utxo::BitcoinInputsOutputs;
@@ -19,13 +20,40 @@ use crate::testing::dummy::DepositTxConfig;
 
 use rand::seq::SliceRandom;
 
-/// A transaction input that implements the right stuff
+/// A slimmed down [`BitcoinTxInfo`] type that can be used to implement the
+/// [`TxDeconstructor`] trait.
+///
+/// In order to implement [`TxDeconstructor`], you need to be able to
+/// return the original output for each input into a transaction. This
+/// struct allows you to do that by "requiring" that you provide the
+/// "original" bitcoin::TxOut for each entry in `tx.input`. This
+/// information gets used to figure out whether a transaction is a sweep
+/// transaction or a donation to the signers. Sweep transactions have
+/// inputs that spend funds locked by the signers, while donations do not.
 #[derive(Debug)]
 pub struct TestBitcoinTxInfo {
-    /// The transaction
+    /// A bitcoin transaction that will be classified as either a
+    /// "donation" or a "sweep".
     pub tx: bitcoin::Transaction,
-    /// The outputs being spent as the inputs.
+    /// The previous outputs that are being spent as inputs in the above
+    /// transaction.
     pub prevouts: Vec<bitcoin::TxOut>,
+}
+
+impl TestBitcoinTxInfo {
+    /// Generate a random input. This is useful for making a bitcoin
+    /// transaction that will appear to be a sweep transaction.
+    pub fn random_prevout<R: rand::Rng + ?Sized>(rng: &mut R) -> bitcoin::TxIn {
+        bitcoin::TxIn {
+            previous_output: bitcoin::OutPoint {
+                txid: model::BitcoinTxId::dummy_with_rng(&fake::Faker, rng).into(),
+                vout: 0,
+            },
+            sequence: bitcoin::Sequence::ZERO,
+            witness: bitcoin::Witness::new(),
+            script_sig: bitcoin::ScriptBuf::new(),
+        }
+    }
 }
 
 impl BitcoinInputsOutputs for TestBitcoinTxInfo {
@@ -80,10 +108,10 @@ pub struct TestData {
     /// Withdraw signers
     pub withdraw_signers: Vec<model::WithdrawalSigner>,
 
-    /// transaction outputs
+    /// Donation outputs and outputs of sweep transactions.
     pub tx_outputs: Vec<model::TxOutput>,
 
-    /// transaction outputs
+    /// The transaction outputs used as inputs into sweep transactions.
     pub tx_prevouts: Vec<model::TxPrevout>,
 }
 
