@@ -110,13 +110,14 @@ async fn libp2p_clients_can_exchange_messages_given_real_network(addr1: &str, ad
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
     // Run the test with a 10-second timeout for the swarms to exchange messages.
-    if let Err(_) = tokio::time::timeout(
+    if tokio::time::timeout(
         tokio::time::Duration::from_secs(10),
         signer::testing::network::assert_clients_can_exchange_messages(
             network1, network2, key1, key2,
         ),
     )
     .await
+    .is_err()
     {
         handle1.abort();
         handle2.abort();

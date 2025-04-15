@@ -37,6 +37,7 @@ use crate::setup::IntoEmilyTestingConfig as _;
 use crate::setup::TestSweepSetup;
 use crate::setup::backfill_bitcoin_blocks;
 
+#[allow(clippy::type_complexity)]
 fn test_environment(
     db: PgStore,
     signing_threshold: u32,

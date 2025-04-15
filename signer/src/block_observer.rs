@@ -993,13 +993,12 @@ mod tests {
         let storage = storage.lock().await;
         assert_eq!(storage.deposit_requests.len(), 1);
         let db_outpoint: (BitcoinTxId, u32) = (tx_setup0.tx.compute_txid().into(), 0);
-        assert!(storage.deposit_requests.get(&db_outpoint).is_some());
+        assert!(storage.deposit_requests.contains_key(&db_outpoint));
 
         assert!(
             storage
                 .bitcoin_transactions_to_blocks
-                .get(&db_outpoint.0)
-                .is_some()
+                .contains_key(&db_outpoint.0)
         );
         assert_eq!(
             storage

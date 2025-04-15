@@ -1277,7 +1277,8 @@ async fn run_subsequent_dkg() {
     //    `dkg_shares` table.
     assert_eq!(all_aggregate_keys.len(), 2);
     let new_aggregate_key = *all_aggregate_keys
-        .iter().find(|k| *k != &aggregate_key_1)
+        .iter()
+        .find(|k| *k != &aggregate_key_1)
         .unwrap();
     assert_ne!(aggregate_key_1, new_aggregate_key);
 
@@ -3198,7 +3199,6 @@ async fn test_conservative_initial_sbtc_limits() {
             });
 
             let enable_emily_limits = enable_emily_limits.clone();
-            let i = i;
             client.expect_get_limits().times(1..).returning(move || {
                 // Since we don't signal the coordinator if we fail to fetch the limits
                 // we need the coordinator to be able to fetch them.
@@ -4516,7 +4516,7 @@ mod get_eligible_pending_withdrawal_requests {
 
     /// Helper function to set up the database with bitcoin and stacks chains,
     /// a set of signers and their DKG shares.
-    async fn test_setup<'a>(
+    async fn test_setup(
         db: &PgStore,
         chains_length: u64,
     ) -> (

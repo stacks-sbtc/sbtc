@@ -85,7 +85,7 @@ use crate::setup::fetch_canonical_bitcoin_blockchain;
 
 #[tokio::test]
 async fn should_be_able_to_query_bitcoin_blocks() {
-    let mut store = testing::storage::new_test_database().await;
+    let store = testing::storage::new_test_database().await;
     let mut rng = get_rng();
 
     let test_model_params = testing::storage::model::Params {
@@ -103,7 +103,7 @@ async fn should_be_able_to_query_bitcoin_blocks() {
     let not_persisted_model = TestData::generate(&mut rng, &signer_set, &test_model_params);
 
     // Write all blocks for the persisted model to the database
-    persisted_model.write_to(&mut store).await;
+    persisted_model.write_to(&store).await;
 
     // Assert that we can query each of the persisted blocks
     for block in &persisted_model.bitcoin_blocks {
@@ -335,8 +335,8 @@ async fn checking_stacks_blocks_exists_works() {
 /// when fetching pending deposit requests
 #[tokio::test]
 async fn should_return_the_same_pending_deposit_requests_as_in_memory_store() {
-    let mut pg_store = testing::storage::new_test_database().await;
-    let mut in_memory_store = storage::in_memory::Store::new_shared();
+    let pg_store = testing::storage::new_test_database().await;
+    let in_memory_store = storage::in_memory::Store::new_shared();
 
     let mut rng = get_rng();
 
@@ -353,8 +353,8 @@ async fn should_return_the_same_pending_deposit_requests_as_in_memory_store() {
     let signer_set = testing::wsts::generate_signer_set_public_keys(&mut rng, num_signers);
     let test_data = TestData::generate(&mut rng, &signer_set, &test_model_params);
 
-    test_data.write_to(&mut in_memory_store).await;
-    test_data.write_to(&mut pg_store).await;
+    test_data.write_to(&in_memory_store).await;
+    test_data.write_to(&pg_store).await;
 
     let chain_tip = in_memory_store
         .get_bitcoin_canonical_chain_tip()
@@ -508,8 +508,8 @@ async fn get_pending_withdrawal_requests_only_pending() {
 /// when fetching pending withdraw requests
 #[tokio::test]
 async fn should_return_the_same_pending_withdraw_requests_as_in_memory_store() {
-    let mut pg_store = testing::storage::new_test_database().await;
-    let mut in_memory_store = storage::in_memory::Store::new_shared();
+    let pg_store = testing::storage::new_test_database().await;
+    let in_memory_store = storage::in_memory::Store::new_shared();
 
     let mut rng = get_rng();
 
@@ -527,8 +527,8 @@ async fn should_return_the_same_pending_withdraw_requests_as_in_memory_store() {
     let signer_set = testing::wsts::generate_signer_set_public_keys(&mut rng, num_signers);
     let test_data = TestData::generate(&mut rng, &signer_set, &test_model_params);
 
-    test_data.write_to(&mut in_memory_store).await;
-    test_data.write_to(&mut pg_store).await;
+    test_data.write_to(&in_memory_store).await;
+    test_data.write_to(&pg_store).await;
 
     let chain_tip = in_memory_store
         .get_bitcoin_canonical_chain_tip()
@@ -585,8 +585,8 @@ async fn should_return_the_same_pending_withdraw_requests_as_in_memory_store() {
 /// when fetching pending accepted deposit requests
 #[tokio::test]
 async fn should_return_the_same_pending_accepted_deposit_requests_as_in_memory_store() {
-    let mut pg_store = testing::storage::new_test_database().await;
-    let mut in_memory_store = storage::in_memory::Store::new_shared();
+    let pg_store = testing::storage::new_test_database().await;
+    let in_memory_store = storage::in_memory::Store::new_shared();
 
     let mut rng = get_rng();
 
@@ -605,8 +605,8 @@ async fn should_return_the_same_pending_accepted_deposit_requests_as_in_memory_s
     let signer_set = testing::wsts::generate_signer_set_public_keys(&mut rng, num_signers);
     let test_data = TestData::generate(&mut rng, &signer_set, &test_model_params);
 
-    test_data.write_to(&mut in_memory_store).await;
-    test_data.write_to(&mut pg_store).await;
+    test_data.write_to(&in_memory_store).await;
+    test_data.write_to(&pg_store).await;
 
     let chain_tip = in_memory_store
         .get_bitcoin_canonical_chain_tip()
@@ -751,8 +751,8 @@ async fn should_return_only_accepted_pending_deposits_that_are_within_reclaim_bo
     }
 
     // Take 1 ------------------------------------------------------------------
-    test_data.write_to(&mut pg_store).await;
-    test_data.write_to(&mut in_memory_store).await;
+    test_data.write_to(&pg_store).await;
+    test_data.write_to(&in_memory_store).await;
 
     let chain_tip = in_memory_store
         .get_bitcoin_canonical_chain_tip()
@@ -876,8 +876,8 @@ async fn should_return_only_accepted_pending_deposits_that_are_within_reclaim_bo
     in_memory_store = storage::in_memory::Store::new_shared();
 
     // Initialize the data.
-    test_data.write_to(&mut pg_store).await;
-    test_data.write_to(&mut in_memory_store).await;
+    test_data.write_to(&pg_store).await;
+    test_data.write_to(&in_memory_store).await;
 
     let mut pending_accepted_deposit_requests_in_memory = in_memory_store
         .get_pending_accepted_deposit_requests(&chain_tip, context_window, threshold)
@@ -911,8 +911,8 @@ async fn should_return_only_accepted_pending_deposits_that_are_within_reclaim_bo
 /// TODO(415): Make this robust to multiple key rotations.
 #[tokio::test]
 async fn should_return_the_same_last_key_rotation_as_in_memory_store() {
-    let mut pg_store = testing::storage::new_test_database().await;
-    let mut in_memory_store = storage::in_memory::Store::new_shared();
+    let pg_store = testing::storage::new_test_database().await;
+    let in_memory_store = storage::in_memory::Store::new_shared();
 
     let mut rng = get_rng();
 
@@ -929,8 +929,8 @@ async fn should_return_the_same_last_key_rotation_as_in_memory_store() {
     let signer_set = testing::wsts::generate_signer_set_public_keys(&mut rng, num_signers);
     let test_data = TestData::generate(&mut rng, &signer_set, &test_model_params);
 
-    test_data.write_to(&mut in_memory_store).await;
-    test_data.write_to(&mut pg_store).await;
+    test_data.write_to(&in_memory_store).await;
+    test_data.write_to(&pg_store).await;
 
     let chain_tip = in_memory_store
         .get_bitcoin_canonical_chain_tip()
@@ -955,11 +955,11 @@ async fn should_return_the_same_last_key_rotation_as_in_memory_store() {
 
     let shares = all_shares.first().unwrap();
     testing_signer_set
-        .write_as_rotate_keys_tx(&mut in_memory_store, &chain_tip, shares, &mut rng)
+        .write_as_rotate_keys_tx(&in_memory_store, &chain_tip, shares, &mut rng)
         .await;
 
     testing_signer_set
-        .write_as_rotate_keys_tx(&mut pg_store, &chain_tip, shares, &mut rng)
+        .write_as_rotate_keys_tx(&pg_store, &chain_tip, shares, &mut rng)
         .await;
 
     let last_key_rotation_in_memory = in_memory_store
@@ -2755,11 +2755,7 @@ async fn get_swept_deposit_requests_response_tx_reorged() {
     // `setup.deposit_request` into the database.
     setup.store_deposit_request(&db).await;
 
-    let stacks_tip = db
-        .get_stacks_chain_tip(&chain_tip)
-        .await
-        .unwrap()
-        .unwrap();
+    let stacks_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
 
     // First, let's check we get the deposit
     let requests = db
@@ -3167,18 +3163,18 @@ async fn should_get_signer_utxo_donations() {
     signer::testing::storage::drop_db(store).await;
 }
 
-/// The following tests check the [`DbRead::get_deposit_request_report`]
-/// function and all follow a similar pattern. The pattern is:
-/// 1. Generate a random blockchain and write it to the database.
-/// 2. Generate a random deposit request and write it to the database.
-///    Write the associated deposit transaction as well, sometimes this
-///    transaction will be on the canonical bitcoin blockchain, sometimes
-///    not.
-/// 3. Maybe generate a random deposit vote for the current signer and
-///    store that in the database.
-/// 4. Maybe generate a sweep transaction and put that in our database.
-/// 5. Check that the report comes out right depending on where the various
-///    transactions are confirmed.
+// The following tests check the [`DbRead::get_deposit_request_report`]
+// function and all follow a similar pattern. The pattern is:
+// 1. Generate a random blockchain and write it to the database.
+// 2. Generate a random deposit request and write it to the database.
+//    Write the associated deposit transaction as well, sometimes this
+//    transaction will be on the canonical bitcoin blockchain, sometimes
+//    not.
+// 3. Maybe generate a random deposit vote for the current signer and
+//    store that in the database.
+// 4. Maybe generate a sweep transaction and put that in our database.
+// 5. Check that the report comes out right depending on where the various
+//    transactions are confirmed.
 
 /// Check the expected report if the deposit request and transaction are in
 /// the database, but this signers vote is missing and the transaction is
@@ -3656,18 +3652,18 @@ async fn deposit_report_with_deposit_request_confirmed() {
     signer::testing::storage::drop_db(db).await;
 }
 
-/// The following tests check the [`DbRead::get_withdrawal_request_report`]
-/// function and all follow a similar pattern. The pattern is:
-/// 1. Generate a random blockchain and write it to the database.
-/// 2. Generate a random withdrawal request and write it to the database.
-///    Write the block that included the transaction that confirmed the
-///    transaction as well, sometimes this transaction will be on the
-///    canonical bitcoin blockchain, sometimes not.
-/// 3. Maybe generate a random withdrawal vote for the current signer and
-///    store that in the database.
-/// 4. Maybe generate a sweep transaction and put that in our database.
-/// 5. Check that the report comes out right depending on where the various
-///    transactions are confirmed.
+// The following tests check the [`DbRead::get_withdrawal_request_report`]
+// function and all follow a similar pattern. The pattern is:
+// 1. Generate a random blockchain and write it to the database.
+// 2. Generate a random withdrawal request and write it to the database.
+//    Write the block that included the transaction that confirmed the
+//    transaction as well, sometimes this transaction will be on the
+//    canonical bitcoin blockchain, sometimes not.
+// 3. Maybe generate a random withdrawal vote for the current signer and
+//    store that in the database.
+// 4. Maybe generate a sweep transaction and put that in our database.
+// 5. Check that the report comes out right depending on where the various
+//    transactions are confirmed.
 
 /// Check that no report is generated if the withdrawal request is not in
 /// the database or if the stacks block that confirmed the transaction that
@@ -4081,7 +4077,6 @@ async fn withdrawal_report_with_withdrawal_request_swept_but_swept_reorged() {
     let signer_public_keys = testing::wsts::generate_signer_set_public_keys(&mut rng, num_signers);
     let signer_public_key = &signer_public_keys[0];
     let mut test_data = TestData::generate(&mut rng, &signer_public_keys, &test_params);
-    let mut block_height = 0;
     let mut parent_hash = Faker.fake_with_rng(&mut rng);
     // Our `TestData` generator doesn't quite build us a nice Stacks
     // blockchain. So we manually make sure that we have consecutive blocks
@@ -4089,10 +4084,9 @@ async fn withdrawal_report_with_withdrawal_request_swept_but_swept_reorged() {
     // data that is generated by default is not a useful blockchain; all
     // blocks have the same height and their parents don't point to blocks
     // that exist.
-    for block in test_data.stacks_blocks.iter_mut() {
-        block.block_height = block_height;
+    for (block_height, block) in test_data.stacks_blocks.iter_mut().enumerate() {
+        block.block_height = block_height as u64;
         block.parent_hash = parent_hash;
-        block_height += 1;
         parent_hash = block.block_hash;
     }
     test_data.write_to(&db).await;
@@ -4235,7 +4229,6 @@ async fn withdrawal_report_with_withdrawal_request_swept_but_swept_reorged2() {
     let signer_public_keys = testing::wsts::generate_signer_set_public_keys(&mut rng, num_signers);
     let signer_public_key = &signer_public_keys[0];
     let mut test_data = TestData::generate(&mut rng, &signer_public_keys, &test_params);
-    let mut block_height = 0;
     let mut parent_hash = Faker.fake_with_rng(&mut rng);
     // Our `TestData` generator doesn't quite build us a nice Stacks
     // blockchain. So we manually make sure that we have consecutive blocks
@@ -4243,10 +4236,9 @@ async fn withdrawal_report_with_withdrawal_request_swept_but_swept_reorged2() {
     // data that is generated by default is not a useful blockchain; all
     // blocks have the same height and their parents don't point to blocks
     // that exist.
-    for block in test_data.stacks_blocks.iter_mut() {
-        block.block_height = block_height;
+    for (block_height, block) in test_data.stacks_blocks.iter_mut().enumerate() {
+        block.block_height = block_height as u64;
         block.parent_hash = parent_hash;
-        block_height += 1;
         parent_hash = block.block_hash;
     }
     test_data.write_to(&db).await;
@@ -5110,7 +5102,7 @@ async fn get_stacks_block(
 /// requests in case there are no events affecting them.
 #[test_log::test(tokio::test)]
 async fn pending_rejected_withdrawal_no_events() {
-    let mut db = testing::storage::new_test_database().await;
+    let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
 
     let num_signers = 10;
@@ -5128,7 +5120,7 @@ async fn pending_rejected_withdrawal_no_events() {
 
     let test_data = TestData::generate(&mut rng, &signer_set, &test_model_params);
 
-    test_data.write_to(&mut db).await;
+    test_data.write_to(&db).await;
 
     let mut bitcoin_chain_tip = db
         .get_bitcoin_canonical_chain_tip_ref()
@@ -5209,7 +5201,7 @@ async fn pending_rejected_withdrawal_no_events() {
 /// requests.
 #[test_log::test(tokio::test)]
 async fn pending_rejected_withdrawal_expiration() {
-    let mut db = testing::storage::new_test_database().await;
+    let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
 
     let num_signers = 10;
@@ -5225,7 +5217,7 @@ async fn pending_rejected_withdrawal_expiration() {
     };
     let signer_set = testing::wsts::generate_signer_set_public_keys(&mut rng, num_signers);
     let test_data = TestData::generate(&mut rng, &signer_set, &test_model_params);
-    test_data.write_to(&mut db).await;
+    test_data.write_to(&db).await;
 
     // Add a withdrawal request not yet confirmed nor expired
     let request_confirmations = 1;
@@ -5310,7 +5302,7 @@ async fn pending_rejected_withdrawal_expiration() {
 /// that already have a confirmed rejection event.
 #[test_log::test(tokio::test)]
 async fn pending_rejected_withdrawal_rejected_already_rejected() {
-    let mut db = testing::storage::new_test_database().await;
+    let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
 
     let num_signers = 10;
@@ -5326,7 +5318,7 @@ async fn pending_rejected_withdrawal_rejected_already_rejected() {
     };
     let signer_set = testing::wsts::generate_signer_set_public_keys(&mut rng, num_signers);
     let test_data = TestData::generate(&mut rng, &signer_set, &test_model_params);
-    test_data.write_to(&mut db).await;
+    test_data.write_to(&db).await;
 
     // Add a withdrawal request already expired
     let request_confirmations = WITHDRAWAL_BLOCKS_EXPIRY as usize + 1;
@@ -5448,7 +5440,7 @@ async fn pending_rejected_withdrawal_rejected_already_rejected() {
 /// that have a confirmed withdrawal output.
 #[test_log::test(tokio::test)]
 async fn pending_rejected_withdrawal_already_accepted() {
-    let mut db = testing::storage::new_test_database().await;
+    let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
 
     let num_signers = 10;
@@ -5464,7 +5456,7 @@ async fn pending_rejected_withdrawal_already_accepted() {
     };
     let signer_set = testing::wsts::generate_signer_set_public_keys(&mut rng, num_signers);
     let test_data = TestData::generate(&mut rng, &signer_set, &test_model_params);
-    test_data.write_to(&mut db).await;
+    test_data.write_to(&db).await;
 
     // Add a withdrawal request already expired
     let request_confirmations = WITHDRAWAL_BLOCKS_EXPIRY as usize + 1;
@@ -5848,7 +5840,7 @@ async fn is_withdrawal_active_for_considered_withdrawal() {
 /// amount of withdrawal amounts in the window.
 #[tokio::test]
 async fn compute_withdrawn_total_gets_all_amounts_in_chain() {
-    let mut db = testing::storage::new_test_database().await;
+    let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
 
     let test_model_params = testing::storage::model::Params {
@@ -5863,7 +5855,7 @@ async fn compute_withdrawn_total_gets_all_amounts_in_chain() {
     let num_signers = 1;
     let signer_set = testing::wsts::generate_signer_set_public_keys(&mut rng, num_signers);
     let test_data = TestData::generate(&mut rng, &signer_set, &test_model_params);
-    test_data.write_to(&mut db).await;
+    test_data.write_to(&db).await;
 
     let context_window = 10;
     let bitcoin_chain_tip = db
@@ -5946,7 +5938,7 @@ async fn compute_withdrawn_total_gets_all_amounts_in_chain() {
 /// chain tip and context window.
 #[tokio::test]
 async fn compute_withdrawn_total_ignores_withdrawals_not_identified_blockchain() {
-    let mut db = testing::storage::new_test_database().await;
+    let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
 
     let test_model_params = testing::storage::model::Params {
@@ -5961,7 +5953,7 @@ async fn compute_withdrawn_total_ignores_withdrawals_not_identified_blockchain()
     let num_signers = 1;
     let signer_set = testing::wsts::generate_signer_set_public_keys(&mut rng, num_signers);
     let test_data = TestData::generate(&mut rng, &signer_set, &test_model_params);
-    test_data.write_to(&mut db).await;
+    test_data.write_to(&db).await;
 
     let context_window = 10;
     let bitcoin_chain_tip = db

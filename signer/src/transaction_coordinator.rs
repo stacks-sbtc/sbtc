@@ -2618,6 +2618,7 @@ mod tests {
     use super::assert_rotate_key_action;
     use super::should_coordinate_dkg;
 
+    #[allow(clippy::type_complexity)]
     fn test_environment() -> TestEnvironment<
         TestContext<
             SharedStore,

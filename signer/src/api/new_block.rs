@@ -354,10 +354,10 @@ mod tests {
     const ROTATE_KEYS_AND_INVALID_EVENT_WEBHOOK: &str =
         include_str!("../../tests/fixtures/rotate-keys-and-invalid-event.json");
 
-    #[test_case(COMPLETED_DEPOSIT_WEBHOOK, |db| db.completed_deposit_events.get(&OutPoint::null()).is_none(); "completed-deposit")]
-    #[test_case(WITHDRAWAL_CREATE_WEBHOOK, |db| db.withdrawal_requests.get(&(1, StacksBlockId::from_hex("75b02b9884ec41c05f2cfa6e20823328321518dd0b027e7b609b63d4d1ea7c78").unwrap().into())).is_none(); "withdrawal-create")]
-    #[test_case(WITHDRAWAL_ACCEPT_WEBHOOK, |db| db.withdrawal_accept_events.get(&1).is_none(); "withdrawal-accept")]
-    #[test_case(WITHDRAWAL_REJECT_WEBHOOK, |db| db.withdrawal_reject_events.get(&1).is_none(); "withdrawal-reject")]
+    #[test_case(COMPLETED_DEPOSIT_WEBHOOK, |db| !db.completed_deposit_events.contains_key(&OutPoint::null()); "completed-deposit")]
+    #[test_case(WITHDRAWAL_CREATE_WEBHOOK, |db| !db.withdrawal_requests.contains_key(&(1, StacksBlockId::from_hex("75b02b9884ec41c05f2cfa6e20823328321518dd0b027e7b609b63d4d1ea7c78").unwrap().into())); "withdrawal-create")]
+    #[test_case(WITHDRAWAL_ACCEPT_WEBHOOK, |db| !db.withdrawal_accept_events.contains_key(&1); "withdrawal-accept")]
+    #[test_case(WITHDRAWAL_REJECT_WEBHOOK, |db| !db.withdrawal_reject_events.contains_key(&1); "withdrawal-reject")]
     #[test_case(ROTATE_KEYS_WEBHOOK, |db| db.rotate_keys_transactions.is_empty(); "rotate-keys")]
     #[tokio::test]
     async fn test_events<F>(body_str: &str, table_is_empty: F)
@@ -385,10 +385,10 @@ mod tests {
         assert!(!table_is_empty(db.lock().await));
     }
 
-    #[test_case(COMPLETED_DEPOSIT_WEBHOOK, |db| db.completed_deposit_events.get(&OutPoint::null()).is_none(); "completed-deposit")]
-    #[test_case(WITHDRAWAL_CREATE_WEBHOOK, |db| db.withdrawal_requests.get(&(1, StacksBlockId::from_hex("75b02b9884ec41c05f2cfa6e20823328321518dd0b027e7b609b63d4d1ea7c78").unwrap().into())).is_none(); "withdrawal-create")]
-    #[test_case(WITHDRAWAL_ACCEPT_WEBHOOK, |db| db.withdrawal_accept_events.get(&1).is_none(); "withdrawal-accept")]
-    #[test_case(WITHDRAWAL_REJECT_WEBHOOK, |db| db.withdrawal_reject_events.get(&2).is_none(); "withdrawal-reject")]
+    #[test_case(COMPLETED_DEPOSIT_WEBHOOK, |db| !db.completed_deposit_events.contains_key(&OutPoint::null()); "completed-deposit")]
+    #[test_case(WITHDRAWAL_CREATE_WEBHOOK, |db| !db.withdrawal_requests.contains_key(&(1, StacksBlockId::from_hex("75b02b9884ec41c05f2cfa6e20823328321518dd0b027e7b609b63d4d1ea7c78").unwrap().into())); "withdrawal-create")]
+    #[test_case(WITHDRAWAL_ACCEPT_WEBHOOK, |db| !db.withdrawal_accept_events.contains_key(&1); "withdrawal-accept")]
+    #[test_case(WITHDRAWAL_REJECT_WEBHOOK, |db| !db.withdrawal_reject_events.contains_key(&2); "withdrawal-reject")]
     #[test_case(ROTATE_KEYS_WEBHOOK, |db| db.rotate_keys_transactions.is_empty(); "rotate-keys")]
     #[tokio::test]
     async fn test_fishy_events<F>(body_str: &str, table_is_empty: F)
@@ -506,8 +506,7 @@ mod tests {
         assert_eq!(db.completed_deposit_events.len(), 1);
         assert!(
             db.completed_deposit_events
-                .get(&deposit_request.outpoint())
-                .is_some()
+                .contains_key(&deposit_request.outpoint())
         );
     }
 
@@ -558,7 +557,7 @@ mod tests {
         assert!(res.is_ok());
         let db = db.lock().await;
         assert_eq!(db.withdrawal_accept_events.len(), 1);
-        assert!(db.withdrawal_accept_events.get(&request_id).is_some());
+        assert!(db.withdrawal_accept_events.contains_key(&request_id));
     }
 
     /// Tests handling of a withdrawal request.
@@ -607,8 +606,7 @@ mod tests {
         assert_eq!(db.withdrawal_requests.len(), 1);
         assert!(
             db.withdrawal_requests
-                .get(&(request_id, stacks_first_block.block_hash))
-                .is_some()
+                .contains_key(&(request_id, stacks_first_block.block_hash))
         );
     }
 
@@ -655,7 +653,7 @@ mod tests {
         assert!(res.is_ok());
         let db = db.lock().await;
         assert_eq!(db.withdrawal_reject_events.len(), 1);
-        assert!(db.withdrawal_reject_events.get(&request_id).is_some());
+        assert!(db.withdrawal_reject_events.contains_key(&request_id));
     }
 
     /// Tests handling a key rotation event.
@@ -685,7 +683,7 @@ mod tests {
         assert!(res.is_ok());
         let db = db.lock().await;
         assert_eq!(db.rotate_keys_transactions.len(), 1);
-        assert!(db.rotate_keys_transactions.get(&txid).is_some());
+        assert!(db.rotate_keys_transactions.contains_key(&txid));
     }
 
     #[test_case(EVENT_OBSERVER_BODY_LIMIT, true; "event within limit")]
