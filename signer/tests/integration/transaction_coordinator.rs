@@ -1076,7 +1076,6 @@ async fn dont_run_dkg_if_signer_set_didnt_change() {
         .build();
     let config_signer_set = ctx.config().signer.bootstrap_signing_set.clone();
 
-
     // Sanity check
     assert!(!config_signer_set.is_empty());
 
@@ -1086,42 +1085,11 @@ async fn dont_run_dkg_if_signer_set_didnt_change() {
         .await
         .expect("failed to write dkg shares");
 
-    // Create rotate keys tx
-    let rotate_keys_tx = model::RotateKeysTransaction {
-        signer_set: config_signer_set.clone(),
-        ..Faker.fake_with_rng(&mut rng)
-    };
+    // We need to construct chaintip
     let bitcoin_block: model::BitcoinBlock = Faker.fake_with_rng(&mut rng);
-    let stacks_block = model::StacksBlock {
-        bitcoin_anchor: bitcoin_block.block_hash,
-        ..Faker.fake_with_rng(&mut rng)
-    };
-    let stacks_tx = model::StacksTransaction {
-        txid: rotate_keys_tx.txid,
-        block_hash: stacks_block.block_hash,
-    };
-    let transaction = model::Transaction {
-        txid: rotate_keys_tx.txid.to_bytes(),
-        block_hash: stacks_block.block_hash.to_bytes(),
-        tx_type: model::TransactionType::RotateKeys,
-    };
-
     db.write_bitcoin_block(&bitcoin_block)
         .await
         .expect("failed to write bitcoin block");
-
-    db.write_transaction(&transaction)
-        .await
-        .expect("failed to write transaction");
-    db.write_stacks_block(&stacks_block)
-        .await
-        .expect("failed to write stacks block");
-    db.write_stacks_transaction(&stacks_tx)
-        .await
-        .expect("failed to write stacks transaction");
-    db.write_rotate_keys_transaction(&rotate_keys_tx)
-        .await
-        .expect("failed to write rotate keys transaction");
 
     // Check that with correct rotate keys tx we won't proceed with dkg.
     let chaintip = db
@@ -1130,7 +1098,7 @@ async fn dont_run_dkg_if_signer_set_didnt_change() {
         .expect("failed to get chain tip")
         .expect("no chain tip");
 
-    ctx.inner.state().update_current_signer_set(rotate_keys_tx.signer_set.iter().cloned().collect());
+    ctx.inner.state().update_current_signer_set(config_signer_set.iter().cloned().collect());
     assert!(!should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
     assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_err());
 }
@@ -1159,46 +1127,14 @@ async fn run_dkg_if_signer_set_changes() {
         .await
         .expect("failed to write dkg shares");
 
-    // Create rotate keys tx
+    // Remove one signer
+    let signer_set_without_signer = config_signer_set[..config_signer_set.len() - 1].to_vec();
 
-    let mut signer_set_without_signer = config_signer_set.clone();
-    signer_set_without_signer.pop();
-
-    let rotate_keys_tx = model::RotateKeysTransaction {
-        signer_set: signer_set_without_signer.clone(),
-        ..Faker.fake_with_rng(&mut rng)
-    };
+    // Create chaintip
     let bitcoin_block: model::BitcoinBlock = Faker.fake_with_rng(&mut rng);
-    let stacks_block = model::StacksBlock {
-        bitcoin_anchor: bitcoin_block.block_hash,
-        ..Faker.fake_with_rng(&mut rng)
-    };
-    let stacks_tx = model::StacksTransaction {
-        txid: rotate_keys_tx.txid,
-        block_hash: stacks_block.block_hash,
-    };
-    let transaction = model::Transaction {
-        txid: rotate_keys_tx.txid.to_bytes(),
-        block_hash: stacks_block.block_hash.to_bytes(),
-        tx_type: model::TransactionType::RotateKeys,
-    };
-
     db.write_bitcoin_block(&bitcoin_block)
         .await
         .expect("failed to write bitcoin block");
-
-    db.write_transaction(&transaction)
-        .await
-        .expect("failed to write transaction");
-    db.write_stacks_block(&stacks_block)
-        .await
-        .expect("failed to write stacks block");
-    db.write_stacks_transaction(&stacks_tx)
-        .await
-        .expect("failed to write stacks transaction");
-    db.write_rotate_keys_transaction(&rotate_keys_tx)
-        .await
-        .expect("failed to write rotate keys transaction");
 
     // Check that with correct rotate keys tx we won't proceed with dkg.
     let chaintip = db
@@ -1207,7 +1143,7 @@ async fn run_dkg_if_signer_set_changes() {
         .expect("failed to get chain tip")
         .expect("no chain tip");
 
-    ctx.inner.state().update_current_signer_set(rotate_keys_tx.signer_set.iter().cloned().collect());
+    ctx.inner.state().update_current_signer_set(signer_set_without_signer.iter().cloned().collect());
     assert!(should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
     assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_ok());
 }
