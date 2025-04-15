@@ -1080,7 +1080,7 @@ async fn dont_run_dkg_if_signer_set_didnt_change() {
     assert!(!config_signer_set.is_empty());
 
     // Write dkg shares so it won't be a reason to trigger dkg.
-    let dkg_shares =  model::EncryptedDkgShares {
+    let dkg_shares = model::EncryptedDkgShares {
         dkg_shares_status: model::DkgSharesStatus::Verified,
         ..Faker.fake_with_rng(&mut rng)
     };
@@ -1126,7 +1126,7 @@ async fn run_dkg_if_signer_set_changes() {
     assert!(!config_signer_set.is_empty());
 
     // Write dkg shares so it won't be a reason to trigger dkg.
-    let dkg_shares =  model::EncryptedDkgShares {
+    let dkg_shares = model::EncryptedDkgShares {
         dkg_shares_status: model::DkgSharesStatus::Verified,
         ..Faker.fake_with_rng(&mut rng)
     };
