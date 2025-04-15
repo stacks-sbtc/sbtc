@@ -2767,6 +2767,7 @@ mod tests {
                 s.signer.dkg_min_bitcoin_block_height =
                     dkg_min_bitcoin_block_height.and_then(NonZeroU64::new);
                 s.signer.dkg_target_rounds = NonZeroU32::new(dkg_target_rounds).unwrap();
+                s.signer.start_dkg_if_signer_set_changed = false;
             })
             .build();
 

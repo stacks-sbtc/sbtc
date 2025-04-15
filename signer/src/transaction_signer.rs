@@ -1723,6 +1723,7 @@ mod tests {
                 s.signer.dkg_min_bitcoin_block_height =
                     dkg_min_bitcoin_block_height.map(NonZeroU64::new).flatten();
                 s.signer.dkg_target_rounds = NonZeroU32::new(dkg_target_rounds).unwrap();
+                s.signer.start_dkg_if_signer_set_changed = false;
             })
             .build();
 
@@ -1768,6 +1769,9 @@ mod tests {
         let context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
+            .modify_settings(|settings| {
+                settings.signer.start_dkg_if_signer_set_changed = false;
+            })
             .build();
 
         let storage = context.get_storage_mut();
