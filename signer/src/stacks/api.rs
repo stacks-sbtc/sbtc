@@ -351,7 +351,7 @@ impl From<NakamotoBlockHeader> for StacksBlockHeader {
     }
 }
 
-impl From<TenureBlocks> for TenureHeaders {
+impl From<TenureBlocks> for TenureBlockHeaders {
     fn from(value: TenureBlocks) -> Self {
         let headers = value
             .blocks
@@ -359,7 +359,7 @@ impl From<TenureBlocks> for TenureHeaders {
             .map(|block| StacksBlockHeader::from(block.header))
             .collect();
 
-        TenureHeaders {
+        TenureBlockHeaders {
             headers,
             anchor_block_hash: value.anchor_block_hash,
             anchor_block_height: value.anchor_block_height,
@@ -370,7 +370,7 @@ impl From<TenureBlocks> for TenureHeaders {
 /// This struct represents a non-empty subset of the Stacks block headers
 /// that were created during a tenure.
 #[derive(Debug)]
-pub struct TenureHeaders {
+pub struct TenureBlockHeaders {
     /// The subset of Stacks block headers that of Nakamoto blocks that
     /// were created during a tenure. This is always non-empty.
     headers: Vec<StacksBlockHeader>,
@@ -381,7 +381,7 @@ pub struct TenureHeaders {
     pub anchor_block_height: u64,
 }
 
-impl TenureHeaders {
+impl TenureBlockHeaders {
     /// Get all the headers contained in this object.
     ///
     /// # Note
@@ -1194,13 +1194,13 @@ pub async fn fetch_unknown_ancestors<S, D>(
     stacks: &S,
     db: &D,
     block_id: StacksBlockId,
-) -> Result<Vec<TenureHeaders>, Error>
+) -> Result<Vec<TenureBlockHeaders>, Error>
 where
     S: StacksInteract,
     D: DbRead + Send + Sync,
 {
     let starting_tenure = stacks.get_tenure(block_id).await?;
-    let mut headers: Vec<TenureHeaders> = vec![starting_tenure.into()];
+    let mut headers: Vec<TenureBlockHeaders> = vec![starting_tenure.into()];
     let pox_info = stacks.get_pox_info().await?;
     let nakamoto_start_height = pox_info
         .nakamoto_start_height()
@@ -1738,7 +1738,7 @@ mod tests {
         let blocks = tenures.unwrap();
         let headers = blocks
             .into_iter()
-            .flat_map(TenureHeaders::as_stacks_blocks)
+            .flat_map(TenureBlockHeaders::as_stacks_blocks)
             .collect::<Vec<_>>();
         db.write_stacks_block_headers(headers).await.unwrap();
 

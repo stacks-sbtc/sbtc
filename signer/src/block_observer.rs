@@ -35,7 +35,7 @@ use crate::metrics::BITCOIN_BLOCKCHAIN;
 use crate::metrics::Metrics;
 use crate::stacks::api::GetNakamotoStartHeight as _;
 use crate::stacks::api::StacksInteract;
-use crate::stacks::api::TenureHeaders;
+use crate::stacks::api::TenureBlockHeaders;
 use crate::storage::DbRead;
 use crate::storage::DbWrite;
 use crate::storage::model;
@@ -393,7 +393,7 @@ impl<C: Context, B> BlockObserver<C, B> {
 
         let headers = stacks_block_headers
             .into_iter()
-            .flat_map(TenureHeaders::as_stacks_blocks)
+            .flat_map(TenureBlockHeaders::as_stacks_blocks)
             .collect::<Vec<_>>();
 
         db.write_stacks_block_headers(headers).await?;
