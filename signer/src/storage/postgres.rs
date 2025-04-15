@@ -452,7 +452,7 @@ impl PgStore {
         chain_tip: &model::BitcoinBlockHash,
         min_block_height: BitcoinBlockHeight,
     ) -> Result<Option<BitcoinBlockHeight>, Error> {
-        Ok(sqlx::query_scalar::<_, BitcoinBlockHeight>(
+        sqlx::query_scalar::<_, BitcoinBlockHeight>(
             r#"
             SELECT bb.block_height
             FROM sbtc_signer.bitcoin_tx_inputs AS bi
@@ -472,7 +472,7 @@ impl PgStore {
         .bind(i64::try_from(min_block_height).map_err(Error::ConversionDatabaseInt)?)
         .fetch_optional(&self.0)
         .await
-        .map_err(Error::SqlxQuery)?)
+        .map_err(Error::SqlxQuery)
     }
 
     /// Return the height of the earliest block in which a donation UTXO
@@ -483,7 +483,7 @@ impl PgStore {
     /// This function does not check whether the donation output has been
     /// spent.
     pub async fn minimum_donation_txo_height(&self) -> Result<Option<BitcoinBlockHeight>, Error> {
-        sqlx::query_scalar::<_, i64>(
+        sqlx::query_scalar::<_, BitcoinBlockHeight>(
             r#"
             SELECT bb.block_height
             FROM sbtc_signer.bitcoin_tx_outputs AS bo
@@ -496,10 +496,7 @@ impl PgStore {
         )
         .fetch_optional(&self.0)
         .await
-        .map_err(Error::SqlxQuery)?
-        .map(BitcoinBlockHeight::try_from)
-        .transpose()
-        .map_err(Error::ConversionDatabaseInt)
+        .map_err(Error::SqlxQuery)
     }
 
     /// Return a donation UTXO with minimum height.
@@ -610,7 +607,7 @@ impl PgStore {
         // the best blockchain. But if we go back at least
         // `MAX_REORG_BLOCK_COUNT` bitcoin blocks then that UTXO is assumed
         // to still be confirmed.
-        let prev_confirmed_height_candidate = sqlx::query_scalar::<_, i64>(
+        let prev_confirmed_height_candidate = sqlx::query_scalar::<_, BitcoinBlockHeight>(
             r#"
             WITH RECURSIVE signer_inputs AS (
                 SELECT
@@ -658,9 +655,7 @@ impl PgStore {
         .bind(min_block_height_candidate)
         .fetch_optional(&self.0)
         .await
-        .map_err(Error::SqlxQuery)?
-        .map(|height| BitcoinBlockHeight::try_from(height).map_err(Error::ConversionDatabaseInt))
-        .transpose()?;
+        .map_err(Error::SqlxQuery)?;
 
         // We need to go back at least MAX_REORG_BLOCK_COUNT blocks before
         // the confirmation height of our best candidate height. If there
@@ -689,7 +684,7 @@ impl PgStore {
         // bitcoin transaction and (after #731) the bitcoin block
         // confirming the deposit to the database. So this will return zero
         // rows only when we cannot find the deposit request.
-        sqlx::query_scalar::<_, i64>(
+        sqlx::query_scalar::<_, BitcoinBlockHeight>(
             r#"
             SELECT block_height
             FROM sbtc_signer.deposit_requests AS dr
@@ -705,10 +700,7 @@ impl PgStore {
         .bind(i32::try_from(output_index).map_err(Error::ConversionDatabaseInt)?)
         .fetch_optional(&self.0)
         .await
-        .map_err(Error::SqlxQuery)?
-        .map(BitcoinBlockHeight::try_from)
-        .transpose()
-        .map_err(Error::ConversionDatabaseInt)
+        .map_err(Error::SqlxQuery)
     }
 
     /// Return the txid of the bitcoin transaction that swept in the
@@ -2256,7 +2248,7 @@ impl super::DbRead for PgStore {
         //    comment).
         // 2. Find the least height of any sweep transaction confirmed in a
         //    block with height greater than the height returned from (1).
-        let last_considered_height = sqlx::query_scalar::<_, Option<i64>>(
+        let last_considered_height = sqlx::query_scalar::<_, Option<BitcoinBlockHeight>>(
             r#"
             SELECT MAX(bb.block_height)
             FROM sbtc_signer.bitcoin_withdrawals_outputs AS bwo
@@ -2270,10 +2262,7 @@ impl super::DbRead for PgStore {
         .bind(id.block_hash)
         .fetch_one(&self.0)
         .await
-        .map_err(Error::SqlxQuery)?
-        .map(BitcoinBlockHeight::try_from)
-        .transpose()
-        .map_err(Error::ConversionDatabaseInt)?;
+        .map_err(Error::SqlxQuery)?;
 
         // We add one because we are interested in sweeps that were
         // confirmed after the signers last considered the withdrawal.
