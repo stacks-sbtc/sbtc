@@ -360,6 +360,7 @@ class TestExpiredLocktimeProcessor(TestDepositProcessorBase):
             mock_tx_spent.assert_called_once_with("edge_signer_tx")
             self.assertEqual(len(updates_spent), 0, "Spent (signer) edge case should NOT fail")
 
+
 # Reset confirmations after test class
 def tearDownModule():
     settings.MIN_BLOCK_CONFIRMATIONS = 6

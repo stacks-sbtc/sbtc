@@ -88,9 +88,7 @@ class EnrichedDepositInfo(DepositInfo):
     @classmethod
     def from_missing(cls, d: DepositInfo) -> Self:
         """Create an EnrichedDepositInfo with missing values."""
-        missing_data = {
-            "in_mempool": False,
-        }
+        missing_data = {"in_mempool": False}
         return cls.from_deposit_info(d, missing_data)
 
     def is_expired(self, bitcoin_chaintip_height: int) -> bool:
