@@ -19,7 +19,6 @@ use clarity::types::chainstate::StacksAddress;
 use clarity::vm::types::PrincipalData;
 use emily_client::apis::deposit_api;
 use emily_client::models::CreateDepositRequestBody;
-use fake::Fake;
 use fake::Faker;
 use sbtc::deposits::CreateDepositRequest;
 use sbtc::deposits::DepositScriptInputs;
