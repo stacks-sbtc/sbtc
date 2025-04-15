@@ -77,15 +77,13 @@ use signer::testing::context::*;
 use signer::testing::storage::DbReadTestExt;
 use url::Url;
 
-use crate::zmq::BITCOIN_CORE_ZMQ_ENDPOINT;
-
+const BITCOIN_CORE_ZMQ_ENDPOINT: &str = "tcp://localhost:28332";
 const DEVENV_DEPLOYER: &str = "SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS";
 const DEVENV_STACKS_API: &str = "http://127.0.0.1:3999";
 
 /// Simple test checking the block observer behaviour when bitcoin forks
 /// Note that this doesn't require devenv per se, it's just a sanity check for
 /// the fork test procedure.
-#[ignore = "This is an integration test that requires devenv running"]
 #[test_log::test(tokio::test)]
 async fn process_blocks_simple_fork() {
     let db = testing::storage::new_test_database().await;
@@ -342,7 +340,6 @@ where
 /// (with the deposit minting tx fail as expected).
 /// Raising `POX_PREPARE_LENGTH` and `POX_REWARD_LENGTH` (in devenv config)
 /// seems to help avoiding the PoX issue.
-#[ignore = "This is an integration test that requires devenv running"]
 #[test_log::test(tokio::test)]
 async fn orphaned_deposit() {
     let stacks = StacksClient::new(Url::parse("http://127.0.0.1:20443").unwrap()).unwrap();
