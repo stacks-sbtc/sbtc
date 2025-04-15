@@ -1,11 +1,30 @@
-name: On Push
-on: [push]
+name: Push & PR
+on:
+  # We explicitly filter on `main` to avoid triggering on pushes to PR branches,
+  # which would otherwise be triggered by the `pull_request.synchronize` event
+  # and cause multiple runs of the same workflow for the same push.
+  # When the merge queue merges to main, it will trigger this workflow.
+  push:
+    branches:
+      - main
+  # This trigger will trigger on pushes to PR branches via the `synchronize`
+  # event type.
+  pull_request:
+    types: [opened, synchronize, reopened]
+  # This is required for the merge queue to work properly with the CI-required
+  # check. `checks_requested` is currently the only event type supported, but
+  # we're being explicit to avoid the potential addition of types like
+  # `checks_completed`, `queue_position`, etc. in the future from causing
+  # multiple CI runs for the same merge queue entry.
+  merge_group:
+    types: [checks_requested]
 
 permissions: read-all
 
 concurrency:
-  # limit concurrency of entire workflow runs for a specific branch
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # Ensure that this workflow only runs once at a time for each PR or push,
+  # cancelling any in-progress runs for the same HEAD (PR) or branch (Push).
+  group: push-pr-${{ github.head_ref || github.ref_name || github.run_id}}
   cancel-in-progress: true
 
 env:
@@ -13,6 +32,7 @@ env:
   BUF_VERSION: 1.42.0
   PYTHON_VERSION: 3.13
   NEXTEST_VERSION: 0.9.88
+  CARGO_VET_VERSION: 0.10.0
   CARGO_INCREMENTAL: 0
   CARGO_PROFILE_DEV_STRIP: "debuginfo"
 
@@ -231,3 +251,57 @@ jobs:
         run: |
           echo "::error title=Emily clients are dirty:: Make sure you ran 'make emily-client-codegen' before pushing."
           exit 1
+
+  # Verifies supply chain security by ensuring all Rust dependencies are properly vetted.
+  # This job runs cargo-vet to check that dependencies match our security requirements,
+  # as defined in supply-chain.toml. If unvetted dependencies are found, it provides
+  # detailed reports and suggestions for adding the necessary audits or exemptions.
+  # Dependencies failing verification will cause the workflow to fail with explicit
+  # error annotations, and an audit report is uploaded as an artifact.
+  cargo-vet:
+    name: Vet Dependencies
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 #v4.2.2
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 #v4.2.3
+        id: cargo-vet-cache
+        with:
+          path: ${{ runner.tool_cache }}/cargo-vet
+          key: cargo-vet-bin-${{ env.CARGO_VET_VERSION }}
+      - name: Add the tool cache directory to the search path
+        run: echo "${{ runner.tool_cache }}/cargo-vet/bin" >> $GITHUB_PATH
+      - name: Ensure that the tool cache is populated with the cargo-vet binary
+        if: steps.cargo-vet-cache.outputs.cache-hit != 'true'
+        run: cargo install --root ${{ runner.tool_cache }}/cargo-vet --version ${{ env.CARGO_VET_VERSION }} --locked cargo-vet
+      - name: Run Cargo Vet
+        id: cargo-vet
+        run: |
+          echo "=============================="
+          echo "Running Dependency Vetting"
+          echo "=============================="
+          cargo vet --locked || {
+            echo "=============================="
+            echo "Unvetted dependencies detected!"
+            echo "Generating suggestions and detailed report..."
+            echo "=============================="
+            cargo vet suggest > audit-suggestions.txt
+            exit 1
+          }
+      - name: Annotate Unvetted Dependencies
+        if: failure()
+        run: |
+          echo "Annotating unvetted dependencies..."
+          cat audit-suggestions.txt | while read -r line; do
+            echo "::error file=supply-chain.toml::$line"
+          done
+      - name: Summarize Unvetted Dependencies
+        if: failure()
+        run: |
+          echo "Dependencies needing review:"
+          awk '/Command/{print $2, $3, $4, $5}' audit-suggestions.txt || true
+      - name: Upload Audit Report
+        if: failure()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 #v4.6.0
+        with:
+          name: cargo-vet-audit-report
+          path: audit-suggestions.txt

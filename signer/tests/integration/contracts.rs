@@ -3,16 +3,14 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use bitcoincore_rpc::RpcApi as _;
-use bitvec::array::BitArray;
 use blockstack_lib::chainstate::stacks::StacksTransaction;
 use blockstack_lib::clarity::vm::types::PrincipalData;
 use blockstack_lib::types::chainstate::StacksAddress;
 use fake::Fake as _;
 use fake::Faker;
-use rand::SeedableRng as _;
 use sbtc::testing::regtest;
-use secp256k1::ecdsa::RecoverableSignature;
 use secp256k1::Keypair;
+use secp256k1::ecdsa::RecoverableSignature;
 use signer::config::Settings;
 use signer::stacks::api::StacksInteract;
 use signer::stacks::contracts::AcceptWithdrawalV1;
@@ -20,12 +18,13 @@ use signer::stacks::contracts::AsContractCall;
 use signer::stacks::contracts::AsTxPayload;
 use signer::stacks::contracts::RejectWithdrawalV1;
 use signer::stacks::contracts::RotateKeysV1;
-use signer::stacks::contracts::SmartContract;
 use signer::stacks::contracts::SMART_CONTRACTS;
+use signer::stacks::contracts::SmartContract;
 use signer::stacks::wallet::SignerWallet;
 use signer::storage::model::BitcoinBlockHash;
 use signer::storage::model::BitcoinTxId;
 use signer::storage::model::StacksTxId;
+use signer::testing::get_rng;
 use signer::testing::wallet::ContractCallWrapper;
 use signer::util::ApiFallbackClient;
 use tokio::sync::OnceCell;
@@ -172,7 +171,7 @@ pub async fn deploy_smart_contracts() -> &'static SignerStxState {
     },
     outpoint: bitcoin::OutPoint::null(),
     tx_fee: 2500,
-    signer_bitmap: BitArray::ZERO,
+    signer_bitmap: 0,
     deployer: *testing::wallet::WALLET.0.address(),
     sweep_block_hash: BitcoinBlockHash::from([0; 32]),
     sweep_block_height: 7,
@@ -189,7 +188,7 @@ pub async fn deploy_smart_contracts() -> &'static SignerStxState {
 	    txid: StacksTxId::from([0; 32]),
 	    block_hash: StacksBlockHash::from([0; 32]),
     },
-    signer_bitmap: BitArray::ZERO,
+    signer_bitmap: 0,
     deployer: *testing::wallet::WALLET.0.address(),
 }); "reject-withdrawal")]
 #[test_case(ContractCallWrapper(RotateKeysV1::new(
@@ -287,7 +286,7 @@ async fn is_deposit_completed_works() {
         let auth = bitcoincore_rpc::Auth::UserPass(username, password);
         bitcoincore_rpc::Client::new("http://localhost:18443", auth).unwrap()
     };
-    let mut rng = rand::rngs::StdRng::seed_from_u64(123);
+    let mut rng = get_rng();
 
     let signers = deploy_smart_contracts().await;
     let outpoint = bitcoin::OutPoint {
@@ -381,7 +380,7 @@ async fn is_withdrawal_completed_rejection_works() {
             block_hash: StacksBlockHash::from([0; 32]),
             txid: StacksTxId::from([0; 32]),
         },
-        signer_bitmap: BitArray::ZERO,
+        signer_bitmap: 0,
         deployer: *testing::wallet::WALLET.0.address(),
     });
 

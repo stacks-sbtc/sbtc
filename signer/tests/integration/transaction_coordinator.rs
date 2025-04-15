@@ -2,19 +2,18 @@ use std::collections::BTreeSet;
 use std::num::NonZeroU32;
 use std::num::NonZeroU64;
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use std::time::Duration;
 
-use bitcoin::consensus::Encodable as _;
-use bitcoin::hashes::Hash as _;
 use bitcoin::Address;
 use bitcoin::AddressType;
 use bitcoin::Amount;
 use bitcoin::BlockHash;
 use bitcoin::Transaction;
+use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc::RpcApi as _;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlockHeader;
@@ -25,10 +24,10 @@ use blockstack_lib::net::api::getpoxinfo::RPCPoxInfoData;
 use blockstack_lib::net::api::getsortition::SortitionInfo;
 use clarity::types::chainstate::StacksAddress;
 use clarity::types::chainstate::StacksBlockId;
+use clarity::vm::Value as ClarityValue;
 use clarity::vm::types::PrincipalData;
 use clarity::vm::types::SequenceData;
 use clarity::vm::types::StandardPrincipalData;
-use clarity::vm::Value as ClarityValue;
 use emily_client::apis::deposit_api;
 use fake::Fake as _;
 use fake::Faker;
@@ -36,23 +35,30 @@ use futures::StreamExt as _;
 use lru::LruCache;
 use mockito;
 use rand::rngs::OsRng;
-use rand::SeedableRng as _;
 use reqwest;
 use sbtc::testing::regtest;
-use sbtc::testing::regtest::p2wpkh_sign_transaction;
 use sbtc::testing::regtest::AsUtxo as _;
 use sbtc::testing::regtest::Recipient;
+use sbtc::testing::regtest::p2wpkh_sign_transaction;
 use secp256k1::Keypair;
+use signer::bitcoin::BitcoinInteract as _;
 use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::bitcoin::utxo::BitcoinInputsOutputs;
 use signer::bitcoin::utxo::Fees;
 use signer::bitcoin::validation::WithdrawalValidationResult;
-use signer::bitcoin::BitcoinInteract as _;
 use signer::context::RequestDeciderEvent;
 use signer::message::Payload;
 use signer::network::MessageTransfer;
+use signer::storage::model::WithdrawalTxOutput;
+use signer::testing::get_rng;
+use testing_emily_client::apis::chainstate_api;
 use testing_emily_client::apis::testing_api;
+use testing_emily_client::apis::withdrawal_api;
+use testing_emily_client::models::Chainstate;
+use testing_emily_client::models::Status as TestingEmilyStatus;
 
+use signer::WITHDRAWAL_BLOCKS_EXPIRY;
+use signer::WITHDRAWAL_MIN_CONFIRMATIONS;
 use signer::context::SbtcLimits;
 use signer::context::TxCoordinatorEvent;
 use signer::keys::PrivateKey;
@@ -65,25 +71,22 @@ use signer::stacks::contracts::AsContractCall;
 use signer::stacks::contracts::RejectWithdrawalV1;
 use signer::stacks::contracts::RotateKeysV1;
 use signer::stacks::contracts::SmartContract;
+use signer::storage::DbRead;
+use signer::storage::DbWrite;
 use signer::storage::model::BitcoinBlockHash;
-use signer::storage::model::BitcoinTx;
 use signer::storage::model::BitcoinTxSigHash;
 use signer::storage::model::DkgSharesStatus;
 use signer::storage::model::StacksTxId;
 use signer::storage::model::WithdrawalRequest;
 use signer::storage::postgres::PgStore;
-use signer::storage::DbRead;
-use signer::storage::DbWrite;
+use signer::testing::IterTestExt;
 use signer::testing::stacks::DUMMY_SORTITION_INFO;
 use signer::testing::stacks::DUMMY_TENURE_INFO;
 use signer::testing::storage::DbReadTestExt;
 use signer::testing::storage::DbWriteTestExt;
 use signer::testing::transaction_coordinator::select_coordinator;
 use signer::testing::wsts::SignerInfo;
-use signer::testing::IterTestExt;
 use signer::transaction_coordinator::given_key_is_coordinator;
-use signer::WITHDRAWAL_BLOCKS_EXPIRY;
-use signer::WITHDRAWAL_MIN_CONFIRMATIONS;
 use stacks_common::types::chainstate::BurnchainHeaderHash;
 use stacks_common::types::chainstate::ConsensusHash;
 use stacks_common::types::chainstate::SortitionId;
@@ -121,10 +124,6 @@ use signer::transaction_signer::TxSignerEventLoop;
 use tokio::sync::broadcast::Sender;
 
 use crate::complete_deposit::make_complete_deposit;
-use crate::setup::backfill_bitcoin_blocks;
-use crate::setup::fetch_canonical_bitcoin_blockchain;
-use crate::setup::set_deposit_completed;
-use crate::setup::set_deposit_incomplete;
 use crate::setup::AsBlockRef as _;
 use crate::setup::IntoEmilyTestingConfig as _;
 use crate::setup::SweepAmounts;
@@ -132,6 +131,10 @@ use crate::setup::TestSignerSet;
 use crate::setup::TestSweepSetup;
 use crate::setup::TestSweepSetup2;
 use crate::setup::WithdrawalTriple;
+use crate::setup::backfill_bitcoin_blocks;
+use crate::setup::fetch_canonical_bitcoin_blockchain;
+use crate::setup::set_deposit_completed;
+use crate::setup::set_deposit_incomplete;
 use crate::utxo_construction::generate_withdrawal;
 use crate::utxo_construction::make_deposit_request;
 use crate::zmq::BITCOIN_CORE_ZMQ_ENDPOINT;
@@ -205,12 +208,8 @@ where
         }],
     };
 
-    let mut tx_bytes = Vec::new();
-    tx.consensus_encode(&mut tx_bytes).unwrap();
-
     let tx = model::Transaction {
         txid: tx.compute_txid().to_byte_array(),
-        tx: tx_bytes,
         tx_type: model::TransactionType::Donation,
         block_hash: *block_hash.as_byte_array(),
     };
@@ -450,7 +449,7 @@ fn mock_recover_and_deploy_all_contracts_after_failure(
 #[test(tokio::test)]
 async fn process_complete_deposit() {
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
     let setup = TestSweepSetup::new_setup(&rpc, &faucet, 1_000_000, &mut rng);
 
@@ -528,6 +527,7 @@ async fn process_complete_deposit() {
     let state = context.state();
     state.update_current_signer_set(signer_set_public_keys);
     state.set_current_aggregate_key(aggregate_key);
+    state.set_bitcoin_chain_tip(bitcoin_chain_tip);
 
     // Ensure we have a signers UTXO (as a donation, to not mess with the current
     // temporary `get_swept_deposit_requests` implementation)
@@ -662,7 +662,7 @@ async fn deploy_smart_contracts_coordinator<F>(
     F: FnOnce(u64, Sender<StacksTransaction>) -> Box<dyn FnOnce(&mut MockStacksInteract)>,
 {
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
 
     let num_messages = smart_contracts.len();
 
@@ -836,7 +836,7 @@ async fn deploy_smart_contracts_coordinator<F>(
 /// from the [`testing::wallet::regtest_bootstrap_wallet`] function.
 #[test(tokio::test)]
 async fn run_dkg_from_scratch() {
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (signer_wallet, signer_key_pairs): (_, [Keypair; 3]) =
         testing::wallet::regtest_bootstrap_wallet();
 
@@ -1063,7 +1063,7 @@ async fn run_dkg_from_scratch() {
 /// that allows for multiple DKG rounds.
 #[test(tokio::test)]
 async fn run_subsequent_dkg() {
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (signer_wallet, signer_key_pairs): (_, [Keypair; 3]) =
         testing::wallet::regtest_bootstrap_wallet();
 
@@ -1542,6 +1542,7 @@ async fn sign_bitcoin_transaction() {
             context: ctx.clone(),
             context_window: 10000,
             deposit_decisions_retry_window: 1,
+            withdrawal_decisions_retry_window: 1,
             blocklist_checker: Some(()),
             signer_private_key: kp.secret_key().into(),
         };
@@ -1711,11 +1712,12 @@ async fn sign_bitcoin_transaction() {
     assert_eq!(&tx_info.tx.output[0].script_pubkey, &script_pub_key);
 
     // Lastly we check that out database has the sweep transaction
-    let tx = sqlx::query_scalar::<_, BitcoinTx>(
+    let script_pubkey = sqlx::query_scalar::<_, model::ScriptPubKey>(
         r#"
-        SELECT tx
-        FROM sbtc_signer.transactions
+        SELECT script_pubkey
+        FROM sbtc_signer.bitcoin_tx_outputs
         WHERE txid = $1
+          AND output_type = 'signers_output'
         "#,
     )
     .bind(txid.to_byte_array())
@@ -1723,9 +1725,8 @@ async fn sign_bitcoin_transaction() {
     .await
     .unwrap();
 
-    let script = tx.output[0].script_pubkey.clone().into();
     for (_, db, _, _) in signers {
-        assert!(db.is_signer_script_pub_key(&script).await.unwrap());
+        assert!(db.is_signer_script_pub_key(&script_pubkey).await.unwrap());
         testing::storage::drop_db(db).await;
     }
 }
@@ -1980,6 +1981,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
             context: ctx.clone(),
             context_window: 10000,
             deposit_decisions_retry_window: 1,
+            withdrawal_decisions_retry_window: 1,
             blocklist_checker: Some(()),
             signer_private_key: kp.secret_key().into(),
         };
@@ -2124,11 +2126,12 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     // Now we check that each database has the sweep transaction and is
     // recognized as a signer script_pubkey.
     for (_, db, _, _) in signers.iter() {
-        let tx = sqlx::query_scalar::<_, BitcoinTx>(
+        let script_pubkey = sqlx::query_scalar::<_, model::ScriptPubKey>(
             r#"
-            SELECT tx
-            FROM sbtc_signer.transactions
+            SELECT script_pubkey
+            FROM sbtc_signer.bitcoin_tx_outputs
             WHERE txid = $1
+              AND output_type = 'signers_output'
             "#,
         )
         .bind(txid.to_byte_array())
@@ -2136,8 +2139,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
         .await
         .unwrap();
 
-        let script = tx.output[0].script_pubkey.clone().into();
-        assert!(db.is_signer_script_pub_key(&script).await.unwrap());
+        assert!(db.is_signer_script_pub_key(&script_pubkey).await.unwrap());
     }
 
     // =========================================================================
@@ -2357,11 +2359,12 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
 
     for (_, db, _, _) in signers {
         // Lastly we check that our database has the sweep transaction
-        let tx = sqlx::query_scalar::<_, BitcoinTx>(
+        let script_pubkey = sqlx::query_scalar::<_, model::ScriptPubKey>(
             r#"
-            SELECT tx
-            FROM sbtc_signer.transactions
+            SELECT script_pubkey
+            FROM sbtc_signer.bitcoin_tx_outputs
             WHERE txid = $1
+              AND output_type = 'signers_output'
             "#,
         )
         .bind(txid.to_byte_array())
@@ -2369,8 +2372,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
         .await
         .unwrap();
 
-        let script = tx.output[0].script_pubkey.clone().into();
-        assert!(db.is_signer_script_pub_key(&script).await.unwrap());
+        assert!(db.is_signer_script_pub_key(&script_pubkey).await.unwrap());
         testing::storage::drop_db(db).await;
     }
 }
@@ -2563,6 +2565,7 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
             context: ctx.clone(),
             context_window: 10000,
             deposit_decisions_retry_window: 1,
+            withdrawal_decisions_retry_window: 1,
             blocklist_checker: Some(()),
             signer_private_key: kp.secret_key().into(),
         };
@@ -2688,7 +2691,7 @@ async fn wait_for_signers(signers: &[(IntegrationTestContext, PgStore, &Keypair,
 /// the `last_fees` field should be `None`.
 #[test(tokio::test)]
 async fn test_get_btc_state_with_no_available_sweep_transactions() {
-    let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+    let mut rng = get_rng();
 
     let db = testing::storage::new_test_database().await;
 
@@ -2748,10 +2751,6 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
         },
     );
     let signer_utxo_txid = signer_utxo_tx.compute_txid();
-    let mut signer_utxo_encoded = Vec::new();
-    signer_utxo_tx
-        .consensus_encode(&mut signer_utxo_encoded)
-        .unwrap();
 
     let utxo_input = model::TxPrevout {
         txid: signer_utxo_txid.into(),
@@ -2770,7 +2769,6 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
     db.write_bitcoin_block(&bitcoin_block).await.unwrap();
     db.write_transaction(&model::Transaction {
         txid: *signer_utxo_txid.as_byte_array(),
-        tx: signer_utxo_encoded,
         tx_type: model::TransactionType::SbtcTransaction,
         block_hash: bitcoin_block.block_hash.into_bytes(),
     })
@@ -2823,7 +2821,7 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
 /// packages available, simulating the case where there has been an RBF.
 #[test(tokio::test)]
 async fn test_get_btc_state_with_available_sweep_transactions_and_rbf() {
-    let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+    let mut rng = get_rng();
 
     let db = testing::storage::new_test_database().await;
 
@@ -2874,12 +2872,6 @@ async fn test_get_btc_state_with_available_sweep_transactions_and_rbf() {
     let signer_utxo_tx = client.get_tx(&outpoint.txid).unwrap().unwrap();
     let signer_utxo_txid = signer_utxo_tx.tx.compute_txid();
 
-    let mut signer_utxo_tx_encoded = Vec::new();
-    signer_utxo_tx
-        .tx
-        .consensus_encode(&mut signer_utxo_tx_encoded)
-        .unwrap();
-
     let utxo_input = model::TxPrevout {
         txid: signer_utxo_txid.into(),
         prevout_type: model::TxPrevoutType::SignersInput,
@@ -2904,7 +2896,6 @@ async fn test_get_btc_state_with_available_sweep_transactions_and_rbf() {
 
     db.write_transaction(&model::Transaction {
         txid: signer_utxo_txid.to_byte_array(),
-        tx: signer_utxo_tx_encoded,
         tx_type: model::TransactionType::SbtcTransaction,
         block_hash: signer_utxo_block_hash.to_byte_array(),
     })
@@ -3113,7 +3104,7 @@ fn create_test_setup(
 #[tokio::test]
 async fn test_conservative_initial_sbtc_limits() {
     let (rpc, faucet) = regtest::initialize_blockchain();
-    let mut rng = rand::rngs::StdRng::seed_from_u64(56);
+    let mut rng = get_rng();
 
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let signatures_required: u16 = 2;
@@ -3198,7 +3189,14 @@ async fn test_conservative_initial_sbtc_limits() {
                 .returning(|| Box::pin(std::future::ready(Ok(vec![]))));
 
             // We don't care about this
-            client.expect_accept_deposits().returning(|_, _| {
+            client.expect_accept_deposits().returning(|_| {
+                Box::pin(std::future::ready(Err(Error::InvalidStacksResponse(
+                    "dummy",
+                ))))
+            });
+
+            // We don't care about this
+            client.expect_accept_withdrawals().returning(|_| {
                 Box::pin(std::future::ready(Err(Error::InvalidStacksResponse(
                     "dummy",
                 ))))
@@ -3371,6 +3369,7 @@ async fn test_conservative_initial_sbtc_limits() {
             blocklist_checker: Some(()),
             signer_private_key: kp.secret_key().into(),
             deposit_decisions_retry_window: 1,
+            withdrawal_decisions_retry_window: 1,
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -3485,9 +3484,9 @@ async fn sign_bitcoin_transaction_withdrawals() {
     )
     .unwrap();
 
-    testing_api::wipe_databases(&emily_client.config().as_testing())
-        .await
-        .unwrap();
+    let emily_config = emily_client.config().as_testing();
+
+    testing_api::wipe_databases(&emily_config).await.unwrap();
 
     let network = WanNetwork::default();
 
@@ -3670,6 +3669,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
             context: ctx.clone(),
             context_window: 10000,
             deposit_decisions_retry_window: 1,
+            withdrawal_decisions_retry_window: 1,
             blocklist_checker: Some(()),
             signer_private_key: kp.secret_key().into(),
         };
@@ -3758,6 +3758,57 @@ async fn sign_bitcoin_transaction_withdrawals() {
         txid: StacksTxId::from([123; 32]),
         sender_address: PrincipalData::from(StandardPrincipalData::transient()).into(),
     };
+    // Now we should manually put withdrawal request to Emily, pretending that
+    // sidecar did it.
+    let stacks_tip_height = db
+        .get_stacks_block(&stacks_chain_tip)
+        .await
+        .unwrap()
+        .unwrap()
+        .block_height;
+
+    // Set the chainstate to Emily before we create the withdrawal request
+    chainstate_api::set_chainstate(
+        &emily_config,
+        Chainstate {
+            stacks_block_hash: stacks_chain_tip.to_string(),
+            stacks_block_height: stacks_tip_height,
+            bitcoin_block_height: Some(Some(0)), // TODO: maybe we will want to have here some sensible data.
+        },
+    )
+    .await
+    .expect("Failed to set chainstate");
+
+    let request_body = testing_emily_client::models::CreateWithdrawalRequestBody {
+        amount: withdrawal_request.amount,
+        parameters: Box::new(testing_emily_client::models::WithdrawalParameters {
+            max_fee: withdrawal_request.max_fee,
+        }),
+        recipient: withdrawal_request.recipient.to_string(),
+        request_id: withdrawal_request.request_id,
+        sender: withdrawal_request.sender_address.to_string(),
+        stacks_block_hash: withdrawal_request.block_hash.to_string(),
+        stacks_block_height: stacks_tip_height,
+        txid: withdrawal_request.txid.to_string(),
+    };
+    let response = withdrawal_api::create_withdrawal(&emily_config, request_body).await;
+    assert!(response.is_ok());
+    // Check that there is no Accepted requests on emily before we broadcast them
+    let withdrawals_on_emily =
+        withdrawal_api::get_withdrawals(&emily_config, TestingEmilyStatus::Accepted, None, None)
+            .await
+            .unwrap()
+            .withdrawals;
+    assert!(withdrawals_on_emily.is_empty());
+
+    // Check that there is no Accepted requests on emily before we broadcast them
+    let withdrawals_on_emily =
+        withdrawal_api::get_withdrawals(&emily_config, TestingEmilyStatus::Pending, None, None)
+            .await
+            .unwrap()
+            .withdrawals;
+    assert_eq!(withdrawals_on_emily.len(), 1);
+
     for (_, db, _, _) in signers.iter() {
         db.write_withdrawal_request(&withdrawal_request)
             .await
@@ -3809,6 +3860,34 @@ async fn sign_bitcoin_transaction_withdrawals() {
     // - Does the sweep outputs to the right scriptPubKey with the right
     //   amount.
     // =========================================================================
+
+    let withdrawals_on_emily =
+        withdrawal_api::get_withdrawals(&emily_config, TestingEmilyStatus::Accepted, None, None)
+            .await
+            .unwrap()
+            .withdrawals;
+
+    assert_eq!(withdrawals_on_emily.len(), 1);
+
+    let withdrawal_on_emily = withdrawals_on_emily[0].clone();
+    assert_eq!(
+        withdrawal_on_emily.request_id,
+        withdrawal_request.request_id
+    );
+    assert_eq!(
+        withdrawal_on_emily.stacks_block_hash,
+        withdrawal_request.block_hash.to_string()
+    );
+    assert_eq!(
+        withdrawal_on_emily.recipient,
+        withdrawal_request.recipient.to_string()
+    );
+    assert_eq!(
+        withdrawal_on_emily.sender,
+        withdrawal_request.sender_address.to_string()
+    );
+    assert_eq!(withdrawal_on_emily.amount, withdrawal_request.amount);
+
     let sleep_fut = tokio::time::sleep(Duration::from_secs(5));
     let broadcast_stacks_txs: Vec<StacksTransaction> = stacks_tx_stream
         .take_until(sleep_fut)
@@ -3848,11 +3927,25 @@ async fn sign_bitcoin_transaction_withdrawals() {
     let withdrawal_amount = withdrawal_request.amount;
     assert_eq!(tx_info.tx.output[2].value.to_sat(), withdrawal_amount);
 
-    // Lastly we check that out database has the sweep transaction
-    let tx = sqlx::query_scalar::<_, BitcoinTx>(
+    // We check that our database has the sweep transaction
+    let script_pubkey = sqlx::query_scalar::<_, model::ScriptPubKey>(
         r#"
-        SELECT tx
-        FROM sbtc_signer.transactions
+        SELECT script_pubkey
+        FROM sbtc_signer.bitcoin_tx_outputs
+        WHERE txid = $1
+          AND output_type = 'signers_output'
+        "#,
+    )
+    .bind(txid.to_byte_array())
+    .fetch_one(ctx.storage.pool())
+    .await
+    .unwrap();
+
+    // We check that that our database has the withdrawal tx output
+    let withdrawal_output = sqlx::query_as::<_, WithdrawalTxOutput>(
+        r#"
+        SELECT txid, output_index, request_id
+        FROM sbtc_signer.bitcoin_withdrawal_tx_outputs
         WHERE txid = $1
         "#,
     )
@@ -3861,9 +3954,11 @@ async fn sign_bitcoin_transaction_withdrawals() {
     .await
     .unwrap();
 
-    let script = tx.output[0].script_pubkey.clone().into();
+    assert_eq!(withdrawal_output.output_index, 2);
+    assert_eq!(withdrawal_output.request_id, withdrawal_request.request_id);
+
     for (_, db, _, _) in signers {
-        assert!(db.is_signer_script_pub_key(&script).await.unwrap());
+        assert!(db.is_signer_script_pub_key(&script_pubkey).await.unwrap());
         testing::storage::drop_db(db).await;
     }
 }
@@ -3874,7 +3969,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
 #[tokio::test]
 async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let mut context = TestContext::builder()
@@ -3967,9 +4062,12 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
     // When the signer binary starts up in main(), it sets the current
     // signer set public keys in the context state using the values in the
     // bootstrap_signing_set configuration parameter. Later, the aggregate
-    // key gets set in the block observer. We're not running a block
-    // observer in this test, nor are we going through main, so we manually
-    // update the state here.
+    // key and bitcoin chain tip get set in the block observer. We're not
+    // running a block observer in this test, nor are we going through
+    // main, so we manually update the state here.
+    //
+    // We hold off from updating the bitcoin chain tip for now, because we
+    // are about to generate some more blocks.
     let signer_set_public_keys = testing_signer_set.signer_keys().into_iter().collect();
     let state = context.state();
     state.update_current_signer_set(signer_set_public_keys);
@@ -3987,12 +4085,14 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
     db.write_withdrawal_request(&request).await.unwrap();
 
     // The request should not be pending yet (missing enough confirmation)
-    assert!(context
-        .get_storage()
-        .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, context_window)
-        .await
-        .unwrap()
-        .is_empty());
+    assert!(
+        context
+            .get_storage()
+            .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, context_window)
+            .await
+            .unwrap()
+            .is_empty()
+    );
 
     let new_tip = faucet
         .generate_blocks(WITHDRAWAL_BLOCKS_EXPIRY + 1)
@@ -4001,6 +4101,9 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
     backfill_bitcoin_blocks(&db, rpc, &new_tip).await;
     let (bitcoin_chain_tip, _) = db.get_chain_tips().await;
 
+    // We've just updated the database with a new chain tip, so we need to
+    // update the signer's state just like the block observer would.
+    state.set_bitcoin_chain_tip(bitcoin_chain_tip);
     // Now it should be pending rejected
     assert_eq!(
         context
@@ -4251,6 +4354,8 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
     setup.store_deposit_decisions(&db).await;
     setup.store_sweep_tx(&db).await;
 
+    let (bitcoin_chain_tip, _) = db.get_chain_tips().await;
+    ctx.state().set_bitcoin_chain_tip(bitcoin_chain_tip);
     // If we try to sign a complete deposit, we will ask the bitcoin node to
     // asses the fees, so we need to mock this.
     let sweep_tx_info = setup.sweep_tx_info.unwrap().tx_info;
@@ -4325,6 +4430,7 @@ mod get_eligible_pending_withdrawal_requests {
     use test_case::test_case;
 
     use signer::{
+        WITHDRAWAL_DUST_LIMIT,
         bitcoin::MockBitcoinInteract,
         emily_client::MockEmilyInteract,
         network::in_memory2::SignerNetworkInstance,
@@ -4334,7 +4440,6 @@ mod get_eligible_pending_withdrawal_requests {
             storage::{DbReadTestExt as _, DbWriteTestExt as _},
         },
         transaction_coordinator::{GetPendingRequestsParams, TxCoordinatorEventLoop},
-        WITHDRAWAL_DUST_LIMIT,
     };
 
     use super::*;
@@ -4520,7 +4625,7 @@ mod get_eligible_pending_withdrawal_requests {
     }; "insufficient_confirmations_one_too_few")]
     #[test_case(TestParams {
         // This case will calculate the confirmations as:
-        // chain_length (10) - min_confirmations(6) = 4 (maximum block height), 
+        // chain_length (10) - min_confirmations(6) = 4 (maximum block height),
         // at_block_height (4) <= 4.
         chain_length: 10,
         at_block_height: 4,
@@ -4546,7 +4651,7 @@ mod get_eligible_pending_withdrawal_requests {
     }; "soft_expiry_one_block_too_old")]
     #[test_case(TestParams {
         // This case will calculate the soft expiry as:
-        // chain_length (10) - expiry_window (10) + expiry_buffer (4) = 4, 
+        // chain_length (10) - expiry_window (10) + expiry_buffer (4) = 4,
         // and at_block_height (4) == 4.
         chain_length: 10,
         expiry_window: 10,
@@ -4557,7 +4662,7 @@ mod get_eligible_pending_withdrawal_requests {
     }; "soft_expiry_exact_block_allowed")]
     #[test_case(TestParams {
         // This case will calculate the hard expiry as:
-        // chain_length (10) - expiry_window (5) = 5, 
+        // chain_length (10) - expiry_window (5) = 5,
         // and at_block_height (5) == 5
         chain_length: 10,
         expiry_window: 5,
@@ -4568,7 +4673,7 @@ mod get_eligible_pending_withdrawal_requests {
     }; "hard_expiry_exact_block_allowed")]
     #[test_case(TestParams {
         // This case will calculate the hard expiry as:
-        // chain_length (10) - expiry_window (5) = 5, 
+        // chain_length (10) - expiry_window (5) = 5,
         // and at_block_height (4) < 5
         chain_length: 10,
         expiry_window: 5,

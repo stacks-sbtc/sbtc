@@ -3,8 +3,8 @@
 use std::collections::BTreeSet;
 use std::ops::Deref;
 
-use bitcoin::hashes::Hash as _;
 use bitcoin::OutPoint;
+use bitcoin::hashes::Hash as _;
 use bitvec::array::BitArray;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
 use clarity::vm::types::PrincipalData;
@@ -44,8 +44,24 @@ pub struct TxOutput {
     #[sqlx(try_from = "i64")]
     #[cfg_attr(feature = "testing", dummy(faker = "1_000_000..1_000_000_000"))]
     pub amount: u64,
-    /// The scriptPubKey locking the output.
+    /// The type of output.
     pub output_type: TxOutputType,
+}
+
+/// A bitcoin transaction output (TXO) related to a withdrawal.
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
+#[cfg_attr(feature = "testing", derive(fake::Dummy))]
+pub struct WithdrawalTxOutput {
+    /// The Bitcoin transaction id.
+    pub txid: BitcoinTxId,
+    /// The index of the output in the sBTC sweep transaction.
+    #[sqlx(try_from = "i32")]
+    #[cfg_attr(feature = "testing", dummy(faker = "0..i32::MAX as u32"))]
+    pub output_index: u32,
+    /// The withdrawal request id.
+    #[sqlx(try_from = "i64")]
+    #[cfg_attr(feature = "testing", dummy(faker = "0..i64::MAX as u64"))]
+    pub request_id: u64,
 }
 
 /// A bitcoin transaction output being spent as an input in a transaction.
@@ -372,8 +388,6 @@ pub struct TransactionIds {
 pub struct Transaction {
     /// Transaction ID.
     pub txid: [u8; 32],
-    /// Encoded transaction.
-    pub tx: Bytes,
     /// The type of the transaction.
     pub tx_type: TransactionType,
     /// The block id of the stacks block that includes this transaction
@@ -727,29 +741,6 @@ impl std::fmt::Display for QualifiedRequestId {
 pub trait ToLittleEndianOrder: Sized {
     /// Return the bytes in little-endian order.
     fn to_le_bytes(&self) -> [u8; 32];
-}
-
-/// A bitcoin transaction
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct BitcoinTx(bitcoin::Transaction);
-
-impl Deref for BitcoinTx {
-    type Target = bitcoin::Transaction;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl From<bitcoin::Transaction> for BitcoinTx {
-    fn from(value: bitcoin::Transaction) -> Self {
-        Self(value)
-    }
-}
-
-impl From<BitcoinTx> for bitcoin::Transaction {
-    fn from(value: BitcoinTx) -> Self {
-        value.0
-    }
 }
 
 /// The bitcoin transaction ID
@@ -1243,11 +1234,7 @@ impl From<sbtc::events::WithdrawalCreateEvent> for WithdrawalRequest {
 impl From<sbtc::events::KeyRotationEvent> for KeyRotationEvent {
     fn from(sbtc_event: sbtc::events::KeyRotationEvent) -> KeyRotationEvent {
         KeyRotationEvent {
-            new_keys: sbtc_event
-                .new_keys
-                .into_iter()
-                .map(|key| key.into())
-                .collect(),
+            new_keys: sbtc_event.new_keys.into_iter().map(Into::into).collect(),
             new_address: sbtc_event.new_address.into(),
             new_aggregate_pubkey: sbtc_event.new_aggregate_pubkey.into(),
             new_signature_threshold: sbtc_event.new_signature_threshold,
@@ -1343,15 +1330,16 @@ pub struct WithdrawalRejectEvent {
 #[cfg(test)]
 mod tests {
     use fake::Fake;
-    use rand::SeedableRng;
 
     use sbtc::events::FromLittleEndianOrder;
+
+    use crate::testing::get_rng;
 
     use super::*;
 
     #[test]
     fn conversion_bitcoin_header_hashes() {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+        let mut rng = get_rng();
 
         let block_hash: BitcoinBlockHash = fake::Faker.fake_with_rng(&mut rng);
         let stacks_hash = BurnchainHeaderHash::from(block_hash);

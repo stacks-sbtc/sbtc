@@ -2,11 +2,10 @@ use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::ops::Deref;
 
-use bitcoin::consensus::Encodable as _;
-use bitcoin::hashes::Hash as _;
 use bitcoin::AddressType;
 use bitcoin::Amount;
 use bitcoin::OutPoint;
+use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc::Client;
 use bitcoincore_rpc::RpcApi as _;
 use blockstack_lib::types::chainstate::StacksAddress;
@@ -22,6 +21,7 @@ use sbtc::deposits::DepositInfo;
 use sbtc::testing::regtest;
 use sbtc::testing::regtest::Faucet;
 use sbtc::testing::regtest::Recipient;
+use signer::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
 use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::bitcoin::rpc::BitcoinTxInfo;
 use signer::bitcoin::rpc::GetTxResponse;
@@ -41,6 +41,8 @@ use signer::keys::PrivateKey;
 use signer::keys::PublicKey;
 use signer::keys::SignerScriptPubKey;
 use signer::stacks::api::MockStacksInteract;
+use signer::storage::DbRead;
+use signer::storage::DbWrite as _;
 use signer::storage::model;
 use signer::storage::model::BitcoinBlock;
 use signer::storage::model::BitcoinBlockHash;
@@ -52,12 +54,9 @@ use signer::storage::model::DkgSharesStatus;
 use signer::storage::model::EncryptedDkgShares;
 use signer::storage::model::QualifiedRequestId;
 use signer::storage::postgres::PgStore;
-use signer::storage::DbRead;
-use signer::storage::DbWrite as _;
 use signer::testing::context::TestContext;
 use signer::testing::context::*;
 use signer::testing::dummy::Unit;
-use signer::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
 use testing_emily_client::apis::configuration::ApiKey as TestingEmilyApiKey;
 use testing_emily_client::apis::configuration::Configuration as TestingEmilyApiConfiguration;
 
@@ -283,7 +282,6 @@ impl TestSweepSetup {
     /// Store the deposit transaction into the database
     pub async fn store_deposit_tx(&self, db: &PgStore) {
         let deposit_tx = model::Transaction {
-            tx: bitcoin::consensus::serialize(&self.deposit_tx_info.tx),
             txid: self.deposit_tx_info.txid.to_byte_array(),
             tx_type: model::TransactionType::SbtcTransaction,
             block_hash: self.deposit_block_hash.to_byte_array(),
@@ -301,7 +299,6 @@ impl TestSweepSetup {
     /// into the database
     pub async fn store_sweep_tx(&self, db: &PgStore) {
         let sweep_tx = model::Transaction {
-            tx: bitcoin::consensus::serialize(&self.sweep_tx_info.tx),
             txid: self.sweep_tx_info.txid.to_byte_array(),
             tx_type: model::TransactionType::SbtcTransaction,
             block_hash: self.sweep_block_hash.to_byte_array(),
@@ -328,7 +325,7 @@ impl TestSweepSetup {
             db.write_tx_prevout(&prevout).await.unwrap();
         }
 
-        for output in self.sweep_tx_info.to_outputs(&signer_script_pubkeys) {
+        for output in self.sweep_tx_info.to_tx_outputs(&signer_script_pubkeys) {
             db.write_tx_output(&output).await.unwrap();
         }
     }
@@ -472,10 +469,6 @@ pub async fn fill_signers_utxo<R: rand::RngCore + ?Sized>(
         },
     );
     let signer_utxo_txid = signer_utxo_tx.compute_txid();
-    let mut signer_utxo_encoded = Vec::new();
-    signer_utxo_tx
-        .consensus_encode(&mut signer_utxo_encoded)
-        .unwrap();
 
     let utxo_input = model::TxPrevout {
         txid: signer_utxo_txid.into(),
@@ -494,7 +487,6 @@ pub async fn fill_signers_utxo<R: rand::RngCore + ?Sized>(
     db.write_bitcoin_block(&bitcoin_block).await.unwrap();
     db.write_transaction(&model::Transaction {
         txid: *signer_utxo_txid.as_byte_array(),
-        tx: signer_utxo_encoded,
         tx_type: model::TransactionType::SbtcTransaction,
         block_hash: bitcoin_block.block_hash.into_bytes(),
     })
@@ -519,10 +511,6 @@ pub async fn fill_signers_utxo<R: rand::RngCore + ?Sized>(
         },
     );
     let signer_utxo_txid = signer_utxo_tx.compute_txid();
-    let mut signer_utxo_encoded = Vec::new();
-    signer_utxo_tx
-        .consensus_encode(&mut signer_utxo_encoded)
-        .unwrap();
 
     let utxo_input = model::TxPrevout {
         txid: signer_utxo_txid.into(),
@@ -541,7 +529,6 @@ pub async fn fill_signers_utxo<R: rand::RngCore + ?Sized>(
     db.write_bitcoin_block(&bitcoin_block).await.unwrap();
     db.write_transaction(&model::Transaction {
         txid: *signer_utxo_txid.as_byte_array(),
-        tx: signer_utxo_encoded,
         tx_type: model::TransactionType::SbtcTransaction,
         block_hash: bitcoin_block.block_hash.into_bytes(),
     })
@@ -1008,7 +995,6 @@ impl TestSweepSetup2 {
     pub async fn store_deposit_txs(&self, db: &PgStore) {
         for (_, _, tx_info) in self.deposits.iter() {
             let deposit_tx = model::Transaction {
-                tx: bitcoin::consensus::serialize(&tx_info.tx),
                 txid: tx_info.txid.to_byte_array(),
                 tx_type: model::TransactionType::SbtcTransaction,
                 block_hash: self.deposit_block_hash.to_byte_array(),
@@ -1095,7 +1081,6 @@ impl TestSweepSetup2 {
         let sweep = self.sweep_tx_info.as_ref().expect("no sweep tx info set");
 
         let sweep_tx = model::Transaction {
-            tx: bitcoin::consensus::serialize(&sweep.tx_info.tx),
             txid: sweep.tx_info.txid.to_byte_array(),
             tx_type: model::TransactionType::SbtcTransaction,
             block_hash: sweep.block_hash.to_byte_array(),
@@ -1123,7 +1108,7 @@ impl TestSweepSetup2 {
             db.write_tx_prevout(&prevout).await.unwrap();
         }
 
-        for output in sweep.tx_info.to_outputs(&signer_script_pubkeys) {
+        for output in sweep.tx_info.to_tx_outputs(&signer_script_pubkeys) {
             db.write_tx_output(&output).await.unwrap();
         }
     }

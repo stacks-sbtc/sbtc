@@ -3,12 +3,11 @@ import unittest
 import json
 import os
 from datetime import datetime
-from unittest.mock import patch, MagicMock, mock_open
+from unittest.mock import patch, MagicMock
 
-from app.models import EnrichedDepositInfo, BlockInfo, RequestStatus, DepositInfo
+from app.models import EnrichedDepositInfo, BlockInfo, RequestStatus
 from app.services.deposit_processor import DepositProcessor
 from app.clients.mempool import _collect_rbf_txids, MempoolAPI
-from app import settings
 
 
 class TestRbfHelpers(unittest.TestCase):
@@ -16,12 +15,12 @@ class TestRbfHelpers(unittest.TestCase):
 
     def setUp(self):
         # Load test fixtures
-        fixtures_dir = os.path.join(os.path.dirname(__file__), 'fixtures')
+        fixtures_dir = os.path.join(os.path.dirname(__file__), "fixtures")
 
-        with open(os.path.join(fixtures_dir, 'fixture-mempool-rbf-multi.json'), 'r') as f:
+        with open(os.path.join(fixtures_dir, "fixture-mempool-rbf-multi.json"), "r") as f:
             self.rbf_data = json.load(f)
 
-        with open(os.path.join(fixtures_dir, 'fixture-mempool-rbf-empty.json'), 'r') as f:
+        with open(os.path.join(fixtures_dir, "fixture-mempool-rbf-empty.json"), "r") as f:
             self.empty_rbf_data = json.load(f)
 
     def test_collect_rbf_txids_complex(self):
@@ -37,7 +36,7 @@ class TestRbfHelpers(unittest.TestCase):
             "3a4940a712111361b66a9df6d0eb9d410f2cf1a94da32405fcd4b34500785e3f",
             "99d6fd9c1b3e22f85aabacea66db9cfa959f20f6877f8dc9360627e63f0cdae8",
             "51c79e6dbd6232547d446614d8a573c00e027e9f2690c9dd336b77e6c644fd7d",
-            "3ed54d49e84f804b117fca784e43caad15787bbbcd9ce34e3bdecd007b91cf3f"
+            "3ed54d49e84f804b117fca784e43caad15787bbbcd9ce34e3bdecd007b91cf3f",
         }
 
         self.assertEqual(txids, expected_txids)
@@ -49,12 +48,7 @@ class TestRbfHelpers(unittest.TestCase):
 
     def test_collect_rbf_txids_simple(self):
         """Test collecting RBF txids from a simple replacement chain."""
-        simple_data = {
-            "tx": {
-                "txid": "abc123"
-            },
-            "replaces": []
-        }
+        simple_data = {"tx": {"txid": "abc123"}, "replaces": []}
 
         txids = _collect_rbf_txids(simple_data)
         self.assertEqual(txids, {"abc123"})
@@ -62,30 +56,14 @@ class TestRbfHelpers(unittest.TestCase):
     def test_collect_rbf_txids_nested(self):
         """Test collecting RBF txids from a nested replacement chain."""
         nested_data = {
-            "tx": {
-                "txid": "parent"
-            },
+            "tx": {"txid": "parent"},
             "replaces": [
+                {"tx": {"txid": "child1"}, "replaces": []},
                 {
-                    "tx": {
-                        "txid": "child1"
-                    },
-                    "replaces": []
+                    "tx": {"txid": "child2"},
+                    "replaces": [{"tx": {"txid": "grandchild"}, "replaces": []}],
                 },
-                {
-                    "tx": {
-                        "txid": "child2"
-                    },
-                    "replaces": [
-                        {
-                            "tx": {
-                                "txid": "grandchild"
-                            },
-                            "replaces": []
-                        }
-                    ]
-                }
-            ]
+            ],
         }
 
         txids = _collect_rbf_txids(nested_data)
@@ -104,53 +82,33 @@ class TestRbfProcessor(unittest.TestCase):
 
         # Create test deposits
         self.unconfirmed_with_rbf = self._create_mock_deposit(
-            txid="unconfirmed_with_rbf",
-            confirmed_height=-1,
-            rbf_txids=["confirmed_replacement"]
+            txid="unconfirmed_with_rbf", confirmed_height=None, rbf_txids=["confirmed_replacement"]
         )
 
         self.confirmed_replacement = self._create_mock_deposit(
-            txid="confirmed_replacement",
-            confirmed_height=700000,
-            rbf_txids=[]
+            txid="confirmed_replacement", confirmed_height=700000, rbf_txids=[]
         )
 
         self.unconfirmed_no_rbf = self._create_mock_deposit(
-            txid="unconfirmed_no_rbf",
-            confirmed_height=-1,
-            rbf_txids=[]
+            txid="unconfirmed_no_rbf", confirmed_height=None, rbf_txids=[]
         )
 
         self.unconfirmed_with_unconfirmed_rbf = self._create_mock_deposit(
             txid="unconfirmed_with_unconfirmed_rbf",
-            confirmed_height=-1,
-            rbf_txids=["another_unconfirmed"]
+            confirmed_height=None,
+            rbf_txids=["another_unconfirmed"],
         )
 
         self.another_unconfirmed = self._create_mock_deposit(
-            txid="another_unconfirmed",
-            confirmed_height=-1,
-            rbf_txids=[]
+            txid="another_unconfirmed", confirmed_height=None, rbf_txids=[]
         )
 
         # Complex RBF chain
-        self.tx1 = self._create_mock_deposit(
-            txid="tx1",
-            confirmed_height=-1,
-            rbf_txids=["tx2"]
-        )
+        self.tx1 = self._create_mock_deposit(txid="tx1", confirmed_height=None, rbf_txids=["tx2"])
 
-        self.tx2 = self._create_mock_deposit(
-            txid="tx2",
-            confirmed_height=-1,
-            rbf_txids=["tx3"]
-        )
+        self.tx2 = self._create_mock_deposit(txid="tx2", confirmed_height=None, rbf_txids=["tx3"])
 
-        self.tx3 = self._create_mock_deposit(
-            txid="tx3",
-            confirmed_height=700000,
-            rbf_txids=[]
-        )
+        self.tx3 = self._create_mock_deposit(txid="tx3", confirmed_height=700000, rbf_txids=[])
 
     def _create_mock_deposit(self, txid, confirmed_height, rbf_txids):
         deposit = MagicMock(spec=EnrichedDepositInfo)
@@ -164,7 +122,7 @@ class TestRbfProcessor(unittest.TestCase):
         """Test with no RBF transactions."""
         deposits = [self.unconfirmed_no_rbf]
 
-        updates = self.processor.process_rbf_transactions(deposits, self.stacks_chaintip)
+        updates = self.processor.process_rbf_transactions(deposits)
 
         self.assertEqual(len(updates), 0, "No transactions should be marked as failed")
 
@@ -172,7 +130,7 @@ class TestRbfProcessor(unittest.TestCase):
         """Test with an unconfirmed transaction that has a confirmed replacement."""
         deposits = [self.unconfirmed_with_rbf, self.confirmed_replacement]
 
-        updates = self.processor.process_rbf_transactions(deposits, self.stacks_chaintip)
+        updates = self.processor.process_rbf_transactions(deposits)
 
         self.assertEqual(len(updates), 1, "One transaction should be marked as failed")
         self.assertEqual(updates[0].bitcoin_txid, "unconfirmed_with_rbf")
@@ -184,7 +142,7 @@ class TestRbfProcessor(unittest.TestCase):
         """Test with an unconfirmed transaction that has an unconfirmed replacement."""
         deposits = [self.unconfirmed_with_unconfirmed_rbf, self.another_unconfirmed]
 
-        updates = self.processor.process_rbf_transactions(deposits, self.stacks_chaintip)
+        updates = self.processor.process_rbf_transactions(deposits)
 
         self.assertEqual(len(updates), 0, "No transactions should be marked as failed")
 
@@ -192,7 +150,7 @@ class TestRbfProcessor(unittest.TestCase):
         """Test with a complex RBF chain where the final transaction is confirmed."""
         deposits = [self.tx1, self.tx2, self.tx3]
 
-        updates = self.processor.process_rbf_transactions(deposits, self.stacks_chaintip)
+        updates = self.processor.process_rbf_transactions(deposits)
 
         self.assertEqual(len(updates), 2, "Two transactions should be marked as failed")
         txids = [update.bitcoin_txid for update in updates]
@@ -207,15 +165,17 @@ class TestRbfProcessor(unittest.TestCase):
     def test_group_rbf_transactions(self):
         """Test the _group_rbf_transactions helper method."""
         # Create deposits with overlapping RBF chains
-        tx_a = self._create_mock_deposit(txid="tx_a", confirmed_height=-1, rbf_txids=["tx_b"])
-        tx_b = self._create_mock_deposit(txid="tx_b", confirmed_height=-1, rbf_txids=["tx_c"])
+        tx_a = self._create_mock_deposit(txid="tx_a", confirmed_height=None, rbf_txids=["tx_b"])
+        tx_b = self._create_mock_deposit(txid="tx_b", confirmed_height=None, rbf_txids=["tx_c"])
         tx_c = self._create_mock_deposit(txid="tx_c", confirmed_height=700000, rbf_txids=[])
 
-        tx_d = self._create_mock_deposit(txid="tx_d", confirmed_height=-1, rbf_txids=["tx_e"])
-        tx_e = self._create_mock_deposit(txid="tx_e", confirmed_height=-1, rbf_txids=[])
+        tx_d = self._create_mock_deposit(txid="tx_d", confirmed_height=None, rbf_txids=["tx_e"])
+        tx_e = self._create_mock_deposit(txid="tx_e", confirmed_height=None, rbf_txids=[])
 
         # Create a deposit that connects the two chains
-        tx_b_d = self._create_mock_deposit(txid="tx_b_d", confirmed_height=-1, rbf_txids=["tx_b", "tx_d"])
+        tx_b_d = self._create_mock_deposit(
+            txid="tx_b_d", confirmed_height=None, rbf_txids=["tx_b", "tx_d"]
+        )
 
         deposits = [tx_a, tx_b, tx_c, tx_d, tx_e, tx_b_d]
 
@@ -230,20 +190,21 @@ class TestRbfProcessor(unittest.TestCase):
         expected_txids = {"tx_a", "tx_b", "tx_c", "tx_d", "tx_e", "tx_b_d"}
         self.assertEqual(group_txids, expected_txids)
 
+
 class TestMempoolRbfApi(unittest.TestCase):
     """Tests for the MempoolAPI.check_for_rbf method."""
 
     def setUp(self):
         # Load test fixtures
-        fixtures_dir = os.path.join(os.path.dirname(__file__), 'fixtures')
+        fixtures_dir = os.path.join(os.path.dirname(__file__), "fixtures")
 
-        with open(os.path.join(fixtures_dir, 'fixture-mempool-rbf-multi.json'), 'r') as f:
+        with open(os.path.join(fixtures_dir, "fixture-mempool-rbf-multi.json"), "r") as f:
             self.rbf_data = json.load(f)
 
-        with open(os.path.join(fixtures_dir, 'fixture-mempool-rbf-empty.json'), 'r') as f:
+        with open(os.path.join(fixtures_dir, "fixture-mempool-rbf-empty.json"), "r") as f:
             self.empty_rbf_data = json.load(f)
 
-    @patch('app.clients.mempool.MempoolAPI.get')
+    @patch("app.clients.mempool.MempoolAPI.get")
     def test_check_for_rbf_with_replacements(self, mock_get):
         """Test checking for RBF with replacements."""
         mock_get.return_value = self.rbf_data
@@ -254,7 +215,7 @@ class TestMempoolRbfApi(unittest.TestCase):
         self.assertEqual(len(txids), 8, "Should have 8 replacement txids")
         self.assertIn("afe18f246b9624b17b21f2ebf84594bb75b582209d55dfc0b6edb34bfb785c3a", txids)
 
-    @patch('app.clients.mempool.MempoolAPI.get')
+    @patch("app.clients.mempool.MempoolAPI.get")
     def test_check_for_rbf_without_replacements(self, mock_get):
         """Test checking for RBF without replacements."""
         mock_get.return_value = self.empty_rbf_data

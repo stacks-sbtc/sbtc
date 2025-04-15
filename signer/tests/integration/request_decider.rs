@@ -1,13 +1,12 @@
+use std::sync::Arc;
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use std::time::Duration;
 
 use bitcoin::consensus::encode::serialize_hex;
 use fake::Fake;
 use fake::Faker;
 use mockito::Server;
-use rand::SeedableRng as _;
 use serde_json::json;
 use url::Url;
 
@@ -21,21 +20,22 @@ use signer::emily_client::MockEmilyInteract;
 use signer::keys::PrivateKey;
 use signer::keys::PublicKey;
 use signer::message::SignerDepositDecision;
-use signer::network::in_memory2::SignerNetwork;
 use signer::network::InMemoryNetwork;
+use signer::network::in_memory2::SignerNetwork;
 use signer::request_decider::RequestDeciderEventLoop;
 use signer::stacks::api::MockStacksInteract;
+use signer::storage::DbRead as _;
 use signer::storage::model::BitcoinBlockHash;
 use signer::storage::postgres::PgStore;
-use signer::storage::DbRead as _;
 use signer::testing;
 use signer::testing::context::*;
+use signer::testing::get_rng;
 use signer::testing::request_decider::TestEnvironment;
 use testing_emily_client::apis::testing_api;
 
-use crate::setup::backfill_bitcoin_blocks;
 use crate::setup::IntoEmilyTestingConfig as _;
 use crate::setup::TestSweepSetup;
+use crate::setup::backfill_bitcoin_blocks;
 
 fn test_environment(
     db: PgStore,
@@ -51,6 +51,7 @@ fn test_environment(
 > {
     let context_window = 6;
     let deposit_decisions_retry_window = 1;
+    let withdrawal_decisions_retry_window = 1;
 
     let test_model_parameters = testing::storage::model::Params {
         num_bitcoin_blocks: 20,
@@ -71,6 +72,7 @@ fn test_environment(
         num_signers,
         context_window,
         deposit_decisions_retry_window,
+        withdrawal_decisions_retry_window,
         signing_threshold,
         test_model_parameters,
     }
@@ -97,6 +99,7 @@ async fn should_store_decisions_for_pending_deposit_requests() {
 }
 
 #[tokio::test]
+// TODO(#1466): This test is currently using a known-working fixed seed, but is flaky with other seeds.
 async fn should_store_decisions_for_pending_withdraw_requests() {
     let num_signers = 3;
     let signing_threshold = 2;
@@ -135,7 +138,7 @@ async fn should_store_decisions_received_from_other_signers() {
 async fn handle_pending_deposit_request_address_script_pub_key() {
     let db = testing::storage::new_test_database().await;
 
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
 
     let ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -180,6 +183,7 @@ async fn handle_pending_deposit_request_address_script_pub_key() {
         context: ctx.clone(),
         context_window: 10000,
         deposit_decisions_retry_window: 1,
+        withdrawal_decisions_retry_window: 1,
         blocklist_checker: Some(()),
         signer_private_key: setup.aggregated_signer.keypair.secret_key().into(),
     };
@@ -220,7 +224,7 @@ async fn handle_pending_deposit_request_address_script_pub_key() {
 async fn handle_pending_deposit_request_not_in_signing_set() {
     let db = testing::storage::new_test_database().await;
 
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
 
     let ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -265,6 +269,7 @@ async fn handle_pending_deposit_request_not_in_signing_set() {
         context: ctx.clone(),
         context_window: 10000,
         deposit_decisions_retry_window: 1,
+        withdrawal_decisions_retry_window: 1,
         blocklist_checker: Some(()),
         // We generate a new private key here so that we know (with very
         // high probability) that this signer is not in the signer set.
@@ -306,7 +311,7 @@ async fn handle_pending_deposit_request_not_in_signing_set() {
 async fn persist_received_deposit_decision_fetches_missing_deposit_requests() {
     let db = testing::storage::new_test_database().await;
 
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
 
     let emily_client = EmilyClient::try_new(
         &Url::parse("http://testApiKey@localhost:3031").unwrap(),
@@ -348,6 +353,7 @@ async fn persist_received_deposit_decision_fetches_missing_deposit_requests() {
         context: ctx.clone(),
         context_window: 10000,
         deposit_decisions_retry_window: 1,
+        withdrawal_decisions_retry_window: 1,
         blocklist_checker: Some(()),
         signer_private_key: PrivateKey::new(&mut rng),
     };
@@ -428,7 +434,7 @@ async fn blocklist_client_retry(num_failures: u8, failing_iters: u8) {
     let db = testing::storage::new_test_database().await;
     let network = InMemoryNetwork::new();
 
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
 
     let ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -502,6 +508,7 @@ async fn blocklist_client_retry(num_failures: u8, failing_iters: u8) {
         blocklist_checker: Some(blocklist_client),
         signer_private_key: setup.aggregated_signer.keypair.secret_key().into(),
         deposit_decisions_retry_window: 1,
+        withdrawal_decisions_retry_window: 1,
     };
 
     // We need this so that there is a live "network". Otherwise we will error
@@ -549,7 +556,7 @@ async fn do_not_procceed_with_blocked_addresses(is_withdrawal: bool, is_blocked:
     let db = testing::storage::new_test_database().await;
     let network = InMemoryNetwork::new();
 
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
 
     let ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -639,6 +646,7 @@ async fn do_not_procceed_with_blocked_addresses(is_withdrawal: bool, is_blocked:
         blocklist_checker: Some(blocklist_client),
         signer_private_key: setup.aggregated_signer.keypair.secret_key().into(),
         deposit_decisions_retry_window: 1,
+        withdrawal_decisions_retry_window: 1,
     };
 
     // We need this so that there is a live "network". Otherwise we will error

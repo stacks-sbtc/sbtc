@@ -1,14 +1,15 @@
 //! Test utilities for the transaction coordinator
 
 use std::cell::RefCell;
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use std::time::Duration;
 
+use super::get_rng;
+use crate::bitcoin::MockBitcoinInteract;
 use crate::bitcoin::rpc::BitcoinTxInfo;
 use crate::bitcoin::utxo::SignerUtxo;
-use crate::bitcoin::MockBitcoinInteract;
 use crate::context::Context;
 use crate::context::RequestDeciderEvent;
 use crate::emily_client::MockEmilyInteract;
@@ -27,40 +28,38 @@ use crate::stacks::contracts::AsContractCall;
 use crate::stacks::contracts::ContractCall;
 use crate::stacks::contracts::RejectWithdrawalV1;
 use crate::stacks::contracts::StacksTx;
+use crate::storage::DbRead;
+use crate::storage::DbWrite;
 use crate::storage::model;
 use crate::storage::model::StacksBlock;
 use crate::storage::model::StacksTxId;
 use crate::storage::model::ToLittleEndianOrder as _;
-use crate::storage::DbRead;
-use crate::storage::DbWrite;
 use crate::testing;
-use crate::testing::storage::model::TestData;
 use crate::testing::storage::DbReadTestExt as _;
+use crate::testing::storage::model::TestData;
 use crate::testing::wsts::SignerSet;
 use crate::transaction_coordinator;
-use crate::transaction_coordinator::coordinator_public_key;
 use crate::transaction_coordinator::TxCoordinatorEventLoop;
+use crate::transaction_coordinator::coordinator_public_key;
 use bitcoin::hashes::Hash as _;
 
-use bitvec::array::BitArray;
-use bitvec::field::BitField as _;
 use blockstack_lib::chainstate::stacks::TransactionContractCall;
 use blockstack_lib::chainstate::stacks::TransactionPayload;
 use blockstack_lib::net::api::getcontractsrc::ContractSrcResponse;
+use clarity::vm::Value;
 use clarity::vm::types::BuffData;
 use clarity::vm::types::SequenceData;
-use clarity::vm::Value;
 use fake::Fake as _;
 use fake::Faker;
+use rand::SeedableRng;
 use rand::seq::IteratorRandom;
-use rand::SeedableRng as _;
 
 use super::context::TestContext;
 use super::context::WrappedMock;
 use super::wallet::WALLET;
 
 const EMPTY_BITCOIN_TX: bitcoin::Transaction = bitcoin::Transaction {
-    version: bitcoin::transaction::Version::ONE,
+    version: bitcoin::transaction::Version::TWO,
     lock_time: bitcoin::absolute::LockTime::ZERO,
     input: vec![],
     output: vec![],
@@ -181,6 +180,8 @@ where
     /// Asserts that TxCoordinatorEventLoop::get_pending_requests processes withdrawals
     pub async fn assert_processes_withdrawals(mut self) {
         // Setup network and signer info
+
+        // TODO(#1590): fix this test for other seeds and use `get_rng()`
         let mut rng = rand::rngs::StdRng::seed_from_u64(46);
         let network = network::InMemoryNetwork::new();
         let context = self.context.clone();
@@ -313,9 +314,11 @@ where
                 block_height = %withdrawal.bitcoin_block_height,
                 %max_processable_height,
                 "checking withdrawal");
-            assert!(withdrawals
-                .iter()
-                .any(|w| w.request_id == withdrawal.request_id && w.txid == withdrawal.txid));
+            assert!(
+                withdrawals
+                    .iter()
+                    .any(|w| w.request_id == withdrawal.request_id && w.txid == withdrawal.txid)
+            );
         }
     }
 
@@ -324,7 +327,7 @@ where
         mut self,
         delay_to_process_new_blocks: Duration,
     ) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
@@ -365,14 +368,11 @@ where
 
         self.context
             .with_emily_client(|client| {
-                client
-                    .expect_accept_deposits()
-                    .times(1..)
-                    .returning(|_, _| {
-                        Box::pin(async {
-                            Ok(emily_client::models::UpdateDepositsResponse { deposits: vec![] })
-                        })
-                    });
+                client.expect_accept_deposits().times(1..).returning(|_| {
+                    Box::pin(async {
+                        Ok(emily_client::models::UpdateDepositsResponse { deposits: vec![] })
+                    })
+                });
             })
             .await;
 
@@ -474,7 +474,7 @@ where
     /// Assert that a coordinator should be able to skip the deployment the sbtc contracts
     /// if they are already deployed.
     pub async fn assert_skips_deploy_sbtc_contracts(mut self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
@@ -515,14 +515,11 @@ where
 
         self.context
             .with_emily_client(|client| {
-                client
-                    .expect_accept_deposits()
-                    .times(1..)
-                    .returning(|_, _| {
-                        Box::pin(async {
-                            Ok(emily_client::models::UpdateDepositsResponse { deposits: vec![] })
-                        })
-                    });
+                client.expect_accept_deposits().times(1..).returning(|_| {
+                    Box::pin(async {
+                        Ok(emily_client::models::UpdateDepositsResponse { deposits: vec![] })
+                    })
+                });
             })
             .await;
 
@@ -661,7 +658,7 @@ where
 
     /// Assert we get a withdrawal accept tx
     pub async fn assert_construct_withdrawal_accept_stacks_sign_request(mut self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let signer_network = SignerNetwork::single(&self.context);
         let private_key = PrivateKey::new(&mut rng);
         let bitcoin_aggregate_key = PublicKey::from_private_key(&private_key);
@@ -768,8 +765,6 @@ where
             .await
             .expect("Failed to construct withdrawal accept stacks sign request");
 
-        // We are not storing the decisions in the db, so we will get all zeros
-        let signer_bitmap: BitArray<[u8; 16]> = BitArray::ZERO;
         let outpoint = withdrawal_req.withdrawal_outpoint();
         assert_eq!(sign_request.tx_fee, 123000);
         assert_eq!(sign_request.aggregate_key, bitcoin_aggregate_key);
@@ -781,7 +776,7 @@ where
             assert_eq!(call.tx_fee, withdrawal_fee);
             assert_eq!(call.id.request_id, withdrawal_req.request_id);
             assert_eq!(call.outpoint, outpoint);
-            assert_eq!(call.signer_bitmap, signer_bitmap);
+            assert_eq!(call.signer_bitmap, 0);
             assert_eq!(call.sweep_block_hash, withdrawal_req.sweep_block_hash);
             assert_eq!(call.sweep_block_height, withdrawal_req.sweep_block_height);
         } else {
@@ -805,7 +800,7 @@ where
                     Value::Sequence(SequenceData::Buffer(BuffData {
                         data: outpoint.txid.to_le_bytes().to_vec()
                     })),
-                    Value::UInt(signer_bitmap.load_le()),
+                    Value::UInt(0),
                     Value::UInt(outpoint.vout as u128),
                     Value::UInt(withdrawal_fee as u128),
                     Value::Sequence(SequenceData::Buffer(BuffData {
@@ -824,7 +819,7 @@ where
 
     /// Assert we get a withdrawal reject tx
     pub async fn assert_construct_withdrawal_reject_stacks_sign_request(mut self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let signer_network = SignerNetwork::single(&self.context);
         let private_key = PrivateKey::new(&mut rng);
         let bitcoin_aggregate_key = PublicKey::from_private_key(&private_key);
@@ -874,8 +869,6 @@ where
             .await
             .expect("Failed to construct withdrawal reject stacks sign request");
 
-        // We are not storing the decisions in the db, so we will get all zeros
-        let signer_bitmap: BitArray<[u8; 16]> = BitArray::ZERO;
         assert_eq!(sign_request.tx_fee, 123000);
         assert_eq!(sign_request.aggregate_key, bitcoin_aggregate_key);
         assert_eq!(sign_request.txid, multi_tx.tx().txid());
@@ -888,7 +881,7 @@ where
         };
 
         assert_eq!(call.id, withdrawal_req.qualified_id());
-        assert_eq!(call.signer_bitmap, signer_bitmap);
+        assert_eq!(call.signer_bitmap, 0);
 
         let TransactionPayload::ContractCall(TransactionContractCall {
             address,
@@ -907,7 +900,7 @@ where
             *function_args,
             vec![
                 Value::UInt(withdrawal_req.request_id as u128),
-                Value::UInt(signer_bitmap.load_le()),
+                Value::UInt(0),
             ]
         );
     }
@@ -919,7 +912,7 @@ where
 {
     /// Assert we get the correct UTXO in a simple case
     pub async fn assert_get_signer_utxo_simple(mut self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
@@ -935,16 +928,10 @@ where
         let original_test_data = test_data.clone();
 
         let tx = bitcoin::Transaction {
-            output: vec![
-                bitcoin::TxOut {
-                    value: bitcoin::Amount::from_sat(42),
-                    script_pubkey: aggregate_key.signers_script_pubkey(),
-                },
-                bitcoin::TxOut {
-                    value: bitcoin::Amount::from_sat(123),
-                    script_pubkey: bitcoin::ScriptBuf::new(),
-                },
-            ],
+            output: vec![bitcoin::TxOut {
+                value: bitcoin::Amount::from_sat(42),
+                script_pubkey: aggregate_key.signers_script_pubkey(),
+            }],
             ..EMPTY_BITCOIN_TX
         };
 
@@ -989,7 +976,7 @@ where
 
     /// Assert we get the correct UTXO in a fork
     pub async fn assert_get_signer_utxo_fork(mut self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
@@ -1086,16 +1073,18 @@ where
         }
 
         // Check context window
-        assert!(storage
-            .get_signer_utxo(&block_c2.block_hash)
-            .await
-            .unwrap()
-            .is_some());
+        assert!(
+            storage
+                .get_signer_utxo(&block_c2.block_hash)
+                .await
+                .unwrap()
+                .is_some()
+        );
     }
 
     /// Assert we get the correct UTXO with a spending chain in a block
     pub async fn assert_get_signer_utxo_unspent(mut self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
@@ -1192,7 +1181,7 @@ where
 
     /// Assert we get the correct UTXO in case of donations
     pub async fn assert_get_signer_utxo_donations(mut self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 

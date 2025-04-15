@@ -1,15 +1,13 @@
 import logging
-from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
-from ..models import BlockInfo
 from .base import APIClient
 from .. import settings
 
 logger = logging.getLogger(__name__)
 
 
-def _collect_rbf_txids(data: dict[str, Any]) -> set[str]:
+def _collect_rbf_txids(data: dict[str, Any] | None) -> set[str]:
     """Recursively collect all RBF transaction IDs from the replacement chain.
 
     Args:
@@ -52,21 +50,23 @@ class MempoolAPI(APIClient):
         return _collect_rbf_txids(data.get("replacements", {}))
 
     @classmethod
-    def get_bitcoin_block_at(cls, timestamp: Optional[int] = None) -> BlockInfo:
-        """Fetch the Bitcoin block at a given timestamp.
+    def get_tip_height(cls) -> int:
+        """Get the height of the tip of the Bitcoin chain.
 
-        Args:
-            timestamp: Unix timestamp to get the block at, or None for current time
+        Errors are not ignored (ignore_errors=False) because tip height
+        is critical for processing deposits and determining chain state.
 
         Returns:
-            BlockInfo: Information about the Bitcoin block
+            int: The height of the tip of the Bitcoin chain
+
+        Raises:
+            requests.RequestException: If the request fails (HTTP 400-599)
+            ValueError: If the response cannot be parsed as JSON
         """
-        if timestamp is None:
-            timestamp = int(datetime.now().timestamp())
-        return BlockInfo.from_bitcoin(cls.get(f"/v1/mining/blocks/timestamp/{timestamp}"))
+        return cls.get("/v1/blocks/tip/height", ignore_errors=False)
 
     @classmethod
-    def get_bitcoin_transaction(cls, txid: str) -> dict[str, Any]:
+    def get_transaction(cls, txid: str) -> dict[str, Any]:
         """Fetch details for a Bitcoin transaction.
 
         Args:
@@ -75,4 +75,33 @@ class MempoolAPI(APIClient):
         Returns:
             dict: Transaction details or empty dict if not found
         """
-        return cls.get(f"/tx/{txid}")
+        return cls.get(f"/tx/{txid}", ignore_errors=True)
+
+    @classmethod
+    def get_utxo_status(cls, txid: str, vout: int) -> dict[str, Any]:
+        """Check if a specific transaction output (UTXO) has been spent.
+
+        Args:
+            txid: The transaction ID of the UTXO
+            vout: The output index (vout) of the UTXO
+
+        Returns:
+            dict: Status of the UTXO. Example:
+                  {'spent': False} if unspent.
+                  {'spent': True, 'txid': 'spending_txid', 'vin': 0, 'status': {'confirmed': True/False}} if spent.
+                  Returns empty dict if the original txid is not found or other errors.
+        """
+        # This endpoint returns spending info if spent, 404 or empty if not.
+        # We don't raise on error here because a 404 indicates "unspent".
+        spending_info = cls.get(f"/tx/{txid}/outspend/{vout}", ignore_errors=True)
+        if not spending_info or not spending_info.get("spent", False):
+            return {"spent": False}
+        else:
+            # Ensure status dictionary exists
+            status = spending_info.get("status", {})
+            return {
+                "spent": True,
+                "txid": spending_info.get("txid"),
+                "vin": spending_info.get("vin"),
+                "status": {"confirmed": status.get("confirmed", False)},
+            }

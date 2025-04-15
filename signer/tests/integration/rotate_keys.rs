@@ -1,6 +1,5 @@
 use blockstack_lib::types::chainstate::StacksAddress;
 use rand::rngs::OsRng;
-use rand::SeedableRng;
 
 use sbtc::testing::regtest;
 use signer::error::Error;
@@ -11,6 +10,8 @@ use signer::stacks::contracts::ReqContext;
 use signer::stacks::contracts::RotateKeysErrorMsg;
 use signer::stacks::contracts::RotateKeysV1;
 use signer::stacks::wallet::SignerWallet;
+use signer::storage::DbRead;
+use signer::storage::DbWrite as _;
 use signer::storage::model::BitcoinBlock;
 use signer::storage::model::DkgSharesStatus;
 use signer::storage::model::EncryptedDkgShares;
@@ -19,10 +20,9 @@ use signer::storage::model::StacksPrincipal;
 use signer::storage::model::Transaction;
 use signer::storage::model::TransactionType;
 use signer::storage::postgres::PgStore;
-use signer::storage::DbRead;
-use signer::storage::DbWrite as _;
 use signer::testing;
 use signer::testing::context::*;
+use signer::testing::get_rng;
 
 use fake::Fake;
 use signer::testing::storage::model::TestData;
@@ -88,7 +88,6 @@ impl TestRotateKeySetup {
 
         let raw_tx = Transaction {
             txid: fake::Faker.fake_with_rng(rng),
-            tx: Vec::new(),
             tx_type: TransactionType::RotateKeys,
             block_hash: stacks_chain_tip.block_hash.into_bytes(),
         };
@@ -176,7 +175,7 @@ fn make_rotate_key(setup: &TestRotateKeySetup) -> (RotateKeysV1, ReqContext) {
 async fn rotate_key_validation_happy_path() {
     // Normal: preamble
     let mut db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
 
     let test_model_params = testing::storage::model::Params {
         num_bitcoin_blocks: 20,
@@ -226,7 +225,7 @@ async fn rotate_key_validation_happy_path() {
 async fn rotate_key_validation_no_dkg() {
     // Normal: preamble
     let mut db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
 
     let test_model_params = testing::storage::model::Params {
         num_bitcoin_blocks: 20,
@@ -264,7 +263,7 @@ async fn rotate_key_validation_no_dkg() {
 async fn rotate_key_validation_wrong_deployer() {
     // Normal: preamble
     let mut db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
 
     let test_model_params = testing::storage::model::Params {
         num_bitcoin_blocks: 20,
@@ -308,7 +307,7 @@ async fn rotate_key_validation_wrong_deployer() {
 async fn rotate_key_validation_wrong_signing_set() {
     // Normal: preamble
     let mut db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
 
     let test_model_params = testing::storage::model::Params {
         num_bitcoin_blocks: 20,
@@ -358,7 +357,7 @@ async fn rotate_key_validation_wrong_signing_set() {
 async fn rotate_key_validation_wrong_aggregate_key() {
     // Normal: preamble
     let mut db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
 
     let test_model_params = testing::storage::model::Params {
         num_bitcoin_blocks: 20,
@@ -408,7 +407,7 @@ async fn rotate_key_validation_wrong_aggregate_key() {
 async fn rotate_key_validation_wrong_signatures_required() {
     // Normal: preamble
     let mut db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
 
     let test_model_params = testing::storage::model::Params {
         num_bitcoin_blocks: 20,
@@ -463,7 +462,7 @@ async fn rotate_key_validation_wrong_signatures_required() {
 async fn rotate_key_validation_replay() {
     // Normal: preamble
     let mut db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
 
     let test_model_params = testing::storage::model::Params {
         num_bitcoin_blocks: 20,
@@ -528,7 +527,7 @@ async fn rotate_key_validation_replay() {
 async fn rotate_key_validation_not_verfied() {
     // Normal: preamble
     let mut db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
 
     let test_model_params = testing::storage::model::Params {
         num_bitcoin_blocks: 20,

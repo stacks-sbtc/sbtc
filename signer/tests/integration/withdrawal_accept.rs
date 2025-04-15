@@ -10,17 +10,17 @@ use signer::stacks::contracts::WithdrawalErrorMsg;
 use signer::storage::model::BitcoinBlockRef;
 use signer::storage::model::BitcoinTxId;
 use signer::testing;
+use signer::testing::get_rng;
 
 use fake::Fake;
-use rand::SeedableRng;
 use signer::testing::context::*;
 
-use crate::setup::backfill_bitcoin_blocks;
-use crate::setup::set_withdrawal_completed;
-use crate::setup::set_withdrawal_incomplete;
 use crate::setup::SweepAmounts;
 use crate::setup::TestSignerSet;
 use crate::setup::TestSweepSetup2;
+use crate::setup::backfill_bitcoin_blocks;
+use crate::setup::set_withdrawal_completed;
+use crate::setup::set_withdrawal_incomplete;
 
 const WITHDRAWAL_AMOUNT: [SweepAmounts; 1] = [SweepAmounts {
     amount: 700_000,
@@ -54,7 +54,7 @@ fn make_withdrawal_accept(data: &TestSweepSetup2) -> (AcceptWithdrawalV1, ReqCon
         // request.
         tx_fee: fee,
         // The bitmap for how the signers voted.
-        signer_bitmap: data.withdrawals[0].request.signer_bitmap,
+        signer_bitmap: 0,
         // The deployer must match what is in the signers' context.
         deployer: StacksAddress::burn_address(false),
         // The block hash of the block that includes the above sweep
@@ -100,7 +100,7 @@ async fn accept_withdrawal_validation_happy_path() {
     // sweeping out the funds for a withdrawal request. This is just setup
     // and should be essentially the same between tests.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(2);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
@@ -157,7 +157,7 @@ async fn accept_withdrawal_validation_deployer_mismatch() {
     // Normal: this generates the blockchain as well as a transaction
     // sweeping out the funds for a withdrawal request.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
@@ -223,7 +223,7 @@ async fn accept_withdrawal_validation_missing_withdrawal_request() {
     // Normal: this generates the blockchain as well as a transaction
     // sweeping out the funds for a withdrawal request.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
@@ -290,7 +290,7 @@ async fn accept_withdrawal_validation_recipient_mismatch() {
     // Normal: this generates the blockchain as well as a transaction
     // sweeping out the funds for a withdrawal request.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
@@ -357,7 +357,7 @@ async fn accept_withdrawal_validation_invalid_amount() {
     // Normal: this generates the blockchain as well as a transaction
     // sweeping out the funds for a withdrawal request.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
@@ -422,7 +422,7 @@ async fn accept_withdrawal_validation_invalid_fee() {
     // Normal: this generates the blockchain as well as a transaction
     // sweeping out the funds for a withdrawal request.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
@@ -496,7 +496,7 @@ async fn accept_withdrawal_validation_sweep_tx_missing() {
     // Normal: this generates the blockchain as well as a transaction
     // sweeping out the funds for a withdrawal request.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
@@ -565,7 +565,7 @@ async fn accept_withdrawal_validation_sweep_reorged() {
     // Normal: this generates the blockchain as well as a transaction
     // sweeping out the funds for a withdrawal request.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
@@ -643,7 +643,7 @@ async fn accept_withdrawal_validation_withdrawal_not_in_sweep() {
     // Normal: this generates the blockchain as well as a transaction
     // sweeping out the funds for a withdrawal request.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
@@ -704,73 +704,6 @@ async fn accept_withdrawal_validation_withdrawal_not_in_sweep() {
 }
 
 /// For this test we check that the `AcceptWithdrawalV1::validate` function
-/// returns a withdrawal validation error with a BitmapMismatch message
-/// when bitmap in the transaction does not match what our records would
-/// create for the bitmap.
-#[tokio::test]
-async fn accept_withdrawal_validation_bitmap_mismatch() {
-    // Normal: this generates the blockchain as well as a transaction
-    // sweeping out the funds for a withdrawal request.
-    let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
-    let (rpc, faucet) = regtest::initialize_blockchain();
-
-    let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, &faucet, &WITHDRAWAL_AMOUNT);
-
-    // Normal: The withdrawal must be swept on bitcoin.
-    setup.submit_sweep_tx(rpc, faucet);
-
-    // Normal: the signer follows the bitcoin blockchain and event observer
-    // should be getting new block events from bitcoin-core. We haven't
-    // hooked up our block observer, so we need to manually update the
-    // database with new bitcoin block headers.
-    backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash().unwrap()).await;
-
-    // Normal: we take the sweep transaction as is from the test setup and
-    // store it in the database.
-    setup.store_sweep_tx(&db).await;
-    setup.store_bitcoin_withdrawals_outputs(&db).await;
-
-    // Normal: we need to store a row in the dkg_shares table so that we
-    // have a record of the scriptPubKey that the signers control.
-    setup.store_dkg_shares(&db).await;
-
-    // Normal: the request and how the signers voted needs to be added to
-    // the database. Here the bitmap in the withdrawal request object
-    // corresponds to how the signers voted.
-    setup.store_withdrawal_requests(&db).await;
-    setup.store_withdrawal_decisions(&db).await;
-
-    // Generate the transaction and corresponding request context.
-    let (mut accept_withdrawal_tx, req_ctx) = make_withdrawal_accept(&setup);
-    // Different: We're going to get the bitmap that is a little different
-    // from what is expected.
-    let first_vote = *accept_withdrawal_tx.signer_bitmap.get(0).unwrap();
-    accept_withdrawal_tx.signer_bitmap.set(0, !first_vote);
-
-    let mut ctx = TestContext::builder()
-        .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
-        .with_mocked_stacks_client()
-        .with_mocked_emily_client()
-        .build();
-
-    // Normal: the request is not completed in the smart contract.
-    set_withdrawal_incomplete(&mut ctx).await;
-
-    let validation_result = accept_withdrawal_tx.validate(&ctx, &req_ctx).await;
-    match validation_result.unwrap_err() {
-        Error::WithdrawalAcceptValidation(ref err) => {
-            assert_eq!(err.error, WithdrawalErrorMsg::BitmapMismatch)
-        }
-        err => panic!("unexpected error during validation {err}"),
-    }
-
-    testing::storage::drop_db(db).await;
-}
-
-/// For this test we check that the `AcceptWithdrawalV1::validate` function
 /// returns a withdrawal validation error with a IncorrectFee message when
 /// the sweep transaction is in our records, is on what the signer thinks
 /// is the canonical bitcoin blockchain, but the supplied transaction
@@ -780,7 +713,7 @@ async fn accept_withdrawal_validation_withdrawal_incorrect_fee() {
     // Normal: this generates the blockchain as well as a transaction
     // sweeping out the funds for a withdrawal request.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
@@ -846,7 +779,7 @@ async fn accept_withdrawal_validation_withdrawal_invalid_sweep() {
     // Normal: this generates the blockchain as well as a transaction
     // sweeping out the funds for a withdrawal request.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
@@ -911,7 +844,7 @@ async fn accept_withdrawal_validation_request_completed() {
     // sweeping out the funds for a withdrawal request. This is just setup
     // and should be essentially the same between tests.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(2);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);

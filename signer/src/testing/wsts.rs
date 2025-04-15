@@ -12,10 +12,10 @@ use stacks_common::address::AddressHashMode;
 use stacks_common::address::C32_ADDRESS_VERSION_TESTNET_MULTISIG;
 use stacks_common::types::chainstate::StacksAddress;
 use wsts::net::SignatureType;
-use wsts::state_machine::coordinator;
-use wsts::state_machine::coordinator::fire;
-use wsts::state_machine::coordinator::Coordinator as _;
 use wsts::state_machine::StateMachine as _;
+use wsts::state_machine::coordinator;
+use wsts::state_machine::coordinator::Coordinator as _;
+use wsts::state_machine::coordinator::fire;
 
 use crate::ecdsa::SignEcdsa as _;
 use crate::keys::PrivateKey;
@@ -492,7 +492,6 @@ impl SignerSet {
 
         let transaction = model::Transaction {
             txid: txid.to_bytes(),
-            tx: Vec::new(),
             tx_type: model::TransactionType::RotateKeys,
             block_hash: stacks_chain_tip.block_hash.to_bytes(),
         };
@@ -545,15 +544,15 @@ impl SignerSet {
 #[cfg(test)]
 mod tests {
     use model::BitcoinBlockHash;
-    use rand::SeedableRng;
 
     use crate::testing::dummy;
+    use crate::testing::get_rng;
 
     use super::*;
 
     #[tokio::test]
     async fn should_be_able_to_run_dkg() {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
         let num_signers = 7;
         let threshold = 5;
