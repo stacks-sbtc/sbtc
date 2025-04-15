@@ -322,21 +322,16 @@ async fn deposit_flow() {
             client
                 .expect_get_tx_info()
                 .once()
-                .returning(move |txid, block_hash| {
+                .returning(move |txid, _| {
                     let res = if *txid == deposit_tx.compute_txid() {
                         Ok(Some(BitcoinTxInfo {
-                            in_active_chain: true,
-                            fee: bitcoin::Amount::from_sat(deposit_max_fee),
+                            fee: Some(bitcoin::Amount::from_sat(deposit_max_fee)),
                             tx: deposit_tx.clone(),
                             txid: deposit_tx.compute_txid(),
-                            hash: deposit_tx.compute_wtxid(),
                             size: deposit_tx.total_size() as u64,
                             vsize: deposit_tx.vsize() as u64,
                             vin: Vec::new(),
                             vout: Vec::new(),
-                            block_hash: *block_hash,
-                            confirmations: 0,
-                            block_time: 0,
                         }))
                     } else {
                         // We may get queried for unrelated txids if Emily state

@@ -42,6 +42,7 @@ use signer::bitcoin::BitcoinInteract as _;
 use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::bitcoin::utxo::BitcoinInputsOutputs;
 use signer::bitcoin::utxo::Fees;
+use signer::bitcoin::utxo::TxDeconstructor as _;
 use signer::bitcoin::validation::WithdrawalValidationResult;
 use signer::context::RequestDeciderEvent;
 use signer::message::Payload;
@@ -1696,7 +1697,7 @@ async fn sign_bitcoin_transaction() {
         .unwrap()
         .unwrap();
     // We check that the scriptPubKey of the first input is the signers'
-    let actual_script_pub_key = tx_info.vin[0].prevout.script_pub_key.script.as_bytes();
+    let actual_script_pub_key = tx_info.prevout(0).unwrap().script_pubkey.as_bytes();
 
     assert_eq!(actual_script_pub_key, script_pub_key.as_bytes());
     assert_eq!(&tx_info.tx.output[0].script_pubkey, &script_pub_key);
@@ -2108,7 +2109,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
         .unwrap()
         .unwrap();
     // We check that the scriptPubKey of the first input is the signers'
-    let actual_script_pub_key = tx_info.vin[0].prevout.script_pub_key.script.as_bytes();
+    let actual_script_pub_key = tx_info.prevout(0).unwrap().script_pubkey.as_bytes();
 
     assert_eq!(actual_script_pub_key, script_pub_key1.as_bytes());
     assert_eq!(&tx_info.tx.output[0].script_pubkey, &script_pub_key1);
@@ -2334,7 +2335,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
         .unwrap();
     // We check that the scriptPubKey of the first input is the signers'
     // old ScriptPubkey
-    let actual_script_pub_key = tx_info.vin[0].prevout.script_pub_key.script.as_bytes();
+    let actual_script_pub_key = tx_info.prevout(0).unwrap().script_pubkey.as_bytes();
     assert_eq!(actual_script_pub_key, script_pub_key1.as_bytes());
 
     // The scriptPubkey of the new signer UTXO should be from the new
@@ -3891,7 +3892,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
         .unwrap()
         .unwrap();
     // We check that the scriptPubKey of the first input is the signers'
-    let actual_script_pub_key = tx_info.vin[0].prevout.script_pub_key.script.as_bytes();
+    let actual_script_pub_key = tx_info.prevout(0).unwrap().script_pubkey.as_bytes();
 
     assert_eq!(actual_script_pub_key, script_pub_key.as_bytes());
     assert_eq!(&tx_info.tx.output[0].script_pubkey, &script_pub_key);

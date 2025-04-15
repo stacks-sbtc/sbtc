@@ -69,6 +69,8 @@ pub struct Deposit {
     /// The deposit information included in one of the output
     /// `scriptPubKey`s of the above transaction.
     pub info: DepositInfo,
+    /// The block hash of the Bitcoin block that includes this transaction.
+    pub block_hash: BlockHash,
 }
 
 impl DepositRequestValidator for CreateDepositRequest {
@@ -105,6 +107,7 @@ impl DepositRequestValidator for CreateDepositRequest {
         Ok(Some(Deposit {
             info: self.validate_tx(&tx_info.tx, is_mainnet)?,
             tx_info,
+            block_hash,
         }))
     }
 }
@@ -234,12 +237,12 @@ impl<C: Context, B> BlockObserver<C, B> {
             Metrics::increment_deposit_total(&deposit);
             let Ok(Some(deposit)) = deposit else { continue };
 
-            self.process_bitcoin_blocks_until(deposit.tx_info.block_hash)
+            self.process_bitcoin_blocks_until(deposit.block_hash)
                 .await?;
 
             let tx = model::BitcoinTxRef {
                 txid: deposit.tx_info.txid.into(),
-                block_hash: deposit.tx_info.block_hash.into(),
+                block_hash: deposit.block_hash.into(),
             };
 
             deposit_requests.push(model::DepositRequest::from(deposit));

@@ -714,18 +714,13 @@ where
             .unwrap();
 
         let sweep_tx_info = BitcoinTxInfo {
-            in_active_chain: true,
-            fee: bitcoin::Amount::from_sat(1000),
+            fee: Some(bitcoin::Amount::from_sat(1000)),
             tx: sweep_tx.clone(),
             txid: sweep_tx.compute_txid(),
-            hash: sweep_tx.compute_wtxid(),
             size: sweep_tx.total_size() as u64,
             vsize: sweep_tx.vsize() as u64,
             vin: Vec::new(),
             vout: Vec::new(),
-            block_hash: sweep_block_hash,
-            confirmations: 0,
-            block_time: 0,
         };
 
         let withdrawal_req = model::SweptWithdrawalRequest {

@@ -321,6 +321,7 @@ impl TestSweepSetup {
         let deposit = Deposit {
             tx_info: self.deposit_tx_info.clone(),
             info: self.deposit_info.clone(),
+            block_hash: self.deposit_block_hash,
         };
         let deposit_request = model::DepositRequest::from(deposit);
         db.write_deposit_request(&deposit_request).await.unwrap();
@@ -1077,6 +1078,7 @@ impl TestSweepSetup2 {
             let deposit = Deposit {
                 tx_info: tx_info.clone(),
                 info: info.clone(),
+                block_hash: self.deposit_block_hash,
             };
             let deposit_request = model::DepositRequest::from(deposit);
             db.write_deposit_request(&deposit_request).await.unwrap();

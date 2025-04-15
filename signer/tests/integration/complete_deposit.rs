@@ -505,7 +505,7 @@ async fn complete_deposit_validation_fee_too_low() {
     let deposit_amount = setup
         .sweep_tx_info
         .as_ref()
-        .map(|info| info.tx_info.fee.to_sat() + DEPOSIT_DUST_LIMIT - 1)
+        .and_then(|info| Some(info.tx_info.fee?.to_sat() + DEPOSIT_DUST_LIMIT - 1))
         .expect("sweep_tx_info not set");
 
     sqlx::query(
