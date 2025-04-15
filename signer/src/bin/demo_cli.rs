@@ -91,11 +91,11 @@ enum CliCommand {
     Info,
     FundBtc(FundBtcArgs),
     FundStx(FundStxArgs),
-    Forward(ForwardArgs),
+    GenerateBlock(GenerateBlockArgs),
 }
 
 #[derive(Debug, Args)]
-struct ForwardArgs {
+struct GenerateBlockArgs {
     #[clap(long, default_value = "1")]
     count: u64,
 }
@@ -255,7 +255,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         CliCommand::Info => exec_info(&ctx).await?,
         CliCommand::FundBtc(args) => exec_fund_btc(&ctx, args).await?,
         CliCommand::FundStx(args) => exec_fund_stx(&ctx, args).await?,
-        CliCommand::Forward(args) => exec_forward(&ctx, args).await?,
+        CliCommand::GenerateBlock(args) => exec_generate_block(&ctx, args).await?,
     }
     Ok(())
 }
@@ -640,7 +640,7 @@ async fn exec_fund_stx(ctx: &Context, args: FundStxArgs) -> Result<(), Error> {
     Ok(())
 }
 
-async fn exec_forward(ctx: &Context, args: ForwardArgs) -> Result<(), Error> {
+async fn exec_generate_block(ctx: &Context, args: GenerateBlockArgs) -> Result<(), Error> {
     // Integration tests faucet
     let recipient = Address::from_str("bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080")?
         .require_network(ctx.network)?;

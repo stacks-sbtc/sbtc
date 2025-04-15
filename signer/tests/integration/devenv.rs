@@ -9,7 +9,7 @@
 //! You also need to fund the faucet (after a while it will unlock coinbase):
 //! ```bash
 //! cargo run -p signer --bin demo-cli fund-btc --recipient BCRT1QW508D6QEJXTDG4Y5R3ZARVARY0C5XW7KYGT080 --amount 1000000000
-//! cargo run -p signer --bin demo-cli forward
+//! cargo run -p signer --bin demo-cli generate-block
 //! ```
 
 use bitcoin::OutPoint;
