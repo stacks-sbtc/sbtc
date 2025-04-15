@@ -115,10 +115,7 @@ class DepositProcessor:
                     f"Deposit {tx.bitcoin_txid} time expired, but UTXO spent by {spending_txid} (likely signer sweep). Not failing."
                 )
 
-        if updates:
-            logger.info(
-                f"Found {len(updates)} transactions to mark as FAILED (expired or reclaimed)"
-            )
+        logger.info(f"Found {len(updates)} transactions to mark as FAILED (expired or reclaimed)")
 
         return updates
 
