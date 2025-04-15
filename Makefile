@@ -31,7 +31,7 @@ test-build:
 
 lint:
 	cargo $(CARGO_FLAGS) fmt --all -- --check
-	cargo $(CARGO_FLAGS) clippy -- -D warnings
+	cargo $(CARGO_FLAGS) clippy --workspace --all-targets --all-features --no-deps -- -D warnings
 	pnpm --recursive run lint
 
 format:

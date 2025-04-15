@@ -134,7 +134,7 @@ impl TestRotateKeySetup {
 
         let aggregate_key: PublicKey = self.aggregate_key();
         let address = StacksPrincipal::from(clarity::vm::types::PrincipalData::from(
-            self.wallet.address().clone(),
+            *self.wallet.address(),
         ));
         let rotate_key_tx = RotateKeysTransaction {
             address,
@@ -514,7 +514,7 @@ async fn rotate_key_validation_replay() {
     let test_data = TestData::generate(&mut rng, &[], &test_model_params);
     test_data.write_to(&mut db).await;
 
-    let mut req_ctx_fork = req_ctx.clone();
+    let mut req_ctx_fork = req_ctx;
     req_ctx_fork.chain_tip.block_hash = test_data.bitcoin_blocks[0].block_hash;
     req_ctx_fork.chain_tip.block_height = test_data.bitcoin_blocks[0].block_height;
 

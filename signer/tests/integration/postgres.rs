@@ -658,7 +658,7 @@ async fn should_not_return_swept_deposits_as_pending_accepted() {
     // sweep transactions, and the [`TestSweepSetup`] structure correctly
     // sets up the database.
     let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(&rpc, &faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
 
     let chain_tip = setup.sweep_block_hash.into();
     let context_window = 20;
@@ -1143,7 +1143,7 @@ async fn writing_withdrawal_requests_postgres() {
 
     // Let's see if we can write these rows to the database.
     store
-        .write_withdrawal_request(&event.clone().into())
+        .write_withdrawal_request(&event.clone())
         .await
         .unwrap();
 
@@ -2077,7 +2077,7 @@ async fn get_swept_deposit_requests_returns_swept_deposit_requests() {
     // sweep transactions, and the [`TestSweepSetup`] structure correctly
     // sets up the database.
     let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(&rpc, &faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
 
     // We need to manually update the database with new bitcoin block
     // headers.
@@ -2345,7 +2345,7 @@ async fn get_swept_deposit_requests_does_not_return_unswept_deposit_requests() {
     // sweep transactions, and the [`TestSweepSetup`] structure correctly
     // sets up the database.
     let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(&rpc, &faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
 
     // We need to manually update the database with new bitcoin block
     // headers.
@@ -2395,8 +2395,8 @@ async fn get_swept_deposit_requests_does_not_return_deposit_requests_with_respon
     // sweep transactions, and the [`TestSweepSetup`] structure correctly
     // sets up the database.
     let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
-    let mut setup_fork = TestSweepSetup::new_setup(&rpc, &faucet, 2_000_000, &mut rng);
-    let mut setup_canonical = TestSweepSetup::new_setup(&rpc, &faucet, 1_000_000, &mut rng);
+    let mut setup_fork = TestSweepSetup::new_setup(rpc, faucet, 2_000_000, &mut rng);
+    let mut setup_canonical = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
 
     let context_window = 20;
 
@@ -2459,8 +2459,8 @@ async fn get_swept_deposit_requests_does_not_return_deposit_requests_with_respon
     // Here we store some events that signals that the deposit request has been confirmed.
     // For `setup_canonical`, the event block is on the canonical chain
     let event = CompletedDepositEvent {
-        txid: fake::Faker.fake_with_rng::<StacksTxId, _>(&mut rng).into(),
-        block_id: setup_canonical_event_block.block_hash.into(),
+        txid: fake::Faker.fake_with_rng::<StacksTxId, _>(&mut rng),
+        block_id: setup_canonical_event_block.block_hash,
         amount: setup_canonical.deposit_request.amount,
         outpoint: setup_canonical.deposit_request.outpoint,
         sweep_block_hash: setup_canonical.deposit_block_hash.into(),
@@ -2471,8 +2471,8 @@ async fn get_swept_deposit_requests_does_not_return_deposit_requests_with_respon
 
     // For `setup_fork`, the event block is not on the canonical chain
     let event = CompletedDepositEvent {
-        txid: fake::Faker.fake_with_rng::<StacksTxId, _>(&mut rng).into(),
-        block_id: setup_fork_event_block.block_hash.into(),
+        txid: fake::Faker.fake_with_rng::<StacksTxId, _>(&mut rng),
+        block_id: setup_fork_event_block.block_hash,
         amount: setup_fork.deposit_request.amount,
         outpoint: setup_fork.deposit_request.outpoint,
         sweep_block_hash: setup_fork.deposit_block_hash.into(),
@@ -2503,8 +2503,8 @@ async fn get_swept_deposit_requests_does_not_return_deposit_requests_with_respon
         .unwrap();
 
     let event = CompletedDepositEvent {
-        txid: fake::Faker.fake_with_rng::<StacksTxId, _>(&mut rng).into(),
-        block_id: setup_fork_event_block.block_hash.into(),
+        txid: fake::Faker.fake_with_rng::<StacksTxId, _>(&mut rng),
+        block_id: setup_fork_event_block.block_hash,
         amount: setup_fork.deposit_request.amount,
         outpoint: setup_fork.deposit_request.outpoint,
         sweep_block_hash: setup_fork.deposit_block_hash.into(),
@@ -2730,7 +2730,7 @@ async fn get_swept_deposit_requests_response_tx_reorged() {
     // sets up the database.
     let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
 
-    let setup = TestSweepSetup::new_setup(&rpc, &faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
 
     let context_window = 20;
 
@@ -2756,14 +2756,14 @@ async fn get_swept_deposit_requests_response_tx_reorged() {
     setup.store_deposit_request(&db).await;
 
     let stacks_tip = db
-        .get_stacks_chain_tip(&chain_tip.into())
+        .get_stacks_chain_tip(&chain_tip)
         .await
         .unwrap()
         .unwrap();
 
     // First, let's check we get the deposit
     let requests = db
-        .get_swept_deposit_requests(&chain_tip.into(), context_window)
+        .get_swept_deposit_requests(&chain_tip, context_window)
         .await
         .unwrap();
     assert_eq!(requests.len(), 1);
@@ -2773,13 +2773,13 @@ async fn get_swept_deposit_requests_response_tx_reorged() {
         block_hash: fake::Faker.fake_with_rng(&mut rng),
         block_height: stacks_tip.block_height + 1,
         parent_hash: stacks_tip.block_hash,
-        bitcoin_anchor: chain_tip.into(),
+        bitcoin_anchor: chain_tip,
     };
     db.write_stacks_block(&original_event_block).await.unwrap();
 
     let event = CompletedDepositEvent {
-        txid: fake::Faker.fake_with_rng::<StacksTxId, _>(&mut rng).into(),
-        block_id: original_event_block.block_hash.into(),
+        txid: fake::Faker.fake_with_rng::<StacksTxId, _>(&mut rng),
+        block_id: original_event_block.block_hash,
         amount: setup.deposit_request.amount,
         outpoint: setup.deposit_request.outpoint,
         sweep_block_hash: setup.deposit_block_hash.into(),
@@ -2790,7 +2790,7 @@ async fn get_swept_deposit_requests_response_tx_reorged() {
 
     // The deposit should be confirmed now
     let requests = db
-        .get_swept_deposit_requests(&chain_tip.into(), context_window)
+        .get_swept_deposit_requests(&chain_tip, context_window)
         .await
         .unwrap();
 
@@ -2830,7 +2830,7 @@ async fn get_swept_deposit_requests_boundary() {
     // sweep transactions, and the [`TestSweepSetup`] structure correctly
     // sets up the database.
     let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(&rpc, &faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
 
     let context_window = 10;
 
@@ -2888,8 +2888,8 @@ async fn get_swept_deposit_requests_boundary() {
 
     // Store the complete deposit event
     let event = CompletedDepositEvent {
-        txid: fake::Faker.fake_with_rng::<StacksTxId, _>(&mut rng).into(),
-        block_id: event_block.block_hash.into(),
+        txid: fake::Faker.fake_with_rng::<StacksTxId, _>(&mut rng),
+        block_id: event_block.block_hash,
         amount: setup.deposit_request.amount,
         outpoint: setup.deposit_request.outpoint,
         sweep_block_hash: setup.sweep_block_hash.into(),

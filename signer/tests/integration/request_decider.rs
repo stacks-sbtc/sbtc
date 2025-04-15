@@ -705,7 +705,7 @@ async fn do_not_procceed_with_blocked_addresses(is_withdrawal: bool, is_blocked:
         assert_eq!(decisions.last().unwrap().is_accepted, !is_blocked);
         assert!(!votes.is_empty());
         assert!(votes.iter().any(|vote| {
-            vote.signer_public_key == signer_public_key && vote.is_accepted.unwrap() == !is_blocked
+            vote.signer_public_key == signer_public_key && vote.is_accepted.unwrap() != is_blocked
         }));
     } else {
         let outpoint = deposit_requests.first().unwrap().outpoint();

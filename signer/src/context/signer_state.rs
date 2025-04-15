@@ -552,7 +552,7 @@ mod tests {
         let public_key = PublicKey::from_private_key(&PrivateKey::new(&mut OsRng));
 
         assert!(!signer_set.is_signer(&public_key));
-        signer_set.add_signer(public_key.clone());
+        signer_set.add_signer(public_key);
         assert!(signer_set.is_signer(&public_key));
         signer_set.remove_signer(&public_key);
         assert!(!signer_set.is_signer(&public_key));
@@ -566,7 +566,7 @@ mod tests {
         let public_key = PublicKey::from_private_key(&PrivateKey::new(&mut OsRng));
 
         assert!(!signer_set.is_allowed_peer(&public_key.into()));
-        signer_set.add_signer(public_key.clone());
+        signer_set.add_signer(public_key);
         assert!(signer_set.is_allowed_peer(&public_key.into()));
         signer_set.remove_signer(&public_key);
         assert!(!signer_set.is_allowed_peer(&public_key.into()));

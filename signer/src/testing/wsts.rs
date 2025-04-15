@@ -572,6 +572,6 @@ mod tests {
             )
             .await;
 
-        assert_eq!(dkg_shares.len(), num_signers as usize);
+        assert_eq!(dkg_shares.len(), { num_signers });
     }
 }

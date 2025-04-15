@@ -483,7 +483,7 @@ mod tests {
         let stacks_txid = test_data.stacks_transactions[0].txid;
 
         let mut deposit_request: DepositRequest = fake::Faker.fake_with_rng(&mut rng);
-        deposit_request.txid = txid.into();
+        deposit_request.txid = txid;
         deposit_request.output_index = 0;
         deposit_request.amount = 1000;
         let btc_fee = 100;
@@ -493,12 +493,12 @@ mod tests {
 
         let event = CompletedDepositEvent {
             outpoint: deposit_request.outpoint(),
-            txid: stacks_txid.into(),
-            block_id: stacks_chaintip.block_hash.into(),
+            txid: stacks_txid,
+            block_id: stacks_chaintip.block_hash,
             amount: deposit_request.amount - btc_fee,
-            sweep_block_hash: bitcoin_block.block_hash.into(),
+            sweep_block_hash: bitcoin_block.block_hash,
             sweep_block_height: bitcoin_block.block_height,
-            sweep_txid: txid.into(),
+            sweep_txid: txid,
         };
         let res = handle_completed_deposit(&ctx, event).await;
         assert!(res.is_ok());
@@ -544,13 +544,13 @@ mod tests {
         let event = WithdrawalAcceptEvent {
             request_id,
             outpoint: OutPoint { txid: *txid, vout: 0 },
-            txid: stacks_tx.txid.into(),
-            block_id: stacks_tx.block_hash.into(),
+            txid: stacks_tx.txid,
+            block_id: stacks_tx.block_hash,
             fee: 1,
             signer_bitmap: BitArray::<_>::ZERO,
-            sweep_block_hash: bitcoin_block.block_hash.into(),
+            sweep_block_hash: bitcoin_block.block_hash,
             sweep_block_height: bitcoin_block.block_height,
-            sweep_txid: txid.into(),
+            sweep_txid: txid,
         };
 
         let res = handle_withdrawal_accept(&ctx, event).await;
@@ -591,7 +591,7 @@ mod tests {
         let request_id = 1;
         let event = WithdrawalRequest {
             request_id,
-            block_hash: stacks_first_tx.block_hash.into(),
+            block_hash: stacks_first_tx.block_hash,
             amount: 100,
             max_fee: 1,
             recipient: fake::Faker.fake_with_rng(&mut rng),
@@ -645,7 +645,7 @@ mod tests {
         let request_id = 1;
         let event = WithdrawalRejectEvent {
             request_id,
-            block_id: stacks_chaintip.block_hash.into(),
+            block_id: stacks_chaintip.block_hash,
             txid: test_data.stacks_transactions[0].txid,
             signer_bitmap: BitArray::<_>::ZERO,
         };

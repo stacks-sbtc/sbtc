@@ -499,9 +499,9 @@ mod tests {
             include_str!("../../tests/fixtures/bitcoind-getblockchaininfo-data.json");
 
         let get_network_info_response: bitcoincore_rpc_json::GetNetworkInfoResult =
-            serde_json::from_str(&get_network_info_response_json).unwrap();
+            serde_json::from_str(get_network_info_response_json).unwrap();
         let get_blockchain_info_response: bitcoincore_rpc_json::GetBlockchainInfoResult =
-            serde_json::from_str(&get_blockchain_info_response_json).unwrap();
+            serde_json::from_str(get_blockchain_info_response_json).unwrap();
 
         context
             .with_bitcoin_client(|client| {

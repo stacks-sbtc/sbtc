@@ -1811,7 +1811,7 @@ mod tests {
         let scalar = p256k1::scalar::Scalar::from(number);
 
         let original = Point::from(scalar);
-        let proto_original = proto::Point::from(original.clone());
+        let proto_original = proto::Point::from(original);
         let original_from_proto = Point::try_from(proto_original).unwrap();
 
         assert_eq!(original, original_from_proto);

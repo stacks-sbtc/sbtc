@@ -139,7 +139,7 @@ async fn libp2p_limits_max_established_connections() -> Result<(), Box<dyn std::
         .collect::<Vec<_>>();
     let public_keys = keys
         .iter()
-        .map(|key| PublicKey::from_private_key(key))
+        .map(PublicKey::from_private_key)
         .collect::<BTreeSet<_>>();
 
     let mut handles = Vec::new();
@@ -160,7 +160,7 @@ async fn libp2p_limits_max_established_connections() -> Result<(), Box<dyn std::
         .with_in_memory_storage()
         .with_mocked_clients()
         .modify_settings(|settings| {
-            settings.signer.private_key = keys[0].clone();
+            settings.signer.private_key = keys[0];
         })
         .build();
     context1
@@ -213,7 +213,7 @@ async fn libp2p_limits_max_established_connections() -> Result<(), Box<dyn std::
             .with_in_memory_storage()
             .with_mocked_clients()
             .modify_settings(|settings| {
-                settings.signer.private_key = key.clone();
+                settings.signer.private_key = *key;
             })
             .build();
         peer_context

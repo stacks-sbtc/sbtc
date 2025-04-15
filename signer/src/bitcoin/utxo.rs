@@ -1726,7 +1726,7 @@ mod tests {
     fn create_deposit(amount: u64, max_fee: u64, signer_bitmap: u128) -> DepositRequest {
         let signers_public_key = generate_x_only_public_key();
 
-        let contract_name = std::iter::repeat('a').take(128).collect::<String>();
+        let contract_name = std::iter::repeat_n('a', 128).collect::<String>();
         let principal_str = format!("{}.{contract_name}", StacksAddress::burn_address(false));
 
         let deposit_inputs = DepositScriptInputs {
@@ -3089,8 +3089,7 @@ mod tests {
             .requests
             .iter()
             .filter_map(RequestRef::as_deposit)
-            .find(|req| req.outpoint == outpoint)
-            .is_some();
+            .any(|req| req.outpoint == outpoint);
 
         assert_eq!(request_is_included, is_included);
     }
