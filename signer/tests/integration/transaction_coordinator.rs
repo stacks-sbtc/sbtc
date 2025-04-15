@@ -1098,7 +1098,9 @@ async fn dont_run_dkg_if_signer_set_didnt_change() {
         .expect("failed to get chain tip")
         .expect("no chain tip");
 
-    ctx.inner.state().update_current_signer_set(config_signer_set.iter().cloned().collect());
+    ctx.inner
+        .state()
+        .update_current_signer_set(config_signer_set.iter().cloned().collect());
     assert!(!should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
     assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_err());
 }
@@ -1116,7 +1118,6 @@ async fn run_dkg_if_signer_set_changes() {
         })
         .build();
     let config_signer_set = ctx.config().signer.bootstrap_signing_set.clone();
-
 
     // Sanity check
     assert!(!config_signer_set.is_empty());
@@ -1143,11 +1144,12 @@ async fn run_dkg_if_signer_set_changes() {
         .expect("failed to get chain tip")
         .expect("no chain tip");
 
-    ctx.inner.state().update_current_signer_set(signer_set_without_signer.iter().cloned().collect());
+    ctx.inner
+        .state()
+        .update_current_signer_set(signer_set_without_signer.iter().cloned().collect());
     assert!(should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
     assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_ok());
 }
-
 
 /// Test that we can run multiple DKG rounds.
 /// This test is very similar to the `run_dkg_from_scratch` test, but it
