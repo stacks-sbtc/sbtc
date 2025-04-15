@@ -990,9 +990,6 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
     // database.
     let (_, faucet) = regtest::initialize_blockchain();
     let db = testing::storage::new_test_database().await;
-    // TODO: it seems Key Rotation tx should be linked to some valid block in the blockchain.
-    // For doing this we should use some other bitcoin client which can be tricky cause
-    // whole this test is about observing blockchain...
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
@@ -1368,25 +1365,6 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
         })
         .await
         .unwrap();
-
-        // Write key rotation transaction to the database, to avoid triggering dkg on changed signer set.
-        let key_rotation_tx = model::RotateKeysTransaction {
-            txid: Faker.fake_with_rng(&mut rng),
-            address: Faker.fake_with_rng(&mut rng),
-            aggregate_key: Faker.fake_with_rng(&mut rng),
-            signer_set: ctx
-                .inner
-                .config()
-                .signer
-                .bootstrap_signing_set()
-                .iter()
-                .cloned()
-                .collect(),
-            signatures_required: 16,
-        };
-        db.write_rotate_keys_transaction(&key_rotation_tx)
-            .await
-            .unwrap();
 
         // Check that the chain tip has been updated (sanity check)
         let db_chain_tip = db
