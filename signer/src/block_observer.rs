@@ -393,7 +393,7 @@ impl<C: Context, B> BlockObserver<C, B> {
 
         let headers = stacks_block_headers
             .into_iter()
-            .flat_map(TenureBlockHeaders::as_stacks_blocks)
+            .flat_map(TenureBlockHeaders::into_iter)
             .collect::<Vec<_>>();
 
         db.write_stacks_block_headers(headers).await?;

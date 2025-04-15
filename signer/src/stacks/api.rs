@@ -394,7 +394,7 @@ impl TenureBlockHeaders {
     }
 
     /// Return an iterator of Stacks blocks included in this object.
-    pub fn as_stacks_blocks(self) -> impl Iterator<Item = StacksBlock> {
+    pub fn into_iter(self) -> impl Iterator<Item = StacksBlock> {
         let bitcoin_anchor = self.anchor_block_hash;
         self.headers.into_iter().map(move |header| StacksBlock {
             block_hash: header.block_id.into(),
@@ -1738,7 +1738,7 @@ mod tests {
         let blocks = tenures.unwrap();
         let headers = blocks
             .into_iter()
-            .flat_map(TenureBlockHeaders::as_stacks_blocks)
+            .flat_map(TenureBlockHeaders::into_iter)
             .collect::<Vec<_>>();
         db.write_stacks_block_headers(headers).await.unwrap();
 
