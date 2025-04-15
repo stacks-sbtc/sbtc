@@ -452,7 +452,7 @@ impl PgStore {
         chain_tip: &model::BitcoinBlockHash,
         min_block_height: BitcoinBlockHeight,
     ) -> Result<Option<BitcoinBlockHeight>, Error> {
-        sqlx::query_scalar::<_, i64>(
+        Ok(sqlx::query_scalar::<_, BitcoinBlockHeight>(
             r#"
             SELECT bb.block_height
             FROM sbtc_signer.bitcoin_tx_inputs AS bi
@@ -472,10 +472,7 @@ impl PgStore {
         .bind(i64::try_from(min_block_height).map_err(Error::ConversionDatabaseInt)?)
         .fetch_optional(&self.0)
         .await
-        .map_err(Error::SqlxQuery)?
-        .map(BitcoinBlockHeight::try_from)
-        .transpose()
-        .map_err(Error::ConversionDatabaseInt)
+        .map_err(Error::SqlxQuery)?)
     }
 
     /// Return the height of the earliest block in which a donation UTXO
