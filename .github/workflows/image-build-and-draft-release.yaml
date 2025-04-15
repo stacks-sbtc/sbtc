@@ -92,7 +92,6 @@ jobs:
           tags: ${{ steps.docker_metadata.outputs.tags }}
           labels: ${{ steps.docker_metadata.outputs.labels }}
           target: ${{ matrix.docker_target }}
-          no-cache: true
           push: true
           build-args: |
             GIT_COMMIT=${{ github.ref_name }}
