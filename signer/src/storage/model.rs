@@ -364,7 +364,7 @@ pub struct BitcoinTxRef {
     pub block_hash: BitcoinBlockHash,
 }
 
-/// A connection between a bitcoin block and a bitcoin transaction.
+/// A connection between a stacks block and a stacks transaction.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct StacksTransaction {
     /// Transaction ID.

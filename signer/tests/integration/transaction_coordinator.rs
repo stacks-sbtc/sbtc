@@ -51,6 +51,8 @@ use signer::message::Payload;
 use signer::network::MessageTransfer;
 use signer::storage::model::WithdrawalTxOutput;
 use signer::testing::get_rng;
+use signer::transaction_coordinator::should_coordinate_dkg;
+use signer::transaction_signer::assert_allow_dkg_begin;
 use testing_emily_client::apis::chainstate_api;
 use testing_emily_client::apis::testing_api;
 use testing_emily_client::apis::withdrawal_api;
@@ -1059,6 +1061,157 @@ async fn run_dkg_from_scratch() {
         testing::storage::drop_db(db).await;
     }
 }
+
+/// Tests that dkg will not be triggered if signer set didn't change
+#[test(tokio::test)]
+async fn dont_run_dkg_if_signer_set_didnt_change() {
+    let mut rng = get_rng();
+    let db = testing::storage::new_test_database().await;
+    let ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.dkg_target_rounds = std::num::NonZero::<u32>::new(1).unwrap();
+        })
+        .build();
+    let config_signer_set = ctx.config().signer.bootstrap_signing_set.clone();
+
+
+    // Sanity check
+    assert!(!config_signer_set.is_empty());
+
+    // Write dkg shares so it won't be a reason to trigger dkg.
+    let dkg_shares: model::EncryptedDkgShares = Faker.fake_with_rng(&mut rng);
+    db.write_encrypted_dkg_shares(&dkg_shares)
+        .await
+        .expect("failed to write dkg shares");
+
+    // Create rotate keys tx
+    let rotate_keys_tx = model::RotateKeysTransaction {
+        signer_set: config_signer_set.clone(),
+        ..Faker.fake_with_rng(&mut rng)
+    };
+    let bitcoin_block: model::BitcoinBlock = Faker.fake_with_rng(&mut rng);
+    let stacks_block = model::StacksBlock {
+        bitcoin_anchor: bitcoin_block.block_hash,
+        ..Faker.fake_with_rng(&mut rng)
+    };
+    let stacks_tx = model::StacksTransaction {
+        txid: rotate_keys_tx.txid,
+        block_hash: stacks_block.block_hash,
+    };
+    let transaction = model::Transaction {
+        txid: rotate_keys_tx.txid.to_bytes(),
+        block_hash: stacks_block.block_hash.to_bytes(),
+        tx_type: model::TransactionType::RotateKeys,
+    };
+
+    db.write_bitcoin_block(&bitcoin_block)
+        .await
+        .expect("failed to write bitcoin block");
+
+    db.write_transaction(&transaction)
+        .await
+        .expect("failed to write transaction");
+    db.write_stacks_block(&stacks_block)
+        .await
+        .expect("failed to write stacks block");
+    db.write_stacks_transaction(&stacks_tx)
+        .await
+        .expect("failed to write stacks transaction");
+    db.write_rotate_keys_transaction(&rotate_keys_tx)
+        .await
+        .expect("failed to write rotate keys transaction");
+
+    // Check that with correct rotate keys tx we won't proceed with dkg.
+    let chaintip = db
+        .get_bitcoin_canonical_chain_tip_ref()
+        .await
+        .expect("failed to get chain tip")
+        .expect("no chain tip");
+
+    ctx.inner.state().update_current_signer_set(rotate_keys_tx.signer_set.iter().cloned().collect());
+    assert!(!should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+    assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_err());
+}
+
+/// Tests that dkg will be triggered if signer set changes
+#[test(tokio::test)]
+async fn run_dkg_if_signer_set_changes() {
+    let mut rng = get_rng();
+    let db = testing::storage::new_test_database().await;
+    let ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.dkg_target_rounds = std::num::NonZero::<u32>::new(1).unwrap();
+        })
+        .build();
+    let config_signer_set = ctx.config().signer.bootstrap_signing_set.clone();
+
+
+    // Sanity check
+    assert!(!config_signer_set.is_empty());
+
+    // Write dkg shares so it won't be a reason to trigger dkg.
+    let dkg_shares: model::EncryptedDkgShares = Faker.fake_with_rng(&mut rng);
+    db.write_encrypted_dkg_shares(&dkg_shares)
+        .await
+        .expect("failed to write dkg shares");
+
+    // Create rotate keys tx
+
+    let mut signer_set_without_signer = config_signer_set.clone();
+    signer_set_without_signer.pop();
+
+    let rotate_keys_tx = model::RotateKeysTransaction {
+        signer_set: signer_set_without_signer.clone(),
+        ..Faker.fake_with_rng(&mut rng)
+    };
+    let bitcoin_block: model::BitcoinBlock = Faker.fake_with_rng(&mut rng);
+    let stacks_block = model::StacksBlock {
+        bitcoin_anchor: bitcoin_block.block_hash,
+        ..Faker.fake_with_rng(&mut rng)
+    };
+    let stacks_tx = model::StacksTransaction {
+        txid: rotate_keys_tx.txid,
+        block_hash: stacks_block.block_hash,
+    };
+    let transaction = model::Transaction {
+        txid: rotate_keys_tx.txid.to_bytes(),
+        block_hash: stacks_block.block_hash.to_bytes(),
+        tx_type: model::TransactionType::RotateKeys,
+    };
+
+    db.write_bitcoin_block(&bitcoin_block)
+        .await
+        .expect("failed to write bitcoin block");
+
+    db.write_transaction(&transaction)
+        .await
+        .expect("failed to write transaction");
+    db.write_stacks_block(&stacks_block)
+        .await
+        .expect("failed to write stacks block");
+    db.write_stacks_transaction(&stacks_tx)
+        .await
+        .expect("failed to write stacks transaction");
+    db.write_rotate_keys_transaction(&rotate_keys_tx)
+        .await
+        .expect("failed to write rotate keys transaction");
+
+    // Check that with correct rotate keys tx we won't proceed with dkg.
+    let chaintip = db
+        .get_bitcoin_canonical_chain_tip_ref()
+        .await
+        .expect("failed to get chain tip")
+        .expect("no chain tip");
+
+    ctx.inner.state().update_current_signer_set(rotate_keys_tx.signer_set.iter().cloned().collect());
+    assert!(should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+    assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_ok());
+}
+
 
 /// Test that we can run multiple DKG rounds.
 /// This test is very similar to the `run_dkg_from_scratch` test, but it
