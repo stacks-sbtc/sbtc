@@ -1673,7 +1673,7 @@ mod tests {
 
     // The is the least non dust amount for withdrawal outputs locked by
     // the generate_address() script, which generates P2WPKH outputs
-    static MINMAL_NON_DUST_AMOUNT_P2WPKH: LazyLock<u64> =
+    static MINIMAL_NON_DUST_AMOUNT_P2WPKH: LazyLock<u64> =
         LazyLock::new(|| generate_address().minimal_non_dust().to_sat());
 
     fn generate_address() -> ScriptPubKey {
@@ -3424,7 +3424,7 @@ mod tests {
             create_withdrawal(8_000, 10_000, 0),  // rejected
             create_withdrawal(10_000, 10_000, 0), // rejected
             create_withdrawal(1_000, 10_000, 0),  // rejected
-            create_withdrawal(*MINMAL_NON_DUST_AMOUNT_P2WPKH, 10_000, 0), // rejected
+            create_withdrawal(*MINIMAL_NON_DUST_AMOUNT_P2WPKH, 10_000, 0), // rejected
         ],
         per_withdrawal_cap: 0,
         rolling_limits: RollingWithdrawalLimits::unlimited(0),
@@ -3433,7 +3433,7 @@ mod tests {
         accepted_amount: 0,
     }; "zero per withdrawal cap rolling withdrawals filters everything")]
     #[test_case(WithdrawalLimitTestCase {
-        withdrawals: vec![create_withdrawal(*MINMAL_NON_DUST_AMOUNT_P2WPKH - 1, 10_000, 0)],
+        withdrawals: vec![create_withdrawal(*MINIMAL_NON_DUST_AMOUNT_P2WPKH - 1, 10_000, 0)],
         per_withdrawal_cap: u64::MAX,
         rolling_limits: RollingWithdrawalLimits::unlimited(0),
         fee_rate: 1.0,
@@ -3449,13 +3449,13 @@ mod tests {
             create_withdrawal(8_000, 10_000, 0),  // accepted
             create_withdrawal(10_000, 10_000, 0), // accepted
             create_withdrawal(1_000, 10_000, 0),  // accepted
-            create_withdrawal(*MINMAL_NON_DUST_AMOUNT_P2WPKH, 10_000, 0), // accepted
+            create_withdrawal(*MINIMAL_NON_DUST_AMOUNT_P2WPKH, 10_000, 0), // accepted
         ],
         per_withdrawal_cap: u64::MAX,
         rolling_limits: RollingWithdrawalLimits::unlimited(0),
         fee_rate: 10.0,
         num_accepted_withdrawals: 7,
-        accepted_amount: 69_001 + *MINMAL_NON_DUST_AMOUNT_P2WPKH,
+        accepted_amount: 69_001 + *MINIMAL_NON_DUST_AMOUNT_P2WPKH,
     }; "unlimited withdrawal caps only applies max-fee filtering")]
     fn test_withdrawal_request_filtering(case: WithdrawalLimitTestCase) {
         let limits =
