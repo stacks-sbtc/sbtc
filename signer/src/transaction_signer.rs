@@ -1533,19 +1533,21 @@ pub async fn assert_allow_dkg_begin(
     let storage = context.get_storage();
     let config = context.config();
 
-    // Trigger dkg if signer set changes
-    let last_dkg_signer_set: BTreeSet<_> = context
-        .state()
-        .current_signer_set()
-        .get_signers()
-        .iter()
-        .map(|signer| signer.public_key().clone())
-        .collect();
-    let config_signer_set = config.signer.bootstrap_signing_set();
+    if config.signer.start_dkg_if_signer_set_changed {
+        // Trigger dkg if signer set changes
+        let last_dkg_signer_set: BTreeSet<_> = context
+            .state()
+            .current_signer_set()
+            .get_signers()
+            .iter()
+            .map(|signer| *signer.public_key())
+            .collect();
+        let config_signer_set = config.signer.bootstrap_signing_set();
 
-    if last_dkg_signer_set != config_signer_set {
-        tracing::info!("signer set has changed, proceeding with DKG");
-        return Ok(());
+        if last_dkg_signer_set != config_signer_set {
+            tracing::info!("signer set has changed, proceeding with DKG");
+            return Ok(());
+        }
     }
 
     // Get the number of DKG shares that have been stored

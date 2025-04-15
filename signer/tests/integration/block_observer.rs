@@ -20,7 +20,6 @@ use clarity::vm::types::PrincipalData;
 use emily_client::apis::deposit_api;
 use emily_client::models::CreateDepositRequestBody;
 use fake::Fake;
-use fake::Fake as _;
 use fake::Faker;
 use sbtc::deposits::CreateDepositRequest;
 use sbtc::deposits::DepositScriptInputs;
@@ -1224,6 +1223,9 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
         .with_first_bitcoin_core_client()
         .with_mocked_emily_client()
         .with_mocked_stacks_client()
+        .modify_settings(|settings| {
+            settings.signer.start_dkg_if_signer_set_changed = false;
+        })
         .build();
 
     // We need to set up the stacks client as well. We use it to fetch
@@ -1367,17 +1369,24 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
         .await
         .unwrap();
 
-                // Write key rotation transaction to the database, to avoid triggering dkg on changed signer set.
-                let key_rotation_tx = model::RotateKeysTransaction {
-                    txid: Faker.fake_with_rng(&mut rng),
-                    address: Faker.fake_with_rng(&mut rng),
-                    aggregate_key: Faker.fake_with_rng(&mut rng),
-                    signer_set: ctx.inner.config().signer.bootstrap_signing_set().iter().cloned().collect(),
-                    signatures_required: 16,
-                };
-                db.write_rotate_keys_transaction(&key_rotation_tx)
-                    .await
-                    .unwrap();
+        // Write key rotation transaction to the database, to avoid triggering dkg on changed signer set.
+        let key_rotation_tx = model::RotateKeysTransaction {
+            txid: Faker.fake_with_rng(&mut rng),
+            address: Faker.fake_with_rng(&mut rng),
+            aggregate_key: Faker.fake_with_rng(&mut rng),
+            signer_set: ctx
+                .inner
+                .config()
+                .signer
+                .bootstrap_signing_set()
+                .iter()
+                .cloned()
+                .collect(),
+            signatures_required: 16,
+        };
+        db.write_rotate_keys_transaction(&key_rotation_tx)
+            .await
+            .unwrap();
 
         // Check that the chain tip has been updated (sanity check)
         let db_chain_tip = db
