@@ -91,20 +91,13 @@ impl TestHarness {
     /// Add a single deposit transaction to the test harness.
     pub fn add_deposit(&mut self, txid: Txid, response: GetTxResponse) {
         let tx_info = BitcoinTxInfo {
-            in_active_chain: response.block_hash.is_some(),
-            fee: bitcoin::Amount::from_sat(1000),
+            fee: Some(bitcoin::Amount::from_sat(1000)),
             tx: response.tx.clone(),
             txid: response.tx.compute_txid(),
-            hash: response.tx.compute_wtxid(),
             size: response.tx.total_size() as u64,
             vsize: response.tx.vsize() as u64,
             vin: Vec::new(),
             vout: Vec::new(),
-            block_hash: response
-                .block_hash
-                .unwrap_or_else(bitcoin::BlockHash::all_zeros),
-            confirmations: 0,
-            block_time: 0,
         };
         self.deposits.insert(txid, (response, tx_info));
     }

@@ -10,7 +10,6 @@ use bitcoin::OutPoint;
 use bitcoin::ScriptBuf;
 use bitcoin::Transaction;
 use bitcoin::Txid;
-use bitcoin::Wtxid;
 use bitcoincore_rpc::Auth;
 use bitcoincore_rpc::Error as BtcRpcError;
 use bitcoincore_rpc::RpcApi as _;
@@ -71,22 +70,21 @@ pub struct GetTxResponse {
 ///   type, which is what the bitcoincore-rpc crate returns for the
 ///   `getrawtransaction` RPC with verbosity set to 1. That type is missing
 ///   some information that we may want.
-/// * The `block_hash`, `block_time`, `confirmations`, `fee`, and
-///   `is_active_chain` fields are always populated from bitcoin-core for a
-///   `getrawtransaction` RPC with verbosity 2 when the `block_hash` is
-///   supplied. That is why they are not `Option`s here.
-/// * This struct omits some fields returned from bitcoin-core, most
-///   notably the `vin.prevout.script_pub_key.desc` field.
+/// * The  are always populated from bitcoin-core for a `getrawtransaction`
+///   RPC with verbosity 2 when the `block_hash` is supplied. That is why
+///   they are not `Option`s here.
+/// * This struct omits some fields returned from bitcoin-core for
+/// * `getrawtransactions` requests, most notably the
+///   `vin.prevout.script_pub_key.desc`, `block_hash`, `block_time`,
+///   `confirmations`, `fee`, and `is_active_chain` fields. These fields
+///   are not returned for in `getblock` requests.
 /// * Since we require bitcoin-core v25 or later these docs were taken from
-///   <https://bitcoincore.org/en/doc/25.0.0/rpc/rawtransactions/getrawtransaction/>
-///   and not from the more generic bitcoin.org docs
+///   <https://bitcoincore.org/en/doc/25.0.0/rpc/rawtransactions/getrawtransaction/>,
+///   <https://bitcoincore.org/en/doc/25.0.0/rpc/blockchain/getblock/>, and
+///   not from the more generic bitcoin.org docs
 ///   <https://developer.bitcoin.org/reference/rpc/getrawtransaction.html>
 #[derive(Clone, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
 pub struct BitcoinTxInfo {
-    /// Whether the specified block (in the getrawtransaction RPC) is in
-    /// the active chain or not. It is only present when the "blockhash"
-    /// argument is present in the RPC.
-    pub in_active_chain: bool,
     /// The transaction fee paid to the bitcoin miners.
     ///
     /// This field is returned whenever the "block undo data" is present
@@ -94,22 +92,20 @@ pub struct BitcoinTxInfo {
     /// blocks, and block validation is always done for blocks on the
     /// currently active chain [1-4]. So if this field is missing then this
     /// block has not been validated and so is not on the active
-    /// blockchain.
+    /// blockchain. It's also missing for coinbase transactions.
     ///
     /// [1]: <https://bitcoincore.reviews/23319#l-133>
     /// [2]: <https://bitcoincore.reviews/23319#l-141>
     /// [3]: <https://bitcoincore.reviews/23319#l-147>
     /// [4]: <https://bitcoincore.reviews/23319#l-153>
-    #[serde(default, with = "bitcoin::amount::serde::as_btc")]
-    pub fee: Amount,
+    #[serde(default, with = "bitcoin::amount::serde::as_btc::opt")]
+    pub fee: Option<Amount>,
     /// The raw bitcoin transaction.
     #[serde(with = "bitcoin::consensus::serde::With::<bitcoin::consensus::serde::Hex>")]
     #[serde(rename = "hex")]
     pub tx: Transaction,
-    /// The transaction id (the same value provided in the RPC).
+    /// The transactions identifier (the same value provided in the RPC).
     pub txid: Txid,
-    /// The transaction hash (differs from txid for witness transactions).
-    pub hash: Wtxid,
     /// The serialized transaction size.
     pub size: u64,
     /// The virtual transaction size (differs from size for witness
@@ -121,16 +117,6 @@ pub struct BitcoinTxInfo {
     /// the `desc` field in the `scriptPubKey` object. That field is the
     /// "Inferred descriptor for the output".
     pub vout: Vec<BitcoinTxInfoVout>,
-    /// The block hash of the Bitcoin block that includes this transaction.
-    #[serde(rename = "blockhash")]
-    pub block_hash: BlockHash,
-    /// The number of confirmations deep from that chain tip of the bitcoin
-    /// block that includes this transaction.
-    pub confirmations: u32,
-    /// The Unix epoch time when the block was mined. It reflects the
-    /// timestamp as recorded by the miner of the block.
-    #[serde(rename = "blocktime")]
-    pub block_time: u64,
 }
 
 /// A slimmed down version of the `BitcoinTxInfo` struct which only contains the
@@ -198,7 +184,7 @@ pub struct BitcoinTxVin {
     /// This field is omitted if block undo data is not available, so it is
     /// missing whenever the `fee` field is missing in the
     /// [`BitcoinTxInfo`].
-    pub prevout: BitcoinTxVinPrevout,
+    pub prevout: Option<BitcoinTxVinPrevout>,
 }
 
 /// The previous output, omitted if block undo data is not available.
