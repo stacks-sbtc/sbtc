@@ -99,7 +99,9 @@ pub fn initialize_blockchain() -> (&'static Client, &'static Faucet) {
     (rpc, faucet)
 }
 
-/// See `initialize_blockchain`
+/// Similar to `initialize_blockchain`, but for devenv.
+/// Note that this will not generate a spendable coinbase since advancing the
+/// bitcoin chain too quickly may break devenv Stacks.
 pub fn initialize_blockchain_devenv() -> (&'static Client, &'static Faucet) {
     static BTC_CLIENT: OnceLock<Client> = OnceLock::new();
     static FAUCET: OnceLock<Faucet> = OnceLock::new();
