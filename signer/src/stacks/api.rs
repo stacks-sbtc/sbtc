@@ -1188,8 +1188,11 @@ impl StacksClient {
     }
 }
 
-/// Fetch all Nakamoto blocks that are not already stored in the
-/// datastore.
+/// Fetch all Nakamoto block headers that are not already stored in the
+/// datastore, starting at the given [`StacksBlockId`].
+///
+/// This function returns the headers sorted in ascending order. So entries
+/// at lower indices correspond to Stacks block with lower block height.
 pub async fn fetch_unknown_ancestors<S, D>(
     stacks: &S,
     db: &D,
@@ -1232,6 +1235,7 @@ where
         headers.push(tenure_blocks.into());
     }
 
+    headers.reverse();
     Ok(headers)
 }
 
