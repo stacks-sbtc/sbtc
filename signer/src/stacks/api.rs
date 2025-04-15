@@ -392,16 +392,38 @@ impl TenureBlockHeaders {
     pub fn headers(&self) -> &[StacksBlockHeader] {
         &self.headers
     }
+}
 
-    /// Return an iterator of Stacks blocks included in this object.
-    pub fn into_iter(self) -> impl Iterator<Item = StacksBlock> {
-        let bitcoin_anchor = self.anchor_block_hash;
-        self.headers.into_iter().map(move |header| StacksBlock {
+/// An iterator over [`StacksBlock`]s
+pub struct StacksBlockIter {
+    /// The underlying iterator
+    iter: std::vec::IntoIter<StacksBlockHeader>,
+    /// The bitcoin block that this tenure builds off of.
+    anchor_block_hash: BitcoinBlockHash,
+}
+
+impl Iterator for StacksBlockIter {
+    type Item = StacksBlock;
+    fn next(&mut self) -> Option<Self::Item> {
+        let header = self.iter.next()?;
+        Some(StacksBlock {
             block_hash: header.block_id.into(),
             block_height: header.block_height,
             parent_hash: header.parent_block_id.into(),
-            bitcoin_anchor,
+            bitcoin_anchor: self.anchor_block_hash,
         })
+    }
+}
+
+impl std::iter::IntoIterator for TenureBlockHeaders {
+    type Item = StacksBlock;
+    type IntoIter = StacksBlockIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        StacksBlockIter {
+            iter: self.headers.into_iter(),
+            anchor_block_hash: self.anchor_block_hash,
+        }
     }
 }
 
