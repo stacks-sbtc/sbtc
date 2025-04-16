@@ -1,0 +1,99 @@
+syntax = "proto3";
+
+package sbtc.signer.v1.backups;
+
+import "bitcoin/bitcoin.proto";
+import "crypto/common.proto";
+import "crypto/wsts/wsts.proto";
+
+// Represents the verification status of DKG shares.
+// Maps to the sbtc_signer.dkg_shares_status ENUM type.
+enum DkgSharesStatus {
+    // Default value, should not be used explicitly if possible.
+    DKG_SHARES_STATUS_UNSPECIFIED = 0;
+    DKG_SHARES_STATUS_UNVERIFIED = 1;
+    DKG_SHARES_STATUS_VERIFIED = 2;
+    DKG_SHARES_STATUS_FAILED = 3;
+}
+
+// DkgShares represents the distributed key generation shares for sBTC signers
+// Maps to the sbtc_signer.dkg_shares table in PostgreSQL
+message DkgShares {
+    // Primary key: The aggregate public key produced through DKG
+    crypto.PublicKey aggregate_key = 1;
+
+    // The tweaked aggregate key used for Bitcoin script creation
+    crypto.PublicKey tweaked_aggregate_key = 2;
+
+    // Encrypted private shares of the aggregate key
+    bytes encrypted_private_shares = 3;
+
+    // Public shares used for verification
+    bytes public_shares = 4;
+
+    // The Bitcoin script_pubkey derived from the tweaked aggregate key
+    bytes script_pubkey = 5;
+
+    // Public keys of all signers participating in this key set
+    repeated crypto.PublicKey signer_set_public_keys = 6;
+
+    // Threshold required for valid signature reconstruction (M-of-N)
+    uint32 signature_share_threshold = 7;
+
+    // Verification status of the DKG shares.
+    // Corresponds to the 'dkg_shares_status' column.
+    DkgSharesStatus dkg_shares_status = 8;
+
+    // The hash of the Bitcoin block that initiated this DKG round.
+    // Corresponds to the 'started_at_bitcoin_block_hash' column (BYTEA).
+    bitcoin.BitcoinBlockHash started_at_bitcoin_block_hash = 9;
+
+    // The height of the Bitcoin block that initiated this DKG round.
+    // Corresponds to the 'started_at_bitcoin_block_height' column (BIGINT).
+    uint64 started_at_bitcoin_block_height = 10;
+}
+
+// Represents the header of a backup file.
+// This header contains metadata about the backup file, including
+// the version of the backup file format, the timestamp of when it was created,
+// the software version that created it, the public key of the signer, and
+// the signature over the backup file body.
+// The header is used to verify the integrity and authenticity of the backup file.
+message BackupFileHeader {
+    // Version of the backup file format structure. Start with 1.
+    uint32 format_version = 1;
+
+    // Timestamp indicating when the backup file was created,
+    // represented as seconds since the Unix epoch (UTC).
+    uint64 unix_timestamp = 2;
+
+    // Version string of the signer software that created this backup, as
+    // reported by the signer's `GIT_COMMIT` constant.
+    string software_revision = 3;
+
+    // Public key of the signer who created this backup file.
+    // This key is used to verify the integrity and authenticity of the backup.
+    crypto.PublicKey public_key = 4;
+
+    // Signature over the serialized bytes of the `BackupFileBody` message.
+    // This signature is generated using the private key corresponding to
+    // the `public_key` field. It ensures that the backup file has not been
+    // tampered with and is indeed created by the signer identified by
+    // the `public_key`.
+    crypto.EcdsaSignature signature = 5;
+}
+
+// Contains the actual data payload being backed up.
+message BackupFileBody {
+    // DKG shares data.
+    repeated DkgShares dkg_shares = 1; // Start tags from 1 within this message
+}
+
+message BackupFile {
+    // The header of the backup file, containing metadata about the backup.
+    BackupFileHeader header = 1;
+
+    // The main body containing the actual backed-up data.
+    // The signature in the header should cover the serialized bytes of this body.
+    BackupFileBody body = 2;
+}
