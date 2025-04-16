@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 use std::ops::Range;
 
+use bitcoin::Amount;
 use bitcoin::OutPoint;
 use bitcoin::ScriptBuf;
 use bitcoin::TapSighash;
@@ -45,6 +46,11 @@ use wsts::net::SignatureType;
 use wsts::traits::PartyState;
 use wsts::traits::SignerState;
 
+use crate::bitcoin::rpc::BitcoinBlockInfo;
+use crate::bitcoin::rpc::BitcoinTxVinDetails;
+use crate::bitcoin::rpc::BitcoinTxVinPrevout;
+use crate::bitcoin::rpc::BitcoinTxVout;
+use crate::bitcoin::rpc::OutputScriptPubKey;
 use crate::bitcoin::utxo::Fees;
 use crate::bitcoin::utxo::SignerBtcState;
 use crate::bitcoin::utxo::SignerUtxo;
@@ -107,6 +113,56 @@ pub fn block<R: rand::RngCore + ?Sized>(
 
     bitcoin::Block { header, txdata }
 }
+
+impl Dummy<Faker> for BitcoinTxVinPrevout {
+    fn dummy_with_rng<R: Rng + ?Sized>(config: &Faker, rng: &mut R) -> Self {
+        let output_amount = Amount::ZERO.to_sat()..Amount::MAX.to_sat();
+        BitcoinTxVinPrevout {
+            generated: false,
+            height: config.fake_with_rng(rng),
+            value: output_amount.choose(rng).map(Amount::from_sat).unwrap(),
+            script_pubkey: OutputScriptPubKey {
+                script: ScriptBuf::new(),
+            }
+        }
+    }
+}
+
+impl Dummy<Faker> for BitcoinTxVinDetails {
+    fn dummy_with_rng<R: Rng + ?Sized>(config: &Faker, rng: &mut R) -> Self {
+        BitcoinTxVinDetails {
+            sequence: config.fake_with_rng(rng),
+            txid: Some(BitcoinTxId::dummy_with_rng(config, rng).into()),
+            vout: (0..50).choose(rng)
+        }
+    }
+}
+
+impl Dummy<Faker> for BitcoinTxVout {
+    fn dummy_with_rng<R: Rng + ?Sized>(_: &Faker, rng: &mut R) -> Self {
+        let output_amount = Amount::ZERO.to_sat()..Amount::MAX.to_sat();
+        BitcoinTxVout {
+            value: output_amount.choose(rng).map(Amount::from_sat).unwrap(),
+            vout: (0..50).choose(rng).unwrap(),
+            script_pubkey: OutputScriptPubKey {
+                script: ScriptBuf::new(),
+            }
+        }
+    }
+}
+
+/// Dummy block
+pub fn block_info<R: rand::RngCore + ?Sized>(
+    _config: &fake::Faker,
+    _rng: &mut R,
+    _height: i64,
+) -> BitcoinBlockInfo {
+    // BitcoinTxInfo {
+        
+    // };
+    unimplemented!()
+}
+
 
 /// Dummy txid
 pub fn txid<R: rand::RngCore + ?Sized>(config: &fake::Faker, rng: &mut R) -> bitcoin::Txid {

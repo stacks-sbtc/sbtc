@@ -19,8 +19,6 @@ use bitcoincore_rpc::jsonrpc::error::RpcError;
 use bitcoincore_rpc_json::GetBlockchainInfoResult;
 use bitcoincore_rpc_json::GetMempoolEntryResult;
 use bitcoincore_rpc_json::GetNetworkInfoResult;
-use bitcoincore_rpc_json::GetRawTransactionResultVin;
-use bitcoincore_rpc_json::GetRawTransactionResultVout as BitcoinTxInfoVout;
 use bitcoincore_rpc_json::GetTxOutResult;
 use serde::Deserialize;
 use url::Url;
@@ -116,7 +114,87 @@ pub struct BitcoinTxInfo {
     /// A description of the transactions outputs. This object is missing
     /// the `desc` field in the `scriptPubKey` object. That field is the
     /// "Inferred descriptor for the output".
-    pub vout: Vec<BitcoinTxInfoVout>,
+    pub vout: Vec<BitcoinTxVout>,
+}
+
+/// A description of an input into a transaction.
+#[derive(Clone, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
+pub struct BitcoinTxVin {
+    /// Most of the details to the input into the transaction
+    #[serde(flatten)]
+    pub details: BitcoinTxVinDetails,
+    /// The previous output.
+    ///
+    /// For non-coinbase transactions, this field is omitted if block undo
+    /// data is not available, so it is missing whenever the `fee` field is
+    /// missing in the [`BitcoinTxInfo`]. It is always omitted for coinbase
+    /// transactions.
+    pub prevout: Option<BitcoinTxVinPrevout>,
+}
+
+/// A detailed vin info for an input into a transacion.
+/// 
+/// This struct ignores two fields often provided in bitcoin core's RPC
+/// responses: the `scriptSig` and the `txinwitness` field for non-coinbase
+/// transactions and the `coinbase` field for coinbase transactions. See
+/// [`bitcoincore_rpc_json::GetRawTransactionResultVin`] or
+/// https://bitcoincore.org/en/doc/25.0.0/rpc/rawtransactions/getrawtransaction/
+/// for more info for what is missing.
+#[derive(Clone, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
+pub struct BitcoinTxVinDetails {
+    /// The script sequence number.
+    pub sequence: u32,
+    /// Not provided for coinbase txs.
+    pub txid: Option<bitcoin::Txid>,
+    /// Not provided for coinbase txs.
+    pub vout: Option<u32>,
+}
+
+/// The previous output, omitted if block undo data is not available.
+#[derive(Clone, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
+pub struct BitcoinTxVinPrevout {
+    /// Whether this is a Coinbase or not.
+    pub generated: bool,
+    /// The height of the prevout.
+    pub height: u64,
+    /// The value of the prevout in BTC.
+    #[serde(with = "bitcoin::amount::serde::as_btc")]
+    pub value: Amount,
+    /// The scriptPubKey of the prevout.
+    #[serde(rename = "scriptPubKey")]
+    pub script_pubkey: OutputScriptPubKey,
+}
+
+/// This type contains the `vin[*].prevout.scriptPubKey` field(s) for the
+/// `getrawtransaction` RPC response when verbose = 2
+///
+/// This struct leaves out the following fields (because we have no use for
+/// them):
+/// * `asm`
+/// * `addresses`
+/// * `address`
+/// * `req_sigs`
+/// * `type`
+#[derive(Clone, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutputScriptPubKey {
+    /// The scriptPubKey locking the UTXO.
+    #[serde(rename = "hex")]
+    pub script: ScriptBuf,
+}
+
+///
+#[derive(Clone, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
+pub struct BitcoinTxVout {
+    /// The amount locked by the output
+    #[serde(with = "bitcoin::amount::serde::as_btc")]
+    pub value: Amount,
+    /// The index of the output
+    #[serde(rename = "n")]
+    pub vout: u32,
+    /// The scriptPubKey of the output.
+    #[serde(rename = "scriptPubKey")]
+    pub script_pubkey: OutputScriptPubKey,
 }
 
 /// A slimmed down version of the `BitcoinTxInfo` struct which only contains the
@@ -130,6 +208,29 @@ pub struct BitcoinTxFeeInfo {
     /// The virtual transaction size (differs from size for witness
     /// transactions).
     pub vsize: u64,
+}
+
+///
+#[derive(Clone, PartialEq, Debug, Deserialize)]
+pub struct BitcoinBlockInfo {
+    /// The hash of the consensus encoded header of the block.
+    #[serde(rename = "hash")]
+    pub block_hash: bitcoin::BlockHash,
+    /// The number of blocks preceeding this one on the blockchain that
+    /// includes this block.
+    pub height: u64,
+    /// The Unix epoch time when the block was mined. It reflects the
+    /// timestamp as recorded by the miner of the block.
+    pub time: u64,
+    ///The median block time expressed in UNIX epoch time
+    pub mediantime: Option<u64>,
+    ///
+    /// The official docs describe this as optional, but the actual block
+    /// type does not, so we require it.
+    #[serde(rename = "previousblockhash")]
+    pub previous_block_hash: bitcoin::BlockHash,
+    ///
+    pub tx: Vec<BitcoinTxInfo>,
 }
 
 /// A struct containing the response from bitcoin-core for a
@@ -171,53 +272,6 @@ impl From<&OutPoint> for RpcOutPoint {
             vout: outpoint.vout,
         }
     }
-}
-
-/// A description of an input into a transaction.
-#[derive(Clone, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
-pub struct BitcoinTxVin {
-    /// Most of the details to the input into the transaction
-    #[serde(flatten)]
-    pub details: GetRawTransactionResultVin,
-    /// The previous output.
-    ///
-    /// This field is omitted if block undo data is not available, so it is
-    /// missing whenever the `fee` field is missing in the
-    /// [`BitcoinTxInfo`].
-    pub prevout: Option<BitcoinTxVinPrevout>,
-}
-
-/// The previous output, omitted if block undo data is not available.
-#[derive(Clone, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
-pub struct BitcoinTxVinPrevout {
-    /// Whether this is a Coinbase or not.
-    pub generated: bool,
-    /// The height of the prevout.
-    pub height: BitcoinBlockHeight,
-    /// The value of the prevout in BTC.
-    #[serde(with = "bitcoin::amount::serde::as_btc")]
-    pub value: Amount,
-    /// The scriptPubKey of the prevout.
-    #[serde(rename = "scriptPubKey")]
-    pub script_pub_key: PrevoutScriptPubKey,
-}
-
-/// This type contains the `vin[*].prevout.scriptPubKey` field(s) for the
-/// `getrawtransaction` RPC response when verbose = 2
-///
-/// This struct leaves out the following fields (because we have no use for
-/// them):
-/// * `asm`
-/// * `addresses`
-/// * `address`
-/// * `req_sigs`
-/// * `type`
-#[derive(Clone, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PrevoutScriptPubKey {
-    /// The scriptPubKey locking the UTXO.
-    #[serde(rename = "hex")]
-    pub script: ScriptBuf,
 }
 
 /// The response for a `getblockheader` RPC call to bitcoin-core with
@@ -296,6 +350,24 @@ impl BitcoinCoreClient {
     /// Fetch the block identified by the given block hash.
     pub fn get_block(&self, block_hash: &BlockHash) -> Result<Option<Block>, Error> {
         match self.inner.get_block(block_hash) {
+            Ok(block) => Ok(Some(block)),
+            Err(BtcRpcError::JsonRpc(JsonRpcError::Rpc(RpcError { code: -5, .. }))) => Ok(None),
+            Err(error) => Err(Error::BitcoinCoreGetBlock(error, *block_hash)),
+        }
+    }
+
+    /// Fetch the block identified by the given block hash with and
+    /// information about each transaction, including prevout information
+    /// for inputs (only for unpruned blocks in the current best chain).
+    pub fn get_block2(&self, block_hash: &BlockHash) -> Result<Option<BitcoinBlockInfo>, Error> {
+        let args = [
+            serde_json::to_value(block_hash).map_err(Error::JsonSerialize)?,
+            // This is the verbosity level. The acceptable values are 0, 1,
+            // 2, and 3, and we want the 3 because it will include all the
+            // required fields of the type.
+            serde_json::Value::Number(serde_json::value::Number::from(3u32)),
+        ];
+        match self.inner.call("getblock", &args) {
             Ok(block) => Ok(Some(block)),
             Err(BtcRpcError::JsonRpc(JsonRpcError::Rpc(RpcError { code: -5, .. }))) => Ok(None),
             Err(error) => Err(Error::BitcoinCoreGetBlock(error, *block_hash)),
@@ -578,8 +650,8 @@ impl BitcoinInteract for BitcoinCoreClient {
             .map(|_| ())
     }
 
-    async fn get_block(&self, block_hash: &BlockHash) -> Result<Option<Block>, Error> {
-        self.get_block(block_hash)
+    async fn get_block(&self, block_hash: &BlockHash) -> Result<Option<BitcoinBlockInfo>, Error> {
+        self.get_block2(block_hash)
     }
 
     async fn get_block_header(
