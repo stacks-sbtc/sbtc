@@ -546,9 +546,10 @@ pub struct KeyRotationEvent {
     /// Transaction ID.
     pub txid: StacksTxId,
     /// The Stacks block ID of the block that includes the transaction
-    /// associated with this withdrawal request.
+    /// associated with this key rotation event.
     pub block_hash: StacksBlockHash,
-    /// The address that deployed the contract.
+    /// The principal that can make contract calls into the protected
+    /// public functions in the sbtc smart contracts.
     pub address: StacksPrincipal,
     /// The aggregate key of the DKG run associated with this event.
     pub aggregate_key: PublicKey,

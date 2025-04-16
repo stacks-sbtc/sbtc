@@ -289,7 +289,8 @@ pub struct KeyRotationEvent {
     /// The new set of public keys for all known signers during this
     /// PoX cycle.
     pub new_keys: Vec<PublicKey>,
-    /// The address that deployed the contract.
+    /// The principal that can make contract calls into the protected
+    /// public functions in the sbtc smart contracts.
     pub new_address: PrincipalData,
     /// The new aggregate key created by combining the above public keys.
     pub new_aggregate_pubkey: PublicKey,
