@@ -1556,14 +1556,13 @@ impl SmartContract {
 #[cfg(test)]
 mod tests {
     use fake::Fake as _;
-    use rand::SeedableRng as _;
-    use rand::rngs::StdRng;
     use secp256k1::SECP256K1;
     use secp256k1::SecretKey;
 
     use crate::config::NetworkKind;
     use crate::storage::model::StacksBlockHash;
     use crate::storage::model::StacksTxId;
+    use crate::testing::get_rng;
 
     use super::*;
 
@@ -1629,7 +1628,7 @@ mod tests {
         // runtime.
         let _ = RotateKeysV1::list_data_type();
 
-        let mut rng = StdRng::seed_from_u64(112);
+        let mut rng = get_rng();
         let secret_keys = [
             SecretKey::new(&mut rng),
             SecretKey::new(&mut rng),

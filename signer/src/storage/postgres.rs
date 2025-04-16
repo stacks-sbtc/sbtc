@@ -8,7 +8,6 @@ use bitcoin::OutPoint;
 use bitcoin::hashes::Hash as _;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
 use blockstack_lib::chainstate::stacks::TransactionPayload;
-use blockstack_lib::codec::StacksMessageCodec;
 use blockstack_lib::types::chainstate::StacksBlockId;
 use sqlx::Executor as _;
 use sqlx::PgExecutor;
@@ -93,7 +92,6 @@ pub fn extract_relevant_transactions(
                 Some(model::Transaction {
                     txid: tx.txid().into_bytes(),
                     block_hash: block_id.into_bytes(),
-                    tx: tx.serialize_to_vec(),
                     tx_type: *transaction_kinds.get(&x.function_name.as_str())?,
                 })
             }
@@ -350,13 +348,11 @@ impl PgStore {
         }
 
         let mut tx_ids = Vec::with_capacity(txs.len());
-        let mut txs_bytes = Vec::with_capacity(txs.len());
         let mut tx_types = Vec::with_capacity(txs.len());
         let mut block_hashes = Vec::with_capacity(txs.len());
 
         for tx in txs {
             tx_ids.push(tx.txid);
-            txs_bytes.push(tx.tx);
             tx_types.push(tx.tx_type.to_string());
             block_hashes.push(tx.block_hash)
         }
@@ -367,26 +363,19 @@ impl PgStore {
                 SELECT ROW_NUMBER() OVER (), txid
                 FROM UNNEST($1::bytea[]) AS txid
             )
-            , txs AS (
-                SELECT ROW_NUMBER() OVER (), tx
-                FROM UNNEST($2::bytea[]) AS tx
-            )
             , transaction_types AS (
                 SELECT ROW_NUMBER() OVER (), tx_type::sbtc_signer.transaction_type
-                FROM UNNEST($3::VARCHAR[]) AS tx_type
+                FROM UNNEST($2::VARCHAR[]) AS tx_type
             )
-            INSERT INTO sbtc_signer.transactions (txid, tx, tx_type)
+            INSERT INTO sbtc_signer.transactions (txid, tx_type)
             SELECT
                 txid
-              , tx
               , tx_type
             FROM tx_ids
-            JOIN txs USING (row_number)
             JOIN transaction_types USING (row_number)
             ON CONFLICT DO NOTHING"#,
         )
         .bind(&tx_ids)
-        .bind(txs_bytes)
         .bind(tx_types)
         .execute(&self.0)
         .await
@@ -460,7 +449,7 @@ impl PgStore {
               ON bo.txid = bi.txid
             JOIN sbtc_signer.bitcoin_transactions AS bt
               ON bt.txid = bi.txid
-            JOIN bitcoin_blockchain_until($1, $2) AS bb 
+            JOIN bitcoin_blockchain_until($1, $2) AS bb
               ON bb.block_hash = bt.block_hash
             WHERE bo.output_type = 'signers_output'
               AND bi.prevout_type = 'signers_input'
@@ -866,7 +855,7 @@ impl PgStore {
               , wr.block_hash   AS stacks_block_hash
               , sb.block_height AS stacks_block_height
             FROM sbtc_signer.withdrawal_requests AS wr
-            JOIN sbtc_signer.stacks_blocks AS sb 
+            JOIN sbtc_signer.stacks_blocks AS sb
               ON sb.block_hash = wr.block_hash
             LEFT JOIN sbtc_signer.withdrawal_signers AS ws
               ON ws.request_id = wr.request_id
@@ -898,7 +887,7 @@ impl PgStore {
     ) -> Result<Option<model::BitcoinTxRef>, Error> {
         sqlx::query_as::<_, model::BitcoinTxRef>(
             r#"
-            SELECT 
+            SELECT
                 bwo.bitcoin_txid AS txid
               , bt.block_hash
             FROM sbtc_signer.withdrawal_requests AS wr
@@ -1513,7 +1502,7 @@ impl super::DbRead for PgStore {
             -- get_pending_accepted_withdrawal_requests
             WITH recursive
 
-            -- Get all withdrawal requests which have a bitcoin block height 
+            -- Get all withdrawal requests which have a bitcoin block height
             -- of at least minimum height provided.
             requests AS (
                 SELECT
@@ -1539,7 +1528,7 @@ impl super::DbRead for PgStore {
                 -- Join in any rejection events we know about.
                 LEFT JOIN sbtc_signer.withdrawal_reject_events AS wre
                     ON wre.request_id = wr.request_id
-                
+
                 -- Only requests where the bitcoin height is >= than the minimum.
                 WHERE wr.bitcoin_block_height >= $3
             ),
@@ -1576,7 +1565,7 @@ impl super::DbRead for PgStore {
                 JOIN bitcoin_blockchain anchor
                     ON anchor.block_hash = parent.bitcoin_anchor
             )
-            
+
             -- Main select clause (what we're returning).
             SELECT
                 wr.request_id
@@ -1609,7 +1598,7 @@ impl super::DbRead for PgStore {
             LEFT JOIN stacks_blockchain AS canonical_reject
                 ON wr.reject_block_hash = canonical_reject.block_hash
 
-            GROUP BY 
+            GROUP BY
                 wr.request_id
               , wr.block_hash
               , wr.txid
@@ -1627,7 +1616,7 @@ impl super::DbRead for PgStore {
                 -- Ensure there are no confirmed reject contract-calls.
                 AND COUNT(canonical_reject.block_hash) = 0
 
-            ORDER BY 
+            ORDER BY
                 wr.request_id ASC
             "#,
         )
@@ -1715,7 +1704,7 @@ impl super::DbRead for PgStore {
             -- Request is expired
             WHERE wr.bitcoin_block_height < $4
 
-            -- we need to group since we could have multiple withdrawals 
+            -- we need to group since we could have multiple withdrawals
             -- outputs for a single request, and some of them may not be in
             -- the canonical chain, resulting in a NULL bc_trx.block_hash;
             -- so we group and check that all the rows have NULL
@@ -2292,27 +2281,6 @@ impl super::DbRead for PgStore {
             .block_height
             .saturating_sub(least_txo_height);
         Ok(txo_confirmations <= min_confirmations.into())
-    }
-
-    async fn get_bitcoin_tx(
-        &self,
-        txid: &model::BitcoinTxId,
-        block_hash: &model::BitcoinBlockHash,
-    ) -> Result<Option<model::BitcoinTx>, Error> {
-        sqlx::query_scalar::<_, model::BitcoinTx>(
-            r#"
-            SELECT txs.tx
-            FROM sbtc_signer.bitcoin_transactions AS bt
-            JOIN sbtc_signer.transactions AS txs USING (txid)
-            WHERE bt.block_hash = $1
-              AND bt.txid = $2
-        "#,
-        )
-        .bind(block_hash)
-        .bind(txid)
-        .fetch_optional(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)
     }
 
     async fn get_swept_deposit_requests(
@@ -2897,14 +2865,12 @@ impl super::DbWrite for PgStore {
         sqlx::query(
             "INSERT INTO sbtc_signer.transactions
               ( txid
-              , tx
               , tx_type
               )
-            VALUES ($1, $2, $3)
+            VALUES ($1, $2)
             ON CONFLICT DO NOTHING",
         )
         .bind(transaction.txid)
-        .bind(&transaction.tx)
         .bind(transaction.tx_type)
         .execute(&self.0)
         .await
@@ -3553,6 +3519,7 @@ mod tests {
     use blockstack_lib::clarity::vm::ContractName;
     use blockstack_lib::types::chainstate::StacksAddress;
     use blockstack_lib::util::hash::Hash160;
+    use clarity::codec::StacksMessageCodec as _;
     use test_case::test_case;
 
     /// Test that we can extract the types of function calls that we care

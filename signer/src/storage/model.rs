@@ -387,8 +387,6 @@ pub struct TransactionIds {
 pub struct Transaction {
     /// Transaction ID.
     pub txid: [u8; 32],
-    /// Encoded transaction.
-    pub tx: Bytes,
     /// The type of the transaction.
     pub tx_type: TransactionType,
     /// The block id of the stacks block that includes this transaction
@@ -738,29 +736,6 @@ impl std::fmt::Display for QualifiedRequestId {
 pub trait ToLittleEndianOrder: Sized {
     /// Return the bytes in little-endian order.
     fn to_le_bytes(&self) -> [u8; 32];
-}
-
-/// A bitcoin transaction
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct BitcoinTx(bitcoin::Transaction);
-
-impl Deref for BitcoinTx {
-    type Target = bitcoin::Transaction;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl From<bitcoin::Transaction> for BitcoinTx {
-    fn from(value: bitcoin::Transaction) -> Self {
-        Self(value)
-    }
-}
-
-impl From<BitcoinTx> for bitcoin::Transaction {
-    fn from(value: BitcoinTx) -> Self {
-        value.0
-    }
 }
 
 /// The bitcoin transaction ID
@@ -1578,15 +1553,16 @@ pub struct StacksBlockHeight(u64);
 #[cfg(test)]
 mod tests {
     use fake::Fake;
-    use rand::SeedableRng;
 
     use sbtc::events::FromLittleEndianOrder;
+
+    use crate::testing::get_rng;
 
     use super::*;
 
     #[test]
     fn conversion_bitcoin_header_hashes() {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+        let mut rng = get_rng();
 
         let block_hash: BitcoinBlockHash = fake::Faker.fake_with_rng(&mut rng);
         let stacks_hash = BurnchainHeaderHash::from(block_hash);

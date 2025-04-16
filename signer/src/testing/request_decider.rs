@@ -22,10 +22,11 @@ use crate::storage::DbWrite;
 use crate::storage::model;
 use crate::storage::model::DkgSharesStatus;
 use crate::testing;
+use crate::testing::get_rng;
 use crate::testing::storage::model::TestData;
 
 use hashbrown::HashSet;
-use rand::SeedableRng as _;
+use rand::SeedableRng;
 use tokio::sync::broadcast;
 use tokio::time::error::Elapsed;
 
@@ -146,7 +147,7 @@ where
     /// Assert that the transaction signer will make and store decisions
     /// for pending deposit requests.
     pub async fn assert_should_store_decisions_for_pending_deposit_requests(self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let wan_network = WanNetwork::default();
 
         let ctx1 = TestContext::default_mocked();
@@ -231,7 +232,8 @@ where
     /// Assert that the transaction signer will make and store decisions
     /// for pending withdraw requests.
     pub async fn assert_should_store_decisions_for_pending_withdrawal_requests(self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(43);
+        // TODO(#1466): fix this test for other seeds and use `get_rng()`
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
         let wan_network = WanNetwork::default();
 
         let ctx1 = TestContext::default_mocked();
@@ -288,8 +290,13 @@ where
         .await
         .expect("timeout");
 
+        // The query that fetches pending withdrawal requests uses
+        // `context_window` blocks plus 1, and the in-memory implementation
+        // matches that behavior. So for this test we need to make sure
+        // that we look back the correct number of blocks, hence the plus
+        // 1.
         self.assert_only_withdraw_requests_in_context_window_has_decisions(
-            self.context_window,
+            self.context_window + 1,
             &test_data.withdraw_requests,
             1,
         )
@@ -309,7 +316,7 @@ where
     /// Assert that the transaction signer will make and store decisions
     /// received from other signers.
     pub async fn assert_should_store_decisions_received_from_other_signers(self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let mut rng = get_rng();
         let network = WanNetwork::default();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers);
         let coordinator_signer_info = signer_info.first().cloned().unwrap();
