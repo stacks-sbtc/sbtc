@@ -4,14 +4,17 @@ ALTER TABLE sbtc_signer.rotate_keys_transactions
 -- At the time that this query was executed, all rotate keys transaction
 -- events are associated with one stacks blocks.
 WITH block_hashes AS (
-    SELECT st.block_hash
+    SELECT 
+        st.block_hash
+      , st.txid
     FROM sbtc_signer.rotate_keys_transactions AS rkt
     JOIN sbtc_signer.stacks_transactions AS st 
       ON st.txid = rkt.txid
 )
 UPDATE sbtc_signer.rotate_keys_transactions
-SET block_hash = block_hashes.block_hash
-FROM block_hashes;
+SET block_hash = bh.block_hash
+FROM block_hashes AS bh
+WHERE sbtc_signer.rotate_keys_transactions.txid = bh.txid;
 
 -- Make the new column `NOT NULL` now that they should all have a value.
 ALTER TABLE sbtc_signer.rotate_keys_transactions
