@@ -28,6 +28,8 @@ pub struct SignerState {
     // The current bitcoin chain tip. This gets updated at the end of the
     // block observer's duties when it observes a new bitcoin block.
     bitcoin_chain_tip: RwLock<BitcoinBlockRef>,
+    // All peers currently connected
+    connected_peers: RwLock<HashSet<PeerId>>,
 }
 
 impl SignerState {
@@ -132,6 +134,22 @@ impl SignerState {
     pub fn is_sbtc_bitcoin_start_height_set(&self) -> bool {
         self.is_sbtc_bitcoin_start_height_set.load(Ordering::SeqCst)
     }
+
+    /// Add a peer to the set of connected peers
+    pub fn add_connected_peer(&self, peer: PeerId) {
+        self.connected_peers
+            .write()
+            .expect("BUG: Failed to acquire write lock")
+            .insert(peer);
+    }
+
+    /// Remove a peer from the set of connected peers
+    pub fn remove_connected_peer(&self, peer: &PeerId) {
+        self.connected_peers
+            .write()
+            .expect("BUG: Failed to acquire write lock")
+            .remove(peer);
+    }
 }
 
 impl Default for SignerState {
@@ -149,6 +167,7 @@ impl Default for SignerState {
                 block_height: 0,
                 block_hash: BitcoinBlockHash::from([0; 32]),
             }),
+            connected_peers: RwLock::new(HashSet::new()),
         }
     }
 }
