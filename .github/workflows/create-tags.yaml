@@ -27,11 +27,13 @@ jobs:
     steps:
       - name: Show Tag Name
         id: print-name
-        run: printf "Tag to be created: ${{ inputs.tag_name }}""
+        run: |
+          printf "Tag to be created: ${{ inputs.tag_name }}""
 
       - name: Set Output
         id: set-output
-        run: printf "tag_name=${{ inputs.tag_name }}" >> $GITHUB_OUTPUT
+        run: |
+          printf "tag_name=${{ inputs.tag_name }}" >> $GITHUB_OUTPUT
 
   create_tag:
     name: Create Tag
