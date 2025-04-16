@@ -158,6 +158,17 @@ impl SignerState {
             .expect("BUG: Failed to acquire readl lock")
             .clone()
     }
+
+    /// Check if all peers in the current signer set are connected
+    pub fn are_all_signers_connected(&self) -> bool {
+        let connected_peers = self.get_connected_peers();
+        let current_signers = self.current_signer_set();
+
+        current_signers
+            .get_signers()
+            .iter()
+            .all(|s| connected_peers.contains(s.peer_id()))
+    }
 }
 
 impl Default for SignerState {
