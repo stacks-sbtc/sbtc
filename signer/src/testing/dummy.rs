@@ -65,7 +65,6 @@ use crate::stacks::contracts::RotateKeysV1;
 use crate::storage::model;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinBlockHeight;
-use crate::storage::model::BitcoinTx;
 use crate::storage::model::BitcoinTxId;
 use crate::storage::model::CompletedDepositEvent;
 use crate::storage::model::DkgSharesStatus;
