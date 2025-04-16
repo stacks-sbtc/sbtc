@@ -531,7 +531,7 @@ impl PgStore {
         #[derive(sqlx::FromRow)]
         struct PgCandidateUtxo {
             txid: model::BitcoinTxId,
-            block_height: i64,
+            block_height: BitcoinBlockHeight,
         }
 
         // Get the block height of the unspent transaction that was most
@@ -584,8 +584,8 @@ impl PgStore {
 
         // Given the utxo candidate above, this is our best guess of the
         // minimum UTXO height. It might be wrong, we'll find out shortly.
-        let min_block_height_candidate = BitcoinBlockHeight::try_from(utxo_candidate.block_height)
-            .map_err(Error::ConversionDatabaseInt)?
+        let min_block_height_candidate = utxo_candidate
+            .block_height
             .saturating_sub(MAX_REORG_BLOCK_COUNT);
 
         // We want to go back at least MAX_REORG_BLOCK_COUNT blocks worth
