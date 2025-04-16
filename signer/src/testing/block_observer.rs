@@ -27,6 +27,7 @@ use emily_client::models::Status;
 use rand::seq::IteratorRandom;
 use sbtc::deposits::CreateDepositRequest;
 
+use crate::bitcoin::rpc::BitcoinBlockInfo;
 use crate::bitcoin::BitcoinInteract;
 use crate::bitcoin::GetTransactionFeeResult;
 use crate::bitcoin::TransactionLookupHint;
@@ -52,7 +53,7 @@ use crate::util::ApiFallbackClient;
 /// A test harness for the block observer.
 #[derive(Debug, Clone)]
 pub struct TestHarness {
-    bitcoin_blocks: Vec<bitcoin::Block>,
+    bitcoin_blocks: Vec<BitcoinBlockInfo>,
     /// This represents the Stacks blockchain. The bitcoin::BlockHash
     /// is used to identify tenures. That is, all NakamotoBlocks that
     /// have the same bitcoin::BlockHash occur within the same tenure.
@@ -66,7 +67,7 @@ pub struct TestHarness {
 
 impl TestHarness {
     /// Get the Bitcoin blocks in the test harness.
-    pub fn bitcoin_blocks(&self) -> &[bitcoin::Block] {
+    pub fn bitcoin_blocks(&self) -> &[BitcoinBlockInfo] {
         &self.bitcoin_blocks
     }
 
@@ -74,7 +75,7 @@ impl TestHarness {
     pub fn min_block_height(&self) -> Option<BitcoinBlockHeight> {
         self.bitcoin_blocks
             .iter()
-            .map(|block| block.bip34_block_height().unwrap().into())
+            .map(|block| block.height)
             .min()
     }
 
@@ -133,12 +134,12 @@ impl TestHarness {
         // There is some issue with using heights less than 17, probably
         // minimal pushes or something.
         let mut bitcoin_blocks: Vec<_> = std::iter::successors(Some(17), |height| Some(height + 1))
-            .map(|height| dummy::block(&fake::Faker, rng, height))
+            .map(|height| dummy::block_info(&fake::Faker, rng, height))
             .take(num_bitcoin_blocks)
             .collect();
 
         for idx in 1..bitcoin_blocks.len() {
-            bitcoin_blocks[idx].header.prev_blockhash = bitcoin_blocks[idx - 1].block_hash();
+            bitcoin_blocks[idx].previous_block_hash = bitcoin_blocks[idx - 1].block_hash;
         }
 
         let first_header = NakamotoBlockHeader::empty();
@@ -157,7 +158,7 @@ impl TestHarness {
                             stx_block.header.parent_block_id = last_stx_block_header.block_id();
                             stx_block.header.chain_length = last_stx_block_header.chain_length + 1;
                             *last_stx_block_header = stx_block.header.clone();
-                            Some((stx_block.block_id(), stx_block, btc_block.block_hash()))
+                            Some((stx_block.block_id(), stx_block, btc_block.block_hash))
                         })
                         .collect();
 
@@ -185,7 +186,7 @@ impl TestHarness {
         let headers: Vec<_> = self
             .bitcoin_blocks
             .iter()
-            .map(|block| Ok(block.block_hash()))
+            .map(|block| Ok(block.block_hash))
             .collect();
 
         let (tx, rx) = tokio::sync::mpsc::channel(128);
@@ -219,12 +220,12 @@ impl BitcoinInteract for TestHarness {
         Ok(self
             .bitcoin_blocks
             .iter()
-            .find(|block| &block.block_hash() == block_hash)
+            .find(|block| &block.block_hash == block_hash)
             .map(|block| BitcoinBlockHeader {
                 hash: *block_hash,
-                height: block.bip34_block_height().unwrap().into(),
-                time: block.header.time as u64,
-                previous_block_hash: block.header.prev_blockhash,
+                height: block.height,
+                time: block.time as u64,
+                previous_block_hash: block.previous_block_hash,
             }))
     }
 
@@ -239,11 +240,11 @@ impl BitcoinInteract for TestHarness {
     async fn get_block(
         &self,
         block_hash: &bitcoin::BlockHash,
-    ) -> Result<Option<bitcoin::Block>, Error> {
+    ) -> Result<Option<BitcoinBlockInfo>, Error> {
         Ok(self
             .bitcoin_blocks
             .iter()
-            .find(|block| &block.block_hash() == block_hash)
+            .find(|block| &block.block_hash == block_hash)
             .cloned())
     }
 
@@ -393,7 +394,7 @@ impl StacksInteract for TestHarness {
         let bitcoin_block = self.bitcoin_blocks.last().unwrap();
         Ok(SortitionInfo {
             burn_block_hash: BurnchainHeaderHash::from_bytes_be(
-                bitcoin_block.block_hash().as_byte_array(),
+                bitcoin_block.block_hash.as_byte_array(),
             )
             .ok_or(Error::MissingBlock)?,
             burn_block_height: 0,

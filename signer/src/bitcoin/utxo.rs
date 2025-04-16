@@ -1619,7 +1619,7 @@ impl TxDeconstructor for BitcoinTxInfo {
         let prevout = vin.prevout.as_ref()?;
         Some(PrevoutRef {
             amount: prevout.value,
-            script_pubkey: &prevout.script_pub_key.script,
+            script_pubkey: &prevout.script_pubkey.script,
             txid: vin.details.txid.as_ref()?,
             output_index: vin.details.vout?,
         })

@@ -665,6 +665,8 @@ pub struct TestSweepSetup2 {
     pub deposits: Vec<(DepositInfo, utxo::DepositRequest, BitcoinTxInfo)>,
     /// And initial donation to make to the signers.
     pub donation: OutPoint,
+    /// And initial donation to make to the signers.
+    pub donation_block_hash: bitcoin::BlockHash,
     /// The transaction that swept in the deposit transaction.
     pub sweep_tx_info: Option<SweepTxInfo>,
     /// Information about the sweep transaction when it was broadcast.
@@ -724,7 +726,7 @@ impl TestSweepSetup2 {
         // Start off with some initial UTXOs to work with.
 
         let donation = faucet.send_to(Amount::ONE_BTC.to_sat(), &signer.address);
-        faucet.generate_blocks(1);
+        let donation_block_hash = faucet.generate_blocks(1)[0];
 
         let mut deposits = Vec::new();
 
@@ -799,6 +801,7 @@ impl TestSweepSetup2 {
             sweep_tx_info: None,
             broadcast_info: None,
             donation,
+            donation_block_hash,
             signers,
             stacks_blocks,
             withdrawals,
@@ -847,15 +850,15 @@ impl TestSweepSetup2 {
 
         // We fetch the entire block, to feed to the block observer. It's
         // easier this way.
-        let GetTxResponse { tx, block_hash, .. } = context
+        let tx_info = context
             .bitcoin_client
-            .get_tx(&self.donation.txid)
+            .get_tx_info(&self.donation.txid, &&self.donation_block_hash)
             .unwrap()
             .unwrap();
         let block_observer = BlockObserver { context, bitcoin_blocks: () };
 
         block_observer
-            .extract_sbtc_transactions(block_hash.unwrap(), &[tx])
+            .extract_sbtc_transactions(self.donation_block_hash, &[tx_info])
             .await
             .unwrap();
     }

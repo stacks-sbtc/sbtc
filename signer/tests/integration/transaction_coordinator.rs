@@ -3012,7 +3012,7 @@ fn create_test_setup(
     )
     .unwrap();
     let donation = faucet.send_to(100_000, &signer_address);
-    faucet.generate_blocks(1);
+    let donation_block_hash = faucet.generate_blocks(1)[0];
 
     let utxo = depositor.get_utxos(rpc, None).pop().unwrap();
     let (deposit_tx, deposit_request, deposit_info) = make_deposit_request(
@@ -3048,6 +3048,7 @@ fn create_test_setup(
         sweep_tx_info: None,
         broadcast_info: None,
         donation,
+        donation_block_hash,
         stacks_blocks: vec![stacks_block],
         signers: test_signers,
         withdrawals: vec![WithdrawalTriple {
@@ -4029,7 +4030,7 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
         bitcoin_blocks: (),
     };
 
-    let tx = rpc.get_raw_transaction(&donation.txid, None).unwrap();
+    let tx = context.bitcoin_client.get_tx_info(&donation.txid, &bitcoin_chain_tip).unwrap().unwrap();
     block_observer
         .extract_sbtc_transactions(bitcoin_chain_tip, &[tx])
         .await
