@@ -26,12 +26,12 @@ jobs:
       tag_name: ${{ steps.set-output.outputs.tag_name }}
     steps:
       - name: Show Tag Name
-        id: print-name
+        id: print_name
         run: |
           printf "Tag to be created: ${{ inputs.tag_name }}"
 
       - name: Set Output
-        id: set-output
+        id: set_output
         run: |
           printf "tag_name=${{ inputs.tag_name }}" >> $GITHUB_OUTPUT
 
