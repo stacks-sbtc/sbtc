@@ -41,14 +41,14 @@ async fn test_get_block_works() {
     let block = client.get_block(&BlockHash::all_zeros()).await;
     assert!(block.is_ok_and(|x| x.is_none()));
 
-    for block in blocks.iter() {
+    for block_hash in blocks.iter() {
         let b = client
-            .get_block(block)
+            .get_block(block_hash)
             .await
             .expect("failed to get block")
             .expect("expected to receive a block, not None");
 
-        assert_eq!(b.header.block_hash(), *block);
+        assert_eq!(b.block_hash, *block_hash);
     }
 }
 
