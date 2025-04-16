@@ -150,6 +150,14 @@ impl SignerState {
             .expect("BUG: Failed to acquire write lock")
             .remove(peer);
     }
+
+    /// Get the set of currently connected peers
+    pub fn get_connected_peers(&self) -> HashSet<PeerId> {
+        self.connected_peers
+            .read()
+            .expect("BUG: Failed to acquire readl lock")
+            .clone()
+    }
 }
 
 impl Default for SignerState {
