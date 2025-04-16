@@ -2552,9 +2552,13 @@ pub async fn should_coordinate_dkg(
         let config_signer_set = config.signer.bootstrap_signing_set();
 
         if last_dkg_signer_set != config_signer_set {
-            // additional check whether all signers are connected should go here
-            tracing::info!("signer set has changed, proceeding with DKG");
-            return Ok(true);
+            if context.state().are_all_signers_connected() {
+                tracing::info!("signer set has changed, proceeding with DKG");
+                return Ok(true);
+            } else {
+                tracing::info!("signer set has changed but not all signers are connected");
+                return Ok(false);
+            }
         }
     }
 
