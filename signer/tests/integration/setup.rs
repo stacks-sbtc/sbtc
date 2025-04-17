@@ -23,7 +23,6 @@ use sbtc::testing::regtest::Recipient;
 use signer::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
 use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::bitcoin::rpc::BitcoinTxInfo;
-use signer::bitcoin::rpc::GetTxResponse;
 use signer::bitcoin::utxo;
 use signer::bitcoin::utxo::Fees;
 use signer::bitcoin::utxo::SbtcRequests;

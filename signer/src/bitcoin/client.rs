@@ -21,10 +21,10 @@ use url::Url;
 
 use crate::{error::Error, util::ApiFallbackClient};
 
-use super::rpc::BitcoinBlockInfo;
 use super::BitcoinInteract;
 use super::TransactionLookupHint;
 use super::rpc::BitcoinBlockHeader;
+use super::rpc::BitcoinBlockInfo;
 use super::rpc::BitcoinCoreClient;
 use super::rpc::BitcoinTxInfo;
 use super::rpc::GetTxResponse;

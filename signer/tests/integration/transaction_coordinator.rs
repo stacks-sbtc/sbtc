@@ -4030,7 +4030,11 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
         bitcoin_blocks: (),
     };
 
-    let tx = context.bitcoin_client.get_tx_info(&donation.txid, &bitcoin_chain_tip).unwrap().unwrap();
+    let tx = context
+        .bitcoin_client
+        .get_tx_info(&donation.txid, &bitcoin_chain_tip)
+        .unwrap()
+        .unwrap();
     block_observer
         .extract_sbtc_transactions(bitcoin_chain_tip, &[tx])
         .await

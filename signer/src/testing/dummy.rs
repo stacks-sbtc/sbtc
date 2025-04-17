@@ -47,6 +47,8 @@ use wsts::traits::PartyState;
 use wsts::traits::SignerState;
 
 use crate::bitcoin::rpc::BitcoinBlockInfo;
+use crate::bitcoin::rpc::BitcoinTxInfo;
+use crate::bitcoin::rpc::BitcoinTxVin;
 use crate::bitcoin::rpc::BitcoinTxVinDetails;
 use crate::bitcoin::rpc::BitcoinTxVinPrevout;
 use crate::bitcoin::rpc::BitcoinTxVout;
@@ -114,39 +116,121 @@ pub fn block<R: rand::RngCore + ?Sized>(
     bitcoin::Block { header, txdata }
 }
 
-impl Dummy<Faker> for BitcoinTxVinPrevout {
+impl Dummy<Faker> for BitcoinTxInfo {
     fn dummy_with_rng<R: Rng + ?Sized>(config: &Faker, rng: &mut R) -> Self {
-        let output_amount = Amount::ZERO.to_sat()..Amount::MAX.to_sat();
-        BitcoinTxVinPrevout {
-            generated: false,
-            height: config.fake_with_rng(rng),
-            value: output_amount.choose(rng).map(Amount::from_sat).unwrap(),
-            script_pubkey: OutputScriptPubKey {
-                script: ScriptBuf::new(),
-            }
+        let output_amount = (500_000..1_000_000_000_u64).choose(rng).unwrap();
+
+        let txin = bitcoin::TxIn {
+            previous_output: OutPoint {
+                txid: config.fake_with_rng::<BitcoinTxId, _>(rng).into(),
+                vout: (1..=50u32).choose(rng).unwrap(),
+            },
+            script_sig: ScriptBuf::new(),
+            sequence: bitcoin::Sequence(0),
+            witness: bitcoin::Witness::new(),
+        };
+
+        let txout = bitcoin::TxOut {
+            value: Amount::from_sat(output_amount),
+            script_pubkey: config.fake_with_rng::<ScriptPubKey, _>(rng).into(),
+        };
+
+        let tx = bitcoin::Transaction {
+            version: bitcoin::transaction::Version::TWO,
+            lock_time: bitcoin::absolute::LockTime::ZERO,
+            input: vec![txin],
+            output: vec![txout],
+        };
+
+        tx.fake_with_rng(rng)
+    }
+}
+
+impl Dummy<bitcoin::Transaction> for BitcoinTxInfo {
+    fn dummy_with_rng<R: Rng + ?Sized>(tx: &bitcoin::Transaction, rng: &mut R) -> Self {
+        let fee_rate = (1..=50u64).choose(rng).unwrap();
+
+        let vsize = tx.vsize() as u64;
+        let vout = tx
+            .output
+            .iter()
+            .enumerate()
+            .map(|(vout, tx_out)| BitcoinTxVout::from_tx_out(tx_out, vout as u32))
+            .collect();
+
+        let vin = tx.input.iter().map(|tx_in| tx_in.fake_with_rng(rng));
+
+        BitcoinTxInfo {
+            fee: Some(Amount::from_sat(fee_rate * vsize)),
+            txid: tx.compute_txid(),
+            size: tx.total_size() as u64,
+            vsize,
+            vin: vin.collect(),
+            vout,
+            tx: tx.clone(),
         }
     }
 }
 
-impl Dummy<Faker> for BitcoinTxVinDetails {
-    fn dummy_with_rng<R: Rng + ?Sized>(config: &Faker, rng: &mut R) -> Self {
-        BitcoinTxVinDetails {
-            sequence: config.fake_with_rng(rng),
-            txid: Some(BitcoinTxId::dummy_with_rng(config, rng).into()),
-            vout: (0..50).choose(rng)
+impl Dummy<bitcoin::TxIn> for BitcoinTxVin {
+    fn dummy_with_rng<R: Rng + ?Sized>(tx_in: &bitcoin::TxIn, rng: &mut R) -> Self {
+        // Check whether this is a transaction input into a coinbase
+        // transaction.
+        let non_coinbase = !tx_in.previous_output.is_null();
+        let script_pubkey: ScriptPubKey = Faker.fake_with_rng(rng);
+        let output_amount = script_pubkey.minimal_non_dust().to_sat()..Amount::ONE_BTC.to_sat();
+        BitcoinTxVin {
+            details: BitcoinTxVinDetails {
+                sequence: 0,
+                txid: Some(tx_in.previous_output.txid),
+                vout: Some(tx_in.previous_output.vout),
+            },
+            prevout: non_coinbase.then(|| BitcoinTxVinPrevout {
+                generated: false,
+                height: Faker.fake_with_rng(rng),
+                value: output_amount.choose(rng).map(Amount::from_sat).unwrap(),
+                script_pubkey: OutputScriptPubKey { script: script_pubkey.into() },
+            }),
         }
     }
 }
 
-impl Dummy<Faker> for BitcoinTxVout {
-    fn dummy_with_rng<R: Rng + ?Sized>(_: &Faker, rng: &mut R) -> Self {
-        let output_amount = Amount::ZERO.to_sat()..Amount::MAX.to_sat();
+impl BitcoinTxVout {
+    fn from_tx_out(tx_out: &bitcoin::TxOut, vout: u32) -> Self {
         BitcoinTxVout {
-            value: output_amount.choose(rng).map(Amount::from_sat).unwrap(),
-            vout: (0..50).choose(rng).unwrap(),
+            value: tx_out.value,
+            vout,
             script_pubkey: OutputScriptPubKey {
-                script: ScriptBuf::new(),
-            }
+                script: tx_out.script_pubkey.clone(),
+            },
+        }
+    }
+}
+
+impl Dummy<Faker> for BitcoinBlockInfo {
+    fn dummy_with_rng<R: Rng + ?Sized>(config: &Faker, rng: &mut R) -> Self {
+        let txout = bitcoin::TxOut {
+            value: Amount::ONE_BTC * 50,
+            script_pubkey: config.fake_with_rng::<ScriptPubKey, _>(rng).into(),
+        };
+
+        // The Default implementation for a bitcoin::TxIn looks similar to
+        // the one input of a coinbase transaction.
+        let coinbase = bitcoin::Transaction {
+            version: bitcoin::transaction::Version::TWO,
+            lock_time: bitcoin::absolute::LockTime::ZERO,
+            input: vec![bitcoin::TxIn::default()],
+            output: vec![txout],
+        };
+
+        let time = config.fake_with_rng(rng);
+        BitcoinBlockInfo {
+            block_hash: config.fake_with_rng::<BitcoinBlockHash, _>(rng).into(),
+            height: config.fake_with_rng(rng),
+            time,
+            mediantime: time.checked_sub(600),
+            previous_block_hash: config.fake_with_rng::<BitcoinBlockHash, _>(rng).into(),
+            tx: vec![coinbase.fake_with_rng(rng)],
         }
     }
 }
@@ -158,11 +242,10 @@ pub fn block_info<R: rand::RngCore + ?Sized>(
     _height: i64,
 ) -> BitcoinBlockInfo {
     // BitcoinTxInfo {
-        
+
     // };
     unimplemented!()
 }
-
 
 /// Dummy txid
 pub fn txid<R: rand::RngCore + ?Sized>(config: &fake::Faker, rng: &mut R) -> bitcoin::Txid {

@@ -1058,7 +1058,7 @@ mod tests {
 
         // First we try extracting the transactions from a block that does
         // not contain any transactions spent to the signers
-        let txs = [tx_setup1.tx.clone()];
+        let txs = [tx_setup1.tx.fake_with_rng(&mut rng)];
         block_observer
             .extract_sbtc_transactions(block_hash, &txs)
             .await
@@ -1078,7 +1078,10 @@ mod tests {
 
         // Now we try again, but we include the transaction that spends to
         // the signer. This one should turn out differently.
-        let txs = [tx_setup0.tx.clone(), tx_setup1.tx.clone()];
+        let txs = [
+            tx_setup0.tx.fake_with_rng(&mut rng),
+            tx_setup1.tx.fake_with_rng(&mut rng),
+        ];
         block_observer
             .extract_sbtc_transactions(block_hash, &txs)
             .await
