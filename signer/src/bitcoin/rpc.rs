@@ -218,7 +218,7 @@ pub struct BitcoinBlockInfo {
     pub block_hash: bitcoin::BlockHash,
     /// The number of blocks preceeding this one on the blockchain that
     /// includes this block.
-    pub height: u64,
+    pub height: BitcoinBlockHeight,
     /// The Unix epoch time when the block was mined. It reflects the
     /// timestamp as recorded by the miner of the block.
     pub time: u64,
