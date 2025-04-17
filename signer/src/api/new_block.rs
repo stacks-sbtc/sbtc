@@ -670,12 +670,15 @@ mod tests {
             new_signature_threshold: 3,
         };
 
-        let res = handle_key_rotation(&ctx, event.into()).await;
+        let event: crate::storage::model::KeyRotationEvent = event.into();
+        let res = handle_key_rotation(&ctx, event.clone()).await;
 
         assert!(res.is_ok());
         let db = db.lock().await;
+
         assert_eq!(db.rotate_keys_transactions.len(), 1);
-        assert!(db.rotate_keys_transactions.get(&block_id.into()).is_some());
+        let stored_events = db.rotate_keys_transactions.get(&block_id.into()).unwrap();
+        assert_eq!(stored_events, &vec![event]);
     }
 
     #[test_case(EVENT_OBSERVER_BODY_LIMIT, true; "event within limit")]
