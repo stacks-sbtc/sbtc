@@ -129,10 +129,8 @@ class DepositProcessor:
 
         # Get current blockchain state
         bitcoin_chaintip_height = MempoolAPI.get_tip_height()
-        stacks_chaintip = HiroAPI.get_stacks_block()
 
         logger.info(f"Bitcoin chain tip: {bitcoin_chaintip_height}")
-        logger.info(f"Stacks chain tip: {stacks_chaintip}")
 
         # Fetch pending and accepted deposits.
         # Accepted deposits are included because Bitcoin forks could invalidate
