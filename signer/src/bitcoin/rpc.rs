@@ -133,7 +133,7 @@ pub struct BitcoinTxVin {
 }
 
 /// A detailed vin info for an input into a transacion.
-/// 
+///
 /// This struct ignores two fields often provided in bitcoin core's RPC
 /// responses: the `scriptSig` and the `txinwitness` field for non-coinbase
 /// transactions and the `coinbase` field for coinbase transactions. See
