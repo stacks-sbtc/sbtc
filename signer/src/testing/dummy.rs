@@ -120,7 +120,7 @@ impl Dummy<Faker> for BitcoinTxInfo {
     fn dummy_with_rng<R: Rng + ?Sized>(config: &Faker, rng: &mut R) -> Self {
         let output_amount = (500_000..1_000_000_000_u64).choose(rng).unwrap();
 
-        let txin = bitcoin::TxIn {
+        let tx_in = bitcoin::TxIn {
             previous_output: OutPoint {
                 txid: config.fake_with_rng::<BitcoinTxId, _>(rng).into(),
                 vout: (1..=50u32).choose(rng).unwrap(),
@@ -130,7 +130,7 @@ impl Dummy<Faker> for BitcoinTxInfo {
             witness: bitcoin::Witness::new(),
         };
 
-        let txout = bitcoin::TxOut {
+        let tx_out = bitcoin::TxOut {
             value: Amount::from_sat(output_amount),
             script_pubkey: config.fake_with_rng::<ScriptPubKey, _>(rng).into(),
         };
@@ -138,8 +138,8 @@ impl Dummy<Faker> for BitcoinTxInfo {
         let tx = bitcoin::Transaction {
             version: bitcoin::transaction::Version::TWO,
             lock_time: bitcoin::absolute::LockTime::ZERO,
-            input: vec![txin],
-            output: vec![txout],
+            input: vec![tx_in],
+            output: vec![tx_out],
         };
 
         tx.fake_with_rng(rng)
@@ -181,7 +181,7 @@ impl Dummy<bitcoin::TxIn> for BitcoinTxVin {
         let output_amount = script_pubkey.minimal_non_dust().to_sat()..Amount::ONE_BTC.to_sat();
         BitcoinTxVin {
             details: BitcoinTxVinDetails {
-                sequence: 0,
+                sequence: tx_in.sequence.to_consensus_u32(),
                 txid: Some(tx_in.previous_output.txid),
                 vout: Some(tx_in.previous_output.vout),
             },
@@ -192,6 +192,13 @@ impl Dummy<bitcoin::TxIn> for BitcoinTxVin {
                 script_pubkey: OutputScriptPubKey { script: script_pubkey.into() },
             }),
         }
+    }
+}
+
+impl Dummy<Faker> for BitcoinBlockInfo {
+    fn dummy_with_rng<R: Rng + ?Sized>(_: &Faker, rng: &mut R) -> Self {
+        let block_height = (0..i64::MAX as u64).choose(rng).unwrap();
+        BitcoinBlockInfo::random_with_height(block_height, rng)
     }
 }
 
@@ -207,44 +214,39 @@ impl BitcoinTxVout {
     }
 }
 
-impl Dummy<Faker> for BitcoinBlockInfo {
-    fn dummy_with_rng<R: Rng + ?Sized>(config: &Faker, rng: &mut R) -> Self {
-        let txout = bitcoin::TxOut {
-            value: Amount::ONE_BTC * 50,
-            script_pubkey: config.fake_with_rng::<ScriptPubKey, _>(rng).into(),
-        };
-
+impl BitcoinBlockInfo {
+    /// Create a random bitcoin block with the given height
+    pub fn random_with_height<R: Rng + ?Sized>(block_height: u64, rng: &mut R) -> Self {
         // The Default implementation for a bitcoin::TxIn looks similar to
         // the one input of a coinbase transaction.
+        let coinbase_tx_in = bitcoin::TxIn {
+            script_sig: bitcoin::script::Builder::new()
+                .push_int(block_height.min(i64::MAX as u64) as i64)
+                .into_script(),
+            ..Default::default()
+        };
+        let tx_out = bitcoin::TxOut {
+            value: Amount::ONE_BTC * 50,
+            script_pubkey: Faker.fake_with_rng::<ScriptPubKey, _>(rng).into(),
+        };
+
         let coinbase = bitcoin::Transaction {
             version: bitcoin::transaction::Version::TWO,
             lock_time: bitcoin::absolute::LockTime::ZERO,
-            input: vec![bitcoin::TxIn::default()],
-            output: vec![txout],
+            input: vec![coinbase_tx_in],
+            output: vec![tx_out],
         };
 
-        let time = config.fake_with_rng(rng);
+        let time = Faker.fake_with_rng(rng);
         BitcoinBlockInfo {
-            block_hash: config.fake_with_rng::<BitcoinBlockHash, _>(rng).into(),
-            height: config.fake_with_rng(rng),
+            block_hash: Faker.fake_with_rng::<BitcoinBlockHash, _>(rng).into(),
+            height: block_height,
             time,
-            mediantime: time.checked_sub(600),
-            previous_block_hash: config.fake_with_rng::<BitcoinBlockHash, _>(rng).into(),
+            mediantime: time.checked_sub(6 * 600),
+            previous_block_hash: Faker.fake_with_rng::<BitcoinBlockHash, _>(rng).into(),
             tx: vec![coinbase.fake_with_rng(rng)],
         }
     }
-}
-
-/// Dummy block
-pub fn block_info<R: rand::RngCore + ?Sized>(
-    _config: &fake::Faker,
-    _rng: &mut R,
-    _height: i64,
-) -> BitcoinBlockInfo {
-    // BitcoinTxInfo {
-
-    // };
-    unimplemented!()
 }
 
 /// Dummy txid
