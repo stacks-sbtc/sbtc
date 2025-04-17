@@ -650,6 +650,7 @@ mod tests {
     /// including updating the database with the new key rotation transaction.
     #[tokio::test]
     async fn test_handle_key_rotation() {
+        let mut rng = get_rng();
         let ctx = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
@@ -657,13 +658,13 @@ mod tests {
 
         let db = ctx.inner_storage();
 
-        let block_id: StacksBlockId = StacksBlockId(fake::Faker.fake_with_rng(&mut OsRng));
+        let block_id: StacksBlockId = StacksBlockId(fake::Faker.fake_with_rng(&mut rng));
         let event = KeyRotationEvent {
-            txid: sbtc::events::StacksTxid(fake::Faker.fake_with_rng(&mut OsRng)),
+            txid: sbtc::events::StacksTxid(fake::Faker.fake_with_rng(&mut rng)),
             block_id,
-            new_aggregate_pubkey: SECP256K1.generate_keypair(&mut OsRng).1.into(),
+            new_aggregate_pubkey: SECP256K1.generate_keypair(&mut rng).1.into(),
             new_keys: (0..3)
-                .map(|_| SECP256K1.generate_keypair(&mut OsRng).1.into())
+                .map(|_| SECP256K1.generate_keypair(&mut rng).1.into())
                 .collect(),
             new_address: PrincipalData::Standard(StandardPrincipalData::transient()).into(),
             new_signature_threshold: 3,
