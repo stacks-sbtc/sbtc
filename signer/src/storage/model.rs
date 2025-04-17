@@ -1,14 +1,18 @@
 //! Database models for the signer.
 
+use std::cmp::{PartialEq, PartialOrd};
 use std::collections::BTreeSet;
+use std::convert::From;
+use std::num::TryFromIntError;
 use std::ops::Deref;
+use std::ops::{Add, Sub};
 
 use bitcoin::OutPoint;
 use bitcoin::hashes::Hash as _;
 use bitvec::array::BitArray;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
 use clarity::vm::types::PrincipalData;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use stacks_common::types::chainstate::BurnchainHeaderHash;
 use stacks_common::types::chainstate::StacksBlockId;
 
@@ -98,9 +102,7 @@ pub struct BitcoinBlock {
     /// Block hash.
     pub block_hash: BitcoinBlockHash,
     /// Block height.
-    #[sqlx(try_from = "i64")]
-    #[cfg_attr(feature = "testing", dummy(faker = "0..i64::MAX as u64"))]
-    pub block_height: u64,
+    pub block_height: BitcoinBlockHeight,
     /// Hash of the parent block.
     pub parent_hash: BitcoinBlockHash,
 }
@@ -117,7 +119,8 @@ impl From<&bitcoin::Block> for BitcoinBlock {
             block_hash: block.block_hash().into(),
             block_height: block
                 .bip34_block_height()
-                .expect("Failed to get block height"),
+                .expect("Failed to get block height")
+                .into(),
             parent_hash: block.header.prev_blockhash.into(),
         }
     }
@@ -145,10 +148,8 @@ impl From<bitcoin::Block> for BitcoinBlock {
 pub struct StacksBlock {
     /// Block hash.
     pub block_hash: StacksBlockHash,
-    /// Block height.
-    #[sqlx(try_from = "i64")]
-    #[cfg_attr(feature = "testing", dummy(faker = "0..u32::MAX as u64"))]
-    pub block_height: u64,
+    /// Block height.    
+    pub block_height: StacksBlockHeight,
     /// Hash of the parent block.
     pub parent_hash: StacksBlockHash,
     /// The bitcoin block this stacks block is build upon (matching consensus hash)
@@ -160,7 +161,7 @@ impl StacksBlock {
     pub fn from_nakamoto_block(block: &NakamotoBlock, bitcoin_anchor: &BitcoinBlockHash) -> Self {
         Self {
             block_hash: block.block_id().into(),
-            block_height: block.header.chain_length,
+            block_height: block.header.chain_length.into(),
             parent_hash: block.header.parent_block_id.into(),
             bitcoin_anchor: *bitcoin_anchor,
         }
@@ -310,9 +311,7 @@ pub struct WithdrawalRequest {
     pub sender_address: StacksPrincipal,
     /// The block height of the bitcoin blockchain when the stacks
     /// transaction that emitted this event was executed.
-    #[sqlx(try_from = "i64")]
-    #[cfg_attr(feature = "testing", dummy(faker = "0..u32::MAX as u64"))]
-    pub bitcoin_block_height: u64,
+    pub bitcoin_block_height: BitcoinBlockHeight,
 }
 
 impl WithdrawalRequest {
@@ -405,9 +404,8 @@ pub struct SweptDepositRequest {
     /// The block id of the bitcoin block that includes the sweep
     /// transaction.
     pub sweep_block_hash: BitcoinBlockHash,
-    /// The block height of the block referenced by the `sweep_block_hash`.
-    #[sqlx(try_from = "i64")]
-    pub sweep_block_height: u64,
+    /// The block height of the block referenced by the `sweep_block_hash`.   
+    pub sweep_block_height: BitcoinBlockHeight,
     /// Transaction ID of the deposit request transaction.
     pub txid: BitcoinTxId,
     /// Index of the deposit request UTXO.
@@ -451,9 +449,8 @@ pub struct SweptWithdrawalRequest {
     /// The block id of the stacks block that includes this sweep
     /// transaction.
     pub sweep_block_hash: BitcoinBlockHash,
-    /// The block height of the block that includes the sweep transaction.
-    #[sqlx(try_from = "i64")]
-    pub sweep_block_height: u64,
+    /// The block height of the block that includes the sweep transaction.    
+    pub sweep_block_height: BitcoinBlockHeight,
     /// Request ID of the withdrawal request. These are supposed to be
     /// unique, but there can be duplicates if there is a reorg that
     /// affects a transaction that calls the `initiate-withdrawal-request`
@@ -534,9 +531,7 @@ pub struct EncryptedDkgShares {
     pub started_at_bitcoin_block_hash: BitcoinBlockHash,
     /// The block height of the chain tip of the canonical bitcoin blockchain
     /// when the DKG round associated with these shares started.
-    #[sqlx(try_from = "i64")]
-    #[cfg_attr(feature = "testing", dummy(faker = "0..i64::MAX as u64"))]
-    pub started_at_bitcoin_block_height: u64,
+    pub started_at_bitcoin_block_height: BitcoinBlockHeight,
 }
 
 /// Persisted public DKG shares from other signers
@@ -888,9 +883,7 @@ impl std::fmt::Display for BitcoinBlockHash {
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
 pub struct BitcoinBlockRef {
     /// The height of the block in the bitcoin blockchain.
-    #[cfg_attr(feature = "testing", dummy(faker = "0..u32::MAX as u64"))]
-    #[sqlx(try_from = "i64")]
-    pub block_height: u64,
+    pub block_height: BitcoinBlockHeight,
     /// Bitcoin block hash. It uniquely identifies the bitcoin block.
     pub block_hash: BitcoinBlockHash,
 }
@@ -1183,7 +1176,7 @@ impl From<sbtc::events::CompletedDepositEvent> for CompletedDepositEvent {
             amount: sbtc_event.amount,
             outpoint: sbtc_event.outpoint,
             sweep_block_hash: sweep_hash,
-            sweep_block_height: sbtc_event.sweep_block_height,
+            sweep_block_height: sbtc_event.sweep_block_height.into(),
             sweep_txid: sbtc_event.sweep_txid.into(),
         }
     }
@@ -1199,7 +1192,7 @@ impl From<sbtc::events::WithdrawalAcceptEvent> for WithdrawalAcceptEvent {
             outpoint: sbtc_event.outpoint,
             fee: sbtc_event.fee,
             sweep_block_hash: sbtc_event.sweep_block_hash.into(),
-            sweep_block_height: sbtc_event.sweep_block_height,
+            sweep_block_height: sbtc_event.sweep_block_height.into(),
             sweep_txid: sbtc_event.sweep_txid.into(),
         }
     }
@@ -1226,7 +1219,7 @@ impl From<sbtc::events::WithdrawalCreateEvent> for WithdrawalRequest {
             amount: sbtc_event.amount,
             max_fee: sbtc_event.max_fee,
             sender_address: sbtc_event.sender.into(),
-            bitcoin_block_height: sbtc_event.block_height,
+            bitcoin_block_height: sbtc_event.block_height.into(),
         }
     }
 }
@@ -1273,7 +1266,7 @@ pub struct CompletedDepositEvent {
     /// The bitcoin block hash where the sweep transaction was included.
     pub sweep_block_hash: BitcoinBlockHash,
     /// The bitcoin block height where the sweep transaction was included.
-    pub sweep_block_height: u64,
+    pub sweep_block_height: BitcoinBlockHeight,
     /// The transaction id of the bitcoin transaction that fulfilled the
     /// deposit.
     pub sweep_txid: BitcoinTxId,
@@ -1303,7 +1296,7 @@ pub struct WithdrawalAcceptEvent {
     /// The bitcoin block hash where the sweep transaction was included.
     pub sweep_block_hash: BitcoinBlockHash,
     /// The bitcoin block height where the sweep transaction was included.
-    pub sweep_block_height: u64,
+    pub sweep_block_height: BitcoinBlockHeight,
     /// The transaction id of the bitcoin transaction that fulfilled the
     /// withdrawal request.
     pub sweep_txid: BitcoinTxId,
@@ -1326,6 +1319,236 @@ pub struct WithdrawalRejectEvent {
     /// accept the request.
     pub signer_bitmap: BitArray<[u8; 16]>,
 }
+
+impl From<u8> for BitcoinBlockHeight {
+    fn from(value: u8) -> Self {
+        Self(value as u64)
+    }
+}
+impl From<u16> for BitcoinBlockHeight {
+    fn from(value: u16) -> Self {
+        Self(value as u64)
+    }
+}
+impl From<u32> for BitcoinBlockHeight {
+    fn from(value: u32) -> Self {
+        Self(value as u64)
+    }
+}
+impl From<u64> for BitcoinBlockHeight {
+    fn from(value: u64) -> Self {
+        Self(value)
+    }
+}
+impl From<usize> for BitcoinBlockHeight {
+    fn from(value: usize) -> Self {
+        Self(value as u64)
+    }
+}
+
+// Conversion BitcoinBlockHeight => u64  is not implemented intentionally.
+// Use deref instead.
+// This was done for consistency across the codebase.
+
+impl From<BitcoinBlockHeight> for u128 {
+    fn from(value: BitcoinBlockHeight) -> Self {
+        *value as u128
+    }
+}
+
+impl std::fmt::Display for BitcoinBlockHeight {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+impl Deref for BitcoinBlockHeight {
+    type Target = u64;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl TryFrom<BitcoinBlockHeight> for i64 {
+    type Error = TryFromIntError;
+    fn try_from(value: BitcoinBlockHeight) -> Result<Self, Self::Error> {
+        i64::try_from(value.0)
+    }
+}
+
+impl TryFrom<i64> for BitcoinBlockHeight {
+    type Error = TryFromIntError;
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        u64::try_from(value).map(Self)
+    }
+}
+
+impl Add<u64> for BitcoinBlockHeight {
+    type Output = BitcoinBlockHeight;
+    fn add(self, other: u64) -> Self::Output {
+        Self(self.0.add(other))
+    }
+}
+impl Add<BitcoinBlockHeight> for u64 {
+    type Output = BitcoinBlockHeight;
+    fn add(self, other: BitcoinBlockHeight) -> Self::Output {
+        BitcoinBlockHeight((self).add(other.0))
+    }
+}
+impl Add for BitcoinBlockHeight {
+    type Output = BitcoinBlockHeight;
+    fn add(self, other: BitcoinBlockHeight) -> Self::Output {
+        Self(self.0.add(other.0))
+    }
+}
+
+impl Sub<u64> for BitcoinBlockHeight {
+    // Height - int is still height.
+    type Output = BitcoinBlockHeight;
+    fn sub(self, other: u64) -> Self::Output {
+        BitcoinBlockHeight((*self).sub(other))
+    }
+}
+impl Sub for BitcoinBlockHeight {
+    // Diff of two heights is int, not height.
+    type Output = u64;
+    fn sub(self, other: BitcoinBlockHeight) -> Self::Output {
+        self.0.sub(other.0)
+    }
+}
+
+impl BitcoinBlockHeight {
+    /// Behaves same as u64.saturating_add
+    pub fn saturating_add(self, rhs: impl Into<BitcoinBlockHeight>) -> Self {
+        let rhs: u64 = rhs.into().0;
+        Self(self.0.saturating_add(rhs))
+    }
+
+    /// Behaves same as u64.saturating_sub
+    pub fn saturating_sub(self, rhs: impl Into<BitcoinBlockHeight>) -> Self {
+        let rhs: u64 = rhs.into().0;
+        Self(self.0.saturating_sub(rhs))
+    }
+}
+
+impl From<u8> for StacksBlockHeight {
+    fn from(value: u8) -> Self {
+        Self(value as u64)
+    }
+}
+impl From<u16> for StacksBlockHeight {
+    fn from(value: u16) -> Self {
+        Self(value as u64)
+    }
+}
+impl From<u32> for StacksBlockHeight {
+    fn from(value: u32) -> Self {
+        Self(value as u64)
+    }
+}
+impl From<u64> for StacksBlockHeight {
+    fn from(value: u64) -> Self {
+        Self(value)
+    }
+}
+impl From<usize> for StacksBlockHeight {
+    fn from(value: usize) -> Self {
+        Self(value as u64)
+    }
+}
+
+// Conversion StacksBlockHeight => u64  is not implemented intentionally.
+// Use deref instead.
+// This was done for consistency across the codebase.
+
+impl From<StacksBlockHeight> for u128 {
+    fn from(value: StacksBlockHeight) -> Self {
+        *value as u128
+    }
+}
+
+impl std::fmt::Display for StacksBlockHeight {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+impl Deref for StacksBlockHeight {
+    type Target = u64;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl TryFrom<StacksBlockHeight> for i64 {
+    type Error = TryFromIntError;
+    fn try_from(value: StacksBlockHeight) -> Result<Self, Self::Error> {
+        i64::try_from(value.0)
+    }
+}
+
+impl TryFrom<i64> for StacksBlockHeight {
+    type Error = TryFromIntError;
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        u64::try_from(value).map(Self)
+    }
+}
+
+impl Add<u64> for StacksBlockHeight {
+    type Output = StacksBlockHeight;
+    fn add(self, other: u64) -> Self::Output {
+        Self(self.0.add(other))
+    }
+}
+impl Add<StacksBlockHeight> for u64 {
+    type Output = StacksBlockHeight;
+    fn add(self, other: StacksBlockHeight) -> Self::Output {
+        StacksBlockHeight((self).add(other.0))
+    }
+}
+impl Add for StacksBlockHeight {
+    type Output = StacksBlockHeight;
+    fn add(self, other: StacksBlockHeight) -> Self::Output {
+        Self(self.0.add(other.0))
+    }
+}
+
+impl Sub<u64> for StacksBlockHeight {
+    // Height - int is still height.
+    type Output = StacksBlockHeight;
+    fn sub(self, other: u64) -> Self::Output {
+        StacksBlockHeight((*self).sub(other))
+    }
+}
+impl Sub for StacksBlockHeight {
+    // Diff of two heights is int, not height.
+    type Output = u64;
+    fn sub(self, other: StacksBlockHeight) -> Self::Output {
+        self.0.sub(other.0)
+    }
+}
+impl StacksBlockHeight {
+    /// Behaves same as u64.saturating_add
+    pub fn saturating_add(self, rhs: impl Into<StacksBlockHeight>) -> Self {
+        let rhs: u64 = rhs.into().0;
+        Self(self.0.saturating_add(rhs))
+    }
+
+    /// Behaves same as u64.saturating_sub
+    pub fn saturating_sub(self, rhs: impl Into<StacksBlockHeight>) -> Self {
+        let rhs: u64 = rhs.into().0;
+        Self(self.0.saturating_sub(rhs))
+    }
+}
+
+/// Bitcoin block height
+#[derive(
+    Debug, Default, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+)]
+#[serde(transparent)]
+pub struct BitcoinBlockHeight(u64);
+/// Stacks block height
+#[derive(
+    Debug, Default, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+)]
+#[serde(transparent)]
+pub struct StacksBlockHeight(u64);
 
 #[cfg(test)]
 mod tests {
