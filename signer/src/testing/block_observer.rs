@@ -72,7 +72,7 @@ impl TestHarness {
     }
 
     /// The minimum block height amount blocks in this blockchain
-    pub fn min_block_height(&self) -> Option<u64> {
+    pub fn min_block_height(&self) -> Option<BitcoinBlockHeight> {
         self.bitcoin_blocks.iter().map(|block| block.height).min()
     }
 
