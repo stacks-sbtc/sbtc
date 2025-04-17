@@ -1942,12 +1942,12 @@ impl super::DbRead for PgStore {
     async fn get_last_key_rotation(
         &self,
         chain_tip: &model::BitcoinBlockHash,
-    ) -> Result<Option<model::RotateKeysTransaction>, Error> {
+    ) -> Result<Option<model::KeyRotationEvent>, Error> {
         let Some(stacks_chain_tip) = self.get_stacks_chain_tip(chain_tip).await? else {
             return Ok(None);
         };
 
-        sqlx::query_as::<_, model::RotateKeysTransaction>(
+        sqlx::query_as::<_, model::KeyRotationEvent>(
             r#"
             WITH RECURSIVE stacks_blocks AS (
                 SELECT
@@ -1970,13 +1970,14 @@ impl super::DbRead for PgStore {
             )
             SELECT
                 rkt.txid
+              , rkt.block_hash
               , rkt.address
               , rkt.aggregate_key
               , rkt.signer_set
               , rkt.signatures_required
             FROM sbtc_signer.rotate_keys_transactions rkt
-            JOIN sbtc_signer.stacks_transactions st ON st.txid = rkt.txid
-            JOIN stacks_blocks sb on st.block_hash = sb.block_hash
+            JOIN stacks_blocks AS sb
+              ON rkt.block_hash = sb.block_hash
             ORDER BY sb.block_height DESC, sb.block_hash DESC, rkt.txid DESC
             LIMIT 1
             "#,
@@ -2021,9 +2022,9 @@ impl super::DbRead for PgStore {
             )
             SELECT EXISTS (
                 SELECT TRUE
-                FROM sbtc_signer.rotate_keys_transactions rkt
-                JOIN sbtc_signer.stacks_transactions st ON st.txid = rkt.txid
-                JOIN stacks_blocks sb on st.block_hash = sb.block_hash
+                FROM sbtc_signer.rotate_keys_transactions AS rkt
+                JOIN stacks_blocks AS sb 
+                  ON rkt.block_hash = sb.block_hash
                 WHERE rkt.signer_set = $2
                   AND rkt.aggregate_key = $3
                   AND rkt.signatures_required = $4
@@ -3083,21 +3084,23 @@ impl super::DbWrite for PgStore {
 
     async fn write_rotate_keys_transaction(
         &self,
-        key_rotation: &model::RotateKeysTransaction,
+        key_rotation: &model::KeyRotationEvent,
     ) -> Result<(), Error> {
         sqlx::query(
             r#"
             INSERT INTO sbtc_signer.rotate_keys_transactions (
                   txid
+                , block_hash
                 , address
                 , aggregate_key
                 , signer_set
                 , signatures_required)
             VALUES
-                ($1, $2, $3, $4, $5)
+                ($1, $2, $3, $4, $5, $6)
             ON CONFLICT DO NOTHING"#,
         )
         .bind(key_rotation.txid)
+        .bind(key_rotation.block_hash)
         .bind(&key_rotation.address)
         .bind(key_rotation.aggregate_key)
         .bind(&key_rotation.signer_set)

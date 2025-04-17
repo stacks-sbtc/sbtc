@@ -15,7 +15,7 @@ use signer::storage::DbWrite as _;
 use signer::storage::model::BitcoinBlock;
 use signer::storage::model::DkgSharesStatus;
 use signer::storage::model::EncryptedDkgShares;
-use signer::storage::model::RotateKeysTransaction;
+use signer::storage::model::KeyRotationEvent;
 use signer::storage::model::StacksPrincipal;
 use signer::storage::model::Transaction;
 use signer::storage::model::TransactionType;
@@ -136,7 +136,8 @@ impl TestRotateKeySetup {
         let address = StacksPrincipal::from(clarity::vm::types::PrincipalData::from(
             self.wallet.address().clone(),
         ));
-        let rotate_key_tx = RotateKeysTransaction {
+        let rotate_key_tx = KeyRotationEvent {
+            block_hash: self.raw_tx.block_hash.into(),
             address,
             txid: self.raw_tx.txid.into(),
             aggregate_key,

@@ -291,7 +291,7 @@ pub trait DbRead {
     fn get_last_key_rotation(
         &self,
         chain_tip: &model::BitcoinBlockHash,
-    ) -> impl Future<Output = Result<Option<model::RotateKeysTransaction>, Error>> + Send;
+    ) -> impl Future<Output = Result<Option<model::KeyRotationEvent>, Error>> + Send;
 
     /// Checks if a key rotation exists on the canonical chain
     fn key_rotation_exists(
@@ -519,7 +519,7 @@ pub trait DbWrite {
     /// Write rotate-keys transaction
     fn write_rotate_keys_transaction(
         &self,
-        key_rotation: &model::RotateKeysTransaction,
+        key_rotation: &model::KeyRotationEvent,
     ) -> impl Future<Output = Result<(), Error>> + Send;
 
     /// Write the withdrawal-reject event to the database.

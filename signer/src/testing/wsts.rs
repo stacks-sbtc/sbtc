@@ -508,8 +508,9 @@ impl SignerSet {
             )
             .expect("failed to create StacksAddress"),
         ));
-        let rotate_keys_tx = model::RotateKeysTransaction {
+        let rotate_keys_tx = model::KeyRotationEvent {
             aggregate_key: shares.aggregate_key,
+            block_hash: stacks_chain_tip.block_hash,
             address,
             txid,
             signer_set: self.signer_keys(),
