@@ -62,6 +62,7 @@ use crate::stacks::contracts::RejectWithdrawalV1;
 use crate::stacks::contracts::RotateKeysV1;
 use crate::stacks::contracts::SmartContract;
 use crate::stacks::contracts::StacksTx;
+use crate::storage::model;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinTxId;
 use crate::storage::model::QualifiedRequestId;
@@ -581,6 +582,97 @@ impl TryFrom<proto::StacksTransactionSignRequest> for StacksTransactionSignReque
             tx_fee: value.tx_fee,
             txid: StacksTxId::try_from(value.txid.required()?)?.into(),
             contract_tx,
+        })
+    }
+}
+
+impl From<model::EncryptedDkgShares> for proto::sbtc::signer::v1::backups::DkgShares {
+    fn from(value: model::EncryptedDkgShares) -> Self {
+        let signer_set_public_keys = value
+            .signer_set_public_keys
+            .into_iter()
+            .map(proto::PublicKey::from)
+            .collect::<Vec<_>>();
+
+        // Convert DKG status enum
+        let dkg_shares_status = match value.dkg_shares_status {
+            model::DkgSharesStatus::Unverified => {
+                proto::sbtc::signer::v1::backups::DkgSharesStatus::Unverified
+            }
+            model::DkgSharesStatus::Verified => {
+                proto::sbtc::signer::v1::backups::DkgSharesStatus::Verified
+            }
+            model::DkgSharesStatus::Failed => {
+                proto::sbtc::signer::v1::backups::DkgSharesStatus::Failed
+            }
+        };
+
+        proto::sbtc::signer::v1::backups::DkgShares {
+            aggregate_key: Some(value.aggregate_key.into()),
+            tweaked_aggregate_key: Some(value.tweaked_aggregate_key.into()),
+            encrypted_private_shares: value.encrypted_private_shares,
+            public_shares: value.public_shares,
+            script_pubkey: value.script_pubkey.to_bytes(),
+            signer_set_public_keys,
+            signature_share_threshold: value.signature_share_threshold as u32,
+            dkg_shares_status: dkg_shares_status.into(),
+            started_at_bitcoin_block_hash: Some(value.started_at_bitcoin_block_hash.into()),
+            started_at_bitcoin_block_height: value.started_at_bitcoin_block_height,
+        }
+    }
+}
+
+impl TryFrom<proto::sbtc::signer::v1::backups::DkgShares> for model::EncryptedDkgShares {
+    type Error = Error;
+
+    fn try_from(value: proto::sbtc::signer::v1::backups::DkgShares) -> Result<Self, Self::Error> {
+        // Convert signer_set_public_keys first as it involves fallible conversion
+        let signer_set_public_keys = value
+            .signer_set_public_keys
+            .into_iter()
+            .map(|pk| pk.try_into()) // Assuming proto::PublicKey -> model::PublicKey is TryFrom
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // Convert DKG status enum
+        let dkg_shares_status =
+            proto::sbtc::signer::v1::backups::DkgSharesStatus::try_from(value.dkg_shares_status)
+                .map_err(|_| Error::TypeConversion)?; // Handle invalid enum value
+
+        let db_dkg_shares_status = match dkg_shares_status {
+            proto::sbtc::signer::v1::backups::DkgSharesStatus::Unspecified => {
+                Err(Error::TypeConversion)
+            } // Or handle as default?
+            proto::sbtc::signer::v1::backups::DkgSharesStatus::Unverified => {
+                Ok(model::DkgSharesStatus::Unverified)
+            }
+            proto::sbtc::signer::v1::backups::DkgSharesStatus::Verified => {
+                Ok(model::DkgSharesStatus::Verified)
+            }
+            proto::sbtc::signer::v1::backups::DkgSharesStatus::Failed => {
+                Ok(model::DkgSharesStatus::Failed)
+            }
+        }?;
+
+        // Convert script_pubkey bytes back to ScriptPubKey
+        let script_pubkey = model::ScriptPubKey::from_bytes(value.script_pubkey);
+
+        Ok(model::EncryptedDkgShares {
+            aggregate_key: value.aggregate_key.required()?.try_into()?, // Assuming TryFrom impl exists
+            tweaked_aggregate_key: value.tweaked_aggregate_key.required()?.try_into()?, // Assuming TryFrom impl exists
+            encrypted_private_shares: value.encrypted_private_shares, // Vec<u8> matches model::Bytes
+            public_shares: value.public_shares, // Vec<u8> matches model::Bytes
+            script_pubkey,                      // Use the converted ScriptPubKey
+            signer_set_public_keys,             // Use the converted Vec
+            signature_share_threshold: value
+                .signature_share_threshold
+                .try_into() // u32 -> u16
+                .map_err(|_| Error::TypeConversion)?, // Handle potential overflow
+            dkg_shares_status: db_dkg_shares_status, // Use the converted DB enum
+            started_at_bitcoin_block_hash: value
+                .started_at_bitcoin_block_hash
+                .required()?
+                .try_into()?, // Assuming TryFrom impl exists
+            started_at_bitcoin_block_height: value.started_at_bitcoin_block_height, // u64 matches
         })
     }
 }
@@ -1724,6 +1816,7 @@ mod tests {
     #[test_case(PhantomData::<(Fees, proto::Fees)>; "Fees")]
     #[test_case(PhantomData::<(BitcoinPreSignRequest, proto::BitcoinPreSignRequest)>; "BitcoinPreSignRequest")]
     #[test_case(PhantomData::<(BitcoinPreSignAck, proto::BitcoinPreSignAck)>; "BitcoinPreSignAck")]
+    #[test_case(PhantomData::<(model::EncryptedDkgShares, proto::sbtc::signer::v1::backups::DkgShares)>; "EncryptedDkgShares")]
     fn convert_protobuf_type<T, U, E>(_: PhantomData<(T, U)>)
     where
         // `.unwrap()` requires that `E` implement `std::fmt::Debug` and
