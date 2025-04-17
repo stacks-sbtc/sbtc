@@ -29,7 +29,7 @@ pub struct SignerState {
     // block observer's duties when it observes a new bitcoin block.
     bitcoin_chain_tip: RwLock<BitcoinBlockRef>,
     // All peers currently connected
-    connected_peers: RwLock<BTreeSet<PeerId>>,
+    connected_peers: RwLock<HashSet<PeerId>>,
 }
 
 impl SignerState {
@@ -152,7 +152,7 @@ impl SignerState {
     }
 
     /// Get the set of currently connected peers
-    pub fn get_connected_peers(&self) -> BTreeSet<PeerId> {
+    pub fn get_connected_peers(&self) -> HashSet<PeerId> {
         self.connected_peers
             .read()
             .expect("BUG: Failed to acquire readl lock")
@@ -186,7 +186,7 @@ impl Default for SignerState {
                 block_height: 0,
                 block_hash: BitcoinBlockHash::from([0; 32]),
             }),
-            connected_peers: RwLock::new(BTreeSet::new()),
+            connected_peers: RwLock::new(HashSet::new()),
         }
     }
 }
