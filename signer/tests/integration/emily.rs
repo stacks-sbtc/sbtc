@@ -220,7 +220,9 @@ async fn deposit_flow() {
 
     // Create a fresh block for the block observer to process
     let mut deposit_block: BitcoinBlockInfo = fake::Faker.fake_with_rng(&mut rng);
-    deposit_block.tx.push(deposit_tx.fake_with_rng(&mut rng));
+    deposit_block
+        .transactions
+        .push(deposit_tx.fake_with_rng(&mut rng));
 
     let deposit_block_hash = deposit_block.block_hash;
 

@@ -370,7 +370,7 @@ impl<C: Context, B> BlockObserver<C, B> {
             .get_storage_mut()
             .write_bitcoin_block(&db_block)
             .await?;
-        self.extract_sbtc_transactions(block_header.hash, &block.tx)
+        self.extract_sbtc_transactions(block_header.hash, &block.transactions)
             .await?;
 
         tracing::debug!("finished processing bitcoin block");

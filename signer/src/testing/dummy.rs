@@ -187,7 +187,6 @@ impl Dummy<bitcoin::TxIn> for BitcoinTxVin {
             },
             prevout: non_coinbase.then(|| BitcoinTxVinPrevout {
                 generated: false,
-                height: Faker.fake_with_rng(rng),
                 value: output_amount.choose(rng).map(Amount::from_sat).unwrap(),
                 script_pubkey: OutputScriptPubKey { script: script_pubkey.into() },
             }),
@@ -244,7 +243,7 @@ impl BitcoinBlockInfo {
             time,
             mediantime: time.checked_sub(6 * 600),
             previous_block_hash: Faker.fake_with_rng::<BitcoinBlockHash, _>(rng).into(),
-            tx: vec![coinbase.fake_with_rng(rng)],
+            transactions: vec![coinbase.fake_with_rng(rng)],
         }
     }
 }
