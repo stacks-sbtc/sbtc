@@ -4,7 +4,7 @@ FROM python:3.13-slim AS emily-cron
 COPY --from=ghcr.io/astral-sh/uv@sha256:562193a4a9d398f8aedddcb223e583da394ee735de36b5815f8f1d22cb49be15 /uv /uvx /bin/
 
 # Install cron
-RUN apt-get update && apt-get install -y cron && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends cron build-essential libgmp3-dev && rm -rf /var/lib/apt/lists/*
 
 # Copy the application into the container
 COPY ../../emily_cron /app
