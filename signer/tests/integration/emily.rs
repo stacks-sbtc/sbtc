@@ -537,7 +537,7 @@ async fn deposit_flow() {
         fetched_deposit.last_update_block_hash,
         stacks_tip.block_hash.to_string()
     );
-    assert_eq!(fetched_deposit.last_update_height, stacks_tip.block_height);
+    assert_eq!(fetched_deposit.last_update_height, *stacks_tip.block_height);
 
     testing::storage::drop_db(db).await;
 }

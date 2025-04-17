@@ -160,7 +160,7 @@ services:
       - EMILY_ENDPOINT=http://emily-server:3031
       - PRIVATE_EMILY_ENDPOINT=http://emily-server:3031
       - MEMPOOL_API_URL=http://mempool-web:8083/api
-      - HIRO_API_URL=https://api.hiro.so/extended
+      - HIRO_API_URL=https://api.hiro.so
       - DEPLOYER_ADDRESS=SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS
     profiles:
       - default

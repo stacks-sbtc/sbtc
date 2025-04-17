@@ -23,7 +23,9 @@ use crate::error::Error;
 use crate::keys::PublicKey;
 use crate::keys::PublicKeyXOnly;
 use crate::storage::model;
+use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::CompletedDepositEvent;
+use crate::storage::model::StacksBlockHeight;
 use crate::storage::model::TransactionType;
 use crate::storage::model::WithdrawalAcceptEvent;
 use crate::storage::model::WithdrawalRejectEvent;
@@ -110,7 +112,7 @@ struct DepositStatusSummary {
     can_sign: Option<bool>,
     /// The height of the block that confirmed the deposit request
     /// transaction.
-    block_height: Option<i64>,
+    block_height: Option<BitcoinBlockHeight>,
     /// The block hash that confirmed the deposit request.
     block_hash: Option<model::BitcoinBlockHash>,
     /// The bitcoin consensus encoded locktime in the reclaim script.
@@ -140,8 +142,7 @@ struct WithdrawalStatusSummary {
     is_accepted: Option<bool>,
     /// The height of the bitcoin chain tip during the execution of the
     /// contract call that generated the withdrawal request.
-    #[sqlx(try_from = "i64")]
-    bitcoin_block_height: u64,
+    bitcoin_block_height: BitcoinBlockHeight,
     /// The amount associated with the deposit UTXO in sats.
     #[sqlx(try_from = "i64")]
     amount: u64,
@@ -156,8 +157,7 @@ struct WithdrawalStatusSummary {
     stacks_block_hash: model::StacksBlockHash,
     /// Stacks block ID of the block that includes the transaction
     /// associated with this withdrawal request.
-    #[sqlx(try_from = "i64")]
-    stacks_block_height: u64,
+    stacks_block_height: StacksBlockHeight,
 }
 
 // A convenience struct for retrieving the signers' UTXO
@@ -388,7 +388,7 @@ impl PgStore {
         &self,
         chain_tip: &model::BitcoinBlockHash,
         output_type: model::TxOutputType,
-        min_block_height: i64,
+        min_block_height: BitcoinBlockHeight,
     ) -> Result<Option<SignerUtxo>, Error> {
         let pg_utxo = sqlx::query_as::<_, PgSignerUtxo>(
             r#"
@@ -424,7 +424,7 @@ impl PgStore {
             "#,
         )
         .bind(chain_tip)
-        .bind(min_block_height)
+        .bind(i64::try_from(min_block_height).map_err(Error::ConversionDatabaseInt)?)
         .bind(output_type)
         .fetch_optional(&self.0)
         .await
@@ -439,9 +439,9 @@ impl PgStore {
     async fn get_least_txo_height(
         &self,
         chain_tip: &model::BitcoinBlockHash,
-        min_block_height: i64,
-    ) -> Result<Option<i64>, Error> {
-        sqlx::query_scalar::<_, i64>(
+        min_block_height: BitcoinBlockHeight,
+    ) -> Result<Option<BitcoinBlockHeight>, Error> {
+        sqlx::query_scalar::<_, BitcoinBlockHeight>(
             r#"
             SELECT bb.block_height
             FROM sbtc_signer.bitcoin_tx_inputs AS bi
@@ -458,7 +458,7 @@ impl PgStore {
             "#,
         )
         .bind(chain_tip)
-        .bind(min_block_height)
+        .bind(i64::try_from(min_block_height).map_err(Error::ConversionDatabaseInt)?)
         .fetch_optional(&self.0)
         .await
         .map_err(Error::SqlxQuery)
@@ -471,8 +471,8 @@ impl PgStore {
     ///
     /// This function does not check whether the donation output has been
     /// spent.
-    pub async fn minimum_donation_txo_height(&self) -> Result<Option<i64>, Error> {
-        sqlx::query_scalar::<_, i64>(
+    pub async fn minimum_donation_txo_height(&self) -> Result<Option<BitcoinBlockHeight>, Error> {
+        sqlx::query_scalar::<_, BitcoinBlockHeight>(
             r#"
             SELECT bb.block_height
             FROM sbtc_signer.bitcoin_tx_outputs AS bo
@@ -516,11 +516,11 @@ impl PgStore {
     ///   to the height returned here should contain the transaction with
     ///   the signers' UTXO, and won't if there is a reorg spanning more
     ///   than [`MAX_REORG_BLOCK_COUNT`] blocks.
-    pub async fn minimum_utxo_height(&self) -> Result<Option<i64>, Error> {
+    pub async fn minimum_utxo_height(&self) -> Result<Option<BitcoinBlockHeight>, Error> {
         #[derive(sqlx::FromRow)]
         struct PgCandidateUtxo {
             txid: model::BitcoinTxId,
-            block_height: i64,
+            block_height: BitcoinBlockHeight,
         }
 
         // Get the block height of the unspent transaction that was most
@@ -583,7 +583,9 @@ impl PgStore {
         // MAX_REORG_BLOCK_COUNT bitcoin blocks, plus one. We add the one
         // because we want the transaction right after
         // MAX_REORG_BLOCK_COUNT worth of transactions.
-        let max_transactions = MAX_MEMPOOL_PACKAGE_TX_COUNT as i64 * MAX_REORG_BLOCK_COUNT + 1;
+        let max_transactions =
+            i64::try_from(MAX_MEMPOOL_PACKAGE_TX_COUNT * MAX_REORG_BLOCK_COUNT + 1)
+                .map_err(Error::ConversionDatabaseInt)?;
 
         // Find the block height of the sweep transaction that occurred at
         // or before block "best candidate block height" minus
@@ -594,7 +596,7 @@ impl PgStore {
         // the best blockchain. But if we go back at least
         // `MAX_REORG_BLOCK_COUNT` bitcoin blocks then that UTXO is assumed
         // to still be confirmed.
-        let prev_confirmed_height_candidate = sqlx::query_scalar::<_, i64>(
+        let prev_confirmed_height_candidate = sqlx::query_scalar::<_, BitcoinBlockHeight>(
             r#"
             WITH RECURSIVE signer_inputs AS (
                 SELECT
@@ -666,12 +668,12 @@ impl PgStore {
         &self,
         txid: &model::BitcoinTxId,
         output_index: u32,
-    ) -> Result<Option<i64>, Error> {
+    ) -> Result<Option<BitcoinBlockHeight>, Error> {
         // Before the deposit request is written a signer also stores the
         // bitcoin transaction and (after #731) the bitcoin block
         // confirming the deposit to the database. So this will return zero
         // rows only when we cannot find the deposit request.
-        sqlx::query_scalar::<_, i64>(
+        sqlx::query_scalar::<_, BitcoinBlockHeight>(
             r#"
             SELECT block_height
             FROM sbtc_signer.deposit_requests AS dr
@@ -701,7 +703,7 @@ impl PgStore {
         chain_tip: &model::BitcoinBlockHash,
         txid: &model::BitcoinTxId,
         output_index: u32,
-        min_block_height: u64,
+        min_block_height: BitcoinBlockHeight,
     ) -> Result<Option<model::BitcoinTxId>, Error> {
         sqlx::query_scalar::<_, model::BitcoinTxId>(
             r#"
@@ -791,7 +793,7 @@ impl PgStore {
         &self,
         chain_tip: &model::StacksBlockHash,
         block_hash: &model::StacksBlockHash,
-        block_height: u64,
+        block_height: StacksBlockHeight,
     ) -> Result<bool, Error> {
         sqlx::query_scalar::<_, bool>(
             r#"
@@ -1099,7 +1101,7 @@ impl super::DbRead for PgStore {
         // Add one to the acceptable unlock height because the chain tip is at height one less
         // than the height of the next block, which is the block for which we are assessing
         // the threshold.
-        let minimum_acceptable_unlock_height = self
+        let minimum_acceptable_unlock_height = *self
             .get_bitcoin_block(chain_tip)
             .await?
             .ok_or(Error::MissingBitcoinBlock(*chain_tip))?
@@ -1269,10 +1271,7 @@ impl super::DbRead for PgStore {
 
         // The block height and block hash are always None or not None at
         // the same time.
-        let block_info = summary
-            .block_height
-            .map(u64::try_from)
-            .zip(summary.block_hash);
+        let block_info = summary.block_height.zip(summary.block_hash);
 
         // Lastly we map the block_height variable to a status enum.
         let status = match block_info {
@@ -1281,7 +1280,7 @@ impl super::DbRead for PgStore {
             // confirmed already. We use the height of when the deposit was
             // confirmed for the min height for when a sweep transaction
             // could be confirmed. We could also use block_height + 1.
-            Some((Ok(block_height), block_hash)) => {
+            Some((block_height, block_hash)) => {
                 let deposit_sweep_txid =
                     self.get_deposit_sweep_txid(chain_tip, txid, output_index, block_height);
 
@@ -1294,9 +1293,6 @@ impl super::DbRead for PgStore {
             // we know that the deposit transaction is not on the
             // blockchain identified by the chain tip.
             None => DepositConfirmationStatus::Unconfirmed,
-            // Block heights are stored as BIGINTs after conversion from
-            // u64s, so converting back to u64s is actually safe.
-            Some((Err(error), _)) => return Err(Error::ConversionDatabaseInt(error)),
         };
 
         let dkg_shares = self
@@ -1498,7 +1494,7 @@ impl super::DbRead for PgStore {
         &self,
         bitcoin_chain_tip: &model::BitcoinBlockHash,
         stacks_chain_tip: &model::StacksBlockHash,
-        min_bitcoin_height: u64,
+        min_bitcoin_height: BitcoinBlockHeight,
         signature_threshold: u16,
     ) -> Result<Vec<model::WithdrawalRequest>, Error> {
         sqlx::query_as::<_, model::WithdrawalRequest>(
@@ -2116,7 +2112,7 @@ impl super::DbRead for PgStore {
         chain_tip: &model::BitcoinBlockRef,
         block_ref: &model::BitcoinBlockRef,
     ) -> Result<bool, Error> {
-        let height_diff = chain_tip
+        let height_diff: u64 = *chain_tip
             .block_height
             .saturating_sub(block_ref.block_height);
 
@@ -2241,7 +2237,7 @@ impl super::DbRead for PgStore {
         //    comment).
         // 2. Find the least height of any sweep transaction confirmed in a
         //    block with height greater than the height returned from (1).
-        let last_considered_height = sqlx::query_scalar::<_, Option<i64>>(
+        let last_considered_height = sqlx::query_scalar::<_, Option<BitcoinBlockHeight>>(
             r#"
             SELECT MAX(bb.block_height)
             FROM sbtc_signer.bitcoin_withdrawals_outputs AS bwo
@@ -2259,7 +2255,7 @@ impl super::DbRead for PgStore {
 
         // We add one because we are interested in sweeps that were
         // confirmed after the signers last considered the withdrawal.
-        let Some(min_block_height) = last_considered_height.map(|x| x + 1) else {
+        let Some(min_block_height) = last_considered_height.map(|height| height + 1) else {
             // This means that there are no rows associated with the ID in the
             // `bitcoin_withdrawals_outputs` table.
             return Ok(false);
@@ -2271,10 +2267,7 @@ impl super::DbRead for PgStore {
         let chain_tip_hash = &bitcoin_chain_tip.block_hash;
         let least_txo_height = self
             .get_least_txo_height(chain_tip_hash, min_block_height)
-            .await?
-            .map(u64::try_from)
-            .transpose()
-            .map_err(|_| Error::TypeConversion)?;
+            .await?;
         // If this returns None, then the sweep itself could be in the
         // mempool. If that's the case then this is definitely active.
         let Some(least_txo_height) = least_txo_height else {
@@ -2287,7 +2280,7 @@ impl super::DbRead for PgStore {
         let txo_confirmations = bitcoin_chain_tip
             .block_height
             .saturating_sub(least_txo_height);
-        Ok(txo_confirmations <= min_confirmations)
+        Ok(txo_confirmations <= min_confirmations.into())
     }
 
     async fn get_swept_deposit_requests(
