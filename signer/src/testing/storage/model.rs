@@ -24,12 +24,12 @@ use rand::seq::SliceRandom;
 /// [`TxDeconstructor`] trait.
 ///
 /// In order to implement [`TxDeconstructor`], you need to be able to
-/// return the original output for each input into a transaction. This
-/// struct allows you to do that by "requiring" that you provide the
-/// "original" bitcoin::TxOut for each entry in `tx.input`. This
-/// information gets used to figure out whether a transaction is a sweep
-/// transaction or a donation to the signers. Sweep transactions have
-/// inputs that spend funds locked by the signers, while donations do not.
+/// return the original output for each input in a transaction. This struct
+/// allows you to do that by "requiring" that you provide the "original"
+/// bitcoin::TxOut for each entry in `tx.input`. This information gets used
+/// to figure out whether a transaction is a sweep transaction or a
+/// donation to the signers. Sweep transactions have inputs that spend
+/// funds locked by the signers, while donations do not.
 #[derive(Debug)]
 pub struct TestBitcoinTxInfo {
     /// A bitcoin transaction that will be classified as either a
