@@ -64,6 +64,7 @@ use crate::stacks::contracts::RejectWithdrawalV1;
 use crate::stacks::contracts::RotateKeysV1;
 use crate::storage::model;
 use crate::storage::model::BitcoinBlockHash;
+use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::BitcoinTxId;
 use crate::storage::model::CompletedDepositEvent;
 use crate::storage::model::DkgSharesStatus;
@@ -73,6 +74,7 @@ use crate::storage::model::RotateKeysTransaction;
 use crate::storage::model::ScriptPubKey;
 use crate::storage::model::SigHash;
 use crate::storage::model::StacksBlockHash;
+use crate::storage::model::StacksBlockHeight;
 use crate::storage::model::StacksPrincipal;
 use crate::storage::model::StacksTxId;
 use crate::storage::model::WithdrawalAcceptEvent;
@@ -270,7 +272,7 @@ pub fn encrypted_dkg_shares<R: rand::RngCore + rand::CryptoRng>(
         signature_share_threshold: 1,
         dkg_shares_status: status,
         started_at_bitcoin_block_hash: Faker.fake_with_rng(rng),
-        started_at_bitcoin_block_height: Faker.fake_with_rng::<u32, _>(rng) as u64,
+        started_at_bitcoin_block_height: Faker.fake_with_rng::<u32, _>(rng).into(),
     }
 }
 
@@ -336,7 +338,7 @@ impl fake::Dummy<fake::Faker> for WithdrawalAcceptEvent {
             },
             fee: rng.next_u32() as u64,
             sweep_block_hash: config.fake_with_rng(rng),
-            sweep_block_height: rng.next_u32() as u64,
+            sweep_block_height: rng.next_u32().into(),
             sweep_txid: config.fake_with_rng(rng),
         }
     }
@@ -365,7 +367,7 @@ impl fake::Dummy<fake::Faker> for CompletedDepositEvent {
             },
             amount: rng.next_u32() as u64,
             sweep_block_hash: config.fake_with_rng(rng),
-            sweep_block_height: rng.next_u32() as u64,
+            sweep_block_height: rng.next_u32().into(),
             sweep_txid: config.fake_with_rng(rng),
         }
     }
@@ -427,7 +429,7 @@ impl fake::Dummy<SignerSetConfig> for EncryptedDkgShares {
             signature_share_threshold: config.signatures_required,
             dkg_shares_status: DkgSharesStatus::Verified,
             started_at_bitcoin_block_hash: Faker.fake_with_rng(rng),
-            started_at_bitcoin_block_height: Faker.fake_with_rng::<u32, _>(rng) as u64,
+            started_at_bitcoin_block_height: Faker.fake_with_rng::<u32, _>(rng).into(),
         }
     }
 }
@@ -499,6 +501,18 @@ impl fake::Dummy<fake::Faker> for ScriptPubKey {
 impl fake::Dummy<fake::Faker> for SigHash {
     fn dummy_with_rng<R: Rng + ?Sized>(config: &fake::Faker, rng: &mut R) -> Self {
         TapSighash::from_byte_array(config.fake_with_rng(rng)).into()
+    }
+}
+
+impl fake::Dummy<fake::Faker> for BitcoinBlockHeight {
+    fn dummy_with_rng<R: rand::Rng + ?Sized>(_config: &fake::Faker, rng: &mut R) -> Self {
+        rng.gen_range(0..i64::MAX as u64).into()
+    }
+}
+
+impl fake::Dummy<fake::Faker> for StacksBlockHeight {
+    fn dummy_with_rng<R: rand::Rng + ?Sized>(_config: &fake::Faker, rng: &mut R) -> Self {
+        rng.gen_range(0..i64::MAX as u64).into()
     }
 }
 
