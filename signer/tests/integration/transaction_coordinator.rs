@@ -48,6 +48,8 @@ use signer::message::Payload;
 use signer::network::MessageTransfer;
 use signer::storage::model::WithdrawalTxOutput;
 use signer::testing::get_rng;
+use signer::transaction_coordinator::should_coordinate_dkg;
+use signer::transaction_signer::assert_allow_dkg_begin;
 use testing_emily_client::apis::chainstate_api;
 use testing_emily_client::apis::testing_api;
 use testing_emily_client::apis::withdrawal_api;
@@ -471,6 +473,9 @@ async fn process_complete_deposit() {
         .with_first_bitcoin_core_client()
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
+        .modify_settings(|settings| {
+            settings.signer.start_dkg_if_signer_set_changed = false;
+        })
         .build();
 
     let nonce = 12;
@@ -1052,6 +1057,101 @@ async fn run_dkg_from_scratch() {
     for (_ctx, db, _, _) in signers {
         testing::storage::drop_db(db).await;
     }
+}
+
+/// Tests that dkg will not be triggered if signer set didn't change
+#[test(tokio::test)]
+async fn dont_run_dkg_if_signer_set_didnt_change() {
+    let mut rng = get_rng();
+    let db = testing::storage::new_test_database().await;
+    let ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.dkg_target_rounds = std::num::NonZero::<u32>::new(1).unwrap();
+        })
+        .build();
+    let config_signer_set = ctx.config().signer.bootstrap_signing_set.clone();
+
+    // Sanity check
+    assert!(!config_signer_set.is_empty());
+
+    // Write dkg shares so it won't be a reason to trigger dkg.
+    let dkg_shares = model::EncryptedDkgShares {
+        dkg_shares_status: model::DkgSharesStatus::Verified,
+        ..Faker.fake_with_rng(&mut rng)
+    };
+    db.write_encrypted_dkg_shares(&dkg_shares)
+        .await
+        .expect("failed to write dkg shares");
+
+    // We need to construct chaintip
+    let bitcoin_block: model::BitcoinBlock = Faker.fake_with_rng(&mut rng);
+    db.write_bitcoin_block(&bitcoin_block)
+        .await
+        .expect("failed to write bitcoin block");
+
+    // Check that with correct rotate keys tx we won't proceed with dkg.
+    let chaintip = db
+        .get_bitcoin_canonical_chain_tip_ref()
+        .await
+        .expect("failed to get chain tip")
+        .expect("no chain tip");
+
+    ctx.inner
+        .state()
+        .update_current_signer_set(config_signer_set.iter().cloned().collect());
+    assert!(!should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+    assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_err());
+}
+
+/// Tests that dkg will be triggered if signer set changes
+#[test(tokio::test)]
+async fn run_dkg_if_signer_set_changes() {
+    let mut rng = get_rng();
+    let db = testing::storage::new_test_database().await;
+    let ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.dkg_target_rounds = std::num::NonZero::<u32>::new(1).unwrap();
+        })
+        .build();
+    let config_signer_set = ctx.config().signer.bootstrap_signing_set.clone();
+
+    // Sanity check
+    assert!(!config_signer_set.is_empty());
+
+    // Write dkg shares so it won't be a reason to trigger dkg.
+    let dkg_shares = model::EncryptedDkgShares {
+        dkg_shares_status: model::DkgSharesStatus::Verified,
+        ..Faker.fake_with_rng(&mut rng)
+    };
+    db.write_encrypted_dkg_shares(&dkg_shares)
+        .await
+        .expect("failed to write dkg shares");
+
+    // Remove one signer
+    let signer_set_without_signer = config_signer_set[..config_signer_set.len() - 1].to_vec();
+
+    // Create chaintip
+    let bitcoin_block: model::BitcoinBlock = Faker.fake_with_rng(&mut rng);
+    db.write_bitcoin_block(&bitcoin_block)
+        .await
+        .expect("failed to write bitcoin block");
+
+    // Check that with correct rotate keys tx we won't proceed with dkg.
+    let chaintip = db
+        .get_bitcoin_canonical_chain_tip_ref()
+        .await
+        .expect("failed to get chain tip")
+        .expect("no chain tip");
+
+    ctx.inner
+        .state()
+        .update_current_signer_set(signer_set_without_signer.iter().cloned().collect());
+    assert!(should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+    assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_ok());
 }
 
 /// Test that we can run multiple DKG rounds.
@@ -3974,6 +4074,9 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
         .with_first_bitcoin_core_client()
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
+        .modify_settings(|settings| {
+            settings.signer.start_dkg_if_signer_set_changed = false;
+        })
         .build();
 
     let expect_tx = !is_completed && !is_in_mempool;
@@ -4286,6 +4389,9 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.start_dkg_if_signer_set_changed = false;
+        })
         .build();
     let network = WanNetwork::default();
     let signer_network = network.connect(&ctx);
