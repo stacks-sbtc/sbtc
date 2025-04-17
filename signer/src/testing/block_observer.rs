@@ -27,11 +27,11 @@ use emily_client::models::Status;
 use rand::seq::IteratorRandom;
 use sbtc::deposits::CreateDepositRequest;
 
-use crate::bitcoin::rpc::BitcoinBlockInfo;
 use crate::bitcoin::BitcoinInteract;
 use crate::bitcoin::GetTransactionFeeResult;
 use crate::bitcoin::TransactionLookupHint;
 use crate::bitcoin::rpc::BitcoinBlockHeader;
+use crate::bitcoin::rpc::BitcoinBlockInfo;
 use crate::bitcoin::rpc::BitcoinTxInfo;
 use crate::bitcoin::rpc::GetTxResponse;
 use crate::bitcoin::utxo;
@@ -72,10 +72,7 @@ impl TestHarness {
 
     /// The minimum block height amount blocks in this blockchain
     pub fn min_block_height(&self) -> Option<u64> {
-        self.bitcoin_blocks
-            .iter()
-            .map(|block| block.height)
-            .min()
+        self.bitcoin_blocks.iter().map(|block| block.height).min()
     }
 
     /// Get the Stacks blocks in the test harness.
