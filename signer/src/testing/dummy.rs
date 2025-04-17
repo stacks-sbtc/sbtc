@@ -240,7 +240,7 @@ impl BitcoinBlockInfo {
         let time = Faker.fake_with_rng(rng);
         BitcoinBlockInfo {
             block_hash: Faker.fake_with_rng::<BitcoinBlockHash, _>(rng).into(),
-            height: block_height,
+            height: block_height.into(),
             time,
             mediantime: time.checked_sub(6 * 600),
             previous_block_hash: Faker.fake_with_rng::<BitcoinBlockHash, _>(rng).into(),
