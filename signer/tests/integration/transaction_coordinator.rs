@@ -1464,12 +1464,14 @@ async fn run_dkg_if_all_signers_are_connected() {
         .state()
         .update_current_signer_set(signer_set_without_signer.iter().cloned().collect());
     assert!(!should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+    assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_err());
 
     // test case 2: All peers connected - dkg should run
     for peer in signer_set_without_signer.iter() {
         ctx.inner.state().add_connected_peer(peer.clone().into());
     }
     assert!(should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+    assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_ok());
 }
 
 /// Test that three signers can successfully sign and broadcast a bitcoin

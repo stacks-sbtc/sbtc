@@ -1545,7 +1545,12 @@ pub async fn assert_allow_dkg_begin(
         let config_signer_set = config.signer.bootstrap_signing_set();
 
         if last_dkg_signer_set != config_signer_set {
-            tracing::info!("signer set has changed, proceeding with DKG");
+            // Check if all signers are connected before proceeding with DKG
+            if !context.state().are_all_signers_connected() {
+                tracing::info!("signer set has changed but not all signers are connected; waiting for connections");
+                return Err(Error::DkgCantRunPostRotation);
+            }
+            tracing::info!("signer set has changed and all signers are connected; proceeding with DKG");
             return Ok(());
         }
     }
