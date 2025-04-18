@@ -9,7 +9,6 @@ use std::sync::{
 use bitcoin::Amount;
 use hashbrown::{HashMap, HashSet};
 use libp2p::PeerId;
-use sha2::digest::consts::U322;
 
 use crate::keys::PublicKey;
 use crate::storage::model::BitcoinBlockHash;
