@@ -506,7 +506,7 @@ async fn update_deposits(
     api_state: ApiStateEntry,
     context: EmilyContext,
     body: UpdateDepositsRequestBody,
-    from_sidecar: bool,
+    is_from_trusted_source: bool,
 ) -> Result<impl warp::reply::Reply, Error> {
     // Validate request.
     let validated_request: ValidatedUpdateDepositsRequest =
@@ -527,17 +527,21 @@ async fn update_deposits(
             "updating deposit"
         );
 
-        let updated_deposit =
-            accessors::pull_and_update_deposit_with_retry(&context, update, 15, from_sidecar)
-                .await
-                .inspect_err(|error| {
-                    tracing::error!(
-                        %bitcoin_txid,
-                        bitcoin_tx_output_index,
-                        %error,
-                        "failed to update deposit"
-                    );
-                })?;
+        let updated_deposit = accessors::pull_and_update_deposit_with_retry(
+            &context,
+            update,
+            15,
+            is_from_trusted_source,
+        )
+        .await
+        .inspect_err(|error| {
+            tracing::error!(
+                %bitcoin_txid,
+                bitcoin_tx_output_index,
+                %error,
+                "failed to update deposit"
+            );
+        })?;
         let deposit: Deposit = updated_deposit.try_into().inspect_err(|error| {
             // This should never happen, because the deposit was
             // validated before being updated.

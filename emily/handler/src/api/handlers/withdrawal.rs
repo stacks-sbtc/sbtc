@@ -401,7 +401,7 @@ async fn update_withdrawals(
     api_state: ApiStateEntry,
     context: EmilyContext,
     body: UpdateWithdrawalsRequestBody,
-    from_sidecar: bool,
+    is_from_trusted_source: bool,
 ) -> Result<impl warp::reply::Reply, Error> {
     // Validate request.
     let validated_request: ValidatedUpdateWithdrawalRequest =
@@ -416,16 +416,20 @@ async fn update_withdrawals(
         let request_id = update.request_id;
         debug!(request_id, "updating withdrawal");
 
-        let updated_withdrawal =
-            accessors::pull_and_update_withdrawal_with_retry(&context, update, 15, from_sidecar)
-                .await
-                .inspect_err(|error| {
-                    tracing::error!(
-                        request_id,
-                        %error,
-                        "failed to update withdrawal",
-                    );
-                })?;
+        let updated_withdrawal = accessors::pull_and_update_withdrawal_with_retry(
+            &context,
+            update,
+            15,
+            is_from_trusted_source,
+        )
+        .await
+        .inspect_err(|error| {
+            tracing::error!(
+                request_id,
+                %error,
+                "failed to update withdrawal",
+            );
+        })?;
 
         let withdrawal: Withdrawal = updated_withdrawal.try_into().inspect_err(|error| {
             // This should never happen, because the withdrawal was
