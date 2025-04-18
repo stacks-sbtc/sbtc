@@ -1563,7 +1563,7 @@ pub async fn assert_allow_dkg_begin(
                 );
                 return Err(Error::DkgHasAlreadyRun);
             }
-            if bitcoin_chain_tip.block_height < dkg_min_height.get() {
+            if bitcoin_chain_tip.block_height < dkg_min_height {
                 tracing::warn!(
                     ?dkg_min_bitcoin_block_height,
                     %dkg_target_rounds,
@@ -1627,7 +1627,7 @@ pub enum ChainTipStatus {
 
 #[cfg(test)]
 mod tests {
-    use std::num::{NonZeroU32, NonZeroU64, NonZeroUsize};
+    use std::num::{NonZeroU32, NonZeroUsize};
 
     use bitcoin::Txid;
     use fake::{Fake, Faker};
@@ -1700,12 +1700,13 @@ mod tests {
         chain_tip_height: u64,
         should_allow: bool,
     ) {
+        let chain_tip_height = chain_tip_height.into();
+        let dkg_min_bitcoin_block_height = dkg_min_bitcoin_block_height.map(Into::into);
         let context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
             .modify_settings(|s| {
-                s.signer.dkg_min_bitcoin_block_height =
-                    dkg_min_bitcoin_block_height.and_then(NonZeroU64::new);
+                s.signer.dkg_min_bitcoin_block_height = dkg_min_bitcoin_block_height;
                 s.signer.dkg_target_rounds = NonZeroU32::new(dkg_target_rounds).unwrap();
             })
             .build();
@@ -1767,13 +1768,13 @@ mod tests {
         // Dummy chain tip hash which will be used to fetch the block height.
         let bitcoin_chain_tip = model::BitcoinBlockRef {
             block_hash: Faker.fake(),
-            block_height: 100,
+            block_height: 100u64.into(),
         };
 
         // Write a bitcoin block at the given height, simulating the chain tip.
         storage
             .write_bitcoin_block(&model::BitcoinBlock {
-                block_height: 100,
+                block_height: 100u64.into(),
                 parent_hash: Faker.fake(),
                 block_hash: bitcoin_chain_tip.block_hash,
             })
@@ -1840,7 +1841,7 @@ mod tests {
         // Write a bitcoin block at the given height, simulating the chain tip.
         storage
             .write_bitcoin_block(&model::BitcoinBlock {
-                block_height: 100,
+                block_height: 100u64.into(),
                 parent_hash: Faker.fake(),
                 block_hash: bitcoin_chain_tip,
             })
@@ -1925,7 +1926,7 @@ mod tests {
         // Write a bitcoin block at the given height, simulating the chain tip.
         storage
             .write_bitcoin_block(&model::BitcoinBlock {
-                block_height: 100,
+                block_height: 100u64.into(),
                 parent_hash: Faker.fake(),
                 block_hash: bitcoin_chain_tip,
             })
