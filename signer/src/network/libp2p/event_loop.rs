@@ -110,6 +110,7 @@ pub async fn run(ctx: &impl Context, swarm: Arc<Mutex<Swarm<SignerBehavior>>>) {
                             let _ = swarm.disconnect_peer_id(peer_id);
                         } else {
                             tracing::debug!(%peer_id, ?endpoint, "connected to peer");
+                            ctx.state().add_connected_peer(peer_id);
                             if endpoint.is_dialer() && swarm.behaviour().kademlia.is_enabled() {
                                 let kad_addr = endpoint.get_remote_address();
                                 tracing::debug!(%peer_id, %kad_addr, "adding address to kademlia");
@@ -125,6 +126,7 @@ pub async fn run(ctx: &impl Context, swarm: Arc<Mutex<Swarm<SignerBehavior>>>) {
                     }
                     SwarmEvent::ConnectionClosed { peer_id, cause, endpoint, .. } => {
                         tracing::trace!(%peer_id, ?cause, ?endpoint, "connection closed");
+                        ctx.state().remove_connected_peer(&peer_id);
                     }
                     SwarmEvent::IncomingConnection { local_addr, send_back_addr, .. } => {
                         tracing::trace!(%local_addr, %send_back_addr, "incoming connection");

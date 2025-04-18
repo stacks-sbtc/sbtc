@@ -554,6 +554,10 @@ pub enum Error {
     #[error("DKG has already been run, can only run once")]
     DkgHasAlreadyRun,
 
+    /// DKG cant run since not all peers are connected after a signer set changed.
+    #[error("DKG can't run post-rotation, not all peers are connected")]
+    DkgCantRunPostRotation,
+
     /// Too many signer utxos
     #[error("too many signer utxos")]
     TooManySignerUtxos,

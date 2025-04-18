@@ -7,7 +7,7 @@ use std::sync::{
 };
 
 use bitcoin::Amount;
-use hashbrown::HashSet;
+use hashbrown::{HashMap, HashSet};
 use libp2p::PeerId;
 
 use crate::keys::PublicKey;
@@ -28,6 +28,8 @@ pub struct SignerState {
     // The current bitcoin chain tip. This gets updated at the end of the
     // block observer's duties when it observes a new bitcoin block.
     bitcoin_chain_tip: RwLock<BitcoinBlockRef>,
+    // All peers currently connected
+    connected_peers: RwLock<HashMap<PeerId, u32>>,
 }
 
 impl SignerState {
@@ -132,6 +134,52 @@ impl SignerState {
     pub fn is_sbtc_bitcoin_start_height_set(&self) -> bool {
         self.is_sbtc_bitcoin_start_height_set.load(Ordering::SeqCst)
     }
+
+    /// Add a peer to the set of connected peers
+    pub fn add_connected_peer(&self, peer: PeerId) {
+        self.connected_peers
+            .write()
+            .expect("BUG: Failed to acquire write lock")
+            .entry(peer)
+            .and_modify(|count| *count += 1)
+            .or_insert(1);
+    }
+
+    /// Remove a peer from the set of connected peers
+    pub fn remove_connected_peer(&self, peer: &PeerId) {
+        let mut peers = self
+            .connected_peers
+            .write()
+            .expect("BUG: Failed to acquire write lock");
+
+        if let Some(count) = peers.get_mut(peer) {
+            *count -= 1;
+            if *count == 0 {
+                peers.remove(peer);
+            }
+        }
+    }
+
+    /// Get the set of currently connected peers
+    pub fn get_connected_peers(&self) -> HashSet<PeerId> {
+        self.connected_peers
+            .read()
+            .expect("BUG: Failed to acquire read lock")
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    /// Check if all peers in the current signer set are connected
+    pub fn are_all_signers_connected(&self) -> bool {
+        let connected_peers = self.get_connected_peers();
+        let current_signers = self.current_signer_set();
+
+        current_signers
+            .get_signers()
+            .iter()
+            .all(|s| connected_peers.contains(s.peer_id()))
+    }
 }
 
 impl Default for SignerState {
@@ -149,6 +197,7 @@ impl Default for SignerState {
                 block_height: 0,
                 block_hash: BitcoinBlockHash::from([0; 32]),
             }),
+            connected_peers: RwLock::new(HashMap::new()),
         }
     }
 }

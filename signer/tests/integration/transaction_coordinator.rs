@@ -1413,6 +1413,67 @@ async fn run_subsequent_dkg() {
     }
 }
 
+/// Test that dkg runs after a set change as long as all peer connections are active.
+/// Similar to the signer_set_changes test above, but specifically checks
+/// if all peers are connected post-rotation. If they are, dkg should proceed.
+#[test(tokio::test)]
+async fn run_dkg_if_all_signers_are_connected() {
+    let mut rng = get_rng();
+    let db = testing::storage::new_test_database().await;
+    let ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.dkg_target_rounds = std::num::NonZero::<u32>::new(1).unwrap();
+            settings.signer.start_dkg_if_signer_set_changed = true;
+        })
+        .build();
+    let config_signer_set = ctx.config().signer.bootstrap_signing_set.clone();
+
+    // sanity check
+    assert!(!config_signer_set.is_empty());
+
+    // write dkg shares so it won't be a reason to trigger dkg
+    let dkg_shares = model::EncryptedDkgShares {
+        dkg_shares_status: model::DkgSharesStatus::Verified,
+        ..Faker.fake_with_rng(&mut rng)
+    };
+    db.write_encrypted_dkg_shares(&dkg_shares)
+        .await
+        .expect("failed to write dkg shares");
+
+    // remove a signer
+    let signer_set_without_signer = config_signer_set[..config_signer_set.len() - 1].to_vec();
+
+    // create chaintip
+    let bitcoin_block: model::BitcoinBlock = Faker.fake_with_rng(&mut rng);
+    db.write_bitcoin_block(&bitcoin_block)
+        .await
+        .expect("failed to write bitcoin block");
+
+    let chaintip = db
+        .get_bitcoin_canonical_chain_tip_ref()
+        .await
+        .expect("failed to get chain tip")
+        .expect("no chain tip");
+
+    // end of setup
+
+    // test case 1: No peers connected - dkg should not run
+    ctx.inner
+        .state()
+        .update_current_signer_set(signer_set_without_signer.iter().cloned().collect());
+    assert!(!should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+    assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_err());
+
+    // test case 2: All peers connected - dkg should run
+    for peer in signer_set_without_signer.iter() {
+        ctx.inner.state().add_connected_peer(peer.clone().into());
+    }
+    assert!(should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+    assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_ok());
+}
+
 /// Test that three signers can successfully sign and broadcast a bitcoin
 /// transaction.
 ///
