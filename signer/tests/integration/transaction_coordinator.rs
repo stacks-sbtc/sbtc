@@ -1,6 +1,5 @@
 use std::collections::BTreeSet;
 use std::num::NonZeroU32;
-use std::num::NonZeroU64;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -13,7 +12,6 @@ use bitcoin::AddressType;
 use bitcoin::Amount;
 use bitcoin::BlockHash;
 use bitcoin::Transaction;
-use bitcoin::consensus::Encodable as _;
 use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc::RpcApi as _;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
@@ -34,10 +32,7 @@ use fake::Fake as _;
 use fake::Faker;
 use futures::StreamExt as _;
 use lru::LruCache;
-use mockito;
-use rand::SeedableRng as _;
 use rand::rngs::OsRng;
-use reqwest;
 use sbtc::testing::regtest;
 use sbtc::testing::regtest::AsUtxo as _;
 use sbtc::testing::regtest::Recipient;
@@ -52,6 +47,7 @@ use signer::context::RequestDeciderEvent;
 use signer::message::Payload;
 use signer::network::MessageTransfer;
 use signer::storage::model::WithdrawalTxOutput;
+use signer::testing::get_rng;
 use testing_emily_client::apis::chainstate_api;
 use testing_emily_client::apis::testing_api;
 use testing_emily_client::apis::withdrawal_api;
@@ -75,7 +71,6 @@ use signer::stacks::contracts::SmartContract;
 use signer::storage::DbRead;
 use signer::storage::DbWrite;
 use signer::storage::model::BitcoinBlockHash;
-use signer::storage::model::BitcoinTx;
 use signer::storage::model::BitcoinTxSigHash;
 use signer::storage::model::DkgSharesStatus;
 use signer::storage::model::StacksTxId;
@@ -210,12 +205,8 @@ where
         }],
     };
 
-    let mut tx_bytes = Vec::new();
-    tx.consensus_encode(&mut tx_bytes).unwrap();
-
     let tx = model::Transaction {
         txid: tx.compute_txid().to_byte_array(),
-        tx: tx_bytes,
         tx_type: model::TransactionType::Donation,
         block_hash: *block_hash.as_byte_array(),
     };
@@ -269,7 +260,7 @@ fn mock_deploy_all_contracts(
                 Ok(AccountInfo {
                     balance: 1_000_000,
                     locked: 0,
-                    unlock_height: 0,
+                    unlock_height: 0u64.into(),
                     nonce,
                 })
             })
@@ -336,7 +327,7 @@ fn mock_deploy_remaining_contracts_when_some_already_deployed(
                 Ok(AccountInfo {
                     balance: 1_000_000,
                     locked: 0,
-                    unlock_height: 0,
+                    unlock_height: 0u64.into(),
                     nonce,
                 })
             })
@@ -432,7 +423,7 @@ fn mock_recover_and_deploy_all_contracts_after_failure(
                 Ok(AccountInfo {
                     balance: 1_000_000,
                     locked: 0,
-                    unlock_height: 0,
+                    unlock_height: 0u64.into(),
                     nonce,
                 })
             })
@@ -455,7 +446,7 @@ fn mock_recover_and_deploy_all_contracts_after_failure(
 #[test(tokio::test)]
 async fn process_complete_deposit() {
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
     let setup = TestSweepSetup::new_setup(&rpc, &faucet, 1_000_000, &mut rng);
 
@@ -469,7 +460,7 @@ async fn process_complete_deposit() {
     // Ensure a stacks tip exists
     let stacks_block = model::StacksBlock {
         block_hash: Faker.fake_with_rng(&mut OsRng),
-        block_height: setup.sweep_block_height,
+        block_height: Faker.fake_with_rng(&mut OsRng),
         parent_hash: Faker.fake_with_rng(&mut OsRng),
         bitcoin_anchor: setup.sweep_block_hash.into(),
     };
@@ -491,7 +482,7 @@ async fn process_complete_deposit() {
                     Ok(AccountInfo {
                         balance: 0,
                         locked: 0,
-                        unlock_height: 0,
+                        unlock_height: 0u64.into(),
                         // The nonce is used to create the stacks tx
                         nonce,
                     })
@@ -668,7 +659,7 @@ async fn deploy_smart_contracts_coordinator<F>(
     F: FnOnce(u64, Sender<StacksTransaction>) -> Box<dyn FnOnce(&mut MockStacksInteract)>,
 {
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
 
     let num_messages = smart_contracts.len();
 
@@ -842,7 +833,7 @@ async fn deploy_smart_contracts_coordinator<F>(
 /// from the [`testing::wallet::regtest_bootstrap_wallet`] function.
 #[test(tokio::test)]
 async fn run_dkg_from_scratch() {
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (signer_wallet, signer_key_pairs): (_, [Keypair; 3]) =
         testing::wallet::regtest_bootstrap_wallet();
 
@@ -908,7 +899,7 @@ async fn run_dkg_from_scratch() {
                     Ok(AccountInfo {
                         balance: 1_000_000,
                         locked: 0,
-                        unlock_height: 0,
+                        unlock_height: 0u64.into(),
                         nonce: 1,
                     })
                 })
@@ -1069,7 +1060,7 @@ async fn run_dkg_from_scratch() {
 /// that allows for multiple DKG rounds.
 #[test(tokio::test)]
 async fn run_subsequent_dkg() {
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (signer_wallet, signer_key_pairs): (_, [Keypair; 3]) =
         testing::wallet::regtest_bootstrap_wallet();
 
@@ -1115,7 +1106,7 @@ async fn run_subsequent_dkg() {
             .with_mocked_clients()
             .modify_settings(|settings| {
                 settings.signer.dkg_target_rounds = NonZeroU32::new(2).unwrap();
-                settings.signer.dkg_min_bitcoin_block_height = Some(NonZeroU64::new(10).unwrap());
+                settings.signer.dkg_min_bitcoin_block_height = Some(10u64.into());
             })
             .build();
 
@@ -1154,7 +1145,7 @@ async fn run_subsequent_dkg() {
                     Ok(AccountInfo {
                         balance: 1_000_000,
                         locked: 0,
-                        unlock_height: 0,
+                        unlock_height: 0u64.into(),
                         nonce: 1,
                     })
                 })
@@ -1440,7 +1431,7 @@ async fn sign_bitcoin_transaction() {
                 let response = Ok(AccountInfo {
                     balance: 0,
                     locked: 0,
-                    unlock_height: 0,
+                    unlock_height: 0u64.into(),
                     // this is the only part used to create the stacks transaction.
                     nonce: 12,
                 });
@@ -1718,11 +1709,12 @@ async fn sign_bitcoin_transaction() {
     assert_eq!(&tx_info.tx.output[0].script_pubkey, &script_pub_key);
 
     // Lastly we check that out database has the sweep transaction
-    let tx = sqlx::query_scalar::<_, BitcoinTx>(
+    let script_pubkey = sqlx::query_scalar::<_, model::ScriptPubKey>(
         r#"
-        SELECT tx
-        FROM sbtc_signer.transactions
+        SELECT script_pubkey
+        FROM sbtc_signer.bitcoin_tx_outputs
         WHERE txid = $1
+          AND output_type = 'signers_output'
         "#,
     )
     .bind(txid.to_byte_array())
@@ -1730,9 +1722,8 @@ async fn sign_bitcoin_transaction() {
     .await
     .unwrap();
 
-    let script = tx.output[0].script_pubkey.clone().into();
     for (_, db, _, _) in signers {
-        assert!(db.is_signer_script_pub_key(&script).await.unwrap());
+        assert!(db.is_signer_script_pub_key(&script_pubkey).await.unwrap());
         testing::storage::drop_db(db).await;
     }
 }
@@ -1817,7 +1808,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
             .with_mocked_stacks_client()
             .modify_settings(|settings| {
                 settings.signer.dkg_target_rounds = NonZeroU32::new(2).unwrap();
-                settings.signer.dkg_min_bitcoin_block_height = NonZeroU64::new(dkg_run_two_height);
+                settings.signer.dkg_min_bitcoin_block_height = Some(dkg_run_two_height.into());
             })
             .build();
 
@@ -1879,7 +1870,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
                 let response = Ok(AccountInfo {
                     balance: 0,
                     locked: 0,
-                    unlock_height: 0,
+                    unlock_height: 0u64.into(),
                     // this is the only part used to create the Stacks transaction.
                     nonce: 12,
                 });
@@ -2132,11 +2123,12 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     // Now we check that each database has the sweep transaction and is
     // recognized as a signer script_pubkey.
     for (_, db, _, _) in signers.iter() {
-        let tx = sqlx::query_scalar::<_, BitcoinTx>(
+        let script_pubkey = sqlx::query_scalar::<_, model::ScriptPubKey>(
             r#"
-            SELECT tx
-            FROM sbtc_signer.transactions
+            SELECT script_pubkey
+            FROM sbtc_signer.bitcoin_tx_outputs
             WHERE txid = $1
+              AND output_type = 'signers_output'
             "#,
         )
         .bind(txid.to_byte_array())
@@ -2144,8 +2136,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
         .await
         .unwrap();
 
-        let script = tx.output[0].script_pubkey.clone().into();
-        assert!(db.is_signer_script_pub_key(&script).await.unwrap());
+        assert!(db.is_signer_script_pub_key(&script_pubkey).await.unwrap());
     }
 
     // =========================================================================
@@ -2365,11 +2356,12 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
 
     for (_, db, _, _) in signers {
         // Lastly we check that our database has the sweep transaction
-        let tx = sqlx::query_scalar::<_, BitcoinTx>(
+        let script_pubkey = sqlx::query_scalar::<_, model::ScriptPubKey>(
             r#"
-            SELECT tx
-            FROM sbtc_signer.transactions
+            SELECT script_pubkey
+            FROM sbtc_signer.bitcoin_tx_outputs
             WHERE txid = $1
+              AND output_type = 'signers_output'
             "#,
         )
         .bind(txid.to_byte_array())
@@ -2377,8 +2369,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
         .await
         .unwrap();
 
-        let script = tx.output[0].script_pubkey.clone().into();
-        assert!(db.is_signer_script_pub_key(&script).await.unwrap());
+        assert!(db.is_signer_script_pub_key(&script_pubkey).await.unwrap());
         testing::storage::drop_db(db).await;
     }
 }
@@ -2477,7 +2468,7 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
                 let response = Ok(AccountInfo {
                     balance: 0,
                     locked: 0,
-                    unlock_height: 0,
+                    unlock_height: 0u64.into(),
                     // this is the only part used to create the stacks transaction.
                     nonce: 12,
                 });
@@ -2697,7 +2688,7 @@ async fn wait_for_signers(signers: &[(IntegrationTestContext, PgStore, &Keypair,
 /// the `last_fees` field should be `None`.
 #[test(tokio::test)]
 async fn test_get_btc_state_with_no_available_sweep_transactions() {
-    let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+    let mut rng = get_rng();
 
     let db = testing::storage::new_test_database().await;
 
@@ -2741,7 +2732,7 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
     // We create a single Bitcoin block which will be the chain tip and hold
     // our signer UTXO.
     let bitcoin_block = model::BitcoinBlock {
-        block_height: 1,
+        block_height: 1u64.into(),
         block_hash: Faker.fake_with_rng(&mut rng),
         parent_hash: Faker.fake_with_rng(&mut rng),
     };
@@ -2757,10 +2748,6 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
         },
     );
     let signer_utxo_txid = signer_utxo_tx.compute_txid();
-    let mut signer_utxo_encoded = Vec::new();
-    signer_utxo_tx
-        .consensus_encode(&mut signer_utxo_encoded)
-        .unwrap();
 
     let utxo_input = model::TxPrevout {
         txid: signer_utxo_txid.into(),
@@ -2779,7 +2766,6 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
     db.write_bitcoin_block(&bitcoin_block).await.unwrap();
     db.write_transaction(&model::Transaction {
         txid: *signer_utxo_txid.as_byte_array(),
-        tx: signer_utxo_encoded,
         tx_type: model::TransactionType::SbtcTransaction,
         block_hash: bitcoin_block.block_hash.into_bytes(),
     })
@@ -2832,7 +2818,7 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
 /// packages available, simulating the case where there has been an RBF.
 #[test(tokio::test)]
 async fn test_get_btc_state_with_available_sweep_transactions_and_rbf() {
-    let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+    let mut rng = get_rng();
 
     let db = testing::storage::new_test_database().await;
 
@@ -2883,12 +2869,6 @@ async fn test_get_btc_state_with_available_sweep_transactions_and_rbf() {
     let signer_utxo_tx = client.get_tx(&outpoint.txid).unwrap().unwrap();
     let signer_utxo_txid = signer_utxo_tx.tx.compute_txid();
 
-    let mut signer_utxo_tx_encoded = Vec::new();
-    signer_utxo_tx
-        .tx
-        .consensus_encode(&mut signer_utxo_tx_encoded)
-        .unwrap();
-
     let utxo_input = model::TxPrevout {
         txid: signer_utxo_txid.into(),
         prevout_type: model::TxPrevoutType::SignersInput,
@@ -2904,7 +2884,7 @@ async fn test_get_btc_state_with_available_sweep_transactions_and_rbf() {
     };
 
     db.write_bitcoin_block(&model::BitcoinBlock {
-        block_height: 1,
+        block_height: 1u64.into(),
         block_hash: signer_utxo_block_hash.into(),
         parent_hash: BlockHash::all_zeros().into(),
     })
@@ -2913,7 +2893,6 @@ async fn test_get_btc_state_with_available_sweep_transactions_and_rbf() {
 
     db.write_transaction(&model::Transaction {
         txid: signer_utxo_txid.to_byte_array(),
-        tx: signer_utxo_tx_encoded,
         tx_type: model::TransactionType::SbtcTransaction,
         block_hash: signer_utxo_block_hash.to_byte_array(),
     })
@@ -3080,7 +3059,7 @@ fn create_test_setup(
     let (request, recipient) = generate_withdrawal();
     let stacks_block = model::StacksBlock {
         block_hash: Faker.fake_with_rng(&mut OsRng),
-        block_height: 0,
+        block_height: 0u64.into(),
         parent_hash: StacksBlockId::first_mined().into(),
         bitcoin_anchor: deposit_block_hash.into(),
     };
@@ -3122,7 +3101,7 @@ fn create_test_setup(
 #[tokio::test]
 async fn test_conservative_initial_sbtc_limits() {
     let (rpc, faucet) = regtest::initialize_blockchain();
-    let mut rng = rand::rngs::StdRng::seed_from_u64(56);
+    let mut rng = get_rng();
 
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let signatures_required: u16 = 2;
@@ -3282,7 +3261,7 @@ async fn test_conservative_initial_sbtc_limits() {
                 let response = Ok(AccountInfo {
                     balance: 0,
                     locked: 0,
-                    unlock_height: 0,
+                    unlock_height: 0u64.into(),
                     // this is the only part used to create the stacks transaction.
                     nonce: 12,
                 });
@@ -3585,7 +3564,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
                 let response = Ok(AccountInfo {
                     balance: 0,
                     locked: 0,
-                    unlock_height: 0,
+                    unlock_height: 0u64.into(),
                     // this is the only part used to create the stacks transaction.
                     nonce: 12,
                 });
@@ -3790,7 +3769,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
         &emily_config,
         Chainstate {
             stacks_block_hash: stacks_chain_tip.to_string(),
-            stacks_block_height: stacks_tip_height,
+            stacks_block_height: *stacks_tip_height,
             bitcoin_block_height: Some(Some(0)), // TODO: maybe we will want to have here some sensible data.
         },
     )
@@ -3806,7 +3785,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
         request_id: withdrawal_request.request_id,
         sender: withdrawal_request.sender_address.to_string(),
         stacks_block_hash: withdrawal_request.block_hash.to_string(),
-        stacks_block_height: stacks_tip_height,
+        stacks_block_height: *stacks_tip_height,
         txid: withdrawal_request.txid.to_string(),
     };
     let response = withdrawal_api::create_withdrawal(&emily_config, request_body).await;
@@ -3946,11 +3925,12 @@ async fn sign_bitcoin_transaction_withdrawals() {
     assert_eq!(tx_info.tx.output[2].value.to_sat(), withdrawal_amount);
 
     // We check that our database has the sweep transaction
-    let tx = sqlx::query_scalar::<_, BitcoinTx>(
+    let script_pubkey = sqlx::query_scalar::<_, model::ScriptPubKey>(
         r#"
-        SELECT tx
-        FROM sbtc_signer.transactions
+        SELECT script_pubkey
+        FROM sbtc_signer.bitcoin_tx_outputs
         WHERE txid = $1
+          AND output_type = 'signers_output'
         "#,
     )
     .bind(txid.to_byte_array())
@@ -3974,9 +3954,8 @@ async fn sign_bitcoin_transaction_withdrawals() {
     assert_eq!(withdrawal_output.output_index, 2);
     assert_eq!(withdrawal_output.request_id, withdrawal_request.request_id);
 
-    let script = tx.output[0].script_pubkey.clone().into();
     for (_, db, _, _) in signers {
-        assert!(db.is_signer_script_pub_key(&script).await.unwrap());
+        assert!(db.is_signer_script_pub_key(&script_pubkey).await.unwrap());
         testing::storage::drop_db(db).await;
     }
 }
@@ -3987,7 +3966,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
 #[tokio::test]
 async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let mut context = TestContext::builder()
@@ -4008,7 +3987,7 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
                     Ok(AccountInfo {
                         balance: 0,
                         locked: 0,
-                        unlock_height: 0,
+                        unlock_height: 0u64.into(),
                         // The nonce is used to create the stacks tx
                         nonce,
                     })
@@ -4042,7 +4021,7 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
     // Ensure we have a stacks chain tip
     let genesis_block = model::StacksBlock {
         block_hash: Faker.fake_with_rng(&mut OsRng),
-        block_height: 0,
+        block_height: 0u64.into(),
         parent_hash: StacksBlockId::first_mined().into(),
         bitcoin_anchor: bitcoin_chain_tip.into(),
     };
@@ -4339,7 +4318,7 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
             let response = Ok(AccountInfo {
                 balance: 0,
                 locked: 0,
-                unlock_height: 0,
+                unlock_height: 0u64.into(),
                 // this is the only part used to create the stacks transaction.
                 nonce: 12,
             });
@@ -4452,7 +4431,9 @@ mod get_eligible_pending_withdrawal_requests {
         bitcoin::MockBitcoinInteract,
         emily_client::MockEmilyInteract,
         network::in_memory2::SignerNetworkInstance,
-        storage::model::{BitcoinBlock, StacksBlock, WithdrawalRequest, WithdrawalSigner},
+        storage::model::{
+            BitcoinBlock, BitcoinBlockHeight, StacksBlock, WithdrawalRequest, WithdrawalSigner,
+        },
         testing::{
             blocks::{BitcoinChain, StacksChain},
             storage::{DbReadTestExt as _, DbWriteTestExt as _},
@@ -4591,7 +4572,7 @@ mod get_eligible_pending_withdrawal_requests {
         expiry_window: u64,
         expiry_buffer: u64,
         min_confirmations: u64,
-        at_block_height: usize,
+        at_block_height: BitcoinBlockHeight,
     }
 
     impl Default for TestParams {
@@ -4606,7 +4587,7 @@ mod get_eligible_pending_withdrawal_requests {
                 expiry_window: 24,
                 expiry_buffer: 0,
                 min_confirmations: 0,
-                at_block_height: 0,
+                at_block_height: 0u64.into(),
             }
         }
     }
@@ -4636,7 +4617,7 @@ mod get_eligible_pending_withdrawal_requests {
         // chain_length (10) - min_confirmations (6) = 4 (maximum block height),
         // at_block_height (5) > 4 (maximum).
         chain_length: 10,
-        at_block_height: 5,
+        at_block_height: 5u64.into(),
         min_confirmations: 6,
         num_expected_results: 0,
         ..Default::default()
@@ -4646,7 +4627,7 @@ mod get_eligible_pending_withdrawal_requests {
         // chain_length (10) - min_confirmations(6) = 4 (maximum block height),
         // at_block_height (4) <= 4.
         chain_length: 10,
-        at_block_height: 4,
+        at_block_height: 4u64.into(),
         min_confirmations: 6,
         num_expected_results: 1,
         ..Default::default()
@@ -4663,7 +4644,7 @@ mod get_eligible_pending_withdrawal_requests {
         chain_length: 10,
         expiry_window: 10,
         expiry_buffer: 4,
-        at_block_height: 3,
+        at_block_height: 3u64.into(),
         num_expected_results: 0,
         ..Default::default()
     }; "soft_expiry_one_block_too_old")]
@@ -4674,7 +4655,7 @@ mod get_eligible_pending_withdrawal_requests {
         chain_length: 10,
         expiry_window: 10,
         expiry_buffer: 4,
-        at_block_height: 4,
+        at_block_height: 4u64.into(),
         num_expected_results: 1,
         ..Default::default()
     }; "soft_expiry_exact_block_allowed")]
@@ -4685,7 +4666,7 @@ mod get_eligible_pending_withdrawal_requests {
         chain_length: 10,
         expiry_window: 5,
         expiry_buffer: 0,
-        at_block_height: 5,
+        at_block_height: 5u64.into(),
         num_expected_results: 1,
         ..Default::default()
     }; "hard_expiry_exact_block_allowed")]
@@ -4696,7 +4677,7 @@ mod get_eligible_pending_withdrawal_requests {
         chain_length: 10,
         expiry_window: 5,
         expiry_buffer: 0,
-        at_block_height: 4,
+        at_block_height: 4u64.into(),
         num_expected_results: 0,
         ..Default::default()
     }; "hard_expiry_one_block_too_old")]
@@ -4727,7 +4708,7 @@ mod get_eligible_pending_withdrawal_requests {
         let request = store_withdrawal_request(
             &db,
             bitcoin_chain.nth_block(params.at_block_height),
-            stacks_chain.nth_block(params.at_block_height),
+            stacks_chain.nth_block((*params.at_block_height).into()), // Here we can cast one height to another because in this test chains are 1 to 1.
             params.amount,
             1_000, // Max fee isn't validated here.
         )

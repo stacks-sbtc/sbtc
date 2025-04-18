@@ -15,7 +15,6 @@ use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc_json::Utxo;
 use fake::Fake as _;
 use futures::future::join_all;
-use rand::SeedableRng;
 use test_case::test_case;
 use test_log::test;
 use url::Url;
@@ -57,6 +56,7 @@ use signer::testing::context::TestContext;
 use signer::testing::context::WrappedMock;
 use signer::testing::dummy;
 use signer::testing::dummy::DepositTxConfig;
+use signer::testing::get_rng;
 use signer::testing::stacks::DUMMY_SORTITION_INFO;
 use signer::testing::stacks::DUMMY_TENURE_INFO;
 use signer::testing::storage::model::TestData;
@@ -156,7 +156,7 @@ async fn deposit_flow() {
     let context_window = 10;
 
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+    let mut rng = get_rng();
     let network = network::in_memory::InMemoryNetwork::new();
     let signer_info = testing::wsts::generate_signer_info(&mut rng, num_signers);
 
@@ -247,7 +247,7 @@ async fn deposit_flow() {
             nonce: 0,
         },
         txdata: vec![
-            get_coinbase_tx((bitcoin_chain_tip.block_height + 1) as i64, &mut rng),
+            get_coinbase_tx((*bitcoin_chain_tip.block_height + 1) as i64, &mut rng),
             deposit_tx.clone(),
         ],
     };
@@ -575,7 +575,7 @@ async fn deposit_flow() {
         fetched_deposit.last_update_block_hash,
         stacks_tip.block_hash.to_string()
     );
-    assert_eq!(fetched_deposit.last_update_height, stacks_tip.block_height);
+    assert_eq!(fetched_deposit.last_update_height, *stacks_tip.block_height);
 
     testing::storage::drop_db(db).await;
 }
@@ -747,7 +747,7 @@ async fn test_get_deposits_returns_pending_and_accepted() {
 
     deposit_api::update_deposits_signer(
         emily_client.config(),
-        UpdateDepositsRequestBody { deposits: deposits },
+        UpdateDepositsRequestBody { deposits },
     )
     .await
     .expect("cannot update deposits");

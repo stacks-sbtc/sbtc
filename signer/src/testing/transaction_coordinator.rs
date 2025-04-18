@@ -6,6 +6,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
+use super::get_rng;
 use crate::bitcoin::MockBitcoinInteract;
 use crate::bitcoin::rpc::BitcoinTxInfo;
 use crate::bitcoin::utxo::SignerUtxo;
@@ -50,7 +51,7 @@ use clarity::vm::types::BuffData;
 use clarity::vm::types::SequenceData;
 use fake::Fake as _;
 use fake::Faker;
-use rand::SeedableRng as _;
+use rand::SeedableRng;
 use rand::seq::IteratorRandom;
 
 use super::context::TestContext;
@@ -58,7 +59,7 @@ use super::context::WrappedMock;
 use super::wallet::WALLET;
 
 const EMPTY_BITCOIN_TX: bitcoin::Transaction = bitcoin::Transaction {
-    version: bitcoin::transaction::Version::ONE,
+    version: bitcoin::transaction::Version::TWO,
     lock_time: bitcoin::absolute::LockTime::ZERO,
     input: vec![],
     output: vec![],
@@ -179,6 +180,8 @@ where
     /// Asserts that TxCoordinatorEventLoop::get_pending_requests processes withdrawals
     pub async fn assert_processes_withdrawals(mut self) {
         // Setup network and signer info
+
+        // TODO(#1590): fix this test for other seeds and use `get_rng()`
         let mut rng = rand::rngs::StdRng::seed_from_u64(46);
         let network = network::InMemoryNetwork::new();
         let context = self.context.clone();
@@ -324,7 +327,7 @@ where
         mut self,
         delay_to_process_new_blocks: Duration,
     ) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
@@ -471,7 +474,7 @@ where
     /// Assert that a coordinator should be able to skip the deployment the sbtc contracts
     /// if they are already deployed.
     pub async fn assert_skips_deploy_sbtc_contracts(mut self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
@@ -589,7 +592,7 @@ where
                         Ok(AccountInfo {
                             balance: 1_000_000,
                             locked: 0,
-                            unlock_height: 0,
+                            unlock_height: 0u64.into(),
                             nonce: 1,
                         })
                     })
@@ -655,7 +658,7 @@ where
 
     /// Assert we get a withdrawal accept tx
     pub async fn assert_construct_withdrawal_accept_stacks_sign_request(mut self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let signer_network = SignerNetwork::single(&self.context);
         let private_key = PrivateKey::new(&mut rng);
         let bitcoin_aggregate_key = PublicKey::from_private_key(&private_key);
@@ -715,7 +718,7 @@ where
             block_hash: stacks_block.block_hash,
             sweep_txid: sweep_tx_info.txid.into(),
             sweep_block_hash: sweep_block_hash.into(),
-            sweep_block_height: 0,
+            sweep_block_height: 0u64.into(),
             ..fake::Faker.fake_with_rng(&mut rng)
         };
 
@@ -803,7 +806,7 @@ where
                     Value::Sequence(SequenceData::Buffer(BuffData {
                         data: withdrawal_req.sweep_block_hash.to_le_bytes().to_vec()
                     })),
-                    Value::UInt(withdrawal_req.sweep_block_height as u128),
+                    Value::UInt(withdrawal_req.sweep_block_height.into()),
                     Value::Sequence(SequenceData::Buffer(BuffData {
                         data: outpoint.txid.to_le_bytes().to_vec()
                     })),
@@ -816,7 +819,7 @@ where
 
     /// Assert we get a withdrawal reject tx
     pub async fn assert_construct_withdrawal_reject_stacks_sign_request(mut self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let signer_network = SignerNetwork::single(&self.context);
         let private_key = PrivateKey::new(&mut rng);
         let bitcoin_aggregate_key = PublicKey::from_private_key(&private_key);
@@ -909,7 +912,7 @@ where
 {
     /// Assert we get the correct UTXO in a simple case
     pub async fn assert_get_signer_utxo_simple(mut self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
@@ -925,16 +928,10 @@ where
         let original_test_data = test_data.clone();
 
         let tx = bitcoin::Transaction {
-            output: vec![
-                bitcoin::TxOut {
-                    value: bitcoin::Amount::from_sat(42),
-                    script_pubkey: aggregate_key.signers_script_pubkey(),
-                },
-                bitcoin::TxOut {
-                    value: bitcoin::Amount::from_sat(123),
-                    script_pubkey: bitcoin::ScriptBuf::new(),
-                },
-            ],
+            output: vec![bitcoin::TxOut {
+                value: bitcoin::Amount::from_sat(42),
+                script_pubkey: aggregate_key.signers_script_pubkey(),
+            }],
             ..EMPTY_BITCOIN_TX
         };
 
@@ -979,7 +976,7 @@ where
 
     /// Assert we get the correct UTXO in a fork
     pub async fn assert_get_signer_utxo_fork(mut self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
@@ -1087,7 +1084,7 @@ where
 
     /// Assert we get the correct UTXO with a spending chain in a block
     pub async fn assert_get_signer_utxo_unspent(mut self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
@@ -1184,7 +1181,7 @@ where
 
     /// Assert we get the correct UTXO in case of donations
     pub async fn assert_get_signer_utxo_donations(mut self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 

@@ -24,6 +24,7 @@ use crate::bitcoin::validation::WithdrawalRequestReport;
 use crate::error::Error;
 use crate::keys::PublicKey;
 use crate::keys::PublicKeyXOnly;
+use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::CompletedDepositEvent;
 use crate::storage::model::WithdrawalAcceptEvent;
 use crate::storage::model::WithdrawalRejectEvent;
@@ -206,7 +207,7 @@ pub trait DbRead {
         &self,
         bitcoin_chain_tip: &model::BitcoinBlockHash,
         stacks_chain_tip: &model::StacksBlockHash,
-        min_bitcoin_height: u64,
+        min_bitcoin_height: BitcoinBlockHeight,
         signature_threshold: u16,
     ) -> impl Future<Output = Result<Vec<model::WithdrawalRequest>, Error>> + Send;
 
@@ -390,14 +391,6 @@ pub trait DbRead {
         bitcoin_chain_tip: &model::BitcoinBlockRef,
         min_confirmations: u64,
     ) -> impl Future<Output = Result<bool, Error>> + Send;
-
-    /// Fetch the bitcoin transaction that is included in the block
-    /// identified by the block hash.
-    fn get_bitcoin_tx(
-        &self,
-        txid: &model::BitcoinTxId,
-        block_hash: &model::BitcoinBlockHash,
-    ) -> impl Future<Output = Result<Option<model::BitcoinTx>, Error>> + Send;
 
     /// Fetch bitcoin transactions that have fulfilled a deposit request
     /// but where we have not confirmed a stacks transaction finalizing the

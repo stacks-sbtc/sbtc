@@ -5,7 +5,6 @@ use std::ops::Deref;
 use bitcoin::AddressType;
 use bitcoin::Amount;
 use bitcoin::OutPoint;
-use bitcoin::consensus::Encodable as _;
 use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc::Client;
 use bitcoincore_rpc::RpcApi as _;
@@ -47,6 +46,7 @@ use signer::storage::DbWrite as _;
 use signer::storage::model;
 use signer::storage::model::BitcoinBlock;
 use signer::storage::model::BitcoinBlockHash;
+use signer::storage::model::BitcoinBlockHeight;
 use signer::storage::model::BitcoinBlockRef;
 use signer::storage::model::BitcoinTxRef;
 use signer::storage::model::BitcoinTxSigHash;
@@ -73,7 +73,7 @@ impl AsBlockRef for bitcoincore_rpc_json::GetBlockHeaderResult {
     fn as_block_ref(&self) -> BitcoinBlockRef {
         BitcoinBlockRef {
             block_hash: self.hash.into(),
-            block_height: self.height as u64,
+            block_height: (self.height as u64).into(),
         }
     }
 }
@@ -125,7 +125,7 @@ pub struct TestSweepSetup {
     pub sweep_block_hash: bitcoin::BlockHash,
     /// The height of the bitcoin block that confirmed the sweep
     /// transaction.
-    pub sweep_block_height: u64,
+    pub sweep_block_height: BitcoinBlockHeight,
     /// The transaction that swept in the deposit transaction.
     pub sweep_tx_info: BitcoinTxInfo,
     /// The withdrawal request, and a bitmap for how the signers voted on
@@ -248,7 +248,7 @@ impl TestSweepSetup {
             deposit_request: requests.deposits.pop().unwrap(),
             deposit_tx_info,
             sweep_tx_info,
-            sweep_block_height,
+            sweep_block_height: sweep_block_height.into(),
             sweep_block_hash,
             signer_keys: signer::testing::wallet::create_signers_keys(rng, &signer, 7),
             aggregated_signer: signer,
@@ -273,7 +273,7 @@ impl TestSweepSetup {
     pub async fn store_stacks_genesis_block(&self, db: &PgStore) {
         let block = model::StacksBlock {
             block_hash: Faker.fake_with_rng(&mut OsRng),
-            block_height: 0,
+            block_height: 0u64.into(),
             parent_hash: StacksBlockId::first_mined().into(),
             bitcoin_anchor: self.sweep_block_hash.into(),
         };
@@ -283,7 +283,6 @@ impl TestSweepSetup {
     /// Store the deposit transaction into the database
     pub async fn store_deposit_tx(&self, db: &PgStore) {
         let deposit_tx = model::Transaction {
-            tx: bitcoin::consensus::serialize(&self.deposit_tx_info.tx),
             txid: self.deposit_tx_info.txid.to_byte_array(),
             tx_type: model::TransactionType::SbtcTransaction,
             block_hash: self.deposit_block_hash.to_byte_array(),
@@ -301,7 +300,6 @@ impl TestSweepSetup {
     /// into the database
     pub async fn store_sweep_tx(&self, db: &PgStore) {
         let sweep_tx = model::Transaction {
-            tx: bitcoin::consensus::serialize(&self.sweep_tx_info.tx),
             txid: self.sweep_tx_info.txid.to_byte_array(),
             tx_type: model::TransactionType::SbtcTransaction,
             block_hash: self.sweep_block_hash.to_byte_array(),
@@ -373,7 +371,7 @@ impl TestSweepSetup {
     pub async fn store_withdrawal_request(&self, db: &PgStore) {
         let block = model::StacksBlock {
             block_hash: self.withdrawal_request.block_hash,
-            block_height: self.sweep_block_height,
+            block_height: 1u64.into(), // Sweep setup creates two stacks blocks, and withdrawal request is in the second one.
             parent_hash: Faker.fake_with_rng(&mut OsRng),
             bitcoin_anchor: self.sweep_block_hash.into(),
         };
@@ -387,7 +385,7 @@ impl TestSweepSetup {
             amount: self.withdrawal_request.amount,
             max_fee: self.withdrawal_request.max_fee,
             sender_address: self.withdrawal_sender.clone().into(),
-            bitcoin_block_height: block.block_height, // This should be set to the bitcoin block height.
+            bitcoin_block_height: self.sweep_block_height,
         };
         db.write_withdrawal_request(&withdrawal_request)
             .await
@@ -408,7 +406,7 @@ impl TestSweepSetup {
             signature_share_threshold: self.signatures_required,
             dkg_shares_status: model::DkgSharesStatus::Verified,
             started_at_bitcoin_block_hash: self.deposit_block_hash.into(),
-            started_at_bitcoin_block_height: 0,
+            started_at_bitcoin_block_height: 0u64.into(),
         };
         db.write_encrypted_dkg_shares(&shares).await.unwrap();
     }
@@ -434,7 +432,7 @@ pub async fn backfill_bitcoin_blocks(db: &PgStore, rpc: &Client, chain_tip: &bit
         let parent_header_hash = block_header.previous_block_hash.unwrap();
         let bitcoin_block = BitcoinBlock {
             block_hash: block_header.hash.into(),
-            block_height: block_header.height as u64,
+            block_height: (block_header.height as u64).into(),
             parent_hash: parent_header_hash.into(),
         };
 
@@ -472,10 +470,6 @@ pub async fn fill_signers_utxo<R: rand::RngCore + ?Sized>(
         },
     );
     let signer_utxo_txid = signer_utxo_tx.compute_txid();
-    let mut signer_utxo_encoded = Vec::new();
-    signer_utxo_tx
-        .consensus_encode(&mut signer_utxo_encoded)
-        .unwrap();
 
     let utxo_input = model::TxPrevout {
         txid: signer_utxo_txid.into(),
@@ -494,7 +488,6 @@ pub async fn fill_signers_utxo<R: rand::RngCore + ?Sized>(
     db.write_bitcoin_block(&bitcoin_block).await.unwrap();
     db.write_transaction(&model::Transaction {
         txid: *signer_utxo_txid.as_byte_array(),
-        tx: signer_utxo_encoded,
         tx_type: model::TransactionType::SbtcTransaction,
         block_hash: bitcoin_block.block_hash.into_bytes(),
     })
@@ -519,10 +512,6 @@ pub async fn fill_signers_utxo<R: rand::RngCore + ?Sized>(
         },
     );
     let signer_utxo_txid = signer_utxo_tx.compute_txid();
-    let mut signer_utxo_encoded = Vec::new();
-    signer_utxo_tx
-        .consensus_encode(&mut signer_utxo_encoded)
-        .unwrap();
 
     let utxo_input = model::TxPrevout {
         txid: signer_utxo_txid.into(),
@@ -541,7 +530,6 @@ pub async fn fill_signers_utxo<R: rand::RngCore + ?Sized>(
     db.write_bitcoin_block(&bitcoin_block).await.unwrap();
     db.write_transaction(&model::Transaction {
         txid: *signer_utxo_txid.as_byte_array(),
-        tx: signer_utxo_encoded,
         tx_type: model::TransactionType::SbtcTransaction,
         block_hash: bitcoin_block.block_hash.into_bytes(),
     })
@@ -657,7 +645,7 @@ pub struct SweepTxInfo {
     pub block_hash: BitcoinBlockHash,
     /// The height of the bitcoin block that confirmed the sweep
     /// transaction.
-    pub block_height: u64,
+    pub block_height: BitcoinBlockHeight,
     /// The parent block hash of the `block_hash`.
     pub parent_hash: BitcoinBlockHash,
     /// The transaction that swept in the deposit transaction.
@@ -797,7 +785,7 @@ impl TestSweepSetup2 {
 
         let genesis_block = model::StacksBlock {
             block_hash: Faker.fake_with_rng(&mut OsRng),
-            block_height: 0,
+            block_height: 0u64.into(),
             parent_hash: StacksBlockId::first_mined().into(),
             bitcoin_anchor: deposit_block_hash.into(),
         };
@@ -998,7 +986,7 @@ impl TestSweepSetup2 {
 
         self.sweep_tx_info = Some(SweepTxInfo {
             block_hash: block_hash.into(),
-            block_height: block_header.height as u64,
+            block_height: (block_header.height as u64).into(),
             parent_hash: block_header.previous_block_hash.unwrap().into(),
             tx_info,
         });
@@ -1008,7 +996,6 @@ impl TestSweepSetup2 {
     pub async fn store_deposit_txs(&self, db: &PgStore) {
         for (_, _, tx_info) in self.deposits.iter() {
             let deposit_tx = model::Transaction {
-                tx: bitcoin::consensus::serialize(&tx_info.tx),
                 txid: tx_info.txid.to_byte_array(),
                 tx_type: model::TransactionType::SbtcTransaction,
                 block_hash: self.deposit_block_hash.to_byte_array(),
@@ -1095,7 +1082,6 @@ impl TestSweepSetup2 {
         let sweep = self.sweep_tx_info.as_ref().expect("no sweep tx info set");
 
         let sweep_tx = model::Transaction {
-            tx: bitcoin::consensus::serialize(&sweep.tx_info.tx),
             txid: sweep.tx_info.txid.to_byte_array(),
             tx_type: model::TransactionType::SbtcTransaction,
             block_hash: sweep.block_hash.to_byte_array(),
@@ -1257,7 +1243,7 @@ impl TestSweepSetup2 {
             signature_share_threshold: self.signatures_required,
             dkg_shares_status: DkgSharesStatus::Verified,
             started_at_bitcoin_block_hash: self.deposit_block_hash.into(),
-            started_at_bitcoin_block_height: 0,
+            started_at_bitcoin_block_height: 0u64.into(),
         };
         db.write_encrypted_dkg_shares(&shares).await.unwrap();
     }
