@@ -329,8 +329,8 @@ impl InfoResponse {
 #[cfg(test)]
 mod tests {
     use std::{
-        cell::LazyCell,
         num::{NonZeroU16, NonZeroU32},
+        sync::LazyLock,
         time::Duration,
     };
 
@@ -409,6 +409,7 @@ mod tests {
         assert_eq!(result.dkg.rounds, 0);
 
         // Assert build info
+        #[allow(clippy::const_is_empty)]
         let target_env_abi = if crate::TARGET_ENV_ABI.is_empty() {
             None
         } else {
@@ -496,9 +497,9 @@ mod tests {
             include_str!("../../tests/fixtures/bitcoind-getblockchaininfo-data.json");
 
         let get_network_info_response: bitcoincore_rpc_json::GetNetworkInfoResult =
-            serde_json::from_str(&get_network_info_response_json).unwrap();
+            serde_json::from_str(get_network_info_response_json).unwrap();
         let get_blockchain_info_response: bitcoincore_rpc_json::GetBlockchainInfoResult =
-            serde_json::from_str(&get_blockchain_info_response_json).unwrap();
+            serde_json::from_str(get_blockchain_info_response_json).unwrap();
 
         context
             .with_bitcoin_client(|client| {
@@ -585,12 +586,12 @@ mod tests {
             })
             .await;
 
-        const NODE_INFO_RESPONSE: LazyCell<RPCPeerInfoData> = LazyCell::new(|| {
+        static NODE_INFO_RESPONSE: LazyLock<RPCPeerInfoData> = LazyLock::new(|| {
             let json = include_str!("../../tests/fixtures/stacksapi-get-node-info-test-data.json");
             serde_json::from_str(json).unwrap()
         });
 
-        const TENURE_INFO_RESPONSE: LazyCell<RPCGetTenureInfo> = LazyCell::new(|| {
+        static TENURE_INFO_RESPONSE: LazyLock<RPCGetTenureInfo> = LazyLock::new(|| {
             let json = include_str!("../../tests/fixtures/stacksapi-v3-tenures-info-data.json");
             serde_json::from_str(json).unwrap()
         });

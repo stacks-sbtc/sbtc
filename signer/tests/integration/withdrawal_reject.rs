@@ -81,7 +81,7 @@ fn new_sweep_setup(signers: &TestSignerSet, faucet: &Faucet) -> TestSweepSetup2 
         is_deposit: false,
     };
 
-    TestSweepSetup2::new_setup(signers.clone(), &faucet, &[withdraw_amounts])
+    TestSweepSetup2::new_setup(signers.clone(), faucet, &[withdraw_amounts])
 }
 
 /// For this test we check that the `RejectWithdrawalV1::validate` function
@@ -96,7 +96,7 @@ async fn reject_withdrawal_validation_happy_path() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let test_signer_set = TestSignerSet::new(&mut rng);
-    let setup = new_sweep_setup(&test_signer_set, &faucet);
+    let setup = new_sweep_setup(&test_signer_set, faucet);
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -155,7 +155,7 @@ async fn reject_withdrawal_validation_not_final() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let test_signer_set = TestSignerSet::new(&mut rng);
-    let setup = new_sweep_setup(&test_signer_set, &faucet);
+    let setup = new_sweep_setup(&test_signer_set, faucet);
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -230,7 +230,7 @@ async fn reject_withdrawal_validation_deployer_mismatch() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let test_signer_set = TestSignerSet::new(&mut rng);
-    let setup = new_sweep_setup(&test_signer_set, &faucet);
+    let setup = new_sweep_setup(&test_signer_set, faucet);
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -299,7 +299,7 @@ async fn reject_withdrawal_validation_missing_withdrawal_request() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let test_signer_set = TestSignerSet::new(&mut rng);
-    let setup = new_sweep_setup(&test_signer_set, &faucet);
+    let setup = new_sweep_setup(&test_signer_set, faucet);
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -370,7 +370,7 @@ async fn reject_withdrawal_validation_request_completed() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let test_signer_set = TestSignerSet::new(&mut rng);
-    let setup = new_sweep_setup(&test_signer_set, &faucet);
+    let setup = new_sweep_setup(&test_signer_set, faucet);
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -438,7 +438,7 @@ async fn reject_withdrawal_validation_request_being_fulfilled() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let test_signer_set = TestSignerSet::new(&mut rng);
-    let mut setup = new_sweep_setup(&test_signer_set, &faucet);
+    let mut setup = new_sweep_setup(&test_signer_set, faucet);
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())

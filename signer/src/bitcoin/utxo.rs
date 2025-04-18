@@ -1673,7 +1673,7 @@ mod tests {
 
     // The is the least non dust amount for withdrawal outputs locked by
     // the generate_address() script, which generates P2WPKH outputs
-    const MINMAL_NON_DUST_AMOUNT_P2WPKH: LazyLock<u64> =
+    static MINIMAL_NON_DUST_AMOUNT_P2WPKH: LazyLock<u64> =
         LazyLock::new(|| generate_address().minimal_non_dust().to_sat());
 
     fn generate_address() -> ScriptPubKey {
@@ -1726,7 +1726,7 @@ mod tests {
     fn create_deposit(amount: u64, max_fee: u64, signer_bitmap: u128) -> DepositRequest {
         let signers_public_key = generate_x_only_public_key();
 
-        let contract_name = std::iter::repeat('a').take(128).collect::<String>();
+        let contract_name = std::iter::repeat_n('a', 128).collect::<String>();
         let principal_str = format!("{}.{contract_name}", StacksAddress::burn_address(false));
 
         let deposit_inputs = DepositScriptInputs {
@@ -3089,8 +3089,7 @@ mod tests {
             .requests
             .iter()
             .filter_map(RequestRef::as_deposit)
-            .find(|req| req.outpoint == outpoint)
-            .is_some();
+            .any(|req| req.outpoint == outpoint);
 
         assert_eq!(request_is_included, is_included);
     }
@@ -3224,14 +3223,14 @@ mod tests {
     }
 
     #[test_case(
-        &vec![create_deposit(
+        &[create_deposit(
             DEPOSIT_DUST_LIMIT + SOLO_DEPOSIT_TX_VSIZE as u64, 10_000, 0
         )],
         &create_limits_for_deposits_and_max_mintable(0, 20_000, 100_000),
         1.0,
         1, DEPOSIT_DUST_LIMIT + SOLO_DEPOSIT_TX_VSIZE as u64; "deposit_amounts_over_the_dust_limit_accepted")]
     #[test_case(
-        &vec![create_deposit(
+        &[create_deposit(
             DEPOSIT_DUST_LIMIT + SOLO_DEPOSIT_TX_VSIZE as u64 - 1, 10_000, 0
         )],
         &create_limits_for_deposits_and_max_mintable(0, 20_000, 100_000),
@@ -3267,7 +3266,7 @@ mod tests {
         1.0,
         1, 10_000; "should_accept_all_deposits_when_under_max_mintable")]
     #[test_case(
-        &vec![create_deposit(10_000, 10_000, 0),],
+        &[create_deposit(10_000, 10_000, 0),],
         &create_limits_for_deposits_and_max_mintable(0, 0, 0),
         1.0,
         0, 0; "should_handle_empty_deposit_list")]
@@ -3281,14 +3280,14 @@ mod tests {
         1.0,
         1, 9_000; "should_skip_invalid_fee_and_accept_valid_deposits")]
     #[test_case(
-        &vec![
+        &[
             create_deposit(10_001, 10_000, 0),
         ],
         &create_limits_for_deposits_and_max_mintable(0, 10_001, 10_000),
         1.0,
         0, 0; "should_reject_single_deposit_exceeding_max_mintable")]
     #[test_case(
-        &vec![
+        &[
             create_deposit(10_000, 10_000, 0),
         ],
         &create_limits_for_deposits_and_max_mintable(0, 8_000, 10_000),
@@ -3316,7 +3315,7 @@ mod tests {
         1.0,
         2, 30_000; "should_respect_all_limits")]
     fn test_deposit_filter_filters_deposits_over_limits(
-        deposits: &Vec<DepositRequest>,
+        deposits: &[DepositRequest],
         sbtc_limits: &SbtcLimits,
         fee_rate: f64,
         num_accepted_deposits: usize,
@@ -3425,7 +3424,7 @@ mod tests {
             create_withdrawal(8_000, 10_000, 0),  // rejected
             create_withdrawal(10_000, 10_000, 0), // rejected
             create_withdrawal(1_000, 10_000, 0),  // rejected
-            create_withdrawal(*MINMAL_NON_DUST_AMOUNT_P2WPKH, 10_000, 0), // rejected
+            create_withdrawal(*MINIMAL_NON_DUST_AMOUNT_P2WPKH, 10_000, 0), // rejected
         ],
         per_withdrawal_cap: 0,
         rolling_limits: RollingWithdrawalLimits::unlimited(0),
@@ -3434,7 +3433,7 @@ mod tests {
         accepted_amount: 0,
     }; "zero per withdrawal cap rolling withdrawals filters everything")]
     #[test_case(WithdrawalLimitTestCase {
-        withdrawals: vec![create_withdrawal(*MINMAL_NON_DUST_AMOUNT_P2WPKH - 1, 10_000, 0)],
+        withdrawals: vec![create_withdrawal(*MINIMAL_NON_DUST_AMOUNT_P2WPKH - 1, 10_000, 0)],
         per_withdrawal_cap: u64::MAX,
         rolling_limits: RollingWithdrawalLimits::unlimited(0),
         fee_rate: 1.0,
@@ -3450,13 +3449,13 @@ mod tests {
             create_withdrawal(8_000, 10_000, 0),  // accepted
             create_withdrawal(10_000, 10_000, 0), // accepted
             create_withdrawal(1_000, 10_000, 0),  // accepted
-            create_withdrawal(*MINMAL_NON_DUST_AMOUNT_P2WPKH, 10_000, 0), // accepted
+            create_withdrawal(*MINIMAL_NON_DUST_AMOUNT_P2WPKH, 10_000, 0), // accepted
         ],
         per_withdrawal_cap: u64::MAX,
         rolling_limits: RollingWithdrawalLimits::unlimited(0),
         fee_rate: 10.0,
         num_accepted_withdrawals: 7,
-        accepted_amount: 69_001 + *MINMAL_NON_DUST_AMOUNT_P2WPKH,
+        accepted_amount: 69_001 + *MINIMAL_NON_DUST_AMOUNT_P2WPKH,
     }; "unlimited withdrawal caps only applies max-fee filtering")]
     fn test_withdrawal_request_filtering(case: WithdrawalLimitTestCase) {
         let limits =

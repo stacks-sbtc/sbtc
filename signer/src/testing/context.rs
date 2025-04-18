@@ -1007,7 +1007,7 @@ mod tests {
         let task1 = tokio::spawn(async move {
             task1_started_clone.notify_one();
 
-            while let Ok(_) = rx2.recv().await {
+            while rx2.recv().await.is_ok() {
                 count1.fetch_add(1, Ordering::Relaxed);
             }
         });
@@ -1022,7 +1022,7 @@ mod tests {
         let task2 = tokio::spawn(async move {
             task2_started_clone.notify_one();
 
-            while let Ok(_) = rx1.recv().await {
+            while rx1.recv().await.is_ok() {
                 count2.fetch_add(1, Ordering::Relaxed);
             }
         });

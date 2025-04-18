@@ -144,7 +144,7 @@ mod tests {
 
         let can_accept = ctx.client.can_accept(ADDRESS).await;
         assert!(can_accept.is_ok());
-        assert_eq!(can_accept.unwrap(), false);
+        assert!(!can_accept.unwrap());
 
         mock.assert_async().await;
     }
@@ -171,7 +171,7 @@ mod tests {
 
         let can_accept = ctx.client.can_accept(ADDRESS).await;
         assert!(can_accept.is_ok());
-        assert_eq!(can_accept.unwrap(), true);
+        assert!(can_accept.unwrap());
 
         mock.assert_async().await;
     }

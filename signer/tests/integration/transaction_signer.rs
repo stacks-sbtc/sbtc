@@ -313,7 +313,7 @@ pub async fn assert_should_be_able_to_handle_sbtc_requests() {
     };
 
     let sbtc_requests: TxRequestIds = TxRequestIds {
-        deposits: vec![setup.deposit_request.outpoint.into()],
+        deposits: vec![setup.deposit_request.outpoint],
         withdrawals: vec![],
     };
 
@@ -539,7 +539,7 @@ async fn new_state_machine_per_valid_sighash() {
     let sighash: SigHash = Faker.fake_with_rng(&mut rng);
 
     let row = BitcoinTxSigHash {
-        txid: txid.clone(),
+        txid,
         chain_tip: BitcoinBlockHash::from([0; 32]),
         prevout_txid: BitcoinTxId::from([0; 32]),
         prevout_output_index: 0,
@@ -766,7 +766,7 @@ mod validate_dkg_verification_message {
         /// the values in this [`TestParams`] instance.
         async fn execute(&self, db: &PgStore) -> Result<(), Error> {
             MockedTxSigner::validate_dkg_verification_message::<PgStore>(
-                &db,
+                db,
                 &self.new_aggregate_key,
                 self.message.as_deref(),
                 self.dkg_verification_window,
