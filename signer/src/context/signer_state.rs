@@ -148,7 +148,8 @@ impl SignerState {
 
     /// Remove a peer from the set of connected peers
     pub fn remove_connected_peer(&self, peer: &PeerId) {
-        let mut peers = self.connected_peers
+        let mut peers = self
+            .connected_peers
             .write()
             .expect("BUG: Failed to acquire write lock");
 
