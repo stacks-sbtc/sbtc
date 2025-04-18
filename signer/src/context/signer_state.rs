@@ -7,8 +7,9 @@ use std::sync::{
 };
 
 use bitcoin::Amount;
-use hashbrown::HashSet;
+use hashbrown::{HashMap, HashSet};
 use libp2p::PeerId;
+use sha2::digest::consts::U322;
 
 use crate::keys::PublicKey;
 use crate::storage::model::BitcoinBlockHash;
@@ -29,7 +30,7 @@ pub struct SignerState {
     // block observer's duties when it observes a new bitcoin block.
     bitcoin_chain_tip: RwLock<BitcoinBlockRef>,
     // All peers currently connected
-    connected_peers: RwLock<HashSet<PeerId>>,
+    connected_peers: RwLock<HashMap<PeerId, u32>>,
 }
 
 impl SignerState {
@@ -140,23 +141,33 @@ impl SignerState {
         self.connected_peers
             .write()
             .expect("BUG: Failed to acquire write lock")
-            .insert(peer);
+            .entry(peer)
+            .and_modify(|count| *count += 1)
+            .or_insert(1);
     }
 
     /// Remove a peer from the set of connected peers
     pub fn remove_connected_peer(&self, peer: &PeerId) {
-        self.connected_peers
+        let mut peers = self.connected_peers
             .write()
-            .expect("BUG: Failed to acquire write lock")
-            .remove(peer);
+            .expect("BUG: Failed to acquire write lock");
+
+        if let Some(count) = peers.get_mut(peer) {
+            *count -= 1;
+            if *count == 0 {
+                peers.remove(peer);
+            }
+        }
     }
 
     /// Get the set of currently connected peers
     pub fn get_connected_peers(&self) -> HashSet<PeerId> {
         self.connected_peers
             .read()
-            .expect("BUG: Failed to acquire readl lock")
-            .clone()
+            .expect("BUG: Failed to acquire read lock")
+            .keys()
+            .cloned()
+            .collect()
     }
 
     /// Check if all peers in the current signer set are connected
@@ -186,7 +197,7 @@ impl Default for SignerState {
                 block_height: 0,
                 block_hash: BitcoinBlockHash::from([0; 32]),
             }),
-            connected_peers: RwLock::new(HashSet::new()),
+            connected_peers: RwLock::new(HashMap::new()),
         }
     }
 }
