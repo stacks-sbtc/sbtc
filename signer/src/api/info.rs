@@ -329,8 +329,8 @@ impl InfoResponse {
 #[cfg(test)]
 mod tests {
     use std::{
-        sync::LazyLock,
         num::{NonZeroU16, NonZeroU32},
+        sync::LazyLock,
         time::Duration,
     };
 
