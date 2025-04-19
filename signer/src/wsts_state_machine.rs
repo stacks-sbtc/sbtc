@@ -169,7 +169,6 @@ where
         storage: &S,
         aggregate_key: PublicKeyXOnly,
         signer_public_keys: impl IntoIterator<Item = PublicKey> + Send,
-        threshold: u16,
         signer_private_key: PrivateKey,
     ) -> impl Future<Output = Result<Self, error::Error>> + Send
     where
@@ -249,7 +248,6 @@ impl WstsCoordinator for FireCoordinator {
         storage: &S,
         aggregate_key: PublicKeyXOnly,
         signer_public_keys: impl IntoIterator<Item = PublicKey> + Send,
-        threshold: u16,
         signer_private_key: PrivateKey,
     ) -> Result<Self, error::Error>
     where
@@ -260,6 +258,7 @@ impl WstsCoordinator for FireCoordinator {
             .await?
             .ok_or(Error::MissingDkgShares(aggregate_key))?;
 
+        let threshold = encrypted_shares.signature_share_threshold;
         let public_dkg_shares: BTreeMap<u32, wsts::net::DkgPublicShares> =
             BTreeMap::decode(encrypted_shares.public_shares.as_slice())?;
         let party_polynomials = public_dkg_shares
@@ -353,7 +352,6 @@ impl WstsCoordinator for FrostCoordinator {
         storage: &S,
         aggregate_key: PublicKeyXOnly,
         signer_public_keys: impl IntoIterator<Item = PublicKey> + Send,
-        threshold: u16,
         signer_private_key: PrivateKey,
     ) -> Result<Self, error::Error>
     where
@@ -363,6 +361,7 @@ impl WstsCoordinator for FrostCoordinator {
             .get_encrypted_dkg_shares(aggregate_key)
             .await?
             .ok_or(Error::MissingDkgShares(aggregate_key))?;
+        let threshold = encrypted_shares.signature_share_threshold;
 
         let public_dkg_shares: BTreeMap<u32, wsts::net::DkgPublicShares> =
             BTreeMap::decode(encrypted_shares.public_shares.as_slice())?;
@@ -487,7 +486,6 @@ impl SignerStateMachine {
     pub async fn load<S>(
         storage: &S,
         aggregate_key: PublicKeyXOnly,
-        threshold: u32,
         signer_private_key: PrivateKey,
     ) -> Result<Self, error::Error>
     where
@@ -505,6 +503,7 @@ impl SignerStateMachine {
         .map_err(|_| error::Error::Encryption)?;
 
         let saved_state = wsts::traits::SignerState::decode(decrypted.as_slice())?;
+        let threshold = saved_state.threshold;
 
         // This may panic if the saved state doesn't contain exactly one party,
         // however, that should never be the case since wsts maintains this invariant
@@ -542,6 +541,11 @@ impl SignerStateMachine {
         // We require the public keys to be stored sorted in db
         signer_set_public_keys.sort();
 
+        let signature_share_threshold = saved_state
+            .threshold
+            .try_into()
+            .map_err(|_| Error::TypeConversion)?;
+
         let encoded = saved_state.encode_to_vec();
         let public_shares = self.dkg_public_shares.clone().encode_to_vec();
 
@@ -549,11 +553,6 @@ impl SignerStateMachine {
         let encrypted_private_shares =
             wsts::util::encrypt(&self.0.network_private_key.to_bytes(), &encoded, rng)
                 .map_err(|_| error::Error::Encryption)?;
-
-        let signature_share_threshold: u16 = self
-            .threshold
-            .try_into()
-            .map_err(|_| Error::TypeConversion)?;
 
         Ok(model::EncryptedDkgShares {
             aggregate_key,

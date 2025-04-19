@@ -816,7 +816,6 @@ where
                 let state_machine = SignerStateMachine::load(
                     &db,
                     aggregate_key,
-                    self.threshold,
                     self.signer_private_key,
                 )
                 .await?;
@@ -1209,7 +1208,6 @@ where
             storage,
             aggregate_key,
             signing_set,
-            dkg_shares.signature_share_threshold,
             signer_private_key,
         )
         .await?;

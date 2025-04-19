@@ -1079,7 +1079,6 @@ where
             &self.context.get_storage(),
             aggregate_key.into(),
             wallet.public_keys().iter().cloned(),
-            wallet.signatures_required(),
             self.private_key,
         )
         .await?;
@@ -1449,7 +1448,6 @@ where
             &self.context.get_storage(),
             sighashes.signers_aggregate_key.into(),
             signer_public_keys.clone(),
-            self.threshold,
             self.private_key,
         )
         .await?;
@@ -1493,7 +1491,6 @@ where
                 &self.context.get_storage(),
                 deposit.signers_public_key.into(),
                 signer_public_keys.clone(),
-                self.threshold,
                 self.private_key,
             )
             .await?;
