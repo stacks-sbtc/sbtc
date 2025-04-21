@@ -152,6 +152,44 @@ pub struct BitcoinTxVinPrevout {
     pub script_pubkey: OutputScriptPubKey,
 }
 
+impl BitcoinTxInfo {
+    /// Check that the object returned from bitcoin core has all necessary
+    /// fields and data.
+    ///
+    /// The necessary data should only ever be missing when bitcoin-core
+    /// has not computed the undo data for the block that confirmed the
+    /// transaction. This should never happen for blocks on the canonical
+    /// chain.
+    pub fn validate(&self) -> Result<(), Error> {
+        // This would likely mean a bug in bitcoin core.
+        if self.vin.len() != self.tx.input.len() {
+            return Err(Error::BitcoinTxMissingData(self.txid));
+        }
+
+        // This would likely mean a bug in bitcoin core.
+        let inputs_misordered = self
+            .vin
+            .iter()
+            .zip(self.tx.input.iter())
+            .any(|(vin, tx_in)| {
+                vin.txid != Some(tx_in.previous_output.txid)
+                    || vin.vout != Some(tx_in.previous_output.vout)
+            });
+        if inputs_misordered {
+            return Err(Error::BitcoinTxInvalidData(self.txid));
+        }
+
+        // This `fee` and `vin.prevout` fields are missing for coinbase
+        // transactions and whenever the block's undo data is missing in
+        // bitcoin core.
+        if self.fee.is_none() || self.vin.iter().any(|x| x.prevout.is_none()) {
+            return Err(Error::BitcoinTxMissingFields(self.txid));
+        }
+
+        Ok(())
+    }
+}
+
 /// The scriptPubKey of a transaction output
 ///
 /// This type contains the `vin[*].prevout.scriptPubKey` field for the

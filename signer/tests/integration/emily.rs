@@ -51,7 +51,6 @@ use signer::testing::context::ConfigureStacksClient;
 use signer::testing::context::ConfigureStorage;
 use signer::testing::context::TestContext;
 use signer::testing::context::WrappedMock;
-use signer::testing::dummy;
 use signer::testing::get_rng;
 use signer::testing::stacks::DUMMY_SORTITION_INFO;
 use signer::testing::stacks::DUMMY_TENURE_INFO;

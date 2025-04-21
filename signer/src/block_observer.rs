@@ -99,9 +99,8 @@ impl DepositRequestValidator for CreateDepositRequest {
             return Ok(None);
         };
 
-        // TODO(515): After the transaction passes validation, we need to
-        // check whether we know about the public key in the deposit
-        // script.
+        // Check that the necessary data is present for the transaction.
+        tx_info.validate()?;
 
         Ok(Some(Deposit {
             info: self.validate_tx(&tx_info.tx, is_mainnet)?,
@@ -455,6 +454,12 @@ impl<C: Context, B> BlockObserver<C, B> {
                 txid: txid.into(),
                 block_hash: block_hash.into(),
             });
+            // Bail if bitcoin-core doesn't return all of the data that we
+            // care about for a non-coinbase transaction. This will happen
+            // if bitcoin core hasn't computed the undo data for the block
+            // with these transactions, of it there is a bug in bitcoin
+            // core.
+            tx_info.validate()?;
 
             for prevout in tx_info.to_inputs(&signer_script_pubkeys) {
                 db.write_tx_prevout(&prevout).await?;
