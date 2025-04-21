@@ -111,12 +111,22 @@ pub struct BitcoinTxInfo {
     pub vin: Vec<BitcoinTxVin>,
 }
 
-/// A description of an input into a transaction.
+/// A struct with more detailed information for transaction inputs. It is
+/// returned in responses to bitcoin core's `getrawtransaction` and
+/// `getblock` RPCs.
+///
+/// This struct omits several fields: `scriptSig`, `txinwitness`, for
+/// non-coinbase transactions, the `coinbase` field for coinbase
+/// transactions, and the `sequence` field. See
+/// [`bitcoincore_rpc_json::GetRawTransactionResultVin`] or
+/// https://bitcoincore.org/en/doc/25.0.0/rpc/rawtransactions/getrawtransaction/
+/// for more information on what is missing.
 #[derive(Clone, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
 pub struct BitcoinTxVin {
-    /// Most of the details to the input into the transaction
-    #[serde(flatten)]
-    pub details: BitcoinTxVinDetails,
+    /// The transaction ID. Not provided for coinbase transactions.
+    pub txid: Option<bitcoin::Txid>,
+    /// The output index. Not provided for coinbase transactions.
+    pub vout: Option<u32>,
     /// The previous output.
     ///
     /// For non-coinbase transactions, this field is omitted if block undo
@@ -124,24 +134,6 @@ pub struct BitcoinTxVin {
     /// missing in the [`BitcoinTxInfo`]. It is always omitted for coinbase
     /// transactions.
     pub prevout: Option<BitcoinTxVinPrevout>,
-}
-
-/// A detailed vin info for an input into a transacion.
-///
-/// This struct ignores two fields often provided in bitcoin core's RPC
-/// responses: the `scriptSig` and the `txinwitness` field for non-coinbase
-/// transactions and the `coinbase` field for coinbase transactions. See
-/// [`bitcoincore_rpc_json::GetRawTransactionResultVin`] or
-/// https://bitcoincore.org/en/doc/25.0.0/rpc/rawtransactions/getrawtransaction/
-/// for more information on what is missing.
-#[derive(Clone, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
-pub struct BitcoinTxVinDetails {
-    /// The script sequence number.
-    pub sequence: u32,
-    /// The transaction ID. Not provided for coinbase transactions.
-    pub txid: Option<bitcoin::Txid>,
-    /// The output index. Not provided for coinbase transactions.
-    pub vout: Option<u32>,
 }
 
 /// The previous output, omitted if block undo data is not available.

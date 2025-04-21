@@ -1620,8 +1620,8 @@ impl TxDeconstructor for BitcoinTxInfo {
         Some(PrevoutRef {
             amount: prevout.value,
             script_pubkey: &prevout.script_pubkey.script,
-            txid: vin.details.txid.as_ref()?,
-            output_index: vin.details.vout?,
+            txid: vin.txid.as_ref()?,
+            output_index: vin.vout?,
         })
     }
 }

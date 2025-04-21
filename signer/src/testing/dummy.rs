@@ -49,7 +49,6 @@ use wsts::traits::SignerState;
 use crate::bitcoin::rpc::BitcoinBlockInfo;
 use crate::bitcoin::rpc::BitcoinTxInfo;
 use crate::bitcoin::rpc::BitcoinTxVin;
-use crate::bitcoin::rpc::BitcoinTxVinDetails;
 use crate::bitcoin::rpc::BitcoinTxVinPrevout;
 use crate::bitcoin::rpc::OutputScriptPubKey;
 use crate::bitcoin::utxo::Fees;
@@ -170,11 +169,8 @@ impl Dummy<bitcoin::TxIn> for BitcoinTxVin {
         let script_pubkey: ScriptPubKey = Faker.fake_with_rng(rng);
         let output_amount = script_pubkey.minimal_non_dust().to_sat()..Amount::ONE_BTC.to_sat();
         BitcoinTxVin {
-            details: BitcoinTxVinDetails {
-                sequence: tx_in.sequence.to_consensus_u32(),
-                txid: Some(tx_in.previous_output.txid),
-                vout: Some(tx_in.previous_output.vout),
-            },
+            txid: Some(tx_in.previous_output.txid),
+            vout: Some(tx_in.previous_output.vout),
             prevout: non_coinbase.then(|| BitcoinTxVinPrevout {
                 generated: false,
                 value: output_amount.choose(rng).map(Amount::from_sat).unwrap(),
