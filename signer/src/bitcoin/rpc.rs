@@ -76,12 +76,13 @@ pub struct GetTxResponse {
 ///   active chain [1-4]. So if an optional field is `None` then the block
 ///   that confirmed this transaction has not been validated and so is not
 ///   on the active blockchain, or this is a coinbase transaction.
-/// * This type is missing some fields that are typically returned in
-///   responses to `getrawtransactions` requests. The most notable ones
-///   include the `block_hash`, `block_time`, `confirmations`, and
-///   `is_active_chain` fields. These fields are not returned for
-///   transaction objects in the `tx` array for `getblock` requests, so
-///   they are omitted here.
+/// * This type omits fields that are typically returned in responses to
+///   `getrawtransactions` requests. The most notable ones include the
+///   `block_hash`, `block_time`, `confirmations`, and `in_active_chain`
+///   fields. These fields are not returned for transaction objects in the
+///   `tx` array for `getblock` requests, so they are omitted here. Other
+///   omitted fields include `hash`, `size`, `version`, `locktime`, and
+///   `vout`.
 /// * Since we require bitcoin-core v25 or later these docs were taken from
 ///   <https://bitcoincore.org/en/doc/25.0.0/rpc/rawtransactions/getrawtransaction/>,
 ///   <https://bitcoincore.org/en/doc/25.0.0/rpc/blockchain/getblock/>, and
@@ -103,17 +104,11 @@ pub struct BitcoinTxInfo {
     pub tx: Transaction,
     /// The transaction's ID.
     pub txid: Txid,
-    /// The serialized transaction size.
-    pub size: u64,
     /// The virtual transaction size (differs from size for witness
     /// transactions).
     pub vsize: u64,
     /// The inputs into the transaction.
     pub vin: Vec<BitcoinTxVin>,
-    /// A description of the transactions outputs. This object is missing
-    /// the `desc` field in the `scriptPubKey` object. That field is the
-    /// "Inferred descriptor for the output".
-    pub vout: Vec<BitcoinTxVout>,
 }
 
 /// A description of an input into a transaction.
@@ -183,22 +178,6 @@ pub struct OutputScriptPubKey {
     /// The scriptPubKey locking the UTXO.
     #[serde(rename = "hex")]
     pub script: ScriptBuf,
-}
-
-/// The output of a bitcoin transaction that is modeled after the
-/// [`GetRawTransactionResultVout`](bitcoincore_rpc_json::GetRawTransactionResultVout)
-/// type.
-#[derive(Clone, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
-pub struct BitcoinTxVout {
-    /// The amount locked by the output
-    #[serde(with = "bitcoin::amount::serde::as_btc")]
-    pub value: Amount,
-    /// The index of the output
-    #[serde(rename = "n")]
-    pub vout: u32,
-    /// The scriptPubKey of the output.
-    #[serde(rename = "scriptPubKey")]
-    pub script_pubkey: OutputScriptPubKey,
 }
 
 /// A slimmed down version of the `BitcoinTxInfo` struct which only contains the

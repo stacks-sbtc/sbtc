@@ -51,7 +51,6 @@ use crate::bitcoin::rpc::BitcoinTxInfo;
 use crate::bitcoin::rpc::BitcoinTxVin;
 use crate::bitcoin::rpc::BitcoinTxVinDetails;
 use crate::bitcoin::rpc::BitcoinTxVinPrevout;
-use crate::bitcoin::rpc::BitcoinTxVout;
 use crate::bitcoin::rpc::OutputScriptPubKey;
 use crate::bitcoin::utxo::Fees;
 use crate::bitcoin::utxo::SignerBtcState;
@@ -151,22 +150,13 @@ impl Dummy<bitcoin::Transaction> for BitcoinTxInfo {
         let fee_rate = (1..=50u64).choose(rng).unwrap();
 
         let vsize = tx.vsize() as u64;
-        let vout = tx
-            .output
-            .iter()
-            .enumerate()
-            .map(|(vout, tx_out)| BitcoinTxVout::from_tx_out(tx_out, vout as u32))
-            .collect();
-
         let vin = tx.input.iter().map(|tx_in| tx_in.fake_with_rng(rng));
 
         BitcoinTxInfo {
             fee: Some(Amount::from_sat(fee_rate * vsize)),
             txid: tx.compute_txid(),
-            size: tx.total_size() as u64,
             vsize,
             vin: vin.collect(),
-            vout,
             tx: tx.clone(),
         }
     }
@@ -198,18 +188,6 @@ impl Dummy<Faker> for BitcoinBlockInfo {
     fn dummy_with_rng<R: Rng + ?Sized>(_: &Faker, rng: &mut R) -> Self {
         let block_height = (0..i64::MAX as u64).choose(rng).unwrap();
         BitcoinBlockInfo::random_with_height(block_height, rng)
-    }
-}
-
-impl BitcoinTxVout {
-    fn from_tx_out(tx_out: &bitcoin::TxOut, vout: u32) -> Self {
-        BitcoinTxVout {
-            value: tx_out.value,
-            vout,
-            script_pubkey: OutputScriptPubKey {
-                script: tx_out.script_pubkey.clone(),
-            },
-        }
     }
 }
 

@@ -502,7 +502,7 @@ fn parse_withdrawal_ids(withdrawal_numbers: u64) {
             .find(|req| req.request_id == output.request_id)
             .unwrap();
 
-        let amount = tx_info.vout[output.output_index as usize].value;
+        let amount = tx_info.tx.output[output.output_index as usize].value;
         assert_eq!(amount.to_sat(), request.amount);
     }
 }

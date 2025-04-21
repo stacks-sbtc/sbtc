@@ -717,10 +717,8 @@ where
             fee: Some(bitcoin::Amount::from_sat(1000)),
             tx: sweep_tx.clone(),
             txid: sweep_tx.compute_txid(),
-            size: sweep_tx.total_size() as u64,
             vsize: sweep_tx.vsize() as u64,
             vin: Vec::new(),
-            vout: Vec::new(),
         };
 
         let withdrawal_req = model::SweptWithdrawalRequest {

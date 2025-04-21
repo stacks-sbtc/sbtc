@@ -298,10 +298,8 @@ async fn deposit_flow() {
                             fee: Some(bitcoin::Amount::from_sat(deposit_max_fee)),
                             tx: deposit_tx.clone(),
                             txid: deposit_tx.compute_txid(),
-                            size: deposit_tx.total_size() as u64,
                             vsize: deposit_tx.vsize() as u64,
                             vin: Vec::new(),
-                            vout: Vec::new(),
                         }))
                     } else {
                         // We may get queried for unrelated txids if Emily state

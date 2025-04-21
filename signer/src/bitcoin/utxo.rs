@@ -1764,11 +1764,9 @@ mod tests {
             BitcoinTxInfo {
                 fee: Some(fee),
                 txid: tx.compute_txid(),
-                size: tx.base_size() as u64,
                 vsize: tx.vsize() as u64,
                 tx,
                 vin: Vec::new(),
-                vout: Vec::new(),
             }
         }
     }
@@ -3479,7 +3477,6 @@ mod tests {
             BitcoinTxInfo {
                 fee: Some(Amount::from_sat(1000)),
                 txid: Txid::all_zeros(),
-                size: 100,
                 vsize: 100,
                 tx: Transaction {
                     version: Version::TWO,
@@ -3488,7 +3485,6 @@ mod tests {
                     output: Vec::new(),
                 },
                 vin: Vec::new(),
-                vout: Vec::new(),
             }
         }
         pub fn output(&mut self, output_type: TxOutputType) -> &mut Self {
