@@ -215,7 +215,7 @@ impl BitcoinBlockInfo {
             block_hash: Faker.fake_with_rng::<BitcoinBlockHash, _>(rng).into(),
             height: block_height.into(),
             time,
-            mediantime: time.checked_sub(6 * 600),
+            median_time: time.checked_sub(6 * 600),
             previous_block_hash: Faker.fake_with_rng::<BitcoinBlockHash, _>(rng).into(),
             transactions: vec![coinbase.fake_with_rng(rng)],
         }

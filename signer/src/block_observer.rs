@@ -454,7 +454,7 @@ impl<C: Context, B> BlockObserver<C, B> {
                 txid: txid.into(),
                 block_hash: block_hash.into(),
             });
-            // Bail if bitcoin-core doesn't return all of the data that we
+            // Bail if bitcoin-core doesn't return all the data that we
             // care about for a non-coinbase transaction. This will happen
             // if bitcoin core hasn't computed the undo data for the block
             // with these transactions, of it there is a bug in bitcoin

@@ -69,7 +69,7 @@ pub struct GetTxResponse {
 ///   type, which is what the bitcoincore-rpc crate returns for the
 ///   `getrawtransaction` RPC with verbosity set to 1. That type is missing
 ///   some information that we want.
-/// * All optional fields are ommited from bitcoin-core for coinbase
+/// * All optional fields are omited from bitcoin-core for coinbase
 ///   transactions and whenever the "block undo data" is missing for a
 ///   block. The block undo data is always present for validated blocks,
 ///   and block validation is always done for blocks on the currently
@@ -124,7 +124,7 @@ pub struct BitcoinTxInfo {
 #[derive(Clone, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
 pub struct BitcoinTxVin {
     /// The transaction ID. Not provided for coinbase transactions.
-    pub txid: Option<bitcoin::Txid>,
+    pub txid: Option<Txid>,
     /// The output index. Not provided for coinbase transactions.
     pub vout: Option<u32>,
     /// The previous output.
@@ -167,7 +167,7 @@ impl BitcoinTxInfo {
         }
 
         // This would likely mean a bug in bitcoin core.
-        let inputs_misordered = self
+        let inputs_disordered = self
             .vin
             .iter()
             .zip(self.tx.input.iter())
@@ -175,7 +175,7 @@ impl BitcoinTxInfo {
                 vin.txid != Some(tx_in.previous_output.txid)
                     || vin.vout != Some(tx_in.previous_output.vout)
             });
-        if inputs_misordered {
+        if inputs_disordered {
             return Err(Error::BitcoinTxInvalidData(self.txid));
         }
 
@@ -233,22 +233,23 @@ pub struct BitcoinTxFeeInfo {
 pub struct BitcoinBlockInfo {
     /// The hash of the consensus encoded header of the block.
     #[serde(rename = "hash")]
-    pub block_hash: bitcoin::BlockHash,
-    /// The number of blocks preceeding this one on the blockchain that
+    pub block_hash: BlockHash,
+    /// The number of blocks preceding this one on the blockchain that
     /// includes this block.
     pub height: BitcoinBlockHeight,
     /// The Unix epoch time when the block was mined. It reflects the
     /// timestamp as recorded by the miner of the block.
     pub time: u64,
     ///The median block time expressed in UNIX epoch time
-    pub mediantime: Option<u64>,
+    #[serde(rename = "mediantime")]
+    pub median_time: Option<u64>,
     /// The hash of the consensus encoded header of the parent block to
     /// this one.
     ///
     /// The official docs describe this as optional, but each block that we
     /// care about should always have one, so we require it.
     #[serde(rename = "previousblockhash")]
-    pub previous_block_hash: bitcoin::BlockHash,
+    pub previous_block_hash: BlockHash,
     /// The transactions included in this block.
     #[serde(rename = "tx")]
     pub transactions: Vec<BitcoinTxInfo>,
@@ -801,5 +802,107 @@ impl BitcoinInteract for BitcoinCoreClient {
 
     async fn get_network_info(&self) -> Result<bitcoincore_rpc_json::GetNetworkInfoResult, Error> {
         self.get_network_info()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use fake::Fake as _;
+    use fake::Faker;
+
+    use crate::storage::model::BitcoinTxId;
+    use crate::testing::get_rng;
+
+    use super::*;
+
+    #[test]
+    fn validate_bitcoin_tx_info_missing_vin() {
+        let mut rng = get_rng();
+
+        let mut tx_info: BitcoinTxInfo = Faker.fake_with_rng(&mut rng);
+        // Let's make sure that we start with a valid transaction object,
+        // although this kinda tests that the Dummy implementation
+        // generates a valid transaction
+        tx_info.validate().unwrap();
+
+        tx_info.vin.pop();
+        match tx_info.validate() {
+            Err(Error::BitcoinTxMissingData(txid)) if txid == tx_info.txid => {}
+            _ => panic!("Did not get the right error when validating"),
+        }
+    }
+
+    #[test]
+    fn validate_bitcoin_tx_info_missing_required_fields() {
+        let mut rng = get_rng();
+
+        let mut tx_info: BitcoinTxInfo = Faker.fake_with_rng(&mut rng);
+        // Let's make sure that we start with a valid transaction object,
+        // although this kinda tests that the Dummy implementation
+        // generates a valid transaction
+        tx_info.validate().unwrap();
+
+        // The fee field is required.
+        tx_info.fee = None;
+        match tx_info.validate() {
+            Err(Error::BitcoinTxMissingFields(txid)) if txid == tx_info.txid => {}
+            _ => panic!("Did not get the right error when validating"),
+        }
+
+        tx_info.fee = Some(Amount::ONE_BTC);
+        tx_info.validate().unwrap();
+
+        // The vin.prevout field is required.
+        let prevout = tx_info.vin[0].prevout.clone();
+        tx_info.vin[0].prevout = None;
+
+        match tx_info.validate() {
+            Err(Error::BitcoinTxMissingFields(txid)) if txid == tx_info.txid => {}
+            _ => panic!("Did not get the right error when validating"),
+        }
+
+        tx_info.vin[0].prevout = prevout;
+        tx_info.validate().unwrap();
+    }
+
+    #[test]
+    fn validate_bitcoin_tx_info_disordered_vin() {
+        let mut rng = get_rng();
+
+        let mut tx_info: BitcoinTxInfo = Faker.fake_with_rng(&mut rng);
+        // Let's make sure that we start with a valid transaction object,
+        // although this kinda tests that the Dummy implementation
+        // generates a valid transaction.
+        tx_info.validate().unwrap();
+        assert_eq!(tx_info.tx.input.len(), 1);
+
+        // Let's add another input so that they can be disordered.
+        let tx_in = bitcoin::TxIn {
+            previous_output: OutPoint {
+                txid: Faker.fake_with_rng::<BitcoinTxId, _>(&mut rng).into(),
+                vout: Faker.fake_with_rng(&mut rng),
+            },
+            script_sig: ScriptBuf::new(),
+            sequence: bitcoin::Sequence::MAX,
+            witness: bitcoin::Witness::new(),
+        };
+        let vin: BitcoinTxVin = tx_in.fake_with_rng(&mut rng);
+        tx_info.tx.input.push(tx_in);
+        tx_info.vin.push(vin);
+
+        // Things are still ordered correctly, so it should be valid.
+        tx_info.validate().unwrap();
+
+        // Okay let's mess up the order.
+        tx_info.vin.reverse();
+        match tx_info.validate() {
+            Err(Error::BitcoinTxInvalidData(txid)) if txid == tx_info.txid => {}
+            _ => panic!("Did not get the right error when validating"),
+        }
+
+        // Let's mess up the order of the tx inputs in the same way as we
+        // did for the vin field. Things should validate now.
+        tx_info.tx.input.reverse();
+        tx_info.validate().unwrap();
     }
 }
