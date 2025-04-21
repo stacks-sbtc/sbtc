@@ -1946,8 +1946,8 @@ impl super::DbRead for PgStore {
             UNION
 
             SELECT script_pubkey
-            FROM sbtc_signer.bitcoin_tx_inputs
-            WHERE prevout_type = 'signers_input'
+            FROM sbtc_signer.bitcoin_tx_outputs
+            WHERE output_type = 'signers_output'
               AND created_at > CURRENT_TIMESTAMP - INTERVAL '365 DAYS'
             "#,
         )

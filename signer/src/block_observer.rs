@@ -417,6 +417,31 @@ impl<C: Context, B> BlockObserver<C, B> {
         block_hash: BlockHash,
         txs: &[BitcoinTxInfo],
     ) -> Result<(), Error> {
+        // The first time, we get all sweep transactions with inputs that
+        // we know about. However, we could have locked the UTXO with a new
+        // scriptPubKey, and we have no way of knowing that ahead of time.
+        // The first pass over, will populate the database with the new
+        // scriptPubKeys.
+        self.extract_sbtc_transactions_inner(block_hash, txs).await?;
+        // This will catch cases where the signers have locked up their
+        // UTXO with a new scriptPubKey and there are a chain of
+        // transactions in the block.
+        self.extract_sbtc_transactions_inner(block_hash, txs).await
+    }
+
+    /// Extract all BTC transactions from the block where one of the UTXOs
+    /// can be spent by the signers.
+    ///
+    /// # Note
+    ///
+    /// When using the postgres storage, we need to make sure that this
+    /// function is called after the `Self::write_bitcoin_block` function
+    /// because of the foreign key constraints.
+    pub async fn extract_sbtc_transactions_inner(
+        &self,
+        block_hash: BlockHash,
+        txs: &[BitcoinTxInfo],
+    ) -> Result<(), Error> {
         let db = self.context.get_storage_mut();
         // We store all the scriptPubKeys associated with the signers'
         // aggregate public key. Let's get the last years worth of them.
