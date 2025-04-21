@@ -1941,7 +1941,14 @@ impl super::DbRead for PgStore {
 
             SELECT script_pubkey
             FROM sbtc_signer.dkg_shares
-            WHERE created_at > CURRENT_TIMESTAMP - INTERVAL '365 DAYS';
+            WHERE created_at > CURRENT_TIMESTAMP - INTERVAL '365 DAYS'
+
+            UNION
+
+            SELECT script_pubkey
+            FROM sbtc_signer.bitcoin_tx_inputs
+            WHERE prevout_type = 'signers_input'
+              AND created_at > CURRENT_TIMESTAMP - INTERVAL '365 DAYS'
             "#,
         )
         .fetch_all(&self.0)
