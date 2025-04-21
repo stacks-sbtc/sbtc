@@ -165,11 +165,13 @@ pub struct BitcoinTxVinPrevout {
     pub script_pubkey: OutputScriptPubKey,
 }
 
-/// This type contains the `vin[*].prevout.scriptPubKey` field(s) for the
-/// `getrawtransaction` RPC response when verbose = 2
+/// The scriptPubKey of a transaction output
 ///
-/// This struct leaves out the following fields (because we have no use for
-/// them):
+/// This type contains the `vin[*].prevout.scriptPubKey` field for the
+/// `getrawtransaction` RPC response when verbose = 2, and the
+/// `tx[*].vin[*].prevout.scriptPubKey` field for the `getblock` RPC when
+/// verbose = 3. This struct leaves out the following fields because we
+/// have no use for them:
 /// * `asm`
 /// * `addresses`
 /// * `address`
