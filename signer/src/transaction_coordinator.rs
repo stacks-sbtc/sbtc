@@ -2540,21 +2540,19 @@ pub async fn should_coordinate_dkg(
     let storage = context.get_storage();
     let config = context.config();
 
-    if config.signer.start_dkg_if_signer_set_changed {
-        // Trigger dkg if signer set changes
-        let last_dkg_signer_set: BTreeSet<_> = context
-            .state()
-            .current_signer_set()
-            .get_signers()
-            .iter()
-            .map(|signer| *signer.public_key())
-            .collect();
-        let config_signer_set = config.signer.bootstrap_signing_set();
+    // Trigger dkg if signer set changes
+    let last_dkg_signer_set: BTreeSet<_> = context
+        .state()
+        .current_signer_set()
+        .get_signers()
+        .iter()
+        .map(|signer| *signer.public_key())
+        .collect();
+    let config_signer_set = config.signer.bootstrap_signing_set();
 
-        if last_dkg_signer_set != config_signer_set {
-            tracing::info!("signer set has changed, proceeding with DKG");
-            return Ok(true);
-        }
+    if last_dkg_signer_set != config_signer_set {
+        tracing::info!("signer set has changed, proceeding with DKG");
+        return Ok(true);
     }
 
     // Get the number of DKG shares that have been stored
@@ -2770,7 +2768,6 @@ mod tests {
             .modify_settings(|s| {
                 s.signer.dkg_min_bitcoin_block_height = dkg_min_bitcoin_block_height;
                 s.signer.dkg_target_rounds = NonZeroU32::new(dkg_target_rounds).unwrap();
-                s.signer.start_dkg_if_signer_set_changed = false;
             })
             .build();
 

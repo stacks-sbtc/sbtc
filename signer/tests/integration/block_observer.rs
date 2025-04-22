@@ -1222,9 +1222,6 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
         .with_first_bitcoin_core_client()
         .with_mocked_emily_client()
         .with_mocked_stacks_client()
-        .modify_settings(|settings| {
-            settings.signer.start_dkg_if_signer_set_changed = false;
-        })
         .build();
 
     // We need to set up the stacks client as well. We use it to fetch

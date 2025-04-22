@@ -355,8 +355,6 @@ pub struct SignerConfig {
     pub dkg_verification_window: u16,
     /// The maximum stacks fee in microSTX that the signer will accept for any stacks transaction.
     pub stacks_fees_max_ustx: NonZeroU64,
-    /// Indicates if the signer will approve starting dkg on changed signer set.
-    pub start_dkg_if_signer_set_changed: bool,
 }
 
 impl Validatable for SignerConfig {

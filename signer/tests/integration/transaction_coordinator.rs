@@ -473,9 +473,6 @@ async fn process_complete_deposit() {
         .with_first_bitcoin_core_client()
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
-        .modify_settings(|settings| {
-            settings.signer.start_dkg_if_signer_set_changed = false;
-        })
         .build();
 
     let nonce = 12;
@@ -4074,9 +4071,6 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
         .with_first_bitcoin_core_client()
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
-        .modify_settings(|settings| {
-            settings.signer.start_dkg_if_signer_set_changed = false;
-        })
         .build();
 
     let expect_tx = !is_completed && !is_in_mempool;
@@ -4389,9 +4383,6 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_mocked_clients()
-        .modify_settings(|settings| {
-            settings.signer.start_dkg_if_signer_set_changed = false;
-        })
         .build();
     let network = WanNetwork::default();
     let signer_network = network.connect(&ctx);
