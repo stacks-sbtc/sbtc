@@ -8,9 +8,8 @@ use secp256k1::{
 };
 
 use crate::{
-    backups::BACKUP_FILE_VERSION,
-    context::Context,
-    keys::PublicKey,
+    cli::backups::BACKUP_FILE_VERSION,
+    keys::{PrivateKey, PublicKey},
     proto::sbtc::signer::v1::backups::BackupFile,
     storage::{DbRead, DbWrite, model},
 };
@@ -18,92 +17,91 @@ use crate::{
 /// Errors which can occur during the restore process.
 #[derive(Debug, thiserror::Error)]
 pub enum RestoreError {
-    /// Error reading backup file
+    /// Failed to read the backup file from the filesystem.
     #[error("failed to read backup file '{0}': {1}.")]
     ReadFailed(PathBuf, #[source] std::io::Error),
 
-    /// Error decoding backup file
+    /// Failed to decode the backup file content using protobuf.
     #[error("failed to decode backup file '{0}': {1}.")]
     DecodeFailed(PathBuf, #[source] prost::DecodeError),
 
-    /// Invalid backup file version
+    /// The backup file format version does not match the expected version.
     #[error("backup file '{0}' has invalid format version {1}, expected {2}.")]
     InvalidFormatVersion(PathBuf, u32, u32),
 
-    /// Invalid backup file header
+    /// The backup file header is missing or contains invalid/incomplete data.
     #[error("backup file header is incomplete or invalid in '{0}'.")]
     InvalidHeader(PathBuf),
 
-    /// Failed to sign backup body.
-    #[error("failed to sign backup body: {0}.")]
+    /// Failed to prepare the message digest for signature verification.
+    #[error("failed to prepare message for signature verification: {0}.")]
     SigningFailed(#[from] secp256k1::Error),
 
-    /// Invalid backup file signature
+    /// The signature in the backup file header is invalid for the backup body content.
     #[error("signature verification failed for backup '{0}', data may be corrupt.")]
     SignatureVerificationFailed(PathBuf),
 
-    /// Signature mismatch
+    /// The backup was signed by a different key than the current signer's key, and `force` was not used.
     #[error(
         "backup file '{0}' was signed by a different key ({1}) than the current signer key ({2}). Use --force to restore anyway."
     )]
     SignatureMismatchRequiresForce(PathBuf, PublicKey, PublicKey),
 
-    /// Error when reading from the database.
-    #[error("database error: {0}")]
+    /// An error occurred when reading existing data from the database during restore.
+    #[error("database read error during restore: {0}")]
     DbRead(#[source] Box<crate::error::Error>),
 
-    /// Error when writing to the database.
+    /// An error occurred when writing restored data to the database.
     #[error("failed to write data during restore from '{0}': {1}")]
     DbWrite(PathBuf, #[source] Box<crate::error::Error>),
 
-    /// Failed to convert a type during the backup process.
-    #[error("type conversion: {0}: {1}")]
-    TypeConversion(
-        &'static str,
-        #[source] Box<dyn std::error::Error + Send + Sync>,
-    ),
-
-    /// Failed to convert between protobuf and model types.
+    /// Failed to convert between internal model types and protobuf types.
     #[error("failed to convert data during restore from '{0}': {1}")]
     ProtoConvert(PathBuf, #[source] Box<crate::error::Error>),
 }
 
 /// Restores signer state from a backup file.
 ///
-/// Reads the backup file, verifies its integrity and signature, and writes the
-/// contained data to the signer's storage.
+/// Reads the backup file, verifies its integrity (format version) and signature
+/// against the public key stored in the header. If the signature is valid but
+/// the public key in the backup header does not match the current `signer_private_key`,
+/// it indicates a potential key rotation. In this scenario, the restore will only
+/// proceed if `force` is true. Finally, it writes the contained data (DKG shares)
+/// to the signer's storage, skipping shares that already exist.
 ///
-/// If the signature verification fails but the public key in the backup header
-/// does not match the current signer's public key, it indicates a potential
-/// key rotation. In this case, the restore will only proceed if `force` is true.
+/// # Arguments
+/// * `storage` - A database context implementing `DbWrite` and `DbRead`.
+/// * `signer_private_key` - The current private key of the signer, used for key comparison.
+/// * `path` - The file system path to the backup file.
+/// * `force` - If true, allows restoring a backup signed by a different key.
+///
+/// # Errors
+/// Returns `RestoreError` if reading, decoding, validation, verification, or database
+/// operations fail. Specifically returns `RestoreError::SignatureMismatchRequiresForce`
+/// if keys mismatch and `force` is false.
 #[allow(unused)]
-pub async fn restore_backup<P>(ctx: &impl Context, path: P, force: bool) -> Result<(), RestoreError>
+pub async fn restore_backup<S, P>(
+    storage: &S,
+    signer_private_key: &PrivateKey,
+    path: P,
+    force: bool,
+) -> Result<(), RestoreError>
 where
     P: AsRef<Path>,
+    S: DbWrite + DbRead,
 {
     let path = path.as_ref();
-    tracing::info!(path = %path.display(), force, "Beginning signer state restore.");
 
-    // --- Steps ---
-    // 1. Read backup file
-    // 2. Decode BackupFile message
-    // 3. Validate header (version, fields present)
-    // 4. Verify signature
-    // 5. Handle signature mismatch (check keys, check force flag)
-    // 6. Restore data (convert proto -> model, write to storage)
-
-    // 1. Read backup file
+    // Read backup file
     let backup_bytes = tokio::fs::read(path)
         .await
         .map_err(|e| RestoreError::ReadFailed(path.to_path_buf(), e))?;
-    tracing::debug!(path = %path.display(), bytes = backup_bytes.len(), "Read backup file.");
 
-    // 2. Decode BackupFile message
+    // Decode BackupFile message
     let decoded_backup = BackupFile::decode(backup_bytes.as_slice())
         .map_err(|e| RestoreError::DecodeFailed(path.to_path_buf(), e))?;
-    tracing::debug!(path = %path.display(), "Decoded backup file.");
 
-    // 3. Validate header
+    // Validate header
     let header = decoded_backup
         .header
         .ok_or_else(|| RestoreError::InvalidHeader(path.to_path_buf()))?;
@@ -124,36 +122,32 @@ where
         .ok_or_else(|| RestoreError::InvalidHeader(path.to_path_buf()))?;
 
     // Convert proto key and signature to internal types
-    // Assuming TryFrom implementations exist in proto::convert
     let backup_public_key: PublicKey = backup_public_key_proto
         .try_into()
         .map_err(|e| RestoreError::ProtoConvert(path.to_path_buf(), Box::new(e)))?;
     let signature: secp256k1::ecdsa::Signature = signature_proto
         .try_into()
         .map_err(|e| RestoreError::ProtoConvert(path.to_path_buf(), Box::new(e)))?;
-    tracing::debug!(path = %path.display(), key = %backup_public_key, "extracted header fields");
 
-    // Get current key for comparison
-    let current_public_key = PublicKey::from_private_key(&ctx.config().signer.private_key);
+    // Get current public key for comparison
+    let current_public_key = PublicKey::from_private_key(signer_private_key);
 
-    // 4. Verify signature
+    // Verify signature
     let body = decoded_backup
         .body
-        .ok_or_else(|| RestoreError::InvalidHeader(path.to_path_buf()))?; // Body needed for verification
+        .ok_or_else(|| RestoreError::InvalidHeader(path.to_path_buf()))?;
 
     let body_bytes_for_verify = body.encode_to_vec();
     let body_hash = Sha256Hash::hash(&body_bytes_for_verify);
     let msg =
-        SecpMessage::from_digest_slice(&body_hash[..]).map_err(RestoreError::SigningFailed)?; // Reuse SigningFailed or create specific error
+        SecpMessage::from_digest_slice(&body_hash[..]).map_err(RestoreError::SigningFailed)?;
 
     let secp = Secp256k1::verification_only();
     match secp.verify_ecdsa(&msg, &signature, &backup_public_key) {
         Ok(_) => {
-            tracing::info!(path = %path.display(), "backup signature verified successfully against header key.");
             // Signature is valid according to the key in the backup file.
-            // NOW, check if that key matches the current signer's key.
+            // Now, check if that key matches the current signer's key.
             if backup_public_key != current_public_key {
-                tracing::warn!(path = %path.display(), backup_key = %backup_public_key, current_key = %current_public_key, "backup key differs from current signer key.");
                 if !force {
                     // Keys differ and force is not set, return error.
                     return Err(RestoreError::SignatureMismatchRequiresForce(
@@ -163,7 +157,9 @@ where
                     ));
                 } else {
                     // Keys differ, but force is set, proceed with warning.
-                    tracing::warn!(path = %path.display(), "--force flag provided, proceeding with restore despite key mismatch.");
+                    println!(
+                        "NOTE: --force flag provided, proceeding with restore despite key mismatch."
+                    );
                 }
             }
             // Keys match, or keys differ but force=true. Proceed to restore.
@@ -171,20 +167,15 @@ where
         Err(e) => {
             // Signature is invalid according to the key in the backup file.
             // This implies corruption or a bug, regardless of the current key or force flag.
-            tracing::warn!(path = %path.display(), error = %e, "backup signature verification failed against header key.");
             return Err(RestoreError::SignatureVerificationFailed(
                 path.to_path_buf(),
             ));
         }
     }
 
-    // 6. Restore data
-    let storage = ctx.get_storage_mut();
-    tracing::info!(path = %path.display(), count = body.dkg_shares.len(), "starting data restore to storage.");
-
+    // Restore data (write to database)
     for proto_share in body.dkg_shares {
         // Convert proto share back to model share
-        // Assuming TryFrom<proto::DkgShares> for model::EncryptedDkgShares exists
         let model_share: model::EncryptedDkgShares = proto_share
             .try_into()
             .map_err(|e| RestoreError::ProtoConvert(path.to_path_buf(), Box::new(e)))?;
@@ -194,21 +185,26 @@ where
             .await
             .map_err(|e| RestoreError::DbRead(Box::new(e)))?;
 
+        // Don't attempt to import if the share already exists
         if let Some(shares) = existing {
-            tracing::warn!(aggregate_key = %shares.aggregate_key, "found existing shares for aggregate key, skipping");
+            println!(
+                "NOTE: Skipping import of existing shares for aggregate key '{}'",
+                shares.aggregate_key
+            );
             continue;
         }
 
-        // Write to storage
-        tracing::info!(aggregate_key = %model_share.aggregate_key, "importing shares for aggregate key");
+        // Write the non-existing shares to the db
+        println!(
+            "Importaing shares for aggregate key '{}'",
+            model_share.aggregate_key
+        );
         storage
             .write_encrypted_dkg_shares(&model_share)
             .await
             .map_err(|e| RestoreError::DbWrite(path.to_path_buf(), Box::new(e)))?;
-        // Note: Assumes StorageError can be the source for RestoreWriteFailed
     }
 
-    tracing::info!(path = %path.display(), "Signer state restore completed successfully.");
     Ok(())
 }
 
@@ -223,20 +219,25 @@ mod tests {
     use tempfile::tempdir;
 
     use crate::{
-        backups::{backup::backup_signer, testing::setup_test_context},
+        cli::backups::backup_signer,
         keys::PrivateKey,
-        storage::DbRead,
+        storage::{DbRead, in_memory::Store},
         testing::get_rng,
     };
 
     // Helper to create a valid backup file for testing restore
     async fn create_test_backup_file(
         backup_path: &Path,
-        signing_key: PrivateKey,
+        signer_private_key: &PrivateKey,
         shares: Vec<model::EncryptedDkgShares>,
     ) {
-        let backup_ctx = setup_test_context(signing_key, shares).await;
-        backup_signer(&backup_ctx, backup_path)
+        let store = Store::new_shared();
+        for share in &shares {
+            store.write_encrypted_dkg_shares(share).await.unwrap();
+        }
+
+        // Execute the backup
+        backup_signer(&store, signer_private_key, backup_path)
             .await
             .expect("failed to create backup file");
     }
@@ -248,14 +249,20 @@ mod tests {
         store.get_all_encrypted_dkg_shares().await
     }
 
+    /// Tests successful restore when the backup key matches the current signer key.
+    ///
+    /// Verifies that only the 'Verified' shares from the backup are correctly
+    /// written to an initially empty store.
     #[tokio::test]
     async fn restore_success_matching_key() {
         let mut rng = get_rng();
         let temp_dir = tempdir().unwrap();
         let backup_path = temp_dir.path().join("restore_success.bin");
 
+        // New signer key
         let signer_key = PrivateKey::new(&mut rng);
-        // Use helper to ensure status is Verified
+
+        // Create some DKG shares, mostly randomized except 1 which will be verified
         let original_shares: Vec<model::EncryptedDkgShares> = vec![
             Faker.fake_with_rng(&mut rng),
             Faker.fake_with_rng(&mut rng),
@@ -267,26 +274,26 @@ mod tests {
                 ..Faker.fake_with_rng(&mut rng)
             },
         ];
+
+        // Filter out the verified shares for comparison (only verified are included in the backup)
         let expected_shares = original_shares
             .iter()
             .filter(|s| s.dkg_shares_status == model::DkgSharesStatus::Verified)
             .cloned()
             .collect::<Vec<_>>();
 
-        // ... rest of the test ...
-        // 1. Create the backup file using the signer key
-        create_test_backup_file(&backup_path, signer_key, original_shares.clone()).await;
+        // Create the backup file using the signer key
+        create_test_backup_file(&backup_path, &signer_key, original_shares.clone()).await;
 
-        // 2. Setup restore context with the SAME key and an EMPTY store
-        let restore_ctx = setup_test_context(signer_key, vec![]).await; // Use setup_test_context
-        let restore_store = restore_ctx.get_storage(); // Get handle to the empty store
+        // Setup restore context with the SAME key and an EMPTY store
+        let restore_store = Store::new_shared();
 
-        // 3. Perform restore (force = false)
-        restore_backup(&restore_ctx, &backup_path, false)
+        // Perform restore (force = false)
+        restore_backup(&restore_store, &signer_key, &backup_path, false)
             .await
             .expect("failed to restore backup");
 
-        // 4. Verify store contents
+        // Verify store contents
         let restored_shares = get_all_shares_from_store(&restore_store)
             .await
             .expect("failed to read dkg shares from db");
@@ -294,12 +301,16 @@ mod tests {
 
         // Use HashSet for order-independent comparison
         let original_shares_set: HashSet<model::EncryptedDkgShares> =
-            expected_shares.into_iter().collect(); // Use model type for HashSet
+            expected_shares.into_iter().collect();
         let restored_shares_set: HashSet<model::EncryptedDkgShares> =
-            restored_shares.into_iter().collect(); // Use model type for HashSet
+            restored_shares.into_iter().collect();
         assert_eq!(restored_shares_set, original_shares_set);
     }
 
+    /// Tests that restore fails if keys mismatch and the `force` flag is false.
+    ///
+    /// Creates a backup with one key, attempts restore with a different key (force=false),
+    /// and verifies it fails with `SignatureMismatchRequiresForce` and the store remains empty.
     #[tokio::test]
     async fn restore_key_mismatch_requires_force() {
         let mut rng = get_rng();
@@ -309,24 +320,24 @@ mod tests {
         let backup_signing_key = PrivateKey::new(&mut rng); // Key used for backup
         let restore_signer_key = PrivateKey::new(&mut rng); // Different key for restore context
         assert_ne!(backup_signing_key, restore_signer_key);
-        // Use helper to ensure status is Verified
+
+        // Create the original "backed up" shares with a single verified share
         let original_shares = vec![model::EncryptedDkgShares {
             dkg_shares_status: model::DkgSharesStatus::Verified,
             ..Faker.fake_with_rng(&mut rng)
         }];
 
-        // 1. Create backup file signed with backup_signing_key
-        create_test_backup_file(&backup_path, backup_signing_key, original_shares.clone()).await;
+        // Create backup file signed with backup_signing_key
+        create_test_backup_file(&backup_path, &backup_signing_key, original_shares.clone()).await;
 
-        // 2. Setup restore context with restore_signer_key (different key)
-        let restore_ctx = setup_test_context(restore_signer_key, vec![]).await; // Use setup_test_context
-        let restore_store = restore_ctx.get_storage();
+        // Setup restore context with restore_signer_key (different key)
+        let restore_store = Store::new_shared();
 
-        // 3. Perform restore (force = false) - Expect error
-        let result = restore_backup(&restore_ctx, &backup_path, false).await;
+        // Perform restore (force = false) - Expect error
+        let result = restore_backup(&restore_store, &restore_signer_key, &backup_path, false).await;
         assert!(result.is_err());
 
-        // 4. Verify the specific error
+        // Verify the specific error
         match result.err().unwrap() {
             RestoreError::SignatureMismatchRequiresForce(path, backup_pk, current_pk) => {
                 assert_eq!(path, backup_path);
@@ -336,13 +347,17 @@ mod tests {
             e => panic!("Expected SignatureMismatchRequiresForce, got {:?}", e),
         }
 
-        // 5. Verify store is still empty
+        // Verify store is still empty
         let shares_in_store = get_all_shares_from_store(&restore_store)
             .await
             .expect("failed to read dkg shares from db");
         assert!(shares_in_store.is_empty());
     }
 
+    /// Tests successful restore despite key mismatch when the `force` flag is true.
+    ///
+    /// Creates a backup with one key, attempts restore with a different key (force=true),
+    /// and verifies it succeeds and the store contains the correct shares.
     #[tokio::test]
     async fn restore_key_mismatch_with_force_success() {
         let mut rng = get_rng();
@@ -359,24 +374,26 @@ mod tests {
             ..Faker.fake_with_rng(&mut rng)
         }];
 
-        // 1. Create backup file signed with backup_signing_key
-        create_test_backup_file(&backup_path, backup_signing_key, original_shares.clone()).await;
+        // Create backup file signed with backup_signing_key
+        create_test_backup_file(&backup_path, &backup_signing_key, original_shares.clone()).await;
 
-        // 2. Setup restore context with restore_signer_key (different key)
-        let restore_ctx = setup_test_context(restore_signer_key, vec![]).await;
-        let restore_store = restore_ctx.get_storage();
+        // Setup restore context with restore_signer_key (different key)
+        let restore_store = Store::new_shared();
 
-        // 3. Perform restore (force = true) - Expect success
-        let restore_result = restore_backup(&restore_ctx, &backup_path, false).await;
+        // Perform restore (force = false) - Expect error
+        let restore_result =
+            restore_backup(&restore_store, &restore_signer_key, &backup_path, false).await;
         assert!(
             restore_result.is_err(),
             "expected restore without force to fail due to signature mismatch"
         );
-        restore_backup(&restore_ctx, &backup_path, true)
+
+        // Perform restore (force = true) - Expect success
+        restore_backup(&restore_store, &restore_signer_key, &backup_path, true)
             .await
             .expect("expected restore with force to succeed"); // Use expect to handle error
 
-        // 4. Verify store contents (should be restored despite key mismatch)
+        // Verify store contents (should be restored despite key mismatch)
         let restored_shares = get_all_shares_from_store(&restore_store)
             .await
             .expect("failed to read dkg shares from db");
@@ -390,6 +407,10 @@ mod tests {
         assert_eq!(restored_shares_set, original_shares_set);
     }
 
+    /// Tests that restore fails if the backup signature is invalid/corrupted.
+    ///
+    /// Creates a valid backup, tampers with the signature bytes, attempts restore
+    /// with the original key, and verifies it fails with `SignatureVerificationFailed`.
     #[tokio::test]
     async fn restore_signature_corrupt_same_key() {
         let mut rng = get_rng();
@@ -397,13 +418,14 @@ mod tests {
         let backup_path = temp_dir.path().join("restore_corrupt.bin");
 
         let signer_key = PrivateKey::new(&mut rng);
-        // Use helper to ensure status is Verified
+
+        // Create the original "backed up" shares
         let original_shares = vec![Faker.fake_with_rng(&mut rng)];
 
-        // 1. Create a valid backup file
-        create_test_backup_file(&backup_path, signer_key, original_shares.clone()).await;
+        // Create a valid backup file
+        create_test_backup_file(&backup_path, &signer_key, original_shares.clone()).await;
 
-        // 2. Read, tamper, write back
+        // Read, tamper, write back
         let backup_bytes = tokio::fs::read(&backup_path)
             .await
             .expect("failed to read backup file");
@@ -429,36 +451,39 @@ mod tests {
             .await
             .expect("failed to write back tampered file");
 
-        // 3. Setup restore context with the original key
-        let restore_ctx = setup_test_context(signer_key, vec![]).await;
-        let restore_store = restore_ctx.get_storage();
+        // Setup restore context with the original key
+        let restore_store = Store::new_shared();
 
-        // 4. Perform restore (force = false) - Expect error
+        // Perform restore (force = false) - Expect error
         assert_matches!(
-            restore_backup(&restore_ctx, &backup_path, false).await,
+            restore_backup(&restore_store, &signer_key, &backup_path, false).await,
             Err(RestoreError::SignatureVerificationFailed(_)),
             "expected signature verification failure"
         );
 
-        // 5. Verify store is still empty
+        // Verify store is still empty
         let shares_in_store = get_all_shares_from_store(&restore_store)
             .await
             .expect("failed to read dkg shares from db");
         assert!(shares_in_store.is_empty());
     }
 
+    /// Tests that restore fails correctly if the backup file does not exist.
+    ///
+    /// Attempts to restore from a non-existent path and verifies it fails with
+    /// `RestoreError::ReadFailed` and the inner error kind is `NotFound`.
     #[tokio::test]
     async fn restore_file_not_found() -> Result<(), Box<dyn std::error::Error>> {
         let mut rng = get_rng();
         let temp_dir = tempdir()?;
-        let backup_path = temp_dir.path().join("non_existent_backup.bin"); // Does not exist
+        let backup_path = temp_dir.path().join("non_existent_backup.bin"); // Should not exist
 
         let signer_key = PrivateKey::new(&mut rng);
-        let restore_ctx = setup_test_context(signer_key, vec![]).await;
+        let restore_store = Store::new_shared();
 
         // Attempt to restore from a non-existent file
         assert_matches!(
-            restore_backup(&restore_ctx, &backup_path, false).await,
+            restore_backup(&restore_store, &signer_key, &backup_path, false).await,
             Err(RestoreError::ReadFailed(path, err)) => {
                 assert_eq!(path, backup_path);
                 assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
@@ -468,6 +493,10 @@ mod tests {
         Ok(())
     }
 
+    /// Tests that restore fails correctly if the backup file contains invalid protobuf data.
+    ///
+    /// Writes arbitrary bytes to a file, attempts restore, and verifies it fails
+    /// with `RestoreError::DecodeFailed`.
     #[tokio::test]
     async fn restore_decode_error() {
         let temp_dir = tempdir().expect("failed to create temp dir");
@@ -479,11 +508,11 @@ mod tests {
             .expect("failed to write invalid data");
 
         let signer_key = PrivateKey::new(&mut get_rng());
-        let restore_ctx = setup_test_context(signer_key, vec![]).await;
+        let restore_store = Store::new_shared();
 
         // Attempt to restore from the invalid file
         assert_matches!(
-            restore_backup(&restore_ctx, &backup_path, false).await,
+            restore_backup(&restore_store, &signer_key, &backup_path, false).await,
             Err(RestoreError::DecodeFailed(path, _)) => {
                 assert_eq!(path, backup_path);
             },
@@ -491,6 +520,10 @@ mod tests {
         );
     }
 
+    /// Tests that restore fails correctly if the backup file has an incorrect format version.
+    ///
+    /// Creates a valid backup, modifies the version in the header, attempts restore,
+    /// and verifies it fails with `RestoreError::InvalidFormatVersion`.
     #[tokio::test]
     async fn restore_invalid_version() {
         let mut rng = get_rng();
@@ -500,10 +533,10 @@ mod tests {
         let signer_key = PrivateKey::new(&mut rng);
         let original_shares = vec![Faker.fake_with_rng(&mut rng)];
 
-        // 1. Create a valid backup file
-        create_test_backup_file(&backup_path, signer_key, original_shares.clone()).await;
+        // Create a valid backup file
+        create_test_backup_file(&backup_path, &signer_key, original_shares.clone()).await;
 
-        // 2. Read, change version, write back
+        // Read, change version, write back
         let backup_bytes = tokio::fs::read(&backup_path)
             .await
             .expect("failed to read backup file");
@@ -517,12 +550,12 @@ mod tests {
             .await
             .expect("failed to write back backup file");
 
-        // 3. Setup restore context
-        let restore_ctx = setup_test_context(signer_key, vec![]).await;
+        // Setup restore context
+        let restore_store = Store::new_shared();
 
-        // 4. Perform restore - Expect error
+        // Perform restore - Expect error
         assert_matches!(
-            restore_backup(&restore_ctx, &backup_path, false).await,
+            restore_backup(&restore_store, &signer_key, &backup_path, false).await,
             Err(RestoreError::InvalidFormatVersion(path, found, expected)) => {
                 assert_eq!(path, backup_path);
                 assert_eq!(found, invalid_version);
