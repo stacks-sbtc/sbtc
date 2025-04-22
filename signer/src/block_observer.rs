@@ -31,6 +31,7 @@ use crate::context::SignerEvent;
 use crate::emily_client::EmilyInteract;
 use crate::error::Error;
 use crate::keys::PublicKey;
+use crate::keys::SignerScriptPubKey as _;
 use crate::metrics::BITCOIN_BLOCKCHAIN;
 use crate::metrics::Metrics;
 use crate::stacks::api::GetNakamotoStartHeight as _;
@@ -422,7 +423,8 @@ impl<C: Context, B> BlockObserver<C, B> {
         // scriptPubKey, and we have no way of knowing that ahead of time.
         // The first pass over, will populate the database with the new
         // scriptPubKeys.
-        self.extract_sbtc_transactions_inner(block_hash, txs).await?;
+        self.extract_sbtc_transactions_inner(block_hash, txs)
+            .await?;
         // This will catch cases where the signers have locked up their
         // UTXO with a new scriptPubKey and there are a chain of
         // transactions in the block.
@@ -443,6 +445,16 @@ impl<C: Context, B> BlockObserver<C, B> {
         txs: &[BitcoinTxInfo],
     ) -> Result<(), Error> {
         let db = self.context.get_storage_mut();
+        // When a signer is not part of the bootstrapa signing set but is
+        // joining the set as a new signer, it will not have the signers
+        // original scriptPubKey in its database, so it reles on the config
+        // to inform them of what it is.
+        let bootstrap_script_pubkey = self
+            .context
+            .config()
+            .signer
+            .bootstrap_aggregate_key
+            .map(|key| key.signers_script_pubkey());
         // We store all the scriptPubKeys associated with the signers'
         // aggregate public key. Let's get the last years worth of them.
         let signer_script_pubkeys: HashSet<ScriptBuf> = db
@@ -450,6 +462,7 @@ impl<C: Context, B> BlockObserver<C, B> {
             .await?
             .into_iter()
             .map(ScriptBuf::from_bytes)
+            .chain(bootstrap_script_pubkey)
             .collect();
 
         // Look through all the UTXOs in the given transaction slice and
