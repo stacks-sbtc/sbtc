@@ -360,6 +360,12 @@ pub struct SignerConfig {
 impl Validatable for SignerConfig {
     fn validate(&self, cfg: &Settings) -> Result<(), ConfigError> {
         self.p2p.validate(cfg)?;
+
+        if !self.bootstrap_signing_set().contains(&self.public_key()) {
+            let err = SignerConfigError::MissingPubkeyInBootstrapSignerSet;
+            return Err(ConfigError::Message(err.to_string()));
+        }
+
         if self.deployer.is_mainnet() != self.network.is_mainnet() {
             let err = SignerConfigError::NetworkDeployerMismatch;
             return Err(ConfigError::Message(err.to_string()));
@@ -428,17 +434,10 @@ impl Validatable for SignerConfig {
 }
 
 impl SignerConfig {
-    /// Return the bootstrapped signing set from the config. This function
-    /// makes sure that the signing set includes the current signer.
+    /// Return the bootstrapped signing set from the config.
+    /// This function just convert [`Vec`] to [`BTreeSet`]
     pub fn bootstrap_signing_set(&self) -> BTreeSet<PublicKey> {
-        // We add in the current signer into the signing set from the
-        // config just in case it hasn't been included already.
-        let self_public_key = PublicKey::from_private_key(&self.private_key);
-        self.bootstrap_signing_set
-            .iter()
-            .copied()
-            .chain([self_public_key])
-            .collect()
+        self.bootstrap_signing_set.iter().copied().collect()
     }
 
     /// Return the public key of the signer.
@@ -756,15 +755,37 @@ mod tests {
     fn default_config_toml_loads_signer_private_key_config_with_environment() {
         clear_env();
 
-        let new = "a1a6fcf2de80dcde3e0e4251eae8c69adf57b88613b2dcb79332cc325fa439bd";
+        let new = "9bfecf16c9c12792589dd2b843f850d5b89b81a04f8ab91c083bdf6709fbefee01";
         set_var("SIGNER_SIGNER__PRIVATE_KEY", new);
 
         let settings = Settings::new_from_default_config().unwrap();
 
         assert_eq!(
             settings.signer.private_key,
-            PrivateKey::from_str(new).unwrap()
+            PrivateKey::from_str(&new[..64]).unwrap()
         );
+    }
+
+    #[test]
+    fn config_bails_if_pubkey_of_this_signer_not_in_bootstrap_signer_set() {
+        clear_env();
+
+        let new = "a1a6fcf2de80dcde3e0e4251eae8c69adf57b88613b2dcb79332cc325fa439bd";
+        set_var("SIGNER_SIGNER__PRIVATE_KEY", new);
+
+        let error = Settings::new_from_default_config().unwrap_err();
+
+        match error {
+            ConfigError::Message(msg) => {
+                assert_eq!(
+                    msg,
+                    "Bootstrap signer set must contain pubkey of this signer".to_string()
+                );
+            }
+            _ => {
+                panic!("Expected ConfigError::Message, got: {:#?}", error);
+            }
+        }
     }
 
     #[test]
@@ -1122,10 +1143,16 @@ mod tests {
     fn valid_33_byte_private_key_works() {
         clear_env();
 
-        set_var(
-            "SIGNER_SIGNER__PRIVATE_KEY",
-            "a1a6fcf2de80dcde3e0e4251eae8c69adf57b88613b2dcb79332cc325fa439bd01",
-        );
+        let privkey = "a1a6fcf2de80dcde3e0e4251eae8c69adf57b88613b2dcb79332cc325fa439bd01";
+
+        set_var("SIGNER_SIGNER__PRIVATE_KEY", privkey);
+
+        let privkey = PrivateKey::from_str(&privkey[..64]).unwrap();
+        let pubkey = PublicKey::from_private_key(&privkey);
+
+        set_var("SIGNER_SIGNER__BOOTSTRAP_SIGNING_SET", pubkey.to_string());
+        set_var("SIGNER_SIGNER__BOOTSTRAP_SIGNATURES_REQUIRED", "1");
+
         let settings = Settings::new_from_default_config();
         assert!(settings.is_ok());
     }
