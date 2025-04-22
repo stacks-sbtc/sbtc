@@ -19,10 +19,27 @@ permissions:
   actions: write # Needed to trigger another workflow via API
 
 jobs:
+  log_tag:
+    name: Print Tag Info
+    runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.set-output.outputs.tag_name }}
+    steps:
+      - name: Show Tag Name
+        id: print_name
+        run: |
+          printf "Tag to be created: ${{ inputs.tag_name }}"
+
+      - name: Set Output
+        id: set_output
+        run: |
+          printf "tag_name=${{ inputs.tag_name }}" >> $GITHUB_OUTPUT
+
   create_tag:
     name: Create Tag
     runs-on: ubuntu-latest
     environment: Tags
+    needs: log_tag
     steps:
       - name: Checkout Repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
