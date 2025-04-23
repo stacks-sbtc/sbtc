@@ -574,6 +574,19 @@ async fn process_complete_deposit() {
     // Get the private key of the coordinator of the signer set.
     let private_key = select_coordinator(&setup.sweep_block_hash.into(), &signer_info);
 
+    // DKG can be triggered if last dkg signer set differ from one in config.
+    // However, we don't want to test this functionality in this test, so
+    // making sure that dkg won't be triggered because of changes in signer set.
+    let last_dkg_signer_set: Vec<_> = context
+        .state()
+        .current_signer_set()
+        .get_signers()
+        .iter()
+        .map(|signer| *signer.public_key())
+        .collect();
+    let config = context.config_mut();
+    config.signer.bootstrap_signing_set = last_dkg_signer_set;
+
     // Bootstrap the tx coordinator event loop
     context.state().set_sbtc_contracts_deployed();
     let tx_coordinator = transaction_coordinator::TxCoordinatorEventLoop {
@@ -4279,6 +4292,19 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
 
     // Get the private key of the coordinator of the signer set.
     let private_key = select_coordinator(&bitcoin_chain_tip.block_hash, &signer_info);
+
+    // DKG can be triggered if last dkg signer set differ from one in config.
+    // However, we don't want to test this functionality in this test, so
+    // making sure that dkg won't be triggered because of changes in signer set.
+    let last_dkg_signer_set: Vec<_> = context
+        .state()
+        .current_signer_set()
+        .get_signers()
+        .iter()
+        .map(|signer| *signer.public_key())
+        .collect();
+    let config = context.config_mut();
+    config.signer.bootstrap_signing_set = last_dkg_signer_set;
 
     // Bootstrap the tx coordinator event loop
     context.state().set_sbtc_contracts_deployed();
