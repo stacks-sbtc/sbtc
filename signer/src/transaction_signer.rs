@@ -1716,7 +1716,7 @@ mod tests {
     ) {
         let chain_tip_height = chain_tip_height.into();
         let dkg_min_bitcoin_block_height = dkg_min_bitcoin_block_height.map(Into::into);
-        let context = TestContext::builder()
+        let mut context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
             .modify_settings(|s| {
@@ -1752,6 +1752,19 @@ mod tests {
             .await
             .unwrap();
 
+        // DKG can be triggered if last dkg signer set differ from one in config.
+        // However, we don't want to test this functionality in this test, so
+        // making sure that dkg won't be triggered because of changes in signer set.
+        let last_dkg_signer_set: Vec<_> = context
+            .state()
+            .current_signer_set()
+            .get_signers()
+            .iter()
+            .map(|signer| *signer.public_key())
+            .collect();
+        let config = context.config_mut();
+        config.signer.bootstrap_signing_set = last_dkg_signer_set;
+
         // Test the case
         let result = assert_allow_dkg_begin(&context, &bitcoin_chain_tip).await;
 
@@ -1764,7 +1777,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_wsts_message_asserts_dkg_begin() {
-        let context = TestContext::builder()
+        let mut context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
             .build();
@@ -1794,6 +1807,19 @@ mod tests {
             })
             .await
             .unwrap();
+
+        // DKG can be triggered if last dkg signer set differ from one in config.
+        // However, we don't want to test this functionality in this test, so
+        // making sure that dkg won't be triggered because of changes in signer set.
+        let last_dkg_signer_set: Vec<_> = context
+            .state()
+            .current_signer_set()
+            .get_signers()
+            .iter()
+            .map(|signer| *signer.public_key())
+            .collect();
+        let config = context.config_mut();
+        config.signer.bootstrap_signing_set = last_dkg_signer_set;
 
         // Create our signer instance.
         let mut signer = TxSignerEventLoop {
