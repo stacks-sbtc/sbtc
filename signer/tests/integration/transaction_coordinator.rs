@@ -4432,6 +4432,19 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
         .update_current_signer_set(signers.signer_keys().iter().copied().collect());
     ctx.state().set_current_aggregate_key(aggregate_key.clone());
 
+    // DKG can be triggered if last dkg signer set differ from one in config.
+    // However, we don't want to test this functionality in this test, so
+    // making sure that dkg won't be triggered because of changes in signer set.
+    let last_dkg_signer_set: Vec<_> = ctx
+        .state()
+        .current_signer_set()
+        .get_signers()
+        .iter()
+        .map(|signer| *signer.public_key())
+        .collect();
+    let config = ctx.config_mut();
+    config.signer.bootstrap_signing_set = last_dkg_signer_set;
+
     ctx.with_stacks_client(|client| {
         client
             .expect_estimate_fees()
@@ -4474,6 +4487,19 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
     setup.store_deposit_decisions(&db).await;
     setup.store_sweep_tx(&db).await;
 
+    // DKG can be triggered if last dkg signer set differ from one in config.
+    // However, we don't want to test this functionality in this test, so
+    // making sure that dkg won't be triggered because of changes in signer set.
+    let last_dkg_signer_set: Vec<_> = ctx
+        .state()
+        .current_signer_set()
+        .get_signers()
+        .iter()
+        .map(|signer| *signer.public_key())
+        .collect();
+    let config = ctx.config_mut();
+    config.signer.bootstrap_signing_set = last_dkg_signer_set;
+
     let (bitcoin_chain_tip, _) = db.get_chain_tips().await;
     ctx.state().set_bitcoin_chain_tip(bitcoin_chain_tip);
     // If we try to sign a complete deposit, we will ask the bitcoin node to
@@ -4490,6 +4516,25 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
     // Start the coordinator event loop and wait for it to be ready
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
+
+    // We will use network messages to detect the coordinator attempt, so we
+    // need to connect to the network
+    let mut fake_ctx = TestContext::default_mocked();
+
+    let new_pubkey = fake_ctx.config().signer.public_key();
+
+    ctx.config_mut()
+        .signer
+        .bootstrap_signing_set
+        .push(new_pubkey);
+    fake_ctx.config_mut().signer.bootstrap_signing_set =
+        ctx.config().signer.bootstrap_signing_set.clone();
+
+    ctx.state()
+        .update_current_signer_set(ctx.config().signer.bootstrap_signing_set());
+    fake_ctx
+        .state()
+        .update_current_signer_set(ctx.config().signer.bootstrap_signing_set());
 
     let signing_round_max_duration = Duration::from_secs(2);
     let ev = TxCoordinatorEventLoop {
@@ -4512,9 +4557,20 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
-    // We will use network messages to detect the coordinator attempt, so we
-    // need to connect to the network
-    let fake_ctx = TestContext::default_mocked();
+    // DKG can be triggered if last dkg signer set differ from one in config.
+    // However, we don't want to test this functionality in this test, so
+    // making sure that dkg won't be triggered because of changes in signer set.
+
+    // let last_dkg_signer_set: Vec<_> = ctx
+    //     .state()
+    //     .current_signer_set()
+    //     .get_signers()
+    //     .iter()
+    //     .map(|signer| *signer.public_key())
+    //     .collect();
+    // let config = fake_ctx.config_mut();
+    // config.signer.bootstrap_signing_set = last_dkg_signer_set;
+
     let mut fake_signer = network.connect(&fake_ctx).spawn();
 
     // Finally, set the deposit status according in the smart contract
@@ -4523,6 +4579,20 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
     } else {
         set_deposit_incomplete(&mut ctx).await;
     }
+
+    // DKG can be triggered if last dkg signer set differ from one in config.
+    // However, we don't want to test this functionality in this test, so
+    // making sure that dkg won't be triggered because of changes in signer set.
+
+    let last_dkg_signer_set: Vec<_> = ctx
+        .state()
+        .current_signer_set()
+        .get_signers()
+        .iter()
+        .map(|signer| *signer.public_key())
+        .collect();
+    let config = fake_ctx.config_mut();
+    config.signer.bootstrap_signing_set = last_dkg_signer_set;
 
     // Wake up the coordinator
     ctx.signal(RequestDeciderEvent::NewRequestsHandled.into())
