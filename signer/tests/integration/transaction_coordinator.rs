@@ -4571,7 +4571,8 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
     ctx.signal(RequestDeciderEvent::NewRequestsHandled.into())
         .expect("failed to signal");
 
-    let network_msg = tokio::time::timeout(Duration::from_millis(2500), fake_signer.receive()).await;
+    let network_msg =
+        tokio::time::timeout(Duration::from_millis(2500), fake_signer.receive()).await;
 
     if deposit_completed {
         network_msg.expect_err("expected timeout, got something instead");
