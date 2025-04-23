@@ -343,7 +343,13 @@ where
         let should_coordinate_dkg =
             should_coordinate_dkg(&self.context, &bitcoin_chain_tip).await?;
         let aggregate_key = if should_coordinate_dkg {
-            self.coordinate_dkg(bitcoin_chain_tip.as_ref()).await?
+            match self.coordinate_dkg(bitcoin_chain_tip.as_ref()).await {
+                Ok(key) => key,
+                Err(error) => {
+                    tracing::error!(%error, "failed to coordinate DKG; using existing aggregate key");
+                    maybe_aggregate_key.ok_or(Error::MissingAggregateKey(*bitcoin_chain_tip.block_hash))?
+                }
+            }
         } else {
             maybe_aggregate_key.ok_or(Error::MissingAggregateKey(*bitcoin_chain_tip.block_hash))?
         };
