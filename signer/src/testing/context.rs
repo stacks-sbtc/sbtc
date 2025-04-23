@@ -206,6 +206,26 @@ impl<Storage, Bitcoin, Stacks>
     }
 }
 
+/// Addition to Context trait, used in tests.
+pub trait TestingContext: Clone + Sync + Send {
+    /// Get mutable reference to current configuration for the signer
+    /// Works only in tests
+    fn config_mut(&mut self) -> &mut Settings;
+}
+
+impl<Storage, Bitcoin, Stacks, Emily> TestingContext
+    for TestContext<Storage, Bitcoin, Stacks, Emily>
+where
+    Storage: DbRead + DbWrite + Clone + Sync + Send + 'static,
+    Bitcoin: BitcoinInteract + Clone + Send + Sync + 'static,
+    Stacks: StacksInteract + Clone + Send + Sync + 'static,
+    Emily: EmilyInteract + Clone + Send + Sync + 'static,
+{
+    fn config_mut(&mut self) -> &mut Settings {
+        self.inner.config_mut()
+    }
+}
+
 impl<Storage, Bitcoin, Stacks, Emily> Context for TestContext<Storage, Bitcoin, Stacks, Emily>
 where
     Storage: DbRead + DbWrite + Clone + Sync + Send + 'static,
@@ -215,10 +235,6 @@ where
 {
     fn config(&self) -> &Settings {
         self.inner.config()
-    }
-
-    fn config_mut(&mut self) -> &mut Settings {
-        self.inner.config_mut()
     }
 
     fn state(&self) -> &SignerState {

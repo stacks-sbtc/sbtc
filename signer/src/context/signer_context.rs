@@ -15,6 +15,9 @@ use crate::{
 
 use super::{Context, SignerSignal, SignerState, TerminationHandle};
 
+#[cfg(any(test, feature = "testing"))]
+use crate::testing::context::TestingContext;
+
 /// Signer context which is passed to different components within the
 /// signer binary.
 #[derive(Debug, Clone)]
@@ -115,10 +118,6 @@ where
         &self.config
     }
 
-    fn config_mut(&mut self) -> &mut Settings {
-        &mut self.config
-    }
-
     fn state(&self) -> &SignerState {
         &self.state
     }
@@ -167,6 +166,19 @@ where
 
     fn get_emily_client(&self) -> impl EmilyInteract + Clone + 'static {
         self.emily_client.clone()
+    }
+}
+
+#[cfg(any(test, feature = "testing"))]
+impl<S, BC, ST, EM> TestingContext for SignerContext<S, BC, ST, EM>
+where
+    S: DbRead + DbWrite + Clone + Sync + Send + 'static,
+    BC: BitcoinInteract + Clone + 'static,
+    ST: StacksInteract + Clone + Sync + Send + 'static,
+    EM: EmilyInteract + Clone + Sync + Send + 'static,
+{
+    fn config_mut(&mut self) -> &mut Settings {
+        &mut self.config
     }
 }
 
