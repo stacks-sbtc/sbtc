@@ -2799,18 +2799,7 @@ mod tests {
             .await
             .unwrap();
 
-        // DKG can be triggered if last dkg signer set differ from one in config.
-        // However, we don't want to test this functionality in this test, so
-        // making sure that dkg won't be triggered because of changes in signer set.
-        let last_dkg_signer_set: Vec<_> = context
-            .state()
-            .current_signer_set()
-            .get_signers()
-            .iter()
-            .map(|signer| *signer.public_key())
-            .collect();
-        let config = context.config_mut();
-        config.signer.bootstrap_signing_set = last_dkg_signer_set;
+        prevent_dkg_on_changed_signer_set(&mut context);
 
         // Test the case
         let result = should_coordinate_dkg(&context, &bitcoin_chain_tip)

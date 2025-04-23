@@ -226,6 +226,23 @@ where
     }
 }
 
+/// DKG can be triggered if last dkg signer set differ from one in config.
+/// However, we don't want to test this functionality in some tests, so
+/// this function makes sure that dkg won't be triggered because of changes in signer set.
+/// Warn: in some cases dkg still can be triggered on changed signer set even if you used
+/// this function.
+pub fn prevent_dkg_on_changed_signer_set(context: &mut (impl Context + TestingContext)) {
+    let last_dkg_signer_set: Vec<_> = context
+        .state()
+        .current_signer_set()
+        .get_signers()
+        .iter()
+        .map(|signer| *signer.public_key())
+        .collect();
+    let config = context.config_mut();
+    config.signer.bootstrap_signing_set = last_dkg_signer_set;
+}
+
 impl<Storage, Bitcoin, Stacks, Emily> Context for TestContext<Storage, Bitcoin, Stacks, Emily>
 where
     Storage: DbRead + DbWrite + Clone + Sync + Send + 'static,
