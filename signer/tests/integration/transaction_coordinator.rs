@@ -4432,19 +4432,6 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
         .update_current_signer_set(signers.signer_keys().iter().copied().collect());
     ctx.state().set_current_aggregate_key(aggregate_key.clone());
 
-    // DKG can be triggered if last dkg signer set differ from one in config.
-    // However, we don't want to test this functionality in this test, so
-    // making sure that dkg won't be triggered because of changes in signer set.
-    let last_dkg_signer_set: Vec<_> = ctx
-        .state()
-        .current_signer_set()
-        .get_signers()
-        .iter()
-        .map(|signer| *signer.public_key())
-        .collect();
-    let config = ctx.config_mut();
-    config.signer.bootstrap_signing_set = last_dkg_signer_set;
-
     ctx.with_stacks_client(|client| {
         client
             .expect_estimate_fees()
@@ -4557,20 +4544,6 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
-    // DKG can be triggered if last dkg signer set differ from one in config.
-    // However, we don't want to test this functionality in this test, so
-    // making sure that dkg won't be triggered because of changes in signer set.
-
-    // let last_dkg_signer_set: Vec<_> = ctx
-    //     .state()
-    //     .current_signer_set()
-    //     .get_signers()
-    //     .iter()
-    //     .map(|signer| *signer.public_key())
-    //     .collect();
-    // let config = fake_ctx.config_mut();
-    // config.signer.bootstrap_signing_set = last_dkg_signer_set;
-
     let mut fake_signer = network.connect(&fake_ctx).spawn();
 
     // Finally, set the deposit status according in the smart contract
@@ -4598,7 +4571,7 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
     ctx.signal(RequestDeciderEvent::NewRequestsHandled.into())
         .expect("failed to signal");
 
-    let network_msg = tokio::time::timeout(signing_round_max_duration, fake_signer.receive()).await;
+    let network_msg = tokio::time::timeout(Duration::from_millis(2500), fake_signer.receive()).await;
 
     if deposit_completed {
         network_msg.expect_err("expected timeout, got something instead");
