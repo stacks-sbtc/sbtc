@@ -1381,6 +1381,19 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
         assert_eq!(latest_dkg, dkg_shares);
         assert_eq!(storage.get_encrypted_dkg_shares_count().await.unwrap(), 1);
 
+        // DKG can be triggered if last dkg signer set differ from one in config.
+        // However, we don't want to test this functionality in this test, so
+        // making sure that dkg won't be triggered because of changes in signer set.
+        let last_dkg_signer_set: Vec<_> = ctx
+            .state()
+            .current_signer_set()
+            .get_signers()
+            .iter()
+            .map(|signer| *signer.public_key())
+            .collect();
+        let config = ctx.config_mut();
+        config.signer.bootstrap_signing_set = last_dkg_signer_set;
+
         // Signers and coordinator should NOT allow DKG
         assert!(!should_coordinate_dkg(&ctx, &db_chain_tip).await.unwrap());
         assert!(assert_allow_dkg_begin(&ctx, &db_chain_tip).await.is_err());
