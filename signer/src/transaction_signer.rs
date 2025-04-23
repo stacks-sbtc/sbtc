@@ -1544,7 +1544,6 @@ pub async fn assert_allow_dkg_begin(
     let config_signer_set = config.signer.bootstrap_signing_set();
 
     if last_dkg_signer_set != config_signer_set {
-        eprintln!("Signer set changed, procceeding with dkg");
         tracing::info!("signer set has changed, proceeding with DKG");
         return Ok(());
     }
