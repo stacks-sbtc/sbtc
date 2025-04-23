@@ -137,8 +137,8 @@ impl TestRotateKeySetup {
             self.wallet.address().clone(),
         ));
         let rotate_key_tx = KeyRotationEvent {
-            address: address,
             block_hash: self.raw_tx.block_hash.into(),
+            address,
             txid: self.raw_tx.txid.into(),
             aggregate_key,
             signer_set: self.signer_keys.clone(),
