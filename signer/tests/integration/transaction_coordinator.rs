@@ -4520,8 +4520,6 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
         set_deposit_incomplete(&mut ctx).await;
     }
 
-    prevent_dkg_on_changed_signer_set(&mut ctx);
-
     // Wake up the coordinator
     ctx.signal(RequestDeciderEvent::NewRequestsHandled.into())
         .expect("failed to signal");
