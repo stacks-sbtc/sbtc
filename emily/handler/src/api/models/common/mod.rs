@@ -23,7 +23,6 @@ pub mod requests;
     Deserialize,
     ToSchema,
     ToResponse,
-    Display,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum Status {
