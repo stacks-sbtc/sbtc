@@ -718,6 +718,7 @@ async fn get_oldest_stacks_block_for_bitcoin_block(
 // Returns oldest stacks block height, ancored to some block in range
 // [range_start_bitcoin_height; range_end_bitcoin_height] (both sides inclusive)
 // If no stacks block is found, returns Error::NotFound.
+#[tracing::instrument(skip(context))]
 async fn get_oldest_stacks_block_in_range(
     context: &EmilyContext,
     range_start_bitcoin_height: u64,
@@ -730,9 +731,11 @@ async fn get_oldest_stacks_block_in_range(
             return Ok(stacks_height);
         }
     }
+    warn!("No Stacks block found in range");
     Err(Error::NotFound)
 }
 
+#[tracing::instrument(skip(context))]
 async fn calculate_sbtc_left_for_withdrawals(
     context: &EmilyContext,
     rolling_withdrawal_blocks: Option<u64>,
@@ -745,7 +748,9 @@ async fn calculate_sbtc_left_for_withdrawals(
         return Ok(None);
     };
     let chaintip = get_api_state(context).await?.chaintip();
+    tracing::info!("chainstate retrieved successfully");
     let bitcoin_tip = chaintip.bitcoin_height.ok_or(Error::NotFound)?;
+    tracing::info!("Bitcoin tip retrieved successfully");
     let bitcoin_end_block = bitcoin_tip.saturating_sub(rolling_withdrawal_blocks.saturating_sub(1));
 
     let minimum_stacks_height_in_window =
@@ -765,6 +770,7 @@ async fn calculate_sbtc_left_for_withdrawals(
             None,
         )
         .await?;
+        tracing::info!("Withdrawal entries retrieved successfully");
         for withdrawal in withdrawals {
             total_withdrawn = total_withdrawn.saturating_add(withdrawal.amount);
         }
@@ -838,7 +844,12 @@ pub async fn get_limits(context: &EmilyContext) -> Result<Limits, Error> {
         global_cap.rolling_withdrawal_blocks,
         global_cap.rolling_withdrawal_cap,
     )
-    .await?;
+    .await
+    .inspect_err(|error| {
+        warn!(%error, "calculate_sbtc_left_for_withdrawals did not return successfully");
+    })
+    .ok()
+    .flatten();
 
     // Get the global limit for the whole thing.
     Ok(Limits {
