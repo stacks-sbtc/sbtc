@@ -248,13 +248,12 @@ pub(crate) trait TableIndexTrait {
             maybe_exclusive_start_key_from_next_token::<Self::SearchToken>(maybe_next_token)?;
 
         let table_name = Self::table_name(settings);
-        let index_name = format!("{:#?}", Self::INDEX_NAME_IF_GSI.map(|s| s.to_string()));
-        let partition_key_name =
-            <<Self::Entry as EntryTrait>::Key as KeyTrait>::PARTITION_KEY_NAME.to_string();
+        let index_name = Self::INDEX_NAME_IF_GSI;
+        let partition_key_name = <<Self::Entry as EntryTrait>::Key as KeyTrait>::PARTITION_KEY_NAME;
         tracing::debug!(
             %table_name,
             %index_name,
-            %partition_key_name,
+            ?partition_key_name,
             "querying dynamoDB",
         );
         // Query the database.
