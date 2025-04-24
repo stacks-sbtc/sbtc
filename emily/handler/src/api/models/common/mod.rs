@@ -1,7 +1,6 @@
 //! Request structures for deposit api calls.
 
 use serde::{Deserialize, Serialize};
-use std::fmt::Display;
 use utoipa::{ToResponse, ToSchema};
 
 /// Common request structures.
