@@ -850,7 +850,9 @@ mod validate_dkg_verification_message {
         ))
     }
 
-    use crate::commands::{CreateDkgShares, Ctx, InitializeRuntime, NewTestDatabase};
+    use crate::commands::{
+        CreateDkgShares, Ctx, InitializeRuntime, NewTestDatabase, WriteDkgShares,
+    };
     use madhouse::{Command, execute_commands, prop_allof, scenario};
     use proptest::prelude::*;
 
@@ -863,6 +865,7 @@ mod validate_dkg_verification_message {
             InitializeRuntime,
             NewTestDatabase,
             CreateDkgShares,
+            WriteDkgShares,
         ]
     }
 
