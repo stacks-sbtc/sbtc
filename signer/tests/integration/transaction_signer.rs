@@ -850,7 +850,7 @@ mod validate_dkg_verification_message {
         ))
     }
 
-    use crate::commands::{Ctx, NewTestDatabase};
+    use crate::commands::{CreateDkgShares, Ctx, NewTestDatabase};
     use madhouse::{Command, execute_commands, prop_allof, scenario};
     use proptest::prelude::*;
 
@@ -858,7 +858,7 @@ mod validate_dkg_verification_message {
     fn latest_key_in_failed_state_scenario() {
         let test_context = std::sync::Arc::new(Ctx);
 
-        scenario![test_context, NewTestDatabase,]
+        scenario![test_context, NewTestDatabase, CreateDkgShares]
     }
 
     #[tokio::test]
