@@ -86,7 +86,7 @@ pub struct Store {
     pub encrypted_dkg_shares: BTreeMap<PublicKeyXOnly, (OffsetDateTime, model::EncryptedDkgShares)>,
 
     /// Rotate keys transactions
-    pub rotate_keys_transactions: HashMap<model::StacksTxId, model::RotateKeysTransaction>,
+    pub rotate_keys_transactions: HashMap<model::StacksTxId, model::KeyRotationEvent>,
 
     /// A mapping between request_ids and withdrawal-accept events. Note
     /// that in prod we can have a single request_id be associated with
@@ -651,7 +651,7 @@ impl super::DbRead for SharedStore {
     async fn get_last_key_rotation(
         &self,
         chain_tip: &model::BitcoinBlockHash,
-    ) -> Result<Option<model::RotateKeysTransaction>, Error> {
+    ) -> Result<Option<model::KeyRotationEvent>, Error> {
         let Some(stacks_chain_tip) = self.get_stacks_chain_tip(chain_tip).await? else {
             return Ok(None);
         };
@@ -1273,7 +1273,7 @@ impl super::DbWrite for SharedStore {
 
     async fn write_rotate_keys_transaction(
         &self,
-        key_rotation: &model::RotateKeysTransaction,
+        key_rotation: &model::KeyRotationEvent,
     ) -> Result<(), Error> {
         self.lock()
             .await
