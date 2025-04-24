@@ -11,11 +11,11 @@ impl Command<TestState, Ctx> for NewTestDatabase {
     }
 
     fn apply(&self, state: &mut TestState) {
-        // Create a Tokio runtime just for this operation
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let runtime = state.runtime.as_ref().unwrap();
+        let db = runtime.block_on(async {
+            signer::testing::storage::new_test_database().await
+        });
 
-        // Use the Tokio runtime to run the async function
-        let db = rt.block_on(signer::testing::storage::new_test_database());
         state.db = Some(db);
     }
 

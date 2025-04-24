@@ -10,6 +10,7 @@ impl TestContext for Ctx {}
 pub struct TestState {
     pub db: Option<signer::storage::postgres::PgStore>,
     pub shares: Option<EncryptedDkgShares>,
+    pub runtime: Option<tokio::runtime::Runtime>,
 }
 
 impl State for TestState {}
