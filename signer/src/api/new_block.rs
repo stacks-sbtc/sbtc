@@ -315,6 +315,7 @@ mod tests {
     use crate::storage::in_memory::Store;
     use crate::storage::model::DepositRequest;
     use crate::storage::model::StacksPrincipal;
+    use crate::storage::model::StacksTxId;
     use crate::testing::context::*;
     use crate::testing::get_rng;
     use crate::testing::storage::model::TestData;
