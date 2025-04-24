@@ -718,7 +718,7 @@ async fn get_oldest_stacks_block_for_bitcoin_block(
 // Returns oldest stacks block height, ancored to some block in range
 // [range_start_bitcoin_height; range_end_bitcoin_height] (both sides inclusive)
 // If no stacks block is found, returns Error::NotFound.
-#[tracing::instrument]
+#[tracing::instrument(skip(context))]
 async fn get_oldest_stacks_block_in_range(
     context: &EmilyContext,
     range_start_bitcoin_height: u64,
@@ -735,7 +735,7 @@ async fn get_oldest_stacks_block_in_range(
     Err(Error::NotFound)
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(context))]
 async fn calculate_sbtc_left_for_withdrawals(
     context: &EmilyContext,
     rolling_withdrawal_blocks: Option<u64>,
