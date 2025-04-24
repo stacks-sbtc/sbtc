@@ -46,7 +46,7 @@ jobs:
     steps:
       - name: Log in to GHCR
         id: ghcr_login
-        uses: stacks-sbtc/actions/docker/login-action@main
+        uses: stacks-sbtc/actions/docker/login-action@0a2a8b638e992ee2ace4805763ac18cc924fbacb
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -56,7 +56,9 @@ jobs:
       ## This requires that a release branch exists for the tag.
       - name: Checkout Repository
         id: checkout_repository
-        uses: stacks-sbtc/actions/checkout@main
+        uses: stacks-sbtc/actions/checkout@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        with:
+          ref: refs/tags/${{ github.event.client_payload.tag_name }}
 
       ## if the repo owner is not `stacks-network`, default to a docker-org of the repo owner (i.e. github user id)
       ## this allows forks to run the docker push workflows without having to hardcode a dockerhub org (but it does require docker hub user to match github username)
@@ -72,7 +74,7 @@ jobs:
       ## ex. debian will have this tag: `type=ref,event=tag,enable=${{ matrix.dist == 'debian' }}`
       - name: Docker Metadata ( ${{ matrix.dist }} )
         id: docker_metadata
-        uses: stacks-sbtc/actions/docker/metadata-action@main
+        uses: stacks-sbtc/actions/docker/metadata-action@0a2a8b638e992ee2ace4805763ac18cc924fbacb
         with:
           images: |
             ${{ env.ghcr_org }}/sbtc
@@ -85,7 +87,7 @@ jobs:
       ## Build docker image for release
       - name: Build and Push ( ${{ matrix.dist }} ${{ matrix.docker_target }} )
         id: docker_build
-        uses: stacks-sbtc/actions/docker/build-push-action@main
+        uses: stacks-sbtc/actions/docker/build-push-action@0a2a8b638e992ee2ace4805763ac18cc924fbacb
         with:
           file: ./.github/actions/dockerfiles/Dockerfile.${{ matrix.docker_target }}.${{ matrix.dist }}
           platforms: ${{ env.docker_platforms }}
@@ -102,7 +104,7 @@ jobs:
 
       - name: Generate artifact attestation
         id: generate_attestation
-        uses: stacks-sbtc/actions/attest-build-provenance@main
+        uses: stacks-sbtc/actions/attest-build-provenance@0a2a8b638e992ee2ace4805763ac18cc924fbacb
         with:
           subject-name: ${{ env.ghcr_org }}/sbtc
           subject-digest: ${{ steps.docker_build.outputs.digest }}
@@ -124,7 +126,7 @@ jobs:
 
       - name: Upload Attestation Files as Artifacts
         id: upload_attestation
-        uses: stacks-sbtc/actions/upload-artifact@main
+        uses: stacks-sbtc/actions/upload-artifact@0a2a8b638e992ee2ace4805763ac18cc924fbacb
         with:
           name: attestation-files
           overwrite: true
@@ -208,7 +210,7 @@ jobs:
 
       - name: Create GitHub Release
         id: create_release
-        uses: stacks-sbtc/actions/github-script@main
+        uses: stacks-sbtc/actions/github-script@0a2a8b638e992ee2ace4805763ac18cc924fbacb
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
