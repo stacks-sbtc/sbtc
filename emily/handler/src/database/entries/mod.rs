@@ -246,10 +246,23 @@ pub(crate) trait TableIndexTrait {
         // Convert inputs into the types needed for querying.
         let exclusive_start_key =
             maybe_exclusive_start_key_from_next_token::<Self::SearchToken>(maybe_next_token)?;
+
+        let table_name = Self::table_name(settings);
+        let index_name = format!("{:#?}", Self::INDEX_NAME_IF_GSI.map(|s| s.to_string()));
+        let partition_key_name = format!(
+            "{}",
+            <<Self::Entry as EntryTrait>::Key as KeyTrait>::PARTITION_KEY_NAME,
+        );
+        tracing::debug!(
+            %table_name,
+            %index_name,
+            %partition_key_name,
+            "querying dynamoDB",
+        );
         // Query the database.
         let query_output = dynamodb_client
             .query()
-            .table_name(Self::table_name(settings))
+            .table_name(table_name)
             .set_index_name(Self::INDEX_NAME_IF_GSI.map(|s| s.to_string()))
             .set_exclusive_start_key(exclusive_start_key)
             .set_limit(maybe_page_size.map(|u| u as i32))

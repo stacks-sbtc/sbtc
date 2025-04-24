@@ -94,6 +94,13 @@ pub async fn get_withdrawals(
             query.page_size,
         )
         .await?;
+        entries.iter().for_each(|entry| {
+            debug!(
+                %entry.sender,
+                %entry.txid,
+                "db returned entry for get_withdrawals request",
+            );
+        });
         // Convert data into resource types.
         let withdrawals: Vec<WithdrawalInfo> =
             entries.into_iter().map(|entry| entry.into()).collect();
@@ -147,6 +154,13 @@ pub async fn get_withdrawals_for_recipient(
             query.page_size,
         )
         .await?;
+        entries.iter().for_each(|entry| {
+            debug!(
+                %entry.sender,
+                %entry.txid,
+                "db returned entry for get_withdrawals request",
+            );
+        });
         // Convert data into resource types.
         let withdrawals: Vec<WithdrawalInfo> =
             entries.into_iter().map(|entry| entry.into()).collect();

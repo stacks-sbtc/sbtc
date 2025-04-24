@@ -335,6 +335,10 @@ pub async fn get_withdrawal_entries(
     maybe_next_token: Option<String>,
     maybe_page_size: Option<u16>,
 ) -> Result<(Vec<WithdrawalInfoEntry>, Option<String>), Error> {
+    debug!(
+        %status,
+        "querying withdrawals by status"
+    );
     query_with_partition_key::<WithdrawalTableSecondaryIndex>(
         context,
         status,
