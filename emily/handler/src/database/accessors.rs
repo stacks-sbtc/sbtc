@@ -838,7 +838,7 @@ pub async fn get_limits(context: &EmilyContext) -> Result<Limits, Error> {
         global_cap.rolling_withdrawal_blocks,
         global_cap.rolling_withdrawal_cap,
     )
-    .await?;
+    .await.ok().flatten();
 
     // Get the global limit for the whole thing.
     Ok(Limits {
