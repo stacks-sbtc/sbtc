@@ -249,10 +249,8 @@ pub(crate) trait TableIndexTrait {
 
         let table_name = Self::table_name(settings);
         let index_name = format!("{:#?}", Self::INDEX_NAME_IF_GSI.map(|s| s.to_string()));
-        let partition_key_name = format!(
-            "{}",
-            <<Self::Entry as EntryTrait>::Key as KeyTrait>::PARTITION_KEY_NAME,
-        );
+        let partition_key_name =
+            <<Self::Entry as EntryTrait>::Key as KeyTrait>::PARTITION_KEY_NAME.to_string();
         tracing::debug!(
             %table_name,
             %index_name,
