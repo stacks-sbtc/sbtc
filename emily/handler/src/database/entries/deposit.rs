@@ -684,9 +684,7 @@ impl DepositUpdatePackage {
     pub fn try_from(entry: &DepositEntry, update: ValidatedDepositUpdate) -> Result<Self, Error> {
         // Ensure the keys are equal.
         if update.key != entry.key {
-            return Err(Error::Debug(
-                "Attempted to update deposit txid + output index combo".into(),
-            ));
+            return Err(Error::DepositUpdate(entry.key.clone(), update.key));
         }
         // Ensure that this event is valid if it follows the current latest event.
         entry

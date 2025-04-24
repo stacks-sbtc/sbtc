@@ -672,8 +672,9 @@ impl WithdrawalUpdatePackage {
     ) -> Result<Self, Error> {
         // Ensure the keys are equal.
         if update.request_id != entry.key.request_id {
-            return Err(Error::Debug(
-                "Attempted to update withdrawal request_id combo.".into(),
+            return Err(Error::WithdrawalUpdate(
+                entry.key.clone(),
+                update.request_id,
             ));
         }
         // Ensure that this event is valid if it follows the current latest event.

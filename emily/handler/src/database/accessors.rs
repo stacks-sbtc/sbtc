@@ -270,7 +270,7 @@ pub async fn update_deposit(
         .send()
         .await?
         .attributes
-        .ok_or(Error::Debug("Failed updating withdrawal".into()))
+        .ok_or(Error::MissingAttributesDeposit(update.key.clone()))
         .and_then(|attributes| {
             serde_dynamo::from_item::<Item, DepositEntry>(attributes.into()).map_err(Error::from)
         })
@@ -321,9 +321,7 @@ pub async fn get_withdrawal_entry(
                 "Found too many withdrawals for id {key}: {}",
                 serde_json::to_string_pretty(&entries)?
             );
-            Err(Error::Debug(format!(
-                "Found too many withdrawals for id {key}: {entries:?}"
-            )))
+            Err(Error::TooManyWithdrawalEntries(*key))
         }
     }
 }
@@ -505,7 +503,7 @@ pub async fn update_withdrawal(
         .send()
         .await?
         .attributes
-        .ok_or(Error::Debug("Failed updating withdrawal".into()))
+        .ok_or(Error::MissingAttributesWithdrawal(update.key.clone()))
         .and_then(|attributes| {
             serde_dynamo::from_item::<Item, WithdrawalEntry>(attributes.into()).map_err(Error::from)
         })

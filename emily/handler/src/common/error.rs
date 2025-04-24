@@ -85,10 +85,6 @@ pub enum Error {
     #[error("Internal server error")]
     InternalServer,
 
-    /// Debug error.
-    #[error("Debug error: {0}")]
-    Debug(String),
-
     /// Internal too many retries error.
     #[error("Too many internal retries")]
     TooManyInternalRetries,
@@ -116,11 +112,49 @@ pub enum Error {
     #[error("deposit entry failed validation; {0}; ID: {1}")]
     DepositEntry(&'static str, DepositEntryKey),
 
+    /// This happens when there is a mismatch in the outpoint of the new
+    /// deposit event and the fetched deposit entry. Seeing this is
+    /// probably due to a programming error.
+    #[error("mismatch when updateing deposit request; existing: {0}; update: {1}")]
+    DepositUpdate(DepositEntryKey, DepositEntryKey),
+
     /// This happens if the withdrawal entry that was stored in the database
     /// was invalid, or if the withdrawal entry that we are creating to store
     /// in the database is invalid.
     #[error("withdrawal entry failed validation; {0}; ID: {1}")]
     WithdrawalEntry(&'static str, WithdrawalEntryKey),
+
+    /// This happens when there is a mismatch in the request ID of the new
+    /// withdrawal event and the fetched withdrawal entry. Seeing this is
+    /// probably due to a programming error.
+    #[error("mismatch when updateing withdrawal request; existing: {0}; update: {1}")]
+    WithdrawalUpdate(WithdrawalEntryKey, u64),
+
+    /// This means that the stacks address in the environment for the
+    /// signers multisig address is invalid.
+    #[error("could not parse a stacks address from a string")]
+    InvalidStacksAddress(#[source] clarity::vm::errors::Error),
+
+    /// This happens when the request to DynamoDB succeeds but does not
+    /// return any values. This happens when the request instructs the
+    /// database to refrain from returning values, so this is likely a
+    /// programming error.
+    #[error("entry in database for deposit request not returned from DynamoDB; {0}")]
+    MissingAttributesDeposit(DepositEntryKey),
+
+    /// This happens when the request to DynamoDB succeeds but does not
+    /// return any values. This happens when the request instructs the
+    /// database to refrain from returning values, so this is likely a
+    /// programming error.
+    #[error("entry in database for withdrawal request not returned from DynamoDB; {0}")]
+    MissingAttributesWithdrawal(WithdrawalEntryKey),
+
+    /// DynamoDB should only contain one entry per withdrawal request ID.
+    ///
+    /// TODO: In case of a re-org, tripple check that we can identify the
+    /// correct withdrawal request if the transaction is replayed.
+    #[error("DynamoDB contained many entries for the given request ID: {0}")]
+    TooManyWithdrawalEntries(u64),
 
     /// This happens when we fail to build a request object when trying to
     /// interact with DynamoDB. For example, when deleting entries in the
@@ -197,15 +231,20 @@ impl Error {
             Error::Forbidden => StatusCode::FORBIDDEN,
             Error::NotFound => StatusCode::NOT_FOUND,
             Error::InternalServer => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::Debug(_) => StatusCode::IM_A_TEAPOT,
             Error::TooManyInternalRetries => StatusCode::INTERNAL_SERVER_ERROR,
             Error::InconsistentState(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::Reorganizing(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::VersionConflict => StatusCode::INTERNAL_SERVER_ERROR,
             Error::Deserialization(_) => StatusCode::BAD_REQUEST,
+            Error::InvalidStacksAddress(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::DepositEntry(_, _) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::DepositUpdate(_, _) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::WithdrawalEntry(_, _) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::WithdrawalUpdate(_, _) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::DynamoDbBuild(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::MissingAttributesDeposit(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::MissingAttributesWithdrawal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::TooManyWithdrawalEntries(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::Base64Decode(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::EnvVariable(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::SerdeJson(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -235,8 +274,7 @@ impl Error {
     /// production ready.
     pub fn into_production_error(self) -> Error {
         match self {
-            Error::Debug(_)
-            | Error::Network(_)
+            Error::Network(_)
             | Error::VersionConflict
             | Error::Reorganizing(_)
             | Error::Base64Decode(_)
