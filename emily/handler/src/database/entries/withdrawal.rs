@@ -671,11 +671,9 @@ impl WithdrawalUpdatePackage {
         update: ValidatedWithdrawalUpdate,
     ) -> Result<Self, Error> {
         // Ensure the keys are equal.
+        let key = entry.key.clone();
         if update.request_id != entry.key.request_id {
-            return Err(Error::WithdrawalUpdate(
-                entry.key.clone(),
-                update.request_id,
-            ));
+            return Err(Error::WithdrawalUpdate(key, update.request_id));
         }
         // Ensure that this event is valid if it follows the current latest event.
         entry
@@ -683,7 +681,7 @@ impl WithdrawalUpdatePackage {
             .ensure_following_event_is_valid(&update.event)?;
         // Create the withdrawal update package.
         Ok(WithdrawalUpdatePackage {
-            key: entry.key.clone(),
+            key,
             version: entry.version,
             event: update.event,
         })
