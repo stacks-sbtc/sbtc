@@ -64,7 +64,6 @@ pub async fn get_deposit_entry(
     key: &DepositEntryKey,
 ) -> Result<DepositEntry, Error> {
     let entry = get_entry::<DepositTablePrimaryIndex>(context, key).await?;
-    #[cfg(feature = "testing")]
     Ok(entry)
 }
 
@@ -311,11 +310,7 @@ pub async fn get_withdrawal_entry(
     // Return.
     match entries.as_slice() {
         [] => Err(Error::NotFound),
-        [withdrawal] =>
-        {
-            #[cfg(feature = "testing")]
-            Ok(withdrawal.clone())
-        }
+        [withdrawal] => Ok(withdrawal.clone()),
         _ => {
             warn!(
                 "Found too many withdrawals for id {key}: {}",
@@ -588,6 +583,7 @@ pub async fn add_chainstate_entry(
         {
             for chainstate in chainstates {
                 // Remove the entry from the table.
+                // TODO: Figure out whether we need to delete anything at all here.
                 let existing_entry: ChainstateEntry = chainstate.into();
                 delete_entry::<ChainstateTablePrimaryIndex>(context, &existing_entry.key).await?;
             }

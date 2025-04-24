@@ -2,12 +2,14 @@
 
 use std::env;
 
+#[cfg(feature = "testing")]
+use aws_sdk_dynamodb::operation::batch_write_item::BatchWriteItemError;
+
 use aws_sdk_dynamodb::{
     error::SdkError,
     operation::{
-        batch_write_item::BatchWriteItemError, delete_item::DeleteItemError,
-        get_item::GetItemError, put_item::PutItemError, query::QueryError, scan::ScanError,
-        update_item::UpdateItemError,
+        delete_item::DeleteItemError, get_item::GetItemError, put_item::PutItemError,
+        query::QueryError, scan::ScanError, update_item::UpdateItemError,
     },
 };
 use reqwest::StatusCode;
@@ -156,18 +158,10 @@ pub enum Error {
     #[error("DynamoDB contained many entries for the given request ID: {0}")]
     TooManyWithdrawalEntries(u64),
 
-    /// This happens when we fail to build a request object when trying to
-    /// interact with DynamoDB. For example, when deleting entries in the
-    /// database in our tests, we build a request object and that operation
-    /// may fail with this error.
-    #[cfg(feature = "testing")]
-    #[error("{0}")]
-    DynamoDbBuild(#[from] aws_sdk_dynamodb::error::BuildError),
-
     /// This happens when we fail to decode a base64 encoded string into a
     /// vector of bytes.
     #[error("failed to base64 decode the string into bytes; {0}")]
-    Base64Decode(#[from] base64::DecodeError),
+    Base64Decode(base64::DecodeError),
 
     /// This is used when trying to get a required value from the
     /// environment and that operation fails.
@@ -202,23 +196,30 @@ pub enum Error {
     #[error("could complete Query operation on DynamoDB; {0}")]
     AwsSdkDynamoDbQuery(#[from] SdkError<QueryError>),
 
-    /// This happens when attempting to delete an item in the database.
-    #[cfg(feature = "testing")]
-    #[error("{0}")]
-    AwsSdkDynamoDbDeleteItem(#[source] DeleteItemError),
-
     /// This happens when attempting the "Scan" operation in DynamoDB.
     #[error("could complete Scan operation on DynamoDB; {0}")]
     AwsSdkDynamoDbScan(#[from] SdkError<ScanError>),
+
+    /// This happens when attempting to update a stored item in DynamoDB.
+    #[error("could not update the item in DynamoDB; {0}")]
+    AwsSdkDynamoDbUpdateItem(#[source] UpdateItemError),
+
+    /// This happens when attempting to delete an item in the database.
+    #[error("Error when deleting an item in DynamoDB; {0}")]
+    AwsSdkDynamoDbDeleteItem(#[source] DeleteItemError),
+
+    /// This happens when we fail to build a request object when trying to
+    /// interact with DynamoDB. For example, when deleting entries in the
+    /// database in our tests, we build a request object and that operation
+    /// may fail with this error.
+    #[cfg(feature = "testing")]
+    #[error("{0}")]
+    DynamoDbBuild(#[from] aws_sdk_dynamodb::error::BuildError),
 
     /// This happens during the BatchWrite operation on DynamoDB.
     #[cfg(feature = "testing")]
     #[error("{0}")]
     AwsSdkDynamoDbBatchWriteItem(#[from] SdkError<BatchWriteItemError>),
-
-    /// This happens when attempting to update a stored item in DynamoDB.
-    #[error("could not update the item in DynamoDB; {0}")]
-    AwsSdkDynamoDbUpdateItem(#[source] UpdateItemError),
 }
 
 /// Error implementation.
@@ -241,7 +242,6 @@ impl Error {
             Error::DepositUpdate(_, _) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::WithdrawalEntry(_, _) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::WithdrawalUpdate(_, _) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::DynamoDbBuild(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::MissingAttributesDeposit(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::MissingAttributesWithdrawal(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::TooManyWithdrawalEntries(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -250,13 +250,16 @@ impl Error {
             Error::SerdeJson(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::SerdeDynamo(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::EnvParseInt(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::AwsSdkDynamoDbDeleteItem(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::AwsSdkDynamoDbGetItem(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::AwsSdkDynamoDbPutItem(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::AwsSdkDynamoDbQuery(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::AwsSdkDynamoDbDeleteItem(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::AwsSdkDynamoDbScan(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::AwsSdkDynamoDbBatchWriteItem(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::AwsSdkDynamoDbUpdateItem(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            #[cfg(feature = "testing")]
+            Error::DynamoDbBuild(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            #[cfg(feature = "testing")]
+            Error::AwsSdkDynamoDbBatchWriteItem(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
     /// Converts the error into a warp response.
@@ -284,15 +287,17 @@ impl Error {
             | Error::EnvParseInt(_)
             | Error::DepositEntry(_, _)
             | Error::WithdrawalEntry(_, _)
-            | Error::DynamoDbBuild(_)
+            | Error::AwsSdkDynamoDbDeleteItem(_)
             | Error::AwsSdkDynamoDbGetItem(_)
             | Error::AwsSdkDynamoDbPutItem(_)
             | Error::AwsSdkDynamoDbQuery(_)
-            | Error::AwsSdkDynamoDbDeleteItem(_)
             | Error::AwsSdkDynamoDbScan(_)
-            | Error::AwsSdkDynamoDbBatchWriteItem(_)
             | Error::AwsSdkDynamoDbUpdateItem(_)
             | Error::InternalServer => Error::InternalServer,
+            #[cfg(feature = "testing")]
+            Error::DynamoDbBuild(_) | Error::AwsSdkDynamoDbBatchWriteItem(_) => {
+                Error::InternalServer
+            }
             err => err,
         }
     }
