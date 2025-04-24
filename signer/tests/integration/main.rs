@@ -4,6 +4,7 @@ mod bitcoin_client;
 mod bitcoin_rpc;
 mod bitcoin_validation;
 mod block_observer;
+mod commands;
 mod communication;
 mod complete_deposit;
 mod contracts;

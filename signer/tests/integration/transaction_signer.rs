@@ -850,6 +850,17 @@ mod validate_dkg_verification_message {
         ))
     }
 
+    use crate::commands::{Ctx, NewTestDatabase};
+    use madhouse::{Command, execute_commands, prop_allof, scenario};
+    use proptest::prelude::*;
+
+    #[test]
+    fn latest_key_in_failed_state_scenario() {
+        let test_context = std::sync::Arc::new(Ctx);
+
+        scenario![test_context, NewTestDatabase,]
+    }
+
     #[tokio::test]
     async fn verification_window_elapsed() {
         let db = testing::storage::new_test_database().await;
