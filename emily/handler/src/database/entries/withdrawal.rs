@@ -246,17 +246,24 @@ impl WithdrawalEvent {
     ) -> Result<(), Error> {
         // Determine if event is valid.
         if self.stacks_block_height > next_event.stacks_block_height {
-            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(
-                "Attempting to update a withdrawal with a block height earlier than it should be."
-                    .into(),
-            )));
+            let message =
+                "Attempting to update a withdrawal with a block height earlier than it should be";
+            tracing::warn!(
+                new_event = ?next_event,
+                last_existing_event = ?self,
+                message
+            );
+            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(message)));
         } else if self.stacks_block_height == next_event.stacks_block_height
             && self.stacks_block_hash != next_event.stacks_block_hash
         {
-            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(
-                "Attempting to update a withdrawal with a block height and hash that conflicts with the current history."
-                    .into(),
-            )));
+            let message = "Attempting to update a withdrawal with a block height and hash that conflicts with the current history";
+            tracing::warn!(
+                new_event = ?next_event,
+                last_existing_event = ?self,
+                message
+            );
+            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(message)));
         }
 
         Ok(())

@@ -34,7 +34,7 @@ pub enum Inconsistency {
     /// are considered equally canonical.
     Chainstates(Vec<Chainstate>),
     /// There is an inconsistency in the way an item is being updated.
-    ItemUpdate(String),
+    ItemUpdate(&'static str),
 }
 
 /// Errors from the internal API logic.

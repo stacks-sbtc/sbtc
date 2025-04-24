@@ -62,29 +62,31 @@ async fn set_api_state_status(
                 if new_reorg_tip.key == current_reorg_tip.key {
                     return Ok(None);
                 } else {
-                    let err_msg: String = format!(
-                        "Trying to reorg with new chaintip {new_reorg_tip:?} while the api is reorganizing around the chaintip {current_reorg_tip:?}"
-                    );
-                    warn!(err_msg);
-                    return Err(Error::InconsistentState(Inconsistency::ItemUpdate(err_msg)));
+                    let message =
+                        "Trying to reorg with new chaintip while the API is already reorganizing";
+                    warn!(?new_reorg_tip, ?current_reorg_tip, message);
+                    return Err(Error::InconsistentState(Inconsistency::ItemUpdate(message)));
                 }
             }
         };
 
         debug!(
-            "Changing Api state from [{original_api_state:?}] to [{api_state:?}]. Attempt {attempt_number} of maximum {MAX_SET_API_STATE_ATTEMPTS_DURING_REORG}."
+            ?api_state,
+            ?original_api_state,
+            attampt = %attempt_number,
+            "Changing Api state, max attempts {MAX_SET_API_STATE_ATTEMPTS_DURING_REORG}."
         );
 
         // Attempt to set the API state.
         match accessors::set_api_state(context, &api_state).await {
             // We successfully set the API state.
             Ok(()) => {
-                info!("Successfully set api state: {:?}.", api_state);
+                info!(?api_state, "Successfully set api state.");
                 return Ok(Some(api_state));
             }
             // Retry if there was a version conflict.
             Err(Error::VersionConflict(error)) => {
-                debug!(%error, "Failed to update API state - retrying; {api_state:?}")
+                warn!(%error, ?api_state, "Failed to update API state, retrying")
             }
             // If some other error occurred then return from here; this shouldn't
             // happen and something has actually gone wrong.
@@ -142,8 +144,9 @@ pub async fn execute_reorg_handler(
                 Err(Error::VersionConflict(error)) => {
                     warn!(
                         %error,
-                        "Encountered race condition in updating entry {:?}. Attempt {}/{}",
-                        entry, attempt, ENTRY_UPDATE_RETRIES
+                        ?entry,
+                        %attempt,
+                        "Encountered race condition in updating entry, max attempts: {ENTRY_UPDATE_RETRIES}",
                     );
                 }
                 e @ Err(_) => e?,
@@ -182,8 +185,9 @@ pub async fn execute_reorg_handler(
                 Err(Error::VersionConflict(error)) => {
                     warn!(
                         %error,
-                        "Encountered race condition in updating entry {:?}. Attempt {}/{}",
-                        entry, attempt, ENTRY_UPDATE_RETRIES
+                        ?entry,
+                        %attempt,
+                        "Encountered race condition in updating entry. Max attempts: {ENTRY_UPDATE_RETRIES}",
                     );
                 }
                 e @ Err(_) => e?,

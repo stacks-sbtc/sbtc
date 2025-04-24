@@ -298,21 +298,24 @@ impl DepositEvent {
     pub fn ensure_following_event_is_valid(&self, next_event: &DepositEvent) -> Result<(), Error> {
         // Determine if event is valid.
         if self.stacks_block_height > next_event.stacks_block_height {
-            let err_msg = format!(
-                "Attempting to update a deposit with a block height earlier than it should be.\n
-                latest_existing_event:\n{self:?}\n
-                newest_event:\n{next_event:?}"
+            let message =
+                "Attempting to update a deposit with a block height earlier than it should be";
+            tracing::warn!(
+                new_event = ?next_event,
+                last_existing_event = ?self,
+                message,
             );
-            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(err_msg)));
+            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(message)));
         } else if self.stacks_block_height == next_event.stacks_block_height
             && self.stacks_block_hash != next_event.stacks_block_hash
         {
-            let err_msg = format!(
-                "Attempting to update a deposit with a block height and hash that conflicts with its current history.\n
-                latest_existing_event:\n{self:?}\n
-                newest_event:\n{next_event:?}"
+            let message = "Attempting to update a deposit with a block height and hash that conflicts with its current history";
+            tracing::warn!(
+                new_event = ?next_event,
+                last_existing_event = ?self,
+                message
             );
-            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(err_msg)));
+            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(message)));
         }
 
         Ok(())

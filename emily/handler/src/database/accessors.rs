@@ -544,12 +544,9 @@ pub async fn add_chainstate_entry(
     debug!("Adding chainstate entry, current api state: {api_state:?}");
     if let ApiStatus::Reorg(reorg_chaintip) = &api_state.api_status {
         if reorg_chaintip.key != entry.key {
-            warn!(
-                "Attempting to update chainstate during a reorg [ new entry {entry:?} | reorg chaintip {reorg_chaintip:?} ]"
-            );
-            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(
-                "Attempting to update chainstate during a reorg.".to_string(),
-            )));
+            let message = "Attempting to update chainstate during a reorg";
+            warn!(?entry, ?reorg_chaintip, message);
+            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(message)));
         }
     }
 
@@ -560,8 +557,11 @@ pub async fn add_chainstate_entry(
             .await
             .and_then(|existing_entry: ChainstateEntry| {
                 if existing_entry.key != entry.key {
-                    debug!("Inconsistent state because of a conflict with the current interpretation of a height.");
-                    debug!("Existing entry: {existing_entry:?} | New entry: {entry:?}");
+                    debug!(
+                        ?existing_entry,
+                        ?entry,
+                        "Inconsistent state because of a conflict with the current interpretation of a height."
+                    );
                     Err(Error::from_inconsistent_chainstate_entry(existing_entry))
                 } else {
                     Ok(())
@@ -615,8 +615,10 @@ pub async fn add_chainstate_entry(
         set_api_state(context, &api_state).await
     } else if blocks_higher_than_current_tip > 1 {
         warn!(
-            "Attempting to add a chaintip that is more than one block ({}) higher than the current tip. {:?} -> {:?}",
-            blocks_higher_than_current_tip, chaintip, entry,
+            ?chaintip,
+            ?entry,
+            "Attempting to add a chaintip that is more than one block ({}) higher than the current tip",
+            blocks_higher_than_current_tip,
         );
         // TODO(TBD): Determine the ramifications of allowing a chaintip to be added much
         // higher than expected.
