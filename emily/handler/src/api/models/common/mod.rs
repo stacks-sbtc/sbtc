@@ -22,6 +22,7 @@ pub mod requests;
     Deserialize,
     ToSchema,
     ToResponse,
+    strum::Display,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum Status {
@@ -48,18 +49,6 @@ pub enum Status {
     Confirmed,
     /// The operation was not fulfilled.
     Failed,
-}
-
-impl std::fmt::Display for Status {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Status::Accepted => write!(f, "accepted"),
-            Status::Confirmed => write!(f, "confirmed"),
-            Status::Failed => write!(f, "failed"),
-            Status::Pending => write!(f, "pending"),
-            Status::Reprocessing => write!(f, "reprocessing"),
-        }
-    }
 }
 
 /// Data about the fulfillment of an sBTC Operation.
