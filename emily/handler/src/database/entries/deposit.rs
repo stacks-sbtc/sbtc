@@ -28,6 +28,12 @@ pub struct DepositEntryKey {
     pub bitcoin_tx_output_index: u32,
 }
 
+impl std::fmt::Display for DepositEntryKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.bitcoin_txid, self.bitcoin_tx_output_index)
+    }
+}
+
 /// Deposit table entry.
 #[derive(Clone, Default, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -126,38 +132,37 @@ impl PrimaryIndexTrait for DepositTablePrimaryIndexInner {
 impl DepositEntry {
     /// Implement validate.
     pub fn validate(&self) -> Result<(), Error> {
-        let stringy_self = serde_json::to_string(self)?;
-
         // Get latest event.
-        let latest_event: &DepositEvent = self.history.last().ok_or(Error::Debug(format!(
-            "Failed getting the last history element for deposit. {stringy_self:?}"
-        )))?;
+        let latest_event: &DepositEvent = self.latest_event()?;
 
         // Verify that the latest event is the current one shown in the entry.
         if self.last_update_block_hash != latest_event.stacks_block_hash {
-            return Err(Error::Debug(format!(
-                "last update block hash is inconsistent between history and top level data. {stringy_self:?}"
-            )));
+            return Err(Error::DepositEntry(
+                "last update block hash is inconsistent between history and top level data",
+                self.key.clone(),
+            ));
         }
         if self.last_update_height != latest_event.stacks_block_height {
-            return Err(Error::Debug(format!(
-                "last update block height is inconsistent between history and top level data. {stringy_self:?}"
-            )));
+            return Err(Error::DepositEntry(
+                "last update block height is inconsistent between history and top level data",
+                self.key.clone(),
+            ));
         }
         if self.status != (&latest_event.status).into() {
-            return Err(Error::Debug(format!(
-                "most recent status is inconsistent between history and top level data. {stringy_self:?}"
-            )));
+            return Err(Error::DepositEntry(
+                "most recent status is inconsistent between history and top level data",
+                self.key.clone(),
+            ));
         }
         Ok(())
     }
 
     /// Gets the latest event.
     pub fn latest_event(&self) -> Result<&DepositEvent, Error> {
-        self.history.last().ok_or(Error::Debug(format!(
-            "Deposit entry must always have at least one event, but entry with id {:?} did not.",
-            self.key(),
-        )))
+        self.history.last().ok_or(Error::DepositEntry(
+            "Deposit entry must always have at least one event but did not",
+            self.key.clone(),
+        ))
     }
 
     /// Reorgs around a given chainstate.
