@@ -5,6 +5,7 @@ use std::env;
 #[cfg(feature = "testing")]
 use aws_sdk_dynamodb::operation::batch_write_item::BatchWriteItemError;
 
+use aws_sdk_dynamodb::types::error::ConditionalCheckFailedException;
 use aws_sdk_dynamodb::{
     error::SdkError,
     operation::{
@@ -101,8 +102,8 @@ pub enum Error {
 
     /// An entry update version conflict in a resource update resulted
     /// in an update not being performed.
-    #[error("there was a conflict when attempting to update the database")]
-    VersionConflict,
+    #[error("there was a conflict when attempting to update the database; {0}")]
+    VersionConflict(#[source] ConditionalCheckFailedException),
 
     /// Deserialization error
     #[error("Deserialization error: {0}")]
@@ -235,7 +236,7 @@ impl Error {
             Error::TooManyInternalRetries => StatusCode::INTERNAL_SERVER_ERROR,
             Error::InconsistentState(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::Reorganizing(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::VersionConflict => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::VersionConflict(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::Deserialization(_) => StatusCode::BAD_REQUEST,
             Error::InvalidStacksAddress(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::DepositEntry(_, _) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -278,7 +279,7 @@ impl Error {
     pub fn into_production_error(self) -> Error {
         match self {
             Error::Network(_)
-            | Error::VersionConflict
+            | Error::VersionConflict(_)
             | Error::Reorganizing(_)
             | Error::Base64Decode(_)
             | Error::EnvVariable(_)
@@ -328,7 +329,7 @@ impl From<SdkError<PutItemError>> for Error {
             // Note, this assumes that any conditional check that fails fails because
             // there's a version conflict. This isn't necessarily true but is a good
             // simplifying assumption.
-            PutItemError::ConditionalCheckFailedException(_) => Error::VersionConflict,
+            PutItemError::ConditionalCheckFailedException(err) => Error::VersionConflict(err),
             service_err => Error::AwsSdkDynamoDbPutItem(service_err),
         }
     }
@@ -340,7 +341,7 @@ impl From<SdkError<DeleteItemError>> for Error {
             // Note, this assumes that any conditional check that fails fails because
             // there's a version conflict. This isn't necessarily true but is a good
             // simplifying assumption.
-            DeleteItemError::ConditionalCheckFailedException(_) => Error::VersionConflict,
+            DeleteItemError::ConditionalCheckFailedException(err) => Error::VersionConflict(err),
             service_err => Error::AwsSdkDynamoDbDeleteItem(service_err),
         }
     }
@@ -352,7 +353,7 @@ impl From<SdkError<UpdateItemError>> for Error {
             // Note, this assumes that any conditional check that fails fails because
             // there's a version conflict. This isn't necessarily true but is a good
             // simplifying assumption.
-            UpdateItemError::ConditionalCheckFailedException(_) => Error::VersionConflict,
+            UpdateItemError::ConditionalCheckFailedException(err) => Error::VersionConflict(err),
             service_err => Error::AwsSdkDynamoDbUpdateItem(service_err),
         }
     }

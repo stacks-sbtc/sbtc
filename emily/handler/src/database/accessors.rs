@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use aws_sdk_dynamodb::types::AttributeValue;
+use aws_sdk_dynamodb::types::error::ConditionalCheckFailedException;
 use serde_dynamo::Item;
 
 use tracing::{debug, warn};
@@ -192,6 +193,7 @@ pub async fn pull_and_update_deposit_with_retry(
     retries: u16,
     is_trusted_key: bool,
 ) -> Result<DepositEntry, Error> {
+    let mut err = ConditionalCheckFailedException::builder().build();
     for _ in 0..retries {
         // Get original deposit entry.
         let deposit_entry = get_deposit_entry(context, &update.key).await?;
@@ -207,7 +209,9 @@ pub async fn pull_and_update_deposit_with_retry(
             DepositUpdatePackage::try_from(&deposit_entry, update.clone())?;
         // Attempt to update the deposit.
         match update_deposit(context, &update_package).await {
-            Err(Error::VersionConflict) => {
+            Err(Error::VersionConflict(error)) => {
+                warn!(%error, "received an error when updating a deposit request");
+                err = error;
                 // Retry.
                 continue;
             }
@@ -217,7 +221,7 @@ pub async fn pull_and_update_deposit_with_retry(
         }
     }
     // Failed to update due to a version conflict
-    Err(Error::VersionConflict)
+    Err(Error::VersionConflict(err))
 }
 
 /// Updates a deposit.
@@ -420,6 +424,7 @@ pub async fn pull_and_update_withdrawal_with_retry(
     retries: u16,
     is_trusted_key: bool,
 ) -> Result<WithdrawalEntry, Error> {
+    let mut err = ConditionalCheckFailedException::builder().build();
     for _ in 0..retries {
         // Get original withdrawal entry.
         let entry = get_withdrawal_entry(context, &update.request_id).await?;
@@ -436,7 +441,9 @@ pub async fn pull_and_update_withdrawal_with_retry(
         let update_package = WithdrawalUpdatePackage::try_from(&entry, update.clone())?;
         // Attempt to update the withdrawal.
         match update_withdrawal(context, &update_package).await {
-            Err(Error::VersionConflict) => {
+            Err(Error::VersionConflict(error)) => {
+                warn!(%error, "received an error when updating a withdrawal request");
+                err = error;
                 // Retry.
                 continue;
             }
@@ -446,7 +453,7 @@ pub async fn pull_and_update_withdrawal_with_retry(
         }
     }
     // Failed to update due to a version conflict
-    Err(Error::VersionConflict)
+    Err(Error::VersionConflict(err))
 }
 
 /// Updates a withdrawal based on the update package.
@@ -514,7 +521,8 @@ pub async fn add_chainstate_entry_with_retry(
 ) -> Result<(), Error> {
     for _ in 0..retries {
         match add_chainstate_entry(context, entry).await {
-            Err(Error::VersionConflict) => {
+            Err(Error::VersionConflict(error)) => {
+                warn!(%error, "received an error when updating the chainstate");
                 // Retry.
                 continue;
             }

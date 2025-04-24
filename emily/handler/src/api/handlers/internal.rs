@@ -83,8 +83,8 @@ async fn set_api_state_status(
                 return Ok(Some(api_state));
             }
             // Retry if there was a version conflict.
-            Err(Error::VersionConflict) => {
-                debug!("Failed to update API state - retrying: {api_state:?}")
+            Err(Error::VersionConflict(error)) => {
+                debug!(%error, "Failed to update API state - retrying; {api_state:?}")
             }
             // If some other error occurred then return from here; this shouldn't
             // happen and something has actually gone wrong.
@@ -139,8 +139,9 @@ pub async fn execute_reorg_handler(
             entry.reorganize_around(&request.canonical_tip)?;
             match accessors::set_deposit_entry(context, &mut entry).await {
                 Ok(_) => break,
-                Err(Error::VersionConflict) => {
-                    debug!(
+                Err(Error::VersionConflict(error)) => {
+                    warn!(
+                        %error,
                         "Encountered race condition in updating entry {:?}. Attempt {}/{}",
                         entry, attempt, ENTRY_UPDATE_RETRIES
                     );
@@ -178,8 +179,9 @@ pub async fn execute_reorg_handler(
             entry.reorganize_around(&request.canonical_tip)?;
             match accessors::set_withdrawal_entry(context, &mut entry).await {
                 Ok(_) => break,
-                Err(Error::VersionConflict) => {
-                    debug!(
+                Err(Error::VersionConflict(error)) => {
+                    warn!(
+                        %error,
                         "Encountered race condition in updating entry {:?}. Attempt {}/{}",
                         entry, attempt, ENTRY_UPDATE_RETRIES
                     );
