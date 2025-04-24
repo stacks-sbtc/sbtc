@@ -748,7 +748,7 @@ async fn calculate_sbtc_left_for_withdrawals(
         return Ok(None);
     };
     let chaintip = get_api_state(context).await?.chaintip();
-    tracing::info!("Api state retrieved sucessfully");
+    tracing::info!("chainstate retrieved successfully");
     let bitcoin_tip = chaintip.bitcoin_height.ok_or(Error::NotFound)?;
     tracing::info!("Bitcoin tip retrieved successfully");
     let bitcoin_end_block = bitcoin_tip.saturating_sub(rolling_withdrawal_blocks.saturating_sub(1));
