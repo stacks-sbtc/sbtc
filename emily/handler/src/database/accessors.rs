@@ -845,8 +845,8 @@ pub async fn get_limits(context: &EmilyContext) -> Result<Limits, Error> {
         global_cap.rolling_withdrawal_cap,
     )
     .await
-    .inspect_err(|err| {
-        warn!(%err, "calculate_sbtc_left_for_withdrawals returned error");
+    .inspect_err(|error| {
+        warn!(%error, "calculate_sbtc_left_for_withdrawals did not return successfully");
     })
     .ok()
     .flatten();
