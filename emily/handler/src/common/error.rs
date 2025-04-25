@@ -187,9 +187,9 @@ pub enum Error {
     #[error("Could not retrieve an item from DynamoDB; {0}")]
     AwsSdkDynamoDbGetItem(#[from] SdkError<GetItemError>),
 
-    /// This happens when attempting to store an item in DynamoDB. Note
-    /// that precondition checks that occur when putting an item into
-    /// DynamoDB are transformed into the `VersionConflict` error variant.
+    /// This error occurs when storing an item in DynamoDB. Note that
+    /// precondition errors on a PutItem operation are returned in the
+    /// `VersionConflict` variant.
     #[error("Could not put the item into DynamoDB; {0}")]
     AwsSdkDynamoDbPutItem(#[source] Box<PutItemError>),
 
@@ -202,10 +202,14 @@ pub enum Error {
     AwsSdkDynamoDbScan(#[from] SdkError<ScanError>),
 
     /// This happens when attempting to update a stored item in DynamoDB.
+    /// Note that precondition errors on an UpdateItem operation are
+    /// returned in the `VersionConflict` variant.
     #[error("Could not update the item in DynamoDB; {0}")]
     AwsSdkDynamoDbUpdateItem(#[source] Box<UpdateItemError>),
 
     /// This happens when attempting to delete an item in the database.
+    /// Note that precondition errors on a DeleteItem operation are
+    /// returned in the `VersionConflict` variant.
     #[error("Could not deleting an item in DynamoDB; {0}")]
     AwsSdkDynamoDbDeleteItem(#[source] Box<DeleteItemError>),
 
