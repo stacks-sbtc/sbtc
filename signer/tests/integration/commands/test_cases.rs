@@ -44,7 +44,7 @@ impl Command<TestState, Ctx> for VerifyDkgVerificationFailed {
         "VERIFY_DKG_VERIFICATION_FAILED".to_string()
     }
 
-    fn build(ctx: std::sync::Arc<Ctx>) -> impl Strategy<Value = CommandWrapper<TestState, Ctx>> {
+    fn build(ctx: Arc<Ctx>) -> impl Strategy<Value = CommandWrapper<TestState, Ctx>> {
         Just(CommandWrapper::new(VerifyDkgVerificationFailed::new(
             ctx.clone(),
         )))

@@ -851,13 +851,17 @@ pub mod validate_dkg_verification_message {
         ))
     }
 
-    use crate::commands::{CreateFailedDkgShares, Ctx, VerifyDkgVerificationFailed, WriteDkgShares};
+    use std::sync::Arc;
+
+    use crate::commands::{
+        CreateFailedDkgShares, Ctx, VerifyDkgVerificationFailed, WriteDkgShares,
+    };
     use madhouse::{Command, execute_commands, prop_allof, scenario};
     use proptest::prelude::*;
 
     #[test]
     fn latest_key_in_failed_state_scenario() {
-        let test_context = std::sync::Arc::new(Ctx::new());
+        let test_context = Arc::new(Ctx::new());
 
         scenario![
             test_context,
