@@ -290,7 +290,7 @@ pub struct SignerConfig {
     pub prometheus_exporter_endpoint: Option<std::net::SocketAddr>,
     /// The public keys of the signer sit during the bootstrapping phase of
     /// the signers.
-    pub bootstrap_signing_set: Vec<PublicKey>,
+    pub bootstrap_signing_set: BTreeSet<PublicKey>,
     /// The number of signatures required for the signers' bootstrapped
     /// multi-sig wallet on Stacks.
     pub bootstrap_signatures_required: u16,
@@ -361,7 +361,7 @@ impl Validatable for SignerConfig {
     fn validate(&self, cfg: &Settings) -> Result<(), ConfigError> {
         self.p2p.validate(cfg)?;
 
-        if !self.bootstrap_signing_set().contains(&self.public_key()) {
+        if !self.bootstrap_signing_set.contains(&self.public_key()) {
             let err = SignerConfigError::MissingPubkeyInBootstrapSignerSet;
             return Err(ConfigError::Message(err.to_string()));
         }
@@ -434,12 +434,6 @@ impl Validatable for SignerConfig {
 }
 
 impl SignerConfig {
-    /// Return the bootstrapped signing set from the config.
-    /// This function just convert [`Vec`] to [`BTreeSet`]
-    pub fn bootstrap_signing_set(&self) -> BTreeSet<PublicKey> {
-        self.bootstrap_signing_set.iter().copied().collect()
-    }
-
     /// Return the public key of the signer.
     pub fn public_key(&self) -> PublicKey {
         PublicKey::from_private_key(&self.private_key)
@@ -1427,7 +1421,7 @@ mod tests {
         let keys = "035249137286c077ccee65ecc43e724b9b9e5a588e3d7f51e3b62f9624c2a49e46,031a4d9f4903da97498945a4e01a5023a1d53bc96ad670bfe03adf8a06c52e6380";
         set_var("SIGNER_SIGNER__BOOTSTRAP_SIGNING_SET", keys);
         let settings = Settings::new_from_default_config().unwrap();
-        let public_keys: Vec<PublicKey> = keys
+        let public_keys = keys
             .split(",")
             .flat_map(secp256k1::PublicKey::from_str)
             .map(PublicKey::from)
