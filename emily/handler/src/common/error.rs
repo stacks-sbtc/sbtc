@@ -194,11 +194,11 @@ pub enum Error {
     AwsSdkDynamoDbPutItem(#[source] Box<PutItemError>),
 
     /// This happens when attempting the "Query" operation in DynamoDB.
-    #[error("Could complete Query operation on DynamoDB; {0}")]
+    #[error("Could not complete Query operation on DynamoDB; {0}")]
     AwsSdkDynamoDbQuery(#[from] SdkError<QueryError>),
 
     /// This happens when attempting the "Scan" operation in DynamoDB.
-    #[error("Could complete Scan operation on DynamoDB; {0}")]
+    #[error("Could not complete Scan operation on DynamoDB; {0}")]
     AwsSdkDynamoDbScan(#[from] SdkError<ScanError>),
 
     /// This happens when attempting to update a stored item in DynamoDB.
