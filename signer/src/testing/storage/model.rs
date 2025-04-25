@@ -2,9 +2,14 @@
 
 use std::collections::HashSet;
 
+use bitcoin::ScriptBuf;
 use bitcoin::hashes::Hash as _;
+use fake::Dummy as _;
 use fake::Fake;
 
+use crate::bitcoin::utxo::BitcoinInputsOutputs;
+use crate::bitcoin::utxo::PrevoutRef;
+use crate::bitcoin::utxo::TxDeconstructor;
 use crate::keys::PublicKey;
 use crate::storage::DbWrite;
 use crate::storage::model;
@@ -15,6 +20,61 @@ use crate::storage::model::StacksBlockHeight;
 use crate::testing::dummy::DepositTxConfig;
 
 use rand::seq::SliceRandom;
+
+/// A slimmed down [`BitcoinTxInfo`] type that can be used to implement the
+/// [`TxDeconstructor`] trait.
+///
+/// In order to implement [`TxDeconstructor`], you need to be able to
+/// return the original output for each input in a transaction. This struct
+/// allows you to do that by "requiring" that you provide the "original"
+/// bitcoin::TxOut for each entry in `tx.input`. This information gets used
+/// to figure out whether a transaction is a sweep transaction or a
+/// donation to the signers. Sweep transactions have inputs that spend
+/// funds locked by the signers, while donations do not.
+#[derive(Debug)]
+pub struct TestBitcoinTxInfo {
+    /// A bitcoin transaction that will be classified as either a
+    /// "donation" or a "sweep".
+    pub tx: bitcoin::Transaction,
+    /// The previous outputs that are being spent as inputs in the above
+    /// transaction.
+    pub prevouts: Vec<bitcoin::TxOut>,
+}
+
+impl TestBitcoinTxInfo {
+    /// Generate a random input. This is useful for making a bitcoin
+    /// transaction that will appear to be a sweep transaction.
+    pub fn random_prevout<R: rand::Rng + ?Sized>(rng: &mut R) -> bitcoin::TxIn {
+        bitcoin::TxIn {
+            previous_output: bitcoin::OutPoint {
+                txid: model::BitcoinTxId::dummy_with_rng(&fake::Faker, rng).into(),
+                vout: 0,
+            },
+            sequence: bitcoin::Sequence::ZERO,
+            witness: bitcoin::Witness::new(),
+            script_sig: bitcoin::ScriptBuf::new(),
+        }
+    }
+}
+
+impl BitcoinInputsOutputs for TestBitcoinTxInfo {
+    fn tx_ref(&self) -> &bitcoin::Transaction {
+        self.tx.tx_ref()
+    }
+}
+
+impl TxDeconstructor for TestBitcoinTxInfo {
+    fn prevout(&self, index: usize) -> Option<PrevoutRef> {
+        let input = self.tx.input.get(index)?;
+        let prevout = self.prevouts.get(index)?;
+        Some(PrevoutRef {
+            amount: prevout.value,
+            script_pubkey: &prevout.script_pubkey,
+            txid: &input.previous_output.txid,
+            output_index: input.previous_output.vout,
+        })
+    }
+}
 
 /// Collection of related data usable for database tests.
 ///
@@ -49,8 +109,11 @@ pub struct TestData {
     /// Withdraw signers
     pub withdraw_signers: Vec<model::WithdrawalSigner>,
 
-    /// transaction outputs
+    /// Donation outputs and outputs of sweep transactions.
     pub tx_outputs: Vec<model::TxOutput>,
+
+    /// The transaction outputs used as inputs into sweep transactions.
+    pub tx_prevouts: Vec<model::TxPrevout>,
 }
 
 impl TestData {
@@ -130,6 +193,7 @@ impl TestData {
                 stacks_transactions: withdraw_data.stacks_transactions,
                 transactions,
                 tx_outputs: Vec::new(),
+                tx_prevouts: Vec::new(),
             },
             block.into(),
         )
@@ -149,6 +213,7 @@ impl TestData {
             .extend(new_data.stacks_transactions);
         self.transactions.extend(new_data.transactions);
         self.tx_outputs.extend(new_data.tx_outputs);
+        self.tx_prevouts.extend(new_data.tx_prevouts);
     }
 
     /// Remove data in `other` present in the current model.
@@ -163,49 +228,41 @@ impl TestData {
         vec_diff(&mut self.stacks_transactions, &other.stacks_transactions);
         vec_diff(&mut self.transactions, &other.transactions);
         vec_diff(&mut self.tx_outputs, &other.tx_outputs);
+        vec_diff(&mut self.tx_prevouts, &other.tx_prevouts);
     }
 
     /// Push bitcoin txs to a specific bitcoin block
     pub fn push_bitcoin_txs(
         &mut self,
         block: &BitcoinBlockRef,
-        sbtc_txs: Vec<(model::TransactionType, bitcoin::Transaction)>,
+        txs: Vec<TestBitcoinTxInfo>,
+        signer_script_pubkeys: &HashSet<ScriptBuf>,
     ) {
         let mut bitcoin_transactions = vec![];
         let mut transactions = vec![];
         let mut tx_outputs = Vec::new();
+        let mut tx_prevouts = Vec::new();
 
-        for (tx_type, tx) in sbtc_txs {
+        for tx_info in txs {
             let model_tx = model::Transaction {
-                txid: tx.compute_txid().to_byte_array(),
-                tx_type,
+                txid: tx_info.tx.compute_txid().to_byte_array(),
+                tx_type: model::TransactionType::Donation,
                 block_hash: block.block_hash.into_bytes(),
             };
-
             let bitcoin_transaction = model::BitcoinTxRef {
-                txid: model_tx.txid.into(),
+                txid: tx_info.tx.compute_txid().into(),
                 block_hash: block.block_hash,
             };
 
             transactions.push(model_tx);
             bitcoin_transactions.push(bitcoin_transaction);
 
-            let output_type = match tx_type {
-                model::TransactionType::SbtcTransaction => model::TxOutputType::SignersOutput,
-                model::TransactionType::Donation => model::TxOutputType::Donation,
-                _ => continue,
-            };
-            if let Some(tx_out) = tx.output.first() {
-                // In our tests we always happen to put the first output as
-                // the signers UTXO, even if it is a donation.
-                let tx_output = model::TxOutput {
-                    txid: tx.compute_txid().into(),
-                    output_index: 0,
-                    script_pubkey: tx_out.script_pubkey.clone().into(),
-                    amount: tx_out.value.to_sat(),
-                    output_type,
-                };
+            for tx_output in tx_info.to_tx_outputs(signer_script_pubkeys) {
                 tx_outputs.push(tx_output);
+            }
+
+            for tx_prevout in tx_info.to_inputs(signer_script_pubkeys) {
+                tx_prevouts.push(tx_prevout);
             }
         }
 
@@ -213,6 +270,7 @@ impl TestData {
             bitcoin_transactions,
             transactions,
             tx_outputs,
+            tx_prevouts,
             ..Self::default()
         });
     }
@@ -287,6 +345,10 @@ impl TestData {
 
         for tx_output in self.tx_outputs.iter() {
             storage.write_tx_output(tx_output).await.unwrap();
+        }
+
+        for tx_prevout in self.tx_prevouts.iter() {
+            storage.write_tx_prevout(tx_prevout).await.unwrap();
         }
     }
 

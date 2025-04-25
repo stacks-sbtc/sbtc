@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::time::Duration;
 
 use bitcoin::AddressType;
@@ -15,6 +16,7 @@ use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc_json::Utxo;
 use fake::Fake as _;
 use futures::future::join_all;
+use signer::testing::storage::model::TestBitcoinTxInfo;
 use test_case::test_case;
 use test_log::test;
 use url::Url;
@@ -45,7 +47,6 @@ use signer::storage::DbRead;
 use signer::storage::DbWrite;
 use signer::storage::model;
 use signer::storage::model::DepositSigner;
-use signer::storage::model::TransactionType;
 use signer::testing;
 use signer::testing::context::BuildContext;
 use signer::testing::context::ConfigureBitcoinClient;
@@ -192,16 +193,21 @@ async fn deposit_flow() {
     let signers_utxo_tx = Transaction {
         version: bitcoin::transaction::Version::ONE,
         lock_time: bitcoin::absolute::LockTime::ZERO,
-        input: vec![],
         output: vec![bitcoin::TxOut {
             value: bitcoin::Amount::from_sat(1_337_000_000_000),
             script_pubkey: aggregate_key.signers_script_pubkey(),
         }],
+        input: vec![TestBitcoinTxInfo::random_prevout(&mut rng)],
     };
-    test_data.push_bitcoin_txs(
-        &bitcoin_chain_tip,
-        vec![(TransactionType::SbtcTransaction, signers_utxo_tx.clone())],
-    );
+    let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
+    let tx_info = TestBitcoinTxInfo {
+        tx: signers_utxo_tx.clone(),
+        prevouts: vec![bitcoin::TxOut {
+            value: bitcoin::Amount::from_sat(1000),
+            script_pubkey: aggregate_key.signers_script_pubkey(),
+        }],
+    };
+    test_data.push_bitcoin_txs(&bitcoin_chain_tip, vec![tx_info], &signer_script_pubkeys);
     test_data.remove(original_test_data);
     test_data.write_to(&context.get_storage_mut()).await;
 

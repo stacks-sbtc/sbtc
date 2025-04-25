@@ -86,7 +86,7 @@ pub struct Store {
     pub encrypted_dkg_shares: BTreeMap<PublicKeyXOnly, (OffsetDateTime, model::EncryptedDkgShares)>,
 
     /// Rotate keys transactions
-    pub rotate_keys_transactions: HashMap<model::StacksTxId, model::KeyRotationEvent>,
+    pub rotate_keys_transactions: HashMap<model::StacksBlockHash, Vec<model::KeyRotationEvent>>,
 
     /// A mapping between request_ids and withdrawal-accept events. Note
     /// that in prod we can have a single request_id be associated with
@@ -128,6 +128,17 @@ impl Store {
         Arc::new(Mutex::new(Self::new()))
     }
 
+    /// Returns an iterator for the stacks blockchain, starting at the
+    /// given chain tip.
+    fn stacks_blockchain<'a>(
+        &'a self,
+        chain_tip: &'a model::StacksBlock,
+    ) -> impl Iterator<Item = &'a model::StacksBlock> {
+        std::iter::successors(Some(chain_tip), |stacks_block| {
+            self.stacks_blocks.get(&stacks_block.parent_hash)
+        })
+    }
+
     /// Create the bitcoin transaction from the stored Prevouts and outputs
     /// for the given transaction ID.
     fn reconstruct_transaction(&self, txid: &model::BitcoinTxId) -> Option<bitcoin::Transaction> {
@@ -155,7 +166,7 @@ impl Store {
                 .into_iter()
                 .map(|prevout| bitcoin::TxIn {
                     previous_output: bitcoin::OutPoint {
-                        txid: prevout.txid.into(),
+                        txid: prevout.prevout_txid.into(),
                         vout: prevout.prevout_output_index,
                     },
                     script_sig: bitcoin::ScriptBuf::new(),
@@ -191,11 +202,14 @@ impl Store {
 
                 let mut sbtc_txs = txs
                     .iter()
-                    .filter_map(|tx| self.raw_transactions.get(&tx.into_bytes()))
-                    .filter(|sbtc_tx| sbtc_tx.tx_type == model::TransactionType::Donation)
-                    .filter_map(|tx| {
-                        let txid = model::BitcoinTxId::from(tx.txid);
-                        self.reconstruct_transaction(&txid)
+                    .filter_map(|txid| {
+                        let outputs = self.bitcoin_outputs.get(txid)?;
+
+                        outputs
+                            .iter()
+                            .any(|output| output.output_type == model::TxOutputType::Donation)
+                            .then_some(outputs.first()?.txid)
+                            .and_then(|txid| self.reconstruct_transaction(&txid))
                     })
                     .filter(|tx| {
                         tx.output
@@ -658,20 +672,18 @@ impl super::DbRead for SharedStore {
 
         let store = self.lock().await;
 
-        Ok(
-            std::iter::successors(Some(&stacks_chain_tip), |stacks_block| {
-                store.stacks_blocks.get(&stacks_block.parent_hash)
-            })
-            .find_map(|block| {
+        let event = store
+            .stacks_blockchain(&stacks_chain_tip)
+            .filter_map(|block| {
                 store
-                    .stacks_block_to_transactions
-                    .get(&block.block_hash)
-                    .into_iter()
-                    .flatten()
-                    .find_map(|txid| store.rotate_keys_transactions.get(txid))
+                    .rotate_keys_transactions
+                    .get(&block.block_hash)?
+                    .last()
+                    .cloned()
             })
-            .cloned(),
-        )
+            .next();
+
+        Ok(event)
     }
 
     async fn key_rotation_exists(
@@ -716,11 +728,14 @@ impl super::DbRead for SharedStore {
 
                 let mut sbtc_txs = txs
                     .iter()
-                    .filter_map(|tx| store.raw_transactions.get(&tx.into_bytes()))
-                    .filter(|sbtc_tx| sbtc_tx.tx_type == model::TransactionType::SbtcTransaction)
-                    .filter_map(|tx| {
-                        let txid = model::BitcoinTxId::from(tx.txid);
-                        store.reconstruct_transaction(&txid)
+                    .filter_map(|txid| {
+                        let outputs = store.bitcoin_outputs.get(txid)?;
+
+                        outputs
+                            .iter()
+                            .any(|output| output.output_type == model::TxOutputType::SignersOutput)
+                            .then_some(outputs.first()?.txid)
+                            .and_then(|txid| store.reconstruct_transaction(&txid))
                     })
                     .filter(|tx| {
                         tx.output
@@ -767,11 +782,12 @@ impl super::DbRead for SharedStore {
         let store = self.lock().await;
         let ans = store
             .rotate_keys_transactions
-            .iter()
-            .find(|(_, tx)| &tx.aggregate_key == aggregate_key);
+            .values()
+            .flatten()
+            .find(|tx| &tx.aggregate_key == aggregate_key);
 
         // Let's merge the signer set with the actual votes.
-        if let Some((_, rotate_keys_tx)) = ans {
+        if let Some(rotate_keys_tx) = ans {
             let votes: Vec<model::SignerVote> = rotate_keys_tx
                 .signer_set
                 .iter()
@@ -805,11 +821,12 @@ impl super::DbRead for SharedStore {
         let store = self.lock().await;
         let ans = store
             .rotate_keys_transactions
-            .iter()
-            .find(|(_, tx)| &tx.aggregate_key == aggregate_key);
+            .values()
+            .flatten()
+            .find(|tx| &tx.aggregate_key == aggregate_key);
 
         // Let's merge the signer set with the actual votes.
-        if let Some((_, rotate_keys_tx)) = ans {
+        if let Some(rotate_keys_tx) = ans {
             let votes: Vec<model::SignerVote> = rotate_keys_tx
                 .signer_set
                 .iter()
@@ -1278,7 +1295,9 @@ impl super::DbWrite for SharedStore {
         self.lock()
             .await
             .rotate_keys_transactions
-            .insert(key_rotation.txid, key_rotation.clone());
+            .entry(key_rotation.block_hash)
+            .or_default()
+            .push(key_rotation.clone());
 
         Ok(())
     }
