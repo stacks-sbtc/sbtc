@@ -624,7 +624,7 @@ async fn update_withdrawals_is_forbidden_for_signer(
             }) => {
                 assert_eq!(status, 403);
             }
-            e => panic!("Expected a 403 error, got {:#?}", e),
+            e => panic!("Expected a 403 error, got {e:#?}"),
         }
 
         let response = apis::withdrawal_api::get_withdrawal(&user_configuration, request_id)
