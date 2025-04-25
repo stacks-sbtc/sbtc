@@ -856,7 +856,7 @@ pub mod validate_dkg_verification_message {
     use crate::commands::{
         CreateFailedDkgShares, Ctx, VerifyDkgVerificationFailed, WriteDkgShares,
     };
-    use madhouse::{Command, execute_commands, prop_allof, scenario};
+    use madhouse::prelude::*;
     use proptest::prelude::*;
 
     #[test]

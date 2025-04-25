@@ -62,7 +62,7 @@ wsts.workspace = true
 # Only for testing
 fake = { workspace = true, optional = true }
 mockall = { workspace = true, optional = true }
-madhouse = { git = "https://github.com/stacks-network/madhouse-rs.git", rev = "b14bb8dce7df68cfe7e6122861e1945d6f6ef618" }
+madhouse = { git = "https://github.com/stacks-network/madhouse-rs.git", rev = "8623f2a4efc6a8b691f25bc95eb9801fec17b4c0" }
 proptest = { git = "https://github.com/proptest-rs/proptest.git", rev = "c9bdf18c232665b2b740c667c81866b598d06dc7" }
 
 [build-dependencies]
