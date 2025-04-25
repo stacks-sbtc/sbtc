@@ -721,7 +721,7 @@ async fn max_one_state_machine_per_bitcoin_block_hash_for_dkg() {
 /// [`MockedTxSigner::validate_dkg_verification_message`] function. See
 /// [`MockedTxSigner`] for information on the validations that these tests
 /// are asserting.
-mod validate_dkg_verification_message {
+pub mod validate_dkg_verification_message {
     use secp256k1::Keypair;
 
     use signer::{
@@ -733,7 +733,8 @@ mod validate_dkg_verification_message {
 
     /// Helper struct for testing
     /// [`MockedTxSigner::validate_dkg_verification_message`].
-    struct TestParams {
+    #[derive(Debug)]
+    pub struct TestParams {
         pub new_aggregate_key: PublicKeyXOnly,
         pub dkg_verification_window: u16,
         pub bitcoin_chain_tip: BitcoinBlockRef,
@@ -756,7 +757,7 @@ mod validate_dkg_verification_message {
     }
 
     impl TestParams {
-        fn new(new_aggregate_key: PublicKeyXOnly) -> Self {
+        pub fn new(new_aggregate_key: PublicKeyXOnly) -> Self {
             Self {
                 new_aggregate_key,
                 ..Self::default()
@@ -764,7 +765,7 @@ mod validate_dkg_verification_message {
         }
         /// Executes [`MockedTxSigner::validate_dkg_verification_message`] with
         /// the values in this [`TestParams`] instance.
-        async fn execute(&self, db: &PgStore) -> Result<(), Error> {
+        pub async fn execute(&self, db: &PgStore) -> Result<(), Error> {
             MockedTxSigner::validate_dkg_verification_message::<PgStore>(
                 &db,
                 &self.new_aggregate_key,
@@ -851,7 +852,8 @@ mod validate_dkg_verification_message {
     }
 
     use crate::commands::{
-        CreateDkgShares, Ctx, InitializeRuntime, NewTestDatabase, WriteDkgShares,
+        CreateDkgShares, Ctx, InitializeRuntime, NewTestDatabase, VerifyDkgVerificationFailed,
+        WriteDkgShares,
     };
     use madhouse::{Command, execute_commands, prop_allof, scenario};
     use proptest::prelude::*;
@@ -866,6 +868,7 @@ mod validate_dkg_verification_message {
             NewTestDatabase,
             CreateDkgShares,
             WriteDkgShares,
+            VerifyDkgVerificationFailed,
         ]
     }
 

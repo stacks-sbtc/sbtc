@@ -1,5 +1,4 @@
 use madhouse::{State, TestContext};
-use signer::storage::model::EncryptedDkgShares;
 
 #[derive(Clone, Debug)]
 pub struct Ctx;
@@ -9,8 +8,8 @@ impl TestContext for Ctx {}
 #[derive(Debug, Default)]
 pub struct TestState {
     pub db: Option<signer::storage::postgres::PgStore>,
-    pub shares: Option<EncryptedDkgShares>,
     pub runtime: Option<tokio::runtime::Runtime>,
+    pub shares: Option<signer::storage::model::EncryptedDkgShares>,
 }
 
 impl State for TestState {}

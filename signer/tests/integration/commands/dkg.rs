@@ -32,7 +32,7 @@ impl Command<TestState, Ctx> for CreateDkgShares {
         let aggregate_key: PublicKey = Keypair::new_global(&mut rng).public_key().into();
         let shares = EncryptedDkgShares {
             aggregate_key,
-            dkg_shares_status: DkgSharesStatus::Unverified,
+            dkg_shares_status: DkgSharesStatus::Failed,
             started_at_bitcoin_block_height: 0u64.into(),
             ..Faker.fake()
         };
