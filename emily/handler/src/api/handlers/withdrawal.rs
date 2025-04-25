@@ -336,10 +336,10 @@ pub async fn update_withdrawals_signer(
         api_state.error_if_reorganizing()?;
 
         // Signers are only allowed to update withdrawals to the accepted state.
-        let is_allowed = !body
+        let is_allowed = body
             .withdrawals
             .iter()
-            .any(|withdrawal| withdrawal.status != Status::Accepted);
+            .all(|withdrawal| withdrawal.status == Status::Accepted);
 
         if !is_allowed {
             return Err(Error::Forbidden);
