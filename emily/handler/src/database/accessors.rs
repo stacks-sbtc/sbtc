@@ -317,8 +317,9 @@ pub async fn get_withdrawal_entry(
         [withdrawal] => Ok(withdrawal.clone()),
         _ => {
             warn!(
-                "Found too many withdrawals for id {key}: {}",
-                serde_json::to_string_pretty(&entries)?
+                request_id = %key,
+                entries = %serde_json::to_string_pretty(&entries)?,
+                "Found too many withdrawals",
             );
             Err(Error::TooManyWithdrawalEntries(*key))
         }
@@ -442,7 +443,7 @@ pub async fn pull_and_update_withdrawal_with_retry(
         // Attempt to update the withdrawal.
         match update_withdrawal(context, &update_package).await {
             Err(Error::VersionConflict(error)) => {
-                warn!(%error, "received an error when updating a withdrawal request");
+                warn!(%error, "Received an error when updating a withdrawal request");
                 err = *error;
                 // Retry.
                 continue;

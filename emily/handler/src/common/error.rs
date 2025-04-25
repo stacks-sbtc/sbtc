@@ -97,12 +97,12 @@ pub enum Error {
     InconsistentState(Inconsistency),
 
     /// API is reorganizing.
-    #[error("the API is reorganizing around new chain tip {0:?}")]
+    #[error("The API is reorganizing around new chain tip {0:?}")]
     Reorganizing(Chainstate),
 
     /// An entry update version conflict in a resource update resulted
     /// in an update not being performed.
-    #[error("there was a conflict when attempting to update the database; {0}")]
+    #[error("There was a conflict when attempting to update the database; {0}")]
     VersionConflict(#[source] Box<ConditionalCheckFailedException>),
 
     /// Deserialization error
@@ -112,44 +112,44 @@ pub enum Error {
     /// This happens if the deposit entry that was stored in the database
     /// was invalid, or if the deposit entry that we are creating to store
     /// in the database is invalid.
-    #[error("deposit entry failed validation; {0}; ID: {1}")]
+    #[error("Deposit entry failed validation; {0}; ID: {1}")]
     DepositEntry(&'static str, DepositEntryKey),
 
     /// This happens when there is a mismatch in the outpoint of the new
     /// deposit event and the fetched deposit entry. Seeing this is
     /// probably due to a programming error.
-    #[error("mismatch when updateing deposit request; existing: {0}; update: {1}")]
+    #[error("Mismatch when updateing deposit request; existing: {0}; update: {1}")]
     DepositUpdate(DepositEntryKey, DepositEntryKey),
 
     /// This happens if the withdrawal entry that was stored in the database
     /// was invalid, or if the withdrawal entry that we are creating to store
     /// in the database is invalid.
-    #[error("withdrawal entry failed validation; {0}; ID: {1}")]
+    #[error("Withdrawal entry failed validation; {0}; ID: {1}")]
     WithdrawalEntry(&'static str, WithdrawalEntryKey),
 
     /// This happens when there is a mismatch in the request ID of the new
     /// withdrawal event and the fetched withdrawal entry. Seeing this is
     /// probably due to a programming error.
-    #[error("mismatch when updateing withdrawal request; existing: {0}; update: {1}")]
+    #[error("Mismatch when updating withdrawal request; existing: {0}; update: {1}")]
     WithdrawalUpdate(WithdrawalEntryKey, u64),
 
     /// This means that the stacks address in the environment for the
     /// signers multisig address is invalid.
-    #[error("could not parse a stacks address from a string")]
+    #[error("Could not parse a stacks address from a string")]
     InvalidStacksAddress(#[source] clarity::vm::errors::Error),
 
     /// This happens when the request to DynamoDB succeeds but does not
     /// return any values. This happens when the request instructs the
     /// database to refrain from returning values, so this is likely a
     /// programming error.
-    #[error("entry in database for deposit request not returned from DynamoDB; {0}")]
+    #[error("Entry in database for deposit request not returned from DynamoDB; {0}")]
     MissingAttributesDeposit(DepositEntryKey),
 
     /// This happens when the request to DynamoDB succeeds but does not
     /// return any values. This happens when the request instructs the
     /// database to refrain from returning values, so this is likely a
     /// programming error.
-    #[error("entry in database for withdrawal request not returned from DynamoDB; {0}")]
+    #[error("Entry in database for withdrawal request not returned from DynamoDB; {0}")]
     MissingAttributesWithdrawal(WithdrawalEntryKey),
 
     /// DynamoDB should only contain one entry per withdrawal request ID.
@@ -161,12 +161,12 @@ pub enum Error {
 
     /// This happens when we fail to decode a base64 encoded string into a
     /// vector of bytes.
-    #[error("failed to base64 decode the string into bytes; {0}")]
+    #[error("Failed to base64 decode the string into bytes; {0}")]
     Base64Decode(base64::DecodeError),
 
     /// This is used when trying to get a required value from the
     /// environment and that operation fails.
-    #[error("could not read the environment variable; {0}")]
+    #[error("Could not read the environment variable; {0}")]
     EnvVariable(#[from] env::VarError),
 
     /// This occurs when serializing or deserializing an object into or
@@ -180,33 +180,33 @@ pub enum Error {
 
     /// This happens when attempting to parse an integer from a string that
     /// has been read from an environment variable.
-    #[error("could not parse the string into an integer; {0}")]
+    #[error("Could not parse the string into an integer; {0}")]
     EnvParseInt(#[from] std::num::ParseIntError),
 
     /// This happens when attempting to read an item from DynamoDB.
-    #[error("could not retrieve an item from DynamoDB; {0}")]
+    #[error("Could not retrieve an item from DynamoDB; {0}")]
     AwsSdkDynamoDbGetItem(#[from] SdkError<GetItemError>),
 
     /// This happens when attempting to store an item in DynamoDB. Note
     /// that precondition checks that occur when putting an item into
     /// DynamoDB are transformed into the `VersionConflict` error variant.
-    #[error("could not put the item into DynamoDB; {0}")]
+    #[error("Could not put the item into DynamoDB; {0}")]
     AwsSdkDynamoDbPutItem(#[source] Box<PutItemError>),
 
     /// This happens when attempting the "Query" operation in DynamoDB.
-    #[error("could complete Query operation on DynamoDB; {0}")]
+    #[error("Could complete Query operation on DynamoDB; {0}")]
     AwsSdkDynamoDbQuery(#[from] SdkError<QueryError>),
 
     /// This happens when attempting the "Scan" operation in DynamoDB.
-    #[error("could complete Scan operation on DynamoDB; {0}")]
+    #[error("Could complete Scan operation on DynamoDB; {0}")]
     AwsSdkDynamoDbScan(#[from] SdkError<ScanError>),
 
     /// This happens when attempting to update a stored item in DynamoDB.
-    #[error("could not update the item in DynamoDB; {0}")]
+    #[error("Could not update the item in DynamoDB; {0}")]
     AwsSdkDynamoDbUpdateItem(#[source] Box<UpdateItemError>),
 
     /// This happens when attempting to delete an item in the database.
-    #[error("Error when deleting an item in DynamoDB; {0}")]
+    #[error("Could not deleting an item in DynamoDB; {0}")]
     AwsSdkDynamoDbDeleteItem(#[source] Box<DeleteItemError>),
 
     /// This happens when we fail to build a request object when trying to
