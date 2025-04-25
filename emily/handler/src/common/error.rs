@@ -118,7 +118,7 @@ pub enum Error {
     /// This happens when there is a mismatch in the outpoint of the new
     /// deposit event and the fetched deposit entry. Seeing this is
     /// probably due to a programming error.
-    #[error("Mismatch when updateing deposit request; existing: {0}; update: {1}")]
+    #[error("Mismatch when updating deposit request; existing: {0}; update: {1}")]
     DepositUpdate(DepositEntryKey, DepositEntryKey),
 
     /// This happens if the withdrawal entry that was stored in the database
