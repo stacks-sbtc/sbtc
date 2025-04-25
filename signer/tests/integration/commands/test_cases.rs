@@ -6,7 +6,15 @@ use crate::transaction_signer::validate_dkg_verification_message::TestParams;
 
 use super::{Ctx, TestState};
 
-pub struct VerifyDkgVerificationFailed;
+pub struct VerifyDkgVerificationFailed {
+    runtime_handle: std::sync::Arc<tokio::runtime::Runtime>,
+}
+
+impl VerifyDkgVerificationFailed {
+    pub fn new(runtime_handle: std::sync::Arc<tokio::runtime::Runtime>) -> Self {
+        Self { runtime_handle }
+    }
+}
 
 impl Command<TestState, Ctx> for VerifyDkgVerificationFailed {
     fn check(&self, state: &TestState) -> bool {
@@ -15,13 +23,14 @@ impl Command<TestState, Ctx> for VerifyDkgVerificationFailed {
     }
 
     fn apply(&self, state: &mut TestState) {
-        let runtime = state.runtime.as_ref().unwrap();
         let aggregate_key = state.shares.as_ref().unwrap().aggregate_key.clone();
         let aggregate_key_x_only: PublicKeyXOnly = aggregate_key.into();
         let params = TestParams::new(aggregate_key_x_only);
         let db = state.db.as_ref().unwrap();
 
-        let result = runtime.block_on(async { params.execute(db).await.unwrap_err() });
+        let result = self
+            .runtime_handle
+            .block_on(async { params.execute(db).await.unwrap_err() });
 
         assert!(matches!(
             result,
@@ -33,7 +42,9 @@ impl Command<TestState, Ctx> for VerifyDkgVerificationFailed {
         "VERIFY_DKG_VERIFICATION_FAILED".to_string()
     }
 
-    fn build(_ctx: std::sync::Arc<Ctx>) -> impl Strategy<Value = CommandWrapper<TestState, Ctx>> {
-        Just(CommandWrapper::new(VerifyDkgVerificationFailed))
+    fn build(ctx: std::sync::Arc<Ctx>) -> impl Strategy<Value = CommandWrapper<TestState, Ctx>> {
+        Just(CommandWrapper::new(VerifyDkgVerificationFailed::new(
+            ctx.runtime_handle(),
+        )))
     }
 }

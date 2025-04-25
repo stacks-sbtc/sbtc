@@ -4,7 +4,15 @@ use signer::storage::DbWrite;
 
 use super::{Ctx, TestState};
 
-pub struct NewTestDatabase;
+pub struct NewTestDatabase {
+    runtime_handle: std::sync::Arc<tokio::runtime::Runtime>,
+}
+
+impl NewTestDatabase {
+    pub fn new(runtime_handle: std::sync::Arc<tokio::runtime::Runtime>) -> Self {
+        Self { runtime_handle }
+    }
+}
 
 impl Command<TestState, Ctx> for NewTestDatabase {
     fn check(&self, state: &TestState) -> bool {
@@ -12,8 +20,9 @@ impl Command<TestState, Ctx> for NewTestDatabase {
     }
 
     fn apply(&self, state: &mut TestState) {
-        let runtime = state.runtime.as_ref().unwrap();
-        let db = runtime.block_on(async { signer::testing::storage::new_test_database().await });
+        let db = self
+            .runtime_handle
+            .block_on(async { signer::testing::storage::new_test_database().await });
 
         state.db = Some(db);
     }
@@ -22,12 +31,22 @@ impl Command<TestState, Ctx> for NewTestDatabase {
         "NEW_TEST_DATABASE".to_string()
     }
 
-    fn build(_ctx: std::sync::Arc<Ctx>) -> impl Strategy<Value = CommandWrapper<TestState, Ctx>> {
-        proptest::prelude::Just(CommandWrapper::new(NewTestDatabase))
+    fn build(ctx: std::sync::Arc<Ctx>) -> impl Strategy<Value = CommandWrapper<TestState, Ctx>> {
+        proptest::prelude::Just(CommandWrapper::new(NewTestDatabase::new(
+            ctx.runtime_handle(),
+        )))
     }
 }
 
-pub struct WriteDkgShares;
+pub struct WriteDkgShares {
+    runtime_handle: std::sync::Arc<tokio::runtime::Runtime>,
+}
+
+impl WriteDkgShares {
+    pub fn new(runtime_handle: std::sync::Arc<tokio::runtime::Runtime>) -> Self {
+        Self { runtime_handle }
+    }
+}
 
 impl Command<TestState, Ctx> for WriteDkgShares {
     fn check(&self, state: &TestState) -> bool {
@@ -35,11 +54,10 @@ impl Command<TestState, Ctx> for WriteDkgShares {
     }
 
     fn apply(&self, state: &mut TestState) {
-        let runtime = state.runtime.as_ref().unwrap();
         let db = state.db.as_ref().unwrap();
         let shares = state.shares.as_ref().unwrap();
 
-        runtime.block_on(async {
+        self.runtime_handle.block_on(async {
             match db.write_encrypted_dkg_shares(shares).await {
                 Ok(db_result) => db_result,
                 Err(e) => {
@@ -53,7 +71,9 @@ impl Command<TestState, Ctx> for WriteDkgShares {
         "WRITE_DKG_SHARES".to_string()
     }
 
-    fn build(_ctx: std::sync::Arc<Ctx>) -> impl Strategy<Value = CommandWrapper<TestState, Ctx>> {
-        proptest::prelude::Just(CommandWrapper::new(WriteDkgShares))
+    fn build(ctx: std::sync::Arc<Ctx>) -> impl Strategy<Value = CommandWrapper<TestState, Ctx>> {
+        proptest::prelude::Just(CommandWrapper::new(WriteDkgShares::new(
+            ctx.runtime_handle(),
+        )))
     }
 }
