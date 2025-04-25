@@ -380,7 +380,7 @@ pub struct TenureBlockHeaders {
     pub anchor_block_hash: BitcoinBlockHash,
     /// The height of the bitcoin block associated with the above block
     /// hash.
-    pub anchor_block_height: u64,
+    pub anchor_block_height: BitcoinBlockHeight,
 }
 
 impl TenureBlockHeaders {
@@ -410,7 +410,7 @@ impl Iterator for StacksBlockIter {
         let header = self.iter.next()?;
         Some(StacksBlock {
             block_hash: header.block_id.into(),
-            block_height: header.block_height,
+            block_height: header.block_height.into(),
             parent_hash: header.parent_block_id.into(),
             bitcoin_anchor: self.anchor_block_hash,
         })
