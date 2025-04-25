@@ -334,7 +334,7 @@ impl TenureBlocks {
 pub struct StacksBlockHeader {
     /// The total number of StacksBlocks and NakamotoBlocks preceding this
     /// block in this block's history.
-    pub block_height: u64,
+    pub block_height: StacksBlockHeight,
     /// The identifier for a block. It is the hash of the this block's
     /// header hash and the block's consensus hash.
     pub block_id: StacksBlockId,
@@ -346,7 +346,7 @@ pub struct StacksBlockHeader {
 impl From<NakamotoBlockHeader> for StacksBlockHeader {
     fn from(value: NakamotoBlockHeader) -> Self {
         StacksBlockHeader {
-            block_height: value.chain_length,
+            block_height: value.chain_length.into(),
             block_id: value.block_id(),
             parent_block_id: value.parent_block_id,
         }
@@ -410,7 +410,7 @@ impl Iterator for StacksBlockIter {
         let header = self.iter.next()?;
         Some(StacksBlock {
             block_hash: header.block_id.into(),
-            block_height: header.block_height.into(),
+            block_height: header.block_height,
             parent_hash: header.parent_block_id.into(),
             bitcoin_anchor: self.anchor_block_hash,
         })
