@@ -180,7 +180,7 @@ pub enum Error {
 
     /// This happens when attempting to parse an integer from a string that
     /// has been read from an environment variable.
-    #[error("Could not parse the string into an integer; {0}")]
+    #[error("Failed to parse the environment variable's value as an integer; {0}")]
     EnvParseInt(#[from] std::num::ParseIntError),
 
     /// This happens when attempting to read an item from DynamoDB.
