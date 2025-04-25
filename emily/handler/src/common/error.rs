@@ -113,25 +113,25 @@ pub enum Error {
     /// was invalid, or if the deposit entry that we are creating to store
     /// in the database is invalid.
     #[error("Deposit entry failed validation; {0}; ID: {1}")]
-    DepositEntry(&'static str, DepositEntryKey),
+    InvalidDepositEntry(&'static str, DepositEntryKey),
 
     /// This happens when there is a mismatch in the outpoint of the new
     /// deposit event and the fetched deposit entry. Seeing this is
     /// probably due to a programming error.
     #[error("Mismatch when updating deposit request; existing: {0}; update: {1}")]
-    DepositUpdate(DepositEntryKey, DepositEntryKey),
+    DepositOutputMismatch(DepositEntryKey, DepositEntryKey),
 
     /// This happens if the withdrawal entry that was stored in the database
     /// was invalid, or if the withdrawal entry that we are creating to store
     /// in the database is invalid.
     #[error("Withdrawal entry failed validation; {0}; ID: {1}")]
-    WithdrawalEntry(&'static str, WithdrawalEntryKey),
+    InvalidWithdrawalEntry(&'static str, WithdrawalEntryKey),
 
     /// This happens when there is a mismatch in the request ID of the new
     /// withdrawal event and the fetched withdrawal entry. Seeing this is
     /// probably due to a programming error.
     #[error("Mismatch when updating withdrawal request; existing: {0}; update: {1}")]
-    WithdrawalUpdate(WithdrawalEntryKey, u64),
+    WithdrawalRequestIdMismatch(WithdrawalEntryKey, u64),
 
     /// This means that the stacks address in the environment for the
     /// signers multisig address is invalid.
@@ -243,10 +243,10 @@ impl Error {
             Error::VersionConflict(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::Deserialization(_) => StatusCode::BAD_REQUEST,
             Error::InvalidStacksAddress(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::DepositEntry(_, _) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::DepositUpdate(_, _) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::WithdrawalEntry(_, _) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::WithdrawalUpdate(_, _) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::InvalidDepositEntry(_, _) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::DepositOutputMismatch(_, _) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::InvalidWithdrawalEntry(_, _) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::WithdrawalRequestIdMismatch(_, _) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::MissingAttributesDeposit(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::MissingAttributesWithdrawal(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::TooManyWithdrawalEntries(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -290,8 +290,8 @@ impl Error {
             | Error::SerdeJson(_)
             | Error::SerdeDynamo(_)
             | Error::EnvParseInt(_)
-            | Error::DepositEntry(_, _)
-            | Error::WithdrawalEntry(_, _)
+            | Error::InvalidDepositEntry(_, _)
+            | Error::InvalidWithdrawalEntry(_, _)
             | Error::AwsSdkDynamoDbDeleteItem(_)
             | Error::AwsSdkDynamoDbGetItem(_)
             | Error::AwsSdkDynamoDbPutItem(_)

@@ -137,19 +137,19 @@ impl DepositEntry {
 
         // Verify that the latest event is the current one shown in the entry.
         if self.last_update_block_hash != latest_event.stacks_block_hash {
-            return Err(Error::DepositEntry(
+            return Err(Error::InvalidDepositEntry(
                 "last update block hash is inconsistent between history and top level data",
                 self.key.clone(),
             ));
         }
         if self.last_update_height != latest_event.stacks_block_height {
-            return Err(Error::DepositEntry(
+            return Err(Error::InvalidDepositEntry(
                 "last update block height is inconsistent between history and top level data",
                 self.key.clone(),
             ));
         }
         if self.status != (&latest_event.status).into() {
-            return Err(Error::DepositEntry(
+            return Err(Error::InvalidDepositEntry(
                 "most recent status is inconsistent between history and top level data",
                 self.key.clone(),
             ));
@@ -159,7 +159,7 @@ impl DepositEntry {
 
     /// Gets the latest event.
     pub fn latest_event(&self) -> Result<&DepositEvent, Error> {
-        self.history.last().ok_or(Error::DepositEntry(
+        self.history.last().ok_or(Error::InvalidDepositEntry(
             "Deposit entry must always have at least one event but did not",
             self.key.clone(),
         ))
@@ -687,7 +687,7 @@ impl DepositUpdatePackage {
     pub fn try_from(entry: &DepositEntry, update: ValidatedDepositUpdate) -> Result<Self, Error> {
         // Ensure the keys are equal.
         if update.key != entry.key {
-            return Err(Error::DepositUpdate(entry.key.clone(), update.key));
+            return Err(Error::DepositOutputMismatch(entry.key.clone(), update.key));
         }
         // Ensure that this event is valid if it follows the current latest event.
         entry

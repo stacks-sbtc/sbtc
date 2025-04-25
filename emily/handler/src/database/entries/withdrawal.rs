@@ -94,19 +94,19 @@ impl WithdrawalEntry {
 
         // Verify that the latest event is the current one shown in the entry.
         if self.last_update_block_hash != latest_event.stacks_block_hash {
-            return Err(Error::WithdrawalEntry(
+            return Err(Error::InvalidWithdrawalEntry(
                 "last update block hash is inconsistent between history and top level data",
                 self.key.clone(),
             ));
         }
         if self.last_update_height != latest_event.stacks_block_height {
-            return Err(Error::WithdrawalEntry(
+            return Err(Error::InvalidWithdrawalEntry(
                 "last update block height is inconsistent between history and top level data",
                 self.key.clone(),
             ));
         }
         if self.status != (&latest_event.status).into() {
-            return Err(Error::WithdrawalEntry(
+            return Err(Error::InvalidWithdrawalEntry(
                 "most recent status is inconsistent between history and top level data",
                 self.key.clone(),
             ));
@@ -116,7 +116,7 @@ impl WithdrawalEntry {
 
     /// Gets the latest event.
     pub fn latest_event(&self) -> Result<&WithdrawalEvent, Error> {
-        self.history.last().ok_or(Error::WithdrawalEntry(
+        self.history.last().ok_or(Error::InvalidWithdrawalEntry(
             "Withdrawal entry must always have at least one event, but did not",
             self.key.clone(),
         ))
@@ -680,7 +680,7 @@ impl WithdrawalUpdatePackage {
         // Ensure the keys are equal.
         let key = entry.key.clone();
         if update.request_id != entry.key.request_id {
-            return Err(Error::WithdrawalUpdate(key, update.request_id));
+            return Err(Error::WithdrawalRequestIdMismatch(key, update.request_id));
         }
         // Ensure that this event is valid if it follows the current latest event.
         entry
