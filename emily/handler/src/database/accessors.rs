@@ -523,7 +523,7 @@ pub async fn add_chainstate_entry_with_retry(
     for _ in 0..retries {
         match add_chainstate_entry(context, entry).await {
             Err(Error::VersionConflict(error)) => {
-                warn!(%error, "received an error when updating the chainstate");
+                warn!(%error, "Received an error when updating the chainstate");
                 // Retry.
                 continue;
             }
