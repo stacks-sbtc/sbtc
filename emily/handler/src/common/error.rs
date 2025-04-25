@@ -103,7 +103,7 @@ pub enum Error {
     /// An entry update version conflict in a resource update resulted
     /// in an update not being performed.
     #[error("there was a conflict when attempting to update the database; {0}")]
-    VersionConflict(#[source] ConditionalCheckFailedException),
+    VersionConflict(#[source] Box<ConditionalCheckFailedException>),
 
     /// Deserialization error
     #[error("Deserialization error: {0}")]
@@ -191,7 +191,7 @@ pub enum Error {
     /// that precondition checks that occur when putting an item into
     /// DynamoDB are transformed into the `VersionConflict` error variant.
     #[error("could not put the item into DynamoDB; {0}")]
-    AwsSdkDynamoDbPutItem(#[source] PutItemError),
+    AwsSdkDynamoDbPutItem(#[source] Box<PutItemError>),
 
     /// This happens when attempting the "Query" operation in DynamoDB.
     #[error("could complete Query operation on DynamoDB; {0}")]
@@ -203,11 +203,11 @@ pub enum Error {
 
     /// This happens when attempting to update a stored item in DynamoDB.
     #[error("could not update the item in DynamoDB; {0}")]
-    AwsSdkDynamoDbUpdateItem(#[source] UpdateItemError),
+    AwsSdkDynamoDbUpdateItem(#[source] Box<UpdateItemError>),
 
     /// This happens when attempting to delete an item in the database.
     #[error("Error when deleting an item in DynamoDB; {0}")]
-    AwsSdkDynamoDbDeleteItem(#[source] DeleteItemError),
+    AwsSdkDynamoDbDeleteItem(#[source] Box<DeleteItemError>),
 
     /// This happens when we fail to build a request object when trying to
     /// interact with DynamoDB. For example, when deleting entries in the
@@ -329,8 +329,8 @@ impl From<SdkError<PutItemError>> for Error {
             // Note, this assumes that any conditional check that fails fails because
             // there's a version conflict. This isn't necessarily true but is a good
             // simplifying assumption.
-            PutItemError::ConditionalCheckFailedException(err) => Error::VersionConflict(err),
-            service_err => Error::AwsSdkDynamoDbPutItem(service_err),
+            PutItemError::ConditionalCheckFailedException(err) => Error::from(err),
+            service_err => Error::AwsSdkDynamoDbPutItem(Box::new(service_err)),
         }
     }
 }
@@ -341,8 +341,8 @@ impl From<SdkError<DeleteItemError>> for Error {
             // Note, this assumes that any conditional check that fails fails because
             // there's a version conflict. This isn't necessarily true but is a good
             // simplifying assumption.
-            DeleteItemError::ConditionalCheckFailedException(err) => Error::VersionConflict(err),
-            service_err => Error::AwsSdkDynamoDbDeleteItem(service_err),
+            DeleteItemError::ConditionalCheckFailedException(err) => Error::from(err),
+            service_err => Error::AwsSdkDynamoDbDeleteItem(Box::new(service_err)),
         }
     }
 }
@@ -353,9 +353,15 @@ impl From<SdkError<UpdateItemError>> for Error {
             // Note, this assumes that any conditional check that fails fails because
             // there's a version conflict. This isn't necessarily true but is a good
             // simplifying assumption.
-            UpdateItemError::ConditionalCheckFailedException(err) => Error::VersionConflict(err),
-            service_err => Error::AwsSdkDynamoDbUpdateItem(service_err),
+            UpdateItemError::ConditionalCheckFailedException(err) => Error::from(err),
+            service_err => Error::AwsSdkDynamoDbUpdateItem(Box::new(service_err)),
         }
+    }
+}
+
+impl From<ConditionalCheckFailedException> for Error {
+    fn from(value: ConditionalCheckFailedException) -> Self {
+        Error::VersionConflict(Box::new(value))
     }
 }
 

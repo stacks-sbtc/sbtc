@@ -211,7 +211,7 @@ pub async fn pull_and_update_deposit_with_retry(
         match update_deposit(context, &update_package).await {
             Err(Error::VersionConflict(error)) => {
                 warn!(%error, "received an error when updating a deposit request");
-                err = error;
+                err = *error;
                 // Retry.
                 continue;
             }
@@ -221,7 +221,7 @@ pub async fn pull_and_update_deposit_with_retry(
         }
     }
     // Failed to update due to a version conflict
-    Err(Error::VersionConflict(err))
+    Err(Error::from(err))
 }
 
 /// Updates a deposit.
@@ -443,7 +443,7 @@ pub async fn pull_and_update_withdrawal_with_retry(
         match update_withdrawal(context, &update_package).await {
             Err(Error::VersionConflict(error)) => {
                 warn!(%error, "received an error when updating a withdrawal request");
-                err = error;
+                err = *error;
                 // Retry.
                 continue;
             }
@@ -453,7 +453,7 @@ pub async fn pull_and_update_withdrawal_with_retry(
         }
     }
     // Failed to update due to a version conflict
-    Err(Error::VersionConflict(err))
+    Err(Error::from(err))
 }
 
 /// Updates a withdrawal based on the update package.
