@@ -154,7 +154,7 @@ pub enum Error {
 
     /// DynamoDB should only contain one entry per withdrawal request ID.
     ///
-    /// TODO: In case of a re-org, tripple check that we can identify the
+    /// TODO: In case of a re-org, triple check that we can identify the
     /// correct withdrawal request if the transaction is replayed.
     #[error("DynamoDB contained many entries for the given request ID: {0}")]
     TooManyWithdrawalEntries(u64),
