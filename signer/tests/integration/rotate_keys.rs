@@ -16,9 +16,9 @@ use signer::storage::model::BitcoinBlock;
 use signer::storage::model::DkgSharesStatus;
 use signer::storage::model::EncryptedDkgShares;
 use signer::storage::model::KeyRotationEvent;
+use signer::storage::model::StacksBlockHash;
 use signer::storage::model::StacksPrincipal;
-use signer::storage::model::Transaction;
-use signer::storage::model::TransactionType;
+use signer::storage::model::StacksTxId;
 use signer::storage::postgres::PgStore;
 use signer::testing;
 use signer::testing::context::*;
@@ -39,8 +39,10 @@ struct TestRotateKeySetup {
     pub signer_keys: Vec<PublicKey>,
     /// This value affects whether a request is considered "accepted".
     pub signatures_required: u16,
-    /// Raw transaction
-    pub raw_tx: Transaction,
+    /// The transaction ID
+    pub txid: StacksTxId,
+    // The block hash of the block that confirmed the transaction.
+    pub block_hash: StacksBlockHash,
     /// Signers wallet
     pub wallet: SignerWallet,
     /// Bitcoin chain tip used when generating current setup
@@ -86,17 +88,12 @@ impl TestRotateKeySetup {
             .expect("failed to get stacks chain tip")
             .expect("no stacks chain tip");
 
-        let raw_tx = Transaction {
-            txid: fake::Faker.fake_with_rng(rng),
-            tx_type: TransactionType::RotateKeys,
-            block_hash: stacks_chain_tip.block_hash.into_bytes(),
-        };
-
         TestRotateKeySetup {
             aggregated_signer,
             signer_keys,
             signatures_required,
-            raw_tx,
+            txid: fake::Faker.fake_with_rng(rng),
+            block_hash: stacks_chain_tip.block_hash,
             wallet,
             chain_tip: bitcoin_chain_tip_block,
         }
@@ -128,18 +125,14 @@ impl TestRotateKeySetup {
 
     /// Store rotate key tx.
     pub async fn store_rotate_keys(&self, db: &PgStore) {
-        db.write_stacks_transactions(vec![self.raw_tx.clone()])
-            .await
-            .unwrap();
-
         let aggregate_key: PublicKey = self.aggregate_key();
         let address = StacksPrincipal::from(clarity::vm::types::PrincipalData::from(
             self.wallet.address().clone(),
         ));
         let rotate_key_tx = KeyRotationEvent {
-            block_hash: self.raw_tx.block_hash.into(),
             address,
-            txid: self.raw_tx.txid.into(),
+            block_hash: self.block_hash,
+            txid: self.txid,
             aggregate_key,
             signer_set: self.signer_keys.clone(),
             signatures_required: self.signatures_required,

@@ -36,7 +36,6 @@ use crate::metrics::Metrics;
 use crate::stacks::api::GetNakamotoStartHeight as _;
 use crate::stacks::api::StacksInteract;
 use crate::stacks::api::TenureBlocks;
-use crate::storage;
 use crate::storage::DbRead;
 use crate::storage::DbWrite;
 use crate::storage::model;
@@ -45,7 +44,6 @@ use bitcoin::Amount;
 use bitcoin::BlockHash;
 use bitcoin::ScriptBuf;
 use bitcoin::Transaction;
-use bitcoin::hashes::Hash as _;
 use futures::stream::Stream;
 use futures::stream::StreamExt;
 use sbtc::deposits::CreateDepositRequest;
@@ -239,10 +237,9 @@ impl<C: Context, B> BlockObserver<C, B> {
             self.process_bitcoin_blocks_until(deposit.tx_info.block_hash)
                 .await?;
 
-            let tx = model::Transaction {
-                txid: deposit.tx_info.txid.to_byte_array(),
-                tx_type: model::TransactionType::DepositRequest,
-                block_hash: deposit.tx_info.block_hash.to_byte_array(),
+            let tx = model::BitcoinTxRef {
+                txid: deposit.tx_info.txid.into(),
+                block_hash: deposit.tx_info.block_hash.into(),
             };
 
             deposit_requests.push(model::DepositRequest::from(deposit));
@@ -455,18 +452,10 @@ impl<C: Context, B> BlockObserver<C, B> {
                 .await?
                 .ok_or(Error::BitcoinTxMissing(txid, None))?;
 
-            // sBTC transactions have as first txin a signers spendable output
-            let tx_type = if tx_info.is_signer_created(&signer_script_pubkeys) {
-                model::TransactionType::SbtcTransaction
-            } else {
-                model::TransactionType::Donation
-            };
-
             let txid = tx.compute_txid();
-            sbtc_txs.push(model::Transaction {
-                txid: txid.to_byte_array(),
-                tx_type,
-                block_hash: block_hash.to_byte_array(),
+            sbtc_txs.push(model::BitcoinTxRef {
+                txid: txid.into(),
+                block_hash: block_hash.into(),
             });
 
             for prevout in tx_info.to_inputs(&signer_script_pubkeys) {
@@ -499,14 +488,6 @@ impl<C: Context, B> BlockObserver<C, B> {
     /// This function also extracts sBTC Stacks transactions from the given
     /// blocks and stores them into the database.
     async fn write_stacks_blocks(&self, tenures: &[TenureBlocks]) -> Result<(), Error> {
-        let deployer = &self.context.config().signer.deployer;
-        let txs = tenures
-            .iter()
-            .flat_map(|tenure| {
-                storage::postgres::extract_relevant_transactions(tenure.blocks(), deployer)
-            })
-            .collect::<Vec<_>>();
-
         let headers = tenures
             .iter()
             .flat_map(TenureBlocks::as_stacks_blocks)
@@ -514,7 +495,6 @@ impl<C: Context, B> BlockObserver<C, B> {
 
         let storage = self.context.get_storage_mut();
         storage.write_stacks_block_headers(headers).await?;
-        storage.write_stacks_transactions(txs).await?;
         Ok(())
     }
 
@@ -728,6 +708,7 @@ mod tests {
     use bitcoin::Amount;
     use bitcoin::BlockHash;
     use bitcoin::TxOut;
+    use bitcoin::hashes::Hash as _;
     use fake::Dummy;
     use fake::Fake;
     use model::BitcoinTxId;
@@ -1006,14 +987,6 @@ mod tests {
                 .bitcoin_transactions_to_blocks
                 .get(&db_outpoint.0)
                 .is_some()
-        );
-        assert_eq!(
-            storage
-                .raw_transactions
-                .get(db_outpoint.0.as_byte_array())
-                .unwrap()
-                .tx_type,
-            model::TransactionType::DepositRequest
         );
     }
 

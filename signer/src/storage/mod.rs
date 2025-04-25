@@ -474,12 +474,6 @@ pub trait DbWrite {
         decision: &model::WithdrawalSigner,
     ) -> impl Future<Output = Result<(), Error>> + Send;
 
-    /// Write a raw transaction.
-    fn write_transaction(
-        &self,
-        transaction: &model::Transaction,
-    ) -> impl Future<Output = Result<(), Error>> + Send;
-
     /// Write a connection between a bitcoin block and a transaction
     fn write_bitcoin_transaction(
         &self,
@@ -489,19 +483,7 @@ pub trait DbWrite {
     /// Write the bitcoin transactions to the data store.
     fn write_bitcoin_transactions(
         &self,
-        txs: Vec<model::Transaction>,
-    ) -> impl Future<Output = Result<(), Error>> + Send;
-
-    /// Write a connection between a stacks block and a transaction
-    fn write_stacks_transaction(
-        &self,
-        stacks_transaction: &model::StacksTransaction,
-    ) -> impl Future<Output = Result<(), Error>> + Send;
-
-    /// Write the stacks transactions to the data store.
-    fn write_stacks_transactions(
-        &self,
-        txs: Vec<model::Transaction>,
+        txs: Vec<model::BitcoinTxRef>,
     ) -> impl Future<Output = Result<(), Error>> + Send;
 
     /// Write the stacks block ids and their parent block ids.

@@ -56,7 +56,6 @@ use signer::testing::context::ConfigureStorage;
 use signer::testing::context::TestContext;
 use signer::testing::context::WrappedMock;
 use signer::testing::dummy;
-use signer::testing::dummy::DepositTxConfig;
 use signer::testing::get_rng;
 use signer::testing::stacks::DUMMY_SORTITION_INFO;
 use signer::testing::stacks::DUMMY_TENURE_INFO;
@@ -212,26 +211,24 @@ async fn deposit_flow() {
     test_data.write_to(&context.get_storage_mut()).await;
 
     // Setup deposit request
-    let deposit_config = DepositTxConfig {
-        aggregate_key,
-        ..fake::Faker.fake_with_rng(&mut rng)
-    };
+    let deposit_amount = fake::Faker.fake_with_rng(&mut rng);
+    let deposit_max_fee = fake::Faker.fake_with_rng(&mut rng);
     let depositor = Recipient::new(AddressType::P2tr);
     let depositor_utxo = Utxo {
         txid: Txid::all_zeros(),
         vout: 0,
         script_pub_key: ScriptBuf::new(),
         descriptor: "".to_string(),
-        amount: Amount::from_sat(deposit_config.amount + deposit_config.max_fee),
+        amount: Amount::from_sat(deposit_amount + deposit_max_fee),
         height: 0,
     };
-    let max_fee = deposit_config.amount / 2;
+    let max_fee = deposit_amount / 2;
     let (deposit_tx, deposit_request, _) = make_deposit_request(
         &depositor,
-        deposit_config.amount,
+        deposit_amount,
         depositor_utxo,
         max_fee,
-        deposit_config.aggregate_key.into(),
+        aggregate_key.into(),
     );
 
     let emily_request = CreateDepositRequestBody {
@@ -329,7 +326,7 @@ async fn deposit_flow() {
                     let res = if *txid == deposit_tx.compute_txid() {
                         Ok(Some(BitcoinTxInfo {
                             in_active_chain: true,
-                            fee: bitcoin::Amount::from_sat(deposit_config.max_fee),
+                            fee: bitcoin::Amount::from_sat(deposit_max_fee),
                             tx: deposit_tx.clone(),
                             txid: deposit_tx.compute_txid(),
                             hash: deposit_tx.compute_wtxid(),

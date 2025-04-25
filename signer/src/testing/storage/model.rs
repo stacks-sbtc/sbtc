@@ -3,7 +3,6 @@
 use std::collections::HashSet;
 
 use bitcoin::ScriptBuf;
-use bitcoin::hashes::Hash as _;
 use fake::Dummy as _;
 use fake::Fake;
 
@@ -17,7 +16,6 @@ use crate::storage::model::BitcoinBlock;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::StacksBlockHeight;
-use crate::testing::dummy::DepositTxConfig;
 
 use rand::seq::SliceRandom;
 
@@ -94,14 +92,8 @@ pub struct TestData {
     /// Deposit requests
     pub withdraw_requests: Vec<model::WithdrawalRequest>,
 
-    /// Raw transaction data
-    pub transactions: Vec<model::Transaction>,
-
     /// Connection between bitcoin blocks and transactions
     pub bitcoin_transactions: Vec<model::BitcoinTxRef>,
-
-    /// Connection between bitcoin blocks and transactions
-    pub stacks_transactions: Vec<model::StacksTransaction>,
 
     /// Deposit signers
     pub deposit_signers: Vec<model::DepositSigner>,
@@ -174,12 +166,6 @@ impl TestData {
             params.num_signers_per_request,
         );
 
-        let transactions = deposit_data
-            .transactions
-            .into_iter()
-            .chain(withdraw_data.transactions)
-            .collect();
-
         let bitcoin_blocks = vec![block.clone()];
         (
             Self {
@@ -190,8 +176,6 @@ impl TestData {
                 withdraw_requests: withdraw_data.withdraw_requests,
                 withdraw_signers: withdraw_data.withdraw_signers,
                 bitcoin_transactions: deposit_data.bitcoin_transactions,
-                stacks_transactions: withdraw_data.stacks_transactions,
-                transactions,
                 tx_outputs: Vec::new(),
                 tx_prevouts: Vec::new(),
             },
@@ -209,9 +193,6 @@ impl TestData {
         self.withdraw_signers.extend(new_data.withdraw_signers);
         self.bitcoin_transactions
             .extend(new_data.bitcoin_transactions);
-        self.stacks_transactions
-            .extend(new_data.stacks_transactions);
-        self.transactions.extend(new_data.transactions);
         self.tx_outputs.extend(new_data.tx_outputs);
         self.tx_prevouts.extend(new_data.tx_prevouts);
     }
@@ -225,8 +206,6 @@ impl TestData {
         vec_diff(&mut self.withdraw_requests, &other.withdraw_requests);
         vec_diff(&mut self.withdraw_signers, &other.withdraw_signers);
         vec_diff(&mut self.bitcoin_transactions, &other.bitcoin_transactions);
-        vec_diff(&mut self.stacks_transactions, &other.stacks_transactions);
-        vec_diff(&mut self.transactions, &other.transactions);
         vec_diff(&mut self.tx_outputs, &other.tx_outputs);
         vec_diff(&mut self.tx_prevouts, &other.tx_prevouts);
     }
@@ -239,22 +218,15 @@ impl TestData {
         signer_script_pubkeys: &HashSet<ScriptBuf>,
     ) {
         let mut bitcoin_transactions = vec![];
-        let mut transactions = vec![];
         let mut tx_outputs = Vec::new();
         let mut tx_prevouts = Vec::new();
 
         for tx_info in txs {
-            let model_tx = model::Transaction {
-                txid: tx_info.tx.compute_txid().to_byte_array(),
-                tx_type: model::TransactionType::Donation,
-                block_hash: block.block_hash.into_bytes(),
-            };
             let bitcoin_transaction = model::BitcoinTxRef {
                 txid: tx_info.tx.compute_txid().into(),
                 block_hash: block.block_hash,
             };
 
-            transactions.push(model_tx);
             bitcoin_transactions.push(bitcoin_transaction);
 
             for tx_output in tx_info.to_tx_outputs(signer_script_pubkeys) {
@@ -268,7 +240,6 @@ impl TestData {
 
         self.push(Self {
             bitcoin_transactions,
-            transactions,
             tx_outputs,
             tx_prevouts,
             ..Self::default()
@@ -294,13 +265,6 @@ impl TestData {
                 .expect("failed to write bitcoin block");
         }
 
-        for tx in self.transactions.iter() {
-            storage
-                .write_transaction(tx)
-                .await
-                .expect("failed to write transaction");
-        }
-
         for req in self.deposit_requests.iter() {
             storage
                 .write_deposit_request(req)
@@ -320,13 +284,6 @@ impl TestData {
                 .write_bitcoin_transaction(bitcoin_tx)
                 .await
                 .expect("failed to write bitcoin transaction");
-        }
-
-        for stacks_tx in self.stacks_transactions.iter() {
-            storage
-                .write_stacks_transaction(stacks_tx)
-                .await
-                .expect("failed to write stacks transaction");
         }
 
         for decision in self.deposit_signers.iter() {
@@ -435,7 +392,6 @@ impl TestData {
 struct DepositData {
     pub deposit_requests: Vec<model::DepositRequest>,
     pub deposit_signers: Vec<model::DepositSigner>,
-    pub transactions: Vec<model::Transaction>,
     pub bitcoin_transactions: Vec<model::BitcoinTxRef>,
 }
 
@@ -454,16 +410,13 @@ impl DepositData {
         (0..num_deposit_requests).fold(Self::new(), |mut deposit_data, _| {
             let mut deposit_request: model::DepositRequest = fake::Faker.fake_with_rng(rng);
 
-            let deposit_config = DepositTxConfig {
-                aggregate_key: PublicKey::combine_keys(signer_keys)
-                    .unwrap_or_else(|_| fake::Faker.fake_with_rng(rng)),
-                ..fake::Faker.fake_with_rng(rng)
-            };
+            let aggregate_key = PublicKey::combine_keys(signer_keys)
+                .unwrap_or_else(|_| fake::Faker.fake_with_rng(rng));
 
-            let mut raw_transaction: model::Transaction = deposit_config.fake_with_rng(rng);
-            raw_transaction.block_hash = *bitcoin_block.block_hash.as_ref();
-            deposit_request.txid = raw_transaction.txid.into();
-            deposit_request.signers_public_key = deposit_config.aggregate_key.into();
+            let mut raw_transaction: model::BitcoinTxRef = fake::Faker.fake_with_rng(rng);
+            raw_transaction.block_hash = bitcoin_block.block_hash;
+            deposit_request.txid = raw_transaction.txid;
+            deposit_request.signers_public_key = aggregate_key.into();
 
             let deposit_signers: Vec<_> = signer_keys
                 .iter()
@@ -485,7 +438,6 @@ impl DepositData {
 
             deposit_data.bitcoin_transactions.push(bitcoin_transaction);
             deposit_data.deposit_requests.push(deposit_request);
-            deposit_data.transactions.push(raw_transaction);
             deposit_data.deposit_signers.extend(deposit_signers);
 
             deposit_data
@@ -497,8 +449,6 @@ impl DepositData {
 struct WithdrawData {
     pub withdraw_requests: Vec<model::WithdrawalRequest>,
     pub withdraw_signers: Vec<model::WithdrawalSigner>,
-    pub transactions: Vec<model::Transaction>,
-    pub stacks_transactions: Vec<model::StacksTransaction>,
 }
 
 impl WithdrawData {
@@ -536,14 +486,6 @@ impl WithdrawData {
                     withdraw_request.recipient = fake::Faker.fake_with_rng(rng);
                     withdraw_request.bitcoin_block_height = bitcoin_block.block_height;
 
-                    let mut raw_transaction: model::Transaction = fake::Faker.fake_with_rng(rng);
-                    raw_transaction.tx_type = model::TransactionType::WithdrawRequest;
-
-                    let stacks_transaction = model::StacksTransaction {
-                        txid: raw_transaction.txid.into(),
-                        block_hash: stacks_block_hash,
-                    };
-
                     let withdraw_signers: Vec<_> = signer_keys
                         .iter()
                         .take(num_signers_per_request)
@@ -557,11 +499,7 @@ impl WithdrawData {
                         })
                         .collect();
 
-                    withdraw_requests
-                        .stacks_transactions
-                        .push(stacks_transaction);
                     withdraw_requests.withdraw_requests.push(withdraw_request);
-                    withdraw_requests.transactions.push(raw_transaction);
                     withdraw_requests.withdraw_signers.extend(withdraw_signers);
 
                     (withdraw_requests, next_withdraw_request_id + 1)
