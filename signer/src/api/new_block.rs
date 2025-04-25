@@ -101,7 +101,7 @@ pub async fn new_block_handler(state: State<ApiState<impl Context>>, body: Strin
 
     let stacks_chaintip = StacksBlock {
         block_hash: new_block_event.index_block_hash.into(),
-        block_height: new_block_event.block_height,
+        block_height: new_block_event.block_height.into(),
         parent_hash: new_block_event.parent_index_block_hash.into(),
         bitcoin_anchor: new_block_event.burn_block_hash.into(),
     };
@@ -109,7 +109,7 @@ pub async fn new_block_handler(state: State<ApiState<impl Context>>, body: Strin
 
     let span = tracing::span::Span::current();
     span.record("block_hash", stacks_chaintip.block_hash.to_hex());
-    span.record("block_height", stacks_chaintip.block_height);
+    span.record("block_height", *stacks_chaintip.block_height);
     span.record("parent_hash", stacks_chaintip.parent_hash.to_hex());
     span.record("bitcoin_anchor", stacks_chaintip.bitcoin_anchor.to_string());
 
@@ -649,6 +649,7 @@ mod tests {
     /// including updating the database with the new key rotation transaction.
     #[tokio::test]
     async fn test_handle_key_rotation() {
+        let mut rng = get_rng();
         let ctx = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
@@ -656,24 +657,27 @@ mod tests {
 
         let db = ctx.inner_storage();
 
-        let block_id: StacksBlockId = StacksBlockId(fake::Faker.fake_with_rng(&mut OsRng));
+        let block_id: StacksBlockId = StacksBlockId(fake::Faker.fake_with_rng(&mut rng));
         let event = KeyRotationEvent {
-            txid: sbtc::events::StacksTxid(fake::Faker.fake_with_rng(&mut OsRng)),
             block_id,
-            new_aggregate_pubkey: SECP256K1.generate_keypair(&mut OsRng).1.into(),
+            txid: sbtc::events::StacksTxid(fake::Faker.fake_with_rng(&mut rng)),
+            new_aggregate_pubkey: SECP256K1.generate_keypair(&mut rng).1.into(),
             new_keys: (0..3)
-                .map(|_| SECP256K1.generate_keypair(&mut OsRng).1.into())
+                .map(|_| SECP256K1.generate_keypair(&mut rng).1.into())
                 .collect(),
             new_address: PrincipalData::Standard(StandardPrincipalData::transient()).into(),
             new_signature_threshold: 3,
         };
 
-        let res = handle_key_rotation(&ctx, event.into()).await;
+        let event: crate::storage::model::KeyRotationEvent = event.into();
+        let res = handle_key_rotation(&ctx, event.clone()).await;
 
         assert!(res.is_ok());
         let db = db.lock().await;
+
         assert_eq!(db.rotate_keys_transactions.len(), 1);
-        assert!(db.rotate_keys_transactions.get(&block_id.into()).is_some());
+        let stored_events = db.rotate_keys_transactions.get(&block_id.into()).unwrap();
+        assert_eq!(stored_events, &vec![event]);
     }
 
     #[test_case(EVENT_OBSERVER_BODY_LIMIT, true; "event within limit")]

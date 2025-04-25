@@ -15,6 +15,7 @@ use crate::storage::model;
 use crate::storage::model::BitcoinBlock;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinBlockRef;
+use crate::storage::model::StacksBlockHeight;
 
 use rand::seq::SliceRandom;
 
@@ -22,12 +23,12 @@ use rand::seq::SliceRandom;
 /// [`TxDeconstructor`] trait.
 ///
 /// In order to implement [`TxDeconstructor`], you need to be able to
-/// return the original output for each input into a transaction. This
-/// struct allows you to do that by "requiring" that you provide the
-/// "original" bitcoin::TxOut for each entry in `tx.input`. This
-/// information gets used to figure out whether a transaction is a sweep
-/// transaction or a donation to the signers. Sweep transactions have
-/// inputs that spend funds locked by the signers, while donations do not.
+/// return the original output for each input in a transaction. This struct
+/// allows you to do that by "requiring" that you provide the "original"
+/// bitcoin::TxOut for each entry in `tx.input`. This information gets used
+/// to figure out whether a transaction is a sweep transaction or a
+/// donation to the signers. Sweep transactions have inputs that spend
+/// funds locked by the signers, while donations do not.
 #[derive(Debug)]
 pub struct TestBitcoinTxInfo {
     /// A bitcoin transaction that will be classified as either a
@@ -536,7 +537,7 @@ impl BitcoinBlockRef {
     fn hallucinate_parent(block: &model::BitcoinBlock) -> Self {
         Self {
             block_hash: block.parent_hash,
-            block_height: 1337, // Arbitrary number
+            block_height: 1337u64.into(), // Arbitrary number
         }
     }
 }
@@ -544,7 +545,7 @@ impl BitcoinBlockRef {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct StacksBlockSummary {
     block_hash: model::StacksBlockHash,
-    block_height: u64,
+    block_height: StacksBlockHeight,
 }
 
 impl StacksBlockSummary {
@@ -558,7 +559,7 @@ impl StacksBlockSummary {
     fn hallucinate_parent(block: &model::StacksBlock) -> Self {
         Self {
             block_hash: block.parent_hash,
-            block_height: 1337, // Arbitrary number
+            block_height: 1337u64.into(), // Arbitrary number
         }
     }
 }
@@ -572,7 +573,7 @@ impl From<&bitcoin::Block> for crate::storage::model::BitcoinBlockRef {
     fn from(value: &bitcoin::Block) -> Self {
         Self {
             block_hash: value.block_hash().into(),
-            block_height: value.bip34_block_height().unwrap(),
+            block_height: value.bip34_block_height().unwrap().into(),
         }
     }
 }
