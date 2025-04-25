@@ -250,7 +250,7 @@ async fn deposit_flow() {
             nonce: 0,
         },
         txdata: vec![
-            get_coinbase_tx((bitcoin_chain_tip.block_height + 1) as i64, &mut rng),
+            get_coinbase_tx((*bitcoin_chain_tip.block_height + 1) as i64, &mut rng),
             deposit_tx.clone(),
         ],
     };
@@ -578,7 +578,7 @@ async fn deposit_flow() {
         fetched_deposit.last_update_block_hash,
         stacks_tip.block_hash.to_string()
     );
-    assert_eq!(fetched_deposit.last_update_height, stacks_tip.block_height);
+    assert_eq!(fetched_deposit.last_update_height, *stacks_tip.block_height);
 
     testing::storage::drop_db(db).await;
 }
@@ -750,7 +750,7 @@ async fn test_get_deposits_returns_pending_and_accepted() {
 
     deposit_api::update_deposits(
         emily_client.config(),
-        UpdateDepositsRequestBody { deposits: deposits },
+        UpdateDepositsRequestBody { deposits },
     )
     .await
     .expect("cannot update deposits");

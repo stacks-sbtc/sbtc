@@ -148,7 +148,7 @@ pub async fn deploy_smart_contracts() -> &'static SignerStxState {
     deployer: *testing::wallet::WALLET.0.address(),
     sweep_txid: BitcoinTxId::from([0; 32]),
     sweep_block_hash: BitcoinBlockHash::from([0; 32]),
-    sweep_block_height: 7,
+    sweep_block_height: 7u64.into(),
 }); "complete-deposit standard recipient")]
 #[test_case(ContractCallWrapper(CompleteDepositV1 {
     outpoint: bitcoin::OutPoint::null(),
@@ -157,7 +157,7 @@ pub async fn deploy_smart_contracts() -> &'static SignerStxState {
     deployer: *testing::wallet::WALLET.0.address(),
     sweep_txid: BitcoinTxId::from([0; 32]),
     sweep_block_hash: BitcoinBlockHash::from([0; 32]),
-    sweep_block_height: 7,
+    sweep_block_height: 7u64.into(),
 }); "complete-deposit contract recipient")]
 #[test_case(ContractCallWrapper(AcceptWithdrawalV1 {
     id: QualifiedRequestId {
@@ -170,7 +170,7 @@ pub async fn deploy_smart_contracts() -> &'static SignerStxState {
     signer_bitmap: 0,
     deployer: *testing::wallet::WALLET.0.address(),
     sweep_block_hash: BitcoinBlockHash::from([0; 32]),
-    sweep_block_height: 7,
+    sweep_block_height: 7u64.into(),
 }); "accept-withdrawal")]
 #[test_case(ContractCallWrapper(InitiateWithdrawalRequest {
     amount: 22500,
@@ -224,7 +224,7 @@ async fn estimate_tx_fees() {
         deployer: StacksAddress::burn_address(false),
         sweep_txid: BitcoinTxId::from([0; 32]),
         sweep_block_hash: BitcoinBlockHash::from([0; 32]),
-        sweep_block_height: 7,
+        sweep_block_height: 7u64.into(),
     };
     let payload = ContractCallWrapper(contract_call);
 
@@ -274,7 +274,7 @@ async fn is_deposit_completed_works() {
         deployer: *testing::wallet::WALLET.0.address(),
         sweep_txid: BitcoinTxId::from([0; 32]),
         sweep_block_hash: BitcoinBlockHash::from(chain_tip_info.best_block_hash),
-        sweep_block_height: chain_tip_info.blocks as u64,
+        sweep_block_height: (chain_tip_info.blocks as u64).into(),
     };
 
     signers.sign_and_submit(&complete_deposit).await;
@@ -316,7 +316,7 @@ async fn is_withdrawal_completed_rejection_works() {
         deployer: *testing::wallet::WALLET.0.address(),
         sweep_txid: BitcoinTxId::from([0; 32]),
         sweep_block_hash: chain_tip_info.best_block_hash.into(),
-        sweep_block_height: chain_tip_info.blocks,
+        sweep_block_height: chain_tip_info.blocks.into(),
     });
 
     signers.sign_and_submit(&mint_sbtc).await;
