@@ -557,7 +557,7 @@ pub async fn add_chainstate_entry(
             .await
             .and_then(|existing_entry: ChainstateEntry| {
                 if existing_entry.key != entry.key {
-                    debug!(
+                    warn!(
                         ?existing_entry,
                         ?entry,
                         "Inconsistent state because of a conflict with the current interpretation of a height."
