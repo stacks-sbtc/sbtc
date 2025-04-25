@@ -35,7 +35,7 @@ use crate::metrics::BITCOIN_BLOCKCHAIN;
 use crate::metrics::Metrics;
 use crate::stacks::api::GetNakamotoStartHeight as _;
 use crate::stacks::api::StacksInteract;
-use crate::stacks::api::TenureBlocks;
+use crate::stacks::api::TenureBlockHeaders;
 use crate::storage::DbRead;
 use crate::storage::DbWrite;
 use crate::storage::model;
@@ -380,17 +380,23 @@ impl<C: Context, B> BlockObserver<C, B> {
     async fn process_stacks_blocks(&self) -> Result<(), Error> {
         tracing::info!("processing stacks block");
         let stacks_client = self.context.get_stacks_client();
+        let db = self.context.get_storage_mut();
         let tenure_info = stacks_client.get_tenure_info().await?;
 
         tracing::debug!("fetching unknown ancestral blocks from stacks-core");
-        let stacks_blocks = crate::stacks::api::fetch_unknown_ancestors(
+        let stacks_block_headers = crate::stacks::api::fetch_unknown_ancestors(
             &stacks_client,
-            &self.context.get_storage(),
+            &db,
             tenure_info.tip_block_id,
         )
         .await?;
 
-        self.write_stacks_blocks(&stacks_blocks).await?;
+        let headers = stacks_block_headers
+            .into_iter()
+            .flat_map(TenureBlockHeaders::into_iter)
+            .collect::<Vec<_>>();
+
+        db.write_stacks_block_headers(headers).await?;
 
         tracing::debug!("finished processing stacks block");
         Ok(())
@@ -480,21 +486,6 @@ impl<C: Context, B> BlockObserver<C, B> {
 
         // Write these transactions into storage.
         db.write_bitcoin_transactions(sbtc_txs).await?;
-        Ok(())
-    }
-
-    /// Write the given stacks blocks to the database.
-    ///
-    /// This function also extracts sBTC Stacks transactions from the given
-    /// blocks and stores them into the database.
-    async fn write_stacks_blocks(&self, tenures: &[TenureBlocks]) -> Result<(), Error> {
-        let headers = tenures
-            .iter()
-            .flat_map(TenureBlocks::as_stacks_blocks)
-            .collect::<Vec<_>>();
-
-        let storage = self.context.get_storage_mut();
-        storage.write_stacks_block_headers(headers).await?;
         Ok(())
     }
 
