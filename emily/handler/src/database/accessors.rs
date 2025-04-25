@@ -617,8 +617,8 @@ pub async fn add_chainstate_entry(
         warn!(
             ?chaintip,
             ?entry,
-            "Attempting to add a chaintip that is more than one block ({}) higher than the current tip",
-            blocks_higher_than_current_tip,
+            %blocks_higher_than_current_tip,
+            "Attempting to add a chaintip with height that is more than one block greater than the current tip height",
         );
         // TODO(TBD): Determine the ramifications of allowing a chaintip to be added much
         // higher than expected.
