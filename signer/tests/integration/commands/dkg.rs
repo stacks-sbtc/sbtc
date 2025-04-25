@@ -12,17 +12,17 @@ use signer::{
 
 use super::{Ctx, TestState};
 
-pub struct CreateDkgShares {
+pub struct CreateFailedDkgShares {
     seed: u64,
 }
 
-impl CreateDkgShares {
+impl CreateFailedDkgShares {
     fn with_seed(seed: u64) -> Self {
         Self { seed }
     }
 }
 
-impl Command<TestState, Ctx> for CreateDkgShares {
+impl Command<TestState, Ctx> for CreateFailedDkgShares {
     fn check(&self, _state: &TestState) -> bool {
         true
     }
@@ -41,10 +41,10 @@ impl Command<TestState, Ctx> for CreateDkgShares {
     }
 
     fn label(&self) -> String {
-        "CREATE_DKG_SHARES".to_string()
+        "CREATE_FAILED_DKG_SHARES".to_string()
     }
 
     fn build(_ctx: std::sync::Arc<Ctx>) -> impl Strategy<Value = CommandWrapper<TestState, Ctx>> {
-        any::<u64>().prop_map(|seed| CommandWrapper::new(CreateDkgShares::with_seed(seed)))
+        any::<u64>().prop_map(|seed| CommandWrapper::new(CreateFailedDkgShares::with_seed(seed)))
     }
 }
