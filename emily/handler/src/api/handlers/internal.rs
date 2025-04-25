@@ -107,7 +107,12 @@ pub async fn execute_reorg_handler(
     context: &EmilyContext,
     request: ExecuteReorgRequest,
 ) -> Result<impl warp::reply::Reply, Error> {
-    info!("Executing a reorg with request {request:?}.");
+    info!(
+        stacks_canonical_chain_tip = ?request.canonical_tip,
+        conflicting_blocks_start = ?request.conflicting_chainstates.first(),
+        conflicting_blocks_end = ?request.conflicting_chainstates.last(),
+        "Executing a reorg request"
+    );
     let empty_reply = warp::reply::with_status(warp::reply(), StatusCode::NO_CONTENT);
 
     let new_status = ApiStatus::Reorg(request.canonical_tip.clone().into());
@@ -147,7 +152,8 @@ pub async fn execute_reorg_handler(
                         %error,
                         ?entry,
                         %attempt,
-                        "Encountered race condition in updating entry, max attempts: {ENTRY_UPDATE_RETRIES}",
+                        max_attempts = %ENTRY_UPDATE_RETRIES,
+                        "Encountered race condition in updating entry",
                     );
                 }
                 e @ Err(_) => e?,
@@ -159,8 +165,8 @@ pub async fn execute_reorg_handler(
 
     // Show updated deposits when in debug mode.
     debug!(
-        "Reorganized deposits: {}",
-        serde_json::to_string_pretty(&debug_modified_deposit_entries)?
+        deposits = serde_json::to_string_pretty(&debug_modified_deposit_entries)?,
+        "Reorganized deposits"
     );
 
     // Get all withdrawals that would be impacted by this reorg.
@@ -188,7 +194,8 @@ pub async fn execute_reorg_handler(
                         %error,
                         ?entry,
                         %attempt,
-                        "Encountered race condition in updating entry. Max attempts: {ENTRY_UPDATE_RETRIES}",
+                        max_attempts = %ENTRY_UPDATE_RETRIES,
+                        "Encountered race condition in updating entry",
                     );
                 }
                 e @ Err(_) => e?,
@@ -200,8 +207,8 @@ pub async fn execute_reorg_handler(
 
     // Show updated withdrawals when in debug mode.
     debug!(
-        "Reorganized withdrawals: {}",
-        serde_json::to_string_pretty(&debug_modified_withdrawal_entries)?
+        withdrawals = serde_json::to_string_pretty(&debug_modified_withdrawal_entries)?,
+        "Reorganized withdrawals",
     );
 
     // Cleanup API state.
