@@ -73,8 +73,9 @@ async fn set_api_state_status(
         debug!(
             ?api_state,
             ?original_api_state,
-            attampt = %attempt_number,
-            "Changing Api state, max attempts {MAX_SET_API_STATE_ATTEMPTS_DURING_REORG}."
+            attempt = %attempt_number,
+            max_attempts = %MAX_SET_API_STATE_ATTEMPTS_DURING_REORG,
+            "Changing the API state"
         );
 
         // Attempt to set the API state.
