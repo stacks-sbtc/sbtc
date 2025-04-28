@@ -3471,6 +3471,15 @@ mod tests {
     }
 
     impl TestTxOut {
+        pub fn tx(&self) -> bitcoin::Transaction {
+            Transaction {
+                version: Version::TWO,
+                lock_time: LockTime::ZERO,
+                input: Vec::new(),
+                output: Vec::new(),
+            }
+        }
+
         pub fn tx_info(&self) -> BitcoinTxInfo {
             BitcoinTxInfo {
                 fee: Some(Amount::from_sat(1000)),
@@ -3484,8 +3493,9 @@ mod tests {
             }
         }
         pub fn output(&mut self, output_type: TxOutputType) -> &mut Self {
+            let tx = self.tx();
             self.tx_outputs.push(TxOutput {
-                txid: Txid::all_zeros().into(),
+                txid: tx.compute_txid().into(),
                 output_index: self.tx_outputs.len() as u32,
                 script_pubkey: ScriptPubKey::from_bytes(vec![]),
                 amount: 0,
@@ -3494,8 +3504,9 @@ mod tests {
             self
         }
         pub fn op_return(&mut self, script: ScriptBuf) -> &mut Self {
+            let tx = self.tx();
             self.tx_outputs.push(TxOutput {
-                txid: Txid::all_zeros().into(),
+                txid: tx.compute_txid().into(),
                 output_index: self.tx_outputs.len() as u32,
                 script_pubkey: script.into(),
                 amount: 0,
