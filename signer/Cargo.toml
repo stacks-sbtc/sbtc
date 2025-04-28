@@ -8,7 +8,7 @@ ignored = ["tonic", "tonic-build", "stackslib"]
 
 [features]
 default = []
-testing = ["dep:fake", "dep:mockall", "sbtc/testing"]
+testing = ["dep:fake", "dep:madhouse", "dep:mockall", "sbtc/testing"]
 
 [dependencies]
 aquamarine.workspace = true
@@ -61,9 +61,8 @@ wsts.workspace = true
 
 # Only for testing
 fake = { workspace = true, optional = true }
+madhouse = { workspace = true, optional = true }
 mockall = { workspace = true, optional = true }
-madhouse = { git = "https://github.com/stacks-network/madhouse-rs.git", rev = "8623f2a4efc6a8b691f25bc95eb9801fec17b4c0" }
-proptest = { git = "https://github.com/proptest-rs/proptest.git", rev = "c9bdf18c232665b2b740c667c81866b598d06dc7" }
 
 [build-dependencies]
 tonic-build.workspace = true
@@ -72,6 +71,7 @@ tonic-build.workspace = true
 bitcoincore-rpc.workspace = true
 mockito.workspace = true
 more-asserts.workspace = true
+proptest.workspace = true
 ripemd.workspace = true
 sbtc = { workspace = true, features = ["testing"] }
 # We need this so that we have access to "testing" feature code in our

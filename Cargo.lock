@@ -3639,10 +3639,10 @@ dependencies = [
 
 [[package]]
 name = "madhouse"
-version = "0.1.1"
-source = "git+https://github.com/stacks-network/madhouse-rs.git?rev=8623f2a4efc6a8b691f25bc95eb9801fec17b4c0#8623f2a4efc6a8b691f25bc95eb9801fec17b4c0"
+version = "0.2.0"
+source = "git+https://github.com/stacks-network/madhouse-rs.git?rev=a0983d0f7d43c4b2a765df7f46b7ee28f160924d#a0983d0f7d43c4b2a765df7f46b7ee28f160924d"
 dependencies = [
- "proptest 1.6.0 (git+https://github.com/proptest-rs/proptest.git?rev=c9bdf18c232665b2b740c667c81866b598d06dc7)",
+ "proptest",
 ]
 
 [[package]]
@@ -4651,21 +4651,6 @@ version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "14cae93065090804185d3b75f0bf93b8eeda30c7a9b4a33d3bdb3988d6229e50"
 dependencies = [
- "bitflags 2.5.0",
- "lazy_static",
- "num-traits",
- "rand",
- "rand_chacha",
- "rand_xorshift",
- "regex-syntax 0.8.3",
- "unarray",
-]
-
-[[package]]
-name = "proptest"
-version = "1.6.0"
-source = "git+https://github.com/proptest-rs/proptest.git?rev=c9bdf18c232665b2b740c667c81866b598d06dc7#c9bdf18c232665b2b740c667c81866b598d06dc7"
-dependencies = [
  "bit-set",
  "bit-vec",
  "bitflags 2.5.0",
@@ -5462,7 +5447,7 @@ dependencies = [
  "clarity",
  "hex",
  "more-asserts",
- "proptest 1.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "proptest",
  "rand",
  "secp256k1 0.29.0",
  "serde",
@@ -5858,7 +5843,7 @@ dependencies = [
  "more-asserts",
  "p256k1",
  "polynomial",
- "proptest 1.6.0 (git+https://github.com/proptest-rs/proptest.git?rev=c9bdf18c232665b2b740c667c81866b598d06dc7)",
+ "proptest",
  "prost",
  "rand",
  "reqwest 0.11.27",
