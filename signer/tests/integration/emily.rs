@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::time::Duration;
 
 use bitcoin::AddressType;
@@ -15,6 +16,7 @@ use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc_json::Utxo;
 use fake::Fake as _;
 use futures::future::join_all;
+use signer::testing::storage::model::TestBitcoinTxInfo;
 use test_case::test_case;
 use test_log::test;
 use url::Url;
@@ -45,7 +47,6 @@ use signer::storage::DbRead;
 use signer::storage::DbWrite;
 use signer::storage::model;
 use signer::storage::model::DepositSigner;
-use signer::storage::model::TransactionType;
 use signer::testing;
 use signer::testing::context::BuildContext;
 use signer::testing::context::ConfigureBitcoinClient;
@@ -55,7 +56,6 @@ use signer::testing::context::ConfigureStorage;
 use signer::testing::context::TestContext;
 use signer::testing::context::WrappedMock;
 use signer::testing::dummy;
-use signer::testing::dummy::DepositTxConfig;
 use signer::testing::get_rng;
 use signer::testing::stacks::DUMMY_SORTITION_INFO;
 use signer::testing::stacks::DUMMY_TENURE_INFO;
@@ -192,40 +192,43 @@ async fn deposit_flow() {
     let signers_utxo_tx = Transaction {
         version: bitcoin::transaction::Version::ONE,
         lock_time: bitcoin::absolute::LockTime::ZERO,
-        input: vec![],
         output: vec![bitcoin::TxOut {
             value: bitcoin::Amount::from_sat(1_337_000_000_000),
             script_pubkey: aggregate_key.signers_script_pubkey(),
         }],
+        input: vec![TestBitcoinTxInfo::random_prevout(&mut rng)],
     };
-    test_data.push_bitcoin_txs(
-        &bitcoin_chain_tip,
-        vec![(TransactionType::SbtcTransaction, signers_utxo_tx.clone())],
-    );
+    let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
+    let tx_info = TestBitcoinTxInfo {
+        tx: signers_utxo_tx.clone(),
+        prevouts: vec![bitcoin::TxOut {
+            value: bitcoin::Amount::from_sat(1000),
+            script_pubkey: aggregate_key.signers_script_pubkey(),
+        }],
+    };
+    test_data.push_bitcoin_txs(&bitcoin_chain_tip, vec![tx_info], &signer_script_pubkeys);
     test_data.remove(original_test_data);
     test_data.write_to(&context.get_storage_mut()).await;
 
     // Setup deposit request
-    let deposit_config = DepositTxConfig {
-        aggregate_key,
-        ..fake::Faker.fake_with_rng(&mut rng)
-    };
+    let deposit_amount = fake::Faker.fake_with_rng(&mut rng);
+    let deposit_max_fee = fake::Faker.fake_with_rng(&mut rng);
     let depositor = Recipient::new(AddressType::P2tr);
     let depositor_utxo = Utxo {
         txid: Txid::all_zeros(),
         vout: 0,
         script_pub_key: ScriptBuf::new(),
         descriptor: "".to_string(),
-        amount: Amount::from_sat(deposit_config.amount + deposit_config.max_fee),
+        amount: Amount::from_sat(deposit_amount + deposit_max_fee),
         height: 0,
     };
-    let max_fee = deposit_config.amount / 2;
+    let max_fee = deposit_amount / 2;
     let (deposit_tx, deposit_request, _) = make_deposit_request(
         &depositor,
-        deposit_config.amount,
+        deposit_amount,
         depositor_utxo,
         max_fee,
-        deposit_config.aggregate_key.into(),
+        aggregate_key.into(),
     );
 
     let emily_request = CreateDepositRequestBody {
@@ -323,7 +326,7 @@ async fn deposit_flow() {
                     let res = if *txid == deposit_tx.compute_txid() {
                         Ok(Some(BitcoinTxInfo {
                             in_active_chain: true,
-                            fee: bitcoin::Amount::from_sat(deposit_config.max_fee),
+                            fee: bitcoin::Amount::from_sat(deposit_max_fee),
                             tx: deposit_tx.clone(),
                             txid: deposit_tx.compute_txid(),
                             hash: deposit_tx.compute_wtxid(),

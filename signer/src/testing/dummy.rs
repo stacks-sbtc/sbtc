@@ -69,8 +69,8 @@ use crate::storage::model::BitcoinTxId;
 use crate::storage::model::CompletedDepositEvent;
 use crate::storage::model::DkgSharesStatus;
 use crate::storage::model::EncryptedDkgShares;
+use crate::storage::model::KeyRotationEvent;
 use crate::storage::model::QualifiedRequestId;
-use crate::storage::model::RotateKeysTransaction;
 use crate::storage::model::ScriptPubKey;
 use crate::storage::model::SigHash;
 use crate::storage::model::StacksBlockHash;
@@ -383,7 +383,7 @@ pub struct SignerSetConfig {
     pub signatures_required: u16,
 }
 
-impl fake::Dummy<SignerSetConfig> for RotateKeysTransaction {
+impl fake::Dummy<SignerSetConfig> for KeyRotationEvent {
     fn dummy_with_rng<R: Rng + ?Sized>(config: &SignerSetConfig, rng: &mut R) -> Self {
         let signer_set: Vec<PublicKey> = std::iter::repeat_with(|| fake::Faker.fake_with_rng(rng))
             .take(config.num_keys as usize)
@@ -402,8 +402,9 @@ impl fake::Dummy<SignerSetConfig> for RotateKeysTransaction {
             .expect("failed to create StacksAddress"),
         ));
 
-        RotateKeysTransaction {
+        KeyRotationEvent {
             txid: fake::Faker.fake_with_rng(rng),
+            block_hash: fake::Faker.fake_with_rng(rng),
             address,
             aggregate_key: fake::Faker.fake_with_rng(rng),
             signer_set,
@@ -516,37 +517,6 @@ impl fake::Dummy<fake::Faker> for StacksBlockHeight {
     }
 }
 
-/// A struct to aid in the generation of bitcoin deposit transactions.
-///
-/// BitcoinTx is created with this config, then it will have a UTXO that is
-/// locked with a valid deposit scriptPubKey
-#[derive(Debug, Clone, Copy, fake::Dummy)]
-pub struct DepositTxConfig {
-    /// The public key of the signer.
-    pub aggregate_key: PublicKey,
-    /// The amount of the deposit
-    #[dummy(faker = "2000..1_000_000_000")]
-    pub amount: u64,
-    /// The max fee of the deposit
-    #[dummy(faker = "1000..1_000_000_000")]
-    pub max_fee: u64,
-    /// The lock-time of the deposit. The value here cannot have the 32nd
-    /// bit set to 1 or the else the [`ReclaimScriptInputs::try_new`]
-    /// function will return an error.
-    #[dummy(faker = "2..250")]
-    pub lock_time: u32,
-}
-
-impl fake::Dummy<DepositTxConfig> for model::Transaction {
-    fn dummy_with_rng<R: Rng + ?Sized>(_: &DepositTxConfig, rng: &mut R) -> Self {
-        model::Transaction {
-            txid: fake::Faker.fake_with_rng(rng),
-            tx_type: model::TransactionType::DepositRequest,
-            block_hash: fake::Faker.fake_with_rng(rng),
-        }
-    }
-}
-
 /// A struct to aid in the generation of bitcoin sweep transactions.
 ///
 /// BitcoinTx is created with this config, then it will have a UTXO that is
@@ -561,16 +531,6 @@ pub struct SweepTxConfig {
     pub inputs: Vec<OutPoint>,
     /// The outputs to include as withdrawals.
     pub outputs: Vec<(u64, ScriptPubKey)>,
-}
-
-impl fake::Dummy<SweepTxConfig> for model::Transaction {
-    fn dummy_with_rng<R: Rng + ?Sized>(_: &SweepTxConfig, rng: &mut R) -> Self {
-        model::Transaction {
-            txid: fake::Faker.fake_with_rng(rng),
-            tx_type: model::TransactionType::SbtcTransaction,
-            block_hash: fake::Faker.fake_with_rng(rng),
-        }
-    }
 }
 
 impl fake::Dummy<fake::Faker> for Signed<SignerMessage> {

@@ -291,7 +291,7 @@ pub trait DbRead {
     fn get_last_key_rotation(
         &self,
         chain_tip: &model::BitcoinBlockHash,
-    ) -> impl Future<Output = Result<Option<model::RotateKeysTransaction>, Error>> + Send;
+    ) -> impl Future<Output = Result<Option<model::KeyRotationEvent>, Error>> + Send;
 
     /// Checks if a key rotation exists on the canonical chain
     fn key_rotation_exists(
@@ -474,12 +474,6 @@ pub trait DbWrite {
         decision: &model::WithdrawalSigner,
     ) -> impl Future<Output = Result<(), Error>> + Send;
 
-    /// Write a raw transaction.
-    fn write_transaction(
-        &self,
-        transaction: &model::Transaction,
-    ) -> impl Future<Output = Result<(), Error>> + Send;
-
     /// Write a connection between a bitcoin block and a transaction
     fn write_bitcoin_transaction(
         &self,
@@ -489,19 +483,7 @@ pub trait DbWrite {
     /// Write the bitcoin transactions to the data store.
     fn write_bitcoin_transactions(
         &self,
-        txs: Vec<model::Transaction>,
-    ) -> impl Future<Output = Result<(), Error>> + Send;
-
-    /// Write a connection between a stacks block and a transaction
-    fn write_stacks_transaction(
-        &self,
-        stacks_transaction: &model::StacksTransaction,
-    ) -> impl Future<Output = Result<(), Error>> + Send;
-
-    /// Write the stacks transactions to the data store.
-    fn write_stacks_transactions(
-        &self,
-        txs: Vec<model::Transaction>,
+        txs: Vec<model::BitcoinTxRef>,
     ) -> impl Future<Output = Result<(), Error>> + Send;
 
     /// Write the stacks block ids and their parent block ids.
@@ -519,7 +501,7 @@ pub trait DbWrite {
     /// Write rotate-keys transaction
     fn write_rotate_keys_transaction(
         &self,
-        key_rotation: &model::RotateKeysTransaction,
+        key_rotation: &model::KeyRotationEvent,
     ) -> impl Future<Output = Result<(), Error>> + Send;
 
     /// Write the withdrawal-reject event to the database.

@@ -30,7 +30,6 @@ use time::OffsetDateTime;
 
 use signer::bitcoin::MockBitcoinInteract;
 use signer::bitcoin::validation::DepositConfirmationStatus;
-use signer::config::Settings;
 use signer::context::Context;
 use signer::emily_client::MockEmilyInteract;
 use signer::error::Error;
@@ -229,14 +228,11 @@ async fn writing_stacks_blocks_works<T: AsContractCall>(contract: ContractCallWr
 
     // Okay now to save these blocks. We check that all of these blocks are
     // saved and that the transaction that we care about is saved as well.
-    let settings = Settings::new_from_default_config().unwrap();
-    let txs = storage::postgres::extract_relevant_transactions(&blocks, &settings.signer.deployer);
     let headers = blocks
         .iter()
         .map(|block| StacksBlock::from_nakamoto_block(block, &[0; 32].into()))
         .collect::<Vec<_>>();
     store.write_stacks_block_headers(headers).await.unwrap();
-    store.write_stacks_transactions(txs).await.unwrap();
 
     // First check that all blocks are saved
     let sql = "SELECT COUNT(*) FROM sbtc_signer.stacks_blocks";
@@ -246,16 +242,6 @@ async fn writing_stacks_blocks_works<T: AsContractCall>(contract: ContractCallWr
         .unwrap();
 
     assert_eq!(stored_block_count, blocks.len() as i64);
-
-    // Next we check that the one transaction that we care about, the one
-    // we just created above, was saved.
-    let sql = "SELECT COUNT(*) FROM sbtc_signer.stacks_transactions";
-    let stored_transaction_count = sqlx::query_scalar::<_, i64>(sql)
-        .fetch_one(store.pool())
-        .await
-        .unwrap();
-
-    assert_eq!(stored_transaction_count, 1);
 
     // We have a sanity check that there are more transactions that we
     // could have saved if we saved all transactions.
@@ -280,14 +266,6 @@ async fn writing_stacks_blocks_works<T: AsContractCall>(contract: ContractCallWr
     assert_eq!(stored_block_count_again, blocks.len() as i64);
     assert_eq!(stored_block_count_again, stored_block_count);
 
-    let sql = "SELECT COUNT(*) FROM sbtc_signer.stacks_transactions";
-    let stored_transaction_count_again = sqlx::query_scalar::<_, i64>(sql)
-        .fetch_one(store.pool())
-        .await
-        .unwrap();
-
-    // No more transactions were written
-    assert_eq!(stored_transaction_count_again, 1);
     signer::testing::storage::drop_db(store).await;
 }
 
@@ -1036,7 +1014,7 @@ async fn writing_transactions_postgres() {
     let store = testing::storage::new_test_database().await;
     let num_rows = 12;
     let mut rng = get_rng();
-    let mut txs: Vec<model::Transaction> =
+    let mut txs: Vec<model::BitcoinTxRef> =
         std::iter::repeat_with(|| fake::Faker.fake_with_rng(&mut rng))
             .take(num_rows)
             .collect();
@@ -1045,7 +1023,7 @@ async fn writing_transactions_postgres() {
     let block_hash = bitcoin::BlockHash::from_byte_array([1; 32]);
 
     txs.iter_mut().for_each(|tx| {
-        tx.block_hash = block_hash.to_byte_array();
+        tx.block_hash = block_hash.into();
     });
 
     let db_block = model::BitcoinBlock {
@@ -1068,14 +1046,6 @@ async fn writing_transactions_postgres() {
     // Were they all written?
     assert_eq!(num_rows, count as usize);
 
-    // what about the transactions table, the same number of rows should
-    // have been written there as well.
-    let count = sqlx::query_scalar::<_, i64>(r#"SELECT COUNT(*) FROM sbtc_signer.transactions"#)
-        .fetch_one(store.pool())
-        .await
-        .unwrap();
-
-    assert_eq!(num_rows, count as usize);
     // Okay now lets test that we do not write duplicates.
     store.write_bitcoin_transactions(txs).await.unwrap();
     let count =
@@ -1087,14 +1057,6 @@ async fn writing_transactions_postgres() {
     // No new records written right?
     assert_eq!(num_rows, count as usize);
 
-    // what about duplicates in the transactions table.
-    let count = sqlx::query_scalar::<_, i64>(r#"SELECT COUNT(*) FROM sbtc_signer.transactions"#)
-        .fetch_one(store.pool())
-        .await
-        .unwrap();
-
-    // let's see, who knows what will happen!
-    assert_eq!(num_rows, count as usize);
     signer::testing::storage::drop_db(store).await;
 }
 
@@ -2189,11 +2151,6 @@ async fn get_swept_withdrawal_requests_returns_swept_withdrawal_requests() {
         bitcoin_chain_tip: bitcoin_block.block_hash,
         ..Faker.fake_with_rng(&mut rng)
     };
-    let sweep_tx_model = model::Transaction {
-        tx_type: model::TransactionType::SbtcTransaction,
-        txid: swept_output.bitcoin_txid.to_byte_array(),
-        block_hash: bitcoin_block.block_hash.to_byte_array(),
-    };
     let sweep_tx_ref = model::BitcoinTxRef {
         txid: swept_output.bitcoin_txid,
         block_hash: bitcoin_block.block_hash,
@@ -2213,7 +2170,6 @@ async fn get_swept_withdrawal_requests_returns_swept_withdrawal_requests() {
     db.write_withdrawal_request(&withdrawal_request)
         .await
         .unwrap();
-    db.write_transaction(&sweep_tx_model).await.unwrap();
     db.write_bitcoin_transaction(&sweep_tx_ref).await.unwrap();
     db.write_bitcoin_withdrawals_outputs(&[swept_output.clone()])
         .await
@@ -2588,11 +2544,6 @@ async fn get_swept_withdrawal_requests_does_not_return_withdrawal_requests_with_
         bitcoin_chain_tip: bitcoin_block.block_hash,
         ..Faker.fake_with_rng(&mut rng)
     };
-    let sweep_tx_model = model::Transaction {
-        tx_type: model::TransactionType::SbtcTransaction,
-        txid: swept_output.bitcoin_txid.to_byte_array(),
-        block_hash: bitcoin_block.block_hash.to_byte_array(),
-    };
     let sweep_tx_ref = model::BitcoinTxRef {
         txid: swept_output.bitcoin_txid,
         block_hash: bitcoin_block.block_hash,
@@ -2612,7 +2563,6 @@ async fn get_swept_withdrawal_requests_does_not_return_withdrawal_requests_with_
     db.write_withdrawal_request(&withdrawal_request)
         .await
         .unwrap();
-    db.write_transaction(&sweep_tx_model).await.unwrap();
     db.write_bitcoin_transaction(&sweep_tx_ref).await.unwrap();
     db.write_bitcoin_withdrawals_outputs(&[swept_output.clone()])
         .await
@@ -3001,11 +2951,6 @@ async fn get_swept_withdrawal_requests_response_tx_reorged() {
         bitcoin_chain_tip: bitcoin_block.block_hash,
         ..Faker.fake_with_rng(&mut rng)
     };
-    let sweep_tx_model = model::Transaction {
-        tx_type: model::TransactionType::SbtcTransaction,
-        txid: swept_output.bitcoin_txid.to_byte_array(),
-        block_hash: bitcoin_block.block_hash.to_byte_array(),
-    };
     let sweep_tx_ref = model::BitcoinTxRef {
         txid: swept_output.bitcoin_txid,
         block_hash: bitcoin_block.block_hash,
@@ -3017,7 +2962,6 @@ async fn get_swept_withdrawal_requests_response_tx_reorged() {
     db.write_withdrawal_request(&withdrawal_request)
         .await
         .unwrap();
-    db.write_transaction(&sweep_tx_model).await.unwrap();
     db.write_bitcoin_transaction(&sweep_tx_ref).await.unwrap();
     db.write_bitcoin_withdrawals_outputs(&[swept_output.clone()])
         .await
@@ -3226,11 +3170,6 @@ async fn deposit_report_with_only_deposit_request() {
     // we want to test what happens if it is not on the canonical bitcoin
     // transaction.
     let random_block: model::BitcoinBlock = fake::Faker.fake_with_rng(&mut rng);
-    let tx = model::Transaction {
-        txid: deposit_request.txid.into_bytes(),
-        tx_type: model::TransactionType::DepositRequest,
-        block_hash: random_block.block_hash.into_bytes(),
-    };
     let tx_ref = model::BitcoinTxRef {
         txid: deposit_request.txid,
         block_hash: random_block.block_hash,
@@ -3248,7 +3187,6 @@ async fn deposit_report_with_only_deposit_request() {
     assert!(report.is_none());
 
     db.write_bitcoin_block(&random_block).await.unwrap();
-    db.write_transaction(&tx).await.unwrap();
     db.write_bitcoin_transaction(&tx_ref).await.unwrap();
 
     // The result shouldn't be Ok(None), since we have a deposit request,
@@ -3313,11 +3251,6 @@ async fn deposit_report_with_deposit_request_reorged() {
     let signer_public_key = &signer_set[0];
 
     let random_block: model::BitcoinBlock = fake::Faker.fake_with_rng(&mut rng);
-    let tx = model::Transaction {
-        txid: deposit_request.txid.into_bytes(),
-        tx_type: model::TransactionType::DepositRequest,
-        block_hash: random_block.block_hash.into_bytes(),
-    };
     let tx_ref = model::BitcoinTxRef {
         txid: deposit_request.txid,
         block_hash: random_block.block_hash,
@@ -3325,7 +3258,6 @@ async fn deposit_report_with_deposit_request_reorged() {
 
     db.write_deposit_request(&deposit_request).await.unwrap();
     db.write_bitcoin_block(&random_block).await.unwrap();
-    db.write_transaction(&tx).await.unwrap();
     db.write_bitcoin_transaction(&tx_ref).await.unwrap();
 
     // Time to record the signers' vote.
@@ -3386,18 +3318,12 @@ async fn deposit_report_with_deposit_request_spent() {
     let output_index = deposit_request.output_index;
     let signer_public_key = &signer_set[0];
 
-    let tx = model::Transaction {
-        txid: deposit_request.txid.into_bytes(),
-        tx_type: model::TransactionType::DepositRequest,
-        block_hash: chain_tip.into_bytes(),
-    };
     let tx_ref = model::BitcoinTxRef {
         txid: deposit_request.txid,
         block_hash: chain_tip,
     };
 
     db.write_deposit_request(&deposit_request).await.unwrap();
-    db.write_transaction(&tx).await.unwrap();
     db.write_bitcoin_transaction(&tx_ref).await.unwrap();
 
     // Write the decision to the database
@@ -3416,16 +3342,10 @@ async fn deposit_report_with_deposit_request_spent() {
     swept_prevout.prevout_output_index = deposit_request.output_index;
     swept_prevout.amount = deposit_request.amount;
 
-    let sweep_tx_model = model::Transaction {
-        tx_type: model::TransactionType::SbtcTransaction,
-        txid: swept_prevout.txid.to_byte_array(),
-        block_hash: chain_tip.to_byte_array(),
-    };
     let sweep_tx_ref = model::BitcoinTxRef {
         txid: swept_prevout.txid,
         block_hash: chain_tip,
     };
-    db.write_transaction(&sweep_tx_model).await.unwrap();
     db.write_bitcoin_transaction(&sweep_tx_ref).await.unwrap();
     db.write_tx_prevout(&swept_prevout).await.unwrap();
 
@@ -3485,18 +3405,12 @@ async fn deposit_report_with_deposit_request_swept_but_swept_reorged() {
 
     // We confirm it on the parent block of the chain tip because later we
     // change the chain tip and test certain conditions.
-    let tx = model::Transaction {
-        txid: deposit_request.txid.into_bytes(),
-        tx_type: model::TransactionType::DepositRequest,
-        block_hash: chain_tip_block.parent_hash.into_bytes(),
-    };
     let tx_ref = model::BitcoinTxRef {
         txid: deposit_request.txid,
         block_hash: chain_tip_block.parent_hash,
     };
 
     db.write_deposit_request(&deposit_request).await.unwrap();
-    db.write_transaction(&tx).await.unwrap();
     db.write_bitcoin_transaction(&tx_ref).await.unwrap();
 
     // Write the decision to the database
@@ -3522,17 +3436,11 @@ async fn deposit_report_with_deposit_request_swept_but_swept_reorged() {
     swept_prevout.prevout_output_index = deposit_request.output_index;
     swept_prevout.amount = deposit_request.amount;
 
-    let sweep_tx_model = model::Transaction {
-        tx_type: model::TransactionType::SbtcTransaction,
-        txid: swept_prevout.txid.to_byte_array(),
-        block_hash: alt_chain_tip_block.block_hash.to_byte_array(),
-    };
     let sweep_tx_ref = model::BitcoinTxRef {
         txid: swept_prevout.txid,
         block_hash: alt_chain_tip_block.block_hash,
     };
     db.write_bitcoin_block(&alt_chain_tip_block).await.unwrap();
-    db.write_transaction(&sweep_tx_model).await.unwrap();
     db.write_bitcoin_transaction(&sweep_tx_ref).await.unwrap();
     db.write_tx_prevout(&swept_prevout).await.unwrap();
 
@@ -3611,18 +3519,12 @@ async fn deposit_report_with_deposit_request_confirmed() {
     let output_index = deposit_request.output_index;
     let signer_public_key = &signer_set[0];
 
-    let tx = model::Transaction {
-        txid: deposit_request.txid.into_bytes(),
-        tx_type: model::TransactionType::DepositRequest,
-        block_hash: chain_tip.into_bytes(),
-    };
     let tx_ref = model::BitcoinTxRef {
         txid: deposit_request.txid,
         block_hash: chain_tip,
     };
 
     db.write_deposit_request(&deposit_request).await.unwrap();
-    db.write_transaction(&tx).await.unwrap();
     db.write_bitcoin_transaction(&tx_ref).await.unwrap();
 
     // Write this signer's vote to the database.
@@ -4007,16 +3909,10 @@ async fn withdrawal_report_with_withdrawal_request_fulfilled() {
         ..Faker.fake_with_rng(&mut rng)
     };
 
-    let sweep_tx_model = model::Transaction {
-        tx_type: model::TransactionType::SbtcTransaction,
-        txid: swept_output.bitcoin_txid.to_byte_array(),
-        block_hash: bitcoin_chain_tip.to_byte_array(),
-    };
     let sweep_tx_ref = model::BitcoinTxRef {
         txid: swept_output.bitcoin_txid,
         block_hash: bitcoin_chain_tip,
     };
-    db.write_transaction(&sweep_tx_model).await.unwrap();
     db.write_bitcoin_transaction(&sweep_tx_ref).await.unwrap();
     db.write_bitcoin_withdrawals_outputs(&[swept_output])
         .await
@@ -4131,16 +4027,10 @@ async fn withdrawal_report_with_withdrawal_request_swept_but_swept_reorged() {
         ..Faker.fake_with_rng(&mut rng)
     };
 
-    let sweep_tx_model = model::Transaction {
-        tx_type: model::TransactionType::SbtcTransaction,
-        txid: swept_output.bitcoin_txid.to_byte_array(),
-        block_hash: bitcoin_chain_tip_ref.block_hash.to_byte_array(),
-    };
     let sweep_tx_ref = model::BitcoinTxRef {
         txid: swept_output.bitcoin_txid,
         block_hash: bitcoin_chain_tip_ref.block_hash,
     };
-    db.write_transaction(&sweep_tx_model).await.unwrap();
     db.write_bitcoin_transaction(&sweep_tx_ref).await.unwrap();
     db.write_bitcoin_withdrawals_outputs(&[swept_output])
         .await
@@ -4290,16 +4180,10 @@ async fn withdrawal_report_with_withdrawal_request_swept_but_swept_reorged2() {
         ..Faker.fake_with_rng(&mut rng)
     };
 
-    let sweep_tx_model = model::Transaction {
-        tx_type: model::TransactionType::SbtcTransaction,
-        txid: swept_output.bitcoin_txid.to_byte_array(),
-        block_hash: bitcoin_chain_tip.block_hash.to_byte_array(),
-    };
     let sweep_tx_ref = model::BitcoinTxRef {
         txid: swept_output.bitcoin_txid,
         block_hash: bitcoin_chain_tip.block_hash,
     };
-    db.write_transaction(&sweep_tx_model).await.unwrap();
     db.write_bitcoin_transaction(&sweep_tx_ref).await.unwrap();
     db.write_bitcoin_withdrawals_outputs(&[swept_output])
         .await
@@ -4679,16 +4563,10 @@ async fn signer_utxo_reorg_suite<const N: usize>(desc: ReorgDescription<N>) {
             swept_output.amount = 0;
             swept_output.script_pubkey = dkg_shares.script_pubkey.clone();
 
-            let sweep_tx_model = model::Transaction {
-                tx_type: model::TransactionType::Donation,
-                txid: swept_output.txid.to_byte_array(),
-                block_hash: chain_tip_ref.block_hash.to_byte_array(),
-            };
             let sweep_tx_ref = model::BitcoinTxRef {
                 txid: swept_output.txid,
                 block_hash: chain_tip_ref.block_hash,
             };
-            db.write_transaction(&sweep_tx_model).await.unwrap();
             db.write_bitcoin_transaction(&sweep_tx_ref).await.unwrap();
             db.write_tx_output(&swept_output).await.unwrap();
         }
@@ -4710,16 +4588,10 @@ async fn signer_utxo_reorg_suite<const N: usize>(desc: ReorgDescription<N>) {
                 swept_output.output_index = 0;
                 swept_output.script_pubkey = dkg_shares.script_pubkey.clone();
 
-                let sweep_tx_model = model::Transaction {
-                    tx_type: model::TransactionType::SbtcTransaction,
-                    txid: swept_prevout.txid.to_byte_array(),
-                    block_hash: chain_tip_ref.block_hash.to_byte_array(),
-                };
                 let sweep_tx_ref = model::BitcoinTxRef {
                     txid: swept_prevout.txid,
                     block_hash: chain_tip_ref.block_hash,
                 };
-                db.write_transaction(&sweep_tx_model).await.unwrap();
                 db.write_bitcoin_transaction(&sweep_tx_ref).await.unwrap();
                 db.write_tx_prevout(&swept_prevout).await.unwrap();
                 db.write_tx_output(&swept_output).await.unwrap();
@@ -5528,13 +5400,6 @@ async fn pending_rejected_withdrawal_already_accepted() {
     db.write_bitcoin_withdrawals_outputs(&[forked_withdrawal_output.clone()])
         .await
         .unwrap();
-    db.write_transaction(&model::Transaction {
-        txid: forked_withdrawal_output.bitcoin_txid.into_bytes(),
-        tx_type: model::TransactionType::SbtcTransaction,
-        block_hash: forked_block.block_hash.into_bytes(),
-    })
-    .await
-    .unwrap();
     db.write_bitcoin_transaction(&model::BitcoinTxRef {
         txid: forked_withdrawal_output.bitcoin_txid,
         block_hash: forked_block.block_hash,
@@ -5583,13 +5448,6 @@ async fn pending_rejected_withdrawal_already_accepted() {
     assert_eq!(&pending_rejected.single(), &request);
 
     // Confirming it (putting the output txid in a confirmed block)
-    db.write_transaction(&model::Transaction {
-        txid: canonical_withdrawal_output.bitcoin_txid.into_bytes(),
-        tx_type: model::TransactionType::SbtcTransaction,
-        block_hash: fork_base.block_hash.into_bytes(),
-    })
-    .await
-    .unwrap();
     db.write_bitcoin_transaction(&model::BitcoinTxRef {
         txid: canonical_withdrawal_output.bitcoin_txid,
         block_hash: fork_base.block_hash,
@@ -5895,10 +5753,9 @@ async fn compute_withdrawn_total_gets_all_amounts_in_chain() {
             ..Faker.fake_with_rng(&mut rng)
         };
 
-        let tx = model::Transaction {
-            txid: output.txid.into_bytes(),
-            tx_type: model::TransactionType::SbtcTransaction,
-            block_hash: block.block_hash.into_bytes(),
+        let tx = model::BitcoinTxRef {
+            txid: output.txid,
+            block_hash: block.block_hash,
         };
         db.write_bitcoin_transactions(vec![tx]).await.unwrap();
         db.write_tx_output(&output).await.unwrap();
@@ -5986,10 +5843,9 @@ async fn compute_withdrawn_total_ignores_withdrawals_not_identified_blockchain()
         ..Faker.fake_with_rng(&mut rng)
     };
 
-    let tx = model::Transaction {
-        txid: output1.txid.into_bytes(),
-        tx_type: model::TransactionType::SbtcTransaction,
-        block_hash: bitcoin_chain_tip.block_hash.into_bytes(),
+    let tx = model::BitcoinTxRef {
+        txid: output1.txid,
+        block_hash: bitcoin_chain_tip.block_hash,
     };
     db.write_bitcoin_transactions(vec![tx]).await.unwrap();
     db.write_tx_output(&output1).await.unwrap();
@@ -6007,10 +5863,9 @@ async fn compute_withdrawn_total_ignores_withdrawals_not_identified_blockchain()
         ..Faker.fake_with_rng(&mut rng)
     };
 
-    let tx = model::Transaction {
-        txid: output2.txid.into_bytes(),
-        tx_type: model::TransactionType::SbtcTransaction,
-        block_hash: another_block.block_hash.into_bytes(),
+    let tx = model::BitcoinTxRef {
+        txid: output2.txid,
+        block_hash: another_block.block_hash,
     };
     db.write_bitcoin_block(&another_block).await.unwrap();
     db.write_bitcoin_transactions(vec![tx]).await.unwrap();
@@ -6140,18 +5995,10 @@ mod get_pending_accepted_withdrawal_requests {
     ) -> BitcoinTxId {
         // Simulate a sweep transaction on the canonical chain which will
         // include the withdrawal request.
-        let transaction = model::Transaction {
-            txid: Faker.fake(),
-            block_hash: at_bitcoin_block.into_bytes(),
-            tx_type: model::TransactionType::SbtcTransaction,
-        };
         let bitcoin_sweep_tx = model::BitcoinTxRef {
-            txid: transaction.txid.into(),
+            txid: Faker.fake(),
             block_hash: *at_bitcoin_block,
         };
-        db.write_transaction(&transaction)
-            .await
-            .expect("failed to write transaction");
         db.write_bitcoin_transaction(&bitcoin_sweep_tx)
             .await
             .expect("failed to write bitcoin transaction");
@@ -6170,7 +6017,7 @@ mod get_pending_accepted_withdrawal_requests {
         .await
         .expect("failed to write bitcoin withdrawal output");
 
-        transaction.txid.into()
+        bitcoin_sweep_tx.txid
     }
 
     /// Asserts that when there are no withdrawal requests, we return an empty
