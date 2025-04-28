@@ -296,8 +296,6 @@ async fn deposit_flow() {
                         Ok(Some(BitcoinTxInfo {
                             fee: Some(bitcoin::Amount::from_sat(deposit_max_fee)),
                             tx: deposit_tx.clone(),
-                            txid: deposit_tx.compute_txid(),
-                            vsize: deposit_tx.vsize() as u64,
                             vin: Vec::new(),
                         }))
                     } else {

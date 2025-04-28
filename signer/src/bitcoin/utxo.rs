@@ -1763,8 +1763,6 @@ mod tests {
         fn from_tx(tx: Transaction, fee: Amount) -> BitcoinTxInfo {
             BitcoinTxInfo {
                 fee: Some(fee),
-                txid: tx.compute_txid(),
-                vsize: tx.vsize() as u64,
                 tx,
                 vin: Vec::new(),
             }
@@ -3476,8 +3474,6 @@ mod tests {
         pub fn tx_info(&self) -> BitcoinTxInfo {
             BitcoinTxInfo {
                 fee: Some(Amount::from_sat(1000)),
-                txid: Txid::all_zeros(),
-                vsize: 100,
                 tx: Transaction {
                     version: Version::TWO,
                     lock_time: LockTime::ZERO,
@@ -3616,12 +3612,12 @@ mod tests {
 
         let expected = vec![
             WithdrawalTxOutput {
-                txid: tx_info.txid.into(),
+                txid: tx_info.compute_txid().into(),
                 output_index: 2,
                 request_id: 42,
             },
             WithdrawalTxOutput {
-                txid: tx_info.txid.into(),
+                txid: tx_info.compute_txid().into(),
                 output_index: 3,
                 request_id: 51,
             },

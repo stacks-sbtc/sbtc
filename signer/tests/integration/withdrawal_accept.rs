@@ -42,7 +42,7 @@ fn make_withdrawal_accept(data: &TestSweepSetup2) -> (AcceptWithdrawalV1, ReqCon
         // record of the actual withdrawal to make sure that the amount
         // matches the one in the withdrawal request.
         outpoint: OutPoint {
-            txid: sweep_tx_info.tx_info.txid,
+            txid: sweep_tx_info.tx_info.compute_txid(),
             // The sweep transaction has exactly 3 outputs, where the first
             // two are about the signers and the third one is for the
             // withdrawal request.
@@ -680,7 +680,8 @@ async fn accept_withdrawal_validation_withdrawal_not_in_sweep() {
     // Here we give an outpoint that doesn't exist in the transaction,
     // triggering the desired error. We use 3 for the vout, but any number
     // greater than 2 will do.
-    accept_withdrawal_tx.outpoint = OutPoint::new(setup.sweep_tx_info.unwrap().tx_info.txid, 3);
+    let txid = setup.sweep_tx_info.unwrap().tx_info.compute_txid();
+    accept_withdrawal_tx.outpoint = OutPoint::new(txid, 3);
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())

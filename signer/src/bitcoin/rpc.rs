@@ -102,11 +102,6 @@ pub struct BitcoinTxInfo {
     #[serde(with = "bitcoin::consensus::serde::With::<bitcoin::consensus::serde::Hex>")]
     #[serde(rename = "hex")]
     pub tx: Transaction,
-    /// The transaction's ID.
-    pub txid: Txid,
-    /// The virtual transaction size (differs from size for witness
-    /// transactions).
-    pub vsize: u64,
     /// The inputs into the transaction.
     pub vin: Vec<BitcoinTxVin>,
 }
@@ -163,7 +158,7 @@ impl BitcoinTxInfo {
     pub fn validate(&self) -> Result<(), Error> {
         // This would likely mean a bug in bitcoin core.
         if self.vin.len() != self.tx.input.len() {
-            return Err(Error::BitcoinTxMissingData(self.txid));
+            return Err(Error::BitcoinTxMissingData(self.compute_txid()));
         }
 
         // This would likely mean a bug in bitcoin core.
@@ -176,17 +171,25 @@ impl BitcoinTxInfo {
                     || vin.vout != Some(tx_in.previous_output.vout)
             });
         if inputs_disordered {
-            return Err(Error::BitcoinTxInvalidData(self.txid));
+            return Err(Error::BitcoinTxInvalidData(self.compute_txid()));
         }
 
         // This `fee` and `vin.prevout` fields are missing for coinbase
         // transactions and whenever the block's undo data is missing in
         // bitcoin core.
         if self.fee.is_none() || self.vin.iter().any(|x| x.prevout.is_none()) {
-            return Err(Error::BitcoinTxMissingFields(self.txid));
+            return Err(Error::BitcoinTxMissingFields(self.compute_txid()));
         }
 
         Ok(())
+    }
+
+    /// Computes the [`Txid`].
+    ///
+    /// Hashes the transaction **excluding** the segwit data (i.e. the
+    /// marker, flag bytes, and the witness fields themselves).
+    pub fn compute_txid(&self) -> Txid {
+        self.tx.compute_txid()
     }
 }
 
@@ -827,7 +830,7 @@ mod tests {
 
         tx_info.vin.pop();
         match tx_info.validate() {
-            Err(Error::BitcoinTxMissingData(txid)) if txid == tx_info.txid => {}
+            Err(Error::BitcoinTxMissingData(txid)) if txid == tx_info.compute_txid() => {}
             _ => panic!("Did not get the right error when validating"),
         }
     }
@@ -845,7 +848,7 @@ mod tests {
         // The fee field is required.
         tx_info.fee = None;
         match tx_info.validate() {
-            Err(Error::BitcoinTxMissingFields(txid)) if txid == tx_info.txid => {}
+            Err(Error::BitcoinTxMissingFields(txid)) if txid == tx_info.compute_txid() => {}
             _ => panic!("Did not get the right error when validating"),
         }
 
@@ -857,7 +860,7 @@ mod tests {
         tx_info.vin[0].prevout = None;
 
         match tx_info.validate() {
-            Err(Error::BitcoinTxMissingFields(txid)) if txid == tx_info.txid => {}
+            Err(Error::BitcoinTxMissingFields(txid)) if txid == tx_info.compute_txid() => {}
             _ => panic!("Did not get the right error when validating"),
         }
 
@@ -896,7 +899,7 @@ mod tests {
         // Okay let's mess up the order.
         tx_info.vin.reverse();
         match tx_info.validate() {
-            Err(Error::BitcoinTxInvalidData(txid)) if txid == tx_info.txid => {}
+            Err(Error::BitcoinTxInvalidData(txid)) if txid == tx_info.compute_txid() => {}
             _ => panic!("Did not get the right error when validating"),
         }
 

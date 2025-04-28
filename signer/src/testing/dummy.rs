@@ -153,8 +153,6 @@ impl Dummy<bitcoin::Transaction> for BitcoinTxInfo {
 
         BitcoinTxInfo {
             fee: Some(Amount::from_sat(fee_rate * vsize)),
-            txid: tx.compute_txid(),
-            vsize,
             vin: vin.collect(),
             tx: tx.clone(),
         }

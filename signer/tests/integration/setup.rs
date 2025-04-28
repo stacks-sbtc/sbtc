@@ -281,7 +281,7 @@ impl TestSweepSetup {
     /// Store the deposit transaction into the database
     pub async fn store_deposit_tx(&self, db: &PgStore) {
         let bitcoin_tx_ref = BitcoinTxRef {
-            txid: self.deposit_tx_info.txid.into(),
+            txid: self.deposit_tx_info.compute_txid().into(),
             block_hash: self.deposit_block_hash.into(),
         };
 
@@ -291,7 +291,7 @@ impl TestSweepSetup {
     /// into the database
     pub async fn store_sweep_tx(&self, db: &PgStore) {
         let bitcoin_tx_ref = BitcoinTxRef {
-            txid: self.sweep_tx_info.txid.into(),
+            txid: self.sweep_tx_info.compute_txid().into(),
             block_hash: self.sweep_block_hash.into(),
         };
 
@@ -970,7 +970,7 @@ impl TestSweepSetup2 {
     pub async fn store_deposit_txs(&self, db: &PgStore) {
         for (_, _, tx_info) in self.deposits.iter() {
             let bitcoin_tx_ref = BitcoinTxRef {
-                txid: tx_info.txid.into(),
+                txid: tx_info.compute_txid().into(),
                 block_hash: self.deposit_block_hash.into(),
             };
 
@@ -1049,7 +1049,7 @@ impl TestSweepSetup2 {
         let sweep = self.sweep_tx_info.as_ref().expect("no sweep tx info set");
 
         let bitcoin_tx_ref = BitcoinTxRef {
-            txid: sweep.tx_info.txid.into(),
+            txid: sweep.tx_info.compute_txid().into(),
             block_hash: sweep.block_hash.into(),
         };
 

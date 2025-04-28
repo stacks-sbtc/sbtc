@@ -99,7 +99,8 @@ impl DepositRequestValidator for CreateDepositRequest {
             return Ok(None);
         };
 
-        // Check that the necessary data is present for the transaction.
+        // Check that the necessary data is present for the transaction
+        // info struct.
         tx_info.validate()?;
 
         Ok(Some(Deposit {
@@ -239,7 +240,7 @@ impl<C: Context, B> BlockObserver<C, B> {
                 .await?;
 
             let tx = model::BitcoinTxRef {
-                txid: deposit.tx_info.txid.into(),
+                txid: deposit.tx_info.compute_txid().into(),
                 block_hash: deposit.block_hash.into(),
             };
 
@@ -431,7 +432,6 @@ impl<C: Context, B> BlockObserver<C, B> {
         // `scriptPubKey` controlled by the signers.
         let mut sbtc_txs = Vec::new();
         for tx_info in txs {
-            tracing::trace!(txid = %tx_info.txid, "attempting to extract sbtc transaction");
             // If any of the outputs are spent to one of the signers'
             // addresses, then we care about it
             let outputs_spent_to_signers = tx_info
@@ -444,7 +444,8 @@ impl<C: Context, B> BlockObserver<C, B> {
                 continue;
             }
 
-            let txid = tx_info.txid;
+            let txid = tx_info.compute_txid();
+            tracing::trace!(%txid, "attempting to extract sbtc transaction");
             if tx_info.tx.is_coinbase() {
                 tracing::warn!(%txid, "ignoring coinbase tx when extracting sbtc transaction");
                 continue;

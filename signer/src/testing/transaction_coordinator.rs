@@ -716,8 +716,6 @@ where
         let sweep_tx_info = BitcoinTxInfo {
             fee: Some(bitcoin::Amount::from_sat(1000)),
             tx: sweep_tx.clone(),
-            txid: sweep_tx.compute_txid(),
-            vsize: sweep_tx.vsize() as u64,
             vin: Vec::new(),
         };
 
@@ -726,7 +724,7 @@ where
             request_id: withdrawal_req.request_id,
             txid: withdrawal_req.txid,
             block_hash: stacks_block.block_hash,
-            sweep_txid: sweep_tx_info.txid.into(),
+            sweep_txid: sweep_tx_info.compute_txid().into(),
             sweep_block_hash: sweep_block_hash.into(),
             sweep_block_height: 0u64.into(),
             ..fake::Faker.fake_with_rng(&mut rng)

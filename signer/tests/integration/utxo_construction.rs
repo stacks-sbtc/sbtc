@@ -496,7 +496,7 @@ fn parse_withdrawal_ids(withdrawal_numbers: u64) {
     );
 
     for output in withdrawal_outputs {
-        assert_eq!(output.txid, tx_info.txid.into());
+        assert_eq!(output.txid, tx_info.compute_txid().into());
         let request = withdrawal_requests
             .iter()
             .find(|req| req.request_id == output.request_id)

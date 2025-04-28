@@ -91,8 +91,6 @@ impl TestHarness {
         let tx_info = BitcoinTxInfo {
             fee: Some(bitcoin::Amount::from_sat(1000)),
             tx: response.tx.clone(),
-            txid: response.tx.compute_txid(),
-            vsize: response.tx.vsize() as u64,
             vin: Vec::new(),
         };
         self.deposits.insert(txid, (response, tx_info));
