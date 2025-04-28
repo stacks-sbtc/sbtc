@@ -3640,7 +3640,7 @@ dependencies = [
 [[package]]
 name = "madhouse"
 version = "0.2.0"
-source = "git+https://github.com/stacks-network/madhouse-rs.git?rev=a0983d0f7d43c4b2a765df7f46b7ee28f160924d#a0983d0f7d43c4b2a765df7f46b7ee28f160924d"
+source = "git+https://github.com/stacks-network/madhouse-rs.git?tag=0.2.0#a0983d0f7d43c4b2a765df7f46b7ee28f160924d"
 dependencies = [
  "proptest",
 ]
