@@ -119,7 +119,6 @@ use signer::testing::wsts::SignerSet;
 use signer::transaction_coordinator;
 use signer::transaction_coordinator::TxCoordinatorEventLoop;
 use signer::transaction_signer::TxSignerEventLoop;
-use signer::transaction_coordinator::should_coordinate_dkg;
 use tokio::sync::broadcast::Sender;
 
 use crate::complete_deposit::make_complete_deposit;
@@ -4732,14 +4731,19 @@ async fn should_handle_dkg_coordination_failure() {
         aggregate_key: existing_aggregate_key,
         ..Faker.fake_with_rng(&mut rng)
     };
-    storage.write_encrypted_dkg_shares(&dkg_shares).await.unwrap();
+    storage
+        .write_encrypted_dkg_shares(&dkg_shares)
+        .await
+        .unwrap();
 
     // Create a bitcoin block to serve as chain tip
     let bitcoin_block: model::BitcoinBlock = Faker.fake_with_rng(&mut rng);
     storage.write_bitcoin_block(&bitcoin_block).await.unwrap();
 
     // Update the context state with the existing aggregate key
-    context.state().set_current_aggregate_key(existing_aggregate_key);
+    context
+        .state()
+        .set_current_aggregate_key(existing_aggregate_key);
 
     // Create coordinator with test parameters using SignerNetwork::single
     let network = SignerNetwork::single(&context);
@@ -4750,14 +4754,17 @@ async fn should_handle_dkg_coordination_failure() {
         threshold: 3,
         context_window: 5,
         signing_round_max_duration: std::time::Duration::from_secs(5),
-        bitcoin_presign_request_max_duration: std::time::Duration::from_secs(5), 
+        bitcoin_presign_request_max_duration: std::time::Duration::from_secs(5),
         dkg_max_duration: std::time::Duration::from_secs(5),
         is_epoch3: true,
     };
 
     // Run the coordinator - this will handle process_new_blocks internally
     let run_result = coordinator.run().await;
-    assert!(run_result.is_ok(), "Coordinator run should complete successfully");
+    assert!(
+        run_result.is_ok(),
+        "Coordinator run should complete successfully"
+    );
 
     // Verify the existing aggregate key was used as fallback
     let current_key = context.state().current_aggregate_key();
