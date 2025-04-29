@@ -33,6 +33,7 @@ use fake::Faker;
 use futures::StreamExt as _;
 use lru::LruCache;
 use rand::rngs::OsRng;
+
 use sbtc::testing::regtest;
 use sbtc::testing::regtest::AsUtxo as _;
 use sbtc::testing::regtest::Recipient;
@@ -118,6 +119,7 @@ use signer::testing::wsts::SignerSet;
 use signer::transaction_coordinator;
 use signer::transaction_coordinator::TxCoordinatorEventLoop;
 use signer::transaction_signer::TxSignerEventLoop;
+use signer::transaction_coordinator::should_coordinate_dkg;
 use tokio::sync::broadcast::Sender;
 
 use crate::complete_deposit::make_complete_deposit;
@@ -4708,4 +4710,60 @@ mod get_eligible_pending_withdrawal_requests {
 
         testing::storage::drop_db(db).await;
     }
+}
+
+#[test_log::test(tokio::test)]
+async fn should_handle_dkg_coordination_failure() {
+    let mut rng = get_rng();
+    let context = TestContext::builder()
+        .with_in_memory_storage()
+        .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.dkg_target_rounds = std::num::NonZero::<u32>::new(1).unwrap();
+        })
+        .build();
+
+    let storage = context.get_storage_mut();
+
+    // Write DKG shares with Verified status
+    let existing_aggregate_key = PublicKey::from_private_key(&PrivateKey::new(&mut rng));
+    let dkg_shares = model::EncryptedDkgShares {
+        dkg_shares_status: model::DkgSharesStatus::Verified,
+        aggregate_key: existing_aggregate_key,
+        ..Faker.fake_with_rng(&mut rng)
+    };
+    storage.write_encrypted_dkg_shares(&dkg_shares).await.unwrap();
+
+    // Create a bitcoin block to serve as chain tip
+    let bitcoin_block: model::BitcoinBlock = Faker.fake_with_rng(&mut rng);
+    storage.write_bitcoin_block(&bitcoin_block).await.unwrap();
+
+    // Update the context state with the existing aggregate key
+    context.state().set_current_aggregate_key(existing_aggregate_key);
+
+    // Create coordinator with test parameters using SignerNetwork::single
+    let network = SignerNetwork::single(&context);
+    let coordinator = TxCoordinatorEventLoop {
+        context: context.clone(),
+        network: network.spawn(),
+        private_key: PrivateKey::new(&mut rng),
+        threshold: 3,
+        context_window: 5,
+        signing_round_max_duration: std::time::Duration::from_secs(5),
+        bitcoin_presign_request_max_duration: std::time::Duration::from_secs(5), 
+        dkg_max_duration: std::time::Duration::from_secs(5),
+        is_epoch3: true,
+    };
+
+    // Run the coordinator - this will handle process_new_blocks internally
+    let run_result = coordinator.run().await;
+    assert!(run_result.is_ok(), "Coordinator run should complete successfully");
+
+    // Verify the existing aggregate key was used as fallback
+    let current_key = context.state().current_aggregate_key();
+    assert_eq!(
+        current_key,
+        Some(existing_aggregate_key),
+        "Should fall back to existing aggregate key after DKG failure"
+    );
 }
