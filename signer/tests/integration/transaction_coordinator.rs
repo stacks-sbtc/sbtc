@@ -1109,7 +1109,7 @@ async fn run_dkg_if_signer_set_changes() {
             settings.signer.dkg_target_rounds = std::num::NonZero::<u32>::new(1).unwrap();
         })
         .build();
-    let config_signer_set = ctx.config().signer.bootstrap_signing_set.clone();
+    let mut config_signer_set = ctx.config().signer.bootstrap_signing_set.clone();
 
     // Sanity check
     assert!(!config_signer_set.is_empty());
@@ -1124,8 +1124,9 @@ async fn run_dkg_if_signer_set_changes() {
         .expect("failed to write dkg shares");
 
     // Remove one signer
-    let signer_set_without_signer = config_signer_set[..config_signer_set.len() - 1].to_vec();
-
+    let _removed_signer = config_signer_set
+        .pop_first()
+        .expect("This signer set should not be empty");
     // Create chaintip
     let bitcoin_block: model::BitcoinBlock = Faker.fake_with_rng(&mut rng);
     db.write_bitcoin_block(&bitcoin_block)
@@ -1141,7 +1142,7 @@ async fn run_dkg_if_signer_set_changes() {
 
     ctx.inner
         .state()
-        .update_current_signer_set(signer_set_without_signer.iter().cloned().collect());
+        .update_current_signer_set(config_signer_set.iter().cloned().collect());
     assert!(should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
     assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_ok());
 }
@@ -4458,15 +4459,15 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
     ctx.config_mut()
         .signer
         .bootstrap_signing_set
-        .push(new_pubkey);
+        .insert(new_pubkey);
     fake_ctx.config_mut().signer.bootstrap_signing_set =
         ctx.config().signer.bootstrap_signing_set.clone();
 
     ctx.state()
-        .update_current_signer_set(ctx.config().signer.bootstrap_signing_set());
+        .update_current_signer_set(ctx.config().signer.bootstrap_signing_set.clone());
     fake_ctx
         .state()
-        .update_current_signer_set(ctx.config().signer.bootstrap_signing_set());
+        .update_current_signer_set(ctx.config().signer.bootstrap_signing_set.clone());
 
     let signing_round_max_duration = Duration::from_secs(2);
     let ev = TxCoordinatorEventLoop {

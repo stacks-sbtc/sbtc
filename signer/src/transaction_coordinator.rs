@@ -2548,9 +2548,9 @@ pub async fn should_coordinate_dkg(
         .iter()
         .map(|signer| *signer.public_key())
         .collect();
-    let config_signer_set = config.signer.bootstrap_signing_set();
+    let config_signer_set = &config.signer.bootstrap_signing_set;
 
-    if last_dkg_signer_set != config_signer_set {
+    if &last_dkg_signer_set != config_signer_set {
         tracing::info!("signer set has changed, proceeding with DKG");
         return Ok(true);
     }

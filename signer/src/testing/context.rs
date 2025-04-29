@@ -232,7 +232,7 @@ where
 /// Warn: in some cases dkg still can be triggered on changed signer set even if you used
 /// this function.
 pub fn prevent_dkg_on_changed_signer_set(context: &mut (impl Context + TestingContext)) {
-    let last_dkg_signer_set: Vec<_> = context
+    let last_dkg_signer_set = context
         .state()
         .current_signer_set()
         .get_signers()
