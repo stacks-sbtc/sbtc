@@ -190,7 +190,7 @@ impl SignerWallet {
     /// Load the bootstrap wallet implicitly defined in the signer config.
     pub fn load_boostrap_wallet(config: &SignerConfig) -> Result<SignerWallet, Error> {
         let network_kind = config.network;
-        let public_keys = config.bootstrap_signing_set();
+        let public_keys = config.bootstrap_signing_set.clone();
         let signatures_required = config.bootstrap_signatures_required;
 
         SignerWallet::new(&public_keys, signatures_required, network_kind, 0)
@@ -718,7 +718,7 @@ mod tests {
             .unwrap();
         let config = &ctx.config().signer;
         let bootstrap_aggregate_key =
-            PublicKey::combine_keys(&config.bootstrap_signing_set()).unwrap();
+            PublicKey::combine_keys(&config.bootstrap_signing_set).unwrap();
         assert_eq!(wallet0.aggregate_key, bootstrap_aggregate_key);
 
         db.write_rotate_keys_transaction(&rotate_keys)

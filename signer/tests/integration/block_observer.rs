@@ -1081,7 +1081,7 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
     // There is no aggregate key since there aren't any key rotation
     // contract calls and no DKG shares. But the current signer set should
     // be the bootstrap signing set now.
-    let bootstrap_signing_set = ctx.config().signer.bootstrap_signing_set();
+    let bootstrap_signing_set = ctx.config().signer.bootstrap_signing_set.clone();
     assert_eq!(state.get_current_limits(), SbtcLimits::unlimited());
     assert!(state.current_aggregate_key().is_none());
     assert_eq!(state.current_signer_public_keys(), bootstrap_signing_set);

@@ -689,7 +689,7 @@ where
                 let signer_set = shares.signer_set_public_keys.into_iter().collect();
                 Ok((Some(shares.aggregate_key), signer_set))
             }
-            None => Ok((None, context.config().signer.bootstrap_signing_set())),
+            None => Ok((None, context.config().signer.bootstrap_signing_set.clone())),
         },
     }
 }
