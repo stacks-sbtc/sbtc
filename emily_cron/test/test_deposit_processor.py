@@ -42,7 +42,6 @@ class TestDepositProcessorBase(unittest.TestCase):
         # Mock blockchain state
         self.stacks_chaintip = BlockInfo(height=500, hash="stx_hash", time=self.current_time)
         self.bitcoin_chaintip_height = 1000
-        # settings.MIN_BLOCK_CONFIRMATIONS = 6
 
     def _create_mock_deposit(self, txid, confirmed_height, lock_time, rbf_txids=None):
         """Helper method to create mock deposits."""

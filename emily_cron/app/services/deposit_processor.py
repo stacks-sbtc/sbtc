@@ -20,11 +20,24 @@ class DepositProcessor:
         self,
         enriched_deposits: list[EnrichedDepositInfo],
     ) -> list[DepositUpdate]:
-        """Process RBF transactions.
+        """Identifies and handles confirmed RBF scenarios.
+
+        This function scans the provided deposits to find groups of transactions
+        linked by RBF (where one transaction attempts to replace another).
+
+        If a group of RBF-related transactions contains at least one transaction
+        that has been confirmed on the Bitcoin blockchain, this function generates
+        updates to mark all other unconfirmed transactions within that same
+        RBF group as FAILED. This signifies that they were successfully replaced
+        by the confirmed transaction.
+
         Args:
             enriched_deposits: List of enriched deposit information
         Returns:
-            list[DepositUpdate]: List of deposit updates
+            A list of DepositUpdate objects, specifically for those deposits
+            that were identified as unconfirmed parts of an RBF chain where
+            another transaction in the chain got confirmed. Returns an empty
+            list if no such scenarios are found.
         """
         updates = []
 
@@ -215,11 +228,27 @@ class DepositProcessor:
         logger.info("Deposit status update job completed")
 
     def _group_rbf_transactions(self, rbf_txs: list[EnrichedDepositInfo]) -> dict[str, set[str]]:
-        """Group RBF transactions by their replacement chains.
+        """Groups transactions that belong to the same RBF chain.
+
+        An RBF chain consists of an original transaction and all subsequent
+        transactions that attempt to replace it (or replace a replacement).
+        This function takes a list of transactions known to have replacements
+        and identifies these complete chains.
+
+        The core logic involves iterating through the transactions and merging
+        any sets of transaction IDs (txids) that share common members. For example,
+        if Tx A is replaced by Tx B, and Tx B is replaced by Tx C, they form a
+        single chain {A, B, C}. If we later find Tx D replaces Tx B, Tx D is also
+        added to the same chain {A, B, C, D}.
+
         Args:
-            rbf_txs: List of transactions with RBF replacements
+            rbf_txs: A list of enriched deposit information objects, specifically
+                     those where the `rbf_txids` attribute is non-empty.
+
         Returns:
-            dict[str, set[str]]: Dictionary mapping group IDs to sets of transaction IDs
+            A dictionary where each key is an arbitrary transaction ID from a
+            discovered RBF chain, and the value is a set containing all
+            transaction IDs belonging to that complete RBF chain.
         """
         rbf_groups: dict[str, set[str]] = {}
 
@@ -231,7 +260,7 @@ class DepositProcessor:
 
             # Find all groups that overlap with this chain
             overlapping_groups = []
-            for group_id, group_txids in list(rbf_groups.items()):
+            for group_id, group_txids in rbf_groups.items():
                 if chain_txids.intersection(group_txids):
                     overlapping_groups.append(group_id)
 
