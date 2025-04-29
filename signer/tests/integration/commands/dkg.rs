@@ -38,7 +38,7 @@ impl Command<TestState, Ctx> for CreateFailedDkgShares {
             aggregate_key,
             dkg_shares_status: DkgSharesStatus::Failed,
             started_at_bitcoin_block_height: 0u64.into(),
-            ..Faker.fake()
+            ..Faker.fake_with_rng(&mut rng)
         };
 
         state.shares = Some(shares);
