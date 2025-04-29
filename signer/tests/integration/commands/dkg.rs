@@ -21,7 +21,7 @@ pub struct CreateFailedDkgShares {
 }
 
 impl CreateFailedDkgShares {
-    fn with_seed(seed: u64) -> Self {
+    fn new(seed: u64) -> Self {
         Self { seed }
     }
 }
@@ -49,7 +49,7 @@ impl Command<TestState, Ctx> for CreateFailedDkgShares {
     }
 
     fn build(_ctx: Arc<Ctx>) -> impl Strategy<Value = CommandWrapper<TestState, Ctx>> {
-        any::<u64>().prop_map(|seed| CommandWrapper::new(CreateFailedDkgShares::with_seed(seed)))
+        any::<u64>().prop_map(|seed| CommandWrapper::new(CreateFailedDkgShares::new(seed)))
     }
 }
 
