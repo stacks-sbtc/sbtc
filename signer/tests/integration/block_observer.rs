@@ -40,7 +40,7 @@ use signer::storage::model;
 use signer::storage::model::BitcoinBlockHash;
 use signer::storage::model::DkgSharesStatus;
 use signer::storage::model::EncryptedDkgShares;
-use signer::storage::model::RotateKeysTransaction;
+use signer::storage::model::KeyRotationEvent;
 use signer::storage::model::StacksBlock;
 use signer::storage::model::TxOutput;
 use signer::storage::model::TxOutputType;
@@ -949,19 +949,9 @@ async fn get_signer_public_keys_and_aggregate_key_falls_back() {
     // tables...
     let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
 
-    let rotate_keys: RotateKeysTransaction = Faker.fake_with_rng(&mut rng);
-    let transaction = model::Transaction {
-        txid: rotate_keys.txid.into_bytes(),
-        tx_type: model::TransactionType::RotateKeys,
-        block_hash: stacks_chain_tip.block_hash.into_bytes(),
-    };
-    let tx = model::StacksTransaction {
-        txid: rotate_keys.txid,
-        block_hash: stacks_chain_tip.block_hash,
-    };
+    let mut rotate_keys: KeyRotationEvent = Faker.fake_with_rng(&mut rng);
+    rotate_keys.block_hash = stacks_chain_tip.block_hash;
 
-    db.write_transaction(&transaction).await.unwrap();
-    db.write_stacks_transaction(&tx).await.unwrap();
     db.write_rotate_keys_transaction(&rotate_keys)
         .await
         .unwrap();
@@ -1091,7 +1081,7 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
     // There is no aggregate key since there aren't any key rotation
     // contract calls and no DKG shares. But the current signer set should
     // be the bootstrap signing set now.
-    let bootstrap_signing_set = ctx.config().signer.bootstrap_signing_set();
+    let bootstrap_signing_set = ctx.config().signer.bootstrap_signing_set.clone();
     assert_eq!(state.get_current_limits(), SbtcLimits::unlimited());
     assert!(state.current_aggregate_key().is_none());
     assert_eq!(state.current_signer_public_keys(), bootstrap_signing_set);
@@ -1150,19 +1140,9 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
 
     db.write_stacks_block(&stacks_block).await.unwrap();
 
-    let rotate_keys: RotateKeysTransaction = Faker.fake_with_rng(&mut rng);
-    let transaction = model::Transaction {
-        txid: rotate_keys.txid.into_bytes(),
-        tx_type: model::TransactionType::RotateKeys,
-        block_hash: stacks_block.block_hash.into_bytes(),
-    };
-    let tx = model::StacksTransaction {
-        txid: rotate_keys.txid,
-        block_hash: stacks_block.block_hash,
-    };
+    let mut rotate_keys: KeyRotationEvent = Faker.fake_with_rng(&mut rng);
+    rotate_keys.block_hash = stacks_block.block_hash;
 
-    db.write_transaction(&transaction).await.unwrap();
-    db.write_stacks_transaction(&tx).await.unwrap();
     db.write_rotate_keys_transaction(&rotate_keys)
         .await
         .unwrap();

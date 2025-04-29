@@ -2,21 +2,28 @@
 
 use std::env;
 
+#[cfg(feature = "testing")]
+use aws_sdk_dynamodb::operation::batch_write_item::BatchWriteItemError;
+
+use aws_sdk_dynamodb::types::error::ConditionalCheckFailedException;
 use aws_sdk_dynamodb::{
     error::SdkError,
     operation::{
-        batch_write_item::BatchWriteItemError, delete_item::DeleteItemError,
-        get_item::GetItemError, put_item::PutItemError, query::QueryError, scan::ScanError,
-        update_item::UpdateItemError,
+        delete_item::DeleteItemError, get_item::GetItemError, put_item::PutItemError,
+        query::QueryError, scan::ScanError, update_item::UpdateItemError,
     },
 };
-use bitcoin::hex::HexToBytesError;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use warp::{reject::Reject, reply::Reply};
 
-use crate::{api::models::chainstate::Chainstate, database::entries::chainstate::ChainstateEntry};
+use crate::{
+    api::models::chainstate::Chainstate,
+    database::entries::{
+        chainstate::ChainstateEntry, deposit::DepositEntryKey, withdrawal::WithdrawalEntryKey,
+    },
+};
 
 /// State inconsistency representations.
 #[derive(Debug)]
@@ -27,7 +34,7 @@ pub enum Inconsistency {
     /// are considered equally canonical.
     Chainstates(Vec<Chainstate>),
     /// There is an inconsistency in the way an item is being updated.
-    ItemUpdate(String),
+    ItemUpdate(&'static str),
 }
 
 /// Errors from the internal API logic.
@@ -68,19 +75,6 @@ pub enum Error {
     #[error("Network error: {0}")]
     Network(#[from] reqwest::Error),
 
-    /// Response serialization error
-    #[error("Serialization error: {0}")]
-    Serialization(String),
-
-    /// Mismatch between defined response data model and what is returned by the API
-    #[error("Invalid API response structure")]
-    InvalidApiResponse,
-
-    /// Your API key is invalid. This may be because your API Key is expired
-    /// or not sent correctly as the value of the Token HTTP header
-    #[error("Unauthorized access - check your API key")]
-    Unauthorized,
-
     /// You do not have permission to access or perform the requested action
     #[error("Forbidden")]
     Forbidden,
@@ -90,34 +84,9 @@ pub enum Error {
     #[error("Resource not found")]
     NotFound,
 
-    /// You requested a response format that the API cannot produce
-    /// We currently only support JSON output
-    #[error("Not acceptable format requested")]
-    NotAcceptable,
-
-    /// The request targeted an endpoint that is not yet implemented.
-    #[error("Not implemented")]
-    NotImplemented,
-
-    /// The request has a conflict
-    #[error("Request conflict")]
-    Conflict,
-
     /// Internal error
     #[error("Internal server error")]
     InternalServer,
-
-    /// Debug error.
-    #[error("Debug error: {0}")]
-    Debug(String),
-
-    /// Server may be unavailable or not ready to handle the request
-    #[error("Service unavailable")]
-    ServiceUnavailable,
-
-    /// Request timeout error
-    #[error("Request timeout")]
-    RequestTimeout,
 
     /// Internal too many retries error.
     #[error("Too many internal retries")]
@@ -128,21 +97,134 @@ pub enum Error {
     InconsistentState(Inconsistency),
 
     /// API is reorganizing.
-    #[error("Api is reorganizing around new chain tip {0:?}")]
+    #[error("The API is reorganizing around new chain tip {0:?}")]
     Reorganizing(Chainstate),
 
     /// An entry update version conflict in a resource update resulted
     /// in an update not being performed.
-    #[error("Version conflict")]
-    VersionConflict,
-
-    /// Bad request
-    #[error("Bad request {0}")]
-    BadRequest(String),
+    #[error("There was a conflict when attempting to update the database; {0}")]
+    VersionConflict(#[source] Box<ConditionalCheckFailedException>),
 
     /// Deserialization error
     #[error("Deserialization error: {0}")]
     Deserialization(String),
+
+    /// This happens if the deposit entry that was stored in the database
+    /// was invalid, or if the deposit entry that we are creating to store
+    /// in the database is invalid.
+    #[error("Deposit entry failed validation; {0}; ID: {1}")]
+    InvalidDepositEntry(&'static str, DepositEntryKey),
+
+    /// This happens when there is a mismatch in the outpoint of the new
+    /// deposit event and the fetched deposit entry. Seeing this is
+    /// probably due to a programming error.
+    #[error("Mismatch when updating deposit request; existing: {0}; update: {1}")]
+    DepositOutputMismatch(DepositEntryKey, DepositEntryKey),
+
+    /// This happens if the withdrawal entry that was stored in the database
+    /// was invalid, or if the withdrawal entry that we are creating to store
+    /// in the database is invalid.
+    #[error("Withdrawal entry failed validation; {0}; ID: {1}")]
+    InvalidWithdrawalEntry(&'static str, WithdrawalEntryKey),
+
+    /// This happens when there is a mismatch in the request ID of the new
+    /// withdrawal event and the fetched withdrawal entry. Seeing this is
+    /// probably due to a programming error.
+    #[error("Mismatch when updating withdrawal request; existing: {0}; update: {1}")]
+    WithdrawalRequestIdMismatch(WithdrawalEntryKey, u64),
+
+    /// This means that the stacks address in the environment for the
+    /// signers multisig address is invalid.
+    #[error("Could not parse a stacks address from a string")]
+    InvalidStacksAddress(#[source] clarity::vm::errors::Error),
+
+    /// This happens when the request to DynamoDB succeeds but does not
+    /// return any values. This happens when the request instructs the
+    /// database to refrain from returning values, so this is likely a
+    /// programming error.
+    #[error("Entry in database for deposit request not returned from DynamoDB; {0}")]
+    MissingAttributesDeposit(DepositEntryKey),
+
+    /// This happens when the request to DynamoDB succeeds but does not
+    /// return any values. This happens when the request instructs the
+    /// database to refrain from returning values, so this is likely a
+    /// programming error.
+    #[error("Entry in database for withdrawal request not returned from DynamoDB; {0}")]
+    MissingAttributesWithdrawal(WithdrawalEntryKey),
+
+    /// DynamoDB should only contain one entry per withdrawal request ID.
+    ///
+    /// TODO: In case of a re-org, triple check that we can identify the
+    /// correct withdrawal request if the transaction is replayed.
+    #[error("DynamoDB contained many entries for the given request ID: {0}")]
+    TooManyWithdrawalEntries(u64),
+
+    /// This happens when we fail to decode a base64 encoded string into a
+    /// vector of bytes.
+    #[error("Failed to base64 decode the string into bytes; {0}")]
+    Base64Decode(base64::DecodeError),
+
+    /// This is used when trying to get a required value from the
+    /// environment and that operation fails.
+    #[error("Could not read the environment variable; {0}")]
+    EnvVariable(#[from] env::VarError),
+
+    /// This occurs when serializing or deserializing an object into or
+    /// from JSON.
+    #[error("{0}")]
+    SerdeJson(#[from] serde_json::Error),
+
+    /// This occurs when converting structs to and from DynamoDB objects.
+    #[error("{0}")]
+    SerdeDynamo(#[from] serde_dynamo::Error),
+
+    /// This happens when attempting to parse an integer from a string that
+    /// has been read from an environment variable.
+    #[error("Failed to parse the environment variable's value as an integer; {0}")]
+    EnvParseInt(#[from] std::num::ParseIntError),
+
+    /// This happens when attempting to read an item from DynamoDB.
+    #[error("Could not retrieve an item from DynamoDB; {0}")]
+    AwsSdkDynamoDbGetItem(#[from] SdkError<GetItemError>),
+
+    /// This error occurs when storing an item in DynamoDB. Note that
+    /// precondition errors on a PutItem operation are returned in the
+    /// `VersionConflict` variant.
+    #[error("Could not put the item into DynamoDB; {0}")]
+    AwsSdkDynamoDbPutItem(#[source] Box<PutItemError>),
+
+    /// This happens when attempting the "Query" operation in DynamoDB.
+    #[error("Could not complete Query operation on DynamoDB; {0}")]
+    AwsSdkDynamoDbQuery(#[from] SdkError<QueryError>),
+
+    /// This happens when attempting the "Scan" operation in DynamoDB.
+    #[error("Could not complete Scan operation on DynamoDB; {0}")]
+    AwsSdkDynamoDbScan(#[from] SdkError<ScanError>),
+
+    /// This happens when attempting to update a stored item in DynamoDB.
+    /// Note that precondition errors on an UpdateItem operation are
+    /// returned in the `VersionConflict` variant.
+    #[error("Could not update the item in DynamoDB; {0}")]
+    AwsSdkDynamoDbUpdateItem(#[source] Box<UpdateItemError>),
+
+    /// This happens when attempting to delete an item in the database.
+    /// Note that precondition errors on a DeleteItem operation are
+    /// returned in the `VersionConflict` variant.
+    #[error("Could not deleting an item in DynamoDB; {0}")]
+    AwsSdkDynamoDbDeleteItem(#[source] Box<DeleteItemError>),
+
+    /// This happens when we fail to build a request object when trying to
+    /// interact with DynamoDB. For example, when deleting entries in the
+    /// database in our tests, we build a request object and that operation
+    /// may fail with this error.
+    #[cfg(feature = "testing")]
+    #[error("{0}")]
+    DynamoDbBuild(#[from] aws_sdk_dynamodb::error::BuildError),
+
+    /// This happens during the BatchWrite operation on DynamoDB.
+    #[cfg(feature = "testing")]
+    #[error("{0}")]
+    AwsSdkDynamoDbBatchWriteItem(#[from] SdkError<BatchWriteItemError>),
 }
 
 /// Error implementation.
@@ -152,24 +234,37 @@ impl Error {
         match self {
             Error::HttpRequest(code, _) => *code,
             Error::Network(_) => StatusCode::BAD_GATEWAY,
-            Error::Serialization(_) => StatusCode::BAD_REQUEST,
-            Error::InvalidApiResponse => StatusCode::BAD_REQUEST,
-            Error::Unauthorized => StatusCode::UNAUTHORIZED,
             Error::Forbidden => StatusCode::FORBIDDEN,
             Error::NotFound => StatusCode::NOT_FOUND,
-            Error::NotAcceptable => StatusCode::NOT_ACCEPTABLE,
-            Error::NotImplemented => StatusCode::NOT_IMPLEMENTED,
-            Error::Conflict => StatusCode::CONFLICT,
             Error::InternalServer => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::Debug(_) => StatusCode::IM_A_TEAPOT,
-            Error::ServiceUnavailable => StatusCode::SERVICE_UNAVAILABLE,
-            Error::RequestTimeout => StatusCode::REQUEST_TIMEOUT,
             Error::TooManyInternalRetries => StatusCode::INTERNAL_SERVER_ERROR,
             Error::InconsistentState(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::Reorganizing(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::BadRequest(_) => StatusCode::BAD_REQUEST,
-            Error::VersionConflict => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::VersionConflict(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::Deserialization(_) => StatusCode::BAD_REQUEST,
+            Error::InvalidStacksAddress(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::InvalidDepositEntry(_, _) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::DepositOutputMismatch(_, _) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::InvalidWithdrawalEntry(_, _) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::WithdrawalRequestIdMismatch(_, _) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::MissingAttributesDeposit(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::MissingAttributesWithdrawal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::TooManyWithdrawalEntries(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::Base64Decode(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::EnvVariable(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::SerdeJson(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::SerdeDynamo(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::EnvParseInt(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::AwsSdkDynamoDbDeleteItem(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::AwsSdkDynamoDbGetItem(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::AwsSdkDynamoDbPutItem(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::AwsSdkDynamoDbQuery(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::AwsSdkDynamoDbScan(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::AwsSdkDynamoDbUpdateItem(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            #[cfg(feature = "testing")]
+            Error::DynamoDbBuild(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            #[cfg(feature = "testing")]
+            Error::AwsSdkDynamoDbBatchWriteItem(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
     /// Converts the error into a warp response.
@@ -187,16 +282,27 @@ impl Error {
     /// production ready.
     pub fn into_production_error(self) -> Error {
         match self {
-            Error::Serialization(_) | Error::InvalidApiResponse | Error::NotAcceptable => {
-                Error::NotAcceptable
-            }
-            Error::NotImplemented
-            | Error::Debug(_)
-            | Error::Network(_)
-            | Error::ServiceUnavailable
-            | Error::VersionConflict
+            Error::Network(_)
+            | Error::VersionConflict(_)
             | Error::Reorganizing(_)
+            | Error::Base64Decode(_)
+            | Error::EnvVariable(_)
+            | Error::SerdeJson(_)
+            | Error::SerdeDynamo(_)
+            | Error::EnvParseInt(_)
+            | Error::InvalidDepositEntry(_, _)
+            | Error::InvalidWithdrawalEntry(_, _)
+            | Error::AwsSdkDynamoDbDeleteItem(_)
+            | Error::AwsSdkDynamoDbGetItem(_)
+            | Error::AwsSdkDynamoDbPutItem(_)
+            | Error::AwsSdkDynamoDbQuery(_)
+            | Error::AwsSdkDynamoDbScan(_)
+            | Error::AwsSdkDynamoDbUpdateItem(_)
             | Error::InternalServer => Error::InternalServer,
+            #[cfg(feature = "testing")]
+            Error::DynamoDbBuild(_) | Error::AwsSdkDynamoDbBatchWriteItem(_) => {
+                Error::InternalServer
+            }
             err => err,
         }
     }
@@ -221,97 +327,45 @@ impl From<ValidationError> for Error {
     }
 }
 
-impl From<SdkError<GetItemError>> for Error {
-    fn from(err: SdkError<GetItemError>) -> Self {
-        Error::Debug(format!("SdkError<GetItemError> - {err:?}"))
-    }
-}
 impl From<SdkError<PutItemError>> for Error {
     fn from(err: SdkError<PutItemError>) -> Self {
         match err.into_service_error() {
             // Note, this assumes that any conditional check that fails fails because
             // there's a version conflict. This isn't necessarily true but is a good
             // simplifying assumption.
-            PutItemError::ConditionalCheckFailedException(_) => Error::VersionConflict,
-            service_err => Error::Debug(format!("SdkError<PutItemError> - {service_err:?}")),
+            PutItemError::ConditionalCheckFailedException(err) => Error::from(err),
+            service_err => Error::AwsSdkDynamoDbPutItem(Box::new(service_err)),
         }
     }
 }
-impl From<SdkError<QueryError>> for Error {
-    fn from(err: SdkError<QueryError>) -> Self {
-        Error::Debug(format!("SdkError<QueryError> - {err:?}"))
-    }
-}
+
 impl From<SdkError<DeleteItemError>> for Error {
     fn from(err: SdkError<DeleteItemError>) -> Self {
         match err.into_service_error() {
             // Note, this assumes that any conditional check that fails fails because
             // there's a version conflict. This isn't necessarily true but is a good
             // simplifying assumption.
-            DeleteItemError::ConditionalCheckFailedException(_) => Error::VersionConflict,
-            service_err => Error::Debug(format!("SdkError<DeleteItemError> - {service_err:?}")),
+            DeleteItemError::ConditionalCheckFailedException(err) => Error::from(err),
+            service_err => Error::AwsSdkDynamoDbDeleteItem(Box::new(service_err)),
         }
     }
 }
-impl From<SdkError<ScanError>> for Error {
-    fn from(err: SdkError<ScanError>) -> Self {
-        Error::Debug(format!("SdkError<ScanError> - {err:?}"))
-    }
-}
-impl From<SdkError<BatchWriteItemError>> for Error {
-    fn from(err: SdkError<BatchWriteItemError>) -> Self {
-        Error::Debug(format!("SdkError<BatchWriteItemError> - {err:?}"))
-    }
-}
+
 impl From<SdkError<UpdateItemError>> for Error {
     fn from(err: SdkError<UpdateItemError>) -> Self {
         match err.into_service_error() {
             // Note, this assumes that any conditional check that fails fails because
             // there's a version conflict. This isn't necessarily true but is a good
             // simplifying assumption.
-            UpdateItemError::ConditionalCheckFailedException(_) => Error::VersionConflict,
-            service_err => Error::Debug(format!("SdkError<UpdateItemError> - {service_err:?}")),
+            UpdateItemError::ConditionalCheckFailedException(err) => Error::from(err),
+            service_err => Error::AwsSdkDynamoDbUpdateItem(Box::new(service_err)),
         }
     }
 }
-impl From<aws_sdk_dynamodb::error::BuildError> for Error {
-    fn from(err: aws_sdk_dynamodb::error::BuildError) -> Self {
-        Error::Debug(format!("aws_sdk_dynamodb::error::BuildError - {err:?}"))
-    }
-}
-impl From<base64::DecodeError> for Error {
-    fn from(err: base64::DecodeError) -> Self {
-        Error::Debug(format!("base64::DecodeError - {err:?}"))
-    }
-}
-impl From<env::VarError> for Error {
-    fn from(err: env::VarError) -> Self {
-        Error::Debug(format!("env::VarError - {err:?}"))
-    }
-}
-impl From<serde_json::Error> for Error {
-    fn from(err: serde_json::Error) -> Self {
-        Error::Debug(format!("serde_json::Error - {err:?}"))
-    }
-}
-impl From<serde_dynamo::Error> for Error {
-    fn from(err: serde_dynamo::Error) -> Self {
-        Error::Debug(format!("serde_dynamo::Error - {err:?}"))
-    }
-}
-impl From<HexToBytesError> for Error {
-    fn from(err: HexToBytesError) -> Self {
-        Error::Debug(format!("HexToBytesError - {err:?}"))
-    }
-}
-impl From<sbtc::error::Error> for Error {
-    fn from(err: sbtc::error::Error) -> Self {
-        Error::Debug(format!("sbtc::error::Error - {err:?}"))
-    }
-}
-impl From<std::num::ParseIntError> for Error {
-    fn from(err: std::num::ParseIntError) -> Self {
-        Error::Debug(format!("std::num::ParseIntError - {err:?}"))
+
+impl From<ConditionalCheckFailedException> for Error {
+    fn from(value: ConditionalCheckFailedException) -> Self {
+        Error::VersionConflict(Box::new(value))
     }
 }
 

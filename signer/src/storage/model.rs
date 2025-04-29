@@ -356,41 +356,12 @@ impl WithdrawalSigner {
 
 /// A connection between a bitcoin block and a bitcoin transaction.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
+#[cfg_attr(feature = "testing", derive(fake::Dummy))]
 pub struct BitcoinTxRef {
     /// Transaction ID.
     pub txid: BitcoinTxId,
     /// The block in which the transaction exists.
     pub block_hash: BitcoinBlockHash,
-}
-
-/// A connection between a stacks block and a stacks transaction.
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct StacksTransaction {
-    /// Transaction ID.
-    pub txid: StacksTxId,
-    /// The block in which the transaction exists.
-    pub block_hash: StacksBlockHash,
-}
-
-/// For writing to the stacks_transactions or bitcoin_transactions table.
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct TransactionIds {
-    /// Transaction IDs.
-    pub tx_ids: Vec<[u8; 32]>,
-    /// The blocks in which the transactions exist.
-    pub block_hashes: Vec<[u8; 32]>,
-}
-
-/// A raw transaction on either Bitcoin or Stacks.
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
-#[cfg_attr(feature = "testing", derive(fake::Dummy))]
-pub struct Transaction {
-    /// Transaction ID.
-    pub txid: [u8; 32],
-    /// The type of the transaction.
-    pub tx_type: TransactionType,
-    /// The block id of the stacks block that includes this transaction
-    pub block_hash: [u8; 32],
 }
 
 /// A deposit request with a response bitcoin transaction that has been
@@ -537,17 +508,19 @@ pub struct EncryptedDkgShares {
 /// Persisted public DKG shares from other signers
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
-pub struct RotateKeysTransaction {
+pub struct KeyRotationEvent {
     /// Transaction ID.
     pub txid: StacksTxId,
-    /// The address that deployed the contract.
+    /// The Stacks block ID of the block that includes the transaction
+    /// associated with this key rotation event.
+    pub block_hash: StacksBlockHash,
+    /// The principal that can make contract calls into the protected
+    /// public functions in the sbtc smart contracts.
     pub address: StacksPrincipal,
-    /// The aggregate key for these shares.
-    ///
-    /// TODO(511): maybe make the aggregate key private. Set it using the
-    /// `signer_set`, ensuring that it cannot drift from the given keys.
+    /// The aggregate key of the DKG run associated with this event.
     pub aggregate_key: PublicKey,
-    /// The public keys of the signers.
+    /// The public keys of the signers who participated in DKG round
+    /// associated with this event.
     pub signer_set: Vec<PublicKey>,
     /// The number of signatures required for the multi-sig wallet.
     #[sqlx(try_from = "i32")]
@@ -624,30 +597,6 @@ pub enum DkgSharesStatus {
     /// The DKG shares have failed verification or the shares have not
     /// passed verification within our configured window.
     Failed,
-}
-
-/// The types of transactions the signer is interested in.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::Type, strum::Display)]
-#[sqlx(type_name = "transaction_type", rename_all = "snake_case")]
-#[cfg_attr(feature = "testing", derive(fake::Dummy))]
-#[strum(serialize_all = "snake_case")]
-pub enum TransactionType {
-    /// An sBTC transaction on Bitcoin.
-    SbtcTransaction,
-    /// A deposit request transaction on Bitcoin.
-    DepositRequest,
-    /// A withdrawal request transaction on Stacks.
-    WithdrawRequest,
-    /// A deposit accept transaction on Stacks.
-    DepositAccept,
-    /// A withdrawal accept transaction on Stacks.
-    WithdrawAccept,
-    /// A withdraw reject transaction on Stacks.
-    WithdrawReject,
-    /// A rotate keys call on Stacks.
-    RotateKeys,
-    /// A donation to signers aggregated key on Bitcoin.
-    Donation,
 }
 
 /// The types of Bitcoin transaction input or outputs that the signer may
@@ -992,6 +941,12 @@ impl Deref for StacksPrincipal {
     }
 }
 
+impl std::fmt::Display for StacksPrincipal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 impl std::str::FromStr for StacksPrincipal {
     type Err = Error;
     fn from_str(literal: &str) -> Result<Self, Self::Err> {
@@ -1227,27 +1182,14 @@ impl From<sbtc::events::WithdrawalCreateEvent> for WithdrawalRequest {
 impl From<sbtc::events::KeyRotationEvent> for KeyRotationEvent {
     fn from(sbtc_event: sbtc::events::KeyRotationEvent) -> KeyRotationEvent {
         KeyRotationEvent {
-            new_keys: sbtc_event.new_keys.into_iter().map(Into::into).collect(),
-            new_address: sbtc_event.new_address.into(),
-            new_aggregate_pubkey: sbtc_event.new_aggregate_pubkey.into(),
-            new_signature_threshold: sbtc_event.new_signature_threshold,
+            txid: sbtc_event.txid.into(),
+            block_hash: sbtc_event.block_id.into(),
+            signer_set: sbtc_event.new_keys.into_iter().map(Into::into).collect(),
+            address: sbtc_event.new_address.into(),
+            aggregate_key: sbtc_event.new_aggregate_pubkey.into(),
+            signatures_required: sbtc_event.new_signature_threshold,
         }
     }
-}
-
-/// This is the event that is emitted from the `rotate-keys`
-/// public function in the sbtc-registry smart contract.
-#[derive(Debug, Clone)]
-pub struct KeyRotationEvent {
-    /// The new set of public keys for all known signers during this
-    /// PoX cycle.
-    pub new_keys: Vec<PublicKey>,
-    /// The address that deployed the contract.
-    pub new_address: StacksPrincipal,
-    /// The new aggregate key created by combining the above public keys.
-    pub new_aggregate_pubkey: PublicKey,
-    /// The number of signatures required for the multi-sig wallet.
-    pub new_signature_threshold: u16,
 }
 
 /// This is the event that is emitted from the `create-withdrawal-request`

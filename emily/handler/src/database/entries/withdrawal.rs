@@ -28,6 +28,12 @@ pub struct WithdrawalEntryKey {
     pub stacks_block_hash: String,
 }
 
+impl std::fmt::Display for WithdrawalEntryKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.request_id, self.stacks_block_hash)
+    }
+}
+
 /// Withdrawal table entry.
 #[derive(Clone, Default, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -83,38 +89,37 @@ impl VersionedEntryTrait for WithdrawalEntry {
 impl WithdrawalEntry {
     /// Implement validate.
     pub fn validate(&self) -> Result<(), Error> {
-        let stringy_self = serde_json::to_string(self)?;
-
         // Get latest event.
-        let latest_event: &WithdrawalEvent = self.history.last().ok_or(Error::Debug(format!(
-            "Failed getting the last history element for withdrawal. {stringy_self:?}"
-        )))?;
+        let latest_event: &WithdrawalEvent = self.latest_event()?;
 
         // Verify that the latest event is the current one shown in the entry.
         if self.last_update_block_hash != latest_event.stacks_block_hash {
-            return Err(Error::Debug(format!(
-                "last update block hash is inconsistent between history and top level data. {stringy_self:?}"
-            )));
+            return Err(Error::InvalidWithdrawalEntry(
+                "last update block hash is inconsistent between history and top level data",
+                self.key.clone(),
+            ));
         }
         if self.last_update_height != latest_event.stacks_block_height {
-            return Err(Error::Debug(format!(
-                "last update block height is inconsistent between history and top level data. {stringy_self:?}"
-            )));
+            return Err(Error::InvalidWithdrawalEntry(
+                "last update block height is inconsistent between history and top level data",
+                self.key.clone(),
+            ));
         }
         if self.status != (&latest_event.status).into() {
-            return Err(Error::Debug(format!(
-                "most recent status is inconsistent between history and top level data. {stringy_self:?}"
-            )));
+            return Err(Error::InvalidWithdrawalEntry(
+                "most recent status is inconsistent between history and top level data",
+                self.key.clone(),
+            ));
         }
         Ok(())
     }
 
     /// Gets the latest event.
     pub fn latest_event(&self) -> Result<&WithdrawalEvent, Error> {
-        self.history.last().ok_or(Error::Debug(format!(
-            "Withdrawal entry must always have at least one event, but entry with id {:?} did not.",
-            self.key(),
-        )))
+        self.history.last().ok_or(Error::InvalidWithdrawalEntry(
+            "Withdrawal entry must always have at least one event, but did not",
+            self.key.clone(),
+        ))
     }
 
     /// Reorgs around a given chainstate.
@@ -241,17 +246,24 @@ impl WithdrawalEvent {
     ) -> Result<(), Error> {
         // Determine if event is valid.
         if self.stacks_block_height > next_event.stacks_block_height {
-            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(
-                "Attempting to update a withdrawal with a block height earlier than it should be."
-                    .into(),
-            )));
+            let message =
+                "Attempting to update a withdrawal with a block height earlier than it should be";
+            tracing::warn!(
+                new_event = ?next_event,
+                last_existing_event = ?self,
+                message
+            );
+            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(message)));
         } else if self.stacks_block_height == next_event.stacks_block_height
             && self.stacks_block_hash != next_event.stacks_block_hash
         {
-            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(
-                "Attempting to update a withdrawal with a block height and hash that conflicts with the current history."
-                    .into(),
-            )));
+            let message = "Attempting to update a withdrawal with a block height and hash that conflicts with the current history";
+            tracing::warn!(
+                new_event = ?next_event,
+                last_existing_event = ?self,
+                message
+            );
+            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(message)));
         }
 
         Ok(())
@@ -666,10 +678,9 @@ impl WithdrawalUpdatePackage {
         update: ValidatedWithdrawalUpdate,
     ) -> Result<Self, Error> {
         // Ensure the keys are equal.
+        let key = entry.key.clone();
         if update.request_id != entry.key.request_id {
-            return Err(Error::Debug(
-                "Attempted to update withdrawal request_id combo.".into(),
-            ));
+            return Err(Error::WithdrawalRequestIdMismatch(key, update.request_id));
         }
         // Ensure that this event is valid if it follows the current latest event.
         entry
@@ -677,7 +688,7 @@ impl WithdrawalUpdatePackage {
             .ensure_following_event_is_valid(&update.event)?;
         // Create the withdrawal update package.
         Ok(WithdrawalUpdatePackage {
-            key: entry.key.clone(),
+            key,
             version: entry.version,
             event: update.event,
         })
