@@ -131,14 +131,12 @@ pub struct BitcoinTxVin {
     pub prevout: Option<BitcoinTxVinPrevout>,
 }
 
-/// The previous output, omitted if block undo data is not available.
+/// The previous output of a transaction input.
 ///
-/// The `height` field is included in the actual response, but omitted
-/// here.
+/// The `height` and `generated` fields are included in the `getblock` and
+/// `getrawtransaction` RPC responses, but is omitted here.
 #[derive(Clone, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
 pub struct BitcoinTxVinPrevout {
-    /// Whether the previous output is from a coinbase transaction or not.
-    pub generated: bool,
     /// The value of the prevout in BTC.
     #[serde(with = "bitcoin::amount::serde::as_btc")]
     pub value: Amount,

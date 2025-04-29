@@ -170,7 +170,6 @@ impl Dummy<bitcoin::TxIn> for BitcoinTxVin {
             txid: Some(tx_in.previous_output.txid),
             vout: Some(tx_in.previous_output.vout),
             prevout: non_coinbase.then(|| BitcoinTxVinPrevout {
-                generated: false,
                 value: output_amount.choose(rng).map(Amount::from_sat).unwrap(),
                 script_pubkey: OutputScriptPubKey { script: script_pubkey.into() },
             }),
