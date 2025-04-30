@@ -48,6 +48,7 @@ services:
           -zmqpubrawblock="tcp://*:$${BITCOIN_ZMQ_PORT}"
 
   stacks-blockchain:
+    # this version can be outdated, check the last image on: https://hub.docker.com/r/blockstack/stacks-blockchain/tags
     image: blockstack/stacks-blockchain:3.1.0.0.8.1@sha256:e8f03d925feec1035a5bd1813c68f05c67ec9e841555cfa913abbc0cf266c7a1
     container_name: stacks-blockchain
     restart: on-failure:3
