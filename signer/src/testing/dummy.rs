@@ -179,16 +179,17 @@ impl Dummy<bitcoin::TxIn> for BitcoinTxVin {
 
 impl Dummy<Faker> for BitcoinBlockInfo {
     fn dummy_with_rng<R: Rng + ?Sized>(_: &Faker, rng: &mut R) -> Self {
-        let block_height = (0..i64::MAX as u64).choose(rng).unwrap();
-        BitcoinBlockInfo::random_with_height(block_height, rng)
+        let height = (0..i64::MAX as u64).choose(rng).unwrap();
+        BitcoinBlockInfo::random_with_height(BitcoinBlockHeight::from(height), rng)
     }
 }
 
 impl BitcoinBlockInfo {
     /// Create a random bitcoin block with the given height
-    pub fn random_with_height<R: Rng + ?Sized>(block_height: u64, rng: &mut R) -> Self {
+    pub fn random_with_height<R: Rng + ?Sized>(height: BitcoinBlockHeight, rng: &mut R) -> Self {
         // The Default implementation for a bitcoin::TxIn looks similar to
         // the one input of a coinbase transaction.
+        let block_height = *height;
         let coinbase_tx_in = bitcoin::TxIn {
             script_sig: bitcoin::script::Builder::new()
                 .push_int(block_height.min(i64::MAX as u64) as i64)

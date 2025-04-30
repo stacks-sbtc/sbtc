@@ -124,9 +124,11 @@ impl TestHarness {
         num_bitcoin_blocks: usize,
         num_stacks_blocks_per_bitcoin_block: std::ops::Range<usize>,
     ) -> Self {
-        // There is some issue with using heights less than 17, probably
-        // minimal pushes or something.
-        let mut bitcoin_blocks: Vec<_> = std::iter::successors(Some(17), |height| Some(height + 1))
+        // There is an issue with using heights less than 17. Bitcoin
+        // mainnet doesn't have this issue because the block height was not
+        // originally included anywhere until much later.
+        let height = Some(BitcoinBlockHeight::from(17u64));
+        let mut bitcoin_blocks: Vec<_> = std::iter::successors(height, |&height| Some(height + 1))
             .map(|height| BitcoinBlockInfo::random_with_height(height, rng))
             .take(num_bitcoin_blocks)
             .collect();
