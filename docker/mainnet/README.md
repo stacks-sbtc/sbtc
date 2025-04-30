@@ -104,3 +104,8 @@ sudo docker compose --env-file .env -f docker-compose.yml -f nodes/docker-compos
 
 This requires the chain-state for Bitcoin and Stacks to be present,
 respectively, at `/mnt/bitcoin` and `/mnt/stacks`.
+
+### sBTC signer and Stacks Node versions
+
+Run always last version of the docker images.
+You can find the sBTC images [here](https://github.com/stacks-sbtc/sbtc/pkgs/container/sbtc) and the latest versions of Stacks [here](https://hub.docker.com/r/blockstack/stacks-blockchain/tags).
