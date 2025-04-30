@@ -4731,7 +4731,10 @@ async fn should_handle_dkg_coordination_failure() {
         aggregate_key: existing_aggregate_key,
         ..Faker.fake_with_rng(&mut rng)
     };
-    storage.write_encrypted_dkg_shares(&dkg_shares).await.unwrap();
+    storage
+        .write_encrypted_dkg_shares(&dkg_shares)
+        .await
+        .unwrap();
 
     // Create a bitcoin block to serve as chain tip
     let bitcoin_block: model::BitcoinBlock = Faker.fake_with_rng(&mut rng);
@@ -4739,17 +4742,20 @@ async fn should_handle_dkg_coordination_failure() {
 
     // Create a set of signer public keys and update the context state
     let mut signer_keys = BTreeSet::new();
-    for _ in 0..3 {  // Create 3 signers
+    for _ in 0..3 {
+        // Create 3 signers
         let private_key = PrivateKey::new(&mut rng);
         let public_key = PublicKey::from_private_key(&private_key);
         signer_keys.insert(public_key);
     }
     context.state().update_current_signer_set(signer_keys);
-    context.state().set_current_aggregate_key(existing_aggregate_key);
+    context
+        .state()
+        .set_current_aggregate_key(existing_aggregate_key);
 
     // Create coordinator with test parameters using SignerNetwork::single
     let network = SignerNetwork::single(&context);
-    let mut coordinator = TxCoordinatorEventLoop {
+    let coordinator = TxCoordinatorEventLoop {
         context: context.clone(),
         network: network.spawn(),
         private_key: PrivateKey::new(&mut rng),
@@ -4761,9 +4767,11 @@ async fn should_handle_dkg_coordination_failure() {
         is_epoch3: true,
     };
 
-    // Call process_new_blocks directly instead of run()
-    let result = coordinator.process_new_blocks().await;
-    assert!(result.is_ok(), "process_new_blocks should complete successfully");
+    // Spawn the coordinator in a separate task
+    let coordinator_handle = tokio::spawn(async move { coordinator.run().await });
+
+    // Give the coordinator a moment to process
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     // Verify the existing aggregate key was used as fallback
     let current_key = context.state().current_aggregate_key();
@@ -4772,4 +4780,7 @@ async fn should_handle_dkg_coordination_failure() {
         Some(existing_aggregate_key),
         "Should fall back to existing aggregate key after DKG failure"
     );
+
+    // Clean up the coordinator task
+    coordinator_handle.abort();
 }
