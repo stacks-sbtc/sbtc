@@ -4731,23 +4731,25 @@ async fn should_handle_dkg_coordination_failure() {
         aggregate_key: existing_aggregate_key,
         ..Faker.fake_with_rng(&mut rng)
     };
-    storage
-        .write_encrypted_dkg_shares(&dkg_shares)
-        .await
-        .unwrap();
+    storage.write_encrypted_dkg_shares(&dkg_shares).await.unwrap();
 
     // Create a bitcoin block to serve as chain tip
     let bitcoin_block: model::BitcoinBlock = Faker.fake_with_rng(&mut rng);
     storage.write_bitcoin_block(&bitcoin_block).await.unwrap();
 
-    // Update the context state with the existing aggregate key
-    context
-        .state()
-        .set_current_aggregate_key(existing_aggregate_key);
+    // Create a set of signer public keys and update the context state
+    let mut signer_keys = BTreeSet::new();
+    for _ in 0..3 {  // Create 3 signers
+        let private_key = PrivateKey::new(&mut rng);
+        let public_key = PublicKey::from_private_key(&private_key);
+        signer_keys.insert(public_key);
+    }
+    context.state().update_current_signer_set(signer_keys);
+    context.state().set_current_aggregate_key(existing_aggregate_key);
 
     // Create coordinator with test parameters using SignerNetwork::single
     let network = SignerNetwork::single(&context);
-    let coordinator = TxCoordinatorEventLoop {
+    let mut coordinator = TxCoordinatorEventLoop {
         context: context.clone(),
         network: network.spawn(),
         private_key: PrivateKey::new(&mut rng),
@@ -4759,12 +4761,9 @@ async fn should_handle_dkg_coordination_failure() {
         is_epoch3: true,
     };
 
-    // Run the coordinator - this will handle process_new_blocks internally
-    let run_result = coordinator.run().await;
-    assert!(
-        run_result.is_ok(),
-        "Coordinator run should complete successfully"
-    );
+    // Call process_new_blocks directly instead of run()
+    let result = coordinator.process_new_blocks().await;
+    assert!(result.is_ok(), "process_new_blocks should complete successfully");
 
     // Verify the existing aggregate key was used as fallback
     let current_key = context.state().current_aggregate_key();
