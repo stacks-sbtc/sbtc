@@ -281,10 +281,16 @@ pub struct WithdrawalRejectEvent {
 /// public function in the sbtc-registry smart contract.
 #[derive(Debug, Clone)]
 pub struct KeyRotationEvent {
+    /// The transaction id of the stacks transaction that generated this
+    /// event.
+    pub txid: StacksTxid,
+    /// The block ID of the block for this event.
+    pub block_id: StacksBlockId,
     /// The new set of public keys for all known signers during this
     /// PoX cycle.
     pub new_keys: Vec<PublicKey>,
-    /// The address that deployed the contract.
+    /// The principal that can make contract calls into the protected
+    /// public functions in the sbtc smart contracts.
     pub new_address: PrincipalData,
     /// The new aggregate key created by combining the above public keys.
     pub new_aggregate_pubkey: PublicKey,
@@ -728,6 +734,8 @@ impl RawTupleData {
         let new_signature_threshold = self.remove_u128("new-signature-threshold")?;
 
         Ok(RegistryEvent::KeyRotation(KeyRotationEvent {
+            txid: self.tx_info.txid,
+            block_id: self.tx_info.block_id,
             new_keys,
             new_address,
             new_aggregate_pubkey: PublicKey::from_slice(&new_aggregate_pubkey)

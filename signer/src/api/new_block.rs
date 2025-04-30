@@ -18,9 +18,7 @@ use crate::metrics::STACKS_BLOCKCHAIN;
 use crate::storage::DbWrite;
 use crate::storage::model::CompletedDepositEvent;
 use crate::storage::model::KeyRotationEvent;
-use crate::storage::model::RotateKeysTransaction;
 use crate::storage::model::StacksBlock;
-use crate::storage::model::StacksTxId;
 use crate::storage::model::WithdrawalAcceptEvent;
 use crate::storage::model::WithdrawalRejectEvent;
 use crate::storage::model::WithdrawalRequest;
@@ -155,7 +153,7 @@ pub async fn new_block_handler(state: State<ApiState<impl Context>>, body: Strin
                 handle_withdrawal_create(&api.ctx, event.into()).await
             }
             Ok(RegistryEvent::KeyRotation(event)) => {
-                handle_key_rotation(&api.ctx, event.into(), tx_info.txid.into()).await
+                handle_key_rotation(&api.ctx, event.into()).await
             }
             Err(error) => {
                 tracing::error!(%error, %txid, "got an error when transforming the event ClarityValue");
@@ -281,25 +279,13 @@ async fn handle_withdrawal_reject(
 }
 
 #[tracing::instrument(skip_all, fields(
-    %stacks_txid,
-    address = %event.new_address.to_string(),
-    aggregate_key = %event.new_aggregate_pubkey
+    stacks_txid = %event.txid,
+    address = %event.address,
+    aggregate_key = %event.aggregate_key
 ))]
-async fn handle_key_rotation(
-    ctx: &impl Context,
-    event: KeyRotationEvent,
-    stacks_txid: StacksTxId,
-) -> Result<(), Error> {
-    let key_rotation_tx = RotateKeysTransaction {
-        txid: stacks_txid,
-        address: event.new_address,
-        aggregate_key: event.new_aggregate_pubkey,
-        signer_set: event.new_keys,
-        signatures_required: event.new_signature_threshold,
-    };
-
+async fn handle_key_rotation(ctx: &impl Context, event: KeyRotationEvent) -> Result<(), Error> {
     ctx.get_storage_mut()
-        .write_rotate_keys_transaction(&key_rotation_tx)
+        .write_rotate_keys_transaction(&event)
         .await?;
 
     tracing::debug!(topic = "key-rotation", "handled stacks event");
@@ -319,6 +305,7 @@ mod tests {
     use clarity::vm::types::PrincipalData;
     use fake::Fake;
     use rand::rngs::OsRng;
+    use sbtc::events::KeyRotationEvent;
     use secp256k1::SECP256K1;
     use stacks_common::types::chainstate::StacksBlockId;
     use test_case::test_case;
@@ -480,7 +467,7 @@ mod tests {
         let txid = test_data.bitcoin_transactions[0].txid;
         let bitcoin_block = &test_data.bitcoin_blocks[0];
         let stacks_chaintip = &test_data.stacks_blocks[0];
-        let stacks_txid = test_data.stacks_transactions[0].txid;
+        let stacks_txid = fake::Faker.fake_with_rng(&mut rng);
 
         let mut deposit_request: DepositRequest = fake::Faker.fake_with_rng(&mut rng);
         deposit_request.txid = txid.into();
@@ -493,12 +480,12 @@ mod tests {
 
         let event = CompletedDepositEvent {
             outpoint: deposit_request.outpoint(),
-            txid: stacks_txid.into(),
-            block_id: stacks_chaintip.block_hash.into(),
+            txid: stacks_txid,
+            block_id: stacks_chaintip.block_hash,
             amount: deposit_request.amount - btc_fee,
-            sweep_block_hash: bitcoin_block.block_hash.into(),
+            sweep_block_hash: bitcoin_block.block_hash,
             sweep_block_height: bitcoin_block.block_height,
-            sweep_txid: txid.into(),
+            sweep_txid: txid,
         };
         let res = handle_completed_deposit(&ctx, event).await;
         assert!(res.is_ok());
@@ -537,18 +524,18 @@ mod tests {
         let test_data = TestData::generate(&mut rng, &[], &test_params);
 
         let txid = test_data.bitcoin_transactions[0].txid;
-        let stacks_tx = &test_data.stacks_transactions[0];
+        let stacks_block = &test_data.stacks_blocks[0];
         let bitcoin_block = &test_data.bitcoin_blocks[0];
 
         let request_id = 1;
         let event = WithdrawalAcceptEvent {
             request_id,
             outpoint: OutPoint { txid: *txid, vout: 0 },
-            txid: stacks_tx.txid.into(),
-            block_id: stacks_tx.block_hash.into(),
+            txid: fake::Faker.fake_with_rng(&mut rng),
+            block_id: stacks_block.block_hash,
             fee: 1,
             signer_bitmap: BitArray::<_>::ZERO,
-            sweep_block_hash: bitcoin_block.block_hash.into(),
+            sweep_block_hash: bitcoin_block.block_hash,
             sweep_block_height: bitcoin_block.block_height,
             sweep_txid: txid.into(),
         };
@@ -585,17 +572,16 @@ mod tests {
         let db = ctx.inner_storage();
         let test_data = TestData::generate(&mut rng, &[], &test_params);
 
-        let stacks_first_tx = &test_data.stacks_transactions[0];
         let stacks_first_block = &test_data.stacks_blocks[0];
 
         let request_id = 1;
         let event = WithdrawalRequest {
             request_id,
-            block_hash: stacks_first_tx.block_hash.into(),
+            block_hash: stacks_first_block.block_hash,
             amount: 100,
             max_fee: 1,
             recipient: fake::Faker.fake_with_rng(&mut rng),
-            txid: stacks_first_tx.txid,
+            txid: fake::Faker.fake_with_rng(&mut rng),
             sender_address: PrincipalData::Standard(StandardPrincipalData::transient()).into(),
             bitcoin_block_height: test_data.bitcoin_blocks[0].block_height,
         };
@@ -645,8 +631,8 @@ mod tests {
         let request_id = 1;
         let event = WithdrawalRejectEvent {
             request_id,
-            block_id: stacks_chaintip.block_hash.into(),
-            txid: test_data.stacks_transactions[0].txid,
+            block_id: stacks_chaintip.block_hash,
+            txid: fake::Faker.fake_with_rng(&mut rng),
             signer_bitmap: BitArray::<_>::ZERO,
         };
 
@@ -663,6 +649,7 @@ mod tests {
     /// including updating the database with the new key rotation transaction.
     #[tokio::test]
     async fn test_handle_key_rotation() {
+        let mut rng = get_rng();
         let ctx = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
@@ -670,22 +657,27 @@ mod tests {
 
         let db = ctx.inner_storage();
 
-        let txid: StacksTxId = fake::Faker.fake_with_rng(&mut OsRng);
+        let block_id: StacksBlockId = StacksBlockId(fake::Faker.fake_with_rng(&mut rng));
         let event = KeyRotationEvent {
-            new_aggregate_pubkey: SECP256K1.generate_keypair(&mut OsRng).1.into(),
+            block_id,
+            txid: sbtc::events::StacksTxid(fake::Faker.fake_with_rng(&mut rng)),
+            new_aggregate_pubkey: SECP256K1.generate_keypair(&mut rng).1.into(),
             new_keys: (0..3)
-                .map(|_| SECP256K1.generate_keypair(&mut OsRng).1.into())
+                .map(|_| SECP256K1.generate_keypair(&mut rng).1.into())
                 .collect(),
             new_address: PrincipalData::Standard(StandardPrincipalData::transient()).into(),
             new_signature_threshold: 3,
         };
 
-        let res = handle_key_rotation(&ctx, event, txid).await;
+        let event: crate::storage::model::KeyRotationEvent = event.into();
+        let res = handle_key_rotation(&ctx, event.clone()).await;
 
         assert!(res.is_ok());
         let db = db.lock().await;
+
         assert_eq!(db.rotate_keys_transactions.len(), 1);
-        assert!(db.rotate_keys_transactions.get(&txid).is_some());
+        let stored_events = db.rotate_keys_transactions.get(&block_id.into()).unwrap();
+        assert_eq!(stored_events, &vec![event]);
     }
 
     #[test_case(EVENT_OBSERVER_BODY_LIMIT, true; "event within limit")]
