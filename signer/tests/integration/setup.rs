@@ -5,7 +5,6 @@ use std::ops::Deref;
 use bitcoin::AddressType;
 use bitcoin::Amount;
 use bitcoin::OutPoint;
-use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc::Client;
 use bitcoincore_rpc::RpcApi as _;
 use blockstack_lib::types::chainstate::StacksAddress;
@@ -282,35 +281,21 @@ impl TestSweepSetup {
 
     /// Store the deposit transaction into the database
     pub async fn store_deposit_tx(&self, db: &PgStore) {
-        let deposit_tx = model::Transaction {
-            txid: self.deposit_tx_info.txid.to_byte_array(),
-            tx_type: model::TransactionType::SbtcTransaction,
-            block_hash: self.deposit_block_hash.to_byte_array(),
-        };
-
         let bitcoin_tx_ref = BitcoinTxRef {
-            txid: deposit_tx.txid.into(),
+            txid: self.deposit_tx_info.txid.into(),
             block_hash: self.deposit_block_hash.into(),
         };
 
-        db.write_transaction(&deposit_tx).await.unwrap();
         db.write_bitcoin_transaction(&bitcoin_tx_ref).await.unwrap();
     }
     /// Store the transaction that swept the deposit into the signers' UTXO
     /// into the database
     pub async fn store_sweep_tx(&self, db: &PgStore) {
-        let sweep_tx = model::Transaction {
-            txid: self.sweep_tx_info.txid.to_byte_array(),
-            tx_type: model::TransactionType::SbtcTransaction,
-            block_hash: self.sweep_block_hash.to_byte_array(),
-        };
-
         let bitcoin_tx_ref = BitcoinTxRef {
-            txid: sweep_tx.txid.into(),
-            block_hash: sweep_tx.block_hash.into(),
+            txid: self.sweep_tx_info.txid.into(),
+            block_hash: self.sweep_block_hash.into(),
         };
 
-        db.write_transaction(&sweep_tx).await.unwrap();
         db.write_bitcoin_transaction(&bitcoin_tx_ref).await.unwrap();
 
         let mut signer_script_pubkeys = HashSet::new();
@@ -486,13 +471,6 @@ pub async fn fill_signers_utxo<R: rand::RngCore + ?Sized>(
 
     // Write the Bitcoin block and transaction to the database.
     db.write_bitcoin_block(&bitcoin_block).await.unwrap();
-    db.write_transaction(&model::Transaction {
-        txid: *signer_utxo_txid.as_byte_array(),
-        tx_type: model::TransactionType::SbtcTransaction,
-        block_hash: bitcoin_block.block_hash.into_bytes(),
-    })
-    .await
-    .unwrap();
     db.write_bitcoin_transaction(&model::BitcoinTxRef {
         block_hash: bitcoin_block.block_hash.into(),
         txid: signer_utxo_txid.into(),
@@ -528,13 +506,6 @@ pub async fn fill_signers_utxo<R: rand::RngCore + ?Sized>(
 
     // Write the Bitcoin block and transaction to the database.
     db.write_bitcoin_block(&bitcoin_block).await.unwrap();
-    db.write_transaction(&model::Transaction {
-        txid: *signer_utxo_txid.as_byte_array(),
-        tx_type: model::TransactionType::SbtcTransaction,
-        block_hash: bitcoin_block.block_hash.into_bytes(),
-    })
-    .await
-    .unwrap();
     db.write_bitcoin_transaction(&model::BitcoinTxRef {
         block_hash: bitcoin_block.block_hash.into(),
         txid: signer_utxo_txid.into(),
@@ -995,18 +966,11 @@ impl TestSweepSetup2 {
     /// Store the deposit transaction into the database
     pub async fn store_deposit_txs(&self, db: &PgStore) {
         for (_, _, tx_info) in self.deposits.iter() {
-            let deposit_tx = model::Transaction {
-                txid: tx_info.txid.to_byte_array(),
-                tx_type: model::TransactionType::SbtcTransaction,
-                block_hash: self.deposit_block_hash.to_byte_array(),
-            };
-
             let bitcoin_tx_ref = BitcoinTxRef {
-                txid: deposit_tx.txid.into(),
+                txid: tx_info.txid.into(),
                 block_hash: self.deposit_block_hash.into(),
             };
 
-            db.write_transaction(&deposit_tx).await.unwrap();
             db.write_bitcoin_transaction(&bitcoin_tx_ref).await.unwrap();
         }
     }
@@ -1081,15 +1045,9 @@ impl TestSweepSetup2 {
     pub async fn store_sweep_tx(&self, db: &PgStore) {
         let sweep = self.sweep_tx_info.as_ref().expect("no sweep tx info set");
 
-        let sweep_tx = model::Transaction {
-            txid: sweep.tx_info.txid.to_byte_array(),
-            tx_type: model::TransactionType::SbtcTransaction,
-            block_hash: sweep.block_hash.to_byte_array(),
-        };
-
         let bitcoin_tx_ref = BitcoinTxRef {
-            txid: sweep_tx.txid.into(),
-            block_hash: sweep_tx.block_hash.into(),
+            txid: sweep.tx_info.txid.into(),
+            block_hash: sweep.block_hash.into(),
         };
 
         let block = BitcoinBlock {
@@ -1098,7 +1056,6 @@ impl TestSweepSetup2 {
             parent_hash: sweep.parent_hash,
         };
         db.write_bitcoin_block(&block).await.unwrap();
-        db.write_transaction(&sweep_tx).await.unwrap();
         db.write_bitcoin_transaction(&bitcoin_tx_ref).await.unwrap();
 
         let mut signer_script_pubkeys = HashSet::new();
