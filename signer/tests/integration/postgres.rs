@@ -5921,6 +5921,8 @@ async fn writing_key_rotation_transactions() {
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
 
+    // key_rotation2 has the same txid has key_rotation1, just a different
+    // block hash.
     let key_rotation1: KeyRotationEvent = Faker.fake_with_rng(&mut rng);
     let key_rotation2 = KeyRotationEvent {
         block_hash: Faker.fake_with_rng(&mut rng),
@@ -5953,6 +5955,41 @@ async fn writing_key_rotation_transactions() {
 
     // Both should be stored now
     assert_eq!(stored_events_again, 2);
+
+    // This one has the same txid and block hash as key_rotation2, but
+    // different contents. However, this one will not be written.
+    let key_rotation3 = KeyRotationEvent {
+        txid: key_rotation2.txid,
+        block_hash: key_rotation2.block_hash,
+        ..Faker.fake_with_rng(&mut rng)
+    };
+
+    db.write_rotate_keys_transaction(&key_rotation3)
+        .await
+        .unwrap();
+
+    let stored_event = sqlx::query_as::<_, KeyRotationEvent>(
+        r#"
+        SELECT
+            rkt.txid
+          , rkt.block_hash
+          , rkt.address
+          , rkt.aggregate_key
+          , rkt.signer_set
+          , rkt.signatures_required
+        FROM sbtc_signer.rotate_keys_transactions rkt
+        WHERE txid = $1
+          AND block_hash = $2"#,
+    )
+    .bind(key_rotation2.txid)
+    .bind(key_rotation2.block_hash)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+
+    // This new one is not stored.
+    assert_eq!(stored_event, key_rotation2);
+    assert_ne!(stored_event, key_rotation3);
 
     testing::storage::drop_db(db).await;
 }
