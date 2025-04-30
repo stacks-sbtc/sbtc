@@ -107,5 +107,5 @@ respectively, at `/mnt/bitcoin` and `/mnt/stacks`.
 
 ### sBTC signer and Stacks Node versions
 
-Always run last version of the docker images.
+Always run the latest version of the docker images.
 You can find the sBTC images [here](https://github.com/stacks-sbtc/sbtc/pkgs/container/sbtc) and the latest version of Stacks Core Image [here](https://hub.docker.com/r/blockstack/stacks-blockchain/tags).
