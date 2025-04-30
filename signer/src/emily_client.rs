@@ -23,6 +23,7 @@ use emily_client::models::UpdateDepositsResponse;
 use emily_client::models::UpdateWithdrawalsRequestBody;
 use emily_client::models::UpdateWithdrawalsResponse;
 use emily_client::models::WithdrawalUpdate;
+use emily_client::models::Fulfillment;
 use sbtc::deposits::CreateDepositRequest;
 use url::Url;
 
@@ -338,11 +339,21 @@ impl EmilyInteract for EmilyClient {
             .filter_map(RequestRef::as_withdrawal);
 
         let update_request: Vec<_> = withdrawals
-            .map(|withdrawal| WithdrawalUpdate {
-                request_id: withdrawal.request_id,
-                fulfillment: None,
-                status: Status::Accepted,
-                status_message: "".to_string(),
+            .map(|withdrawal| {
+                let fullfillment = Fulfillment {
+                    bitcoin_block_hash: "change-me".to_string(),
+                    bitcoin_block_height: 0,
+                    bitcoin_tx_index: 0,
+                    bitcoin_txid: transaction.tx.compute_txid().to_string(),
+                    btc_fee: transaction.tx_fee,
+                    stacks_txid: withdrawal.txid.to_string(),
+                };
+                WithdrawalUpdate {
+                    request_id: withdrawal.request_id,
+                    fulfillment: Some(Some(Box::new(fullfillment))),
+                    status: Status::Accepted,
+                    status_message: "".to_string(),
+                }
             })
             .collect();
 
@@ -359,12 +370,22 @@ impl EmilyInteract for EmilyClient {
             .filter_map(RequestRef::as_deposit);
 
         let update_request: Vec<_> = deposits
-            .map(|deposit| DepositUpdate {
-                bitcoin_tx_output_index: deposit.outpoint.vout,
-                bitcoin_txid: deposit.outpoint.txid.to_string(),
-                status: Status::Accepted,
-                fulfillment: None,
-                status_message: "".to_string(),
+            .map(|deposit| {
+                let fullfillment = Fulfillment {
+                    bitcoin_block_hash: "change-me".to_string(),
+                    bitcoin_block_height: 0,
+                    bitcoin_tx_index: deposit.outpoint.vout,
+                    bitcoin_txid: transaction.tx.compute_txid().to_string(),
+                    btc_fee: transaction.tx_fee,
+                    stacks_txid: "".to_string(),
+                };
+                DepositUpdate {
+                    bitcoin_tx_output_index: deposit.outpoint.vout,
+                    bitcoin_txid: deposit.outpoint.txid.to_string(),
+                    status: Status::Accepted,
+                    fulfillment: Some(Some(Box::new(fullfillment))),
+                    status_message: "".to_string(),
+                }
             })
             .collect();
 
