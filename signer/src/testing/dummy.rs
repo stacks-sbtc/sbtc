@@ -179,8 +179,8 @@ impl Dummy<bitcoin::TxIn> for BitcoinTxVin {
 
 impl Dummy<Faker> for BitcoinBlockInfo {
     fn dummy_with_rng<R: Rng + ?Sized>(_: &Faker, rng: &mut R) -> Self {
-        let height = (0..i64::MAX as u64).choose(rng).unwrap();
-        BitcoinBlockInfo::random_with_height(BitcoinBlockHeight::from(height), rng)
+        let height: BitcoinBlockHeight = Faker.fake_with_rng(rng);
+        BitcoinBlockInfo::random_with_height(height, rng)
     }
 }
 
