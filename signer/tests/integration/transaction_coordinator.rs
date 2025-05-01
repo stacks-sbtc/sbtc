@@ -4726,7 +4726,7 @@ async fn should_handle_dkg_coordination_failure() {
     let bitcoin_block: model::BitcoinBlock = Faker.fake_with_rng(&mut rng);
     storage.write_bitcoin_block(&bitcoin_block).await.unwrap();
 
-    // Get chain tip reference 
+    // Get chain tip reference
     let chain_tip = storage
         .get_bitcoin_canonical_chain_tip_ref()
         .await
@@ -4735,29 +4735,36 @@ async fn should_handle_dkg_coordination_failure() {
 
     // Create a set of signer public keys and update the context state
     let mut signer_keys = BTreeSet::new();
-    for _ in 0..3 {  // Create 3 signers
+    for _ in 0..3 {
+        // Create 3 signers
         let private_key = PrivateKey::new(&mut rng);
         let public_key = PublicKey::from_private_key(&private_key);
         signer_keys.insert(public_key);
     }
-    context.state().update_current_signer_set(signer_keys.clone());
+    context
+        .state()
+        .update_current_signer_set(signer_keys.clone());
 
     // Mock the stacks client to handle contract source checks
-    context.with_stacks_client(|client| {
-        client.expect_get_contract_source().returning(|_, _| {
-            Box::pin(async {
-                Ok(ContractSrcResponse {
-                    source: String::new(),
-                    publish_height: 1,
-                    marf_proof: None,
+    context
+        .with_stacks_client(|client| {
+            client.expect_get_contract_source().returning(|_, _| {
+                Box::pin(async {
+                    Ok(ContractSrcResponse {
+                        source: String::new(),
+                        publish_height: 1,
+                        marf_proof: None,
+                    })
                 })
-            })
-        });
-    }).await;
+            });
+        })
+        .await;
 
     // Verify DKG should run
     assert!(
-        transaction_coordinator::should_coordinate_dkg(&context, &chain_tip).await.unwrap(),
+        transaction_coordinator::should_coordinate_dkg(&context, &chain_tip)
+            .await
+            .unwrap(),
         "DKG should be triggered since no shares exist yet"
     );
 
@@ -4778,9 +4785,15 @@ async fn should_handle_dkg_coordination_failure() {
 
     // This should trigger DKG coordination which will fail, falling back to existing key
     let result = coordinator.process_new_blocks().await;
-    assert!(result.is_ok(), "process_new_blocks should complete successfully even with DKG failure");
+    assert!(
+        result.is_ok(),
+        "process_new_blocks should complete successfully even with DKG failure"
+    );
 
     // Verify that we can still process blocks after DKG failure
     let result = coordinator.process_new_blocks().await;
-    assert!(result.is_ok(), "Should be able to continue processing blocks after DKG failure");
+    assert!(
+        result.is_ok(),
+        "Should be able to continue processing blocks after DKG failure"
+    );
 }
