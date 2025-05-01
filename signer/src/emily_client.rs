@@ -341,7 +341,7 @@ impl EmilyInteract for EmilyClient {
         let update_request: Vec<_> = withdrawals
             .map(|withdrawal| {
                 let fullfillment = Fulfillment {
-                    bitcoin_block_hash: "change-me".to_string(),
+                    bitcoin_block_hash: "".to_string(),
                     bitcoin_block_height: 0,
                     bitcoin_tx_index: 0,
                     bitcoin_txid: transaction.tx.compute_txid().to_string(),
@@ -372,7 +372,7 @@ impl EmilyInteract for EmilyClient {
         let update_request: Vec<_> = deposits
             .map(|deposit| {
                 let fullfillment = Fulfillment {
-                    bitcoin_block_hash: "change-me".to_string(),
+                    bitcoin_block_hash: "".to_string(),
                     bitcoin_block_height: 0,
                     bitcoin_tx_index: deposit.outpoint.vout,
                     bitcoin_txid: transaction.tx.compute_txid().to_string(),
