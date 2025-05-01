@@ -17,13 +17,13 @@ use emily_client::apis::limits_api;
 use emily_client::apis::withdrawal_api;
 use emily_client::models::DepositInfo;
 use emily_client::models::DepositUpdate;
+use emily_client::models::Fulfillment;
 use emily_client::models::Status;
 use emily_client::models::UpdateDepositsRequestBody;
 use emily_client::models::UpdateDepositsResponse;
 use emily_client::models::UpdateWithdrawalsRequestBody;
 use emily_client::models::UpdateWithdrawalsResponse;
 use emily_client::models::WithdrawalUpdate;
-use emily_client::models::Fulfillment;
 use sbtc::deposits::CreateDepositRequest;
 use url::Url;
 
