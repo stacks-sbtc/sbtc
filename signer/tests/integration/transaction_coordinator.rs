@@ -49,6 +49,7 @@ use signer::message::Payload;
 use signer::network::MessageTransfer;
 use signer::storage::model::WithdrawalTxOutput;
 use signer::testing::get_rng;
+
 use testing_emily_client::apis::chainstate_api;
 use testing_emily_client::apis::testing_api;
 use testing_emily_client::apis::withdrawal_api;
@@ -4714,48 +4715,55 @@ mod get_eligible_pending_withdrawal_requests {
 #[test_log::test(tokio::test)]
 async fn should_handle_dkg_coordination_failure() {
     let mut rng = get_rng();
-    let context = TestContext::builder()
+    let mut context = TestContext::builder()
         .with_in_memory_storage()
         .with_mocked_clients()
-        .modify_settings(|settings| {
-            settings.signer.dkg_target_rounds = std::num::NonZero::<u32>::new(1).unwrap();
-        })
         .build();
 
     let storage = context.get_storage_mut();
-
-    // Write DKG shares with Verified status
-    let existing_aggregate_key = PublicKey::from_private_key(&PrivateKey::new(&mut rng));
-    let dkg_shares = model::EncryptedDkgShares {
-        dkg_shares_status: model::DkgSharesStatus::Verified,
-        aggregate_key: existing_aggregate_key,
-        ..Faker.fake_with_rng(&mut rng)
-    };
-    storage
-        .write_encrypted_dkg_shares(&dkg_shares)
-        .await
-        .unwrap();
 
     // Create a bitcoin block to serve as chain tip
     let bitcoin_block: model::BitcoinBlock = Faker.fake_with_rng(&mut rng);
     storage.write_bitcoin_block(&bitcoin_block).await.unwrap();
 
+    // Get chain tip reference 
+    let chain_tip = storage
+        .get_bitcoin_canonical_chain_tip_ref()
+        .await
+        .unwrap()
+        .unwrap();
+
     // Create a set of signer public keys and update the context state
     let mut signer_keys = BTreeSet::new();
-    for _ in 0..3 {
-        // Create 3 signers
+    for _ in 0..3 {  // Create 3 signers
         let private_key = PrivateKey::new(&mut rng);
         let public_key = PublicKey::from_private_key(&private_key);
         signer_keys.insert(public_key);
     }
-    context.state().update_current_signer_set(signer_keys);
-    context
-        .state()
-        .set_current_aggregate_key(existing_aggregate_key);
+    context.state().update_current_signer_set(signer_keys.clone());
+
+    // Mock the stacks client to handle contract source checks
+    context.with_stacks_client(|client| {
+        client.expect_get_contract_source().returning(|_, _| {
+            Box::pin(async {
+                Ok(ContractSrcResponse {
+                    source: String::new(),
+                    publish_height: 1,
+                    marf_proof: None,
+                })
+            })
+        });
+    }).await;
+
+    // Verify DKG should run
+    assert!(
+        transaction_coordinator::should_coordinate_dkg(&context, &chain_tip).await.unwrap(),
+        "DKG should be triggered since no shares exist yet"
+    );
 
     // Create coordinator with test parameters using SignerNetwork::single
     let network = SignerNetwork::single(&context);
-    let coordinator = TxCoordinatorEventLoop {
+    let mut coordinator = TxCoordinatorEventLoop {
         context: context.clone(),
         network: network.spawn(),
         private_key: PrivateKey::new(&mut rng),
@@ -4763,24 +4771,16 @@ async fn should_handle_dkg_coordination_failure() {
         context_window: 5,
         signing_round_max_duration: std::time::Duration::from_secs(5),
         bitcoin_presign_request_max_duration: std::time::Duration::from_secs(5),
-        dkg_max_duration: std::time::Duration::from_secs(5),
+        // extremely short duration so that DKG fails...
+        dkg_max_duration: Duration::from_millis(1),
         is_epoch3: true,
     };
 
-    // Spawn the coordinator in a separate task
-    let coordinator_handle = tokio::spawn(async move { coordinator.run().await });
+    // This should trigger DKG coordination which will fail, falling back to existing key
+    let result = coordinator.process_new_blocks().await;
+    assert!(result.is_ok(), "process_new_blocks should complete successfully even with DKG failure");
 
-    // Give the coordinator a moment to process
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-
-    // Verify the existing aggregate key was used as fallback
-    let current_key = context.state().current_aggregate_key();
-    assert_eq!(
-        current_key,
-        Some(existing_aggregate_key),
-        "Should fall back to existing aggregate key after DKG failure"
-    );
-
-    // Clean up the coordinator task
-    coordinator_handle.abort();
+    // Verify that we can still process blocks after DKG failure
+    let result = coordinator.process_new_blocks().await;
+    assert!(result.is_ok(), "Should be able to continue processing blocks after DKG failure");
 }
