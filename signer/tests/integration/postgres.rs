@@ -22,6 +22,7 @@ use signer::bitcoin::validation::WithdrawalRequestStatus;
 use signer::bitcoin::validation::WithdrawalValidationResult;
 use signer::storage::model::BitcoinBlockHeight;
 use signer::storage::model::DkgSharesStatus;
+use signer::storage::model::KeyRotationEvent;
 use signer::storage::model::SweptWithdrawalRequest;
 use signer::storage::model::WithdrawalRequest;
 use signer::testing::IterTestExt as _;
@@ -5907,10 +5908,90 @@ async fn compute_withdrawn_total_ignores_withdrawals_not_identified_blockchain()
     assert_eq!(current_total, amount2);
 
     // Sanity check that the test isn't totally busted. It still might be
-    // regular busted for some other reason though.
+    // "regular" busted for some other reason though.
     assert_ne!(amount1, amount2);
 
     signer::testing::storage::drop_db(db).await;
+}
+
+/// Check that we can write two events with the same txid but different
+/// confirming block hashes to the rotate_keys_transactions table.
+#[tokio::test]
+async fn writing_key_rotation_transactions() {
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
+
+    // key_rotation2 has the same txid has key_rotation1, just a different
+    // block hash.
+    let key_rotation1: KeyRotationEvent = Faker.fake_with_rng(&mut rng);
+    let key_rotation2 = KeyRotationEvent {
+        block_hash: Faker.fake_with_rng(&mut rng),
+        ..key_rotation1.clone()
+    };
+
+    assert_eq!(key_rotation1.txid, key_rotation2.txid);
+    assert_ne!(key_rotation1.block_hash, key_rotation2.block_hash);
+
+    // First check that the table is empty
+    let sql = "SELECT COUNT(*) FROM sbtc_signer.rotate_keys_transactions";
+    let stored_events = sqlx::query_scalar::<_, i64>(sql)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+
+    assert_eq!(stored_events, 0);
+
+    db.write_rotate_keys_transaction(&key_rotation1)
+        .await
+        .unwrap();
+    db.write_rotate_keys_transaction(&key_rotation2)
+        .await
+        .unwrap();
+
+    let stored_events_again = sqlx::query_scalar::<_, i64>(sql)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+
+    // Both should be stored now
+    assert_eq!(stored_events_again, 2);
+
+    // This one has the same txid and block hash as key_rotation2, but
+    // different contents. However, this one will not be written.
+    let key_rotation3 = KeyRotationEvent {
+        txid: key_rotation2.txid,
+        block_hash: key_rotation2.block_hash,
+        ..Faker.fake_with_rng(&mut rng)
+    };
+
+    db.write_rotate_keys_transaction(&key_rotation3)
+        .await
+        .unwrap();
+
+    let stored_event = sqlx::query_as::<_, KeyRotationEvent>(
+        r#"
+        SELECT
+            rkt.txid
+          , rkt.block_hash
+          , rkt.address
+          , rkt.aggregate_key
+          , rkt.signer_set
+          , rkt.signatures_required
+        FROM sbtc_signer.rotate_keys_transactions rkt
+        WHERE txid = $1
+          AND block_hash = $2"#,
+    )
+    .bind(key_rotation2.txid)
+    .bind(key_rotation2.block_hash)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+
+    // This new one is not stored.
+    assert_eq!(stored_event, key_rotation2);
+    assert_ne!(stored_event, key_rotation3);
+
+    testing::storage::drop_db(db).await;
 }
 
 /// Module containing a test suite and helpers specific to
