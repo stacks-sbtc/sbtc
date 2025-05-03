@@ -28,3 +28,16 @@ contracts/docs
 __pycache__/
 *.py[cod]
 *$py.class
+
+#  Local .terraform directories
+**/.terraform/*
+
+# .tfstate files
+*.tfstate
+*.tfstate.*
+
+# .tfvars files
+*.tfvars
+*.pkrvars.hcl
+
+*.pem
