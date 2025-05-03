@@ -10,11 +10,7 @@ terraform {
     }
   }
 
-  backend "s3" {
-    bucket = var.tfstate_bucket
-    key    = "tfstate/terraform.tfstate"
-    region = "us-east-1"
-  }
+  backend "s3" {}
 }
 
 provider "aws" {

@@ -1,3 +1,14 @@
+You will need a `config.tfvars` file with s3 backend configuration variables. Something like
+```
+bucket = "service-provisioning-or-something"
+key = "key/terraform.tfstate"
+region = "eu-west-1"
+```
+
+```bash
+terraform init -backend-config=config.tfvars
+```
+
 On the main devenv machine do:
 ```bash
 # Add Docker's official GPG key:
@@ -41,18 +52,18 @@ make devenv-up
 On the attacking servers do
 ```
 sudo snap install --classic go
-
-curl https://go.dev/dl/go1.24.2.linux-amd64.tar.gz
-
-tar -C /usr/local -xzf go1.24.2.linux-amd64.tar.gz
-export PATH=$PATH:/usr/local/go/bin
 go version
 ```
 
 
-```
+```bash
+# On one attacking server
 go mod init sbtcattacklibp2p
 go mod tidy
-go build -o attacker1 attack_p2p_immunefi_42752_v1.go
-go build -o attacker2 attack_p2p_immunefi_42752_v2.go
+go build -o attacker POC_1.go
+
+# On the another attacking server
+go mod init sbtcattacklibp2p
+go mod tidy
+go build -o attacker POC_2.go
 ```
