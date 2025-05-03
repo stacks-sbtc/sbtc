@@ -53,6 +53,8 @@ x-sbtc-signer: &sbtc-signer
     dockerfile: docker/sbtc/Dockerfile
     target: signer
   entrypoint: "/bin/bash -c '/usr/local/bin/signer -c /signer-config.toml --migrate-db --output-format json'"
+  cpus: 2
+  mem_limit: 4gb
   environment: &sbtc-signer-environment
     RUST_LOG: info
     SIGNER_SIGNER__P2P__LISTEN_ON: tcp://0.0.0.0:4122
@@ -540,7 +542,7 @@ services:
   # Mempool.
   # --------
   electrs:
-    image: electrs:latest
+    image: mempool/electrs:latest
     container_name: electrs
     stop_grace_period: 5s
     build: electrs
