@@ -19,7 +19,7 @@ WORKDIR /code
 RUN git clone https://github.com/stacks-network/sbtc.git
 WORKDIR /code/sbtc
 
-ARG GIT_BRANCH=main
+ARG GIT_BRANCH=immunefi-sbtc-42752
 RUN git checkout $GIT_BRANCH
 
 # Run an install that we'll cache the result of and then build the code
