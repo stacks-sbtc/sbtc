@@ -30,6 +30,6 @@ for i in range(1, 151):
     except subprocess.TimeoutExpired:
         print(f"⏱  Timeout on iteration {i}. Skipping.")
 
-    time.sleep(3)
+    time.sleep(1)
 
 print(f"\n✅ Done. TXIDs saved to {output_file}")

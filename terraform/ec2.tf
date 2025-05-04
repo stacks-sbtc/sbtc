@@ -103,7 +103,7 @@ resource "aws_launch_template" "sbtc_devenv_immunefi_attacker" {
   name          = "sbtc-immunefi-attacker-launch-template"
   description   = "The launch template for sbtc protocol attacker applications"
   image_id      = data.aws_ami.ubuntu_noble.id
-  instance_type = "c7i.xlarge"
+  instance_type = "c7i.2xlarge"
   ebs_optimized = true
   key_name      = aws_key_pair.sbtc_ec2.key_name
 
@@ -116,7 +116,7 @@ resource "aws_launch_template" "sbtc_devenv_immunefi_attacker" {
       delete_on_termination = true
       encrypted             = false
       volume_type           = "gp3"
-      volume_size           = "40"
+      volume_size           = "80"
     }
   }
 
