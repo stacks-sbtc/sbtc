@@ -181,10 +181,10 @@ resource "aws_security_group" "sbtc_immunefi" {
 
   ingress {
     from_port   = 4122
-    to_port     = 4122
+    to_port     = 4124
     protocol    = "tcp"
     self        = true
-    description = "Hit cluster endpoints from home"
+    description = "Hit cluster endpoints from within the security group"
   }
 
   ingress {

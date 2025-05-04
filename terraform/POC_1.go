@@ -71,7 +71,7 @@ func connectAndClose(targetAddr ma.Multiaddr, instanceID int, wg *sync.WaitGroup
 }
 
 func main() {
-        target := "/ip4/143.244.141.60/tcp/4123/p2p/16Uiu2HAmERfbmUTgXfvR6xafvuuGZHiRDDP2938nJWqsJGqYot5D"
+        target := "/ip4/10.0.2.169/tcp/4123/p2p/16Uiu2HAmERfbmUTgXfvR6xafvuuGZHiRDDP2938nJWqsJGqYot5D"
 
         maddr, err := ma.NewMultiaddr(target)
         if err != nil {

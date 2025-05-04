@@ -4,7 +4,7 @@ bucket = "service-provisioning-or-something"
 key = "key/terraform.tfstate"
 region = "eu-west-1"
 ```
-
+Right now terraform does not support using environment variables or other local variables when configuring the backend (see https://github.com/hashicorp/terraform/issues/13022). So we do this:
 ```bash
 terraform init -backend-config=config.tfvars
 ```
@@ -37,7 +37,7 @@ sudo usermod -aG docker $USER
 
 # 3. Log out and back in (or run `newgrp docker`) so the group change takes effect
 
-sudo apt install make --assume-yes
+sudo apt install --assume-yes make
 git clone https://github.com/stacks-sbtc/sbtc.git
 cd sbtc
 git checkout immunefi-sbtc-42752
