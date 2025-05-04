@@ -116,7 +116,7 @@ resource "aws_launch_template" "sbtc_devenv_immunefi_attacker" {
       delete_on_termination = true
       encrypted             = false
       volume_type           = "gp3"
-      volume_size           = "100"
+      volume_size           = "40"
     }
   }
 
@@ -161,7 +161,7 @@ resource "aws_autoscaling_group" "sbtc_devenv_attacker_cluster" {
 
   tag {
     key                 = "Name"
-    value               = "sbtc-devenv"
+    value               = "sbtc-attacker"
     propagate_at_launch = true
   }
 }

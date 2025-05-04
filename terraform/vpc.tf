@@ -127,7 +127,7 @@ resource "aws_security_group" "sbtc_immunefi" {
 
   ingress {
     from_port        = 5432
-    to_port          = 5432
+    to_port          = 5434
     protocol         = "tcp"
     cidr_blocks      = [var.home_ipv4]
     ipv6_cidr_blocks = [var.home_ipv6]
