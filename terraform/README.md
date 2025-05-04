@@ -42,7 +42,7 @@ git clone https://github.com/stacks-sbtc/sbtc.git
 cd sbtc
 git checkout immunefi-sbtc-42752
 docker compose -f docker/docker-compose.yml build sbtc-signer-1
-docker compose -f docker/docker-compose.yml build sbtc-signer-2 sbtc-signer-3
+docker compose -f docker/docker-compose.yml build sbtc-signer-2 sbtc-signer-3 
 docker compose -f docker/docker-compose.yml build emily-server
 docker compose -f docker/docker-compose.yml build emily-aws-setup
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -50,20 +50,26 @@ make devenv-up
 ```
 
 On the attacking servers do
-```
-sudo snap install --classic go
-go version
-```
-
-
 ```bash
-# On one attacking server
+sudo snap install --classic go
+# note the version
+go version
+
+git clone https://github.com/stacks-sbtc/sbtc.git
+cd sbtc
+git checkout immunefi-sbtc-42752
+```
+
+Then
+```bash
+# On either of the attacking servers
+cd terraform
 go mod init sbtcattacklibp2p
 go mod tidy
-go build -o attacker POC_1.go
+
+# On one attacking server
+go build -o attacker1 POC_1.go
 
 # On the another attacking server
-go mod init sbtcattacklibp2p
-go mod tidy
-go build -o attacker POC_2.go
+go build -o attacker2 POC_2.go
 ```
