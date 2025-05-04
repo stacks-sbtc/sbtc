@@ -1,5 +1,6 @@
 import subprocess
 import re
+import time
 
 output_file = "deposit_txids.txt"
 
@@ -7,8 +8,8 @@ output_file = "deposit_txids.txt"
 with open(output_file, "w") as f:
     f.write("")
 
-for i in range(1, 51):
-    print(f"[{i}/50] Running ./signers.sh demo...")
+for i in range(1, 151):
+    print(f"[{i}/150] Running ./signers.sh demo...")
 
     try:
         # Run the script and get output
@@ -28,5 +29,7 @@ for i in range(1, 51):
 
     except subprocess.TimeoutExpired:
         print(f"⏱  Timeout on iteration {i}. Skipping.")
+
+    time.sleep(3)
 
 print(f"\n✅ Done. TXIDs saved to {output_file}")
