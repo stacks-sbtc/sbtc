@@ -40,7 +40,7 @@ sudo usermod -aG docker $USER
 sudo apt install make --assume-yes
 git clone https://github.com/stacks-sbtc/sbtc.git
 cd sbtc
-git checkout  immunefi-sbtc-42752
+git checkout immunefi-sbtc-42752
 docker compose -f docker/docker-compose.yml build sbtc-signer-1
 docker compose -f docker/docker-compose.yml build sbtc-signer-2 sbtc-signer-3
 docker compose -f docker/docker-compose.yml build emily-server
