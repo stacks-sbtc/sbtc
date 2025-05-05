@@ -1075,7 +1075,7 @@ async fn update_deposits_is_not_forbidden_for_sidecar(previous_status: Status, n
 
     let create_deposit_body = CreateDepositRequestBody {
         bitcoin_tx_output_index,
-        bitcoin_txid: bitcoin_txid.clone().into(),
+        bitcoin_txid: bitcoin_txid.clone(),
         deposit_script: deposit_script.clone(),
         reclaim_script: reclaim_script.clone(),
         transaction_hex: transaction_hex.clone(),
@@ -1105,8 +1105,8 @@ async fn update_deposits_is_not_forbidden_for_sidecar(previous_status: Status, n
             &testing_configuration,
             UpdateDepositsRequestBody {
                 deposits: vec![DepositUpdate {
-                    bitcoin_tx_output_index: bitcoin_tx_output_index,
-                    bitcoin_txid: bitcoin_txid.clone().into(),
+                    bitcoin_tx_output_index,
+                    bitcoin_txid: bitcoin_txid.clone(),
                     fulfillment,
                     status: previous_status,
                     status_message: "foo".into(),
@@ -1134,8 +1134,8 @@ async fn update_deposits_is_not_forbidden_for_sidecar(previous_status: Status, n
         &user_configuration,
         UpdateDepositsRequestBody {
             deposits: vec![DepositUpdate {
-                bitcoin_tx_output_index: bitcoin_tx_output_index,
-                bitcoin_txid: bitcoin_txid.clone().into(),
+                bitcoin_tx_output_index,
+                bitcoin_txid: bitcoin_txid.clone(),
                 fulfillment,
                 status: new_status,
                 status_message: "foo".into(),

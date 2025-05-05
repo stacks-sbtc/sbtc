@@ -659,11 +659,11 @@ mod tests {
         let event = KeyRotationEvent {
             block_id,
             txid: sbtc::events::StacksTxid(fake::Faker.fake_with_rng(&mut rng)),
-            new_aggregate_pubkey: SECP256K1.generate_keypair(&mut rng).1.into(),
+            new_aggregate_pubkey: SECP256K1.generate_keypair(&mut rng).1,
             new_keys: (0..3)
-                .map(|_| SECP256K1.generate_keypair(&mut rng).1.into())
+                .map(|_| SECP256K1.generate_keypair(&mut rng).1)
                 .collect(),
-            new_address: PrincipalData::Standard(StandardPrincipalData::transient()).into(),
+            new_address: PrincipalData::Standard(StandardPrincipalData::transient()),
             new_signature_threshold: 3,
         };
 

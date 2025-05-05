@@ -432,7 +432,7 @@ impl DepositData {
                 .collect();
 
             let bitcoin_transaction = model::BitcoinTxRef {
-                txid: raw_transaction.txid.into(),
+                txid: raw_transaction.txid,
                 block_hash: bitcoin_block.block_hash,
             };
 

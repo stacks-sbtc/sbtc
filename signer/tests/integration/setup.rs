@@ -1047,7 +1047,7 @@ impl TestSweepSetup2 {
 
         let bitcoin_tx_ref = BitcoinTxRef {
             txid: sweep.tx_info.txid.into(),
-            block_hash: sweep.block_hash.into(),
+            block_hash: sweep.block_hash,
         };
 
         let block = BitcoinBlock {
