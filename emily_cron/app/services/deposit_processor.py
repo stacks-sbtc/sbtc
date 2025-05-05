@@ -1,5 +1,5 @@
 import logging
-from itertools import chain
+from itertools import chain, groupby
 from typing import Iterable
 
 from ..clients import PrivateEmilyAPI, HiroAPI, MempoolAPI
@@ -48,35 +48,47 @@ class DepositProcessor:
 
         logger.info(f"Found {len(rbf_txs)} transactions with RBF replacements")
 
-        # Group by replacement chain
-        rbf_groups = self._group_rbf_transactions(rbf_txs)
+        # Group txs by RBF chain. All txs in a group have the same RBF chain.
+        for rbf_key, group_iter in groupby(rbf_txs, key=lambda tx: "".join(sorted(tx.rbf_txids))):
 
-        # Process each group
-        for group_txids in rbf_groups.values():
-            # Find all transactions in this group
-            group_txs = [tx for tx in enriched_deposits if tx.bitcoin_txid in group_txids]
+            confirmed_txid_in_group: str | None = None
+            unconfirmed_txs_in_group: list[EnrichedDepositInfo] = []
 
-            # Check if any transaction in this group is confirmed
-            confirmed_txs = [tx for tx in group_txs if tx.confirmed_height is not None]
+            # Identify confirmed tx and collect unconfirmed ones
+            for tx in group_iter:
+                if tx.confirmed_height is not None:
+                    # Should ideally only be one confirmed tx per RBF group
+                    if confirmed_txid_in_group is not None:
+                        logger.warning(
+                            f"Multiple confirmed transactions found in RBF group {rbf_key}: "
+                            f"{confirmed_txid_in_group} and {tx.bitcoin_txid}. Using first found."
+                        )
+                    else:
+                        confirmed_txid_in_group = tx.bitcoin_txid
+                else:
+                    unconfirmed_txs_in_group.append(tx)
 
-            if not confirmed_txs:
-                logger.debug(f"No confirmed transactions found for group {group_txids}")
+            if confirmed_txid_in_group is None:
+                logger.debug(f"No confirmed transactions found for RBF group {rbf_key}")
                 continue
 
-            # If we have confirmed transactions, mark all unconfirmed ones as FAILED
-            for tx in group_txs:
-                if tx.confirmed_height is None:
-                    logger.info(
-                        f"Marking RBF'd transaction {tx.bitcoin_txid} as FAILED (replaced by confirmed tx)"
+            logger.info(
+                f"Confirmed transaction {confirmed_txid_in_group} found for RBF group {rbf_key}"
+            )
+            # Mark all collected unconfirmed transactions as FAILED
+            for tx in unconfirmed_txs_in_group:
+                logger.info(
+                    f"Marking RBF'd transaction {tx.bitcoin_txid} as FAILED (replaced by confirmed tx {confirmed_txid_in_group})"
+                )
+                updates.append(
+                    DepositUpdate(
+                        bitcoin_txid=tx.bitcoin_txid,
+                        bitcoin_tx_output_index=tx.bitcoin_tx_output_index,
+                        status=RequestStatus.FAILED.value,
+                        status_message=f"Replaced by confirmed tx {confirmed_txid_in_group}",
                     )
-                    updates.append(
-                        DepositUpdate(
-                            bitcoin_txid=tx.bitcoin_txid,
-                            bitcoin_tx_output_index=tx.bitcoin_tx_output_index,
-                            status=RequestStatus.FAILED.value,
-                            status_message=f"Replaced by confirmed tx {confirmed_txs[0].bitcoin_txid}",
-                        )
-                    )
+                )
+
         return updates
 
     def process_expired_locktime(
@@ -226,65 +238,6 @@ class DepositProcessor:
             logger.info("No deposit updates needed")
 
         logger.info("Deposit status update job completed")
-
-    def _group_rbf_transactions(self, rbf_txs: list[EnrichedDepositInfo]) -> dict[str, set[str]]:
-        """Groups transactions that belong to the same RBF chain.
-
-        An RBF chain consists of an original transaction and all subsequent
-        transactions that attempt to replace it (or replace a replacement).
-        This function takes a list of transactions known to have replacements
-        and identifies these complete chains.
-
-        The core logic involves iterating through the transactions and merging
-        any sets of transaction IDs (txids) that share common members. For example,
-        if Tx A is replaced by Tx B, and Tx B is replaced by Tx C, they form a
-        single chain {A, B, C}. If we later find Tx D replaces Tx B, Tx D is also
-        added to the same chain {A, B, C, D}.
-
-        Args:
-            rbf_txs: A list of enriched deposit information objects, specifically
-                     those where the `rbf_txids` attribute is non-empty.
-
-        Returns:
-            A dictionary where each key is an arbitrary transaction ID from a
-            discovered RBF chain, and the value is a set containing all
-            transaction IDs belonging to that complete RBF chain.
-        """
-        rbf_groups: dict[str, set[str]] = {}
-
-        # First, build groups of related transactions (original + replacements)
-        for tx in rbf_txs:
-            # Create a set of all txids in this RBF chain
-            chain_txids = set(tx.rbf_txids)
-            chain_txids.add(tx.bitcoin_txid)
-
-            # Find all groups that overlap with this chain
-            overlapping_groups = []
-            for group_id, group_txids in rbf_groups.items():
-                if chain_txids.intersection(group_txids):
-                    overlapping_groups.append(group_id)
-
-            if overlapping_groups:
-                # Merge all overlapping groups into the first one
-                primary_group_id = overlapping_groups[0]
-                merged_txids = set(rbf_groups[primary_group_id])
-
-                # Add the current chain
-                merged_txids.update(chain_txids)
-
-                # Merge in all other overlapping groups
-                for group_id in overlapping_groups[1:]:
-                    merged_txids.update(rbf_groups[group_id])
-                    # Remove the merged group
-                    del rbf_groups[group_id]
-
-                # Update the primary group with the merged set
-                rbf_groups[primary_group_id] = merged_txids
-            else:
-                # Create a new group
-                rbf_groups[tx.bitcoin_txid] = chain_txids
-
-        return rbf_groups
 
     def _enrich_deposits(self, deposits: Iterable[DepositInfo]) -> list[EnrichedDepositInfo]:
         """Fetch transaction details and UTXO status, and enrich deposit info.

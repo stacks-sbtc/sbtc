@@ -28,7 +28,7 @@ class TestRbfHelpers(unittest.TestCase):
         txids = _collect_rbf_txids(self.rbf_data["replacements"])
 
         # Expected txids from the fixture
-        expected_txids = {
+        expected_txids = [
             "afe18f246b9624b17b21f2ebf84594bb75b582209d55dfc0b6edb34bfb785c3a",
             "2f1c7f3fcfa444781825491efe38912839ccabec20086767605b947245bbce5f",
             "c1a83eb973b7904224d54003329eb97bf62088c0bd2906640a0a3c005bf65cd3",
@@ -37,21 +37,21 @@ class TestRbfHelpers(unittest.TestCase):
             "99d6fd9c1b3e22f85aabacea66db9cfa959f20f6877f8dc9360627e63f0cdae8",
             "51c79e6dbd6232547d446614d8a573c00e027e9f2690c9dd336b77e6c644fd7d",
             "3ed54d49e84f804b117fca784e43caad15787bbbcd9ce34e3bdecd007b91cf3f",
-        }
+        ]
 
         self.assertEqual(txids, expected_txids)
 
     def test_collect_rbf_txids_empty(self):
         """Test collecting RBF txids from an empty replacement chain."""
         txids = _collect_rbf_txids(self.empty_rbf_data["replacements"])
-        self.assertEqual(txids, set())
+        self.assertEqual(txids, [])
 
     def test_collect_rbf_txids_simple(self):
         """Test collecting RBF txids from a simple replacement chain."""
         simple_data = {"tx": {"txid": "abc123"}, "replaces": []}
 
         txids = _collect_rbf_txids(simple_data)
-        self.assertEqual(txids, {"abc123"})
+        self.assertEqual(txids, ["abc123"])
 
     def test_collect_rbf_txids_nested(self):
         """Test collecting RBF txids from a nested replacement chain."""
@@ -67,7 +67,7 @@ class TestRbfHelpers(unittest.TestCase):
         }
 
         txids = _collect_rbf_txids(nested_data)
-        self.assertEqual(txids, {"parent", "child1", "child2", "grandchild"})
+        self.assertEqual(txids, ["parent", "child1", "child2", "grandchild"])
 
 
 class TestRbfProcessor(unittest.TestCase):
@@ -82,11 +82,15 @@ class TestRbfProcessor(unittest.TestCase):
 
         # Create test deposits
         self.unconfirmed_with_rbf = self._create_mock_deposit(
-            txid="unconfirmed_with_rbf", confirmed_height=None, rbf_txids=["confirmed_replacement"]
+            txid="unconfirmed_with_rbf",
+            confirmed_height=None,
+            rbf_txids=["confirmed_replacement", "unconfirmed_with_rbf"],
         )
 
         self.confirmed_replacement = self._create_mock_deposit(
-            txid="confirmed_replacement", confirmed_height=700000, rbf_txids=[]
+            txid="confirmed_replacement",
+            confirmed_height=700000,
+            rbf_txids=["confirmed_replacement", "unconfirmed_with_rbf"],
         )
 
         self.unconfirmed_no_rbf = self._create_mock_deposit(
@@ -96,19 +100,27 @@ class TestRbfProcessor(unittest.TestCase):
         self.unconfirmed_with_unconfirmed_rbf = self._create_mock_deposit(
             txid="unconfirmed_with_unconfirmed_rbf",
             confirmed_height=None,
-            rbf_txids=["another_unconfirmed"],
+            rbf_txids=["another_unconfirmed", "unconfirmed_with_unconfirmed_rbf"],
         )
 
         self.another_unconfirmed = self._create_mock_deposit(
-            txid="another_unconfirmed", confirmed_height=None, rbf_txids=[]
+            txid="another_unconfirmed",
+            confirmed_height=None,
+            rbf_txids=["another_unconfirmed", "unconfirmed_with_unconfirmed_rbf"],
         )
 
         # Complex RBF chain
-        self.tx1 = self._create_mock_deposit(txid="tx1", confirmed_height=None, rbf_txids=["tx2"])
+        self.tx1 = self._create_mock_deposit(
+            txid="tx1", confirmed_height=None, rbf_txids=["tx3", "tx2", "tx1"]
+        )
 
-        self.tx2 = self._create_mock_deposit(txid="tx2", confirmed_height=None, rbf_txids=["tx3"])
+        self.tx2 = self._create_mock_deposit(
+            txid="tx2", confirmed_height=None, rbf_txids=["tx3", "tx2", "tx1"]
+        )
 
-        self.tx3 = self._create_mock_deposit(txid="tx3", confirmed_height=700000, rbf_txids=[])
+        self.tx3 = self._create_mock_deposit(
+            txid="tx3", confirmed_height=700000, rbf_txids=["tx3", "tx2", "tx1"]
+        )
 
     def _create_mock_deposit(self, txid, confirmed_height, rbf_txids):
         deposit = MagicMock(spec=EnrichedDepositInfo)
@@ -161,34 +173,6 @@ class TestRbfProcessor(unittest.TestCase):
             self.assertEqual(update.status, RequestStatus.FAILED.value)
             self.assertTrue("Replaced by confirmed tx" in update.status_message)
             self.assertTrue("tx3" in update.status_message)
-
-    def test_group_rbf_transactions(self):
-        """Test the _group_rbf_transactions helper method."""
-        # Create deposits with overlapping RBF chains
-        tx_a = self._create_mock_deposit(txid="tx_a", confirmed_height=None, rbf_txids=["tx_b"])
-        tx_b = self._create_mock_deposit(txid="tx_b", confirmed_height=None, rbf_txids=["tx_c"])
-        tx_c = self._create_mock_deposit(txid="tx_c", confirmed_height=700000, rbf_txids=[])
-
-        tx_d = self._create_mock_deposit(txid="tx_d", confirmed_height=None, rbf_txids=["tx_e"])
-        tx_e = self._create_mock_deposit(txid="tx_e", confirmed_height=None, rbf_txids=[])
-
-        # Create a deposit that connects the two chains
-        tx_b_d = self._create_mock_deposit(
-            txid="tx_b_d", confirmed_height=None, rbf_txids=["tx_b", "tx_d"]
-        )
-
-        deposits = [tx_a, tx_b, tx_c, tx_d, tx_e, tx_b_d]
-
-        # Group the transactions
-        groups = self.processor._group_rbf_transactions(deposits)
-
-        # With the fixed implementation, we expect a single group containing all transactions
-        self.assertEqual(len(groups), 1, "Should have one group")
-
-        # The group should contain all txids
-        group_txids = next(iter(groups.values()))
-        expected_txids = {"tx_a", "tx_b", "tx_c", "tx_d", "tx_e", "tx_b_d"}
-        self.assertEqual(group_txids, expected_txids)
 
 
 class TestMempoolRbfApi(unittest.TestCase):
