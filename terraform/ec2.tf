@@ -81,7 +81,7 @@ resource "aws_autoscaling_group" "sbtc_devenv_server_cluster" {
   min_size = 0
   max_size = 32
 
-  desired_capacity     = 1
+  desired_capacity     = 0
   health_check_type    = "EC2"
   termination_policies = ["OldestLaunchTemplate", "NewestInstance"]
   vpc_zone_identifier  = [aws_subnet.main[0].id]
@@ -149,7 +149,7 @@ resource "aws_autoscaling_group" "sbtc_devenv_attacker_cluster" {
   min_size = 0
   max_size = 32
 
-  desired_capacity     = 2
+  desired_capacity     = 0
   health_check_type    = "EC2"
   termination_policies = ["OldestLaunchTemplate", "NewestInstance"]
   vpc_zone_identifier  = [aws_subnet.main[0].id]
