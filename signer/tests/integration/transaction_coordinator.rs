@@ -4374,7 +4374,6 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
     }
 }
 
-
 async fn coordinator_skip_onchain_completed_deposits_inner(deposit_completed: bool) -> bool {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
@@ -4485,17 +4484,20 @@ async fn coordinator_skip_onchain_completed_deposits_inner(deposit_completed: bo
         .state()
         .update_current_signer_set(ctx.config().signer.bootstrap_signing_set.clone());
 
-
     // We want signer with [`signer_kp`] to be the coordinator in this test.
     // Coordinator is choosed based on bitcoin tip hash, so, if coordinator is different from what we want we simply restart test.
 
     let chaintip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
-    let is_coordinator = given_key_is_coordinator(signer_kp.public_key().into(), &chaintip, &ctx.config().signer.bootstrap_signing_set);
+    let is_coordinator = given_key_is_coordinator(
+        signer_kp.public_key().into(),
+        &chaintip,
+        &ctx.config().signer.bootstrap_signing_set,
+    );
 
     if !is_coordinator {
         return false;
     }
-    
+
     let signing_round_max_duration = Duration::from_secs(2);
     let ev = TxCoordinatorEventLoop {
         network: signer_network.spawn(),
@@ -4530,8 +4532,7 @@ async fn coordinator_skip_onchain_completed_deposits_inner(deposit_completed: bo
     ctx.signal(RequestDeciderEvent::NewRequestsHandled.into())
         .expect("failed to signal");
 
-    let network_msg =
-        tokio::time::timeout(signing_round_max_duration, fake_signer.receive()).await;
+    let network_msg = tokio::time::timeout(signing_round_max_duration, fake_signer.receive()).await;
 
     if deposit_completed {
         network_msg.expect_err("expected timeout, got something instead");
