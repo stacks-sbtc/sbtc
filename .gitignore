@@ -41,3 +41,6 @@ __pycache__/
 *.pkrvars.hcl
 
 *.pem
+
+go.mod
+go.sum

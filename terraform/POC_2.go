@@ -2,7 +2,7 @@ package main
 
 import (
         "context"
-        "encoding/base64"
+        "encoding/hex"
         "log"
         "sync"
         "time"
@@ -21,14 +21,24 @@ var (
         semaphore = make(chan struct{}, 12000) // limit concurrency
 )
 
-const privKeyBase64 = "CAESQEFjR2LYnfoJEzpKjpwTeNAWHSnNCpQztR8ePTKUenPcdvQTOHqdfS+qNZIdtYWRnO+40WPoaFpld743Q3XVhpU="
+// const privKeyBase64 = "CAESQEFjR2LYnfoJEzpKjpwTeNAWHSnNCpQztR8ePTKUenPcdvQTOHqdfS+qNZIdtYWRnO+40WPoaFpld743Q3XVhpU="
 
-func getIdentity() (crypto.PrivKey, error) {
-        keyBytes, err := base64.StdEncoding.DecodeString(privKeyBase64)
+// func getIdentity() (crypto.PrivKey, error) {
+//         keyBytes, err := base64.StdEncoding.DecodeString(privKeyBase64)
+//         if err != nil {
+//                 return nil, err
+//         }
+//         return crypto.UnmarshalPrivateKey(keyBytes)
+// }
+
+func nonPeerIdentity() (crypto.PrivKey, error) {
+        raw, err := hex.DecodeString("0000000000000000000000000000000000000000000000000000000000000001")
         if err != nil {
-                return nil, err
+                log.Fatal(err)
         }
-        return crypto.UnmarshalPrivateKey(keyBytes)
+
+        // 2. Unmarshal into a libp2p PrivKey
+        return crypto.UnmarshalSecp256k1PrivateKey(raw)
 }
 
 func connectAndClose(targetAddr ma.Multiaddr, instanceID int, wg *sync.WaitGroup) {
@@ -38,7 +48,7 @@ func connectAndClose(targetAddr ma.Multiaddr, instanceID int, wg *sync.WaitGroup
 
         ctx := context.Background()
 
-        privKey, err := getIdentity()
+        privKey, err := nonPeerIdentity()
         if err != nil {
                 log.Printf("[Instance %d] Failed to get identity: %s", instanceID, err)
                 return
@@ -71,7 +81,7 @@ func connectAndClose(targetAddr ma.Multiaddr, instanceID int, wg *sync.WaitGroup
 }
 
 func main() {
-        target := "/ip4/10.0.2.132/tcp/4122/p2p/16Uiu2HAmJCCQmWYiiQDxD88SGWKiPc6XgXLRKZhu8jMmyzdpQXSV"
+        target := "/ip4/10.0.3.92/tcp/4122/p2p/16Uiu2HAmJCCQmWYiiQDxD88SGWKiPc6XgXLRKZhu8jMmyzdpQXSV"
 
         maddr, err := ma.NewMultiaddr(target)
         if err != nil {
