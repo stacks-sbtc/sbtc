@@ -35,6 +35,13 @@ include_containers = [
     "sbtc-signer-1",
     "sbtc-signer-2",
     "sbtc-signer-3",
+    "stacks-api",
+]
+
+[sources.docker_logs2]
+type = "docker_logs"
+include_containers = [
+    "stacks-node",
 ]
 
 # Reshape the logs produced by the docker source.
@@ -69,4 +76,17 @@ out_of_order_action = "accept"
   codec = "json"
 
   [sinks.loki.labels]
+  docker_image = "{{ docker_image }}"
+
+
+[sinks.loki2]
+type = "loki"
+inputs = [ "docker_logs2"]
+endpoint = "http://loki:3100"
+out_of_order_action = "accept"
+
+  [sinks.loki2.encoding]
+  codec = "text"
+
+  [sinks.loki2.labels]
   docker_image = "{{ docker_image }}"
