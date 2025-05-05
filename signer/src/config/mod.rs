@@ -290,7 +290,7 @@ pub struct SignerConfig {
     pub prometheus_exporter_endpoint: Option<std::net::SocketAddr>,
     /// The public keys of the signer sit during the bootstrapping phase of
     /// the signers.
-    pub bootstrap_signing_set: Vec<PublicKey>,
+    pub bootstrap_signing_set: BTreeSet<PublicKey>,
     /// The number of signatures required for the signers' bootstrapped
     /// multi-sig wallet on Stacks.
     pub bootstrap_signatures_required: u16,
@@ -360,6 +360,12 @@ pub struct SignerConfig {
 impl Validatable for SignerConfig {
     fn validate(&self, cfg: &Settings) -> Result<(), ConfigError> {
         self.p2p.validate(cfg)?;
+
+        if !self.bootstrap_signing_set.contains(&self.public_key()) {
+            let err = SignerConfigError::MissingPubkeyInBootstrapSignerSet;
+            return Err(ConfigError::Message(err.to_string()));
+        }
+
         if self.deployer.is_mainnet() != self.network.is_mainnet() {
             let err = SignerConfigError::NetworkDeployerMismatch;
             return Err(ConfigError::Message(err.to_string()));
@@ -428,19 +434,6 @@ impl Validatable for SignerConfig {
 }
 
 impl SignerConfig {
-    /// Return the bootstrapped signing set from the config. This function
-    /// makes sure that the signing set includes the current signer.
-    pub fn bootstrap_signing_set(&self) -> BTreeSet<PublicKey> {
-        // We add in the current signer into the signing set from the
-        // config just in case it hasn't been included already.
-        let self_public_key = PublicKey::from_private_key(&self.private_key);
-        self.bootstrap_signing_set
-            .iter()
-            .copied()
-            .chain([self_public_key])
-            .collect()
-    }
-
     /// Return the public key of the signer.
     pub fn public_key(&self) -> PublicKey {
         PublicKey::from_private_key(&self.private_key)
@@ -756,15 +749,37 @@ mod tests {
     fn default_config_toml_loads_signer_private_key_config_with_environment() {
         clear_env();
 
-        let new = "a1a6fcf2de80dcde3e0e4251eae8c69adf57b88613b2dcb79332cc325fa439bd";
+        let new = "9bfecf16c9c12792589dd2b843f850d5b89b81a04f8ab91c083bdf6709fbefee01";
         set_var("SIGNER_SIGNER__PRIVATE_KEY", new);
 
         let settings = Settings::new_from_default_config().unwrap();
 
         assert_eq!(
             settings.signer.private_key,
-            PrivateKey::from_str(new).unwrap()
+            PrivateKey::from_str(&new[..64]).unwrap()
         );
+    }
+
+    #[test]
+    fn config_bails_if_pubkey_of_this_signer_not_in_bootstrap_signer_set() {
+        clear_env();
+
+        let new = "a1a6fcf2de80dcde3e0e4251eae8c69adf57b88613b2dcb79332cc325fa439bd";
+        set_var("SIGNER_SIGNER__PRIVATE_KEY", new);
+
+        let error = Settings::new_from_default_config().unwrap_err();
+
+        match error {
+            ConfigError::Message(msg) => {
+                assert_eq!(
+                    msg,
+                    "Bootstrap signer set must contain pubkey of this signer".to_string()
+                );
+            }
+            _ => {
+                panic!("Expected ConfigError::Message, got: {:#?}", error);
+            }
+        }
     }
 
     #[test]
@@ -1122,10 +1137,16 @@ mod tests {
     fn valid_33_byte_private_key_works() {
         clear_env();
 
-        set_var(
-            "SIGNER_SIGNER__PRIVATE_KEY",
-            "a1a6fcf2de80dcde3e0e4251eae8c69adf57b88613b2dcb79332cc325fa439bd01",
-        );
+        let privkey = "a1a6fcf2de80dcde3e0e4251eae8c69adf57b88613b2dcb79332cc325fa439bd01";
+
+        set_var("SIGNER_SIGNER__PRIVATE_KEY", privkey);
+
+        let privkey = PrivateKey::from_str(&privkey[..64]).unwrap();
+        let pubkey = PublicKey::from_private_key(&privkey);
+
+        set_var("SIGNER_SIGNER__BOOTSTRAP_SIGNING_SET", pubkey.to_string());
+        set_var("SIGNER_SIGNER__BOOTSTRAP_SIGNATURES_REQUIRED", "1");
+
         let settings = Settings::new_from_default_config();
         assert!(settings.is_ok());
     }
@@ -1400,7 +1421,7 @@ mod tests {
         let keys = "035249137286c077ccee65ecc43e724b9b9e5a588e3d7f51e3b62f9624c2a49e46,031a4d9f4903da97498945a4e01a5023a1d53bc96ad670bfe03adf8a06c52e6380";
         set_var("SIGNER_SIGNER__BOOTSTRAP_SIGNING_SET", keys);
         let settings = Settings::new_from_default_config().unwrap();
-        let public_keys: Vec<PublicKey> = keys
+        let public_keys = keys
             .split(",")
             .flat_map(secp256k1::PublicKey::from_str)
             .map(PublicKey::from)

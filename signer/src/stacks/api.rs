@@ -9,6 +9,7 @@ use bitcoin::OutPoint;
 use blockstack_lib::burnchains::Txid;
 use blockstack_lib::chainstate::burn::ConsensusHash;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
+use blockstack_lib::chainstate::nakamoto::NakamotoBlockHeader;
 use blockstack_lib::chainstate::stacks::StacksTransaction;
 use blockstack_lib::chainstate::stacks::TokenTransferMemo;
 use blockstack_lib::chainstate::stacks::TransactionPayload;
@@ -322,16 +323,109 @@ impl TenureBlocks {
     /// # Note
     ///
     /// The struct doesn't need to contain all the blocks in a tenure.
+    #[cfg(any(test, feature = "testing"))]
     pub fn into_blocks(self) -> Vec<NakamotoBlock> {
         self.blocks
     }
+}
 
-    /// Return an iterator of Stacks blocks included in this object.
-    pub fn as_stacks_blocks(&self) -> impl Iterator<Item = StacksBlock> + '_ {
-        let bitcoin_anchor = &self.anchor_block_hash;
-        self.blocks
-            .iter()
-            .map(|block| StacksBlock::from_nakamoto_block(block, bitcoin_anchor))
+/// A slimmed down [`NakamotoBlockHeader`]
+#[derive(Debug, Clone, PartialEq)]
+pub struct StacksBlockHeader {
+    /// The total number of StacksBlocks and NakamotoBlocks preceding this
+    /// block in this block's history.
+    pub block_height: StacksBlockHeight,
+    /// The identifier for a block. It is the hash of the this block's
+    /// header hash and the block's consensus hash.
+    pub block_id: StacksBlockId,
+    /// The index block hash of the immediate parent of this block. This is
+    /// the hash of the parent block's hash and consensus hash.
+    pub parent_block_id: StacksBlockId,
+}
+
+impl From<NakamotoBlockHeader> for StacksBlockHeader {
+    fn from(value: NakamotoBlockHeader) -> Self {
+        StacksBlockHeader {
+            block_height: value.chain_length.into(),
+            block_id: value.block_id(),
+            parent_block_id: value.parent_block_id,
+        }
+    }
+}
+
+impl From<TenureBlocks> for TenureBlockHeaders {
+    fn from(value: TenureBlocks) -> Self {
+        let headers = value
+            .blocks
+            .into_iter()
+            .map(|block| StacksBlockHeader::from(block.header))
+            .collect();
+
+        TenureBlockHeaders {
+            headers,
+            anchor_block_hash: value.anchor_block_hash,
+            anchor_block_height: value.anchor_block_height,
+        }
+    }
+}
+
+/// This struct represents a non-empty subset of the Stacks block headers
+/// that were created during a tenure.
+#[derive(Debug)]
+pub struct TenureBlockHeaders {
+    /// The subset of Stacks block headers that of Nakamoto blocks that
+    /// were created during a tenure. This is always non-empty.
+    headers: Vec<StacksBlockHeader>,
+    /// The bitcoin block that this tenure builds off of.
+    pub anchor_block_hash: BitcoinBlockHash,
+    /// The height of the bitcoin block associated with the above block
+    /// hash.
+    pub anchor_block_height: BitcoinBlockHeight,
+}
+
+impl TenureBlockHeaders {
+    /// Get all the headers contained in this object.
+    ///
+    /// # Note
+    ///
+    /// * The returned slice is nonempty.
+    /// * The struct doesn't need to contain all the headers of stacks
+    ///   blocks in a tenure.
+    pub fn headers(&self) -> &[StacksBlockHeader] {
+        &self.headers
+    }
+}
+
+/// An iterator over [`StacksBlock`]s
+pub struct StacksBlockIter {
+    /// The underlying iterator
+    iter: std::vec::IntoIter<StacksBlockHeader>,
+    /// The bitcoin block that this tenure builds off of.
+    anchor_block_hash: BitcoinBlockHash,
+}
+
+impl Iterator for StacksBlockIter {
+    type Item = StacksBlock;
+    fn next(&mut self) -> Option<Self::Item> {
+        let header = self.iter.next()?;
+        Some(StacksBlock {
+            block_hash: header.block_id.into(),
+            block_height: header.block_height,
+            parent_hash: header.parent_block_id.into(),
+            bitcoin_anchor: self.anchor_block_hash,
+        })
+    }
+}
+
+impl std::iter::IntoIterator for TenureBlockHeaders {
+    type Item = StacksBlock;
+    type IntoIter = StacksBlockIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        StacksBlockIter {
+            iter: self.headers.into_iter(),
+            anchor_block_hash: self.anchor_block_hash,
+        }
     }
 }
 
@@ -1118,24 +1212,28 @@ impl StacksClient {
     }
 }
 
-/// Fetch all Nakamoto blocks that are not already stored in the
-/// datastore.
+/// Fetch all Nakamoto block headers that are not already stored in the
+/// datastore, starting at the given [`StacksBlockId`].
+///
+/// This function returns the headers sorted in ascending order. So entries
+/// at lower indices correspond to Stacks block with lower block height.
 pub async fn fetch_unknown_ancestors<S, D>(
     stacks: &S,
     db: &D,
     block_id: StacksBlockId,
-) -> Result<Vec<TenureBlocks>, Error>
+) -> Result<Vec<TenureBlockHeaders>, Error>
 where
     S: StacksInteract,
     D: DbRead + Send + Sync,
 {
-    let mut blocks = vec![stacks.get_tenure(block_id).await?];
+    let starting_tenure = stacks.get_tenure(block_id).await?;
+    let mut headers: Vec<TenureBlockHeaders> = vec![starting_tenure.into()];
     let pox_info = stacks.get_pox_info().await?;
     let nakamoto_start_height = pox_info
         .nakamoto_start_height()
         .ok_or(Error::MissingNakamotoStartHeight)?;
 
-    while let Some(tenure) = blocks.last() {
+    while let Some(tenure) = headers.last() {
         // We won't get anymore Nakamoto blocks before this point, so
         // time to stop.
         if tenure.anchor_block_height <= nakamoto_start_height {
@@ -1148,20 +1246,21 @@ where
         }
         // Tenure blocks are always non-empty, and this invariant is upheld
         // by the type. So no need to worry about the early break.
-        let Some(block) = tenure.blocks().last() else {
+        let Some(header) = tenure.headers().last() else {
             break;
         };
         // We've seen this parent already, so time to stop.
-        if db.stacks_block_exists(block.header.parent_block_id).await? {
+        if db.stacks_block_exists(header.parent_block_id).await? {
             tracing::debug!("parent block known in the database");
             break;
         }
         // There are more blocks to fetch, so let's get them.
-        let tenure_blocks = stacks.get_tenure(block.header.parent_block_id).await?;
-        blocks.push(tenure_blocks);
+        let tenure_blocks = stacks.get_tenure(header.parent_block_id).await?;
+        headers.push(tenure_blocks.into());
     }
 
-    Ok(blocks)
+    headers.reverse();
+    Ok(headers)
 }
 
 /// A deserializer for Clarity's [`Value`] type that deserializes a hex-encoded
@@ -1666,8 +1765,8 @@ mod tests {
 
         let blocks = tenures.unwrap();
         let headers = blocks
-            .iter()
-            .flat_map(TenureBlocks::as_stacks_blocks)
+            .into_iter()
+            .flat_map(TenureBlockHeaders::into_iter)
             .collect::<Vec<_>>();
         db.write_stacks_block_headers(headers).await.unwrap();
 
