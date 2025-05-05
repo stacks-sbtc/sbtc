@@ -35,8 +35,9 @@ sudo groupadd docker
 # 2. Add your user to it
 sudo usermod -aG docker $USER
 newgrp docker
-
-sudo apt-get install --assume-yes libclang-dev make
+# This is for compiling the signer binary with cargo, which we do later when 
+# doing ./signers.sh demo
+sudo apt-get install --assume-yes libclang-dev make build-essential libssl-dev pkg-config
 
 git clone https://github.com/stacks-sbtc/sbtc.git
 cd sbtc
@@ -48,6 +49,10 @@ docker compose -f docker/docker-compose.yml build emily-aws-setup
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 . "$HOME/.cargo/env"
 make devenv-up
+```
+After you are in nakamoto, do:
+```bash
+./signers.sh demo
 ```
 
 On the attacking servers do
