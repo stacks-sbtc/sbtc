@@ -23,7 +23,7 @@ install-py:
 install-pnpm:
 	pnpm --recursive install
 
-install: install-pnpm
+install: install-py install-pnpm
 
 build: blocklist-client-codegen emily-client-codegen contracts
 	cargo $(CARGO_FLAGS) build --all-targets $(CARGO_EXCLUDES) ${CARGO_BUILD_ARGS}
