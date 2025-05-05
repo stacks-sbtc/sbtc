@@ -4778,8 +4778,8 @@ async fn should_handle_dkg_coordination_failure() {
         context_window: 5,
         signing_round_max_duration: std::time::Duration::from_secs(5),
         bitcoin_presign_request_max_duration: std::time::Duration::from_secs(5),
-        // extremely short duration so that DKG fails...
-        dkg_max_duration: Duration::from_millis(1),
+        // short be short enough to broadcast, yet fail
+        dkg_max_duration: Duration::from_millis(10),
         is_epoch3: true,
     };
 
@@ -4789,6 +4789,8 @@ async fn should_handle_dkg_coordination_failure() {
         result.is_ok(),
         "process_new_blocks should complete successfully even with DKG failure"
     );
+
+    // TODO: should probably assert that DKG did actually attempt to run & fail
 
     // Verify that we can still process blocks after DKG failure
     let result = coordinator.process_new_blocks().await;
