@@ -103,7 +103,7 @@ resource "aws_launch_template" "sbtc_devenv_immunefi_attacker" {
   name          = "sbtc-immunefi-attacker-launch-template"
   description   = "The launch template for sbtc protocol attacker applications"
   image_id      = data.aws_ami.ubuntu_noble.id
-  instance_type = "c7i.2xlarge"
+  instance_type = "m7i.2xlarge"
   ebs_optimized = true
   key_name      = aws_key_pair.sbtc_ec2.key_name
 
@@ -149,7 +149,7 @@ resource "aws_autoscaling_group" "sbtc_devenv_attacker_cluster" {
   min_size = 0
   max_size = 32
 
-  desired_capacity     = 0
+  desired_capacity     = 2
   health_check_type    = "EC2"
   termination_policies = ["OldestLaunchTemplate", "NewestInstance"]
   vpc_zone_identifier  = [aws_subnet.main[0].id]
