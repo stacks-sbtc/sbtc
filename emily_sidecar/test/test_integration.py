@@ -6,10 +6,11 @@ import requests
 from fastapi.testclient import TestClient
 
 from app import logging_config, settings
-from app.main import app, headers
-
 
 logging_config.silence_logging()
+
+from app.main import app, headers
+
 
 WIPE_URL = f"{settings.EMILY_ENDPOINT}/testing/wipe"
 DEPOSITS_URL = f"{settings.EMILY_ENDPOINT}/deposit_private"
