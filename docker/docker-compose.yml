@@ -56,7 +56,7 @@ x-sbtc-signer: &sbtc-signer
   cpus: 2
   mem_limit: 4gb
   environment: &sbtc-signer-environment
-    RUST_LOG: debug
+    RUST_LOG: info,signer=debug
     SIGNER_SIGNER__P2P__LISTEN_ON: tcp://0.0.0.0:4122
   volumes:
     - ./sbtc/signer/signer-config.toml:/signer-config.toml
