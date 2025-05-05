@@ -4360,6 +4360,22 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
 #[test_case(false; "deposit not completed")]
 #[tokio::test]
 async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
+    // We use this loop for just one purpose:
+    // Restart the test if was chosen different coordinator from one we want.
+    // It is hacky and not so nice, but I didn't find a nice way to grant necessary signer
+    // a coordinator role.
+    // In terms of performance it is not a problem, because if we chose wrong coordinator we restart pretty fast, and,
+    // probability of chosing correct coordinator is 50%.
+    loop {
+        let need_break = coordinator_skip_onchain_completed_deposits_inner(deposit_completed).await;
+        if need_break {
+            break;
+        }
+    }
+}
+
+
+async fn coordinator_skip_onchain_completed_deposits_inner(deposit_completed: bool) -> bool {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let db = testing::storage::new_test_database().await;
@@ -4469,6 +4485,17 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
         .state()
         .update_current_signer_set(ctx.config().signer.bootstrap_signing_set.clone());
 
+
+    // We want signer with [`signer_kp`] to be the coordinator in this test.
+    // Coordinator is choosed based on bitcoin tip hash, so, if coordinator is different from what we want we simply restart test.
+
+    let chaintip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
+    let is_coordinator = given_key_is_coordinator(signer_kp.public_key().into(), &chaintip, &ctx.config().signer.bootstrap_signing_set);
+
+    if !is_coordinator {
+        return false;
+    }
+    
     let signing_round_max_duration = Duration::from_secs(2);
     let ev = TxCoordinatorEventLoop {
         network: signer_network.spawn(),
@@ -4504,7 +4531,7 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
         .expect("failed to signal");
 
     let network_msg =
-        tokio::time::timeout(Duration::from_millis(2500), fake_signer.receive()).await;
+        tokio::time::timeout(signing_round_max_duration, fake_signer.receive()).await;
 
     if deposit_completed {
         network_msg.expect_err("expected timeout, got something instead");
@@ -4517,6 +4544,7 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
     }
 
     testing::storage::drop_db(db).await;
+    return true;
 }
 
 /// Module containing a test suite and helpers specific to
