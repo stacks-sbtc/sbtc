@@ -34,10 +34,10 @@ sudo groupadd docker
 
 # 2. Add your user to it
 sudo usermod -aG docker $USER
+newgrp docker
 
-# 3. Log out and back in (or run `newgrp docker`) so the group change takes effect
+sudo apt-get install --assume-yes libclang-dev make
 
-sudo apt install --assume-yes make
 git clone https://github.com/stacks-sbtc/sbtc.git
 cd sbtc
 git checkout immunefi-sbtc-42752
@@ -46,6 +46,7 @@ docker compose -f docker/docker-compose.yml build sbtc-signer-2 sbtc-signer-3
 docker compose -f docker/docker-compose.yml build emily-server
 docker compose -f docker/docker-compose.yml build emily-aws-setup
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+. "$HOME/.cargo/env"
 make devenv-up
 ```
 
