@@ -32,10 +32,11 @@ The following are the developer tools that you should install on your local mach
 
 - **[Cargo](https://doc.rust-lang.org/cargo/)** - [Installation Guide](https://doc.rust-lang.org/cargo/getting-started/installation.html) - Builds rust packages.
 - **[Cargo-lambda](https://www.cargo-lambda.info/)** - [Installation Guide](https://www.cargo-lambda.info/guide/getting-started.html) - Compile the package for AWS Lambda.
-- **[pnpm](https://pnpm.io)** - [Installation guide](https://pnpm.io/installation) - Manages node packages
+- **[pnpm](https://pnpm.io)** - [Installation guide](https://pnpm.io/installation) - Manages node packages.
 - **[Make](https://www.gnu.org/software/make/)** - Development task runner; natively present on nearly every system.
-- **[Docker](https://docs.docker.com/manuals/)** - [Installation Guide](https://docs.docker.com/desktop/). This is used for running integration tests.
-- **[protoc](https://github.com/protocolbuffers/protobuf)** - [Installation Guide](https://grpc.io/docs/protoc-installation/). Compiles protobuf files.
+- **[Docker](https://docs.docker.com/manuals/)** - [Installation Guide](https://docs.docker.com/desktop/) - This is used for running integration tests.
+- **[protoc](https://github.com/protocolbuffers/protobuf)** - [Installation Guide](https://grpc.io/docs/protoc-installation/) - Compiles protobuf files.
+- **[uv](https://docs.astral.sh/uv/)** - [Installation Guide](https://docs.astral.sh/uv/getting-started/installation/) - Manages python packages.
 
 #### Developer shell through `nix`
 
@@ -57,7 +58,8 @@ echo "\n--- sBTC tool versions ---" \
     && cargo --version \
     && cargo lambda --version \
     && echo "pnpm $(pnpm --version)" \
-    && make --version | head -n 1
+    && make --version | head -n 1 \
+    && uv --version
 ```
 
 Below is the output on a machine that is able to build and run all the sources and tests.
@@ -68,6 +70,7 @@ cargo 1.86.0 (adf9b6ad1 2025-02-28)
 cargo-lambda 1.2.1 (12f9b61 2024-04-05Z)
 pnpm 9.1.0
 GNU Make 3.81
+uv 0.6.3
 ```
 
 ### Building

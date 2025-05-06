@@ -41,7 +41,7 @@ class PrivateEmilyAPI(PublicEmilyAPI):
             return []
 
         return cls.put(
-            "/deposit",
+            "/deposit_private",
             json_data={"deposits": [asdict_camel(update) for update in updates]},
             headers=cls.HEADERS,
             ignore_errors=True,

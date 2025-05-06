@@ -282,7 +282,7 @@ async fn deposit_flow() {
                     // We may get queried for unrelated txids if Emily state
                     // was not reset; returning an error will ignore those
                     // deposit requests (as desired).
-                    Err(Error::BitcoinTxMissing(txid.clone(), None))
+                    Err(Error::BitcoinTxMissing(*txid, None))
                 };
                 Box::pin(async move { res })
             });
@@ -302,7 +302,7 @@ async fn deposit_flow() {
                         // We may get queried for unrelated txids if Emily state
                         // was not reset; returning an error will ignore those
                         // deposit requests (as desired).
-                        Err(Error::BitcoinTxMissing(txid.clone(), None))
+                        Err(Error::BitcoinTxMissing(*txid, None))
                     };
                     Box::pin(async move { res })
                 });
@@ -404,7 +404,7 @@ async fn deposit_flow() {
     assert!(
         context
             .get_storage()
-            .get_pending_deposit_requests(&chain_tip, context_window as u16, &signer_public_key)
+            .get_pending_deposit_requests(&chain_tip, context_window, &signer_public_key)
             .await
             .unwrap()
             .is_empty()
@@ -417,7 +417,7 @@ async fn deposit_flow() {
 
     // Wake up block observer to process the new block
     block_observer_stream_tx
-        .send(Ok(deposit_block_hash.into()))
+        .send(Ok(deposit_block_hash))
         .await
         .unwrap();
 
@@ -438,7 +438,7 @@ async fn deposit_flow() {
     assert!(
         !context
             .get_storage()
-            .get_pending_deposit_requests(&deposit_block, context_window as u16, &signer_public_key)
+            .get_pending_deposit_requests(&deposit_block, context_window, &signer_public_key)
             .await
             .unwrap()
             .is_empty()
@@ -462,7 +462,7 @@ async fn deposit_flow() {
             .write_deposit_signer_decision(&DepositSigner {
                 txid: deposit_request.outpoint.txid.into(),
                 output_index: deposit_request.outpoint.vout,
-                signer_pub_key: signer_pub_key.clone(),
+                signer_pub_key: *signer_pub_key,
                 can_accept: true,
                 can_sign: true,
             })
@@ -708,7 +708,7 @@ async fn test_get_deposits_returns_pending_and_accepted() {
         })
         .collect();
 
-    deposit_api::update_deposits(
+    deposit_api::update_deposits_signer(
         emily_client.config(),
         UpdateDepositsRequestBody { deposits },
     )
