@@ -4790,7 +4790,12 @@ async fn should_handle_dkg_coordination_failure() {
         "process_new_blocks should complete successfully even with DKG failure"
     );
 
-    // TODO: should probably assert that DKG did actually attempt to run & fail
+    // Check if DKG shares exist
+    let dkg_shares = storage.get_latest_encrypted_dkg_shares().await.unwrap();
+    assert!(
+        dkg_shares.is_none(),
+        "DKG shares should not exist since DKG failed to complete due to timeout"
+    );
 
     // Verify that we can still process blocks after DKG failure
     let result = coordinator.process_new_blocks().await;
