@@ -34,8 +34,8 @@ The following are the developer tools that you should install on your local mach
 - **[Cargo-lambda](https://www.cargo-lambda.info/)** - [Installation Guide](https://www.cargo-lambda.info/guide/getting-started.html) - Compile the package for AWS Lambda.
 - **[pnpm](https://pnpm.io)** - [Installation guide](https://pnpm.io/installation) - Manages node packages.
 - **[Make](https://www.gnu.org/software/make/)** - Development task runner; natively present on nearly every system.
-- **[Docker](https://docs.docker.com/manuals/)** - [Installation Guide](https://docs.docker.com/desktop/). This is used for running integration tests.
-- **[protoc](https://github.com/protocolbuffers/protobuf)** - [Installation Guide](https://grpc.io/docs/protoc-installation/). Compiles protobuf files.
+- **[Docker](https://docs.docker.com/manuals/)** - [Installation Guide](https://docs.docker.com/desktop/) - This is used for running integration tests.
+- **[protoc](https://github.com/protocolbuffers/protobuf)** - [Installation Guide](https://grpc.io/docs/protoc-installation/) - Compiles protobuf files.
 - **[uv](https://docs.astral.sh/uv/)** - [Installation Guide](https://docs.astral.sh/uv/getting-started/installation/) - Manages python packages.
 
 #### Developer shell through `nix`

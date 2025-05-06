@@ -729,9 +729,7 @@ mod tests {
             .with_stacks_client(test_harness.clone())
             .with_emily_client(test_harness.clone())
             .with_bitcoin_client(test_harness.clone())
-            .modify_settings(|settings| {
-                settings.signer.sbtc_bitcoin_start_height = min_height.map(Into::into)
-            })
+            .modify_settings(|settings| settings.signer.sbtc_bitcoin_start_height = min_height)
             .build();
 
         // There must be at least one signal receiver alive when the block observer
@@ -869,9 +867,7 @@ mod tests {
             .with_stacks_client(test_harness.clone())
             .with_emily_client(test_harness.clone())
             .with_bitcoin_client(test_harness.clone())
-            .modify_settings(|settings| {
-                settings.signer.sbtc_bitcoin_start_height = min_height.map(Into::into)
-            })
+            .modify_settings(|settings| settings.signer.sbtc_bitcoin_start_height = min_height)
             .build();
 
         let block_observer = BlockObserver {
@@ -956,9 +952,7 @@ mod tests {
             .with_stacks_client(test_harness.clone())
             .with_emily_client(test_harness.clone())
             .with_bitcoin_client(test_harness.clone())
-            .modify_settings(|settings| {
-                settings.signer.sbtc_bitcoin_start_height = min_height.map(Into::into)
-            })
+            .modify_settings(|settings| settings.signer.sbtc_bitcoin_start_height = min_height)
             .build();
 
         let block_observer = BlockObserver {
@@ -971,13 +965,12 @@ mod tests {
         let storage = storage.lock().await;
         assert_eq!(storage.deposit_requests.len(), 1);
         let db_outpoint: (BitcoinTxId, u32) = (tx_setup0.tx.compute_txid().into(), 0);
-        assert!(storage.deposit_requests.get(&db_outpoint).is_some());
+        assert!(storage.deposit_requests.contains_key(&db_outpoint));
 
         assert!(
             storage
                 .bitcoin_transactions_to_blocks
-                .get(&db_outpoint.0)
-                .is_some()
+                .contains_key(&db_outpoint.0)
         );
     }
 

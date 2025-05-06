@@ -127,7 +127,7 @@ impl TestRotateKeySetup {
     pub async fn store_rotate_keys(&self, db: &PgStore) {
         let aggregate_key: PublicKey = self.aggregate_key();
         let address = StacksPrincipal::from(clarity::vm::types::PrincipalData::from(
-            self.wallet.address().clone(),
+            *self.wallet.address(),
         ));
         let rotate_key_tx = KeyRotationEvent {
             address,
@@ -168,7 +168,7 @@ fn make_rotate_key(setup: &TestRotateKeySetup) -> (RotateKeysV1, ReqContext) {
 #[tokio::test]
 async fn rotate_key_validation_happy_path() {
     // Normal: preamble
-    let mut db = testing::storage::new_test_database().await;
+    let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
 
     let test_model_params = testing::storage::model::Params {
@@ -180,7 +180,7 @@ async fn rotate_key_validation_happy_path() {
         consecutive_blocks: false,
     };
     let test_data = TestData::generate(&mut rng, &[], &test_model_params);
-    test_data.write_to(&mut db).await;
+    test_data.write_to(&db).await;
 
     let ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -218,7 +218,7 @@ async fn rotate_key_validation_happy_path() {
 #[tokio::test]
 async fn rotate_key_validation_no_dkg() {
     // Normal: preamble
-    let mut db = testing::storage::new_test_database().await;
+    let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
 
     let test_model_params = testing::storage::model::Params {
@@ -230,7 +230,7 @@ async fn rotate_key_validation_no_dkg() {
         consecutive_blocks: false,
     };
     let test_data = TestData::generate(&mut rng, &[], &test_model_params);
-    test_data.write_to(&mut db).await;
+    test_data.write_to(&db).await;
 
     let ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -256,7 +256,7 @@ async fn rotate_key_validation_no_dkg() {
 #[tokio::test]
 async fn rotate_key_validation_wrong_deployer() {
     // Normal: preamble
-    let mut db = testing::storage::new_test_database().await;
+    let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
 
     let test_model_params = testing::storage::model::Params {
@@ -268,7 +268,7 @@ async fn rotate_key_validation_wrong_deployer() {
         consecutive_blocks: false,
     };
     let test_data = TestData::generate(&mut rng, &[], &test_model_params);
-    test_data.write_to(&mut db).await;
+    test_data.write_to(&db).await;
 
     let ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -300,7 +300,7 @@ async fn rotate_key_validation_wrong_deployer() {
 #[tokio::test]
 async fn rotate_key_validation_wrong_signing_set() {
     // Normal: preamble
-    let mut db = testing::storage::new_test_database().await;
+    let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
 
     let test_model_params = testing::storage::model::Params {
@@ -312,7 +312,7 @@ async fn rotate_key_validation_wrong_signing_set() {
         consecutive_blocks: false,
     };
     let test_data = TestData::generate(&mut rng, &[], &test_model_params);
-    test_data.write_to(&mut db).await;
+    test_data.write_to(&db).await;
 
     let ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -350,7 +350,7 @@ async fn rotate_key_validation_wrong_signing_set() {
 #[tokio::test]
 async fn rotate_key_validation_wrong_aggregate_key() {
     // Normal: preamble
-    let mut db = testing::storage::new_test_database().await;
+    let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
 
     let test_model_params = testing::storage::model::Params {
@@ -362,7 +362,7 @@ async fn rotate_key_validation_wrong_aggregate_key() {
         consecutive_blocks: false,
     };
     let test_data = TestData::generate(&mut rng, &[], &test_model_params);
-    test_data.write_to(&mut db).await;
+    test_data.write_to(&db).await;
 
     let ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -400,7 +400,7 @@ async fn rotate_key_validation_wrong_aggregate_key() {
 #[tokio::test]
 async fn rotate_key_validation_wrong_signatures_required() {
     // Normal: preamble
-    let mut db = testing::storage::new_test_database().await;
+    let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
 
     let test_model_params = testing::storage::model::Params {
@@ -412,7 +412,7 @@ async fn rotate_key_validation_wrong_signatures_required() {
         consecutive_blocks: false,
     };
     let test_data = TestData::generate(&mut rng, &[], &test_model_params);
-    test_data.write_to(&mut db).await;
+    test_data.write_to(&db).await;
 
     let ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -455,7 +455,7 @@ async fn rotate_key_validation_wrong_signatures_required() {
 #[tokio::test]
 async fn rotate_key_validation_replay() {
     // Normal: preamble
-    let mut db = testing::storage::new_test_database().await;
+    let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
 
     let test_model_params = testing::storage::model::Params {
@@ -467,7 +467,7 @@ async fn rotate_key_validation_replay() {
         consecutive_blocks: false,
     };
     let test_data = TestData::generate(&mut rng, &[], &test_model_params);
-    test_data.write_to(&mut db).await;
+    test_data.write_to(&db).await;
 
     let ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -506,9 +506,9 @@ async fn rotate_key_validation_replay() {
         consecutive_blocks: false,
     };
     let test_data = TestData::generate(&mut rng, &[], &test_model_params);
-    test_data.write_to(&mut db).await;
+    test_data.write_to(&db).await;
 
-    let mut req_ctx_fork = req_ctx.clone();
+    let mut req_ctx_fork = req_ctx;
     req_ctx_fork.chain_tip.block_hash = test_data.bitcoin_blocks[0].block_hash;
     req_ctx_fork.chain_tip.block_height = test_data.bitcoin_blocks[0].block_height;
 
@@ -520,7 +520,7 @@ async fn rotate_key_validation_replay() {
 #[tokio::test]
 async fn rotate_key_validation_not_verfied() {
     // Normal: preamble
-    let mut db = testing::storage::new_test_database().await;
+    let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
 
     let test_model_params = testing::storage::model::Params {
@@ -532,7 +532,7 @@ async fn rotate_key_validation_not_verfied() {
         consecutive_blocks: false,
     };
     let test_data = TestData::generate(&mut rng, &[], &test_model_params);
-    test_data.write_to(&mut db).await;
+    test_data.write_to(&db).await;
 
     let ctx = TestContext::builder()
         .with_storage(db.clone())
