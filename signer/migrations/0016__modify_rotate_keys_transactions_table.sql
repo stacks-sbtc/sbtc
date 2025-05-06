@@ -19,3 +19,12 @@ WHERE sbtc_signer.rotate_keys_transactions.txid = bht.txid;
 -- Make the new column `NOT NULL` now that they should all have a value.
 ALTER TABLE sbtc_signer.rotate_keys_transactions
     ALTER COLUMN block_hash SET NOT NULL;
+
+ -- The existing primary key is on txid, but now the block hash needs to be
+ -- part of the primary key.
+ALTER TABLE sbtc_signer.rotate_keys_transactions
+  DROP CONSTRAINT rotate_keys_transactions_pkey;
+
+-- Add the new composite primary key
+ALTER TABLE sbtc_signer.rotate_keys_transactions
+  ADD PRIMARY KEY (txid, block_hash);
