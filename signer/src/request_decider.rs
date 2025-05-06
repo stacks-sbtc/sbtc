@@ -551,6 +551,7 @@ mod tests {
     use crate::testing;
     use crate::testing::context::*;
 
+    #[allow(clippy::type_complexity)]
     fn test_environment() -> testing::request_decider::TestEnvironment<
         TestContext<
             SharedStore,

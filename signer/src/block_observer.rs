@@ -35,8 +35,7 @@ use crate::metrics::BITCOIN_BLOCKCHAIN;
 use crate::metrics::Metrics;
 use crate::stacks::api::GetNakamotoStartHeight as _;
 use crate::stacks::api::StacksInteract;
-use crate::stacks::api::TenureBlocks;
-use crate::storage;
+use crate::stacks::api::TenureBlockHeaders;
 use crate::storage::DbRead;
 use crate::storage::DbWrite;
 use crate::storage::model;
@@ -45,7 +44,6 @@ use bitcoin::Amount;
 use bitcoin::BlockHash;
 use bitcoin::ScriptBuf;
 use bitcoin::Transaction;
-use bitcoin::hashes::Hash as _;
 use futures::stream::Stream;
 use futures::stream::StreamExt;
 use sbtc::deposits::CreateDepositRequest;
@@ -239,10 +237,9 @@ impl<C: Context, B> BlockObserver<C, B> {
             self.process_bitcoin_blocks_until(deposit.tx_info.block_hash)
                 .await?;
 
-            let tx = model::Transaction {
-                txid: deposit.tx_info.txid.to_byte_array(),
-                tx_type: model::TransactionType::DepositRequest,
-                block_hash: deposit.tx_info.block_hash.to_byte_array(),
+            let tx = model::BitcoinTxRef {
+                txid: deposit.tx_info.txid.into(),
+                block_hash: deposit.tx_info.block_hash.into(),
             };
 
             deposit_requests.push(model::DepositRequest::from(deposit));
@@ -383,17 +380,23 @@ impl<C: Context, B> BlockObserver<C, B> {
     async fn process_stacks_blocks(&self) -> Result<(), Error> {
         tracing::info!("processing stacks block");
         let stacks_client = self.context.get_stacks_client();
+        let db = self.context.get_storage_mut();
         let tenure_info = stacks_client.get_tenure_info().await?;
 
         tracing::debug!("fetching unknown ancestral blocks from stacks-core");
-        let stacks_blocks = crate::stacks::api::fetch_unknown_ancestors(
+        let stacks_block_headers = crate::stacks::api::fetch_unknown_ancestors(
             &stacks_client,
-            &self.context.get_storage(),
+            &db,
             tenure_info.tip_block_id,
         )
         .await?;
 
-        self.write_stacks_blocks(&stacks_blocks).await?;
+        let headers = stacks_block_headers
+            .into_iter()
+            .flat_map(TenureBlockHeaders::into_iter)
+            .collect::<Vec<_>>();
+
+        db.write_stacks_block_headers(headers).await?;
 
         tracing::debug!("finished processing stacks block");
         Ok(())
@@ -455,18 +458,10 @@ impl<C: Context, B> BlockObserver<C, B> {
                 .await?
                 .ok_or(Error::BitcoinTxMissing(txid, None))?;
 
-            // sBTC transactions have as first txin a signers spendable output
-            let tx_type = if tx_info.is_signer_created(&signer_script_pubkeys) {
-                model::TransactionType::SbtcTransaction
-            } else {
-                model::TransactionType::Donation
-            };
-
             let txid = tx.compute_txid();
-            sbtc_txs.push(model::Transaction {
-                txid: txid.to_byte_array(),
-                tx_type,
-                block_hash: block_hash.to_byte_array(),
+            sbtc_txs.push(model::BitcoinTxRef {
+                txid: txid.into(),
+                block_hash: block_hash.into(),
             });
 
             for prevout in tx_info.to_inputs(&signer_script_pubkeys) {
@@ -491,30 +486,6 @@ impl<C: Context, B> BlockObserver<C, B> {
 
         // Write these transactions into storage.
         db.write_bitcoin_transactions(sbtc_txs).await?;
-        Ok(())
-    }
-
-    /// Write the given stacks blocks to the database.
-    ///
-    /// This function also extracts sBTC Stacks transactions from the given
-    /// blocks and stores them into the database.
-    async fn write_stacks_blocks(&self, tenures: &[TenureBlocks]) -> Result<(), Error> {
-        let deployer = &self.context.config().signer.deployer;
-        let txs = tenures
-            .iter()
-            .flat_map(|tenure| {
-                storage::postgres::extract_relevant_transactions(tenure.blocks(), deployer)
-            })
-            .collect::<Vec<_>>();
-
-        let headers = tenures
-            .iter()
-            .flat_map(TenureBlocks::as_stacks_blocks)
-            .collect::<Vec<_>>();
-
-        let storage = self.context.get_storage_mut();
-        storage.write_stacks_block_headers(headers).await?;
-        storage.write_stacks_transactions(txs).await?;
         Ok(())
     }
 
@@ -718,7 +689,7 @@ where
                 let signer_set = shares.signer_set_public_keys.into_iter().collect();
                 Ok((Some(shares.aggregate_key), signer_set))
             }
-            None => Ok((None, context.config().signer.bootstrap_signing_set())),
+            None => Ok((None, context.config().signer.bootstrap_signing_set.clone())),
         },
     }
 }
@@ -728,6 +699,7 @@ mod tests {
     use bitcoin::Amount;
     use bitcoin::BlockHash;
     use bitcoin::TxOut;
+    use bitcoin::hashes::Hash as _;
     use fake::Dummy;
     use fake::Fake;
     use model::BitcoinTxId;
@@ -993,21 +965,12 @@ mod tests {
         let storage = storage.lock().await;
         assert_eq!(storage.deposit_requests.len(), 1);
         let db_outpoint: (BitcoinTxId, u32) = (tx_setup0.tx.compute_txid().into(), 0);
-        assert!(storage.deposit_requests.get(&db_outpoint).is_some());
+        assert!(storage.deposit_requests.contains_key(&db_outpoint));
 
         assert!(
             storage
                 .bitcoin_transactions_to_blocks
-                .get(&db_outpoint.0)
-                .is_some()
-        );
-        assert_eq!(
-            storage
-                .raw_transactions
-                .get(db_outpoint.0.as_byte_array())
-                .unwrap()
-                .tx_type,
-            model::TransactionType::DepositRequest
+                .contains_key(&db_outpoint.0)
         );
     }
 
@@ -1047,7 +1010,7 @@ mod tests {
             signature_share_threshold: 1,
             dkg_shares_status: DkgSharesStatus::Unverified,
             started_at_bitcoin_block_hash: block_hash.into(),
-            started_at_bitcoin_block_height: 1,
+            started_at_bitcoin_block_height: 1u64.into(),
         };
         storage.write_encrypted_dkg_shares(&shares).await.unwrap();
 

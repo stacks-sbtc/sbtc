@@ -554,12 +554,10 @@ class TestDepositProcessor(TestDepositProcessorBase):
     @patch("app.clients.PrivateEmilyAPI.fetch_deposits")
     @patch("app.clients.PrivateEmilyAPI.update_deposits")
     @patch("app.clients.MempoolAPI.get_tip_height")
-    @patch("app.clients.HiroAPI.get_stacks_block")
     @patch("app.services.deposit_processor.DepositProcessor._enrich_deposits")
     def test_update_deposits_workflow_with_failures(
         self,
         mock_enrich,  # Order matters
-        mock_stacks_block,
         mock_btc_tip_height,
         mock_update_deposits,
         mock_fetch_deposits,
@@ -567,7 +565,6 @@ class TestDepositProcessor(TestDepositProcessorBase):
         """Test the complete deposit update workflow."""
         # Set up mocks
         mock_btc_tip_height.return_value = self.bitcoin_chaintip_height
-        mock_stacks_block.return_value = self.stacks_chaintip
 
         # Mock deposit fetching - use real instances for asdict
         pending_deposit = DepositInfo(
@@ -804,20 +801,15 @@ class TestDepositProcessorIntegration(unittest.TestCase):
         # Expiry height = 675229 + 96 + 6 = 675331
         self.bitcoin_chaintip_height = 678410  # Well past expiry
         settings.MIN_BLOCK_CONFIRMATIONS = 6
-        self.stacks_chaintip = BlockInfo(
-            height=2000, hash="stx_hash_int", time=int(datetime.now().timestamp())
-        )
 
     @patch("app.clients.PrivateEmilyAPI.update_deposits")
     @patch("app.clients.MempoolAPI.get_transaction")
     @patch("app.clients.MempoolAPI.get_utxo_status")
     @patch("app.clients.MempoolAPI.get_tip_height")
-    @patch("app.clients.HiroAPI.get_stacks_block")
     @patch("app.clients.PrivateEmilyAPI.fetch_deposits")
     def test_reclaimed_deposit_marked_failed(
         self,
         mock_fetch_deposits,
-        mock_stacks_block,
         mock_btc_tip_height,
         mock_get_utxo_status,
         mock_get_transaction,
@@ -825,7 +817,6 @@ class TestDepositProcessorIntegration(unittest.TestCase):
     ):
         """Verify a known reclaimed deposit is correctly identified and marked FAILED."""
         mock_btc_tip_height.return_value = self.bitcoin_chaintip_height
-        mock_stacks_block.return_value = self.stacks_chaintip
 
         # Simulate fetching this specific deposit (as pending or accepted)
         reclaimed_deposit_info = DepositInfo(**RECLAIMED_DEPOSIT_DATA)
@@ -867,12 +858,10 @@ class TestDepositProcessorIntegration(unittest.TestCase):
     @patch("app.clients.MempoolAPI.get_transaction")
     @patch("app.clients.MempoolAPI.get_utxo_status")
     @patch("app.clients.MempoolAPI.get_tip_height")
-    @patch("app.clients.HiroAPI.get_stacks_block")
     @patch("app.clients.PrivateEmilyAPI.fetch_deposits")
     def test_accepted_deposit_not_failed(
         self,
         mock_fetch_deposits,
-        mock_stacks_block,
         mock_btc_tip_height,
         mock_get_utxo_status,
         mock_get_transaction,
@@ -885,7 +874,6 @@ class TestDepositProcessorIntegration(unittest.TestCase):
         # Current chaintip = 678410
         # Expiry height = 678404 + 950 + 6 = 679360  # expired
         mock_btc_tip_height.return_value = self.bitcoin_chaintip_height
-        mock_stacks_block.return_value = self.stacks_chaintip
 
         # Simulate fetching this specific deposit
         accepted_deposit_info = DepositInfo(**ACCEPTED_DEPOSIT_DATA)

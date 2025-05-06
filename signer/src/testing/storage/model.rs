@@ -2,18 +2,77 @@
 
 use std::collections::HashSet;
 
-use bitcoin::hashes::Hash as _;
+use bitcoin::ScriptBuf;
+use fake::Dummy as _;
 use fake::Fake;
 
+use crate::bitcoin::utxo::BitcoinInputsOutputs;
+use crate::bitcoin::utxo::PrevoutRef;
+use crate::bitcoin::utxo::TxDeconstructor;
 use crate::keys::PublicKey;
 use crate::storage::DbWrite;
 use crate::storage::model;
 use crate::storage::model::BitcoinBlock;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinBlockRef;
-use crate::testing::dummy::DepositTxConfig;
+use crate::storage::model::StacksBlockHeight;
 
 use rand::seq::SliceRandom;
+
+/// A slimmed down [`BitcoinTxInfo`] type that can be used to implement the
+/// [`TxDeconstructor`] trait.
+///
+/// In order to implement [`TxDeconstructor`], you need to be able to
+/// return the original output for each input in a transaction. This struct
+/// allows you to do that by "requiring" that you provide the "original"
+/// bitcoin::TxOut for each entry in `tx.input`. This information gets used
+/// to figure out whether a transaction is a sweep transaction or a
+/// donation to the signers. Sweep transactions have inputs that spend
+/// funds locked by the signers, while donations do not.
+#[derive(Debug)]
+pub struct TestBitcoinTxInfo {
+    /// A bitcoin transaction that will be classified as either a
+    /// "donation" or a "sweep".
+    pub tx: bitcoin::Transaction,
+    /// The previous outputs that are being spent as inputs in the above
+    /// transaction.
+    pub prevouts: Vec<bitcoin::TxOut>,
+}
+
+impl TestBitcoinTxInfo {
+    /// Generate a random input. This is useful for making a bitcoin
+    /// transaction that will appear to be a sweep transaction.
+    pub fn random_prevout<R: rand::Rng + ?Sized>(rng: &mut R) -> bitcoin::TxIn {
+        bitcoin::TxIn {
+            previous_output: bitcoin::OutPoint {
+                txid: model::BitcoinTxId::dummy_with_rng(&fake::Faker, rng).into(),
+                vout: 0,
+            },
+            sequence: bitcoin::Sequence::ZERO,
+            witness: bitcoin::Witness::new(),
+            script_sig: bitcoin::ScriptBuf::new(),
+        }
+    }
+}
+
+impl BitcoinInputsOutputs for TestBitcoinTxInfo {
+    fn tx_ref(&self) -> &bitcoin::Transaction {
+        self.tx.tx_ref()
+    }
+}
+
+impl TxDeconstructor for TestBitcoinTxInfo {
+    fn prevout(&self, index: usize) -> Option<PrevoutRef> {
+        let input = self.tx.input.get(index)?;
+        let prevout = self.prevouts.get(index)?;
+        Some(PrevoutRef {
+            amount: prevout.value,
+            script_pubkey: &prevout.script_pubkey,
+            txid: &input.previous_output.txid,
+            output_index: input.previous_output.vout,
+        })
+    }
+}
 
 /// Collection of related data usable for database tests.
 ///
@@ -33,14 +92,8 @@ pub struct TestData {
     /// Deposit requests
     pub withdraw_requests: Vec<model::WithdrawalRequest>,
 
-    /// Raw transaction data
-    pub transactions: Vec<model::Transaction>,
-
     /// Connection between bitcoin blocks and transactions
     pub bitcoin_transactions: Vec<model::BitcoinTxRef>,
-
-    /// Connection between bitcoin blocks and transactions
-    pub stacks_transactions: Vec<model::StacksTransaction>,
 
     /// Deposit signers
     pub deposit_signers: Vec<model::DepositSigner>,
@@ -48,8 +101,11 @@ pub struct TestData {
     /// Withdraw signers
     pub withdraw_signers: Vec<model::WithdrawalSigner>,
 
-    /// transaction outputs
+    /// Donation outputs and outputs of sweep transactions.
     pub tx_outputs: Vec<model::TxOutput>,
+
+    /// The transaction outputs used as inputs into sweep transactions.
+    pub tx_prevouts: Vec<model::TxPrevout>,
 }
 
 impl TestData {
@@ -110,12 +166,6 @@ impl TestData {
             params.num_signers_per_request,
         );
 
-        let transactions = deposit_data
-            .transactions
-            .into_iter()
-            .chain(withdraw_data.transactions)
-            .collect();
-
         let bitcoin_blocks = vec![block.clone()];
         (
             Self {
@@ -126,9 +176,8 @@ impl TestData {
                 withdraw_requests: withdraw_data.withdraw_requests,
                 withdraw_signers: withdraw_data.withdraw_signers,
                 bitcoin_transactions: deposit_data.bitcoin_transactions,
-                stacks_transactions: withdraw_data.stacks_transactions,
-                transactions,
                 tx_outputs: Vec::new(),
+                tx_prevouts: Vec::new(),
             },
             block.into(),
         )
@@ -144,10 +193,8 @@ impl TestData {
         self.withdraw_signers.extend(new_data.withdraw_signers);
         self.bitcoin_transactions
             .extend(new_data.bitcoin_transactions);
-        self.stacks_transactions
-            .extend(new_data.stacks_transactions);
-        self.transactions.extend(new_data.transactions);
         self.tx_outputs.extend(new_data.tx_outputs);
+        self.tx_prevouts.extend(new_data.tx_prevouts);
     }
 
     /// Remove data in `other` present in the current model.
@@ -159,59 +206,42 @@ impl TestData {
         vec_diff(&mut self.withdraw_requests, &other.withdraw_requests);
         vec_diff(&mut self.withdraw_signers, &other.withdraw_signers);
         vec_diff(&mut self.bitcoin_transactions, &other.bitcoin_transactions);
-        vec_diff(&mut self.stacks_transactions, &other.stacks_transactions);
-        vec_diff(&mut self.transactions, &other.transactions);
         vec_diff(&mut self.tx_outputs, &other.tx_outputs);
+        vec_diff(&mut self.tx_prevouts, &other.tx_prevouts);
     }
 
     /// Push bitcoin txs to a specific bitcoin block
     pub fn push_bitcoin_txs(
         &mut self,
         block: &BitcoinBlockRef,
-        sbtc_txs: Vec<(model::TransactionType, bitcoin::Transaction)>,
+        txs: Vec<TestBitcoinTxInfo>,
+        signer_script_pubkeys: &HashSet<ScriptBuf>,
     ) {
         let mut bitcoin_transactions = vec![];
-        let mut transactions = vec![];
         let mut tx_outputs = Vec::new();
+        let mut tx_prevouts = Vec::new();
 
-        for (tx_type, tx) in sbtc_txs {
-            let model_tx = model::Transaction {
-                txid: tx.compute_txid().to_byte_array(),
-                tx_type,
-                block_hash: block.block_hash.into_bytes(),
-            };
-
+        for tx_info in txs {
             let bitcoin_transaction = model::BitcoinTxRef {
-                txid: model_tx.txid.into(),
+                txid: tx_info.tx.compute_txid().into(),
                 block_hash: block.block_hash,
             };
 
-            transactions.push(model_tx);
             bitcoin_transactions.push(bitcoin_transaction);
 
-            let output_type = match tx_type {
-                model::TransactionType::SbtcTransaction => model::TxOutputType::SignersOutput,
-                model::TransactionType::Donation => model::TxOutputType::Donation,
-                _ => continue,
-            };
-            if let Some(tx_out) = tx.output.first() {
-                // In our tests we always happen to put the first output as
-                // the signers UTXO, even if it is a donation.
-                let tx_output = model::TxOutput {
-                    txid: tx.compute_txid().into(),
-                    output_index: 0,
-                    script_pubkey: tx_out.script_pubkey.clone().into(),
-                    amount: tx_out.value.to_sat(),
-                    output_type,
-                };
+            for tx_output in tx_info.to_tx_outputs(signer_script_pubkeys) {
                 tx_outputs.push(tx_output);
+            }
+
+            for tx_prevout in tx_info.to_inputs(signer_script_pubkeys) {
+                tx_prevouts.push(tx_prevout);
             }
         }
 
         self.push(Self {
             bitcoin_transactions,
-            transactions,
             tx_outputs,
+            tx_prevouts,
             ..Self::default()
         });
     }
@@ -235,13 +265,6 @@ impl TestData {
                 .expect("failed to write bitcoin block");
         }
 
-        for tx in self.transactions.iter() {
-            storage
-                .write_transaction(tx)
-                .await
-                .expect("failed to write transaction");
-        }
-
         for req in self.deposit_requests.iter() {
             storage
                 .write_deposit_request(req)
@@ -263,13 +286,6 @@ impl TestData {
                 .expect("failed to write bitcoin transaction");
         }
 
-        for stacks_tx in self.stacks_transactions.iter() {
-            storage
-                .write_stacks_transaction(stacks_tx)
-                .await
-                .expect("failed to write stacks transaction");
-        }
-
         for decision in self.deposit_signers.iter() {
             storage
                 .write_deposit_signer_decision(decision)
@@ -286,6 +302,10 @@ impl TestData {
 
         for tx_output in self.tx_outputs.iter() {
             storage.write_tx_output(tx_output).await.unwrap();
+        }
+
+        for tx_prevout in self.tx_prevouts.iter() {
+            storage.write_tx_prevout(tx_prevout).await.unwrap();
         }
     }
 
@@ -372,7 +392,6 @@ impl TestData {
 struct DepositData {
     pub deposit_requests: Vec<model::DepositRequest>,
     pub deposit_signers: Vec<model::DepositSigner>,
-    pub transactions: Vec<model::Transaction>,
     pub bitcoin_transactions: Vec<model::BitcoinTxRef>,
 }
 
@@ -391,16 +410,13 @@ impl DepositData {
         (0..num_deposit_requests).fold(Self::new(), |mut deposit_data, _| {
             let mut deposit_request: model::DepositRequest = fake::Faker.fake_with_rng(rng);
 
-            let deposit_config = DepositTxConfig {
-                aggregate_key: PublicKey::combine_keys(signer_keys)
-                    .unwrap_or_else(|_| fake::Faker.fake_with_rng(rng)),
-                ..fake::Faker.fake_with_rng(rng)
-            };
+            let aggregate_key = PublicKey::combine_keys(signer_keys)
+                .unwrap_or_else(|_| fake::Faker.fake_with_rng(rng));
 
-            let mut raw_transaction: model::Transaction = deposit_config.fake_with_rng(rng);
-            raw_transaction.block_hash = *bitcoin_block.block_hash.as_ref();
-            deposit_request.txid = raw_transaction.txid.into();
-            deposit_request.signers_public_key = deposit_config.aggregate_key.into();
+            let mut raw_transaction: model::BitcoinTxRef = fake::Faker.fake_with_rng(rng);
+            raw_transaction.block_hash = bitcoin_block.block_hash;
+            deposit_request.txid = raw_transaction.txid;
+            deposit_request.signers_public_key = aggregate_key.into();
 
             let deposit_signers: Vec<_> = signer_keys
                 .iter()
@@ -416,13 +432,12 @@ impl DepositData {
                 .collect();
 
             let bitcoin_transaction = model::BitcoinTxRef {
-                txid: raw_transaction.txid.into(),
+                txid: raw_transaction.txid,
                 block_hash: bitcoin_block.block_hash,
             };
 
             deposit_data.bitcoin_transactions.push(bitcoin_transaction);
             deposit_data.deposit_requests.push(deposit_request);
-            deposit_data.transactions.push(raw_transaction);
             deposit_data.deposit_signers.extend(deposit_signers);
 
             deposit_data
@@ -434,8 +449,6 @@ impl DepositData {
 struct WithdrawData {
     pub withdraw_requests: Vec<model::WithdrawalRequest>,
     pub withdraw_signers: Vec<model::WithdrawalSigner>,
-    pub transactions: Vec<model::Transaction>,
-    pub stacks_transactions: Vec<model::StacksTransaction>,
 }
 
 impl WithdrawData {
@@ -473,14 +486,6 @@ impl WithdrawData {
                     withdraw_request.recipient = fake::Faker.fake_with_rng(rng);
                     withdraw_request.bitcoin_block_height = bitcoin_block.block_height;
 
-                    let mut raw_transaction: model::Transaction = fake::Faker.fake_with_rng(rng);
-                    raw_transaction.tx_type = model::TransactionType::WithdrawRequest;
-
-                    let stacks_transaction = model::StacksTransaction {
-                        txid: raw_transaction.txid.into(),
-                        block_hash: stacks_block_hash,
-                    };
-
                     let withdraw_signers: Vec<_> = signer_keys
                         .iter()
                         .take(num_signers_per_request)
@@ -494,11 +499,7 @@ impl WithdrawData {
                         })
                         .collect();
 
-                    withdraw_requests
-                        .stacks_transactions
-                        .push(stacks_transaction);
                     withdraw_requests.withdraw_requests.push(withdraw_request);
-                    withdraw_requests.transactions.push(raw_transaction);
                     withdraw_requests.withdraw_signers.extend(withdraw_signers);
 
                     (withdraw_requests, next_withdraw_request_id + 1)
@@ -536,7 +537,7 @@ impl BitcoinBlockRef {
     fn hallucinate_parent(block: &model::BitcoinBlock) -> Self {
         Self {
             block_hash: block.parent_hash,
-            block_height: 1337, // Arbitrary number
+            block_height: 1337u64.into(), // Arbitrary number
         }
     }
 }
@@ -544,7 +545,7 @@ impl BitcoinBlockRef {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct StacksBlockSummary {
     block_hash: model::StacksBlockHash,
-    block_height: u64,
+    block_height: StacksBlockHeight,
 }
 
 impl StacksBlockSummary {
@@ -558,7 +559,7 @@ impl StacksBlockSummary {
     fn hallucinate_parent(block: &model::StacksBlock) -> Self {
         Self {
             block_hash: block.parent_hash,
-            block_height: 1337, // Arbitrary number
+            block_height: 1337u64.into(), // Arbitrary number
         }
     }
 }
@@ -572,7 +573,7 @@ impl From<&bitcoin::Block> for crate::storage::model::BitcoinBlockRef {
     fn from(value: &bitcoin::Block) -> Self {
         Self {
             block_hash: value.block_hash().into(),
-            block_height: value.bip34_block_height().unwrap(),
+            block_height: value.bip34_block_height().unwrap().into(),
         }
     }
 }
@@ -591,7 +592,7 @@ mod tests {
 
     #[tokio::test]
     async fn check_simple_chain() {
-        let mut store = storage::in_memory::Store::new_shared();
+        let store = storage::in_memory::Store::new_shared();
         let mut rng = get_rng();
 
         let test_model_params = Params {
@@ -605,7 +606,7 @@ mod tests {
         let signer_set = testing::wsts::generate_signer_set_public_keys(&mut rng, 7);
 
         let test_data = TestData::generate(&mut rng, &signer_set, &test_model_params);
-        test_data.write_to(&mut store).await;
+        test_data.write_to(&store).await;
 
         let bitcoin_chain_tip = store
             .get_bitcoin_canonical_chain_tip()

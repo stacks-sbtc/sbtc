@@ -313,7 +313,7 @@ pub async fn assert_should_be_able_to_handle_sbtc_requests() {
     };
 
     let sbtc_requests: TxRequestIds = TxRequestIds {
-        deposits: vec![setup.deposit_request.outpoint.into()],
+        deposits: vec![setup.deposit_request.outpoint],
         withdrawals: vec![],
     };
 
@@ -419,7 +419,7 @@ pub async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is
         .unwrap();
     let chain_tip = BitcoinBlockRef {
         block_hash: block_header.hash.into(),
-        block_height: block_header.height as u64,
+        block_height: block_header.height.into(),
     };
 
     // Store the necessary data for passing validation
@@ -529,7 +529,7 @@ async fn new_state_machine_per_valid_sighash() {
         chain_tip_status: ChainTipStatus::Canonical,
         chain_tip: BitcoinBlockRef {
             block_hash: BitcoinBlockHash::from([0; 32]),
-            block_height: 0,
+            block_height: 0u64.into(),
         },
     };
 
@@ -539,7 +539,7 @@ async fn new_state_machine_per_valid_sighash() {
     let sighash: SigHash = Faker.fake_with_rng(&mut rng);
 
     let row = BitcoinTxSigHash {
-        txid: txid.clone(),
+        txid,
         chain_tip: BitcoinBlockHash::from([0; 32]),
         prevout_txid: BitcoinTxId::from([0; 32]),
         prevout_output_index: 0,
@@ -623,7 +623,7 @@ async fn max_one_state_machine_per_bitcoin_block_hash_for_dkg() {
     let headers = &rpc.get_chain_tips().unwrap()[0];
     let chain_tip = BitcoinBlockRef {
         block_hash: headers.hash.into(),
-        block_height: headers.height,
+        block_height: headers.height.into(),
     };
     backfill_bitcoin_blocks(&db, rpc, &chain_tip.block_hash).await;
 
@@ -748,7 +748,7 @@ mod validate_dkg_verification_message {
                 dkg_verification_window: 0,
                 bitcoin_chain_tip: BitcoinBlockRef {
                     block_hash: BitcoinBlockHash::from([0; 32]),
-                    block_height: 0,
+                    block_height: 0u64.into(),
                 },
                 message: None,
             }
@@ -766,7 +766,7 @@ mod validate_dkg_verification_message {
         /// the values in this [`TestParams`] instance.
         async fn execute(&self, db: &PgStore) -> Result<(), Error> {
             MockedTxSigner::validate_dkg_verification_message::<PgStore>(
-                &db,
+                db,
                 &self.new_aggregate_key,
                 self.message.as_deref(),
                 self.dkg_verification_window,
@@ -861,7 +861,7 @@ mod validate_dkg_verification_message {
         let shares = EncryptedDkgShares {
             aggregate_key,
             dkg_shares_status: DkgSharesStatus::Unverified,
-            started_at_bitcoin_block_height: 0,
+            started_at_bitcoin_block_height: 0u64.into(),
             ..Faker.fake()
         };
         db.write_encrypted_dkg_shares(&shares).await.unwrap();
@@ -873,7 +873,7 @@ mod validate_dkg_verification_message {
             dkg_verification_window: 10,
             bitcoin_chain_tip: BitcoinBlockRef {
                 block_hash: BitcoinBlockHash::from([0; 32]),
-                block_height: 11,
+                block_height: 11u64.into(),
             },
             ..Default::default()
         };
@@ -897,7 +897,7 @@ mod validate_dkg_verification_message {
         let shares = EncryptedDkgShares {
             aggregate_key,
             dkg_shares_status: DkgSharesStatus::Unverified,
-            started_at_bitcoin_block_height: 0,
+            started_at_bitcoin_block_height: 0u64.into(),
             ..Faker.fake()
         };
         db.write_encrypted_dkg_shares(&shares).await.unwrap();
@@ -910,7 +910,7 @@ mod validate_dkg_verification_message {
             dkg_verification_window: 10,
             bitcoin_chain_tip: BitcoinBlockRef {
                 block_hash: BitcoinBlockHash::from([0; 32]),
-                block_height: 10,
+                block_height: 10u64.into(),
             },
             ..Default::default()
         };
@@ -928,7 +928,7 @@ mod validate_dkg_verification_message {
         let shares = EncryptedDkgShares {
             aggregate_key,
             dkg_shares_status: DkgSharesStatus::Unverified,
-            started_at_bitcoin_block_height: 0,
+            started_at_bitcoin_block_height: 0u64.into(),
             ..Faker.fake()
         };
         db.write_encrypted_dkg_shares(&shares).await.unwrap();
@@ -957,7 +957,7 @@ mod validate_dkg_verification_message {
         let shares = EncryptedDkgShares {
             aggregate_key,
             dkg_shares_status: DkgSharesStatus::Unverified,
-            started_at_bitcoin_block_height: 0,
+            started_at_bitcoin_block_height: 0u64.into(),
             ..Faker.fake()
         };
         db.write_encrypted_dkg_shares(&shares).await.unwrap();
@@ -969,7 +969,7 @@ mod validate_dkg_verification_message {
             dkg_verification_window: 10,
             bitcoin_chain_tip: BitcoinBlockRef {
                 block_hash: BitcoinBlockHash::from([0; 32]),
-                block_height: 10,
+                block_height: 10u64.into(),
             },
             message: Some(Faker.fake()),
         };

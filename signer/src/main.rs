@@ -120,8 +120,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // signing set, and only assume we are bootstrapping if that source is
     // empty.
     let settings = context.config();
-    for signer in settings.signer.bootstrap_signing_set() {
-        context.state().current_signer_set().add_signer(signer);
+    for signer in &settings.signer.bootstrap_signing_set {
+        context.state().current_signer_set().add_signer(*signer);
     }
 
     // Run the application components concurrently. We're `join!`ing them
