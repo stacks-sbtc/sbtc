@@ -432,7 +432,7 @@ impl DepositData {
                 .collect();
 
             let bitcoin_transaction = model::BitcoinTxRef {
-                txid: raw_transaction.txid.into(),
+                txid: raw_transaction.txid,
                 block_hash: bitcoin_block.block_hash,
             };
 
@@ -592,7 +592,7 @@ mod tests {
 
     #[tokio::test]
     async fn check_simple_chain() {
-        let mut store = storage::in_memory::Store::new_shared();
+        let store = storage::in_memory::Store::new_shared();
         let mut rng = get_rng();
 
         let test_model_params = Params {
@@ -606,7 +606,7 @@ mod tests {
         let signer_set = testing::wsts::generate_signer_set_public_keys(&mut rng, 7);
 
         let test_data = TestData::generate(&mut rng, &signer_set, &test_model_params);
-        test_data.write_to(&mut store).await;
+        test_data.write_to(&store).await;
 
         let bitcoin_chain_tip = store
             .get_bitcoin_canonical_chain_tip()

@@ -604,7 +604,7 @@ mod tests {
             // This message is unlikely to be the digest of the transaction
             Message::from_digest([1; 32])
         };
-        let signature = SECP256K1.sign_ecdsa_recoverable(&msg, &secret_key).into();
+        let signature = SECP256K1.sign_ecdsa_recoverable(&msg, &secret_key);
 
         // Now let's try to add a bad signature. We skip the case where we
         // have a correct key and the correct digest so this should always
@@ -620,7 +620,7 @@ mod tests {
         // things update correctly.
         let secret_key = key_pairs[0].secret_key();
         let msg = tx_signer.digest;
-        let signature = SECP256K1.sign_ecdsa_recoverable(&msg, &secret_key).into();
+        let signature = SECP256K1.sign_ecdsa_recoverable(&msg, &secret_key);
         tx_signer.add_signature(signature).unwrap();
         assert!(!tx_signer.signatures.values().all(Option::is_none));
     }
@@ -704,7 +704,7 @@ mod tests {
             txid: fake::Faker.fake_with_rng(&mut rng),
             block_hash: stacks_chain_tip,
             address: StacksPrincipal::from(clarity::vm::types::PrincipalData::from(
-                wallet1.address().clone(),
+                *wallet1.address(),
             )),
             aggregate_key: *wallet1.stacks_aggregate_key(),
             signer_set: signer_keys.clone(),

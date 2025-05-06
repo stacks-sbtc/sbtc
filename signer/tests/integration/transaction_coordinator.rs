@@ -441,7 +441,7 @@ async fn process_complete_deposit() {
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(&rpc, &faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
 
     backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash).await;
     setup.store_deposit_tx(&db).await;
@@ -1254,7 +1254,7 @@ async fn run_subsequent_dkg() {
         // 6. Check that we have exactly one row in the `dkg_shares` table.
         assert_eq!(aggregate_keys.len(), 2);
         for key in aggregate_keys.iter() {
-            all_aggregate_keys.insert(key.0.clone());
+            all_aggregate_keys.insert(key.0);
         }
 
         // An additional sanity check that the query in
@@ -1268,12 +1268,10 @@ async fn run_subsequent_dkg() {
     // 7. Check that they all have the same aggregate keys in the
     //    `dkg_shares` table.
     assert_eq!(all_aggregate_keys.len(), 2);
-    let new_aggregate_key = all_aggregate_keys
+    let new_aggregate_key = *all_aggregate_keys
         .iter()
-        .filter(|k| *k != &aggregate_key_1)
-        .next()
-        .unwrap()
-        .clone();
+        .find(|k| *k != &aggregate_key_1)
+        .unwrap();
     assert_ne!(aggregate_key_1, new_aggregate_key);
 
     // 8. Check that the coordinator broadcast a rotate key tx
@@ -2715,7 +2713,7 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
     let aggregate_key = &PublicKey::from_private_key(&PrivateKey::new(&mut rng));
 
     let dkg_shares = model::EncryptedDkgShares {
-        aggregate_key: aggregate_key.clone(),
+        aggregate_key: *aggregate_key,
         script_pubkey: aggregate_key.signers_script_pubkey().into(),
         dkg_shares_status: DkgSharesStatus::Unverified,
         ..Faker.fake_with_rng(&mut rng)
@@ -2758,7 +2756,7 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
     // Write the Bitcoin block and transaction to the database.
     db.write_bitcoin_block(&bitcoin_block).await.unwrap();
     db.write_bitcoin_transaction(&model::BitcoinTxRef {
-        block_hash: bitcoin_block.block_hash.into(),
+        block_hash: bitcoin_block.block_hash,
         txid: signer_utxo_txid.into(),
     })
     .await
@@ -2772,7 +2770,7 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
         .await
         .unwrap()
         .expect("no chain tip");
-    assert_eq!(chain_tip, bitcoin_block.block_hash.into());
+    assert_eq!(chain_tip, bitcoin_block.block_hash);
 
     // Get the signer UTXO and assert that it is the one we just wrote.
     let utxo = db
@@ -2780,16 +2778,16 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
         .await
         .unwrap()
         .expect("no signer utxo");
-    assert_eq!(utxo.outpoint.txid, signer_utxo_txid.into());
+    assert_eq!(utxo.outpoint.txid, signer_utxo_txid);
 
     // Grab the BTC state.
     let btc_state = coord
-        .get_btc_state(&chain_tip, &aggregate_key)
+        .get_btc_state(&chain_tip, aggregate_key)
         .await
         .unwrap();
 
     // Assert that the BTC state is correct.
-    assert_eq!(btc_state.utxo.outpoint.txid, signer_utxo_txid.into());
+    assert_eq!(btc_state.utxo.outpoint.txid, signer_utxo_txid);
     assert_eq!(btc_state.utxo.public_key, aggregate_key.into());
     assert_eq!(btc_state.public_key, aggregate_key.into());
     assert_eq!(btc_state.fee_rate, 1.3);
@@ -2838,7 +2836,7 @@ async fn test_get_btc_state_with_available_sweep_transactions_and_rbf() {
     let aggregate_key = &PublicKey::from_private_key(&PrivateKey::new(&mut rng));
 
     let dkg_shares = model::EncryptedDkgShares {
-        aggregate_key: aggregate_key.clone(),
+        aggregate_key: *aggregate_key,
         script_pubkey: aggregate_key.signers_script_pubkey().into(),
         dkg_shares_status: DkgSharesStatus::Unverified,
         ..Faker.fake_with_rng(&mut rng)
@@ -2895,7 +2893,7 @@ async fn test_get_btc_state_with_available_sweep_transactions_and_rbf() {
         .await
         .unwrap()
         .expect("no signer utxo");
-    assert_eq!(utxo.outpoint.txid, signer_utxo_txid.into());
+    assert_eq!(utxo.outpoint.txid, signer_utxo_txid);
 
     // Get a utxo to spend.
     let utxo = addr.get_utxos(rpc, Some(10_000)).pop().unwrap();
@@ -2923,17 +2921,17 @@ async fn test_get_btc_state_with_available_sweep_transactions_and_rbf() {
 
     // Grab the BTC state.
     let btc_state = coord
-        .get_btc_state(&chain_tip, &aggregate_key)
+        .get_btc_state(&chain_tip, aggregate_key)
         .await
         .unwrap();
 
     let expected_fees = Fees {
         total: 1_000,
-        rate: 1_000 as f64 / tx1.vsize() as f64,
+        rate: 1_000_f64 / tx1.vsize() as f64,
     };
 
     // Assert that everything's as expected.
-    assert_eq!(btc_state.utxo.outpoint.txid, signer_utxo_txid.into());
+    assert_eq!(btc_state.utxo.outpoint.txid, signer_utxo_txid);
     assert_eq!(btc_state.utxo.public_key, aggregate_key.into());
     assert_eq!(btc_state.public_key, aggregate_key.into());
     assert_eq!(btc_state.last_fees, Some(expected_fees));
@@ -2961,7 +2959,7 @@ async fn test_get_btc_state_with_available_sweep_transactions_and_rbf() {
 
     // Grab the BTC state.
     let btc_state = coord
-        .get_btc_state(&chain_tip, &aggregate_key)
+        .get_btc_state(&chain_tip, aggregate_key)
         .await
         .unwrap();
 
@@ -2971,7 +2969,7 @@ async fn test_get_btc_state_with_available_sweep_transactions_and_rbf() {
     };
 
     // Assert that everything's as expected.
-    assert_eq!(btc_state.utxo.outpoint.txid, signer_utxo_txid.into());
+    assert_eq!(btc_state.utxo.outpoint.txid, signer_utxo_txid);
     assert_eq!(btc_state.last_fees, Some(expected_fees));
 
     testing::storage::drop_db(db).await;
@@ -3147,7 +3145,7 @@ async fn test_conservative_initial_sbtc_limits() {
             .write_as_rotate_keys_tx(db, &chain_tip, dkg_shares, &mut rng)
             .await;
 
-        db.write_encrypted_dkg_shares(&dkg_shares)
+        db.write_encrypted_dkg_shares(dkg_shares)
             .await
             .expect("failed to write encrypted shares");
     }
@@ -3178,7 +3176,6 @@ async fn test_conservative_initial_sbtc_limits() {
             });
 
             let enable_emily_limits = enable_emily_limits.clone();
-            let i = i;
             client.expect_get_limits().times(1..).returning(move || {
                 // Since we don't signal the coordinator if we fail to fetch the limits
                 // we need the coordinator to be able to fetch them.
@@ -3284,12 +3281,12 @@ async fn test_conservative_initial_sbtc_limits() {
         &bitcoin_client,
     );
     for (_, db, _, _) in signers.iter_mut() {
-        backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
-        setup.store_stacks_genesis_block(&db).await;
-        setup.store_donation(&db).await;
-        setup.store_deposit_txs(&db).await;
-        setup.store_deposit_request(&db).await;
-        setup.store_deposit_decisions(&db).await;
+        backfill_bitcoin_blocks(db, rpc, &setup.deposit_block_hash).await;
+        setup.store_stacks_genesis_block(db).await;
+        setup.store_donation(db).await;
+        setup.store_deposit_txs(db).await;
+        setup.store_deposit_request(db).await;
+        setup.store_deposit_decisions(db).await;
     }
 
     // =========================================================================
@@ -4269,7 +4266,7 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
     let signer_network = network.connect(&ctx);
 
     let signer = Recipient::new(AddressType::P2tr);
-    let signer_kp = signer.keypair.clone();
+    let signer_kp = signer.keypair;
     let signers = TestSignerSet {
         signer,
         keys: vec![signer_kp.public_key().into()],
@@ -4285,7 +4282,7 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
     // we manually update the state here.
     ctx.state()
         .update_current_signer_set(signers.signer_keys().iter().copied().collect());
-    ctx.state().set_current_aggregate_key(aggregate_key.clone());
+    ctx.state().set_current_aggregate_key(aggregate_key);
 
     ctx.with_stacks_client(|client| {
         client
@@ -4315,7 +4312,7 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
         max_fee: 500_000,
         is_deposit: true,
     }];
-    let mut setup = TestSweepSetup2::new_setup(signers.clone(), &faucet, &amounts);
+    let mut setup = TestSweepSetup2::new_setup(signers.clone(), faucet, &amounts);
 
     // Store everything we need for the deposit to be considered swept
     setup.submit_sweep_tx(rpc, faucet);
@@ -4445,9 +4442,9 @@ mod get_eligible_pending_withdrawal_requests {
         // Create an iterator of signer keys and their corresponding votes.
         let signer_votes = signer_set
             .signer_keys()
-            .into_iter()
+            .iter()
             .cloned()
-            .zip(votes.into_iter().cloned());
+            .zip(votes.iter().cloned());
 
         for (signer_pub_key, is_accepted) in signer_votes {
             let signer = WithdrawalSigner {
@@ -4498,7 +4495,7 @@ mod get_eligible_pending_withdrawal_requests {
 
     /// Helper function to set up the database with bitcoin and stacks chains,
     /// a set of signers and their DKG shares.
-    async fn test_setup<'a>(
+    async fn test_setup(
         db: &PgStore,
         chains_length: u64,
     ) -> (

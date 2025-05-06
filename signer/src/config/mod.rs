@@ -991,7 +991,7 @@ mod tests {
 
         let mut remove_parameter = |config_name: &str, parameter: &str| {
             config_toml
-                .get_mut(&config_name)
+                .get_mut(config_name)
                 .unwrap()
                 .as_table_mut()
                 .unwrap()
@@ -1009,7 +1009,7 @@ mod tests {
 
         let new_config = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
 
-        std::fs::write(&new_config.path(), config_toml.to_string()).unwrap();
+        std::fs::write(new_config.path(), config_toml.to_string()).unwrap();
 
         let settings = Settings::new(Some(&new_config.path())).unwrap();
 

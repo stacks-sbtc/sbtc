@@ -1540,7 +1540,7 @@ async fn block_observer_ignores_coinbase() {
     let max_fee = 100_042;
     let signers_public_key = shares.aggregate_key.into();
     let (deposit_tx, deposit_request) =
-        make_coinbase_deposit_request(&rpc, max_fee, signers_public_key);
+        make_coinbase_deposit_request(rpc, max_fee, signers_public_key);
 
     // `make_coinbase_deposit_request` will generate a block, ensure we process
     // it just fine.
@@ -1596,7 +1596,7 @@ async fn block_observer_ignores_coinbase() {
     // that the deposit request validation in the block observer failed as
     // expected.
     let request = CreateDepositRequest {
-        outpoint: deposit_request.outpoint.clone(),
+        outpoint: deposit_request.outpoint,
         reclaim_script: deposit_request.reclaim_script.clone(),
         deposit_script: deposit_request.deposit_script.clone(),
     };
@@ -1642,12 +1642,12 @@ fn make_coinbase_deposit_request(
 
     let req = signer::bitcoin::utxo::DepositRequest {
         outpoint: OutPoint::new(deposit_tx.compute_txid(), 0),
-        max_fee: max_fee,
+        max_fee,
         signer_bitmap: bitvec::array::BitArray::ZERO,
         amount: deposit_tx.output[0].value.to_sat(),
-        deposit_script: deposit_script,
-        reclaim_script: reclaim_script,
-        signers_public_key: signers_public_key,
+        deposit_script,
+        reclaim_script,
+        signers_public_key,
     };
     (deposit_tx, req)
 }
