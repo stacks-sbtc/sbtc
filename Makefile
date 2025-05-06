@@ -16,8 +16,14 @@ CARGO_FLAGS := --locked
 # MAIN TARGETS
 # ##############################################################################
 
-install:
+install-py:
+	uv --directory emily_cron venv && uv --directory emily_cron pip sync pyproject.toml
+	uv --directory emily_sidecar venv && uv --directory emily_sidecar pip sync pyproject.toml
+
+install-pnpm:
 	pnpm --recursive install
+
+install: install-pnpm
 
 build: blocklist-client-codegen emily-client-codegen contracts
 	cargo $(CARGO_FLAGS) build --all-targets $(CARGO_EXCLUDES) ${CARGO_BUILD_ARGS}
@@ -44,7 +50,7 @@ clean:
 	cargo $(CARGO_FLAGS) clean
 	pnpm --recursive clean
 
-.PHONY: install build test test-build lint format contracts clean
+.PHONY: install-py install-pnpm install build test test-build lint format contracts clean
 
 # ##############################################################################
 # NEXTEST
