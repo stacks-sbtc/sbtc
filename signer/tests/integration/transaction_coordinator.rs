@@ -4712,6 +4712,9 @@ mod get_eligible_pending_withdrawal_requests {
     }
 }
 
+// This test checks that blocks are still created
+// if DKG encounters an error but there's an existing
+// aggregate key to fallback on.
 #[test_log::test(tokio::test)]
 async fn should_handle_dkg_coordination_failure() {
     let mut rng = get_rng();
@@ -4783,21 +4786,29 @@ async fn should_handle_dkg_coordination_failure() {
         is_epoch3: true,
     };
 
-    // This should trigger DKG coordination which will fail, falling back to existing key
+    // We're verifying that the coordinator is currently
+    // processing blocks correctly. Since we previously checked
+    // that 'should_coordinate_dkg' will trigger & we set the
+    // 'dkg_max_duration' to 10 milliseconds we expect that
+    // DKG will run & fail
     let result = coordinator.process_new_blocks().await;
     assert!(
         result.is_ok(),
         "process_new_blocks should complete successfully even with DKG failure"
     );
 
-    // Check if DKG shares exist
+    // Here we check that DKG ran & correctly failed by fetching
+    // the latest DKG shares from storage. We test it failed
+    // by asserting that the latest row is_none()
     let dkg_shares = storage.get_latest_encrypted_dkg_shares().await.unwrap();
     assert!(
         dkg_shares.is_none(),
         "DKG shares should not exist since DKG failed to complete due to timeout"
     );
 
-    // Verify that we can still process blocks after DKG failure
+    // Verify that we can still process blocks after DKG failure,
+    // this final assert specifically checks that blocks are still
+    // being processed since there was an aggregate key to fallback on
     let result = coordinator.process_new_blocks().await;
     assert!(
         result.is_ok(),
