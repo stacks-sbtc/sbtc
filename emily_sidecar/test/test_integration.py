@@ -6,14 +6,15 @@ import requests
 from fastapi.testclient import TestClient
 
 from app import logging_config, settings
-from app.main import app, headers
-
 
 logging_config.silence_logging()
 
+from app.main import app, headers
+
+
 WIPE_URL = f"{settings.EMILY_ENDPOINT}/testing/wipe"
-DEPOSITS_URL = f"{settings.EMILY_ENDPOINT}/deposit_private"
-WITHDRAWALS_URL = f"{settings.EMILY_ENDPOINT}/withdrawal_private"
+DEPOSITS_URL = f"{settings.EMILY_ENDPOINT}/deposit"
+WITHDRAWALS_URL = f"{settings.EMILY_ENDPOINT}/withdrawal"
 
 client = TestClient(app)
 
@@ -83,10 +84,11 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(withdrawal.status_code, 200)
         self.assertEqual(
             withdrawal.json(),
+
             {
                 "requestId": 1,
                 "stacksBlockHash": "75b02b9884ec41c05f2cfa6e20823328321518dd0b027e7b609b63d4d1ea7c78",
-                "stacksBlockHeight": 0,
+                "stacksBlockHeight": 253,
                 "recipient": "76a914000000000000000000000000000000000000000088ac",
                 "sender": "SN2V7WTJ7BHR03MPHZ1C9A9ZR6NZGR4WM8HT4V67Y",
                 "amount": 22500,
@@ -95,6 +97,7 @@ class IntegrationTests(unittest.TestCase):
                 "status": "pending",
                 "statusMessage": "Just received withdrawal",
                 "parameters": {"maxFee": 3000},
+                "txid": "25982fe028733fe0158fa3972b68fe93ade7f242fb51283c3bc18145d0248d9a",
             },
         )
 
@@ -149,7 +152,7 @@ class IntegrationTests(unittest.TestCase):
             {
                 "requestId": 1,
                 "stacksBlockHash": "75b02b9884ec41c05f2cfa6e20823328321518dd0b027e7b609b63d4d1ea7c78",
-                "stacksBlockHeight": 0,
+                "stacksBlockHeight": 253,
                 "recipient": "76a914000000000000000000000000000000000000000088ac",
                 "sender": "SN2V7WTJ7BHR03MPHZ1C9A9ZR6NZGR4WM8HT4V67Y",
                 "amount": 22500,
@@ -166,6 +169,7 @@ class IntegrationTests(unittest.TestCase):
                     "BitcoinBlockHeight": 42,
                     "BtcFee": 2500,
                 },
+                "txid": "25982fe028733fe0158fa3972b68fe93ade7f242fb51283c3bc18145d0248d9a",
             },
         )
 
@@ -183,7 +187,7 @@ class IntegrationTests(unittest.TestCase):
             {
                 "requestId": 1,
                 "stacksBlockHash": "75b02b9884ec41c05f2cfa6e20823328321518dd0b027e7b609b63d4d1ea7c78",
-                "stacksBlockHeight": 0,
+                "stacksBlockHeight": 253,
                 "recipient": "76a914000000000000000000000000000000000000000088ac",
                 "sender": "SN2V7WTJ7BHR03MPHZ1C9A9ZR6NZGR4WM8HT4V67Y",
                 "amount": 22500,
@@ -192,6 +196,7 @@ class IntegrationTests(unittest.TestCase):
                 "status": "failed",
                 "statusMessage": "Rejected",
                 "parameters": {"maxFee": 3000},
+                "txid": "25982fe028733fe0158fa3972b68fe93ade7f242fb51283c3bc18145d0248d9a",
             },
         )
 

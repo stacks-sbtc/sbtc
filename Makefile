@@ -23,13 +23,18 @@ install-py:
 install-pnpm:
 	pnpm --recursive install
 
-install: install-pnpm
+install: install-py install-pnpm
 
 build: blocklist-client-codegen emily-client-codegen contracts
 	cargo $(CARGO_FLAGS) build --all-targets $(CARGO_EXCLUDES) ${CARGO_BUILD_ARGS}
 
+test-py:
+	uv run --directory emily_cron python -m unittest discover
+	uv run --directory emily_sidecar python -m unittest test/test_main.py
+
 test:
 	cargo $(CARGO_FLAGS) nextest run --features "testing" --lib $(CARGO_EXCLUDES) --no-fail-fast ${CARGO_BUILD_ARGS}
+	make test-py
 	pnpm --recursive test
 
 test-build:
@@ -50,7 +55,7 @@ clean:
 	cargo $(CARGO_FLAGS) clean
 	pnpm --recursive clean
 
-.PHONY: install-py install-pnpm install build test test-build lint format contracts clean
+.PHONY: install-py install-pnpm install build test-py test test-build lint format contracts clean
 
 # ##############################################################################
 # NEXTEST
@@ -83,6 +88,7 @@ integration-env-up: emily-cdk-synth
 
 integration-test:
 	cargo $(CARGO_FLAGS) nextest run --features "testing" $(CARGO_EXCLUDES) --test integration --no-fail-fast --test-threads 1
+	uv run --directory emily_sidecar python -m unittest test/test_integration.py
 
 integration-test-build:
 	cargo $(CARGO_FLAGS) test build --features "testing" $(CARGO_EXCLUDES) --test integration --no-run --locked

@@ -37,7 +37,6 @@ env:
   CARGO_PROFILE_DEV_STRIP: "debuginfo"
 
 jobs:
-
   # Runs various lints and checks for the project, including Rustfmt, Clippy,
   # Protobuf lints, and pnpm lints.
   lint:
@@ -62,7 +61,7 @@ jobs:
           components: clippy, rustfmt
           cache-key: "rust-tests"
       - name: Install Package Dependencies
-        run: make install
+        run: make install-pnpm
       - name: Lint (Rustfmt)
         run: cargo fmt --all -- --check
       - name: Lint (Clippy)
@@ -122,7 +121,11 @@ jobs:
       - uses: taiki-e/install-action@da41fb311fbbcecf899732e575aaeaa2fe65c934 #v2.47.21
         with:
           tool: nextest@${{ env.NEXTEST_VERSION }}
-      - name: Install Package Dependencies
+      - name: Install uv
+        uses: astral-sh/setup-uv@6b9c6063abd6010835644d4c2e1bef4cf5cd0fca #v6.0.1
+        with:
+          version: "0.6.5"
+      - name: Install node packages and python dependencies
         run: make install
       - name: Download Nextest Archives
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 #v4.1.8
@@ -133,6 +136,8 @@ jobs:
         run: pnpm --recursive test
       - name: Run Unit Tests (Rust)
         run: cargo-nextest nextest --color always run --no-fail-fast --archive-file nextest-archive.tar.zst
+      - name: Run Unit Tests (Python)
+        run: make test-py
 
   # Runs the Rust integration tests for the project. It depends on the
   # `build-tests` job to build the nextest test archives and upload them as
@@ -166,7 +171,11 @@ jobs:
       - uses: taiki-e/install-action@da41fb311fbbcecf899732e575aaeaa2fe65c934 #v2.47.21
         with:
           tool: nextest@${{ env.NEXTEST_VERSION }}
-      - name: Install Package Dependencies
+      - name: Install uv
+        uses: astral-sh/setup-uv@6b9c6063abd6010835644d4c2e1bef4cf5cd0fca #v6.0.1
+        with:
+          version: "0.6.5"
+      - name: Install node packages and python dependencies
         run: make install
       - name: Start Integration Test Environment
         run: make integration-env-up-ci
@@ -174,7 +183,7 @@ jobs:
         uses: kachick/wait-other-jobs@0584f1460011b97726c04abf4bbec5bfb5cdb654 #v3.6.0
         timeout-minutes: 5
         with:
-          retry-method: 'equal_intervals'
+          retry-method: "equal_intervals"
           wait-seconds-before-first-polling: 1
           min-interval-seconds: 5
           wait-list: |
@@ -195,7 +204,10 @@ jobs:
           path: .
       - name: Run Integration Tests (Rust)
         run: cargo-nextest nextest --color always run --no-fail-fast --test-threads 1 --partition hash:${{ matrix.partition }}/2 --archive-file nextest-archive-serial.tar.zst
-      
+      - name: Run Integration Tests (Python)
+        if: matrix.partition == 1 # Only run the python tests on the first partition
+        run: uv run --directory emily_sidecar python -m unittest test/test_integration.py
+
   # Runs checks on the generated code in the project for contracts, the
   # blocklist client and the emily clients. This job is used to ensure that the
   # generated code is up-to-date with the latest changes in the project. It does
