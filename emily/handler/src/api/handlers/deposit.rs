@@ -575,7 +575,7 @@ async fn update_deposits(
         ));
     }
 
-    if updated_deposits.is_empty() {
+    if updated_deposits.iter().all(|(_, deposit)| deposit.status == StatusCode::NOT_FOUND.as_u16()) {
         return Err(Error::NotFound);
     }
 
