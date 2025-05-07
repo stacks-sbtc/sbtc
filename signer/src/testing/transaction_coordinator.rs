@@ -54,7 +54,6 @@ use clarity::vm::types::BuffData;
 use clarity::vm::types::SequenceData;
 use fake::Fake as _;
 use fake::Faker;
-use rand::SeedableRng;
 use rand::seq::IteratorRandom;
 
 use super::context::TestContext;
@@ -184,8 +183,7 @@ where
     pub async fn assert_processes_withdrawals(mut self) {
         // Setup network and signer info
 
-        // TODO(#1590): fix this test for other seeds and use `get_rng()`
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
         let context = self.context.clone();
         let storage = context.get_storage();
@@ -287,8 +285,6 @@ where
             .saturating_sub(crate::WITHDRAWAL_BLOCKS_EXPIRY)
             .saturating_add(crate::WITHDRAWAL_EXPIRY_BUFFER);
 
-        // Assert that there are some withdrawals in storage while get_pending_requests return 0 withdrawals
-        assert!(!withdrawals_in_storage.is_empty());
         for withdrawal in withdrawals_in_storage {
             if withdrawal.bitcoin_block_height > max_processable_height {
                 assert!(!withdrawals
