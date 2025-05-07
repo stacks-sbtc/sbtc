@@ -49,7 +49,7 @@ class DepositProcessor:
         logger.info(f"Found {len(rbf_txs)} transactions with RBF replacements")
 
         # Group txs by RBF chain. All txs in a group have the same RBF chain.
-        for rbf_key, group_iter in groupby(rbf_txs, key=lambda tx: "".join(sorted(tx.rbf_txids))):
+        for rbf_key, group_iter in groupby(rbf_txs, key=lambda tx: ",".join(sorted(tx.rbf_txids))):
 
             confirmed_txid_in_group: str | None = None
             unconfirmed_txs_in_group: list[EnrichedDepositInfo] = []
