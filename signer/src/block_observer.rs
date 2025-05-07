@@ -457,13 +457,14 @@ impl<C: Context, B> BlockObserver<C, B> {
             .map(|key| key.signers_script_pubkey());
         // We store all the scriptPubKeys associated with the signers'
         // aggregate public key. Let's get the last years worth of them.
-        let signer_script_pubkeys: HashSet<ScriptBuf> = db
-            .get_signers_script_pubkeys()
-            .await?
-            .into_iter()
-            .map(ScriptBuf::from_bytes)
-            .chain(bootstrap_script_pubkey)
-            .collect();
+        let mut signer_script_pubkeys: HashSet<ScriptBuf> = dbg!(
+            db.get_signers_script_pubkeys()
+                .await?
+                .into_iter()
+                .map(ScriptBuf::from_bytes)
+                .chain(bootstrap_script_pubkey)
+                .collect()
+        );
 
         // Look through all the UTXOs in the given transaction slice and
         // keep the transactions where a UTXO is locked with a
@@ -478,7 +479,16 @@ impl<C: Context, B> BlockObserver<C, B> {
                 .iter()
                 .any(|tx_out| signer_script_pubkeys.contains(&tx_out.script_pubkey));
 
-            if !outputs_spent_to_signers {
+            // We might not know about the new scriptPubKey, but we are
+            // supposed to know about all existing scriptPubKeys, so we
+            // check the inputs as well.
+            let inputs_spent_by_signers = tx_info
+                .vin
+                .iter()
+                .filter_map(|vin| vin.prevout.as_ref())
+                .any(|prevout| signer_script_pubkeys.contains(&prevout.script_pubkey.script));
+
+            if !outputs_spent_to_signers && !inputs_spent_by_signers {
                 continue;
             }
 
@@ -487,6 +497,17 @@ impl<C: Context, B> BlockObserver<C, B> {
             if tx_info.tx.is_coinbase() {
                 tracing::warn!(%txid, "ignoring coinbase tx when extracting sbtc transaction");
                 continue;
+            }
+
+            // Let's add the scriptPubKey of signers new UTXO to our set of
+            // scriptPubKeys for all sweep transactions. We might not know
+            // about it already.
+            if inputs_spent_by_signers {
+                // This is okay because all bitcoin transactions must have
+                // at least one input and one output. See
+                // https://github.com/bitcoin/bitcoin/blob/1b1b9f32cfdb7c3b21723d2e1b60d9d3dc7818f3/src/consensus/tx_check.cpp#L11-L17
+                let prevout = tx_info.prevout(0).expect("invalid bitcoin transaction");
+                signer_script_pubkeys.insert(prevout.script_pubkey.clone());
             }
 
             sbtc_txs.push(model::BitcoinTxRef {

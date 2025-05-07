@@ -687,14 +687,19 @@ async fn blockk_observer_picks_up_chained_sweeps() {
     faucet.generate_block();
 
     let new_signer = Recipient::new_with_rng(AddressType::P2tr, &mut rng);
-    let signers_public_key2  = PublicKey::from(new_signer.keypair.public_key()).into();
+    let signers_public_key2 = PublicKey::from(new_signer.keypair.public_key()).into();
 
     // Now lets make a deposit transaction.
-    let mut deposit_request1 = generate_deposit_request(faucet, 950_000, signers_public_key1, &mut rng);
-    let mut deposit_request2 = generate_deposit_request(faucet, 875_000, signers_public_key2, &mut rng);
-    let mut deposit_request3 = generate_deposit_request(faucet, 725_000, signers_public_key2, &mut rng);
+    let mut deposit_request1 =
+        generate_deposit_request(faucet, 950_000, signers_public_key1, &mut rng);
+    let mut deposit_request2 =
+        generate_deposit_request(faucet, 875_000, signers_public_key2, &mut rng);
+    let mut deposit_request3 =
+        generate_deposit_request(faucet, 725_000, signers_public_key2, &mut rng);
 
-
+    // We want to construct three sweep transactions in order to
+    // demonstrate that a chain of transactions are all picked up, even in
+    // the case where the scriptPubKey has changed for the first one.
     deposit_request1.signer_bitmap.set(0, true);
     deposit_request2.signer_bitmap.set(1, true);
     deposit_request3.signer_bitmap.set(2, true);
