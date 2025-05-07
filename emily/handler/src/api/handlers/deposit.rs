@@ -11,7 +11,7 @@ use warp::reply::{Reply, json, with_status};
 use crate::api::models::common::Status;
 use crate::api::models::common::requests::BasicPaginationQuery;
 use crate::api::models::deposit::responses::{
-    GetDepositsForTransactionResponse, UpdateDepositsResponse,
+    DepositWithStatus, GetDepositsForTransactionResponse, UpdateDepositsResponse,
 };
 use crate::api::models::deposit::{Deposit, DepositInfo};
 use crate::api::models::{
@@ -412,7 +412,7 @@ pub async fn create_deposit(
     tag = "deposit",
     request_body = UpdateDepositsRequestBody,
     responses(
-        (status = 200, description = "Deposits updated successfully", body = UpdateDepositsResponse),
+        (status = 207, description = "Deposits updated successfully", body = UpdateDepositsResponse),
         (status = 400, description = "Invalid request body", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
         (status = 404, description = "Address not found", body = ErrorResponse),
@@ -466,7 +466,7 @@ pub async fn update_deposits_signer(
     tag = "deposit",
     request_body = UpdateDepositsRequestBody,
     responses(
-        (status = 200, description = "Deposits updated successfully", body = UpdateDepositsResponse),
+        (status = 207, description = "Deposits updated successfully", body = UpdateDepositsResponse),
         (status = 400, description = "Invalid request body", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
         (status = 404, description = "Address not found", body = ErrorResponse),
@@ -513,7 +513,7 @@ async fn update_deposits(
         body.try_into_validated_update_request(api_state.chaintip().into())?;
 
     // Create aggregator.
-    let mut updated_deposits: Vec<(usize, Deposit)> =
+    let mut updated_deposits: Vec<(usize, DepositWithStatus)> =
         Vec::with_capacity(validated_request.deposits.len());
 
     // Loop through all updates and execute.
@@ -543,7 +543,16 @@ async fn update_deposits(
             );
         }) {
             Ok(updated_deposit) => updated_deposit,
-            Err(Error::NotFound) => continue,
+            Err(Error::NotFound) => {
+                updated_deposits.push((
+                    index,
+                    DepositWithStatus {
+                        deposit: Deposit::default(),
+                        status: StatusCode::NOT_FOUND.as_u16(),
+                    },
+                ));
+                continue;
+            }
             Err(e) => return Err(e),
         };
 
@@ -557,7 +566,13 @@ async fn update_deposits(
                 "failed to convert deposit"
             );
         })?;
-        updated_deposits.push((index, deposit));
+        updated_deposits.push((
+            index,
+            DepositWithStatus {
+                deposit,
+                status: StatusCode::OK.as_u16(),
+            },
+        ));
     }
 
     if updated_deposits.is_empty() {
@@ -570,7 +585,7 @@ async fn update_deposits(
         .map(|(_, deposit)| deposit)
         .collect();
     let response = UpdateDepositsResponse { deposits };
-    Ok(with_status(json(&response), StatusCode::CREATED))
+    Ok(with_status(json(&response), StatusCode::MULTI_STATUS))
 }
 
 const OP_DROP: u8 = opcodes::OP_DROP.to_u8();

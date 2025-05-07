@@ -1,5 +1,6 @@
 //! Response structures for deposit api calls.
 
+use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use utoipa::{ToResponse, ToSchema};
 
@@ -30,5 +31,15 @@ pub struct GetDepositsResponse {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateDepositsResponse {
     /// Deposit infos: deposits with a little less data.
-    pub deposits: Vec<Deposit>,
+    pub deposits: Vec<DepositWithStatus>,
+}
+
+/// Wrapper for deposit with status code. Used for multi-status responses.
+#[derive(Clone, Default, Debug, PartialEq, Hash, Serialize, Deserialize, ToSchema, ToResponse)]
+#[serde(rename_all = "camelCase")]
+pub struct DepositWithStatus {
+    /// Deposit itself.
+    pub deposit: Deposit,
+    /// Status code.
+    pub status: u16,
 }

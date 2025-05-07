@@ -1079,7 +1079,7 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "207": {
             "description": "Deposits updated successfully",
             "content": {
               "application/json": {
@@ -2828,7 +2828,7 @@
           "deposits": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Deposit"
+              "$ref": "#/components/schemas/DepositWithStatus"
             },
             "description": "Deposit infos: deposits with a little less data."
           }
