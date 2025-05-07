@@ -23,12 +23,13 @@ ARG GIT_BRANCH=main
 RUN git checkout $GIT_BRANCH
 
 # Run an install that we'll cache the result of and then build the code
-RUN make install && make build
+# only install pnpm dependencies because we don't need the python venvs.
+RUN make install-pnpm && make build
 
 # Build the codebase from the local sources.
 # -------------------------------------------
 COPY . /code/sbtc/
-RUN make install && make build
+RUN make install-pnpm && make build
 
 # Build Emily Server.
 # --------------------

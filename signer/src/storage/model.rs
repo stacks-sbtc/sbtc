@@ -356,41 +356,12 @@ impl WithdrawalSigner {
 
 /// A connection between a bitcoin block and a bitcoin transaction.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
+#[cfg_attr(feature = "testing", derive(fake::Dummy))]
 pub struct BitcoinTxRef {
     /// Transaction ID.
     pub txid: BitcoinTxId,
     /// The block in which the transaction exists.
     pub block_hash: BitcoinBlockHash,
-}
-
-/// A connection between a bitcoin block and a bitcoin transaction.
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct StacksTransaction {
-    /// Transaction ID.
-    pub txid: StacksTxId,
-    /// The block in which the transaction exists.
-    pub block_hash: StacksBlockHash,
-}
-
-/// For writing to the stacks_transactions or bitcoin_transactions table.
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct TransactionIds {
-    /// Transaction IDs.
-    pub tx_ids: Vec<[u8; 32]>,
-    /// The blocks in which the transactions exist.
-    pub block_hashes: Vec<[u8; 32]>,
-}
-
-/// A raw transaction on either Bitcoin or Stacks.
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
-#[cfg_attr(feature = "testing", derive(fake::Dummy))]
-pub struct Transaction {
-    /// Transaction ID.
-    pub txid: [u8; 32],
-    /// The type of the transaction.
-    pub tx_type: TransactionType,
-    /// The block id of the stacks block that includes this transaction
-    pub block_hash: [u8; 32],
 }
 
 /// A deposit request with a response bitcoin transaction that has been
@@ -626,30 +597,6 @@ pub enum DkgSharesStatus {
     /// The DKG shares have failed verification or the shares have not
     /// passed verification within our configured window.
     Failed,
-}
-
-/// The types of transactions the signer is interested in.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::Type, strum::Display)]
-#[sqlx(type_name = "transaction_type", rename_all = "snake_case")]
-#[cfg_attr(feature = "testing", derive(fake::Dummy))]
-#[strum(serialize_all = "snake_case")]
-pub enum TransactionType {
-    /// An sBTC transaction on Bitcoin.
-    SbtcTransaction,
-    /// A deposit request transaction on Bitcoin.
-    DepositRequest,
-    /// A withdrawal request transaction on Stacks.
-    WithdrawRequest,
-    /// A deposit accept transaction on Stacks.
-    DepositAccept,
-    /// A withdrawal accept transaction on Stacks.
-    WithdrawAccept,
-    /// A withdraw reject transaction on Stacks.
-    WithdrawReject,
-    /// A rotate keys call on Stacks.
-    RotateKeys,
-    /// A donation to signers aggregated key on Bitcoin.
-    Donation,
 }
 
 /// The types of Bitcoin transaction input or outputs that the signer may

@@ -190,7 +190,7 @@ impl SignerWallet {
     /// Load the bootstrap wallet implicitly defined in the signer config.
     pub fn load_boostrap_wallet(config: &SignerConfig) -> Result<SignerWallet, Error> {
         let network_kind = config.network;
-        let public_keys = config.bootstrap_signing_set();
+        let public_keys = config.bootstrap_signing_set.clone();
         let signatures_required = config.bootstrap_signatures_required;
 
         SignerWallet::new(&public_keys, signatures_required, network_kind, 0)
@@ -453,13 +453,13 @@ mod tests {
     use crate::stacks::contracts::AsContractCall;
     use crate::stacks::contracts::ReqContext;
     use crate::storage::DbWrite;
-    use crate::storage::model;
     use crate::storage::model::KeyRotationEvent;
     use crate::storage::model::StacksPrincipal;
     use crate::testing::context::ConfigureMockedClients;
     use crate::testing::context::TestContext;
     use crate::testing::context::*;
     use crate::testing::get_rng;
+    use crate::testing::storage::DbReadTestExt;
     use crate::testing::storage::model::TestData;
 
     use super::*;
@@ -604,7 +604,7 @@ mod tests {
             // This message is unlikely to be the digest of the transaction
             Message::from_digest([1; 32])
         };
-        let signature = SECP256K1.sign_ecdsa_recoverable(&msg, &secret_key).into();
+        let signature = SECP256K1.sign_ecdsa_recoverable(&msg, &secret_key);
 
         // Now let's try to add a bad signature. We skip the case where we
         // have a correct key and the correct digest so this should always
@@ -620,7 +620,7 @@ mod tests {
         // things update correctly.
         let secret_key = key_pairs[0].secret_key();
         let msg = tx_signer.digest;
-        let signature = SECP256K1.sign_ecdsa_recoverable(&msg, &secret_key).into();
+        let signature = SECP256K1.sign_ecdsa_recoverable(&msg, &secret_key);
         tx_signer.add_signature(signature).unwrap();
         assert!(!tx_signer.signatures.values().all(Option::is_none));
     }
@@ -697,45 +697,38 @@ mod tests {
         let network = NetworkKind::Regtest;
         let wallet1 = SignerWallet::new(&signer_keys, signatures_required, network, 0).unwrap();
 
+        let (bitcoin_chain_tip, stacks_chain_tip) = db.get_chain_tips().await;
+
         // Let's store the key information about this wallet into the database
         let rotate_keys = KeyRotationEvent {
             txid: fake::Faker.fake_with_rng(&mut rng),
-            block_hash: fake::Faker.fake_with_rng(&mut rng),
+            block_hash: stacks_chain_tip,
             address: StacksPrincipal::from(clarity::vm::types::PrincipalData::from(
-                wallet1.address().clone(),
+                *wallet1.address(),
             )),
             aggregate_key: *wallet1.stacks_aggregate_key(),
             signer_set: signer_keys.clone(),
             signatures_required: wallet1.signatures_required,
         };
 
-        let bitcoin_chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
-        let stacks_chain_tip = db
-            .get_stacks_chain_tip(&bitcoin_chain_tip)
-            .await
-            .unwrap()
-            .unwrap();
-
         // We haven't stored any RotateKeysTransactions into the database
         // yet, so it will try to load the wallet from the context.
-        let wallet0 = SignerWallet::load(&ctx, &bitcoin_chain_tip).await.unwrap();
+        let wallet0 = SignerWallet::load(&ctx, &bitcoin_chain_tip.block_hash)
+            .await
+            .unwrap();
         let config = &ctx.config().signer;
         let bootstrap_aggregate_key =
-            PublicKey::combine_keys(&config.bootstrap_signing_set()).unwrap();
+            PublicKey::combine_keys(&config.bootstrap_signing_set).unwrap();
         assert_eq!(wallet0.aggregate_key, bootstrap_aggregate_key);
 
-        let tx = model::StacksTransaction {
-            txid: rotate_keys.txid,
-            block_hash: stacks_chain_tip.block_hash,
-        };
-
-        db.write_stacks_transaction(&tx).await.unwrap();
         db.write_rotate_keys_transaction(&rotate_keys)
             .await
             .unwrap();
 
         // Okay, now let's load it up and make sure things match.
-        let wallet2 = SignerWallet::load(&ctx, &bitcoin_chain_tip).await.unwrap();
+        let wallet2 = SignerWallet::load(&ctx, &bitcoin_chain_tip.block_hash)
+            .await
+            .unwrap();
 
         assert_eq!(wallet1.address(), wallet2.address());
         assert_eq!(wallet1.public_keys(), wallet2.public_keys());

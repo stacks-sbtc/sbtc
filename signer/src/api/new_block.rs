@@ -315,7 +315,6 @@ mod tests {
     use crate::storage::in_memory::Store;
     use crate::storage::model::DepositRequest;
     use crate::storage::model::StacksPrincipal;
-    use crate::storage::model::StacksTxId;
     use crate::testing::context::*;
     use crate::testing::get_rng;
     use crate::testing::storage::model::TestData;
@@ -342,10 +341,10 @@ mod tests {
     const ROTATE_KEYS_AND_INVALID_EVENT_WEBHOOK: &str =
         include_str!("../../tests/fixtures/rotate-keys-and-invalid-event.json");
 
-    #[test_case(COMPLETED_DEPOSIT_WEBHOOK, |db| db.completed_deposit_events.get(&OutPoint::null()).is_none(); "completed-deposit")]
-    #[test_case(WITHDRAWAL_CREATE_WEBHOOK, |db| db.withdrawal_requests.get(&(1, StacksBlockId::from_hex("75b02b9884ec41c05f2cfa6e20823328321518dd0b027e7b609b63d4d1ea7c78").unwrap().into())).is_none(); "withdrawal-create")]
-    #[test_case(WITHDRAWAL_ACCEPT_WEBHOOK, |db| db.withdrawal_accept_events.get(&1).is_none(); "withdrawal-accept")]
-    #[test_case(WITHDRAWAL_REJECT_WEBHOOK, |db| db.withdrawal_reject_events.get(&1).is_none(); "withdrawal-reject")]
+    #[test_case(COMPLETED_DEPOSIT_WEBHOOK, |db| !db.completed_deposit_events.contains_key(&OutPoint::null()); "completed-deposit")]
+    #[test_case(WITHDRAWAL_CREATE_WEBHOOK, |db| !db.withdrawal_requests.contains_key(&(1, StacksBlockId::from_hex("75b02b9884ec41c05f2cfa6e20823328321518dd0b027e7b609b63d4d1ea7c78").unwrap().into())); "withdrawal-create")]
+    #[test_case(WITHDRAWAL_ACCEPT_WEBHOOK, |db| !db.withdrawal_accept_events.contains_key(&1); "withdrawal-accept")]
+    #[test_case(WITHDRAWAL_REJECT_WEBHOOK, |db| !db.withdrawal_reject_events.contains_key(&1); "withdrawal-reject")]
     #[test_case(ROTATE_KEYS_WEBHOOK, |db| db.rotate_keys_transactions.is_empty(); "rotate-keys")]
     #[tokio::test]
     async fn test_events<F>(body_str: &str, table_is_empty: F)
@@ -373,10 +372,10 @@ mod tests {
         assert!(!table_is_empty(db.lock().await));
     }
 
-    #[test_case(COMPLETED_DEPOSIT_WEBHOOK, |db| db.completed_deposit_events.get(&OutPoint::null()).is_none(); "completed-deposit")]
-    #[test_case(WITHDRAWAL_CREATE_WEBHOOK, |db| db.withdrawal_requests.get(&(1, StacksBlockId::from_hex("75b02b9884ec41c05f2cfa6e20823328321518dd0b027e7b609b63d4d1ea7c78").unwrap().into())).is_none(); "withdrawal-create")]
-    #[test_case(WITHDRAWAL_ACCEPT_WEBHOOK, |db| db.withdrawal_accept_events.get(&1).is_none(); "withdrawal-accept")]
-    #[test_case(WITHDRAWAL_REJECT_WEBHOOK, |db| db.withdrawal_reject_events.get(&2).is_none(); "withdrawal-reject")]
+    #[test_case(COMPLETED_DEPOSIT_WEBHOOK, |db| !db.completed_deposit_events.contains_key(&OutPoint::null()); "completed-deposit")]
+    #[test_case(WITHDRAWAL_CREATE_WEBHOOK, |db| !db.withdrawal_requests.contains_key(&(1, StacksBlockId::from_hex("75b02b9884ec41c05f2cfa6e20823328321518dd0b027e7b609b63d4d1ea7c78").unwrap().into())); "withdrawal-create")]
+    #[test_case(WITHDRAWAL_ACCEPT_WEBHOOK, |db| !db.withdrawal_accept_events.contains_key(&1); "withdrawal-accept")]
+    #[test_case(WITHDRAWAL_REJECT_WEBHOOK, |db| !db.withdrawal_reject_events.contains_key(&2); "withdrawal-reject")]
     #[test_case(ROTATE_KEYS_WEBHOOK, |db| db.rotate_keys_transactions.is_empty(); "rotate-keys")]
     #[tokio::test]
     async fn test_fishy_events<F>(body_str: &str, table_is_empty: F)
@@ -468,10 +467,10 @@ mod tests {
         let txid = test_data.bitcoin_transactions[0].txid;
         let bitcoin_block = &test_data.bitcoin_blocks[0];
         let stacks_chaintip = &test_data.stacks_blocks[0];
-        let stacks_txid = test_data.stacks_transactions[0].txid;
+        let stacks_txid = fake::Faker.fake_with_rng(&mut rng);
 
         let mut deposit_request: DepositRequest = fake::Faker.fake_with_rng(&mut rng);
-        deposit_request.txid = txid.into();
+        deposit_request.txid = txid;
         deposit_request.output_index = 0;
         deposit_request.amount = 1000;
         let btc_fee = 100;
@@ -481,12 +480,12 @@ mod tests {
 
         let event = CompletedDepositEvent {
             outpoint: deposit_request.outpoint(),
-            txid: stacks_txid.into(),
-            block_id: stacks_chaintip.block_hash.into(),
+            txid: stacks_txid,
+            block_id: stacks_chaintip.block_hash,
             amount: deposit_request.amount - btc_fee,
-            sweep_block_hash: bitcoin_block.block_hash.into(),
+            sweep_block_hash: bitcoin_block.block_hash,
             sweep_block_height: bitcoin_block.block_height,
-            sweep_txid: txid.into(),
+            sweep_txid: txid,
         };
         let res = handle_completed_deposit(&ctx, event).await;
         assert!(res.is_ok());
@@ -494,8 +493,7 @@ mod tests {
         assert_eq!(db.completed_deposit_events.len(), 1);
         assert!(
             db.completed_deposit_events
-                .get(&deposit_request.outpoint())
-                .is_some()
+                .contains_key(&deposit_request.outpoint())
         );
     }
 
@@ -525,20 +523,20 @@ mod tests {
         let test_data = TestData::generate(&mut rng, &[], &test_params);
 
         let txid = test_data.bitcoin_transactions[0].txid;
-        let stacks_tx = &test_data.stacks_transactions[0];
+        let stacks_block = &test_data.stacks_blocks[0];
         let bitcoin_block = &test_data.bitcoin_blocks[0];
 
         let request_id = 1;
         let event = WithdrawalAcceptEvent {
             request_id,
             outpoint: OutPoint { txid: *txid, vout: 0 },
-            txid: stacks_tx.txid.into(),
-            block_id: stacks_tx.block_hash.into(),
+            txid: fake::Faker.fake_with_rng(&mut rng),
+            block_id: stacks_block.block_hash,
             fee: 1,
             signer_bitmap: BitArray::<_>::ZERO,
-            sweep_block_hash: bitcoin_block.block_hash.into(),
+            sweep_block_hash: bitcoin_block.block_hash,
             sweep_block_height: bitcoin_block.block_height,
-            sweep_txid: txid.into(),
+            sweep_txid: txid,
         };
 
         let res = handle_withdrawal_accept(&ctx, event).await;
@@ -546,7 +544,7 @@ mod tests {
         assert!(res.is_ok());
         let db = db.lock().await;
         assert_eq!(db.withdrawal_accept_events.len(), 1);
-        assert!(db.withdrawal_accept_events.get(&request_id).is_some());
+        assert!(db.withdrawal_accept_events.contains_key(&request_id));
     }
 
     /// Tests handling of a withdrawal request.
@@ -573,17 +571,16 @@ mod tests {
         let db = ctx.inner_storage();
         let test_data = TestData::generate(&mut rng, &[], &test_params);
 
-        let stacks_first_tx = &test_data.stacks_transactions[0];
         let stacks_first_block = &test_data.stacks_blocks[0];
 
         let request_id = 1;
         let event = WithdrawalRequest {
             request_id,
-            block_hash: stacks_first_tx.block_hash.into(),
+            block_hash: stacks_first_block.block_hash,
             amount: 100,
             max_fee: 1,
             recipient: fake::Faker.fake_with_rng(&mut rng),
-            txid: stacks_first_tx.txid,
+            txid: fake::Faker.fake_with_rng(&mut rng),
             sender_address: PrincipalData::Standard(StandardPrincipalData::transient()).into(),
             bitcoin_block_height: test_data.bitcoin_blocks[0].block_height,
         };
@@ -595,8 +592,7 @@ mod tests {
         assert_eq!(db.withdrawal_requests.len(), 1);
         assert!(
             db.withdrawal_requests
-                .get(&(request_id, stacks_first_block.block_hash))
-                .is_some()
+                .contains_key(&(request_id, stacks_first_block.block_hash))
         );
     }
 
@@ -633,8 +629,8 @@ mod tests {
         let request_id = 1;
         let event = WithdrawalRejectEvent {
             request_id,
-            block_id: stacks_chaintip.block_hash.into(),
-            txid: test_data.stacks_transactions[0].txid,
+            block_id: stacks_chaintip.block_hash,
+            txid: fake::Faker.fake_with_rng(&mut rng),
             signer_bitmap: BitArray::<_>::ZERO,
         };
 
@@ -643,7 +639,7 @@ mod tests {
         assert!(res.is_ok());
         let db = db.lock().await;
         assert_eq!(db.withdrawal_reject_events.len(), 1);
-        assert!(db.withdrawal_reject_events.get(&request_id).is_some());
+        assert!(db.withdrawal_reject_events.contains_key(&request_id));
     }
 
     /// Tests handling a key rotation event.
@@ -659,24 +655,27 @@ mod tests {
 
         let db = ctx.inner_storage();
 
-        let txid: StacksTxId = fake::Faker.fake_with_rng(&mut rng);
+        let block_id: StacksBlockId = StacksBlockId(fake::Faker.fake_with_rng(&mut rng));
         let event = KeyRotationEvent {
-            txid: sbtc::events::StacksTxid(txid.into_bytes()),
-            block_id: StacksBlockId(fake::Faker.fake_with_rng(&mut rng)),
-            new_aggregate_pubkey: SECP256K1.generate_keypair(&mut rng).1.into(),
+            block_id,
+            txid: sbtc::events::StacksTxid(fake::Faker.fake_with_rng(&mut rng)),
+            new_aggregate_pubkey: SECP256K1.generate_keypair(&mut rng).1,
             new_keys: (0..3)
-                .map(|_| SECP256K1.generate_keypair(&mut rng).1.into())
+                .map(|_| SECP256K1.generate_keypair(&mut rng).1)
                 .collect(),
-            new_address: PrincipalData::Standard(StandardPrincipalData::transient()).into(),
+            new_address: PrincipalData::Standard(StandardPrincipalData::transient()),
             new_signature_threshold: 3,
         };
 
-        let res = handle_key_rotation(&ctx, event.into()).await;
+        let event: crate::storage::model::KeyRotationEvent = event.into();
+        let res = handle_key_rotation(&ctx, event.clone()).await;
 
         assert!(res.is_ok());
         let db = db.lock().await;
+
         assert_eq!(db.rotate_keys_transactions.len(), 1);
-        assert!(db.rotate_keys_transactions.get(&txid).is_some());
+        let stored_events = db.rotate_keys_transactions.get(&block_id.into()).unwrap();
+        assert_eq!(stored_events, &vec![event]);
     }
 
     #[test_case(EVENT_OBSERVER_BODY_LIMIT, true; "event within limit")]

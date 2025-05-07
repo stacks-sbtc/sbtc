@@ -1,18 +1,13 @@
 //! Postgres storage implementation.
 
 use std::collections::BTreeSet;
-use std::collections::HashMap;
-use std::sync::OnceLock;
 
 use bitcoin::OutPoint;
 use bitcoin::hashes::Hash as _;
-use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
-use blockstack_lib::chainstate::stacks::TransactionPayload;
 use blockstack_lib::types::chainstate::StacksBlockId;
 use sqlx::Executor as _;
 use sqlx::PgExecutor;
 use sqlx::postgres::PgPoolOptions;
-use stacks_common::types::chainstate::StacksAddress;
 
 use crate::bitcoin::utxo::SignerUtxo;
 use crate::bitcoin::validation::DepositConfirmationStatus;
@@ -26,7 +21,6 @@ use crate::storage::model;
 use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::CompletedDepositEvent;
 use crate::storage::model::StacksBlockHeight;
-use crate::storage::model::TransactionType;
 use crate::storage::model::WithdrawalAcceptEvent;
 use crate::storage::model::WithdrawalRejectEvent;
 
@@ -38,67 +32,6 @@ use crate::WITHDRAWAL_BLOCKS_EXPIRY;
 /// All migration scripts from the `signer/migrations` directory.
 static PGSQL_MIGRATIONS: include_dir::Dir =
     include_dir::include_dir!("$CARGO_MANIFEST_DIR/migrations");
-
-const CONTRACT_NAMES: [&str; 4] = [
-    // The name of the Stacks smart contract used for minting sBTC after a
-    // successful transaction moving BTC under the signers' control.
-    "sbtc-deposit",
-    // The name of the Stacks smart contract for recording or registering
-    // successfully completed withdrawal and deposit requests.
-    "sbtc-registry",
-    // The name of the Stacks sBTC smart contract used by the signers for
-    // managing the signer set and the associated keys for a PoX cycle.
-    "sbtc-bootstrap-signers",
-    // The name of the Stacks smart contract used for withdrawing sBTC as
-    // BTC on chain.
-    "sbtc-withdrawal",
-];
-
-#[rustfmt::skip]
-const CONTRACT_FUNCTION_NAMES: [(&str, TransactionType); 5] = [
-    ("initiate-withdrawal-request", TransactionType::WithdrawRequest),
-    ("complete-deposit-wrapper", TransactionType::DepositAccept),
-    ("accept-withdrawal-request", TransactionType::WithdrawAccept),
-    ("reject-withdrawal-request", TransactionType::WithdrawReject),
-    ("rotate-keys-wrapper", TransactionType::RotateKeys),
-];
-
-/// Returns the mapping between functions in a contract call and the
-/// transaction type.
-fn contract_transaction_kinds() -> &'static HashMap<&'static str, TransactionType> {
-    static CONTRACT_FUNCTION_NAME_MAPPING: OnceLock<HashMap<&str, TransactionType>> =
-        OnceLock::new();
-
-    CONTRACT_FUNCTION_NAME_MAPPING.get_or_init(|| CONTRACT_FUNCTION_NAMES.into_iter().collect())
-}
-
-/// This function extracts the signer relevant sBTC related transactions
-/// from the given blocks.
-///
-/// Here the deployer is the address that deployed the sBTC smart
-/// contracts.
-pub fn extract_relevant_transactions(
-    blocks: &[NakamotoBlock],
-    deployer: &StacksAddress,
-) -> Vec<model::Transaction> {
-    let transaction_kinds = contract_transaction_kinds();
-    blocks
-        .iter()
-        .flat_map(|block| block.txs.iter().map(|tx| (tx, block.block_id())))
-        .filter_map(|(tx, block_id)| match &tx.payload {
-            TransactionPayload::ContractCall(x)
-                if CONTRACT_NAMES.contains(&x.contract_name.as_str()) && &x.address == deployer =>
-            {
-                Some(model::Transaction {
-                    txid: tx.txid().into_bytes(),
-                    block_hash: block_id.into_bytes(),
-                    tx_type: *transaction_kinds.get(&x.function_name.as_str())?,
-                })
-            }
-            _ => None,
-        })
-        .collect()
-}
 
 /// A convenience struct for retrieving a deposit request report
 #[derive(sqlx::FromRow)]
@@ -334,54 +267,6 @@ impl PgStore {
     /// Get a reference to the underlying pool.
     pub fn pool(&self) -> &sqlx::PgPool {
         &self.0
-    }
-
-    async fn write_transactions(
-        &self,
-        txs: Vec<model::Transaction>,
-    ) -> Result<model::TransactionIds, Error> {
-        if txs.is_empty() {
-            return Ok(model::TransactionIds {
-                tx_ids: Vec::new(),
-                block_hashes: Vec::new(),
-            });
-        }
-
-        let mut tx_ids = Vec::with_capacity(txs.len());
-        let mut tx_types = Vec::with_capacity(txs.len());
-        let mut block_hashes = Vec::with_capacity(txs.len());
-
-        for tx in txs {
-            tx_ids.push(tx.txid);
-            tx_types.push(tx.tx_type.to_string());
-            block_hashes.push(tx.block_hash)
-        }
-
-        sqlx::query(
-            r#"
-            WITH tx_ids AS (
-                SELECT ROW_NUMBER() OVER (), txid
-                FROM UNNEST($1::bytea[]) AS txid
-            )
-            , transaction_types AS (
-                SELECT ROW_NUMBER() OVER (), tx_type::sbtc_signer.transaction_type
-                FROM UNNEST($2::VARCHAR[]) AS tx_type
-            )
-            INSERT INTO sbtc_signer.transactions (txid, tx_type)
-            SELECT
-                txid
-              , tx_type
-            FROM tx_ids
-            JOIN transaction_types USING (row_number)
-            ON CONFLICT DO NOTHING"#,
-        )
-        .bind(&tx_ids)
-        .bind(tx_types)
-        .execute(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(model::TransactionIds { tx_ids, block_hashes })
     }
 
     async fn get_utxo(
@@ -2862,24 +2747,6 @@ impl super::DbWrite for PgStore {
         Ok(())
     }
 
-    async fn write_transaction(&self, transaction: &model::Transaction) -> Result<(), Error> {
-        sqlx::query(
-            "INSERT INTO sbtc_signer.transactions
-              ( txid
-              , tx_type
-              )
-            VALUES ($1, $2)
-            ON CONFLICT DO NOTHING",
-        )
-        .bind(transaction.txid)
-        .bind(transaction.tx_type)
-        .execute(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(())
-    }
-
     async fn write_bitcoin_transaction(&self, tx_ref: &model::BitcoinTxRef) -> Result<(), Error> {
         sqlx::query(
             "INSERT INTO sbtc_signer.bitcoin_transactions (txid, block_hash)
@@ -2895,11 +2762,19 @@ impl super::DbWrite for PgStore {
         Ok(())
     }
 
-    async fn write_bitcoin_transactions(&self, txs: Vec<model::Transaction>) -> Result<(), Error> {
-        let summary = self.write_transactions(txs).await?;
-        if summary.tx_ids.is_empty() {
+    async fn write_bitcoin_transactions(&self, txs: Vec<model::BitcoinTxRef>) -> Result<(), Error> {
+        if txs.is_empty() {
             return Ok(());
         }
+
+        let mut tx_ids = Vec::with_capacity(txs.len());
+        let mut block_hashes = Vec::with_capacity(txs.len());
+
+        for tx in txs {
+            tx_ids.push(tx.txid);
+            block_hashes.push(tx.block_hash)
+        }
+
         sqlx::query(
             r#"
             WITH tx_ids AS (
@@ -2918,59 +2793,8 @@ impl super::DbWrite for PgStore {
             JOIN block_ids USING (row_number)
             ON CONFLICT DO NOTHING"#,
         )
-        .bind(&summary.tx_ids)
-        .bind(&summary.block_hashes)
-        .execute(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(())
-    }
-
-    async fn write_stacks_transaction(
-        &self,
-        stacks_transaction: &model::StacksTransaction,
-    ) -> Result<(), Error> {
-        sqlx::query(
-            "INSERT INTO sbtc_signer.stacks_transactions (txid, block_hash)
-            VALUES ($1, $2)
-            ON CONFLICT DO NOTHING",
-        )
-        .bind(stacks_transaction.txid)
-        .bind(stacks_transaction.block_hash)
-        .execute(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(())
-    }
-
-    async fn write_stacks_transactions(&self, txs: Vec<model::Transaction>) -> Result<(), Error> {
-        let summary = self.write_transactions(txs).await?;
-        if summary.tx_ids.is_empty() {
-            return Ok(());
-        }
-
-        sqlx::query(
-            r#"
-            WITH tx_ids AS (
-                SELECT ROW_NUMBER() OVER (), txid
-                FROM UNNEST($1::bytea[]) AS txid
-            )
-            , block_ids AS (
-                SELECT ROW_NUMBER() OVER (), block_id
-                FROM UNNEST($2::bytea[]) AS block_id
-            )
-            INSERT INTO sbtc_signer.stacks_transactions (txid, block_hash)
-            SELECT
-                txid
-              , block_id
-            FROM tx_ids
-            JOIN block_ids USING (row_number)
-            ON CONFLICT DO NOTHING"#,
-        )
-        .bind(&summary.tx_ids)
-        .bind(&summary.block_hashes)
+        .bind(&tx_ids)
+        .bind(&block_hashes)
         .execute(&self.0)
         .await
         .map_err(Error::SqlxQuery)?;
@@ -3508,83 +3332,5 @@ impl super::DbWrite for PgStore {
         .await
         .map(|res| res.rows_affected() > 0)
         .map_err(Error::SqlxQuery)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    use std::io::Read;
-
-    use blockstack_lib::chainstate::stacks::TransactionContractCall;
-    use blockstack_lib::clarity::vm::ClarityName;
-    use blockstack_lib::clarity::vm::ContractName;
-    use blockstack_lib::types::chainstate::StacksAddress;
-    use blockstack_lib::util::hash::Hash160;
-    use clarity::codec::StacksMessageCodec as _;
-    use test_case::test_case;
-
-    /// Test that we can extract the types of function calls that we care
-    /// about
-    #[test_case("sbtc-withdrawal", "initiate-withdrawal-request"; "initiate withdrawal request")]
-    fn extract_transaction_type(contract_name: &str, function_name: &str) {
-        let path = "tests/fixtures/tenure-blocks-0-e5fdeb1a51ba6eb297797a1c473e715c27dc81a58ba82c698f6a32eeccee9a5b.bin";
-        let mut file = std::fs::File::open(path).unwrap();
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf).unwrap();
-
-        let bytes: &mut &[u8] = &mut buf.as_ref();
-        let mut blocks = Vec::new();
-
-        while !bytes.is_empty() {
-            blocks.push(NakamotoBlock::consensus_deserialize(bytes).unwrap());
-        }
-
-        let deployer = StacksAddress::burn_address(false);
-        let txs = extract_relevant_transactions(&blocks, &deployer);
-        assert!(txs.is_empty());
-
-        let last_block = blocks.last_mut().unwrap();
-        let mut tx = last_block.txs.last().unwrap().clone();
-
-        let contract_call = TransactionContractCall {
-            address: deployer,
-            contract_name: ContractName::from(contract_name),
-            function_name: ClarityName::from(function_name),
-            function_args: Vec::new(),
-        };
-        tx.payload = TransactionPayload::ContractCall(contract_call);
-        last_block.txs.push(tx);
-
-        let txs = extract_relevant_transactions(&blocks, &deployer);
-        assert_eq!(txs.len(), 1);
-
-        // We've just seen that if the deployer supplied here matches the
-        // address in the transaction, then we will consider it a relevant
-        // transaction. Now what if someone tries to pull a fast one by
-        // deploying their own modified version of the sBTC smart contracts
-        // and creating contract calls against that? Well the address of
-        // these contract calls won't match the ones that we are interested
-        // in, and we will filter them out. We test that now,
-        let contract_call = TransactionContractCall {
-            // This is the address of the poser that deployed their own
-            // versions of the sBTC smart contracts.
-            address: StacksAddress::new(2, Hash160([1; 20])),
-            contract_name: ContractName::from(contract_name),
-            function_name: ClarityName::from(function_name),
-            function_args: Vec::new(),
-        };
-        // The last transaction in the last nakamoto block is a legit
-        // transaction. Let's remove it and replace it with a non-legit
-        // one.
-        let last_block = blocks.last_mut().unwrap();
-        let mut tx = last_block.txs.pop().unwrap();
-        tx.payload = TransactionPayload::ContractCall(contract_call);
-        last_block.txs.push(tx);
-
-        // Now there aren't any relevant transactions in the block
-        let txs = extract_relevant_transactions(&blocks, &deployer);
-        assert!(txs.is_empty());
     }
 }

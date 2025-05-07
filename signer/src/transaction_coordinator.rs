@@ -2619,6 +2619,7 @@ mod tests {
     use super::assert_rotate_key_action;
     use super::should_coordinate_dkg;
 
+    #[allow(clippy::type_complexity)]
     fn test_environment() -> TestEnvironment<
         TestContext<
             SharedStore,
@@ -2705,7 +2706,6 @@ mod tests {
         test_environment().assert_get_signer_utxo_fork().await;
     }
 
-    #[ignore = "test data needs to be updated to store tx inputs first"]
     #[tokio::test]
     async fn should_get_signer_utxo_unspent() {
         test_environment().assert_get_signer_utxo_unspent().await;
