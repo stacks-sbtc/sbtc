@@ -13,6 +13,7 @@ use crate::common::error::{Error, Inconsistency};
 
 use crate::{api::models::common::Status, context::EmilyContext};
 
+use super::entries::StatusEntry;
 use super::entries::deposit::{
     DepositInfoByRecipientEntry, DepositInfoByReclaimPubkeysEntry,
     DepositTableByRecipientSecondaryIndex, DepositTableByReclaimPubkeysSecondaryIndex,
@@ -201,7 +202,10 @@ pub async fn pull_and_update_deposit_with_retry(
         if update.is_unnecessary(&deposit_entry) {
             return Ok(deposit_entry);
         }
-        if !is_trusted_key && deposit_entry.status != Status::Pending {
+        let is_valid_untrusted_status_update = deposit_entry.status == Status::Pending
+            || update.event.status == StatusEntry::Accepted
+                && deposit_entry.status == Status::Accepted;
+        if !is_trusted_key && !is_valid_untrusted_status_update {
             return Err(Error::Forbidden);
         }
         // Make the update package.
