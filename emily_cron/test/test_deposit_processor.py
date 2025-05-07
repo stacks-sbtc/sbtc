@@ -473,13 +473,11 @@ class TestDepositProcessorWithRbf(TestDepositProcessorBase):
             txid="replacement1",
             confirmed_height=None,
             lock_time=10,
-            rbf_txids=["replacement1", "replacement2"],
         )
         deposit2 = self._create_mock_deposit(
             txid="replacement2",
             confirmed_height=700000,
             lock_time=10,
-            rbf_txids=["replacement1", "replacement2"],
         )
 
         # Mock the transaction data returned by the Mempool API
@@ -513,8 +511,8 @@ class TestDepositProcessorWithRbf(TestDepositProcessorBase):
                 enriched.confirmed_height = additional_info.get("confirmed_height")
                 enriched.confirmed_time = additional_info.get("confirmed_time")
                 enriched.fee = additional_info.get("fee")
-                enriched.in_mempool = additional_info.get("in_mempool")
-                enriched.rbf_txids = additional_info.get("rbf_txids")
+                enriched.in_mempool = additional_info.get("in_mempool", False)
+                enriched.rbf_txids = additional_info.get("rbf_txids", [])
                 return enriched
 
             mock_from_info.side_effect = mock_from_info_side_effect
@@ -542,7 +540,7 @@ class TestDepositProcessorWithRbf(TestDepositProcessorBase):
             self.assertEqual(result[1].confirmed_height, deposit2.confirmed_height)
             self.assertEqual(result[1].fee, 100000)
             self.assertEqual(result[1].in_mempool, True)
-
+            self.assertEqual(result[1].rbf_txids, [])
 
 class TestDepositProcessor(TestDepositProcessorBase):
     """Tests for the DepositProcessor class."""
