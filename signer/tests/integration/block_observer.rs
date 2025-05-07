@@ -25,9 +25,12 @@ use sbtc::deposits::CreateDepositRequest;
 use sbtc::deposits::DepositScriptInputs;
 use sbtc::deposits::ReclaimScriptInputs;
 use sbtc::testing::regtest;
+use sbtc::testing::regtest::Faucet;
 use sbtc::testing::regtest::Recipient;
+use signer::bitcoin::utxo::DepositRequest;
 use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
+use signer::bitcoin::utxo::SignerUtxo;
 use signer::block_observer::get_signer_set_and_aggregate_key;
 use signer::context::SbtcLimits;
 use signer::emily_client::EmilyClient;
@@ -639,6 +642,193 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     assert_eq!(amount, deposit_amount);
     assert_eq!(prevout_txid.deref(), &deposit_tx.compute_txid());
     assert_eq!(txid.deref(), &unsigned.tx.compute_txid());
+
+    testing::storage::drop_db(db).await;
+}
+
+fn generate_deposit_request<R>(
+    faucet: &Faucet,
+    amount: u64,
+    signers_public_key: bitcoin::XOnlyPublicKey,
+    rng: &mut R,
+) -> DepositRequest
+where
+    R: rand::Rng + ?Sized,
+{
+    let depositor = Recipient::new_with_rng(AddressType::P2tr, rng);
+    faucet.send_to(amount + amount / 2, &depositor.address);
+    faucet.generate_block();
+
+    let utxo = depositor.get_utxos(faucet.rpc, None).pop().unwrap();
+    let max_fee = amount / 2;
+
+    let (deposit_tx, deposit_request, _) =
+        make_deposit_request(&depositor, amount, utxo, max_fee, signers_public_key);
+
+    faucet.rpc.send_raw_transaction(&deposit_tx).unwrap();
+    deposit_request
+}
+
+/// This tests that a new signer, when they are coming online, can
+/// successfully pick up transactions when there is a key rotation.
+#[tokio::test]
+async fn blockk_observer_picks_up_chained_sweeps() {
+    let (rpc, faucet) = regtest::initialize_blockchain();
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
+
+    let signer = Recipient::new_with_rng(AddressType::P2tr, &mut rng);
+    let aggregate_key = signer.keypair.public_key().into();
+    let signers_public_key1 = signer.keypair.x_only_public_key().0;
+
+    // Start off with some initial UTXOs to work with.
+    let signers_amount = 100_000_000;
+    let signer_outpoint = faucet.send_to(signers_amount, &signer.address);
+    faucet.generate_block();
+
+    let new_signer = Recipient::new_with_rng(AddressType::P2tr, &mut rng);
+    let signers_public_key2  = PublicKey::from(new_signer.keypair.public_key()).into();
+
+    // Now lets make a deposit transaction.
+    let mut deposit_request1 = generate_deposit_request(faucet, 950_000, signers_public_key1, &mut rng);
+    let mut deposit_request2 = generate_deposit_request(faucet, 875_000, signers_public_key2, &mut rng);
+    let mut deposit_request3 = generate_deposit_request(faucet, 725_000, signers_public_key2, &mut rng);
+
+
+    deposit_request1.signer_bitmap.set(0, true);
+    deposit_request2.signer_bitmap.set(1, true);
+    deposit_request3.signer_bitmap.set(2, true);
+
+    let requests = SbtcRequests {
+        deposits: vec![deposit_request1, deposit_request2, deposit_request3],
+        withdrawals: Vec::new(),
+        signer_state: SignerBtcState {
+            utxo: SignerUtxo {
+                outpoint: signer_outpoint,
+                amount: signers_amount,
+                public_key: signers_public_key1,
+            },
+            fee_rate: 2.0,
+            public_key: signers_public_key2,
+            last_fees: None,
+            magic_bytes: [b'T', b'3'],
+        },
+        accept_threshold: 2,
+        num_signers: 3,
+        sbtc_limits: SbtcLimits::unlimited(),
+        max_deposits_per_bitcoin_tx: 25,
+    };
+
+    // There should only be one transaction here since there are only
+    // withdrawal requests and no deposit requests.
+    let mut transactions = requests.construct_transactions().unwrap();
+    assert_eq!(transactions.len(), 3);
+
+    signer::testing::set_witness_data(&mut transactions[0], signer.keypair);
+    signer::testing::set_witness_data(&mut transactions[1], new_signer.keypair);
+    signer::testing::set_witness_data(&mut transactions[2], new_signer.keypair);
+
+    rpc.send_raw_transaction(&transactions[0].tx).unwrap();
+    rpc.send_raw_transaction(&transactions[1].tx).unwrap();
+    rpc.send_raw_transaction(&transactions[2].tx).unwrap();
+
+    let mut ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_first_bitcoin_core_client()
+        .with_mocked_emily_client()
+        .with_mocked_stacks_client()
+        .modify_settings(|settings| settings.signer.bootstrap_aggregate_key = Some(aggregate_key))
+        .build();
+
+    // We need to set up the stacks client as well. We use it to fetch
+    // information about the Stacks blockchain, so we need to prep it, even
+    // though it isn't necessary for our test.
+    ctx.with_stacks_client(|client| {
+        client
+            .expect_get_tenure_info()
+            .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
+        client.expect_get_block().returning(|_| {
+            let response = Ok(NakamotoBlock {
+                header: NakamotoBlockHeader::empty(),
+                txs: Vec::new(),
+            });
+            Box::pin(std::future::ready(response))
+        });
+        client
+            .expect_get_tenure()
+            .returning(|_| Box::pin(std::future::ready(TenureBlocks::nearly_empty())));
+        client.expect_get_pox_info().returning(|| {
+            let response = serde_json::from_str::<RPCPoxInfoData>(GET_POX_INFO_JSON)
+                .map_err(Error::JsonSerialize);
+            Box::pin(std::future::ready(response))
+        });
+        client
+            .expect_get_sortition_info()
+            .returning(move |_| Box::pin(std::future::ready(Ok(DUMMY_SORTITION_INFO.clone()))));
+    })
+    .await;
+
+    ctx.with_emily_client(|client| {
+        client
+            .expect_get_deposits()
+            .returning(move || Box::pin(std::future::ready(Ok(vec![]))));
+    })
+    .await;
+
+    // Now we do the actual test case setup.
+
+    ctx.with_emily_client(|client| {
+        client
+            .expect_get_limits()
+            .once()
+            .returning(move || Box::pin(std::future::ready(Ok(SbtcLimits::unlimited()))));
+    })
+    .await;
+
+    ctx.with_stacks_client(move |client| {
+        client
+            .expect_get_sbtc_total_supply()
+            .returning(|_| Box::pin(std::future::ready(Ok(Amount::ZERO))));
+    })
+    .await;
+    ctx.state().set_sbtc_contracts_deployed();
+
+    // We only proceed with the test after the BlockObserver "process" has
+    // started, and we use this counter to notify us when that happens.
+    let start_flag = Arc::new(AtomicBool::new(false));
+    let flag = start_flag.clone();
+
+    let block_observer = BlockObserver {
+        context: ctx.clone(),
+        bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT).await,
+    };
+
+    let mut signal_receiver = ctx.get_signal_receiver();
+
+    tokio::spawn(async move {
+        flag.store(true, Ordering::Relaxed);
+        block_observer.run().await
+    });
+
+    // Wait for the task to start.
+    while !start_flag.load(Ordering::SeqCst) {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // Let's generate a new block and wait for our block observer to send a
+    // BitcoinBlockObserved signal.
+    let _expected_tip = faucet.generate_blocks(1).pop().unwrap();
+
+    let waiting_fut = async {
+        let signal = signal_receiver.recv();
+        let Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved)) = signal.await else {
+            panic!("Not the right signal")
+        };
+    };
+
+    tokio::time::timeout(Duration::from_secs(3), waiting_fut)
+        .await
+        .unwrap();
 
     testing::storage::drop_db(db).await;
 }
