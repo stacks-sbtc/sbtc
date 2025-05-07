@@ -1,6 +1,5 @@
 //! Response structures for deposit api calls.
 
-use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use utoipa::{ToResponse, ToSchema};
 

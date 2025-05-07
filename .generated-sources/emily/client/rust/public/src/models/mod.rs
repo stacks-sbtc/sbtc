@@ -12,6 +12,8 @@ pub mod deposit_parameters;
 pub use self::deposit_parameters::DepositParameters;
 pub mod deposit_update;
 pub use self::deposit_update::DepositUpdate;
+pub mod deposit_with_status;
+pub use self::deposit_with_status::DepositWithStatus;
 pub mod error_response;
 pub use self::error_response::ErrorResponse;
 pub mod fulfillment;

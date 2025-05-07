@@ -798,7 +798,11 @@ async fn update_deposits() {
 
     // Assert.
     // -------
-    let mut updated_deposits = update_deposits_response.deposits;
+    let mut updated_deposits = update_deposits_response
+        .deposits
+        .iter()
+        .map(|deposit| *deposit.deposit.clone())
+        .collect::<Vec<_>>();
     updated_deposits.sort_by(arbitrary_deposit_partial_cmp);
     expected_deposits.sort_by(arbitrary_deposit_partial_cmp);
     assert_eq!(expected_deposits, updated_deposits);
@@ -1039,7 +1043,12 @@ async fn update_deposits_is_forbidden_for_signer(
     } else {
         assert!(response.is_ok());
         let response = response.unwrap();
-        let deposit = response.deposits.first().expect("No deposit in response");
+        let deposit = *response
+            .deposits
+            .first()
+            .expect("No deposit in response")
+            .deposit
+            .clone();
         assert_eq!(deposit.bitcoin_txid, bitcoin_txid);
         assert_eq!(deposit.status, new_status);
     }
@@ -1146,7 +1155,12 @@ async fn update_deposits_is_not_forbidden_for_sidecar(previous_status: Status, n
 
     assert!(response.is_ok());
     let response = response.unwrap();
-    let deposit = response.deposits.first().expect("No deposit in response");
+    let deposit = *response
+        .deposits
+        .first()
+        .expect("No deposit in response")
+        .deposit
+        .clone();
     assert_eq!(deposit.bitcoin_txid, bitcoin_txid);
     assert_eq!(deposit.status, new_status);
 }
