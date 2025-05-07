@@ -560,6 +560,10 @@ async fn update_deposits(
         updated_deposits.push((index, deposit));
     }
 
+    if updated_deposits.is_empty() {
+        return Err(Error::NotFound);
+    }
+
     updated_deposits.sort_by_key(|(index, _)| *index);
     let deposits = updated_deposits
         .into_iter()
