@@ -527,7 +527,7 @@ async fn update_deposits(
             "updating deposit"
         );
 
-        let updated_deposit = accessors::pull_and_update_deposit_with_retry(
+        let updated_deposit = match accessors::pull_and_update_deposit_with_retry(
             &context,
             update,
             15,
@@ -541,7 +541,12 @@ async fn update_deposits(
                 %error,
                 "failed to update deposit"
             );
-        })?;
+        }) {
+            Ok(updated_deposit) => updated_deposit,
+            Err(Error::NotFound) => continue,
+            Err(e) => return Err(e),
+        };
+
         let deposit: Deposit = updated_deposit.try_into().inspect_err(|error| {
             // This should never happen, because the deposit was
             // validated before being updated.

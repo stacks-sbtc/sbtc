@@ -1204,7 +1204,6 @@ async fn emily_process_deposit_updates_when_some_of_them_already_accepted() {
         "The two deposits should have different transaction hex."
     );
 
-    
     apis::deposit_api::create_deposit(&testing_configuration, create_deposit_body1.clone())
         .await
         .expect("Received an error after making a valid create deposit request api call.");
@@ -1213,8 +1212,10 @@ async fn emily_process_deposit_updates_when_some_of_them_already_accepted() {
         .expect("Received an error after making a valid create deposit request api call.");
 
     // Now we should have 2 pending deposits.
-    let deposits = apis::deposit_api::get_deposits(&testing_configuration, Status::Pending, None, None).await
-        .expect("Received an error after making a valid get deposits api call.");
+    let deposits =
+        apis::deposit_api::get_deposits(&testing_configuration, Status::Pending, None, None)
+            .await
+            .expect("Received an error after making a valid get deposits api call.");
     assert_eq!(deposits.deposits.len(), 2);
 
     // Update first deposit to Accepted.
@@ -1227,15 +1228,20 @@ async fn emily_process_deposit_updates_when_some_of_them_already_accepted() {
             status_message: "First update".into(),
         }],
     };
-    apis::deposit_api::update_deposits_signer(&testing_configuration, update_deposits_request_body).await
+    apis::deposit_api::update_deposits_signer(&testing_configuration, update_deposits_request_body)
+        .await
         .expect("Received an error after making a valid update deposit request api call.");
 
     // Now we should have 1 pending and 1 accepted deposit.
-    let deposits = apis::deposit_api::get_deposits(&testing_configuration, Status::Pending, None, None).await
-        .expect("Received an error after making a valid get deposits api call.");
+    let deposits =
+        apis::deposit_api::get_deposits(&testing_configuration, Status::Pending, None, None)
+            .await
+            .expect("Received an error after making a valid get deposits api call.");
     assert_eq!(deposits.deposits.len(), 1);
-    let deposits = apis::deposit_api::get_deposits(&testing_configuration, Status::Accepted, None, None).await
-        .expect("Received an error after making a valid get deposits api call.");
+    let deposits =
+        apis::deposit_api::get_deposits(&testing_configuration, Status::Accepted, None, None)
+            .await
+            .expect("Received an error after making a valid get deposits api call.");
     assert_eq!(deposits.deposits.len(), 1);
 
     // Now we update both deposits to Accepted in a batch. This still should be a valid api call.
@@ -1257,12 +1263,15 @@ async fn emily_process_deposit_updates_when_some_of_them_already_accepted() {
             },
         ],
     };
-    apis::deposit_api::update_deposits_signer(&testing_configuration, update_deposits_request_body).await
+    apis::deposit_api::update_deposits_signer(&testing_configuration, update_deposits_request_body)
+        .await
         .expect("Received an error after making a valid update deposit request api call.");
 
     // Now we should have 2 accepted deposits.
-    let deposits = apis::deposit_api::get_deposits(&testing_configuration, Status::Accepted, None, None).await
-        .expect("Received an error after making a valid get deposits api call.");
+    let deposits =
+        apis::deposit_api::get_deposits(&testing_configuration, Status::Accepted, None, None)
+            .await
+            .expect("Received an error after making a valid get deposits api call.");
     assert_eq!(deposits.deposits.len(), 2);
 }
 
@@ -1324,12 +1333,12 @@ async fn emily_process_deposit_updates_when_some_of_them_are_unknown() {
         .await
         .expect("Received an error after making a valid create deposit request api call.");
 
-
     // Now we should have 2 pending deposits.
-    let deposits = apis::deposit_api::get_deposits(&testing_configuration, Status::Pending, None, None).await
-        .expect("Received an error after making a valid get deposits api call.");
+    let deposits =
+        apis::deposit_api::get_deposits(&testing_configuration, Status::Pending, None, None)
+            .await
+            .expect("Received an error after making a valid get deposits api call.");
     assert_eq!(deposits.deposits.len(), 1);
-
 
     // Now we update both deposits to Accepted in a batch. This still should be a valid api call
     // and existing deposit should be updated.
@@ -1351,11 +1360,14 @@ async fn emily_process_deposit_updates_when_some_of_them_are_unknown() {
             },
         ],
     };
-    apis::deposit_api::update_deposits_signer(&testing_configuration, update_deposits_request_body).await
+    apis::deposit_api::update_deposits_signer(&testing_configuration, update_deposits_request_body)
+        .await
         .expect("Received an error after making a valid update deposit request api call.");
 
     // Now we should have 2 accepted deposits.
-    let deposits = apis::deposit_api::get_deposits(&testing_configuration, Status::Accepted, None, None).await
-        .expect("Received an error after making a valid get deposits api call.");
+    let deposits =
+        apis::deposit_api::get_deposits(&testing_configuration, Status::Accepted, None, None)
+            .await
+            .expect("Received an error after making a valid get deposits api call.");
     assert_eq!(deposits.deposits.len(), 1);
 }
