@@ -4,6 +4,8 @@
 (define-constant ERR_UNAUTHORIZED (err u400))
 (define-constant ERR_INVALID_REQUEST_ID (err u401))
 (define-constant ERR_AGG_PUBKEY_REPLAY (err u402))
+(define-constant ERR_REGISTRY_DEPOSIT_REPLAY (err u403))
+(define-constant ERR_REGISTRY_WITHDRAWAL_REPLAY (err u404))
 
 ;; Protocol contract type
 (define-constant governance-role 0x00)
@@ -207,6 +209,7 @@
 	)
 	(begin
 		(try! (is-protocol-caller withdrawal-role contract-caller))
+		(asserts! (is-none (map-get? withdrawal-status request-id)) ERR_REGISTRY_WITHDRAWAL_REPLAY)
 		;; Mark the withdrawal as completed
 		(map-insert withdrawal-status request-id true)
 		(map-insert completed-withdrawal-sweep request-id {
@@ -240,6 +243,7 @@
 	)
 	(begin
 		(try! (is-protocol-caller withdrawal-role contract-caller))
+		(asserts! (is-none (map-get? withdrawal-status request-id)) ERR_REGISTRY_WITHDRAWAL_REPLAY)
 		;; Mark the withdrawal as completed
 		(map-insert withdrawal-status request-id false)
 		(print {
@@ -269,6 +273,7 @@
 	)
 	(begin
 		(try! (is-protocol-caller deposit-role contract-caller))
+		(asserts! (is-none (map-get? deposit-status {txid: txid, vout-index: vout-index})) ERR_REGISTRY_DEPOSIT_REPLAY)
 		(map-insert deposit-status {txid: txid, vout-index: vout-index} true)
 		(map-insert completed-deposits {txid: txid, vout-index: vout-index} {
 			amount: amount,
