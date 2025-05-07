@@ -1150,3 +1150,212 @@ async fn update_deposits_is_not_forbidden_for_sidecar(previous_status: Status, n
     assert_eq!(deposit.bitcoin_txid, bitcoin_txid);
     assert_eq!(deposit.status, new_status);
 }
+
+#[tokio::test]
+async fn emily_process_deposit_updates_when_some_of_them_already_accepted() {
+    // the testing configuration has privileged access to all endpoints.
+    let testing_configuration = clean_setup().await;
+
+    // Create two deposits.
+    let bitcoin_tx_output_index = 0;
+
+    let DepositTxnData {
+        reclaim_scripts,
+        deposit_scripts,
+        bitcoin_txid,
+        transaction_hex,
+        ..
+    } = DepositTxnData::new(DEPOSIT_LOCK_TIME, DEPOSIT_MAX_FEE, &[DEPOSIT_AMOUNT_SATS]);
+    let reclaim_script = reclaim_scripts.first().unwrap().clone();
+    let deposit_script = deposit_scripts.first().unwrap().clone();
+
+    let create_deposit_body1 = CreateDepositRequestBody {
+        bitcoin_tx_output_index,
+        bitcoin_txid: bitcoin_txid.clone(),
+        deposit_script: deposit_script.clone(),
+        reclaim_script: reclaim_script.clone(),
+        transaction_hex: transaction_hex.clone(),
+    };
+
+    let DepositTxnData {
+        reclaim_scripts,
+        deposit_scripts,
+        bitcoin_txid,
+        transaction_hex,
+        ..
+    } = DepositTxnData::new(DEPOSIT_LOCK_TIME, DEPOSIT_MAX_FEE, &[DEPOSIT_AMOUNT_SATS]);
+    let reclaim_script = reclaim_scripts.first().unwrap().clone();
+    let deposit_script = deposit_scripts.first().unwrap().clone();
+    let create_deposit_body2 = CreateDepositRequestBody {
+        bitcoin_tx_output_index,
+        bitcoin_txid: bitcoin_txid.clone(),
+        deposit_script: deposit_script.clone(),
+        reclaim_script: reclaim_script.clone(),
+        transaction_hex: transaction_hex.clone(),
+    };
+
+    // Sanity check that the two deposits are different.
+    assert_ne!(
+        create_deposit_body1.bitcoin_txid, create_deposit_body2.bitcoin_txid,
+        "The two deposits should have different bitcoin txids."
+    );
+    assert_ne!(
+        create_deposit_body1.transaction_hex, create_deposit_body2.transaction_hex,
+        "The two deposits should have different transaction hex."
+    );
+
+    
+    apis::deposit_api::create_deposit(&testing_configuration, create_deposit_body1.clone())
+        .await
+        .expect("Received an error after making a valid create deposit request api call.");
+    apis::deposit_api::create_deposit(&testing_configuration, create_deposit_body2.clone())
+        .await
+        .expect("Received an error after making a valid create deposit request api call.");
+
+    // Now we should have 2 pending deposits.
+    let deposits = apis::deposit_api::get_deposits(&testing_configuration, Status::Pending, None, None).await
+        .expect("Received an error after making a valid get deposits api call.");
+    assert_eq!(deposits.deposits.len(), 2);
+
+    // Update first deposit to Accepted.
+    let update_deposits_request_body = UpdateDepositsRequestBody {
+        deposits: vec![DepositUpdate {
+            bitcoin_tx_output_index,
+            bitcoin_txid: bitcoin_txid.clone(),
+            fulfillment: None,
+            status: Status::Accepted,
+            status_message: "First update".into(),
+        }],
+    };
+    apis::deposit_api::update_deposits_signer(&testing_configuration, update_deposits_request_body).await
+        .expect("Received an error after making a valid update deposit request api call.");
+
+    // Now we should have 1 pending and 1 accepted deposit.
+    let deposits = apis::deposit_api::get_deposits(&testing_configuration, Status::Pending, None, None).await
+        .expect("Received an error after making a valid get deposits api call.");
+    assert_eq!(deposits.deposits.len(), 1);
+    let deposits = apis::deposit_api::get_deposits(&testing_configuration, Status::Accepted, None, None).await
+        .expect("Received an error after making a valid get deposits api call.");
+    assert_eq!(deposits.deposits.len(), 1);
+
+    // Now we update both deposits to Accepted in a batch. This still should be a valid api call.
+    let update_deposits_request_body = UpdateDepositsRequestBody {
+        deposits: vec![
+            DepositUpdate {
+                bitcoin_tx_output_index,
+                bitcoin_txid: create_deposit_body2.bitcoin_txid.clone(),
+                fulfillment: None,
+                status: Status::Accepted,
+                status_message: "Second update".into(),
+            },
+            DepositUpdate {
+                bitcoin_tx_output_index,
+                bitcoin_txid: create_deposit_body1.bitcoin_txid.clone(),
+                fulfillment: None,
+                status: Status::Accepted,
+                status_message: "Second update".into(),
+            },
+        ],
+    };
+    apis::deposit_api::update_deposits_signer(&testing_configuration, update_deposits_request_body).await
+        .expect("Received an error after making a valid update deposit request api call.");
+
+    // Now we should have 2 accepted deposits.
+    let deposits = apis::deposit_api::get_deposits(&testing_configuration, Status::Accepted, None, None).await
+        .expect("Received an error after making a valid get deposits api call.");
+    assert_eq!(deposits.deposits.len(), 2);
+}
+
+#[tokio::test]
+async fn emily_process_deposit_updates_when_some_of_them_are_unknown() {
+    // the testing configuration has privileged access to all endpoints.
+    let testing_configuration = clean_setup().await;
+
+    // Create two deposits.
+    let bitcoin_tx_output_index = 0;
+
+    let DepositTxnData {
+        reclaim_scripts,
+        deposit_scripts,
+        bitcoin_txid,
+        transaction_hex,
+        ..
+    } = DepositTxnData::new(DEPOSIT_LOCK_TIME, DEPOSIT_MAX_FEE, &[DEPOSIT_AMOUNT_SATS]);
+    let reclaim_script = reclaim_scripts.first().unwrap().clone();
+    let deposit_script = deposit_scripts.first().unwrap().clone();
+
+    let create_deposit_body1 = CreateDepositRequestBody {
+        bitcoin_tx_output_index,
+        bitcoin_txid: bitcoin_txid.clone(),
+        deposit_script: deposit_script.clone(),
+        reclaim_script: reclaim_script.clone(),
+        transaction_hex: transaction_hex.clone(),
+    };
+
+    let DepositTxnData {
+        reclaim_scripts,
+        deposit_scripts,
+        bitcoin_txid,
+        transaction_hex,
+        ..
+    } = DepositTxnData::new(DEPOSIT_LOCK_TIME, DEPOSIT_MAX_FEE, &[DEPOSIT_AMOUNT_SATS]);
+    let reclaim_script = reclaim_scripts.first().unwrap().clone();
+    let deposit_script = deposit_scripts.first().unwrap().clone();
+    let create_deposit_body2 = CreateDepositRequestBody {
+        bitcoin_tx_output_index,
+        bitcoin_txid: bitcoin_txid.clone(),
+        deposit_script: deposit_script.clone(),
+        reclaim_script: reclaim_script.clone(),
+        transaction_hex: transaction_hex.clone(),
+    };
+
+    // Sanity check that the two deposits are different.
+    assert_ne!(
+        create_deposit_body1.bitcoin_txid, create_deposit_body2.bitcoin_txid,
+        "The two deposits should have different bitcoin txids."
+    );
+    assert_ne!(
+        create_deposit_body1.transaction_hex, create_deposit_body2.transaction_hex,
+        "The two deposits should have different transaction hex."
+    );
+
+    // Here we intentionally don't create one of deposits.
+    apis::deposit_api::create_deposit(&testing_configuration, create_deposit_body1.clone())
+        .await
+        .expect("Received an error after making a valid create deposit request api call.");
+
+
+    // Now we should have 2 pending deposits.
+    let deposits = apis::deposit_api::get_deposits(&testing_configuration, Status::Pending, None, None).await
+        .expect("Received an error after making a valid get deposits api call.");
+    assert_eq!(deposits.deposits.len(), 1);
+
+
+    // Now we update both deposits to Accepted in a batch. This still should be a valid api call
+    // and existing deposit should be updated.
+    let update_deposits_request_body = UpdateDepositsRequestBody {
+        deposits: vec![
+            DepositUpdate {
+                bitcoin_tx_output_index,
+                bitcoin_txid: create_deposit_body2.bitcoin_txid.clone(),
+                fulfillment: None,
+                status: Status::Accepted,
+                status_message: "Second update".into(),
+            },
+            DepositUpdate {
+                bitcoin_tx_output_index,
+                bitcoin_txid: create_deposit_body1.bitcoin_txid.clone(),
+                fulfillment: None,
+                status: Status::Accepted,
+                status_message: "Second update".into(),
+            },
+        ],
+    };
+    apis::deposit_api::update_deposits_signer(&testing_configuration, update_deposits_request_body).await
+        .expect("Received an error after making a valid update deposit request api call.");
+
+    // Now we should have 2 accepted deposits.
+    let deposits = apis::deposit_api::get_deposits(&testing_configuration, Status::Accepted, None, None).await
+        .expect("Received an error after making a valid get deposits api call.");
+    assert_eq!(deposits.deposits.len(), 1);
+}
