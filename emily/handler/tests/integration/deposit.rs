@@ -1374,9 +1374,12 @@ async fn emily_process_deposit_updates_when_some_of_them_are_unknown() {
             },
         ],
     };
-    let update_responce = apis::deposit_api::update_deposits_signer(&testing_configuration, update_deposits_request_body)
-        .await
-        .expect("Received an error after making a valid update deposit request api call.");
+    let update_responce = apis::deposit_api::update_deposits_signer(
+        &testing_configuration,
+        update_deposits_request_body,
+    )
+    .await
+    .expect("Received an error after making a valid update deposit request api call.");
 
     // Check that multi
     assert!(update_responce.deposits.iter().all(|deposit| {
@@ -1386,7 +1389,6 @@ async fn emily_process_deposit_updates_when_some_of_them_are_unknown() {
             deposit.status == 404
         }
     }));
-    
 
     // Now we should have 2 accepted deposits.
     let deposits =
