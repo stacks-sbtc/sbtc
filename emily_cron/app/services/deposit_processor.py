@@ -2,13 +2,14 @@ import logging
 from itertools import chain, groupby
 from typing import Iterable
 
-from ..clients import PrivateEmilyAPI, HiroAPI, MempoolAPI
+from ..clients import PrivateEmilyAPI, MempoolAPI
 from ..models import (
     DepositUpdate,
     EnrichedDepositInfo,
     RequestStatus,
     DepositInfo,
 )
+from .. import settings
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,7 @@ class DepositProcessor:
     def process_rbf_transactions(
         self,
         enriched_deposits: list[EnrichedDepositInfo],
+        bitcoin_chaintip_height: int,
     ) -> list[DepositUpdate]:
         """Identifies and handles confirmed RBF scenarios.
 
@@ -62,6 +64,13 @@ class DepositProcessor:
                         logger.warning(
                             f"Multiple confirmed transactions found in RBF group {rbf_key}: "
                             f"{confirmed_txid_in_group} and {tx.bitcoin_txid}. Using first found."
+                        )
+                    elif (
+                        bitcoin_chaintip_height
+                        < tx.confirmed_height + settings.MIN_BLOCK_CONFIRMATIONS
+                    ):
+                        logger.warning(
+                            f"Confirmed transaction {tx.bitcoin_txid} is not yet eligible for RBF replacement"
                         )
                     else:
                         confirmed_txid_in_group = tx.bitcoin_txid
@@ -225,7 +234,7 @@ class DepositProcessor:
         updates.extend(locktime_updates)
 
         # Process RBF transactions
-        rbf_updates = self.process_rbf_transactions(enriched_deposits)
+        rbf_updates = self.process_rbf_transactions(enriched_deposits, bitcoin_chaintip_height)
         updates.extend(rbf_updates)
 
         # Apply updates

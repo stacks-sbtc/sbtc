@@ -370,6 +370,7 @@ class TestDepositProcessorWithRbf(TestDepositProcessorBase):
 
     def setUp(self):
         super().setUp()
+        settings.MIN_BLOCK_CONFIRMATIONS = 6
 
         # Create mock deposits for testing
         self.expired_locktime = self._create_mock_deposit(
@@ -387,7 +388,7 @@ class TestDepositProcessorWithRbf(TestDepositProcessorBase):
 
         self.rbf_replacement = self._create_mock_deposit(
             txid="rbf_replacement_tx",
-            confirmed_height=990,  # Confirmed 10 blocks ago
+            confirmed_height=994,  # Confirmed 6 blocks ago
             lock_time=20,
             rbf_txids=["rbf_replacement_tx", "rbf_original_tx"],
         )
@@ -535,7 +536,7 @@ class TestDepositProcessorWithRbf(TestDepositProcessorBase):
             self.assertEqual(result[0].confirmed_height, deposit1.confirmed_height)
             self.assertEqual(result[0].fee, 100000)
             self.assertEqual(result[0].in_mempool, True)
-            self.assertEqual(result[0].rbf_txids, {"replacement1", "replacement2"})
+            self.assertEqual(result[0].rbf_txids, ["replacement1", "replacement2"])
 
             self.assertEqual(result[1].bitcoin_txid, deposit2.bitcoin_txid)
             self.assertEqual(result[1].confirmed_height, deposit2.confirmed_height)
