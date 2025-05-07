@@ -40,7 +40,6 @@ class TestDepositProcessorBase(unittest.TestCase):
         self.current_time = int(datetime.now().timestamp())
 
         # Mock blockchain state
-        self.stacks_chaintip = BlockInfo(height=500, hash="stx_hash", time=self.current_time)
         self.bitcoin_chaintip_height = 1000
 
     def _create_mock_deposit(self, txid, confirmed_height, lock_time, rbf_txids=None):
@@ -50,7 +49,7 @@ class TestDepositProcessorBase(unittest.TestCase):
         deposit.bitcoin_tx_output_index = 0
         deposit.confirmed_height = confirmed_height
         deposit.lock_time = lock_time
-        deposit.rbf_txids = rbf_txids or set()
+        deposit.rbf_txids = rbf_txids or []
         deposit.is_expired = lambda x: EnrichedDepositInfo.is_expired(deposit, x)
         return deposit
 
@@ -397,10 +396,8 @@ class TestDepositProcessorWithRbf(TestDepositProcessorBase):
     @patch("app.clients.PrivateEmilyAPI.update_deposits")
     @patch("app.clients.MempoolAPI.get_utxo_status")
     @patch("app.clients.MempoolAPI.get_tip_height")
-    @patch("app.clients.HiroAPI.get_stacks_block")
     def test_update_deposits_workflow_with_rbf(
         self,
-        mock_stacks_block,
         mock_btc_tip_height,
         mock_get_utxo_status,
         mock_update_deposits,
@@ -408,8 +405,8 @@ class TestDepositProcessorWithRbf(TestDepositProcessorBase):
     ):
         """Test the complete deposit update workflow with RBF."""
         # Set up mocks
+        # Ensure chaintip is high enough for rbf_replacement to be considered confirmed
         mock_btc_tip_height.return_value = self.bitcoin_chaintip_height
-        mock_stacks_block.return_value = self.stacks_chaintip
         mock_get_utxo_status.return_value = {"spent": False}
 
         # Mock the _enrich_deposits method
@@ -436,6 +433,7 @@ class TestDepositProcessorWithRbf(TestDepositProcessorBase):
             # Verify the update was called with the correct updates
             mock_update_deposits.assert_called_once()
             updates = mock_update_deposits.call_args[0][0]
+
             # We expect 2 updates: one for expired_locktime_tx and one for rbf_original_tx
             self.assertEqual(len(updates), 2)
             # Let's check the actual updates to understand what's happening
@@ -502,7 +500,7 @@ class TestDepositProcessorWithRbf(TestDepositProcessorBase):
 
         # Mock the RBF check
         mock_check_rbf.side_effect = lambda txid: (
-            {"replacement1", "replacement2"} if txid == "replacement1" else set()
+            ["replacement1", "replacement2"] if txid == "replacement1" else []
         )
 
         # Mock the from_deposit_info method, because MagicMock would not work with asdict
