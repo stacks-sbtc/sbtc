@@ -1374,9 +1374,19 @@ async fn emily_process_deposit_updates_when_some_of_them_are_unknown() {
             },
         ],
     };
-    apis::deposit_api::update_deposits_signer(&testing_configuration, update_deposits_request_body)
+    let update_responce = apis::deposit_api::update_deposits_signer(&testing_configuration, update_deposits_request_body)
         .await
         .expect("Received an error after making a valid update deposit request api call.");
+
+    // Check that multi
+    assert!(update_responce.deposits.iter().all(|deposit| {
+        if deposit.deposit.bitcoin_txid == create_deposit_body1.bitcoin_txid {
+            deposit.status == 200
+        } else {
+            deposit.status == 404
+        }
+    }));
+    
 
     // Now we should have 2 accepted deposits.
     let deposits =
