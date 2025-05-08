@@ -1,6 +1,5 @@
 use bitcoin::hashes::Hash;
 use blockstack_lib::types::chainstate::StacksAddress;
-use rand::rngs::OsRng;
 use sbtc::testing::regtest;
 use sbtc::testing::regtest::Faucet;
 use signer::error::Error;
@@ -32,9 +31,10 @@ use crate::setup::set_withdrawal_incomplete;
 /// given information. If the information here is correct then the returned
 /// [`RejectWithdrawalV1`] object will pass validation with the given
 /// context.
-async fn make_withdrawal_reject(
+async fn make_withdrawal_reject<R: rand::Rng>(
     data: &TestSweepSetup2,
     db: &PgStore,
+    rng: &mut R,
 ) -> (RejectWithdrawalV1, ReqContext) {
     // Okay now we get ready to create the transaction using the
     // `RejectWithdrawalV1` type.
@@ -56,7 +56,7 @@ async fn make_withdrawal_reject(
         // looking for pending and rejected withdrawal requests.
         context_window: 20,
         // The value here doesn't matter.
-        origin: fake::Faker.fake_with_rng(&mut OsRng),
+        origin: fake::Faker.fake_with_rng(rng),
         // When checking whether the transaction is from the signer, we
         // check that the first "prevout" has a `scriptPubKey` that the
         // signers control.
@@ -140,7 +140,7 @@ async fn reject_withdrawal_validation_happy_path() {
     setup.store_donation(&db).await;
 
     // Generate the transaction and corresponding request context.
-    let (reject_withdrawal_tx, req_ctx) = make_withdrawal_reject(&setup, &db).await;
+    let (reject_withdrawal_tx, req_ctx) = make_withdrawal_reject(&setup, &db, &mut rng).await;
 
     reject_withdrawal_tx.validate(&ctx, &req_ctx).await.unwrap();
 
@@ -200,7 +200,7 @@ async fn reject_withdrawal_validation_not_final() {
     setup.store_donation(&db).await;
 
     // Generate the transaction and corresponding request context.
-    let (reject_withdrawal_tx, req_ctx) = make_withdrawal_reject(&setup, &db).await;
+    let (reject_withdrawal_tx, req_ctx) = make_withdrawal_reject(&setup, &db, &mut rng).await;
 
     let validate_future = reject_withdrawal_tx.validate(&ctx, &req_ctx);
     match validate_future.await.unwrap_err() {
@@ -215,7 +215,7 @@ async fn reject_withdrawal_validation_not_final() {
     fetch_canonical_bitcoin_blockchain(&db, rpc).await;
 
     // Generate the transaction and corresponding request context.
-    let (reject_withdrawal_tx, req_ctx) = make_withdrawal_reject(&setup, &db).await;
+    let (reject_withdrawal_tx, req_ctx) = make_withdrawal_reject(&setup, &db, &mut rng).await;
 
     reject_withdrawal_tx.validate(&ctx, &req_ctx).await.unwrap();
 
@@ -274,7 +274,8 @@ async fn reject_withdrawal_validation_deployer_mismatch() {
     setup.store_donation(&db).await;
 
     // Generate the transaction and corresponding request context.
-    let (mut reject_withdrawal_tx, mut req_ctx) = make_withdrawal_reject(&setup, &db).await;
+    let (mut reject_withdrawal_tx, mut req_ctx) =
+        make_withdrawal_reject(&setup, &db, &mut rng).await;
     // Different: Okay, let's make sure the deployers do not match.
     reject_withdrawal_tx.deployer = StacksAddress::p2pkh(false, &setup.signers.keys[0].into());
     req_ctx.deployer = StacksAddress::p2pkh(false, &setup.signers.keys[1].into());
@@ -343,7 +344,7 @@ async fn reject_withdrawal_validation_missing_withdrawal_request() {
     setup.store_donation(&db).await;
 
     // Generate the transaction and corresponding request context.
-    let (mut reject_withdrawal_tx, req_ctx) = make_withdrawal_reject(&setup, &db).await;
+    let (mut reject_withdrawal_tx, req_ctx) = make_withdrawal_reject(&setup, &db, &mut rng).await;
     // Different: Let's use a request_id that does not exist in our
     // database. In these tests, the withdrawal id starts at 0 and
     // increments by 1 for each withdrawal request generated.
@@ -414,7 +415,7 @@ async fn reject_withdrawal_validation_request_completed() {
     setup.store_donation(&db).await;
 
     // Generate the transaction and corresponding request context.
-    let (reject_withdrawal_tx, req_ctx) = make_withdrawal_reject(&setup, &db).await;
+    let (reject_withdrawal_tx, req_ctx) = make_withdrawal_reject(&setup, &db, &mut rng).await;
 
     let validation_result = reject_withdrawal_tx.validate(&ctx, &req_ctx).await;
     match validation_result.unwrap_err() {
@@ -522,7 +523,7 @@ async fn reject_withdrawal_validation_request_being_fulfilled() {
     fetch_canonical_bitcoin_blockchain(&db, rpc).await;
 
     // Generate the transaction and corresponding request context.
-    let (reject_withdrawal_tx, req_ctx) = make_withdrawal_reject(&setup, &db).await;
+    let (reject_withdrawal_tx, req_ctx) = make_withdrawal_reject(&setup, &db, &mut rng).await;
 
     let validation_result = reject_withdrawal_tx.validate(&ctx, &req_ctx).await;
     match validation_result.unwrap_err() {
@@ -624,7 +625,7 @@ async fn reject_withdrawal_validation_request_still_active() {
     setup.store_bitcoin_tx_sighashes(&db, &mut rng).await;
 
     // Generate the transaction and corresponding request context.
-    let (reject_withdrawal_tx, req_ctx) = make_withdrawal_reject(&setup, &db).await;
+    let (reject_withdrawal_tx, req_ctx) = make_withdrawal_reject(&setup, &db, &mut rng).await;
 
     // Right now the withdrawal request is expired, but there is a
     // transaction in the mempool that is trying to fulfill it, so
@@ -667,7 +668,7 @@ async fn reject_withdrawal_validation_request_still_active() {
     // We need to add back the withdrawals so that `make_withdrawal_reject`
     // works.
     setup.withdrawals = withdrawals;
-    let (reject_withdrawal_tx, req_ctx) = make_withdrawal_reject(&setup, &db).await;
+    let (reject_withdrawal_tx, req_ctx) = make_withdrawal_reject(&setup, &db, &mut rng).await;
 
     // Okay, this should fail because we haven't observed enough blocks yet.
     let validation_result = reject_withdrawal_tx.validate(&ctx, &req_ctx).await;
@@ -683,7 +684,7 @@ async fn reject_withdrawal_validation_request_still_active() {
     faucet.generate_block();
     fetch_canonical_bitcoin_blockchain(&db, rpc).await;
 
-    let (reject_withdrawal_tx, req_ctx) = make_withdrawal_reject(&setup, &db).await;
+    let (reject_withdrawal_tx, req_ctx) = make_withdrawal_reject(&setup, &db, &mut rng).await;
 
     reject_withdrawal_tx.validate(&ctx, &req_ctx).await.unwrap();
 

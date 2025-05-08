@@ -1,6 +1,5 @@
 use bitcoin::OutPoint;
 use blockstack_lib::types::chainstate::StacksAddress;
-use rand::rngs::OsRng;
 use sbtc::testing::regtest;
 use signer::error::Error;
 use signer::stacks::contracts::AcceptWithdrawalV1;
@@ -32,7 +31,10 @@ const WITHDRAWAL_AMOUNT: [SweepAmounts; 1] = [SweepAmounts {
 /// given information. If the information here is correct then the returned
 /// [`AcceptWithdrawalV1`] object will pass validation with the given
 /// context.
-fn make_withdrawal_accept(data: &TestSweepSetup2) -> (AcceptWithdrawalV1, ReqContext) {
+fn make_withdrawal_accept<R: rand::Rng>(
+    data: &TestSweepSetup2,
+    rng: &mut R,
+) -> (AcceptWithdrawalV1, ReqContext) {
     // Okay now we get ready to create the transaction using the
     // `AcceptWithdrawalV1` type.
     let sweep_tx_info = data.sweep_tx_info.clone().unwrap();
@@ -75,7 +77,7 @@ fn make_withdrawal_accept(data: &TestSweepSetup2) -> (AcceptWithdrawalV1, ReqCon
         // looking for pending and accepted withdrawal requests.
         context_window: 20,
         // The value here doesn't matter.
-        origin: fake::Faker.fake_with_rng(&mut OsRng),
+        origin: fake::Faker.fake_with_rng(rng),
         // When checking whether the transaction is from the signer, we
         // check that the first "prevout" has a `scriptPubKey` that the
         // signers control.
@@ -131,7 +133,7 @@ async fn accept_withdrawal_validation_happy_path() {
     setup.store_withdrawal_decisions(&db).await;
 
     // Generate the transaction and corresponding request context.
-    let (accept_withdrawal_tx, req_ctx) = make_withdrawal_accept(&setup);
+    let (accept_withdrawal_tx, req_ctx) = make_withdrawal_accept(&setup, &mut rng);
 
     // This should not return an Err.
     let mut ctx = TestContext::builder()
@@ -188,7 +190,7 @@ async fn accept_withdrawal_validation_deployer_mismatch() {
     setup.store_withdrawal_decisions(&db).await;
 
     // Generate the transaction and corresponding request context.
-    let (mut accept_withdrawal_tx, mut req_ctx) = make_withdrawal_accept(&setup);
+    let (mut accept_withdrawal_tx, mut req_ctx) = make_withdrawal_accept(&setup, &mut rng);
     // Different: Okay, let's make sure the deployers do not match.
     accept_withdrawal_tx.deployer = StacksAddress::p2pkh(false, &setup.signers.keys[0].into());
     req_ctx.deployer = StacksAddress::p2pkh(false, &setup.signers.keys[1].into());
@@ -254,7 +256,7 @@ async fn accept_withdrawal_validation_missing_withdrawal_request() {
     setup.store_withdrawal_decisions(&db).await;
 
     // Generate the transaction and corresponding request context.
-    let (mut accept_withdrawal_tx, req_ctx) = make_withdrawal_accept(&setup);
+    let (mut accept_withdrawal_tx, req_ctx) = make_withdrawal_accept(&setup, &mut rng);
     // Different: Let's use a request_id that does not exist in our
     // database. In these tests, the withdrawal id starts at 0 and
     // increments by 1 for each withdrawal request generated.
@@ -325,7 +327,7 @@ async fn accept_withdrawal_validation_recipient_mismatch() {
     setup.store_withdrawal_decisions(&db).await;
 
     // Generate the transaction and corresponding request context.
-    let (accept_withdrawal_tx, req_ctx) = make_withdrawal_accept(&setup);
+    let (accept_withdrawal_tx, req_ctx) = make_withdrawal_accept(&setup, &mut rng);
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -390,7 +392,7 @@ async fn accept_withdrawal_validation_invalid_amount() {
     setup.store_withdrawal_decisions(&db).await;
 
     // Generate the transaction and corresponding request context.
-    let (accept_withdrawal_tx, req_ctx) = make_withdrawal_accept(&setup);
+    let (accept_withdrawal_tx, req_ctx) = make_withdrawal_accept(&setup, &mut rng);
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -464,7 +466,7 @@ async fn accept_withdrawal_validation_invalid_fee() {
     setup.store_withdrawal_decisions(&db).await;
 
     // Generate the transaction and corresponding request context.
-    let (accept_withdrawal_tx, req_ctx) = make_withdrawal_accept(&setup);
+    let (accept_withdrawal_tx, req_ctx) = make_withdrawal_accept(&setup, &mut rng);
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -527,7 +529,7 @@ async fn accept_withdrawal_validation_sweep_tx_missing() {
     setup.store_withdrawal_decisions(&db).await;
 
     // Generate the transaction and corresponding request context.
-    let (mut accept_withdrawal_tx, req_ctx) = make_withdrawal_accept(&setup);
+    let (mut accept_withdrawal_tx, req_ctx) = make_withdrawal_accept(&setup, &mut rng);
 
     // Different: there is supposed to be sweep transaction in
     // bitcoin-core, but we make sure that such a transaction does not
@@ -596,7 +598,7 @@ async fn accept_withdrawal_validation_sweep_reorged() {
     setup.store_withdrawal_decisions(&db).await;
 
     // Generate the transaction and corresponding request context.
-    let (accept_withdrawal_tx, mut req_ctx) = make_withdrawal_accept(&setup);
+    let (accept_withdrawal_tx, mut req_ctx) = make_withdrawal_accept(&setup, &mut rng);
 
     // Different: the transaction that sweeps in the withdrawal has been
     // confirmed, but let's suppose that it gets confirmed on a bitcoin
@@ -674,7 +676,7 @@ async fn accept_withdrawal_validation_withdrawal_not_in_sweep() {
     setup.store_withdrawal_decisions(&db).await;
 
     // Generate the transaction and corresponding request context.
-    let (mut accept_withdrawal_tx, req_ctx) = make_withdrawal_accept(&setup);
+    let (mut accept_withdrawal_tx, req_ctx) = make_withdrawal_accept(&setup, &mut rng);
     // Different: the outpoint here is supposed to be the outpoint of the
     // UTXO in the sweep transactions that spends to the desired recipient.
     // Here we give an outpoint that doesn't exist in the transaction,
@@ -744,7 +746,7 @@ async fn accept_withdrawal_validation_withdrawal_incorrect_fee() {
     setup.store_withdrawal_decisions(&db).await;
 
     // Generate the transaction and corresponding request context.
-    let (mut accept_withdrawal_tx, req_ctx) = make_withdrawal_accept(&setup);
+    let (mut accept_withdrawal_tx, req_ctx) = make_withdrawal_accept(&setup, &mut rng);
     // Different: the fee here is less than we would think that it
     // should be.
     accept_withdrawal_tx.tx_fee -= 1;
@@ -811,7 +813,7 @@ async fn accept_withdrawal_validation_withdrawal_invalid_sweep() {
     setup.store_withdrawal_decisions(&db).await;
 
     // Generate the transaction and corresponding request context.
-    let (accept_withdrawal_tx, req_ctx) = make_withdrawal_accept(&setup);
+    let (accept_withdrawal_tx, req_ctx) = make_withdrawal_accept(&setup, &mut rng);
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -875,7 +877,7 @@ async fn accept_withdrawal_validation_request_completed() {
     setup.store_withdrawal_decisions(&db).await;
 
     // Generate the transaction and corresponding request context.
-    let (accept_withdrawal_tx, req_ctx) = make_withdrawal_accept(&setup);
+    let (accept_withdrawal_tx, req_ctx) = make_withdrawal_accept(&setup, &mut rng);
 
     // This should not return an Err.
     let mut ctx = TestContext::builder()
