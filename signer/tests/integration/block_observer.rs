@@ -841,45 +841,7 @@ async fn block_observer_picks_up_chained_sweeps() {
     }
 
     // Let's make sure the relevant tables are empty
-    let num_rows = sqlx::query_scalar::<_, i32>(
-        r#"
-        SELECT COUNT(*)::INTEGER
-        FROM bitcoin_tx_inputs
-        WHERE prevout_type = 'signers_input'
-
-        UNION ALL
-
-        SELECT COUNT(*)::INTEGER
-        FROM bitcoin_tx_outputs
-        WHERE output_type = 'signers_output'
-        "#,
-    )
-    .fetch_all(db.pool())
-    .await
-    .unwrap();
-
-    assert_eq!(num_rows[0], 0);
-    assert_eq!(num_rows[1], 0);
-
-    // Let's generate a new block and wait for our block observer to send a
-    // BitcoinBlockObserved signal.
-    faucet.generate_blocks(1).pop().unwrap();
-
-    let waiting_fut = async {
-        let signal = signal_receiver.recv();
-        let Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved)) = signal.await else {
-            panic!("Not the right signal")
-        };
-    };
-
-    tokio::time::timeout(Duration::from_secs(3), waiting_fut)
-        .await
-        .unwrap();
-
-    // Okay, now the tables should be populated with all three
-    // transactions.
-    let num_rows = sqlx::query_scalar::<_, i32>(
-        r#"
+    let sql = r#"
         SELECT COUNT(*)::INTEGER
         FROM bitcoin_tx_inputs
         WHERE prevout_type = 'signers_input'
@@ -894,17 +856,44 @@ async fn block_observer_picks_up_chained_sweeps() {
 
         SELECT COUNT(*)::INTEGER
         FROM bitcoin_tx_outputs
-        WHERE output_type = 'signers_output'
-        "#,
-    )
-    .fetch_all(db.pool())
-    .await
-    .unwrap();
+        WHERE output_type = 'signers_output'"#;
+
+    let num_rows = sqlx::query_scalar::<_, i32>(sql)
+        .fetch_all(db.pool())
+        .await
+        .unwrap();
+
+    assert_eq!(num_rows[0], 0);
+    assert_eq!(num_rows[1], 0);
+    assert_eq!(num_rows[2], 0);
+    assert_eq!(num_rows.len(), 3);
+
+    // Let's generate a new block and wait for our block observer to send a
+    // BitcoinBlockObserved signal.
+    let block_hash = faucet.generate_blocks(1).pop().unwrap();
+    dbg!(ctx.bitcoin_client.get_block(&block_hash).unwrap().unwrap());
+
+    let waiting_fut = async {
+        let signal = signal_receiver.recv();
+        let Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved)) = signal.await else {
+            panic!("Not the right signal")
+        };
+    };
+
+    tokio::time::timeout(Duration::from_secs(3), waiting_fut)
+        .await
+        .unwrap();
+
+    // Okay, now the tables should be populated with all three
+    // transactions.
+    let num_rows = sqlx::query_scalar::<_, i32>(sql)
+        .fetch_all(db.pool())
+        .await
+        .unwrap();
 
     assert_eq!(num_rows[0], 3);
     assert_eq!(num_rows[1], 3);
     assert_eq!(num_rows[2], 3);
-    assert_eq!(num_rows.len(), 3);
 
     testing::storage::drop_db(db).await;
 }
