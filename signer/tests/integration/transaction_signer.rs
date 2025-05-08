@@ -7,7 +7,6 @@ use fake::Fake as _;
 use fake::Faker;
 use lru::LruCache;
 use rand::SeedableRng as _;
-use rand::rngs::OsRng;
 use signer::bitcoin::MockBitcoinInteract;
 use signer::emily_client::MockEmilyInteract;
 use signer::network::in_memory2::SignerNetworkInstance;
@@ -70,7 +69,7 @@ type MockedTxSigner = TxSignerEventLoop<
         WrappedMock<MockEmilyInteract>,
     >,
     SignerNetworkInstance,
-    OsRng,
+    rand::rngs::StdRng,
 >;
 
 /// Test that [`TxSignerEventLoop::assert_valid_stacks_tx_sign_request`]
@@ -742,7 +741,10 @@ mod validate_dkg_verification_message {
 
     impl Default for TestParams {
         fn default() -> Self {
-            let new_aggregate_key = Keypair::new_global(&mut OsRng).x_only_public_key().into();
+            // Here we use explicitly seeded RNG to ensure that [`default()`] is deterministic.
+            // (and default don't allow to pass any parameters)
+            let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+            let new_aggregate_key = Keypair::new_global(&mut rng).x_only_public_key().into();
             Self {
                 new_aggregate_key,
                 dkg_verification_window: 0,
@@ -825,8 +827,9 @@ mod validate_dkg_verification_message {
 
     #[tokio::test]
     async fn latest_key_in_failed_state() {
+        let mut rng = get_rng();
         let db = testing::storage::new_test_database().await;
-        let aggregate_key: PublicKey = Keypair::new_global(&mut OsRng).public_key().into();
+        let aggregate_key: PublicKey = Keypair::new_global(&mut rng).public_key().into();
         let aggregate_key_x_only = aggregate_key.into();
 
         // Create new DKG shares and store them in the database. We expect the
@@ -852,8 +855,9 @@ mod validate_dkg_verification_message {
 
     #[tokio::test]
     async fn verification_window_elapsed() {
+        let mut rng = get_rng();
         let db = testing::storage::new_test_database().await;
-        let aggregate_key: PublicKey = Keypair::new_global(&mut OsRng).public_key().into();
+        let aggregate_key: PublicKey = Keypair::new_global(&mut rng).public_key().into();
 
         // Create new DKG shares and store them in the database. We expect the
         // aggregate keys to match and the status to be allowed. We use 0 as the
@@ -888,8 +892,9 @@ mod validate_dkg_verification_message {
 
     #[tokio::test]
     async fn verification_window_is_inclusive() {
+        let mut rng = get_rng();
         let db = testing::storage::new_test_database().await;
-        let aggregate_key: PublicKey = Keypair::new_global(&mut OsRng).public_key().into();
+        let aggregate_key: PublicKey = Keypair::new_global(&mut rng).public_key().into();
 
         // Create new DKG shares and store them in the database. We expect the
         // aggregate keys to match and the status to be allowed. We use 0 as the
@@ -920,8 +925,9 @@ mod validate_dkg_verification_message {
 
     #[tokio::test]
     async fn expected_sighash_succeeds() {
+        let mut rng = get_rng();
         let db = testing::storage::new_test_database().await;
-        let aggregate_key: PublicKey = Keypair::new_global(&mut OsRng).public_key().into();
+        let aggregate_key: PublicKey = Keypair::new_global(&mut rng).public_key().into();
 
         // Create new DKG shares and store them in the database. We expect
         // all other verifications to succeed.
@@ -949,8 +955,9 @@ mod validate_dkg_verification_message {
 
     #[tokio::test]
     async fn unexpected_sighash_fails() {
+        let mut rng = get_rng();
         let db = testing::storage::new_test_database().await;
-        let aggregate_key: PublicKey = Keypair::new_global(&mut OsRng).public_key().into();
+        let aggregate_key: PublicKey = Keypair::new_global(&mut rng).public_key().into();
 
         // Create new DKG shares and store them in the database. We expect
         // all other verifications to succeed.
