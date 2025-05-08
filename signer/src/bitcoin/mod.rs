@@ -14,7 +14,6 @@ use rpc::GetTxResponse;
 use crate::error::Error;
 
 pub mod client;
-pub mod fees;
 pub mod packaging;
 pub mod rpc;
 pub mod utxo;
