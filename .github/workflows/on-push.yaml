@@ -45,35 +45,35 @@ jobs:
     steps:
       - name: Setup Mold
         id: setup_mold
-        uses: stacks-sbtc/actions/setup-mold@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        uses: stacks-sbtc/actions/setup-mold@095003d35774808f27b29f272976b1e01704ca93
         with:
           make-default: true
 
       - name: Checkout Repository
         id: checkout_Repository
-        uses: stacks-sbtc/actions/checkout@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        uses: stacks-sbtc/actions/checkout@095003d35774808f27b29f272976b1e01704ca93
 
       - name: Setup Pnpm
         id: setup_pnpm
-        uses: stacks-sbtc/actions/setup-pnpm@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        uses: stacks-sbtc/actions/setup-pnpm@095003d35774808f27b29f272976b1e01704ca93
 
       - name: Setup Node
         id: setup_node
-        uses: stacks-sbtc/actions/setup-node@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        uses: stacks-sbtc/actions/setup-node@095003d35774808f27b29f272976b1e01704ca93
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "pnpm"
 
       - name: Setup Buf
         id: setup_buf
-        uses: stacks-sbtc/actions/setup-buf@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        uses: stacks-sbtc/actions/setup-buf@095003d35774808f27b29f272976b1e01704ca93
         with:
           version: ${{ env.BUF_VERSION }}
           setup_only: true
 
       - name: Setup Rust
         id: setup_rust
-        uses: stacks-sbtc/actions/setup-rust-toolchain@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        uses: stacks-sbtc/actions/setup-rust-toolchain@095003d35774808f27b29f272976b1e01704ca93
         with:
           components: clippy, rustfmt
           cache-key: "rust-tests"
@@ -114,23 +114,23 @@ jobs:
     steps:
       - name: Setup Mold
         id: setup_mold
-        uses: stacks-sbtc/actions/setup-mold@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        uses: stacks-sbtc/actions/setup-mold@095003d35774808f27b29f272976b1e01704ca93
         with:
           make-default: true
 
       - name: Checkout Repository
         id: checkout_Repository
-        uses: stacks-sbtc/actions/checkout@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        uses: stacks-sbtc/actions/checkout@095003d35774808f27b29f272976b1e01704ca93
 
       - name: Setup Rust
         id: setup_rust
-        uses: stacks-sbtc/actions/setup-rust-toolchain@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        uses: stacks-sbtc/actions/setup-rust-toolchain@095003d35774808f27b29f272976b1e01704ca93
         with:
           cache-key: "rust-tests"
 
       - name: Install Action
         id: install_action
-        uses: stacks-sbtc/actions/install-action@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        uses: stacks-sbtc/actions/install-action@095003d35774808f27b29f272976b1e01704ca93
         with:
           tool: nextest@${{ env.NEXTEST_VERSION }}
 
@@ -144,7 +144,7 @@ jobs:
 
       - name: Upload Nextest Archives
         id: upload_nextest_archives
-        uses: stacks-sbtc/actions/upload-artifact@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        uses: stacks-sbtc/actions/upload-artifact@095003d35774808f27b29f272976b1e01704ca93
         with:
           name: nextest-archives
           path: ./target/nextest/*.tar.zst
@@ -160,27 +160,28 @@ jobs:
     steps:
       - name: Checkout Repository
         id: checkout_Repository
-        uses: stacks-sbtc/actions/checkout@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        uses: stacks-sbtc/actions/checkout@095003d35774808f27b29f272976b1e01704ca93
 
       - name: Setup Pnpm
         id: setup_pnpm
-        uses: stacks-sbtc/actions/setup-pnpm@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        uses: stacks-sbtc/actions/setup-pnpm@095003d35774808f27b29f272976b1e01704ca93
 
       - name: Setup Node
         id: setup_node
-        uses: stacks-sbtc/actions/setup-node@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        uses: stacks-sbtc/actions/setup-node@095003d35774808f27b29f272976b1e01704ca93
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "pnpm"
 
       - name: Install Action
         id: install_action
-        uses: stacks-sbtc/actions/install-action@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        uses: stacks-sbtc/actions/install-action@095003d35774808f27b29f272976b1e01704ca93
         with:
           tool: nextest@${{ env.NEXTEST_VERSION }}
 
       - name: Install uv
-        uses: stacks-sbtc/setup-uv@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        id: install_uv
+        uses: stacks-sbtc/setup-uv@095003d35774808f27b29f272976b1e01704ca93
         with:
           version: "0.6.5"
 
@@ -190,7 +191,7 @@ jobs:
 
       - name: Download Nextest Archives
         id: download_nextest_archives
-        uses: stacks-sbtc/actions/download-artifact@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        uses: stacks-sbtc/actions/download-artifact@095003d35774808f27b29f272976b1e01704ca93
         with:
           name: nextest-archives
           path: .
@@ -202,7 +203,9 @@ jobs:
       - name: Run Unit Tests (Rust)
         id: run_rust_tests
         run: cargo-nextest nextest --color always run --no-fail-fast --archive-file nextest-archive.tar.zst
+
       - name: Run Unit Tests (Python)
+        id: run_python_tests
         run: make test-py
 
   # Runs the Rust integration tests for the project. It depends on the
@@ -223,28 +226,28 @@ jobs:
     steps:
       - name: Checkout Repository
         id: checkout_Repository
-        uses: stacks-sbtc/actions/checkout@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        uses: stacks-sbtc/actions/checkout@095003d35774808f27b29f272976b1e01704ca93
 
       - name: Setup Rust
         id: setup_rust
-        uses: stacks-sbtc/actions/setup-rust-toolchain@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        uses: stacks-sbtc/actions/setup-rust-toolchain@095003d35774808f27b29f272976b1e01704ca93
         with:
           cache-key: "rust-tests"
 
       - name: Setup Pnpm
         id: setup_pnpm
-        uses: stacks-sbtc/actions/setup-pnpm@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        uses: stacks-sbtc/actions/setup-pnpm@095003d35774808f27b29f272976b1e01704ca93
 
       - name: Setup Node
         id: setup_node
-        uses: stacks-sbtc/actions/setup-node@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        uses: stacks-sbtc/actions/setup-node@095003d35774808f27b29f272976b1e01704ca93
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "pnpm"
 
       - name: Setup Python
         id: setup_python
-        uses: stacks-sbtc/actions/setup-python@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        uses: stacks-sbtc/actions/setup-python@095003d35774808f27b29f272976b1e01704ca93
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -254,12 +257,13 @@ jobs:
 
       - name: Install Action
         id: install_action
-        uses: stacks-sbtc/actions/install-action@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        uses: stacks-sbtc/actions/install-action@095003d35774808f27b29f272976b1e01704ca93
         with:
           tool: nextest@${{ env.NEXTEST_VERSION }}
 
       - name: Install uv
-        uses: stacks-sbtc/setup-uv@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        id: install_uv
+        uses: stacks-sbtc/setup-uv@095003d35774808f27b29f272976b1e01704ca93
         with:
           version: "0.6.5"
 
@@ -273,7 +277,7 @@ jobs:
 
       - name: Wait for Test Artifacts
         id: wait_test_artifacts
-        uses: stacks-sbtc/actions/wait-other-jobs@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        uses: stacks-sbtc/actions/wait-other-jobs@095003d35774808f27b29f272976b1e01704ca93
         timeout-minutes: 5
         with:
           retry-method: "equal_intervals"
@@ -293,7 +297,7 @@ jobs:
 
       - name: Download Nextest Archives
         id: download_nextest_archives
-        uses: stacks-sbtc/actions/download-artifact@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        uses: stacks-sbtc/actions/download-artifact@095003d35774808f27b29f272976b1e01704ca93
         with:
           name: nextest-archives
           path: .
@@ -303,6 +307,7 @@ jobs:
         run: cargo-nextest nextest --color always run --no-fail-fast --test-threads 1 --partition hash:${{ matrix.partition }}/2 --archive-file nextest-archive-serial.tar.zst
 
       - name: Run Integration Tests (Python)
+        id: run_python_tests
         if: matrix.partition == 1 # Only run the python tests on the first partition
         run: uv run --directory emily_sidecar python -m unittest test/test_integration.py
 
@@ -319,21 +324,21 @@ jobs:
     steps:
       - name: Checkout Repository
         id: checkout_Repository
-        uses: stacks-sbtc/actions/checkout@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        uses: stacks-sbtc/actions/checkout@095003d35774808f27b29f272976b1e01704ca93
 
       - name: Setup Rust
         id: setup_rust
-        uses: stacks-sbtc/actions/setup-rust-toolchain@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        uses: stacks-sbtc/actions/setup-rust-toolchain@095003d35774808f27b29f272976b1e01704ca93
         with:
           cache-key: "rust-tests"
 
       - name: Setup Pnpm
         id: setup_pnpm
-        uses: stacks-sbtc/actions/setup-pnpm@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        uses: stacks-sbtc/actions/setup-pnpm@095003d35774808f27b29f272976b1e01704ca93
 
       - name: Setup Node
         id: setup_node
-        uses: stacks-sbtc/actions/setup-node@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        uses: stacks-sbtc/actions/setup-node@095003d35774808f27b29f272976b1e01704ca93
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "pnpm"
@@ -402,10 +407,11 @@ jobs:
     steps:
       - name: Checkout Repository
         id: checkout_Repository
-        uses: stacks-sbtc/actions/checkout@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        uses: stacks-sbtc/actions/checkout@095003d35774808f27b29f272976b1e01704ca93
 
-      - uses: stacks-sbtc/actions/cache@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+      - name: Cargo Vet Cache
         id: cargo_vet_cache
+        uses: stacks-sbtc/actions/cache@095003d35774808f27b29f272976b1e01704ca93
         with:
           path: ${{ runner.tool_cache }}/cargo-vet
           key: cargo-vet-bin-${{ env.CARGO_VET_VERSION }}
@@ -453,7 +459,7 @@ jobs:
       - name: Upload Audit Report
         id: upload_audit_report
         if: failure()
-        uses: stacks-sbtc/actions/upload-artifact@0a2a8b638e992ee2ace4805763ac18cc924fbacb
+        uses: stacks-sbtc/actions/upload-artifact@095003d35774808f27b29f272976b1e01704ca93
         with:
           name: cargo-vet-audit-report
           path: audit-suggestions.txt
