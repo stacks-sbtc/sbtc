@@ -181,7 +181,7 @@ jobs:
 
       - name: Install uv
         id: install_uv
-        uses: stacks-sbtc/setup-uv@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/setup-uv@095003d35774808f27b29f272976b1e01704ca93
         with:
           version: "0.6.5"
 
@@ -263,7 +263,7 @@ jobs:
 
       - name: Install uv
         id: install_uv
-        uses: stacks-sbtc/setup-uv@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/setup-uv@095003d35774808f27b29f272976b1e01704ca93
         with:
           version: "0.6.5"
 
