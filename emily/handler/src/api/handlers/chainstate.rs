@@ -93,6 +93,7 @@ pub async fn get_chainstate_at_height(
         (status = 400, description = "Invalid request body", body = ErrorResponse),
         (status = 404, description = "Address not found", body = ErrorResponse),
         (status = 405, description = "Method not allowed", body = ErrorResponse),
+        (status = 422, description = "Unprocessable entity", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
     ),
     security(("ApiGatewayKey" = []))
@@ -133,6 +134,7 @@ pub async fn set_chainstate(context: EmilyContext, body: Chainstate) -> impl war
         (status = 400, description = "Invalid request body", body = ErrorResponse),
         (status = 404, description = "Address not found", body = ErrorResponse),
         (status = 405, description = "Method not allowed", body = ErrorResponse),
+        (status = 422, description = "Unprocessable entity", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
     ),
     security(("ApiGatewayKey" = []))
@@ -169,6 +171,21 @@ pub async fn add_chainstate_entry_or_reorg(
     context: &EmilyContext,
     chainstate: &Chainstate,
 ) -> Result<(), Error> {
+    // We don't want to do reorg for too old chainstates, because it highly
+    // likely means that we reconnected to new stacks node which is not fully synced,
+    // rather then actual reorg happen.
+    let new_bitcoin_tip_height = chainstate.bitcoin_block_height;
+    let current_bitcoin_tip_height = accessors::get_api_state(&context).await?.chaintip().bitcoin_height;
+
+    if let Some(current_bitcoin_tip_height) = current_bitcoin_tip_height {
+        if let Some(new_bitcoin_tip_height) = new_bitcoin_tip_height {
+            if new_bitcoin_tip_height < current_bitcoin_tip_height - 2 {
+                return Err(Error::TooOldChaintipToReorg(new_bitcoin_tip_height, current_bitcoin_tip_height));
+            }
+        }
+    }
+
+
     // Get chainstate as entry.
     let entry: ChainstateEntry = chainstate.clone().into();
     debug!("Attempting to add chainstate: {entry:?}");
@@ -179,6 +196,7 @@ pub async fn add_chainstate_entry_or_reorg(
                 canonical_tip: chainstate.clone(),
                 conflicting_chainstates,
             };
+
             // Execute the reorg.
             execute_reorg_handler(context, execute_reorg_request)
                 .await
