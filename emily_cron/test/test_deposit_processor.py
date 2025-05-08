@@ -761,7 +761,7 @@ class TestDepositProcessor(TestDepositProcessorBase):
             last_update_height=800,
             last_update_block_hash="hp",
             status="pending",
-            reclaim_script="51", # Locktime 1, will expire
+            reclaim_script="51",  # Locktime 1, will expire
             deposit_script="51",
         )
         accepted_deposit = DepositInfo(
@@ -825,7 +825,11 @@ class TestDepositProcessor(TestDepositProcessorBase):
         )
         # mock deposit time
         long_pending_enriched.deposit_time = self.current_time - settings.MAX_UNCONFIRMED_TIME
-        mock_enrich.return_value = [expired_deposit_enriched, active_deposit_enriched, long_pending_enriched]
+        mock_enrich.return_value = [
+            expired_deposit_enriched,
+            active_deposit_enriched,
+            long_pending_enriched,
+        ]
 
         # Define mocks for the lazy calls within process_expired_locktime
         def mock_utxo_lazy(txid, vout):
@@ -835,7 +839,8 @@ class TestDepositProcessor(TestDepositProcessorBase):
             return {}
 
         with patch(
-            "app.clients.MempoolAPI.get_utxo_status", side_effect=mock_utxo_lazy,
+            "app.clients.MempoolAPI.get_utxo_status",
+            side_effect=mock_utxo_lazy,
         ) as mock_utxo_status_lazy:
             # Run the update_deposits method
             self.processor.update_deposits()
