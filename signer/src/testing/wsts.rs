@@ -12,10 +12,10 @@ use stacks_common::address::AddressHashMode;
 use stacks_common::address::C32_ADDRESS_VERSION_TESTNET_MULTISIG;
 use stacks_common::types::chainstate::StacksAddress;
 use wsts::net::SignatureType;
-use wsts::state_machine::coordinator;
-use wsts::state_machine::coordinator::fire;
-use wsts::state_machine::coordinator::Coordinator as _;
 use wsts::state_machine::StateMachine as _;
+use wsts::state_machine::coordinator;
+use wsts::state_machine::coordinator::Coordinator as _;
+use wsts::state_machine::coordinator::fire;
 
 use crate::ecdsa::SignEcdsa as _;
 use crate::keys::PrivateKey;
@@ -426,7 +426,7 @@ impl SignerSet {
 
         let started_at = model::BitcoinBlockRef {
             block_hash: bitcoin_chain_tip,
-            block_height: 0,
+            block_height: 0u64.into(),
         };
 
         (
@@ -485,17 +485,6 @@ impl SignerSet {
             .expect("no stacks chain tip");
 
         let txid: model::StacksTxId = fake::Faker.fake_with_rng(rng);
-        let stacks_transaction = model::StacksTransaction {
-            txid,
-            block_hash: stacks_chain_tip.block_hash,
-        };
-
-        let transaction = model::Transaction {
-            txid: txid.to_bytes(),
-            tx: Vec::new(),
-            tx_type: model::TransactionType::RotateKeys,
-            block_hash: stacks_chain_tip.block_hash.to_bytes(),
-        };
         let address = StacksPrincipal::from(PrincipalData::from(
             StacksAddress::from_public_keys(
                 C32_ADDRESS_VERSION_TESTNET_MULTISIG,
@@ -509,23 +498,14 @@ impl SignerSet {
             )
             .expect("failed to create StacksAddress"),
         ));
-        let rotate_keys_tx = model::RotateKeysTransaction {
+        let rotate_keys_tx = model::KeyRotationEvent {
             aggregate_key: shares.aggregate_key,
+            block_hash: stacks_chain_tip.block_hash,
             address,
             txid,
             signer_set: self.signer_keys(),
             signatures_required: self.signers.len() as u16,
         };
-
-        storage
-            .write_transaction(&transaction)
-            .await
-            .expect("failed to write transaction");
-
-        storage
-            .write_stacks_transaction(&stacks_transaction)
-            .await
-            .expect("failed to write stacks transaction");
 
         storage
             .write_rotate_keys_transaction(&rotate_keys_tx)
@@ -545,15 +525,15 @@ impl SignerSet {
 #[cfg(test)]
 mod tests {
     use model::BitcoinBlockHash;
-    use rand::SeedableRng;
 
     use crate::testing::dummy;
+    use crate::testing::get_rng;
 
     use super::*;
 
     #[tokio::test]
     async fn should_be_able_to_run_dkg() {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
         let num_signers = 7;
         let threshold = 5;
@@ -573,6 +553,6 @@ mod tests {
             )
             .await;
 
-        assert_eq!(dkg_shares.len(), num_signers as usize);
+        assert_eq!(dkg_shares.len(), num_signers);
     }
 }

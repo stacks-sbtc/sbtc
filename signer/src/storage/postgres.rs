@@ -1,19 +1,13 @@
 //! Postgres storage implementation.
 
 use std::collections::BTreeSet;
-use std::collections::HashMap;
-use std::sync::OnceLock;
 
-use bitcoin::hashes::Hash as _;
 use bitcoin::OutPoint;
-use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
-use blockstack_lib::chainstate::stacks::TransactionPayload;
-use blockstack_lib::codec::StacksMessageCodec;
+use bitcoin::hashes::Hash as _;
 use blockstack_lib::types::chainstate::StacksBlockId;
-use sqlx::postgres::PgPoolOptions;
 use sqlx::Executor as _;
 use sqlx::PgExecutor;
-use stacks_common::types::chainstate::StacksAddress;
+use sqlx::postgres::PgPoolOptions;
 
 use crate::bitcoin::utxo::SignerUtxo;
 use crate::bitcoin::validation::DepositConfirmationStatus;
@@ -24,8 +18,9 @@ use crate::error::Error;
 use crate::keys::PublicKey;
 use crate::keys::PublicKeyXOnly;
 use crate::storage::model;
+use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::CompletedDepositEvent;
-use crate::storage::model::TransactionType;
+use crate::storage::model::StacksBlockHeight;
 use crate::storage::model::WithdrawalAcceptEvent;
 use crate::storage::model::WithdrawalRejectEvent;
 
@@ -37,68 +32,6 @@ use crate::WITHDRAWAL_BLOCKS_EXPIRY;
 /// All migration scripts from the `signer/migrations` directory.
 static PGSQL_MIGRATIONS: include_dir::Dir =
     include_dir::include_dir!("$CARGO_MANIFEST_DIR/migrations");
-
-const CONTRACT_NAMES: [&str; 4] = [
-    // The name of the Stacks smart contract used for minting sBTC after a
-    // successful transaction moving BTC under the signers' control.
-    "sbtc-deposit",
-    // The name of the Stacks smart contract for recording or registering
-    // successfully completed withdrawal and deposit requests.
-    "sbtc-registry",
-    // The name of the Stacks sBTC smart contract used by the signers for
-    // managing the signer set and the associated keys for a PoX cycle.
-    "sbtc-bootstrap-signers",
-    // The name of the Stacks smart contract used for withdrawing sBTC as
-    // BTC on chain.
-    "sbtc-withdrawal",
-];
-
-#[rustfmt::skip]
-const CONTRACT_FUNCTION_NAMES: [(&str, TransactionType); 5] = [
-    ("initiate-withdrawal-request", TransactionType::WithdrawRequest),
-    ("complete-deposit-wrapper", TransactionType::DepositAccept),
-    ("accept-withdrawal-request", TransactionType::WithdrawAccept),
-    ("reject-withdrawal-request", TransactionType::WithdrawReject),
-    ("rotate-keys-wrapper", TransactionType::RotateKeys),
-];
-
-/// Returns the mapping between functions in a contract call and the
-/// transaction type.
-fn contract_transaction_kinds() -> &'static HashMap<&'static str, TransactionType> {
-    static CONTRACT_FUNCTION_NAME_MAPPING: OnceLock<HashMap<&str, TransactionType>> =
-        OnceLock::new();
-
-    CONTRACT_FUNCTION_NAME_MAPPING.get_or_init(|| CONTRACT_FUNCTION_NAMES.into_iter().collect())
-}
-
-/// This function extracts the signer relevant sBTC related transactions
-/// from the given blocks.
-///
-/// Here the deployer is the address that deployed the sBTC smart
-/// contracts.
-pub fn extract_relevant_transactions(
-    blocks: &[NakamotoBlock],
-    deployer: &StacksAddress,
-) -> Vec<model::Transaction> {
-    let transaction_kinds = contract_transaction_kinds();
-    blocks
-        .iter()
-        .flat_map(|block| block.txs.iter().map(|tx| (tx, block.block_id())))
-        .filter_map(|(tx, block_id)| match &tx.payload {
-            TransactionPayload::ContractCall(x)
-                if CONTRACT_NAMES.contains(&x.contract_name.as_str()) && &x.address == deployer =>
-            {
-                Some(model::Transaction {
-                    txid: tx.txid().into_bytes(),
-                    block_hash: block_id.into_bytes(),
-                    tx: tx.serialize_to_vec(),
-                    tx_type: *transaction_kinds.get(&x.function_name.as_str())?,
-                })
-            }
-            _ => None,
-        })
-        .collect()
-}
 
 /// A convenience struct for retrieving a deposit request report
 #[derive(sqlx::FromRow)]
@@ -112,7 +45,7 @@ struct DepositStatusSummary {
     can_sign: Option<bool>,
     /// The height of the block that confirmed the deposit request
     /// transaction.
-    block_height: Option<i64>,
+    block_height: Option<BitcoinBlockHeight>,
     /// The block hash that confirmed the deposit request.
     block_hash: Option<model::BitcoinBlockHash>,
     /// The bitcoin consensus encoded locktime in the reclaim script.
@@ -142,8 +75,7 @@ struct WithdrawalStatusSummary {
     is_accepted: Option<bool>,
     /// The height of the bitcoin chain tip during the execution of the
     /// contract call that generated the withdrawal request.
-    #[sqlx(try_from = "i64")]
-    bitcoin_block_height: u64,
+    bitcoin_block_height: BitcoinBlockHeight,
     /// The amount associated with the deposit UTXO in sats.
     #[sqlx(try_from = "i64")]
     amount: u64,
@@ -158,8 +90,7 @@ struct WithdrawalStatusSummary {
     stacks_block_hash: model::StacksBlockHash,
     /// Stacks block ID of the block that includes the transaction
     /// associated with this withdrawal request.
-    #[sqlx(try_from = "i64")]
-    stacks_block_height: u64,
+    stacks_block_height: StacksBlockHeight,
 }
 
 // A convenience struct for retrieving the signers' UTXO
@@ -338,68 +269,11 @@ impl PgStore {
         &self.0
     }
 
-    async fn write_transactions(
-        &self,
-        txs: Vec<model::Transaction>,
-    ) -> Result<model::TransactionIds, Error> {
-        if txs.is_empty() {
-            return Ok(model::TransactionIds {
-                tx_ids: Vec::new(),
-                block_hashes: Vec::new(),
-            });
-        }
-
-        let mut tx_ids = Vec::with_capacity(txs.len());
-        let mut txs_bytes = Vec::with_capacity(txs.len());
-        let mut tx_types = Vec::with_capacity(txs.len());
-        let mut block_hashes = Vec::with_capacity(txs.len());
-
-        for tx in txs {
-            tx_ids.push(tx.txid);
-            txs_bytes.push(tx.tx);
-            tx_types.push(tx.tx_type.to_string());
-            block_hashes.push(tx.block_hash)
-        }
-
-        sqlx::query(
-            r#"
-            WITH tx_ids AS (
-                SELECT ROW_NUMBER() OVER (), txid
-                FROM UNNEST($1::bytea[]) AS txid
-            )
-            , txs AS (
-                SELECT ROW_NUMBER() OVER (), tx
-                FROM UNNEST($2::bytea[]) AS tx
-            )
-            , transaction_types AS (
-                SELECT ROW_NUMBER() OVER (), tx_type::sbtc_signer.transaction_type
-                FROM UNNEST($3::VARCHAR[]) AS tx_type
-            )
-            INSERT INTO sbtc_signer.transactions (txid, tx, tx_type)
-            SELECT
-                txid
-              , tx
-              , tx_type
-            FROM tx_ids
-            JOIN txs USING (row_number)
-            JOIN transaction_types USING (row_number)
-            ON CONFLICT DO NOTHING"#,
-        )
-        .bind(&tx_ids)
-        .bind(txs_bytes)
-        .bind(tx_types)
-        .execute(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(model::TransactionIds { tx_ids, block_hashes })
-    }
-
     async fn get_utxo(
         &self,
         chain_tip: &model::BitcoinBlockHash,
         output_type: model::TxOutputType,
-        min_block_height: i64,
+        min_block_height: BitcoinBlockHeight,
     ) -> Result<Option<SignerUtxo>, Error> {
         let pg_utxo = sqlx::query_as::<_, PgSignerUtxo>(
             r#"
@@ -435,7 +309,7 @@ impl PgStore {
             "#,
         )
         .bind(chain_tip)
-        .bind(min_block_height)
+        .bind(i64::try_from(min_block_height).map_err(Error::ConversionDatabaseInt)?)
         .bind(output_type)
         .fetch_optional(&self.0)
         .await
@@ -450,9 +324,9 @@ impl PgStore {
     async fn get_least_txo_height(
         &self,
         chain_tip: &model::BitcoinBlockHash,
-        min_block_height: i64,
-    ) -> Result<Option<i64>, Error> {
-        sqlx::query_scalar::<_, i64>(
+        min_block_height: BitcoinBlockHeight,
+    ) -> Result<Option<BitcoinBlockHeight>, Error> {
+        sqlx::query_scalar::<_, BitcoinBlockHeight>(
             r#"
             SELECT bb.block_height
             FROM sbtc_signer.bitcoin_tx_inputs AS bi
@@ -460,7 +334,7 @@ impl PgStore {
               ON bo.txid = bi.txid
             JOIN sbtc_signer.bitcoin_transactions AS bt
               ON bt.txid = bi.txid
-            JOIN bitcoin_blockchain_until($1, $2) AS bb 
+            JOIN bitcoin_blockchain_until($1, $2) AS bb
               ON bb.block_hash = bt.block_hash
             WHERE bo.output_type = 'signers_output'
               AND bi.prevout_type = 'signers_input'
@@ -469,7 +343,7 @@ impl PgStore {
             "#,
         )
         .bind(chain_tip)
-        .bind(min_block_height)
+        .bind(i64::try_from(min_block_height).map_err(Error::ConversionDatabaseInt)?)
         .fetch_optional(&self.0)
         .await
         .map_err(Error::SqlxQuery)
@@ -482,8 +356,8 @@ impl PgStore {
     ///
     /// This function does not check whether the donation output has been
     /// spent.
-    pub async fn minimum_donation_txo_height(&self) -> Result<Option<i64>, Error> {
-        sqlx::query_scalar::<_, i64>(
+    pub async fn minimum_donation_txo_height(&self) -> Result<Option<BitcoinBlockHeight>, Error> {
+        sqlx::query_scalar::<_, BitcoinBlockHeight>(
             r#"
             SELECT bb.block_height
             FROM sbtc_signer.bitcoin_tx_outputs AS bo
@@ -527,11 +401,11 @@ impl PgStore {
     ///   to the height returned here should contain the transaction with
     ///   the signers' UTXO, and won't if there is a reorg spanning more
     ///   than [`MAX_REORG_BLOCK_COUNT`] blocks.
-    pub async fn minimum_utxo_height(&self) -> Result<Option<i64>, Error> {
+    pub async fn minimum_utxo_height(&self) -> Result<Option<BitcoinBlockHeight>, Error> {
         #[derive(sqlx::FromRow)]
         struct PgCandidateUtxo {
             txid: model::BitcoinTxId,
-            block_height: i64,
+            block_height: BitcoinBlockHeight,
         }
 
         // Get the block height of the unspent transaction that was most
@@ -594,7 +468,9 @@ impl PgStore {
         // MAX_REORG_BLOCK_COUNT bitcoin blocks, plus one. We add the one
         // because we want the transaction right after
         // MAX_REORG_BLOCK_COUNT worth of transactions.
-        let max_transactions = MAX_MEMPOOL_PACKAGE_TX_COUNT as i64 * MAX_REORG_BLOCK_COUNT + 1;
+        let max_transactions =
+            i64::try_from(MAX_MEMPOOL_PACKAGE_TX_COUNT * MAX_REORG_BLOCK_COUNT + 1)
+                .map_err(Error::ConversionDatabaseInt)?;
 
         // Find the block height of the sweep transaction that occurred at
         // or before block "best candidate block height" minus
@@ -605,7 +481,7 @@ impl PgStore {
         // the best blockchain. But if we go back at least
         // `MAX_REORG_BLOCK_COUNT` bitcoin blocks then that UTXO is assumed
         // to still be confirmed.
-        let prev_confirmed_height_candidate = sqlx::query_scalar::<_, i64>(
+        let prev_confirmed_height_candidate = sqlx::query_scalar::<_, BitcoinBlockHeight>(
             r#"
             WITH RECURSIVE signer_inputs AS (
                 SELECT
@@ -677,12 +553,12 @@ impl PgStore {
         &self,
         txid: &model::BitcoinTxId,
         output_index: u32,
-    ) -> Result<Option<i64>, Error> {
+    ) -> Result<Option<BitcoinBlockHeight>, Error> {
         // Before the deposit request is written a signer also stores the
         // bitcoin transaction and (after #731) the bitcoin block
         // confirming the deposit to the database. So this will return zero
         // rows only when we cannot find the deposit request.
-        sqlx::query_scalar::<_, i64>(
+        sqlx::query_scalar::<_, BitcoinBlockHeight>(
             r#"
             SELECT block_height
             FROM sbtc_signer.deposit_requests AS dr
@@ -712,7 +588,7 @@ impl PgStore {
         chain_tip: &model::BitcoinBlockHash,
         txid: &model::BitcoinTxId,
         output_index: u32,
-        min_block_height: u64,
+        min_block_height: BitcoinBlockHeight,
     ) -> Result<Option<model::BitcoinTxId>, Error> {
         sqlx::query_scalar::<_, model::BitcoinTxId>(
             r#"
@@ -802,7 +678,7 @@ impl PgStore {
         &self,
         chain_tip: &model::StacksBlockHash,
         block_hash: &model::StacksBlockHash,
-        block_height: u64,
+        block_height: StacksBlockHeight,
     ) -> Result<bool, Error> {
         sqlx::query_scalar::<_, bool>(
             r#"
@@ -864,7 +740,7 @@ impl PgStore {
               , wr.block_hash   AS stacks_block_hash
               , sb.block_height AS stacks_block_height
             FROM sbtc_signer.withdrawal_requests AS wr
-            JOIN sbtc_signer.stacks_blocks AS sb 
+            JOIN sbtc_signer.stacks_blocks AS sb
               ON sb.block_hash = wr.block_hash
             LEFT JOIN sbtc_signer.withdrawal_signers AS ws
               ON ws.request_id = wr.request_id
@@ -896,7 +772,7 @@ impl PgStore {
     ) -> Result<Option<model::BitcoinTxRef>, Error> {
         sqlx::query_as::<_, model::BitcoinTxRef>(
             r#"
-            SELECT 
+            SELECT
                 bwo.bitcoin_txid AS txid
               , bt.block_hash
             FROM sbtc_signer.withdrawal_requests AS wr
@@ -1110,7 +986,7 @@ impl super::DbRead for PgStore {
         // Add one to the acceptable unlock height because the chain tip is at height one less
         // than the height of the next block, which is the block for which we are assessing
         // the threshold.
-        let minimum_acceptable_unlock_height = self
+        let minimum_acceptable_unlock_height = *self
             .get_bitcoin_block(chain_tip)
             .await?
             .ok_or(Error::MissingBitcoinBlock(*chain_tip))?
@@ -1280,10 +1156,7 @@ impl super::DbRead for PgStore {
 
         // The block height and block hash are always None or not None at
         // the same time.
-        let block_info = summary
-            .block_height
-            .map(u64::try_from)
-            .zip(summary.block_hash);
+        let block_info = summary.block_height.zip(summary.block_hash);
 
         // Lastly we map the block_height variable to a status enum.
         let status = match block_info {
@@ -1292,7 +1165,7 @@ impl super::DbRead for PgStore {
             // confirmed already. We use the height of when the deposit was
             // confirmed for the min height for when a sweep transaction
             // could be confirmed. We could also use block_height + 1.
-            Some((Ok(block_height), block_hash)) => {
+            Some((block_height, block_hash)) => {
                 let deposit_sweep_txid =
                     self.get_deposit_sweep_txid(chain_tip, txid, output_index, block_height);
 
@@ -1305,9 +1178,6 @@ impl super::DbRead for PgStore {
             // we know that the deposit transaction is not on the
             // blockchain identified by the chain tip.
             None => DepositConfirmationStatus::Unconfirmed,
-            // Block heights are stored as BIGINTs after conversion from
-            // u64s, so converting back to u64s is actually safe.
-            Some((Err(error), _)) => return Err(Error::ConversionDatabaseInt(error)),
         };
 
         let dkg_shares = self
@@ -1509,7 +1379,7 @@ impl super::DbRead for PgStore {
         &self,
         bitcoin_chain_tip: &model::BitcoinBlockHash,
         stacks_chain_tip: &model::StacksBlockHash,
-        min_bitcoin_height: u64,
+        min_bitcoin_height: BitcoinBlockHeight,
         signature_threshold: u16,
     ) -> Result<Vec<model::WithdrawalRequest>, Error> {
         sqlx::query_as::<_, model::WithdrawalRequest>(
@@ -1517,7 +1387,7 @@ impl super::DbRead for PgStore {
             -- get_pending_accepted_withdrawal_requests
             WITH recursive
 
-            -- Get all withdrawal requests which have a bitcoin block height 
+            -- Get all withdrawal requests which have a bitcoin block height
             -- of at least minimum height provided.
             requests AS (
                 SELECT
@@ -1543,7 +1413,7 @@ impl super::DbRead for PgStore {
                 -- Join in any rejection events we know about.
                 LEFT JOIN sbtc_signer.withdrawal_reject_events AS wre
                     ON wre.request_id = wr.request_id
-                
+
                 -- Only requests where the bitcoin height is >= than the minimum.
                 WHERE wr.bitcoin_block_height >= $3
             ),
@@ -1580,7 +1450,7 @@ impl super::DbRead for PgStore {
                 JOIN bitcoin_blockchain anchor
                     ON anchor.block_hash = parent.bitcoin_anchor
             )
-            
+
             -- Main select clause (what we're returning).
             SELECT
                 wr.request_id
@@ -1613,7 +1483,7 @@ impl super::DbRead for PgStore {
             LEFT JOIN stacks_blockchain AS canonical_reject
                 ON wr.reject_block_hash = canonical_reject.block_hash
 
-            GROUP BY 
+            GROUP BY
                 wr.request_id
               , wr.block_hash
               , wr.txid
@@ -1631,7 +1501,7 @@ impl super::DbRead for PgStore {
                 -- Ensure there are no confirmed reject contract-calls.
                 AND COUNT(canonical_reject.block_hash) = 0
 
-            ORDER BY 
+            ORDER BY
                 wr.request_id ASC
             "#,
         )
@@ -1719,7 +1589,7 @@ impl super::DbRead for PgStore {
             -- Request is expired
             WHERE wr.bitcoin_block_height < $4
 
-            -- we need to group since we could have multiple withdrawals 
+            -- we need to group since we could have multiple withdrawals
             -- outputs for a single request, and some of them may not be in
             -- the canonical chain, resulting in a NULL bc_trx.block_hash;
             -- so we group and check that all the rows have NULL
@@ -1786,6 +1656,33 @@ impl super::DbRead for PgStore {
             status,
             bitcoin_block_height: summary.bitcoin_block_height,
         }))
+    }
+
+    async fn compute_withdrawn_total(
+        &self,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+    ) -> Result<u64, Error> {
+        let total_amount = sqlx::query_scalar::<_, Option<i64>>(
+            r#"
+            SELECT SUM(bto.amount)::BIGINT
+            FROM sbtc_signer.bitcoin_tx_outputs AS bto
+            JOIN sbtc_signer.bitcoin_transactions AS bt
+              ON bt.txid = bto.txid
+            JOIN bitcoin_blockchain_of($1, $2) AS bbo
+              ON bbo.block_hash = bt.block_hash
+            WHERE bto.output_type = 'withdrawal'
+            "#,
+        )
+        .bind(bitcoin_chain_tip)
+        .bind(i32::from(context_window))
+        .fetch_one(&self.0)
+        .await
+        .map_err(Error::SqlxQuery)?;
+
+        // Amounts are always positive in the database, so this conversion
+        // is always fine.
+        u64::try_from(total_amount.unwrap_or(0)).map_err(|_| Error::TypeConversion)
     }
 
     async fn get_bitcoin_blocks_with_transaction(
@@ -1930,12 +1827,12 @@ impl super::DbRead for PgStore {
     async fn get_last_key_rotation(
         &self,
         chain_tip: &model::BitcoinBlockHash,
-    ) -> Result<Option<model::RotateKeysTransaction>, Error> {
+    ) -> Result<Option<model::KeyRotationEvent>, Error> {
         let Some(stacks_chain_tip) = self.get_stacks_chain_tip(chain_tip).await? else {
             return Ok(None);
         };
 
-        sqlx::query_as::<_, model::RotateKeysTransaction>(
+        sqlx::query_as::<_, model::KeyRotationEvent>(
             r#"
             WITH RECURSIVE stacks_blocks AS (
                 SELECT
@@ -1958,13 +1855,14 @@ impl super::DbRead for PgStore {
             )
             SELECT
                 rkt.txid
+              , rkt.block_hash
               , rkt.address
               , rkt.aggregate_key
               , rkt.signer_set
               , rkt.signatures_required
             FROM sbtc_signer.rotate_keys_transactions rkt
-            JOIN sbtc_signer.stacks_transactions st ON st.txid = rkt.txid
-            JOIN stacks_blocks sb on st.block_hash = sb.block_hash
+            JOIN stacks_blocks AS sb
+              ON rkt.block_hash = sb.block_hash
             ORDER BY sb.block_height DESC, sb.block_hash DESC, rkt.txid DESC
             LIMIT 1
             "#,
@@ -2009,9 +1907,9 @@ impl super::DbRead for PgStore {
             )
             SELECT EXISTS (
                 SELECT TRUE
-                FROM sbtc_signer.rotate_keys_transactions rkt
-                JOIN sbtc_signer.stacks_transactions st ON st.txid = rkt.txid
-                JOIN stacks_blocks sb on st.block_hash = sb.block_hash
+                FROM sbtc_signer.rotate_keys_transactions AS rkt
+                JOIN stacks_blocks AS sb 
+                  ON rkt.block_hash = sb.block_hash
                 WHERE rkt.signer_set = $2
                   AND rkt.aggregate_key = $3
                   AND rkt.signatures_required = $4
@@ -2100,7 +1998,7 @@ impl super::DbRead for PgStore {
         chain_tip: &model::BitcoinBlockRef,
         block_ref: &model::BitcoinBlockRef,
     ) -> Result<bool, Error> {
-        let height_diff = chain_tip
+        let height_diff: u64 = *chain_tip
             .block_height
             .saturating_sub(block_ref.block_height);
 
@@ -2225,7 +2123,7 @@ impl super::DbRead for PgStore {
         //    comment).
         // 2. Find the least height of any sweep transaction confirmed in a
         //    block with height greater than the height returned from (1).
-        let last_considered_height = sqlx::query_scalar::<_, Option<i64>>(
+        let last_considered_height = sqlx::query_scalar::<_, Option<BitcoinBlockHeight>>(
             r#"
             SELECT MAX(bb.block_height)
             FROM sbtc_signer.bitcoin_withdrawals_outputs AS bwo
@@ -2243,7 +2141,7 @@ impl super::DbRead for PgStore {
 
         // We add one because we are interested in sweeps that were
         // confirmed after the signers last considered the withdrawal.
-        let Some(min_block_height) = last_considered_height.map(|x| x + 1) else {
+        let Some(min_block_height) = last_considered_height.map(|height| height + 1) else {
             // This means that there are no rows associated with the ID in the
             // `bitcoin_withdrawals_outputs` table.
             return Ok(false);
@@ -2255,10 +2153,7 @@ impl super::DbRead for PgStore {
         let chain_tip_hash = &bitcoin_chain_tip.block_hash;
         let least_txo_height = self
             .get_least_txo_height(chain_tip_hash, min_block_height)
-            .await?
-            .map(u64::try_from)
-            .transpose()
-            .map_err(|_| Error::TypeConversion)?;
+            .await?;
         // If this returns None, then the sweep itself could be in the
         // mempool. If that's the case then this is definitely active.
         let Some(least_txo_height) = least_txo_height else {
@@ -2271,28 +2166,7 @@ impl super::DbRead for PgStore {
         let txo_confirmations = bitcoin_chain_tip
             .block_height
             .saturating_sub(least_txo_height);
-        Ok(txo_confirmations <= min_confirmations)
-    }
-
-    async fn get_bitcoin_tx(
-        &self,
-        txid: &model::BitcoinTxId,
-        block_hash: &model::BitcoinBlockHash,
-    ) -> Result<Option<model::BitcoinTx>, Error> {
-        sqlx::query_scalar::<_, model::BitcoinTx>(
-            r#"
-            SELECT txs.tx
-            FROM sbtc_signer.bitcoin_transactions AS bt
-            JOIN sbtc_signer.transactions AS txs USING (txid)
-            WHERE bt.block_hash = $1
-              AND bt.txid = $2
-        "#,
-        )
-        .bind(block_hash)
-        .bind(txid)
-        .fetch_optional(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)
+        Ok(txo_confirmations <= min_confirmations.into())
     }
 
     async fn get_swept_deposit_requests(
@@ -2529,6 +2403,41 @@ impl super::DbRead for PgStore {
         .map_err(Error::SqlxQuery)
     }
 
+    async fn get_withdrawal_signer_decisions(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+        signer_public_key: &PublicKey,
+    ) -> Result<Vec<model::WithdrawalSigner>, Error> {
+        sqlx::query_as::<_, model::WithdrawalSigner>(
+            r#"
+            WITH target_block AS (
+                SELECT blocks.block_hash, blocks.created_at
+                FROM sbtc_signer.bitcoin_blockchain_of($1, $2) chain
+                JOIN sbtc_signer.bitcoin_blocks blocks USING (block_hash)
+                ORDER BY chain.block_height ASC
+                LIMIT 1
+            )
+            SELECT
+                ws.request_id
+              , ws.txid
+              , ws.block_hash
+              , ws.signer_pub_key
+              , ws.is_accepted
+
+            FROM sbtc_signer.withdrawal_signers ws
+            WHERE ws.signer_pub_key = $3
+              AND ws.created_at >= (SELECT created_at FROM target_block)
+            "#,
+        )
+        .bind(chain_tip)
+        .bind(i32::from(context_window))
+        .bind(signer_public_key)
+        .fetch_all(&self.0)
+        .await
+        .map_err(Error::SqlxQuery)
+    }
+
     async fn get_deposit_signer_decisions(
         &self,
         chain_tip: &model::BitcoinBlockHash,
@@ -2545,11 +2454,11 @@ impl super::DbRead for PgStore {
                 LIMIT 1
             )
             SELECT
-                ds.txid,
-                ds.output_index,
-                ds.signer_pub_key,
-                ds.can_sign,
-                ds.can_accept
+                ds.txid
+              , ds.output_index
+              , ds.signer_pub_key
+              , ds.can_sign
+              , ds.can_accept
             FROM sbtc_signer.deposit_signers ds
             WHERE ds.signer_pub_key = $3
               AND ds.created_at >= (SELECT created_at FROM target_block)
@@ -2838,26 +2747,6 @@ impl super::DbWrite for PgStore {
         Ok(())
     }
 
-    async fn write_transaction(&self, transaction: &model::Transaction) -> Result<(), Error> {
-        sqlx::query(
-            "INSERT INTO sbtc_signer.transactions
-              ( txid
-              , tx
-              , tx_type
-              )
-            VALUES ($1, $2, $3)
-            ON CONFLICT DO NOTHING",
-        )
-        .bind(transaction.txid)
-        .bind(&transaction.tx)
-        .bind(transaction.tx_type)
-        .execute(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(())
-    }
-
     async fn write_bitcoin_transaction(&self, tx_ref: &model::BitcoinTxRef) -> Result<(), Error> {
         sqlx::query(
             "INSERT INTO sbtc_signer.bitcoin_transactions (txid, block_hash)
@@ -2873,11 +2762,19 @@ impl super::DbWrite for PgStore {
         Ok(())
     }
 
-    async fn write_bitcoin_transactions(&self, txs: Vec<model::Transaction>) -> Result<(), Error> {
-        let summary = self.write_transactions(txs).await?;
-        if summary.tx_ids.is_empty() {
+    async fn write_bitcoin_transactions(&self, txs: Vec<model::BitcoinTxRef>) -> Result<(), Error> {
+        if txs.is_empty() {
             return Ok(());
         }
+
+        let mut tx_ids = Vec::with_capacity(txs.len());
+        let mut block_hashes = Vec::with_capacity(txs.len());
+
+        for tx in txs {
+            tx_ids.push(tx.txid);
+            block_hashes.push(tx.block_hash)
+        }
+
         sqlx::query(
             r#"
             WITH tx_ids AS (
@@ -2896,59 +2793,8 @@ impl super::DbWrite for PgStore {
             JOIN block_ids USING (row_number)
             ON CONFLICT DO NOTHING"#,
         )
-        .bind(&summary.tx_ids)
-        .bind(&summary.block_hashes)
-        .execute(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(())
-    }
-
-    async fn write_stacks_transaction(
-        &self,
-        stacks_transaction: &model::StacksTransaction,
-    ) -> Result<(), Error> {
-        sqlx::query(
-            "INSERT INTO sbtc_signer.stacks_transactions (txid, block_hash)
-            VALUES ($1, $2)
-            ON CONFLICT DO NOTHING",
-        )
-        .bind(stacks_transaction.txid)
-        .bind(stacks_transaction.block_hash)
-        .execute(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(())
-    }
-
-    async fn write_stacks_transactions(&self, txs: Vec<model::Transaction>) -> Result<(), Error> {
-        let summary = self.write_transactions(txs).await?;
-        if summary.tx_ids.is_empty() {
-            return Ok(());
-        }
-
-        sqlx::query(
-            r#"
-            WITH tx_ids AS (
-                SELECT ROW_NUMBER() OVER (), txid
-                FROM UNNEST($1::bytea[]) AS txid
-            )
-            , block_ids AS (
-                SELECT ROW_NUMBER() OVER (), block_id
-                FROM UNNEST($2::bytea[]) AS block_id
-            )
-            INSERT INTO sbtc_signer.stacks_transactions (txid, block_hash)
-            SELECT
-                txid
-              , block_id
-            FROM tx_ids
-            JOIN block_ids USING (row_number)
-            ON CONFLICT DO NOTHING"#,
-        )
-        .bind(&summary.tx_ids)
-        .bind(&summary.block_hashes)
+        .bind(&tx_ids)
+        .bind(&block_hashes)
         .execute(&self.0)
         .await
         .map_err(Error::SqlxQuery)?;
@@ -3062,21 +2908,23 @@ impl super::DbWrite for PgStore {
 
     async fn write_rotate_keys_transaction(
         &self,
-        key_rotation: &model::RotateKeysTransaction,
+        key_rotation: &model::KeyRotationEvent,
     ) -> Result<(), Error> {
         sqlx::query(
             r#"
             INSERT INTO sbtc_signer.rotate_keys_transactions (
                   txid
+                , block_hash
                 , address
                 , aggregate_key
                 , signer_set
                 , signatures_required)
             VALUES
-                ($1, $2, $3, $4, $5)
+                ($1, $2, $3, $4, $5, $6)
             ON CONFLICT DO NOTHING"#,
         )
         .bind(key_rotation.txid)
+        .bind(key_rotation.block_hash)
         .bind(&key_rotation.address)
         .bind(key_rotation.aggregate_key)
         .bind(&key_rotation.signer_set)
@@ -3202,6 +3050,31 @@ impl super::DbWrite for PgStore {
         .bind(i64::try_from(output.amount).map_err(Error::ConversionDatabaseInt)?)
         .bind(&output.script_pubkey)
         .bind(output.output_type)
+        .execute(&self.0)
+        .await
+        .map_err(Error::SqlxQuery)?;
+
+        Ok(())
+    }
+
+    async fn write_withdrawal_tx_output(
+        &self,
+        output: &model::WithdrawalTxOutput,
+    ) -> Result<(), Error> {
+        sqlx::query(
+            r#"
+            INSERT INTO bitcoin_withdrawal_tx_outputs (
+                txid
+              , output_index
+              , request_id
+            )
+            VALUES ($1, $2, $3)
+            ON CONFLICT DO NOTHING;
+            "#,
+        )
+        .bind(output.txid)
+        .bind(i32::try_from(output.output_index).map_err(Error::ConversionDatabaseInt)?)
+        .bind(i64::try_from(output.request_id).map_err(Error::ConversionDatabaseInt)?)
         .execute(&self.0)
         .await
         .map_err(Error::SqlxQuery)?;
@@ -3459,82 +3332,5 @@ impl super::DbWrite for PgStore {
         .await
         .map(|res| res.rows_affected() > 0)
         .map_err(Error::SqlxQuery)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    use std::io::Read;
-
-    use blockstack_lib::chainstate::stacks::TransactionContractCall;
-    use blockstack_lib::clarity::vm::ClarityName;
-    use blockstack_lib::clarity::vm::ContractName;
-    use blockstack_lib::types::chainstate::StacksAddress;
-    use blockstack_lib::util::hash::Hash160;
-    use test_case::test_case;
-
-    /// Test that we can extract the types of function calls that we care
-    /// about
-    #[test_case("sbtc-withdrawal", "initiate-withdrawal-request"; "initiate withdrawal request")]
-    fn extract_transaction_type(contract_name: &str, function_name: &str) {
-        let path = "tests/fixtures/tenure-blocks-0-e5fdeb1a51ba6eb297797a1c473e715c27dc81a58ba82c698f6a32eeccee9a5b.bin";
-        let mut file = std::fs::File::open(path).unwrap();
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf).unwrap();
-
-        let bytes: &mut &[u8] = &mut buf.as_ref();
-        let mut blocks = Vec::new();
-
-        while !bytes.is_empty() {
-            blocks.push(NakamotoBlock::consensus_deserialize(bytes).unwrap());
-        }
-
-        let deployer = StacksAddress::burn_address(false);
-        let txs = extract_relevant_transactions(&blocks, &deployer);
-        assert!(txs.is_empty());
-
-        let last_block = blocks.last_mut().unwrap();
-        let mut tx = last_block.txs.last().unwrap().clone();
-
-        let contract_call = TransactionContractCall {
-            address: deployer,
-            contract_name: ContractName::from(contract_name),
-            function_name: ClarityName::from(function_name),
-            function_args: Vec::new(),
-        };
-        tx.payload = TransactionPayload::ContractCall(contract_call);
-        last_block.txs.push(tx);
-
-        let txs = extract_relevant_transactions(&blocks, &deployer);
-        assert_eq!(txs.len(), 1);
-
-        // We've just seen that if the deployer supplied here matches the
-        // address in the transaction, then we will consider it a relevant
-        // transaction. Now what if someone tries to pull a fast one by
-        // deploying their own modified version of the sBTC smart contracts
-        // and creating contract calls against that? Well the address of
-        // these contract calls won't match the ones that we are interested
-        // in, and we will filter them out. We test that now,
-        let contract_call = TransactionContractCall {
-            // This is the address of the poser that deployed their own
-            // versions of the sBTC smart contracts.
-            address: StacksAddress::new(2, Hash160([1; 20])),
-            contract_name: ContractName::from(contract_name),
-            function_name: ClarityName::from(function_name),
-            function_args: Vec::new(),
-        };
-        // The last transaction in the last nakamoto block is a legit
-        // transaction. Let's remove it and replace it with a non-legit
-        // one.
-        let last_block = blocks.last_mut().unwrap();
-        let mut tx = last_block.txs.pop().unwrap();
-        tx.payload = TransactionPayload::ContractCall(contract_call);
-        last_block.txs.push(tx);
-
-        // Now there aren't any relevant transactions in the block
-        let txs = extract_relevant_transactions(&blocks, &deployer);
-        assert!(txs.is_empty());
     }
 }

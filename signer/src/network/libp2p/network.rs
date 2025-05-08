@@ -117,7 +117,7 @@ mod tests {
     use crate::{
         keys::{PrivateKey, PublicKey},
         network::libp2p::SignerSwarmBuilder,
-        testing::{self, clear_env, context::*, network::RandomMemoryMultiaddr},
+        testing::{self, clear_env, context::*, get_rng, network::RandomMemoryMultiaddr},
     };
 
     #[test(tokio::test)]
@@ -199,11 +199,12 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
         // Run the test with a 30-second timeout for the swarms to exchange messages.
-        if let Err(_) = tokio::time::timeout(
+        if tokio::time::timeout(
             tokio::time::Duration::from_secs(30),
             testing::network::assert_clients_can_exchange_messages(network1, network2, key1, key2),
         )
         .await
+        .is_err()
         {
             handle1.abort();
             handle2.abort();
@@ -222,7 +223,7 @@ mod tests {
     async fn connected_peers_gossip_to_one_another() {
         clear_env();
 
-        let mut rng = rand::rngs::OsRng;
+        let mut rng = get_rng();
         let key1 = PrivateKey::new(&mut rng);
         let key2 = PrivateKey::new(&mut rng);
         let key3 = PrivateKey::new(&mut rng);
@@ -232,6 +233,7 @@ mod tests {
             .with_mocked_clients()
             .modify_settings(|settings| {
                 settings.signer.private_key = key1;
+                settings.signer.p2p.enable_mdns = false;
             })
             .build();
         let context2 = TestContext::builder()
@@ -239,6 +241,7 @@ mod tests {
             .with_mocked_clients()
             .modify_settings(|settings| {
                 settings.signer.private_key = key2;
+                settings.signer.p2p.enable_mdns = false;
             })
             .build();
         let context3 = TestContext::builder()
@@ -246,6 +249,7 @@ mod tests {
             .with_mocked_clients()
             .modify_settings(|settings| {
                 settings.signer.private_key = key3;
+                settings.signer.p2p.enable_mdns = false;
             })
             .build();
 
@@ -304,7 +308,7 @@ mod tests {
 
         // The swarms are discovering themselves via mDNS, so we need to give
         // them a bit of time to connect.
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        tokio::time::sleep(Duration::from_secs(3)).await;
 
         // Let's generate some messages for signer 3 to try to send to signer 1.
         let number_of_messages = 10;
@@ -373,7 +377,7 @@ mod tests {
     async fn signers_check_source_peer_ids() {
         clear_env();
 
-        let mut rng = rand::rngs::OsRng;
+        let mut rng = get_rng();
         let key1 = PrivateKey::new(&mut rng);
         let key2 = PrivateKey::new(&mut rng);
         let key3 = PrivateKey::new(&mut rng);
@@ -383,6 +387,7 @@ mod tests {
             .with_mocked_clients()
             .modify_settings(|settings| {
                 settings.signer.private_key = key1;
+                settings.signer.p2p.enable_mdns = false;
             })
             .build();
         let context2 = TestContext::builder()
@@ -390,6 +395,7 @@ mod tests {
             .with_mocked_clients()
             .modify_settings(|settings| {
                 settings.signer.private_key = key2;
+                settings.signer.p2p.enable_mdns = false;
             })
             .build();
         let context3 = TestContext::builder()
@@ -397,6 +403,7 @@ mod tests {
             .with_mocked_clients()
             .modify_settings(|settings| {
                 settings.signer.private_key = key3;
+                settings.signer.p2p.enable_mdns = false;
             })
             .build();
 
@@ -498,7 +505,7 @@ mod tests {
         });
 
         // This is the connected signer, signer 2, it should receive all
-        // messages pretty quicky.
+        // messages pretty quickly.
         let mut gossiped_messages = gossip_msg_stream
             .take(number_of_messages)
             .take_until(tokio::time::sleep(Duration::from_secs(4)))
@@ -518,7 +525,7 @@ mod tests {
             .collect::<Vec<_>>()
             .await;
 
-        // Messages from signer 3 should not be propogated to signer 1,
+        // Messages from signer 3 should not be propagated to signer 1,
         // since it is not in that signer's signing set.
         assert!(received_messages.is_empty());
 
@@ -628,7 +635,7 @@ mod tests {
             .build()
             .expect("Failed to build swarm 3");
 
-        // Create the network liasons for the swarms (i.e. `MessageTransfer`
+        // Create the network liaisons for the swarms (i.e. `MessageTransfer`
         // instances).
         let mut trusted1 = P2PNetwork::new(&context1);
         let mut trusted2 = P2PNetwork::new(&context2);

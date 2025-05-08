@@ -6,15 +6,15 @@ use bitcoincore_rpc::RpcApi;
 use fake::Fake as _;
 use fake::Faker;
 use lru::LruCache;
-use rand::rngs::OsRng;
 use rand::SeedableRng as _;
+use rand::rngs::OsRng;
 use signer::bitcoin::MockBitcoinInteract;
 use signer::emily_client::MockEmilyInteract;
 use signer::network::in_memory2::SignerNetworkInstance;
 use signer::stacks::api::MockStacksInteract;
-use signer::storage::postgres::PgStore;
 use signer::storage::DbRead;
 use signer::storage::DbWrite;
+use signer::storage::postgres::PgStore;
 use test_case::test_case;
 
 use signer::bitcoin::utxo::RequestRef;
@@ -31,9 +31,9 @@ use signer::message::BitcoinPreSignRequest;
 use signer::message::StacksTransactionSignRequest;
 use signer::message::WstsMessage;
 use signer::message::WstsMessageId;
-use signer::network::in_memory2::WanNetwork;
 use signer::network::InMemoryNetwork;
 use signer::network::MessageTransfer;
+use signer::network::in_memory2::WanNetwork;
 use signer::stacks::contracts::ContractCall;
 use signer::storage::model;
 use signer::storage::model::BitcoinBlockHash;
@@ -45,6 +45,7 @@ use signer::storage::model::SigHash;
 use signer::storage::model::StacksTxId;
 use signer::testing;
 use signer::testing::context::*;
+use signer::testing::get_rng;
 use signer::transaction_signer::ChainTipStatus;
 use signer::transaction_signer::MsgChainTipReport;
 use signer::transaction_signer::TxSignerEventLoop;
@@ -52,14 +53,14 @@ use signer::wsts_state_machine::StateMachineId;
 use wsts::net::DkgBegin;
 use wsts::net::NonceRequest;
 
-use crate::setup::backfill_bitcoin_blocks;
-use crate::setup::fill_signers_utxo;
-use crate::setup::set_deposit_incomplete;
-use crate::setup::set_verification_status;
 use crate::setup::SweepAmounts;
 use crate::setup::TestSignerSet;
 use crate::setup::TestSweepSetup;
 use crate::setup::TestSweepSetup2;
+use crate::setup::backfill_bitcoin_blocks;
+use crate::setup::fill_signers_utxo;
+use crate::setup::set_deposit_incomplete;
+use crate::setup::set_verification_status;
 
 type MockedTxSigner = TxSignerEventLoop<
     TestContext<
@@ -78,7 +79,7 @@ type MockedTxSigner = TxSignerEventLoop<
 async fn signing_set_validation_check_for_stacks_transactions() {
     let db = testing::storage::new_test_database().await;
 
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -159,11 +160,99 @@ async fn signing_set_validation_check_for_stacks_transactions() {
     testing::storage::drop_db(db).await;
 }
 
+#[test_case(1, false ; "fee-too-high")]
+#[test_case(0, true ; "fee-okay")]
+#[tokio::test]
+async fn signer_rejects_stacks_txns_with_too_high_a_fee(
+    fee_relative_to_configured_limit: u64,
+    should_accept: bool,
+) {
+    let db = testing::storage::new_test_database().await;
+
+    let mut rng = get_rng();
+
+    let mut ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_first_bitcoin_core_client()
+        .with_mocked_emily_client()
+        .with_mocked_stacks_client()
+        .build();
+
+    // We need this or the contract call will fail validation with an
+    // unrelated error, since we mock reaching out to the stacks node.
+    set_deposit_incomplete(&mut ctx).await;
+
+    let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
+
+    // This confirms a deposit transaction, and has a nice helper function
+    // for storing a real deposit.
+    let mut setup = TestSweepSetup::new_setup(rpc, faucet, 10000, &mut rng);
+
+    // Let's get the blockchain data into the database.
+    let chain_tip = BitcoinBlockRef {
+        block_hash: setup.sweep_block_hash.into(),
+        block_height: setup.sweep_block_height,
+    };
+    backfill_bitcoin_blocks(&db, rpc, &chain_tip.block_hash).await;
+
+    // This is all normal things that need to happen in order to pass
+    // validation.
+    setup.store_happy_path_data(&db).await;
+
+    let (mut req, _) = crate::complete_deposit::make_complete_deposit(&setup);
+
+    req.deployer = ctx.config().signer.deployer;
+    let network = InMemoryNetwork::new();
+    let tx_signer = TxSignerEventLoop {
+        network: network.connect(),
+        context: ctx.clone(),
+        context_window: 10000,
+        wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
+        signer_private_key: setup.aggregated_signer.keypair.secret_key().into(),
+        threshold: 2,
+        rng: rand::rngs::StdRng::seed_from_u64(51),
+        dkg_begin_pause: None,
+        dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
+    };
+
+    // Setup the transaction fee to be the maximum fee configured plus one, so that it
+    // exceeds the configured value.
+    let stacks_fees_max_ustx = ctx.config().signer.stacks_fees_max_ustx;
+    let tx_fee = stacks_fees_max_ustx.get() + fee_relative_to_configured_limit;
+
+    // Let's create a proper sign request.
+    let request = StacksTransactionSignRequest {
+        aggregate_key: setup.aggregated_signer.keypair.public_key().into(),
+        contract_tx: ContractCall::CompleteDepositV1(req).into(),
+        // The nonce isn't really validated against anything at the moment.
+        nonce: 1,
+        tx_fee,
+        txid: Faker.fake_with_rng::<StacksTxId, _>(&mut rng).into(),
+    };
+
+    // We can sign a transaction generated by a coordinator who is not in
+    // the signer set, so the origin doesn't matter much for this function
+    // call.
+    let origin_public_key: PublicKey = Faker.fake_with_rng(&mut rng);
+    let result = tx_signer
+        .assert_valid_stacks_tx_sign_request(&request, &chain_tip, &origin_public_key)
+        .await;
+
+    if should_accept {
+        assert!(matches!(result, Ok(())));
+    } else {
+        // We cannot enable partial eq for the error type because it contains many
+        // internal types that don't implement it, so we have to match on the error
+        // and ensure that it is the correct one.
+        assert!(matches!(result, Err(Error::StacksFeeLimitExceeded(_, _))));
+    }
+}
+
 #[tokio::test]
 pub async fn assert_should_be_able_to_handle_sbtc_requests() {
     let db = testing::storage::new_test_database().await;
 
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let fee_rate = 1.3;
     // Build the test context with mocked clients
     let ctx = TestContext::builder()
@@ -224,7 +313,7 @@ pub async fn assert_should_be_able_to_handle_sbtc_requests() {
     };
 
     let sbtc_requests: TxRequestIds = TxRequestIds {
-        deposits: vec![setup.deposit_request.outpoint.into()],
+        deposits: vec![setup.deposit_request.outpoint],
         withdrawals: vec![],
     };
 
@@ -303,7 +392,7 @@ pub async fn assert_should_be_able_to_handle_sbtc_requests() {
 pub async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is_ok: bool) {
     let db = testing::storage::new_test_database().await;
 
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     // Build the test context with mocked clients
     let ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -330,7 +419,7 @@ pub async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is
         .unwrap();
     let chain_tip = BitcoinBlockRef {
         block_hash: block_header.hash.into(),
-        block_height: block_header.height as u64,
+        block_height: block_header.height.into(),
     };
 
     // Store the necessary data for passing validation
@@ -396,7 +485,7 @@ pub async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is
 async fn new_state_machine_per_valid_sighash() {
     let db = testing::storage::new_test_database().await;
 
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     // Build the test context with mocked clients
     let ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -440,7 +529,7 @@ async fn new_state_machine_per_valid_sighash() {
         chain_tip_status: ChainTipStatus::Canonical,
         chain_tip: BitcoinBlockRef {
             block_hash: BitcoinBlockHash::from([0; 32]),
-            block_height: 0,
+            block_height: 0u64.into(),
         },
     };
 
@@ -450,7 +539,7 @@ async fn new_state_machine_per_valid_sighash() {
     let sighash: SigHash = Faker.fake_with_rng(&mut rng);
 
     let row = BitcoinTxSigHash {
-        txid: txid.clone(),
+        txid,
         chain_tip: BitcoinBlockHash::from([0; 32]),
         prevout_txid: BitcoinTxId::from([0; 32]),
         prevout_output_index: 0,
@@ -520,7 +609,7 @@ async fn new_state_machine_per_valid_sighash() {
 async fn max_one_state_machine_per_bitcoin_block_hash_for_dkg() {
     let db = testing::storage::new_test_database().await;
 
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     // Build the test context with mocked clients
     let ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -534,7 +623,7 @@ async fn max_one_state_machine_per_bitcoin_block_hash_for_dkg() {
     let headers = &rpc.get_chain_tips().unwrap()[0];
     let chain_tip = BitcoinBlockRef {
         block_hash: headers.hash.into(),
-        block_height: headers.height,
+        block_height: headers.height.into(),
     };
     backfill_bitcoin_blocks(&db, rpc, &chain_tip.block_hash).await;
 
@@ -633,7 +722,6 @@ async fn max_one_state_machine_per_bitcoin_block_hash_for_dkg() {
 /// [`MockedTxSigner`] for information on the validations that these tests
 /// are asserting.
 mod validate_dkg_verification_message {
-    use rand::rngs::StdRng;
     use secp256k1::Keypair;
 
     use signer::{
@@ -660,7 +748,7 @@ mod validate_dkg_verification_message {
                 dkg_verification_window: 0,
                 bitcoin_chain_tip: BitcoinBlockRef {
                     block_hash: BitcoinBlockHash::from([0; 32]),
-                    block_height: 0,
+                    block_height: 0u64.into(),
                 },
                 message: None,
             }
@@ -678,7 +766,7 @@ mod validate_dkg_verification_message {
         /// the values in this [`TestParams`] instance.
         async fn execute(&self, db: &PgStore) -> Result<(), Error> {
             MockedTxSigner::validate_dkg_verification_message::<PgStore>(
-                &db,
+                db,
                 &self.new_aggregate_key,
                 self.message.as_deref(),
                 self.dkg_verification_window,
@@ -701,7 +789,7 @@ mod validate_dkg_verification_message {
 
     #[tokio::test]
     async fn latest_key_mismatch() {
-        let mut rng = StdRng::seed_from_u64(42);
+        let mut rng = get_rng();
         let db = testing::storage::new_test_database().await;
         let latest_aggregate_key = Keypair::new_global(&mut rng).public_key().into();
         let new_aggregate_key = Keypair::new_global(&mut rng).x_only_public_key().into();
@@ -773,7 +861,7 @@ mod validate_dkg_verification_message {
         let shares = EncryptedDkgShares {
             aggregate_key,
             dkg_shares_status: DkgSharesStatus::Unverified,
-            started_at_bitcoin_block_height: 0,
+            started_at_bitcoin_block_height: 0u64.into(),
             ..Faker.fake()
         };
         db.write_encrypted_dkg_shares(&shares).await.unwrap();
@@ -785,7 +873,7 @@ mod validate_dkg_verification_message {
             dkg_verification_window: 10,
             bitcoin_chain_tip: BitcoinBlockRef {
                 block_hash: BitcoinBlockHash::from([0; 32]),
-                block_height: 11,
+                block_height: 11u64.into(),
             },
             ..Default::default()
         };
@@ -809,7 +897,7 @@ mod validate_dkg_verification_message {
         let shares = EncryptedDkgShares {
             aggregate_key,
             dkg_shares_status: DkgSharesStatus::Unverified,
-            started_at_bitcoin_block_height: 0,
+            started_at_bitcoin_block_height: 0u64.into(),
             ..Faker.fake()
         };
         db.write_encrypted_dkg_shares(&shares).await.unwrap();
@@ -822,7 +910,7 @@ mod validate_dkg_verification_message {
             dkg_verification_window: 10,
             bitcoin_chain_tip: BitcoinBlockRef {
                 block_hash: BitcoinBlockHash::from([0; 32]),
-                block_height: 10,
+                block_height: 10u64.into(),
             },
             ..Default::default()
         };
@@ -840,7 +928,7 @@ mod validate_dkg_verification_message {
         let shares = EncryptedDkgShares {
             aggregate_key,
             dkg_shares_status: DkgSharesStatus::Unverified,
-            started_at_bitcoin_block_height: 0,
+            started_at_bitcoin_block_height: 0u64.into(),
             ..Faker.fake()
         };
         db.write_encrypted_dkg_shares(&shares).await.unwrap();
@@ -869,7 +957,7 @@ mod validate_dkg_verification_message {
         let shares = EncryptedDkgShares {
             aggregate_key,
             dkg_shares_status: DkgSharesStatus::Unverified,
-            started_at_bitcoin_block_height: 0,
+            started_at_bitcoin_block_height: 0u64.into(),
             ..Faker.fake()
         };
         db.write_encrypted_dkg_shares(&shares).await.unwrap();
@@ -881,7 +969,7 @@ mod validate_dkg_verification_message {
             dkg_verification_window: 10,
             bitcoin_chain_tip: BitcoinBlockRef {
                 block_hash: BitcoinBlockHash::from([0; 32]),
-                block_height: 10,
+                block_height: 10u64.into(),
             },
             message: Some(Faker.fake()),
         };

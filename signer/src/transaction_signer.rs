@@ -29,8 +29,8 @@ use crate::message::BitcoinPreSignAck;
 use crate::message::Payload;
 use crate::message::StacksTransactionSignRequest;
 use crate::message::WstsMessageId;
-use crate::metrics::Metrics;
 use crate::metrics::BITCOIN_BLOCKCHAIN;
+use crate::metrics::Metrics;
 use crate::metrics::STACKS_BLOCKCHAIN;
 use crate::network;
 use crate::stacks::contracts::AsContractCall as _;
@@ -39,18 +39,18 @@ use crate::stacks::contracts::ReqContext;
 use crate::stacks::contracts::StacksTx;
 use crate::stacks::wallet::MultisigTx;
 use crate::stacks::wallet::SignerWallet;
+use crate::storage::DbRead;
+use crate::storage::DbWrite as _;
 use crate::storage::model;
 use crate::storage::model::DkgSharesStatus;
 use crate::storage::model::SigHash;
-use crate::storage::DbRead;
-use crate::storage::DbWrite as _;
 use crate::wsts_state_machine::FrostCoordinator;
 use crate::wsts_state_machine::SignerStateMachine;
 use crate::wsts_state_machine::StateMachineId;
 use crate::wsts_state_machine::WstsCoordinator;
 
-use bitcoin::hashes::Hash as _;
 use bitcoin::TapSighash;
+use bitcoin::hashes::Hash as _;
 use futures::StreamExt;
 use lru::LruCache;
 use rand::rngs::OsRng;
@@ -488,6 +488,15 @@ where
         chain_tip: &model::BitcoinBlockRef,
         origin_public_key: &PublicKey,
     ) -> Result<(), Error> {
+        // Ensure that the Stacks fee is within the acceptable range.
+        let highest_acceptable_fee = self.context.config().signer.stacks_fees_max_ustx.get();
+        if request.tx_fee > highest_acceptable_fee {
+            return Err(Error::StacksFeeLimitExceeded(
+                request.tx_fee,
+                highest_acceptable_fee,
+            ));
+        }
+
         let db = self.context.get_storage();
         let public_key = self.signer_public_key();
 
@@ -1274,15 +1283,21 @@ where
         // Determine if the state machine is in an end-state.
         let is_end_state = match state_machine.state() {
             dkg::verification::State::Success(_) => {
-                tracing::warn!("🔐 the DKG verification signing round already completed for this aggregate key");
+                tracing::warn!(
+                    "🔐 the DKG verification signing round already completed for this aggregate key"
+                );
                 true
             }
             dkg::verification::State::Error => {
-                tracing::warn!("🔐 the DKG verification state machine for this aggregate key is in a failed state and may not be used");
+                tracing::warn!(
+                    "🔐 the DKG verification state machine for this aggregate key is in a failed state and may not be used"
+                );
                 true
             }
             dkg::verification::State::Expired => {
-                tracing::warn!("🔐 the DKG verification state machine for this aggregate key is expired and the state machine may not be used");
+                tracing::warn!(
+                    "🔐 the DKG verification state machine for this aggregate key is expired and the state machine may not be used"
+                );
                 true
             }
             dkg::verification::State::Idle | dkg::verification::State::Signing => false,
@@ -1359,7 +1374,9 @@ where
                 self.dkg_verification_state_machines.pop(&state_machine_id);
 
                 // Perform verification of the signature.
-                tracing::info!("🔐 verifying that the signature can be used to spend a UTXO locked by the new aggregate key");
+                tracing::info!(
+                    "🔐 verifying that the signature can be used to spend a UTXO locked by the new aggregate key"
+                );
                 let mock_tx = UnsignedMockTransaction::new(aggregate_key.into());
 
                 match mock_tx.verify_signature(&signature) {
@@ -1546,7 +1563,7 @@ pub async fn assert_allow_dkg_begin(
                 );
                 return Err(Error::DkgHasAlreadyRun);
             }
-            if bitcoin_chain_tip.block_height < dkg_min_height.get() {
+            if bitcoin_chain_tip.block_height < dkg_min_height {
                 tracing::warn!(
                     ?dkg_min_bitcoin_block_height,
                     %dkg_target_rounds,
@@ -1610,7 +1627,7 @@ pub enum ChainTipStatus {
 
 #[cfg(test)]
 mod tests {
-    use std::num::{NonZeroU32, NonZeroU64, NonZeroUsize};
+    use std::num::{NonZeroU32, NonZeroUsize};
 
     use bitcoin::Txid;
     use fake::{Fake, Faker};
@@ -1622,12 +1639,13 @@ mod tests {
     use crate::emily_client::MockEmilyInteract;
     use crate::stacks::api::MockStacksInteract;
     use crate::storage::in_memory::SharedStore;
-    use crate::storage::{model, DbWrite};
+    use crate::storage::{DbWrite, model};
     use crate::testing;
     use crate::testing::context::*;
 
     use super::*;
 
+    #[allow(clippy::type_complexity)]
     fn test_environment() -> testing::transaction_signer::TestEnvironment<
         TestContext<
             SharedStore,
@@ -1682,12 +1700,13 @@ mod tests {
         chain_tip_height: u64,
         should_allow: bool,
     ) {
+        let chain_tip_height = chain_tip_height.into();
+        let dkg_min_bitcoin_block_height = dkg_min_bitcoin_block_height.map(Into::into);
         let context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
             .modify_settings(|s| {
-                s.signer.dkg_min_bitcoin_block_height =
-                    dkg_min_bitcoin_block_height.map(NonZeroU64::new).flatten();
+                s.signer.dkg_min_bitcoin_block_height = dkg_min_bitcoin_block_height;
                 s.signer.dkg_target_rounds = NonZeroU32::new(dkg_target_rounds).unwrap();
             })
             .build();
@@ -1749,13 +1768,13 @@ mod tests {
         // Dummy chain tip hash which will be used to fetch the block height.
         let bitcoin_chain_tip = model::BitcoinBlockRef {
             block_hash: Faker.fake(),
-            block_height: 100,
+            block_height: 100u64.into(),
         };
 
         // Write a bitcoin block at the given height, simulating the chain tip.
         storage
             .write_bitcoin_block(&model::BitcoinBlock {
-                block_height: 100,
+                block_height: 100u64.into(),
                 parent_hash: Faker.fake(),
                 block_hash: bitcoin_chain_tip.block_hash,
             })
@@ -1822,7 +1841,7 @@ mod tests {
         // Write a bitcoin block at the given height, simulating the chain tip.
         storage
             .write_bitcoin_block(&model::BitcoinBlock {
-                block_height: 100,
+                block_height: 100u64.into(),
                 parent_hash: Faker.fake(),
                 block_hash: bitcoin_chain_tip,
             })
@@ -1907,7 +1926,7 @@ mod tests {
         // Write a bitcoin block at the given height, simulating the chain tip.
         storage
             .write_bitcoin_block(&model::BitcoinBlock {
-                block_height: 100,
+                block_height: 100u64.into(),
                 parent_hash: Faker.fake(),
                 block_hash: bitcoin_chain_tip,
             })

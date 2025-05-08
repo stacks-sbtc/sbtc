@@ -8,13 +8,13 @@ use bitcoin::Amount;
 use bitcoin::OutPoint;
 use bitcoin::ScriptBuf;
 use bitcoin::Txid;
+use emily_client::apis::Error as EmilyError;
+use emily_client::apis::ResponseContent;
 use emily_client::apis::configuration::ApiKey;
 use emily_client::apis::configuration::Configuration as EmilyApiConfig;
 use emily_client::apis::deposit_api;
 use emily_client::apis::limits_api;
 use emily_client::apis::withdrawal_api;
-use emily_client::apis::Error as EmilyError;
-use emily_client::apis::ResponseContent;
 use emily_client::models::DepositInfo;
 use emily_client::models::DepositUpdate;
 use emily_client::models::Status;
@@ -32,7 +32,6 @@ use crate::config::EmilyClientConfig;
 use crate::context::SbtcLimits;
 use crate::error::Error;
 use crate::storage::model::BitcoinTxId;
-use crate::storage::model::StacksBlock;
 use crate::util::ApiFallbackClient;
 
 /// Emily client error variants.
@@ -56,11 +55,11 @@ pub enum EmilyClientError {
 
     /// An error occurred while updating deposits
     #[error("error updating deposits: {0}")]
-    UpdateDeposits(EmilyError<deposit_api::UpdateDepositsError>),
+    UpdateDeposits(EmilyError<deposit_api::UpdateDepositsSignerError>),
 
     /// An error occurred while updating withdrawals
     #[error("error updating withdrawals: {0}")]
-    UpdateWithdrawals(EmilyError<withdrawal_api::UpdateWithdrawalsError>),
+    UpdateWithdrawals(EmilyError<withdrawal_api::UpdateWithdrawalsSignerError>),
 
     /// An error occurred while getting limits
     #[error("error getting limits: {0}")]
@@ -94,8 +93,15 @@ pub trait EmilyInteract: Sync + Send {
     fn accept_deposits<'a>(
         &'a self,
         transaction: &'a UnsignedTransaction<'a>,
-        stacks_chain_tip: &'a StacksBlock,
     ) -> impl std::future::Future<Output = Result<UpdateDepositsResponse, Error>> + Send;
+
+    /// Update accepted withdrawals after their sweep bitcoin transaction has
+    /// been submitted (but before being finalized -- the stacks transaction
+    /// accepting the withdrawal has not been submitted yet).
+    fn accept_withdrawals<'a>(
+        &'a self,
+        transaction: &'a UnsignedTransaction<'a>,
+    ) -> impl std::future::Future<Output = Result<UpdateWithdrawalsResponse, Error>> + Send;
 
     /// Update the status of deposits in Emily.
     fn update_deposits(
@@ -207,7 +213,7 @@ impl EmilyInteract for EmilyClient {
             Err(EmilyError::ResponseError(ResponseContent { status, .. }))
                 if status.as_u16() == 404 =>
             {
-                return Ok(None)
+                return Ok(None);
             }
             error => error.map_err(EmilyClientError::GetDeposit)?,
         };
@@ -316,16 +322,36 @@ impl EmilyInteract for EmilyClient {
         }
 
         let update_request = UpdateDepositsRequestBody { deposits: update_deposits };
-        deposit_api::update_deposits(&self.config, update_request)
+        deposit_api::update_deposits_signer(&self.config, update_request)
             .await
             .map_err(EmilyClientError::UpdateDeposits)
             .map_err(Error::EmilyApi)
     }
 
+    async fn accept_withdrawals<'a>(
+        &'a self,
+        transaction: &'a UnsignedTransaction<'a>,
+    ) -> Result<UpdateWithdrawalsResponse, Error> {
+        let withdrawals = transaction
+            .requests
+            .iter()
+            .filter_map(RequestRef::as_withdrawal);
+
+        let update_request: Vec<_> = withdrawals
+            .map(|withdrawal| WithdrawalUpdate {
+                request_id: withdrawal.request_id,
+                fulfillment: None,
+                status: Status::Accepted,
+                status_message: "".to_string(),
+            })
+            .collect();
+
+        self.update_withdrawals(update_request).await
+    }
+
     async fn accept_deposits<'a>(
         &'a self,
         transaction: &'a UnsignedTransaction<'a>,
-        stacks_chain_tip: &'a StacksBlock,
     ) -> Result<UpdateDepositsResponse, Error> {
         let deposits = transaction
             .requests
@@ -339,8 +365,6 @@ impl EmilyInteract for EmilyClient {
                 status: Status::Accepted,
                 fulfillment: None,
                 status_message: "".to_string(),
-                last_update_block_hash: stacks_chain_tip.block_hash.to_string(),
-                last_update_height: stacks_chain_tip.block_height,
             })
             .collect();
 
@@ -358,7 +382,7 @@ impl EmilyInteract for EmilyClient {
         let update_request = UpdateWithdrawalsRequestBody {
             withdrawals: update_withdrawals,
         };
-        withdrawal_api::update_withdrawals(&self.config, update_request)
+        withdrawal_api::update_withdrawals_signer(&self.config, update_request)
             .await
             .map_err(EmilyClientError::UpdateWithdrawals)
             .map_err(Error::EmilyApi)
@@ -370,22 +394,24 @@ impl EmilyInteract for EmilyClient {
             .map_err(EmilyClientError::GetLimits)
             .map_err(Error::EmilyApi)?;
 
-        let total_cap = limits.peg_cap.and_then(|cap| cap.map(Amount::from_sat));
-        let per_deposit_minimum: Option<Amount> = limits
-            .per_deposit_minimum
-            .and_then(|min| min.map(Amount::from_sat));
-        let per_deposit_cap = limits
-            .per_deposit_cap
-            .and_then(|cap| cap.map(Amount::from_sat));
-        let per_withdrawal_cap = limits
-            .per_withdrawal_cap
-            .and_then(|cap| cap.map(Amount::from_sat));
+        let total_cap = limits.peg_cap.flatten().map(Amount::from_sat);
+        let per_deposit_minimum = limits.per_deposit_minimum.flatten().map(Amount::from_sat);
+        let per_deposit_cap = limits.per_deposit_cap.flatten().map(Amount::from_sat);
+        let per_withdrawal_cap = limits.per_withdrawal_cap.flatten().map(Amount::from_sat);
+        let rolling_withdrawal_blocks = limits
+            .rolling_withdrawal_blocks
+            .flatten()
+            .map(|x| x.min(u16::MAX as u64) as u16);
+        let rolling_withdrawal_cap = limits.rolling_withdrawal_cap.flatten();
 
         Ok(SbtcLimits::new(
             total_cap,
             per_deposit_minimum,
             per_deposit_cap,
             per_withdrawal_cap,
+            rolling_withdrawal_blocks,
+            rolling_withdrawal_cap,
+            None,
             None,
         ))
     }
@@ -424,9 +450,16 @@ impl EmilyInteract for ApiFallbackClient<EmilyClient> {
     async fn accept_deposits<'a>(
         &'a self,
         transaction: &'a UnsignedTransaction<'a>,
-        stacks_chain_tip: &'a StacksBlock,
     ) -> Result<UpdateDepositsResponse, Error> {
-        self.exec(|client, _| client.accept_deposits(transaction, stacks_chain_tip))
+        self.exec(|client, _| client.accept_deposits(transaction))
+            .await
+    }
+
+    async fn accept_withdrawals<'a>(
+        &'a self,
+        transaction: &'a UnsignedTransaction<'a>,
+    ) -> Result<UpdateWithdrawalsResponse, Error> {
+        self.exec(|client, _| client.accept_withdrawals(transaction))
             .await
     }
 

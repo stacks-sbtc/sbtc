@@ -33,8 +33,6 @@ pub struct Settings {
     pub limit_table_name: String,
     /// The default global limits for the system.
     pub default_limits: AccountLimits,
-    /// The API key for the Bitcoin Layer 2 API.
-    pub trusted_reorg_api_key: String,
     /// Whether the lambda is expecting transactions on mainnet.
     pub is_mainnet: bool,
     /// The version of the lambda.
@@ -56,12 +54,26 @@ pub struct EmilyContext {
 /// Implement debug print for the context struct.
 impl fmt::Debug for EmilyContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            serde_json::to_string_pretty(self)
-                .expect("Failed to serialize Emily Context in debug print.")
-        )
+        f.debug_struct("Settings")
+            .field("is_local", &self.settings.is_local)
+            .field("deposit_table_name", &self.settings.deposit_table_name)
+            .field(
+                "withdrawal_table_name",
+                &self.settings.withdrawal_table_name,
+            )
+            .field(
+                "chainstate_table_name",
+                &self.settings.chainstate_table_name,
+            )
+            .field("limit_table_name", &self.settings.limit_table_name)
+            .field("default_limits", &self.settings.default_limits)
+            .field("is_mainnet", &self.settings.is_mainnet)
+            .field("version", &self.settings.version)
+            .field(
+                "deployer_address",
+                &self.settings.deployer_address.to_string(),
+            )
+            .finish()
     }
 }
 
@@ -73,7 +85,7 @@ impl Settings {
     pub fn from_env() -> Result<Self, Error> {
         let deployer_address = env::var("DEPLOYER_ADDRESS")?;
         let deployer_address = PrincipalData::parse_standard_principal(&deployer_address)
-            .map_err(|e| Error::Debug(format!("Failed to parse deployer address: {}", e)))?;
+            .map_err(Error::InvalidStacksAddress)?;
 
         Ok(Settings {
             is_local: env::var("IS_LOCAL")?.to_lowercase() == "true",
@@ -98,8 +110,15 @@ impl Settings {
                     .ok()
                     .map(|v| v.parse())
                     .transpose()?,
+                rolling_withdrawal_blocks: env::var("DEFAULT_ROLLING_WITHDRAWAL_BLOCKS")
+                    .ok()
+                    .map(|v| v.parse())
+                    .transpose()?,
+                rolling_withdrawal_cap: env::var("DEFAULT_ROLLING_WITHDRAWAL_CAP")
+                    .ok()
+                    .map(|v| v.parse())
+                    .transpose()?,
             },
-            trusted_reorg_api_key: env::var("TRUSTED_REORG_API_KEY")?,
             is_mainnet: env::var("IS_MAINNET")?.to_lowercase() == "true",
             version: env::var("VERSION")?,
             deployer_address,
@@ -188,7 +207,6 @@ impl EmilyContext {
                     .expect("Couldn't find valid limit table table in existing table list.")
                     .to_string(),
                 default_limits: AccountLimits::default(),
-                trusted_reorg_api_key: "testApiKey".to_string(),
                 is_mainnet: false,
                 version: "local-instance".to_string(),
                 deployer_address: PrincipalData::parse_standard_principal(

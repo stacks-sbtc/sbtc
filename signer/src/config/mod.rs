@@ -3,8 +3,8 @@ use config::Config;
 use config::ConfigError;
 use config::Environment;
 use config::File;
-use libp2p::multiaddr::Protocol;
 use libp2p::Multiaddr;
+use libp2p::multiaddr::Protocol;
 use serde::Deserialize;
 use stacks_common::types::chainstate::StacksAddress;
 use std::collections::BTreeSet;
@@ -14,6 +14,7 @@ use std::num::NonZeroU64;
 use std::path::Path;
 use url::Url;
 
+use crate::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
 use crate::config::error::SignerConfigError;
 use crate::config::serialization::duration_milliseconds_deserializer;
 use crate::config::serialization::duration_seconds_deserializer;
@@ -26,7 +27,7 @@ use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
 use crate::network::libp2p::MultiaddrExt as _;
 use crate::stacks::wallet::SignerWallet;
-use crate::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
+use crate::storage::model::BitcoinBlockHeight;
 
 mod error;
 mod serialization;
@@ -289,7 +290,7 @@ pub struct SignerConfig {
     pub prometheus_exporter_endpoint: Option<std::net::SocketAddr>,
     /// The public keys of the signer sit during the bootstrapping phase of
     /// the signers.
-    pub bootstrap_signing_set: Vec<PublicKey>,
+    pub bootstrap_signing_set: BTreeSet<PublicKey>,
     /// The number of signatures required for the signers' bootstrapped
     /// multi-sig wallet on Stacks.
     pub bootstrap_signatures_required: u16,
@@ -309,6 +310,9 @@ pub struct SignerConfig {
     /// How many bitcoin blocks back from the chain tip the signer will
     /// look for deposit decisions to retry to propagate.
     pub deposit_decisions_retry_window: u16,
+    /// How many bitcoin blocks back from the chain tip the signer will
+    /// look for withdrawal decisions to retry to propagate.
+    pub withdrawal_decisions_retry_window: u16,
     /// The maximum duration of a signing round before the coordinator will
     /// time out and return an error.
     #[serde(deserialize_with = "duration_seconds_deserializer")]
@@ -327,7 +331,7 @@ pub struct SignerConfig {
     pub dkg_begin_pause: Option<u64>,
     /// The minimum bitcoin block height for which the sbtc signers will
     /// backfill bitcoin blocks to.
-    pub sbtc_bitcoin_start_height: Option<u64>,
+    pub sbtc_bitcoin_start_height: Option<BitcoinBlockHeight>,
     /// The maximum number of deposit inputs that will be included in a
     /// single bitcoin transaction. Transactions must be constructed within
     /// a tenure of a bitcoin block, and higher values here imply lower
@@ -339,7 +343,7 @@ pub struct SignerConfig {
     /// already been run, the coordinator will attempt to re-run DKG after this
     /// block height is met if `dkg_target_rounds` has not been reached. If DKG
     /// has never been run, this configuration has no effect.
-    pub dkg_min_bitcoin_block_height: Option<NonZeroU64>,
+    pub dkg_min_bitcoin_block_height: Option<BitcoinBlockHeight>,
     /// Configures a target number of DKG rounds to run/accept. If this is set
     /// and the number of DKG shares is less than this number, the coordinator
     /// will continue to run DKG rounds until this number of rounds is reached,
@@ -349,11 +353,19 @@ pub struct SignerConfig {
     /// The number of bitcoin blocks after a DKG start where we attempt to
     /// verify the shares. After this many blocks, we mark the shares as failed.
     pub dkg_verification_window: u16,
+    /// The maximum stacks fee in microSTX that the signer will accept for any stacks transaction.
+    pub stacks_fees_max_ustx: NonZeroU64,
 }
 
 impl Validatable for SignerConfig {
     fn validate(&self, cfg: &Settings) -> Result<(), ConfigError> {
         self.p2p.validate(cfg)?;
+
+        if !self.bootstrap_signing_set.contains(&self.public_key()) {
+            let err = SignerConfigError::MissingPubkeyInBootstrapSignerSet;
+            return Err(ConfigError::Message(err.to_string()));
+        }
+
         if self.deployer.is_mainnet() != self.network.is_mainnet() {
             let err = SignerConfigError::NetworkDeployerMismatch;
             return Err(ConfigError::Message(err.to_string()));
@@ -422,19 +434,6 @@ impl Validatable for SignerConfig {
 }
 
 impl SignerConfig {
-    /// Return the bootstrapped signing set from the config. This function
-    /// makes sure that the signing set includes the current signer.
-    pub fn bootstrap_signing_set(&self) -> BTreeSet<PublicKey> {
-        // We add in the current signer into the signing set from the
-        // config just in case it hasn't been included already.
-        let self_public_key = PublicKey::from_private_key(&self.private_key);
-        self.bootstrap_signing_set
-            .iter()
-            .copied()
-            .chain([self_public_key])
-            .collect()
-    }
-
     /// Return the public key of the signer.
     pub fn public_key(&self) -> PublicKey {
         PublicKey::from_private_key(&self.private_key)
@@ -497,6 +496,7 @@ impl Settings {
         // done.
         cfg_builder = cfg_builder.set_default("signer.context_window", 1000)?;
         cfg_builder = cfg_builder.set_default("signer.deposit_decisions_retry_window", 3)?;
+        cfg_builder = cfg_builder.set_default("signer.withdrawal_decisions_retry_window", 3)?;
         cfg_builder = cfg_builder.set_default("signer.dkg_max_duration", 120)?;
         cfg_builder = cfg_builder.set_default("signer.bitcoin_presign_request_max_duration", 30)?;
         cfg_builder = cfg_builder.set_default("signer.signer_round_max_duration", 30)?;
@@ -507,6 +507,7 @@ impl Settings {
         cfg_builder = cfg_builder.set_default("signer.dkg_target_rounds", 1)?;
         cfg_builder = cfg_builder.set_default("emily.pagination_timeout", 10)?;
         cfg_builder = cfg_builder.set_default("signer.dkg_verification_window", 10)?;
+        cfg_builder = cfg_builder.set_default("signer.stacks_fees_max_ustx", 1_500_000)?;
 
         if let Some(path) = config_path {
             cfg_builder = cfg_builder.add_source(File::from(path.as_ref()));
@@ -556,18 +557,18 @@ impl Validatable for StacksConfig {
 mod tests {
     use std::net::SocketAddr;
     use std::str::FromStr;
+    use std::time::Duration;
 
     use tempfile;
     use toml_edit::DocumentMut;
 
     use crate::config::serialization::try_parse_p2p_multiaddr;
-
     use crate::error::Error;
     use crate::testing::clear_env;
-
-    use std::time::Duration;
+    use crate::testing::set_var;
 
     use super::*;
+    use test_case::test_case;
 
     /// Helper function to quickly create a URL from a string in tests.
     fn url(s: &str) -> url::Url {
@@ -612,7 +613,7 @@ mod tests {
 
         assert_eq!(
             settings.bitcoin.rpc_endpoints,
-            vec![url("http://devnet:devnet@localhost:18443")]
+            vec![url("http://devnet:devnet@127.0.0.1:18443")]
         );
         assert_eq!(settings.bitcoin.rpc_endpoints[0].username(), "devnet");
         assert_eq!(settings.bitcoin.rpc_endpoints[0].password(), Some("devnet"));
@@ -626,10 +627,14 @@ mod tests {
         );
         assert!(!settings.signer.bootstrap_signing_set.is_empty());
         assert!(settings.signer.dkg_begin_pause.is_none());
-        assert_eq!(settings.signer.sbtc_bitcoin_start_height, Some(101));
+        assert_eq!(
+            settings.signer.sbtc_bitcoin_start_height,
+            Some(101u64.into())
+        );
         assert_eq!(settings.signer.bootstrap_signatures_required, 2);
         assert_eq!(settings.signer.context_window, 1000);
         assert_eq!(settings.signer.deposit_decisions_retry_window, 3);
+        assert_eq!(settings.signer.withdrawal_decisions_retry_window, 3);
         assert!(settings.signer.prometheus_exporter_endpoint.is_none());
         assert_eq!(
             settings.signer.bitcoin_presign_request_max_duration,
@@ -653,10 +658,10 @@ mod tests {
     fn default_config_toml_loads_with_signer_environment() {
         clear_env();
 
-        std::env::set_var("SIGNER_SIGNER__CONTEXT_WINDOW", "600");
-        std::env::set_var("SIGNER_SIGNER__BITCOIN_PRESIGN_REQUEST_MAX_DURATION", "60");
-        std::env::set_var("SIGNER_SIGNER__SIGNER_ROUND_MAX_DURATION", "70");
-        std::env::set_var("SIGNER_SIGNER__DKG_MAX_DURATION", "80");
+        set_var("SIGNER_SIGNER__CONTEXT_WINDOW", "600");
+        set_var("SIGNER_SIGNER__BITCOIN_PRESIGN_REQUEST_MAX_DURATION", "60");
+        set_var("SIGNER_SIGNER__SIGNER_ROUND_MAX_DURATION", "70");
+        set_var("SIGNER_SIGNER__DKG_MAX_DURATION", "80");
 
         let settings = Settings::new_from_default_config().unwrap();
 
@@ -676,11 +681,11 @@ mod tests {
     fn default_config_toml_loads_signer_p2p_config_with_environment() {
         clear_env();
 
-        std::env::set_var(
+        set_var(
             "SIGNER_SIGNER__P2P__SEEDS",
             "tcp://seed-1:4122,tcp://seed-2:4122",
         );
-        std::env::set_var("SIGNER_SIGNER__P2P__LISTEN_ON", "tcp://1.2.3.4:1234");
+        set_var("SIGNER_SIGNER__P2P__LISTEN_ON", "tcp://1.2.3.4:1234");
 
         let settings = Settings::new_from_default_config().unwrap();
 
@@ -701,12 +706,12 @@ mod tests {
     fn default_config_toml_loads_bitcoin_config_with_environment() {
         clear_env();
 
-        std::env::set_var(
+        set_var(
             "SIGNER_BITCOIN__RPC_ENDPOINTS",
             "http://user:pass@localhost:1234,http://foo:bar@localhost:5678",
         );
 
-        std::env::set_var(
+        set_var(
             "SIGNER_BITCOIN__BLOCK_HASH_STREAM_ENDPOINTS",
             "tcp://localhost:1234,tcp://localhost:5678",
         );
@@ -714,37 +719,67 @@ mod tests {
         let settings = Settings::new_from_default_config().unwrap();
 
         assert_eq!(settings.bitcoin.rpc_endpoints.len(), 2);
-        assert!(settings
-            .bitcoin
-            .rpc_endpoints
-            .contains(&url("http://user:pass@localhost:1234")));
-        assert!(settings
-            .bitcoin
-            .rpc_endpoints
-            .contains(&url("http://foo:bar@localhost:5678")));
-        assert!(settings
-            .bitcoin
-            .block_hash_stream_endpoints
-            .contains(&url("tcp://localhost:1234")));
-        assert!(settings
-            .bitcoin
-            .block_hash_stream_endpoints
-            .contains(&url("tcp://localhost:5678")));
+        assert!(
+            settings
+                .bitcoin
+                .rpc_endpoints
+                .contains(&url("http://user:pass@localhost:1234"))
+        );
+        assert!(
+            settings
+                .bitcoin
+                .rpc_endpoints
+                .contains(&url("http://foo:bar@localhost:5678"))
+        );
+        assert!(
+            settings
+                .bitcoin
+                .block_hash_stream_endpoints
+                .contains(&url("tcp://localhost:1234"))
+        );
+        assert!(
+            settings
+                .bitcoin
+                .block_hash_stream_endpoints
+                .contains(&url("tcp://localhost:5678"))
+        );
     }
 
     #[test]
     fn default_config_toml_loads_signer_private_key_config_with_environment() {
         clear_env();
 
-        let new = "a1a6fcf2de80dcde3e0e4251eae8c69adf57b88613b2dcb79332cc325fa439bd";
-        std::env::set_var("SIGNER_SIGNER__PRIVATE_KEY", new);
+        let new = "9bfecf16c9c12792589dd2b843f850d5b89b81a04f8ab91c083bdf6709fbefee01";
+        set_var("SIGNER_SIGNER__PRIVATE_KEY", new);
 
         let settings = Settings::new_from_default_config().unwrap();
 
         assert_eq!(
             settings.signer.private_key,
-            PrivateKey::from_str(new).unwrap()
+            PrivateKey::from_str(&new[..64]).unwrap()
         );
+    }
+
+    #[test]
+    fn config_bails_if_pubkey_of_this_signer_not_in_bootstrap_signer_set() {
+        clear_env();
+
+        let new = "a1a6fcf2de80dcde3e0e4251eae8c69adf57b88613b2dcb79332cc325fa439bd";
+        set_var("SIGNER_SIGNER__PRIVATE_KEY", new);
+
+        let error = Settings::new_from_default_config().unwrap_err();
+
+        match error {
+            ConfigError::Message(msg) => {
+                assert_eq!(
+                    msg,
+                    "Bootstrap signer set must contain pubkey of this signer".to_string()
+                );
+            }
+            _ => {
+                panic!("Expected ConfigError::Message, got: {:#?}", error);
+            }
+        }
     }
 
     #[test]
@@ -763,12 +798,12 @@ mod tests {
         // the `value` and the default are different.
         assert_ne!(DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX, expected_value.get());
 
-        std::env::set_var("SIGNER_SIGNER__MAX_DEPOSITS_PER_BITCOIN_TX", value);
+        set_var("SIGNER_SIGNER__MAX_DEPOSITS_PER_BITCOIN_TX", value);
 
         let settings = Settings::new_from_default_config().unwrap();
         assert_eq!(settings.signer.max_deposits_per_bitcoin_tx, expected_value);
 
-        std::env::set_var("SIGNER_SIGNER__MAX_DEPOSITS_PER_BITCOIN_TX", "0");
+        set_var("SIGNER_SIGNER__MAX_DEPOSITS_PER_BITCOIN_TX", "0");
         assert!(Settings::new_from_default_config().is_err());
     }
 
@@ -779,11 +814,11 @@ mod tests {
         let settings = Settings::new_from_default_config().unwrap();
         assert_eq!(settings.signer.dkg_min_bitcoin_block_height, None);
 
-        std::env::set_var("SIGNER_SIGNER__DKG_MIN_BITCOIN_BLOCK_HEIGHT", "42");
+        set_var("SIGNER_SIGNER__DKG_MIN_BITCOIN_BLOCK_HEIGHT", "42");
         let settings = Settings::new_from_default_config().unwrap();
         assert_eq!(
             settings.signer.dkg_min_bitcoin_block_height,
-            Some(NonZeroU64::new(42).unwrap())
+            Some(42u64.into())
         );
     }
 
@@ -797,7 +832,7 @@ mod tests {
             NonZeroU32::new(1).unwrap()
         );
 
-        std::env::set_var("SIGNER_SIGNER__DKG_TARGET_ROUNDS", "42");
+        set_var("SIGNER_SIGNER__DKG_TARGET_ROUNDS", "42");
         let settings = Settings::new_from_default_config().unwrap();
         assert_eq!(
             settings.signer.dkg_target_rounds,
@@ -812,7 +847,7 @@ mod tests {
         let settings = Settings::new_from_default_config().unwrap();
         assert_eq!(settings.signer.dkg_verification_window, 10);
 
-        std::env::set_var("SIGNER_SIGNER__DKG_VERIFICATION_WINDOW", "42");
+        set_var("SIGNER_SIGNER__DKG_VERIFICATION_WINDOW", "42");
         let settings = Settings::new_from_default_config().unwrap();
         assert_eq!(settings.signer.dkg_verification_window, 42);
     }
@@ -824,16 +859,16 @@ mod tests {
         let new = "testnet";
         // We set the p2p seeds here as we'll otherwise fail p2p seed validation
         // when the network is mainnet or testnet.
-        std::env::set_var("SIGNER_SIGNER__P2P__SEEDS", "tcp://seed-1:4122");
-        std::env::set_var("SIGNER_SIGNER__NETWORK", new);
+        set_var("SIGNER_SIGNER__P2P__SEEDS", "tcp://seed-1:4122");
+        set_var("SIGNER_SIGNER__NETWORK", new);
 
         let settings = Settings::new_from_default_config().unwrap();
         assert_eq!(settings.signer.network, NetworkKind::Testnet);
 
         // We unset the p2p seeds here as they're not required for regtest.
-        std::env::set_var("SIGNER_SIGNER__P2P__SEEDS", "");
+        set_var("SIGNER_SIGNER__P2P__SEEDS", "");
         let new = "regtest";
-        std::env::set_var("SIGNER_SIGNER__NETWORK", new);
+        set_var("SIGNER_SIGNER__NETWORK", new);
 
         let settings = Settings::new_from_default_config().unwrap();
         assert_eq!(settings.signer.network, NetworkKind::Regtest);
@@ -843,19 +878,19 @@ mod tests {
     fn sbtc_bitcoin_start_height() {
         clear_env();
 
-        std::env::set_var("SIGNER_SIGNER__SBTC_BITCOIN_START_HEIGHT", "12345");
+        set_var("SIGNER_SIGNER__SBTC_BITCOIN_START_HEIGHT", "12345");
 
         let settings = Settings::new_from_default_config().unwrap();
         let height = settings.signer.sbtc_bitcoin_start_height.unwrap();
 
-        assert_eq!(height, 12345);
+        assert_eq!(height, 12345u64.into());
     }
 
     #[test]
     fn prometheus_exporter_endpoint_with_environment() {
         clear_env();
 
-        std::env::set_var("SIGNER_SIGNER__PROMETHEUS_EXPORTER_ENDPOINT", "[::]:9851");
+        set_var("SIGNER_SIGNER__PROMETHEUS_EXPORTER_ENDPOINT", "[::]:9851");
 
         let settings = Settings::new_from_default_config().unwrap();
         let endpoint = settings.signer.prometheus_exporter_endpoint.unwrap();
@@ -864,7 +899,7 @@ mod tests {
         assert!(endpoint.is_ipv6());
         assert_eq!(endpoint.port(), 9851);
 
-        std::env::set_var(
+        set_var(
             "SIGNER_SIGNER__PROMETHEUS_EXPORTER_ENDPOINT",
             "0.0.0.0:9852",
         );
@@ -881,14 +916,15 @@ mod tests {
     fn default_config_toml_loads_with_environment() {
         clear_env();
 
-        // The default toml used here specifies http://localhost:20443
+        // The default toml used here specifies http://127.0.0.1:20443
         // as the stacks node endpoint.
         let settings = Settings::new_from_default_config().unwrap();
         let host = settings.stacks.endpoints[0].host();
-        assert_eq!(host, Some(url::Host::Domain("localhost")));
+        let ip: std::net::Ipv4Addr = "127.0.0.1".parse().unwrap();
+        assert_eq!(host, Some(url::Host::Ipv4(ip)));
         assert_eq!(settings.stacks.endpoints[0].port(), Some(20443));
 
-        std::env::set_var(
+        set_var(
             "SIGNER_STACKS__ENDPOINTS",
             "http://whatever:1234,http://whateva:4321",
         );
@@ -901,7 +937,7 @@ mod tests {
         assert_eq!(host, Some(url::Host::Domain("whateva")));
         assert_eq!(settings.stacks.endpoints[1].port(), Some(4321));
 
-        std::env::set_var("SIGNER_STACKS__ENDPOINTS", "http://127.0.0.1:5678");
+        set_var("SIGNER_STACKS__ENDPOINTS", "http://127.0.0.1:5678");
 
         let settings = Settings::new_from_default_config().unwrap();
         let ip: std::net::Ipv4Addr = "127.0.0.1".parse().unwrap();
@@ -911,7 +947,7 @@ mod tests {
         );
         assert_eq!(settings.stacks.endpoints[0].port(), Some(5678));
 
-        std::env::set_var("SIGNER_STACKS__ENDPOINTS", "http://[::1]:9101");
+        set_var("SIGNER_STACKS__ENDPOINTS", "http://[::1]:9101");
 
         let settings = Settings::new_from_default_config().unwrap();
         let ip: std::net::Ipv6Addr = "::1".parse().unwrap();
@@ -922,7 +958,7 @@ mod tests {
         assert_eq!(settings.stacks.endpoints[0].port(), Some(9101));
 
         let delay = 42;
-        std::env::set_var("SIGNER_SIGNER__BITCOIN_PROCESSING_DELAY", delay.to_string());
+        set_var("SIGNER_SIGNER__BITCOIN_PROCESSING_DELAY", delay.to_string());
 
         let settings = Settings::new_from_default_config().unwrap();
         assert_eq!(
@@ -931,7 +967,7 @@ mod tests {
         );
 
         let delay = 42;
-        std::env::set_var(
+        set_var(
             "SIGNER_SIGNER__REQUESTS_PROCESSING_DELAY",
             delay.to_string(),
         );
@@ -955,7 +991,7 @@ mod tests {
 
         let mut remove_parameter = |config_name: &str, parameter: &str| {
             config_toml
-                .get_mut(&config_name)
+                .get_mut(config_name)
                 .unwrap()
                 .as_table_mut()
                 .unwrap()
@@ -963,6 +999,7 @@ mod tests {
         };
         remove_parameter("signer", "context_window");
         remove_parameter("signer", "deposit_decisions_retry_window");
+        remove_parameter("signer", "withdrawal_decisions_retry_window");
         remove_parameter("signer", "signer_round_max_duration");
         remove_parameter("signer", "bitcoin_presign_request_max_duration");
         remove_parameter("signer", "dkg_max_duration");
@@ -972,12 +1009,13 @@ mod tests {
 
         let new_config = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
 
-        std::fs::write(&new_config.path(), config_toml.to_string()).unwrap();
+        std::fs::write(new_config.path(), config_toml.to_string()).unwrap();
 
         let settings = Settings::new(Some(&new_config.path())).unwrap();
 
         assert_eq!(settings.signer.context_window, 1000);
         assert_eq!(settings.signer.deposit_decisions_retry_window, 3);
+        assert_eq!(settings.signer.withdrawal_decisions_retry_window, 3);
         assert_eq!(
             settings.signer.bitcoin_presign_request_max_duration,
             Duration::from_secs(30)
@@ -992,16 +1030,32 @@ mod tests {
     }
 
     #[test]
-    fn zero_durations_fails_in_signer_config() {
-        fn test_one(field: &str) {
-            clear_env();
-            std::env::set_var(format!("SIGNER_SIGNER__{}", field.to_uppercase()), "0");
-            let _ = Settings::new_from_default_config()
-                .expect_err(&format!("Duration for {field} must be non zero"));
-        }
-        test_one("dkg_max_duration");
-        test_one("bitcoin_presign_request_max_duration");
-        test_one("signer_round_max_duration");
+    fn stacks_fees_max_ustx_can_be_loaded_from_environment() {
+        clear_env();
+        let expected_stacks_fees_max_ustx = NonZeroU64::new(1234).unwrap();
+        set_var(
+            "SIGNER_SIGNER__STACKS_FEES_MAX_USTX",
+            format!("{expected_stacks_fees_max_ustx}"),
+        );
+        assert_eq!(
+            Settings::new_from_default_config()
+                .unwrap()
+                .signer
+                .stacks_fees_max_ustx,
+            expected_stacks_fees_max_ustx,
+        );
+    }
+
+    #[test_case("dkg_max_duration" ; "dkg_max_duration")]
+    #[test_case("bitcoin_presign_request_max_duration" ; "bitcoin_presign_request_max_duration")]
+    #[test_case("signer_round_max_duration" ; "signer_round_max_duration")]
+    #[test_case("stacks_fees_max_ustx" ; "stacks_fees_max_ustx")]
+    fn zero_values_for_nonzero_fields_fail_in_signer_config(field: &str) {
+        clear_env();
+
+        set_var(format!("SIGNER_SIGNER__{}", field.to_uppercase()), "0");
+
+        Settings::new_from_default_config().expect_err("value for must be non zero");
     }
 
     #[test]
@@ -1009,7 +1063,7 @@ mod tests {
         clear_env();
 
         let endpoint = "http://127.0.0.1:12345";
-        std::env::set_var("SIGNER_BLOCKLIST_CLIENT__ENDPOINT", endpoint);
+        set_var("SIGNER_BLOCKLIST_CLIENT__ENDPOINT", endpoint);
         let settings = Settings::new_from_default_config().unwrap();
 
         let actual_endpoint = settings.blocklist_client.unwrap().endpoint;
@@ -1020,7 +1074,7 @@ mod tests {
     fn invalid_private_key_length_returns_correct_error() {
         clear_env();
 
-        std::env::set_var("SIGNER_SIGNER__PRIVATE_KEY", "1234");
+        set_var("SIGNER_SIGNER__PRIVATE_KEY", "1234");
 
         let settings = Settings::new_from_default_config();
         assert!(settings.is_err());
@@ -1035,7 +1089,7 @@ mod tests {
         clear_env();
 
         let delay = MAX_BITCOIN_PROCESSING_DELAY_SECONDS + 1;
-        std::env::set_var("SIGNER_SIGNER__BITCOIN_PROCESSING_DELAY", delay.to_string());
+        set_var("SIGNER_SIGNER__BITCOIN_PROCESSING_DELAY", delay.to_string());
 
         let settings = Settings::new_from_default_config();
         assert!(settings.is_err());
@@ -1050,7 +1104,7 @@ mod tests {
         clear_env();
 
         let delay = MAX_REQUESTS_PROCESSING_DELAY_SECONDS + 1;
-        std::env::set_var(
+        set_var(
             "SIGNER_SIGNER__REQUESTS_PROCESSING_DELAY",
             delay.to_string(),
         );
@@ -1067,7 +1121,7 @@ mod tests {
     fn invalid_private_key_compression_byte_marker_returns_correct_error() {
         clear_env();
 
-        std::env::set_var(
+        set_var(
             "SIGNER_SIGNER__PRIVATE_KEY",
             "a1a6fcf2de80dcde3e0e4251eae8c69adf57b88613b2dcb79332cc325fa439bd02",
         );
@@ -1083,10 +1137,16 @@ mod tests {
     fn valid_33_byte_private_key_works() {
         clear_env();
 
-        std::env::set_var(
-            "SIGNER_SIGNER__PRIVATE_KEY",
-            "a1a6fcf2de80dcde3e0e4251eae8c69adf57b88613b2dcb79332cc325fa439bd01",
-        );
+        let privkey = "a1a6fcf2de80dcde3e0e4251eae8c69adf57b88613b2dcb79332cc325fa439bd01";
+
+        set_var("SIGNER_SIGNER__PRIVATE_KEY", privkey);
+
+        let privkey = PrivateKey::from_str(&privkey[..64]).unwrap();
+        let pubkey = PublicKey::from_private_key(&privkey);
+
+        set_var("SIGNER_SIGNER__BOOTSTRAP_SIGNING_SET", pubkey.to_string());
+        set_var("SIGNER_SIGNER__BOOTSTRAP_SIGNATURES_REQUIRED", "1");
+
         let settings = Settings::new_from_default_config();
         assert!(settings.is_ok());
     }
@@ -1095,7 +1155,7 @@ mod tests {
     fn invalid_private_key_hex_returns_correct_error() {
         clear_env();
 
-        std::env::set_var(
+        set_var(
             "SIGNER_SIGNER__PRIVATE_KEY",
             "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
         );
@@ -1112,7 +1172,7 @@ mod tests {
     fn dkg_pause_env_variables_work() {
         clear_env();
 
-        std::env::set_var("SIGNER_SIGNER__DKG_BEGIN_PAUSE", "1234");
+        set_var("SIGNER_SIGNER__DKG_BEGIN_PAUSE", "1234");
         let config = Settings::new_from_default_config().unwrap();
         assert_eq!(config.signer.dkg_begin_pause, Some(1234));
     }
@@ -1121,7 +1181,7 @@ mod tests {
     fn invalid_p2p_uri_scheme_returns_correct_error() {
         clear_env();
 
-        std::env::set_var("SIGNER_SIGNER__P2P__SEEDS", "http://seed-1:4122");
+        set_var("SIGNER_SIGNER__P2P__SEEDS", "http://seed-1:4122");
         assert!(matches!(
             Settings::new_from_default_config(),
             Err(ConfigError::Message(msg)) if msg == SignerConfigError::InvalidP2PScheme("http".to_string()).to_string()
@@ -1132,7 +1192,7 @@ mod tests {
     fn missing_p2p_uri_port_returns_correct_error() {
         clear_env();
 
-        std::env::set_var("SIGNER_SIGNER__P2P__SEEDS", "tcp://seed-1");
+        set_var("SIGNER_SIGNER__P2P__SEEDS", "tcp://seed-1");
         assert!(matches!(
             Settings::new_from_default_config(),
             Err(ConfigError::Message(msg)) if msg == SignerConfigError::P2PPortRequired.to_string()
@@ -1143,7 +1203,7 @@ mod tests {
     fn missing_p2p_uri_host_returns_correct_error() {
         clear_env();
 
-        std::env::set_var("SIGNER_SIGNER__P2P__SEEDS", "tcp://:4122");
+        set_var("SIGNER_SIGNER__P2P__SEEDS", "tcp://:4122");
         assert!(matches!(
             Settings::new_from_default_config(),
             Err(ConfigError::Message(msg)) if msg == SignerConfigError::InvalidP2PUri(url::ParseError::EmptyHost).to_string()
@@ -1154,7 +1214,7 @@ mod tests {
     fn p2p_uri_with_username_returns_correct_error() {
         clear_env();
 
-        std::env::set_var("SIGNER_SIGNER__P2P__SEEDS", "tcp://user:@localhost:4122");
+        set_var("SIGNER_SIGNER__P2P__SEEDS", "tcp://user:@localhost:4122");
         assert!(matches!(
             Settings::new_from_default_config(),
             Err(ConfigError::Message(msg)) if msg == SignerConfigError::P2PUsernameNotSupported("user".to_string()).to_string()
@@ -1165,7 +1225,7 @@ mod tests {
     fn p2p_uri_with_password_returns_correct_error() {
         clear_env();
 
-        std::env::set_var("SIGNER_SIGNER__P2P__SEEDS", "tcp://:pass@localhost:4122");
+        set_var("SIGNER_SIGNER__P2P__SEEDS", "tcp://:pass@localhost:4122");
         assert!(matches!(
             Settings::new_from_default_config(),
             Err(ConfigError::Message(msg)) if msg == SignerConfigError::P2PPasswordNotSupported("pass".to_string()).to_string()
@@ -1176,7 +1236,7 @@ mod tests {
     fn p2p_uri_with_query_string_returns_correct_error() {
         clear_env();
 
-        std::env::set_var("SIGNER_SIGNER__P2P__SEEDS", "tcp://localhost:4122?foo=bar");
+        set_var("SIGNER_SIGNER__P2P__SEEDS", "tcp://localhost:4122?foo=bar");
         assert!(matches!(
             Settings::new_from_default_config(),
             Err(ConfigError::Message(msg)) if msg == SignerConfigError::P2PQueryStringsNotSupported("foo=bar".to_string()).to_string()
@@ -1187,7 +1247,7 @@ mod tests {
     fn p2p_uri_with_path_returns_correct_error() {
         clear_env();
 
-        std::env::set_var("SIGNER_SIGNER__P2P__SEEDS", "tcp://localhost:4122/hello");
+        set_var("SIGNER_SIGNER__P2P__SEEDS", "tcp://localhost:4122/hello");
         assert!(matches!(
             Settings::new_from_default_config(),
             Err(ConfigError::Message(msg)) if msg == SignerConfigError::P2PPathsNotSupported("/hello".to_string()).to_string()
@@ -1200,7 +1260,7 @@ mod tests {
 
         clear_env();
 
-        std::env::set_var("SIGNER_SIGNER__P2P__LISTEN_ON", "tcp://0.0.0.0:4122");
+        set_var("SIGNER_SIGNER__P2P__LISTEN_ON", "tcp://0.0.0.0:4122");
         let settings = Settings::new_from_default_config().expect("failed to load default config");
 
         let actual = settings
@@ -1224,7 +1284,7 @@ mod tests {
 
         clear_env();
 
-        std::env::set_var("SIGNER_SIGNER__P2P__LISTEN_ON", "tcp://[ff06::c3]:4122");
+        set_var("SIGNER_SIGNER__P2P__LISTEN_ON", "tcp://[ff06::c3]:4122");
         let settings = Settings::new_from_default_config().expect("failed to load default config");
 
         let actual = settings
@@ -1246,16 +1306,16 @@ mod tests {
     fn p2p_public_endpoint_transport_protocols_must_match_listen_on() {
         clear_env();
 
-        std::env::set_var("SIGNER_SIGNER__P2P__LISTEN_ON", "tcp://127.0.0.1:4122");
-        std::env::set_var(
+        set_var("SIGNER_SIGNER__P2P__LISTEN_ON", "tcp://127.0.0.1:4122");
+        set_var(
             "SIGNER_SIGNER__P2P__PUBLIC_ENDPOINTS",
             "tcp://127.0.0.1:4122",
         );
         let result = Settings::new_from_default_config();
         assert!(result.is_ok());
 
-        std::env::set_var("SIGNER_SIGNER__P2P__LISTEN_ON", "tcp://127.0.0.1:4122");
-        std::env::set_var(
+        set_var("SIGNER_SIGNER__P2P__LISTEN_ON", "tcp://127.0.0.1:4122");
+        set_var(
             "SIGNER_SIGNER__P2P__PUBLIC_ENDPOINTS",
             "quic-v1://127.0.0.1:4122",
         );
@@ -1265,11 +1325,11 @@ mod tests {
             Err(ConfigError::Message(msg)) if msg == SignerConfigError::P2PPublicEndpointProtocolMismatch("/ip4/127.0.0.1/udp/4122/quic-v1".parse().unwrap()).to_string()
         ));
 
-        std::env::set_var(
+        set_var(
             "SIGNER_SIGNER__P2P__LISTEN_ON",
             "tcp://127.0.0.1:4122,quic-v1://127.0.0.1:4122",
         );
-        std::env::set_var(
+        set_var(
             "SIGNER_SIGNER__P2P__PUBLIC_ENDPOINTS",
             "quic-v1://127.0.0.1:4122",
         );
@@ -1281,7 +1341,7 @@ mod tests {
     fn p2p_memory_transport_cannot_be_used() {
         clear_env();
 
-        std::env::set_var("SIGNER_SIGNER__P2P__LISTEN_ON", "memory://localhost:123");
+        set_var("SIGNER_SIGNER__P2P__LISTEN_ON", "memory://localhost:123");
         let result = Settings::new_from_default_config();
         assert!(matches!(
             result,
@@ -1297,16 +1357,16 @@ mod tests {
         let is_mainnet = network == NetworkKind::Mainnet;
         // The deployer address always has the opposite network kind.
         let address = StacksAddress::burn_address(!is_mainnet);
-        std::env::set_var("SIGNER_SIGNER__DEPLOYER", address.to_string());
+        set_var("SIGNER_SIGNER__DEPLOYER", address.to_string());
         // Let's set the network. maybe use strum for this in the future
         let network = match network {
             NetworkKind::Mainnet => "mainnet",
             NetworkKind::Testnet => "testnet",
             NetworkKind::Regtest => "regtest",
         };
-        std::env::set_var("SIGNER_SIGNER__NETWORK", network);
+        set_var("SIGNER_SIGNER__NETWORK", network);
         // We need to set at least one seed when deploying to mainnet.
-        std::env::set_var("SIGNER_SIGNER__P2P__SEEDS", "tcp://localhost:4122");
+        set_var("SIGNER_SIGNER__P2P__SEEDS", "tcp://localhost:4122");
 
         assert!(matches!(
             Settings::new_from_default_config(),
@@ -1323,16 +1383,16 @@ mod tests {
         let is_mainnet = network == NetworkKind::Mainnet;
         // The deployer address always has the opposite network kind.
         let address = StacksAddress::burn_address(is_mainnet);
-        std::env::set_var("SIGNER_SIGNER__DEPLOYER", address.to_string());
+        set_var("SIGNER_SIGNER__DEPLOYER", address.to_string());
         // Let's set the network. maybe use strum for this in the future
         let network = match network {
             NetworkKind::Mainnet => "mainnet",
             NetworkKind::Testnet => "testnet",
             NetworkKind::Regtest => "regtest",
         };
-        std::env::set_var("SIGNER_SIGNER__NETWORK", network);
+        set_var("SIGNER_SIGNER__NETWORK", network);
         // We need to set at least one seed when deploying to mainnet.
-        std::env::set_var("SIGNER_SIGNER__P2P__SEEDS", "tcp://localhost:4122");
+        set_var("SIGNER_SIGNER__P2P__SEEDS", "tcp://localhost:4122");
 
         assert!(Settings::new_from_default_config().is_ok());
     }
@@ -1342,7 +1402,7 @@ mod tests {
         clear_env();
 
         let signatures_required = 3;
-        std::env::set_var(
+        set_var(
             "SIGNER_SIGNER__BOOTSTRAP_SIGNATURES_REQUIRED",
             signatures_required.to_string(),
         );
@@ -1359,9 +1419,9 @@ mod tests {
         clear_env();
 
         let keys = "035249137286c077ccee65ecc43e724b9b9e5a588e3d7f51e3b62f9624c2a49e46,031a4d9f4903da97498945a4e01a5023a1d53bc96ad670bfe03adf8a06c52e6380";
-        std::env::set_var("SIGNER_SIGNER__BOOTSTRAP_SIGNING_SET", keys);
+        set_var("SIGNER_SIGNER__BOOTSTRAP_SIGNING_SET", keys);
         let settings = Settings::new_from_default_config().unwrap();
-        let public_keys: Vec<PublicKey> = keys
+        let public_keys = keys
             .split(",")
             .flat_map(secp256k1::PublicKey::from_str)
             .map(PublicKey::from)
@@ -1376,8 +1436,8 @@ mod tests {
 
         let keys = "031a4d9f4903da97498945a4e01a5023a1d53bc96ad670bfe03adf8a06c52e6380";
         let signatures_required = 3;
-        std::env::set_var("SIGNER_SIGNER__BOOTSTRAP_SIGNING_SET", keys);
-        std::env::set_var(
+        set_var("SIGNER_SIGNER__BOOTSTRAP_SIGNING_SET", keys);
+        set_var(
             "SIGNER_SIGNER__BOOTSTRAP_SIGNATURES_REQUIRED",
             signatures_required.to_string(),
         );
@@ -1391,7 +1451,7 @@ mod tests {
         let driver = "postgresql";
         let endpoint = format!("{driver}://user:pass@localhost:1234/abc123");
 
-        std::env::set_var("SIGNER_SIGNER__DB_ENDPOINT", &endpoint);
+        set_var("SIGNER_SIGNER__DB_ENDPOINT", &endpoint);
         let settings = Settings::new_from_default_config().unwrap();
         assert_eq!(url(&endpoint), settings.signer.db_endpoint);
     }
@@ -1403,7 +1463,7 @@ mod tests {
         let driver = "somedb";
         let endpoint = format!("{driver}://user:pass@localhost:1234/abc123");
 
-        std::env::set_var("SIGNER_SIGNER__DB_ENDPOINT", &endpoint);
+        set_var("SIGNER_SIGNER__DB_ENDPOINT", &endpoint);
         let settings = Settings::new_from_default_config();
         assert!(settings.is_err());
         assert!(matches!(

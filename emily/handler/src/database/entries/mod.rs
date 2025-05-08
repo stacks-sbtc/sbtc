@@ -49,7 +49,7 @@ use std::{collections::HashMap, fmt::Debug};
 use aws_sdk_dynamodb::types::AttributeValue;
 #[cfg(feature = "testing")]
 use aws_sdk_dynamodb::types::{DeleteRequest, WriteRequest};
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
 use serde_dynamo::Item;
 
@@ -339,7 +339,6 @@ pub(crate) trait TableIndexTrait {
     }
 
     /// Get all entries from a dynamodb table.
-    #[cfg(feature = "testing")]
     async fn get_all_entries(
         dynamodb_client: &aws_sdk_dynamodb::Client,
         settings: &Settings,
@@ -371,7 +370,6 @@ pub(crate) trait TableIndexTrait {
     }
 
     /// Generic delete table entry.
-    #[cfg(feature = "testing")]
     async fn delete_entry(
         dynamodb_client: &aws_sdk_dynamodb::Client,
         settings: &Settings,
@@ -588,7 +586,7 @@ fn detokenize<T>(token: String) -> Result<T, Error>
 where
     T: for<'de> Deserialize<'de>,
 {
-    let decoded = URL_SAFE_NO_PAD.decode(token)?;
+    let decoded = URL_SAFE_NO_PAD.decode(token).map_err(Error::Base64Decode)?;
     let deserialized = serde_json::from_slice::<T>(&decoded)?;
     Ok(deserialized)
 }

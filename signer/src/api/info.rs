@@ -1,6 +1,6 @@
 //! Handler for the `/info` endpoint.
 
-use axum::{extract::State, response::IntoResponse, Json};
+use axum::{Json, extract::State, response::IntoResponse};
 use clarity::types::chainstate::StacksBlockId;
 use serde::Serialize;
 
@@ -10,8 +10,8 @@ use crate::{
     context::Context,
     stacks::api::StacksInteract,
     storage::{
-        model::{BitcoinBlockHash, StacksBlockHash},
         DbRead,
+        model::{BitcoinBlockHash, BitcoinBlockHeight, StacksBlockHash, StacksBlockHeight},
     },
 };
 
@@ -37,8 +37,8 @@ pub struct BuildInfo {
 
 #[derive(Debug, Default, Serialize)]
 pub struct BitcoinInfo {
-    pub signer_tip: Option<ChainTipInfo<BitcoinBlockHash>>,
-    pub node_tip: Option<ChainTipInfo<BitcoinBlockHash>>,
+    pub signer_tip: Option<ChainTipInfo<BitcoinBlockHash, BitcoinBlockHeight>>,
+    pub node_tip: Option<ChainTipInfo<BitcoinBlockHash, BitcoinBlockHeight>>,
     pub node_chain: Option<String>,
     pub node_version: Option<usize>,
     pub node_subversion: Option<String>,
@@ -46,16 +46,16 @@ pub struct BitcoinInfo {
 
 #[derive(Debug, Default, Serialize)]
 pub struct StacksInfo {
-    pub signer_tip: Option<ChainTipInfo<StacksBlockHash>>,
-    pub node_tip: Option<ChainTipInfo<StacksBlockId>>,
-    pub node_bitcoin_block_height: Option<u64>,
+    pub signer_tip: Option<ChainTipInfo<StacksBlockHash, StacksBlockHeight>>,
+    pub node_tip: Option<ChainTipInfo<StacksBlockId, StacksBlockHeight>>,
+    pub node_bitcoin_block_height: Option<BitcoinBlockHeight>,
     pub node_version: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
-pub struct ChainTipInfo<T> {
-    pub block_hash: T,
-    pub block_height: u64,
+pub struct ChainTipInfo<THash, THeight> {
+    pub block_hash: THash,
+    pub block_height: THeight,
 }
 
 #[derive(Debug, Serialize)]
@@ -68,10 +68,10 @@ pub struct ConfigInfo {
     pub signer_round_max_duration: u64,
     pub bitcoin_presign_request_max_duration: u64,
     pub dkg_max_duration: u64,
-    pub sbtc_bitcoin_start_height: Option<u64>,
+    pub sbtc_bitcoin_start_height: Option<BitcoinBlockHeight>,
     pub dkg_begin_pause: u64,
     pub max_deposits_per_bitcoin_block: u16,
-    pub dkg_min_bitcoin_block_height: Option<u64>,
+    pub dkg_min_bitcoin_block_height: Option<BitcoinBlockHeight>,
     pub dkg_target_rounds: u32,
 }
 
@@ -157,10 +157,7 @@ impl InfoResponse {
             sbtc_bitcoin_start_height: config.signer.sbtc_bitcoin_start_height,
             dkg_begin_pause: config.signer.dkg_begin_pause.unwrap_or(0),
             max_deposits_per_bitcoin_block: config.signer.max_deposits_per_bitcoin_tx.get(),
-            dkg_min_bitcoin_block_height: config
-                .signer
-                .dkg_min_bitcoin_block_height
-                .map(|h| h.get()),
+            dkg_min_bitcoin_block_height: config.signer.dkg_min_bitcoin_block_height,
             dkg_target_rounds: config.signer.dkg_target_rounds.get(),
         });
     }
@@ -230,7 +227,7 @@ impl InfoResponse {
                 self.bitcoin.node_chain = Some(info.chain.to_string());
                 self.bitcoin.node_tip = Some(ChainTipInfo {
                     block_hash: info.best_block_hash.into(),
-                    block_height: info.blocks,
+                    block_height: info.blocks.into(),
                 });
             }
             Err(error) => {
@@ -259,7 +256,7 @@ impl InfoResponse {
             Ok(tenure_info) => {
                 self.stacks.node_tip = Some(ChainTipInfo {
                     block_hash: tenure_info.tip_block_id,
-                    block_height: tenure_info.tip_height,
+                    block_height: tenure_info.tip_height.into(),
                 });
             }
             Err(error) => {
@@ -269,7 +266,7 @@ impl InfoResponse {
 
         match node_info {
             Ok(node_info) => {
-                self.stacks.node_bitcoin_block_height = Some(node_info.burn_block_height);
+                self.stacks.node_bitcoin_block_height = Some(node_info.burn_block_height.into());
                 self.stacks.node_version = Some(node_info.server_version);
             }
             Err(error) => {
@@ -332,8 +329,8 @@ impl InfoResponse {
 #[cfg(test)]
 mod tests {
     use std::{
-        cell::LazyCell,
-        num::{NonZeroU16, NonZeroU32, NonZeroU64},
+        num::{NonZeroU16, NonZeroU32},
+        sync::LazyLock,
         time::Duration,
     };
 
@@ -345,8 +342,8 @@ mod tests {
         api::ApiState,
         error::Error,
         storage::{
-            model::{BitcoinBlock, StacksBlock},
             DbWrite,
+            model::{BitcoinBlock, StacksBlock},
         },
         testing::context::*,
     };
@@ -412,6 +409,7 @@ mod tests {
         assert_eq!(result.dkg.rounds, 0);
 
         // Assert build info
+        #[allow(clippy::const_is_empty)]
         let target_env_abi = if crate::TARGET_ENV_ABI.is_empty() {
             None
         } else {
@@ -499,9 +497,9 @@ mod tests {
             include_str!("../../tests/fixtures/bitcoind-getblockchaininfo-data.json");
 
         let get_network_info_response: bitcoincore_rpc_json::GetNetworkInfoResult =
-            serde_json::from_str(&get_network_info_response_json).unwrap();
+            serde_json::from_str(get_network_info_response_json).unwrap();
         let get_blockchain_info_response: bitcoincore_rpc_json::GetBlockchainInfoResult =
-            serde_json::from_str(&get_blockchain_info_response_json).unwrap();
+            serde_json::from_str(get_blockchain_info_response_json).unwrap();
 
         context
             .with_bitcoin_client(|client| {
@@ -554,7 +552,7 @@ mod tests {
         );
         assert_eq!(
             bitcoin_node_tip.block_height,
-            get_blockchain_info_response.blocks
+            get_blockchain_info_response.blocks.into()
         );
         assert_eq!(
             result.bitcoin.node_chain,
@@ -588,12 +586,12 @@ mod tests {
             })
             .await;
 
-        const NODE_INFO_RESPONSE: LazyCell<RPCPeerInfoData> = LazyCell::new(|| {
+        static NODE_INFO_RESPONSE: LazyLock<RPCPeerInfoData> = LazyLock::new(|| {
             let json = include_str!("../../tests/fixtures/stacksapi-get-node-info-test-data.json");
             serde_json::from_str(json).unwrap()
         });
 
-        const TENURE_INFO_RESPONSE: LazyCell<RPCGetTenureInfo> = LazyCell::new(|| {
+        static TENURE_INFO_RESPONSE: LazyLock<RPCGetTenureInfo> = LazyLock::new(|| {
             let json = include_str!("../../tests/fixtures/stacksapi-v3-tenures-info-data.json");
             serde_json::from_str(json).unwrap()
         });
@@ -629,11 +627,11 @@ mod tests {
         );
         assert_eq!(
             stacks_node_tip.block_height,
-            TENURE_INFO_RESPONSE.tip_height
+            TENURE_INFO_RESPONSE.tip_height.into()
         );
         assert_eq!(
             result.stacks.node_bitcoin_block_height,
-            Some(NODE_INFO_RESPONSE.burn_block_height)
+            Some(NODE_INFO_RESPONSE.burn_block_height.into())
         );
         assert_eq!(
             result.stacks.node_version.expect("no node version"),
@@ -655,10 +653,11 @@ mod tests {
                 settings.signer.signer_round_max_duration = Duration::from_secs(2);
                 settings.signer.bitcoin_presign_request_max_duration = Duration::from_secs(3);
                 settings.signer.dkg_max_duration = Duration::from_secs(4);
-                settings.signer.sbtc_bitcoin_start_height = Some(101);
+                settings.signer.sbtc_bitcoin_start_height = Some(BitcoinBlockHeight::from(101u64));
                 settings.signer.dkg_begin_pause = Some(5);
                 settings.signer.max_deposits_per_bitcoin_tx = NonZeroU16::new(6).unwrap();
-                settings.signer.dkg_min_bitcoin_block_height = Some(NonZeroU64::new(102).unwrap());
+                settings.signer.dkg_min_bitcoin_block_height =
+                    Some(BitcoinBlockHeight::from(102u64));
                 settings.signer.dkg_target_rounds = NonZeroU32::new(7).unwrap();
             })
             .build();
@@ -736,7 +735,7 @@ mod tests {
         );
         assert_eq!(
             config.dkg_min_bitcoin_block_height,
-            settings.dkg_min_bitcoin_block_height.map(|h| h.get())
+            settings.dkg_min_bitcoin_block_height
         );
         assert_eq!(config.dkg_target_rounds, settings.dkg_target_rounds.get());
     }

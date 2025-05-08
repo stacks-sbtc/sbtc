@@ -5,9 +5,9 @@
 //! include querying the blocklist API and interpreting the responses to determine if a given
 //! address is blocklisted, along with its associated risk severity.
 
-use blocklist_api::apis::address_api::{check_address, CheckAddressError};
-use blocklist_api::apis::configuration::Configuration;
 use blocklist_api::apis::Error as ClientError;
+use blocklist_api::apis::address_api::{CheckAddressError, check_address};
+use blocklist_api::apis::configuration::Configuration;
 use std::future::Future;
 use std::time::Duration;
 
@@ -144,7 +144,7 @@ mod tests {
 
         let can_accept = ctx.client.can_accept(ADDRESS).await;
         assert!(can_accept.is_ok());
-        assert_eq!(can_accept.unwrap(), false);
+        assert!(!can_accept.unwrap());
 
         mock.assert_async().await;
     }
@@ -171,7 +171,7 @@ mod tests {
 
         let can_accept = ctx.client.can_accept(ADDRESS).await;
         assert!(can_accept.is_ok());
-        assert_eq!(can_accept.unwrap(), true);
+        assert!(can_accept.unwrap());
 
         mock.assert_async().await;
     }

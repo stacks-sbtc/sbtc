@@ -258,6 +258,7 @@ export class EmilyStack extends cdk.Stack {
                 "Sender",
                 "Amount",
                 "LastUpdateBlockHash",
+                "Txid",
             ]
         });
 
@@ -281,6 +282,7 @@ export class EmilyStack extends cdk.Stack {
                 "Sender",
                 "Amount",
                 "LastUpdateBlockHash",
+                "Txid",
             ]
         });
 
@@ -304,6 +306,7 @@ export class EmilyStack extends cdk.Stack {
                 "Recipient",
                 "Amount",
                 "LastUpdateBlockHash",
+                "Txid",
             ]
         });
         return table;
@@ -323,7 +326,7 @@ export class EmilyStack extends cdk.Stack {
         pointInTimeRecovery: undefined | boolean,
     ): dynamodb.Table {
         // Create DynamoDB table to store the messages. Encrypted by default.
-        return new dynamodb.Table(this, tableId, {
+        const table =  new dynamodb.Table(this, tableId, {
             tableName: tableName,
             partitionKey: {
                 name: 'Height',
@@ -337,6 +340,23 @@ export class EmilyStack extends cdk.Stack {
             billingMode: dynamodb.BillingMode.PAY_PER_REQUEST, // On-demand provisioning
             pointInTimeRecovery: pointInTimeRecovery,
         });
+        const byBitcoinHeight: string = "BitcoinBlockHeightIndex";
+        table.addGlobalSecondaryIndex({
+            indexName: byBitcoinHeight,
+            partitionKey: {
+                name: 'BitcoinHeight',
+                type: dynamodb.AttributeType.NUMBER
+            },
+            sortKey: {
+                name: 'Height',
+                type: dynamodb.AttributeType.NUMBER
+            },
+            projectionType: dynamodb.ProjectionType.INCLUDE,
+            nonKeyAttributes: [
+                "Hash",
+            ]
+        });
+        return table;
     }
 
     /**
@@ -410,7 +430,6 @@ export class EmilyStack extends cdk.Stack {
                 // deployments the AWS stack. SAM can only set environment variables that are
                 // already expected to be present in the lambda.
                 IS_LOCAL: "false",
-                TRUSTED_REORG_API_KEY: props.trustedReorgApiKey,
                 IS_MAINNET: props.stageName == Constants.PROD_STAGE_NAME || props.stageName == Constants.PRIVATE_MAINNET_STAGE_NAME ? "true" : "false",
                 VERSION: EmilyStackUtils.getLambdaGitIdentifier(),
                 DEPLOYER_ADDRESS: props.deployerAddress,

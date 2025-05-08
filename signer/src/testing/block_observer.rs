@@ -3,10 +3,10 @@
 use std::collections::HashMap;
 use std::ops::Deref;
 
-use bitcoin::hashes::Hash;
 use bitcoin::Amount;
 use bitcoin::BlockHash;
 use bitcoin::Txid;
+use bitcoin::hashes::Hash;
 use bitcoincore_rpc_json::GetTxOutResult;
 use blockstack_lib::chainstate::burn::ConsensusHash;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
@@ -27,13 +27,13 @@ use emily_client::models::Status;
 use rand::seq::IteratorRandom;
 use sbtc::deposits::CreateDepositRequest;
 
+use crate::bitcoin::BitcoinInteract;
+use crate::bitcoin::GetTransactionFeeResult;
+use crate::bitcoin::TransactionLookupHint;
 use crate::bitcoin::rpc::BitcoinBlockHeader;
 use crate::bitcoin::rpc::BitcoinTxInfo;
 use crate::bitcoin::rpc::GetTxResponse;
 use crate::bitcoin::utxo;
-use crate::bitcoin::BitcoinInteract;
-use crate::bitcoin::GetTransactionFeeResult;
-use crate::bitcoin::TransactionLookupHint;
 use crate::context::SbtcLimits;
 use crate::emily_client::EmilyInteract;
 use crate::error::Error;
@@ -45,6 +45,7 @@ use crate::stacks::api::SubmitTxResponse;
 use crate::stacks::api::TenureBlocks;
 use crate::stacks::wallet::SignerWallet;
 use crate::storage::model;
+use crate::storage::model::BitcoinBlockHeight;
 use crate::testing::dummy;
 use crate::util::ApiFallbackClient;
 
@@ -70,10 +71,10 @@ impl TestHarness {
     }
 
     /// The minimum block height amount blocks in this blockchain
-    pub fn min_block_height(&self) -> Option<u64> {
+    pub fn min_block_height(&self) -> Option<BitcoinBlockHeight> {
         self.bitcoin_blocks
             .iter()
-            .map(|block| block.bip34_block_height().unwrap())
+            .map(|block| block.bip34_block_height().unwrap().into())
             .min()
     }
 
@@ -228,7 +229,7 @@ impl BitcoinInteract for TestHarness {
             .find(|block| &block.block_hash() == block_hash)
             .map(|block| BitcoinBlockHeader {
                 hash: *block_hash,
-                height: block.bip34_block_height().unwrap(),
+                height: block.bip34_block_height().unwrap().into(),
                 time: block.header.time as u64,
                 previous_block_hash: block.header.prev_blockhash,
             }))
@@ -518,8 +519,14 @@ impl EmilyInteract for TestHarness {
     async fn accept_deposits<'a>(
         &'a self,
         _transaction: &'a utxo::UnsignedTransaction<'a>,
-        _stacks_chain_tip: &'a model::StacksBlock,
     ) -> Result<emily_client::models::UpdateDepositsResponse, Error> {
+        unimplemented!()
+    }
+
+    async fn accept_withdrawals<'a>(
+        &'a self,
+        _transaction: &'a utxo::UnsignedTransaction<'a>,
+    ) -> Result<emily_client::models::UpdateWithdrawalsResponse, Error> {
         unimplemented!()
     }
 

@@ -49,7 +49,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// 3. The signer bitmap in the clarity contract can take only 128 signers.
 /// 4. The rotate-keys-wrapper public function in one of the clarity
 ///    contracts takes a maximum of 128 keys.
-const MAX_KEYS: u16 = 128;
+pub const MAX_KEYS: u16 = 128;
 
 /// Each deposit has a reclaim script spend path that can be executed after
 /// some "time". Right now this "time", the locktime, can only be
@@ -73,7 +73,7 @@ pub const SIGNER_CHANNEL_CAPACITY: usize = 1024;
 /// The maximum number of blocks that can be affected by a reorg on the
 /// bitcoin blockchain. This is used when adding a buffer when searching
 /// for the signers UTXO.
-pub const MAX_REORG_BLOCK_COUNT: i64 = 10;
+pub const MAX_REORG_BLOCK_COUNT: u64 = 10;
 
 /// The maximum number of sweep transactions that the signers can confirm
 /// per block.

@@ -1,19 +1,14 @@
 //! Entries into the withdrawal table.
 
-use std::collections::HashSet;
-
 use serde::{Deserialize, Serialize};
 
 use crate::{
     api::models::{
         chainstate::Chainstate,
         common::Status,
-        withdrawal::{
-            requests::{UpdateWithdrawalsRequestBody, WithdrawalUpdate},
-            Withdrawal, WithdrawalInfo, WithdrawalParameters,
-        },
+        withdrawal::{Withdrawal, WithdrawalInfo, WithdrawalParameters},
     },
-    common::error::{Error, Inconsistency, ValidationError},
+    common::error::{Error, Inconsistency},
 };
 
 use super::{
@@ -31,6 +26,12 @@ pub struct WithdrawalEntryKey {
     pub request_id: u64,
     /// The stacks block hash of the block in which this withdrawal was initiated.
     pub stacks_block_hash: String,
+}
+
+impl std::fmt::Display for WithdrawalEntryKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.request_id, self.stacks_block_hash)
+    }
 }
 
 /// Withdrawal table entry.
@@ -64,6 +65,8 @@ pub struct WithdrawalEntry {
     /// updated. If the most recent update is tied to an artifact on the Stacks blockchain
     /// then this hash is the Stacks block hash that contains that artifact.
     pub last_update_block_hash: String,
+    /// The hex encoded txid of the stacks transaction that generated this event.
+    pub txid: String,
     /// History of this withdrawal transaction.
     pub history: Vec<WithdrawalEvent>,
 }
@@ -86,27 +89,26 @@ impl VersionedEntryTrait for WithdrawalEntry {
 impl WithdrawalEntry {
     /// Implement validate.
     pub fn validate(&self) -> Result<(), Error> {
-        let stringy_self = serde_json::to_string(self)?;
-
         // Get latest event.
-        let latest_event: &WithdrawalEvent = self.history.last().ok_or(Error::Debug(format!(
-            "Failed getting the last history element for withdrawal. {stringy_self:?}"
-        )))?;
+        let latest_event: &WithdrawalEvent = self.latest_event()?;
 
         // Verify that the latest event is the current one shown in the entry.
         if self.last_update_block_hash != latest_event.stacks_block_hash {
-            return Err(Error::Debug(
-                format!("last update block hash is inconsistent between history and top level data. {stringy_self:?}")
+            return Err(Error::InvalidWithdrawalEntry(
+                "last update block hash is inconsistent between history and top level data",
+                self.key.clone(),
             ));
         }
         if self.last_update_height != latest_event.stacks_block_height {
-            return Err(Error::Debug(
-                format!("last update block height is inconsistent between history and top level data. {stringy_self:?}")
+            return Err(Error::InvalidWithdrawalEntry(
+                "last update block height is inconsistent between history and top level data",
+                self.key.clone(),
             ));
         }
         if self.status != (&latest_event.status).into() {
-            return Err(Error::Debug(
-                format!("most recent status is inconsistent between history and top level data. {stringy_self:?}")
+            return Err(Error::InvalidWithdrawalEntry(
+                "most recent status is inconsistent between history and top level data",
+                self.key.clone(),
             ));
         }
         Ok(())
@@ -114,10 +116,10 @@ impl WithdrawalEntry {
 
     /// Gets the latest event.
     pub fn latest_event(&self) -> Result<&WithdrawalEvent, Error> {
-        self.history.last().ok_or(Error::Debug(format!(
-            "Withdrawal entry must always have at least one event, but entry with id {:?} did not.",
-            self.key(),
-        )))
+        self.history.last().ok_or(Error::InvalidWithdrawalEntry(
+            "Withdrawal entry must always have at least one event, but did not",
+            self.key.clone(),
+        ))
     }
 
     /// Reorgs around a given chainstate.
@@ -205,6 +207,7 @@ impl TryFrom<WithdrawalEntry> for Withdrawal {
             parameters: WithdrawalParameters {
                 max_fee: withdrawal_entry.parameters.max_fee,
             },
+            txid: withdrawal_entry.txid,
             fulfillment,
         })
     }
@@ -243,17 +246,24 @@ impl WithdrawalEvent {
     ) -> Result<(), Error> {
         // Determine if event is valid.
         if self.stacks_block_height > next_event.stacks_block_height {
-            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(
-                "Attempting to update a withdrawal with a block height earlier than it should be."
-                    .into(),
-            )));
+            let message =
+                "Attempting to update a withdrawal with a block height earlier than it should be";
+            tracing::warn!(
+                new_event = ?next_event,
+                last_existing_event = ?self,
+                message
+            );
+            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(message)));
         } else if self.stacks_block_height == next_event.stacks_block_height
             && self.stacks_block_hash != next_event.stacks_block_hash
         {
-            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(
-                "Attempting to update a withdrawal with a block height and hash that conflicts with the current history."
-                    .into(),
-            )));
+            let message = "Attempting to update a withdrawal with a block height and hash that conflicts with the current history";
+            tracing::warn!(
+                new_event = ?next_event,
+                last_existing_event = ?self,
+                message
+            );
+            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(message)));
         }
 
         Ok(())
@@ -346,6 +356,8 @@ pub struct WithdrawalInfoEntry {
     /// updated. If the most recent update is tied to an artifact on the Stacks blockchain
     /// then this hash is the Stacks block hash that contains that artifact.
     pub last_update_block_hash: String,
+    /// The hex encoded txid of the stacks transaction that generated this event.
+    pub txid: String,
 }
 
 /// Implements the key trait for the withdrawal info entry key.
@@ -397,6 +409,7 @@ impl From<WithdrawalInfoEntry> for WithdrawalInfo {
             last_update_height: withdrawal_info_entry.key.last_update_height,
             last_update_block_hash: withdrawal_info_entry.last_update_block_hash,
             status: withdrawal_info_entry.key.status,
+            txid: withdrawal_info_entry.txid,
         }
     }
 }
@@ -448,6 +461,8 @@ pub struct WithdrawalInfoByRecipientEntry {
     /// updated. If the most recent update is tied to an artifact on the Stacks blockchain
     /// then this hash is the Stacks block hash that contains that artifact.
     pub last_update_block_hash: String,
+    /// The hex encoded txid of the stacks transaction that generated this event.
+    pub txid: String,
 }
 
 /// Implements the key trait for the withdrawal info entry key.
@@ -500,6 +515,7 @@ impl From<WithdrawalInfoByRecipientEntry> for WithdrawalInfo {
             last_update_height: withdrawal_info_entry.key.last_update_height,
             last_update_block_hash: withdrawal_info_entry.last_update_block_hash,
             status: withdrawal_info_entry.status,
+            txid: withdrawal_info_entry.txid,
         }
     }
 }
@@ -551,6 +567,8 @@ pub struct WithdrawalInfoBySenderEntry {
     /// updated. If the most recent update is tied to an artifact on the Stacks blockchain
     /// then this hash is the Stacks block hash that contains that artifact.
     pub last_update_block_hash: String,
+    /// The hex encoded txid of the stacks transaction that generated this event.
+    pub txid: String,
 }
 
 /// Implements the key trait for the withdrawal info entry key.
@@ -603,6 +621,7 @@ impl From<WithdrawalInfoBySenderEntry> for WithdrawalInfo {
             last_update_height: withdrawal_info_entry.key.last_update_height,
             last_update_block_hash: withdrawal_info_entry.last_update_block_hash,
             status: withdrawal_info_entry.status,
+            txid: withdrawal_info_entry.txid,
         }
     }
 }
@@ -620,60 +639,6 @@ pub struct ValidatedUpdateWithdrawalRequest {
     pub withdrawals: Vec<(usize, ValidatedWithdrawalUpdate)>,
 }
 
-/// Implement try from for the validated withdrawal requests.
-impl TryFrom<UpdateWithdrawalsRequestBody> for ValidatedUpdateWithdrawalRequest {
-    type Error = Error;
-    fn try_from(update_request: UpdateWithdrawalsRequestBody) -> Result<Self, Self::Error> {
-        // Validate all the withdrawal updates.
-        let mut withdrawals: Vec<(usize, ValidatedWithdrawalUpdate)> = vec![];
-        let mut failed_ids: Vec<u64> = vec![];
-
-        for (index, update) in update_request.withdrawals.into_iter().enumerate() {
-            match update.clone().try_into() {
-                Ok(validated_update) => withdrawals.push((index, validated_update)),
-                Err(_) => failed_ids.push(update.request_id),
-            }
-        }
-
-        // If there are failed conversion, return an error.
-        if !failed_ids.is_empty() {
-            return Err(ValidationError::WithdrawalsMissingFulfillment(failed_ids).into());
-        }
-
-        // Order the updates by order of when they occur so that it's as though we got them in
-        // chronological order.
-        withdrawals.sort_by_key(|(_, update)| update.event.stacks_block_height);
-
-        Ok(ValidatedUpdateWithdrawalRequest { withdrawals })
-    }
-}
-
-impl ValidatedUpdateWithdrawalRequest {
-    /// Infers all chainstates that need to be present in the API for the
-    /// withdrawal updates to be valid.
-    pub fn inferred_chainstates(&self) -> Vec<Chainstate> {
-        // TODO(TBD): Error if the inferred chainstates have conflicting block hashes
-        // for a the same block height.
-        let mut inferred_chainstates = self
-            .withdrawals
-            .clone()
-            .into_iter()
-            .map(|(_, update)| Chainstate {
-                stacks_block_hash: update.event.stacks_block_hash,
-                stacks_block_height: update.event.stacks_block_height,
-            })
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
-
-        // Sort the chainstates in the order that they should come in.
-        inferred_chainstates.sort_by_key(|chainstate| chainstate.stacks_block_height);
-
-        // Return.
-        inferred_chainstates
-    }
-}
-
 /// Validated withdrawal update.
 #[derive(Clone, Default, Debug, Eq, PartialEq, Hash)]
 pub struct ValidatedWithdrawalUpdate {
@@ -681,41 +646,6 @@ pub struct ValidatedWithdrawalUpdate {
     pub request_id: u64,
     /// Withdrawal event.
     pub event: WithdrawalEvent,
-}
-
-impl TryFrom<WithdrawalUpdate> for ValidatedWithdrawalUpdate {
-    type Error = ValidationError;
-
-    fn try_from(update: WithdrawalUpdate) -> Result<Self, Self::Error> {
-        // Make status entry.
-        let status_entry: StatusEntry = match update.status {
-            Status::Confirmed => {
-                let fulfillment =
-                    update
-                        .fulfillment
-                        .ok_or(ValidationError::WithdrawalMissingFulfillment(
-                            update.request_id,
-                        ))?;
-                StatusEntry::Confirmed(fulfillment)
-            }
-            Status::Accepted => StatusEntry::Accepted,
-            Status::Pending => StatusEntry::Pending,
-            Status::Reprocessing => StatusEntry::Reprocessing,
-            Status::Failed => StatusEntry::Failed,
-        };
-        // Make the new event.
-        let event = WithdrawalEvent {
-            status: status_entry,
-            message: update.status_message,
-            stacks_block_height: update.last_update_height,
-            stacks_block_hash: update.last_update_block_hash,
-        };
-        // Return the validated update.
-        Ok(ValidatedWithdrawalUpdate {
-            request_id: update.request_id,
-            event,
-        })
-    }
 }
 
 impl ValidatedWithdrawalUpdate {
@@ -748,10 +678,9 @@ impl WithdrawalUpdatePackage {
         update: ValidatedWithdrawalUpdate,
     ) -> Result<Self, Error> {
         // Ensure the keys are equal.
+        let key = entry.key.clone();
         if update.request_id != entry.key.request_id {
-            return Err(Error::Debug(
-                "Attempted to update withdrawal request_id combo.".into(),
-            ));
+            return Err(Error::WithdrawalRequestIdMismatch(key, update.request_id));
         }
         // Ensure that this event is valid if it follows the current latest event.
         entry
@@ -759,7 +688,7 @@ impl WithdrawalUpdatePackage {
             .ensure_following_event_is_valid(&update.event)?;
         // Create the withdrawal update package.
         Ok(WithdrawalUpdatePackage {
-            key: entry.key.clone(),
+            key,
             version: entry.version,
             event: update.event,
         })
@@ -812,6 +741,7 @@ mod tests {
             last_update_height: 1,
             last_update_block_hash: "hash".to_string(),
             history: vec![pending, failed.clone()],
+            txid: "txid".to_string(),
         };
 
         let withdrawal_update = ValidatedWithdrawalUpdate { request_id: 1, event: failed };
@@ -855,6 +785,7 @@ mod tests {
             last_update_height: 1,
             last_update_block_hash: "hash".to_string(),
             history: vec![pending.clone()],
+            txid: "txid".to_string(),
         };
 
         let withdrawal_update = ValidatedWithdrawalUpdate { request_id: 1, event: failed };
@@ -915,6 +846,7 @@ mod tests {
             last_update_height: 6,
             last_update_block_hash: "hash6".to_string(),
             history: vec![pending.clone(), accepted.clone(), confirmed.clone()],
+            txid: "txid".to_string(),
         };
 
         // Ensure the withdrawal is valid.
@@ -927,6 +859,7 @@ mod tests {
         let chainstate = Chainstate {
             stacks_block_height: reorg_height,
             stacks_block_hash: reorg_hash.to_string(),
+            bitcoin_block_height: Some(0),
         };
         withdrawal_entry.reorganize_around(&chainstate).unwrap();
 

@@ -4,25 +4,25 @@ use std::future::Future;
 use tracing::instrument;
 use warp::reply::Reply;
 
-use clarity::vm::types::QualifiedContractIdentifier;
 use clarity::vm::ContractName;
+use clarity::vm::types::QualifiedContractIdentifier;
 use sbtc::events::{
     CompletedDepositEvent, RegistryEvent, TxInfo, WithdrawalAcceptEvent, WithdrawalCreateEvent,
     WithdrawalRejectEvent,
 };
 
 use crate::api::handlers::chainstate::set_chainstate;
-use crate::api::handlers::deposit::update_deposits;
-use crate::api::handlers::withdrawal::{create_withdrawal, update_withdrawals};
+use crate::api::handlers::deposit::update_deposits_sidecar;
+use crate::api::handlers::withdrawal::{create_withdrawal, update_withdrawals_sidecar};
 use crate::api::models::chainstate::Chainstate;
 use crate::api::models::common::Fulfillment;
 use crate::api::models::common::Status;
 use crate::api::models::deposit::requests::{DepositUpdate, UpdateDepositsRequestBody};
 use crate::api::models::new_block::NewBlockEventRaw;
+use crate::api::models::withdrawal::WithdrawalParameters;
 use crate::api::models::withdrawal::requests::{
     CreateWithdrawalRequestBody, UpdateWithdrawalsRequestBody, WithdrawalUpdate,
 };
-use crate::api::models::withdrawal::WithdrawalParameters;
 use crate::database::entries::deposit::DepositEntryKey;
 use crate::{common::error::Error, context::EmilyContext, database::accessors};
 
@@ -110,10 +110,10 @@ pub async fn new_block(
         handle_internal_call(
             set_chainstate(
                 context.clone(),
-                context.settings.trusted_reorg_api_key.clone(),
                 Chainstate {
                     stacks_block_height: stacks_chaintip.block_height,
                     stacks_block_hash: stacks_chaintip.block_hash.clone(),
+                    bitcoin_block_height: Some(new_block_event.burn_block_height as u64),
                 },
             ),
             "failed to update chainstate in Emily",
@@ -140,8 +140,7 @@ pub async fn new_block(
             };
             match RegistryEvent::try_new(ev.value, tx_info) {
                 Ok(RegistryEvent::CompletedDeposit(event)) => {
-                    let deposit_maybe =
-                        handle_completed_deposit(&context, event, stacks_chaintip.clone()).await;
+                    let deposit_maybe = handle_completed_deposit(&context, event).await;
                     match deposit_maybe {
                         Ok(deposit) => completed_deposits.push(deposit),
                         Err(error) => {
@@ -153,10 +152,12 @@ pub async fn new_block(
                         }
                     }
                 }
-                Ok(RegistryEvent::WithdrawalAccept(event)) => updated_withdrawals
-                    .push(handle_withdrawal_accept(event, stacks_chaintip.clone())),
-                Ok(RegistryEvent::WithdrawalReject(event)) => updated_withdrawals
-                    .push(handle_withdrawal_reject(event, stacks_chaintip.clone())),
+                Ok(RegistryEvent::WithdrawalAccept(event)) => {
+                    updated_withdrawals.push(handle_withdrawal_accept(event))
+                }
+                Ok(RegistryEvent::WithdrawalReject(event)) => {
+                    updated_withdrawals.push(handle_withdrawal_reject(event))
+                }
                 Ok(RegistryEvent::WithdrawalCreate(event)) => created_withdrawals.push(
                     handle_withdrawal_create(event, stacks_chaintip.block_height),
                 ),
@@ -185,9 +186,8 @@ pub async fn new_block(
 
         if !completed_deposits.is_empty() {
             handle_internal_call(
-                update_deposits(
+                update_deposits_sidecar(
                     context.clone(),
-                    context.settings.trusted_reorg_api_key.clone(),
                     UpdateDepositsRequestBody { deposits: completed_deposits },
                 ),
                 "failed to update deposits in Emily",
@@ -208,9 +208,8 @@ pub async fn new_block(
 
         if !updated_withdrawals.is_empty() {
             handle_internal_call(
-                update_withdrawals(
+                update_withdrawals_sidecar(
                     context.clone(),
-                    context.settings.trusted_reorg_api_key.clone(),
                     UpdateWithdrawalsRequestBody {
                         withdrawals: updated_withdrawals,
                     },
@@ -234,8 +233,6 @@ pub async fn new_block(
 /// # Parameters
 /// - `contex`: Application context needed for database access.
 /// - `event`: The deposit event to be processed.
-/// - `stacks_chaintip`: Current chaintip information for the Stacks blockchain,
-///   including block height and hash.
 ///
 /// # Returns
 /// - `Result<DepositUpdate, Error>`:  On success, returns a `DepositUpdate`
@@ -247,7 +244,6 @@ pub async fn new_block(
 async fn handle_completed_deposit(
     context: &EmilyContext,
     event: CompletedDepositEvent,
-    stacks_chaintip: StacksBlock,
 ) -> Result<DepositUpdate, Error> {
     tracing::debug!(topic = "completed-deposit", "handled stacks event");
 
@@ -280,8 +276,6 @@ async fn handle_completed_deposit(
             stacks_txid: hex::encode(event.txid.0),
         }),
         status_message: format!("Included in block {}", event.block_id.to_hex()),
-        last_update_block_hash: stacks_chaintip.block_hash,
-        last_update_height: stacks_chaintip.block_height,
     })
 }
 
@@ -289,8 +283,6 @@ async fn handle_completed_deposit(
 ///
 /// # Parameters
 /// - `event`: The withdrawal acceptance event to be processed.
-/// - `stacks_chaintip`: Current Stacks blockchain chaintip information for
-///   context on block height and hash.
 ///
 /// # Returns
 /// - `WithdrawalUpdate`: the struct containing relevant withdrawal information.
@@ -298,10 +290,7 @@ async fn handle_completed_deposit(
     stacks_txid = %event.txid,
     request_id = %event.request_id
 ))]
-fn handle_withdrawal_accept(
-    event: WithdrawalAcceptEvent,
-    stacks_chaintip: StacksBlock,
-) -> WithdrawalUpdate {
+fn handle_withdrawal_accept(event: WithdrawalAcceptEvent) -> WithdrawalUpdate {
     tracing::debug!(topic = "withdrawal-accept", "handled stacks event");
 
     WithdrawalUpdate {
@@ -316,8 +305,6 @@ fn handle_withdrawal_accept(
             stacks_txid: hex::encode(event.txid.0),
         }),
         status_message: format!("Included in block {}", event.block_id.to_hex()),
-        last_update_block_hash: stacks_chaintip.block_hash,
-        last_update_height: stacks_chaintip.block_height,
     }
 }
 
@@ -347,6 +334,7 @@ fn handle_withdrawal_create(
         request_id: event.request_id,
         stacks_block_hash: event.block_id.to_hex(),
         stacks_block_height,
+        txid: event.txid.to_string(),
     }
 }
 
@@ -354,8 +342,6 @@ fn handle_withdrawal_create(
 ///
 /// # Parameters
 /// - `event`: The withdrawal rejection event to be processed.
-/// - `stacks_chaintip`: Information about the current chaintip of the Stacks blockchain,
-///   such as block height and hash.
 ///
 /// # Returns
 /// - `WithdrawalUpdate`: Returns a `WithdrawalUpdate` with rejection information.
@@ -363,16 +349,11 @@ fn handle_withdrawal_create(
     stacks_txid = %event.txid,
     request_id = %event.request_id
 ))]
-fn handle_withdrawal_reject(
-    event: WithdrawalRejectEvent,
-    stacks_chaintip: StacksBlock,
-) -> WithdrawalUpdate {
+fn handle_withdrawal_reject(event: WithdrawalRejectEvent) -> WithdrawalUpdate {
     tracing::debug!(topic = "withdrawal-reject", "handled stacks event");
 
     WithdrawalUpdate {
         fulfillment: None,
-        last_update_block_hash: stacks_chaintip.block_hash,
-        last_update_height: stacks_chaintip.block_height,
         request_id: event.request_id,
         status: Status::Failed,
         status_message: "Rejected".to_string(),
@@ -398,10 +379,11 @@ mod test {
 
     use super::*;
     use bitcoin::{
+        BlockHash, OutPoint, ScriptBuf, Txid,
         hashes::Hash,
         hex::DisplayHex,
         key::rand::{random, rngs::OsRng},
-        secp256k1, BlockHash, OutPoint, ScriptBuf, Txid,
+        secp256k1,
     };
     use clarity::{
         types::chainstate::StacksBlockId,
@@ -437,12 +419,10 @@ mod test {
             request_id: event.request_id,
             status: Status::Failed,
             fulfillment: None,
-            last_update_block_hash: stacks_chaintip.block_hash.clone(),
-            last_update_height: stacks_chaintip.block_height,
             status_message: "Rejected".to_string(),
         };
 
-        let res = handle_withdrawal_reject(event, stacks_chaintip.clone());
+        let res = handle_withdrawal_reject(event);
 
         assert_eq!(res, expectation);
     }
@@ -474,11 +454,9 @@ mod test {
                 stacks_txid: event.txid.to_string(),
             }),
             status_message: format!("Included in block {}", event.block_id.to_hex()),
-            last_update_block_hash: stacks_chaintip.block_hash.clone(),
-            last_update_height: stacks_chaintip.block_height,
         };
 
-        let res = handle_withdrawal_accept(event, stacks_chaintip.clone());
+        let res = handle_withdrawal_accept(event);
 
         assert_eq!(res, expectation);
     }
@@ -497,7 +475,7 @@ mod test {
             recipient: script_pubkey,
             txid: StacksTxid(random()),
             block_id: StacksBlockId::from_hex(&stacks_chaintip.block_hash).unwrap(),
-            sender: PrincipalData::Standard(StandardPrincipalData::transient()).into(),
+            sender: PrincipalData::Standard(StandardPrincipalData::transient()),
             block_height: random(),
         };
 
@@ -509,6 +487,7 @@ mod test {
             request_id: event.request_id,
             stacks_block_hash: stacks_chaintip.block_hash,
             stacks_block_height: stacks_chaintip.block_height,
+            txid: event.txid.to_string(),
         };
         let res = handle_withdrawal_create(event, stacks_chaintip.block_height);
         assert_eq!(res, expectation);

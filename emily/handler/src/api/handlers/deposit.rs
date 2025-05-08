@@ -1,15 +1,15 @@
 //! Handlers for Deposit endpoints.
-use bitcoin::opcodes::all::{self as opcodes};
 use bitcoin::ScriptBuf;
+use bitcoin::opcodes::all::{self as opcodes};
 use sbtc::deposits::ReclaimScriptInputs;
 use sha2::{Digest, Sha256};
 use stacks_common::codec::StacksMessageCodec as _;
 use tracing::instrument;
 use warp::http::StatusCode;
-use warp::reply::{json, with_status, Reply};
+use warp::reply::{Reply, json, with_status};
 
-use crate::api::models::common::requests::BasicPaginationQuery;
 use crate::api::models::common::Status;
+use crate::api::models::common::requests::BasicPaginationQuery;
 use crate::api::models::deposit::responses::{
     GetDepositsForTransactionResponse, UpdateDepositsResponse,
 };
@@ -24,11 +24,12 @@ use crate::api::models::{
 use crate::common::error::Error;
 use crate::context::EmilyContext;
 use crate::database::accessors;
+use crate::database::entries::StatusEntry;
+use crate::database::entries::chainstate::ApiStateEntry;
 use crate::database::entries::deposit::{
     DepositEntry, DepositEntryKey, DepositEvent, DepositParametersEntry,
     ValidatedUpdateDepositsRequest,
 };
-use crate::database::entries::StatusEntry;
 
 /// Get deposit handler.
 #[utoipa::path(
@@ -406,7 +407,7 @@ pub async fn create_deposit(
 /// Update deposits handler.
 #[utoipa::path(
     put,
-    operation_id = "updateDeposits",
+    operation_id = "updateDepositsSigner",
     path = "/deposit",
     tag = "deposit",
     request_body = UpdateDepositsRequestBody,
@@ -420,17 +421,15 @@ pub async fn create_deposit(
     ),
     security(("ApiGatewayKey" = []))
 )]
-#[instrument(skip(context, api_key))]
-pub async fn update_deposits(
+#[instrument(skip(context))]
+pub async fn update_deposits_signer(
     context: EmilyContext,
-    api_key: String,
     body: UpdateDepositsRequestBody,
 ) -> impl warp::reply::Reply {
     tracing::debug!("in update deposits");
     // Internal handler so `?` can be used correctly while still returning a reply.
     async fn handler(
         context: EmilyContext,
-        api_key: String,
         body: UpdateDepositsRequestBody,
     ) -> Result<impl warp::reply::Reply, Error> {
         // Get the api state and error if the api state is claimed by a reorg.
@@ -441,87 +440,128 @@ pub async fn update_deposits(
         let api_state = accessors::get_api_state(&context).await?;
         api_state.error_if_reorganizing()?;
 
-        let is_trusted_key = context.settings.trusted_reorg_api_key == api_key;
         // Signers are only allowed to update deposits to the accepted state.
-        if !is_trusted_key {
-            let is_unauthorized = body
-                .deposits
-                .iter()
-                .any(|deposit| deposit.status != Status::Accepted);
+        let is_allowed = !body
+            .deposits
+            .iter()
+            .any(|deposit| deposit.status != Status::Accepted);
 
-            if is_unauthorized {
-                return Err(Error::Forbidden);
-            }
+        if !is_allowed {
+            return Err(Error::Forbidden);
         }
 
-        // Validate request.
-        let validated_request: ValidatedUpdateDepositsRequest = body.try_into()?;
-
-        // Infer the new chainstates that would come from these deposit updates and then
-        // attempt to update the chainstates.
-        let inferred_chainstates = validated_request.inferred_chainstates();
-        for chainstate in inferred_chainstates {
-            // TODO(TBD): Determine what happens if this occurs in multiple lambda
-            // instances at once.
-            crate::api::handlers::chainstate::add_chainstate_entry_or_reorg(
-                &context,
-                is_trusted_key,
-                &chainstate,
-            )
-            .await?;
-        }
-
-        // Create aggregator.
-        let mut updated_deposits: Vec<(usize, Deposit)> =
-            Vec::with_capacity(validated_request.deposits.len());
-
-        // Loop through all updates and execute.
-        for (index, update) in validated_request.deposits {
-            let bitcoin_txid = update.key.bitcoin_txid.clone();
-            let bitcoin_tx_output_index = update.key.bitcoin_tx_output_index;
-
-            tracing::debug!(
-                %bitcoin_txid,
-                bitcoin_tx_output_index,
-                "updating deposit"
-            );
-
-            let updated_deposit =
-                accessors::pull_and_update_deposit_with_retry(&context, update, 15, is_trusted_key)
-                    .await
-                    .inspect_err(|error| {
-                        tracing::error!(
-                            %bitcoin_txid,
-                            bitcoin_tx_output_index,
-                            %error,
-                            "failed to update deposit"
-                        );
-                    })?;
-            let deposit: Deposit = updated_deposit.try_into().inspect_err(|error| {
-                // This should never happen, because the deposit was
-                // validated before being updated.
-                tracing::error!(
-                    %bitcoin_txid,
-                    bitcoin_tx_output_index,
-                    %error,
-                    "failed to convert deposit"
-                );
-            })?;
-            updated_deposits.push((index, deposit));
-        }
-
-        updated_deposits.sort_by_key(|(index, _)| *index);
-        let deposits = updated_deposits
-            .into_iter()
-            .map(|(_, deposit)| deposit)
-            .collect();
-        let response = UpdateDepositsResponse { deposits };
-        Ok(with_status(json(&response), StatusCode::CREATED))
+        update_deposits(api_state, context, body, false).await
     }
     // Handle and respond.
-    handler(context, api_key, body)
+    handler(context, body)
         .await
         .map_or_else(Reply::into_response, Reply::into_response)
+}
+
+/// Update deposits handler.
+#[utoipa::path(
+    put,
+    operation_id = "updateDepositsSidecar",
+    path = "/deposit_private",
+    tag = "deposit",
+    request_body = UpdateDepositsRequestBody,
+    responses(
+        (status = 201, description = "Deposits updated successfully", body = UpdateDepositsResponse),
+        (status = 400, description = "Invalid request body", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 404, description = "Address not found", body = ErrorResponse),
+        (status = 405, description = "Method not allowed", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    security(("ApiGatewayKey" = []))
+)]
+#[instrument(skip(context))]
+pub async fn update_deposits_sidecar(
+    context: EmilyContext,
+    body: UpdateDepositsRequestBody,
+) -> impl warp::reply::Reply {
+    tracing::debug!("in update deposits");
+    // Internal handler so `?` can be used correctly while still returning a reply.
+    async fn handler(
+        context: EmilyContext,
+        body: UpdateDepositsRequestBody,
+    ) -> Result<impl warp::reply::Reply, Error> {
+        // Get the api state and error if the api state is claimed by a reorg.
+        //
+        // Note: This may not be necessary due to the implied order of events
+        // that the API can receive from stacks nodes, but it's being added here
+        // in order to enforce added stability to the API during a reorg.
+        let api_state = accessors::get_api_state(&context).await?;
+        api_state.error_if_reorganizing()?;
+
+        update_deposits(api_state, context, body, true).await
+    }
+    // Handle and respond.
+    handler(context, body)
+        .await
+        .map_or_else(Reply::into_response, Reply::into_response)
+}
+
+async fn update_deposits(
+    api_state: ApiStateEntry,
+    context: EmilyContext,
+    body: UpdateDepositsRequestBody,
+    is_from_trusted_source: bool,
+) -> Result<impl warp::reply::Reply, Error> {
+    // Validate request.
+    let validated_request: ValidatedUpdateDepositsRequest =
+        body.try_into_validated_update_request(api_state.chaintip().into())?;
+
+    // Create aggregator.
+    let mut updated_deposits: Vec<(usize, Deposit)> =
+        Vec::with_capacity(validated_request.deposits.len());
+
+    // Loop through all updates and execute.
+    for (index, update) in validated_request.deposits {
+        let bitcoin_txid = update.key.bitcoin_txid.clone();
+        let bitcoin_tx_output_index = update.key.bitcoin_tx_output_index;
+
+        tracing::debug!(
+            %bitcoin_txid,
+            bitcoin_tx_output_index,
+            "updating deposit"
+        );
+
+        let updated_deposit = accessors::pull_and_update_deposit_with_retry(
+            &context,
+            update,
+            15,
+            is_from_trusted_source,
+        )
+        .await
+        .inspect_err(|error| {
+            tracing::error!(
+                %bitcoin_txid,
+                bitcoin_tx_output_index,
+                %error,
+                "failed to update deposit"
+            );
+        })?;
+        let deposit: Deposit = updated_deposit.try_into().inspect_err(|error| {
+            // This should never happen, because the deposit was
+            // validated before being updated.
+            tracing::error!(
+                %bitcoin_txid,
+                bitcoin_tx_output_index,
+                %error,
+                "failed to convert deposit"
+            );
+        })?;
+        updated_deposits.push((index, deposit));
+    }
+
+    updated_deposits.sort_by_key(|(index, _)| *index);
+    let deposits = updated_deposits
+        .into_iter()
+        .map(|(_, deposit)| deposit)
+        .collect();
+    let response = UpdateDepositsResponse { deposits };
+    Ok(with_status(json(&response), StatusCode::CREATED))
 }
 
 const OP_DROP: u8 = opcodes::OP_DROP.to_u8();
@@ -552,9 +592,7 @@ fn extract_reclaim_pubkeys_hash(reclaim_script: &ScriptBuf) -> Option<String> {
 
     match reclaim.user_script().as_bytes() {
         // The reclaim script used by sBTC Bridge and Leather.
-        [OP_DROP, OP_PUSHBYTES_32, pubkey @ .., OP_CHECKSIG] => {
-            Some(vec![pubkey.try_into().ok()?])
-        }
+        [OP_DROP, OP_PUSHBYTES_32, pubkey @ .., OP_CHECKSIG] => Some(vec![pubkey.try_into().ok()?]),
         // The multi-sig reclaim script used by Asigna.
         [OP_DROP, keys_data @ .., OP_NUMEQUAL] => {
             // keys_data is a composed like below:
@@ -612,7 +650,7 @@ mod tests {
     use super::*;
     use bitcoin::{
         key::rand::rngs::OsRng,
-        secp256k1::{SecretKey, SECP256K1},
+        secp256k1::{SECP256K1, SecretKey},
     };
     use test_case::test_case;
 
@@ -624,7 +662,7 @@ mod tests {
             .into_script()
     }
 
-    fn make_asigna_reclaim_script(pubkeys: &Vec<[u8; 32]>) -> ScriptBuf {
+    fn make_asigna_reclaim_script(pubkeys: &[[u8; 32]]) -> ScriptBuf {
         let mut pubkeys_iter = pubkeys.iter();
         let mut script = ScriptBuf::builder().push_opcode(opcodes::OP_DROP);
         script = script
@@ -652,7 +690,7 @@ mod tests {
             .unwrap()
             .reclaim_script();
         let pubkey_from_script = extract_reclaim_pubkeys_hash(&reclaim_script).unwrap();
-        assert_eq!(pubkey_from_script, hex::encode(Sha256::digest(&pubkey)));
+        assert_eq!(pubkey_from_script, hex::encode(Sha256::digest(pubkey)));
     }
 
     #[tokio::test]
@@ -733,7 +771,7 @@ mod tests {
     ) {
         let pubkeys_hex: String = pubkeys
             .iter()
-            .map(|key| hex::encode(key))
+            .map(hex::encode)
             .collect::<Vec<String>>()
             .join("-");
         let validated_pubkeys = validate_reclaim_pubkeys(&pubkeys_hex).unwrap();

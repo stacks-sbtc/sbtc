@@ -14,17 +14,14 @@ class PublicEmilyAPI(APIClient):
 
     BASE_URL = settings.EMILY_ENDPOINT
 
-    def __init__(self, api_key: str):
-        self.headers = {"x-api-key": api_key}
-
     @classmethod
     def fetch_deposits(cls, status: RequestStatus) -> list[DepositInfo]:
         """Fetch deposits based on status."""
-        data = cls.get(f"/deposit?status={status.value}")
+        data: dict[str, Any] = cls.get(f"/deposit?status={status.value}", ignore_errors=True)
         return [DepositInfo.from_json(deposit) for deposit in data.get("deposits", [])]
 
 
-class PrivateEmilyAPI(APIClient):
+class PrivateEmilyAPI(PublicEmilyAPI):
     """Client for interacting with the Private Emily API."""
 
     BASE_URL = settings.PRIVATE_EMILY_ENDPOINT
@@ -40,10 +37,12 @@ class PrivateEmilyAPI(APIClient):
         Returns:
             list[dict[str, Any]]: The updated deposits
         """
-        assert len(updates) > 0, "Updates must contain at least one deposit update"
+        if len(updates) == 0:
+            return []
 
         return cls.put(
-            f"/deposit",
+            "/deposit_private",
             json_data={"deposits": [asdict_camel(update) for update in updates]},
             headers=cls.HEADERS,
+            ignore_errors=True,
         )

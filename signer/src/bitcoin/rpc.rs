@@ -11,12 +11,12 @@ use bitcoin::ScriptBuf;
 use bitcoin::Transaction;
 use bitcoin::Txid;
 use bitcoin::Wtxid;
-use bitcoincore_rpc::json::EstimateMode;
-use bitcoincore_rpc::jsonrpc::error::Error as JsonRpcError;
-use bitcoincore_rpc::jsonrpc::error::RpcError;
 use bitcoincore_rpc::Auth;
 use bitcoincore_rpc::Error as BtcRpcError;
 use bitcoincore_rpc::RpcApi as _;
+use bitcoincore_rpc::json::EstimateMode;
+use bitcoincore_rpc::jsonrpc::error::Error as JsonRpcError;
+use bitcoincore_rpc::jsonrpc::error::RpcError;
 use bitcoincore_rpc_json::GetBlockchainInfoResult;
 use bitcoincore_rpc_json::GetMempoolEntryResult;
 use bitcoincore_rpc_json::GetNetworkInfoResult;
@@ -28,6 +28,7 @@ use url::Url;
 
 use crate::bitcoin::BitcoinInteract;
 use crate::error::Error;
+use crate::storage::model::BitcoinBlockHeight;
 
 use super::GetTransactionFeeResult;
 use super::TransactionLookupHint;
@@ -206,7 +207,7 @@ pub struct BitcoinTxVinPrevout {
     /// Whether this is a Coinbase or not.
     pub generated: bool,
     /// The height of the prevout.
-    pub height: u64,
+    pub height: BitcoinBlockHeight,
     /// The value of the prevout in BTC.
     #[serde(with = "bitcoin::amount::serde::as_btc")]
     pub value: Amount,
@@ -244,7 +245,7 @@ pub struct BitcoinBlockHeader {
     /// The consensus hash of the block header.
     pub hash: BlockHash,
     /// The height of the block associated with the header.
-    pub height: u64,
+    pub height: BitcoinBlockHeight,
     /// The time value in the block header.
     pub time: u64,
     /// The block hash of this blocks parent block.
