@@ -457,14 +457,13 @@ impl<C: Context, B> BlockObserver<C, B> {
             .map(|key| key.signers_script_pubkey());
         // We store all the scriptPubKeys associated with the signers'
         // aggregate public key. Let's get the last years worth of them.
-        let mut signer_script_pubkeys: HashSet<ScriptBuf> = dbg!(
-            db.get_signers_script_pubkeys()
-                .await?
-                .into_iter()
-                .map(ScriptBuf::from_bytes)
-                .chain(bootstrap_script_pubkey)
-                .collect()
-        );
+        let mut signer_script_pubkeys: HashSet<ScriptBuf> = db
+            .get_signers_script_pubkeys()
+            .await?
+            .into_iter()
+            .map(ScriptBuf::from_bytes)
+            .chain(bootstrap_script_pubkey)
+            .collect();
 
         // Look through all the UTXOs in the given transaction slice and
         // keep the transactions where a UTXO is locked with a
@@ -503,10 +502,15 @@ impl<C: Context, B> BlockObserver<C, B> {
             // scriptPubKeys for all sweep transactions. We might not know
             // about it already.
             if inputs_spent_by_signers {
-                // This is okay because all bitcoin transactions must have
-                // at least one input and one output. See
+                // This should never happen because all bitcoin
+                // transactions must have at least one input and at least
+                // one output. See
                 // https://github.com/bitcoin/bitcoin/blob/1b1b9f32cfdb7c3b21723d2e1b60d9d3dc7818f3/src/consensus/tx_check.cpp#L11-L17
-                let prevout = tx_info.prevout(0).expect("invalid bitcoin transaction");
+                let prevout = &tx_info
+                    .tx
+                    .output
+                    .first()
+                    .ok_or_else(|| Error::BitcoinTxNoOutputs(txid))?;
                 signer_script_pubkeys.insert(prevout.script_pubkey.clone());
             }
 

@@ -682,7 +682,7 @@ async fn blockk_observer_picks_up_chained_sweeps() {
     let signers_public_key1 = signer.keypair.x_only_public_key().0;
 
     // Start off with some initial UTXOs to work with.
-    let signers_amount = 100_000_000;
+    let signers_amount = 12_340_000;
     let signer_outpoint = faucet.send_to(signers_amount, &signer.address);
     faucet.generate_block();
 
@@ -820,9 +820,30 @@ async fn blockk_observer_picks_up_chained_sweeps() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
+    // Let's make sure the relevant tables are empty
+    let num_rows = sqlx::query_scalar::<_, i32>(
+        r#"
+        SELECT COUNT(*)::INTEGER
+        FROM bitcoin_tx_inputs
+        WHERE prevout_type = 'signers_input'
+
+        UNION ALL
+
+        SELECT COUNT(*)::INTEGER
+        FROM bitcoin_tx_outputs
+        WHERE output_type = 'signers_output'
+        "#,
+    )
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+
+    assert_eq!(num_rows[0], 0);
+    assert_eq!(num_rows[1], 0);
+
     // Let's generate a new block and wait for our block observer to send a
     // BitcoinBlockObserved signal.
-    let _expected_tip = faucet.generate_blocks(1).pop().unwrap();
+    faucet.generate_blocks(1).pop().unwrap();
 
     let waiting_fut = async {
         let signal = signal_receiver.recv();
@@ -834,6 +855,28 @@ async fn blockk_observer_picks_up_chained_sweeps() {
     tokio::time::timeout(Duration::from_secs(3), waiting_fut)
         .await
         .unwrap();
+
+    // Okay, not the tables should be populated with all three
+    // transactions.
+    let num_rows = sqlx::query_scalar::<_, i32>(
+        r#"
+        SELECT COUNT(*)::INTEGER
+        FROM bitcoin_tx_inputs
+        WHERE prevout_type = 'signers_input'
+
+        UNION ALL
+
+        SELECT COUNT(*)::INTEGER
+        FROM bitcoin_tx_outputs
+        WHERE output_type = 'signers_output'
+        "#,
+    )
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+
+    assert_eq!(num_rows[0], 3);
+    assert_eq!(num_rows[1], 3);
 
     testing::storage::drop_db(db).await;
 }
