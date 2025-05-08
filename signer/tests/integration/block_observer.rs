@@ -21,6 +21,7 @@ use emily_client::apis::deposit_api;
 use emily_client::models::CreateDepositRequestBody;
 use fake::Fake as _;
 use fake::Faker;
+use rand::seq::SliceRandom;
 use sbtc::deposits::CreateDepositRequest;
 use sbtc::deposits::DepositScriptInputs;
 use sbtc::deposits::ReclaimScriptInputs;
@@ -688,8 +689,10 @@ where
 /// scriptPubKey of the signers bootstrap UTXO. Note that we do not need to
 /// worry about the signers scriptPubKey changing more than particular once
 /// because that case is impossible.
+#[test_case::test_case(true; "shuffled")]
+#[test_case::test_case(false; "unshuffled")]
 #[tokio::test]
-async fn block_observer_picks_up_chained_sweeps() {
+async fn block_observer_picks_up_chained_unordered_sweeps(shuffled_txs: bool) {
     let (rpc, faucet) = regtest::initialize_blockchain();
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
@@ -699,7 +702,7 @@ async fn block_observer_picks_up_chained_sweeps() {
     let signers_public_key1 = signer.keypair.x_only_public_key().0;
 
     // Start off with some initial UTXOs to work with.
-    let signers_amount = 12_340_000;
+    let signers_amount = 56_780_000;
     let signer_outpoint = faucet.send_to(signers_amount, &signer.address);
     faucet.generate_block();
 
@@ -766,7 +769,7 @@ async fn block_observer_picks_up_chained_sweeps() {
     rpc.send_raw_transaction(&transactions[1].tx).unwrap();
     rpc.send_raw_transaction(&transactions[2].tx).unwrap();
 
-    let mut ctx = TestContext::builder()
+    let ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
         .with_mocked_emily_client()
@@ -774,71 +777,10 @@ async fn block_observer_picks_up_chained_sweeps() {
         .modify_settings(|settings| settings.signer.bootstrap_aggregate_key = Some(aggregate_key))
         .build();
 
-    // We need to set up the stacks client and emily well. We don't need
-    // the stacks client for the test, we just want to make sure that the
-    // nothing panics, which would happen if we had no implementation.
-    ctx.with_stacks_client(|client| {
-        client
-            .expect_get_tenure_info()
-            .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
-
-        client
-            .expect_get_tenure()
-            .returning(|_| Box::pin(std::future::ready(TenureBlocks::nearly_empty())));
-
-        client
-            .expect_get_sortition_info()
-            .returning(move |_| Box::pin(std::future::ready(Ok(DUMMY_SORTITION_INFO.clone()))));
-
-        client.expect_get_block().returning(|_| {
-            let response = Ok(NakamotoBlock {
-                header: NakamotoBlockHeader::empty(),
-                txs: Vec::new(),
-            });
-            Box::pin(std::future::ready(response))
-        });
-
-        client.expect_get_pox_info().returning(|| {
-            let response = serde_json::from_str::<RPCPoxInfoData>(GET_POX_INFO_JSON)
-                .map_err(Error::JsonSerialize);
-            Box::pin(std::future::ready(response))
-        });
-    })
-    .await;
-
-    ctx.with_emily_client(|client| {
-        client
-            .expect_get_deposits()
-            .returning(move || Box::pin(std::future::ready(Ok(vec![]))));
-
-        client
-            .expect_get_limits()
-            .once()
-            .returning(move || Box::pin(std::future::ready(Ok(SbtcLimits::unlimited()))));
-    })
-    .await;
-
-    // We only proceed with the test after the BlockObserver "process" has
-    // started, and we use this counter to notify us when that happens.
-    let start_flag = Arc::new(AtomicBool::new(false));
-    let flag = start_flag.clone();
-
     let block_observer = BlockObserver {
         context: ctx.clone(),
         bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT).await,
     };
-
-    let mut signal_receiver = ctx.get_signal_receiver();
-
-    tokio::spawn(async move {
-        flag.store(true, Ordering::Relaxed);
-        block_observer.run().await
-    });
-
-    // Wait for the task to start.
-    while !start_flag.load(Ordering::SeqCst) {
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
 
     // Let's make sure the relevant tables are empty
     let sql = r#"
@@ -868,21 +810,22 @@ async fn block_observer_picks_up_chained_sweeps() {
     assert_eq!(num_rows[2], 0);
     assert_eq!(num_rows.len(), 3);
 
-    // Let's generate a new block and wait for our block observer to send a
-    // BitcoinBlockObserved signal.
+    // Let's generate a new block with the sweep transactions and feed it
+    // to the block observer
     let block_hash = faucet.generate_blocks(1).pop().unwrap();
-    dbg!(ctx.bitcoin_client.get_block(&block_hash).unwrap().unwrap());
+    let block_info = ctx.bitcoin_client.get_block(&block_hash).unwrap().unwrap();
 
-    let waiting_fut = async {
-        let signal = signal_receiver.recv();
-        let Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved)) = signal.await else {
-            panic!("Not the right signal")
-        };
-    };
+    // We need to make sure that we populate the `bitcoin_blocks` table.
+    let db_block = model::BitcoinBlock::from(&block_info);
+    db.write_bitcoin_block(&db_block).await.unwrap();
 
-    tokio::time::timeout(Duration::from_secs(3), waiting_fut)
-        .await
-        .unwrap();
+    let mut transactions = block_info.transactions;
+
+    if shuffled_txs {
+        transactions.shuffle(&mut rng);
+    }
+
+    block_observer.extract_sbtc_transactions(block_hash, &transactions).await.unwrap();
 
     // Okay, now the tables should be populated with all three
     // transactions.
@@ -897,6 +840,7 @@ async fn block_observer_picks_up_chained_sweeps() {
 
     testing::storage::drop_db(db).await;
 }
+
 
 #[test_case::test_case(false, SbtcLimits::unlimited(); "no contracts, default limits")]
 #[test_case::test_case(false, SbtcLimits::new(Some(bitcoin::Amount::from_sat(1_000)), None, None, None, None, None, None, None); "no contracts, total cap limit")]
