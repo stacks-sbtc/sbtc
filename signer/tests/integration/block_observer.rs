@@ -820,7 +820,10 @@ async fn block_observer_picks_up_chained_unordered_sweeps() {
     let mut transactions = block_info.transactions;
     transactions.shuffle(&mut rng);
 
-    block_observer.extract_sbtc_transactions(block_hash, &transactions).await.unwrap();
+    block_observer
+        .extract_sbtc_transactions(block_hash, &transactions)
+        .await
+        .unwrap();
 
     // Okay, now the tables should be populated with all three
     // transactions.
@@ -835,7 +838,6 @@ async fn block_observer_picks_up_chained_unordered_sweeps() {
 
     testing::storage::drop_db(db).await;
 }
-
 
 #[test_case::test_case(false, SbtcLimits::unlimited(); "no contracts, default limits")]
 #[test_case::test_case(false, SbtcLimits::new(Some(bitcoin::Amount::from_sat(1_000)), None, None, None, None, None, None, None); "no contracts, total cap limit")]
