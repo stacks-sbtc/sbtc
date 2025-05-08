@@ -67,12 +67,10 @@ where
     // This is a variant of the Best-Fit-Decreasing algorithm, so we sort
     // by "weight" decreasing. We use the votes against as the weight, but
     // vsize is a reasonable weight metric as well.
-    let mut item_vec: Vec<(u32, T)> = items
+    let item_vec: Vec<(u32, T)> = items
         .into_iter()
         .map(|item| (item.votes().count_ones(), item))
         .collect();
-
-    item_vec.sort_by_key(|(vote_count, _)| std::cmp::Reverse(*vote_count));
 
     // Now we just add each item into a bag, and return the
     // collection of bags afterward.
