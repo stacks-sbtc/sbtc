@@ -2967,7 +2967,7 @@
           "status": {
             "type": "integer",
             "format": "int32",
-            "description": "Status code.",
+            "description": "HTTP status code, returned as part of multi-status responses.",
             "minimum": 0
           }
         }

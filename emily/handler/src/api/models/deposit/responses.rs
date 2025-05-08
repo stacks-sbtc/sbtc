@@ -39,6 +39,6 @@ pub struct UpdateDepositsResponse {
 pub struct DepositWithStatus {
     /// Deposit itself.
     pub deposit: Deposit,
-    /// Status code.
+    /// HTTP status code, returned as part of multi-status responses.
     pub status: u16,
 }
