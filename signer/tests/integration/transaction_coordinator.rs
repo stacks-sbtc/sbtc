@@ -32,7 +32,6 @@ use fake::Fake as _;
 use fake::Faker;
 use futures::StreamExt as _;
 use lru::LruCache;
-use rand::rngs::OsRng;
 use sbtc::testing::regtest;
 use sbtc::testing::regtest::AsUtxo as _;
 use sbtc::testing::regtest::Recipient;
@@ -452,9 +451,9 @@ async fn process_complete_deposit() {
 
     // Ensure a stacks tip exists
     let stacks_block = model::StacksBlock {
-        block_hash: Faker.fake_with_rng(&mut OsRng),
-        block_height: Faker.fake_with_rng(&mut OsRng),
-        parent_hash: Faker.fake_with_rng(&mut OsRng),
+        block_hash: Faker.fake_with_rng(&mut rng),
+        block_height: Faker.fake_with_rng(&mut rng),
+        parent_hash: Faker.fake_with_rng(&mut rng),
         bitcoin_anchor: setup.sweep_block_hash.into(),
     };
     db.write_stacks_block(&stacks_block).await.unwrap();
@@ -951,7 +950,7 @@ async fn run_dkg_from_scratch() {
     });
 
     let tx_signer_processes = signers.iter().map(|(context, _, _, net)| {
-        TxSignerEventLoop::new(context.clone(), net.spawn(), OsRng)
+        TxSignerEventLoop::new(context.clone(), net.spawn(), rng.clone())
             .expect("failed to create TxSignerEventLoop")
     });
 
@@ -1194,7 +1193,7 @@ async fn run_subsequent_dkg() {
             context_window: 10000,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             signer_private_key: kp.secret_key().into(),
-            rng: rand::rngs::OsRng,
+            rng: rng.clone(),
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         });
@@ -1330,6 +1329,8 @@ async fn run_subsequent_dkg() {
 async fn sign_bitcoin_transaction() {
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let (rpc, faucet) = regtest::initialize_blockchain();
+
+    let rng = get_rng();
 
     // We need to populate our databases, so let's fetch the data.
     let emily_client = EmilyClient::try_new(
@@ -1515,7 +1516,7 @@ async fn sign_bitcoin_transaction() {
             context_window: 10000,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             signer_private_key: kp.secret_key().into(),
-            rng: rand::rngs::OsRng,
+            rng: rng.clone(),
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         };
@@ -1755,6 +1756,7 @@ async fn sign_bitcoin_transaction() {
 /// then, once everything is up and running, run the test.
 #[test(tokio::test)]
 async fn sign_bitcoin_transaction_multiple_locking_keys() {
+    let rng = get_rng();
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
@@ -1954,7 +1956,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
             context_window: 10000,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             signer_private_key: kp.secret_key().into(),
-            rng: rand::rngs::OsRng,
+            rng: rng.clone(),
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         };
@@ -2369,6 +2371,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
 /// if we think things are up-to-date.
 #[tokio::test]
 async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
+    let rng = get_rng();
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
@@ -2538,7 +2541,7 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
             context_window: 10000,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             signer_private_key: kp.secret_key().into(),
-            rng: rand::rngs::OsRng,
+            rng: rng.clone(),
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         };
@@ -2992,12 +2995,13 @@ fn create_signer_set(signers: &[Keypair], threshold: u32) -> (SignerSet, InMemor
     )
 }
 
-fn create_test_setup(
+fn create_test_setup<R: rand::Rng>(
     dkg_shares: &EncryptedDkgShares,
     signatures_required: u16,
     faucet: &regtest::Faucet,
     rpc: &bitcoincore_rpc::Client,
     bitcoin_client: &BitcoinCoreClient,
+    rng: &mut R,
 ) -> TestSweepSetup2 {
     let depositor = Recipient::new(AddressType::P2tr);
     faucet.send_to(50_000_000, &depositor.address);
@@ -3034,7 +3038,7 @@ fn create_test_setup(
     };
     let (request, recipient) = generate_withdrawal();
     let stacks_block = model::StacksBlock {
-        block_hash: Faker.fake_with_rng(&mut OsRng),
+        block_hash: Faker.fake_with_rng(rng),
         block_height: 0u64.into(),
         parent_hash: StacksBlockId::first_mined().into(),
         bitcoin_anchor: deposit_block_hash.into(),
@@ -3279,6 +3283,7 @@ async fn test_conservative_initial_sbtc_limits() {
         faucet,
         rpc,
         &bitcoin_client,
+        &mut rng,
     );
     for (_, db, _, _) in signers.iter_mut() {
         backfill_bitcoin_blocks(db, rpc, &setup.deposit_block_hash).await;
@@ -3324,7 +3329,7 @@ async fn test_conservative_initial_sbtc_limits() {
             context_window: 10000,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             signer_private_key: kp.secret_key().into(),
-            rng: rand::rngs::OsRng,
+            rng: rng.clone(),
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         };
@@ -3445,6 +3450,7 @@ async fn test_conservative_initial_sbtc_limits() {
 /// then, once everything is up and running, run the test.
 #[tokio::test]
 async fn sign_bitcoin_transaction_withdrawals() {
+    let rng = get_rng();
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
@@ -3626,7 +3632,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
             context_window: 10000,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             signer_private_key: kp.secret_key().into(),
-            rng: rand::rngs::OsRng,
+            rng: rng.clone(),
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         };
@@ -3995,7 +4001,7 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
 
     // Ensure we have a stacks chain tip
     let genesis_block = model::StacksBlock {
-        block_hash: Faker.fake_with_rng(&mut OsRng),
+        block_hash: Faker.fake_with_rng(&mut rng),
         block_height: 0u64.into(),
         parent_hash: StacksBlockId::first_mined().into(),
         bitcoin_anchor: bitcoin_chain_tip.into(),
@@ -4497,16 +4503,17 @@ mod get_eligible_pending_withdrawal_requests {
 
     /// Helper function to set up the database with bitcoin and stacks chains,
     /// a set of signers and their DKG shares.
-    async fn test_setup(
+    async fn test_setup<R: rand::Rng>(
         db: &PgStore,
         chains_length: u64,
+        rng: &mut R,
     ) -> (
         BitcoinChain,
         StacksChain,
         TestSignerSet,
         BTreeSet<PublicKey>,
     ) {
-        let signer_set = TestSignerSet::new(&mut OsRng);
+        let signer_set = TestSignerSet::new(rng);
         let signer_keys = signer_set.keys.iter().copied().collect();
 
         // Create a new bitcoin chain with 31 blocks and a sibling stacks chain
@@ -4660,6 +4667,7 @@ mod get_eligible_pending_withdrawal_requests {
     }; "hard_expiry_one_block_too_old")]
     #[test_log::test(tokio::test)]
     async fn test_validations(params: TestParams) {
+        let mut rng = get_rng();
         let db = testing::storage::new_test_database().await;
 
         // Note: we create the chains with a length of `chain_length + 1` to
@@ -4667,7 +4675,7 @@ mod get_eligible_pending_withdrawal_requests {
         // starts at block height 0, so the chain tip of a chain with 10 blocks
         // has a height of 9).
         let (bitcoin_chain, stacks_chain, signer_set, signer_keys) =
-            test_setup(&db, params.chain_length + 1).await;
+            test_setup(&db, params.chain_length + 1, &mut rng).await;
 
         let (bitcoin_chain_tip, stacks_chain_tip) = db.get_chain_tips().await;
 
