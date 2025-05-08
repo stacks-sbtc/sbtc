@@ -777,7 +777,7 @@ async fn block_observer_picks_up_chained_unordered_sweeps() {
 
     let block_observer = BlockObserver {
         context: ctx.clone(),
-        bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT).await,
+        bitcoin_blocks: (),
     };
 
     // Let's make sure the relevant tables are empty

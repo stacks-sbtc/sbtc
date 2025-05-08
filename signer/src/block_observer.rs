@@ -1157,6 +1157,6 @@ mod tests {
         let tx_ids = stored_transactions.unwrap();
         let expected_tx_id = tx_setup0.tx.compute_txid().into();
         assert_eq!(tx_ids.len(), 1);
-        assert_eq!(tx_ids[0], expected_tx_id);
+        assert!(tx_ids.contains(&expected_tx_id));
     }
 }
