@@ -213,15 +213,21 @@ where
         test_data.push_bitcoin_txs(&bitcoin_chain_tip, vec![tx_info], &signer_script_pubkeys);
 
         // Also ensure one valid withdrawal exists for test consistency
-        let stacks_block = test_data
+        let stacks_blocks = test_data
             .stacks_blocks
             .iter()
-            .find(|b| b.bitcoin_anchor == bitcoin_chain_tip.block_hash)
-            .unwrap();
+            .filter_map(|b| {
+                if b.bitcoin_anchor == bitcoin_chain_tip.block_hash {
+                    Some(b.block_hash)
+                } else {
+                    None
+                }
+            })
+            .collect::<HashSet<_>>();
         let mut withdrawal = test_data
             .withdraw_requests
             .iter()
-            .find(|w| w.block_hash == stacks_block.block_hash)
+            .find(|w| stacks_blocks.contains(&w.block_hash))
             .unwrap()
             .clone();
 
