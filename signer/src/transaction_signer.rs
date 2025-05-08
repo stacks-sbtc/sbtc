@@ -1682,8 +1682,9 @@ mod tests {
     #[ignore = "we have a test for this"]
     #[tokio::test]
     async fn should_be_able_to_participate_in_dkg() {
+        let mut rng = get_rng();
         test_environment()
-            .assert_should_be_able_to_participate_in_dkg()
+            .assert_should_be_able_to_participate_in_dkg(&mut rng)
             .await;
     }
 

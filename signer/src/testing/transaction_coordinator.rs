@@ -7,7 +7,6 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use super::get_rng;
 use crate::bitcoin::MockBitcoinInteract;
 use crate::bitcoin::rpc::BitcoinTxInfo;
 use crate::bitcoin::utxo::SignerUtxo;
@@ -328,13 +327,15 @@ where
     }
 
     /// Assert that a coordinator should be able to coordinate a signing round
-    pub async fn assert_should_be_able_to_coordinate_signing_rounds(
+    pub async fn assert_should_be_able_to_coordinate_signing_rounds<
+        R: rand::Rng + rand::CryptoRng + Send + Clone + 'static,
+    >(
         mut self,
         delay_to_process_new_blocks: Duration,
+        rng: &mut R,
     ) {
-        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
-        let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
+        let signer_info = testing::wsts::generate_signer_info(rng, self.num_signers as usize);
 
         let mut testing_signer_set =
             testing::wsts::SignerSet::new(&signer_info, self.signing_threshold as u32, || {
@@ -342,7 +343,7 @@ where
             });
 
         let (aggregate_key, bitcoin_chain_tip, mut test_data) = self
-            .prepare_database_and_run_dkg(&mut rng, &mut testing_signer_set)
+            .prepare_database_and_run_dkg(rng, &mut testing_signer_set)
             .await;
 
         let original_test_data = test_data.clone();
@@ -352,7 +353,7 @@ where
                 value: bitcoin::Amount::from_sat(1_337_000_000_000),
                 script_pubkey: aggregate_key.signers_script_pubkey(),
             }],
-            input: vec![TestBitcoinTxInfo::random_prevout(&mut rng)],
+            input: vec![TestBitcoinTxInfo::random_prevout(rng)],
             ..EMPTY_BITCOIN_TX
         };
         let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
@@ -446,9 +447,10 @@ where
         let handle = event_loop_harness.start().await;
 
         // Start the in-memory signer set.
+        let mut rng_for_handle = rng.clone();
         let _signers_handle = tokio::spawn(async move {
             testing_signer_set
-                .participate_in_signing_rounds_forever(&mut rng)
+                .participate_in_signing_rounds_forever(&mut rng_for_handle)
                 .await
         });
 
@@ -484,10 +486,14 @@ where
 
     /// Assert that a coordinator should be able to skip the deployment the sbtc contracts
     /// if they are already deployed.
-    pub async fn assert_skips_deploy_sbtc_contracts(mut self) {
-        let mut rng = get_rng();
+    pub async fn assert_skips_deploy_sbtc_contracts<
+        R: rand::Rng + rand::CryptoRng + Send + Clone + 'static,
+    >(
+        mut self,
+        rng: &mut R,
+    ) {
         let network = network::InMemoryNetwork::new();
-        let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
+        let signer_info = testing::wsts::generate_signer_info(rng, self.num_signers as usize);
 
         let mut testing_signer_set =
             testing::wsts::SignerSet::new(&signer_info, self.signing_threshold as u32, || {
@@ -495,7 +501,7 @@ where
             });
 
         let (aggregate_key, bitcoin_chain_tip, mut test_data) = self
-            .prepare_database_and_run_dkg(&mut rng, &mut testing_signer_set)
+            .prepare_database_and_run_dkg(rng, &mut testing_signer_set)
             .await;
 
         let original_test_data = test_data.clone();
@@ -505,7 +511,7 @@ where
                 value: bitcoin::Amount::from_sat(1_337_000_000_000),
                 script_pubkey: aggregate_key.signers_script_pubkey(),
             }],
-            input: vec![TestBitcoinTxInfo::random_prevout(&mut rng)],
+            input: vec![TestBitcoinTxInfo::random_prevout(rng)],
             ..EMPTY_BITCOIN_TX
         };
         let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
@@ -639,9 +645,10 @@ where
         let handle = event_loop_harness.start().await;
 
         // Start the in-memory signer set.
+        let mut rng_for_handle = rng.clone();
         let _signers_handle = tokio::spawn(async move {
             testing_signer_set
-                .participate_in_signing_rounds_forever(&mut rng)
+                .participate_in_signing_rounds_forever(&mut rng_for_handle)
                 .await
         });
 
@@ -674,22 +681,24 @@ where
     }
 
     /// Assert we get a withdrawal accept tx
-    pub async fn assert_construct_withdrawal_accept_stacks_sign_request(mut self) {
-        let mut rng = get_rng();
+    pub async fn assert_construct_withdrawal_accept_stacks_sign_request<R: rand::Rng>(
+        mut self,
+        rng: &mut R,
+    ) {
         let signer_network = SignerNetwork::single(&self.context);
-        let private_key = PrivateKey::new(&mut rng);
+        let private_key = PrivateKey::new(rng);
         let bitcoin_aggregate_key = PublicKey::from_private_key(&private_key);
 
         // Create test data for the withdrawal request
-        let stacks_block: StacksBlock = fake::Faker.fake_with_rng(&mut rng);
+        let stacks_block: StacksBlock = fake::Faker.fake_with_rng(rng);
         let withdrawal_req = model::WithdrawalRequest {
             block_hash: stacks_block.block_hash,
-            ..fake::Faker.fake_with_rng::<model::WithdrawalRequest, _>(&mut rng)
+            ..fake::Faker.fake_with_rng::<model::WithdrawalRequest, _>(rng)
         };
 
         // Too big outindex will make this test slow and don't really happen in practice
         // Output index smaller than 2 is invalid in our case
-        let output_index: u32 = (2..200).choose(&mut rng).unwrap();
+        let output_index: u32 = (2..200).choose(rng).unwrap();
 
         let mut output = vec![bitcoin::TxOut::NULL; output_index as usize];
         output.push(bitcoin::TxOut {
@@ -736,7 +745,7 @@ where
             sweep_txid: sweep_tx_info.txid.into(),
             sweep_block_hash: sweep_block_hash.into(),
             sweep_block_height: 0u64.into(),
-            ..fake::Faker.fake_with_rng(&mut rng)
+            ..fake::Faker.fake_with_rng(rng)
         };
 
         let withdrawal_fee = sweep_tx_info
@@ -835,17 +844,19 @@ where
     }
 
     /// Assert we get a withdrawal reject tx
-    pub async fn assert_construct_withdrawal_reject_stacks_sign_request(mut self) {
-        let mut rng = get_rng();
+    pub async fn assert_construct_withdrawal_reject_stacks_sign_request<R: rand::Rng>(
+        mut self,
+        rng: &mut R,
+    ) {
         let signer_network = SignerNetwork::single(&self.context);
-        let private_key = PrivateKey::new(&mut rng);
+        let private_key = PrivateKey::new(rng);
         let bitcoin_aggregate_key = PublicKey::from_private_key(&private_key);
 
         // Create test data for the withdrawal request
-        let stacks_block: StacksBlock = fake::Faker.fake_with_rng(&mut rng);
+        let stacks_block: StacksBlock = fake::Faker.fake_with_rng(rng);
         let withdrawal_req = model::WithdrawalRequest {
             block_hash: stacks_block.block_hash,
-            ..fake::Faker.fake_with_rng(&mut rng)
+            ..fake::Faker.fake_with_rng(rng)
         };
 
         let store = self.context.get_storage_mut();
@@ -928,10 +939,14 @@ where
     C: Context,
 {
     /// Assert we get the correct UTXO in a simple case
-    pub async fn assert_get_signer_utxo_simple(mut self) {
-        let mut rng = get_rng();
+    pub async fn assert_get_signer_utxo_simple<
+        R: rand::Rng + rand::CryptoRng + Send + Clone + 'static,
+    >(
+        mut self,
+        rng: &mut R,
+    ) {
         let network = network::InMemoryNetwork::new();
-        let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
+        let signer_info = testing::wsts::generate_signer_info(rng, self.num_signers as usize);
 
         let mut signer_set =
             testing::wsts::SignerSet::new(&signer_info, self.signing_threshold as u32, || {
@@ -939,7 +954,7 @@ where
             });
 
         let (aggregate_key, bitcoin_chain_tip, mut test_data) = self
-            .prepare_database_and_run_dkg(&mut rng, &mut signer_set)
+            .prepare_database_and_run_dkg(rng, &mut signer_set)
             .await;
 
         let original_test_data = test_data.clone();
@@ -949,12 +964,12 @@ where
                 value: bitcoin::Amount::from_sat(42),
                 script_pubkey: aggregate_key.signers_script_pubkey(),
             }],
-            input: vec![TestBitcoinTxInfo::random_prevout(&mut rng)],
+            input: vec![TestBitcoinTxInfo::random_prevout(rng)],
             ..EMPTY_BITCOIN_TX
         };
 
         let (block, block_ref) = test_data.new_block(
-            &mut rng,
+            rng,
             &signer_set.signer_keys(),
             &self.test_model_parameters,
             Some(&bitcoin_chain_tip),
@@ -999,10 +1014,14 @@ where
     }
 
     /// Assert we get the correct UTXO in a fork
-    pub async fn assert_get_signer_utxo_fork(mut self) {
-        let mut rng = get_rng();
+    pub async fn assert_get_signer_utxo_fork<
+        R: rand::Rng + rand::CryptoRng + Send + Clone + 'static,
+    >(
+        mut self,
+        rng: &mut R,
+    ) {
         let network = network::InMemoryNetwork::new();
-        let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
+        let signer_info = testing::wsts::generate_signer_info(rng, self.num_signers as usize);
 
         let mut signer_set =
             testing::wsts::SignerSet::new(&signer_info, self.signing_threshold as u32, || {
@@ -1010,7 +1029,7 @@ where
             });
 
         let (aggregate_key, bitcoin_chain_tip, test_data) = self
-            .prepare_database_and_run_dkg(&mut rng, &mut signer_set)
+            .prepare_database_and_run_dkg(rng, &mut signer_set)
             .await;
 
         let original_test_data = test_data.clone();
@@ -1120,10 +1139,14 @@ where
     }
 
     /// Assert we get the correct UTXO with a spending chain in a block
-    pub async fn assert_get_signer_utxo_unspent(mut self) {
-        let mut rng = get_rng();
+    pub async fn assert_get_signer_utxo_unspent<
+        R: rand::Rng + rand::CryptoRng + Send + Clone + 'static,
+    >(
+        mut self,
+        rng: &mut R,
+    ) {
         let network = network::InMemoryNetwork::new();
-        let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
+        let signer_info = testing::wsts::generate_signer_info(rng, self.num_signers as usize);
 
         let mut signer_set =
             testing::wsts::SignerSet::new(&signer_info, self.signing_threshold as u32, || {
@@ -1131,7 +1154,7 @@ where
             });
 
         let (aggregate_key, bitcoin_chain_tip, mut test_data) = self
-            .prepare_database_and_run_dkg(&mut rng, &mut signer_set)
+            .prepare_database_and_run_dkg(rng, &mut signer_set)
             .await;
 
         let original_test_data = test_data.clone();
@@ -1141,7 +1164,7 @@ where
                 value: bitcoin::Amount::from_sat(1),
                 script_pubkey: aggregate_key.signers_script_pubkey(),
             }],
-            input: vec![TestBitcoinTxInfo::random_prevout(&mut rng)],
+            input: vec![TestBitcoinTxInfo::random_prevout(rng)],
             ..EMPTY_BITCOIN_TX
         };
         let tx_2 = bitcoin::Transaction {
@@ -1149,7 +1172,7 @@ where
                 value: bitcoin::Amount::from_sat(2),
                 script_pubkey: aggregate_key.signers_script_pubkey(),
             }],
-            input: vec![TestBitcoinTxInfo::random_prevout(&mut rng)],
+            input: vec![TestBitcoinTxInfo::random_prevout(rng)],
             ..EMPTY_BITCOIN_TX
         };
         let tx_3 = bitcoin::Transaction {
@@ -1178,7 +1201,7 @@ where
             ..EMPTY_BITCOIN_TX
         };
         let (block, block_ref) = test_data.new_block(
-            &mut rng,
+            rng,
             &signer_set.signer_keys(),
             &self.test_model_parameters,
             Some(&bitcoin_chain_tip),
@@ -1248,10 +1271,14 @@ where
     }
 
     /// Assert we get the correct UTXO in case of donations
-    pub async fn assert_get_signer_utxo_donations(mut self) {
-        let mut rng = get_rng();
+    pub async fn assert_get_signer_utxo_donations<
+        R: rand::Rng + rand::CryptoRng + Send + Clone + 'static,
+    >(
+        mut self,
+        rng: &mut R,
+    ) {
         let network = network::InMemoryNetwork::new();
-        let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
+        let signer_info = testing::wsts::generate_signer_info(rng, self.num_signers as usize);
 
         let mut signer_set =
             testing::wsts::SignerSet::new(&signer_info, self.signing_threshold as u32, || {
@@ -1259,7 +1286,7 @@ where
             });
 
         let (aggregate_key, bitcoin_chain_tip, mut test_data) = self
-            .prepare_database_and_run_dkg(&mut rng, &mut signer_set)
+            .prepare_database_and_run_dkg(rng, &mut signer_set)
             .await;
 
         let original_test_data = test_data.clone();
@@ -1269,7 +1296,7 @@ where
         //                     +- [block b1 with donation]
 
         let (block, block_a1) = test_data.new_block(
-            &mut rng,
+            rng,
             &signer_set.signer_keys(),
             &self.test_model_parameters,
             Some(&bitcoin_chain_tip),
@@ -1279,7 +1306,7 @@ where
                 value: bitcoin::Amount::from_sat(0xA1),
                 script_pubkey: aggregate_key.signers_script_pubkey(),
             }],
-            input: vec![TestBitcoinTxInfo::random_prevout(&mut rng)],
+            input: vec![TestBitcoinTxInfo::random_prevout(rng)],
             ..EMPTY_BITCOIN_TX
         };
         let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
@@ -1294,7 +1321,7 @@ where
         test_data.push(block);
 
         let (block, block_a2) = test_data.new_block(
-            &mut rng,
+            rng,
             &signer_set.signer_keys(),
             &self.test_model_parameters,
             Some(&block_a1),
@@ -1317,7 +1344,7 @@ where
         test_data.push(block);
 
         let (block, block_b1) = test_data.new_block(
-            &mut rng,
+            rng,
             &signer_set.signer_keys(),
             &self.test_model_parameters,
             Some(&bitcoin_chain_tip),

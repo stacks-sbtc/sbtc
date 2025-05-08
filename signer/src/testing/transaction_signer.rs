@@ -19,7 +19,6 @@ use crate::storage::DbRead;
 use crate::storage::DbWrite;
 use crate::storage::model;
 use crate::testing;
-use crate::testing::get_rng;
 use crate::testing::storage::model::TestData;
 use crate::transaction_signer;
 
@@ -143,10 +142,14 @@ where
 {
     /// Assert that a group of transaction signers together can
     /// participate successfully in a DKG round
-    pub async fn assert_should_be_able_to_participate_in_dkg(self) {
-        let mut rng = get_rng();
+    pub async fn assert_should_be_able_to_participate_in_dkg<
+        R: rand::Rng + rand::CryptoRng + Send + Sync + Clone + 'static,
+    >(
+        self,
+        rng: &mut R,
+    ) {
         let network = network::InMemoryNetwork::new();
-        let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers);
+        let signer_info = testing::wsts::generate_signer_info(rng, self.num_signers);
         let coordinator_signer_info = signer_info.first().unwrap().clone();
 
         // Create a new event-loop for each signer, based on the number of signers
@@ -169,7 +172,7 @@ where
             .collect();
 
         let signer_set = &coordinator_signer_info.signer_public_keys;
-        let test_data = self.generate_test_data(&mut rng, signer_set);
+        let test_data = self.generate_test_data(rng, signer_set);
         for handle in event_loop_handles.iter_mut() {
             Self::write_test_data(&handle.context.get_storage_mut(), &test_data).await;
         }
@@ -203,11 +206,11 @@ where
             event_loop_handles
                 .iter_mut()
                 .map(|handle| handle.context.get_storage_mut()),
-            &mut rng,
+            rng,
         )
         .await;
 
-        let dummy_txid = testing::dummy::txid(&fake::Faker, &mut rng);
+        let dummy_txid = testing::dummy::txid(&fake::Faker, rng);
 
         let mut coordinator = testing::wsts::Coordinator::new(
             network.connect(),

@@ -130,6 +130,9 @@ mod tests {
 
         let pk = PrivateKey::new(&mut rng);
 
-        testing::network::assert_clients_can_exchange_messages(client_1, client_2, pk, pk).await;
+        testing::network::assert_clients_can_exchange_messages(
+            client_1, client_2, pk, pk, &mut rng,
+        )
+        .await;
     }
 }

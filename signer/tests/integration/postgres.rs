@@ -3065,9 +3065,11 @@ async fn should_process_withdrawals() {
 async fn should_get_signer_utxo_simple() {
     let store = testing::storage::new_test_database().await;
 
+    let mut rng = get_rng();
+
     transaction_coordinator_test_environment(store.clone())
         .await
-        .assert_get_signer_utxo_simple()
+        .assert_get_signer_utxo_simple(&mut rng)
         .await;
 
     signer::testing::storage::drop_db(store).await;
@@ -3077,9 +3079,11 @@ async fn should_get_signer_utxo_simple() {
 async fn should_get_signer_utxo_fork() {
     let store = testing::storage::new_test_database().await;
 
+    let mut rng = get_rng();
+
     transaction_coordinator_test_environment(store.clone())
         .await
-        .assert_get_signer_utxo_fork()
+        .assert_get_signer_utxo_fork(&mut rng)
         .await;
 
     signer::testing::storage::drop_db(store).await;
@@ -3089,9 +3093,11 @@ async fn should_get_signer_utxo_fork() {
 async fn should_get_signer_utxo_unspent() {
     let store = testing::storage::new_test_database().await;
 
+    let mut rng = get_rng();
+
     transaction_coordinator_test_environment(store.clone())
         .await
-        .assert_get_signer_utxo_unspent()
+        .assert_get_signer_utxo_unspent(&mut rng)
         .await;
 
     signer::testing::storage::drop_db(store).await;
@@ -3101,9 +3107,11 @@ async fn should_get_signer_utxo_unspent() {
 async fn should_get_signer_utxo_donations() {
     let store = testing::storage::new_test_database().await;
 
+    let mut rng = get_rng();
+
     transaction_coordinator_test_environment(store.clone())
         .await
-        .assert_get_signer_utxo_donations()
+        .assert_get_signer_utxo_donations(&mut rng)
         .await;
 
     signer::testing::storage::drop_db(store).await;

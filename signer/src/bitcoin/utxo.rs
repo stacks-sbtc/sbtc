@@ -1674,7 +1674,7 @@ mod tests {
     }
 
     static GLOBAL_RNG: LazyLock<rand::rngs::StdRng> = LazyLock::new(|| {
-        let seed = get_rng().next_u64();
+        let seed = rand::rngs::OsRng.next_u64();
         // Nextest prints stdout and stderr only for failed tests so this
         // wouldn't be too much noise.
         eprintln!("bitcoin::utxo.rs GLOBAL_RNG seed: {seed:}");

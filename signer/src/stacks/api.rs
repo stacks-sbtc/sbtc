@@ -1739,11 +1739,14 @@ mod tests {
     use super::*;
     use std::io::Read;
 
-    fn generate_wallet(num_keys: u16, signatures_required: u16) -> SignerWallet {
-        let mut rng = get_rng();
+    fn generate_wallet<R: rand::Rng>(
+        num_keys: u16,
+        signatures_required: u16,
+        rng: &mut R,
+    ) -> SignerWallet {
         let network_kind = NetworkKind::Regtest;
 
-        let public_keys = std::iter::repeat_with(|| Keypair::new_global(&mut rng))
+        let public_keys = std::iter::repeat_with(|| Keypair::new_global(rng))
             .map(|kp| kp.public_key().into())
             .take(num_keys as usize)
             .collect::<Vec<_>>();
@@ -2285,7 +2288,8 @@ mod tests {
     #[test_case(15, 11)]
     #[tokio::test]
     async fn estimate_fees_fallback_works(num_keys: u16, signatures_required: u16) {
-        let wallet = generate_wallet(num_keys, signatures_required);
+        let mut rng = get_rng();
+        let wallet = generate_wallet(num_keys, signatures_required, &mut rng);
         let mut stacks_node_server = mockito::Server::new_async().await;
 
         // Setup a mock which will fail both the transaction and STX transfer
@@ -2317,7 +2321,8 @@ mod tests {
     /// Check that everything works as expected in the happy path case.
     #[tokio::test]
     async fn get_fee_estimate_works() {
-        let wallet = generate_wallet(1, 1);
+        let mut rng = get_rng();
+        let wallet = generate_wallet(1, 1, &mut rng);
         // The following was taken from a locally running stacks node for
         // the cost of a contract deploy.
         let raw_json_response = r#"{

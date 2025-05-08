@@ -22,11 +22,9 @@ use crate::storage::DbWrite;
 use crate::storage::model;
 use crate::storage::model::DkgSharesStatus;
 use crate::testing;
-use crate::testing::get_rng;
 use crate::testing::storage::model::TestData;
 
 use hashbrown::HashSet;
-use rand::SeedableRng;
 use tokio::sync::broadcast;
 use tokio::time::error::Elapsed;
 
@@ -146,14 +144,18 @@ where
 {
     /// Assert that the transaction signer will make and store decisions
     /// for pending deposit requests.
-    pub async fn assert_should_store_decisions_for_pending_deposit_requests(self) {
-        let mut rng = get_rng();
+    pub async fn assert_should_store_decisions_for_pending_deposit_requests<
+        R: rand::Rng + rand::CryptoRng + Send + Clone + 'static,
+    >(
+        self,
+        rng: &mut R,
+    ) {
         let wan_network = WanNetwork::default();
 
         let ctx1 = TestContext::default_mocked();
         let signer_network = wan_network.connect(&ctx1);
 
-        let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers);
+        let signer_info = testing::wsts::generate_signer_info(rng, self.num_signers);
         let coordinator_signer_info = &signer_info.first().cloned().unwrap();
 
         let ctx2 = TestContext::default_mocked();
@@ -174,12 +176,12 @@ where
         let handle = event_loop_harness.start();
 
         let signer_set = &coordinator_signer_info.signer_public_keys;
-        let test_data = self.generate_test_data(&mut rng, signer_set);
+        let test_data = self.generate_test_data(rng, signer_set);
         Self::write_test_data(&handle.context.get_storage_mut(), &test_data).await;
 
         let group_key = PublicKey::combine_keys(signer_set).unwrap();
         store_dummy_dkg_shares(
-            &mut rng,
+            rng,
             &coordinator_signer_info.signer_private_key.to_bytes(),
             &handle.context.get_storage_mut(),
             group_key,
@@ -231,15 +233,18 @@ where
 
     /// Assert that the transaction signer will make and store decisions
     /// for pending withdraw requests.
-    pub async fn assert_should_store_decisions_for_pending_withdrawal_requests(self) {
-        // TODO(#1466): fix this test for other seeds and use `get_rng()`
-        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+    pub async fn assert_should_store_decisions_for_pending_withdrawal_requests<
+        R: rand::Rng + rand::CryptoRng + Send + Clone + 'static,
+    >(
+        self,
+        rng: &mut R,
+    ) {
         let wan_network = WanNetwork::default();
 
         let ctx1 = TestContext::default_mocked();
         let signer_network = wan_network.connect(&ctx1);
 
-        let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers);
+        let signer_info = testing::wsts::generate_signer_info(rng, self.num_signers);
         let coordinator_signer_info = &signer_info.first().cloned().unwrap();
 
         let ctx2 = TestContext::default_mocked();
@@ -260,7 +265,7 @@ where
         let handle = event_loop_harness.start();
 
         let signer_set = &coordinator_signer_info.signer_public_keys;
-        let test_data = self.generate_test_data(&mut rng, signer_set);
+        let test_data = self.generate_test_data(rng, signer_set);
         Self::write_test_data(&handle.context.get_storage_mut(), &test_data).await;
 
         handle
@@ -315,10 +320,14 @@ where
 
     /// Assert that the transaction signer will make and store decisions
     /// received from other signers.
-    pub async fn assert_should_store_decisions_received_from_other_signers(self) {
-        let mut rng = get_rng();
+    pub async fn assert_should_store_decisions_received_from_other_signers<
+        R: rand::Rng + rand::CryptoRng + Send + Clone + 'static,
+    >(
+        self,
+        rng: &mut R,
+    ) {
         let network = WanNetwork::default();
-        let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers);
+        let signer_info = testing::wsts::generate_signer_info(rng, self.num_signers);
         let coordinator_signer_info = signer_info.first().cloned().unwrap();
 
         // Create a new event-loop for each signer, based on the number of signers
@@ -347,13 +356,13 @@ where
 
         // Generate test data and write it to each signer's storage.
         let signer_set = &coordinator_signer_info.signer_public_keys;
-        let test_data = self.generate_test_data(&mut rng, signer_set);
+        let test_data = self.generate_test_data(rng, signer_set);
         for handle in event_loop_handles.iter_mut() {
             test_data.write_to(&handle.context.get_storage_mut()).await;
 
             let group_key = PublicKey::combine_keys(signer_set).unwrap();
             store_dummy_dkg_shares(
-                &mut rng,
+                rng,
                 &handle.context.config().signer.private_key.to_bytes(),
                 &handle.context.get_storage_mut(),
                 group_key,

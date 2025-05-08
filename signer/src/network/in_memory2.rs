@@ -339,7 +339,7 @@ mod tests {
         let pk = PrivateKey::new(&mut rng);
 
         crate::testing::network::assert_clients_can_exchange_messages(
-            instance_1, instance_2, pk, pk,
+            instance_1, instance_2, pk, pk, &mut rng,
         )
         .await;
     }
