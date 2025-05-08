@@ -64,9 +64,10 @@ where
     I: IntoIterator<Item = T>,
     T: Weighted,
 {
-    // This is a variant of the Best-Fit-Decreasing algorithm, so we sort
-    // by "weight" decreasing. We use the votes against as the weight, but
-    // vsize is a reasonable weight metric as well.
+    // We might want to sort the items, and previously the was sorted by votes.
+    // However, it can allow malicious signer to speedup/slowdown requests execution,
+    // so it is not so good key to sort with. Some better keys can be time or something
+    // like this, but it require a bit more work so for now we just keep it unsorted.
     let item_vec: Vec<(u32, T)> = items
         .into_iter()
         .map(|item| (item.votes().count_ones(), item))
