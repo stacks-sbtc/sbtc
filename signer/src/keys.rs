@@ -483,9 +483,10 @@ mod tests {
     struct Key<T>(T);
 
     impl Key<p256k1::keys::PublicKey> {
-        fn new() -> Self {
-            // Under the hood this uses a rand::thread_rng() for randomness.
-            let private_key = Secp256k1PrivateKey::new();
+        fn new<R: rand::Rng>(rng: &mut R) -> Self {
+            let mut seed = [0u8; 32];
+            rng.fill(&mut seed);
+            let private_key = Secp256k1PrivateKey::from_seed(&seed);
             let pub_key = Secp256k1PublicKey::from_private(&private_key);
             let bytes = pub_key.to_bytes_compressed();
             Key(p256k1::keys::PublicKey::try_from(bytes.as_slice()).unwrap())
@@ -493,9 +494,10 @@ mod tests {
     }
 
     impl Key<Secp256k1PublicKey> {
-        fn new() -> Self {
-            // Under the hood this uses a rand::thread_rng() for randomness.
-            let private_key = Secp256k1PrivateKey::new();
+        fn new<R: rand::Rng>(rng: &mut R) -> Self {
+            let mut seed = [0u8; 32];
+            rng.fill(&mut seed);
+            let private_key = Secp256k1PrivateKey::from_seed(&seed);
             Key(Secp256k1PublicKey::from_private(&private_key))
         }
     }
@@ -607,8 +609,8 @@ mod tests {
     }
 
     #[test_case(Key::<secp256k1::PublicKey>::new(&mut get_rng()); "from a rust-secp256k1 PublicKey")]
-    #[test_case(Key::<Secp256k1PublicKey>::new(); "from a stacks-common Secp256k1PublicKey")]
-    #[test_case(Key::<p256k1::keys::PublicKey>::new(); "from a p256k1 PublicKey")]
+    #[test_case(Key::<Secp256k1PublicKey>::new(&mut get_rng()); "from a stacks-common Secp256k1PublicKey")]
+    #[test_case(Key::<p256k1::keys::PublicKey>::new(&mut get_rng()); "from a p256k1 PublicKey")]
     fn public_key_conversions_is_isomorphism<T>(source_key: Key<T>)
     where
         T: for<'a> From<&'a PublicKey> + PartialEq + std::fmt::Debug,

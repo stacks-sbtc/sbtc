@@ -667,7 +667,7 @@ mod tests {
             adversarial.receive().await.unwrap();
         });
         trusted2
-            .broadcast(Msg::random_with_private_key(&mut rand::thread_rng(), &key2))
+            .broadcast(Msg::random_with_private_key(&mut rng, &key2))
             .await
             .unwrap();
         trusted_msg_from_2_to_1
@@ -685,7 +685,7 @@ mod tests {
             adversarial.receive().await.unwrap();
         });
         trusted1
-            .broadcast(Msg::random_with_private_key(&mut rand::thread_rng(), &key1))
+            .broadcast(Msg::random_with_private_key(&mut rng, &key1))
             .await
             .unwrap();
         trusted_msg_from_1_to_2
@@ -699,20 +699,14 @@ mod tests {
         let adversarial_msg_to_1 = tokio::time::timeout(Duration::from_secs(1), async {
             trusted1.receive().await.unwrap();
         });
-        adversarial
-            .broadcast(Msg::random(&mut rand::thread_rng()))
-            .await
-            .unwrap();
+        adversarial.broadcast(Msg::random(&mut rng)).await.unwrap();
         assert!(adversarial_msg_to_1.await.is_err());
 
         // Test that adversarial can't send a message to trusted 2.
         let adversarial_msg_to_2 = tokio::time::timeout(Duration::from_secs(1), async {
             trusted2.receive().await.unwrap();
         });
-        adversarial
-            .broadcast(Msg::random(&mut rand::thread_rng()))
-            .await
-            .unwrap();
+        adversarial.broadcast(Msg::random(&mut rng)).await.unwrap();
         assert!(adversarial_msg_to_2.await.is_err());
 
         // Kill the swarms just to be sure.

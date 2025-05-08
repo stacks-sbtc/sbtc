@@ -490,8 +490,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_signer_swarm_builder() {
+        let mut rng = get_rng();
         let addr: Multiaddr = "/ip4/127.0.0.1/tcp/0".parse().unwrap();
-        let private_key = PrivateKey::new(&mut rand::thread_rng());
+        let private_key = PrivateKey::new(&mut rng);
         let keypair: Keypair = private_key.into();
         let builder = SignerSwarmBuilder::new(&private_key)
             .add_listen_endpoint(addr.clone())
@@ -507,7 +508,8 @@ mod tests {
 
     #[tokio::test]
     async fn swarm_shuts_down_on_shutdown_signal() {
-        let private_key = PrivateKey::new(&mut rand::thread_rng());
+        let mut rng = get_rng();
+        let private_key = PrivateKey::new(&mut rng);
         let builder = SignerSwarmBuilder::new(&private_key);
         let mut swarm = builder.build().unwrap();
 
@@ -568,7 +570,7 @@ mod tests {
     #[tokio::test]
     async fn swarm_with_memory_transport_disabled() {
         let mut rng = get_rng();
-        let private_key = PrivateKey::new(&mut rand::thread_rng());
+        let private_key = PrivateKey::new(&mut rng);
         let builder = SignerSwarmBuilder::new(&private_key);
         let mut swarm = builder
             .enable_memory_transport(false)
@@ -592,7 +594,8 @@ mod tests {
     /// an OS-provided port.
     #[tokio::test]
     async fn swarm_with_tcp_transport() {
-        let private_key = PrivateKey::new(&mut rand::thread_rng());
+        let mut rng = get_rng();
+        let private_key = PrivateKey::new(&mut rng);
         let builder = SignerSwarmBuilder::new(&private_key);
         let mut swarm = builder
             .add_listen_endpoint("/ip4/127.0.0.1/tcp/0".parse().unwrap())
@@ -617,7 +620,8 @@ mod tests {
     /// an OS-provided port.
     #[tokio::test]
     async fn swarm_with_quic_transport() {
-        let private_key = PrivateKey::new(&mut rand::thread_rng());
+        let mut rng = get_rng();
+        let private_key = PrivateKey::new(&mut rng);
         let builder = SignerSwarmBuilder::new(&private_key);
         let mut swarm = builder
             .enable_quic_transport(true)
@@ -641,7 +645,8 @@ mod tests {
 
     #[tokio::test]
     async fn swarm_with_quic_transport_disabled() {
-        let private_key = PrivateKey::new(&mut rand::thread_rng());
+        let mut rng = get_rng();
+        let private_key = PrivateKey::new(&mut rng);
         let builder = SignerSwarmBuilder::new(&private_key);
         let mut swarm = builder
             .enable_quic_transport(false)

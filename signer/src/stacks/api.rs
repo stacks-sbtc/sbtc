@@ -1965,9 +1965,9 @@ mod tests {
     }
 
     /// Helper method for generating a list of public keys.
-    fn generate_pubkeys(count: u16) -> Vec<PublicKey> {
+    fn generate_pubkeys<R: rand::Rng>(count: u16, rng: &mut R) -> Vec<PublicKey> {
         (0..count)
-            .map(|_| PublicKey::from_private_key(&PrivateKey::new(&mut rand::thread_rng())))
+            .map(|_| PublicKey::from_private_key(&PrivateKey::new(rng)))
             .collect()
     }
 
@@ -2035,9 +2035,10 @@ mod tests {
         C: StacksInteract,
         F: Fn(Url) -> C,
     {
+        let mut rng = get_rng();
         // Create our simulated response JSON. This uses the same method to generate
         // the serialized list of public keys as the actual Stacks node does.
-        let public_keys = generate_pubkeys(list_size);
+        let public_keys = generate_pubkeys(list_size, &mut rng);
         let signer_set = Value::Sequence(SequenceData::List(ListData {
             data: create_clarity_pubkey_list(&public_keys),
             type_signature: ListTypeData::new_list(
@@ -2095,7 +2096,8 @@ mod tests {
         C: StacksInteract,
         F: Fn(Url) -> C,
     {
-        let aggregate_key = generate_pubkeys(1).into_iter().next().unwrap();
+        let mut rng = get_rng();
+        let aggregate_key = generate_pubkeys(1, &mut rng).into_iter().next().unwrap();
 
         let data;
         let expected;
@@ -2145,10 +2147,11 @@ mod tests {
     #[test_case(128; "list-128")]
     #[tokio::test]
     async fn get_data_var_works(list_size: u16) {
+        let mut rng = get_rng();
         // Create our simulated response JSON. This uses the same method to generate
         // the serialized list of public keys as the actual Stacks node does.
         let signer_set = Value::Sequence(SequenceData::List(ListData {
-            data: create_clarity_pubkey_list(&generate_pubkeys(list_size)),
+            data: create_clarity_pubkey_list(&generate_pubkeys(list_size, &mut rng)),
             type_signature: ListTypeData::new_list(
                 TypeSignature::list_of(
                     TypeSignature::SequenceType(SequenceSubtype::BufferType(

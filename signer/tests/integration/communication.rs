@@ -14,6 +14,7 @@ use signer::network::P2PNetwork;
 use signer::network::libp2p::SignerSwarmBuilder;
 use signer::testing::context::TestContext;
 use signer::testing::context::*;
+use signer::testing::get_rng;
 use test_case::test_case;
 use tokio_stream::StreamExt;
 
@@ -134,9 +135,10 @@ async fn libp2p_clients_can_exchange_messages_given_real_network(addr1: &str, ad
 
 #[test_log::test(tokio::test)]
 async fn libp2p_limits_max_established_connections() -> Result<(), Box<dyn std::error::Error>> {
+    let mut rng = get_rng();
     // Create 10 keys (main swarm + 9 peers)
     let keys = (0..10)
-        .map(|_| PrivateKey::new(&mut rand::thread_rng()))
+        .map(|_| PrivateKey::new(&mut rng))
         .collect::<Vec<_>>();
     let public_keys = keys
         .iter()
