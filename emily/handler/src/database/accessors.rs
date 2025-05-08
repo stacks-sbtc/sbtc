@@ -202,9 +202,9 @@ pub async fn pull_and_update_deposit_with_retry(
         if update.is_unnecessary(&deposit_entry) {
             return Ok(deposit_entry);
         }
-        let is_valid_untrusted_status_update = deposit_entry.status == Status::Pending
-            || update.event.status == StatusEntry::Accepted
-                && deposit_entry.status == Status::Accepted;
+        let is_valid_untrusted_status_update = update.event.status == StatusEntry::Accepted
+            && (deposit_entry.status == Status::Pending
+                || deposit_entry.status == Status::Accepted);
         if !is_trusted_key && !is_valid_untrusted_status_update {
             return Err(Error::Forbidden);
         }
