@@ -3036,7 +3036,7 @@ fn create_test_setup<R: rand::Rng>(
         // We don't use `signer`
         signer: Recipient::new(AddressType::P2tr),
     };
-    let (request, recipient) = generate_withdrawal();
+    let (request, recipient) = generate_withdrawal(rng);
     let stacks_block = model::StacksBlock {
         block_hash: Faker.fake_with_rng(rng),
         block_height: 0u64.into(),

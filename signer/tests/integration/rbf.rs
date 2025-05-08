@@ -187,15 +187,16 @@ pub fn transaction_with_rbf(
             .collect();
 
     let mut withdrawal_recipients: Vec<Recipient> = Vec::new();
-    let withdrawals: Vec<WithdrawalRequest> = std::iter::repeat_with(generate_withdrawal)
-        .take(ctx.initial_withdrawals.max(ctx.rbf_withdrawals))
-        .enumerate()
-        .map(|(index, (mut req, recipient))| {
-            withdrawal_recipients.push(recipient);
-            req.signer_bitmap.set(index, true);
-            req
-        })
-        .collect();
+    let withdrawals: Vec<WithdrawalRequest> =
+        std::iter::repeat_with(|| generate_withdrawal(&mut rng))
+            .take(ctx.initial_withdrawals.max(ctx.rbf_withdrawals))
+            .enumerate()
+            .map(|(index, (mut req, recipient))| {
+                withdrawal_recipients.push(recipient);
+                req.signer_bitmap.set(index, true);
+                req
+            })
+            .collect();
 
     faucet.generate_blocks(1);
     // We deposited the transaction to the signer, but it's not clear to the

@@ -19,9 +19,7 @@ use bitcoincore_rpc::RpcApi as _;
 use bitvec::array::BitArray;
 use clarity::vm::types::PrincipalData;
 use fake::Fake;
-use rand::Rng as _;
 use rand::distributions::Uniform;
-use rand::rngs::OsRng;
 use sbtc::deposits::CreateDepositRequest;
 use sbtc::deposits::DepositInfo;
 use sbtc::deposits::DepositScriptInputs;
@@ -37,6 +35,7 @@ use signer::bitcoin::utxo::WithdrawalRequest;
 use signer::config::Settings;
 use signer::context::SbtcLimits;
 use signer::keys::SignerScriptPubKey;
+use signer::testing::get_rng;
 use stacks_common::types::chainstate::StacksAddress;
 
 use regtest::Recipient;
@@ -45,12 +44,16 @@ use sbtc::testing::regtest::AsUtxo;
 
 pub static REQUEST_IDS: AtomicU64 = AtomicU64::new(0);
 
-pub fn generate_withdrawal() -> (WithdrawalRequest, Recipient) {
-    let amount = OsRng.sample(Uniform::new(200_000, 250_000));
-    make_withdrawal(amount, amount / 2)
+pub fn generate_withdrawal<R: rand::Rng>(rng: &mut R) -> (WithdrawalRequest, Recipient) {
+    let amount = rng.sample(Uniform::new(200_000, 250_000));
+    make_withdrawal(amount, amount / 2, rng)
 }
 
-pub fn make_withdrawal(amount: u64, max_fee: u64) -> (WithdrawalRequest, Recipient) {
+pub fn make_withdrawal<R: rand::Rng>(
+    amount: u64,
+    max_fee: u64,
+    rng: &mut R,
+) -> (WithdrawalRequest, Recipient) {
     let recipient = Recipient::new(AddressType::P2tr);
 
     let req = WithdrawalRequest {
@@ -59,8 +62,8 @@ pub fn make_withdrawal(amount: u64, max_fee: u64) -> (WithdrawalRequest, Recipie
         script_pubkey: recipient.script_pubkey.clone().into(),
         signer_bitmap: BitArray::ZERO,
         request_id: REQUEST_IDS.fetch_add(1, Ordering::Relaxed),
-        txid: fake::Faker.fake_with_rng(&mut OsRng),
-        block_hash: fake::Faker.fake_with_rng(&mut OsRng),
+        txid: fake::Faker.fake_with_rng(rng),
+        block_hash: fake::Faker.fake_with_rng(rng),
     };
 
     (req, recipient)
@@ -259,6 +262,7 @@ fn deposits_add_to_controlled_amounts() {
 
 #[test]
 fn withdrawals_reduce_to_signers_amounts() {
+    let mut rng = get_rng();
     const FEE_RATE: f64 = 10.0;
 
     let (rpc, faucet) = regtest::initialize_blockchain();
@@ -274,7 +278,7 @@ fn withdrawals_reduce_to_signers_amounts() {
 
     // Now lets make a withdrawal request. This recipient shouldn't
     // have any coins to their name.
-    let (withdrawal_request, recipient) = generate_withdrawal();
+    let (withdrawal_request, recipient) = generate_withdrawal(&mut rng);
     assert_eq!(recipient.get_balance(rpc).to_sat(), 0);
 
     // Okay now we try to peg-out the withdrawal by making a transaction. Let's
@@ -384,6 +388,7 @@ fn withdrawals_reduce_to_signers_amounts() {
 #[test_case(1; "single withdrawals")]
 #[test_case(11; "multiple withdrawals")]
 fn parse_withdrawal_ids(withdrawal_numbers: u64) {
+    let mut rng = get_rng();
     const FEE_RATE: f64 = 10.0;
 
     let (rpc, faucet) = regtest::initialize_blockchain();
@@ -418,7 +423,7 @@ fn parse_withdrawal_ids(withdrawal_numbers: u64) {
     // Now lets make some withdrawal requests
     let mut withdrawal_requests = vec![];
     for i in 0..withdrawal_numbers {
-        let (withdrawal_request, _) = generate_withdrawal();
+        let (withdrawal_request, _) = generate_withdrawal(&mut rng);
         withdrawal_requests.push(withdrawal_request);
         // Add some gaps in the request ids
         if i % 2 == 1 {

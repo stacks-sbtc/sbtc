@@ -182,7 +182,7 @@ impl TestSweepSetup {
 
         // This is randomly generated withdrawal request and the recipient
         // who can sign for the withdrawal UTXO.
-        let (withdrawal_request, _withdrawal_recipient) = generate_withdrawal();
+        let (withdrawal_request, _withdrawal_recipient) = generate_withdrawal(rng);
         // Okay now we try to peg-in the deposit by making a transaction.
         // Let's start by getting the signer's sole UTXO.
         let signer_utxo = signer.get_utxos(rpc, None).pop().unwrap();
@@ -752,7 +752,7 @@ impl TestSweepSetup2 {
             .iter()
             .filter(|sweep_amount| !sweep_amount.is_deposit)
             .map(|&SweepAmounts { amount, max_fee, .. }| {
-                let (request, recipient) = make_withdrawal(amount, max_fee);
+                let (request, recipient) = make_withdrawal(amount, max_fee, rng);
                 WithdrawalTriple { request, recipient, block_ref }
             })
             .collect();
