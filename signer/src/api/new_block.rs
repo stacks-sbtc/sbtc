@@ -304,7 +304,6 @@ mod tests {
     use bitvec::array::BitArray;
     use clarity::vm::types::PrincipalData;
     use fake::Fake;
-    use rand::rngs::OsRng;
     use sbtc::events::KeyRotationEvent;
     use secp256k1::SECP256K1;
     use stacks_common::types::chainstate::StacksBlockId;
@@ -382,6 +381,7 @@ mod tests {
     where
         F: Fn(tokio::sync::MutexGuard<'_, Store>) -> bool,
     {
+        let mut rng = get_rng();
         let ctx = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
@@ -402,7 +402,7 @@ mod tests {
         let contract_name = ContractName::from(SBTC_REGISTRY_CONTRACT_NAME);
         let identifier = QualifiedContractIdentifier::new(issuer, contract_name.clone());
 
-        let fishy_principal: StacksPrincipal = fake::Faker.fake_with_rng(&mut OsRng);
+        let fishy_principal: StacksPrincipal = fake::Faker.fake_with_rng(&mut rng);
         let fishy_issuer = match PrincipalData::from(fishy_principal) {
             PrincipalData::Contract(contract) => contract.issuer,
             PrincipalData::Standard(standard) => standard,

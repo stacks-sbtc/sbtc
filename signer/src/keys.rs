@@ -471,11 +471,12 @@ impl SignerScriptPubKey for secp256k1::XOnlyPublicKey {
 mod tests {
     use super::*;
 
-    use rand::rngs::OsRng;
     use secp256k1::Parity;
     use secp256k1::SecretKey;
     use stacks_common::util::secp256k1::Secp256k1PrivateKey;
     use stacks_common::util::secp256k1::Secp256k1PublicKey;
+
+    use crate::testing::get_rng;
 
     use test_case::test_case;
 
@@ -536,9 +537,10 @@ mod tests {
 
     #[test]
     fn zero_x_valid_point_invalid_public_key() {
+        let mut rng = get_rng();
         let bytes = [0; 32];
         let scalar = p256k1::scalar::Scalar::from(bytes);
-        let any_y = p256k1::scalar::Scalar::random(&mut OsRng);
+        let any_y = p256k1::scalar::Scalar::random(&mut rng);
         let point = p256k1::point::Point::from((scalar, any_y));
         assert!(PublicKey::try_from(&point).is_err());
 
@@ -550,12 +552,13 @@ mod tests {
 
     #[test]
     fn regular_point_conversion() {
+        let mut rng = get_rng();
         // secp256k1::SecretKey::new does not allow for invalid private
         // keys while p256k1::scalar::Scalar does, so we start with a that
         // library to make sure that we always generate a valid public key
         // when using PublicKey::try_from below (although it's extremely
         // unlikely that we would generate an invalid one anyway).
-        let sk = secp256k1::SecretKey::new(&mut OsRng);
+        let sk = secp256k1::SecretKey::new(&mut rng);
         let scalar = p256k1::scalar::Scalar::from(sk.secret_bytes());
         let point1 = p256k1::point::Point::from(scalar);
         // Because we started with a valid private key, the point is not
@@ -603,7 +606,7 @@ mod tests {
         assert!(PrivateKey::try_from(&scalar).is_err());
     }
 
-    #[test_case(Key::<secp256k1::PublicKey>::new(&mut OsRng); "from a rust-secp256k1 PublicKey")]
+    #[test_case(Key::<secp256k1::PublicKey>::new(&mut get_rng()); "from a rust-secp256k1 PublicKey")]
     #[test_case(Key::<Secp256k1PublicKey>::new(); "from a stacks-common Secp256k1PublicKey")]
     #[test_case(Key::<p256k1::keys::PublicKey>::new(); "from a p256k1 PublicKey")]
     fn public_key_conversions_is_isomorphism<T>(source_key: Key<T>)
@@ -620,16 +623,18 @@ mod tests {
 
     #[test]
     fn stacks_common_public_key_compressed() {
-        let public_key = PublicKey::from_private_key(&PrivateKey::new(&mut OsRng));
+        let mut rng = get_rng();
+        let public_key = PublicKey::from_private_key(&PrivateKey::new(&mut rng));
         let key = stacks_common::util::secp256k1::Secp256k1PublicKey::from(&public_key);
         assert!(key.compressed())
     }
 
     #[test]
     fn selective_conversion_private_key() {
+        let mut rng = get_rng();
         // We test that we can go from a scalar to a PrivateKey with high
         // probability, and we can go back 100% of the time.
-        let scalar = p256k1::scalar::Scalar::random(&mut OsRng);
+        let scalar = p256k1::scalar::Scalar::random(&mut rng);
         if scalar.to_bytes() == [0u8; 32] {
             return;
         }
@@ -638,7 +643,7 @@ mod tests {
         let from_pk = p256k1::scalar::Scalar::from(&private_key);
         assert_eq!(from_pk, scalar);
 
-        let pk = PrivateKey(SecretKey::new(&mut OsRng));
+        let pk = PrivateKey(SecretKey::new(&mut rng));
         let scalar = p256k1::scalar::Scalar::from(&pk);
         let from_scalar = PrivateKey::try_from(&scalar).unwrap();
 
@@ -650,7 +655,8 @@ mod tests {
     // `scriptPubKey`s must match.
     #[test]
     fn x_only_key_and_secp256k1_pubkey_same_script() {
-        let secret_key = SecretKey::new(&mut OsRng);
+        let mut rng = get_rng();
+        let secret_key = SecretKey::new(&mut rng);
         let x_part = secret_key.x_only_public_key(SECP256K1).0;
         // It doesn't matter what the parity bit is.
         let pk = secp256k1::PublicKey::from_x_only_public_key(x_part, Parity::Even);
@@ -664,7 +670,8 @@ mod tests {
 
     #[test]
     fn tap_tweak_equivalence() {
-        let private_key = PrivateKey::new(&mut OsRng);
+        let mut rng = get_rng();
+        let private_key = PrivateKey::new(&mut rng);
         let mut public_key = PublicKey::from_private_key(&private_key);
         // If we are given a public key that is `odd` then negate it to
         // make it even. This is what happens under the hood in

@@ -184,17 +184,19 @@ pub mod serde_utils {
 #[cfg(test)]
 mod tests {
     use fake::Fake;
-    use rand::rngs::OsRng;
 
     use super::*;
 
+    use crate::testing::get_rng;
+
     #[test]
     fn recoverable_signatures_recover_public_key() {
+        let mut rng = get_rng();
         // Let's create a random digest to sign, sign it, and recover the
         // public key from the signature.
-        let private_key = PrivateKey::new(&mut OsRng);
+        let private_key = PrivateKey::new(&mut rng);
 
-        let digest: [u8; 32] = fake::Faker.fake_with_rng(&mut OsRng);
+        let digest: [u8; 32] = fake::Faker.fake_with_rng(&mut rng);
         let msg = secp256k1::Message::from_digest(digest);
         let sig = private_key.sign_ecdsa_recoverable(&msg);
 
@@ -212,7 +214,8 @@ mod tests {
 
     #[test]
     fn deserialize_inverts_serialize_compact() {
-        let sig1 = crate::testing::dummy::recoverable_signature(&fake::Faker, &mut OsRng);
+        let mut rng = get_rng();
+        let sig1 = crate::testing::dummy::recoverable_signature(&fake::Faker, &mut rng);
         let data = sig1.to_byte_array();
         let sig2 = RecoverableSignature::from_byte_array(&data).unwrap();
 

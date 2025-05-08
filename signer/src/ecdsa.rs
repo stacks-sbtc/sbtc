@@ -263,7 +263,6 @@ mod tests {
     use std::marker::PhantomData;
 
     use fake::Fake as _;
-    use rand::rngs::OsRng;
 
     use crate::codec::Encode as _;
     use crate::ecdsa::SignEcdsa;
@@ -291,12 +290,13 @@ mod tests {
     where
         T: Into<message::Payload> + fake::Dummy<Faker>,
     {
-        let keypair = secp256k1::Keypair::new_global(&mut OsRng);
+        let mut rng = get_rng();
+        let keypair = secp256k1::Keypair::new_global(&mut rng);
         let private_key: PrivateKey = keypair.secret_key().into();
         let public_key: PublicKey = keypair.public_key().into();
         let original_message = SignerMessage {
             bitcoin_chain_tip: BitcoinBlockHash::from([1; 32]),
-            payload: Faker.fake_with_rng::<T, _>(&mut OsRng).into(),
+            payload: Faker.fake_with_rng::<T, _>(&mut rng).into(),
         };
 
         // We sign a payload digest. It should always be what this function
@@ -349,12 +349,13 @@ mod tests {
     where
         T: Into<message::Payload> + fake::Dummy<Faker>,
     {
-        let keypair = secp256k1::Keypair::new_global(&mut OsRng);
+        let mut rng = get_rng();
+        let keypair = secp256k1::Keypair::new_global(&mut rng);
         let private_key: PrivateKey = keypair.secret_key().into();
         let public_key: PublicKey = keypair.public_key().into();
         let original_message = SignerMessage {
             bitcoin_chain_tip: BitcoinBlockHash::from([1; 32]),
-            payload: Faker.fake_with_rng::<T, _>(&mut OsRng).into(),
+            payload: Faker.fake_with_rng::<T, _>(&mut rng).into(),
         };
 
         // We sign a payload digest. It should always be what this function
@@ -435,14 +436,15 @@ mod tests {
     where
         T: Into<message::Payload> + fake::Dummy<Faker>,
     {
+        let mut rng = get_rng();
         // This is the upgraded signer. They will construct a message for
         // consumption by another signer.
-        let keypair = secp256k1::Keypair::new_global(&mut OsRng);
+        let keypair = secp256k1::Keypair::new_global(&mut rng);
         let private_key: PrivateKey = keypair.secret_key().into();
         let public_key: PublicKey = keypair.public_key().into();
         let original_message = SignerMessage {
             bitcoin_chain_tip: BitcoinBlockHash::from([1; 32]),
-            payload: Faker.fake_with_rng::<T, _>(&mut OsRng).into(),
+            payload: Faker.fake_with_rng::<T, _>(&mut rng).into(),
         };
 
         // The upgraded signer sends messages with an additional field.
@@ -537,9 +539,10 @@ mod tests {
 
     #[test]
     fn backwards_compatible_updates2() {
+        let mut rng = get_rng();
         // This is the upgraded signer. They will construct a message for
         // consumption by another signer.
-        let keypair = secp256k1::Keypair::new_global(&mut OsRng);
+        let keypair = secp256k1::Keypair::new_global(&mut rng);
         let private_key: PrivateKey = keypair.secret_key().into();
         let public_key: PublicKey = keypair.public_key().into();
 
@@ -552,10 +555,10 @@ mod tests {
         // values.
         let mut new_field = std::collections::HashMap::new();
         for _ in 0..100 {
-            new_field.insert(Faker.fake_with_rng(&mut OsRng), proto::SetValueZst {});
+            new_field.insert(Faker.fake_with_rng(&mut rng), proto::SetValueZst {});
         }
-        let block_hash = Faker.fake_with_rng::<StacksBlockHash, _>(&mut OsRng);
-        let txid = Faker.fake_with_rng::<StacksTxId, _>(&mut OsRng);
+        let block_hash = Faker.fake_with_rng::<StacksBlockHash, _>(&mut rng);
+        let txid = Faker.fake_with_rng::<StacksTxId, _>(&mut rng);
         let decision = SignerWithdrawalDecisionUpgraded {
             request_id: 102,
             block_id: Some(proto::StacksBlockId::from(block_hash)),

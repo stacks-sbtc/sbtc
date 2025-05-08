@@ -1643,9 +1643,9 @@ mod tests {
     use fake::Fake as _;
     use model::SignerVote;
     use more_asserts::assert_ge;
+    use rand::SeedableRng;
     use rand::distributions::Distribution;
     use rand::distributions::Uniform;
-    use rand::rngs::OsRng;
     use sbtc::deposits::DepositScriptInputs;
     use secp256k1::Keypair;
     use secp256k1::SecretKey;
@@ -1657,6 +1657,8 @@ mod tests {
     use crate::context::RollingWithdrawalLimits;
     use crate::testing;
     use crate::testing::btc::base_signer_transaction;
+    use crate::testing::get_rng;
+    use rand::RngCore;
 
     /// The maximum virtual size of a transaction package in v-bytes.
     const MEMPOOL_MAX_PACKAGE_SIZE: u32 = 101000;
@@ -1666,25 +1668,40 @@ mod tests {
 
     static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(0);
 
-    fn generate_x_only_public_key() -> XOnlyPublicKey {
-        let secret_key = SecretKey::new(&mut OsRng);
+    fn generate_x_only_public_key<R: rand::Rng>(rng: &mut R) -> XOnlyPublicKey {
+        let secret_key = SecretKey::new(rng);
         secret_key.x_only_public_key(SECP256K1).0
+    }
+
+    static GLOBAL_RNG: LazyLock<rand::rngs::StdRng> = LazyLock::new(|| {
+        let seed = get_rng().next_u64();
+        // Nextest prints stdout and stderr only for failed tests so this
+        // wouldn't be too much noise.
+        eprintln!("bitcoin::utxo.rs GLOBAL_RNG seed: {seed:}");
+        rand::rngs::StdRng::seed_from_u64(seed)
+    });
+
+    fn global_rng() -> rand::rngs::StdRng {
+        GLOBAL_RNG.clone()
     }
 
     // The is the least non dust amount for withdrawal outputs locked by
     // the generate_address() script, which generates P2WPKH outputs
-    static MINIMAL_NON_DUST_AMOUNT_P2WPKH: LazyLock<u64> =
-        LazyLock::new(|| generate_address().minimal_non_dust().to_sat());
+    static MINIMAL_NON_DUST_AMOUNT_P2WPKH: LazyLock<u64> = LazyLock::new(|| {
+        generate_address(&mut global_rng())
+            .minimal_non_dust()
+            .to_sat()
+    });
 
-    fn generate_address() -> ScriptPubKey {
-        let secret_key = SecretKey::new(&mut OsRng);
+    fn generate_address<R: rand::Rng>(rng: &mut R) -> ScriptPubKey {
+        let secret_key = SecretKey::new(rng);
         let pk = CompressedPublicKey(secret_key.public_key(SECP256K1));
 
         ScriptBuf::new_p2wpkh(&pk.wpubkey_hash()).into()
     }
 
-    fn generate_outpoint(amount: u64, vout: u32) -> OutPoint {
-        let sats: u64 = Uniform::new(1, 500_000_000).sample(&mut OsRng);
+    fn generate_outpoint<R: rand::Rng>(amount: u64, vout: u32, rng: &mut R) -> OutPoint {
+        let sats: u64 = Uniform::new(1, 500_000_000).sample(rng);
 
         let tx = Transaction {
             version: Version::TWO,
@@ -1723,8 +1740,13 @@ mod tests {
     }
 
     /// Create a new deposit request depositing from a random public key.
-    fn create_deposit(amount: u64, max_fee: u64, signer_bitmap: u128) -> DepositRequest {
-        let signers_public_key = generate_x_only_public_key();
+    fn create_deposit<R: rand::Rng>(
+        amount: u64,
+        max_fee: u64,
+        signer_bitmap: u128,
+        rng: &mut R,
+    ) -> DepositRequest {
+        let signers_public_key = generate_x_only_public_key(rng);
 
         let contract_name = std::iter::repeat_n('a', 128).collect::<String>();
         let principal_str = format!("{}.{contract_name}", StacksAddress::burn_address(false));
@@ -1736,7 +1758,7 @@ mod tests {
         };
 
         DepositRequest {
-            outpoint: generate_outpoint(amount, 1),
+            outpoint: generate_outpoint(amount, 1, rng),
             max_fee,
             signer_bitmap: BitArray::new(signer_bitmap.to_le_bytes()),
             amount,
@@ -1747,15 +1769,20 @@ mod tests {
     }
 
     /// Create a new withdrawal request withdrawing to a random address.
-    fn create_withdrawal(amount: u64, max_fee: u64, signer_bitmap: u128) -> WithdrawalRequest {
+    fn create_withdrawal<R: rand::Rng>(
+        amount: u64,
+        max_fee: u64,
+        signer_bitmap: u128,
+        rng: &mut R,
+    ) -> WithdrawalRequest {
         WithdrawalRequest {
             max_fee,
             signer_bitmap: BitArray::new(signer_bitmap.to_le_bytes()),
             amount,
-            script_pubkey: generate_address(),
-            txid: fake::Faker.fake_with_rng(&mut OsRng),
+            script_pubkey: generate_address(rng),
+            txid: fake::Faker.fake_with_rng(rng),
             request_id: NEXT_REQUEST_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-            block_hash: fake::Faker.fake_with_rng(&mut OsRng),
+            block_hash: fake::Faker.fake_with_rng(rng),
         }
     }
 
@@ -1792,10 +1819,11 @@ mod tests {
     /// DKG round has completed.
     #[test]
     fn mock_signer_utxo_signing_and_spending_verification() {
+        let mut rng = get_rng();
         let secp = secp256k1::Secp256k1::new();
 
         // Generate a key pair which will serve as the signers' aggregate key.
-        let secret_key = SecretKey::new(&mut OsRng);
+        let secret_key = SecretKey::new(&mut rng);
         let keypair = secp256k1::Keypair::from_secret_key(&secp, &secret_key);
         let tweaked = keypair.tap_tweak(&secp, None);
         let (aggregate_key, _) = keypair.x_only_public_key();
@@ -1845,7 +1873,7 @@ mod tests {
 
         // [4] Verify an incorrect signature with the correct sighash type, which
         // should fail. In this case we use a completely newly generated keypair.
-        let secret_key = SecretKey::new(&mut OsRng);
+        let secret_key = SecretKey::new(&mut rng);
         let keypair = secp256k1::Keypair::from_secret_key(&secp, &secret_key);
         let schnorr_sig = secp.sign_schnorr(&message, &keypair);
         let taproot_sig = bitcoin::taproot::Signature {
@@ -1870,18 +1898,19 @@ mod tests {
 
     #[test]
     fn calculate_solo_tx_sizes_for_consts() {
+        let mut rng = get_rng();
         // For solo deposits
         let mut requests = SbtcRequests {
-            deposits: vec![create_deposit(123456, 30_000, 0)],
+            deposits: vec![create_deposit(123456, 30_000, 0, &mut rng)],
             withdrawals: Vec::new(),
             signer_state: SignerBtcState {
                 utxo: SignerUtxo {
-                    outpoint: generate_outpoint(550_000_000, 0),
+                    outpoint: generate_outpoint(550_000_000, 0, &mut rng),
                     amount: 550_000_000,
-                    public_key: generate_x_only_public_key(),
+                    public_key: generate_x_only_public_key(&mut rng),
                 },
                 fee_rate: 5.0,
-                public_key: generate_x_only_public_key(),
+                public_key: generate_x_only_public_key(&mut rng),
                 last_fees: None,
                 magic_bytes: [0; 2],
             },
@@ -1890,7 +1919,7 @@ mod tests {
             sbtc_limits: SbtcLimits::unlimited(),
             max_deposits_per_bitcoin_tx: DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX,
         };
-        let keypair = Keypair::new_global(&mut OsRng);
+        let keypair = Keypair::new_global(&mut rng);
 
         let mut transactions = requests.construct_transactions().unwrap();
         assert_eq!(transactions.len(), 1);
@@ -1908,7 +1937,7 @@ mod tests {
         // that the withdrawal ID encoding takes up the maximum amount of
         // space in the OP_RETURN output.
         requests.deposits = Vec::new();
-        requests.withdrawals = vec![create_withdrawal(154_321, 40_000, 0).wid(u64::MAX)];
+        requests.withdrawals = vec![create_withdrawal(154_321, 40_000, 0, &mut rng).wid(u64::MAX)];
 
         let mut transactions = requests.construct_transactions().unwrap();
         assert_eq!(transactions.len(), 1);
@@ -1995,17 +2024,21 @@ mod tests {
     /// second output is a data output.
     #[test]
     fn the_first_input_and_output_is_signers_second_output_data() {
+        let mut rng = get_rng();
         let requests = SbtcRequests {
-            deposits: vec![create_deposit(123456, 0, 0)],
-            withdrawals: vec![create_withdrawal(1000, 0, 0), create_withdrawal(2000, 0, 0)],
+            deposits: vec![create_deposit(123456, 0, 0, &mut rng)],
+            withdrawals: vec![
+                create_withdrawal(1000, 0, 0, &mut rng),
+                create_withdrawal(2000, 0, 0, &mut rng),
+            ],
             signer_state: SignerBtcState {
                 utxo: SignerUtxo {
-                    outpoint: generate_outpoint(5500, 0),
+                    outpoint: generate_outpoint(5500, 0, &mut rng),
                     amount: 5500,
-                    public_key: generate_x_only_public_key(),
+                    public_key: generate_x_only_public_key(&mut rng),
                 },
                 fee_rate: 0.0,
-                public_key: generate_x_only_public_key(),
+                public_key: generate_x_only_public_key(&mut rng),
                 last_fees: None,
                 magic_bytes: [0; 2],
             },
@@ -2084,19 +2117,20 @@ mod tests {
     #[test_case(&[1000, 2000, 3000]; "sparse_withdrawal_ids")]
     #[test_case(&(1..100).map(|i| i * 23).collect::<Vec<u64>>(); "ids_causing_multiple_transactions")]
     fn test_withdrawal_id_packaging(withdrawal_ids: &[u64]) {
+        let mut rng = get_rng();
         // Setup test environment
         let public_key = XOnlyPublicKey::from_str(X_ONLY_PUBLIC_KEY1).unwrap();
         let withdrawals = withdrawal_ids
             .iter()
-            .map(|&id| create_withdrawal(10000, 10000, 0).wid(id))
+            .map(|&id| create_withdrawal(10000, 10000, 0, &mut rng).wid(id))
             .collect::<Vec<_>>();
 
         let requests = SbtcRequests {
-            deposits: vec![create_deposit(100_000, 5_000, 0)],
+            deposits: vec![create_deposit(100_000, 5_000, 0, &mut rng)],
             withdrawals,
             signer_state: SignerBtcState {
                 utxo: SignerUtxo {
-                    outpoint: generate_outpoint(500_000_000, 0),
+                    outpoint: generate_outpoint(500_000_000, 0, &mut rng),
                     amount: 500_000_000,
                     public_key,
                 },
@@ -2197,6 +2231,7 @@ mod tests {
     /// Deposit requests add to the signers' UTXO.
     #[test]
     fn deposits_with_low_amount_and_high_max_fee() {
+        let mut rng = get_rng();
         // The bad deposit
         let deposit_amount = 100;
         let max_fee = 123456;
@@ -2204,8 +2239,8 @@ mod tests {
         let public_key = XOnlyPublicKey::from_str(X_ONLY_PUBLIC_KEY1).unwrap();
         let requests = SbtcRequests {
             deposits: vec![
-                create_deposit(deposit_amount, max_fee, 0),
-                create_deposit(345678, 345678, 0),
+                create_deposit(deposit_amount, max_fee, 0, &mut rng),
+                create_deposit(345678, 345678, 0, &mut rng),
             ],
             withdrawals: Vec::new(),
             signer_state: SignerBtcState {
@@ -2245,12 +2280,13 @@ mod tests {
     /// Deposit requests add to the signers' UTXO.
     #[test]
     fn deposits_increase_signers_utxo_amount() {
+        let mut rng = get_rng();
         let public_key = XOnlyPublicKey::from_str(X_ONLY_PUBLIC_KEY1).unwrap();
         let requests = SbtcRequests {
             deposits: vec![
-                create_deposit(123456, 0, 0),
-                create_deposit(789012, 0, 0),
-                create_deposit(345678, 0, 0),
+                create_deposit(123456, 0, 0, &mut rng),
+                create_deposit(789012, 0, 0, &mut rng),
+                create_deposit(345678, 0, 0, &mut rng),
             ],
             withdrawals: Vec::new(),
             signer_state: SignerBtcState {
@@ -2296,13 +2332,14 @@ mod tests {
     /// Withdrawal requests remove funds from the signers' UTXO.
     #[test]
     fn withdrawals_decrease_signers_utxo_amount() {
+        let mut rng = get_rng();
         let public_key = XOnlyPublicKey::from_str(X_ONLY_PUBLIC_KEY1).unwrap();
         let requests = SbtcRequests {
             deposits: Vec::new(),
             withdrawals: vec![
-                create_withdrawal(1000, 0, 0),
-                create_withdrawal(2000, 0, 0),
-                create_withdrawal(3000, 0, 0),
+                create_withdrawal(1000, 0, 0, &mut rng),
+                create_withdrawal(2000, 0, 0, &mut rng),
+                create_withdrawal(3000, 0, 0, &mut rng),
             ],
             signer_state: SignerBtcState {
                 utxo: SignerUtxo {
@@ -2339,22 +2376,23 @@ mod tests {
     /// We chain transactions so that we have a single signer UTXO at the end.
     #[test]
     fn returned_txs_form_a_tx_chain() {
+        let mut rng = get_rng();
         let public_key = XOnlyPublicKey::from_str(X_ONLY_PUBLIC_KEY1).unwrap();
         let requests = SbtcRequests {
             deposits: vec![
-                create_deposit(1234, 0, 1 << 1),
-                create_deposit(5678, 0, 1 << 2),
-                create_deposit(9012, 0, (1 << 3) | (1 << 4)),
+                create_deposit(1234, 0, 1 << 1, &mut rng),
+                create_deposit(5678, 0, 1 << 2, &mut rng),
+                create_deposit(9012, 0, (1 << 3) | (1 << 4), &mut rng),
             ],
             withdrawals: vec![
-                create_withdrawal(1000, 0, 1 << 5),
-                create_withdrawal(2000, 0, 1 << 6),
-                create_withdrawal(3000, 0, 1 << 7),
-                create_withdrawal(4000, 0, (1 << 8) | (1 << 9)),
+                create_withdrawal(1000, 0, 1 << 5, &mut rng),
+                create_withdrawal(2000, 0, 1 << 6, &mut rng),
+                create_withdrawal(3000, 0, 1 << 7, &mut rng),
+                create_withdrawal(4000, 0, (1 << 8) | (1 << 9), &mut rng),
             ],
             signer_state: SignerBtcState {
                 utxo: SignerUtxo {
-                    outpoint: generate_outpoint(300_000, 0),
+                    outpoint: generate_outpoint(300_000, 0, &mut rng),
                     amount: 300_000,
                     public_key,
                 },
@@ -2392,29 +2430,30 @@ mod tests {
     /// deposit in the transaction package.
     #[test]
     fn requests_in_unsigned_transaction_are_in_btc_tx() {
+        let mut rng = get_rng();
         // The requests in the UnsignedTransaction correspond to
         // inputs and outputs in the transaction
         let public_key = XOnlyPublicKey::from_str(X_ONLY_PUBLIC_KEY1).unwrap();
         let requests = SbtcRequests {
             deposits: vec![
-                create_deposit(1234, 0, 1 << 1),
-                create_deposit(5678, 0, 1 << 2),
-                create_deposit(9012, 0, (1 << 3) | (1 << 4)),
-                create_deposit(3456, 0, 1 << 5),
-                create_deposit(7890, 0, 0),
+                create_deposit(1234, 0, 1 << 1, &mut rng),
+                create_deposit(5678, 0, 1 << 2, &mut rng),
+                create_deposit(9012, 0, (1 << 3) | (1 << 4), &mut rng),
+                create_deposit(3456, 0, 1 << 5, &mut rng),
+                create_deposit(7890, 0, 0, &mut rng),
             ],
             withdrawals: vec![
-                create_withdrawal(1000, 0, 1 << 6),
-                create_withdrawal(2000, 0, 1 << 7),
-                create_withdrawal(3000, 0, 1 << 8),
-                create_withdrawal(4000, 0, (1 << 9) | (1 << 10)),
-                create_withdrawal(5000, 0, 0),
-                create_withdrawal(6000, 0, 0),
-                create_withdrawal(7000, 0, 0),
+                create_withdrawal(1000, 0, 1 << 6, &mut rng),
+                create_withdrawal(2000, 0, 1 << 7, &mut rng),
+                create_withdrawal(3000, 0, 1 << 8, &mut rng),
+                create_withdrawal(4000, 0, (1 << 9) | (1 << 10), &mut rng),
+                create_withdrawal(5000, 0, 0, &mut rng),
+                create_withdrawal(6000, 0, 0, &mut rng),
+                create_withdrawal(7000, 0, 0, &mut rng),
             ],
             signer_state: SignerBtcState {
                 utxo: SignerUtxo {
-                    outpoint: generate_outpoint(300_000, 0),
+                    outpoint: generate_outpoint(300_000, 0, &mut rng),
                     amount: 300_000,
                     public_key,
                 },
@@ -2489,32 +2528,33 @@ mod tests {
     ///   deducted from the signers.
     #[test]
     fn returned_txs_match_fee_rate() {
+        let mut rng = get_rng();
         // Each deposit and withdrawal has a max fee greater than the current market fee rate
         let public_key = XOnlyPublicKey::from_str(X_ONLY_PUBLIC_KEY1).unwrap();
         // Any old keypair will do here, we need it to construct the
         // witness data of the right size.
-        let keypair = Keypair::new_global(&mut OsRng);
+        let keypair = Keypair::new_global(&mut rng);
 
         let requests = SbtcRequests {
             deposits: vec![
-                create_deposit(12340, 100_000, 1 << 1),
-                create_deposit(56780, 100_000, 1 << 2),
-                create_deposit(90120, 100_000, (1 << 3) | (1 << 4)),
-                create_deposit(34560, 100_000, 1 << 5),
-                create_deposit(78900, 100_000, 0),
+                create_deposit(12340, 100_000, 1 << 1, &mut rng),
+                create_deposit(56780, 100_000, 1 << 2, &mut rng),
+                create_deposit(90120, 100_000, (1 << 3) | (1 << 4), &mut rng),
+                create_deposit(34560, 100_000, 1 << 5, &mut rng),
+                create_deposit(78900, 100_000, 0, &mut rng),
             ],
             withdrawals: vec![
-                create_withdrawal(10000, 100_000, 1 << 6),
-                create_withdrawal(20000, 100_000, 1 << 7),
-                create_withdrawal(30000, 100_000, 1 << 8),
-                create_withdrawal(40000, 100_000, (1 << 9) | (1 << 10)),
-                create_withdrawal(50000, 100_000, 0),
-                create_withdrawal(60000, 100_000, 0),
-                create_withdrawal(70000, 100_000, 0),
+                create_withdrawal(10000, 100_000, 1 << 6, &mut rng),
+                create_withdrawal(20000, 100_000, 1 << 7, &mut rng),
+                create_withdrawal(30000, 100_000, 1 << 8, &mut rng),
+                create_withdrawal(40000, 100_000, (1 << 9) | (1 << 10), &mut rng),
+                create_withdrawal(50000, 100_000, 0, &mut rng),
+                create_withdrawal(60000, 100_000, 0, &mut rng),
+                create_withdrawal(70000, 100_000, 0, &mut rng),
             ],
             signer_state: SignerBtcState {
                 utxo: SignerUtxo {
-                    outpoint: generate_outpoint(300_000, 0),
+                    outpoint: generate_outpoint(300_000, 0, &mut rng),
                     amount: 300_000_000,
                     public_key,
                 },
@@ -2564,23 +2604,24 @@ mod tests {
 
     #[test]
     fn rbf_txs_have_greater_total_fee() {
+        let mut rng = get_rng();
         // Each deposit and withdrawal has a max fee greater than the current market fee rate
         let public_key = XOnlyPublicKey::from_str(X_ONLY_PUBLIC_KEY1).unwrap();
         let mut requests = SbtcRequests {
             deposits: vec![
-                create_deposit(12340, 100_000, 0),
-                create_deposit(56780, 100_000, 0),
-                create_deposit(90120, 100_000, 0),
-                create_deposit(34560, 100_000, 0),
-                create_deposit(78900, 100_000, 0),
+                create_deposit(12340, 100_000, 0, &mut rng),
+                create_deposit(56780, 100_000, 0, &mut rng),
+                create_deposit(90120, 100_000, 0, &mut rng),
+                create_deposit(34560, 100_000, 0, &mut rng),
+                create_deposit(78900, 100_000, 0, &mut rng),
             ],
             withdrawals: vec![
-                create_withdrawal(10000, 100_000, 0).wid(1),
-                create_withdrawal(20000, 100_000, 0).wid(1000),
+                create_withdrawal(10000, 100_000, 0, &mut rng).wid(1),
+                create_withdrawal(20000, 100_000, 0, &mut rng).wid(1000),
             ],
             signer_state: SignerBtcState {
                 utxo: SignerUtxo {
-                    outpoint: generate_outpoint(300_000, 0),
+                    outpoint: generate_outpoint(300_000, 0, &mut rng),
                     amount: 300_000_000,
                     public_key,
                 },
@@ -2649,19 +2690,20 @@ mod tests {
     #[test_case(2, true; "some deposits, multiple txs")]
     #[test_case(0, false; "no deposits, single tx")]
     fn unsigned_tx_digests(num_deposits: usize, multiple_txs: bool) {
+        let mut rng = get_rng();
         // Each deposit and withdrawal has a max fee greater than the current market fee rate
         let public_key = XOnlyPublicKey::from_str(X_ONLY_PUBLIC_KEY1).unwrap();
         let mut requests = SbtcRequests {
-            deposits: std::iter::repeat_with(|| create_deposit(123456, 100_000, 0))
+            deposits: std::iter::repeat_with(|| create_deposit(123456, 100_000, 0, &mut rng))
                 .take(num_deposits)
                 .collect(),
             withdrawals: (0..600)
                 .step_by(10)
-                .map(|id| create_withdrawal(10_000, 100_000, 0).wid(id))
+                .map(|id| create_withdrawal(10_000, 100_000, 0, &mut rng).wid(id))
                 .collect(),
             signer_state: SignerBtcState {
                 utxo: SignerUtxo {
-                    outpoint: generate_outpoint(300_000, 0),
+                    outpoint: generate_outpoint(300_000, 0, &mut rng),
                     amount: 300_000_000,
                     public_key,
                 },
@@ -2680,7 +2722,7 @@ mod tests {
         if multiple_txs {
             requests
                 .withdrawals
-                .push(create_withdrawal(70000, 100_000, 0).wid(650));
+                .push(create_withdrawal(70000, 100_000, 0, &mut rng).wid(650));
         }
         let transactions = requests.construct_transactions().unwrap();
         let expected_tx_count = if multiple_txs { 2 } else { 1 };
@@ -2696,13 +2738,14 @@ mod tests {
     /// then we return an error.
     #[test]
     fn negative_amounts_give_error() {
+        let mut rng = get_rng();
         let public_key = XOnlyPublicKey::from_str(X_ONLY_PUBLIC_KEY1).unwrap();
         let requests = SbtcRequests {
             deposits: Vec::new(),
             withdrawals: vec![
-                create_withdrawal(1000, 0, 0),
-                create_withdrawal(2000, 0, 0),
-                create_withdrawal(3000, 0, 0),
+                create_withdrawal(1000, 0, 0, &mut rng),
+                create_withdrawal(2000, 0, 0, &mut rng),
+                create_withdrawal(3000, 0, 0, &mut rng),
             ],
             signer_state: SignerBtcState {
                 utxo: SignerUtxo {
@@ -2735,6 +2778,7 @@ mod tests {
         good_withdrawal_count: usize,
         low_fee_withdrawal_count: usize,
     ) {
+        let mut rng = get_rng();
         // Each deposit and withdrawal has a max fee greater than the current market fee rate
         let public_key = XOnlyPublicKey::from_str(X_ONLY_PUBLIC_KEY1).unwrap();
         let fee_rate = 10.0;
@@ -2743,20 +2787,20 @@ mod tests {
         // Create deposit and withdrawal requests, some with too low of a
         // max fees and some with a good max fee.
         let deposit_low_fee = ((SOLO_DEPOSIT_TX_VSIZE - 1.0) * fee_rate) as u64;
-        let low_fee_deposits = std::iter::repeat_with(|| uniform.sample(&mut OsRng))
+        let low_fee_deposits = std::iter::repeat_with(|| uniform.sample(&mut rng.clone()))
             .take(low_fee_deposit_count)
-            .map(|amount| create_deposit(amount, deposit_low_fee, 0));
-        let good_fee_deposits = std::iter::repeat_with(|| uniform.sample(&mut OsRng))
+            .map(|amount| create_deposit(amount, deposit_low_fee, 0, &mut rng.clone()));
+        let good_fee_deposits = std::iter::repeat_with(|| uniform.sample(&mut rng.clone()))
             .take(good_deposit_count)
-            .map(|amount| create_deposit(amount, 100_000, 0));
+            .map(|amount| create_deposit(amount, 100_000, 0, &mut rng.clone()));
 
         let withdrawal_low_fee = ((BASE_WITHDRAWAL_TX_VSIZE - 1.0) * fee_rate) as u64;
-        let low_fee_withdrawals = std::iter::repeat_with(|| uniform.sample(&mut OsRng))
+        let low_fee_withdrawals = std::iter::repeat_with(|| uniform.sample(&mut rng.clone()))
             .take(low_fee_withdrawal_count)
-            .map(|amount| create_withdrawal(amount, withdrawal_low_fee, 0));
-        let good_fee_withdrawals = std::iter::repeat_with(|| uniform.sample(&mut OsRng))
+            .map(|amount| create_withdrawal(amount, withdrawal_low_fee, 0, &mut rng.clone()));
+        let good_fee_withdrawals = std::iter::repeat_with(|| uniform.sample(&mut rng.clone()))
             .take(good_withdrawal_count)
-            .map(|amount| create_withdrawal(amount, 100_000, 0));
+            .map(|amount| create_withdrawal(amount, 100_000, 0, &mut rng.clone()));
 
         // Okay now generate the (unsigned) transaction that we will submit.
         let requests = SbtcRequests {
@@ -2764,7 +2808,7 @@ mod tests {
             withdrawals: good_fee_withdrawals.chain(low_fee_withdrawals).collect(),
             signer_state: SignerBtcState {
                 utxo: SignerUtxo {
-                    outpoint: generate_outpoint(300_000_000, 0),
+                    outpoint: generate_outpoint(300_000_000, 0, &mut rng),
                     amount: 300_000_000,
                     public_key,
                 },
@@ -2808,30 +2852,31 @@ mod tests {
     /// the model type to the required type here.
     #[test]
     fn creating_deposit_request_from_model_bitmap_is_right() {
+        let mut rng = get_rng();
         let signer_votes = [
             SignerVote {
-                signer_public_key: fake::Faker.fake_with_rng(&mut OsRng),
+                signer_public_key: fake::Faker.fake_with_rng(&mut rng),
                 is_accepted: Some(true),
             },
             SignerVote {
-                signer_public_key: fake::Faker.fake_with_rng(&mut OsRng),
+                signer_public_key: fake::Faker.fake_with_rng(&mut rng),
                 is_accepted: Some(false),
             },
             SignerVote {
-                signer_public_key: fake::Faker.fake_with_rng(&mut OsRng),
+                signer_public_key: fake::Faker.fake_with_rng(&mut rng),
                 is_accepted: Some(true),
             },
             SignerVote {
-                signer_public_key: fake::Faker.fake_with_rng(&mut OsRng),
+                signer_public_key: fake::Faker.fake_with_rng(&mut rng),
                 is_accepted: Some(true),
             },
             SignerVote {
-                signer_public_key: fake::Faker.fake_with_rng(&mut OsRng),
+                signer_public_key: fake::Faker.fake_with_rng(&mut rng),
                 is_accepted: None,
             },
         ];
         let votes = SignerVotes::from(signer_votes.to_vec());
-        let request: model::DepositRequest = fake::Faker.fake_with_rng(&mut OsRng);
+        let request: model::DepositRequest = fake::Faker.fake_with_rng(&mut rng);
         let deposit_request = DepositRequest::from_model(request, votes.clone());
 
         // One explicit vote against and one implicit vote against.
@@ -2847,34 +2892,35 @@ mod tests {
     /// the model type to the required type here.
     #[test]
     fn creating_withdrawal_request_from_model_bitmap_is_right() {
+        let mut rng = get_rng();
         let signer_votes = [
             SignerVote {
-                signer_public_key: fake::Faker.fake_with_rng(&mut OsRng),
+                signer_public_key: fake::Faker.fake_with_rng(&mut rng),
                 is_accepted: Some(true),
             },
             SignerVote {
-                signer_public_key: fake::Faker.fake_with_rng(&mut OsRng),
+                signer_public_key: fake::Faker.fake_with_rng(&mut rng),
                 is_accepted: None,
             },
             SignerVote {
-                signer_public_key: fake::Faker.fake_with_rng(&mut OsRng),
+                signer_public_key: fake::Faker.fake_with_rng(&mut rng),
                 is_accepted: Some(false),
             },
             SignerVote {
-                signer_public_key: fake::Faker.fake_with_rng(&mut OsRng),
+                signer_public_key: fake::Faker.fake_with_rng(&mut rng),
                 is_accepted: Some(true),
             },
             SignerVote {
-                signer_public_key: fake::Faker.fake_with_rng(&mut OsRng),
+                signer_public_key: fake::Faker.fake_with_rng(&mut rng),
                 is_accepted: Some(true),
             },
             SignerVote {
-                signer_public_key: fake::Faker.fake_with_rng(&mut OsRng),
+                signer_public_key: fake::Faker.fake_with_rng(&mut rng),
                 is_accepted: None,
             },
         ];
         let votes = SignerVotes::from(signer_votes.to_vec());
-        let request: model::WithdrawalRequest = fake::Faker.fake_with_rng(&mut OsRng);
+        let request: model::WithdrawalRequest = fake::Faker.fake_with_rng(&mut rng);
         let withdrawal_request = WithdrawalRequest::from_model(request, votes.clone());
 
         // One explicit vote against and one implicit vote against.
@@ -3041,7 +3087,8 @@ mod tests {
         create_deposit(
             DEPOSIT_DUST_LIMIT + SOLO_DEPOSIT_TX_VSIZE as u64,
             10_000,
-            0
+            0,
+            &mut global_rng(),
         ),
         true; "deposit amounts over the dust limit accepted")]
     #[test_case(
@@ -3049,9 +3096,11 @@ mod tests {
             DEPOSIT_DUST_LIMIT + SOLO_DEPOSIT_TX_VSIZE as u64 - 1,
             10_000,
             0
+            , &mut global_rng()
         ),
         false; "deposit amounts under the dust limit rejected")]
     fn deposit_requests_respect_dust_limits(req: DepositRequest, is_included: bool) {
+        let mut rng = get_rng();
         let outpoint = req.outpoint;
         let public_key = XOnlyPublicKey::from_str(X_ONLY_PUBLIC_KEY1).unwrap();
 
@@ -3063,11 +3112,11 @@ mod tests {
         // we should filter the request if the deposit amount is less than
         // SOLO_DEPOSIT_TX_VSIZE + DEPOSIT_DUST_LIMIT.
         let requests = SbtcRequests {
-            deposits: vec![create_deposit(2500000, 100000, 0), req],
+            deposits: vec![create_deposit(2500000, 100000, 0, &mut rng), req],
             withdrawals: vec![],
             signer_state: SignerBtcState {
                 utxo: SignerUtxo {
-                    outpoint: generate_outpoint(300_000, 0),
+                    outpoint: generate_outpoint(300_000, 0, &mut rng),
                     amount: 300_000_000,
                     public_key,
                 },
@@ -3096,16 +3145,17 @@ mod tests {
 
     #[test]
     fn construct_transactions_limits_transaction_count() {
+        let mut rng = get_rng();
         // With 30 deposits and 30 withdrawals each with one nonoverlapping
         // vote against, we should generate 60 distinct transactions since
         // each transaction can tolerate a max of one vote against. But we
         // should cap the number of transactions returned to
         // MAX_MEMPOOL_PACKAGE_TX_COUNT.
         let deposits: Vec<DepositRequest> = (0..30)
-            .map(|shift| create_deposit(10_000, 10_000, 1 << shift))
+            .map(|shift| create_deposit(10_000, 10_000, 1 << shift, &mut rng))
             .collect();
         let withdrawals: Vec<WithdrawalRequest> = (0..30)
-            .map(|shift| create_withdrawal(10_000, 10_000, 1 << (shift + 30)))
+            .map(|shift| create_withdrawal(10_000, 10_000, 1 << (shift + 30), &mut rng))
             .collect();
 
         let requests = SbtcRequests {
@@ -3115,10 +3165,10 @@ mod tests {
                 utxo: SignerUtxo {
                     outpoint: OutPoint::null(),
                     amount: 1000000,
-                    public_key: generate_x_only_public_key(),
+                    public_key: generate_x_only_public_key(&mut rng),
                 },
                 fee_rate: 1.0,
-                public_key: generate_x_only_public_key(),
+                public_key: generate_x_only_public_key(&mut rng),
                 last_fees: None,
                 magic_bytes: [0; 2],
             },
@@ -3136,6 +3186,7 @@ mod tests {
 
     #[test]
     fn construct_transactions_limits_package_vsize() {
+        let mut rng = get_rng();
         const NUM_DEPOSITS: usize =
             DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX as usize * MAX_MEMPOOL_PACKAGE_TX_COUNT as usize;
         // We set the signer bitmap to 3, so that each deposit is
@@ -3145,7 +3196,7 @@ mod tests {
         // transaction package because we use a variant of the best-fit
         // decreasing algorithm when packaging requests.
         let deposits: Vec<DepositRequest> =
-            std::iter::repeat_with(|| create_deposit(10_000, 10_000, 3))
+            std::iter::repeat_with(|| create_deposit(10_000, 10_000, 3, &mut rng))
                 .take(NUM_DEPOSITS)
                 .collect();
         // Each withdrawal request weighs about 31 vbytes (with the first
@@ -3161,7 +3212,7 @@ mod tests {
         // ensuring lots of votes against the set of request.
         const MAX_WITHDRAWALS: usize = 4000;
         let withdrawals: Vec<WithdrawalRequest> = (0..MAX_WITHDRAWALS)
-            .map(|id| create_withdrawal(1_000, 10_000, 1 << (id % 14)).wid(id as u64))
+            .map(|id| create_withdrawal(1_000, 10_000, 1 << (id % 14), &mut rng).wid(id as u64))
             .collect();
 
         let requests = SbtcRequests {
@@ -3171,10 +3222,10 @@ mod tests {
                 utxo: SignerUtxo {
                     outpoint: OutPoint::null(),
                     amount: 100000000,
-                    public_key: generate_x_only_public_key(),
+                    public_key: generate_x_only_public_key(&mut rng),
                 },
                 fee_rate: 1.0,
-                public_key: generate_x_only_public_key(),
+                public_key: generate_x_only_public_key(&mut rng),
                 last_fees: None,
                 magic_bytes: [0; 2],
             },
@@ -3210,7 +3261,7 @@ mod tests {
         // As a sanity check, we sign each transaction input to get "full"
         // transactions. We then make sure that we are below the limit and
         // that our earlier total_vsize value is accurate.
-        let keypair = secp256k1::Keypair::new_global(&mut OsRng);
+        let keypair = secp256k1::Keypair::new_global(&mut rng);
         let package_vsize = transactions
             .iter_mut()
             .map(|unsigned| {
@@ -3224,92 +3275,92 @@ mod tests {
 
     #[test_case(
         &[create_deposit(
-            DEPOSIT_DUST_LIMIT + SOLO_DEPOSIT_TX_VSIZE as u64, 10_000, 0
+            DEPOSIT_DUST_LIMIT + SOLO_DEPOSIT_TX_VSIZE as u64, 10_000, 0, &mut global_rng()
         )],
         &create_limits_for_deposits_and_max_mintable(0, 20_000, 100_000),
         1.0,
         1, DEPOSIT_DUST_LIMIT + SOLO_DEPOSIT_TX_VSIZE as u64; "deposit_amounts_over_the_dust_limit_accepted")]
     #[test_case(
         &[create_deposit(
-            DEPOSIT_DUST_LIMIT + SOLO_DEPOSIT_TX_VSIZE as u64 - 1, 10_000, 0
+            DEPOSIT_DUST_LIMIT + SOLO_DEPOSIT_TX_VSIZE as u64 - 1, 10_000, 0, &mut global_rng()
         )],
         &create_limits_for_deposits_and_max_mintable(0, 20_000, 100_000),
         1.0,
         0, 0; "should_reject_deposits_under_dust_limit")]
     #[test_case(
         &vec![
-            create_deposit(10_000, 1_000, 0),
-            create_deposit(11_000, 100, 0),
-            create_deposit(12_000, 2_000, 0),
-            create_deposit(13_000, 0, 0),
+            create_deposit(10_000, 1_000, 0, &mut global_rng()),
+            create_deposit(11_000, 100, 0, &mut global_rng()),
+            create_deposit(12_000, 2_000, 0, &mut global_rng()),
+            create_deposit(13_000, 0, 0, &mut global_rng()),
         ],
         &create_limits_for_deposits_and_max_mintable(0, 20_000, 100_000),
         1.0,
         2, 22_000; "should_accept_all_deposits_above_or_equal_min_fee")]
     #[test_case(
         &vec![
-            create_deposit(10_000, 10_000, 0),
-            create_deposit(10_000, 10_000, 0),
-            create_deposit(10_000, 10_000, 0),
-            create_deposit(10_000, 10_000, 0),
-            create_deposit(10_000, 10_000, 0),
+            create_deposit(10_000, 10_000, 0, &mut global_rng()),
+            create_deposit(10_000, 10_000, 0, &mut global_rng()),
+            create_deposit(10_000, 10_000, 0, &mut global_rng()),
+            create_deposit(10_000, 10_000, 0, &mut global_rng()),
+            create_deposit(10_000, 10_000, 0, &mut global_rng()),
         ],
         &create_limits_for_deposits_and_max_mintable(0, 10_000, 30_000),
         1.0,
         3, 30_000; "should_accept_deposits_until_max_mintable_reached")]
     #[test_case(
         &vec![
-            create_deposit(10_000, 10_000, 0),
-            create_deposit(10_000, 10_000, 0),
+            create_deposit(10_000, 10_000, 0, &mut global_rng()),
+            create_deposit(10_000, 10_000, 0, &mut global_rng()),
         ],
         &create_limits_for_deposits_and_max_mintable(0, 10_000, 15_000),
         1.0,
         1, 10_000; "should_accept_all_deposits_when_under_max_mintable")]
     #[test_case(
-        &[create_deposit(10_000, 10_000, 0),],
+        &[create_deposit(10_000, 10_000, 0, &mut global_rng()),],
         &create_limits_for_deposits_and_max_mintable(0, 0, 0),
         1.0,
         0, 0; "should_handle_empty_deposit_list")]
     #[test_case(
         &vec![
-            create_deposit(10_000, 0, 0),
-            create_deposit(11_000, 10_000, 0),
-            create_deposit(9_000, 10_000, 0),
+            create_deposit(10_000, 0, 0, &mut global_rng()),
+            create_deposit(11_000, 10_000, 0, &mut global_rng()),
+            create_deposit(9_000, 10_000, 0, &mut global_rng()),
         ],
         &create_limits_for_deposits_and_max_mintable(0, 10_000, 10_000),
         1.0,
         1, 9_000; "should_skip_invalid_fee_and_accept_valid_deposits")]
     #[test_case(
         &[
-            create_deposit(10_001, 10_000, 0),
+            create_deposit(10_001, 10_000, 0, &mut global_rng()),
         ],
         &create_limits_for_deposits_and_max_mintable(0, 10_001, 10_000),
         1.0,
         0, 0; "should_reject_single_deposit_exceeding_max_mintable")]
     #[test_case(
         &[
-            create_deposit(10_000, 10_000, 0),
+            create_deposit(10_000, 10_000, 0, &mut global_rng()),
         ],
         &create_limits_for_deposits_and_max_mintable(0, 8_000, 10_000),
         1.0,
         0, 0; "should_reject_single_deposit_exceeding_per_deposit_cap")]
     #[test_case(
         &vec![
-            create_deposit(5_000, 2_000, 0),
-            create_deposit(15_000, 2_000, 0),
+            create_deposit(5_000, 2_000, 0, &mut global_rng()),
+            create_deposit(15_000, 2_000, 0, &mut global_rng()),
         ],
         &create_limits_for_deposits_and_max_mintable(10_000, 20_000, 30_000),
         1.0,
         1, 15_000; "should_reject_deposits_below_per_deposit_minimum")]
     #[test_case(
         &vec![
-            create_deposit(10_000, 10_000, 0), // accepted
-            create_deposit(DEPOSIT_DUST_LIMIT + 999, 10_000, 0), // rejected (1 below dust limit) min_fee is 1_000
-            create_deposit(9_000, 10_000, 0),  // rejected (below per_deposit_minimum)
-            create_deposit(21_000, 10_000, 0), // rejected (above per_deposit_cap)
-            create_deposit(20_000, 10_000, 0), // accepted
-            create_deposit(20_000, 10_000, 0), // rejected (above max_mintable)
-            create_deposit(5_000, 500, 0),     // rejected (below minimum_fee)
+            create_deposit(10_000, 10_000, 0, &mut global_rng()), // accepted
+            create_deposit(DEPOSIT_DUST_LIMIT + 999, 10_000, 0, &mut global_rng()), // rejected (1 below dust limit) min_fee is 1_000
+            create_deposit(9_000, 10_000, 0, &mut global_rng()),  // rejected (below per_deposit_minimum)
+            create_deposit(21_000, 10_000, 0, &mut global_rng()), // rejected (above per_deposit_cap)
+            create_deposit(20_000, 10_000, 0, &mut global_rng()), // accepted
+            create_deposit(20_000, 10_000, 0, &mut global_rng()), // rejected (above max_mintable)
+            create_deposit(5_000, 500, 0, &mut global_rng()),     // rejected (below minimum_fee)
         ],
         &create_limits_for_deposits_and_max_mintable(10_000, 20_000, 40_000),
         1.0,
@@ -3353,13 +3404,13 @@ mod tests {
 
     #[test_case(WithdrawalLimitTestCase {
         withdrawals: vec![
-            create_withdrawal(10_000, 10_000, 0), // accepted
-            create_withdrawal(20_001, 10_000, 0), // rejected (above per_withdrawal_cap)
-            create_withdrawal(20_000, 10_000, 0), // accepted
-            create_withdrawal(5_000, 500, 0),     // rejected (max-fee is too low)
-            create_withdrawal(8_000, 10_000, 0),  // accepted
-            create_withdrawal(10_000, 10_000, 0), // rejected (above rolling cap)
-            create_withdrawal(1_000, 10_000, 0),  // accepted
+            create_withdrawal(10_000, 10_000, 0, &mut global_rng()), // accepted
+            create_withdrawal(20_001, 10_000, 0, &mut global_rng()), // rejected (above per_withdrawal_cap)
+            create_withdrawal(20_000, 10_000, 0, &mut global_rng()), // accepted
+            create_withdrawal(5_000, 500, 0, &mut global_rng()),     // rejected (max-fee is too low)
+            create_withdrawal(8_000, 10_000, 0, &mut global_rng()),  // accepted
+            create_withdrawal(10_000, 10_000, 0, &mut global_rng()), // rejected (above rolling cap)
+            create_withdrawal(1_000, 10_000, 0, &mut global_rng()),  // accepted
         ],
         per_withdrawal_cap: 20_000,
         rolling_limits: RollingWithdrawalLimits { blocks: 0, cap: 40_000, withdrawn_total: 0 },
@@ -3368,7 +3419,7 @@ mod tests {
         accepted_amount: 39_000,
     }; "should respect all limits")]
     #[test_case(WithdrawalLimitTestCase {
-        withdrawals: vec![create_withdrawal(10_000, 10_000, 0)],
+        withdrawals: vec![create_withdrawal(10_000, 10_000, 0, &mut global_rng())],
         per_withdrawal_cap: 10_000,
         rolling_limits: RollingWithdrawalLimits { blocks: 0, cap: 10_000, withdrawn_total: 0 },
         fee_rate: 10.0,
@@ -3376,7 +3427,7 @@ mod tests {
         accepted_amount: 10_000,
     }; "regular withdrawal within limits v1")]
     #[test_case(WithdrawalLimitTestCase {
-        withdrawals: vec![create_withdrawal(9_999, 10_000, 0)],
+        withdrawals: vec![create_withdrawal(9_999, 10_000, 0, &mut global_rng())],
         per_withdrawal_cap: 10_000,
         rolling_limits: RollingWithdrawalLimits { blocks: 0, cap: 10_000, withdrawn_total: 1 },
         fee_rate: 10.0,
@@ -3384,7 +3435,7 @@ mod tests {
         accepted_amount: 9_999,
     }; "regular withdrawal within limits v2")]
     #[test_case(WithdrawalLimitTestCase {
-        withdrawals: vec![create_withdrawal(10_000, 10_000, 0)],
+        withdrawals: vec![create_withdrawal(10_000, 10_000, 0, &mut global_rng())],
         per_withdrawal_cap: 10_000,
         rolling_limits: RollingWithdrawalLimits { blocks: 0, cap: 10_000, withdrawn_total: 1 },
         fee_rate: 10.0,
@@ -3392,7 +3443,7 @@ mod tests {
         accepted_amount: 0,
     }; "regular withdrawal just outside of limits")]
     #[test_case(WithdrawalLimitTestCase {
-        withdrawals: vec![create_withdrawal(10_000, 10_000, 0)],
+        withdrawals: vec![create_withdrawal(10_000, 10_000, 0, &mut global_rng())],
         per_withdrawal_cap: 9_999,
         rolling_limits: RollingWithdrawalLimits { blocks: 0, cap: 10_000, withdrawn_total: 0 },
         fee_rate: 10.0,
@@ -3401,13 +3452,13 @@ mod tests {
     }; "over the per withdrawal cap gets filtered")]
     #[test_case(WithdrawalLimitTestCase {
         withdrawals: vec![
-            create_withdrawal(10_000, 10_000, 0), // rejected
-            create_withdrawal(20_001, 10_000, 0), // rejected
-            create_withdrawal(20_000, 10_000, 0), // rejected
-            create_withdrawal(5_000, 500, 0),     // rejected
-            create_withdrawal(8_000, 10_000, 0),  // rejected
-            create_withdrawal(10_000, 10_000, 0), // rejected
-            create_withdrawal(1_000, 10_000, 0),  // rejected
+            create_withdrawal(10_000, 10_000, 0, &mut global_rng()), // rejected
+            create_withdrawal(20_001, 10_000, 0, &mut global_rng()), // rejected
+            create_withdrawal(20_000, 10_000, 0, &mut global_rng()), // rejected
+            create_withdrawal(5_000, 500, 0, &mut global_rng()),     // rejected
+            create_withdrawal(8_000, 10_000, 0, &mut global_rng()),  // rejected
+            create_withdrawal(10_000, 10_000, 0, &mut global_rng()), // rejected
+            create_withdrawal(1_000, 10_000, 0, &mut global_rng()),  // rejected
         ],
         per_withdrawal_cap: Amount::MAX_MONEY.to_sat(),
         rolling_limits: RollingWithdrawalLimits::fully_constrained(0),
@@ -3417,14 +3468,14 @@ mod tests {
     }; "zero for rolling withdrawals filters everything")]
     #[test_case(WithdrawalLimitTestCase {
         withdrawals: vec![
-            create_withdrawal(10_000, 10_000, 0), // rejected
-            create_withdrawal(20_001, 10_000, 0), // rejected
-            create_withdrawal(20_000, 10_000, 0), // rejected
-            create_withdrawal(5_000, 10_000, 0),  // rejected
-            create_withdrawal(8_000, 10_000, 0),  // rejected
-            create_withdrawal(10_000, 10_000, 0), // rejected
-            create_withdrawal(1_000, 10_000, 0),  // rejected
-            create_withdrawal(*MINIMAL_NON_DUST_AMOUNT_P2WPKH, 10_000, 0), // rejected
+            create_withdrawal(10_000, 10_000, 0, &mut global_rng()), // rejected
+            create_withdrawal(20_001, 10_000, 0, &mut global_rng()), // rejected
+            create_withdrawal(20_000, 10_000, 0, &mut global_rng()), // rejected
+            create_withdrawal(5_000, 10_000, 0, &mut global_rng()),  // rejected
+            create_withdrawal(8_000, 10_000, 0, &mut global_rng()),  // rejected
+            create_withdrawal(10_000, 10_000, 0, &mut global_rng()), // rejected
+            create_withdrawal(1_000, 10_000, 0, &mut global_rng()),  // rejected
+            create_withdrawal(*MINIMAL_NON_DUST_AMOUNT_P2WPKH, 10_000, 0, &mut global_rng()), // rejected
         ],
         per_withdrawal_cap: 0,
         rolling_limits: RollingWithdrawalLimits::unlimited(0),
@@ -3433,7 +3484,7 @@ mod tests {
         accepted_amount: 0,
     }; "zero per withdrawal cap rolling withdrawals filters everything")]
     #[test_case(WithdrawalLimitTestCase {
-        withdrawals: vec![create_withdrawal(*MINIMAL_NON_DUST_AMOUNT_P2WPKH - 1, 10_000, 0)],
+        withdrawals: vec![create_withdrawal(*MINIMAL_NON_DUST_AMOUNT_P2WPKH - 1, 10_000, 0, &mut global_rng())],
         per_withdrawal_cap: u64::MAX,
         rolling_limits: RollingWithdrawalLimits::unlimited(0),
         fee_rate: 1.0,
@@ -3442,14 +3493,14 @@ mod tests {
     }; "amounts below the dust limit are filtered")]
     #[test_case(WithdrawalLimitTestCase {
         withdrawals: vec![
-            create_withdrawal(10_000, 10_000, 0), // accepted
-            create_withdrawal(20_001, 10_000, 0), // accepted
-            create_withdrawal(20_000, 10_000, 0), // accepted
-            create_withdrawal(5_000, 500, 0),     // rejected (max-fee is too low)
-            create_withdrawal(8_000, 10_000, 0),  // accepted
-            create_withdrawal(10_000, 10_000, 0), // accepted
-            create_withdrawal(1_000, 10_000, 0),  // accepted
-            create_withdrawal(*MINIMAL_NON_DUST_AMOUNT_P2WPKH, 10_000, 0), // accepted
+            create_withdrawal(10_000, 10_000, 0, &mut global_rng()), // accepted
+            create_withdrawal(20_001, 10_000, 0, &mut global_rng()), // accepted
+            create_withdrawal(20_000, 10_000, 0, &mut global_rng()), // accepted
+            create_withdrawal(5_000, 500, 0, &mut global_rng()),     // rejected (max-fee is too low)
+            create_withdrawal(8_000, 10_000, 0, &mut global_rng()),  // accepted
+            create_withdrawal(10_000, 10_000, 0, &mut global_rng()), // accepted
+            create_withdrawal(1_000, 10_000, 0, &mut global_rng()),  // accepted
+            create_withdrawal(*MINIMAL_NON_DUST_AMOUNT_P2WPKH, 10_000, 0, &mut global_rng()), // accepted
         ],
         per_withdrawal_cap: u64::MAX,
         rolling_limits: RollingWithdrawalLimits::unlimited(0),
