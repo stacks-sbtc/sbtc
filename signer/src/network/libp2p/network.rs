@@ -124,6 +124,8 @@ mod tests {
     async fn two_clients_should_be_able_to_exchange_messages_given_a_libp2p_network() {
         clear_env();
 
+        let mut rng = get_rng();
+
         // PeerId = 16Uiu2HAm46BSFWYYWzMjhTRDRwXHpDWpQ32iu93nzDwd1F4Tt256
         let key1 = PrivateKey::from_slice(
             hex::decode("ab0893ecf683dc188c3fb219dd6489dc304bb5babb8151a41245a70e60cb7258")
@@ -166,8 +168,8 @@ mod tests {
         let term1 = context1.get_termination_handle();
         let term2 = context2.get_termination_handle();
 
-        let swarm1_addr = Multiaddr::random_memory();
-        let swarm2_addr = Multiaddr::random_memory();
+        let swarm1_addr = Multiaddr::random_memory(&mut rng);
+        let swarm2_addr = Multiaddr::random_memory(&mut rng);
 
         let mut swarm1 = SignerSwarmBuilder::new(&key1)
             .enable_memory_transport(true)
@@ -264,9 +266,9 @@ mod tests {
             current_signer_set3.add_signer(PublicKey::from_private_key(&key));
         }
 
-        let swarm1_addr = Multiaddr::random_memory();
-        let swarm2_addr = Multiaddr::random_memory();
-        let swarm3_addr = Multiaddr::random_memory();
+        let swarm1_addr = Multiaddr::random_memory(&mut rng);
+        let swarm2_addr = Multiaddr::random_memory(&mut rng);
+        let swarm3_addr = Multiaddr::random_memory(&mut rng);
 
         // Configure the swarms to listen on hard-coded ports
         let mut swarm1 = SignerSwarmBuilder::new(&key1)
@@ -420,9 +422,9 @@ mod tests {
             current_signer_set3.add_signer(PublicKey::from_private_key(&key));
         }
 
-        let swarm1_addr = Multiaddr::random_memory();
-        let swarm2_addr = Multiaddr::random_memory();
-        let swarm3_addr = Multiaddr::random_memory();
+        let swarm1_addr = Multiaddr::random_memory(&mut rng);
+        let swarm2_addr = Multiaddr::random_memory(&mut rng);
+        let swarm3_addr = Multiaddr::random_memory(&mut rng);
 
         let mut swarm1 = SignerSwarmBuilder::new(&key1)
             .enable_memory_transport(true)
@@ -546,6 +548,8 @@ mod tests {
         // events from the swarms and checking that the expected events are
         // emitted.
 
+        let mut rng = get_rng();
+
         // PeerId = 16Uiu2HAm46BSFWYYWzMjhTRDRwXHpDWpQ32iu93nzDwd1F4Tt256
         let key1 = PrivateKey::from_str(
             "ab0893ecf683dc188c3fb219dd6489dc304bb5babb8151a41245a70e60cb7258",
@@ -610,9 +614,9 @@ mod tests {
             .current_signer_set()
             .add_signer(PublicKey::from_private_key(&key2));
 
-        let swarm1_addr = Multiaddr::random_memory();
-        let swarm2_addr = Multiaddr::random_memory();
-        let swarm3_addr = Multiaddr::random_memory();
+        let swarm1_addr = Multiaddr::random_memory(&mut rng);
+        let swarm2_addr = Multiaddr::random_memory(&mut rng);
+        let swarm3_addr = Multiaddr::random_memory(&mut rng);
 
         // Create the two trusted swarms.
         let mut swarm1 = SignerSwarmBuilder::new(&key1)

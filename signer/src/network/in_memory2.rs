@@ -180,15 +180,16 @@ mod tests {
     use std::sync::atomic::{AtomicU16, Ordering};
 
     use futures::future::join_all;
-    use rand::rngs::OsRng;
 
     use crate::keys::PrivateKey;
     use crate::testing::context::TestContext;
+    use crate::testing::get_rng;
 
     use super::*;
 
     #[tokio::test]
     async fn signer_2_can_receive_messages_from_signer_1() {
+        let mut rng = get_rng();
         let network = WanNetwork::new(100);
         let ctx1 = TestContext::default_mocked();
         let ctx2 = TestContext::default_mocked();
@@ -198,7 +199,7 @@ mod tests {
         let mut client_1 = signer_1.spawn();
         let mut client_2 = signer_2.spawn();
 
-        let msg = Msg::random(&mut OsRng);
+        let msg = Msg::random(&mut rng);
 
         tokio::spawn(async {
             tokio::time::timeout(Duration::from_secs(1), async move {
@@ -213,6 +214,7 @@ mod tests {
 
     #[tokio::test]
     async fn signer_2_can_receive_messages_from_signer_1_concurrent_send() {
+        let rng = get_rng();
         let network = WanNetwork::new(1_000);
 
         let ctx1 = TestContext::default_mocked();
@@ -237,15 +239,22 @@ mod tests {
             .expect("client 2 did not receive all messages in time")
         });
 
+        let mut rng_for_corutine = rng.clone();
         let send1_handle = tokio::spawn(async move {
             for _ in 0..100 {
-                client_1a.broadcast(Msg::random(&mut OsRng)).await.unwrap();
+                client_1a
+                    .broadcast(Msg::random(&mut rng_for_corutine))
+                    .await
+                    .unwrap();
             }
         });
-
+        let mut rng_for_corutine = rng.clone();
         let send2_handle = tokio::spawn(async move {
             for _ in 0..100 {
-                client_1b.broadcast(Msg::random(&mut OsRng)).await.unwrap();
+                client_1b
+                    .broadcast(Msg::random(&mut rng_for_corutine))
+                    .await
+                    .unwrap();
             }
         });
 
@@ -255,6 +264,7 @@ mod tests {
 
     #[tokio::test]
     async fn network_instance_does_not_receive_messages_from_same_signer_network() {
+        let mut rng = get_rng();
         let network = WanNetwork::new(100);
 
         let ctx = TestContext::default_mocked();
@@ -263,7 +273,7 @@ mod tests {
         let mut client_a = client.spawn();
         let mut client_b = client.spawn();
 
-        let msg = Msg::random(&mut OsRng);
+        let msg = Msg::random(&mut rng);
 
         tokio::spawn(async {
             tokio::time::timeout(Duration::from_secs(1), async move {
@@ -278,6 +288,7 @@ mod tests {
 
     #[tokio::test]
     async fn two_clients_can_exchange_messages_simple() {
+        let mut rng = get_rng();
         let network = WanNetwork::new(100);
 
         let ctx1 = TestContext::default_mocked();
@@ -289,7 +300,7 @@ mod tests {
         let mut client_2 = client_2.spawn();
         let mut client_2b = client_2.clone();
 
-        let msg = Msg::random(&mut OsRng);
+        let msg = Msg::random(&mut rng);
 
         tokio::spawn(async {
             tokio::time::timeout(Duration::from_secs(1), async move {
@@ -314,6 +325,7 @@ mod tests {
 
     #[tokio::test]
     async fn two_clients_can_exchange_messages_advanced() {
+        let mut rng = get_rng();
         let network = WanNetwork::new(100);
 
         let ctx1 = TestContext::default_mocked();
@@ -324,7 +336,7 @@ mod tests {
         let instance_1 = client_1.spawn();
         let instance_2 = client_2.spawn();
 
-        let pk = PrivateKey::new(&mut OsRng);
+        let pk = PrivateKey::new(&mut rng);
 
         crate::testing::network::assert_clients_can_exchange_messages(
             instance_1, instance_2, pk, pk,

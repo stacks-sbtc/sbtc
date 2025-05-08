@@ -482,7 +482,7 @@ impl SignerSwarm {
 
 #[cfg(test)]
 mod tests {
-    use crate::testing::{context::*, network::RandomMemoryMultiaddr};
+    use crate::testing::{context::*, get_rng, network::RandomMemoryMultiaddr};
 
     use super::*;
 
@@ -542,11 +542,12 @@ mod tests {
 
     #[tokio::test]
     async fn swarm_with_memory_transport() {
-        let private_key = PrivateKey::new(&mut rand::thread_rng());
+        let mut rng = get_rng();
+        let private_key = PrivateKey::new(&mut rng);
         let builder = SignerSwarmBuilder::new(&private_key);
         let mut swarm = builder
             .enable_memory_transport(true)
-            .add_listen_endpoint(Multiaddr::random_memory())
+            .add_listen_endpoint(Multiaddr::random_memory(&mut rng))
             .build()
             .unwrap();
 
@@ -566,11 +567,12 @@ mod tests {
 
     #[tokio::test]
     async fn swarm_with_memory_transport_disabled() {
+        let mut rng = get_rng();
         let private_key = PrivateKey::new(&mut rand::thread_rng());
         let builder = SignerSwarmBuilder::new(&private_key);
         let mut swarm = builder
             .enable_memory_transport(false)
-            .add_listen_endpoint(Multiaddr::random_memory())
+            .add_listen_endpoint(Multiaddr::random_memory(&mut rng))
             .build()
             .unwrap();
 

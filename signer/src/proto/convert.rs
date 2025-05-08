@@ -1674,6 +1674,7 @@ impl codec::ProtoSerializable for BTreeMap<u32, DkgPublicShares> {
 #[cfg(test)]
 mod tests {
     use crate::testing::dummy::Unit;
+    use crate::testing::get_rng;
 
     use super::*;
 
@@ -1682,16 +1683,16 @@ mod tests {
     use fake::Dummy;
     use fake::Fake as _;
     use fake::Faker;
-    use rand::rngs::OsRng;
     use test_case::test_case;
 
     #[test]
     fn conversion_between_bytes_and_uint256() {
+        let mut rng = get_rng();
         let number = proto::Uint256 {
-            bits_part0: Faker.fake_with_rng(&mut OsRng),
-            bits_part1: Faker.fake_with_rng(&mut OsRng),
-            bits_part2: Faker.fake_with_rng(&mut OsRng),
-            bits_part3: Faker.fake_with_rng(&mut OsRng),
+            bits_part0: Faker.fake_with_rng(&mut rng),
+            bits_part1: Faker.fake_with_rng(&mut rng),
+            bits_part2: Faker.fake_with_rng(&mut rng),
+            bits_part3: Faker.fake_with_rng(&mut rng),
         };
 
         let bytes = <[u8; 32]>::from(number);
@@ -1733,10 +1734,11 @@ mod tests {
         E: std::fmt::Debug,
     {
         // TODO: proptest
+        let mut rng = get_rng();
         for _ in 0..25 {
             // The type T originates from a signer. Let's create a random
             // instance of one.
-            let original: T = Faker.fake_with_rng(&mut OsRng);
+            let original: T = Faker.fake_with_rng(&mut rng);
             // The type U is a protobuf type. Before sending it to other
             // signers, we convert our internal type into it's protobuf
             // counterpart. We can always infallibly create U from T.
@@ -1793,8 +1795,9 @@ mod tests {
         E: std::fmt::Debug,
     {
         // TODO: proptest
+        let mut rng = get_rng();
         for _ in 0..10 {
-            let original: T = Unit.fake_with_rng(&mut OsRng);
+            let original: T = Unit.fake_with_rng(&mut rng);
             let proto_original = U::from(original.clone());
 
             let original_from_proto = T::try_from(proto_original).unwrap();

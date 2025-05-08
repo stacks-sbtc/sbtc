@@ -1,7 +1,6 @@
 //! Test utilities for the `network` module
 
 use libp2p::{Multiaddr, multiaddr::Protocol};
-use rand::{RngCore, rngs::OsRng};
 
 use crate::testing::get_rng;
 use crate::{keys::PrivateKey, network};
@@ -10,12 +9,12 @@ use crate::{keys::PrivateKey, network};
 pub trait RandomMemoryMultiaddr {
     /// Generates a random [`Multiaddr`] with the
     /// [`libp2p::core::transport::MemoryTransport`] transport.
-    fn random_memory() -> Multiaddr;
+    fn random_memory<R: rand::Rng>(rng: &mut R) -> Multiaddr;
 }
 
 impl RandomMemoryMultiaddr for Multiaddr {
-    fn random_memory() -> Multiaddr {
-        Protocol::Memory(OsRng.next_u64()).into()
+    fn random_memory<R: rand::Rng>(rng: &mut R) -> Multiaddr {
+        Protocol::Memory(rng.next_u64()).into()
     }
 }
 

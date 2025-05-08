@@ -2,7 +2,6 @@
 
 use std::collections::VecDeque;
 
-use rand::rngs::OsRng;
 use secp256k1::XOnlyPublicKey;
 use wsts::{
     net::{Message, NonceRequest, NonceResponse, SignatureShareRequest, SignatureType},
@@ -40,7 +39,7 @@ pub struct TestSetup {
 }
 
 impl TestSetup {
-    pub fn setup(num_parties: u32) -> Self {
+    pub fn setup<R: rand::Rng>(num_parties: u32, rng: &mut R) -> Self {
         if num_parties == 0 {
             panic!("must have at least 1 parties");
         }
@@ -49,7 +48,7 @@ impl TestSetup {
             wsts_test::run_dkg::<frost::Coordinator<v2::Aggregator>, v2::Party>(num_parties, 5);
 
         let signers = signers.into();
-        let aggregate_key = pubkey_xonly();
+        let aggregate_key = pubkey_xonly(rng);
         let coordinator: FrostCoordinator = coordinators.into_iter().next().unwrap().into();
         let state_machine = StateMachine::new(coordinator, aggregate_key, None)
             .expect("failed to create new dkg verification state machine");
@@ -66,8 +65,8 @@ impl TestSetup {
     }
 }
 
-pub fn pubkey_xonly() -> secp256k1::XOnlyPublicKey {
-    let keypair = secp256k1::Keypair::new_global(&mut OsRng);
+pub fn pubkey_xonly<R: rand::Rng>(rng: &mut R) -> secp256k1::XOnlyPublicKey {
+    let keypair = secp256k1::Keypair::new_global(rng);
     keypair.x_only_public_key().0
 }
 

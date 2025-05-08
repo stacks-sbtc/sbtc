@@ -115,20 +115,20 @@ impl super::MessageTransfer for MpmcBroadcaster {
 
 #[cfg(test)]
 mod tests {
-    use rand::rngs::OsRng;
-
     use super::*;
     use crate::keys::PrivateKey;
     use crate::testing;
+    use crate::testing::get_rng;
 
     #[tokio::test]
     async fn two_clients_should_be_able_to_exchange_messages_given_an_in_memory_network() {
+        let mut rng = get_rng();
         let network = InMemoryNetwork::new();
 
         let client_1 = network.connect();
         let client_2 = network.connect();
 
-        let pk = PrivateKey::new(&mut OsRng);
+        let pk = PrivateKey::new(&mut rng);
 
         testing::network::assert_clients_can_exchange_messages(client_1, client_2, pk, pk).await;
     }

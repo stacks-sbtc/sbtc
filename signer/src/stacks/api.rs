@@ -1725,13 +1725,13 @@ mod tests {
     use crate::stacks::wallet::get_full_tx_size;
     use crate::storage::DbWrite;
     use crate::storage::in_memory::Store;
+    use crate::testing::get_rng;
 
     use clarity::types::Address;
     use clarity::vm::types::{
         BuffData, BufferLength, ListData, ListTypeData, SequenceData, SequenceSubtype,
         TypeSignature,
     };
-    use rand::rngs::OsRng;
     use secp256k1::Keypair;
     use test_case::test_case;
     use test_log::test;
@@ -1740,9 +1740,10 @@ mod tests {
     use std::io::Read;
 
     fn generate_wallet(num_keys: u16, signatures_required: u16) -> SignerWallet {
+        let mut rng = get_rng();
         let network_kind = NetworkKind::Regtest;
 
-        let public_keys = std::iter::repeat_with(|| Keypair::new_global(&mut OsRng))
+        let public_keys = std::iter::repeat_with(|| Keypair::new_global(&mut rng))
             .map(|kp| kp.public_key().into())
             .take(num_keys as usize)
             .collect::<Vec<_>>();

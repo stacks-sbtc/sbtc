@@ -440,7 +440,6 @@ mod tests {
     use blockstack_lib::chainstate::stacks::TransactionPayload;
     use blockstack_lib::clarity::vm::Value as ClarityValue;
     use fake::Fake;
-    use rand::rngs::OsRng;
     use rand::seq::SliceRandom;
     use secp256k1::Keypair;
     use secp256k1::SECP256K1;
@@ -519,6 +518,7 @@ mod tests {
         [NetworkKind::Mainnet, NetworkKind::Testnet]
     )]
     fn multi_sig_works(wallet_spec: WalletSpec, max_sigs: bool, network: NetworkKind) {
+        let mut rng = get_rng();
         // We do the following:
         // 1. Construct the specified multi-sig wallet.
         // 2. Construct any old transaction. In this case it is a contract
@@ -528,7 +528,7 @@ mod tests {
         //    prove the minimum number of required signatures.
         // 4. Check that transaction "verifies".
         let WalletSpec { signatures_required, num_keys } = wallet_spec;
-        let key_pairs: Vec<Keypair> = std::iter::repeat_with(|| Keypair::new_global(&mut OsRng))
+        let key_pairs: Vec<Keypair> = std::iter::repeat_with(|| Keypair::new_global(&mut rng))
             .take(num_keys)
             .collect();
 
@@ -577,9 +577,10 @@ mod tests {
     #[test_case(false, true, NetworkKind::Testnet; "incorrect key, correct digest, testnet")]
     #[test_case(true, false, NetworkKind::Testnet; "correct key, incorrect digest, testnet")]
     fn cannot_accept_invalid_sig(correct_key: bool, correct_digest: bool, network: NetworkKind) {
+        let mut rng = get_rng();
         let signatures_required = 4;
         let num_keys = 7;
-        let key_pairs: Vec<Keypair> = std::iter::repeat_with(|| Keypair::new_global(&mut OsRng))
+        let key_pairs: Vec<Keypair> = std::iter::repeat_with(|| Keypair::new_global(&mut rng))
             .take(num_keys)
             .collect();
 
@@ -595,7 +596,7 @@ mod tests {
             key_pairs[0].secret_key()
         } else {
             // This key pair is unlikely to be one of the known key pairs
-            Keypair::new_global(&mut OsRng).secret_key()
+            Keypair::new_global(&mut rng).secret_key()
         };
 
         let msg = if correct_digest {
@@ -634,8 +635,9 @@ mod tests {
         // keys. Check that the SignerWallet returns the same address
         // regardless of the ordering of the keys given to it on
         // construction.
+        let mut rng = get_rng();
         let mut public_keys: Vec<PublicKey> =
-            std::iter::repeat_with(|| Keypair::new_global(&mut OsRng))
+            std::iter::repeat_with(|| Keypair::new_global(&mut rng))
                 .map(|kp| kp.public_key().into())
                 .take(50)
                 .collect();
@@ -646,7 +648,7 @@ mod tests {
         // Although it's unlikely, it's possible for the shuffle to not
         // shuffle anything, so we need to keep trying.
         while pks1 == public_keys {
-            public_keys.shuffle(&mut OsRng);
+            public_keys.shuffle(&mut rng);
         }
 
         let wallet2 = SignerWallet::new(&public_keys, 5, network, 0).unwrap();
@@ -688,11 +690,10 @@ mod tests {
         test_data.write_to(&db).await;
 
         // Let's generate a the signers' wallet.
-        let signer_keys: Vec<PublicKey> =
-            std::iter::repeat_with(|| Keypair::new_global(&mut OsRng))
-                .map(|kp| kp.public_key().into())
-                .take(50)
-                .collect();
+        let signer_keys: Vec<PublicKey> = std::iter::repeat_with(|| Keypair::new_global(&mut rng))
+            .map(|kp| kp.public_key().into())
+            .take(50)
+            .collect();
         let signatures_required = 5;
         let network = NetworkKind::Regtest;
         let wallet1 = SignerWallet::new(&signer_keys, signatures_required, network, 0).unwrap();
@@ -757,9 +758,11 @@ mod tests {
         const SIGNATURE_SIZE: u64 = 66;
         const PUBKEY_SIZE: u64 = 34;
 
+        let mut rng = get_rng();
+
         let network_kind = NetworkKind::Regtest;
 
-        let public_keys = std::iter::repeat_with(|| Keypair::new_global(&mut OsRng))
+        let public_keys = std::iter::repeat_with(|| Keypair::new_global(&mut rng))
             .map(|kp| kp.public_key().into())
             .take(num_keys as usize)
             .collect::<Vec<_>>();

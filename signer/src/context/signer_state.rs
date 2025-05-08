@@ -541,16 +541,17 @@ impl SignerSet {
 
 #[cfg(test)]
 mod tests {
-    use rand::rngs::OsRng;
-
     use crate::keys::PrivateKey;
+    use crate::testing::get_rng;
 
     #[test]
     fn test_signer_set() {
         use super::*;
 
+        let mut rng = get_rng();
+
         let signer_set = SignerSet::default();
-        let public_key = PublicKey::from_private_key(&PrivateKey::new(&mut OsRng));
+        let public_key = PublicKey::from_private_key(&PrivateKey::new(&mut rng));
 
         assert!(!signer_set.is_signer(&public_key));
         signer_set.add_signer(public_key);
@@ -563,8 +564,10 @@ mod tests {
     fn test_is_allowed_peer() {
         use super::*;
 
+        let mut rng = get_rng();
+
         let signer_set = SignerSet::default();
-        let public_key = PublicKey::from_private_key(&PrivateKey::new(&mut OsRng));
+        let public_key = PublicKey::from_private_key(&PrivateKey::new(&mut rng));
 
         assert!(!signer_set.is_allowed_peer(&public_key.into()));
         signer_set.add_signer(public_key);
