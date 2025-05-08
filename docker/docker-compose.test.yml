@@ -65,6 +65,8 @@ services:
       context: ../
       dockerfile: docker/sbtc/Dockerfile
       target: emily-server
+      args:
+        EMILY_SERVER_BUILD_ARGS: --features testing
     depends_on:
       emily-aws-setup:
         condition: service_completed_successfully
