@@ -70,7 +70,7 @@ class DepositProcessor:
                         bitcoin_chaintip_height
                         < tx.confirmed_height + settings.MIN_BLOCK_CONFIRMATIONS
                     ):
-                        logger.warning(
+                        logger.info(
                             f"Confirmed transaction {tx.bitcoin_txid} is not yet eligible for RBF replacement"
                         )
                     else:
