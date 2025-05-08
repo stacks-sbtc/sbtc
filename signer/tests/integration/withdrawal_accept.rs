@@ -104,7 +104,7 @@ async fn accept_withdrawal_validation_happy_path() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT, &mut rng);
 
     // Normal: The withdrawal must be swept on bitcoin.
     setup.submit_sweep_tx(rpc, faucet);
@@ -122,7 +122,7 @@ async fn accept_withdrawal_validation_happy_path() {
 
     // Normal: we need to store a row in the dkg_shares table so that we
     // have a record of the scriptPubKey that the signers control.
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
 
     // Normal: the request and how the signers voted needs to be added to
     // the database. Here the bitmap in the withdrawal request object
@@ -161,7 +161,7 @@ async fn accept_withdrawal_validation_deployer_mismatch() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT, &mut rng);
 
     // Normal: The withdrawal must be swept on bitcoin.
     setup.submit_sweep_tx(rpc, faucet);
@@ -179,7 +179,7 @@ async fn accept_withdrawal_validation_deployer_mismatch() {
 
     // Normal: we need to store a row in the dkg_shares table so that we
     // have a record of the scriptPubKey that the signers control.
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
 
     // Normal: the request and how the signers voted needs to be added to
     // the database. Here the bitmap in the withdrawal request object
@@ -227,7 +227,7 @@ async fn accept_withdrawal_validation_missing_withdrawal_request() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT, &mut rng);
 
     // Normal: The withdrawal must be swept on bitcoin.
     setup.submit_sweep_tx(rpc, faucet);
@@ -245,7 +245,7 @@ async fn accept_withdrawal_validation_missing_withdrawal_request() {
 
     // Normal: we need to store a row in the dkg_shares table so that we
     // have a record of the scriptPubKey that the signers control.
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
 
     // Normal: the request and how the signers voted needs to be added to
     // the database. Here the bitmap in the withdrawal request object
@@ -294,7 +294,7 @@ async fn accept_withdrawal_validation_recipient_mismatch() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT, &mut rng);
 
     // Normal: The withdrawal must be swept on bitcoin.
     setup.submit_sweep_tx(rpc, faucet);
@@ -312,7 +312,7 @@ async fn accept_withdrawal_validation_recipient_mismatch() {
 
     // Normal: we need to store a row in the dkg_shares table so that we
     // have a record of the scriptPubKey that the signers control.
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
 
     // Different: the sweep transaction has already taken place, but our
     // records of the recipient does not match the actual recipient on
@@ -361,7 +361,7 @@ async fn accept_withdrawal_validation_invalid_amount() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT, &mut rng);
 
     // Normal: The withdrawal must be swept on bitcoin.
     setup.submit_sweep_tx(rpc, faucet);
@@ -379,7 +379,7 @@ async fn accept_withdrawal_validation_invalid_amount() {
 
     // Normal: we need to store a row in the dkg_shares table so that we
     // have a record of the scriptPubKey that the signers control.
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
 
     // Different: the request amount and the amount on chain do not match.
     setup.withdrawals[0].request.amount += 1;
@@ -426,7 +426,7 @@ async fn accept_withdrawal_validation_invalid_fee() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT, &mut rng);
 
     // Normal: The withdrawal must be swept on bitcoin.
     setup.submit_sweep_tx(rpc, faucet);
@@ -444,7 +444,7 @@ async fn accept_withdrawal_validation_invalid_fee() {
 
     // Normal: we need to store a row in the dkg_shares table so that we
     // have a record of the scriptPubKey that the signers control.
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
 
     // Different: The fee cannot exceed the max fee. As usual, we still
     // need to store the withdrawal request and how the signers voted.
@@ -500,7 +500,7 @@ async fn accept_withdrawal_validation_sweep_tx_missing() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT, &mut rng);
 
     // Normal: The withdrawal must be swept on bitcoin.
     setup.submit_sweep_tx(rpc, faucet);
@@ -518,7 +518,7 @@ async fn accept_withdrawal_validation_sweep_tx_missing() {
 
     // Normal: we need to store a row in the dkg_shares table so that we
     // have a record of the scriptPubKey that the signers control.
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
 
     // Normal: the request and how the signers voted needs to be added to
     // the database. Here the bitmap in the withdrawal request object
@@ -569,7 +569,7 @@ async fn accept_withdrawal_validation_sweep_reorged() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT, &mut rng);
 
     // Normal: The withdrawal must be swept on bitcoin.
     setup.submit_sweep_tx(rpc, faucet);
@@ -587,7 +587,7 @@ async fn accept_withdrawal_validation_sweep_reorged() {
 
     // Normal: we need to store a row in the dkg_shares table so that we
     // have a record of the scriptPubKey that the signers control.
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
 
     // Normal: the request and how the signers voted needs to be added to
     // the database. Here the bitmap in the withdrawal request object
@@ -647,7 +647,7 @@ async fn accept_withdrawal_validation_withdrawal_not_in_sweep() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT, &mut rng);
 
     // Normal: The withdrawal must be swept on bitcoin.
     setup.submit_sweep_tx(rpc, faucet);
@@ -665,7 +665,7 @@ async fn accept_withdrawal_validation_withdrawal_not_in_sweep() {
 
     // Normal: we need to store a row in the dkg_shares table so that we
     // have a record of the scriptPubKey that the signers control.
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
 
     // Normal: the request and how the signers voted needs to be added to
     // the database. Here the bitmap in the withdrawal request object
@@ -717,7 +717,7 @@ async fn accept_withdrawal_validation_withdrawal_incorrect_fee() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT, &mut rng);
 
     // Normal: The withdrawal must be swept on bitcoin.
     setup.submit_sweep_tx(rpc, faucet);
@@ -735,7 +735,7 @@ async fn accept_withdrawal_validation_withdrawal_incorrect_fee() {
 
     // Normal: we need to store a row in the dkg_shares table so that we
     // have a record of the scriptPubKey that the signers control.
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
 
     // Normal: the request and how the signers voted needs to be added to
     // the database. Here the bitmap in the withdrawal request object
@@ -783,7 +783,7 @@ async fn accept_withdrawal_validation_withdrawal_invalid_sweep() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT, &mut rng);
 
     // Normal: The withdrawal must be swept on bitcoin.
     setup.submit_sweep_tx(rpc, faucet);
@@ -848,7 +848,7 @@ async fn accept_withdrawal_validation_request_completed() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT, &mut rng);
 
     // Normal: The withdrawal must be swept on bitcoin.
     setup.submit_sweep_tx(rpc, faucet);
@@ -866,7 +866,7 @@ async fn accept_withdrawal_validation_request_completed() {
 
     // Normal: we need to store a row in the dkg_shares table so that we
     // have a record of the scriptPubKey that the signers control.
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
 
     // Normal: the request and how the signers voted needs to be added to
     // the database. Here the bitmap in the withdrawal request object

@@ -14,7 +14,6 @@ use clarity::vm::types::PrincipalData;
 use emily_client::apis::configuration::Configuration as EmilyApiConfiguration;
 use fake::Fake;
 use fake::Faker;
-use rand::rngs::OsRng;
 use sbtc::deposits::CreateDepositRequest;
 use sbtc::deposits::DepositInfo;
 use sbtc::testing::regtest;
@@ -269,9 +268,9 @@ impl TestSweepSetup {
 
     /// Store a stacks genesis block that is on the canonical Stacks
     /// blockchain identified by the sweep chain tip.
-    pub async fn store_stacks_genesis_block(&self, db: &PgStore) {
+    pub async fn store_stacks_genesis_block<R: rand::Rng>(&self, db: &PgStore, rng: &mut R) {
         let block = model::StacksBlock {
-            block_hash: Faker.fake_with_rng(&mut OsRng),
+            block_hash: Faker.fake_with_rng(rng),
             block_height: 0u64.into(),
             parent_hash: StacksBlockId::first_mined().into(),
             bitcoin_anchor: self.sweep_block_hash.into(),
@@ -353,11 +352,11 @@ impl TestSweepSetup {
         }
     }
 
-    pub async fn store_withdrawal_request(&self, db: &PgStore) {
+    pub async fn store_withdrawal_request<R: rand::Rng>(&self, db: &PgStore, rng: &mut R) {
         let block = model::StacksBlock {
             block_hash: self.withdrawal_request.block_hash,
             block_height: 1u64.into(), // Sweep setup creates two stacks blocks, and withdrawal request is in the second one.
-            parent_hash: Faker.fake_with_rng(&mut OsRng),
+            parent_hash: Faker.fake_with_rng(rng),
             bitcoin_anchor: self.sweep_block_hash.into(),
         };
         db.write_stacks_block(&block).await.unwrap();
@@ -398,13 +397,13 @@ impl TestSweepSetup {
 
     // This is all normal happy path things that need to happen in order to
     // pass validation of a Stacks transaction.
-    pub async fn store_happy_path_data(&mut self, db: &PgStore) {
+    pub async fn store_happy_path_data<R: rand::Rng>(&mut self, db: &PgStore, rng: &mut R) {
         self.store_deposit_tx(db).await;
         self.store_sweep_tx(db).await;
         self.store_dkg_shares(db).await;
         self.store_deposit_request(db).await;
         self.store_deposit_decisions(db).await;
-        self.store_withdrawal_request(db).await;
+        self.store_withdrawal_request(db, rng).await;
     }
 }
 
@@ -704,7 +703,12 @@ impl TestSweepSetup2 {
     /// 4. Generate a set of "signer keys" that kinda represent the
     ///    signers. Transactions can be signed using only the private keys
     ///    of the "signer" from (1).
-    pub fn new_setup(signers: TestSignerSet, faucet: &Faucet, amounts: &[SweepAmounts]) -> Self {
+    pub fn new_setup<R: rand::Rng>(
+        signers: TestSignerSet,
+        faucet: &Faucet,
+        amounts: &[SweepAmounts],
+        rng: &mut R,
+    ) -> Self {
         let signer = &signers.signer;
         let rpc = faucet.rpc;
         let signers_public_key = signer.keypair.x_only_public_key().0;
@@ -755,7 +759,7 @@ impl TestSweepSetup2 {
         withdrawals.sort_by_key(|w| w.request.qualified_id());
 
         let genesis_block = model::StacksBlock {
-            block_hash: Faker.fake_with_rng(&mut OsRng),
+            block_hash: Faker.fake_with_rng(rng),
             block_height: 0u64.into(),
             parent_hash: StacksBlockId::first_mined().into(),
             bitcoin_anchor: deposit_block_hash.into(),
@@ -980,7 +984,7 @@ impl TestSweepSetup2 {
     /// This simulates the sweep transaction successfully going through
     /// validation, where we write to the `bitcoin_tx_sighashes` table at
     /// the end.
-    pub async fn store_bitcoin_tx_sighashes(&self, db: &PgStore) {
+    pub async fn store_bitcoin_tx_sighashes<R: rand::Rng>(&self, db: &PgStore, rng: &mut R) {
         let sweep = self.broadcast_info.as_ref().expect("no sweep tx info set");
 
         let sighash = BitcoinTxSigHash {
@@ -993,7 +997,7 @@ impl TestSweepSetup2 {
             is_valid_tx: true,
             validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
             prevout_type: model::TxPrevoutType::SignersInput,
-            sighash: Faker.fake_with_rng(&mut OsRng),
+            sighash: Faker.fake_with_rng(rng),
         };
         db.write_bitcoin_txs_sighashes(&[sighash]).await.unwrap();
 
@@ -1008,7 +1012,7 @@ impl TestSweepSetup2 {
                 is_valid_tx: true,
                 validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
                 prevout_type: model::TxPrevoutType::SignersInput,
-                sighash: Faker.fake_with_rng(&mut OsRng),
+                sighash: Faker.fake_with_rng(rng),
             };
             db.write_bitcoin_txs_sighashes(&[sighash]).await.unwrap();
         }
@@ -1164,7 +1168,11 @@ impl TestSweepSetup2 {
 
     /// We need to have a row in the dkg_shares table for the scriptPubKey
     /// associated with the signers aggregate key.
-    pub async fn store_dkg_shares(&self, db: &PgStore) {
+    pub async fn store_dkg_shares<R: rand::Rng + rand::CryptoRng>(
+        &self,
+        db: &PgStore,
+        rng: &mut R,
+    ) {
         let num_signers = self.signers.keys.len() as u32;
         let aggregate_key: PublicKey = self.signers.signer.keypair.public_key().into();
         let private_shares = wsts::traits::SignerState {
@@ -1180,14 +1188,13 @@ impl TestSweepSetup2 {
             num_parties: num_signers,
             threshold: self.signatures_required as u32,
             group_key: aggregate_key.into(),
-            parties: vec![Unit.fake_with_rng(&mut OsRng)],
+            parties: vec![Unit.fake_with_rng(rng)],
         };
         let encoded = private_shares.encode_to_vec();
         let signer_private_key = self.signers.private_key().to_bytes();
 
         let encrypted_private_shares =
-            wsts::util::encrypt(&signer_private_key, &encoded, &mut OsRng)
-                .expect("failed to encrypt");
+            wsts::util::encrypt(&signer_private_key, &encoded, rng).expect("failed to encrypt");
         let public_shares: BTreeMap<u32, wsts::net::DkgPublicShares> = BTreeMap::new();
 
         let shares = EncryptedDkgShares {

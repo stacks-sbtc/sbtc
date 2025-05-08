@@ -73,7 +73,11 @@ async fn make_withdrawal_reject(
     (complete_withdrawal_tx, req_ctx)
 }
 
-fn new_sweep_setup(signers: &TestSignerSet, faucet: &Faucet) -> TestSweepSetup2 {
+fn new_sweep_setup<R: rand::Rng>(
+    signers: &TestSignerSet,
+    faucet: &Faucet,
+    rng: &mut R,
+) -> TestSweepSetup2 {
     let amount = 1_000_000;
     let withdraw_amounts = SweepAmounts {
         amount,
@@ -81,7 +85,7 @@ fn new_sweep_setup(signers: &TestSignerSet, faucet: &Faucet) -> TestSweepSetup2 
         is_deposit: false,
     };
 
-    TestSweepSetup2::new_setup(signers.clone(), faucet, &[withdraw_amounts])
+    TestSweepSetup2::new_setup(signers.clone(), faucet, &[withdraw_amounts], rng)
 }
 
 /// For this test we check that the `RejectWithdrawalV1::validate` function
@@ -96,7 +100,7 @@ async fn reject_withdrawal_validation_happy_path() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let test_signer_set = TestSignerSet::new(&mut rng);
-    let setup = new_sweep_setup(&test_signer_set, faucet);
+    let setup = new_sweep_setup(&test_signer_set, faucet, &mut rng);
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -111,7 +115,7 @@ async fn reject_withdrawal_validation_happy_path() {
 
     // Normal: we need to store a row in the dkg_shares table so that we
     // have a record of the scriptPubKey that the signers control.
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
 
     // Normal: the request and how the signers voted needs to be added to
     // the database. Here the bitmap in the withdrawal request object
@@ -155,7 +159,7 @@ async fn reject_withdrawal_validation_not_final() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let test_signer_set = TestSignerSet::new(&mut rng);
-    let setup = new_sweep_setup(&test_signer_set, faucet);
+    let setup = new_sweep_setup(&test_signer_set, faucet, &mut rng);
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -170,7 +174,7 @@ async fn reject_withdrawal_validation_not_final() {
 
     // Normal: we need to store a row in the dkg_shares table so that we
     // have a record of the scriptPubKey that the signers control.
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
 
     // Normal: the request and how the signers voted needs to be added to
     // the database. Here the bitmap in the withdrawal request object
@@ -230,7 +234,7 @@ async fn reject_withdrawal_validation_deployer_mismatch() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let test_signer_set = TestSignerSet::new(&mut rng);
-    let setup = new_sweep_setup(&test_signer_set, faucet);
+    let setup = new_sweep_setup(&test_signer_set, faucet, &mut rng);
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -245,7 +249,7 @@ async fn reject_withdrawal_validation_deployer_mismatch() {
 
     // Normal: we need to store a row in the dkg_shares table so that we
     // have a record of the scriptPubKey that the signers control.
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
 
     // Normal: the request and how the signers voted needs to be added to
     // the database. Here the bitmap in the withdrawal request object
@@ -299,7 +303,7 @@ async fn reject_withdrawal_validation_missing_withdrawal_request() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let test_signer_set = TestSignerSet::new(&mut rng);
-    let setup = new_sweep_setup(&test_signer_set, faucet);
+    let setup = new_sweep_setup(&test_signer_set, faucet, &mut rng);
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -314,7 +318,7 @@ async fn reject_withdrawal_validation_missing_withdrawal_request() {
 
     // Normal: we need to store a row in the dkg_shares table so that we
     // have a record of the scriptPubKey that the signers control.
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
 
     // Normal: the request and how the signers voted needs to be added to
     // the database. Here the bitmap in the withdrawal request object
@@ -370,7 +374,7 @@ async fn reject_withdrawal_validation_request_completed() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let test_signer_set = TestSignerSet::new(&mut rng);
-    let setup = new_sweep_setup(&test_signer_set, faucet);
+    let setup = new_sweep_setup(&test_signer_set, faucet, &mut rng);
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -385,7 +389,7 @@ async fn reject_withdrawal_validation_request_completed() {
 
     // Normal: we need to store a row in the dkg_shares table so that we
     // have a record of the scriptPubKey that the signers control.
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
 
     // Normal: the request and how the signers voted needs to be added to
     // the database. Here the bitmap in the withdrawal request object
@@ -438,7 +442,7 @@ async fn reject_withdrawal_validation_request_being_fulfilled() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let test_signer_set = TestSignerSet::new(&mut rng);
-    let mut setup = new_sweep_setup(&test_signer_set, faucet);
+    let mut setup = new_sweep_setup(&test_signer_set, faucet, &mut rng);
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -460,7 +464,7 @@ async fn reject_withdrawal_validation_request_being_fulfilled() {
     // Normal: we need to store a row in the dkg_shares table so that we
     // have a record of the scriptPubKey that the signers control. This is
     // needed for the donation.
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
 
     // Normal: The signers normally have a UTXO, so we add one here too. It
     // is necessary when checking for whether the withdrawal being
@@ -559,7 +563,7 @@ async fn reject_withdrawal_validation_request_still_active() {
         },
     ];
 
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts, &mut rng);
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -581,7 +585,7 @@ async fn reject_withdrawal_validation_request_still_active() {
     // Normal: we need to store a row in the dkg_shares table so that we
     // have a record of the scriptPubKey that the signers control. We need
     // this so that the donation gets picked up correctly below.
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
 
     // Normal: The signers normally have a UTXO, so we add one here too. It
     // is necessary when checking for whether the withdrawal being
@@ -617,7 +621,7 @@ async fn reject_withdrawal_validation_request_still_active() {
     // we're saying that the coordinator may have tried to fulfill the
     // withdrawal.
     setup.store_bitcoin_withdrawals_outputs(&db).await;
-    setup.store_bitcoin_tx_sighashes(&db).await;
+    setup.store_bitcoin_tx_sighashes(&db, &mut rng).await;
 
     // Generate the transaction and corresponding request context.
     let (reject_withdrawal_tx, req_ctx) = make_withdrawal_reject(&setup, &db).await;

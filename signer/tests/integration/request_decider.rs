@@ -575,7 +575,7 @@ async fn do_not_procceed_with_blocked_addresses(is_withdrawal: bool, is_blocked:
 
     if is_withdrawal {
         // For withdrawals we can store only request and dkg shares
-        setup.store_withdrawal_request(&db).await;
+        setup.store_withdrawal_request(&db, &mut rng).await;
     } else {
         // We need to store the deposit request because of the foreign key
         // constraint on the deposit_signers table.

@@ -169,7 +169,7 @@ async fn complete_deposit_validation_happy_path() {
     backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash).await;
     // Normal: This stores a genesis stacks block anchored to the bitcoin
     // blockchain identified by setup.sweep_block_hash.
-    setup.store_stacks_genesis_block(&db).await;
+    setup.store_stacks_genesis_block(&db, &mut rng).await;
 
     // Normal: we take the deposit transaction as is from the test setup
     // and store it in the database. This is necessary for when we fetch
@@ -233,7 +233,7 @@ async fn complete_deposit_validation_deployer_mismatch() {
     backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash).await;
     // Normal: This stores a genesis stacks block anchored to the bitcoin
     // blockchain identified by setup.sweep_block_hash.
-    setup.store_stacks_genesis_block(&db).await;
+    setup.store_stacks_genesis_block(&db, &mut rng).await;
 
     // Normal: we take the deposit transaction as is from the test setup
     // and store it in the database. This is necessary for when we fetch
@@ -302,7 +302,7 @@ async fn complete_deposit_validation_missing_deposit_request() {
     backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash).await;
     // Normal: This stores a genesis stacks block anchored to the bitcoin
     // blockchain identified by setup.sweep_block_hash.
-    setup.store_stacks_genesis_block(&db).await;
+    setup.store_stacks_genesis_block(&db, &mut rng).await;
 
     // Normal: we take the deposit transaction as is from the test setup
     // and store it in the database. This is necessary for when we fetch
@@ -365,7 +365,7 @@ async fn complete_deposit_validation_recipient_mismatch() {
     backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash).await;
     // Normal: This stores a genesis stacks block anchored to the bitcoin
     // blockchain identified by setup.sweep_block_hash.
-    setup.store_stacks_genesis_block(&db).await;
+    setup.store_stacks_genesis_block(&db, &mut rng).await;
 
     // Normal: we take the deposit transaction as is from the test setup
     // and store it in the database. This is necessary for when we fetch
@@ -456,7 +456,7 @@ async fn complete_deposit_validation_fee_too_low() {
         max_fee: 80_000,
         is_deposit: true,
     };
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &[amounts]);
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &[amounts], &mut rng);
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -485,7 +485,7 @@ async fn complete_deposit_validation_fee_too_low() {
 
     // Normal: we need to store a row in the dkg_shares table so that we
     // have a record of the scriptPubKey that the signers control.
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
 
     // Normal: the request and how the signers voted needs to be added to
     // the database. Here the bitmap in the deposit request object
@@ -599,7 +599,7 @@ async fn complete_deposit_validation_fee_too_high() {
     backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash).await;
     // Normal: This stores a genesis stacks block anchored to the bitcoin
     // blockchain identified by setup.sweep_block_hash.
-    setup.store_stacks_genesis_block(&db).await;
+    setup.store_stacks_genesis_block(&db, &mut rng).await;
 
     // Normal: we take the deposit transaction as is from the test setup
     // and store it in the database. This is necessary for when we fetch
@@ -673,7 +673,7 @@ async fn complete_deposit_validation_sweep_tx_missing() {
     backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash).await;
     // Normal: This stores a genesis stacks block anchored to the bitcoin
     // blockchain identified by setup.sweep_block_hash.
-    setup.store_stacks_genesis_block(&db).await;
+    setup.store_stacks_genesis_block(&db, &mut rng).await;
 
     // Normal: we take the deposit transaction as is from the test setup
     // and store it in the database. This is necessary for when we fetch
@@ -744,7 +744,7 @@ async fn complete_deposit_validation_sweep_reorged() {
     backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash).await;
     // Normal: This stores a genesis stacks block anchored to the bitcoin
     // blockchain identified by setup.sweep_block_hash.
-    setup.store_stacks_genesis_block(&db).await;
+    setup.store_stacks_genesis_block(&db, &mut rng).await;
 
     // Normal: we take the deposit transaction as is from the test setup
     // and store it in the database. This is necessary for when we fetch
@@ -825,7 +825,7 @@ async fn complete_deposit_validation_deposit_not_in_sweep() {
     backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash).await;
     // Normal: This stores a genesis stacks block anchored to the bitcoin
     // blockchain identified by setup.sweep_block_hash.
-    setup.store_stacks_genesis_block(&db).await;
+    setup.store_stacks_genesis_block(&db, &mut rng).await;
 
     // Normal: we take the deposit transaction as is from the test setup
     // and store it in the database. This is necessary for when we fetch
@@ -898,7 +898,7 @@ async fn complete_deposit_validation_deposit_incorrect_fee() {
     backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash).await;
     // Normal: This stores a genesis stacks block anchored to the bitcoin
     // blockchain identified by setup.sweep_block_hash.
-    setup.store_stacks_genesis_block(&db).await;
+    setup.store_stacks_genesis_block(&db, &mut rng).await;
 
     // Normal: we take the deposit transaction as is from the test setup
     // and store it in the database. This is necessary for when we fetch
@@ -968,7 +968,7 @@ async fn complete_deposit_validation_deposit_invalid_sweep() {
     backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash).await;
     // Normal: This stores a genesis stacks block anchored to the bitcoin
     // blockchain identified by setup.sweep_block_hash.
-    setup.store_stacks_genesis_block(&db).await;
+    setup.store_stacks_genesis_block(&db, &mut rng).await;
 
     // Normal: we take the deposit transaction as is from the test setup
     // and store it in the database. This is necessary for when we fetch
@@ -1035,7 +1035,7 @@ async fn complete_deposit_validation_request_completed() {
     backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash).await;
     // Normal: This stores a genesis stacks block anchored to the bitcoin
     // blockchain identified by setup.sweep_block_hash.
-    setup.store_stacks_genesis_block(&db).await;
+    setup.store_stacks_genesis_block(&db, &mut rng).await;
 
     // Normal: we take the deposit transaction as is from the test setup
     // and store it in the database. This is necessary for when we fetch

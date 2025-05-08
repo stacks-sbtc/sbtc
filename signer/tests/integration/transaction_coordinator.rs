@@ -4257,6 +4257,8 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
 async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
+    let mut rng = get_rng();
+
     let db = testing::storage::new_test_database().await;
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -4312,14 +4314,14 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
         max_fee: 500_000,
         is_deposit: true,
     }];
-    let mut setup = TestSweepSetup2::new_setup(signers.clone(), faucet, &amounts);
+    let mut setup = TestSweepSetup2::new_setup(signers.clone(), faucet, &amounts, &mut rng);
 
     // Store everything we need for the deposit to be considered swept
     setup.submit_sweep_tx(rpc, faucet);
     fetch_canonical_bitcoin_blockchain(&db, rpc).await;
 
     setup.store_stacks_genesis_block(&db).await;
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
     setup.store_donation(&db).await;
     setup.store_deposit_txs(&db).await;
     setup.store_deposit_request(&db).await;
