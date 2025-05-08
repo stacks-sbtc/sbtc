@@ -159,8 +159,8 @@ impl AsContractCall for InitiateWithdrawalRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::get_rng;
 
-    use rand::rngs::OsRng;
     use test_case::test_case;
 
     #[test_case(3; "3 signers")]
@@ -168,10 +168,11 @@ mod tests {
     #[test_case(7; "7 signers")]
     #[test_case(15; "15 signers")]
     fn constructed_signer_set_has_desired_aggregate_key(num_signers: usize) {
+        let mut rng = get_rng();
         let signer = Recipient::new(bitcoin::AddressType::P2tr);
 
         let aggregate_key = PublicKey::from(signer.keypair.public_key());
-        let keys = create_signers_keys(&mut OsRng, &signer, num_signers);
+        let keys = create_signers_keys(&mut rng, &signer, num_signers);
 
         assert_eq!(keys.len(), num_signers);
         assert_eq!(PublicKey::combine_keys(&keys).unwrap(), aggregate_key);

@@ -7,7 +7,6 @@ use std::time::Duration;
 use clarity::util::secp256k1::Secp256k1PublicKey;
 use clarity::vm::types::PrincipalData;
 use fake::Fake;
-use rand::rngs::OsRng;
 use stacks_common::address::AddressHashMode;
 use stacks_common::address::C32_ADDRESS_VERSION_TESTNET_MULTISIG;
 use stacks_common::types::chainstate::StacksAddress;
@@ -249,10 +248,13 @@ impl Signer {
     }
 
     /// Participate in a DKG round and return the result
-    pub async fn run_until_dkg_end(mut self) -> Self {
+    pub async fn run_until_dkg_end<R: rand::Rng + Clone + rand::CryptoRng>(
+        mut self,
+        rng: R,
+    ) -> Self {
         let future = async move {
-            let mut rng = OsRng;
             loop {
+                let mut rng = rng.clone();
                 let msg = self.network.receive().await.expect("network error");
                 let bitcoin_chain_tip = msg.bitcoin_chain_tip;
 
@@ -290,10 +292,13 @@ impl Signer {
     }
 
     /// Participate in a signing round and return the result
-    pub async fn run_until_signature_share_response(mut self) -> Self {
+    pub async fn run_until_signature_share_response<R: rand::Rng + rand::CryptoRng + Clone>(
+        mut self,
+        rng: R,
+    ) -> Self {
         let future = async move {
-            let mut rng = OsRng;
             loop {
+                let mut rng = rng.clone();
                 let msg = self.network.receive().await.expect("network error");
                 let bitcoin_chain_tip = msg.bitcoin_chain_tip;
 
@@ -404,7 +409,7 @@ impl SignerSet {
 
     /// Run DKG and return the private and public shares
     /// for all signers
-    pub async fn run_dkg<Rng: rand::RngCore + rand::CryptoRng>(
+    pub async fn run_dkg<Rng: rand::RngCore + rand::CryptoRng + Clone + Send + 'static>(
         &mut self,
         bitcoin_chain_tip: model::BitcoinBlockHash,
         id: WstsMessageId,
@@ -412,8 +417,10 @@ impl SignerSet {
         dkg_shares_status: model::DkgSharesStatus,
     ) -> (PublicKey, Vec<model::EncryptedDkgShares>) {
         let mut signer_handles = Vec::new();
+        let mut rng = rng.clone();
         for signer in self.signers.drain(..) {
-            let handle = tokio::spawn(async { signer.run_until_dkg_end().await });
+            let rng_to_move = rng.clone();
+            let handle = tokio::spawn(async { signer.run_until_dkg_end(rng_to_move).await });
             signer_handles.push(handle);
         }
 
@@ -436,7 +443,7 @@ impl SignerSet {
                 .map(|signer| {
                     let mut shares = signer
                         .wsts_signer
-                        .get_encrypted_dkg_shares(rng, &started_at)
+                        .get_encrypted_dkg_shares(&mut rng, &started_at)
                         .expect("failed to get encrypted shares");
                     shares.dkg_shares_status = dkg_shares_status;
                     shares
@@ -447,17 +454,31 @@ impl SignerSet {
 
     /// Participate in signing rounds coordinated by an external coordinator.
     /// Will never terminate unless the signer panics.
-    pub async fn participate_in_signing_rounds_forever(&mut self) {
+    pub async fn participate_in_signing_rounds_forever<
+        R: rand::Rng + rand::CryptoRng + Send + Clone + 'static,
+    >(
+        &mut self,
+        rng: &mut R,
+    ) {
         loop {
-            self.participate_in_signing_round().await
+            self.participate_in_signing_round(rng).await
         }
     }
 
     /// Participate in a signing round coordinated by an external coordinator.
-    pub async fn participate_in_signing_round(&mut self) {
+    pub async fn participate_in_signing_round<
+        R: rand::Rng + rand::CryptoRng + Send + Clone + 'static,
+    >(
+        &mut self,
+        rng: &mut R,
+    ) {
+        let rng = rng.clone();
         let mut signer_handles = Vec::new();
         for signer in self.signers.drain(..) {
-            let handle = tokio::spawn(async { signer.run_until_signature_share_response().await });
+            let rng_to_move = rng.clone();
+            let handle = tokio::spawn(async {
+                signer.run_until_signature_share_response(rng_to_move).await
+            });
             signer_handles.push(handle);
         }
 

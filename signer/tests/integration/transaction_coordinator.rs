@@ -142,14 +142,14 @@ type IntegrationTestContext =
 pub const GET_POX_INFO_JSON: &str =
     include_str!("../../tests/fixtures/stacksapi-get-pox-info-test-data.json");
 
-async fn run_dkg<Rng, C>(
-    ctx: &C,
+async fn run_dkg<'ctx, 'signerset, Rng, C>(
+    ctx: &'ctx C,
     rng: &mut Rng,
-    signer_set: &mut SignerSet,
+    signer_set: &'signerset mut SignerSet,
 ) -> (keys::PublicKey, model::BitcoinBlockRef)
 where
     C: Context + Send + Sync,
-    Rng: rand::CryptoRng + rand::RngCore,
+    Rng: rand::CryptoRng + rand::RngCore + Send + Clone + 'signerset + 'ctx + 'static,
 {
     let storage = ctx.get_storage_mut();
 

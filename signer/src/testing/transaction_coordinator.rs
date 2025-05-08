@@ -448,7 +448,7 @@ where
         // Start the in-memory signer set.
         let _signers_handle = tokio::spawn(async move {
             testing_signer_set
-                .participate_in_signing_rounds_forever()
+                .participate_in_signing_rounds_forever(&mut rng)
                 .await
         });
 
@@ -641,7 +641,7 @@ where
         // Start the in-memory signer set.
         let _signers_handle = tokio::spawn(async move {
             testing_signer_set
-                .participate_in_signing_rounds_forever()
+                .participate_in_signing_rounds_forever(&mut rng)
                 .await
         });
 
@@ -1394,7 +1394,7 @@ where
         signer_set: &mut SignerSet,
     ) -> (keys::PublicKey, model::BitcoinBlockRef, TestData)
     where
-        Rng: rand::CryptoRng + rand::RngCore,
+        Rng: rand::CryptoRng + rand::RngCore + Send + Clone + 'static,
     {
         let storage = self.context.get_storage_mut();
 

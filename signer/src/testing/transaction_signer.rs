@@ -249,15 +249,15 @@ where
 
 /// This function runs a DKG round for the given signers and stores the
 /// result in the provided stores for all signers.
-async fn run_dkg_and_store_results_for_signers<'s: 'r, 'r, S, Rng>(
-    signer_info: &[testing::wsts::SignerInfo],
-    chain_tip: &model::BitcoinBlockHash,
+async fn run_dkg_and_store_results_for_signers<'info, 'chaintip, 's: 'r, 'r, S, Rng>(
+    signer_info: &'info [testing::wsts::SignerInfo],
+    chain_tip: &'chaintip model::BitcoinBlockHash,
     threshold: u32,
     stores: impl IntoIterator<Item = S>,
     rng: &mut Rng,
 ) where
     S: storage::DbRead + storage::DbWrite,
-    Rng: rand::CryptoRng + rand::RngCore,
+    Rng: rand::CryptoRng + rand::RngCore + Send + Clone + 'chaintip + 'info + 'r + 's + 'static,
 {
     let network = network::InMemoryNetwork::new();
     let mut testing_signer_set =
