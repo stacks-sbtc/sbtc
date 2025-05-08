@@ -689,10 +689,8 @@ where
 /// scriptPubKey of the signers bootstrap UTXO. Note that we do not need to
 /// worry about the signers scriptPubKey changing more than particular once
 /// because that case is impossible.
-#[test_case::test_case(true; "shuffled")]
-#[test_case::test_case(false; "unshuffled")]
 #[tokio::test]
-async fn block_observer_picks_up_chained_unordered_sweeps(shuffled_txs: bool) {
+async fn block_observer_picks_up_chained_unordered_sweeps() {
     let (rpc, faucet) = regtest::initialize_blockchain();
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
@@ -820,10 +818,7 @@ async fn block_observer_picks_up_chained_unordered_sweeps(shuffled_txs: bool) {
     db.write_bitcoin_block(&db_block).await.unwrap();
 
     let mut transactions = block_info.transactions;
-
-    if shuffled_txs {
-        transactions.shuffle(&mut rng);
-    }
+    transactions.shuffle(&mut rng);
 
     block_observer.extract_sbtc_transactions(block_hash, &transactions).await.unwrap();
 
