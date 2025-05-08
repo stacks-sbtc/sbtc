@@ -384,7 +384,6 @@ class TestDepositProcessorWithRbf(TestDepositProcessorBase):
             txid="expired_locktime_tx",
             confirmed_height=900,  # Confirmed 100 blocks ago
             lock_time=50,  # Locktime of 50 blocks
-            # status=RequestStatus.ACCEPTED.value
         )
 
         self.rbf_original = self._create_mock_deposit(

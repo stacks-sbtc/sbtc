@@ -701,11 +701,7 @@ services:
     command: --config /etc/vector/vector.toml
     restart: always
     ports:
-<<<<<<< HEAD
-      - 9598
-=======
       - "127.0.0.1:9598:9598"
->>>>>>> main
     volumes:
       - ./observability/vector.toml:/etc/vector/vector.toml:ro
       # This is needed for vector to read logs from other containers
