@@ -389,7 +389,7 @@ async fn get_pending_deposit_requests_only_pending() {
         is_deposit: true,
     };
     let signers = TestSignerSet::new(&mut rng);
-    let setup = TestSweepSetup2::new_setup(signers, faucet, &[amounts]);
+    let setup = TestSweepSetup2::new_setup(signers, faucet, &[amounts], &mut rng);
 
     backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
     let chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
@@ -445,7 +445,7 @@ async fn get_pending_withdrawal_requests_only_pending() {
         is_deposit: false,
     };
     let signers = TestSignerSet::new(&mut rng);
-    let setup = TestSweepSetup2::new_setup(signers, faucet, &[amounts]);
+    let setup = TestSweepSetup2::new_setup(signers, faucet, &[amounts], &mut rng);
 
     backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
     let chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
@@ -647,7 +647,7 @@ async fn should_not_return_swept_deposits_as_pending_accepted() {
     // We need to manually update the database with new bitcoin block
     // headers.
     crate::setup::backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash).await;
-    setup.store_stacks_genesis_block(&db).await;
+    setup.store_stacks_genesis_block(&db, &mut rng).await;
 
     // This isn't technically required right now, but the deposit
     // transaction is supposed to be there, so future versions of our query
@@ -2046,7 +2046,7 @@ async fn get_swept_deposit_requests_returns_swept_deposit_requests() {
     // We need to manually update the database with new bitcoin block
     // headers.
     crate::setup::backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash).await;
-    setup.store_stacks_genesis_block(&db).await;
+    setup.store_stacks_genesis_block(&db, &mut rng).await;
 
     // This isn't technically required right now, but the deposit
     // transaction is supposed to be there, so future versions of our query
@@ -2367,7 +2367,7 @@ async fn get_swept_deposit_requests_does_not_return_deposit_requests_with_respon
 
     for setup in [&mut setup_fork, &mut setup_canonical] {
         // We almost always need a stacks genesis block, so let's store it.
-        setup.store_stacks_genesis_block(&db).await;
+        setup.store_stacks_genesis_block(&db, &mut rng).await;
         // This isn't technically required right now, but the deposit
         // transaction is supposed to be there, so future versions of our query
         // can rely on that fact.
@@ -2692,7 +2692,7 @@ async fn get_swept_deposit_requests_response_tx_reorged() {
     // We need to manually update the database with new bitcoin block
     // headers.
     crate::setup::backfill_bitcoin_blocks(&db, rpc, &chain_tip).await;
-    setup.store_stacks_genesis_block(&db).await;
+    setup.store_stacks_genesis_block(&db, &mut rng).await;
 
     // This isn't technically required right now, but the deposit
     // transaction is supposed to be there, so future versions of our query
@@ -2786,7 +2786,7 @@ async fn get_swept_deposit_requests_boundary() {
     let chain_tip = fetch_canonical_bitcoin_blockchain(&db, rpc).await;
 
     // We almost always need a stacks genesis block, so let's store it.
-    setup.store_stacks_genesis_block(&db).await;
+    setup.store_stacks_genesis_block(&db, &mut rng).await;
     // This isn't technically required right now, but the deposit
     // transaction is supposed to be there, so future versions of our query
     // can rely on that fact.
@@ -3065,9 +3065,11 @@ async fn should_process_withdrawals() {
 async fn should_get_signer_utxo_simple() {
     let store = testing::storage::new_test_database().await;
 
+    let mut rng = get_rng();
+
     transaction_coordinator_test_environment(store.clone())
         .await
-        .assert_get_signer_utxo_simple()
+        .assert_get_signer_utxo_simple(&mut rng)
         .await;
 
     signer::testing::storage::drop_db(store).await;
@@ -3077,9 +3079,11 @@ async fn should_get_signer_utxo_simple() {
 async fn should_get_signer_utxo_fork() {
     let store = testing::storage::new_test_database().await;
 
+    let mut rng = get_rng();
+
     transaction_coordinator_test_environment(store.clone())
         .await
-        .assert_get_signer_utxo_fork()
+        .assert_get_signer_utxo_fork(&mut rng)
         .await;
 
     signer::testing::storage::drop_db(store).await;
@@ -3089,9 +3093,11 @@ async fn should_get_signer_utxo_fork() {
 async fn should_get_signer_utxo_unspent() {
     let store = testing::storage::new_test_database().await;
 
+    let mut rng = get_rng();
+
     transaction_coordinator_test_environment(store.clone())
         .await
-        .assert_get_signer_utxo_unspent()
+        .assert_get_signer_utxo_unspent(&mut rng)
         .await;
 
     signer::testing::storage::drop_db(store).await;
@@ -3101,9 +3107,11 @@ async fn should_get_signer_utxo_unspent() {
 async fn should_get_signer_utxo_donations() {
     let store = testing::storage::new_test_database().await;
 
+    let mut rng = get_rng();
+
     transaction_coordinator_test_environment(store.clone())
         .await
-        .assert_get_signer_utxo_donations()
+        .assert_get_signer_utxo_donations(&mut rng)
         .await;
 
     signer::testing::storage::drop_db(store).await;
@@ -5469,7 +5477,7 @@ async fn is_withdrawal_inflight_catches_withdrawals_with_rows_in_table() {
     let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    let setup = TestSweepSetup2::new_setup(signers, faucet, &[]);
+    let setup = TestSweepSetup2::new_setup(signers, faucet, &[], &mut rng);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't
@@ -5481,7 +5489,7 @@ async fn is_withdrawal_inflight_catches_withdrawals_with_rows_in_table() {
 
     // This is needed for the part of the query that fetches the signers'
     // UTXO.
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
 
     // This donation is currently the signers' UTXO, which is needed in the
     // `is_withdrawal_inflight` implementation.
@@ -5543,7 +5551,7 @@ async fn is_withdrawal_inflight_catches_withdrawals_in_package() {
     // We use TestSweepSetup2 to help set up the signers' UTXO, which needs
     // to be available for this test.
     let signers = TestSignerSet::new(&mut rng);
-    let setup = TestSweepSetup2::new_setup(signers, faucet, &[]);
+    let setup = TestSweepSetup2::new_setup(signers, faucet, &[], &mut rng);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't
@@ -5554,7 +5562,7 @@ async fn is_withdrawal_inflight_catches_withdrawals_in_package() {
 
     // This is needed for the part of the query that fetches the signers'
     // UTXO.
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
     // This donation is currently the signers' UTXO, which is needed in the
     // `is_withdrawal_inflight` implementation.
     setup.store_donation(&db).await;

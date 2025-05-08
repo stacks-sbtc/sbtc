@@ -145,7 +145,6 @@ mod tests {
     use fake::Fake as _;
     use fake::Faker;
     use prost::bytes::Buf as _;
-    use rand::rngs::OsRng;
     use test_case::test_case;
 
     use p256k1::point::Point;
@@ -251,7 +250,8 @@ mod tests {
         U: From<T> + prost::Message + Default + PartialEq,
         E: std::fmt::Debug,
     {
-        let original: T = Faker.fake_with_rng(&mut OsRng);
+        let mut rng = get_rng();
+        let original: T = Faker.fake_with_rng(&mut rng);
         let proto_original = U::from(original.clone());
         let data = proto_original.encode_to_vec();
         let mut buf = data.as_slice();
@@ -316,7 +316,8 @@ mod tests {
         U: From<T> + prost::Message + Default + PartialEq,
         E: std::fmt::Debug,
     {
-        let original: T = Unit.fake_with_rng(&mut OsRng);
+        let mut rng = get_rng();
+        let original: T = Unit.fake_with_rng(&mut rng);
         let proto_original = U::from(original.clone());
         let data = proto_original.encode_to_vec();
         let mut buf = data.as_slice();

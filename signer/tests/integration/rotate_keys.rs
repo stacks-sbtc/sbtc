@@ -1,5 +1,4 @@
 use blockstack_lib::types::chainstate::StacksAddress;
-use rand::rngs::OsRng;
 
 use sbtc::testing::regtest;
 use signer::error::Error;
@@ -143,7 +142,10 @@ impl TestRotateKeySetup {
     }
 }
 
-fn make_rotate_key(setup: &TestRotateKeySetup) -> (RotateKeysV1, ReqContext) {
+fn make_rotate_key<R: rand::Rng>(
+    setup: &TestRotateKeySetup,
+    rng: &mut R,
+) -> (RotateKeysV1, ReqContext) {
     let rotate_key = RotateKeysV1::new(
         &setup.wallet,
         StacksAddress::burn_address(false),
@@ -156,7 +158,7 @@ fn make_rotate_key(setup: &TestRotateKeySetup) -> (RotateKeysV1, ReqContext) {
         // This is not used for rotate-key tests.
         stacks_chain_tip: signer::storage::model::StacksBlockHash::from([0; 32]),
         context_window: 10,
-        origin: fake::Faker.fake_with_rng(&mut OsRng),
+        origin: fake::Faker.fake_with_rng(rng),
         aggregate_key: setup.aggregate_key(),
         signatures_required: setup.signatures_required,
         deployer: StacksAddress::burn_address(false),
@@ -193,14 +195,14 @@ async fn rotate_key_validation_happy_path() {
     setup.store_dkg_shares(&db).await;
 
     // Normal: we get the rotate key from the setup
-    let (rotate_key_tx, req_ctx) = make_rotate_key(&setup);
+    let (rotate_key_tx, req_ctx) = make_rotate_key(&setup, &mut rng);
 
     // Check to see if validation passes.
     rotate_key_tx.validate(&ctx, &req_ctx).await.unwrap();
 
     // Check that, if we run another dkg, the new tx pass validation
     let setup_other = TestRotateKeySetup::new(&db, 2, 3, &mut rng).await;
-    let (rotate_key_tx_other, _) = make_rotate_key(&setup_other);
+    let (rotate_key_tx_other, _) = make_rotate_key(&setup_other, &mut rng);
 
     // No DKG yet
     rotate_key_tx_other
@@ -242,7 +244,7 @@ async fn rotate_key_validation_no_dkg() {
     // Differnt: we do NOT store setup dkg shares
 
     // Normal: we get the rotate key from the setup
-    let (rotate_key_tx, req_ctx) = make_rotate_key(&setup);
+    let (rotate_key_tx, req_ctx) = make_rotate_key(&setup, &mut rng);
 
     let validate_future = rotate_key_tx.validate(&ctx, &req_ctx);
     match validate_future.await.unwrap_err() {
@@ -281,7 +283,7 @@ async fn rotate_key_validation_wrong_deployer() {
     setup.store_dkg_shares(&db).await;
 
     // Normal: we get the rotate key from the setup
-    let (rotate_key_tx, mut req_ctx) = make_rotate_key(&setup);
+    let (rotate_key_tx, mut req_ctx) = make_rotate_key(&setup, &mut rng);
 
     // Different: use a different (expected) deployer
     req_ctx.deployer = StacksAddress::p2pkh(false, &setup.signer_keys[0].into());
@@ -325,7 +327,7 @@ async fn rotate_key_validation_wrong_signing_set() {
     setup.store_dkg_shares(&db).await;
 
     // Normal: we get the rotate key from the setup
-    let (rotate_key_tx, req_ctx) = make_rotate_key(&setup);
+    let (rotate_key_tx, req_ctx) = make_rotate_key(&setup, &mut rng);
 
     // Different: create another setup, resulting in different public keys, and try to use
     // those as public keys in rotate keys tx
@@ -375,7 +377,7 @@ async fn rotate_key_validation_wrong_aggregate_key() {
     setup.store_dkg_shares(&db).await;
 
     // Normal: we get the rotate key from the setup
-    let (rotate_key_tx, req_ctx) = make_rotate_key(&setup);
+    let (rotate_key_tx, req_ctx) = make_rotate_key(&setup, &mut rng);
 
     // Different: create another setup, resulting in different aggregate key, and try to use
     // that as aggregate key in rotate keys tx
@@ -425,7 +427,7 @@ async fn rotate_key_validation_wrong_signatures_required() {
     setup.store_dkg_shares(&db).await;
 
     // Normal: we get the rotate key from the setup
-    let (rotate_key_tx, req_ctx) = make_rotate_key(&setup);
+    let (rotate_key_tx, req_ctx) = make_rotate_key(&setup, &mut rng);
 
     // Different: we change the signature threshold
     let wallet_other = SignerWallet::new(
@@ -480,7 +482,7 @@ async fn rotate_key_validation_replay() {
     setup.store_dkg_shares(&db).await;
 
     // Normal: we get the rotate key from the setup
-    let (rotate_key_tx, req_ctx) = make_rotate_key(&setup);
+    let (rotate_key_tx, req_ctx) = make_rotate_key(&setup, &mut rng);
 
     // Check to see if validation passes.
     rotate_key_tx.validate(&ctx, &req_ctx).await.unwrap();
@@ -548,7 +550,7 @@ async fn rotate_key_validation_not_verfied() {
     set_verification_status(&db, setup.aggregate_key(), DkgSharesStatus::Failed).await;
 
     // Normal: we get the rotate key from the setup
-    let (rotate_key_tx, req_ctx) = make_rotate_key(&setup);
+    let (rotate_key_tx, req_ctx) = make_rotate_key(&setup, &mut rng);
 
     let validate_future = rotate_key_tx.validate(&ctx, &req_ctx);
     match validate_future.await.unwrap_err() {

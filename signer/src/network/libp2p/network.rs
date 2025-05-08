@@ -124,6 +124,8 @@ mod tests {
     async fn two_clients_should_be_able_to_exchange_messages_given_a_libp2p_network() {
         clear_env();
 
+        let mut rng = get_rng();
+
         // PeerId = 16Uiu2HAm46BSFWYYWzMjhTRDRwXHpDWpQ32iu93nzDwd1F4Tt256
         let key1 = PrivateKey::from_slice(
             hex::decode("ab0893ecf683dc188c3fb219dd6489dc304bb5babb8151a41245a70e60cb7258")
@@ -166,8 +168,8 @@ mod tests {
         let term1 = context1.get_termination_handle();
         let term2 = context2.get_termination_handle();
 
-        let swarm1_addr = Multiaddr::random_memory();
-        let swarm2_addr = Multiaddr::random_memory();
+        let swarm1_addr = Multiaddr::random_memory(&mut rng);
+        let swarm2_addr = Multiaddr::random_memory(&mut rng);
 
         let mut swarm1 = SignerSwarmBuilder::new(&key1)
             .enable_memory_transport(true)
@@ -201,7 +203,9 @@ mod tests {
         // Run the test with a 30-second timeout for the swarms to exchange messages.
         if tokio::time::timeout(
             tokio::time::Duration::from_secs(30),
-            testing::network::assert_clients_can_exchange_messages(network1, network2, key1, key2),
+            testing::network::assert_clients_can_exchange_messages(
+                network1, network2, key1, key2, &mut rng,
+            ),
         )
         .await
         .is_err()
@@ -264,9 +268,9 @@ mod tests {
             current_signer_set3.add_signer(PublicKey::from_private_key(&key));
         }
 
-        let swarm1_addr = Multiaddr::random_memory();
-        let swarm2_addr = Multiaddr::random_memory();
-        let swarm3_addr = Multiaddr::random_memory();
+        let swarm1_addr = Multiaddr::random_memory(&mut rng);
+        let swarm2_addr = Multiaddr::random_memory(&mut rng);
+        let swarm3_addr = Multiaddr::random_memory(&mut rng);
 
         // Configure the swarms to listen on hard-coded ports
         let mut swarm1 = SignerSwarmBuilder::new(&key1)
@@ -420,9 +424,9 @@ mod tests {
             current_signer_set3.add_signer(PublicKey::from_private_key(&key));
         }
 
-        let swarm1_addr = Multiaddr::random_memory();
-        let swarm2_addr = Multiaddr::random_memory();
-        let swarm3_addr = Multiaddr::random_memory();
+        let swarm1_addr = Multiaddr::random_memory(&mut rng);
+        let swarm2_addr = Multiaddr::random_memory(&mut rng);
+        let swarm3_addr = Multiaddr::random_memory(&mut rng);
 
         let mut swarm1 = SignerSwarmBuilder::new(&key1)
             .enable_memory_transport(true)
@@ -546,6 +550,8 @@ mod tests {
         // events from the swarms and checking that the expected events are
         // emitted.
 
+        let mut rng = get_rng();
+
         // PeerId = 16Uiu2HAm46BSFWYYWzMjhTRDRwXHpDWpQ32iu93nzDwd1F4Tt256
         let key1 = PrivateKey::from_str(
             "ab0893ecf683dc188c3fb219dd6489dc304bb5babb8151a41245a70e60cb7258",
@@ -610,9 +616,9 @@ mod tests {
             .current_signer_set()
             .add_signer(PublicKey::from_private_key(&key2));
 
-        let swarm1_addr = Multiaddr::random_memory();
-        let swarm2_addr = Multiaddr::random_memory();
-        let swarm3_addr = Multiaddr::random_memory();
+        let swarm1_addr = Multiaddr::random_memory(&mut rng);
+        let swarm2_addr = Multiaddr::random_memory(&mut rng);
+        let swarm3_addr = Multiaddr::random_memory(&mut rng);
 
         // Create the two trusted swarms.
         let mut swarm1 = SignerSwarmBuilder::new(&key1)
@@ -663,7 +669,7 @@ mod tests {
             adversarial.receive().await.unwrap();
         });
         trusted2
-            .broadcast(Msg::random_with_private_key(&mut rand::thread_rng(), &key2))
+            .broadcast(Msg::random_with_private_key(&mut rng, &key2))
             .await
             .unwrap();
         trusted_msg_from_2_to_1
@@ -681,7 +687,7 @@ mod tests {
             adversarial.receive().await.unwrap();
         });
         trusted1
-            .broadcast(Msg::random_with_private_key(&mut rand::thread_rng(), &key1))
+            .broadcast(Msg::random_with_private_key(&mut rng, &key1))
             .await
             .unwrap();
         trusted_msg_from_1_to_2
@@ -695,20 +701,14 @@ mod tests {
         let adversarial_msg_to_1 = tokio::time::timeout(Duration::from_secs(1), async {
             trusted1.receive().await.unwrap();
         });
-        adversarial
-            .broadcast(Msg::random(&mut rand::thread_rng()))
-            .await
-            .unwrap();
+        adversarial.broadcast(Msg::random(&mut rng)).await.unwrap();
         assert!(adversarial_msg_to_1.await.is_err());
 
         // Test that adversarial can't send a message to trusted 2.
         let adversarial_msg_to_2 = tokio::time::timeout(Duration::from_secs(1), async {
             trusted2.receive().await.unwrap();
         });
-        adversarial
-            .broadcast(Msg::random(&mut rand::thread_rng()))
-            .await
-            .unwrap();
+        adversarial.broadcast(Msg::random(&mut rng)).await.unwrap();
         assert!(adversarial_msg_to_2.await.is_err());
 
         // Kill the swarms just to be sure.

@@ -550,6 +550,7 @@ mod tests {
     use crate::storage::in_memory::SharedStore;
     use crate::testing;
     use crate::testing::context::*;
+    use crate::testing::get_rng;
 
     #[allow(clippy::type_complexity)]
     fn test_environment() -> testing::request_decider::TestEnvironment<
@@ -587,23 +588,28 @@ mod tests {
 
     #[tokio::test]
     async fn should_store_decisions_for_pending_deposit_requests() {
+        let mut rng = get_rng();
         test_environment()
-            .assert_should_store_decisions_for_pending_deposit_requests()
+            .assert_should_store_decisions_for_pending_deposit_requests(&mut rng)
             .await;
     }
 
     #[tokio::test]
     // TODO(#1466): This test is currently using a known-working fixed seed, but is flaky with other seeds.
     async fn should_store_decisions_for_pending_withdrawal_requests() {
+        // TODO(#1466): fix this test for other seeds and use `get_rng()`
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
         test_environment()
-            .assert_should_store_decisions_for_pending_withdrawal_requests()
+            .assert_should_store_decisions_for_pending_withdrawal_requests(&mut rng)
             .await;
     }
 
     #[tokio::test]
     async fn should_store_decisions_received_from_other_signers() {
+        let mut rng = get_rng();
         test_environment()
-            .assert_should_store_decisions_received_from_other_signers()
+            .assert_should_store_decisions_received_from_other_signers(&mut rng)
             .await;
     }
 }

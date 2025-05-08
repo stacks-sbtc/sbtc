@@ -423,7 +423,8 @@ mod tests {
 
     #[test]
     fn test_initial_state() {
-        let signers = TestSetup::setup(5);
+        let mut rng = get_rng();
+        let signers = TestSetup::setup(5, &mut rng);
         let state_machine = signers.state_machine;
 
         assert_eq!(state_machine.signer_count(), 5);
@@ -444,7 +445,8 @@ mod tests {
 
     #[test]
     fn test_reset() {
-        let mut setup = TestSetup::setup(5);
+        let mut rng = get_rng();
+        let mut setup = TestSetup::setup(5, &mut rng);
         let sender1 = setup.next_signer().as_public_key();
         let mut state_machine = setup.state_machine;
 
@@ -488,7 +490,8 @@ mod tests {
 
     #[test]
     fn test_enqueue_message() {
-        let setup = TestSetup::setup(2);
+        let mut rng = get_rng();
+        let setup = TestSetup::setup(2, &mut rng);
         let mut state_machine = setup.state_machine;
 
         let dkg_id = 0;
@@ -519,7 +522,8 @@ mod tests {
 
     #[test]
     fn test_out_of_order_messages() {
-        let mut setup = TestSetup::setup(2);
+        let mut rng = get_rng();
+        let mut setup = TestSetup::setup(2, &mut rng);
         let mut signer1 = setup.next_signer();
         let mut signer2 = setup.next_signer();
         let sender1 = signer1.as_public_key();
@@ -572,7 +576,8 @@ mod tests {
 
     #[test]
     fn test_nonce_phase_with_in_order_messages() {
-        let mut setup = TestSetup::setup(2);
+        let mut rng = get_rng();
+        let mut setup = TestSetup::setup(2, &mut rng);
         let mut signer1 = setup.next_signer();
         let mut signer2 = setup.next_signer();
         let sender1 = signer1.as_public_key();
@@ -627,7 +632,8 @@ mod tests {
 
     #[test]
     fn test_dkg_verification_state_machine() {
-        let mut setup = TestSetup::setup(2);
+        let mut rng = get_rng();
+        let mut setup = TestSetup::setup(2, &mut rng);
         let mut signer1 = setup.next_signer();
         let mut signer2 = setup.next_signer();
         let sender1 = signer1.as_public_key();

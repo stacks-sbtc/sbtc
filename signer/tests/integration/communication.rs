@@ -14,6 +14,7 @@ use signer::network::P2PNetwork;
 use signer::network::libp2p::SignerSwarmBuilder;
 use signer::testing::context::TestContext;
 use signer::testing::context::*;
+use signer::testing::get_rng;
 use test_case::test_case;
 use tokio_stream::StreamExt;
 
@@ -21,6 +22,7 @@ use tokio_stream::StreamExt;
 #[test_case("/ip4/127.0.0.1/udp/0/quic-v1", "/ip4/127.0.0.1/udp/0/quic-v1"; "quic-v1")]
 #[tokio::test]
 async fn libp2p_clients_can_exchange_messages_given_real_network(addr1: &str, addr2: &str) {
+    let mut rng = get_rng();
     let swarm1_addr: Multiaddr = addr1.parse().expect("Failed to parse swarm1 address");
     let swarm2_addr: Multiaddr = addr2.parse().expect("Failed to parse swarm2 address");
 
@@ -113,7 +115,7 @@ async fn libp2p_clients_can_exchange_messages_given_real_network(addr1: &str, ad
     if tokio::time::timeout(
         tokio::time::Duration::from_secs(10),
         signer::testing::network::assert_clients_can_exchange_messages(
-            network1, network2, key1, key2,
+            network1, network2, key1, key2, &mut rng,
         ),
     )
     .await
@@ -134,9 +136,10 @@ async fn libp2p_clients_can_exchange_messages_given_real_network(addr1: &str, ad
 
 #[test_log::test(tokio::test)]
 async fn libp2p_limits_max_established_connections() -> Result<(), Box<dyn std::error::Error>> {
+    let mut rng = get_rng();
     // Create 10 keys (main swarm + 9 peers)
     let keys = (0..10)
-        .map(|_| PrivateKey::new(&mut rand::thread_rng()))
+        .map(|_| PrivateKey::new(&mut rng))
         .collect::<Vec<_>>();
     let public_keys = keys
         .iter()

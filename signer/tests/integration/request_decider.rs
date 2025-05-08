@@ -88,11 +88,13 @@ async fn should_store_decisions_for_pending_deposit_requests() {
     let num_signers = 3;
     let signing_threshold = 2;
 
+    let mut rng = get_rng();
+
     let db = create_signer_database().await;
     // We need to clone the connection so that we can drop the associated
     // databases later.
     test_environment(db.clone(), signing_threshold, num_signers)
-        .assert_should_store_decisions_for_pending_deposit_requests()
+        .assert_should_store_decisions_for_pending_deposit_requests(&mut rng)
         .await;
 
     // Now drop the database that we just created.
@@ -105,11 +107,15 @@ async fn should_store_decisions_for_pending_withdraw_requests() {
     let num_signers = 3;
     let signing_threshold = 2;
 
+    // TODO(#1466): fix this test for other seeds and use `get_rng()`
+    use rand::SeedableRng;
+    let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+
     let db = create_signer_database().await;
     // We need to clone the connection so that we can drop the associated
     // databases later.
     test_environment(db.clone(), signing_threshold, num_signers)
-        .assert_should_store_decisions_for_pending_withdrawal_requests()
+        .assert_should_store_decisions_for_pending_withdrawal_requests(&mut rng)
         .await;
 
     // Now drop the database that we just created.
@@ -121,11 +127,13 @@ async fn should_store_decisions_received_from_other_signers() {
     let num_signers = 3;
     let signing_threshold = 2;
 
+    let mut rng = get_rng();
+
     let db = create_signer_database().await;
     // We need to clone the connection so that we can drop the associated
     // databases later.
     test_environment(db.clone(), signing_threshold, num_signers)
-        .assert_should_store_decisions_received_from_other_signers()
+        .assert_should_store_decisions_received_from_other_signers(&mut rng)
         .await;
 
     // Now drop the database that we just created.
@@ -575,7 +583,7 @@ async fn do_not_procceed_with_blocked_addresses(is_withdrawal: bool, is_blocked:
 
     if is_withdrawal {
         // For withdrawals we can store only request and dkg shares
-        setup.store_withdrawal_request(&db).await;
+        setup.store_withdrawal_request(&db, &mut rng).await;
     } else {
         // We need to store the deposit request because of the foreign key
         // constraint on the deposit_signers table.

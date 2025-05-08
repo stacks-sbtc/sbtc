@@ -1642,6 +1642,7 @@ mod tests {
     use crate::storage::{DbWrite, model};
     use crate::testing;
     use crate::testing::context::*;
+    use crate::testing::get_rng;
 
     use super::*;
 
@@ -1681,8 +1682,9 @@ mod tests {
     #[ignore = "we have a test for this"]
     #[tokio::test]
     async fn should_be_able_to_participate_in_dkg() {
+        let mut rng = get_rng();
         test_environment()
-            .assert_should_be_able_to_participate_in_dkg()
+            .assert_should_be_able_to_participate_in_dkg(&mut rng)
             .await;
     }
 
@@ -1750,6 +1752,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_wsts_message_asserts_dkg_begin() {
+        let mut rng = get_rng();
         let context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
@@ -1785,11 +1788,11 @@ mod tests {
         let mut signer = TxSignerEventLoop {
             context,
             network: network.connect(),
-            signer_private_key: PrivateKey::new(&mut rand::rngs::OsRng),
+            signer_private_key: PrivateKey::new(&mut rng),
             context_window: 1,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             threshold: 1,
-            rng: rand::rngs::OsRng,
+            rng,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         };
@@ -1820,6 +1823,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_wsts_message_non_canonical_dkg_begin() {
+        let mut rng = get_rng();
         let context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
@@ -1852,11 +1856,11 @@ mod tests {
         let mut signer = TxSignerEventLoop {
             context,
             network: network.connect(),
-            signer_private_key: PrivateKey::new(&mut rand::rngs::OsRng),
+            signer_private_key: PrivateKey::new(&mut rng),
             context_window: 1,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             threshold: 1,
-            rng: rand::rngs::OsRng,
+            rng,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         };
@@ -1913,6 +1917,7 @@ mod tests {
         }); "SignatureShareRequest")]
     #[tokio::test]
     async fn test_handle_wsts_message_non_canonical(wsts_message: WstsNetMessage) {
+        let mut rng = get_rng();
         let context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
@@ -1937,11 +1942,11 @@ mod tests {
         let mut signer = TxSignerEventLoop {
             context,
             network: network.connect(),
-            signer_private_key: PrivateKey::new(&mut rand::rngs::OsRng),
+            signer_private_key: PrivateKey::new(&mut rng),
             context_window: 1,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             threshold: 1,
-            rng: rand::rngs::OsRng,
+            rng,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         };

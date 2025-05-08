@@ -75,7 +75,7 @@ async fn run_dkg<Rng, C>(
 ) -> (keys::PublicKey, model::BitcoinBlockRef, TestData)
 where
     C: Context + Send + Sync,
-    Rng: rand::CryptoRng + rand::RngCore,
+    Rng: rand::CryptoRng + rand::RngCore + Send + Clone + 'static,
 {
     let storage = ctx.get_storage_mut();
     let signer_keys = signer_set.signer_keys();
@@ -513,7 +513,7 @@ async fn deposit_flow() {
     // Start the in-memory signer set.
     let _signers_handle = tokio::spawn(async move {
         testing_signer_set
-            .participate_in_signing_rounds_forever()
+            .participate_in_signing_rounds_forever(&mut rng)
             .await
     });
 

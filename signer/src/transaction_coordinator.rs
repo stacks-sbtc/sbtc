@@ -2610,6 +2610,7 @@ mod tests {
     use crate::storage::{DbWrite, model};
     use crate::testing;
     use crate::testing::context::*;
+    use crate::testing::get_rng;
     use crate::testing::transaction_coordinator::TestEnvironment;
 
     use fake::{Fake, Faker};
@@ -2655,29 +2656,32 @@ mod tests {
     #[ignore = "we have a test for this"]
     #[test_log::test(tokio::test)]
     async fn should_be_able_to_coordinate_signing_rounds() {
+        let mut rng = get_rng();
         test_environment()
-            .assert_should_be_able_to_coordinate_signing_rounds(std::time::Duration::ZERO)
+            .assert_should_be_able_to_coordinate_signing_rounds(std::time::Duration::ZERO, &mut rng)
             .await;
     }
 
     #[ignore = "we have a test for this"]
     #[tokio::test]
     async fn should_be_able_to_skip_deploy_sbtc_contracts() {
+        let mut rng = get_rng();
         test_environment()
-            .assert_skips_deploy_sbtc_contracts()
+            .assert_skips_deploy_sbtc_contracts(&mut rng)
             .await;
     }
 
     #[ignore = "This is sensitive to the values set in the config"]
     #[tokio::test]
     async fn should_wait_before_processing_bitcoin_blocks() {
+        let mut rng = get_rng();
         // NOTE: Above test `should_be_able_to_coordinate_signing_rounds`
         // could be removed as redundant now.
 
         // Measure baseline.
         let baseline_start = std::time::Instant::now();
         test_environment()
-            .assert_should_be_able_to_coordinate_signing_rounds(std::time::Duration::ZERO)
+            .assert_should_be_able_to_coordinate_signing_rounds(std::time::Duration::ZERO, &mut rng)
             .await;
         // Locally this takes a couple seconds to execute.
         // This truncates the decimals.
@@ -2691,42 +2695,56 @@ mod tests {
         );
         let start = std::time::Instant::now();
         test_environment()
-            .assert_should_be_able_to_coordinate_signing_rounds(delay)
+            .assert_should_be_able_to_coordinate_signing_rounds(delay, &mut rng)
             .await;
         more_asserts::assert_gt!(start.elapsed(), delay + baseline_elapsed);
     }
 
     #[tokio::test]
     async fn should_get_signer_utxo_simple() {
-        test_environment().assert_get_signer_utxo_simple().await;
+        let mut rng = get_rng();
+        test_environment()
+            .assert_get_signer_utxo_simple(&mut rng)
+            .await;
     }
 
     #[tokio::test]
     async fn should_get_signer_utxo_fork() {
-        test_environment().assert_get_signer_utxo_fork().await;
+        let mut rng = get_rng();
+        test_environment()
+            .assert_get_signer_utxo_fork(&mut rng)
+            .await;
     }
 
     #[tokio::test]
     async fn should_get_signer_utxo_unspent() {
-        test_environment().assert_get_signer_utxo_unspent().await;
+        let mut rng = get_rng();
+        test_environment()
+            .assert_get_signer_utxo_unspent(&mut rng)
+            .await;
     }
 
     #[tokio::test]
     async fn should_get_signer_utxo_donations() {
-        test_environment().assert_get_signer_utxo_donations().await;
+        let mut rng = get_rng();
+        test_environment()
+            .assert_get_signer_utxo_donations(&mut rng)
+            .await;
     }
 
     #[tokio::test]
     async fn should_construct_withdrawal_accept_stacks_sign_request() {
+        let mut rng = get_rng();
         test_environment()
-            .assert_construct_withdrawal_accept_stacks_sign_request()
+            .assert_construct_withdrawal_accept_stacks_sign_request(&mut rng)
             .await;
     }
 
     #[tokio::test]
     async fn should_construct_withdrawal_reject_stacks_sign_request() {
+        let mut rng = get_rng();
         test_environment()
-            .assert_construct_withdrawal_reject_stacks_sign_request()
+            .assert_construct_withdrawal_reject_stacks_sign_request(&mut rng)
             .await;
     }
 

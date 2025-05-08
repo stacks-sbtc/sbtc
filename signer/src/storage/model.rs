@@ -1519,13 +1519,14 @@ mod tests {
 
     #[test]
     fn endian_conversion() {
-        let block_hash: BitcoinBlockHash = fake::Faker.fake_with_rng(&mut rand::rngs::OsRng);
+        let mut rng = get_rng();
+        let block_hash: BitcoinBlockHash = fake::Faker.fake_with_rng(&mut rng);
         let block_hash = bitcoin::BlockHash::from(block_hash);
         let round_trip = bitcoin::BlockHash::from_le_bytes(block_hash.to_le_bytes());
 
         assert_eq!(block_hash, round_trip);
 
-        let block_hash: BitcoinTxId = fake::Faker.fake_with_rng(&mut rand::rngs::OsRng);
+        let block_hash: BitcoinTxId = fake::Faker.fake_with_rng(&mut rng);
         let block_hash = bitcoin::Txid::from(block_hash);
         let round_trip = bitcoin::Txid::from_le_bytes(block_hash.to_le_bytes());
 

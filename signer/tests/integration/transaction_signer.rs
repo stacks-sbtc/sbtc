@@ -7,7 +7,6 @@ use fake::Fake as _;
 use fake::Faker;
 use lru::LruCache;
 use rand::SeedableRng as _;
-use rand::rngs::OsRng;
 use signer::bitcoin::MockBitcoinInteract;
 use signer::emily_client::MockEmilyInteract;
 use signer::network::in_memory2::SignerNetworkInstance;
@@ -70,7 +69,7 @@ type MockedTxSigner = TxSignerEventLoop<
         WrappedMock<MockEmilyInteract>,
     >,
     SignerNetworkInstance,
-    OsRng,
+    rand::rngs::StdRng,
 >;
 
 /// Test that [`TxSignerEventLoop::assert_valid_stacks_tx_sign_request`]
@@ -102,9 +101,9 @@ async fn signing_set_validation_check_for_stacks_transactions() {
 
     // This is all normal things that need to happen in order to pass
     // validation.
-    setup.store_happy_path_data(&db).await;
+    setup.store_happy_path_data(&db, &mut rng).await;
 
-    let (mut req, _) = crate::complete_deposit::make_complete_deposit(&setup);
+    let (mut req, _) = crate::complete_deposit::make_complete_deposit(&setup, &mut rng);
 
     req.deployer = ctx.config().signer.deployer;
     let network = InMemoryNetwork::new();
@@ -197,9 +196,9 @@ async fn signer_rejects_stacks_txns_with_too_high_a_fee(
 
     // This is all normal things that need to happen in order to pass
     // validation.
-    setup.store_happy_path_data(&db).await;
+    setup.store_happy_path_data(&db, &mut rng).await;
 
-    let (mut req, _) = crate::complete_deposit::make_complete_deposit(&setup);
+    let (mut req, _) = crate::complete_deposit::make_complete_deposit(&setup, &mut rng);
 
     req.deployer = ctx.config().signer.deployer;
     let network = InMemoryNetwork::new();
@@ -281,7 +280,7 @@ pub async fn assert_should_be_able_to_handle_sbtc_requests() {
     fill_signers_utxo(&db, bitcoin_block.unwrap(), &public_aggregate_key, &mut rng).await;
 
     // Store the necessary data for passing validation
-    setup.store_stacks_genesis_block(&db).await;
+    setup.store_stacks_genesis_block(&db, &mut rng).await;
     setup.store_deposit_tx(&db).await;
     setup.store_dkg_shares(&db).await;
     setup.store_deposit_request(&db).await;
@@ -412,7 +411,7 @@ pub async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is
         max_fee: 10000,
         is_deposit: true,
     };
-    let setup = TestSweepSetup2::new_setup(signers, faucet, &[amounts]);
+    let setup = TestSweepSetup2::new_setup(signers, faucet, &[amounts], &mut rng);
 
     let block_header = rpc
         .get_block_header_info(&setup.deposit_block_hash)
@@ -428,7 +427,7 @@ pub async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is
     backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
 
     setup.store_stacks_genesis_block(&db).await;
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
     setup.store_donation(&db).await;
     setup.store_deposit_txs(&db).await;
     setup.store_deposit_request(&db).await;
@@ -500,9 +499,9 @@ async fn new_state_machine_per_valid_sighash() {
     // Create a test setup object so that we can simply create proper DKG
     // shares in the database. Note that calling TestSweepSetup2::new_setup
     // creates two bitcoin block.
-    let setup = TestSweepSetup2::new_setup(signers, faucet, &[]);
+    let setup = TestSweepSetup2::new_setup(signers, faucet, &[], &mut rng);
 
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
 
     // Initialize the transaction signer event loop
     let network = WanNetwork::default();
@@ -742,7 +741,10 @@ mod validate_dkg_verification_message {
 
     impl Default for TestParams {
         fn default() -> Self {
-            let new_aggregate_key = Keypair::new_global(&mut OsRng).x_only_public_key().into();
+            // Here we use explicitly seeded RNG to ensure that [`default()`] is deterministic.
+            // (and default don't allow to pass any parameters)
+            let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+            let new_aggregate_key = Keypair::new_global(&mut rng).x_only_public_key().into();
             Self {
                 new_aggregate_key,
                 dkg_verification_window: 0,
@@ -825,8 +827,9 @@ mod validate_dkg_verification_message {
 
     #[tokio::test]
     async fn latest_key_in_failed_state() {
+        let mut rng = get_rng();
         let db = testing::storage::new_test_database().await;
-        let aggregate_key: PublicKey = Keypair::new_global(&mut OsRng).public_key().into();
+        let aggregate_key: PublicKey = Keypair::new_global(&mut rng).public_key().into();
         let aggregate_key_x_only = aggregate_key.into();
 
         // Create new DKG shares and store them in the database. We expect the
@@ -852,8 +855,9 @@ mod validate_dkg_verification_message {
 
     #[tokio::test]
     async fn verification_window_elapsed() {
+        let mut rng = get_rng();
         let db = testing::storage::new_test_database().await;
-        let aggregate_key: PublicKey = Keypair::new_global(&mut OsRng).public_key().into();
+        let aggregate_key: PublicKey = Keypair::new_global(&mut rng).public_key().into();
 
         // Create new DKG shares and store them in the database. We expect the
         // aggregate keys to match and the status to be allowed. We use 0 as the
@@ -888,8 +892,9 @@ mod validate_dkg_verification_message {
 
     #[tokio::test]
     async fn verification_window_is_inclusive() {
+        let mut rng = get_rng();
         let db = testing::storage::new_test_database().await;
-        let aggregate_key: PublicKey = Keypair::new_global(&mut OsRng).public_key().into();
+        let aggregate_key: PublicKey = Keypair::new_global(&mut rng).public_key().into();
 
         // Create new DKG shares and store them in the database. We expect the
         // aggregate keys to match and the status to be allowed. We use 0 as the
@@ -920,8 +925,9 @@ mod validate_dkg_verification_message {
 
     #[tokio::test]
     async fn expected_sighash_succeeds() {
+        let mut rng = get_rng();
         let db = testing::storage::new_test_database().await;
-        let aggregate_key: PublicKey = Keypair::new_global(&mut OsRng).public_key().into();
+        let aggregate_key: PublicKey = Keypair::new_global(&mut rng).public_key().into();
 
         // Create new DKG shares and store them in the database. We expect
         // all other verifications to succeed.
@@ -949,8 +955,9 @@ mod validate_dkg_verification_message {
 
     #[tokio::test]
     async fn unexpected_sighash_fails() {
+        let mut rng = get_rng();
         let db = testing::storage::new_test_database().await;
-        let aggregate_key: PublicKey = Keypair::new_global(&mut OsRng).public_key().into();
+        let aggregate_key: PublicKey = Keypair::new_global(&mut rng).public_key().into();
 
         // Create new DKG shares and store them in the database. We expect
         // all other verifications to succeed.

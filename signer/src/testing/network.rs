@@ -1,21 +1,19 @@
 //! Test utilities for the `network` module
 
 use libp2p::{Multiaddr, multiaddr::Protocol};
-use rand::{RngCore, rngs::OsRng};
 
-use crate::testing::get_rng;
 use crate::{keys::PrivateKey, network};
 
 /// Trait for generating random memory `Multiaddr`s for testing purposes.
 pub trait RandomMemoryMultiaddr {
     /// Generates a random [`Multiaddr`] with the
     /// [`libp2p::core::transport::MemoryTransport`] transport.
-    fn random_memory() -> Multiaddr;
+    fn random_memory<R: rand::Rng>(rng: &mut R) -> Multiaddr;
 }
 
 impl RandomMemoryMultiaddr for Multiaddr {
-    fn random_memory() -> Multiaddr {
-        Protocol::Memory(OsRng.next_u64()).into()
+    fn random_memory<R: rand::Rng>(rng: &mut R) -> Multiaddr {
+        Protocol::Memory(rng.next_u64()).into()
     }
 }
 
@@ -25,20 +23,23 @@ impl RandomMemoryMultiaddr for Multiaddr {
 /// that they should be able to receive each other's messages.
 ///
 /// The function asserts that all sent messages are received unmodified and in-order on the other end.
-pub async fn assert_clients_can_exchange_messages<C: network::MessageTransfer + Send + 'static>(
+pub async fn assert_clients_can_exchange_messages<
+    C: network::MessageTransfer + Send + 'static,
+    R: rand::Rng + rand::CryptoRng,
+>(
     client_1: C,
     client_2: C,
     private_key_1: PrivateKey,
     private_key_2: PrivateKey,
+    rng: &mut R,
 ) {
-    let mut rng = get_rng();
     let number_of_messages = 32;
 
     let client_1_messages: Vec<_> = (0..number_of_messages)
-        .map(|_| network::Msg::random_with_private_key(&mut rng, &private_key_1))
+        .map(|_| network::Msg::random_with_private_key(rng, &private_key_1))
         .collect();
     let client_2_messages: Vec<_> = (0..number_of_messages)
-        .map(|_| network::Msg::random_with_private_key(&mut rng, &private_key_2))
+        .map(|_| network::Msg::random_with_private_key(rng, &private_key_2))
         .collect();
 
     let handle_1 = spawn_client_task(

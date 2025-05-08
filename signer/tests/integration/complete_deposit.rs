@@ -1,5 +1,4 @@
 use blockstack_lib::types::chainstate::StacksAddress;
-use rand::rngs::OsRng;
 
 use sbtc::testing::regtest;
 use signer::error::Error;
@@ -29,7 +28,10 @@ use crate::setup::set_deposit_incomplete;
 /// given information. If the information here is correct then the returned
 /// [`CompleteDepositV1`] object will pass validation with the given
 /// context.
-pub fn make_complete_deposit(data: &TestSweepSetup) -> (CompleteDepositV1, ReqContext) {
+pub fn make_complete_deposit<R: rand::Rng>(
+    data: &TestSweepSetup,
+    rng: &mut R,
+) -> (CompleteDepositV1, ReqContext) {
     // The fee assessed for a deposit is subtracted from the minted amount.
     let fee = data
         .sweep_tx_info
@@ -68,7 +70,7 @@ pub fn make_complete_deposit(data: &TestSweepSetup) -> (CompleteDepositV1, ReqCo
         // looking for pending and accepted deposit requests.
         context_window: 10,
         // The value here doesn't matter.
-        origin: fake::Faker.fake_with_rng(&mut OsRng),
+        origin: fake::Faker.fake_with_rng(rng),
         // When checking whether the transaction is from the signer, we
         // check that the first "prevout" has a `scriptPubKey` that the
         // signers control.
@@ -89,7 +91,10 @@ pub fn make_complete_deposit(data: &TestSweepSetup) -> (CompleteDepositV1, ReqCo
 /// given information. If the information here is correct then the returned
 /// [`CompleteDepositV1`] object will pass validation with the given
 /// context.
-pub fn make_complete_deposit2(data: &TestSweepSetup2) -> (CompleteDepositV1, ReqContext) {
+pub fn make_complete_deposit2<R: rand::Rng>(
+    data: &TestSweepSetup2,
+    rng: &mut R,
+) -> (CompleteDepositV1, ReqContext) {
     let deposit = &data.deposits[0];
     let sweep_tx_info = data.sweep_tx_info.clone().unwrap();
     // The fee assessed for a deposit is subtracted from the minted amount.
@@ -130,7 +135,7 @@ pub fn make_complete_deposit2(data: &TestSweepSetup2) -> (CompleteDepositV1, Req
         // looking for pending and accepted deposit requests.
         context_window: 10,
         // The value here doesn't matter.
-        origin: fake::Faker.fake_with_rng(&mut OsRng),
+        origin: fake::Faker.fake_with_rng(rng),
         // When checking whether the transaction is from the signer, we
         // check that the first "prevout" has a `scriptPubKey` that the
         // signers control.
@@ -164,7 +169,7 @@ async fn complete_deposit_validation_happy_path() {
     backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash).await;
     // Normal: This stores a genesis stacks block anchored to the bitcoin
     // blockchain identified by setup.sweep_block_hash.
-    setup.store_stacks_genesis_block(&db).await;
+    setup.store_stacks_genesis_block(&db, &mut rng).await;
 
     // Normal: we take the deposit transaction as is from the test setup
     // and store it in the database. This is necessary for when we fetch
@@ -187,7 +192,7 @@ async fn complete_deposit_validation_happy_path() {
 
     // Normal: create a properly formed complete-deposit transaction object
     // and the corresponding request context.
-    let (complete_deposit_tx, req_ctx) = make_complete_deposit(&setup);
+    let (complete_deposit_tx, req_ctx) = make_complete_deposit(&setup, &mut rng);
 
     // Create a context object for reaching out to the database and bitcoin
     // core. This will create a bitcoin core client that connects to the
@@ -228,7 +233,7 @@ async fn complete_deposit_validation_deployer_mismatch() {
     backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash).await;
     // Normal: This stores a genesis stacks block anchored to the bitcoin
     // blockchain identified by setup.sweep_block_hash.
-    setup.store_stacks_genesis_block(&db).await;
+    setup.store_stacks_genesis_block(&db, &mut rng).await;
 
     // Normal: we take the deposit transaction as is from the test setup
     // and store it in the database. This is necessary for when we fetch
@@ -251,7 +256,7 @@ async fn complete_deposit_validation_deployer_mismatch() {
 
     // Normal: create a properly formed complete-deposit transaction object
     // and the corresponding request context.
-    let (mut complete_deposit_tx, mut req_ctx) = make_complete_deposit(&setup);
+    let (mut complete_deposit_tx, mut req_ctx) = make_complete_deposit(&setup, &mut rng);
     // Different: Okay, let's make sure we get the deployers do not match.
     complete_deposit_tx.deployer = StacksAddress::p2pkh(false, &setup.signer_keys[0].into());
     req_ctx.deployer = StacksAddress::p2pkh(false, &setup.signer_keys[1].into());
@@ -297,7 +302,7 @@ async fn complete_deposit_validation_missing_deposit_request() {
     backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash).await;
     // Normal: This stores a genesis stacks block anchored to the bitcoin
     // blockchain identified by setup.sweep_block_hash.
-    setup.store_stacks_genesis_block(&db).await;
+    setup.store_stacks_genesis_block(&db, &mut rng).await;
 
     // Normal: we take the deposit transaction as is from the test setup
     // and store it in the database. This is necessary for when we fetch
@@ -317,7 +322,7 @@ async fn complete_deposit_validation_missing_deposit_request() {
 
     // Normal: create a properly formed complete-deposit transaction object
     // and the corresponding request context.
-    let (complete_deposit_tx, req_ctx) = make_complete_deposit(&setup);
+    let (complete_deposit_tx, req_ctx) = make_complete_deposit(&setup, &mut rng);
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -360,7 +365,7 @@ async fn complete_deposit_validation_recipient_mismatch() {
     backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash).await;
     // Normal: This stores a genesis stacks block anchored to the bitcoin
     // blockchain identified by setup.sweep_block_hash.
-    setup.store_stacks_genesis_block(&db).await;
+    setup.store_stacks_genesis_block(&db, &mut rng).await;
 
     // Normal: we take the deposit transaction as is from the test setup
     // and store it in the database. This is necessary for when we fetch
@@ -383,7 +388,7 @@ async fn complete_deposit_validation_recipient_mismatch() {
 
     // Normal: create a properly formed complete-deposit transaction object
     // and the corresponding request context.
-    let (mut complete_deposit_tx, req_ctx) = make_complete_deposit(&setup);
+    let (mut complete_deposit_tx, req_ctx) = make_complete_deposit(&setup, &mut rng);
     // Different: Okay, let's make sure we the recipients do not match.
     complete_deposit_tx.recipient = fake::Faker
         .fake_with_rng::<StacksPrincipal, _>(&mut rng)
@@ -451,7 +456,7 @@ async fn complete_deposit_validation_fee_too_low() {
         max_fee: 80_000,
         is_deposit: true,
     };
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &[amounts]);
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &[amounts], &mut rng);
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -480,7 +485,7 @@ async fn complete_deposit_validation_fee_too_low() {
 
     // Normal: we need to store a row in the dkg_shares table so that we
     // have a record of the scriptPubKey that the signers control.
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
 
     // Normal: the request and how the signers voted needs to be added to
     // the database. Here the bitmap in the deposit request object
@@ -527,7 +532,7 @@ async fn complete_deposit_validation_fee_too_low() {
 
     // Normal: create a properly formed complete-deposit transaction object
     // and the corresponding request context.
-    let (complete_deposit_tx, req_ctx) = make_complete_deposit2(&setup);
+    let (complete_deposit_tx, req_ctx) = make_complete_deposit2(&setup, &mut rng);
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -568,7 +573,7 @@ async fn complete_deposit_validation_fee_too_low() {
 
     // Normal: create a properly formed complete-deposit transaction object
     // and the corresponding request context.
-    let (complete_deposit_tx, req_ctx) = make_complete_deposit2(&setup);
+    let (complete_deposit_tx, req_ctx) = make_complete_deposit2(&setup, &mut rng);
     assert!(complete_deposit_tx.validate(&ctx, &req_ctx).await.is_ok());
 
     testing::storage::drop_db(db).await;
@@ -594,7 +599,7 @@ async fn complete_deposit_validation_fee_too_high() {
     backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash).await;
     // Normal: This stores a genesis stacks block anchored to the bitcoin
     // blockchain identified by setup.sweep_block_hash.
-    setup.store_stacks_genesis_block(&db).await;
+    setup.store_stacks_genesis_block(&db, &mut rng).await;
 
     // Normal: we take the deposit transaction as is from the test setup
     // and store it in the database. This is necessary for when we fetch
@@ -625,7 +630,7 @@ async fn complete_deposit_validation_fee_too_high() {
 
     // Normal: create a properly formed complete-deposit transaction object
     // and the corresponding request context.
-    let (complete_deposit_tx, req_ctx) = make_complete_deposit(&setup);
+    let (complete_deposit_tx, req_ctx) = make_complete_deposit(&setup, &mut rng);
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -668,7 +673,7 @@ async fn complete_deposit_validation_sweep_tx_missing() {
     backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash).await;
     // Normal: This stores a genesis stacks block anchored to the bitcoin
     // blockchain identified by setup.sweep_block_hash.
-    setup.store_stacks_genesis_block(&db).await;
+    setup.store_stacks_genesis_block(&db, &mut rng).await;
 
     // Normal: we take the deposit transaction as is from the test setup
     // and store it in the database. This is necessary for when we fetch
@@ -691,7 +696,7 @@ async fn complete_deposit_validation_sweep_tx_missing() {
 
     // Normal: create a properly formed complete-deposit transaction object
     // and the corresponding request context.
-    let (mut complete_deposit_tx, req_ctx) = make_complete_deposit(&setup);
+    let (mut complete_deposit_tx, req_ctx) = make_complete_deposit(&setup, &mut rng);
 
     // Different: there is supposed to be sweep transaction in
     // bitcoin-core, but we make sure that such a transaction does not
@@ -739,7 +744,7 @@ async fn complete_deposit_validation_sweep_reorged() {
     backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash).await;
     // Normal: This stores a genesis stacks block anchored to the bitcoin
     // blockchain identified by setup.sweep_block_hash.
-    setup.store_stacks_genesis_block(&db).await;
+    setup.store_stacks_genesis_block(&db, &mut rng).await;
 
     // Normal: we take the deposit transaction as is from the test setup
     // and store it in the database. This is necessary for when we fetch
@@ -762,7 +767,7 @@ async fn complete_deposit_validation_sweep_reorged() {
 
     // Normal: create a properly formed complete-deposit transaction object
     // and the corresponding request context.
-    let (complete_deposit_tx, mut req_ctx) = make_complete_deposit(&setup);
+    let (complete_deposit_tx, mut req_ctx) = make_complete_deposit(&setup, &mut rng);
 
     // Different: the transaction that sweeps in the deposit has been
     // confirmed, but let's suppose that it gets confirmed on a bitcoin
@@ -820,7 +825,7 @@ async fn complete_deposit_validation_deposit_not_in_sweep() {
     backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash).await;
     // Normal: This stores a genesis stacks block anchored to the bitcoin
     // blockchain identified by setup.sweep_block_hash.
-    setup.store_stacks_genesis_block(&db).await;
+    setup.store_stacks_genesis_block(&db, &mut rng).await;
 
     // Normal: we take the deposit transaction as is from the test setup
     // and store it in the database. This is necessary for when we fetch
@@ -843,7 +848,7 @@ async fn complete_deposit_validation_deposit_not_in_sweep() {
 
     // Normal: create a properly formed complete-deposit transaction object
     // and the corresponding request context.
-    let (mut complete_deposit_tx, req_ctx) = make_complete_deposit(&setup);
+    let (mut complete_deposit_tx, req_ctx) = make_complete_deposit(&setup, &mut rng);
 
     // Different: We want to simulate what would happen if the sweep
     // transaction did not include the deposit request UTXO as an input. To
@@ -893,7 +898,7 @@ async fn complete_deposit_validation_deposit_incorrect_fee() {
     backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash).await;
     // Normal: This stores a genesis stacks block anchored to the bitcoin
     // blockchain identified by setup.sweep_block_hash.
-    setup.store_stacks_genesis_block(&db).await;
+    setup.store_stacks_genesis_block(&db, &mut rng).await;
 
     // Normal: we take the deposit transaction as is from the test setup
     // and store it in the database. This is necessary for when we fetch
@@ -916,7 +921,7 @@ async fn complete_deposit_validation_deposit_incorrect_fee() {
 
     // Normal: create a properly formed complete-deposit transaction object
     // and the corresponding request context.
-    let (mut complete_deposit_tx, req_ctx) = make_complete_deposit(&setup);
+    let (mut complete_deposit_tx, req_ctx) = make_complete_deposit(&setup, &mut rng);
     // Different: the amount here is less than we would think that it
     // should be, implying that the assessed fee is greater than what we
     // would have thought.
@@ -963,7 +968,7 @@ async fn complete_deposit_validation_deposit_invalid_sweep() {
     backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash).await;
     // Normal: This stores a genesis stacks block anchored to the bitcoin
     // blockchain identified by setup.sweep_block_hash.
-    setup.store_stacks_genesis_block(&db).await;
+    setup.store_stacks_genesis_block(&db, &mut rng).await;
 
     // Normal: we take the deposit transaction as is from the test setup
     // and store it in the database. This is necessary for when we fetch
@@ -987,7 +992,7 @@ async fn complete_deposit_validation_deposit_invalid_sweep() {
 
     // Normal: create a properly formed complete-deposit transaction object
     // and the corresponding request context.
-    let (complete_deposit_tx, req_ctx) = make_complete_deposit(&setup);
+    let (complete_deposit_tx, req_ctx) = make_complete_deposit(&setup, &mut rng);
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -1030,7 +1035,7 @@ async fn complete_deposit_validation_request_completed() {
     backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash).await;
     // Normal: This stores a genesis stacks block anchored to the bitcoin
     // blockchain identified by setup.sweep_block_hash.
-    setup.store_stacks_genesis_block(&db).await;
+    setup.store_stacks_genesis_block(&db, &mut rng).await;
 
     // Normal: we take the deposit transaction as is from the test setup
     // and store it in the database. This is necessary for when we fetch
@@ -1053,7 +1058,7 @@ async fn complete_deposit_validation_request_completed() {
 
     // Normal: create a properly formed complete-deposit transaction object
     // and the corresponding request context.
-    let (complete_deposit_tx, req_ctx) = make_complete_deposit(&setup);
+    let (complete_deposit_tx, req_ctx) = make_complete_deposit(&setup, &mut rng);
 
     // Create a context object for reaching out to the database and bitcoin
     // core. This will create a bitcoin core client that connects to the

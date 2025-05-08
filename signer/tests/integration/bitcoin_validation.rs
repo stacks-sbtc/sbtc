@@ -2,7 +2,6 @@ use std::collections::HashSet;
 use std::ops::Deref;
 
 use bitcoin::hashes::Hash as _;
-use rand::rngs::OsRng;
 use rand::seq::SliceRandom;
 use test_case::test_case;
 
@@ -112,12 +111,12 @@ async fn one_tx_per_request_set() {
         is_deposit: true,
     }];
 
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts, &mut rng);
     setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
     backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
 
     setup.store_stacks_genesis_block(&db).await;
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
     setup.store_donation(&db).await;
     setup.store_deposit_txs(&db).await;
     setup.store_deposit_request(&db).await;
@@ -217,12 +216,12 @@ async fn one_invalid_deposit_invalidates_tx() {
 
     // When making assertions below, we need to make sure that we're
     // comparing the right deposits transaction outputs, so we sort.
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts, &mut rng);
     setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
     backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
 
     setup.store_stacks_genesis_block(&db).await;
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
     setup.store_donation(&db).await;
     setup.store_deposit_txs(&db).await;
     setup.store_deposit_request(&db).await;
@@ -369,12 +368,12 @@ async fn withdrawals_and_deposits_can_pass_validation(amounts: Vec<SweepAmounts>
 
     // When making assertions below, we need to make sure that we're
     // comparing the right deposits transaction outputs, so we sort.
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts, &mut rng);
     setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
     backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
 
     setup.store_stacks_genesis_block(&db).await;
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
     setup.store_donation(&db).await;
     setup.store_deposit_txs(&db).await;
     setup.store_deposit_request(&db).await;
@@ -469,12 +468,12 @@ async fn swept_withdrawals_fail_validation() {
 
     // When making assertions below, we need to make sure that we're
     // comparing the right deposits transaction outputs, so we sort.
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts, &mut rng);
     setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
     backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
 
     setup.store_stacks_genesis_block(&db).await;
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
     setup.store_donation(&db).await;
     setup.store_deposit_txs(&db).await;
     setup.store_deposit_request(&db).await;
@@ -585,7 +584,7 @@ async fn cannot_sign_deposit_is_ok() {
 
     // When making assertions below, we need to make sure that we're
     // comparing the right deposits transaction outputs, so we sort.
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts, &mut rng);
     setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
     // Let's suppose that signer 0 cannot sign for the deposit, but that
     // they still accept the deposit. That means the bitmap at signer 0
@@ -596,7 +595,7 @@ async fn cannot_sign_deposit_is_ok() {
     backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
 
     setup.store_stacks_genesis_block(&db).await;
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
     setup.store_donation(&db).await;
     setup.store_deposit_txs(&db).await;
     setup.store_deposit_request(&db).await;
@@ -749,12 +748,12 @@ async fn sighashes_match_from_sbtc_requests_object() {
         },
     ];
 
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts, &mut rng);
     setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
     backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
 
     setup.store_stacks_genesis_block(&db).await;
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
     setup.store_donation(&db).await;
     setup.store_deposit_txs(&db).await;
     setup.store_deposit_request(&db).await;
@@ -858,7 +857,7 @@ async fn sighashes_match_from_sbtc_requests_object() {
 #[tokio::test]
 async fn outcome_is_independent_of_input_order() {
     let db = testing::storage::new_test_database().await;
-    let mut rng = OsRng;
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let ctx = TestContext::builder()
@@ -893,12 +892,12 @@ async fn outcome_is_independent_of_input_order() {
         },
     ];
 
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts, &mut rng);
     setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
     backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
 
     setup.store_stacks_genesis_block(&db).await;
-    setup.store_dkg_shares(&db).await;
+    setup.store_dkg_shares(&db, &mut rng).await;
     setup.store_donation(&db).await;
     setup.store_deposit_txs(&db).await;
     setup.store_deposit_request(&db).await;
