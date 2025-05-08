@@ -9,7 +9,6 @@ use bitcoincore_rpc::RpcApi;
 use bitcoincore_rpc::json::GetTxOutResult;
 use bitcoincore_rpc::jsonrpc::error::Error as JsonRpcError;
 use bitcoincore_rpc::jsonrpc::error::RpcError;
-use rand::Rng;
 use rand::distributions::Uniform;
 use signer::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
 use signer::bitcoin::utxo::DepositRequest;
@@ -22,6 +21,7 @@ use signer::bitcoin::utxo::UnsignedTransaction;
 use signer::bitcoin::utxo::WithdrawalRequest;
 use signer::context::SbtcLimits;
 use signer::storage::model::ScriptPubKey;
+use signer::testing::get_rng;
 
 use crate::utxo_construction::generate_withdrawal;
 use crate::utxo_construction::make_deposit_request;
@@ -52,13 +52,18 @@ impl AsUtxo for FullUtxo {
     }
 }
 
-fn generate_depositor(rpc: &Client, faucet: &Faucet, signer: &Recipient) -> DepositRequest {
+fn generate_depositor<R: rand::Rng>(
+    rpc: &Client,
+    faucet: &Faucet,
+    signer: &Recipient,
+    rng: &mut R,
+) -> DepositRequest {
     let depositor = Recipient::new(AddressType::P2tr);
     let signers_public_key = signer.keypair.x_only_public_key().0;
 
     // Start off with some initial UTXOs to work with.
     let outpoint = faucet.send_to(50_000_000, &depositor.address);
-    let amount = rand::rngs::OsRng.sample(Uniform::new(100_000, 500_000));
+    let amount = rng.sample(Uniform::new(100_000, 500_000));
 
     // Now lets make a deposit transaction and submit it. We need the UTXO
     // that was just sent to us.
@@ -143,6 +148,7 @@ pub fn transaction_with_rbf(
     rbf_fee_rate: f64,
     failure_threshold: u16,
 ) {
+    let mut rng = get_rng();
     // This is not a case that we support; why would we replace a
     // submitted transaction without any peg-in or peg-out inputs and
     // outputs? So let's skip this case.
@@ -171,7 +177,7 @@ pub fn transaction_with_rbf(
     // we cannot generate new blocks once we submit the transaction that
     // we want to RBF (since it would then be confirmed).
     let deposits: Vec<DepositRequest> =
-        std::iter::repeat_with(|| generate_depositor(rpc, faucet, &signer))
+        std::iter::repeat_with(|| generate_depositor(rpc, faucet, &signer, &mut rng))
             .take(ctx.initial_deposits.max(ctx.rbf_deposits))
             .enumerate()
             .map(|(index, mut req)| {
