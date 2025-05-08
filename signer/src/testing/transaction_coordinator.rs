@@ -211,6 +211,36 @@ where
             prevouts: Vec::new(),
         };
         test_data.push_bitcoin_txs(&bitcoin_chain_tip, vec![tx_info], &signer_script_pubkeys);
+
+        // Also ensure one valid withdrawal exists for test consistency
+        let stacks_block = test_data
+            .stacks_blocks
+            .iter()
+            .find(|b| b.bitcoin_anchor == bitcoin_chain_tip.block_hash)
+            .unwrap();
+        let mut withdrawal = test_data
+            .withdraw_requests
+            .iter()
+            .find(|w| w.block_hash == stacks_block.block_hash)
+            .unwrap()
+            .clone();
+
+        let mut withdrawal_votes = test_data
+            .withdraw_signers
+            .iter()
+            .filter(|ws| ws.qualified_id() == withdrawal.qualified_id())
+            .cloned()
+            .collect::<Vec<_>>();
+
+        withdrawal.request_id *= 100;
+        withdrawal_votes.iter_mut().for_each(|ws| {
+            ws.is_accepted = true;
+            ws.request_id = withdrawal.request_id;
+        });
+
+        test_data.withdraw_requests.push(withdrawal);
+        test_data.withdraw_signers.append(&mut withdrawal_votes);
+
         test_data.remove(original_test_data);
         self.write_test_data(&test_data).await;
 
@@ -285,6 +315,8 @@ where
             .saturating_sub(crate::WITHDRAWAL_BLOCKS_EXPIRY)
             .saturating_add(crate::WITHDRAWAL_EXPIRY_BUFFER);
 
+        // Assert that there are some withdrawals for test consistency
+        assert!(!withdrawals_in_storage.is_empty());
         for withdrawal in withdrawals_in_storage {
             if withdrawal.bitcoin_block_height > max_processable_height {
                 assert!(!withdrawals
