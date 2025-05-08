@@ -7,6 +7,7 @@ use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
 
@@ -18,14 +19,19 @@ use crate::error::Error;
 use crate::keys::PublicKey;
 use crate::keys::PublicKeyXOnly;
 use crate::keys::SignerScriptPubKey as _;
+use crate::storage::DbRead;
+use crate::storage::DbWrite;
+use crate::storage::Transactable;
 use crate::storage::model;
 use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::CompletedDepositEvent;
 use crate::storage::model::WithdrawalAcceptEvent;
 use crate::storage::model::WithdrawalRejectEvent;
 
-use super::model::DkgSharesStatus;
-use super::util::get_utxo;
+use crate::storage::model::DkgSharesStatus;
+use crate::storage::util::get_utxo;
+
+use super::InMemoryTransaction;
 
 /// A store wrapped in an Arc<Mutex<...>> for interior mutability
 pub type SharedStore = Arc<Mutex<Store>>;
@@ -34,8 +40,12 @@ type DepositRequestPk = (model::BitcoinTxId, u32);
 type WithdrawalRequestPk = (u64, model::StacksBlockHash);
 
 /// In-memory store
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Store {
+    /// Transactional version of the store, used in naive optimistic concurrency
+    /// control for in-memory transaction emulation.
+    pub version: usize,
+
     /// Bitcoin blocks
     pub bitcoin_blocks: HashMap<model::BitcoinBlockHash, model::BitcoinBlock>,
 
@@ -325,7 +335,7 @@ impl Store {
     }
 }
 
-impl super::DbRead for SharedStore {
+impl DbRead for SharedStore {
     async fn get_bitcoin_block(
         &self,
         block_hash: &model::BitcoinBlockHash,
@@ -1072,7 +1082,7 @@ impl super::DbRead for SharedStore {
     }
 }
 
-impl super::DbWrite for SharedStore {
+impl DbWrite for SharedStore {
     async fn write_bitcoin_block(&self, block: &model::BitcoinBlock) -> Result<(), Error> {
         self.lock()
             .await
@@ -1366,5 +1376,20 @@ impl super::DbWrite for SharedStore {
             }
         }
         Ok(false)
+    }
+}
+
+impl Transactable for SharedStore {
+    type Tx<'a> = InMemoryTransaction; // No GAT needed if InMemoryTransaction is not generic over 'a
+
+    async fn begin_transaction(&self) -> Result<Self::Tx<'_>, Error> {
+        let store = self.lock().await;
+        let store_clone = store.clone();
+        Ok(InMemoryTransaction {
+            version: store.version,
+            transactional_store: Arc::new(Mutex::new(store_clone)),
+            original_store_mutex: Arc::clone(self), // Clone the Arc for the transaction
+            completed: AtomicBool::new(false),
+        })
     }
 }

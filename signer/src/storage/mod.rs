@@ -29,6 +29,28 @@ use crate::storage::model::CompletedDepositEvent;
 use crate::storage::model::WithdrawalAcceptEvent;
 use crate::storage::model::WithdrawalRejectEvent;
 
+/// Represents a handle to an ongoing database transaction.
+pub trait TransactionHandle: Send {
+    /// Commits the transaction.
+    fn commit(self) -> impl Future<Output = Result<(), Error>> + Send;
+    /// Rolls back the transaction.
+    fn rollback(self) -> impl Future<Output = Result<(), Error>> + Send;
+}
+
+/// Trait for storage backends that support initiating transactions.
+/// The returned transaction object itself implements `DbRead` and `DbWrite`.
+pub trait Transactable: Send + Sync {
+    /// The type of the transaction object. It must implement `DbRead`, `DbWrite`,
+    /// and `TransactionHandle`. The lifetime `'a` ties the transaction to the
+    /// lifetime of the `Transactable` implementor (e.g., the `PgStore`).
+    type Tx<'a>: DbRead + DbWrite + TransactionHandle + Send + 'a
+    where
+        Self: 'a;
+
+    /// Begins a new database transaction.
+    fn begin_transaction(&self) -> impl Future<Output = Result<Self::Tx<'_>, Error>> + Send;
+}
+
 /// Represents the ability to read data from the signer storage.
 pub trait DbRead {
     /// Get the bitcoin block with the given block hash.
