@@ -646,6 +646,11 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     testing::storage::drop_db(db).await;
 }
 
+/// Generates a random deposit request transaction with the input amount
+/// that is locked by the given aggregate key.
+///
+/// Note: The deposit transaction will be in the mempool when this function
+/// returns.
 fn generate_deposit_request<R>(
     faucet: &Faucet,
     amount: u64,
@@ -670,9 +675,21 @@ where
 }
 
 /// This tests that a new signer, when they are coming online, can
-/// successfully pick up transactions when there is a key rotation.
+/// successfully pick up transactions given a bootstrap aggregate key when
+/// there is a key rotation.
+///
+/// In this test we start off with a bootstrap aggregate key of the signers
+/// where:
+/// 1. The sweep transaction moves the signers UTXO to a new scriptPubKey,
+/// 2. There are three sweep transactions confirmed within one bitcoin
+///    block.
+///
+/// All three transactions should be picked up so long as we know the
+/// scriptPubKey of the signers bootstrap UTXO. Note that we do not need to
+/// worry about the signers scriptPubKey changing more than particular once
+/// because that case is impossible.
 #[tokio::test]
-async fn blockk_observer_picks_up_chained_sweeps() {
+async fn block_observer_picks_up_chained_sweeps() {
     let (rpc, faucet) = regtest::initialize_blockchain();
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
@@ -689,7 +706,8 @@ async fn blockk_observer_picks_up_chained_sweeps() {
     let new_signer = Recipient::new_with_rng(AddressType::P2tr, &mut rng);
     let signers_public_key2 = PublicKey::from(new_signer.keypair.public_key()).into();
 
-    // Now lets make a deposit transaction.
+    // Now lets make three deposit transactions, one for each sweep
+    // transaction.
     let mut deposit_request1 =
         generate_deposit_request(faucet, 950_000, signers_public_key1, &mut rng);
     let mut deposit_request2 =
@@ -698,8 +716,8 @@ async fn blockk_observer_picks_up_chained_sweeps() {
         generate_deposit_request(faucet, 725_000, signers_public_key2, &mut rng);
 
     // We want to construct three sweep transactions in order to
-    // demonstrate that a chain of transactions are all picked up, even in
-    // the case where the scriptPubKey has changed for the first one.
+    // demonstrate that a chain of transactions are picked up, even in the
+    // case where the scriptPubKey has changed for the first one.
     deposit_request1.signer_bitmap.set(0, true);
     deposit_request2.signer_bitmap.set(1, true);
     deposit_request3.signer_bitmap.set(2, true);
@@ -714,6 +732,8 @@ async fn blockk_observer_picks_up_chained_sweeps() {
                 public_key: signers_public_key1,
             },
             fee_rate: 2.0,
+            // This ensures that the new signer UTXO is locked by the new
+            // aggregate key.
             public_key: signers_public_key2,
             last_fees: None,
             magic_bytes: [b'T', b'3'],
@@ -724,14 +744,23 @@ async fn blockk_observer_picks_up_chained_sweeps() {
         max_deposits_per_bitcoin_tx: 25,
     };
 
-    // There should only be one transaction here since there are only
-    // withdrawal requests and no deposit requests.
+    // By playing around with the votes above, we set things up so that we
+    // get three transactions.
     let mut transactions = requests.construct_transactions().unwrap();
     assert_eq!(transactions.len(), 3);
 
-    signer::testing::set_witness_data(&mut transactions[0], signer.keypair);
-    signer::testing::set_witness_data(&mut transactions[1], new_signer.keypair);
-    signer::testing::set_witness_data(&mut transactions[2], new_signer.keypair);
+    // We depend on the fact that `construct_transactions` does not sort
+    // the items. In the first transaction, all inputs are locked by the
+    // second key, while the other ones are locked by the new aggregate
+    // key.
+    //
+    // TODO(1661): Technically the packager tries to sort thing right now,
+    // but all requests have the same number of votes against so the
+    // current sorting implementation leaves the elements unchanged (they
+    // use a stable sorting algorithm).
+    testing::set_witness_data(&mut transactions[0], signer.keypair);
+    testing::set_witness_data(&mut transactions[1], new_signer.keypair);
+    testing::set_witness_data(&mut transactions[2], new_signer.keypair);
 
     rpc.send_raw_transaction(&transactions[0].tx).unwrap();
     rpc.send_raw_transaction(&transactions[1].tx).unwrap();
@@ -745,13 +774,22 @@ async fn blockk_observer_picks_up_chained_sweeps() {
         .modify_settings(|settings| settings.signer.bootstrap_aggregate_key = Some(aggregate_key))
         .build();
 
-    // We need to set up the stacks client as well. We use it to fetch
-    // information about the Stacks blockchain, so we need to prep it, even
-    // though it isn't necessary for our test.
+    // We need to set up the stacks client and emily well. We don't need
+    // the stacks client for the test, we just want to make sure that the
+    // nothing panics, which would happen if we had no implementation.
     ctx.with_stacks_client(|client| {
         client
             .expect_get_tenure_info()
             .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
+
+        client
+            .expect_get_tenure()
+            .returning(|_| Box::pin(std::future::ready(TenureBlocks::nearly_empty())));
+
+        client
+            .expect_get_sortition_info()
+            .returning(move |_| Box::pin(std::future::ready(Ok(DUMMY_SORTITION_INFO.clone()))));
+
         client.expect_get_block().returning(|_| {
             let response = Ok(NakamotoBlock {
                 header: NakamotoBlockHeader::empty(),
@@ -759,17 +797,12 @@ async fn blockk_observer_picks_up_chained_sweeps() {
             });
             Box::pin(std::future::ready(response))
         });
-        client
-            .expect_get_tenure()
-            .returning(|_| Box::pin(std::future::ready(TenureBlocks::nearly_empty())));
+
         client.expect_get_pox_info().returning(|| {
             let response = serde_json::from_str::<RPCPoxInfoData>(GET_POX_INFO_JSON)
                 .map_err(Error::JsonSerialize);
             Box::pin(std::future::ready(response))
         });
-        client
-            .expect_get_sortition_info()
-            .returning(move |_| Box::pin(std::future::ready(Ok(DUMMY_SORTITION_INFO.clone()))));
     })
     .await;
 
@@ -777,26 +810,13 @@ async fn blockk_observer_picks_up_chained_sweeps() {
         client
             .expect_get_deposits()
             .returning(move || Box::pin(std::future::ready(Ok(vec![]))));
-    })
-    .await;
 
-    // Now we do the actual test case setup.
-
-    ctx.with_emily_client(|client| {
         client
             .expect_get_limits()
             .once()
             .returning(move || Box::pin(std::future::ready(Ok(SbtcLimits::unlimited()))));
     })
     .await;
-
-    ctx.with_stacks_client(move |client| {
-        client
-            .expect_get_sbtc_total_supply()
-            .returning(|_| Box::pin(std::future::ready(Ok(Amount::ZERO))));
-    })
-    .await;
-    ctx.state().set_sbtc_contracts_deployed();
 
     // We only proceed with the test after the BlockObserver "process" has
     // started, and we use this counter to notify us when that happens.
@@ -856,13 +876,19 @@ async fn blockk_observer_picks_up_chained_sweeps() {
         .await
         .unwrap();
 
-    // Okay, not the tables should be populated with all three
+    // Okay, now the tables should be populated with all three
     // transactions.
     let num_rows = sqlx::query_scalar::<_, i32>(
         r#"
         SELECT COUNT(*)::INTEGER
         FROM bitcoin_tx_inputs
         WHERE prevout_type = 'signers_input'
+
+        UNION ALL
+
+        SELECT COUNT(*)::INTEGER
+        FROM bitcoin_tx_inputs
+        WHERE prevout_type = 'deposit'
 
         UNION ALL
 
@@ -877,6 +903,8 @@ async fn blockk_observer_picks_up_chained_sweeps() {
 
     assert_eq!(num_rows[0], 3);
     assert_eq!(num_rows[1], 3);
+    assert_eq!(num_rows[2], 3);
+    assert_eq!(num_rows.len(), 3);
 
     testing::storage::drop_db(db).await;
 }
