@@ -2,7 +2,6 @@ use std::collections::HashSet;
 use std::ops::Deref;
 
 use bitcoin::hashes::Hash as _;
-use rand::rngs::OsRng;
 use rand::seq::SliceRandom;
 use test_case::test_case;
 
@@ -858,7 +857,7 @@ async fn sighashes_match_from_sbtc_requests_object() {
 #[tokio::test]
 async fn outcome_is_independent_of_input_order() {
     let db = testing::storage::new_test_database().await;
-    let mut rng = OsRng;
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let ctx = TestContext::builder()

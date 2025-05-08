@@ -104,7 +104,7 @@ async fn signing_set_validation_check_for_stacks_transactions() {
     // validation.
     setup.store_happy_path_data(&db).await;
 
-    let (mut req, _) = crate::complete_deposit::make_complete_deposit(&setup);
+    let (mut req, _) = crate::complete_deposit::make_complete_deposit(&setup, &mut rng);
 
     req.deployer = ctx.config().signer.deployer;
     let network = InMemoryNetwork::new();
@@ -199,7 +199,7 @@ async fn signer_rejects_stacks_txns_with_too_high_a_fee(
     // validation.
     setup.store_happy_path_data(&db).await;
 
-    let (mut req, _) = crate::complete_deposit::make_complete_deposit(&setup);
+    let (mut req, _) = crate::complete_deposit::make_complete_deposit(&setup, &mut rng);
 
     req.deployer = ctx.config().signer.deployer;
     let network = InMemoryNetwork::new();

@@ -13,7 +13,6 @@ use bitcoin::transaction::Version;
 use bitcoincore_rpc::RpcApi;
 use bitcoincore_rpc_json::Utxo;
 use fake::{Fake, Faker};
-use rand::rngs::OsRng;
 use sbtc::testing::regtest;
 use sbtc::testing::regtest::AsUtxo;
 use sbtc::testing::regtest::Recipient;
@@ -22,6 +21,7 @@ use signer::bitcoin::BitcoinInteract;
 use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::storage::model::BitcoinBlockHash;
 use signer::storage::model::BitcoinTxId;
+use signer::testing::get_rng;
 
 #[test]
 fn btc_client_getstransaction() {
@@ -135,6 +135,7 @@ fn btc_client_gets_transaction_info() {
 
 #[test]
 fn btc_client_gets_transaction_info_missing_tx() {
+    let mut rng = get_rng();
     let client = BitcoinCoreClient::new(
         "http://localhost:18443",
         regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
@@ -158,7 +159,7 @@ fn btc_client_gets_transaction_info_missing_tx() {
     // Now let's confirm it and try again
     let block_hash = faucet.generate_blocks(1).pop().unwrap();
 
-    let fake_block_hash: BitcoinBlockHash = Faker.fake_with_rng(&mut OsRng);
+    let fake_block_hash: BitcoinBlockHash = Faker.fake_with_rng(&mut rng);
 
     let response = client
         .get_tx_info(&outpoint.txid, &fake_block_hash)
@@ -166,7 +167,7 @@ fn btc_client_gets_transaction_info_missing_tx() {
 
     assert!(response.is_none());
 
-    let fake_txid: BitcoinTxId = Faker.fake_with_rng(&mut OsRng);
+    let fake_txid: BitcoinTxId = Faker.fake_with_rng(&mut rng);
 
     let response = client.get_tx_info(&fake_txid, &block_hash).unwrap();
 

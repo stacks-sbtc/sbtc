@@ -620,7 +620,7 @@ async fn process_complete_deposit() {
 
     assert_eq!(broadcasted_tx.get_origin_nonce(), nonce);
 
-    let (complete_deposit, _) = make_complete_deposit(&setup);
+    let (complete_deposit, _) = make_complete_deposit(&setup, &mut rng);
     let TransactionPayload::ContractCall(contract_call) = broadcasted_tx.payload else {
         panic!("unexpected tx payload")
     };
