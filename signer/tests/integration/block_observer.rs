@@ -717,8 +717,8 @@ async fn block_observer_picks_up_chained_unordered_sweeps() {
         generate_deposit_request(faucet, 725_000, signers_public_key2, &mut rng);
 
     // We want to construct three sweep transactions in order to
-    // demonstrate that a chain of transactions are picked up, even in the
-    // case where the scriptPubKey has changed for the first one.
+    // demonstrate that the transactions are picked up, even in the case
+    // where the scriptPubKey has changed for the first one.
     deposit_request1.signer_bitmap.set(0, true);
     deposit_request2.signer_bitmap.set(1, true);
     deposit_request3.signer_bitmap.set(2, true);
@@ -755,10 +755,10 @@ async fn block_observer_picks_up_chained_unordered_sweeps() {
     // second key, while the other ones are locked by the new aggregate
     // key.
     //
-    // TODO(1661): Technically the packager tries to sort thing right now,
+    // TODO(1661): Technically the packager tries to sort things right now,
     // but all requests have the same number of votes against so the
-    // current sorting implementation leaves the elements unchanged (they
-    // use a stable sorting algorithm).
+    // current sorting implementation leaves the elements unchanged (we use
+    // a stable sorting algorithm).
     testing::set_witness_data(&mut transactions[0], signer.keypair);
     testing::set_witness_data(&mut transactions[1], new_signer.keypair);
     testing::set_witness_data(&mut transactions[2], new_signer.keypair);
