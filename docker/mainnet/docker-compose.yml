@@ -49,7 +49,8 @@ services:
   sbtc-signer:
     container_name: sbtc-signer
     restart: on-failure
-    image: blockstack/sbtc:signer-0.0.9-rc6@sha256:44d2c828c6452f75ea2fabe5160ba95a9f944c0fcaeeaea5523dff81da8bc342
+    # this version can be outdated, check the last image on: https://github.com/stacks-sbtc/sbtc/pkgs/container/sbtc
+    image: ghcr.io/stacks-sbtc/sbtc:signer-v1.0.2@sha256:60832405b3f56e8c8ae9ac9429866ce5173f86ff79652bad7f38481f220b2332
     entrypoint: "/entrypoint.sh"
     command:
       - /bin/bash
@@ -99,7 +100,8 @@ services:
   blocklist-client:
     restart: on-failure
     container_name: blocklist-client
-    image: blockstack/sbtc:blocklist-client-0.0.9-rc6@sha256:e4fa52ac16c357ae69f3b9eb5d5254a43bc605dbded621291b5637064b04d105
+    # this version can be outdated, check the last image on: https://github.com/stacks-sbtc/sbtc/pkgs/container/sbtc
+    image: ghcr.io/stacks-sbtc/sbtc:blocklist-client-v1.0.2@sha256:713a19fc6ad6f3538da7849d8c731f65b1bc0d9258f59947b487087c0c94d4be
     entrypoint: "/entrypoint.sh"
     command: "/usr/local/bin/blocklist-client"
     environment:
