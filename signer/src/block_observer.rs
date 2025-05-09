@@ -470,6 +470,21 @@ impl<C: Context, B> BlockObserver<C, B> {
         // `scriptPubKey` controlled by the signers.
         let mut sbtc_txs = Vec::new();
         for tx_info in txs {
+
+            let txid = tx_info.compute_txid();
+            tracing::trace!(%txid, "attempting to extract sbtc transaction");
+            if tx_info.tx.is_coinbase() {
+                tracing::warn!(%txid, "ignoring coinbase tx when extracting sbtc transaction");
+                continue;
+            }
+
+            // Bail if bitcoin-core doesn't return all the data that we
+            // care about for a non-coinbase transaction. This will happen
+            // if bitcoin core hasn't computed the undo data for the block
+            // with these transactions, of it there is a bug in bitcoin
+            // core.
+            tx_info.validate()?;
+
             // If any of the outputs are spent to one of the signers'
             // addresses, then we care about it
             let outputs_spent_to_signers = tx_info
@@ -488,13 +503,6 @@ impl<C: Context, B> BlockObserver<C, B> {
                 .any(|prevout| signer_script_pubkeys.contains(&prevout.script_pubkey.script));
 
             if !outputs_spent_to_signers && !inputs_spent_by_signers {
-                continue;
-            }
-
-            let txid = tx_info.compute_txid();
-            tracing::trace!(%txid, "attempting to extract sbtc transaction");
-            if tx_info.tx.is_coinbase() {
-                tracing::warn!(%txid, "ignoring coinbase tx when extracting sbtc transaction");
                 continue;
             }
 
@@ -518,12 +526,6 @@ impl<C: Context, B> BlockObserver<C, B> {
                 txid: txid.into(),
                 block_hash: block_hash.into(),
             });
-            // Bail if bitcoin-core doesn't return all the data that we
-            // care about for a non-coinbase transaction. This will happen
-            // if bitcoin core hasn't computed the undo data for the block
-            // with these transactions, of it there is a bug in bitcoin
-            // core.
-            tx_info.validate()?;
 
             for prevout in tx_info.to_inputs(&signer_script_pubkeys) {
                 db.write_tx_prevout(&prevout).await?;
