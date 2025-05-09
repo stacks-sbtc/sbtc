@@ -553,7 +553,16 @@ async fn update_deposits(
                 ));
                 continue;
             }
-            Err(e) => return Err(e),
+            Err(_) => {
+                updated_deposits.push((
+                    index,
+                    DepositWithStatus {
+                        deposit: Deposit::default(),
+                        status: StatusCode::INTERNAL_SERVER_ERROR.as_u16(),
+                    },
+                ));
+                continue;
+            }
         };
 
         let deposit: Deposit = updated_deposit.try_into().inspect_err(|error| {
