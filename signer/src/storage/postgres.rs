@@ -264,7 +264,7 @@ impl PgStore {
         .execute(executor)
         .await
         .map_err(Error::SqlxQuery)?;
-    
+
         Ok(())
     }
 
