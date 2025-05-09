@@ -652,15 +652,12 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
 ///
 /// Note: The deposit transaction will be in the mempool when this function
 /// returns.
-fn generate_deposit_request<R>(
+fn generate_deposit_request<R: rand::Rng>(
     faucet: &Faucet,
     amount: u64,
     signers_public_key: bitcoin::XOnlyPublicKey,
     rng: &mut R,
-) -> DepositRequest
-where
-    R: rand::Rng + ?Sized,
-{
+) -> DepositRequest {
     let depositor = Recipient::new_with_rng(AddressType::P2tr, rng);
     faucet.send_to(amount + amount / 2, &depositor.address);
     faucet.generate_block();

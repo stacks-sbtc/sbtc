@@ -157,7 +157,7 @@ impl Recipient {
 
     /// Generate a new public-private key pair and address of the given
     /// kind using the given random number generator.
-    pub fn new_with_rng<R: rand::Rng + ?Sized>(kind: AddressType, rng: &mut R) -> Self {
+    pub fn new_with_rng<R: rand::Rng>(kind: AddressType, rng: &mut R) -> Self {
         let keypair = secp256k1::Keypair::new_global(rng);
         let pk = keypair.public_key();
         let script_pubkey = match kind {
