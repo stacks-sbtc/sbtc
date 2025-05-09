@@ -470,7 +470,6 @@ impl<C: Context, B> BlockObserver<C, B> {
         // `scriptPubKey` controlled by the signers.
         let mut sbtc_txs = Vec::new();
         for tx_info in txs {
-
             let txid = tx_info.compute_txid();
             tracing::trace!(%txid, "attempting to extract sbtc transaction");
             if tx_info.tx.is_coinbase() {
