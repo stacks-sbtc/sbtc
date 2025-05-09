@@ -64,22 +64,13 @@ where
     I: IntoIterator<Item = T>,
     T: Weighted,
 {
-    // We might want to sort the items, and previously the was sorted by votes.
-    // However, it can allow malicious signer to speedup/slowdown requests execution,
-    // so it is not so good key to sort with. Some better keys can be time or something
-    // like this, but it require a bit more work so for now we just keep it unsorted.
-    let item_vec: Vec<(u32, T)> = items
-        .into_iter()
-        .map(|item| (item.votes().count_ones(), item))
-        .collect();
-
     // Now we just add each item into a bag, and return the
     // collection of bags afterward.
     // Create config and packager
     let config = PackagerConfig::new(max_votes_against, max_needs_signature);
     let mut packager = BestFitPackager::new(config);
 
-    for (_, item) in item_vec {
+    for item in items {
         packager.insert_item(item);
     }
 
