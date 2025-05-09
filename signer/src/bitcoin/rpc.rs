@@ -241,7 +241,7 @@ pub struct BitcoinBlockInfo {
     /// The Unix epoch time when the block was mined. It reflects the
     /// timestamp as recorded by the miner of the block.
     pub time: u64,
-    ///The median block time expressed in UNIX epoch time
+    /// The median block time expressed in UNIX epoch time
     #[serde(rename = "mediantime")]
     pub median_time: Option<u64>,
     /// The hash of the consensus encoded header of the parent block to
