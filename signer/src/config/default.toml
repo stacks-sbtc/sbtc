@@ -265,6 +265,14 @@ sbtc_bitcoin_start_height = 101
 # Environment: SIGNER_SIGNER__STACKS_FEES_MAX_USTX
 # stacks_fees_max_ustx = 1500000
 
+# The hex encoded bytes of the compressed public key that locked the first
+# UTXO created by the signers. It is also aggregate key constructed during
+# the signers' first DKG.
+#
+# Required: false
+# Environment: SIGNER_SIGNER__BOOTSTRAP_AGGREGATE_KEY
+# bootstrap_aggregate_key = "03a9b4e455fabecf0e8cf423dd519a6ea5968cf365f4e65c4feab5589da1f84895"
+
 # !! ==============================================================================
 # !! Stacks Event Observer Configuration
 # !!
