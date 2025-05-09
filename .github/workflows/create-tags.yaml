@@ -1,0 +1,85 @@
+name: Manual Tag and Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Tag Name (e.g., v1.0.0)"
+        required: true
+      release:
+        type: choice
+        description: "Trigger Release?"
+        required: true
+        options:
+        - no
+        - yes
+
+permissions:
+  contents: write # Needed to create a tag
+  actions: write # Needed to trigger another workflow via API
+
+jobs:
+  log_tag:
+    name: Print Tag Info
+    runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.set-output.outputs.tag_name }}
+    steps:
+      - name: Show Tag Name
+        id: print_name
+        run: |
+          printf "Tag to be created: ${{ inputs.tag_name }}"
+
+      - name: Set Output
+        id: set_output
+        run: |
+          printf "tag_name=${{ inputs.tag_name }}" >> $GITHUB_OUTPUT
+
+  create_tag:
+    name: Create Tag
+    runs-on: ubuntu-latest
+    environment: Tags
+    needs: log_tag
+    steps:
+      - name: Checkout Repository
+        id: checkout_repository
+        uses: stacks-sbtc/actions/checkout@095003d35774808f27b29f272976b1e01704ca93
+
+      - name: Create Tag
+        id: create_tag
+        uses: stacks-sbtc/actions/github-script@095003d35774808f27b29f272976b1e01704ca93
+        with:
+          script: |
+            const tag = "${{ inputs.tag_name }}";
+            const semverRegex = /^v?\d+\.\d+\.\d+(-[\w.-]+)?(\+[\w.-]+)?$/;
+            
+            if (!semverRegex.test(tag)) {
+              core.setFailed(`Error: Invalid tag format: "${tag}". Expected SemVer like X.Y.Z, vX.Y.Z-note, or X.Y.Z+note`);
+            } else {
+              github.rest.git.createRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `refs/tags/${tag}`,
+                sha: context.sha
+              });
+            }
+
+  trigger_release:
+    name: Trigger Release
+    runs-on: ubuntu-latest
+    needs: create_tag
+    if: ${{ inputs.release == 'true' }}
+    steps:
+      - name: Trigger Release Workflow
+        id: trigger_release
+        uses: stacks-sbtc/actions/github-script@095003d35774808f27b29f272976b1e01704ca93
+        with:
+          script: |
+            const response = await github.request('POST /repos/{owner}/{repo}/dispatches', {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              event_type: 'image_build_and_draft_release',
+              client_payload: {
+                tag_name: '${{ inputs.tag_name }}' // Pass the input value
+              }
+            });

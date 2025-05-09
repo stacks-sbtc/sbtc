@@ -1,11 +1,13 @@
 //! Test utilities for the transaction coordinator
 
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
+use super::get_rng;
 use crate::bitcoin::MockBitcoinInteract;
 use crate::bitcoin::rpc::BitcoinTxInfo;
 use crate::bitcoin::utxo::SignerUtxo;
@@ -35,6 +37,7 @@ use crate::storage::model::StacksTxId;
 use crate::storage::model::ToLittleEndianOrder as _;
 use crate::testing;
 use crate::testing::storage::DbReadTestExt as _;
+use crate::testing::storage::model::TestBitcoinTxInfo;
 use crate::testing::storage::model::TestData;
 use crate::testing::wsts::SignerSet;
 use crate::transaction_coordinator;
@@ -42,6 +45,7 @@ use crate::transaction_coordinator::TxCoordinatorEventLoop;
 use crate::transaction_coordinator::coordinator_public_key;
 use bitcoin::hashes::Hash as _;
 
+use bitcoin::Amount;
 use blockstack_lib::chainstate::stacks::TransactionContractCall;
 use blockstack_lib::chainstate::stacks::TransactionPayload;
 use blockstack_lib::net::api::getcontractsrc::ContractSrcResponse;
@@ -50,7 +54,7 @@ use clarity::vm::types::BuffData;
 use clarity::vm::types::SequenceData;
 use fake::Fake as _;
 use fake::Faker;
-use rand::SeedableRng as _;
+use rand::SeedableRng;
 use rand::seq::IteratorRandom;
 
 use super::context::TestContext;
@@ -58,7 +62,7 @@ use super::context::WrappedMock;
 use super::wallet::WALLET;
 
 const EMPTY_BITCOIN_TX: bitcoin::Transaction = bitcoin::Transaction {
-    version: bitcoin::transaction::Version::ONE,
+    version: bitcoin::transaction::Version::TWO,
     lock_time: bitcoin::absolute::LockTime::ZERO,
     input: vec![],
     output: vec![],
@@ -179,6 +183,8 @@ where
     /// Asserts that TxCoordinatorEventLoop::get_pending_requests processes withdrawals
     pub async fn assert_processes_withdrawals(mut self) {
         // Setup network and signer info
+
+        // TODO(#1590): fix this test for other seeds and use `get_rng()`
         let mut rng = rand::rngs::StdRng::seed_from_u64(46);
         let network = network::InMemoryNetwork::new();
         let context = self.context.clone();
@@ -201,10 +207,12 @@ where
             }],
             ..EMPTY_BITCOIN_TX
         };
-        test_data.push_bitcoin_txs(
-            &bitcoin_chain_tip,
-            vec![(model::TransactionType::SbtcTransaction, tx_1.clone())],
-        );
+        let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
+        let tx_info = TestBitcoinTxInfo {
+            tx: tx_1.clone(),
+            prevouts: Vec::new(),
+        };
+        test_data.push_bitcoin_txs(&bitcoin_chain_tip, vec![tx_info], &signer_script_pubkeys);
         test_data.remove(original_test_data);
         self.write_test_data(&test_data).await;
 
@@ -324,7 +332,7 @@ where
         mut self,
         delay_to_process_new_blocks: Duration,
     ) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
@@ -344,12 +352,18 @@ where
                 value: bitcoin::Amount::from_sat(1_337_000_000_000),
                 script_pubkey: aggregate_key.signers_script_pubkey(),
             }],
+            input: vec![TestBitcoinTxInfo::random_prevout(&mut rng)],
             ..EMPTY_BITCOIN_TX
         };
-        test_data.push_bitcoin_txs(
-            &bitcoin_chain_tip,
-            vec![(model::TransactionType::SbtcTransaction, tx_1.clone())],
-        );
+        let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
+        let tx_info = TestBitcoinTxInfo {
+            tx: tx_1.clone(),
+            prevouts: vec![bitcoin::TxOut {
+                value: bitcoin::Amount::from_sat(1000),
+                script_pubkey: aggregate_key.signers_script_pubkey(),
+            }],
+        };
+        test_data.push_bitcoin_txs(&bitcoin_chain_tip, vec![tx_info], &signer_script_pubkeys);
 
         test_data.remove(original_test_data);
         self.write_test_data(&test_data).await;
@@ -471,7 +485,7 @@ where
     /// Assert that a coordinator should be able to skip the deployment the sbtc contracts
     /// if they are already deployed.
     pub async fn assert_skips_deploy_sbtc_contracts(mut self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
@@ -491,12 +505,18 @@ where
                 value: bitcoin::Amount::from_sat(1_337_000_000_000),
                 script_pubkey: aggregate_key.signers_script_pubkey(),
             }],
+            input: vec![TestBitcoinTxInfo::random_prevout(&mut rng)],
             ..EMPTY_BITCOIN_TX
         };
-        test_data.push_bitcoin_txs(
-            &bitcoin_chain_tip,
-            vec![(model::TransactionType::SbtcTransaction, tx_1.clone())],
-        );
+        let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
+        let tx_info = TestBitcoinTxInfo {
+            tx: tx_1.clone(),
+            prevouts: vec![bitcoin::TxOut {
+                value: bitcoin::Amount::from_sat(1000),
+                script_pubkey: aggregate_key.signers_script_pubkey(),
+            }],
+        };
+        test_data.push_bitcoin_txs(&bitcoin_chain_tip, vec![tx_info], &signer_script_pubkeys);
 
         test_data.remove(original_test_data);
         self.write_test_data(&test_data).await;
@@ -589,7 +609,7 @@ where
                         Ok(AccountInfo {
                             balance: 1_000_000,
                             locked: 0,
-                            unlock_height: 0,
+                            unlock_height: 0u64.into(),
                             nonce: 1,
                         })
                     })
@@ -655,7 +675,7 @@ where
 
     /// Assert we get a withdrawal accept tx
     pub async fn assert_construct_withdrawal_accept_stacks_sign_request(mut self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let signer_network = SignerNetwork::single(&self.context);
         let private_key = PrivateKey::new(&mut rng);
         let bitcoin_aggregate_key = PublicKey::from_private_key(&private_key);
@@ -715,7 +735,7 @@ where
             block_hash: stacks_block.block_hash,
             sweep_txid: sweep_tx_info.txid.into(),
             sweep_block_hash: sweep_block_hash.into(),
-            sweep_block_height: 0,
+            sweep_block_height: 0u64.into(),
             ..fake::Faker.fake_with_rng(&mut rng)
         };
 
@@ -803,7 +823,7 @@ where
                     Value::Sequence(SequenceData::Buffer(BuffData {
                         data: withdrawal_req.sweep_block_hash.to_le_bytes().to_vec()
                     })),
-                    Value::UInt(withdrawal_req.sweep_block_height as u128),
+                    Value::UInt(withdrawal_req.sweep_block_height.into()),
                     Value::Sequence(SequenceData::Buffer(BuffData {
                         data: outpoint.txid.to_le_bytes().to_vec()
                     })),
@@ -816,7 +836,7 @@ where
 
     /// Assert we get a withdrawal reject tx
     pub async fn assert_construct_withdrawal_reject_stacks_sign_request(mut self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let signer_network = SignerNetwork::single(&self.context);
         let private_key = PrivateKey::new(&mut rng);
         let bitcoin_aggregate_key = PublicKey::from_private_key(&private_key);
@@ -909,7 +929,7 @@ where
 {
     /// Assert we get the correct UTXO in a simple case
     pub async fn assert_get_signer_utxo_simple(mut self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
@@ -925,16 +945,11 @@ where
         let original_test_data = test_data.clone();
 
         let tx = bitcoin::Transaction {
-            output: vec![
-                bitcoin::TxOut {
-                    value: bitcoin::Amount::from_sat(42),
-                    script_pubkey: aggregate_key.signers_script_pubkey(),
-                },
-                bitcoin::TxOut {
-                    value: bitcoin::Amount::from_sat(123),
-                    script_pubkey: bitcoin::ScriptBuf::new(),
-                },
-            ],
+            output: vec![bitcoin::TxOut {
+                value: bitcoin::Amount::from_sat(42),
+                script_pubkey: aggregate_key.signers_script_pubkey(),
+            }],
+            input: vec![TestBitcoinTxInfo::random_prevout(&mut rng)],
             ..EMPTY_BITCOIN_TX
         };
 
@@ -944,11 +959,17 @@ where
             &self.test_model_parameters,
             Some(&bitcoin_chain_tip),
         );
+
+        let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
+        let tx_info = TestBitcoinTxInfo {
+            tx: tx.clone(),
+            prevouts: vec![bitcoin::TxOut {
+                value: bitcoin::Amount::from_sat(1000),
+                script_pubkey: aggregate_key.signers_script_pubkey(),
+            }],
+        };
+        test_data.push_bitcoin_txs(&block_ref, vec![tx_info], &signer_script_pubkeys);
         test_data.push(block);
-        test_data.push_bitcoin_txs(
-            &block_ref,
-            vec![(model::TransactionType::SbtcTransaction, tx.clone())],
-        );
 
         let expected = SignerUtxo {
             outpoint: bitcoin::OutPoint::new(tx.compute_txid(), 0),
@@ -979,7 +1000,7 @@ where
 
     /// Assert we get the correct UTXO in a fork
     pub async fn assert_get_signer_utxo_fork(mut self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
@@ -995,9 +1016,10 @@ where
         let original_test_data = test_data.clone();
 
         let test_data_rc = RefCell::new(test_data);
-        let mut push_block = |parent| {
+        let rng_rc = RefCell::new(rng);
+        let push_block = |parent| {
             let (block, block_ref) = test_data_rc.borrow_mut().new_block(
-                &mut rng,
+                &mut *rng_rc.borrow_mut(),
                 &signer_set.signer_keys(),
                 &self.test_model_parameters,
                 Some(parent),
@@ -1005,17 +1027,29 @@ where
             test_data_rc.borrow_mut().push(block);
             block_ref
         };
+        let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
         let push_utxo = |block_ref, sat_amt| {
+            // These are sweep transactions, so they need inputs so that
+            // they get labeled as such.
             let tx = bitcoin::Transaction {
                 output: vec![bitcoin::TxOut {
                     value: bitcoin::Amount::from_sat(sat_amt),
                     script_pubkey: aggregate_key.signers_script_pubkey(),
                 }],
+                input: vec![TestBitcoinTxInfo::random_prevout(&mut *rng_rc.borrow_mut())],
                 ..EMPTY_BITCOIN_TX
+            };
+            let tx_info = TestBitcoinTxInfo {
+                tx: tx.clone(),
+                prevouts: vec![bitcoin::TxOut {
+                    value: bitcoin::Amount::from_sat(1000),
+                    script_pubkey: aggregate_key.signers_script_pubkey(),
+                }],
             };
             test_data_rc.borrow_mut().push_bitcoin_txs(
                 block_ref,
-                vec![(model::TransactionType::SbtcTransaction, tx.clone())],
+                vec![tx_info],
+                &signer_script_pubkeys,
             );
             tx
         };
@@ -1087,7 +1121,7 @@ where
 
     /// Assert we get the correct UTXO with a spending chain in a block
     pub async fn assert_get_signer_utxo_unspent(mut self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
@@ -1107,6 +1141,7 @@ where
                 value: bitcoin::Amount::from_sat(1),
                 script_pubkey: aggregate_key.signers_script_pubkey(),
             }],
+            input: vec![TestBitcoinTxInfo::random_prevout(&mut rng)],
             ..EMPTY_BITCOIN_TX
         };
         let tx_2 = bitcoin::Transaction {
@@ -1114,6 +1149,7 @@ where
                 value: bitcoin::Amount::from_sat(2),
                 script_pubkey: aggregate_key.signers_script_pubkey(),
             }],
+            input: vec![TestBitcoinTxInfo::random_prevout(&mut rng)],
             ..EMPTY_BITCOIN_TX
         };
         let tx_3 = bitcoin::Transaction {
@@ -1123,6 +1159,7 @@ where
                         txid: tx_1.compute_txid(),
                         vout: 0,
                     },
+                    sequence: bitcoin::Sequence::ZERO,
                     ..Default::default()
                 },
                 bitcoin::TxIn {
@@ -1130,6 +1167,7 @@ where
                         txid: tx_2.compute_txid(),
                         vout: 0,
                     },
+                    sequence: bitcoin::Sequence::ZERO,
                     ..Default::default()
                 },
             ],
@@ -1145,15 +1183,42 @@ where
             &self.test_model_parameters,
             Some(&bitcoin_chain_tip),
         );
-        test_data.push(block);
+
+        let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
+        let tx_info_1 = TestBitcoinTxInfo {
+            tx: tx_1.clone(),
+            prevouts: vec![bitcoin::TxOut {
+                value: bitcoin::Amount::from_sat(1000),
+                script_pubkey: aggregate_key.signers_script_pubkey(),
+            }],
+        };
+        let tx_info_2 = TestBitcoinTxInfo {
+            tx: tx_2.clone(),
+            prevouts: vec![bitcoin::TxOut {
+                value: bitcoin::Amount::from_sat(2000),
+                script_pubkey: aggregate_key.signers_script_pubkey(),
+            }],
+        };
+        let tx_info_3 = TestBitcoinTxInfo {
+            tx: tx_3.clone(),
+            prevouts: vec![
+                bitcoin::TxOut {
+                    value: bitcoin::Amount::from_sat(3000),
+                    script_pubkey: aggregate_key.signers_script_pubkey(),
+                },
+                bitcoin::TxOut {
+                    value: bitcoin::Amount::from_sat(4000),
+                    script_pubkey: bitcoin::ScriptBuf::new(),
+                },
+            ],
+        };
         test_data.push_bitcoin_txs(
             &block_ref,
-            vec![
-                (model::TransactionType::SbtcTransaction, tx_1.clone()),
-                (model::TransactionType::SbtcTransaction, tx_3.clone()),
-                (model::TransactionType::SbtcTransaction, tx_2.clone()),
-            ],
+            vec![tx_info_1, tx_info_2, tx_info_3],
+            &signer_script_pubkeys,
         );
+
+        test_data.push(block);
 
         let expected = SignerUtxo {
             outpoint: bitcoin::OutPoint::new(tx_3.compute_txid(), 0),
@@ -1184,7 +1249,7 @@ where
 
     /// Assert we get the correct UTXO in case of donations
     pub async fn assert_get_signer_utxo_donations(mut self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
@@ -1214,13 +1279,19 @@ where
                 value: bitcoin::Amount::from_sat(0xA1),
                 script_pubkey: aggregate_key.signers_script_pubkey(),
             }],
+            input: vec![TestBitcoinTxInfo::random_prevout(&mut rng)],
             ..EMPTY_BITCOIN_TX
         };
+        let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
+        let tx_info = TestBitcoinTxInfo {
+            tx: tx_a1.clone(),
+            prevouts: vec![bitcoin::TxOut {
+                value: Amount::from_sat(0xA1),
+                script_pubkey: aggregate_key.signers_script_pubkey(),
+            }],
+        };
+        test_data.push_bitcoin_txs(&block_a1, vec![tx_info], &signer_script_pubkeys);
         test_data.push(block);
-        test_data.push_bitcoin_txs(
-            &block_a1,
-            vec![(model::TransactionType::SbtcTransaction, tx_a1.clone())],
-        );
 
         let (block, block_a2) = test_data.new_block(
             &mut rng,
@@ -1228,6 +1299,9 @@ where
             &self.test_model_parameters,
             Some(&block_a1),
         );
+        // This is a donation. It should be labeled as such since the first
+        // input (which doesn't exist), is not locked by the signers
+        // scriptPubKey.
         let tx_a2 = bitcoin::Transaction {
             output: vec![bitcoin::TxOut {
                 value: bitcoin::Amount::from_sat(0xA2),
@@ -1235,11 +1309,12 @@ where
             }],
             ..EMPTY_BITCOIN_TX
         };
+        let tx_info = TestBitcoinTxInfo {
+            tx: tx_a2.clone(),
+            prevouts: Vec::new(),
+        };
+        test_data.push_bitcoin_txs(&block_a2, vec![tx_info], &signer_script_pubkeys);
         test_data.push(block);
-        test_data.push_bitcoin_txs(
-            &block_a2,
-            vec![(model::TransactionType::Donation, tx_a2.clone())],
-        );
 
         let (block, block_b1) = test_data.new_block(
             &mut rng,
@@ -1247,6 +1322,7 @@ where
             &self.test_model_parameters,
             Some(&bitcoin_chain_tip),
         );
+        // This is a donation as well
         let tx_b1 = bitcoin::Transaction {
             output: vec![bitcoin::TxOut {
                 value: bitcoin::Amount::from_sat(0xB1),
@@ -1254,11 +1330,12 @@ where
             }],
             ..EMPTY_BITCOIN_TX
         };
+        let tx_info = TestBitcoinTxInfo {
+            tx: tx_b1.clone(),
+            prevouts: Vec::new(),
+        };
+        test_data.push_bitcoin_txs(&block_b1, vec![tx_info], &signer_script_pubkeys);
         test_data.push(block);
-        test_data.push_bitcoin_txs(
-            &block_b1,
-            vec![(model::TransactionType::Donation, tx_b1.clone())],
-        );
 
         test_data.remove(original_test_data);
         self.write_test_data(&test_data).await;

@@ -7,7 +7,6 @@ use bitcoin::consensus::encode::serialize_hex;
 use fake::Fake;
 use fake::Faker;
 use mockito::Server;
-use rand::SeedableRng as _;
 use serde_json::json;
 use url::Url;
 
@@ -30,6 +29,7 @@ use signer::storage::model::BitcoinBlockHash;
 use signer::storage::postgres::PgStore;
 use signer::testing;
 use signer::testing::context::*;
+use signer::testing::get_rng;
 use signer::testing::request_decider::TestEnvironment;
 use testing_emily_client::apis::testing_api;
 
@@ -37,6 +37,7 @@ use crate::setup::IntoEmilyTestingConfig as _;
 use crate::setup::TestSweepSetup;
 use crate::setup::backfill_bitcoin_blocks;
 
+#[allow(clippy::type_complexity)]
 fn test_environment(
     db: PgStore,
     signing_threshold: u32,
@@ -99,6 +100,7 @@ async fn should_store_decisions_for_pending_deposit_requests() {
 }
 
 #[tokio::test]
+// TODO(#1466): This test is currently using a known-working fixed seed, but is flaky with other seeds.
 async fn should_store_decisions_for_pending_withdraw_requests() {
     let num_signers = 3;
     let signing_threshold = 2;
@@ -137,7 +139,7 @@ async fn should_store_decisions_received_from_other_signers() {
 async fn handle_pending_deposit_request_address_script_pub_key() {
     let db = testing::storage::new_test_database().await;
 
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
 
     let ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -223,7 +225,7 @@ async fn handle_pending_deposit_request_address_script_pub_key() {
 async fn handle_pending_deposit_request_not_in_signing_set() {
     let db = testing::storage::new_test_database().await;
 
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
 
     let ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -310,7 +312,7 @@ async fn handle_pending_deposit_request_not_in_signing_set() {
 async fn persist_received_deposit_decision_fetches_missing_deposit_requests() {
     let db = testing::storage::new_test_database().await;
 
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
 
     let emily_client = EmilyClient::try_new(
         &Url::parse("http://testApiKey@localhost:3031").unwrap(),
@@ -433,7 +435,7 @@ async fn blocklist_client_retry(num_failures: u8, failing_iters: u8) {
     let db = testing::storage::new_test_database().await;
     let network = InMemoryNetwork::new();
 
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
 
     let ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -555,7 +557,7 @@ async fn do_not_procceed_with_blocked_addresses(is_withdrawal: bool, is_blocked:
     let db = testing::storage::new_test_database().await;
     let network = InMemoryNetwork::new();
 
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
 
     let ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -704,7 +706,7 @@ async fn do_not_procceed_with_blocked_addresses(is_withdrawal: bool, is_blocked:
         assert_eq!(decisions.last().unwrap().is_accepted, !is_blocked);
         assert!(!votes.is_empty());
         assert!(votes.iter().any(|vote| {
-            vote.signer_public_key == signer_public_key && vote.is_accepted.unwrap() == !is_blocked
+            vote.signer_public_key == signer_public_key && vote.is_accepted.unwrap() != is_blocked
         }));
     } else {
         let outpoint = deposit_requests.first().unwrap().outpoint();

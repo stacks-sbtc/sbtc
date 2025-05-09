@@ -102,7 +102,6 @@ services:
       - emily-dynamodb
     environment:
       - DYNAMODB_ENDPOINT=http://emily-dynamodb:8000
-      - TRUSTED_REORG_API_KEY=testApiKey
       - DEPLOYER_ADDRESS=SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS
     profiles:
       - default
@@ -148,6 +147,26 @@ services:
       - default
     depends_on:
       - emily-server
+
+  emily-cron:
+    build:
+      context: ../
+      dockerfile: docker/sbtc/emily-cron/Dockerfile
+      target: emily-cron
+    restart: on-failure
+    environment:
+      - API_KEY=testApiKey
+      - EMILY_ENDPOINT=http://emily-server:3031
+      - PRIVATE_EMILY_ENDPOINT=http://emily-server:3031
+      - MEMPOOL_API_URL=http://mempool-web:8083/api
+      - HIRO_API_URL=https://api.hiro.so
+      - DEPLOYER_ADDRESS=SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS
+    profiles:
+      - default
+      - bitcoin-mempool
+    depends_on:
+      - emily-server
+      - mempool-web
 
   # sBTC Signers.
   # ------------------
@@ -490,7 +509,7 @@ services:
       - default
 
   stacks-api:
-    image: blockstack/stacks-blockchain-api:8.6.0
+    image: hirosystems/stacks-blockchain-api:8.9.0
     container_name: stacks-api
     stop_grace_period: 5s
     ports:
@@ -502,7 +521,6 @@ services:
       - bitcoin
     environment:
       NODE_ENV: "production"
-      GIT_TAG: "v7.10.0-nakamoto.7"
       PG_HOST: "postgres-stacks-api"
       PG_PORT: 5432
       PG_USER: "postgres"

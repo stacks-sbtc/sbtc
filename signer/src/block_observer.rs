@@ -35,8 +35,7 @@ use crate::metrics::BITCOIN_BLOCKCHAIN;
 use crate::metrics::Metrics;
 use crate::stacks::api::GetNakamotoStartHeight as _;
 use crate::stacks::api::StacksInteract;
-use crate::stacks::api::TenureBlocks;
-use crate::storage;
+use crate::stacks::api::TenureBlockHeaders;
 use crate::storage::DbRead;
 use crate::storage::DbWrite;
 use crate::storage::model;
@@ -45,7 +44,6 @@ use bitcoin::Amount;
 use bitcoin::BlockHash;
 use bitcoin::ScriptBuf;
 use bitcoin::Transaction;
-use bitcoin::hashes::Hash as _;
 use futures::stream::Stream;
 use futures::stream::StreamExt;
 use sbtc::deposits::CreateDepositRequest;
@@ -89,6 +87,10 @@ impl DepositRequestValidator for CreateDepositRequest {
         let Some(block_hash) = response.block_hash else {
             return Ok(None);
         };
+
+        if response.tx.is_coinbase() {
+            return Err(Error::BitcoinTxCoinbase(self.outpoint.txid));
+        }
 
         // The `get_tx_info` call here should not return None, we know that
         // it has been included in a block.
@@ -217,6 +219,7 @@ impl<C: Context, B> BlockObserver<C, B> {
     #[tracing::instrument(skip_all)]
     pub async fn load_requests(&self, requests: &[CreateDepositRequest]) -> Result<(), Error> {
         let mut deposit_requests = Vec::new();
+        let mut deposit_request_txs = Vec::new();
         let bitcoin_client = self.context.get_bitcoin_client();
         let is_mainnet = self.context.config().signer.network.is_mainnet();
 
@@ -228,24 +231,24 @@ impl<C: Context, B> BlockObserver<C, B> {
 
             // We log the error above, so we just need to extract the
             // deposit now.
-            let deposit_status = match deposit {
-                Ok(Some(deposit)) => {
-                    deposit_requests.push(deposit);
-                    "success"
-                }
-                Ok(None) => "unconfirmed",
-                Err(_) => "failed",
+            Metrics::increment_deposit_total(&deposit);
+            let Ok(Some(deposit)) = deposit else { continue };
+
+            self.process_bitcoin_blocks_until(deposit.tx_info.block_hash)
+                .await?;
+
+            let tx = model::BitcoinTxRef {
+                txid: deposit.tx_info.txid.into(),
+                block_hash: deposit.tx_info.block_hash.into(),
             };
 
-            metrics::counter!(
-                Metrics::DepositRequestsTotal,
-                "blockchain" => BITCOIN_BLOCKCHAIN,
-                "status" => deposit_status,
-            )
-            .increment(1);
+            deposit_requests.push(model::DepositRequest::from(deposit));
+            deposit_request_txs.push(tx);
         }
 
-        self.store_deposit_requests(deposit_requests).await?;
+        let db = self.context.get_storage_mut();
+        db.write_bitcoin_transactions(deposit_request_txs).await?;
+        db.write_deposit_requests(deposit_requests).await?;
 
         tracing::debug!("finished processing deposit requests");
         Ok(())
@@ -377,63 +380,25 @@ impl<C: Context, B> BlockObserver<C, B> {
     async fn process_stacks_blocks(&self) -> Result<(), Error> {
         tracing::info!("processing stacks block");
         let stacks_client = self.context.get_stacks_client();
+        let db = self.context.get_storage_mut();
         let tenure_info = stacks_client.get_tenure_info().await?;
 
         tracing::debug!("fetching unknown ancestral blocks from stacks-core");
-        let stacks_blocks = crate::stacks::api::fetch_unknown_ancestors(
+        let stacks_block_headers = crate::stacks::api::fetch_unknown_ancestors(
             &stacks_client,
-            &self.context.get_storage(),
+            &db,
             tenure_info.tip_block_id,
         )
         .await?;
 
-        self.write_stacks_blocks(&stacks_blocks).await?;
+        let headers = stacks_block_headers
+            .into_iter()
+            .flat_map(TenureBlockHeaders::into_iter)
+            .collect::<Vec<_>>();
+
+        db.write_stacks_block_headers(headers).await?;
 
         tracing::debug!("finished processing stacks block");
-        Ok(())
-    }
-
-    /// For each of the deposit requests, persist the corresponding
-    /// transaction and the parsed deposit info into the database.
-    ///
-    /// This function does three things:
-    /// 1. For all deposit requests, check to see if there are bitcoin
-    ///    blocks that we do not have in our database.
-    /// 2. If we do not have a record of the bitcoin block then write it
-    ///    to the database.
-    /// 3. Write the deposit transaction and the extracted deposit info
-    ///    into the database.
-    async fn store_deposit_requests(&self, requests: Vec<Deposit>) -> Result<(), Error> {
-        // We need to check to see if we have a record of the bitcoin block
-        // that contains the deposit request in our database. If we don't
-        // then write them to our database.
-        for deposit in requests.iter() {
-            self.process_bitcoin_blocks_until(deposit.tx_info.block_hash)
-                .await?;
-        }
-
-        // Okay now we write the deposit requests and the transactions to
-        // the database.
-        let (deposit_requests, deposit_request_txs) = requests
-            .into_iter()
-            .map(|deposit| {
-                let tx = model::Transaction {
-                    txid: deposit.tx_info.txid.to_byte_array(),
-                    tx: bitcoin::consensus::serialize(&deposit.tx_info.tx),
-                    tx_type: model::TransactionType::DepositRequest,
-                    block_hash: deposit.tx_info.block_hash.to_byte_array(),
-                };
-
-                (model::DepositRequest::from(deposit), tx)
-            })
-            .collect::<Vec<_>>()
-            .into_iter()
-            .unzip();
-
-        let db = self.context.get_storage_mut();
-        db.write_bitcoin_transactions(deposit_request_txs).await?;
-        db.write_deposit_requests(deposit_requests).await?;
-
         Ok(())
     }
 
@@ -478,29 +443,25 @@ impl<C: Context, B> BlockObserver<C, B> {
                 continue;
             }
 
+            let txid = tx.compute_txid();
+            if tx.is_coinbase() {
+                tracing::warn!(%txid, "ignoring coinbase tx when extracting sbtc transaction");
+                continue;
+            }
+
             // This function is called after we have received a
             // notification of a bitcoin block, and we are iterating
             // through all of the transactions within that block. This
             // means the `get_tx_info` call below should not fail.
-            let txid = tx.compute_txid();
             let tx_info = btc_rpc
                 .get_tx_info(&txid, &block_hash)
                 .await?
                 .ok_or(Error::BitcoinTxMissing(txid, None))?;
 
-            // sBTC transactions have as first txin a signers spendable output
-            let tx_type = if tx_info.is_signer_created(&signer_script_pubkeys) {
-                model::TransactionType::SbtcTransaction
-            } else {
-                model::TransactionType::Donation
-            };
-
             let txid = tx.compute_txid();
-            sbtc_txs.push(model::Transaction {
-                txid: txid.to_byte_array(),
-                tx: bitcoin::consensus::serialize(&tx),
-                tx_type,
-                block_hash: block_hash.to_byte_array(),
+            sbtc_txs.push(model::BitcoinTxRef {
+                txid: txid.into(),
+                block_hash: block_hash.into(),
             });
 
             for prevout in tx_info.to_inputs(&signer_script_pubkeys) {
@@ -525,30 +486,6 @@ impl<C: Context, B> BlockObserver<C, B> {
 
         // Write these transactions into storage.
         db.write_bitcoin_transactions(sbtc_txs).await?;
-        Ok(())
-    }
-
-    /// Write the given stacks blocks to the database.
-    ///
-    /// This function also extracts sBTC Stacks transactions from the given
-    /// blocks and stores them into the database.
-    async fn write_stacks_blocks(&self, tenures: &[TenureBlocks]) -> Result<(), Error> {
-        let deployer = &self.context.config().signer.deployer;
-        let txs = tenures
-            .iter()
-            .flat_map(|tenure| {
-                storage::postgres::extract_relevant_transactions(tenure.blocks(), deployer)
-            })
-            .collect::<Vec<_>>();
-
-        let headers = tenures
-            .iter()
-            .flat_map(TenureBlocks::as_stacks_blocks)
-            .collect::<Vec<_>>();
-
-        let storage = self.context.get_storage_mut();
-        storage.write_stacks_block_headers(headers).await?;
-        storage.write_stacks_transactions(txs).await?;
         Ok(())
     }
 
@@ -752,7 +689,7 @@ where
                 let signer_set = shares.signer_set_public_keys.into_iter().collect();
                 Ok((Some(shares.aggregate_key), signer_set))
             }
-            None => Ok((None, context.config().signer.bootstrap_signing_set())),
+            None => Ok((None, context.config().signer.bootstrap_signing_set.clone())),
         },
     }
 }
@@ -762,11 +699,11 @@ mod tests {
     use bitcoin::Amount;
     use bitcoin::BlockHash;
     use bitcoin::TxOut;
+    use bitcoin::hashes::Hash as _;
     use fake::Dummy;
     use fake::Fake;
     use model::BitcoinTxId;
     use model::ScriptPubKey;
-    use rand::SeedableRng;
     use test_log::test;
 
     use crate::bitcoin::rpc::GetTxResponse;
@@ -777,12 +714,13 @@ mod tests {
     use crate::storage::model::DkgSharesStatus;
     use crate::testing::block_observer::TestHarness;
     use crate::testing::context::*;
+    use crate::testing::get_rng;
 
     use super::*;
 
     #[test(tokio::test)]
     async fn should_be_able_to_extract_bitcoin_blocks_given_a_block_header_stream() {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let storage = storage::in_memory::Store::new_shared();
         let test_harness = TestHarness::generate(&mut rng, 20, 0..5);
         let min_height = test_harness.min_block_height();
@@ -832,7 +770,7 @@ mod tests {
     /// pass validation and have been confirmed.
     #[tokio::test]
     async fn validated_confirmed_deposits_get_added_to_state() {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let mut test_harness = TestHarness::generate(&mut rng, 20, 0..5);
         // We want the test harness to fetch a block from our
         // "bitcoin-core", which in this case is the test harness. So we
@@ -961,7 +899,7 @@ mod tests {
     /// deposit requests into "storage".
     #[tokio::test]
     async fn extract_deposit_requests_stores_validated_deposits() {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(365);
+        let mut rng = get_rng();
         let mut test_harness = TestHarness::generate(&mut rng, 20, 0..5);
 
         // We want the test harness to fetch a block from our
@@ -1027,21 +965,12 @@ mod tests {
         let storage = storage.lock().await;
         assert_eq!(storage.deposit_requests.len(), 1);
         let db_outpoint: (BitcoinTxId, u32) = (tx_setup0.tx.compute_txid().into(), 0);
-        assert!(storage.deposit_requests.get(&db_outpoint).is_some());
+        assert!(storage.deposit_requests.contains_key(&db_outpoint));
 
         assert!(
             storage
                 .bitcoin_transactions_to_blocks
-                .get(&db_outpoint.0)
-                .is_some()
-        );
-        assert_eq!(
-            storage
-                .raw_transactions
-                .get(db_outpoint.0.as_byte_array())
-                .unwrap()
-                .tx_type,
-            model::TransactionType::DepositRequest
+                .contains_key(&db_outpoint.0)
         );
     }
 
@@ -1050,7 +979,7 @@ mod tests {
     /// bitcoin block that match one of those `scriptPubkey`s.
     #[tokio::test]
     async fn sbtc_transactions_get_stored() {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let mut test_harness = TestHarness::generate(&mut rng, 20, 0..5);
 
         let block_hash = BlockHash::from_byte_array([1u8; 32]);
@@ -1081,7 +1010,7 @@ mod tests {
             signature_share_threshold: 1,
             dkg_shares_status: DkgSharesStatus::Unverified,
             started_at_bitcoin_block_hash: block_hash.into(),
-            started_at_bitcoin_block_height: 1,
+            started_at_bitcoin_block_height: 1u64.into(),
         };
         storage.write_encrypted_dkg_shares(&shares).await.unwrap();
 

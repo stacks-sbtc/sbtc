@@ -117,7 +117,7 @@ mod tests {
     use crate::{
         keys::{PrivateKey, PublicKey},
         network::libp2p::SignerSwarmBuilder,
-        testing::{self, clear_env, context::*, network::RandomMemoryMultiaddr},
+        testing::{self, clear_env, context::*, get_rng, network::RandomMemoryMultiaddr},
     };
 
     #[test(tokio::test)]
@@ -199,11 +199,12 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
         // Run the test with a 30-second timeout for the swarms to exchange messages.
-        if let Err(_) = tokio::time::timeout(
+        if tokio::time::timeout(
             tokio::time::Duration::from_secs(30),
             testing::network::assert_clients_can_exchange_messages(network1, network2, key1, key2),
         )
         .await
+        .is_err()
         {
             handle1.abort();
             handle2.abort();
@@ -222,7 +223,7 @@ mod tests {
     async fn connected_peers_gossip_to_one_another() {
         clear_env();
 
-        let mut rng = rand::rngs::OsRng;
+        let mut rng = get_rng();
         let key1 = PrivateKey::new(&mut rng);
         let key2 = PrivateKey::new(&mut rng);
         let key3 = PrivateKey::new(&mut rng);
@@ -376,7 +377,7 @@ mod tests {
     async fn signers_check_source_peer_ids() {
         clear_env();
 
-        let mut rng = rand::rngs::OsRng;
+        let mut rng = get_rng();
         let key1 = PrivateKey::new(&mut rng);
         let key2 = PrivateKey::new(&mut rng);
         let key3 = PrivateKey::new(&mut rng);
