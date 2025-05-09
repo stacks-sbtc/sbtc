@@ -20,6 +20,7 @@ use rand::seq::SliceRandom as _;
 use signer::WITHDRAWAL_BLOCKS_EXPIRY;
 use signer::bitcoin::validation::WithdrawalRequestStatus;
 use signer::bitcoin::validation::WithdrawalValidationResult;
+use signer::context::SbtcLimits;
 use signer::storage::model::BitcoinBlockHeight;
 use signer::storage::model::DkgSharesStatus;
 use signer::storage::model::KeyRotationEvent;
@@ -3038,6 +3039,10 @@ async fn transaction_coordinator_test_environment(
         .with_mocked_clients()
         .build();
 
+    context
+        .state()
+        .update_current_limits(SbtcLimits::unlimited());
+
     testing::transaction_coordinator::TestEnvironment {
         context,
         context_window: 5,
@@ -3049,7 +3054,6 @@ async fn transaction_coordinator_test_environment(
 
 /// Tests that TxCoordinatorEventLoop::get_pending_requests processes withdrawals
 #[tokio::test]
-// TODO(#1590): This test is currently using a known-working fixed seed, but is flaky with other seeds.
 async fn should_process_withdrawals() {
     let store = testing::storage::new_test_database().await;
 
