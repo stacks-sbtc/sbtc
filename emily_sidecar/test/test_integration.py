@@ -84,7 +84,6 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(withdrawal.status_code, 200)
         self.assertEqual(
             withdrawal.json(),
-
             {
                 "requestId": 1,
                 "stacksBlockHash": "75b02b9884ec41c05f2cfa6e20823328321518dd0b027e7b609b63d4d1ea7c78",

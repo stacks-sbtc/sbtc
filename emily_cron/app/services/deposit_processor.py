@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from itertools import chain, groupby
 from typing import Iterable
 
@@ -69,7 +70,7 @@ class DepositProcessor:
                         bitcoin_chaintip_height
                         < tx.confirmed_height + settings.MIN_BLOCK_CONFIRMATIONS
                     ):
-                        logger.warning(
+                        logger.info(
                             f"Confirmed transaction {tx.bitcoin_txid} is not yet eligible for RBF replacement"
                         )
                     else:
@@ -203,6 +204,49 @@ class DepositProcessor:
 
         return updates
 
+    def process_long_pending(
+        self,
+        enriched_deposits: list[EnrichedDepositInfo],
+    ) -> list[DepositUpdate]:
+        """Process long-pending transactions.
+        Args:
+            enriched_deposits: List of enriched deposit information
+            stacks_chaintip: Current Stacks block info
+        Returns:
+            list[DepositUpdate]: List of deposit updates
+        """
+        updates = []
+
+        # Get the current time
+        current_time = int(datetime.now().timestamp())
+
+        long_pending_txs = [
+            tx
+            for tx in enriched_deposits
+            if tx.status == RequestStatus.PENDING.value  # Only check pending transactions
+            and not tx.in_mempool  # that we can't find via the mempool API (it might have been dropped)
+            and current_time - tx.deposit_time
+            >= settings.MAX_UNCONFIRMED_TIME  # and has been pending for too long
+        ]
+
+        if not long_pending_txs:
+            return updates
+
+        logger.info(f"Found {len(long_pending_txs)} long-pending transactions to mark as FAILED")
+
+        for tx in long_pending_txs:
+            logger.info(f"Marking long-pending transaction {tx.bitcoin_txid} as FAILED")
+            updates.append(
+                DepositUpdate(
+                    bitcoin_txid=tx.bitcoin_txid,
+                    bitcoin_tx_output_index=tx.bitcoin_tx_output_index,
+                    status=RequestStatus.FAILED.value,
+                    status_message=f"Pending for too long ({settings.MAX_UNCONFIRMED_TIME} seconds)",
+                )
+            )
+
+        return updates
+
     def update_deposits(self) -> None:
         """Update deposit statuses.
 
@@ -237,6 +281,9 @@ class DepositProcessor:
         rbf_updates = self.process_rbf_transactions(enriched_deposits, bitcoin_chaintip_height)
         updates.extend(rbf_updates)
 
+        # Process long-pending transactions
+        pending_updates = self.process_long_pending(enriched_deposits)
+        updates.extend(pending_updates)
         # Apply updates
         if updates:
             logger.info(f"Updating {len(updates)} deposit statuses")
