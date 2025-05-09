@@ -43,37 +43,66 @@ jobs:
     name: Run Lints
     runs-on: ubuntu-24.04
     steps:
-      - uses: rui314/setup-mold@f80524ca6eeaa76759b57fb78ddce5d87a20c720 #v1
+      - name: Setup Mold
+        id: setup_mold
+        uses: stacks-sbtc/actions/setup-mold@095003d35774808f27b29f272976b1e01704ca93
         with:
           make-default: true
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 #v4.2.2
-      - uses: pnpm/action-setup@fe02b34f77f8bc703788d5817da081398fad5dd2 #v4.0
-      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af #v4.1.0
+
+      - name: Checkout Repository
+        id: checkout_Repository
+        uses: stacks-sbtc/actions/checkout@095003d35774808f27b29f272976b1e01704ca93
+
+      - name: Setup Pnpm
+        id: setup_pnpm
+        uses: stacks-sbtc/actions/setup-pnpm@095003d35774808f27b29f272976b1e01704ca93
+
+      - name: Setup Node
+        id: setup_node
+        uses: stacks-sbtc/actions/setup-node@095003d35774808f27b29f272976b1e01704ca93
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "pnpm"
-      - uses: bufbuild/buf-action@3fb70352251376e958c4c2c92c3818de82a71c2b #v1.0.2
+
+      - name: Setup Buf
+        id: setup_buf
+        uses: stacks-sbtc/actions/setup-buf@095003d35774808f27b29f272976b1e01704ca93
         with:
           version: ${{ env.BUF_VERSION }}
           setup_only: true
-      - uses: actions-rust-lang/setup-rust-toolchain@11df97af8e8102fd60b60a77dfbf58d40cd843b8 #v1.10.1
+
+      - name: Setup Rust
+        id: setup_rust
+        uses: stacks-sbtc/actions/setup-rust-toolchain@095003d35774808f27b29f272976b1e01704ca93
         with:
           components: clippy, rustfmt
           cache-key: "rust-tests"
+
       - name: Install Package Dependencies
+        id: install_dependencies
         run: make install-pnpm
+
       - name: Lint (Rustfmt)
+        id: lint_rustfmt
         run: cargo fmt --all -- --check
+
       - name: Lint (Clippy)
+        id: lint_clippy
         run: cargo clippy -- -D warnings
+
       - name: Lint (pnpm)
+        id: lint_pnpm
         run: pnpm --recursive run lint
+
       - name: Lint (Protobuf)
+        id: lint_protobuf
         run: |
           buf format --diff --exit-code
           buf lint
         working-directory: ./protobufs
+
       - name: Typecheck (pnpm)
+        id: typecheck_pnpm
         run: pnpm --recursive typecheck
 
   # Builds the Rust test artifacts for the project, packages them as Nextest
@@ -83,22 +112,39 @@ jobs:
     name: Build Test Artifacts
     runs-on: ubuntu-24.04
     steps:
-      - uses: rui314/setup-mold@f80524ca6eeaa76759b57fb78ddce5d87a20c720 #v1
+      - name: Setup Mold
+        id: setup_mold
+        uses: stacks-sbtc/actions/setup-mold@095003d35774808f27b29f272976b1e01704ca93
         with:
           make-default: true
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 #v4.2.2
-      - uses: actions-rust-lang/setup-rust-toolchain@11df97af8e8102fd60b60a77dfbf58d40cd843b8 #v1.10.1
+
+      - name: Checkout Repository
+        id: checkout_Repository
+        uses: stacks-sbtc/actions/checkout@095003d35774808f27b29f272976b1e01704ca93
+
+      - name: Setup Rust
+        id: setup_rust
+        uses: stacks-sbtc/actions/setup-rust-toolchain@095003d35774808f27b29f272976b1e01704ca93
         with:
           cache-key: "rust-tests"
-      - uses: taiki-e/install-action@da41fb311fbbcecf899732e575aaeaa2fe65c934 #v2.47.21
+
+      - name: Install Action
+        id: install_action
+        uses: stacks-sbtc/actions/install-action@095003d35774808f27b29f272976b1e01704ca93
         with:
           tool: nextest@${{ env.NEXTEST_VERSION }}
+
       - name: Build Tests
+        id: build_tests
         run: make test-build
+
       - name: Create Nextest Archives
+        id: create_nextest_archives
         run: make nextest-archive
+
       - name: Upload Nextest Archives
-        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 #v4.6.0
+        id: upload_nextest_archives
+        uses: stacks-sbtc/actions/upload-artifact@095003d35774808f27b29f272976b1e01704ca93
         with:
           name: nextest-archives
           path: ./target/nextest/*.tar.zst
@@ -112,31 +158,54 @@ jobs:
     runs-on: ubuntu-24.04
     needs: build-tests
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 #v4.2.2
-      - uses: pnpm/action-setup@fe02b34f77f8bc703788d5817da081398fad5dd2 #v4.0
-      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af #v4.1.0
+      - name: Checkout Repository
+        id: checkout_Repository
+        uses: stacks-sbtc/actions/checkout@095003d35774808f27b29f272976b1e01704ca93
+
+      - name: Setup Pnpm
+        id: setup_pnpm
+        uses: stacks-sbtc/actions/setup-pnpm@095003d35774808f27b29f272976b1e01704ca93
+
+      - name: Setup Node
+        id: setup_node
+        uses: stacks-sbtc/actions/setup-node@095003d35774808f27b29f272976b1e01704ca93
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "pnpm"
-      - uses: taiki-e/install-action@da41fb311fbbcecf899732e575aaeaa2fe65c934 #v2.47.21
+
+      - name: Install Action
+        id: install_action
+        uses: stacks-sbtc/actions/install-action@095003d35774808f27b29f272976b1e01704ca93
         with:
           tool: nextest@${{ env.NEXTEST_VERSION }}
+
       - name: Install uv
-        uses: astral-sh/setup-uv@6b9c6063abd6010835644d4c2e1bef4cf5cd0fca #v6.0.1
+        id: install_uv
+        uses: stacks-sbtc/actions/setup-uv@095003d35774808f27b29f272976b1e01704ca93
         with:
           version: "0.6.5"
+
       - name: Install node packages and python dependencies
+        id: install_dependencies
         run: make install
+
       - name: Download Nextest Archives
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 #v4.1.8
+        id: download_nextest_archives
+        uses: stacks-sbtc/actions/download-artifact@095003d35774808f27b29f272976b1e01704ca93
         with:
           name: nextest-archives
           path: .
+
       - name: Run Unit Tests (Node)
+        id: run_node_tests
         run: pnpm --recursive test
+
       - name: Run Unit Tests (Rust)
+        id: run_rust_tests
         run: cargo-nextest nextest --color always run --no-fail-fast --archive-file nextest-archive.tar.zst
+
       - name: Run Unit Tests (Python)
+        id: run_python_tests
         run: make test-py
 
   # Runs the Rust integration tests for the project. It depends on the
@@ -155,32 +224,60 @@ jobs:
       matrix:
         partition: [1, 2]
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 #v4.2.2
-      - uses: actions-rust-lang/setup-rust-toolchain@11df97af8e8102fd60b60a77dfbf58d40cd843b8 #v1.10.1
+      - name: Checkout Repository
+        id: checkout_Repository
+        uses: stacks-sbtc/actions/checkout@095003d35774808f27b29f272976b1e01704ca93
+
+      - name: Setup Rust
+        id: setup_rust
+        uses: stacks-sbtc/actions/setup-rust-toolchain@095003d35774808f27b29f272976b1e01704ca93
         with:
           cache-key: "rust-tests"
-      - uses: pnpm/action-setup@fe02b34f77f8bc703788d5817da081398fad5dd2 #v4.0
-      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af #v4.1.0
+
+      - name: Setup Pnpm
+        id: setup_pnpm
+        uses: stacks-sbtc/actions/setup-pnpm@095003d35774808f27b29f272976b1e01704ca93
+
+      - name: Setup Node
+        id: setup_node
+        uses: stacks-sbtc/actions/setup-node@095003d35774808f27b29f272976b1e01704ca93
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "pnpm"
-      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b #v5.3.0
+
+      - name: Setup Python
+        id: setup_python
+        uses: stacks-sbtc/actions/setup-python@095003d35774808f27b29f272976b1e01704ca93
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - run: pip install boto3
-      - uses: taiki-e/install-action@da41fb311fbbcecf899732e575aaeaa2fe65c934 #v2.47.21
+
+      - name: Install AWS SDK
+        id: install_aws_sdk
+        run: pip install boto3
+
+      - name: Install Action
+        id: install_action
+        uses: stacks-sbtc/actions/install-action@095003d35774808f27b29f272976b1e01704ca93
         with:
           tool: nextest@${{ env.NEXTEST_VERSION }}
+
       - name: Install uv
-        uses: astral-sh/setup-uv@6b9c6063abd6010835644d4c2e1bef4cf5cd0fca #v6.0.1
+        id: install_uv
+        uses: stacks-sbtc/actions/setup-uv@095003d35774808f27b29f272976b1e01704ca93
         with:
           version: "0.6.5"
+
       - name: Install node packages and python dependencies
+        id: install_dependencies
         run: make install
+
       - name: Start Integration Test Environment
+        id: start_test_environment
         run: make integration-env-up-ci
+
       - name: Wait for Test Artifacts
-        uses: kachick/wait-other-jobs@0584f1460011b97726c04abf4bbec5bfb5cdb654 #v3.6.0
+        id: wait_test_artifacts
+        uses: stacks-sbtc/actions/wait-other-jobs@095003d35774808f27b29f272976b1e01704ca93
         timeout-minutes: 5
         with:
           retry-method: "equal_intervals"
@@ -197,14 +294,20 @@ jobs:
                 }
               }
             ]
+
       - name: Download Nextest Archives
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 #v4.1.8
+        id: download_nextest_archives
+        uses: stacks-sbtc/actions/download-artifact@095003d35774808f27b29f272976b1e01704ca93
         with:
           name: nextest-archives
           path: .
+
       - name: Run Integration Tests (Rust)
+        id: run_rust_tests
         run: cargo-nextest nextest --color always run --no-fail-fast --test-threads 1 --partition hash:${{ matrix.partition }}/2 --archive-file nextest-archive-serial.tar.zst
+
       - name: Run Integration Tests (Python)
+        id: run_python_tests
         if: matrix.partition == 1 # Only run the python tests on the first partition
         run: uv run --directory emily_sidecar python -m unittest test/test_integration.py
 
@@ -219,47 +322,75 @@ jobs:
     name: Run Generated Code Checks
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 #v4.2.2
-      - uses: actions-rust-lang/setup-rust-toolchain@11df97af8e8102fd60b60a77dfbf58d40cd843b8 #v1.10.1
+      - name: Checkout Repository
+        id: checkout_Repository
+        uses: stacks-sbtc/actions/checkout@095003d35774808f27b29f272976b1e01704ca93
+
+      - name: Setup Rust
+        id: setup_rust
+        uses: stacks-sbtc/actions/setup-rust-toolchain@095003d35774808f27b29f272976b1e01704ca93
         with:
           cache-key: "rust-tests"
-      - uses: pnpm/action-setup@fe02b34f77f8bc703788d5817da081398fad5dd2 #v4.0
-      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af #v4.1.0
+
+      - name: Setup Pnpm
+        id: setup_pnpm
+        uses: stacks-sbtc/actions/setup-pnpm@095003d35774808f27b29f272976b1e01704ca93
+
+      - name: Setup Node
+        id: setup_node
+        uses: stacks-sbtc/actions/setup-node@095003d35774808f27b29f272976b1e01704ca93
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "pnpm"
+
       - name: Install Package Dependencies
+        id: install_dependencies
         run: pnpm --recursive install
+
       - name: Generate Contract Docs and Types
+        id: generate_docs
         run: make contracts
+
       - name: Ensure Git is Clean (Contracts)
-        id: git-status-contracts
+        id: git_status_contracts
         run: git diff --no-ext-diff --exit-code
         continue-on-error: true
+
       - name: Git is Dirty (Contracts)
-        if: steps.git-status-contracts.outcome == 'failure'
+        id: git_is_dirty
+        if: steps.git_status_contracts.outcome == 'failure'
         run: |
           echo "::error title=Contracts are dirty:: Make sure you ran 'make contracts' before pushing."
           exit 1
+
       - name: Generate Blocklist Client
+        id: generate_blocklist_client
         run: make blocklist-client-codegen
+
       - name: Ensure Git is Clean (Blocklist Client)
-        id: git-status-blocklist-client
+        id: git_status_blocklist_client
         run: git diff --no-ext-diff --exit-code
         continue-on-error: true
+
       - name: Git is Dirty (Blocklist Client)
-        if: steps.git-status-blocklist-client.outcome == 'failure'
+        id: git_is_dirty_blocklist
+        if: steps.git_status_blocklist_client.outcome == 'failure'
         run: |
           echo "::error title=Blocklist client is dirty:: Make sure you ran 'make blocklist-client-codegen' before pushing."
           exit 1
+
       - name: Generate Emily Clients
+        id: generate_emily_clients
         run: make emily-client-codegen
+
       - name: Ensure Git is Clean (Emily Clients)
-        id: git-status-emily-clients
+        id: git_status_emily_clients
         run: git diff --no-ext-diff --exit-code
         continue-on-error: true
+
       - name: Git is Dirty (Emily Clients)
-        if: steps.git-status-emily-clients.outcome == 'failure'
+        id: git_is_dirty_emily
+        if: steps.git_status_emily_clients.outcome == 'failure'
         run: |
           echo "::error title=Emily clients are dirty:: Make sure you ran 'make emily-client-codegen' before pushing."
           exit 1
@@ -274,19 +405,28 @@ jobs:
     name: Vet Dependencies
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 #v4.2.2
-      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 #v4.2.3
-        id: cargo-vet-cache
+      - name: Checkout Repository
+        id: checkout_Repository
+        uses: stacks-sbtc/actions/checkout@095003d35774808f27b29f272976b1e01704ca93
+
+      - name: Cargo Vet Cache
+        id: cargo_vet_cache
+        uses: stacks-sbtc/actions/cache@095003d35774808f27b29f272976b1e01704ca93
         with:
           path: ${{ runner.tool_cache }}/cargo-vet
           key: cargo-vet-bin-${{ env.CARGO_VET_VERSION }}
+
       - name: Add the tool cache directory to the search path
+        id: add_tool_dir_to_path
         run: echo "${{ runner.tool_cache }}/cargo-vet/bin" >> $GITHUB_PATH
+
       - name: Ensure that the tool cache is populated with the cargo-vet binary
-        if: steps.cargo-vet-cache.outputs.cache-hit != 'true'
+        id: ensure_tool_cache_is_populated
+        if: steps.cargo_vet_cache.outputs.cache-hit != 'true'
         run: cargo install --root ${{ runner.tool_cache }}/cargo-vet --version ${{ env.CARGO_VET_VERSION }} --locked cargo-vet
+
       - name: Run Cargo Vet
-        id: cargo-vet
+        id: cargo_vet
         run: |
           echo "=============================="
           echo "Running Dependency Vetting"
@@ -299,21 +439,27 @@ jobs:
             cargo vet suggest > audit-suggestions.txt
             exit 1
           }
+
       - name: Annotate Unvetted Dependencies
+        id: annotate_unvetted_dependencies
         if: failure()
         run: |
           echo "Annotating unvetted dependencies..."
           cat audit-suggestions.txt | while read -r line; do
             echo "::error file=supply-chain.toml::$line"
           done
+
       - name: Summarize Unvetted Dependencies
+        id: summarize_unvetted_dependencies
         if: failure()
         run: |
           echo "Dependencies needing review:"
           awk '/Command/{print $2, $3, $4, $5}' audit-suggestions.txt || true
+
       - name: Upload Audit Report
+        id: upload_audit_report
         if: failure()
-        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 #v4.6.0
+        uses: stacks-sbtc/actions/upload-artifact@095003d35774808f27b29f272976b1e01704ca93
         with:
           name: cargo-vet-audit-report
           path: audit-suggestions.txt
