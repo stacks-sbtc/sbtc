@@ -138,6 +138,11 @@ where
         })
         .await
     }
+
+    /// Get a mutable reference to the inner config.
+    pub fn config_mut(&mut self) -> &mut Settings {
+        self.inner.config_mut()
+    }
 }
 
 impl TestContext<(), (), (), ()> {
@@ -206,32 +211,19 @@ impl<Storage, Bitcoin, Stacks>
     }
 }
 
-/// Addition to Context trait, used in tests.
-pub trait TestingContext: Clone + Sync + Send {
-    /// Get mutable reference to current configuration for the signer
-    /// Works only in tests
-    fn config_mut(&mut self) -> &mut Settings;
-}
-
-impl<Storage, Bitcoin, Stacks, Emily> TestingContext
-    for TestContext<Storage, Bitcoin, Stacks, Emily>
-where
-    Storage: DbRead + DbWrite + Clone + Sync + Send + 'static,
-    Bitcoin: BitcoinInteract + Clone + Send + Sync + 'static,
-    Stacks: StacksInteract + Clone + Send + Sync + 'static,
-    Emily: EmilyInteract + Clone + Send + Sync + 'static,
-{
-    fn config_mut(&mut self) -> &mut Settings {
-        self.inner.config_mut()
-    }
-}
-
 /// DKG can be triggered if last dkg signer set differ from one in config.
 /// However, we don't want to test this functionality in some tests, so
 /// this function makes sure that dkg won't be triggered because of changes in signer set.
 /// Warn: in some cases dkg still can be triggered on changed signer set even if you used
 /// this function.
-pub fn prevent_dkg_on_changed_signer_set(context: &mut (impl Context + TestingContext)) {
+pub fn prevent_dkg_on_changed_signer_set<Storage, Bitcoin, Stacks, Emily>(
+    context: &mut TestContext<Storage, Bitcoin, Stacks, Emily>,
+) where
+    Storage: DbRead + DbWrite + Clone + Sync + Send + 'static,
+    Bitcoin: BitcoinInteract + Clone + Send + Sync + 'static,
+    Stacks: StacksInteract + Clone + Send + Sync + 'static,
+    Emily: EmilyInteract + Clone + Send + Sync + 'static,
+{
     let last_dkg_signer_set = context
         .state()
         .current_signer_set()
