@@ -811,7 +811,7 @@ mod tests {
     use fake::Fake as _;
     use fake::Faker;
 
-    use crate::storage::model::BitcoinTxId;
+    use crate::testing;
     use crate::testing::get_rng;
 
     use super::*;
@@ -878,15 +878,7 @@ mod tests {
         assert_eq!(tx_info.tx.input.len(), 1);
 
         // Let's add another input so that they can be disordered.
-        let tx_in = bitcoin::TxIn {
-            previous_output: OutPoint {
-                txid: Faker.fake_with_rng::<BitcoinTxId, _>(&mut rng).into(),
-                vout: Faker.fake_with_rng(&mut rng),
-            },
-            script_sig: ScriptBuf::new(),
-            sequence: bitcoin::Sequence::MAX,
-            witness: bitcoin::Witness::new(),
-        };
+        let tx_in = testing::dummy::txin(&Faker, &mut rng);
         let vin: BitcoinTxVin = tx_in.fake_with_rng(&mut rng);
         tx_info.tx.input.push(tx_in);
         tx_info.vin.push(vin);

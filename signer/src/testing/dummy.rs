@@ -118,15 +118,7 @@ impl Dummy<Faker> for BitcoinTxInfo {
     fn dummy_with_rng<R: Rng + ?Sized>(config: &Faker, rng: &mut R) -> Self {
         let output_amount = (500_000..1_000_000_000_u64).choose(rng).unwrap();
 
-        let tx_in = bitcoin::TxIn {
-            previous_output: OutPoint {
-                txid: config.fake_with_rng::<BitcoinTxId, _>(rng).into(),
-                vout: (1..=50u32).choose(rng).unwrap(),
-            },
-            script_sig: ScriptBuf::new(),
-            sequence: bitcoin::Sequence(0),
-            witness: bitcoin::Witness::new(),
-        };
+        let tx_in = txin(config, rng);
 
         let tx_out = bitcoin::TxOut {
             value: Amount::from_sat(output_amount),
