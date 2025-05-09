@@ -270,7 +270,7 @@ impl Error {
     /// Converts the error into a warp response.
     pub fn into_response(self) -> warp::reply::Response {
         warp::reply::with_status(
-            warp::reply::json(&ErrorResponse { message: format!("{self:}") }),
+            warp::reply::json(&ErrorResponse { message: format!("{self}") }),
             self.status_code(),
         )
         .into_response()
