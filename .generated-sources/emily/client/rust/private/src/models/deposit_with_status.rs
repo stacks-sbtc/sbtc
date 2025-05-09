@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 pub struct DepositWithStatus {
     #[serde(rename = "deposit")]
     pub deposit: Box<models::Deposit>,
-    /// Status code.
+    /// HTTP status code, returned as part of multi-status responses.
     #[serde(rename = "status")]
     pub status: u32,
 }
