@@ -8,7 +8,6 @@ mod communication;
 mod complete_deposit;
 mod contracts;
 mod emily;
-mod fees;
 mod postgres;
 mod rbf;
 mod request_decider;
