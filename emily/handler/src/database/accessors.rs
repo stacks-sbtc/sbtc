@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use aws_sdk_dynamodb::types::AttributeValue;
+use aws_sdk_dynamodb::types::error::ConditionalCheckFailedException;
 use serde_dynamo::Item;
 
 use tracing::{debug, warn};
@@ -64,7 +65,6 @@ pub async fn get_deposit_entry(
     key: &DepositEntryKey,
 ) -> Result<DepositEntry, Error> {
     let entry = get_entry::<DepositTablePrimaryIndex>(context, key).await?;
-    #[cfg(feature = "testing")]
     Ok(entry)
 }
 
@@ -193,6 +193,7 @@ pub async fn pull_and_update_deposit_with_retry(
     retries: u16,
     is_trusted_key: bool,
 ) -> Result<DepositEntry, Error> {
+    let mut err = ConditionalCheckFailedException::builder().build();
     for _ in 0..retries {
         // Get original deposit entry.
         let deposit_entry = get_deposit_entry(context, &update.key).await?;
@@ -208,7 +209,9 @@ pub async fn pull_and_update_deposit_with_retry(
             DepositUpdatePackage::try_from(&deposit_entry, update.clone())?;
         // Attempt to update the deposit.
         match update_deposit(context, &update_package).await {
-            Err(Error::VersionConflict) => {
+            Err(Error::VersionConflict(error)) => {
+                warn!(%error, "received an error when updating a deposit request");
+                err = *error;
                 // Retry.
                 continue;
             }
@@ -218,7 +221,7 @@ pub async fn pull_and_update_deposit_with_retry(
         }
     }
     // Failed to update due to a version conflict
-    Err(Error::VersionConflict)
+    Err(Error::from(err))
 }
 
 /// Updates a deposit.
@@ -270,7 +273,7 @@ pub async fn update_deposit(
         .send()
         .await?
         .attributes
-        .ok_or(Error::Debug("Failed updating withdrawal".into()))
+        .ok_or(Error::MissingAttributesDeposit(update.key.clone()))
         .and_then(|attributes| {
             serde_dynamo::from_item::<Item, DepositEntry>(attributes.into()).map_err(Error::from)
         })
@@ -311,19 +314,14 @@ pub async fn get_withdrawal_entry(
     // Return.
     match entries.as_slice() {
         [] => Err(Error::NotFound),
-        [withdrawal] =>
-        {
-            #[cfg(feature = "testing")]
-            Ok(withdrawal.clone())
-        }
+        [withdrawal] => Ok(withdrawal.clone()),
         _ => {
             warn!(
-                "Found too many withdrawals for id {key}: {}",
-                serde_json::to_string_pretty(&entries)?
+                request_id = %key,
+                entries = %serde_json::to_string_pretty(&entries)?,
+                "Found too many withdrawals",
             );
-            Err(Error::Debug(format!(
-                "Found too many withdrawals for id {key}: {entries:?}"
-            )))
+            Err(Error::TooManyWithdrawalEntries(*key))
         }
     }
 }
@@ -427,6 +425,7 @@ pub async fn pull_and_update_withdrawal_with_retry(
     retries: u16,
     is_trusted_key: bool,
 ) -> Result<WithdrawalEntry, Error> {
+    let mut err = ConditionalCheckFailedException::builder().build();
     for _ in 0..retries {
         // Get original withdrawal entry.
         let entry = get_withdrawal_entry(context, &update.request_id).await?;
@@ -443,7 +442,9 @@ pub async fn pull_and_update_withdrawal_with_retry(
         let update_package = WithdrawalUpdatePackage::try_from(&entry, update.clone())?;
         // Attempt to update the withdrawal.
         match update_withdrawal(context, &update_package).await {
-            Err(Error::VersionConflict) => {
+            Err(Error::VersionConflict(error)) => {
+                warn!(%error, "Received an error when updating a withdrawal request");
+                err = *error;
                 // Retry.
                 continue;
             }
@@ -453,7 +454,7 @@ pub async fn pull_and_update_withdrawal_with_retry(
         }
     }
     // Failed to update due to a version conflict
-    Err(Error::VersionConflict)
+    Err(Error::from(err))
 }
 
 /// Updates a withdrawal based on the update package.
@@ -505,7 +506,7 @@ pub async fn update_withdrawal(
         .send()
         .await?
         .attributes
-        .ok_or(Error::Debug("Failed updating withdrawal".into()))
+        .ok_or(Error::MissingAttributesWithdrawal(update.key.clone()))
         .and_then(|attributes| {
             serde_dynamo::from_item::<Item, WithdrawalEntry>(attributes.into()).map_err(Error::from)
         })
@@ -521,7 +522,8 @@ pub async fn add_chainstate_entry_with_retry(
 ) -> Result<(), Error> {
     for _ in 0..retries {
         match add_chainstate_entry(context, entry).await {
-            Err(Error::VersionConflict) => {
+            Err(Error::VersionConflict(error)) => {
+                warn!(%error, "Received an error when updating the chainstate");
                 // Retry.
                 continue;
             }
@@ -543,12 +545,9 @@ pub async fn add_chainstate_entry(
     debug!("Adding chainstate entry, current api state: {api_state:?}");
     if let ApiStatus::Reorg(reorg_chaintip) = &api_state.api_status {
         if reorg_chaintip.key != entry.key {
-            warn!(
-                "Attempting to update chainstate during a reorg [ new entry {entry:?} | reorg chaintip {reorg_chaintip:?} ]"
-            );
-            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(
-                "Attempting to update chainstate during a reorg.".to_string(),
-            )));
+            let message = "Attempting to update chainstate during a reorg";
+            warn!(?entry, ?reorg_chaintip, message);
+            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(message)));
         }
     }
 
@@ -559,8 +558,11 @@ pub async fn add_chainstate_entry(
             .await
             .and_then(|existing_entry: ChainstateEntry| {
                 if existing_entry.key != entry.key {
-                    debug!("Inconsistent state because of a conflict with the current interpretation of a height.");
-                    debug!("Existing entry: {existing_entry:?} | New entry: {entry:?}");
+                    warn!(
+                        ?existing_entry,
+                        ?entry,
+                        "Inconsistent state because of a conflict with the current interpretation of a height."
+                    );
                     Err(Error::from_inconsistent_chainstate_entry(existing_entry))
                 } else {
                     Ok(())
@@ -590,6 +592,7 @@ pub async fn add_chainstate_entry(
         {
             for chainstate in chainstates {
                 // Remove the entry from the table.
+                // TODO: Figure out whether we need to delete anything at all here.
                 let existing_entry: ChainstateEntry = chainstate.into();
                 delete_entry::<ChainstateTablePrimaryIndex>(context, &existing_entry.key).await?;
             }
@@ -613,8 +616,10 @@ pub async fn add_chainstate_entry(
         set_api_state(context, &api_state).await
     } else if blocks_higher_than_current_tip > 1 {
         warn!(
-            "Attempting to add a chaintip that is more than one block ({}) higher than the current tip. {:?} -> {:?}",
-            blocks_higher_than_current_tip, chaintip, entry,
+            ?chaintip,
+            ?entry,
+            %blocks_higher_than_current_tip,
+            "Attempting to add a chaintip with height that is more than one block greater than the current tip height",
         );
         // TODO(TBD): Determine the ramifications of allowing a chaintip to be added much
         // higher than expected.
@@ -718,6 +723,7 @@ async fn get_oldest_stacks_block_for_bitcoin_block(
 // Returns oldest stacks block height, ancored to some block in range
 // [range_start_bitcoin_height; range_end_bitcoin_height] (both sides inclusive)
 // If no stacks block is found, returns Error::NotFound.
+#[tracing::instrument(skip(context))]
 async fn get_oldest_stacks_block_in_range(
     context: &EmilyContext,
     range_start_bitcoin_height: u64,
@@ -730,9 +736,11 @@ async fn get_oldest_stacks_block_in_range(
             return Ok(stacks_height);
         }
     }
+    warn!("No Stacks block found in range");
     Err(Error::NotFound)
 }
 
+#[tracing::instrument(skip(context))]
 async fn calculate_sbtc_left_for_withdrawals(
     context: &EmilyContext,
     rolling_withdrawal_blocks: Option<u64>,
@@ -745,7 +753,9 @@ async fn calculate_sbtc_left_for_withdrawals(
         return Ok(None);
     };
     let chaintip = get_api_state(context).await?.chaintip();
+    tracing::info!("chainstate retrieved successfully");
     let bitcoin_tip = chaintip.bitcoin_height.ok_or(Error::NotFound)?;
+    tracing::info!("Bitcoin tip retrieved successfully");
     let bitcoin_end_block = bitcoin_tip.saturating_sub(rolling_withdrawal_blocks.saturating_sub(1));
 
     let minimum_stacks_height_in_window =
@@ -765,6 +775,7 @@ async fn calculate_sbtc_left_for_withdrawals(
             None,
         )
         .await?;
+        tracing::info!("Withdrawal entries retrieved successfully");
         for withdrawal in withdrawals {
             total_withdrawn = total_withdrawn.saturating_add(withdrawal.amount);
         }
@@ -838,7 +849,12 @@ pub async fn get_limits(context: &EmilyContext) -> Result<Limits, Error> {
         global_cap.rolling_withdrawal_blocks,
         global_cap.rolling_withdrawal_cap,
     )
-    .await?;
+    .await
+    .inspect_err(|error| {
+        warn!(%error, "calculate_sbtc_left_for_withdrawals did not return successfully");
+    })
+    .ok()
+    .flatten();
 
     // Get the global limit for the whole thing.
     Ok(Limits {

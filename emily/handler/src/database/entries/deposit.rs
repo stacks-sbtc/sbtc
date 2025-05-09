@@ -28,6 +28,12 @@ pub struct DepositEntryKey {
     pub bitcoin_tx_output_index: u32,
 }
 
+impl std::fmt::Display for DepositEntryKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.bitcoin_txid, self.bitcoin_tx_output_index)
+    }
+}
+
 /// Deposit table entry.
 #[derive(Clone, Default, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -126,38 +132,37 @@ impl PrimaryIndexTrait for DepositTablePrimaryIndexInner {
 impl DepositEntry {
     /// Implement validate.
     pub fn validate(&self) -> Result<(), Error> {
-        let stringy_self = serde_json::to_string(self)?;
-
         // Get latest event.
-        let latest_event: &DepositEvent = self.history.last().ok_or(Error::Debug(format!(
-            "Failed getting the last history element for deposit. {stringy_self:?}"
-        )))?;
+        let latest_event: &DepositEvent = self.latest_event()?;
 
         // Verify that the latest event is the current one shown in the entry.
         if self.last_update_block_hash != latest_event.stacks_block_hash {
-            return Err(Error::Debug(format!(
-                "last update block hash is inconsistent between history and top level data. {stringy_self:?}"
-            )));
+            return Err(Error::InvalidDepositEntry(
+                "last update block hash is inconsistent between history and top level data",
+                self.key.clone(),
+            ));
         }
         if self.last_update_height != latest_event.stacks_block_height {
-            return Err(Error::Debug(format!(
-                "last update block height is inconsistent between history and top level data. {stringy_self:?}"
-            )));
+            return Err(Error::InvalidDepositEntry(
+                "last update block height is inconsistent between history and top level data",
+                self.key.clone(),
+            ));
         }
         if self.status != (&latest_event.status).into() {
-            return Err(Error::Debug(format!(
-                "most recent status is inconsistent between history and top level data. {stringy_self:?}"
-            )));
+            return Err(Error::InvalidDepositEntry(
+                "most recent status is inconsistent between history and top level data",
+                self.key.clone(),
+            ));
         }
         Ok(())
     }
 
     /// Gets the latest event.
     pub fn latest_event(&self) -> Result<&DepositEvent, Error> {
-        self.history.last().ok_or(Error::Debug(format!(
-            "Deposit entry must always have at least one event, but entry with id {:?} did not.",
-            self.key(),
-        )))
+        self.history.last().ok_or(Error::InvalidDepositEntry(
+            "Deposit entry must always have at least one event but did not",
+            self.key.clone(),
+        ))
     }
 
     /// Reorgs around a given chainstate.
@@ -293,21 +298,24 @@ impl DepositEvent {
     pub fn ensure_following_event_is_valid(&self, next_event: &DepositEvent) -> Result<(), Error> {
         // Determine if event is valid.
         if self.stacks_block_height > next_event.stacks_block_height {
-            let err_msg = format!(
-                "Attempting to update a deposit with a block height earlier than it should be.\n
-                latest_existing_event:\n{self:?}\n
-                newest_event:\n{next_event:?}"
+            let message =
+                "Attempting to update a deposit with a block height earlier than it should be";
+            tracing::warn!(
+                new_event = ?next_event,
+                last_existing_event = ?self,
+                message,
             );
-            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(err_msg)));
+            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(message)));
         } else if self.stacks_block_height == next_event.stacks_block_height
             && self.stacks_block_hash != next_event.stacks_block_hash
         {
-            let err_msg = format!(
-                "Attempting to update a deposit with a block height and hash that conflicts with its current history.\n
-                latest_existing_event:\n{self:?}\n
-                newest_event:\n{next_event:?}"
+            let message = "Attempting to update a deposit with a block height and hash that conflicts with its current history";
+            tracing::warn!(
+                new_event = ?next_event,
+                last_existing_event = ?self,
+                message
             );
-            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(err_msg)));
+            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(message)));
         }
 
         Ok(())
@@ -679,9 +687,7 @@ impl DepositUpdatePackage {
     pub fn try_from(entry: &DepositEntry, update: ValidatedDepositUpdate) -> Result<Self, Error> {
         // Ensure the keys are equal.
         if update.key != entry.key {
-            return Err(Error::Debug(
-                "Attempted to update deposit txid + output index combo".into(),
-            ));
+            return Err(Error::DepositOutputMismatch(entry.key.clone(), update.key));
         }
         // Ensure that this event is valid if it follows the current latest event.
         entry

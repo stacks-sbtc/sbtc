@@ -27,6 +27,7 @@ use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
 use crate::network::libp2p::MultiaddrExt as _;
 use crate::stacks::wallet::SignerWallet;
+use crate::storage::model::BitcoinBlockHeight;
 
 mod error;
 mod serialization;
@@ -289,7 +290,7 @@ pub struct SignerConfig {
     pub prometheus_exporter_endpoint: Option<std::net::SocketAddr>,
     /// The public keys of the signer sit during the bootstrapping phase of
     /// the signers.
-    pub bootstrap_signing_set: Vec<PublicKey>,
+    pub bootstrap_signing_set: BTreeSet<PublicKey>,
     /// The number of signatures required for the signers' bootstrapped
     /// multi-sig wallet on Stacks.
     pub bootstrap_signatures_required: u16,
@@ -330,7 +331,7 @@ pub struct SignerConfig {
     pub dkg_begin_pause: Option<u64>,
     /// The minimum bitcoin block height for which the sbtc signers will
     /// backfill bitcoin blocks to.
-    pub sbtc_bitcoin_start_height: Option<u64>,
+    pub sbtc_bitcoin_start_height: Option<BitcoinBlockHeight>,
     /// The maximum number of deposit inputs that will be included in a
     /// single bitcoin transaction. Transactions must be constructed within
     /// a tenure of a bitcoin block, and higher values here imply lower
@@ -342,7 +343,7 @@ pub struct SignerConfig {
     /// already been run, the coordinator will attempt to re-run DKG after this
     /// block height is met if `dkg_target_rounds` has not been reached. If DKG
     /// has never been run, this configuration has no effect.
-    pub dkg_min_bitcoin_block_height: Option<NonZeroU64>,
+    pub dkg_min_bitcoin_block_height: Option<BitcoinBlockHeight>,
     /// Configures a target number of DKG rounds to run/accept. If this is set
     /// and the number of DKG shares is less than this number, the coordinator
     /// will continue to run DKG rounds until this number of rounds is reached,
@@ -359,6 +360,12 @@ pub struct SignerConfig {
 impl Validatable for SignerConfig {
     fn validate(&self, cfg: &Settings) -> Result<(), ConfigError> {
         self.p2p.validate(cfg)?;
+
+        if !self.bootstrap_signing_set.contains(&self.public_key()) {
+            let err = SignerConfigError::MissingPubkeyInBootstrapSignerSet;
+            return Err(ConfigError::Message(err.to_string()));
+        }
+
         if self.deployer.is_mainnet() != self.network.is_mainnet() {
             let err = SignerConfigError::NetworkDeployerMismatch;
             return Err(ConfigError::Message(err.to_string()));
@@ -427,19 +434,6 @@ impl Validatable for SignerConfig {
 }
 
 impl SignerConfig {
-    /// Return the bootstrapped signing set from the config. This function
-    /// makes sure that the signing set includes the current signer.
-    pub fn bootstrap_signing_set(&self) -> BTreeSet<PublicKey> {
-        // We add in the current signer into the signing set from the
-        // config just in case it hasn't been included already.
-        let self_public_key = PublicKey::from_private_key(&self.private_key);
-        self.bootstrap_signing_set
-            .iter()
-            .copied()
-            .chain([self_public_key])
-            .collect()
-    }
-
     /// Return the public key of the signer.
     pub fn public_key(&self) -> PublicKey {
         PublicKey::from_private_key(&self.private_key)
@@ -633,7 +627,10 @@ mod tests {
         );
         assert!(!settings.signer.bootstrap_signing_set.is_empty());
         assert!(settings.signer.dkg_begin_pause.is_none());
-        assert_eq!(settings.signer.sbtc_bitcoin_start_height, Some(101));
+        assert_eq!(
+            settings.signer.sbtc_bitcoin_start_height,
+            Some(101u64.into())
+        );
         assert_eq!(settings.signer.bootstrap_signatures_required, 2);
         assert_eq!(settings.signer.context_window, 1000);
         assert_eq!(settings.signer.deposit_decisions_retry_window, 3);
@@ -752,15 +749,37 @@ mod tests {
     fn default_config_toml_loads_signer_private_key_config_with_environment() {
         clear_env();
 
-        let new = "a1a6fcf2de80dcde3e0e4251eae8c69adf57b88613b2dcb79332cc325fa439bd";
+        let new = "9bfecf16c9c12792589dd2b843f850d5b89b81a04f8ab91c083bdf6709fbefee01";
         set_var("SIGNER_SIGNER__PRIVATE_KEY", new);
 
         let settings = Settings::new_from_default_config().unwrap();
 
         assert_eq!(
             settings.signer.private_key,
-            PrivateKey::from_str(new).unwrap()
+            PrivateKey::from_str(&new[..64]).unwrap()
         );
+    }
+
+    #[test]
+    fn config_bails_if_pubkey_of_this_signer_not_in_bootstrap_signer_set() {
+        clear_env();
+
+        let new = "a1a6fcf2de80dcde3e0e4251eae8c69adf57b88613b2dcb79332cc325fa439bd";
+        set_var("SIGNER_SIGNER__PRIVATE_KEY", new);
+
+        let error = Settings::new_from_default_config().unwrap_err();
+
+        match error {
+            ConfigError::Message(msg) => {
+                assert_eq!(
+                    msg,
+                    "Bootstrap signer set must contain pubkey of this signer".to_string()
+                );
+            }
+            _ => {
+                panic!("Expected ConfigError::Message, got: {:#?}", error);
+            }
+        }
     }
 
     #[test]
@@ -799,7 +818,7 @@ mod tests {
         let settings = Settings::new_from_default_config().unwrap();
         assert_eq!(
             settings.signer.dkg_min_bitcoin_block_height,
-            Some(NonZeroU64::new(42).unwrap())
+            Some(42u64.into())
         );
     }
 
@@ -864,7 +883,7 @@ mod tests {
         let settings = Settings::new_from_default_config().unwrap();
         let height = settings.signer.sbtc_bitcoin_start_height.unwrap();
 
-        assert_eq!(height, 12345);
+        assert_eq!(height, 12345u64.into());
     }
 
     #[test]
@@ -972,7 +991,7 @@ mod tests {
 
         let mut remove_parameter = |config_name: &str, parameter: &str| {
             config_toml
-                .get_mut(&config_name)
+                .get_mut(config_name)
                 .unwrap()
                 .as_table_mut()
                 .unwrap()
@@ -990,7 +1009,7 @@ mod tests {
 
         let new_config = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
 
-        std::fs::write(&new_config.path(), config_toml.to_string()).unwrap();
+        std::fs::write(new_config.path(), config_toml.to_string()).unwrap();
 
         let settings = Settings::new(Some(&new_config.path())).unwrap();
 
@@ -1118,10 +1137,16 @@ mod tests {
     fn valid_33_byte_private_key_works() {
         clear_env();
 
-        set_var(
-            "SIGNER_SIGNER__PRIVATE_KEY",
-            "a1a6fcf2de80dcde3e0e4251eae8c69adf57b88613b2dcb79332cc325fa439bd01",
-        );
+        let privkey = "a1a6fcf2de80dcde3e0e4251eae8c69adf57b88613b2dcb79332cc325fa439bd01";
+
+        set_var("SIGNER_SIGNER__PRIVATE_KEY", privkey);
+
+        let privkey = PrivateKey::from_str(&privkey[..64]).unwrap();
+        let pubkey = PublicKey::from_private_key(&privkey);
+
+        set_var("SIGNER_SIGNER__BOOTSTRAP_SIGNING_SET", pubkey.to_string());
+        set_var("SIGNER_SIGNER__BOOTSTRAP_SIGNATURES_REQUIRED", "1");
+
         let settings = Settings::new_from_default_config();
         assert!(settings.is_ok());
     }
@@ -1396,7 +1421,7 @@ mod tests {
         let keys = "035249137286c077ccee65ecc43e724b9b9e5a588e3d7f51e3b62f9624c2a49e46,031a4d9f4903da97498945a4e01a5023a1d53bc96ad670bfe03adf8a06c52e6380";
         set_var("SIGNER_SIGNER__BOOTSTRAP_SIGNING_SET", keys);
         let settings = Settings::new_from_default_config().unwrap();
-        let public_keys: Vec<PublicKey> = keys
+        let public_keys = keys
             .split(",")
             .flat_map(secp256k1::PublicKey::from_str)
             .map(PublicKey::from)

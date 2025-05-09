@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -8,7 +7,6 @@ use blockstack_lib::clarity::vm::types::PrincipalData;
 use blockstack_lib::types::chainstate::StacksAddress;
 use fake::Fake as _;
 use fake::Faker;
-use rand::SeedableRng as _;
 use sbtc::testing::regtest;
 use secp256k1::Keypair;
 use secp256k1::ecdsa::RecoverableSignature;
@@ -25,20 +23,18 @@ use signer::stacks::wallet::SignerWallet;
 use signer::storage::model::BitcoinBlockHash;
 use signer::storage::model::BitcoinTxId;
 use signer::storage::model::StacksTxId;
+use signer::testing::get_rng;
 use signer::testing::wallet::ContractCallWrapper;
 use signer::util::ApiFallbackClient;
 use tokio::sync::OnceCell;
 
-use signer::stacks;
 use signer::stacks::api::FeePriority;
 use signer::stacks::api::StacksClient;
 use signer::stacks::api::SubmitTxResponse;
 use signer::stacks::contracts::CompleteDepositV1;
 use signer::stacks::wallet::MultisigTx;
-use signer::storage::in_memory::Store;
 use signer::storage::model::QualifiedRequestId;
 use signer::storage::model::StacksBlockHash;
-use signer::storage::postgres;
 use signer::testing;
 use signer::testing::wallet::InitiateWithdrawalRequest;
 
@@ -123,7 +119,7 @@ pub async fn deploy_smart_contracts() -> &'static SignerStxState {
 
     let signer = SIGNER_STATE
         .get_or_init(|| async {
-            let account_info = client.get_account(&signer_wallet.address()).await.unwrap();
+            let account_info = client.get_account(signer_wallet.address()).await.unwrap();
             signer_wallet.set_nonce(account_info.nonce);
             SignerStxState {
                 wallet: signer_wallet,
@@ -152,7 +148,7 @@ pub async fn deploy_smart_contracts() -> &'static SignerStxState {
     deployer: *testing::wallet::WALLET.0.address(),
     sweep_txid: BitcoinTxId::from([0; 32]),
     sweep_block_hash: BitcoinBlockHash::from([0; 32]),
-    sweep_block_height: 7,
+    sweep_block_height: 7u64.into(),
 }); "complete-deposit standard recipient")]
 #[test_case(ContractCallWrapper(CompleteDepositV1 {
     outpoint: bitcoin::OutPoint::null(),
@@ -161,7 +157,7 @@ pub async fn deploy_smart_contracts() -> &'static SignerStxState {
     deployer: *testing::wallet::WALLET.0.address(),
     sweep_txid: BitcoinTxId::from([0; 32]),
     sweep_block_hash: BitcoinBlockHash::from([0; 32]),
-    sweep_block_height: 7,
+    sweep_block_height: 7u64.into(),
 }); "complete-deposit contract recipient")]
 #[test_case(ContractCallWrapper(AcceptWithdrawalV1 {
     id: QualifiedRequestId {
@@ -174,7 +170,7 @@ pub async fn deploy_smart_contracts() -> &'static SignerStxState {
     signer_bitmap: 0,
     deployer: *testing::wallet::WALLET.0.address(),
     sweep_block_hash: BitcoinBlockHash::from([0; 32]),
-    sweep_block_height: 7,
+    sweep_block_height: 7u64.into(),
 }); "accept-withdrawal")]
 #[test_case(ContractCallWrapper(InitiateWithdrawalRequest {
     amount: 22500,
@@ -205,40 +201,7 @@ async fn complete_deposit_wrapper_tx_accepted<T: AsContractCall>(contract: Contr
     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
     let txid = signer.sign_and_submit(&contract).await;
-
-    // The submitted transaction tends to linger in the mempool for quite
-    // some time before being confirmed in a Nakamoto block (best guess is
-    // 5-10 minutes). It's not clear why this is the case.
-    if true {
-        println!("{}", txid);
-        return;
-    }
-
-    let client = stacks_client();
-
-    // We need a block id
-    let info = client.get_tenure_info().await.unwrap();
-    let storage = Store::new_shared();
-
-    let tenures = stacks::api::fetch_unknown_ancestors(&client, &storage, info.tip_block_id)
-        .await
-        .unwrap();
-
-    let blocks = tenures
-        .into_iter()
-        .flat_map(|tenure| tenure.into_blocks())
-        .collect::<Vec<_>>();
-
-    let transactions = postgres::extract_relevant_transactions(&blocks, &signer.wallet.address());
-    assert!(!transactions.is_empty());
-
-    let txids = transactions
-        .iter()
-        .map(|stx| blockstack_lib::burnchains::Txid::from_bytes(&stx.txid))
-        .collect::<Option<HashSet<_>>>()
-        .unwrap();
-
-    assert!(txids.contains(&txid));
+    println!("{txid}");
 }
 
 #[ignore = "This is an integration test that requires a stacks-node to work"]
@@ -261,7 +224,7 @@ async fn estimate_tx_fees() {
         deployer: StacksAddress::burn_address(false),
         sweep_txid: BitcoinTxId::from([0; 32]),
         sweep_block_hash: BitcoinBlockHash::from([0; 32]),
-        sweep_block_height: 7,
+        sweep_block_height: 7u64.into(),
     };
     let payload = ContractCallWrapper(contract_call);
 
@@ -286,7 +249,7 @@ async fn is_deposit_completed_works() {
         let auth = bitcoincore_rpc::Auth::UserPass(username, password);
         bitcoincore_rpc::Client::new("http://localhost:18443", auth).unwrap()
     };
-    let mut rng = rand::rngs::StdRng::seed_from_u64(123);
+    let mut rng = get_rng();
 
     let signers = deploy_smart_contracts().await;
     let outpoint = bitcoin::OutPoint {
@@ -311,7 +274,7 @@ async fn is_deposit_completed_works() {
         deployer: *testing::wallet::WALLET.0.address(),
         sweep_txid: BitcoinTxId::from([0; 32]),
         sweep_block_hash: BitcoinBlockHash::from(chain_tip_info.best_block_hash),
-        sweep_block_height: chain_tip_info.blocks as u64,
+        sweep_block_height: (chain_tip_info.blocks).into(),
     };
 
     signers.sign_and_submit(&complete_deposit).await;
@@ -353,7 +316,7 @@ async fn is_withdrawal_completed_rejection_works() {
         deployer: *testing::wallet::WALLET.0.address(),
         sweep_txid: BitcoinTxId::from([0; 32]),
         sweep_block_hash: chain_tip_info.best_block_hash.into(),
-        sweep_block_height: chain_tip_info.blocks,
+        sweep_block_height: chain_tip_info.blocks.into(),
     });
 
     signers.sign_and_submit(&mint_sbtc).await;

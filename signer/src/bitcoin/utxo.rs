@@ -1,7 +1,6 @@
 //! Utxo management and transaction construction
 
 use std::collections::HashSet;
-use std::ops::Deref as _;
 use std::sync::LazyLock;
 
 use bitcoin::Amount;
@@ -50,7 +49,6 @@ use crate::context::SbtcLimits;
 use crate::error::Error;
 use crate::keys::SignerScriptPubKey as _;
 use crate::storage::model;
-use crate::storage::model::BitcoinTx;
 use crate::storage::model::BitcoinTxId;
 use crate::storage::model::QualifiedRequestId;
 use crate::storage::model::ScriptPubKey;
@@ -1363,12 +1361,6 @@ impl BitcoinInputsOutputs for UnsignedTransaction<'_> {
     }
 }
 
-impl BitcoinInputsOutputs for BitcoinTx {
-    fn tx_ref(&self) -> &Transaction {
-        self.deref()
-    }
-}
-
 impl BitcoinInputsOutputs for BitcoinTxInfo {
     fn tx_ref(&self) -> &Transaction {
         &self.tx
@@ -1669,7 +1661,7 @@ mod tests {
     /// The maximum virtual size of a transaction package in v-bytes.
     const MEMPOOL_MAX_PACKAGE_SIZE: u32 = 101000;
 
-    const X_ONLY_PUBLIC_KEY1: &'static str =
+    const X_ONLY_PUBLIC_KEY1: &str =
         "2e58afe51f9ed8ad3cc7897f634d881fdbe49a81564629ded8156bebd2ffd1af";
 
     static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(0);
@@ -1681,7 +1673,7 @@ mod tests {
 
     // The is the least non dust amount for withdrawal outputs locked by
     // the generate_address() script, which generates P2WPKH outputs
-    const MINMAL_NON_DUST_AMOUNT_P2WPKH: LazyLock<u64> =
+    static MINIMAL_NON_DUST_AMOUNT_P2WPKH: LazyLock<u64> =
         LazyLock::new(|| generate_address().minimal_non_dust().to_sat());
 
     fn generate_address() -> ScriptPubKey {
@@ -1734,7 +1726,7 @@ mod tests {
     fn create_deposit(amount: u64, max_fee: u64, signer_bitmap: u128) -> DepositRequest {
         let signers_public_key = generate_x_only_public_key();
 
-        let contract_name = std::iter::repeat('a').take(128).collect::<String>();
+        let contract_name = std::iter::repeat_n('a', 128).collect::<String>();
         let principal_str = format!("{}.{contract_name}", StacksAddress::burn_address(false));
 
         let deposit_inputs = DepositScriptInputs {
@@ -2188,7 +2180,7 @@ mod tests {
                 "data should contain at least the header bytes"
             );
 
-            assert_eq!(&data[0..2], &[b'S', b'T'], "magic bytes should be 'ST'");
+            assert_eq!(&data[0..2], b"ST", "magic bytes should be 'ST'");
             assert_eq!(
                 data[2], OP_RETURN_VERSION,
                 "version should match OP_RETURN_VERSION"
@@ -2352,13 +2344,13 @@ mod tests {
             deposits: vec![
                 create_deposit(1234, 0, 1 << 1),
                 create_deposit(5678, 0, 1 << 2),
-                create_deposit(9012, 0, 1 << 3 | 1 << 4),
+                create_deposit(9012, 0, (1 << 3) | (1 << 4)),
             ],
             withdrawals: vec![
                 create_withdrawal(1000, 0, 1 << 5),
                 create_withdrawal(2000, 0, 1 << 6),
                 create_withdrawal(3000, 0, 1 << 7),
-                create_withdrawal(4000, 0, 1 << 8 | 1 << 9),
+                create_withdrawal(4000, 0, (1 << 8) | (1 << 9)),
             ],
             signer_state: SignerBtcState {
                 utxo: SignerUtxo {
@@ -2407,7 +2399,7 @@ mod tests {
             deposits: vec![
                 create_deposit(1234, 0, 1 << 1),
                 create_deposit(5678, 0, 1 << 2),
-                create_deposit(9012, 0, 1 << 3 | 1 << 4),
+                create_deposit(9012, 0, (1 << 3) | (1 << 4)),
                 create_deposit(3456, 0, 1 << 5),
                 create_deposit(7890, 0, 0),
             ],
@@ -2415,7 +2407,7 @@ mod tests {
                 create_withdrawal(1000, 0, 1 << 6),
                 create_withdrawal(2000, 0, 1 << 7),
                 create_withdrawal(3000, 0, 1 << 8),
-                create_withdrawal(4000, 0, 1 << 9 | 1 << 10),
+                create_withdrawal(4000, 0, (1 << 9) | (1 << 10)),
                 create_withdrawal(5000, 0, 0),
                 create_withdrawal(6000, 0, 0),
                 create_withdrawal(7000, 0, 0),
@@ -2507,7 +2499,7 @@ mod tests {
             deposits: vec![
                 create_deposit(12340, 100_000, 1 << 1),
                 create_deposit(56780, 100_000, 1 << 2),
-                create_deposit(90120, 100_000, 1 << 3 | 1 << 4),
+                create_deposit(90120, 100_000, (1 << 3) | (1 << 4)),
                 create_deposit(34560, 100_000, 1 << 5),
                 create_deposit(78900, 100_000, 0),
             ],
@@ -2515,7 +2507,7 @@ mod tests {
                 create_withdrawal(10000, 100_000, 1 << 6),
                 create_withdrawal(20000, 100_000, 1 << 7),
                 create_withdrawal(30000, 100_000, 1 << 8),
-                create_withdrawal(40000, 100_000, 1 << 9 | 1 << 10),
+                create_withdrawal(40000, 100_000, (1 << 9) | (1 << 10)),
                 create_withdrawal(50000, 100_000, 0),
                 create_withdrawal(60000, 100_000, 0),
                 create_withdrawal(70000, 100_000, 0),
@@ -3097,8 +3089,7 @@ mod tests {
             .requests
             .iter()
             .filter_map(RequestRef::as_deposit)
-            .find(|req| req.outpoint == outpoint)
-            .is_some();
+            .any(|req| req.outpoint == outpoint);
 
         assert_eq!(request_is_included, is_included);
     }
@@ -3114,7 +3105,7 @@ mod tests {
             .map(|shift| create_deposit(10_000, 10_000, 1 << shift))
             .collect();
         let withdrawals: Vec<WithdrawalRequest> = (0..30)
-            .map(|shift| create_withdrawal(10_000, 10_000, 1 << shift + 30))
+            .map(|shift| create_withdrawal(10_000, 10_000, 1 << (shift + 30)))
             .collect();
 
         let requests = SbtcRequests {
@@ -3232,14 +3223,14 @@ mod tests {
     }
 
     #[test_case(
-        &vec![create_deposit(
+        &[create_deposit(
             DEPOSIT_DUST_LIMIT + SOLO_DEPOSIT_TX_VSIZE as u64, 10_000, 0
         )],
         &create_limits_for_deposits_and_max_mintable(0, 20_000, 100_000),
         1.0,
         1, DEPOSIT_DUST_LIMIT + SOLO_DEPOSIT_TX_VSIZE as u64; "deposit_amounts_over_the_dust_limit_accepted")]
     #[test_case(
-        &vec![create_deposit(
+        &[create_deposit(
             DEPOSIT_DUST_LIMIT + SOLO_DEPOSIT_TX_VSIZE as u64 - 1, 10_000, 0
         )],
         &create_limits_for_deposits_and_max_mintable(0, 20_000, 100_000),
@@ -3275,7 +3266,7 @@ mod tests {
         1.0,
         1, 10_000; "should_accept_all_deposits_when_under_max_mintable")]
     #[test_case(
-        &vec![create_deposit(10_000, 10_000, 0),],
+        &[create_deposit(10_000, 10_000, 0),],
         &create_limits_for_deposits_and_max_mintable(0, 0, 0),
         1.0,
         0, 0; "should_handle_empty_deposit_list")]
@@ -3289,14 +3280,14 @@ mod tests {
         1.0,
         1, 9_000; "should_skip_invalid_fee_and_accept_valid_deposits")]
     #[test_case(
-        &vec![
+        &[
             create_deposit(10_001, 10_000, 0),
         ],
         &create_limits_for_deposits_and_max_mintable(0, 10_001, 10_000),
         1.0,
         0, 0; "should_reject_single_deposit_exceeding_max_mintable")]
     #[test_case(
-        &vec![
+        &[
             create_deposit(10_000, 10_000, 0),
         ],
         &create_limits_for_deposits_and_max_mintable(0, 8_000, 10_000),
@@ -3324,7 +3315,7 @@ mod tests {
         1.0,
         2, 30_000; "should_respect_all_limits")]
     fn test_deposit_filter_filters_deposits_over_limits(
-        deposits: &Vec<DepositRequest>,
+        deposits: &[DepositRequest],
         sbtc_limits: &SbtcLimits,
         fee_rate: f64,
         num_accepted_deposits: usize,
@@ -3433,7 +3424,7 @@ mod tests {
             create_withdrawal(8_000, 10_000, 0),  // rejected
             create_withdrawal(10_000, 10_000, 0), // rejected
             create_withdrawal(1_000, 10_000, 0),  // rejected
-            create_withdrawal(*MINMAL_NON_DUST_AMOUNT_P2WPKH, 10_000, 0), // rejected
+            create_withdrawal(*MINIMAL_NON_DUST_AMOUNT_P2WPKH, 10_000, 0), // rejected
         ],
         per_withdrawal_cap: 0,
         rolling_limits: RollingWithdrawalLimits::unlimited(0),
@@ -3442,7 +3433,7 @@ mod tests {
         accepted_amount: 0,
     }; "zero per withdrawal cap rolling withdrawals filters everything")]
     #[test_case(WithdrawalLimitTestCase {
-        withdrawals: vec![create_withdrawal(*MINMAL_NON_DUST_AMOUNT_P2WPKH - 1, 10_000, 0)],
+        withdrawals: vec![create_withdrawal(*MINIMAL_NON_DUST_AMOUNT_P2WPKH - 1, 10_000, 0)],
         per_withdrawal_cap: u64::MAX,
         rolling_limits: RollingWithdrawalLimits::unlimited(0),
         fee_rate: 1.0,
@@ -3458,13 +3449,13 @@ mod tests {
             create_withdrawal(8_000, 10_000, 0),  // accepted
             create_withdrawal(10_000, 10_000, 0), // accepted
             create_withdrawal(1_000, 10_000, 0),  // accepted
-            create_withdrawal(*MINMAL_NON_DUST_AMOUNT_P2WPKH, 10_000, 0), // accepted
+            create_withdrawal(*MINIMAL_NON_DUST_AMOUNT_P2WPKH, 10_000, 0), // accepted
         ],
         per_withdrawal_cap: u64::MAX,
         rolling_limits: RollingWithdrawalLimits::unlimited(0),
         fee_rate: 10.0,
         num_accepted_withdrawals: 7,
-        accepted_amount: 69_001 + *MINMAL_NON_DUST_AMOUNT_P2WPKH,
+        accepted_amount: 69_001 + *MINIMAL_NON_DUST_AMOUNT_P2WPKH,
     }; "unlimited withdrawal caps only applies max-fee filtering")]
     fn test_withdrawal_request_filtering(case: WithdrawalLimitTestCase) {
         let limits =

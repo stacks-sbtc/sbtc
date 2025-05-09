@@ -7,10 +7,10 @@ from fastapi.testclient import TestClient
 import requests
 
 from app import logging_config
-from app.main import app
-
 
 logging_config.silence_logging()
+
+from app.main import app
 
 
 client = TestClient(app)
@@ -33,8 +33,7 @@ FIXTURE_FILES = {
 }
 
 FIXTURES = {
-    name: read_fixture(os.path.join(FIXTURES_PATH, file))
-    for name, file in FIXTURE_FILES.items()
+    name: read_fixture(os.path.join(FIXTURES_PATH, file)) for name, file in FIXTURE_FILES.items()
 }
 
 
@@ -55,7 +54,7 @@ class NewBlockTestCase(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
 
     def test_new_block_invalid_json(self):
-        response = self.app.post("/new_block", data="Not a JSON")
+        response = self.app.post("/new_block", content="Not a JSON")
         self.assertEqual(response.status_code, 422)
         self.assertIn("json_invalid", response.json()["detail"][0]["type"])
 
@@ -67,9 +66,7 @@ class NewBlockTestCase(unittest.TestCase):
     @patch("requests.post")
     def test_new_block_post_request_failure(self, mock_post: MagicMock):
         # Mock the response from new_block to raise an exception
-        mock_post.side_effect = requests.RequestException(
-            "Failed to send new_block event"
-        )
+        mock_post.side_effect = requests.RequestException("Failed to send new_block event")
         response = self.app.post("/new_block", json=FIXTURES["complete_deposit"])
         self.assertEqual(response.status_code, 500)
         self.assertIn("Failed to send new_block event", response.json()["detail"])

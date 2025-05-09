@@ -1,5 +1,4 @@
 use blockstack_lib::types::chainstate::StacksAddress;
-use rand::SeedableRng;
 use rand::rngs::OsRng;
 
 use sbtc::testing::regtest;
@@ -13,6 +12,7 @@ use signer::storage::model::BitcoinTxId;
 use signer::storage::model::StacksPrincipal;
 use signer::testing;
 use signer::testing::context::*;
+use signer::testing::get_rng;
 
 use fake::Fake;
 use signer::DEPOSIT_DUST_LIMIT;
@@ -153,9 +153,9 @@ async fn complete_deposit_validation_happy_path() {
     // transactions and a transaction sweeping in the deposited funds.
     // This is just setup and should be essentially the same between tests.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(&rpc, &faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -217,9 +217,9 @@ async fn complete_deposit_validation_deployer_mismatch() {
     // Normal: this generates the blockchain as well as deposit request
     // transactions and a transaction sweeping in the deposited funds.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(&rpc, &faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -286,9 +286,9 @@ async fn complete_deposit_validation_missing_deposit_request() {
     // Normal: this generates the blockchain as well as deposit request
     // transactions and a transaction sweeping in the deposited funds.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(&rpc, &faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -349,9 +349,9 @@ async fn complete_deposit_validation_recipient_mismatch() {
     // Normal: this generates the blockchain as well as deposit request
     // transactions and a transaction sweeping in the deposited funds.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(&rpc, &faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -432,7 +432,7 @@ async fn complete_deposit_validation_fee_too_low() {
     // Normal: this generates the blockchain as well as deposit request
     // transactions and a transaction sweeping in the deposited funds.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
@@ -512,7 +512,7 @@ async fn complete_deposit_validation_fee_too_low() {
         r#"
         UPDATE deposit_requests AS dr
         SET amount = $1
-        WHERE 
+        WHERE
             dr.txid = $2
             AND dr.output_index = $3;
     "#,
@@ -553,7 +553,7 @@ async fn complete_deposit_validation_fee_too_low() {
         r#"
         UPDATE deposit_requests AS dr
         SET amount = $1
-        WHERE 
+        WHERE
             dr.txid = $2
             AND dr.output_index = $3;
     "#,
@@ -583,9 +583,9 @@ async fn complete_deposit_validation_fee_too_high() {
     // Normal: this generates the blockchain as well as deposit request
     // transactions and a transaction sweeping in the deposited funds.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
-    let mut setup = TestSweepSetup::new_setup(&rpc, &faucet, 1_000_000, &mut rng);
+    let mut setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -657,9 +657,9 @@ async fn complete_deposit_validation_sweep_tx_missing() {
     // Normal: this generates the blockchain as well as deposit request
     // transactions and a transaction sweeping in the deposited funds.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(&rpc, &faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -728,9 +728,9 @@ async fn complete_deposit_validation_sweep_reorged() {
     // Normal: this generates the blockchain as well as deposit request
     // transactions and a transaction sweeping in the deposited funds.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(&rpc, &faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -775,7 +775,7 @@ async fn complete_deposit_validation_sweep_reorged() {
         // detail. All that should matter is that the block_hash does not
         // identify the bitcoin blockchain that includes the sweep
         // transaction.
-        block_height: 30000,
+        block_height: 30000u64.into(),
     };
 
     let mut ctx = TestContext::builder()
@@ -809,9 +809,9 @@ async fn complete_deposit_validation_deposit_not_in_sweep() {
     // Normal: this generates the blockchain as well as deposit request
     // transactions and a transaction sweeping in the deposited funds.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(&rpc, &faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -882,9 +882,9 @@ async fn complete_deposit_validation_deposit_incorrect_fee() {
     // Normal: this generates the blockchain as well as deposit request
     // transactions and a transaction sweeping in the deposited funds.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(&rpc, &faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -952,9 +952,9 @@ async fn complete_deposit_validation_deposit_invalid_sweep() {
     // Normal: this generates the blockchain as well as deposit request
     // transactions and a transaction sweeping in the deposited funds.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(&rpc, &faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -1019,9 +1019,9 @@ async fn complete_deposit_validation_request_completed() {
     // transactions and a transaction sweeping in the deposited funds.
     // This is just setup and should be essentially the same between tests.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(&rpc, &faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,

@@ -6,10 +6,11 @@ import requests
 from fastapi.testclient import TestClient
 
 from app import logging_config, settings
-from app.main import app, headers
-
 
 logging_config.silence_logging()
+
+from app.main import app, headers
+
 
 WIPE_URL = f"{settings.EMILY_ENDPOINT}/testing/wipe"
 DEPOSITS_URL = f"{settings.EMILY_ENDPOINT}/deposit"
@@ -25,9 +26,7 @@ def read_fixture(filename):
 
 BASE_PATH = os.path.join(os.path.dirname(__file__), "..", "..")
 NEW_BLOCK_FIXTURES_PATH = os.path.join(BASE_PATH, "signer", "tests", "fixtures")
-DEPOSIT_TESTNET_FIXTURES_PATH = os.path.join(
-    BASE_PATH, "emily", "handler", "tests", "fixtures"
-)
+DEPOSIT_TESTNET_FIXTURES_PATH = os.path.join(BASE_PATH, "emily", "handler", "tests", "fixtures")
 
 
 TESTNET_DEPOSIT_FIXTURES_FILES = {
@@ -61,9 +60,7 @@ def create_deposit(deposit: dict) -> requests.Response:
 
 
 def get_deposit(bitcoin_txid: str, bitcoin_tx_output_index: int) -> requests.Response:
-    return requests.get(
-        f"{DEPOSITS_URL}/{bitcoin_txid}/{bitcoin_tx_output_index}", headers=headers
-    )
+    return requests.get(f"{DEPOSITS_URL}/{bitcoin_txid}/{bitcoin_tx_output_index}", headers=headers)
 
 
 def get_withdrawal(request_id: int) -> requests.Response:
@@ -87,10 +84,11 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(withdrawal.status_code, 200)
         self.assertEqual(
             withdrawal.json(),
+
             {
                 "requestId": 1,
                 "stacksBlockHash": "75b02b9884ec41c05f2cfa6e20823328321518dd0b027e7b609b63d4d1ea7c78",
-                "stacksBlockHeight": 0,
+                "stacksBlockHeight": 253,
                 "recipient": "76a914000000000000000000000000000000000000000088ac",
                 "sender": "SN2V7WTJ7BHR03MPHZ1C9A9ZR6NZGR4WM8HT4V67Y",
                 "amount": 22500,
@@ -99,6 +97,7 @@ class IntegrationTests(unittest.TestCase):
                 "status": "pending",
                 "statusMessage": "Just received withdrawal",
                 "parameters": {"maxFee": 3000},
+                "txid": "25982fe028733fe0158fa3972b68fe93ade7f242fb51283c3bc18145d0248d9a",
             },
         )
 
@@ -106,9 +105,7 @@ class IntegrationTests(unittest.TestCase):
         create_deposit_fixture = TESTNET_DEPOSIT_FIXTURES["create_deposit"]
         response = create_deposit(create_deposit_fixture)
         self.assertEqual(response.status_code, 201)
-        response = self.app.post(
-            "/new_block", json=TESTNET_DEPOSIT_FIXTURES["complete_deposit"]
-        )
+        response = self.app.post("/new_block", json=TESTNET_DEPOSIT_FIXTURES["complete_deposit"])
         self.assertEqual(response.status_code, 200)
         deposit = get_deposit(
             create_deposit_fixture["bitcoinTxid"],
@@ -142,14 +139,10 @@ class IntegrationTests(unittest.TestCase):
         )
 
     def test_withdrawal_accept(self):
-        response = self.app.post(
-            "/new_block", json=NEW_BLOCK_FIXTURES["withdrawal_create"]
-        )
+        response = self.app.post("/new_block", json=NEW_BLOCK_FIXTURES["withdrawal_create"])
         self.assertEqual(response.status_code, 200)
 
-        response = self.app.post(
-            "/new_block", json=NEW_BLOCK_FIXTURES["withdrawal_accept"]
-        )
+        response = self.app.post("/new_block", json=NEW_BLOCK_FIXTURES["withdrawal_accept"])
         self.assertEqual(response.status_code, 200)
 
         withdrawal = get_withdrawal(1)
@@ -159,7 +152,7 @@ class IntegrationTests(unittest.TestCase):
             {
                 "requestId": 1,
                 "stacksBlockHash": "75b02b9884ec41c05f2cfa6e20823328321518dd0b027e7b609b63d4d1ea7c78",
-                "stacksBlockHeight": 0,
+                "stacksBlockHeight": 253,
                 "recipient": "76a914000000000000000000000000000000000000000088ac",
                 "sender": "SN2V7WTJ7BHR03MPHZ1C9A9ZR6NZGR4WM8HT4V67Y",
                 "amount": 22500,
@@ -176,18 +169,15 @@ class IntegrationTests(unittest.TestCase):
                     "BitcoinBlockHeight": 42,
                     "BtcFee": 2500,
                 },
+                "txid": "25982fe028733fe0158fa3972b68fe93ade7f242fb51283c3bc18145d0248d9a",
             },
         )
 
     def test_withdrawal_reject(self):
-        response = self.app.post(
-            "/new_block", json=NEW_BLOCK_FIXTURES["withdrawal_create"]
-        )
+        response = self.app.post("/new_block", json=NEW_BLOCK_FIXTURES["withdrawal_create"])
         self.assertEqual(response.status_code, 200)
 
-        response = self.app.post(
-            "/new_block", json=NEW_BLOCK_FIXTURES["withdrawal_reject"]
-        )
+        response = self.app.post("/new_block", json=NEW_BLOCK_FIXTURES["withdrawal_reject"])
         self.assertEqual(response.status_code, 200)
 
         withdrawal = get_withdrawal(1)
@@ -197,7 +187,7 @@ class IntegrationTests(unittest.TestCase):
             {
                 "requestId": 1,
                 "stacksBlockHash": "75b02b9884ec41c05f2cfa6e20823328321518dd0b027e7b609b63d4d1ea7c78",
-                "stacksBlockHeight": 0,
+                "stacksBlockHeight": 253,
                 "recipient": "76a914000000000000000000000000000000000000000088ac",
                 "sender": "SN2V7WTJ7BHR03MPHZ1C9A9ZR6NZGR4WM8HT4V67Y",
                 "amount": 22500,
@@ -206,6 +196,7 @@ class IntegrationTests(unittest.TestCase):
                 "status": "failed",
                 "statusMessage": "Rejected",
                 "parameters": {"maxFee": 3000},
+                "txid": "25982fe028733fe0158fa3972b68fe93ade7f242fb51283c3bc18145d0248d9a",
             },
         )
 

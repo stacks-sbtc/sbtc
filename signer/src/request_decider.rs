@@ -551,6 +551,7 @@ mod tests {
     use crate::testing;
     use crate::testing::context::*;
 
+    #[allow(clippy::type_complexity)]
     fn test_environment() -> testing::request_decider::TestEnvironment<
         TestContext<
             SharedStore,
@@ -592,6 +593,7 @@ mod tests {
     }
 
     #[tokio::test]
+    // TODO(#1466): This test is currently using a known-working fixed seed, but is flaky with other seeds.
     async fn should_store_decisions_for_pending_withdrawal_requests() {
         test_environment()
             .assert_should_store_decisions_for_pending_withdrawal_requests()
