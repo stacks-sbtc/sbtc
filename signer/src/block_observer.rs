@@ -450,17 +450,17 @@ impl<C: Context, B> BlockObserver<C, B> {
                 tracing::warn!(%txid, "ignoring coinbase tx when extracting sbtc transaction");
                 continue;
             }
-
-            sbtc_txs.push(model::BitcoinTxRef {
-                txid: txid.into(),
-                block_hash: block_hash.into(),
-            });
             // Bail if bitcoin-core doesn't return all the data that we
             // care about for a non-coinbase transaction. This will happen
             // if bitcoin core hasn't computed the undo data for the block
             // with these transactions, of it there is a bug in bitcoin
             // core.
             tx_info.validate()?;
+
+            sbtc_txs.push(model::BitcoinTxRef {
+                txid: txid.into(),
+                block_hash: block_hash.into(),
+            });
 
             for prevout in tx_info.to_inputs(&signer_script_pubkeys) {
                 db.write_tx_prevout(&prevout).await?;
