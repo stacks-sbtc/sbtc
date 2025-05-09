@@ -539,7 +539,7 @@ impl SignerSet {
     }
 
     /// Returns true if the two signer sets have the same public keys.
-    pub fn have_same_pubkeys<I, P>(&self, other: I) -> bool
+    pub fn has_same_pubkeys<I, P>(&self, other: I) -> bool
     where
         I: IntoIterator<Item = P>,
         P: Into<PublicKey>,
