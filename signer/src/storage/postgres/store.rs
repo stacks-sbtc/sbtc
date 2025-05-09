@@ -10,7 +10,8 @@ use crate::{
         postgres::PGSQL_MIGRATIONS,
     },
 };
-use sqlx::Executor;
+use sqlx::pool::PoolConnection;
+use sqlx::{Executor, PgConnection};
 use sqlx::{PgExecutor, postgres::PgPoolOptions};
 
 use super::transaction::PgTransaction;
@@ -171,12 +172,25 @@ impl PgStore {
         &self.0
     }
 
-    pub(super) async fn get_utxo(
-        &self,
+    /// Get a connection from the pool.
+    pub async fn get_connection(&self) -> PoolConnection<sqlx::Postgres> {
+        self.0
+            .acquire()
+            .await
+            .expect("Failed to acquire connection") // TODO: FIX
+
+        //.map_err(Error::SqlxAcquireConnection)
+    }
+
+    pub(super) async fn get_utxo<'e, E>(
+        executor: &'e mut E,
         chain_tip: &model::BitcoinBlockHash,
         output_type: model::TxOutputType,
         min_block_height: BitcoinBlockHeight,
-    ) -> Result<Option<SignerUtxo>, Error> {
+    ) -> Result<Option<SignerUtxo>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+    {
         let pg_utxo = sqlx::query_as::<_, PgSignerUtxo>(
             r#"
             WITH bitcoin_blockchain AS (
@@ -213,7 +227,7 @@ impl PgStore {
         .bind(chain_tip)
         .bind(i64::try_from(min_block_height).map_err(Error::ConversionDatabaseInt)?)
         .bind(output_type)
-        .fetch_optional(&self.0)
+        .fetch_optional(executor)
         .await
         .map_err(Error::SqlxQuery)?;
 
@@ -223,11 +237,14 @@ impl PgStore {
     /// This function returns the bitcoin block height of the first
     /// confirmed sweep that happened on or after the given minimum block
     /// height.
-    pub(super) async fn get_least_txo_height(
-        &self,
+    pub(super) async fn get_least_txo_height<'e, E>(
+        executor: &'e mut E,
         chain_tip: &model::BitcoinBlockHash,
         min_block_height: BitcoinBlockHeight,
-    ) -> Result<Option<BitcoinBlockHeight>, Error> {
+    ) -> Result<Option<BitcoinBlockHeight>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+    {
         sqlx::query_scalar::<_, BitcoinBlockHeight>(
             r#"
             SELECT bb.block_height
@@ -246,7 +263,7 @@ impl PgStore {
         )
         .bind(chain_tip)
         .bind(i64::try_from(min_block_height).map_err(Error::ConversionDatabaseInt)?)
-        .fetch_optional(&self.0)
+        .fetch_optional(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
@@ -258,7 +275,12 @@ impl PgStore {
     ///
     /// This function does not check whether the donation output has been
     /// spent.
-    async fn minimum_donation_txo_height(&self) -> Result<Option<BitcoinBlockHeight>, Error> {
+    async fn minimum_donation_txo_height<'e, E>(
+        executor: &'e mut E,
+    ) -> Result<Option<BitcoinBlockHeight>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+    {
         sqlx::query_scalar::<_, BitcoinBlockHeight>(
             r#"
             SELECT bb.block_height
@@ -270,22 +292,25 @@ impl PgStore {
             LIMIT 1;
             "#,
         )
-        .fetch_optional(&self.0)
+        .fetch_optional(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 
     /// Return a donation UTXO with minimum height.
-    pub(super) async fn get_donation_utxo(
-        &self,
+    pub(super) async fn get_donation_utxo<'e, E>(
+        executor: &'e mut E,
         chain_tip: &model::BitcoinBlockHash,
-    ) -> Result<Option<SignerUtxo>, Error> {
-        let Some(min_block_height) = self.minimum_donation_txo_height().await? else {
+    ) -> Result<Option<SignerUtxo>, Error>
+    where
+        E: Unpin + Send + 'static,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
+    {
+        let Some(min_block_height) = Self::minimum_donation_txo_height(executor).await? else {
             return Ok(None);
         };
         let output_type = model::TxOutputType::Donation;
-        self.get_utxo(chain_tip, output_type, min_block_height)
-            .await
+        Self::get_utxo(executor, chain_tip, output_type, min_block_height).await
     }
     /// Return a block height that is less than or equal to the block that
     /// confirms the signers' UTXO.
@@ -303,7 +328,13 @@ impl PgStore {
     ///   to the height returned here should contain the transaction with
     ///   the signers' UTXO, and won't if there is a reorg spanning more
     ///   than [`MAX_REORG_BLOCK_COUNT`] blocks.
-    pub(super) async fn minimum_utxo_height(&self) -> Result<Option<BitcoinBlockHeight>, Error> {
+    pub(super) async fn minimum_utxo_height<'e, E>(
+        executor: &'e mut E,
+    ) -> Result<Option<BitcoinBlockHeight>, Error>
+    where
+        E: Unpin + Send + 'static,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
+    {
         #[derive(sqlx::FromRow)]
         struct PgCandidateUtxo {
             txid: model::BitcoinTxId,
@@ -339,7 +370,7 @@ impl PgStore {
             LIMIT 1;
             "#,
         )
-        .fetch_optional(&self.0)
+        .fetch_optional(&mut *executor)
         .await
         .map_err(Error::SqlxQuery)?;
 
@@ -429,7 +460,7 @@ impl PgStore {
         .bind(max_transactions)
         .bind(utxo_candidate.txid)
         .bind(min_block_height_candidate)
-        .fetch_optional(&self.0)
+        .fetch_optional(&mut *executor)
         .await
         .map_err(Error::SqlxQuery)?;
 
@@ -576,12 +607,15 @@ impl PgStore {
 
     /// Check whether the given block hash is a part of the stacks
     /// blockchain identified by the given chain-tip.
-    pub async fn in_canonical_stacks_blockchain(
-        &self,
+    pub async fn in_canonical_stacks_blockchain<'e, E>(
+        executor: &'e mut E,
         chain_tip: &model::StacksBlockHash,
         block_hash: &model::StacksBlockHash,
         block_height: StacksBlockHeight,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+    {
         sqlx::query_scalar::<_, bool>(
             r#"
             WITH RECURSIVE tx_block_chain AS (
@@ -613,7 +647,7 @@ impl PgStore {
         .bind(chain_tip)
         .bind(i64::try_from(block_height).map_err(Error::ConversionDatabaseInt)?)
         .bind(block_hash)
-        .fetch_one(&self.0)
+        .fetch_one(executor)
         .await
         .map_err(Error::SqlxQuery)
     }

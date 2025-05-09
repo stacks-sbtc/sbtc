@@ -10,7 +10,7 @@ use super::read::PgRead;
 /// Represents an active PostgreSQL transaction.
 /// Implements DbRead and DbWrite to allow operations within the transaction.
 pub struct PgTransaction<'a> {
-    tx: Mutex<sqlx::Transaction<'a, sqlx::Postgres>>,
+    tx: Mutex<sqlx::PgTransaction<'a>>,
 }
 
 impl<'a> PgTransaction<'a> {
@@ -41,12 +41,13 @@ impl TransactionHandle for PgTransaction<'_> {
     }
 }
 
-impl DbRead for PgTransaction<'_> {
+impl<'a> DbRead for PgTransaction<'a> {
     async fn get_bitcoin_block(
         &self,
         block_hash: &model::BitcoinBlockHash,
     ) -> Result<Option<model::BitcoinBlock>, Error> {
-        PgRead::get_bitcoin_block(self.tx.lock().await.as_mut(), block_hash).await
+        let mut tx = self.tx.lock().await;
+        PgRead::get_bitcoin_block(tx.as_mut(), block_hash).await
     }
 
     async fn get_stacks_block(
