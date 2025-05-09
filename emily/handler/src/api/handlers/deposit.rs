@@ -534,16 +534,14 @@ async fn update_deposits(
             is_from_trusted_source,
         )
         .await
-        .inspect_err(|error| {
-            tracing::error!(
-                %bitcoin_txid,
-                bitcoin_tx_output_index,
-                %error,
-                "failed to update deposit"
-            );
-        }) {
+        {
             Ok(updated_deposit) => updated_deposit,
             Err(Error::NotFound) => {
+                tracing::warn!(
+                    %bitcoin_txid,
+                    bitcoin_tx_output_index,
+                    "failed to update deposit. Deposit not found in the database"
+                );
                 updated_deposits.push((
                     index,
                     DepositWithStatus {
@@ -553,7 +551,13 @@ async fn update_deposits(
                 ));
                 continue;
             }
-            Err(_) => {
+            Err(error) => {
+                tracing::error!(
+                    %bitcoin_txid,
+                    bitcoin_tx_output_index,
+                    %error,
+                    "failed to update deposit"
+                );
                 updated_deposits.push((
                     index,
                     DepositWithStatus {
