@@ -3,14 +3,12 @@
 use std::sync::Arc;
 
 use bitcoin::Amount;
-use bitcoin::Block;
 use bitcoin::BlockHash;
 use bitcoin::Denomination;
 use bitcoin::OutPoint;
 use bitcoin::ScriptBuf;
 use bitcoin::Transaction;
 use bitcoin::Txid;
-use bitcoin::Wtxid;
 use bitcoincore_rpc::Auth;
 use bitcoincore_rpc::Error as BtcRpcError;
 use bitcoincore_rpc::RpcApi as _;
@@ -20,8 +18,6 @@ use bitcoincore_rpc::jsonrpc::error::RpcError;
 use bitcoincore_rpc_json::GetBlockchainInfoResult;
 use bitcoincore_rpc_json::GetMempoolEntryResult;
 use bitcoincore_rpc_json::GetNetworkInfoResult;
-use bitcoincore_rpc_json::GetRawTransactionResultVin;
-use bitcoincore_rpc_json::GetRawTransactionResultVout as BitcoinTxInfoVout;
 use bitcoincore_rpc_json::GetTxOutResult;
 use serde::Deserialize;
 use url::Url;
@@ -60,77 +56,159 @@ pub struct GetTxResponse {
     pub block_time: Option<u64>,
 }
 
-/// A struct containing the response from bitcoin-core for a
-/// `getrawtransaction` RPC where verbose is set to 2 where the block hash
-/// is supplied as an RPC argument.
+/// A struct containing the response from bitcoin-core for requests for
+/// detailed transactions. Specifically, this object can be used for:
+/// 1. The response object for `getrawtransaction` RPC where verbose is set
+///    to 2 when the block hash is supplied as an RPC argument, or
+/// 2. For objects in the `tx` field in the response to a `getblock` RPC.
 ///
 /// # Notes
 ///
-/// * This struct is a slightly modified version of the
+/// * This struct is a modified version of the
 ///   [`GetRawTransactionResult`](bitcoincore_rpc_json::GetRawTransactionResult)
 ///   type, which is what the bitcoincore-rpc crate returns for the
 ///   `getrawtransaction` RPC with verbosity set to 1. That type is missing
-///   some information that we may want.
-/// * The `block_hash`, `block_time`, `confirmations`, `fee`, and
-///   `is_active_chain` fields are always populated from bitcoin-core for a
-///   `getrawtransaction` RPC with verbosity 2 when the `block_hash` is
-///   supplied. That is why they are not `Option`s here.
-/// * This struct omits some fields returned from bitcoin-core, most
-///   notably the `vin.prevout.script_pub_key.desc` field.
+///   some information that we want.
+/// * All optional fields are omited from bitcoin-core for coinbase
+///   transactions and whenever the "block undo data" is missing for a
+///   block. The block undo data is always present for validated blocks,
+///   and block validation is always done for blocks on the currently
+///   active chain [1-4]. So if an optional field is `None` then the block
+///   that confirmed this transaction has not been validated and so is not
+///   on the active blockchain, or this is a coinbase transaction.
+/// * This type omits fields that are typically returned in responses to
+///   `getrawtransactions` requests. The most notable ones include the
+///   `block_hash`, `block_time`, `confirmations`, and `in_active_chain`
+///   fields. These fields are not returned for transaction objects in the
+///   `tx` array for `getblock` requests, so they are omitted here. Other
+///   omitted fields include `hash`, `size`, `version`, `locktime`, and
+///   `vout`.
 /// * Since we require bitcoin-core v25 or later these docs were taken from
-///   <https://bitcoincore.org/en/doc/25.0.0/rpc/rawtransactions/getrawtransaction/>
-///   and not from the more generic bitcoin.org docs
-///   <https://developer.bitcoin.org/reference/rpc/getrawtransaction.html>
+///   <https://bitcoincore.org/en/doc/25.0.0/rpc/rawtransactions/getrawtransaction/>,
+///   <https://bitcoincore.org/en/doc/25.0.0/rpc/blockchain/getblock/>, and
+///   not from the more generic bitcoin.org docs
+///   <https://developer.bitcoin.org/reference/rpc/getrawtransaction.html>.
+///
+/// [1]: <https://bitcoincore.reviews/23319#l-133>
+/// [2]: <https://bitcoincore.reviews/23319#l-141>
+/// [3]: <https://bitcoincore.reviews/23319#l-147>
+/// [4]: <https://bitcoincore.reviews/23319#l-153>
 #[derive(Clone, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
 pub struct BitcoinTxInfo {
-    /// Whether the specified block (in the getrawtransaction RPC) is in
-    /// the active chain or not. It is only present when the "blockhash"
-    /// argument is present in the RPC.
-    pub in_active_chain: bool,
     /// The transaction fee paid to the bitcoin miners.
-    ///
-    /// This field is returned whenever the "block undo data" is present
-    /// for a block. The block undo data is always present for validated
-    /// blocks, and block validation is always done for blocks on the
-    /// currently active chain [1-4]. So if this field is missing then this
-    /// block has not been validated and so is not on the active
-    /// blockchain.
-    ///
-    /// [1]: <https://bitcoincore.reviews/23319#l-133>
-    /// [2]: <https://bitcoincore.reviews/23319#l-141>
-    /// [3]: <https://bitcoincore.reviews/23319#l-147>
-    /// [4]: <https://bitcoincore.reviews/23319#l-153>
-    #[serde(default, with = "bitcoin::amount::serde::as_btc")]
-    pub fee: Amount,
+    #[serde(default, with = "bitcoin::amount::serde::as_btc::opt")]
+    pub fee: Option<Amount>,
     /// The raw bitcoin transaction.
     #[serde(with = "bitcoin::consensus::serde::With::<bitcoin::consensus::serde::Hex>")]
     #[serde(rename = "hex")]
     pub tx: Transaction,
-    /// The transaction id (the same value provided in the RPC).
-    pub txid: Txid,
-    /// The transaction hash (differs from txid for witness transactions).
-    pub hash: Wtxid,
-    /// The serialized transaction size.
-    pub size: u64,
-    /// The virtual transaction size (differs from size for witness
-    /// transactions).
-    pub vsize: u64,
     /// The inputs into the transaction.
     pub vin: Vec<BitcoinTxVin>,
-    /// A description of the transactions outputs. This object is missing
-    /// the `desc` field in the `scriptPubKey` object. That field is the
-    /// "Inferred descriptor for the output".
-    pub vout: Vec<BitcoinTxInfoVout>,
-    /// The block hash of the Bitcoin block that includes this transaction.
-    #[serde(rename = "blockhash")]
-    pub block_hash: BlockHash,
-    /// The number of confirmations deep from that chain tip of the bitcoin
-    /// block that includes this transaction.
-    pub confirmations: u32,
-    /// The Unix epoch time when the block was mined. It reflects the
-    /// timestamp as recorded by the miner of the block.
-    #[serde(rename = "blocktime")]
-    pub block_time: u64,
+}
+
+/// A struct with more detailed information for transaction inputs. It is
+/// returned in responses to bitcoin core's `getrawtransaction` and
+/// `getblock` RPCs.
+///
+/// This struct omits several fields: `scriptSig`, `txinwitness`, for
+/// non-coinbase transactions, the `coinbase` field for coinbase
+/// transactions, and the `sequence` field. See
+/// [`bitcoincore_rpc_json::GetRawTransactionResultVin`] or
+/// https://bitcoincore.org/en/doc/25.0.0/rpc/rawtransactions/getrawtransaction/
+/// for more information on what is missing.
+#[derive(Clone, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
+pub struct BitcoinTxVin {
+    /// The transaction ID. Not provided for coinbase transactions.
+    pub txid: Option<Txid>,
+    /// The output index. Not provided for coinbase transactions.
+    pub vout: Option<u32>,
+    /// The previous output.
+    ///
+    /// For non-coinbase transactions, this field is omitted if block undo
+    /// data is not available, so it is missing whenever the `fee` field is
+    /// missing in the [`BitcoinTxInfo`]. It is always omitted for coinbase
+    /// transactions.
+    pub prevout: Option<BitcoinTxVinPrevout>,
+}
+
+/// The previous output of a transaction input.
+///
+/// The `height` and `generated` fields are included in the `getblock` and
+/// `getrawtransaction` RPC responses, but is omitted here.
+#[derive(Clone, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
+pub struct BitcoinTxVinPrevout {
+    /// The value of the prevout in BTC.
+    #[serde(with = "bitcoin::amount::serde::as_btc")]
+    pub value: Amount,
+    /// The scriptPubKey of the prevout.
+    #[serde(rename = "scriptPubKey")]
+    pub script_pubkey: OutputScriptPubKey,
+}
+
+impl BitcoinTxInfo {
+    /// Check that the object returned from bitcoin core has all necessary
+    /// fields and data.
+    ///
+    /// The necessary data should only ever be missing when bitcoin-core
+    /// has not computed the undo data for the block that confirmed the
+    /// transaction. This should never happen for blocks on the canonical
+    /// chain.
+    pub fn validate(&self) -> Result<(), Error> {
+        // This would likely mean a bug in bitcoin core.
+        if self.vin.len() != self.tx.input.len() {
+            return Err(Error::BitcoinTxMissingData(self.compute_txid()));
+        }
+
+        // This would likely mean a bug in bitcoin core.
+        let inputs_disordered = self
+            .vin
+            .iter()
+            .zip(self.tx.input.iter())
+            .any(|(vin, tx_in)| {
+                vin.txid != Some(tx_in.previous_output.txid)
+                    || vin.vout != Some(tx_in.previous_output.vout)
+            });
+        if inputs_disordered {
+            return Err(Error::BitcoinTxInvalidData(self.compute_txid()));
+        }
+
+        // This `fee` and `vin.prevout` fields are missing for coinbase
+        // transactions and whenever the block's undo data is missing in
+        // bitcoin core.
+        if self.fee.is_none() || self.vin.iter().any(|x| x.prevout.is_none()) {
+            return Err(Error::BitcoinTxMissingFields(self.compute_txid()));
+        }
+
+        Ok(())
+    }
+
+    /// Computes the [`Txid`].
+    ///
+    /// Hashes the transaction **excluding** the segwit data (i.e. the
+    /// marker, flag bytes, and the witness fields themselves).
+    pub fn compute_txid(&self) -> Txid {
+        self.tx.compute_txid()
+    }
+}
+
+/// The scriptPubKey of a transaction output
+///
+/// This type contains the `vin[*].prevout.scriptPubKey` field for the
+/// `getrawtransaction` RPC response when verbose = 2, and the
+/// `tx[*].vin[*].prevout.scriptPubKey` field for the `getblock` RPC when
+/// verbose = 3. This struct leaves out the following fields because we
+/// have no use for them:
+/// * `asm`
+/// * `addresses`
+/// * `address`
+/// * `req_sigs`
+/// * `type`
+#[derive(Clone, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutputScriptPubKey {
+    /// The scriptPubKey locking the UTXO.
+    #[serde(rename = "hex")]
+    pub script: ScriptBuf,
 }
 
 /// A slimmed down version of the `BitcoinTxInfo` struct which only contains the
@@ -144,6 +222,38 @@ pub struct BitcoinTxFeeInfo {
     /// The virtual transaction size (differs from size for witness
     /// transactions).
     pub vsize: u64,
+}
+
+/// A detailed version of a bitcoin block. It is a slimmed down version of
+/// the response from a `getblock` RPC call from bitcoin core with a
+/// verbosity of 3.
+///
+/// See https://bitcoincore.org/en/doc/25.0.0/rpc/blockchain/getblock/ for
+/// more information on what is missing.
+#[derive(Clone, PartialEq, Debug, Deserialize)]
+pub struct BitcoinBlockInfo {
+    /// The hash of the consensus encoded header of the block.
+    #[serde(rename = "hash")]
+    pub block_hash: BlockHash,
+    /// The number of blocks preceding this one on the blockchain that
+    /// includes this block.
+    pub height: BitcoinBlockHeight,
+    /// The Unix epoch time when the block was mined. It reflects the
+    /// timestamp as recorded by the miner of the block.
+    pub time: u64,
+    /// The median block time expressed in UNIX epoch time
+    #[serde(rename = "mediantime")]
+    pub median_time: Option<u64>,
+    /// The hash of the consensus encoded header of the parent block to
+    /// this one.
+    ///
+    /// The official docs describe this as optional, but each block that we
+    /// care about should always have one, so we require it.
+    #[serde(rename = "previousblockhash")]
+    pub previous_block_hash: BlockHash,
+    /// The transactions included in this block.
+    #[serde(rename = "tx")]
+    pub transactions: Vec<BitcoinTxInfo>,
 }
 
 /// A struct containing the response from bitcoin-core for a
@@ -185,53 +295,6 @@ impl From<&OutPoint> for RpcOutPoint {
             vout: outpoint.vout,
         }
     }
-}
-
-/// A description of an input into a transaction.
-#[derive(Clone, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
-pub struct BitcoinTxVin {
-    /// Most of the details to the input into the transaction
-    #[serde(flatten)]
-    pub details: GetRawTransactionResultVin,
-    /// The previous output.
-    ///
-    /// This field is omitted if block undo data is not available, so it is
-    /// missing whenever the `fee` field is missing in the
-    /// [`BitcoinTxInfo`].
-    pub prevout: BitcoinTxVinPrevout,
-}
-
-/// The previous output, omitted if block undo data is not available.
-#[derive(Clone, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
-pub struct BitcoinTxVinPrevout {
-    /// Whether this is a Coinbase or not.
-    pub generated: bool,
-    /// The height of the prevout.
-    pub height: BitcoinBlockHeight,
-    /// The value of the prevout in BTC.
-    #[serde(with = "bitcoin::amount::serde::as_btc")]
-    pub value: Amount,
-    /// The scriptPubKey of the prevout.
-    #[serde(rename = "scriptPubKey")]
-    pub script_pub_key: PrevoutScriptPubKey,
-}
-
-/// This type contains the `vin[*].prevout.scriptPubKey` field(s) for the
-/// `getrawtransaction` RPC response when verbose = 2
-///
-/// This struct leaves out the following fields (because we have no use for
-/// them):
-/// * `asm`
-/// * `addresses`
-/// * `address`
-/// * `req_sigs`
-/// * `type`
-#[derive(Clone, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PrevoutScriptPubKey {
-    /// The scriptPubKey locking the UTXO.
-    #[serde(rename = "hex")]
-    pub script: ScriptBuf,
 }
 
 /// The response for a `getblockheader` RPC call to bitcoin-core with
@@ -307,9 +370,19 @@ impl BitcoinCoreClient {
         &self.inner
     }
 
-    /// Fetch the block identified by the given block hash.
-    pub fn get_block(&self, block_hash: &BlockHash) -> Result<Option<Block>, Error> {
-        match self.inner.get_block(block_hash) {
+    /// Fetch the block identified by the given block hash with additional
+    /// information about each transaction included in the block, including
+    /// prevout information for inputs, but only for unpruned blocks in the
+    /// current best chain.
+    pub fn get_block(&self, block_hash: &BlockHash) -> Result<Option<BitcoinBlockInfo>, Error> {
+        let args = [
+            serde_json::to_value(block_hash).map_err(Error::JsonSerialize)?,
+            // This is the verbosity level. The acceptable values are 0, 1,
+            // 2, and 3, and we want the 3 because it will include all the
+            // required fields of the type.
+            serde_json::Value::Number(serde_json::value::Number::from(3u32)),
+        ];
+        match self.inner.call("getblock", &args) {
             Ok(block) => Ok(Some(block)),
             Err(BtcRpcError::JsonRpc(JsonRpcError::Rpc(RpcError { code: -5, .. }))) => Ok(None),
             Err(error) => Err(Error::BitcoinCoreGetBlock(error, *block_hash)),
@@ -592,7 +665,7 @@ impl BitcoinInteract for BitcoinCoreClient {
             .map(|_| ())
     }
 
-    async fn get_block(&self, block_hash: &BlockHash) -> Result<Option<Block>, Error> {
+    async fn get_block(&self, block_hash: &BlockHash) -> Result<Option<BitcoinBlockInfo>, Error> {
         self.get_block(block_hash)
     }
 
@@ -730,5 +803,99 @@ impl BitcoinInteract for BitcoinCoreClient {
 
     async fn get_network_info(&self) -> Result<bitcoincore_rpc_json::GetNetworkInfoResult, Error> {
         self.get_network_info()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use fake::Fake as _;
+    use fake::Faker;
+
+    use crate::testing;
+    use crate::testing::get_rng;
+
+    use super::*;
+
+    #[test]
+    fn validate_bitcoin_tx_info_missing_vin() {
+        let mut rng = get_rng();
+
+        let mut tx_info: BitcoinTxInfo = Faker.fake_with_rng(&mut rng);
+        // Let's make sure that we start with a valid transaction object,
+        // although this kinda tests that the Dummy implementation
+        // generates a valid transaction
+        tx_info.validate().unwrap();
+
+        tx_info.vin.pop();
+        match tx_info.validate() {
+            Err(Error::BitcoinTxMissingData(txid)) if txid == tx_info.compute_txid() => {}
+            _ => panic!("Did not get the right error when validating"),
+        }
+    }
+
+    #[test]
+    fn validate_bitcoin_tx_info_missing_required_fields() {
+        let mut rng = get_rng();
+
+        let mut tx_info: BitcoinTxInfo = Faker.fake_with_rng(&mut rng);
+        // Let's make sure that we start with a valid transaction object,
+        // although this kinda tests that the Dummy implementation
+        // generates a valid transaction
+        tx_info.validate().unwrap();
+
+        // The fee field is required.
+        tx_info.fee = None;
+        match tx_info.validate() {
+            Err(Error::BitcoinTxMissingFields(txid)) if txid == tx_info.compute_txid() => {}
+            _ => panic!("Did not get the right error when validating"),
+        }
+
+        tx_info.fee = Some(Amount::ONE_BTC);
+        tx_info.validate().unwrap();
+
+        // The vin.prevout field is required.
+        let prevout = tx_info.vin[0].prevout.clone();
+        tx_info.vin[0].prevout = None;
+
+        match tx_info.validate() {
+            Err(Error::BitcoinTxMissingFields(txid)) if txid == tx_info.compute_txid() => {}
+            _ => panic!("Did not get the right error when validating"),
+        }
+
+        tx_info.vin[0].prevout = prevout;
+        tx_info.validate().unwrap();
+    }
+
+    #[test]
+    fn validate_bitcoin_tx_info_disordered_vin() {
+        let mut rng = get_rng();
+
+        let mut tx_info: BitcoinTxInfo = Faker.fake_with_rng(&mut rng);
+        // Let's make sure that we start with a valid transaction object,
+        // although this kinda tests that the Dummy implementation
+        // generates a valid transaction.
+        tx_info.validate().unwrap();
+        assert_eq!(tx_info.tx.input.len(), 1);
+
+        // Let's add another input so that they can be disordered.
+        let tx_in = testing::dummy::txin(&Faker, &mut rng);
+        let vin: BitcoinTxVin = tx_in.fake_with_rng(&mut rng);
+        tx_info.tx.input.push(tx_in);
+        tx_info.vin.push(vin);
+
+        // Things are still ordered correctly, so it should be valid.
+        tx_info.validate().unwrap();
+
+        // Okay let's mess up the order.
+        tx_info.vin.reverse();
+        match tx_info.validate() {
+            Err(Error::BitcoinTxInvalidData(txid)) if txid == tx_info.compute_txid() => {}
+            _ => panic!("Did not get the right error when validating"),
+        }
+
+        // Let's mess up the order of the tx inputs in the same way as we
+        // did for the vin field. Things should validate now.
+        tx_info.tx.input.reverse();
+        tx_info.validate().unwrap();
     }
 }

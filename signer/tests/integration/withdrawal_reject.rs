@@ -485,7 +485,7 @@ async fn reject_withdrawal_validation_request_being_fulfilled() {
     setup.store_bitcoin_withdrawals_outputs(&db).await;
 
     let signer_tx_sighash = BitcoinTxSigHash {
-        txid: sweep.tx_info.txid.into(),
+        txid: sweep.tx_info.compute_txid().into(),
         prevout_type: model::TxPrevoutType::SignersInput,
         prevout_txid: setup.donation.txid.into(),
         prevout_output_index: setup.donation.vout,

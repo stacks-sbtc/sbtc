@@ -3,14 +3,9 @@ use std::time::Duration;
 
 use bitcoin::AddressType;
 use bitcoin::Amount;
-use bitcoin::Block;
-use bitcoin::CompactTarget;
 use bitcoin::ScriptBuf;
 use bitcoin::Transaction;
-use bitcoin::TxMerkleNode;
 use bitcoin::Txid;
-use bitcoin::block::Header;
-use bitcoin::block::Version;
 use bitcoin::consensus::encode::serialize_hex;
 use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc_json::Utxo;
@@ -30,6 +25,7 @@ use emily_client::models::DepositUpdate;
 use emily_client::models::Status;
 use emily_client::models::UpdateDepositsRequestBody;
 use sbtc::testing::regtest::Recipient;
+use signer::bitcoin::rpc::BitcoinBlockInfo;
 use signer::bitcoin::rpc::BitcoinTxInfo;
 use signer::bitcoin::rpc::GetTxResponse;
 use signer::block_observer;
@@ -55,7 +51,6 @@ use signer::testing::context::ConfigureStacksClient;
 use signer::testing::context::ConfigureStorage;
 use signer::testing::context::TestContext;
 use signer::testing::context::WrappedMock;
-use signer::testing::dummy;
 use signer::testing::get_rng;
 use signer::testing::stacks::DUMMY_SORTITION_INFO;
 use signer::testing::stacks::DUMMY_TENURE_INFO;
@@ -125,23 +120,6 @@ where
         .expect("failed to write encrypted shares");
 
     (aggregate_key, bitcoin_chain_tip_ref, test_data)
-}
-
-fn get_coinbase_tx<Rng>(block_height: i64, rng: &mut Rng) -> Transaction
-where
-    Rng: rand::CryptoRng + rand::RngCore,
-{
-    assert!(block_height >= 17);
-    let coinbase_script = bitcoin::script::Builder::new()
-        .push_int(block_height)
-        .into_script();
-
-    let mut coinbase_tx = dummy::tx(&fake::Faker, rng);
-    let mut coinbase_input = dummy::txin(&fake::Faker, rng);
-    coinbase_input.script_sig = coinbase_script;
-    coinbase_tx.input = vec![coinbase_input];
-
-    coinbase_tx
 }
 
 /// End to end test for deposits via Emily: a deposit request is created on Emily,
@@ -240,21 +218,12 @@ async fn deposit_flow() {
     };
 
     // Create a fresh block for the block observer to process
-    let deposit_block = Block {
-        header: Header {
-            version: Version::TWO,
-            prev_blockhash: *bitcoin_chain_tip.block_hash,
-            merkle_root: TxMerkleNode::all_zeros(),
-            time: 0,
-            bits: CompactTarget::from_consensus(0),
-            nonce: 0,
-        },
-        txdata: vec![
-            get_coinbase_tx((*bitcoin_chain_tip.block_height + 1) as i64, &mut rng),
-            deposit_tx.clone(),
-        ],
-    };
-    let deposit_block_hash = deposit_block.block_hash();
+    let mut deposit_block: BitcoinBlockInfo = fake::Faker.fake_with_rng(&mut rng);
+    deposit_block
+        .transactions
+        .push(deposit_tx.fake_with_rng(&mut rng));
+
+    let deposit_block_hash = deposit_block.block_hash;
 
     // Mock required bitcoin client functions
     context
@@ -322,21 +291,12 @@ async fn deposit_flow() {
             client
                 .expect_get_tx_info()
                 .once()
-                .returning(move |txid, block_hash| {
+                .returning(move |txid, _| {
                     let res = if *txid == deposit_tx.compute_txid() {
                         Ok(Some(BitcoinTxInfo {
-                            in_active_chain: true,
-                            fee: bitcoin::Amount::from_sat(deposit_max_fee),
+                            fee: Some(bitcoin::Amount::from_sat(deposit_max_fee)),
                             tx: deposit_tx.clone(),
-                            txid: deposit_tx.compute_txid(),
-                            hash: deposit_tx.compute_wtxid(),
-                            size: deposit_tx.total_size() as u64,
-                            vsize: deposit_tx.vsize() as u64,
                             vin: Vec::new(),
-                            vout: Vec::new(),
-                            block_hash: *block_hash,
-                            confirmations: 0,
-                            block_time: 0,
                         }))
                     } else {
                         // We may get queried for unrelated txids if Emily state

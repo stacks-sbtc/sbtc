@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 use std::ops::Range;
 
+use bitcoin::Amount;
 use bitcoin::OutPoint;
 use bitcoin::ScriptBuf;
 use bitcoin::TapSighash;
@@ -45,6 +46,11 @@ use wsts::net::SignatureType;
 use wsts::traits::PartyState;
 use wsts::traits::SignerState;
 
+use crate::bitcoin::rpc::BitcoinBlockInfo;
+use crate::bitcoin::rpc::BitcoinTxInfo;
+use crate::bitcoin::rpc::BitcoinTxVin;
+use crate::bitcoin::rpc::BitcoinTxVinPrevout;
+use crate::bitcoin::rpc::OutputScriptPubKey;
 use crate::bitcoin::utxo::Fees;
 use crate::bitcoin::utxo::SignerBtcState;
 use crate::bitcoin::utxo::SignerUtxo;
@@ -106,6 +112,104 @@ pub fn block<R: rand::RngCore + ?Sized>(
     };
 
     bitcoin::Block { header, txdata }
+}
+
+impl Dummy<Faker> for BitcoinTxInfo {
+    fn dummy_with_rng<R: Rng + ?Sized>(config: &Faker, rng: &mut R) -> Self {
+        let output_amount = (500_000..1_000_000_000_u64).choose(rng).unwrap();
+
+        let tx_in = txin(config, rng);
+
+        let tx_out = bitcoin::TxOut {
+            value: Amount::from_sat(output_amount),
+            script_pubkey: config.fake_with_rng::<ScriptPubKey, _>(rng).into(),
+        };
+
+        let tx = bitcoin::Transaction {
+            version: bitcoin::transaction::Version::TWO,
+            lock_time: bitcoin::absolute::LockTime::ZERO,
+            input: vec![tx_in],
+            output: vec![tx_out],
+        };
+
+        tx.fake_with_rng(rng)
+    }
+}
+
+impl Dummy<bitcoin::Transaction> for BitcoinTxInfo {
+    fn dummy_with_rng<R: Rng + ?Sized>(tx: &bitcoin::Transaction, rng: &mut R) -> Self {
+        let fee_rate = (1..=50u64).choose(rng).unwrap();
+
+        let vsize = tx.vsize() as u64;
+        let vin = tx.input.iter().map(|tx_in| tx_in.fake_with_rng(rng));
+
+        BitcoinTxInfo {
+            fee: Some(Amount::from_sat(fee_rate * vsize)),
+            vin: vin.collect(),
+            tx: tx.clone(),
+        }
+    }
+}
+
+impl Dummy<bitcoin::TxIn> for BitcoinTxVin {
+    fn dummy_with_rng<R: Rng + ?Sized>(tx_in: &bitcoin::TxIn, rng: &mut R) -> Self {
+        // Check whether this is a transaction input into a coinbase
+        // transaction.
+        let non_coinbase = !tx_in.previous_output.is_null();
+        let script_pubkey: ScriptPubKey = Faker.fake_with_rng(rng);
+        let output_amount = script_pubkey.minimal_non_dust().to_sat()..Amount::ONE_BTC.to_sat();
+        BitcoinTxVin {
+            txid: Some(tx_in.previous_output.txid),
+            vout: Some(tx_in.previous_output.vout),
+            prevout: non_coinbase.then(|| BitcoinTxVinPrevout {
+                value: output_amount.choose(rng).map(Amount::from_sat).unwrap(),
+                script_pubkey: OutputScriptPubKey { script: script_pubkey.into() },
+            }),
+        }
+    }
+}
+
+impl Dummy<Faker> for BitcoinBlockInfo {
+    fn dummy_with_rng<R: Rng + ?Sized>(_: &Faker, rng: &mut R) -> Self {
+        let height: BitcoinBlockHeight = Faker.fake_with_rng(rng);
+        BitcoinBlockInfo::random_with_height(height, rng)
+    }
+}
+
+impl BitcoinBlockInfo {
+    /// Create a random bitcoin block with the given height
+    pub fn random_with_height<R: Rng + ?Sized>(height: BitcoinBlockHeight, rng: &mut R) -> Self {
+        // The Default implementation for a bitcoin::TxIn looks similar to
+        // the one input of a coinbase transaction.
+        let block_height = *height;
+        let coinbase_tx_in = bitcoin::TxIn {
+            script_sig: bitcoin::script::Builder::new()
+                .push_int(block_height.min(i64::MAX as u64) as i64)
+                .into_script(),
+            ..Default::default()
+        };
+        let tx_out = bitcoin::TxOut {
+            value: Amount::ONE_BTC * 50,
+            script_pubkey: Faker.fake_with_rng::<ScriptPubKey, _>(rng).into(),
+        };
+
+        let coinbase = bitcoin::Transaction {
+            version: bitcoin::transaction::Version::TWO,
+            lock_time: bitcoin::absolute::LockTime::ZERO,
+            input: vec![coinbase_tx_in],
+            output: vec![tx_out],
+        };
+
+        let time = Faker.fake_with_rng(rng);
+        BitcoinBlockInfo {
+            block_hash: Faker.fake_with_rng::<BitcoinBlockHash, _>(rng).into(),
+            height: block_height.into(),
+            time,
+            median_time: time.checked_sub(6 * 600),
+            previous_block_hash: Faker.fake_with_rng::<BitcoinBlockHash, _>(rng).into(),
+            transactions: vec![coinbase.fake_with_rng(rng)],
+        }
+    }
 }
 
 /// Dummy txid

@@ -181,6 +181,22 @@ pub enum Error {
     #[error("transaction is coinbase, txid: {0}")]
     BitcoinTxCoinbase(bitcoin::Txid),
 
+    /// The returned detailed transaction object from bitcoin core is
+    /// invalid because it is missing prevout data for some transaction
+    /// inputs, or it is missing transaction inputs.
+    #[error("detailed transaction object from bitcoin-core is missing vin data; txid: {0}")]
+    BitcoinTxMissingData(bitcoin::Txid),
+
+    /// The returned detailed transaction object from bitcoin core is
+    /// invalid because the inputs and vin data do not align.
+    #[error("detailed transaction object from bitcoin-core has mismatched vin data; txid: {0}")]
+    BitcoinTxInvalidData(bitcoin::Txid),
+
+    /// The returned detailed transaction object is missing fields that
+    /// should not be missing.
+    #[error("detailed transaction object from bitcoin-core is missing fields; txid: {0}")]
+    BitcoinTxMissingFields(bitcoin::Txid),
+
     /// This is the error that is returned when validating a bitcoin
     /// transaction.
     #[error("bitcoin validation error: {0}")]

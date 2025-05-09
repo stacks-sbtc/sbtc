@@ -19,7 +19,7 @@ use tokio::sync::{Mutex, broadcast};
 use tokio::time::error::Elapsed;
 
 use crate::bitcoin::GetTransactionFeeResult;
-use crate::bitcoin::rpc::BitcoinBlockHeader;
+use crate::bitcoin::rpc::{BitcoinBlockHeader, BitcoinBlockInfo};
 use crate::context::SbtcLimits;
 use crate::stacks::api::TenureBlocks;
 use crate::stacks::wallet::SignerWallet;
@@ -301,7 +301,7 @@ impl BitcoinInteract for WrappedMock<MockBitcoinInteract> {
     async fn get_block(
         &self,
         block_hash: &bitcoin::BlockHash,
-    ) -> Result<Option<bitcoin::Block>, Error> {
+    ) -> Result<Option<BitcoinBlockInfo>, Error> {
         self.inner.lock().await.get_block(block_hash).await
     }
 

@@ -1371,12 +1371,12 @@ impl BitcoinTxInfo {
     /// Assess how much of the bitcoin miner fee should be apportioned to
     /// the input associated with the given `outpoint`.
     pub fn assess_input_fee(&self, outpoint: &OutPoint) -> Option<Amount> {
-        FeeAssessment::assess_input_fee(self, outpoint, self.fee)
+        FeeAssessment::assess_input_fee(self, outpoint, self.fee?)
     }
     /// Assess how much of the bitcoin miner fee should be apportioned to
     /// the output at the given output index `vout`.
     pub fn assess_output_fee(&self, vout: usize) -> Option<Amount> {
-        FeeAssessment::assess_output_fee(self, vout, self.fee)
+        FeeAssessment::assess_output_fee(self, vout, self.fee?)
     }
 }
 
@@ -1616,11 +1616,12 @@ pub trait TxDeconstructor: BitcoinInputsOutputs {
 impl TxDeconstructor for BitcoinTxInfo {
     fn prevout(&self, index: usize) -> Option<PrevoutRef> {
         let vin = self.vin.get(index)?;
+        let prevout = vin.prevout.as_ref()?;
         Some(PrevoutRef {
-            amount: vin.prevout.value,
-            script_pubkey: &vin.prevout.script_pub_key.script,
-            txid: vin.details.txid.as_ref()?,
-            output_index: vin.details.vout?,
+            amount: prevout.value,
+            script_pubkey: &prevout.script_pubkey.script,
+            txid: vin.txid.as_ref()?,
+            output_index: vin.vout?,
         })
     }
 }
@@ -1632,7 +1633,6 @@ mod tests {
     use std::sync::atomic::AtomicU64;
 
     use super::*;
-    use bitcoin::BlockHash;
     use bitcoin::CompressedPublicKey;
     use bitcoin::Txid;
     use bitcoin::hashes::Hash as _;
@@ -1762,18 +1762,9 @@ mod tests {
     impl BitcoinTxInfo {
         fn from_tx(tx: Transaction, fee: Amount) -> BitcoinTxInfo {
             BitcoinTxInfo {
-                in_active_chain: true,
-                fee,
-                txid: tx.compute_txid(),
-                hash: tx.compute_wtxid(),
-                size: tx.base_size() as u64,
-                vsize: tx.vsize() as u64,
+                fee: Some(fee),
                 tx,
                 vin: Vec::new(),
-                vout: Vec::new(),
-                block_hash: BlockHash::from_byte_array([0; 32]),
-                confirmations: 1,
-                block_time: 0,
             }
         }
     }
@@ -3479,17 +3470,18 @@ mod tests {
     }
 
     impl TestTxOut {
+        pub fn tx(&self) -> bitcoin::Transaction {
+            Transaction {
+                version: Version::TWO,
+                lock_time: LockTime::ZERO,
+                input: Vec::new(),
+                output: Vec::new(),
+            }
+        }
+
         pub fn tx_info(&self) -> BitcoinTxInfo {
             BitcoinTxInfo {
-                in_active_chain: true,
-                fee: Amount::from_sat(1000),
-                txid: Txid::all_zeros(),
-                hash: bitcoin::Wtxid::all_zeros(),
-                size: 100,
-                vsize: 100,
-                block_hash: bitcoin::BlockHash::all_zeros(),
-                confirmations: 0,
-                block_time: 0,
+                fee: Some(Amount::from_sat(1000)),
                 tx: Transaction {
                     version: Version::TWO,
                     lock_time: LockTime::ZERO,
@@ -3497,12 +3489,12 @@ mod tests {
                     output: Vec::new(),
                 },
                 vin: Vec::new(),
-                vout: Vec::new(),
             }
         }
         pub fn output(&mut self, output_type: TxOutputType) -> &mut Self {
+            let tx = self.tx();
             self.tx_outputs.push(TxOutput {
-                txid: Txid::all_zeros().into(),
+                txid: tx.compute_txid().into(),
                 output_index: self.tx_outputs.len() as u32,
                 script_pubkey: ScriptPubKey::from_bytes(vec![]),
                 amount: 0,
@@ -3511,8 +3503,9 @@ mod tests {
             self
         }
         pub fn op_return(&mut self, script: ScriptBuf) -> &mut Self {
+            let tx = self.tx();
             self.tx_outputs.push(TxOutput {
-                txid: Txid::all_zeros().into(),
+                txid: tx.compute_txid().into(),
                 output_index: self.tx_outputs.len() as u32,
                 script_pubkey: script.into(),
                 amount: 0,
@@ -3629,12 +3622,12 @@ mod tests {
 
         let expected = vec![
             WithdrawalTxOutput {
-                txid: tx_info.txid.into(),
+                txid: tx_info.compute_txid().into(),
                 output_index: 2,
                 request_id: 42,
             },
             WithdrawalTxOutput {
-                txid: tx_info.txid.into(),
+                txid: tx_info.compute_txid().into(),
                 output_index: 3,
                 request_id: 51,
             },

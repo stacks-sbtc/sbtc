@@ -8,6 +8,7 @@ use bitcoin::Txid;
 use bitcoincore_rpc_json::GetMempoolEntryResult;
 use bitcoincore_rpc_json::GetTxOutResult;
 use rpc::BitcoinBlockHeader;
+use rpc::BitcoinBlockInfo;
 use rpc::BitcoinTxInfo;
 use rpc::GetTxResponse;
 
@@ -50,7 +51,7 @@ pub trait BitcoinInteract: Sync + Send {
     fn get_block(
         &self,
         block_hash: &BlockHash,
-    ) -> impl Future<Output = Result<Option<bitcoin::Block>, Error>> + Send;
+    ) -> impl Future<Output = Result<Option<BitcoinBlockInfo>, Error>> + Send;
 
     /// Get the header of the block identified by the given block hash.
     fn get_block_header(
