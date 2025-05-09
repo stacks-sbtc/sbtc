@@ -175,16 +175,25 @@ pub async fn add_chainstate_entry_or_reorg(
     // likely means that we reconnected to new stacks node which is not fully synced,
     // rather then actual reorg happen.
     let new_bitcoin_tip_height = chainstate.bitcoin_block_height;
-    let current_bitcoin_tip_height = accessors::get_api_state(&context).await?.chaintip().bitcoin_height;
+    let current_bitcoin_tip_height = accessors::get_api_state(context)
+        .await?
+        .chaintip()
+        .bitcoin_height;
+
+    // 6 block confirmations are considered as industry standard for considering that this block
+    // will not be reorged. See https://en.bitcoin.it/wiki/Confirmation
+    let no_reorg_depth = 6;
 
     if let Some(current_bitcoin_tip_height) = current_bitcoin_tip_height {
         if let Some(new_bitcoin_tip_height) = new_bitcoin_tip_height {
-            if new_bitcoin_tip_height < current_bitcoin_tip_height - 2 {
-                return Err(Error::TooOldChaintipToReorg(new_bitcoin_tip_height, current_bitcoin_tip_height));
+            if new_bitcoin_tip_height < current_bitcoin_tip_height - no_reorg_depth {
+                return Err(Error::TooOldChaintipToReorg(
+                    new_bitcoin_tip_height,
+                    current_bitcoin_tip_height,
+                ));
             }
         }
     }
-
 
     // Get chainstate as entry.
     let entry: ChainstateEntry = chainstate.clone().into();

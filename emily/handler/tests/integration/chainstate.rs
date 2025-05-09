@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use testing_emily_client::apis::{self, chainstate_api::SetChainstateError};
+use testing_emily_client::apis;
 use testing_emily_client::models::Chainstate;
 
 use crate::common::{batch_set_chainstates, clean_setup, new_test_chainstate};
@@ -98,14 +98,10 @@ async fn create_and_get_chainstate_reorg_happy_path(
     assert_eq!(expected_post_reorg_chaintip, gotten_post_reorg_chaintip);
 }
 
-#[test_case(1123, 1224, 1227; "standard-reorg")]
-#[test_case(1123, 1121, 1124; "reorg-to-tip-below-any-existing-entry")]
+#[test_case(1110, 1220, 1227; "standard-reorg")]
+#[test_case(1125, 1120, 1127; "reorg-to-tip-below-any-existing-entry")]
 #[tokio::test]
-async fn too_old_chaintip_to_reorg(
-    min_height: u64,
-    reorg_height: u64,
-    max_height: u64,
-) {
+async fn too_old_chaintip_to_reorg(min_height: u64, reorg_height: u64, max_height: u64) {
     let configuration = clean_setup().await;
 
     // Arrange.
@@ -124,21 +120,26 @@ async fn too_old_chaintip_to_reorg(
         .await
         .expect("Received an error after making a valid get chaintip api call.");
 
-    let gotten_err =
-        apis::chainstate_api::set_chainstate(&configuration, reorg_chaintip.clone())
-            .await.expect_err("This chaintip is too old for a reorg.");
+    let gotten_err = apis::chainstate_api::set_chainstate(&configuration, reorg_chaintip.clone())
+        .await
+        .expect_err("This chaintip is too old for a reorg.");
 
-    let old_bitcoin_tip = gotten_pre_reorg_chaintip.bitcoin_block_height.unwrap().unwrap();
+    let old_bitcoin_tip = gotten_pre_reorg_chaintip
+        .bitcoin_block_height
+        .unwrap()
+        .unwrap();
     let reorg_bitcoin_tip = reorg_chaintip.bitcoin_block_height.unwrap().unwrap();
 
     match gotten_err {
         testing_emily_client::apis::Error::ResponseError(err) => {
             assert_eq!(err.status, 422);
-
+            let expected_content = format!(
+                "{{\"message\":\"TooOldChaintipToReorg({reorg_bitcoin_tip}, {old_bitcoin_tip})\"}}"
+            );
+            assert_eq!(err.content, expected_content);
         }
         _ => panic!("Expected a ResponseError, but got: {:?}", gotten_err),
     }
-    
 
     let gotten_post_reorg_chaintip = apis::chainstate_api::get_chain_tip(&configuration)
         .await
