@@ -51,6 +51,12 @@ impl Deref for PublicKey {
     }
 }
 
+impl From<&PublicKey> for PublicKey {
+    fn from(pk: &PublicKey) -> Self {
+        *pk
+    }
+}
+
 impl From<&secp256k1::PublicKey> for PublicKey {
     fn from(value: &secp256k1::PublicKey) -> Self {
         Self(*value)

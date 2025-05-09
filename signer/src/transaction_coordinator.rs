@@ -2541,16 +2541,12 @@ pub async fn should_coordinate_dkg(
     let config = context.config();
 
     // Trigger dkg if signer set changes
-    let last_dkg_signer_set: BTreeSet<_> = context
+    let signer_set_changed = !context
         .state()
         .current_signer_set()
-        .get_signers()
-        .iter()
-        .map(|signer| *signer.public_key())
-        .collect();
-    let config_signer_set = &config.signer.bootstrap_signing_set;
+        .have_same_pubkeys(&config.signer.bootstrap_signing_set);
 
-    if &last_dkg_signer_set != config_signer_set {
+    if signer_set_changed {
         tracing::info!("signer set has changed, proceeding with DKG");
         return Ok(true);
     }
