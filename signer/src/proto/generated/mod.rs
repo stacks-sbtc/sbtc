@@ -8,6 +8,15 @@ pub mod crypto {
         include!("crypto.wsts.rs");
     }
 }
+pub mod sbtc {
+    pub mod signer {
+        pub mod v1 {
+            pub mod backups {
+                include!("sbtc.signer.v1.backups.rs");
+            }
+        }
+    }
+}
 pub mod stacks {
     include!("stacks.rs");
     pub mod signer {

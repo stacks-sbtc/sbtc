@@ -21,6 +21,11 @@ use crate::wsts_state_machine::StateMachineId;
 /// Top-level signer error
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// An error was generated while executing a command in the CLI (other than
+    /// `run`, which is handled separately).
+    #[error(transparent)]
+    Cli(#[from] crate::cli::error::CliError),
+
     /// The length of bytes to write to an OP_RETURN output exceeds the maximum allowed size.
     #[error("OP_RETURN output size limit exceeded: {size} bytes, max allowed: {max_size} bytes")]
     OpReturnSizeLimitExceeded {
