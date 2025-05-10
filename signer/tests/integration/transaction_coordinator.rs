@@ -4712,7 +4712,7 @@ mod get_eligible_pending_withdrawal_requests {
     }
 }
 
-// This test checks that the coordinator attempts to fulfill its 
+// This test checks that the coordinator attempts to fulfill its
 // other duties if DKG encounters an error but there's an existing
 // aggregate key to fallback on.
 #[test_log::test(tokio::test)]
