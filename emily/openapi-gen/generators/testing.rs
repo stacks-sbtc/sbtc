@@ -51,6 +51,7 @@ use super::CorsSupport;
         api::models::chainstate::Chainstate,
         // Deposit models.
         api::models::deposit::Deposit,
+        api::models::deposit::responses::DepositWithStatus,
         api::models::deposit::DepositParameters,
         api::models::deposit::DepositInfo,
         api::models::deposit::requests::CreateDepositRequestBody,
