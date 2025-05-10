@@ -4712,8 +4712,8 @@ mod get_eligible_pending_withdrawal_requests {
     }
 }
 
-// This test checks that blocks are still created
-// if DKG encounters an error but there's an existing
+// This test checks that the coordinator attempts to fulfill its 
+// other duties if DKG encounters an error but there's an existing
 // aggregate key to fallback on.
 #[test_log::test(tokio::test)]
 async fn should_handle_dkg_coordination_failure() {
@@ -4787,8 +4787,8 @@ async fn should_handle_dkg_coordination_failure() {
     };
 
     // We're verifying that the coordinator is currently
-    // processing blocks correctly. Since we previously checked
-    // that 'should_coordinate_dkg' will trigger & we set the
+    // processing requests correctly. Since we previously checked
+    // that 'should_coordinate_dkg' will trigger and we set the
     // 'dkg_max_duration' to 10 milliseconds we expect that
     // DKG will run & fail
     let result = coordinator.process_new_blocks().await;
