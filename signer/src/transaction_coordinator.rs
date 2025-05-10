@@ -285,12 +285,13 @@ where
         Ok(is_epoch3)
     }
 
+    /// A function for processing new blocks
     #[tracing::instrument(skip_all, fields(
         public_key = %self.signer_public_key(),
         bitcoin_tip_hash = tracing::field::Empty,
         bitcoin_tip_height = tracing::field::Empty,
     ))]
-    async fn process_new_blocks(&mut self) -> Result<(), Error> {
+    pub async fn process_new_blocks(&mut self) -> Result<(), Error> {
         if !self.is_epoch3().await? {
             return Ok(());
         }
@@ -343,7 +344,14 @@ where
         let should_coordinate_dkg =
             should_coordinate_dkg(&self.context, &bitcoin_chain_tip).await?;
         let aggregate_key = if should_coordinate_dkg {
-            self.coordinate_dkg(bitcoin_chain_tip.as_ref()).await?
+            match self.coordinate_dkg(bitcoin_chain_tip.as_ref()).await {
+                Ok(key) => key,
+                Err(error) => {
+                    tracing::error!(%error, "failed to coordinate DKG; using existing aggregate key");
+                    maybe_aggregate_key
+                        .ok_or(Error::MissingAggregateKey(*bitcoin_chain_tip.block_hash))?
+                }
+            }
         } else {
             maybe_aggregate_key.ok_or(Error::MissingAggregateKey(*bitcoin_chain_tip.block_hash))?
         };
