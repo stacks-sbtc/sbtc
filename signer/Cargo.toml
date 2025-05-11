@@ -8,7 +8,7 @@ ignored = ["tonic", "tonic-build", "stackslib"]
 
 [features]
 default = []
-testing = ["dep:fake", "dep:madhouse", "dep:mockall", "sbtc/testing"]
+testing = ["dep:fake", "dep:mockall", "sbtc/testing"]
 
 [dependencies]
 aquamarine.workspace = true
@@ -61,7 +61,6 @@ wsts.workspace = true
 
 # Only for testing
 fake = { workspace = true, optional = true }
-madhouse = { workspace = true, optional = true }
 mockall = { workspace = true, optional = true }
 
 [build-dependencies]
@@ -69,6 +68,7 @@ tonic-build.workspace = true
 
 [dev-dependencies]
 bitcoincore-rpc.workspace = true
+madhouse.workspace = true
 mockito.workspace = true
 more-asserts.workspace = true
 proptest.workspace = true
