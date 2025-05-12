@@ -229,7 +229,7 @@ class DepositProcessor:
             # that we can't find via the mempool API (it might have been dropped)
             and not tx.in_mempool
             # and have been pending for too long
-            and current_time - tx.deposit_time > settings.MAX_UNCONFIRMED_TIME
+            and current_time - tx.deposit_last_update > settings.MAX_UNCONFIRMED_TIME
         ]
 
         if not long_pending_txs:

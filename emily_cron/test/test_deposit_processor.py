@@ -44,7 +44,7 @@ class TestDepositProcessorBase(unittest.TestCase):
         lock_time,
         rbf_txids=None,
         in_mempool=False,
-        deposit_time=None,
+        deposit_last_update=None,
         status=RequestStatus.PENDING.value,
     ):
         """Helper method to create mock deposits."""
@@ -56,7 +56,7 @@ class TestDepositProcessorBase(unittest.TestCase):
         deposit.rbf_txids = rbf_txids or []
         deposit.is_expired = lambda x: EnrichedDepositInfo.is_expired(deposit, x)
         deposit.in_mempool = in_mempool
-        deposit.deposit_time = deposit_time or int(datetime.now().timestamp())
+        deposit.deposit_last_update = deposit_last_update or int(datetime.now().timestamp())
         deposit.status = status
         return deposit
 
@@ -391,7 +391,7 @@ class TestDepositProcessorWithRbf(TestDepositProcessorBase):
             confirmed_height=None,  # Not confirmed
             lock_time=0,
             rbf_txids=["rbf_replacement_tx", "rbf_original_tx"],
-            deposit_time=int(datetime.now().timestamp()) - 3600,  # 1 hour ago
+            deposit_last_update=int(datetime.now().timestamp()) - 3600,  # 1 hour ago
         )
 
         self.rbf_replacement = self._create_mock_deposit(
@@ -423,7 +423,7 @@ class TestDepositProcessorWithRbf(TestDepositProcessorBase):
             txid="long_pending_tx",
             confirmed_height=None,
             lock_time=0,
-            deposit_time=int(datetime.now().timestamp()) - settings.MAX_UNCONFIRMED_TIME - 3600,
+            deposit_last_update=int(datetime.now().timestamp()) - settings.MAX_UNCONFIRMED_TIME - 3600,
             status=RequestStatus.PENDING.value,
         )
 
@@ -586,7 +586,7 @@ class TestLongPendingProcessor(TestDepositProcessorBase):
             confirmed_height=None,  # Not confirmed
             lock_time=0,
             in_mempool=False,
-            deposit_time=self.current_time
+            deposit_last_update=self.current_time
             - settings.MAX_UNCONFIRMED_TIME
             - 3600,  # 1 hour over limit
         )
@@ -596,7 +596,7 @@ class TestLongPendingProcessor(TestDepositProcessorBase):
             confirmed_height=None,  # Not confirmed
             lock_time=0,
             in_mempool=False,
-            deposit_time=self.current_time - 3600,  # Just 1 hour old
+            deposit_last_update=self.current_time - 3600,  # Just 1 hour old
         )
 
         self.in_mempool = self._create_mock_deposit(
@@ -604,7 +604,7 @@ class TestLongPendingProcessor(TestDepositProcessorBase):
             confirmed_height=None,  # Not confirmed
             lock_time=0,
             in_mempool=True,
-            deposit_time=self.current_time
+            deposit_last_update=self.current_time
             - settings.MAX_UNCONFIRMED_TIME
             - 3600,  # Old but in mempool
         )
@@ -649,7 +649,7 @@ class TestLongPendingProcessor(TestDepositProcessorBase):
             confirmed_height=None,
             lock_time=0,
             in_mempool=False,
-            deposit_time=self.current_time - 7200,  # 2 hours old
+            deposit_last_update=self.current_time - 7200,  # 2 hours old
         )
 
         deposits = [edge_case]
@@ -823,7 +823,7 @@ class TestDepositProcessor(TestDepositProcessorBase):
             },
         )
         # mock deposit time
-        long_pending_enriched.deposit_time = self.current_time - settings.MAX_UNCONFIRMED_TIME
+        long_pending_enriched.deposit_last_update = self.current_time - settings.MAX_UNCONFIRMED_TIME
         mock_enrich.return_value = [
             expired_deposit_enriched,
             active_deposit_enriched,

@@ -64,7 +64,7 @@ class DepositInfo:
         return int.from_bytes(max_fee_bytes[:8], byteorder="big", signed=False)
 
     @functools.cached_property
-    def deposit_time(self) -> int:
+    def deposit_last_update(self) -> int:
         """Get the timestamp from the last update block hash."""
         from ..clients import HiroAPI  # avoid circular import
 
