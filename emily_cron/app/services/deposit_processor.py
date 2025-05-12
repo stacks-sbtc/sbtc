@@ -209,9 +209,10 @@ class DepositProcessor:
         enriched_deposits: list[EnrichedDepositInfo],
     ) -> list[DepositUpdate]:
         """Process long-pending transactions.
+
         Args:
             enriched_deposits: List of enriched deposit information
-            stacks_chaintip: Current Stacks block info
+
         Returns:
             list[DepositUpdate]: List of deposit updates
         """
