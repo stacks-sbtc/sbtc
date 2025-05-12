@@ -46,10 +46,10 @@ impl TransactionHandle for InMemoryTransaction {
 
         // Naive optimistic concurrency check
         if self.version != original_store.version {
-            panic!(
-                "Optimistic concurrency violation: attempted to commit in-memory \
-                DB transaction where the store is at another version than the current transaction"
-            );
+            return Err(Error::OptimisticConcurrencyViolation {
+                transaction_version: self.version,
+                store_version: original_store.version,
+            });
         }
 
         // Commit the changes from the transactional store to the original store.
@@ -605,6 +605,7 @@ mod tests {
     use crate::storage::{DbRead, DbWrite, Transactable, TransactionHandle};
     use crate::testing::blocks::{BitcoinChain, StacksChain};
 
+    use assert_matches::assert_matches;
     use test_log::test;
 
     #[tokio::test]
@@ -774,7 +775,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[should_panic(expected = "Optimistic concurrency violation")]
     async fn test_in_memory_transaction_optimistic_concurrency_violation() {
         let shared_store = Store::new_shared(); // Initial store.version is typically 0
 
@@ -814,9 +814,10 @@ mod tests {
         // Attempt to commit transaction 1
         // tx1.version is still the initial version (e.g., 0).
         // shared_store.version is now updated by tx2's commit (e.g., 1).
-        // The versions will not match, and this commit attempt should panic.
-        tx1.commit()
-            .await
-            .expect("Commit for tx1 should have panicked but returned Ok");
+        // The versions will not match, and this commit attempt should error.
+        assert_matches!(
+            tx1.commit().await,
+            Err(Error::OptimisticConcurrencyViolation { .. })
+        );
     }
 }

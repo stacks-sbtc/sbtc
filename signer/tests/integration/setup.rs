@@ -31,10 +31,11 @@ use signer::bitcoin::utxo::SignerBtcState;
 use signer::bitcoin::utxo::SignerUtxo;
 use signer::bitcoin::utxo::TxDeconstructor as _;
 use signer::bitcoin::validation::WithdrawalValidationResult;
-use signer::block_observer::BlockObserver;
+use signer::block_observer;
 use signer::block_observer::Deposit;
 use signer::codec::Encode as _;
 use signer::config::Settings;
+use signer::context::Context;
 use signer::context::SbtcLimits;
 use signer::keys::PrivateKey;
 use signer::keys::PublicKey;
@@ -843,6 +844,7 @@ impl TestSweepSetup2 {
             .with_mocked_stacks_client()
             .with_mocked_emily_client()
             .build();
+        let bitcoin_client = context.get_bitcoin_client();
 
         // We fetch the entire block, to feed to the block observer. It's
         // easier this way.
@@ -851,10 +853,8 @@ impl TestSweepSetup2 {
             .get_tx(&self.donation.txid)
             .unwrap()
             .unwrap();
-        let block_observer = BlockObserver { context, bitcoin_blocks: () };
 
-        block_observer
-            .extract_sbtc_transactions(block_hash.unwrap(), &[tx])
+        block_observer::extract_sbtc_transactions(db, &bitcoin_client, block_hash.unwrap(), &[tx])
             .await
             .unwrap();
     }

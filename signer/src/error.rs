@@ -713,7 +713,8 @@ pub enum Error {
     ExceedsSbtcSupplyCap {
         /// Total deposit amount in sats
         total_amount: u64,
-        /// Maximum sBTC mintable
+        /// Maximum sBTC mintablecccccbrffkkkttcjrfefdlvvfefjretriclellkjvftj
+        ///
         max_mintable: u64,
     },
 
@@ -737,6 +738,20 @@ pub enum Error {
     #[cfg(test)]
     #[error("Dummy (for testing purposes)")]
     Dummy,
+
+    /// An optimistic concurrency violation occurred. This is currently used in
+    /// the in-memory database implementation.
+    #[error(
+        "Optimistic concurrency violation: attempted to commit in-memory \
+        DB transaction where the store is at another version than the current transaction.\
+        Store version: {store_version}, transaction version: {transaction_version}"
+    )]
+    OptimisticConcurrencyViolation {
+        /// The version of the store at the time of the transaction.
+        store_version: usize,
+        /// The version of the transaction.
+        transaction_version: usize,
+    },
 }
 
 impl From<std::convert::Infallible> for Error {

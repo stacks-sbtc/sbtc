@@ -30,7 +30,7 @@ use crate::storage::model::WithdrawalAcceptEvent;
 use crate::storage::model::WithdrawalRejectEvent;
 
 /// Represents a handle to an ongoing database transaction.
-pub trait TransactionHandle: Send {
+pub trait TransactionHandle: DbRead + DbWrite + Send {
     /// Commits the transaction.
     fn commit(self) -> impl Future<Output = Result<(), Error>> + Send;
     /// Rolls back the transaction.
@@ -43,7 +43,7 @@ pub trait Transactable {
     /// The type of the transaction object. It must implement `DbRead`, `DbWrite`,
     /// and `TransactionHandle`. The lifetime `'a` ties the transaction to the
     /// lifetime of the `Transactable` implementor (e.g., the `PgStore`).
-    type Tx<'a>: DbRead + DbWrite + TransactionHandle + Send + 'a
+    type Tx<'a>: DbRead + DbWrite + TransactionHandle + Sync + Send + 'a
     where
         Self: 'a;
 

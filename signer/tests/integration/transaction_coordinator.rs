@@ -44,6 +44,7 @@ use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::bitcoin::utxo::BitcoinInputsOutputs;
 use signer::bitcoin::utxo::Fees;
 use signer::bitcoin::validation::WithdrawalValidationResult;
+use signer::block_observer;
 use signer::context::RequestDeciderEvent;
 use signer::message::Payload;
 use signer::network::MessageTransfer;
@@ -3953,6 +3954,8 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
         .with_mocked_emily_client()
         .build();
 
+    let bitcoin_client = context.get_bitcoin_client();
+
     let expect_tx = !is_completed && !is_in_mempool;
 
     let nonce = 12;
@@ -4022,14 +4025,8 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
     let bitcoin_chain_tip = rpc.get_blockchain_info().unwrap().best_block_hash;
     backfill_bitcoin_blocks(&db, rpc, &bitcoin_chain_tip).await;
 
-    let block_observer = BlockObserver {
-        context: context.clone(),
-        bitcoin_blocks: (),
-    };
-
     let tx = rpc.get_raw_transaction(&donation.txid, None).unwrap();
-    block_observer
-        .extract_sbtc_transactions(bitcoin_chain_tip, &[tx])
+    block_observer::extract_sbtc_transactions(&db, &bitcoin_client, bitcoin_chain_tip, &[tx])
         .await
         .unwrap();
 
