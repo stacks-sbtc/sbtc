@@ -1,4 +1,4 @@
-use super::PgStore;
+use super::{PgStore, PgTransaction};
 use crate::{
     error::Error,
     keys::PublicKeyXOnly,
@@ -9,8 +9,16 @@ use crate::{
 };
 use bitcoin::hashes::Hash as _;
 
-impl DbWrite for PgStore {
-    async fn write_bitcoin_block(&self, block: &model::BitcoinBlock) -> Result<(), Error> {
+pub struct PgWrite;
+
+impl PgWrite {
+    async fn write_bitcoin_block<'e, E>(
+        executor: &'e mut E,
+        block: &model::BitcoinBlock,
+    ) -> Result<(), Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+    {
         sqlx::query(
             "INSERT INTO sbtc_signer.bitcoin_blocks
               ( block_hash
@@ -23,14 +31,20 @@ impl DbWrite for PgStore {
         .bind(block.block_hash)
         .bind(i64::try_from(block.block_height).map_err(Error::ConversionDatabaseInt)?)
         .bind(block.parent_hash)
-        .execute(self.pool())
+        .execute(executor)
         .await
         .map_err(Error::SqlxQuery)?;
 
         Ok(())
     }
 
-    async fn write_stacks_block(&self, block: &model::StacksBlock) -> Result<(), Error> {
+    async fn write_stacks_block<'e, E>(
+        executor: &'e mut E,
+        block: &model::StacksBlock,
+    ) -> Result<(), Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+    {
         sqlx::query(
             "INSERT INTO sbtc_signer.stacks_blocks
               ( block_hash
@@ -45,17 +59,20 @@ impl DbWrite for PgStore {
         .bind(i64::try_from(block.block_height).map_err(Error::ConversionDatabaseInt)?)
         .bind(block.parent_hash)
         .bind(block.bitcoin_anchor)
-        .execute(self.pool())
+        .execute(executor)
         .await
         .map_err(Error::SqlxQuery)?;
 
         Ok(())
     }
 
-    async fn write_deposit_request(
-        &self,
+    async fn write_deposit_request<'e, E>(
+        executor: &'e mut E,
         deposit_request: &model::DepositRequest,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+    {
         sqlx::query(
             "INSERT INTO sbtc_signer.deposit_requests
               ( txid
@@ -82,17 +99,20 @@ impl DbWrite for PgStore {
         .bind(i64::from(deposit_request.lock_time))
         .bind(deposit_request.signers_public_key)
         .bind(&deposit_request.sender_script_pub_keys)
-        .execute(self.pool())
+        .execute(executor)
         .await
         .map_err(Error::SqlxQuery)?;
 
         Ok(())
     }
 
-    async fn write_deposit_requests(
-        &self,
+    async fn write_deposit_requests<'e, E>(
+        executor: &'e mut E,
         deposit_requests: Vec<model::DepositRequest>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+    {
         if deposit_requests.is_empty() {
             return Ok(());
         }
@@ -188,17 +208,20 @@ impl DbWrite for PgStore {
         .bind(lock_time)
         .bind(signers_public_key)
         .bind(sender_script_pubkeys)
-        .execute(self.pool())
+        .execute(executor)
         .await
         .map_err(Error::SqlxQuery)?;
 
         Ok(())
     }
 
-    async fn write_withdrawal_request(
-        &self,
+    async fn write_withdrawal_request<'e, E>(
+        executor: &'e mut E,
         request: &model::WithdrawalRequest,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+    {
         sqlx::query(
             "INSERT INTO sbtc_signer.withdrawal_requests
               ( request_id
@@ -221,18 +244,21 @@ impl DbWrite for PgStore {
         .bind(i64::try_from(request.max_fee).map_err(Error::ConversionDatabaseInt)?)
         .bind(&request.sender_address)
         .bind(i64::try_from(request.bitcoin_block_height).map_err(Error::ConversionDatabaseInt)?)
-        .execute(self.pool())
+        .execute(executor)
         .await
         .map_err(Error::SqlxQuery)?;
 
         Ok(())
     }
 
-    #[tracing::instrument(skip(self))]
-    async fn write_deposit_signer_decision(
-        &self,
+    #[tracing::instrument(skip(executor))]
+    async fn write_deposit_signer_decision<'e, E>(
+        executor: &'e mut E,
         decision: &model::DepositSigner,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+    {
         sqlx::query(
             "INSERT INTO sbtc_signer.deposit_signers
               ( txid
@@ -249,17 +275,20 @@ impl DbWrite for PgStore {
         .bind(decision.signer_pub_key)
         .bind(decision.can_accept)
         .bind(decision.can_sign)
-        .execute(self.pool())
+        .execute(executor)
         .await
         .map_err(Error::SqlxQuery)?;
 
         Ok(())
     }
 
-    async fn write_withdrawal_signer_decision(
-        &self,
+    async fn write_withdrawal_signer_decision<'e, E>(
+        executor: &'e mut E,
         decision: &model::WithdrawalSigner,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+    {
         sqlx::query(
             "INSERT INTO sbtc_signer.withdrawal_signers
               ( request_id
@@ -276,14 +305,20 @@ impl DbWrite for PgStore {
         .bind(decision.block_hash)
         .bind(decision.signer_pub_key)
         .bind(decision.is_accepted)
-        .execute(self.pool())
+        .execute(executor)
         .await
         .map_err(Error::SqlxQuery)?;
 
         Ok(())
     }
 
-    async fn write_bitcoin_transaction(&self, tx_ref: &model::BitcoinTxRef) -> Result<(), Error> {
+    async fn write_bitcoin_transaction<'e, E>(
+        executor: &'e mut E,
+        tx_ref: &model::BitcoinTxRef,
+    ) -> Result<(), Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+    {
         sqlx::query(
             "INSERT INTO sbtc_signer.bitcoin_transactions (txid, block_hash)
             VALUES ($1, $2)
@@ -291,14 +326,20 @@ impl DbWrite for PgStore {
         )
         .bind(tx_ref.txid)
         .bind(tx_ref.block_hash)
-        .execute(self.pool())
+        .execute(executor)
         .await
         .map_err(Error::SqlxQuery)?;
 
         Ok(())
     }
 
-    async fn write_bitcoin_transactions(&self, txs: Vec<model::BitcoinTxRef>) -> Result<(), Error> {
+    async fn write_bitcoin_transactions<'e, E>(
+        executor: &'e mut E,
+        txs: Vec<model::BitcoinTxRef>,
+    ) -> Result<(), Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+    {
         if txs.is_empty() {
             return Ok(());
         }
@@ -331,17 +372,20 @@ impl DbWrite for PgStore {
         )
         .bind(&tx_ids)
         .bind(&block_hashes)
-        .execute(self.pool())
+        .execute(executor)
         .await
         .map_err(Error::SqlxQuery)?;
 
         Ok(())
     }
 
-    async fn write_stacks_block_headers(
-        &self,
+    async fn write_stacks_block_headers<'e, E>(
+        executor: &'e mut E,
         blocks: Vec<model::StacksBlock>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+    {
         if blocks.is_empty() {
             return Ok(());
         }
@@ -394,17 +438,20 @@ impl DbWrite for PgStore {
         .bind(&parent_block_ids)
         .bind(&chain_lengths)
         .bind(&bitcoin_anchors)
-        .execute(self.pool())
+        .execute(executor)
         .await
         .map_err(Error::SqlxQuery)?;
 
         Ok(())
     }
 
-    async fn write_encrypted_dkg_shares(
-        &self,
+    async fn write_encrypted_dkg_shares<'e, E>(
+        executor: &'e mut E,
         shares: &model::EncryptedDkgShares,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+    {
         let started_at_bitcoin_block_height = i64::try_from(shares.started_at_bitcoin_block_height)
             .map_err(Error::ConversionDatabaseInt)?;
 
@@ -435,17 +482,20 @@ impl DbWrite for PgStore {
         .bind(shares.dkg_shares_status)
         .bind(shares.started_at_bitcoin_block_hash)
         .bind(started_at_bitcoin_block_height)
-        .execute(self.pool())
+        .execute(executor)
         .await
         .map_err(Error::SqlxQuery)?;
 
         Ok(())
     }
 
-    async fn write_rotate_keys_transaction(
-        &self,
+    async fn write_rotate_keys_transaction<'e, E>(
+        executor: &'e mut E,
         key_rotation: &model::KeyRotationEvent,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+    {
         sqlx::query(
             r#"
             INSERT INTO sbtc_signer.rotate_keys_transactions (
@@ -465,17 +515,20 @@ impl DbWrite for PgStore {
         .bind(key_rotation.aggregate_key)
         .bind(&key_rotation.signer_set)
         .bind(i32::from(key_rotation.signatures_required))
-        .execute(self.pool())
+        .execute(executor)
         .await
         .map_err(Error::SqlxQuery)?;
 
         Ok(())
     }
 
-    async fn write_completed_deposit_event(
-        &self,
+    async fn write_completed_deposit_event<'e, E>(
+        executor: &'e mut E,
         event: &CompletedDepositEvent,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+    {
         sqlx::query(
             "
         INSERT INTO sbtc_signer.completed_deposit_events (
@@ -498,17 +551,20 @@ impl DbWrite for PgStore {
         .bind(event.sweep_block_hash.to_byte_array())
         .bind(i64::try_from(event.sweep_block_height).map_err(Error::ConversionDatabaseInt)?)
         .bind(event.sweep_txid.to_byte_array())
-        .execute(self.pool())
+        .execute(executor)
         .await
         .map_err(Error::SqlxQuery)?;
 
         Ok(())
     }
 
-    async fn write_withdrawal_accept_event(
-        &self,
+    async fn write_withdrawal_accept_event<'e, E>(
+        executor: &'e mut E,
         event: &WithdrawalAcceptEvent,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+    {
         sqlx::query(
             "
         INSERT INTO sbtc_signer.withdrawal_accept_events (
@@ -535,17 +591,20 @@ impl DbWrite for PgStore {
         .bind(event.sweep_block_hash.to_byte_array())
         .bind(i64::try_from(event.sweep_block_height).map_err(Error::ConversionDatabaseInt)?)
         .bind(event.sweep_txid.to_byte_array())
-        .execute(self.pool())
+        .execute(executor)
         .await
         .map_err(Error::SqlxQuery)?;
 
         Ok(())
     }
 
-    async fn write_withdrawal_reject_event(
-        &self,
+    async fn write_withdrawal_reject_event<'e, E>(
+        executor: &'e mut E,
         event: &WithdrawalRejectEvent,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+    {
         sqlx::query(
             "
         INSERT INTO sbtc_signer.withdrawal_reject_events (
@@ -560,14 +619,20 @@ impl DbWrite for PgStore {
         .bind(event.block_id)
         .bind(i64::try_from(event.request_id).map_err(Error::ConversionDatabaseInt)?)
         .bind(event.signer_bitmap.into_inner())
-        .execute(self.pool())
+        .execute(executor)
         .await
         .map_err(Error::SqlxQuery)?;
 
         Ok(())
     }
 
-    async fn write_tx_output(&self, output: &model::TxOutput) -> Result<(), Error> {
+    async fn write_tx_output<'e, E>(
+        executor: &'e mut E,
+        output: &model::TxOutput,
+    ) -> Result<(), Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+    {
         sqlx::query(
             r#"
             INSERT INTO bitcoin_tx_outputs (
@@ -586,17 +651,20 @@ impl DbWrite for PgStore {
         .bind(i64::try_from(output.amount).map_err(Error::ConversionDatabaseInt)?)
         .bind(&output.script_pubkey)
         .bind(output.output_type)
-        .execute(self.pool())
+        .execute(executor)
         .await
         .map_err(Error::SqlxQuery)?;
 
         Ok(())
     }
 
-    async fn write_withdrawal_tx_output(
-        &self,
+    async fn write_withdrawal_tx_output<'e, E>(
+        executor: &'e mut E,
         output: &model::WithdrawalTxOutput,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+    {
         sqlx::query(
             r#"
             INSERT INTO bitcoin_withdrawal_tx_outputs (
@@ -611,14 +679,20 @@ impl DbWrite for PgStore {
         .bind(output.txid)
         .bind(i32::try_from(output.output_index).map_err(Error::ConversionDatabaseInt)?)
         .bind(i64::try_from(output.request_id).map_err(Error::ConversionDatabaseInt)?)
-        .execute(self.pool())
+        .execute(executor)
         .await
         .map_err(Error::SqlxQuery)?;
 
         Ok(())
     }
 
-    async fn write_tx_prevout(&self, prevout: &model::TxPrevout) -> Result<(), Error> {
+    async fn write_tx_prevout<'e, E>(
+        executor: &'e mut E,
+        prevout: &model::TxPrevout,
+    ) -> Result<(), Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+    {
         sqlx::query(
             r#"
             INSERT INTO bitcoin_tx_inputs (
@@ -639,17 +713,20 @@ impl DbWrite for PgStore {
         .bind(i64::try_from(prevout.amount).map_err(Error::ConversionDatabaseInt)?)
         .bind(&prevout.script_pubkey)
         .bind(prevout.prevout_type)
-        .execute(self.pool())
+        .execute(executor)
         .await
         .map_err(Error::SqlxQuery)?;
 
         Ok(())
     }
 
-    async fn write_bitcoin_txs_sighashes(
-        &self,
+    async fn write_bitcoin_txs_sighashes<'e, E>(
+        executor: &'e mut E,
         sighashes: &[model::BitcoinTxSigHash],
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+    {
         if sighashes.is_empty() {
             return Ok(());
         }
@@ -738,17 +815,20 @@ impl DbWrite for PgStore {
         .bind(is_valid_tx)
         .bind(will_sign)
         .bind(aggregate_key)
-        .execute(self.pool())
+        .execute(executor)
         .await
         .map_err(Error::SqlxQuery)?;
 
         Ok(())
     }
 
-    async fn write_bitcoin_withdrawals_outputs(
-        &self,
+    async fn write_bitcoin_withdrawals_outputs<'e, E>(
+        executor: &'e mut E,
         withdrawal_outputs: &[model::BitcoinWithdrawalOutput],
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+    {
         if withdrawal_outputs.is_empty() {
             return Ok(());
         }
@@ -825,16 +905,20 @@ impl DbWrite for PgStore {
         .bind(stacks_block_hash)
         .bind(validation_result)
         .bind(is_valid_tx)
-        .execute(self.pool())
+        .execute(executor)
         .await
         .map_err(Error::SqlxQuery)?;
 
         Ok(())
     }
 
-    async fn revoke_dkg_shares<X>(&self, aggregate_key: X) -> Result<bool, Error>
+    async fn revoke_dkg_shares<'e, X, E>(
+        executor: &'e mut E,
+        aggregate_key: X,
+    ) -> Result<bool, Error>
     where
         X: Into<PublicKeyXOnly> + Send,
+        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
     {
         sqlx::query(
             r#"
@@ -845,15 +929,19 @@ impl DbWrite for PgStore {
             "#,
         )
         .bind(aggregate_key.into())
-        .execute(self.pool())
+        .execute(executor)
         .await
         .map(|res| res.rows_affected() > 0)
         .map_err(Error::SqlxQuery)
     }
 
-    async fn verify_dkg_shares<X>(&self, aggregate_key: X) -> Result<bool, Error>
+    async fn verify_dkg_shares<'e, X, E>(
+        executor: &'e mut E,
+        aggregate_key: X,
+    ) -> Result<bool, Error>
     where
         X: Into<PublicKeyXOnly> + Send,
+        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
     {
         sqlx::query(
             r#"
@@ -864,9 +952,333 @@ impl DbWrite for PgStore {
             "#,
         )
         .bind(aggregate_key.into())
-        .execute(self.pool())
+        .execute(executor)
         .await
         .map(|res| res.rows_affected() > 0)
         .map_err(Error::SqlxQuery)
+    }
+}
+
+impl DbWrite for PgStore {
+    async fn write_bitcoin_block(&self, block: &model::BitcoinBlock) -> Result<(), Error> {
+        PgWrite::write_bitcoin_block(self.get_connection().await.as_mut(), block).await
+    }
+
+    async fn write_stacks_block(&self, block: &model::StacksBlock) -> Result<(), Error> {
+        PgWrite::write_stacks_block(self.get_connection().await.as_mut(), block).await
+    }
+
+    async fn write_deposit_request(
+        &self,
+        deposit_request: &model::DepositRequest,
+    ) -> Result<(), Error> {
+        PgWrite::write_deposit_request(self.get_connection().await.as_mut(), deposit_request).await
+    }
+
+    async fn write_deposit_requests(
+        &self,
+        deposit_requests: Vec<model::DepositRequest>,
+    ) -> Result<(), Error> {
+        PgWrite::write_deposit_requests(self.get_connection().await.as_mut(), deposit_requests)
+            .await
+    }
+
+    async fn write_withdrawal_request(
+        &self,
+        request: &model::WithdrawalRequest,
+    ) -> Result<(), Error> {
+        PgWrite::write_withdrawal_request(self.get_connection().await.as_mut(), request).await
+    }
+
+    #[tracing::instrument(skip(self))]
+    async fn write_deposit_signer_decision(
+        &self,
+        decision: &model::DepositSigner,
+    ) -> Result<(), Error> {
+        PgWrite::write_deposit_signer_decision(self.get_connection().await.as_mut(), decision).await
+    }
+
+    async fn write_withdrawal_signer_decision(
+        &self,
+        decision: &model::WithdrawalSigner,
+    ) -> Result<(), Error> {
+        PgWrite::write_withdrawal_signer_decision(self.get_connection().await.as_mut(), decision)
+            .await
+    }
+
+    async fn write_bitcoin_transaction(&self, tx_ref: &model::BitcoinTxRef) -> Result<(), Error> {
+        PgWrite::write_bitcoin_transaction(self.get_connection().await.as_mut(), tx_ref).await
+    }
+
+    async fn write_bitcoin_transactions(&self, txs: Vec<model::BitcoinTxRef>) -> Result<(), Error> {
+        PgWrite::write_bitcoin_transactions(self.get_connection().await.as_mut(), txs).await
+    }
+
+    async fn write_stacks_block_headers(
+        &self,
+        blocks: Vec<model::StacksBlock>,
+    ) -> Result<(), Error> {
+        PgWrite::write_stacks_block_headers(self.get_connection().await.as_mut(), blocks).await
+    }
+
+    async fn write_encrypted_dkg_shares(
+        &self,
+        shares: &model::EncryptedDkgShares,
+    ) -> Result<(), Error> {
+        PgWrite::write_encrypted_dkg_shares(self.get_connection().await.as_mut(), shares).await
+    }
+
+    async fn write_rotate_keys_transaction(
+        &self,
+        key_rotation: &model::KeyRotationEvent,
+    ) -> Result<(), Error> {
+        PgWrite::write_rotate_keys_transaction(self.get_connection().await.as_mut(), key_rotation)
+            .await
+    }
+
+    async fn write_completed_deposit_event(
+        &self,
+        event: &CompletedDepositEvent,
+    ) -> Result<(), Error> {
+        PgWrite::write_completed_deposit_event(self.get_connection().await.as_mut(), event).await
+    }
+
+    async fn write_withdrawal_accept_event(
+        &self,
+        event: &WithdrawalAcceptEvent,
+    ) -> Result<(), Error> {
+        PgWrite::write_withdrawal_accept_event(self.get_connection().await.as_mut(), event).await
+    }
+
+    async fn write_withdrawal_reject_event(
+        &self,
+        event: &WithdrawalRejectEvent,
+    ) -> Result<(), Error> {
+        PgWrite::write_withdrawal_reject_event(self.get_connection().await.as_mut(), event).await
+    }
+
+    async fn write_tx_output(&self, output: &model::TxOutput) -> Result<(), Error> {
+        PgWrite::write_tx_output(self.get_connection().await.as_mut(), output).await
+    }
+
+    async fn write_withdrawal_tx_output(
+        &self,
+        output: &model::WithdrawalTxOutput,
+    ) -> Result<(), Error> {
+        PgWrite::write_withdrawal_tx_output(self.get_connection().await.as_mut(), output).await
+    }
+
+    async fn write_tx_prevout(&self, prevout: &model::TxPrevout) -> Result<(), Error> {
+        PgWrite::write_tx_prevout(self.get_connection().await.as_mut(), prevout).await
+    }
+
+    async fn write_bitcoin_txs_sighashes(
+        &self,
+        sighashes: &[model::BitcoinTxSigHash],
+    ) -> Result<(), Error> {
+        PgWrite::write_bitcoin_txs_sighashes(self.get_connection().await.as_mut(), sighashes).await
+    }
+
+    async fn write_bitcoin_withdrawals_outputs(
+        &self,
+        withdrawal_outputs: &[model::BitcoinWithdrawalOutput],
+    ) -> Result<(), Error> {
+        PgWrite::write_bitcoin_withdrawals_outputs(
+            self.get_connection().await.as_mut(),
+            withdrawal_outputs,
+        )
+        .await
+    }
+
+    async fn revoke_dkg_shares<X>(&self, aggregate_key: X) -> Result<bool, Error>
+    where
+        X: Into<PublicKeyXOnly> + Send,
+    {
+        PgWrite::revoke_dkg_shares(self.get_connection().await.as_mut(), aggregate_key).await
+    }
+
+    async fn verify_dkg_shares<X>(&self, aggregate_key: X) -> Result<bool, Error>
+    where
+        X: Into<PublicKeyXOnly> + Send,
+    {
+        PgWrite::verify_dkg_shares(self.get_connection().await.as_mut(), aggregate_key).await
+    }
+}
+
+impl DbWrite for PgTransaction<'_> {
+    async fn write_bitcoin_block(
+        &self,
+        block: &crate::storage::model::BitcoinBlock,
+    ) -> Result<(), crate::error::Error> {
+        let mut tx = self.tx.lock().await;
+        PgWrite::write_bitcoin_block(tx.as_mut(), block).await
+    }
+
+    async fn write_stacks_block(
+        &self,
+        block: &crate::storage::model::StacksBlock,
+    ) -> Result<(), crate::error::Error> {
+        let mut tx = self.tx.lock().await;
+        PgWrite::write_stacks_block(tx.as_mut(), block).await
+    }
+
+    async fn write_deposit_request(
+        &self,
+        deposit_request: &crate::storage::model::DepositRequest,
+    ) -> Result<(), crate::error::Error> {
+        let mut tx = self.tx.lock().await;
+        PgWrite::write_deposit_request(tx.as_mut(), deposit_request).await
+    }
+
+    async fn write_deposit_requests(
+        &self,
+        deposit_requests: Vec<crate::storage::model::DepositRequest>,
+    ) -> Result<(), crate::error::Error> {
+        let mut tx = self.tx.lock().await;
+        PgWrite::write_deposit_requests(tx.as_mut(), deposit_requests).await
+    }
+
+    async fn write_withdrawal_request(
+        &self,
+        request: &crate::storage::model::WithdrawalRequest,
+    ) -> Result<(), crate::error::Error> {
+        let mut tx = self.tx.lock().await;
+        PgWrite::write_withdrawal_request(tx.as_mut(), request).await
+    }
+
+    async fn write_deposit_signer_decision(
+        &self,
+        decision: &crate::storage::model::DepositSigner,
+    ) -> Result<(), crate::error::Error> {
+        let mut tx = self.tx.lock().await;
+        PgWrite::write_deposit_signer_decision(tx.as_mut(), decision).await
+    }
+
+    async fn write_withdrawal_signer_decision(
+        &self,
+        decision: &crate::storage::model::WithdrawalSigner,
+    ) -> Result<(), crate::error::Error> {
+        let mut tx = self.tx.lock().await;
+        PgWrite::write_withdrawal_signer_decision(tx.as_mut(), decision).await
+    }
+
+    async fn write_bitcoin_transaction(
+        &self,
+        bitcoin_transaction: &crate::storage::model::BitcoinTxRef,
+    ) -> Result<(), crate::error::Error> {
+        let mut tx = self.tx.lock().await;
+        PgWrite::write_bitcoin_transaction(tx.as_mut(), bitcoin_transaction).await
+    }
+
+    async fn write_bitcoin_transactions(
+        &self,
+        txs: Vec<crate::storage::model::BitcoinTxRef>,
+    ) -> Result<(), crate::error::Error> {
+        let mut tx = self.tx.lock().await;
+        PgWrite::write_bitcoin_transactions(tx.as_mut(), txs).await
+    }
+
+    async fn write_stacks_block_headers(
+        &self,
+        headers: Vec<crate::storage::model::StacksBlock>,
+    ) -> Result<(), crate::error::Error> {
+        let mut tx = self.tx.lock().await;
+        PgWrite::write_stacks_block_headers(tx.as_mut(), headers).await
+    }
+
+    async fn write_encrypted_dkg_shares(
+        &self,
+        shares: &crate::storage::model::EncryptedDkgShares,
+    ) -> Result<(), crate::error::Error> {
+        let mut tx = self.tx.lock().await;
+        PgWrite::write_encrypted_dkg_shares(tx.as_mut(), shares).await
+    }
+
+    async fn write_rotate_keys_transaction(
+        &self,
+        key_rotation: &crate::storage::model::KeyRotationEvent,
+    ) -> Result<(), crate::error::Error> {
+        let mut tx = self.tx.lock().await;
+        PgWrite::write_rotate_keys_transaction(tx.as_mut(), key_rotation).await
+    }
+
+    async fn write_withdrawal_reject_event(
+        &self,
+        event: &crate::storage::model::WithdrawalRejectEvent,
+    ) -> Result<(), crate::error::Error> {
+        let mut tx = self.tx.lock().await;
+        PgWrite::write_withdrawal_reject_event(tx.as_mut(), event).await
+    }
+
+    async fn write_withdrawal_accept_event(
+        &self,
+        event: &crate::storage::model::WithdrawalAcceptEvent,
+    ) -> Result<(), crate::error::Error> {
+        let mut tx = self.tx.lock().await;
+        PgWrite::write_withdrawal_accept_event(tx.as_mut(), event).await
+    }
+
+    async fn write_completed_deposit_event(
+        &self,
+        event: &crate::storage::model::CompletedDepositEvent,
+    ) -> Result<(), crate::error::Error> {
+        let mut tx = self.tx.lock().await;
+        PgWrite::write_completed_deposit_event(tx.as_mut(), event).await
+    }
+
+    async fn write_tx_output(
+        &self,
+        output: &crate::storage::model::TxOutput,
+    ) -> Result<(), crate::error::Error> {
+        let mut tx = self.tx.lock().await;
+        PgWrite::write_tx_output(tx.as_mut(), output).await
+    }
+
+    async fn write_withdrawal_tx_output(
+        &self,
+        output: &crate::storage::model::WithdrawalTxOutput,
+    ) -> Result<(), crate::error::Error> {
+        let mut tx = self.tx.lock().await;
+        PgWrite::write_withdrawal_tx_output(tx.as_mut(), output).await
+    }
+
+    async fn write_tx_prevout(
+        &self,
+        prevout: &crate::storage::model::TxPrevout,
+    ) -> Result<(), crate::error::Error> {
+        let mut tx = self.tx.lock().await;
+        PgWrite::write_tx_prevout(tx.as_mut(), prevout).await
+    }
+
+    async fn write_bitcoin_txs_sighashes(
+        &self,
+        sighashes: &[crate::storage::model::BitcoinTxSigHash],
+    ) -> Result<(), crate::error::Error> {
+        let mut tx = self.tx.lock().await;
+        PgWrite::write_bitcoin_txs_sighashes(tx.as_mut(), sighashes).await
+    }
+
+    async fn write_bitcoin_withdrawals_outputs(
+        &self,
+        withdrawals_outputs: &[crate::storage::model::BitcoinWithdrawalOutput],
+    ) -> Result<(), crate::error::Error> {
+        let mut tx = self.tx.lock().await;
+        PgWrite::write_bitcoin_withdrawals_outputs(tx.as_mut(), withdrawals_outputs).await
+    }
+
+    async fn revoke_dkg_shares<X>(&self, aggregate_key: X) -> Result<bool, crate::error::Error>
+    where
+        X: Into<crate::keys::PublicKeyXOnly> + Send,
+    {
+        let mut tx = self.tx.lock().await;
+        PgWrite::revoke_dkg_shares(tx.as_mut(), aggregate_key).await
+    }
+
+    async fn verify_dkg_shares<X>(&self, aggregate_key: X) -> Result<bool, crate::error::Error>
+    where
+        X: Into<crate::keys::PublicKeyXOnly> + Send,
+    {
+        let mut tx = self.tx.lock().await;
+        PgWrite::verify_dkg_shares(tx.as_mut(), aggregate_key).await
     }
 }

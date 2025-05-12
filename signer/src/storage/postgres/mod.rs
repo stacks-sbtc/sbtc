@@ -1,17 +1,20 @@
 //! Postgres storage implementation.
 
 use bitcoin::OutPoint;
+use tokio::sync::Mutex;
 
 use crate::{
     bitcoin::utxo::SignerUtxo,
     keys::{PublicKey, PublicKeyXOnly},
 };
 
-use super::model::{self, BitcoinBlockHeight, StacksBlockHeight};
+use super::{
+    TransactionHandle,
+    model::{self, BitcoinBlockHeight, StacksBlockHeight},
+};
 
 mod read;
 mod store;
-mod transaction;
 mod write;
 
 pub use store::PgStore;
@@ -98,5 +101,40 @@ impl From<PgSignerUtxo> for SignerUtxo {
             amount: pg_txo.amount,
             public_key: pg_txo.aggregate_key.into(),
         }
+    }
+}
+
+/// Represents an active PostgreSQL transaction.
+/// Implements DbRead and DbWrite to allow operations within the transaction.
+pub struct PgTransaction<'a> {
+    /// The underlying transaction.
+    pub tx: Mutex<sqlx::PgTransaction<'a>>,
+}
+
+impl<'a> PgTransaction<'a> {
+    pub(super) fn new(tx: sqlx::Transaction<'a, sqlx::Postgres>) -> Self {
+        Self { tx: Mutex::new(tx) }
+    }
+}
+
+impl TransactionHandle for PgTransaction<'_> {
+    async fn commit(self) -> Result<(), crate::error::Error> {
+        let tx = self.tx.into_inner();
+
+        tx.commit()
+            .await
+            .map_err(crate::error::Error::SqlxCommitTransaction)?;
+
+        Ok(())
+    }
+
+    async fn rollback(self) -> Result<(), crate::error::Error> {
+        let tx = self.tx.into_inner();
+
+        tx.rollback()
+            .await
+            .map_err(crate::error::Error::SqlxRollbackTransaction)?;
+
+        Ok(())
     }
 }
