@@ -1,7 +1,10 @@
 import logging
 from datetime import datetime
 from itertools import chain, groupby
+from json import JSONDecodeError
 from typing import Iterable
+
+from requests.exceptions import RequestException, JSONDecodeError
 
 from ..clients import PrivateEmilyAPI, MempoolAPI
 from ..models import (
@@ -218,24 +221,26 @@ class DepositProcessor:
         """
         updates = []
 
-        # Get the current time
         current_time = int(datetime.now().timestamp())
 
-        long_pending_txs = [
-            tx
-            for tx in enriched_deposits
+        long_pending_txs = []
+        for tx in enriched_deposits:
             # Only check pending transactions
-            if tx.status == RequestStatus.PENDING.value
+            if tx.status != RequestStatus.PENDING.value:
+                continue
             # that we can't find via the mempool API (it might have been dropped)
-            and not tx.in_mempool
-            # and have been pending for too long
-            and current_time - tx.deposit_last_update > settings.MAX_UNCONFIRMED_TIME
-        ]
+            if tx.in_mempool:
+                continue
 
-        if not long_pending_txs:
-            return updates
-
-        logger.info(f"Found {len(long_pending_txs)} long-pending transactions to mark as FAILED")
+            try:
+                # and have been pending for too long
+                if current_time - tx.deposit_last_update > settings.MAX_UNCONFIRMED_TIME:
+                    long_pending_txs.append(tx)
+            except (RequestException, ValueError, JSONDecodeError) as e:
+                logger.warning(
+                    f"Could not check pending status for deposit {tx.bitcoin_txid} due to "
+                    f"API error fetching block {tx.last_update_block_hash}: {e}. Skipping."
+                )
 
         for tx in long_pending_txs:
             logger.info(f"Marking long-pending transaction {tx.bitcoin_txid} as FAILED")
@@ -248,6 +253,7 @@ class DepositProcessor:
                 )
             )
 
+        logger.info(f"Found {len(long_pending_txs)} long-pending transactions to mark as FAILED")
         return updates
 
     def update_deposits(self) -> None:
