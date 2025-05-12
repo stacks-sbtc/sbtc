@@ -54,7 +54,6 @@ use clarity::vm::types::BuffData;
 use clarity::vm::types::SequenceData;
 use fake::Fake as _;
 use fake::Faker;
-use rand::SeedableRng;
 use rand::seq::IteratorRandom;
 
 use super::context::TestContext;
@@ -184,8 +183,7 @@ where
     pub async fn assert_processes_withdrawals(mut self) {
         // Setup network and signer info
 
-        // TODO(#1590): fix this test for other seeds and use `get_rng()`
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
         let context = self.context.clone();
         let storage = context.get_storage();
@@ -213,6 +211,42 @@ where
             prevouts: Vec::new(),
         };
         test_data.push_bitcoin_txs(&bitcoin_chain_tip, vec![tx_info], &signer_script_pubkeys);
+
+        // Also ensure one valid withdrawal exists for test consistency
+        let stacks_blocks = test_data
+            .stacks_blocks
+            .iter()
+            .filter_map(|b| {
+                if b.bitcoin_anchor == bitcoin_chain_tip.block_hash {
+                    Some(b.block_hash)
+                } else {
+                    None
+                }
+            })
+            .collect::<HashSet<_>>();
+        let mut withdrawal = test_data
+            .withdraw_requests
+            .iter()
+            .find(|w| stacks_blocks.contains(&w.block_hash))
+            .unwrap()
+            .clone();
+
+        let mut withdrawal_votes = test_data
+            .withdraw_signers
+            .iter()
+            .filter(|ws| ws.qualified_id() == withdrawal.qualified_id())
+            .cloned()
+            .collect::<Vec<_>>();
+
+        withdrawal.request_id *= 100;
+        withdrawal_votes.iter_mut().for_each(|ws| {
+            ws.is_accepted = true;
+            ws.request_id = withdrawal.request_id;
+        });
+
+        test_data.withdraw_requests.push(withdrawal);
+        test_data.withdraw_signers.append(&mut withdrawal_votes);
+
         test_data.remove(original_test_data);
         self.write_test_data(&test_data).await;
 
@@ -287,7 +321,7 @@ where
             .saturating_sub(crate::WITHDRAWAL_BLOCKS_EXPIRY)
             .saturating_add(crate::WITHDRAWAL_EXPIRY_BUFFER);
 
-        // Assert that there are some withdrawals in storage while get_pending_requests return 0 withdrawals
+        // Assert that there are some withdrawals for test consistency
         assert!(!withdrawals_in_storage.is_empty());
         for withdrawal in withdrawals_in_storage {
             if withdrawal.bitcoin_block_height > max_processable_height {
