@@ -7,9 +7,9 @@
 //! allowing the signer to use a Postgres database to store data.
 
 #[cfg(any(test, feature = "testing"))]
-pub mod in_memory;
+pub mod memory;
 pub mod model;
-pub mod postgres;
+pub mod pgsql;
 pub mod sqlx;
 pub mod util;
 

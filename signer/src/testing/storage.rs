@@ -6,7 +6,7 @@ use std::time::Duration;
 use crate::storage::model::{
     BitcoinBlock, BitcoinBlockHash, BitcoinBlockRef, StacksBlock, StacksBlockHash,
 };
-use crate::storage::postgres::PgStore;
+use crate::storage::pgsql::PgStore;
 use crate::storage::{DbRead, DbWrite};
 
 pub mod model;

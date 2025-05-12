@@ -4,7 +4,7 @@ use crate::{
     error::Error,
     storage::{
         model::{self},
-        postgres::PGSQL_MIGRATIONS,
+        pgsql::PGSQL_MIGRATIONS,
     },
 };
 use sqlx::Executor;

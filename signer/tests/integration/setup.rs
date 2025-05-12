@@ -53,7 +53,7 @@ use signer::storage::model::BitcoinWithdrawalOutput;
 use signer::storage::model::DkgSharesStatus;
 use signer::storage::model::EncryptedDkgShares;
 use signer::storage::model::QualifiedRequestId;
-use signer::storage::postgres::PgStore;
+use signer::storage::pgsql::PgStore;
 use signer::testing::context::TestContext;
 use signer::testing::context::*;
 use signer::testing::dummy::Unit;

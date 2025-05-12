@@ -1,8 +1,10 @@
 //! In-memory storage module for testing.
 
-mod memory;
+mod read;
+mod store;
 mod transaction;
+mod write;
 
-pub use memory::SharedStore;
-pub use memory::Store;
+pub use store::SharedStore;
+pub use store::Store;
 pub use transaction::InMemoryTransaction;

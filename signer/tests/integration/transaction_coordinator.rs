@@ -77,7 +77,7 @@ use signer::storage::model::BitcoinTxSigHash;
 use signer::storage::model::DkgSharesStatus;
 use signer::storage::model::StacksTxId;
 use signer::storage::model::WithdrawalRequest;
-use signer::storage::postgres::PgStore;
+use signer::storage::pgsql::PgStore;
 use signer::testing::IterTestExt;
 use signer::testing::stacks::DUMMY_SORTITION_INFO;
 use signer::testing::stacks::DUMMY_TENURE_INFO;
