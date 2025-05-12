@@ -109,12 +109,12 @@ integration-env-up-ci: emily-cdk-synth
 		LOCAL_LAMBDA_PATH=empty.zip \
 		DEPLOYER_ADDRESS=SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS \
 		python3 docker/sbtc/emily-aws-setup/initialize.py
-	cargo $(CARGO_FLAGS) build --bin emily-server
+	cargo $(CARGO_FLAGS) build --bin emily-server --features "testing"
 	AWS_ACCESS_KEY_ID=xxxxxxxxxxxx \
 		AWS_SECRET_ACCESS_KEY=xxxxxxxxxxxx \
 		AWS_REGION=us-west-2 \
 		DEPLOYER_ADDRESS=SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS \
-		cargo $(CARGO_FLAGS) run --bin emily-server -- \
+		cargo $(CARGO_FLAGS) run --bin emily-server --features "testing" -- \
 			--host 127.0.0.1 --port 3031 --dynamodb-endpoint http://localhost:8000 > ./target/emily-server.log 2>&1 &
 
 integration-env-down-ci:
