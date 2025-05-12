@@ -823,7 +823,7 @@ class TestDepositProcessor(TestDepositProcessorBase):
             },
         )
         # mock deposit time
-        long_pending_enriched.deposit_last_update = self.current_time - settings.MAX_UNCONFIRMED_TIME
+        long_pending_enriched.deposit_last_update = self.current_time - settings.MAX_UNCONFIRMED_TIME - 1
         mock_enrich.return_value = [
             expired_deposit_enriched,
             active_deposit_enriched,
