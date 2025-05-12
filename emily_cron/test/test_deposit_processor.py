@@ -423,7 +423,9 @@ class TestDepositProcessorWithRbf(TestDepositProcessorBase):
             txid="long_pending_tx",
             confirmed_height=None,
             lock_time=0,
-            deposit_last_update=int(datetime.now().timestamp()) - settings.MAX_UNCONFIRMED_TIME - 3600,
+            deposit_last_update=int(datetime.now().timestamp())
+            - settings.MAX_UNCONFIRMED_TIME
+            - 3600,
             status=RequestStatus.PENDING.value,
         )
 
@@ -823,7 +825,9 @@ class TestDepositProcessor(TestDepositProcessorBase):
             },
         )
         # mock deposit time
-        long_pending_enriched.deposit_last_update = self.current_time - settings.MAX_UNCONFIRMED_TIME - 1
+        long_pending_enriched.deposit_last_update = (
+            self.current_time - settings.MAX_UNCONFIRMED_TIME - 1
+        )
         mock_enrich.return_value = [
             expired_deposit_enriched,
             active_deposit_enriched,
