@@ -224,10 +224,12 @@ class DepositProcessor:
         long_pending_txs = [
             tx
             for tx in enriched_deposits
-            if tx.status == RequestStatus.PENDING.value  # Only check pending transactions
-            and not tx.in_mempool  # that we can't find via the mempool API (it might have been dropped)
-            and current_time - tx.deposit_time
-            >= settings.MAX_UNCONFIRMED_TIME  # and has been pending for too long
+            # Only check pending transactions
+            if tx.status == RequestStatus.PENDING.value
+            # that we can't find via the mempool API (it might have been dropped)
+            and not tx.in_mempool
+            # and have been pending for too long
+            and current_time - tx.deposit_time > settings.MAX_UNCONFIRMED_TIME
         ]
 
         if not long_pending_txs:
