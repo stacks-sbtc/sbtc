@@ -421,7 +421,7 @@ impl<C: Context, B> BlockObserver<C, B> {
         // The first time, we get all sweep transactions with inputs that
         // we know about. However, we could have locked the UTXO with a new
         // scriptPubKey, and we have no way of knowing that ahead of time.
-        // The first pass over, will populate the database with the new
+        // The first pass over will populate the database with the new
         // scriptPubKeys.
         self.extract_sbtc_transactions_inner(block_hash, txs)
             .await?;
@@ -445,9 +445,9 @@ impl<C: Context, B> BlockObserver<C, B> {
         txs: &[BitcoinTxInfo],
     ) -> Result<(), Error> {
         let db = self.context.get_storage_mut();
-        // When a signer is not part of the bootstrapa signing set but is
+        // When a signer is not part of the bootstrap signing set but is
         // joining the set as a new signer, it will not have the signers
-        // original scriptPubKey in its database, so it reles on the config
+        // original scriptPubKey in its database, so it relies on the config
         // to inform them of what it is.
         let bootstrap_script_pubkey = self
             .context

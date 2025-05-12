@@ -684,8 +684,8 @@ fn generate_deposit_request<R: rand::Rng>(
 ///
 /// All three transactions should be picked up so long as we know the
 /// scriptPubKey of the signers bootstrap UTXO. Note that we do not need to
-/// worry about the signers scriptPubKey changing more than particular once
-/// because that case is impossible.
+/// worry about the signers scriptPubKey changing more than once because
+/// that case is impossible.
 #[tokio::test]
 async fn block_observer_picks_up_chained_unordered_sweeps() {
     let (rpc, faucet) = regtest::initialize_blockchain();
