@@ -33,6 +33,7 @@ use fake::Faker;
 use futures::StreamExt as _;
 use lru::LruCache;
 use rand::rngs::OsRng;
+
 use sbtc::testing::regtest;
 use sbtc::testing::regtest::AsUtxo as _;
 use sbtc::testing::regtest::Recipient;
@@ -48,6 +49,7 @@ use signer::message::Payload;
 use signer::network::MessageTransfer;
 use signer::storage::model::WithdrawalTxOutput;
 use signer::testing::get_rng;
+
 use testing_emily_client::apis::chainstate_api;
 use testing_emily_client::apis::testing_api;
 use testing_emily_client::apis::withdrawal_api;
@@ -4708,4 +4710,108 @@ mod get_eligible_pending_withdrawal_requests {
 
         testing::storage::drop_db(db).await;
     }
+}
+
+// This test checks that the coordinator attempts to fulfill its
+// other duties if DKG encounters an error but there's an existing
+// aggregate key to fallback on.
+#[test_log::test(tokio::test)]
+async fn should_handle_dkg_coordination_failure() {
+    let mut rng = get_rng();
+    let mut context = TestContext::builder()
+        .with_in_memory_storage()
+        .with_mocked_clients()
+        .build();
+
+    let storage = context.get_storage_mut();
+
+    // Create a bitcoin block to serve as chain tip
+    let bitcoin_block: model::BitcoinBlock = Faker.fake_with_rng(&mut rng);
+    storage.write_bitcoin_block(&bitcoin_block).await.unwrap();
+
+    // Get chain tip reference
+    let chain_tip = storage
+        .get_bitcoin_canonical_chain_tip_ref()
+        .await
+        .unwrap()
+        .unwrap();
+
+    // Create a set of signer public keys and update the context state
+    let mut signer_keys = BTreeSet::new();
+    for _ in 0..3 {
+        // Create 3 signers
+        let private_key = PrivateKey::new(&mut rng);
+        let public_key = PublicKey::from_private_key(&private_key);
+        signer_keys.insert(public_key);
+    }
+    context
+        .state()
+        .update_current_signer_set(signer_keys.clone());
+
+    // Mock the stacks client to handle contract source checks
+    context
+        .with_stacks_client(|client| {
+            client.expect_get_contract_source().returning(|_, _| {
+                Box::pin(async {
+                    Ok(ContractSrcResponse {
+                        source: String::new(),
+                        publish_height: 1,
+                        marf_proof: None,
+                    })
+                })
+            });
+        })
+        .await;
+
+    // Verify DKG should run
+    assert!(
+        transaction_coordinator::should_coordinate_dkg(&context, &chain_tip)
+            .await
+            .unwrap(),
+        "DKG should be triggered since no shares exist yet"
+    );
+
+    // Create coordinator with test parameters using SignerNetwork::single
+    let network = SignerNetwork::single(&context);
+    let mut coordinator = TxCoordinatorEventLoop {
+        context: context.clone(),
+        network: network.spawn(),
+        private_key: PrivateKey::new(&mut rng),
+        threshold: 3,
+        context_window: 5,
+        signing_round_max_duration: std::time::Duration::from_secs(5),
+        bitcoin_presign_request_max_duration: std::time::Duration::from_secs(5),
+        // short be short enough to broadcast, yet fail
+        dkg_max_duration: Duration::from_millis(10),
+        is_epoch3: true,
+    };
+
+    // We're verifying that the coordinator is currently
+    // processing requests correctly. Since we previously checked
+    // that 'should_coordinate_dkg' will trigger and we set the
+    // 'dkg_max_duration' to 10 milliseconds we expect that
+    // DKG will run & fail
+    let result = coordinator.process_new_blocks().await;
+    assert!(
+        result.is_ok(),
+        "process_new_blocks should complete successfully even with DKG failure"
+    );
+
+    // Here we check that DKG ran & correctly failed by fetching
+    // the latest DKG shares from storage. We test it failed
+    // by asserting that the latest row is_none()
+    let dkg_shares = storage.get_latest_encrypted_dkg_shares().await.unwrap();
+    assert!(
+        dkg_shares.is_none(),
+        "DKG shares should not exist since DKG failed to complete due to timeout"
+    );
+
+    // Verify that we can still process blocks after DKG failure,
+    // this final assert specifically checks that blocks are still
+    // being processed since there was an aggregate key to fallback on
+    let result = coordinator.process_new_blocks().await;
+    assert!(
+        result.is_ok(),
+        "Should be able to continue processing blocks after DKG failure"
+    );
 }
