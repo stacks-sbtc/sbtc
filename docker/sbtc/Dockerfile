@@ -22,6 +22,12 @@ WORKDIR /code/sbtc
 ARG GIT_BRANCH=main
 RUN git checkout $GIT_BRANCH
 
+# Install uv from Astral's official script
+RUN curl -Ls https://astral.sh/uv/install.sh | sh
+
+# Add installed uv to PATH
+ENV PATH="/root/.cargo/bin:/root/.local/bin:$PATH"
+
 # Run an install that we'll cache the result of and then build the code
 # only install pnpm dependencies because we don't need the python venvs.
 RUN make install-pnpm && make build
