@@ -37,6 +37,7 @@ use sbtc::testing::regtest::AsUtxo;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::to_value;
+use signer::bitcoin::BitcoinInteract;
 use signer::bitcoin::utxo::DepositRequest;
 use signer::error::Error;
 use signer::stacks::contracts::SmartContract;
@@ -175,6 +176,134 @@ async fn process_blocks_simple_fork() {
 
     block_observer_handle.abort();
     testing::storage::drop_db(db).await;
+}
+
+/// Test checking `getrawtransaction` behaviour after a fork
+#[test_log::test(tokio::test)]
+async fn getrawtransaction_simple_fork() {
+    // We don't really need a context, we just need the bitcoin client
+    let ctx = TestContext::builder()
+        .with_in_memory_storage()
+        .with_first_bitcoin_core_client()
+        .with_mocked_stacks_client()
+        .with_mocked_emily_client()
+        .build();
+    let bitcoin = ctx.get_bitcoin_client();
+
+    let (rpc, faucet) = regtest::initialize_blockchain_devenv();
+
+    // Start from a clean mempool
+    faucet.generate_block();
+
+    // Prepare the UTXO used by the tx
+    let utxo_outpoint = &faucet.send_to(10_000, &faucet.address);
+    faucet.generate_block();
+
+    let utxos = faucet.get_utxos(None);
+    let utxo = utxos.iter().find(|u| u.txid == utxo_outpoint.txid).unwrap();
+
+    // Create a tx spending the UTXO
+    let mut tx = Transaction {
+        version: Version::ONE,
+        lock_time: LockTime::ZERO,
+        input: vec![TxIn {
+            previous_output: utxo.outpoint(),
+            sequence: Sequence::ZERO,
+            script_sig: ScriptBuf::new(),
+            witness: Witness::new(),
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(9_000),
+            script_pubkey: faucet.address.script_pubkey(),
+        }],
+    };
+    let input_index = 0;
+    let keypair = &faucet.keypair;
+    match faucet.address.address_type().unwrap() {
+        AddressType::P2wpkh => {
+            regtest::p2wpkh_sign_transaction(&mut tx, input_index, utxo, keypair)
+        }
+        AddressType::P2tr => {
+            regtest::p2tr_sign_transaction(&mut tx, input_index, &[utxo.clone()], keypair)
+        }
+        _ => unimplemented!(),
+    };
+    rpc.send_raw_transaction(&tx).unwrap();
+    let txid = &tx.compute_txid();
+
+    // The tx should be in mempool
+    let tx = bitcoin.get_tx(txid).await.unwrap().unwrap();
+    assert!(tx.confirmations.is_none());
+
+    let block_1a = faucet.generate_block();
+
+    // And now it should be confirmed
+    let tx = bitcoin.get_tx(txid).await.unwrap().unwrap();
+    assert_eq!(tx.confirmations, Some(1));
+
+    // Now we fork by invalidating the tip and creating a 2 blocks branch
+    rpc.invalidate_block(&block_1a).unwrap();
+
+    // As it's invalidated, the tx is back to mempool
+    let tx = bitcoin.get_tx(txid).await.unwrap().unwrap();
+    assert!(tx.confirmations.is_none());
+
+    // And we send a new tx invalidating the previous one
+    let mut tx = Transaction {
+        version: Version::ONE,
+        lock_time: LockTime::ZERO,
+        input: vec![TxIn {
+            previous_output: utxo.outpoint(),
+            sequence: Sequence::ZERO,
+            script_sig: ScriptBuf::new(),
+            witness: Witness::new(),
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(8_000), // higher fee to be accepted as RBF
+            script_pubkey: faucet.address.script_pubkey(),
+        }],
+    };
+    match faucet.address.address_type().unwrap() {
+        AddressType::P2wpkh => {
+            regtest::p2wpkh_sign_transaction(&mut tx, input_index, utxo, keypair)
+        }
+        AddressType::P2tr => {
+            regtest::p2tr_sign_transaction(&mut tx, input_index, &[utxo.clone()], keypair)
+        }
+        _ => unimplemented!(),
+    };
+    rpc.send_raw_transaction(&tx).unwrap();
+    let invalidating_txid = &tx.compute_txid();
+
+    // The invalidating tx isn't confirmed yet
+    let invalidating_tx = bitcoin.get_tx(invalidating_txid).await.unwrap().unwrap();
+    assert!(invalidating_tx.confirmations.is_none());
+
+    // And the original one also is back to unconfirmed
+    let tx = bitcoin.get_tx(txid).await.unwrap().unwrap();
+    assert_eq!(tx.confirmations, Some(0));
+
+    let block_1b = faucet.generate_block();
+    assert_ne!(block_1a, block_1b);
+
+    // The invalidating tx should be confirmed now
+    let invalidating_tx = bitcoin.get_tx(invalidating_txid).await.unwrap().unwrap();
+    assert_eq!(invalidating_tx.confirmations, Some(1));
+
+    // And the original tx is still unconfirmed
+    let tx = bitcoin.get_tx(txid).await.unwrap().unwrap();
+    assert_eq!(tx.confirmations, Some(0));
+
+    // One more block to make this the canonical one
+    faucet.generate_block();
+
+    // The invalidating tx is still very much confirmed
+    let invalidating_tx = bitcoin.get_tx(invalidating_txid).await.unwrap().unwrap();
+    assert_eq!(invalidating_tx.confirmations, Some(2));
+
+    // And the original tx is still unconfirmed
+    let tx = bitcoin.get_tx(txid).await.unwrap().unwrap();
+    assert_eq!(tx.confirmations, Some(0));
 }
 
 /// Same as `make_deposit_request`, but with a recipient (and no dust change)
@@ -396,7 +525,6 @@ async fn orphaned_deposit() {
         recipient.clone().into(),
     );
     rpc.send_raw_transaction(&deposit_tx).unwrap();
-    let block_deposit_tx = faucet.generate_block();
 
     let emily_request = CreateDepositRequestBody {
         bitcoin_tx_output_index: deposit_request.outpoint.vout,
@@ -410,11 +538,17 @@ async fn orphaned_deposit() {
         .await
         .expect("cannot create emily deposit");
 
+    let block_deposit_tx = faucet.generate_block();
+
     // Wait for the signers to process the deposit
     tokio::time::sleep(Duration::from_secs(10)).await;
     faucet.generate_block();
 
     // Then wait for the signers to mint the deposit
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    faucet.generate_block();
+
+    // Then give some extra slack to make the test more stable
     tokio::time::sleep(Duration::from_secs(10)).await;
     faucet.generate_block();
 
@@ -441,8 +575,8 @@ async fn orphaned_deposit() {
     //  - we invalidate the deposit tx block via rpc
     rpc.invalidate_block(&block_deposit_tx).unwrap();
 
-    //  - we invalidate the deposit tx by spending its vin
-    let invlidating_deposit_tx = create_nop_transaction(
+    //  - we create a tx invalidating the deposit tx by spending its vin
+    let invalidating_deposit_tx = create_nop_transaction(
         &depositor,
         depositor_utxo.clone(),
         // must be more than the package (deposit tx + sweep) in mempool to be
@@ -450,13 +584,14 @@ async fn orphaned_deposit() {
         Amount::from_sat(deposit_amount - 1000),
     )
     .await;
-    let invlidating_deposit_txid = rpc.send_raw_transaction(&invlidating_deposit_tx).unwrap();
+    let invalidating_deposit_txid = rpc.send_raw_transaction(&invalidating_deposit_tx).unwrap();
 
+    //  - we generate a block including the invalidating tx
     rpc.call::<GenerateBlockJson>(
         "generateblock",
         &[
             faucet.address.to_string().into(),
-            to_value(&[invlidating_deposit_txid.to_string()]).unwrap(),
+            to_value(&[invalidating_deposit_txid.to_string()]).unwrap(),
         ],
     )
     .unwrap();
@@ -468,14 +603,18 @@ async fn orphaned_deposit() {
         faucet.generate_block();
     }
 
-    // Check that the recipient did get the expected sBTC
+    // Check that the recipient no longer has sBTC after the fork
     let balance = get_sbtc_balance(&stacks, &deployer, &recipient.into())
         .await
         .unwrap();
     dbg!(&balance);
+    // NOTE: this assert usually fails, as stacks keeps returning the previous
+    // balance. But the reason seems to be that the stacks miner actually
+    // stopped mining, and even generating extra bitcoin blocks the chain
+    // doesn't unstall.
     assert_eq!(balance.to_sat(), 0);
 
-    // Ensure the previously confirmed tx now is now failed
+    // Ensure the previously confirmed tx is now failed
     let deposit_tx =
         &stacks_api_call::<serde_json::Value>(&format!("/extended/v1/tx/{deposit_txid}")).await;
     dbg!(deposit_tx);

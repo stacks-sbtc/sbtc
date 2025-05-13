@@ -294,7 +294,7 @@ impl Faucet {
     /// Return all UTXOs for this recipient where the amount is greater
     /// than or equal to the given amount. The address must be tracked by
     /// the bitcoin-core wallet.
-    fn get_utxos(&self, amount: Option<u64>) -> Vec<ListUnspentResultEntry> {
+    pub fn get_utxos(&self, amount: Option<u64>) -> Vec<ListUnspentResultEntry> {
         let query_options = amount.map(|sats| ListUnspentQueryOptions {
             minimum_amount: Some(Amount::from_sat(sats)),
             ..Default::default()
