@@ -46,7 +46,7 @@ use signer::storage::model::TxOutput;
 use signer::storage::model::TxOutputType;
 use signer::storage::model::TxPrevout;
 use signer::storage::model::TxPrevoutType;
-use signer::storage::postgres::PgStore;
+use signer::storage::pgsql::PgStore;
 use signer::testing::stacks::DUMMY_SORTITION_INFO;
 use signer::testing::stacks::DUMMY_TENURE_INFO;
 use testing_emily_client::apis::testing_api;
