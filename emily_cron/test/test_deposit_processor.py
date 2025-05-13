@@ -32,8 +32,8 @@ ACCEPTED_UTXO_TX_OUTSPENT = TRANSACTION_FIXTURES["accepted_deposit"]["utxo_outsp
 INFLIGHT_UTXO_STATUS = TRANSACTION_FIXTURES["inflight_utxo"]
 
 
-class TestExpiredLocktimeProcessor(unittest.TestCase):
-    """Tests for the process_expired_locktime method."""
+class TestDepositProcessorBase(unittest.TestCase):
+    """Base class for DepositProcessor tests with common setup."""
 
     def setUp(self):
         self.processor = DepositProcessor()
@@ -42,11 +42,27 @@ class TestExpiredLocktimeProcessor(unittest.TestCase):
         # Mock blockchain state
         self.bitcoin_chaintip_height = 1000
 
-        settings.MIN_BLOCK_CONFIRMATIONS = 6
+    def _create_mock_deposit(self, txid, confirmed_height, lock_time, rbf_txids=None):
+        """Helper method to create mock deposits."""
+        deposit = MagicMock(spec=EnrichedDepositInfo)
+        deposit.bitcoin_txid = txid
+        deposit.bitcoin_tx_output_index = 0
+        deposit.confirmed_height = confirmed_height
+        deposit.lock_time = lock_time
+        deposit.rbf_txids = rbf_txids or []
+        deposit.is_expired = lambda x: EnrichedDepositInfo.is_expired(deposit, x)
+        return deposit
+
+
+class TestExpiredLocktimeProcessor(TestDepositProcessorBase):
+    """Tests for the process_expired_locktime method."""
+
+    def setUp(self):
+        super().setUp()
 
         # Create test deposits
-        self.confirmed_expired_unspent = self._create_mock_deposit(
-            txid="confirmed_expired_unspent",
+        self.confirmed_expired = self._create_mock_deposit(
+            txid="confirmed_expired",
             confirmed_height=890,  # Confirmed 110 blocks ago (890 + 50 + 6 = 946 < 1000)
             lock_time=50,  # Locktime of 50 blocks
         )
@@ -63,22 +79,6 @@ class TestExpiredLocktimeProcessor(unittest.TestCase):
             lock_time=20,
         )
 
-    def _create_mock_deposit(
-        self,
-        txid,
-        confirmed_height,
-        lock_time,
-    ):
-        deposit = MagicMock(spec=EnrichedDepositInfo)
-        deposit.bitcoin_txid = txid
-        deposit.bitcoin_tx_output_index = 0
-        deposit.confirmed_height = confirmed_height
-        deposit.lock_time = lock_time
-
-        # Mock the is_expired method to use the real logic
-        deposit.is_expired = lambda x: EnrichedDepositInfo.is_expired(deposit, x)
-        return deposit
-
     def test_no_failures(self):
         """Test case where no deposits should be marked as failed."""
         # Includes active deposits (spent and unspent) and unconfirmed
@@ -94,17 +94,17 @@ class TestExpiredLocktimeProcessor(unittest.TestCase):
         with patch(
             "app.clients.MempoolAPI.get_utxo_status", return_value={"spent": False}
         ) as mock_utxo_status:
-            deposits = [self.confirmed_expired_unspent]
+            deposits = [self.confirmed_expired]
             updates = self.processor.process_expired_locktime(
                 deposits, self.bitcoin_chaintip_height
             )
 
             mock_utxo_status.assert_called_once_with(
-                self.confirmed_expired_unspent.bitcoin_txid,
-                self.confirmed_expired_unspent.bitcoin_tx_output_index,
+                self.confirmed_expired.bitcoin_txid,
+                self.confirmed_expired.bitcoin_tx_output_index,
             )
         self.assertEqual(len(updates), 1, "One transaction should be marked as failed")
-        self.assertEqual(updates[0].bitcoin_txid, "confirmed_expired_unspent")
+        self.assertEqual(updates[0].bitcoin_txid, "confirmed_expired")
         self.assertEqual(updates[0].status, RequestStatus.FAILED.value)
         self.assertTrue("Locktime expired" in updates[0].status_message)
 
@@ -365,42 +365,188 @@ def tearDownModule():
     settings.MIN_BLOCK_CONFIRMATIONS = 6
 
 
-class TestDepositProcessor(unittest.TestCase):
+class TestDepositProcessorWithRbf(TestDepositProcessorBase):
+    """Tests for the DepositProcessor with RBF functionality."""
+
+    def setUp(self):
+        super().setUp()
+        settings.MIN_BLOCK_CONFIRMATIONS = 6
+
+        # Create mock deposits for testing
+        self.expired_locktime = self._create_mock_deposit(
+            txid="expired_locktime_tx",
+            confirmed_height=900,  # Confirmed 100 blocks ago
+            lock_time=50,  # Locktime of 50 blocks
+        )
+
+        self.rbf_original = self._create_mock_deposit(
+            txid="rbf_original_tx",
+            confirmed_height=None,  # Not confirmed
+            lock_time=0,
+            rbf_txids=["rbf_replacement_tx", "rbf_original_tx"],
+        )
+
+        self.rbf_replacement = self._create_mock_deposit(
+            txid="rbf_replacement_tx",
+            confirmed_height=994,  # Confirmed 6 blocks ago
+            lock_time=20,
+            rbf_txids=["rbf_replacement_tx", "rbf_original_tx"],
+        )
+
+    @patch("app.clients.PublicEmilyAPI.fetch_deposits")
+    @patch("app.clients.PrivateEmilyAPI.update_deposits")
+    @patch("app.clients.MempoolAPI.get_utxo_status")
+    @patch("app.clients.MempoolAPI.get_tip_height")
+    def test_update_deposits_workflow_with_rbf(
+        self,
+        mock_btc_tip_height,
+        mock_get_utxo_status,
+        mock_update_deposits,
+        mock_fetch_deposits,
+    ):
+        """Test the complete deposit update workflow with RBF."""
+        # Set up mocks
+        # Ensure chaintip is high enough for rbf_replacement to be considered confirmed
+        mock_btc_tip_height.return_value = self.bitcoin_chaintip_height
+        mock_get_utxo_status.return_value = {"spent": False}
+
+        # Mock the _enrich_deposits method
+        with patch.object(self.processor, "_enrich_deposits") as mock_enrich:
+            # Return our test deposits when enriching
+            mock_enrich.return_value = [
+                self.expired_locktime,
+                self.rbf_original,
+                self.rbf_replacement,
+            ]
+
+            # Run the update_deposits method
+            self.processor.update_deposits()
+            # Verify the correct API calls were made
+            mock_fetch_deposits.assert_any_call(RequestStatus.PENDING)
+            mock_fetch_deposits.assert_any_call(RequestStatus.ACCEPTED)
+
+            # Verify the enrichment was called with both deposits
+            mock_enrich.assert_called_once()
+
+            # Verify the get_utxo_status was called for the expired_locktime deposit
+            mock_get_utxo_status.assert_called_once()
+
+            # Verify the update was called with the correct updates
+            mock_update_deposits.assert_called_once()
+            updates = mock_update_deposits.call_args[0][0]
+
+            # We expect 2 updates: one for expired_locktime_tx and one for rbf_original_tx
+            self.assertEqual(len(updates), 2)
+            # Let's check the actual updates to understand what's happening
+            update_txids = [update.bitcoin_txid for update in updates]
+            self.assertIn(
+                "expired_locktime_tx", update_txids, "Should include expired locktime transaction"
+            )
+            self.assertIn(
+                "rbf_original_tx", update_txids, "Should include RBF original transaction"
+            )
+
+            # Count the updates by type
+            expired_locktime_updates = [
+                u for u in updates if u.bitcoin_txid == "expired_locktime_tx"
+            ]
+            rbf_updates = [u for u in updates if u.bitcoin_txid == "rbf_original_tx"]
+
+            self.assertEqual(
+                len(expired_locktime_updates), 1, "Should have 1 expired locktime update"
+            )
+            self.assertEqual(len(rbf_updates), 1, "Should have 1 RBF update")
+
+            # Check the status messages
+            for update in updates:
+                if update.bitcoin_txid == "expired_locktime_tx":
+                    self.assertTrue("Locktime expired" in update.status_message)
+                elif update.bitcoin_txid == "rbf_original_tx":
+                    self.assertTrue("Replaced by confirmed tx" in update.status_message)
+
+    @patch("app.clients.MempoolAPI.get_transaction")
+    @patch("app.clients.MempoolAPI.check_for_rbf")
+    def test_enrich_deposits_with_rbf(self, mock_check_rbf, mock_get_tx):
+        """Test the deposit enrichment process with RBF."""
+        # Create test deposits
+        deposit1 = self._create_mock_deposit(
+            txid="replacement1",
+            confirmed_height=None,
+            lock_time=10,
+        )
+        deposit2 = self._create_mock_deposit(
+            txid="replacement2",
+            confirmed_height=700000,
+            lock_time=10,
+        )
+
+        # Mock the transaction data returned by the Mempool API
+        tx1_data = {
+            "vin": [{"prevout": {"value": 2000000}}],
+            "vout": [{"scriptpubkey_address": "bc1q...", "value": 1900000}],
+            "fee": 100000,
+            "status": {"block_height": None, "block_time": None},  # Unconfirmed
+        }
+
+        tx2_data = {
+            "vin": [{"prevout": {"value": 2000000}}],
+            "vout": [{"scriptpubkey_address": "bc1q...", "value": 1900000}],
+            "fee": 100000,
+            "status": {"block_height": 700000, "block_time": self.current_time - 3600},  # Confirmed
+        }
+
+        mock_get_tx.side_effect = lambda txid: tx1_data if txid == "replacement1" else tx2_data
+
+        # Mock the RBF check
+        mock_check_rbf.side_effect = lambda txid: (
+            ["replacement1", "replacement2"] if txid == "replacement1" else []
+        )
+
+        # Mock the from_deposit_info method, because MagicMock would not work with asdict
+        with patch("app.models.EnrichedDepositInfo.from_deposit_info") as mock_from_info:
+            # Set up the mock returns
+            def mock_from_info_side_effect(deposit, additional_info):
+                enriched = MagicMock(spec=EnrichedDepositInfo)
+                enriched.bitcoin_txid = deposit.bitcoin_txid
+                enriched.confirmed_height = additional_info.get("confirmed_height")
+                enriched.confirmed_time = additional_info.get("confirmed_time")
+                enriched.fee = additional_info.get("fee")
+                enriched.in_mempool = additional_info.get("in_mempool", False)
+                enriched.rbf_txids = additional_info.get("rbf_txids", [])
+                return enriched
+
+            mock_from_info.side_effect = mock_from_info_side_effect
+
+            # Run the _enrich_deposits method
+            result = self.processor._enrich_deposits([deposit1, deposit2])
+            # Verify the correct methods were called
+            mock_get_tx.assert_any_call("replacement1")
+            mock_get_tx.assert_any_call("replacement2")
+
+            # Verify RBF check was called only for the unconfirmed transaction
+            mock_check_rbf.assert_called_once_with("replacement1")
+
+            # Verify from_deposit_info was called with the correct parameters
+            self.assertEqual(mock_from_info.call_count, 2)
+
+            # Assertions on the configured mock results
+            self.assertEqual(result[0].bitcoin_txid, deposit1.bitcoin_txid)
+            self.assertEqual(result[0].confirmed_height, deposit1.confirmed_height)
+            self.assertEqual(result[0].fee, 100000)
+            self.assertEqual(result[0].in_mempool, True)
+            self.assertEqual(result[0].rbf_txids, ["replacement1", "replacement2"])
+
+            self.assertEqual(result[1].bitcoin_txid, deposit2.bitcoin_txid)
+            self.assertEqual(result[1].confirmed_height, deposit2.confirmed_height)
+            self.assertEqual(result[1].fee, 100000)
+            self.assertEqual(result[1].in_mempool, True)
+            self.assertEqual(result[1].rbf_txids, [])
+
+class TestDepositProcessor(TestDepositProcessorBase):
     """Tests for the DepositProcessor class."""
 
     def setUp(self):
-        self.processor = DepositProcessor()
-        self.current_time = int(datetime.now().timestamp())
-
-        # Mock blockchain state
-        self.bitcoin_chaintip_height = 1000
-        self.stacks_chaintip = BlockInfo(height=100, hash="stx_hash", time=self.current_time)
-
-        # Create mock deposits for testing
-        self.mock_deposits = self._create_test_deposits()
-
-    def _create_test_deposits(self):
-        """Create a set of mock deposits for testing."""
-        # Create a deposit with expired locktime
-        expired_locktime = MagicMock(spec=EnrichedDepositInfo)
-        expired_locktime.bitcoin_txid = "expired_locktime_tx"
-        expired_locktime.bitcoin_tx_output_index = 0
-        expired_locktime.confirmed_height = 890  # Confirmed 110 blocks ago
-        expired_locktime.lock_time = 50  # Locktime of 50 blocks
-        expired_locktime.is_expired = lambda x: EnrichedDepositInfo.is_expired(expired_locktime, x)
-
-        # Create a deposit with non-expired locktime
-        active_locktime = MagicMock(spec=EnrichedDepositInfo)
-        active_locktime.bitcoin_txid = "active_locktime_tx"
-        active_locktime.bitcoin_tx_output_index = 0
-        active_locktime.confirmed_height = 990  # Confirmed 10 blocks ago
-        active_locktime.lock_time = 50  # Locktime of 50 blocks
-        active_locktime.is_expired = lambda x: EnrichedDepositInfo.is_expired(active_locktime, x)
-
-        return {
-            "expired_locktime": expired_locktime,
-            "active_locktime": active_locktime,
-        }
+        super().setUp()
 
     @patch("app.clients.PrivateEmilyAPI.fetch_deposits")
     @patch("app.clients.PrivateEmilyAPI.update_deposits")
@@ -508,7 +654,8 @@ class TestDepositProcessor(unittest.TestCase):
             self.assertEqual(updates[0].status, RequestStatus.FAILED.value)
 
     @patch("app.clients.MempoolAPI.get_transaction")
-    def test_enrich_deposits(self, mock_get_tx):
+    @patch("app.clients.MempoolAPI.check_for_rbf")
+    def test_enrich_deposits(self, mock_check_rbf, mock_get_tx):
         """Test the simplified deposit enrichment process."""
         # Create actual DepositInfo instances for testing asdict
         deposit1 = DepositInfo(
@@ -594,6 +741,8 @@ class TestDepositProcessor(unittest.TestCase):
             },  # Minimal data for deposit4
             "tx5": {"fee": 10000, "status": {"confirmed": False}},  # In-flight
         }.get(txid)
+        # There are no RBF txids in this test
+        mock_check_rbf.side_effect = lambda txid: set()
 
         # Run the _enrich_deposits method
         result = self.processor._enrich_deposits([deposit1, deposit2, deposit3, deposit4, deposit5])

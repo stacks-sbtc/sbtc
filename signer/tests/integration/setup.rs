@@ -399,18 +399,18 @@ impl TestSweepSetup {
     // This is all normal happy path things that need to happen in order to
     // pass validation of a Stacks transaction.
     pub async fn store_happy_path_data(&mut self, db: &PgStore) {
-        self.store_deposit_tx(&db).await;
-        self.store_sweep_tx(&db).await;
-        self.store_dkg_shares(&db).await;
-        self.store_deposit_request(&db).await;
-        self.store_deposit_decisions(&db).await;
-        self.store_withdrawal_request(&db).await;
+        self.store_deposit_tx(db).await;
+        self.store_sweep_tx(db).await;
+        self.store_dkg_shares(db).await;
+        self.store_deposit_request(db).await;
+        self.store_deposit_decisions(db).await;
+        self.store_withdrawal_request(db).await;
     }
 }
 
 /// Fetch all block headers from bitcoin-core and store it in the database.
 pub async fn backfill_bitcoin_blocks(db: &PgStore, rpc: &Client, chain_tip: &bitcoin::BlockHash) {
-    let mut block_header = rpc.get_block_header_info(&chain_tip).unwrap();
+    let mut block_header = rpc.get_block_header_info(chain_tip).unwrap();
 
     // There are no non-coinbase transactions below this height.
     while block_header.height as u64 >= regtest::MIN_BLOCKCHAIN_HEIGHT {
@@ -472,7 +472,7 @@ pub async fn fill_signers_utxo<R: rand::RngCore + ?Sized>(
     // Write the Bitcoin block and transaction to the database.
     db.write_bitcoin_block(&bitcoin_block).await.unwrap();
     db.write_bitcoin_transaction(&model::BitcoinTxRef {
-        block_hash: bitcoin_block.block_hash.into(),
+        block_hash: bitcoin_block.block_hash,
         txid: signer_utxo_txid.into(),
     })
     .await
@@ -507,7 +507,7 @@ pub async fn fill_signers_utxo<R: rand::RngCore + ?Sized>(
     // Write the Bitcoin block and transaction to the database.
     db.write_bitcoin_block(&bitcoin_block).await.unwrap();
     db.write_bitcoin_transaction(&model::BitcoinTxRef {
-        block_hash: bitcoin_block.block_hash.into(),
+        block_hash: bitcoin_block.block_hash,
         txid: signer_utxo_txid.into(),
     })
     .await
@@ -1047,7 +1047,7 @@ impl TestSweepSetup2 {
 
         let bitcoin_tx_ref = BitcoinTxRef {
             txid: sweep.tx_info.txid.into(),
-            block_hash: sweep.block_hash.into(),
+            block_hash: sweep.block_hash,
         };
 
         let block = BitcoinBlock {

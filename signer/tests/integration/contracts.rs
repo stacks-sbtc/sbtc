@@ -119,7 +119,7 @@ pub async fn deploy_smart_contracts() -> &'static SignerStxState {
 
     let signer = SIGNER_STATE
         .get_or_init(|| async {
-            let account_info = client.get_account(&signer_wallet.address()).await.unwrap();
+            let account_info = client.get_account(signer_wallet.address()).await.unwrap();
             signer_wallet.set_nonce(account_info.nonce);
             SignerStxState {
                 wallet: signer_wallet,
@@ -274,7 +274,7 @@ async fn is_deposit_completed_works() {
         deployer: *testing::wallet::WALLET.0.address(),
         sweep_txid: BitcoinTxId::from([0; 32]),
         sweep_block_hash: BitcoinBlockHash::from(chain_tip_info.best_block_hash),
-        sweep_block_height: (chain_tip_info.blocks as u64).into(),
+        sweep_block_height: (chain_tip_info.blocks).into(),
     };
 
     signers.sign_and_submit(&complete_deposit).await;

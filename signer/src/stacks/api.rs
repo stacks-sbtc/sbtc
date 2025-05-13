@@ -1835,7 +1835,7 @@ mod tests {
             .expect(1)
             .create();
 
-        let path = format!("tests/fixtures/stacksapi-v3-sortitions.json");
+        let path = "tests/fixtures/stacksapi-v3-sortitions.json";
         let mut file = std::fs::File::open(path).unwrap();
         let mut buf = Vec::new();
         file.read_to_end(&mut buf).unwrap();

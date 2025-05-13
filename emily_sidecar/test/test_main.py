@@ -7,10 +7,10 @@ from fastapi.testclient import TestClient
 import requests
 
 from app import logging_config
-from app.main import app
-
 
 logging_config.silence_logging()
+
+from app.main import app
 
 
 client = TestClient(app)
@@ -54,7 +54,7 @@ class NewBlockTestCase(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
 
     def test_new_block_invalid_json(self):
-        response = self.app.post("/new_block", data="Not a JSON")
+        response = self.app.post("/new_block", content="Not a JSON")
         self.assertEqual(response.status_code, 422)
         self.assertIn("json_invalid", response.json()["detail"][0]["type"])
 

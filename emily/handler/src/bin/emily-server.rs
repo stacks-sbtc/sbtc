@@ -72,7 +72,7 @@ async fn main() {
     // TODO(389 + 358): Handle config pickup in a way that will only fail for the relevant call.
     let context: EmilyContext = EmilyContext::local_instance(&dynamodb_endpoint)
         .await
-        .unwrap_or_else(|e| panic!("{e}"));
+        .unwrap();
     info!(lambdaContext = ?context);
 
     // Create CORS configuration
