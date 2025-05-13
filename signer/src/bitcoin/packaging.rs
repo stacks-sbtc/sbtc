@@ -749,6 +749,36 @@ mod tests {
         assert!(!bag.can_fit_withdrawal_ids(&large_set));
     }
 
+    use rand::prelude::SliceRandom;
+
+    #[test]
+    fn item_order_matters_in_compute_optimal_packages() {
+        let mut rng = get_rng();
+        let len = rng.gen_range(10..=100) as usize;
+        let mut items = Vec::with_capacity(len);
+        for _ in 0..len {
+            items.push(RequestItem::with_rng(&mut rng));
+        }
+
+        let max_needs_signature = 100;
+        let max_votes_against = 3;
+        let packages1 = compute_optimal_packages(
+            items.clone(),
+            max_votes_against,
+            max_needs_signature,
+        ).collect::<Vec<_>>();
+
+        items.shuffle(&mut rng);
+
+        let packages2 = compute_optimal_packages(
+            items,
+            max_votes_against,
+            max_needs_signature,
+        ).collect::<Vec<_>>();
+        
+        assert_ne!(packages1, packages2);
+    }
+
     /// Tests that bags correctly collect, sort, and deduplicate withdrawal IDs.
     #[test]
     fn test_bag_collects_withdrawal_ids() {
