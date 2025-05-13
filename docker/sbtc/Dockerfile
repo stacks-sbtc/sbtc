@@ -23,7 +23,7 @@ ARG GIT_BRANCH=main
 RUN git checkout $GIT_BRANCH
 
 # Install uv from Astral's official script
-RUN curl -Ls https://astral.sh/uv/install.sh | sh
+RUN curl --proto '=https' --tlsv1.2 -LsSf https://github.com/astral-sh/uv/releases/download/0.7.3/uv-installer.sh | sh
 
 # Add installed uv to PATH
 ENV PATH="/root/.cargo/bin:/root/.local/bin:$PATH"
