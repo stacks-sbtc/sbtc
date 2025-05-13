@@ -7233,7 +7233,7 @@ mod sqlx_transactions {
         let bitcoin_chain = BitcoinChain::default();
         let stacks_chain = StacksChain::new_anchored(&bitcoin_chain);
         let btc_1 = bitcoin_chain.first_block();
-        let stx_a = stacks_chain.first_block(); // Anchored to btc_1 by default in StacksChain
+        let stx_a = stacks_chain.first_block();
 
         // Start transaction
         let tx = db.begin_transaction().await?;
@@ -7259,14 +7259,14 @@ mod sqlx_transactions {
         let bitcoin_chain = BitcoinChain::default();
         let stacks_chain = StacksChain::new_anchored(&bitcoin_chain);
         let btc_1 = bitcoin_chain.first_block();
-        let stx_a = stacks_chain.first_block(); // Anchored to btc_1
+        let stx_a = stacks_chain.first_block();
 
-        // Scope for the transaction
+        // Scope for the transaction. The transaction is dropped at the end of
+        // the scope and should be implicitly rolled-back.
         {
             let tx = db.begin_transaction().await?;
             tx.write_bitcoin_block(btc_1).await?;
             tx.write_stacks_block(stx_a).await?;
-            // tx is dropped here, Drop implementation should trigger implicit rollback
         }
 
         // Verify data is NOT in original store

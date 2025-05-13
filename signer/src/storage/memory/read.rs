@@ -17,7 +17,7 @@ use crate::{
     },
 };
 
-use super::SharedStore;
+use super::{SharedStore, store::InMemoryTransaction};
 
 impl DbRead for SharedStore {
     async fn get_bitcoin_block(
@@ -763,5 +763,363 @@ impl DbRead for SharedStore {
             .collect();
 
         Ok(result)
+    }
+}
+
+impl DbRead for InMemoryTransaction {
+    async fn get_bitcoin_block(
+        &self,
+        block_hash: &model::BitcoinBlockHash,
+    ) -> Result<Option<model::BitcoinBlock>, Error> {
+        self.store.get_bitcoin_block(block_hash).await
+    }
+
+    async fn get_stacks_block(
+        &self,
+        block_hash: &model::StacksBlockHash,
+    ) -> Result<Option<model::StacksBlock>, Error> {
+        self.store.get_stacks_block(block_hash).await
+    }
+
+    async fn get_bitcoin_canonical_chain_tip(
+        &self,
+    ) -> Result<Option<model::BitcoinBlockHash>, Error> {
+        self.store.get_bitcoin_canonical_chain_tip().await
+    }
+
+    async fn get_bitcoin_canonical_chain_tip_ref(
+        &self,
+    ) -> Result<Option<model::BitcoinBlockRef>, Error> {
+        self.store.get_bitcoin_canonical_chain_tip_ref().await
+    }
+
+    async fn get_stacks_chain_tip(
+        &self,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+    ) -> Result<Option<model::StacksBlock>, Error> {
+        self.store.get_stacks_chain_tip(bitcoin_chain_tip).await
+    }
+
+    async fn get_pending_deposit_requests(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+        signer_public_key: &PublicKey,
+    ) -> Result<Vec<model::DepositRequest>, Error> {
+        self.store
+            .get_pending_deposit_requests(chain_tip, context_window, signer_public_key)
+            .await
+    }
+
+    async fn get_pending_accepted_deposit_requests(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+        signatures_required: u16,
+    ) -> Result<Vec<model::DepositRequest>, Error> {
+        self.store
+            .get_pending_accepted_deposit_requests(chain_tip, context_window, signatures_required)
+            .await
+    }
+
+    async fn deposit_request_exists(
+        &self,
+        txid: &model::BitcoinTxId,
+        output_index: u32,
+    ) -> Result<bool, Error> {
+        self.store.deposit_request_exists(txid, output_index).await
+    }
+
+    async fn get_deposit_request_report(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+        txid: &model::BitcoinTxId,
+        output_index: u32,
+        signer_public_key: &PublicKey,
+    ) -> Result<Option<DepositRequestReport>, Error> {
+        self.store
+            .get_deposit_request_report(chain_tip, txid, output_index, signer_public_key)
+            .await
+    }
+
+    async fn get_deposit_signers(
+        &self,
+        txid: &model::BitcoinTxId,
+        output_index: u32,
+    ) -> Result<Vec<model::DepositSigner>, Error> {
+        self.store.get_deposit_signers(txid, output_index).await
+    }
+
+    async fn get_deposit_signer_decisions(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+        signer_public_key: &PublicKey,
+    ) -> Result<Vec<model::DepositSigner>, Error> {
+        self.store
+            .get_deposit_signer_decisions(chain_tip, context_window, signer_public_key)
+            .await
+    }
+
+    async fn get_withdrawal_signer_decisions(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+        signer_public_key: &PublicKey,
+    ) -> Result<Vec<model::WithdrawalSigner>, Error> {
+        self.store
+            .get_withdrawal_signer_decisions(chain_tip, context_window, signer_public_key)
+            .await
+    }
+
+    async fn can_sign_deposit_tx(
+        &self,
+        txid: &model::BitcoinTxId,
+        output_index: u32,
+        signer_public_key: &PublicKey,
+    ) -> Result<Option<bool>, Error> {
+        self.store
+            .can_sign_deposit_tx(txid, output_index, signer_public_key)
+            .await
+    }
+
+    async fn get_withdrawal_signers(
+        &self,
+        request_id: u64,
+        block_hash: &model::StacksBlockHash,
+    ) -> Result<Vec<model::WithdrawalSigner>, Error> {
+        self.store
+            .get_withdrawal_signers(request_id, block_hash)
+            .await
+    }
+
+    async fn get_pending_withdrawal_requests(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+        signer_public_key: &PublicKey,
+    ) -> Result<Vec<model::WithdrawalRequest>, Error> {
+        self.store
+            .get_pending_withdrawal_requests(chain_tip, context_window, signer_public_key)
+            .await
+    }
+
+    async fn get_pending_accepted_withdrawal_requests(
+        &self,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+        stacks_chain_tip: &model::StacksBlockHash,
+        min_bitcoin_height: BitcoinBlockHeight,
+        signature_threshold: u16,
+    ) -> Result<Vec<model::WithdrawalRequest>, Error> {
+        self.store
+            .get_pending_accepted_withdrawal_requests(
+                bitcoin_chain_tip,
+                stacks_chain_tip,
+                min_bitcoin_height,
+                signature_threshold,
+            )
+            .await
+    }
+
+    async fn get_pending_rejected_withdrawal_requests(
+        &self,
+        chain_tip: &model::BitcoinBlockRef,
+        context_window: u16,
+    ) -> Result<Vec<model::WithdrawalRequest>, Error> {
+        self.store
+            .get_pending_rejected_withdrawal_requests(chain_tip, context_window)
+            .await
+    }
+
+    async fn get_withdrawal_request_report(
+        &self,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+        stacks_chain_tip: &model::StacksBlockHash,
+        id: &model::QualifiedRequestId,
+        signer_public_key: &PublicKey,
+    ) -> Result<Option<WithdrawalRequestReport>, Error> {
+        self.store
+            .get_withdrawal_request_report(
+                bitcoin_chain_tip,
+                stacks_chain_tip,
+                id,
+                signer_public_key,
+            )
+            .await
+    }
+
+    async fn compute_withdrawn_total(
+        &self,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+    ) -> Result<u64, Error> {
+        self.store
+            .compute_withdrawn_total(bitcoin_chain_tip, context_window)
+            .await
+    }
+
+    async fn get_bitcoin_blocks_with_transaction(
+        &self,
+        txid: &model::BitcoinTxId,
+    ) -> Result<Vec<model::BitcoinBlockHash>, Error> {
+        self.store.get_bitcoin_blocks_with_transaction(txid).await
+    }
+
+    async fn stacks_block_exists(&self, block_id: StacksBlockId) -> Result<bool, Error> {
+        self.store.stacks_block_exists(block_id).await
+    }
+
+    async fn get_encrypted_dkg_shares<X>(
+        &self,
+        aggregate_key: X,
+    ) -> Result<Option<model::EncryptedDkgShares>, Error>
+    where
+        X: Into<PublicKeyXOnly> + Send,
+    {
+        self.store.get_encrypted_dkg_shares(aggregate_key).await
+    }
+
+    async fn get_latest_encrypted_dkg_shares(
+        &self,
+    ) -> Result<Option<model::EncryptedDkgShares>, Error> {
+        self.store.get_latest_encrypted_dkg_shares().await
+    }
+
+    async fn get_latest_verified_dkg_shares(
+        &self,
+    ) -> Result<Option<model::EncryptedDkgShares>, Error> {
+        self.store.get_latest_verified_dkg_shares().await
+    }
+
+    async fn get_encrypted_dkg_shares_count(&self) -> Result<u32, Error> {
+        self.store.get_encrypted_dkg_shares_count().await
+    }
+
+    async fn get_last_key_rotation(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+    ) -> Result<Option<model::KeyRotationEvent>, Error> {
+        self.store.get_last_key_rotation(chain_tip).await
+    }
+
+    async fn key_rotation_exists(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+        signer_set: &BTreeSet<PublicKey>,
+        aggregate_key: &PublicKey,
+        signatures_required: u16,
+    ) -> Result<bool, Error> {
+        self.store
+            .key_rotation_exists(chain_tip, signer_set, aggregate_key, signatures_required)
+            .await
+    }
+
+    async fn get_signers_script_pubkeys(&self) -> Result<Vec<model::Bytes>, Error> {
+        self.store.get_signers_script_pubkeys().await
+    }
+
+    async fn get_signer_utxo(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+    ) -> Result<Option<SignerUtxo>, Error> {
+        self.store.get_signer_utxo(chain_tip).await
+    }
+
+    async fn get_deposit_request_signer_votes(
+        &self,
+        txid: &model::BitcoinTxId,
+        output_index: u32,
+        aggregate_key: &PublicKey,
+    ) -> Result<model::SignerVotes, Error> {
+        self.store
+            .get_deposit_request_signer_votes(txid, output_index, aggregate_key)
+            .await
+    }
+
+    async fn get_withdrawal_request_signer_votes(
+        &self,
+        id: &model::QualifiedRequestId,
+        aggregate_key: &PublicKey,
+    ) -> Result<model::SignerVotes, Error> {
+        self.store
+            .get_withdrawal_request_signer_votes(id, aggregate_key)
+            .await
+    }
+
+    async fn is_known_bitcoin_block_hash(
+        &self,
+        block_hash: &model::BitcoinBlockHash,
+    ) -> Result<bool, Error> {
+        self.store.is_known_bitcoin_block_hash(block_hash).await
+    }
+
+    async fn in_canonical_bitcoin_blockchain(
+        &self,
+        chain_tip: &model::BitcoinBlockRef,
+        block_ref: &model::BitcoinBlockRef,
+    ) -> Result<bool, Error> {
+        self.store
+            .in_canonical_bitcoin_blockchain(chain_tip, block_ref)
+            .await
+    }
+
+    async fn is_signer_script_pub_key(&self, script: &model::ScriptPubKey) -> Result<bool, Error> {
+        self.store.is_signer_script_pub_key(script).await
+    }
+
+    async fn is_withdrawal_inflight(
+        &self,
+        id: &model::QualifiedRequestId,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+    ) -> Result<bool, Error> {
+        self.store
+            .is_withdrawal_inflight(id, bitcoin_chain_tip)
+            .await
+    }
+
+    async fn is_withdrawal_active(
+        &self,
+        id: &model::QualifiedRequestId,
+        bitcoin_chain_tip: &model::BitcoinBlockRef,
+        min_confirmations: u64,
+    ) -> Result<bool, Error> {
+        self.store
+            .is_withdrawal_active(id, bitcoin_chain_tip, min_confirmations)
+            .await
+    }
+
+    async fn get_swept_deposit_requests(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+    ) -> Result<Vec<model::SweptDepositRequest>, Error> {
+        self.store
+            .get_swept_deposit_requests(chain_tip, context_window)
+            .await
+    }
+
+    async fn get_swept_withdrawal_requests(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+    ) -> Result<Vec<model::SweptWithdrawalRequest>, Error> {
+        self.store
+            .get_swept_withdrawal_requests(chain_tip, context_window)
+            .await
+    }
+
+    async fn get_deposit_request(
+        &self,
+        txid: &model::BitcoinTxId,
+        output_index: u32,
+    ) -> Result<Option<model::DepositRequest>, Error> {
+        self.store.get_deposit_request(txid, output_index).await
+    }
+
+    async fn will_sign_bitcoin_tx_sighash(
+        &self,
+        sighash: &model::SigHash,
+    ) -> Result<Option<(bool, PublicKeyXOnly)>, Error> {
+        self.store.will_sign_bitcoin_tx_sighash(sighash).await
     }
 }

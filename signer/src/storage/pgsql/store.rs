@@ -1,5 +1,5 @@
-use crate::storage::Transactable;
 use crate::storage::model::StacksBlockHeight;
+use crate::storage::{Transactable, TransactionHandle};
 use crate::{
     error::Error,
     storage::{
@@ -10,8 +10,7 @@ use crate::{
 use sqlx::Executor;
 use sqlx::pool::PoolConnection;
 use sqlx::{PgExecutor, postgres::PgPoolOptions};
-
-use super::PgTransaction;
+use tokio::sync::Mutex;
 
 /// A wrapper around a [`sqlx::PgPool`] which implements
 /// [`crate::storage::DbRead`] and [`crate::storage::DbWrite`].
@@ -169,13 +168,8 @@ impl PgStore {
     }
 
     /// Get a connection from the pool.
-    pub async fn get_connection(&self) -> PoolConnection<sqlx::Postgres> {
-        self.0
-            .acquire()
-            .await
-            .expect("Failed to acquire connection") // TODO: FIX
-
-        //.map_err(Error::SqlxAcquireConnection)
+    pub async fn get_connection(&self) -> Result<PoolConnection<sqlx::Postgres>, Error> {
+        self.0.acquire().await.map_err(Error::SqlxAcquireConnection)
     }
 
     /// Check whether the given block hash is a part of the stacks
@@ -217,7 +211,7 @@ impl PgStore {
         .bind(chain_tip)
         .bind(i64::try_from(block_height).map_err(Error::ConversionDatabaseInt)?)
         .bind(block_hash)
-        .fetch_one(self.get_connection().await.as_mut())
+        .fetch_one(self.get_connection().await?.as_mut())
         .await
         .map_err(Error::SqlxQuery)
     }
@@ -239,5 +233,40 @@ impl Transactable for PgStore {
             .await
             .map_err(Error::SqlxBeginTransaction)?;
         Ok(PgTransaction::new(tx))
+    }
+}
+
+/// Represents an active PostgreSQL transaction.
+/// Implements DbRead and DbWrite to allow operations within the transaction.
+pub struct PgTransaction<'a> {
+    /// The underlying transaction.
+    pub tx: Mutex<sqlx::PgTransaction<'a>>,
+}
+
+impl<'a> PgTransaction<'a> {
+    pub(super) fn new(tx: sqlx::Transaction<'a, sqlx::Postgres>) -> Self {
+        Self { tx: Mutex::new(tx) }
+    }
+}
+
+impl TransactionHandle for PgTransaction<'_> {
+    async fn commit(self) -> Result<(), crate::error::Error> {
+        let tx = self.tx.into_inner();
+
+        tx.commit()
+            .await
+            .map_err(crate::error::Error::SqlxCommitTransaction)?;
+
+        Ok(())
+    }
+
+    async fn rollback(self) -> Result<(), crate::error::Error> {
+        let tx = self.tx.into_inner();
+
+        tx.rollback()
+            .await
+            .map_err(crate::error::Error::SqlxRollbackTransaction)?;
+
+        Ok(())
     }
 }

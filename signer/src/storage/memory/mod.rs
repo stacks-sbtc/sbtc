@@ -2,9 +2,11 @@
 
 mod read;
 mod store;
-mod transaction;
 mod write;
 
+#[cfg(test)]
+mod tests;
+
+pub use store::InMemoryTransaction;
 pub use store::SharedStore;
 pub use store::Store;
-pub use transaction::InMemoryTransaction;

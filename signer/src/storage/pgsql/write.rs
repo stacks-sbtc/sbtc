@@ -961,25 +961,25 @@ impl PgWrite {
 
 impl DbWrite for PgStore {
     async fn write_bitcoin_block(&self, block: &model::BitcoinBlock) -> Result<(), Error> {
-        PgWrite::write_bitcoin_block(self.get_connection().await.as_mut(), block).await
+        PgWrite::write_bitcoin_block(self.get_connection().await?.as_mut(), block).await
     }
 
     async fn write_stacks_block(&self, block: &model::StacksBlock) -> Result<(), Error> {
-        PgWrite::write_stacks_block(self.get_connection().await.as_mut(), block).await
+        PgWrite::write_stacks_block(self.get_connection().await?.as_mut(), block).await
     }
 
     async fn write_deposit_request(
         &self,
         deposit_request: &model::DepositRequest,
     ) -> Result<(), Error> {
-        PgWrite::write_deposit_request(self.get_connection().await.as_mut(), deposit_request).await
+        PgWrite::write_deposit_request(self.get_connection().await?.as_mut(), deposit_request).await
     }
 
     async fn write_deposit_requests(
         &self,
         deposit_requests: Vec<model::DepositRequest>,
     ) -> Result<(), Error> {
-        PgWrite::write_deposit_requests(self.get_connection().await.as_mut(), deposit_requests)
+        PgWrite::write_deposit_requests(self.get_connection().await?.as_mut(), deposit_requests)
             .await
     }
 
@@ -987,7 +987,7 @@ impl DbWrite for PgStore {
         &self,
         request: &model::WithdrawalRequest,
     ) -> Result<(), Error> {
-        PgWrite::write_withdrawal_request(self.get_connection().await.as_mut(), request).await
+        PgWrite::write_withdrawal_request(self.get_connection().await?.as_mut(), request).await
     }
 
     #[tracing::instrument(skip(self))]
@@ -995,44 +995,45 @@ impl DbWrite for PgStore {
         &self,
         decision: &model::DepositSigner,
     ) -> Result<(), Error> {
-        PgWrite::write_deposit_signer_decision(self.get_connection().await.as_mut(), decision).await
+        PgWrite::write_deposit_signer_decision(self.get_connection().await?.as_mut(), decision)
+            .await
     }
 
     async fn write_withdrawal_signer_decision(
         &self,
         decision: &model::WithdrawalSigner,
     ) -> Result<(), Error> {
-        PgWrite::write_withdrawal_signer_decision(self.get_connection().await.as_mut(), decision)
+        PgWrite::write_withdrawal_signer_decision(self.get_connection().await?.as_mut(), decision)
             .await
     }
 
     async fn write_bitcoin_transaction(&self, tx_ref: &model::BitcoinTxRef) -> Result<(), Error> {
-        PgWrite::write_bitcoin_transaction(self.get_connection().await.as_mut(), tx_ref).await
+        PgWrite::write_bitcoin_transaction(self.get_connection().await?.as_mut(), tx_ref).await
     }
 
     async fn write_bitcoin_transactions(&self, txs: Vec<model::BitcoinTxRef>) -> Result<(), Error> {
-        PgWrite::write_bitcoin_transactions(self.get_connection().await.as_mut(), txs).await
+        PgWrite::write_bitcoin_transactions(self.get_connection().await?.as_mut(), txs).await
     }
 
     async fn write_stacks_block_headers(
         &self,
         blocks: Vec<model::StacksBlock>,
     ) -> Result<(), Error> {
-        PgWrite::write_stacks_block_headers(self.get_connection().await.as_mut(), blocks).await
+        PgWrite::write_stacks_block_headers(self.get_connection().await?.as_mut(), blocks).await
     }
 
     async fn write_encrypted_dkg_shares(
         &self,
         shares: &model::EncryptedDkgShares,
     ) -> Result<(), Error> {
-        PgWrite::write_encrypted_dkg_shares(self.get_connection().await.as_mut(), shares).await
+        PgWrite::write_encrypted_dkg_shares(self.get_connection().await?.as_mut(), shares).await
     }
 
     async fn write_rotate_keys_transaction(
         &self,
         key_rotation: &model::KeyRotationEvent,
     ) -> Result<(), Error> {
-        PgWrite::write_rotate_keys_transaction(self.get_connection().await.as_mut(), key_rotation)
+        PgWrite::write_rotate_keys_transaction(self.get_connection().await?.as_mut(), key_rotation)
             .await
     }
 
@@ -1040,43 +1041,43 @@ impl DbWrite for PgStore {
         &self,
         event: &CompletedDepositEvent,
     ) -> Result<(), Error> {
-        PgWrite::write_completed_deposit_event(self.get_connection().await.as_mut(), event).await
+        PgWrite::write_completed_deposit_event(self.get_connection().await?.as_mut(), event).await
     }
 
     async fn write_withdrawal_accept_event(
         &self,
         event: &WithdrawalAcceptEvent,
     ) -> Result<(), Error> {
-        PgWrite::write_withdrawal_accept_event(self.get_connection().await.as_mut(), event).await
+        PgWrite::write_withdrawal_accept_event(self.get_connection().await?.as_mut(), event).await
     }
 
     async fn write_withdrawal_reject_event(
         &self,
         event: &WithdrawalRejectEvent,
     ) -> Result<(), Error> {
-        PgWrite::write_withdrawal_reject_event(self.get_connection().await.as_mut(), event).await
+        PgWrite::write_withdrawal_reject_event(self.get_connection().await?.as_mut(), event).await
     }
 
     async fn write_tx_output(&self, output: &model::TxOutput) -> Result<(), Error> {
-        PgWrite::write_tx_output(self.get_connection().await.as_mut(), output).await
+        PgWrite::write_tx_output(self.get_connection().await?.as_mut(), output).await
     }
 
     async fn write_withdrawal_tx_output(
         &self,
         output: &model::WithdrawalTxOutput,
     ) -> Result<(), Error> {
-        PgWrite::write_withdrawal_tx_output(self.get_connection().await.as_mut(), output).await
+        PgWrite::write_withdrawal_tx_output(self.get_connection().await?.as_mut(), output).await
     }
 
     async fn write_tx_prevout(&self, prevout: &model::TxPrevout) -> Result<(), Error> {
-        PgWrite::write_tx_prevout(self.get_connection().await.as_mut(), prevout).await
+        PgWrite::write_tx_prevout(self.get_connection().await?.as_mut(), prevout).await
     }
 
     async fn write_bitcoin_txs_sighashes(
         &self,
         sighashes: &[model::BitcoinTxSigHash],
     ) -> Result<(), Error> {
-        PgWrite::write_bitcoin_txs_sighashes(self.get_connection().await.as_mut(), sighashes).await
+        PgWrite::write_bitcoin_txs_sighashes(self.get_connection().await?.as_mut(), sighashes).await
     }
 
     async fn write_bitcoin_withdrawals_outputs(
@@ -1084,7 +1085,7 @@ impl DbWrite for PgStore {
         withdrawal_outputs: &[model::BitcoinWithdrawalOutput],
     ) -> Result<(), Error> {
         PgWrite::write_bitcoin_withdrawals_outputs(
-            self.get_connection().await.as_mut(),
+            self.get_connection().await?.as_mut(),
             withdrawal_outputs,
         )
         .await
@@ -1094,14 +1095,14 @@ impl DbWrite for PgStore {
     where
         X: Into<PublicKeyXOnly> + Send,
     {
-        PgWrite::revoke_dkg_shares(self.get_connection().await.as_mut(), aggregate_key).await
+        PgWrite::revoke_dkg_shares(self.get_connection().await?.as_mut(), aggregate_key).await
     }
 
     async fn verify_dkg_shares<X>(&self, aggregate_key: X) -> Result<bool, Error>
     where
         X: Into<PublicKeyXOnly> + Send,
     {
-        PgWrite::verify_dkg_shares(self.get_connection().await.as_mut(), aggregate_key).await
+        PgWrite::verify_dkg_shares(self.get_connection().await?.as_mut(), aggregate_key).await
     }
 }
 

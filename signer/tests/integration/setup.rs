@@ -21,6 +21,7 @@ use sbtc::testing::regtest;
 use sbtc::testing::regtest::Faucet;
 use sbtc::testing::regtest::Recipient;
 use signer::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
+use signer::bitcoin::BitcoinInteract;
 use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::bitcoin::rpc::BitcoinTxInfo;
 use signer::bitcoin::rpc::GetTxResponse;
@@ -844,13 +845,14 @@ impl TestSweepSetup2 {
             .with_mocked_stacks_client()
             .with_mocked_emily_client()
             .build();
+
         let bitcoin_client = context.get_bitcoin_client();
 
         // We fetch the entire block, to feed to the block observer. It's
         // easier this way.
-        let GetTxResponse { tx, block_hash, .. } = context
-            .bitcoin_client
+        let GetTxResponse { tx, block_hash, .. } = bitcoin_client
             .get_tx(&self.donation.txid)
+            .await
             .unwrap()
             .unwrap();
 

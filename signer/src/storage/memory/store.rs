@@ -19,9 +19,8 @@ use crate::storage::model::CompletedDepositEvent;
 use crate::storage::model::WithdrawalAcceptEvent;
 use crate::storage::model::WithdrawalRejectEvent;
 
+use crate::storage::TransactionHandle;
 use crate::storage::util::get_utxo;
-
-use super::InMemoryTransaction;
 
 /// A store wrapped in an Arc<Mutex<...>> for interior mutability
 pub type SharedStore = Arc<Mutex<Store>>;
@@ -329,7 +328,7 @@ impl Store {
 }
 
 impl Transactable for SharedStore {
-    type Tx<'a> = InMemoryTransaction; // No GAT needed if InMemoryTransaction is not generic over 'a
+    type Tx<'a> = InMemoryTransaction;
 
     async fn begin_transaction(&self) -> Result<Self::Tx<'_>, Error> {
         let store = self.lock().await;
@@ -337,8 +336,80 @@ impl Transactable for SharedStore {
         Ok(InMemoryTransaction {
             version: store.version,
             store: Arc::new(Mutex::new(store_clone)),
-            original_store_mutex: Arc::clone(self), // Clone the Arc for the transaction
+            original_store_mutex: Arc::clone(self),
             completed: AtomicBool::new(false),
         })
+    }
+}
+
+/// Represents an active in-memory transaction.
+pub struct InMemoryTransaction {
+    /// Records the version of the store at the time of transaction creation.
+    pub version: usize,
+    /// Holds a clone of the store's data for operations within this transaction.
+    pub store: SharedStore,
+    /// Reference to the original store's mutex to commit changes back.
+    pub original_store_mutex: SharedStore,
+    /// Tracks if commit/rollback has been called.
+    pub completed: AtomicBool,
+}
+
+impl TransactionHandle for InMemoryTransaction {
+    async fn commit(self) -> Result<(), Error> {
+        if self.completed.load(std::sync::atomic::Ordering::SeqCst) {
+            panic!("Transaction already completed");
+        }
+
+        // Lock the transaction's clone of the store and get a guard
+        let store = self.store.lock().await.clone();
+        // Lock the original store and get a guard
+        let mut original_store = self.original_store_mutex.lock().await;
+
+        // Naive optimistic concurrency check
+        if self.version != original_store.version {
+            return Err(Error::OptimisticConcurrencyViolation {
+                transaction_version: self.version,
+                store_version: original_store.version,
+            });
+        }
+
+        // Commit the changes from the transactional store to the original store.
+        // This copies all fields from transactional_store_content.
+        *original_store = store.clone();
+
+        // Explicitly set the original store's version to be one greater than the version
+        // this transaction started with. This marks that the store has been updated.
+        original_store.version = self.version + 1;
+
+        // Mark the transaction as completed.
+        self.completed
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+
+        Ok(())
+    }
+
+    async fn rollback(self) -> Result<(), Error> {
+        if self.completed.load(std::sync::atomic::Ordering::SeqCst) {
+            panic!("Transaction already completed");
+        }
+
+        // Rollback is a no-op for in-memory transactions.
+        // Just mark the transaction as completed.
+        self.completed
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+/// Log a warning if the transaction is dropped without being committed or
+/// rolled back. We only do this for in-memory transactions to help highlight
+/// potential misses in tests.
+impl Drop for InMemoryTransaction {
+    fn drop(&mut self) {
+        if !*self.completed.get_mut() {
+            tracing::warn!(
+                "in-memory transaction dropped without explicit commit or rollback. Implicitly rolling back."
+            );
+        }
     }
 }

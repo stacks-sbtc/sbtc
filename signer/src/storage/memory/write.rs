@@ -10,7 +10,7 @@ use crate::{
     },
 };
 
-use super::SharedStore;
+use super::{SharedStore, store::InMemoryTransaction};
 
 impl DbWrite for SharedStore {
     async fn write_bitcoin_block(&self, block: &model::BitcoinBlock) -> Result<(), Error> {
@@ -306,5 +306,150 @@ impl DbWrite for SharedStore {
             }
         }
         Ok(false)
+    }
+}
+
+impl DbWrite for InMemoryTransaction {
+    async fn write_bitcoin_block(&self, block: &model::BitcoinBlock) -> Result<(), Error> {
+        self.store.write_bitcoin_block(block).await
+    }
+
+    async fn write_stacks_block(&self, block: &model::StacksBlock) -> Result<(), Error> {
+        self.store.write_stacks_block(block).await
+    }
+
+    async fn write_deposit_request(
+        &self,
+        deposit_request: &model::DepositRequest,
+    ) -> Result<(), Error> {
+        self.store.write_deposit_request(deposit_request).await
+    }
+
+    async fn write_deposit_requests(
+        &self,
+        deposit_requests: Vec<model::DepositRequest>,
+    ) -> Result<(), Error> {
+        self.store.write_deposit_requests(deposit_requests).await
+    }
+
+    async fn write_withdrawal_request(
+        &self,
+        request: &model::WithdrawalRequest,
+    ) -> Result<(), Error> {
+        self.store.write_withdrawal_request(request).await
+    }
+
+    async fn write_deposit_signer_decision(
+        &self,
+        decision: &model::DepositSigner,
+    ) -> Result<(), Error> {
+        self.store.write_deposit_signer_decision(decision).await
+    }
+
+    async fn write_withdrawal_signer_decision(
+        &self,
+        decision: &model::WithdrawalSigner,
+    ) -> Result<(), Error> {
+        self.store.write_withdrawal_signer_decision(decision).await
+    }
+
+    async fn write_bitcoin_transaction(
+        &self,
+        bitcoin_transaction: &model::BitcoinTxRef,
+    ) -> Result<(), Error> {
+        self.store
+            .write_bitcoin_transaction(bitcoin_transaction)
+            .await
+    }
+
+    async fn write_bitcoin_transactions(&self, txs: Vec<model::BitcoinTxRef>) -> Result<(), Error> {
+        self.store.write_bitcoin_transactions(txs).await
+    }
+
+    async fn write_stacks_block_headers(
+        &self,
+        headers: Vec<model::StacksBlock>,
+    ) -> Result<(), Error> {
+        self.store.write_stacks_block_headers(headers).await
+    }
+
+    async fn write_encrypted_dkg_shares(
+        &self,
+        shares: &model::EncryptedDkgShares,
+    ) -> Result<(), Error> {
+        self.store.write_encrypted_dkg_shares(shares).await
+    }
+
+    async fn write_rotate_keys_transaction(
+        &self,
+        key_rotation: &model::KeyRotationEvent,
+    ) -> Result<(), Error> {
+        self.store.write_rotate_keys_transaction(key_rotation).await
+    }
+
+    async fn write_withdrawal_reject_event(
+        &self,
+        event: &WithdrawalRejectEvent,
+    ) -> Result<(), Error> {
+        self.store.write_withdrawal_reject_event(event).await
+    }
+
+    async fn write_withdrawal_accept_event(
+        &self,
+        event: &WithdrawalAcceptEvent,
+    ) -> Result<(), Error> {
+        self.store.write_withdrawal_accept_event(event).await
+    }
+
+    async fn write_completed_deposit_event(
+        &self,
+        event: &CompletedDepositEvent,
+    ) -> Result<(), Error> {
+        self.store.write_completed_deposit_event(event).await
+    }
+
+    async fn write_tx_output(&self, output: &model::TxOutput) -> Result<(), Error> {
+        self.store.write_tx_output(output).await
+    }
+
+    async fn write_withdrawal_tx_output(
+        &self,
+        output: &model::WithdrawalTxOutput,
+    ) -> Result<(), Error> {
+        self.store.write_withdrawal_tx_output(output).await
+    }
+
+    async fn write_tx_prevout(&self, prevout: &model::TxPrevout) -> Result<(), Error> {
+        self.store.write_tx_prevout(prevout).await
+    }
+
+    async fn write_bitcoin_txs_sighashes(
+        &self,
+        sighashes: &[model::BitcoinTxSigHash],
+    ) -> Result<(), Error> {
+        self.store.write_bitcoin_txs_sighashes(sighashes).await
+    }
+
+    async fn write_bitcoin_withdrawals_outputs(
+        &self,
+        withdrawals_outputs: &[model::BitcoinWithdrawalOutput],
+    ) -> Result<(), Error> {
+        self.store
+            .write_bitcoin_withdrawals_outputs(withdrawals_outputs)
+            .await
+    }
+
+    async fn revoke_dkg_shares<X>(&self, aggregate_key: X) -> Result<bool, Error>
+    where
+        X: Into<PublicKeyXOnly> + Send,
+    {
+        self.store.revoke_dkg_shares(aggregate_key).await
+    }
+
+    async fn verify_dkg_shares<X>(&self, aggregate_key: X) -> Result<bool, Error>
+    where
+        X: Into<PublicKeyXOnly> + Send,
+    {
+        self.store.verify_dkg_shares(aggregate_key).await
     }
 }

@@ -20,7 +20,9 @@ use crate::{
     },
 };
 
-use super::{DepositStatusSummary, PgSignerUtxo, PgStore, PgTransaction, WithdrawalStatusSummary};
+use super::{
+    DepositStatusSummary, PgSignerUtxo, PgStore, WithdrawalStatusSummary, store::PgTransaction,
+};
 
 /// Read-accessors to the Postgres database.
 pub struct PgRead;
@@ -147,7 +149,7 @@ impl PgRead {
         chain_tip: &model::BitcoinBlockHash,
     ) -> Result<Option<SignerUtxo>, Error>
     where
-        E: Unpin + Send + 'static,
+        E: 'static,
         for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
     {
         let Some(min_block_height) = Self::minimum_donation_txo_height(executor).await? else {
@@ -301,7 +303,7 @@ impl PgRead {
         signer_public_key: &PublicKey,
     ) -> Result<Option<DepositStatusSummary>, Error>
     where
-        E: Send + Unpin + 'static,
+        E: 'static,
         for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
     {
         // We first get the least height for when the deposit request was
@@ -405,7 +407,7 @@ impl PgRead {
         executor: &'e mut E,
     ) -> Result<Option<BitcoinBlockHeight>, Error>
     where
-        E: Unpin + Send + 'static,
+        E: 'static,
         for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
     {
         #[derive(sqlx::FromRow)]
@@ -792,7 +794,7 @@ impl PgRead {
         threshold: u16,
     ) -> Result<Vec<model::DepositRequest>, Error>
     where
-        E: Send + Unpin + 'static,
+        E: 'static,
         for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
     {
         // Add one to the acceptable unlock height because the chain tip is at height one less
@@ -962,7 +964,7 @@ impl PgRead {
         signer_public_key: &PublicKey,
     ) -> Result<Option<DepositRequestReport>, Error>
     where
-        E: Send + Unpin + 'static,
+        E: 'static,
         for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
     {
         // Now fetch the deposit summary
@@ -1145,7 +1147,7 @@ impl PgRead {
         signer_public_key: &PublicKey,
     ) -> Result<Vec<model::WithdrawalRequest>, Error>
     where
-        E: Send + Unpin + 'static,
+        E: 'static,
         for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
     {
         let Some(stacks_chain_tip) = Self::get_stacks_chain_tip(executor, chain_tip).await? else {
@@ -1366,7 +1368,7 @@ impl PgRead {
         context_window: u16,
     ) -> Result<Vec<model::WithdrawalRequest>, Error>
     where
-        E: Send + Unpin + 'static,
+        E: 'static,
         for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
     {
         let Some(stacks_chain_tip) =
@@ -1478,7 +1480,7 @@ impl PgRead {
         signer_public_key: &PublicKey,
     ) -> Result<Option<WithdrawalRequestReport>, Error>
     where
-        E: Send + Unpin + 'static,
+        E: 'static,
         for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
     {
         let summary_fut =
@@ -1709,7 +1711,7 @@ impl PgRead {
         chain_tip: &model::BitcoinBlockHash,
     ) -> Result<Option<model::KeyRotationEvent>, Error>
     where
-        E: Send + Unpin + 'static,
+        E: 'static,
         for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
     {
         let Some(stacks_chain_tip) = Self::get_stacks_chain_tip(executor, chain_tip).await? else {
@@ -1765,7 +1767,7 @@ impl PgRead {
         signatures_required: u16,
     ) -> Result<bool, Error>
     where
-        E: Send + Unpin + 'static,
+        E: 'static,
         for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
     {
         let Some(stacks_chain_tip) = Self::get_stacks_chain_tip(executor, chain_tip).await? else {
@@ -1847,7 +1849,7 @@ impl PgRead {
         chain_tip: &model::BitcoinBlockHash,
     ) -> Result<Option<SignerUtxo>, Error>
     where
-        E: Send + Unpin + 'static,
+        E: 'static,
         for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
     {
         // If we've swept funds before, then will have a signer output and
@@ -1973,7 +1975,7 @@ impl PgRead {
         bitcoin_chain_tip: &model::BitcoinBlockHash,
     ) -> Result<bool, Error>
     where
-        E: Send + Unpin + 'static,
+        E: 'static,
         for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
     {
         let Some(signer_utxo) = Self::get_signer_utxo(executor, bitcoin_chain_tip).await? else {
@@ -2029,7 +2031,7 @@ impl PgRead {
         min_confirmations: u64,
     ) -> Result<bool, Error>
     where
-        E: Send + Unpin + 'static,
+        E: 'static,
         for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
     {
         // We want to find the first sweep transaction that happened
@@ -2091,7 +2093,7 @@ impl PgRead {
         context_window: u16,
     ) -> Result<Vec<model::SweptDepositRequest>, Error>
     where
-        E: Send + Unpin + 'static,
+        E: 'static,
         for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
     {
         // The following tests define the criteria for this query:
@@ -2184,7 +2186,7 @@ impl PgRead {
         context_window: u16,
     ) -> Result<Vec<model::SweptWithdrawalRequest>, Error>
     where
-        E: Send + Unpin + 'static,
+        E: 'static,
         for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
     {
         // The following tests define the criteria for this query:
@@ -2414,33 +2416,33 @@ impl DbRead for PgStore {
         &self,
         block_hash: &model::BitcoinBlockHash,
     ) -> Result<Option<model::BitcoinBlock>, Error> {
-        PgRead::get_bitcoin_block(self.get_connection().await.as_mut(), block_hash).await
+        PgRead::get_bitcoin_block(self.get_connection().await?.as_mut(), block_hash).await
     }
 
     async fn get_stacks_block(
         &self,
         block_hash: &model::StacksBlockHash,
     ) -> Result<Option<model::StacksBlock>, Error> {
-        PgRead::get_stacks_block(self.get_connection().await.as_mut(), block_hash).await
+        PgRead::get_stacks_block(self.get_connection().await?.as_mut(), block_hash).await
     }
 
     async fn get_bitcoin_canonical_chain_tip(
         &self,
     ) -> Result<Option<model::BitcoinBlockHash>, Error> {
-        PgRead::get_bitcoin_canonical_chain_tip(self.get_connection().await.as_mut()).await
+        PgRead::get_bitcoin_canonical_chain_tip(self.get_connection().await?.as_mut()).await
     }
 
     async fn get_bitcoin_canonical_chain_tip_ref(
         &self,
     ) -> Result<Option<model::BitcoinBlockRef>, Error> {
-        PgRead::get_bitcoin_canonical_chain_tip_ref(self.get_connection().await.as_mut()).await
+        PgRead::get_bitcoin_canonical_chain_tip_ref(self.get_connection().await?.as_mut()).await
     }
 
     async fn get_stacks_chain_tip(
         &self,
         bitcoin_chain_tip: &model::BitcoinBlockHash,
     ) -> Result<Option<model::StacksBlock>, Error> {
-        PgRead::get_stacks_chain_tip(self.get_connection().await.as_mut(), bitcoin_chain_tip).await
+        PgRead::get_stacks_chain_tip(self.get_connection().await?.as_mut(), bitcoin_chain_tip).await
     }
 
     async fn get_pending_deposit_requests(
@@ -2450,7 +2452,7 @@ impl DbRead for PgStore {
         signer_public_key: &PublicKey,
     ) -> Result<Vec<model::DepositRequest>, Error> {
         PgRead::get_pending_deposit_requests(
-            self.get_connection().await.as_mut(),
+            self.get_connection().await?.as_mut(),
             chain_tip,
             context_window,
             signer_public_key,
@@ -2465,7 +2467,7 @@ impl DbRead for PgStore {
         threshold: u16,
     ) -> Result<Vec<model::DepositRequest>, Error> {
         PgRead::get_pending_accepted_deposit_requests(
-            self.get_connection().await.as_mut(),
+            self.get_connection().await?.as_mut(),
             chain_tip,
             context_window,
             threshold,
@@ -2480,7 +2482,7 @@ impl DbRead for PgStore {
         aggregate_key: &PublicKey,
     ) -> Result<model::SignerVotes, Error> {
         PgRead::get_deposit_request_signer_votes(
-            self.get_connection().await.as_mut(),
+            self.get_connection().await?.as_mut(),
             txid,
             output_index,
             aggregate_key,
@@ -2494,7 +2496,7 @@ impl DbRead for PgStore {
         aggregate_key: &PublicKey,
     ) -> Result<model::SignerVotes, Error> {
         PgRead::get_withdrawal_request_signer_votes(
-            self.get_connection().await.as_mut(),
+            self.get_connection().await?.as_mut(),
             id,
             aggregate_key,
         )
@@ -2509,7 +2511,7 @@ impl DbRead for PgStore {
         signer_public_key: &PublicKey,
     ) -> Result<Option<DepositRequestReport>, Error> {
         PgRead::get_deposit_request_report(
-            self.get_connection().await.as_mut(),
+            self.get_connection().await?.as_mut(),
             chain_tip,
             txid,
             output_index,
@@ -2523,7 +2525,7 @@ impl DbRead for PgStore {
         txid: &model::BitcoinTxId,
         output_index: u32,
     ) -> Result<Vec<model::DepositSigner>, Error> {
-        PgRead::get_deposit_signers(self.get_connection().await.as_mut(), txid, output_index).await
+        PgRead::get_deposit_signers(self.get_connection().await?.as_mut(), txid, output_index).await
     }
 
     async fn can_sign_deposit_tx(
@@ -2533,7 +2535,7 @@ impl DbRead for PgStore {
         signer_public_key: &PublicKey,
     ) -> Result<Option<bool>, Error> {
         PgRead::can_sign_deposit_tx(
-            self.get_connection().await.as_mut(),
+            self.get_connection().await?.as_mut(),
             txid,
             output_index,
             signer_public_key,
@@ -2546,7 +2548,7 @@ impl DbRead for PgStore {
         txid: &model::BitcoinTxId,
         output_index: u32,
     ) -> Result<bool, Error> {
-        PgRead::deposit_request_exists(self.get_connection().await.as_mut(), txid, output_index)
+        PgRead::deposit_request_exists(self.get_connection().await?.as_mut(), txid, output_index)
             .await
     }
 
@@ -2555,8 +2557,12 @@ impl DbRead for PgStore {
         request_id: u64,
         block_hash: &model::StacksBlockHash,
     ) -> Result<Vec<model::WithdrawalSigner>, Error> {
-        PgRead::get_withdrawal_signers(self.get_connection().await.as_mut(), request_id, block_hash)
-            .await
+        PgRead::get_withdrawal_signers(
+            self.get_connection().await?.as_mut(),
+            request_id,
+            block_hash,
+        )
+        .await
     }
 
     async fn get_pending_withdrawal_requests(
@@ -2566,7 +2572,7 @@ impl DbRead for PgStore {
         signer_public_key: &PublicKey,
     ) -> Result<Vec<model::WithdrawalRequest>, Error> {
         PgRead::get_pending_withdrawal_requests(
-            self.get_connection().await.as_mut(),
+            self.get_connection().await?.as_mut(),
             chain_tip,
             context_window,
             signer_public_key,
@@ -2582,7 +2588,7 @@ impl DbRead for PgStore {
         signature_threshold: u16,
     ) -> Result<Vec<model::WithdrawalRequest>, Error> {
         PgRead::get_pending_accepted_withdrawal_requests(
-            self.get_connection().await.as_mut(),
+            self.get_connection().await?.as_mut(),
             bitcoin_chain_tip,
             stacks_chain_tip,
             min_bitcoin_height,
@@ -2597,7 +2603,7 @@ impl DbRead for PgStore {
         context_window: u16,
     ) -> Result<Vec<model::WithdrawalRequest>, Error> {
         PgRead::get_pending_rejected_withdrawal_requests(
-            self.get_connection().await.as_mut(),
+            self.get_connection().await?.as_mut(),
             chain_tip,
             context_window,
         )
@@ -2612,7 +2618,7 @@ impl DbRead for PgStore {
         signer_public_key: &PublicKey,
     ) -> Result<Option<WithdrawalRequestReport>, Error> {
         PgRead::get_withdrawal_request_report(
-            self.get_connection().await.as_mut(),
+            self.get_connection().await?.as_mut(),
             bitcoin_chain_tip,
             stacks_chain_tip,
             id,
@@ -2627,7 +2633,7 @@ impl DbRead for PgStore {
         context_window: u16,
     ) -> Result<u64, Error> {
         PgRead::compute_withdrawn_total(
-            self.get_connection().await.as_mut(),
+            self.get_connection().await?.as_mut(),
             bitcoin_chain_tip,
             context_window,
         )
@@ -2638,12 +2644,12 @@ impl DbRead for PgStore {
         &self,
         txid: &model::BitcoinTxId,
     ) -> Result<Vec<model::BitcoinBlockHash>, Error> {
-        PgRead::get_bitcoin_blocks_with_transaction(self.get_connection().await.as_mut(), txid)
+        PgRead::get_bitcoin_blocks_with_transaction(self.get_connection().await?.as_mut(), txid)
             .await
     }
 
     async fn stacks_block_exists(&self, block_id: StacksBlockId) -> Result<bool, Error> {
-        PgRead::stacks_block_exists(self.get_connection().await.as_mut(), block_id).await
+        PgRead::stacks_block_exists(self.get_connection().await?.as_mut(), block_id).await
     }
 
     async fn get_encrypted_dkg_shares<X>(
@@ -2653,24 +2659,24 @@ impl DbRead for PgStore {
     where
         X: Into<PublicKeyXOnly> + Send,
     {
-        PgRead::get_encrypted_dkg_shares(self.get_connection().await.as_mut(), aggregate_key).await
+        PgRead::get_encrypted_dkg_shares(self.get_connection().await?.as_mut(), aggregate_key).await
     }
 
     async fn get_latest_encrypted_dkg_shares(
         &self,
     ) -> Result<Option<model::EncryptedDkgShares>, Error> {
-        PgRead::get_latest_encrypted_dkg_shares(self.get_connection().await.as_mut()).await
+        PgRead::get_latest_encrypted_dkg_shares(self.get_connection().await?.as_mut()).await
     }
 
     async fn get_latest_verified_dkg_shares(
         &self,
     ) -> Result<Option<model::EncryptedDkgShares>, Error> {
-        PgRead::get_latest_verified_dkg_shares(self.get_connection().await.as_mut()).await
+        PgRead::get_latest_verified_dkg_shares(self.get_connection().await?.as_mut()).await
     }
 
     /// Returns the number of non-failed rows in the `dkg_shares` table.
     async fn get_encrypted_dkg_shares_count(&self) -> Result<u32, Error> {
-        PgRead::get_encrypted_dkg_shares_count(self.get_connection().await.as_mut()).await
+        PgRead::get_encrypted_dkg_shares_count(self.get_connection().await?.as_mut()).await
     }
 
     /// Find the last key rotation by iterating backwards from the stacks
@@ -2684,7 +2690,7 @@ impl DbRead for PgStore {
         &self,
         chain_tip: &model::BitcoinBlockHash,
     ) -> Result<Option<model::KeyRotationEvent>, Error> {
-        PgRead::get_last_key_rotation(self.get_connection().await.as_mut(), chain_tip).await
+        PgRead::get_last_key_rotation(self.get_connection().await?.as_mut(), chain_tip).await
     }
 
     async fn key_rotation_exists(
@@ -2695,7 +2701,7 @@ impl DbRead for PgStore {
         signatures_required: u16,
     ) -> Result<bool, Error> {
         PgRead::key_rotation_exists(
-            self.get_connection().await.as_mut(),
+            self.get_connection().await?.as_mut(),
             chain_tip,
             signer_set,
             aggregate_key,
@@ -2705,21 +2711,21 @@ impl DbRead for PgStore {
     }
 
     async fn get_signers_script_pubkeys(&self) -> Result<Vec<model::Bytes>, Error> {
-        PgRead::get_signers_script_pubkeys(self.get_connection().await.as_mut()).await
+        PgRead::get_signers_script_pubkeys(self.get_connection().await?.as_mut()).await
     }
 
     async fn get_signer_utxo(
         &self,
         chain_tip: &model::BitcoinBlockHash,
     ) -> Result<Option<SignerUtxo>, Error> {
-        PgRead::get_signer_utxo(self.get_connection().await.as_mut(), chain_tip).await
+        PgRead::get_signer_utxo(self.get_connection().await?.as_mut(), chain_tip).await
     }
 
     async fn is_known_bitcoin_block_hash(
         &self,
         block_hash: &model::BitcoinBlockHash,
     ) -> Result<bool, Error> {
-        PgRead::is_known_bitcoin_block_hash(self.get_connection().await.as_mut(), block_hash).await
+        PgRead::is_known_bitcoin_block_hash(self.get_connection().await?.as_mut(), block_hash).await
     }
 
     async fn in_canonical_bitcoin_blockchain(
@@ -2728,7 +2734,7 @@ impl DbRead for PgStore {
         block_ref: &model::BitcoinBlockRef,
     ) -> Result<bool, Error> {
         PgRead::in_canonical_bitcoin_blockchain(
-            self.get_connection().await.as_mut(),
+            self.get_connection().await?.as_mut(),
             chain_tip,
             block_ref,
         )
@@ -2736,7 +2742,7 @@ impl DbRead for PgStore {
     }
 
     async fn is_signer_script_pub_key(&self, script: &model::ScriptPubKey) -> Result<bool, Error> {
-        PgRead::is_signer_script_pub_key(self.get_connection().await.as_mut(), script).await
+        PgRead::is_signer_script_pub_key(self.get_connection().await?.as_mut(), script).await
     }
 
     async fn is_withdrawal_inflight(
@@ -2744,7 +2750,7 @@ impl DbRead for PgStore {
         id: &model::QualifiedRequestId,
         bitcoin_chain_tip: &model::BitcoinBlockHash,
     ) -> Result<bool, Error> {
-        PgRead::is_withdrawal_inflight(self.get_connection().await.as_mut(), id, bitcoin_chain_tip)
+        PgRead::is_withdrawal_inflight(self.get_connection().await?.as_mut(), id, bitcoin_chain_tip)
             .await
     }
 
@@ -2755,7 +2761,7 @@ impl DbRead for PgStore {
         min_confirmations: u64,
     ) -> Result<bool, Error> {
         PgRead::is_withdrawal_active(
-            self.get_connection().await.as_mut(),
+            self.get_connection().await?.as_mut(),
             id,
             bitcoin_chain_tip,
             min_confirmations,
@@ -2769,7 +2775,7 @@ impl DbRead for PgStore {
         context_window: u16,
     ) -> Result<Vec<model::SweptDepositRequest>, Error> {
         PgRead::get_swept_deposit_requests(
-            self.get_connection().await.as_mut(),
+            self.get_connection().await?.as_mut(),
             chain_tip,
             context_window,
         )
@@ -2782,7 +2788,7 @@ impl DbRead for PgStore {
         context_window: u16,
     ) -> Result<Vec<model::SweptWithdrawalRequest>, Error> {
         PgRead::get_swept_withdrawal_requests(
-            self.get_connection().await.as_mut(),
+            self.get_connection().await?.as_mut(),
             chain_tip,
             context_window,
         )
@@ -2794,14 +2800,14 @@ impl DbRead for PgStore {
         txid: &model::BitcoinTxId,
         output_index: u32,
     ) -> Result<Option<model::DepositRequest>, Error> {
-        PgRead::get_deposit_request(self.get_connection().await.as_mut(), txid, output_index).await
+        PgRead::get_deposit_request(self.get_connection().await?.as_mut(), txid, output_index).await
     }
 
     async fn will_sign_bitcoin_tx_sighash(
         &self,
         sighash: &model::SigHash,
     ) -> Result<Option<(bool, PublicKeyXOnly)>, Error> {
-        PgRead::will_sign_bitcoin_tx_sighash(self.get_connection().await.as_mut(), sighash).await
+        PgRead::will_sign_bitcoin_tx_sighash(self.get_connection().await?.as_mut(), sighash).await
     }
 
     async fn get_withdrawal_signer_decisions(
@@ -2811,7 +2817,7 @@ impl DbRead for PgStore {
         signer_public_key: &PublicKey,
     ) -> Result<Vec<model::WithdrawalSigner>, Error> {
         PgRead::get_withdrawal_signer_decisions(
-            self.get_connection().await.as_mut(),
+            self.get_connection().await?.as_mut(),
             chain_tip,
             context_window,
             signer_public_key,
@@ -2826,7 +2832,7 @@ impl DbRead for PgStore {
         signer_public_key: &PublicKey,
     ) -> Result<Vec<model::DepositSigner>, Error> {
         PgRead::get_deposit_signer_decisions(
-            self.get_connection().await.as_mut(),
+            self.get_connection().await?.as_mut(),
             chain_tip,
             context_window,
             signer_public_key,
