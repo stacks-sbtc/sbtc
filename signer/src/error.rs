@@ -439,6 +439,11 @@ pub enum Error {
     #[error("encountered an error while rolling back an sqlx transaction: {0}")]
     SqlxRollbackTransaction(#[source] sqlx::Error),
 
+    /// An error occurred while attempting to acquire a connection to the
+    /// database.
+    #[error("encountered an error while attempting to acquire a connection to the database: {0}")]
+    SqlxAcquireConnection(#[source] sqlx::Error),
+
     /// An error when attempting to read a migration script.
     #[error("failed to read migration script: {0}")]
     ReadSqlMigration(Cow<'static, str>),
@@ -737,6 +742,20 @@ pub enum Error {
     #[cfg(test)]
     #[error("Dummy (for testing purposes)")]
     Dummy,
+
+    /// An optimistic concurrency violation occurred. This is currently used in
+    /// the in-memory database implementation.
+    #[error(
+        "Optimistic concurrency violation: attempted to commit in-memory \
+        DB transaction where the store is at another version than the current transaction.\
+        Store version: {store_version}, transaction version: {transaction_version}"
+    )]
+    OptimisticConcurrencyViolation {
+        /// The version of the store at the time of the transaction.
+        store_version: usize,
+        /// The version of the transaction.
+        transaction_version: usize,
+    },
 }
 
 impl From<std::convert::Infallible> for Error {
