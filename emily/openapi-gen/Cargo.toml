@@ -7,11 +7,11 @@ edition = "2024"
 ignored = ["emily-handler", "utoipa", "serde_json"]
 
 [dependencies]
-emily-handler.workspace = true
+emily-handler = { workspace = true, features = ["testing"] }
 serde_json.workspace = true
 utoipa.workspace = true
 
 [build-dependencies]
-emily-handler.workspace = true
+emily-handler  = { workspace = true, features = ["testing"] }
 serde_json.workspace = true
 utoipa.workspace = true

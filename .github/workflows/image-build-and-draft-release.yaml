@@ -41,12 +41,12 @@ jobs:
     outputs:
       signer: ${{ steps.save_digest.outputs.signer }}
       blocklist-client: ${{ steps.save_digest.outputs.blocklist-client }}
-
     runs-on: ubuntu-latest
     environment: "Push to Docker"
     steps:
       - name: Log in to GHCR
-        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        id: ghcr_login
+        uses: stacks-sbtc/actions/docker/login-action@095003d35774808f27b29f272976b1e01704ca93
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -54,8 +54,9 @@ jobs:
 
       ## Checkout the branch of the release provided.
       ## This requires that a release branch exists for the tag.
-      - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Checkout Repository
+        id: checkout_repository
+        uses: stacks-sbtc/actions/checkout@095003d35774808f27b29f272976b1e01704ca93
         with:
           ref: refs/tags/${{ github.event.client_payload.tag_name }}
 
@@ -73,7 +74,7 @@ jobs:
       ## ex. debian will have this tag: `type=ref,event=tag,enable=${{ matrix.dist == 'debian' }}`
       - name: Docker Metadata ( ${{ matrix.dist }} )
         id: docker_metadata
-        uses: docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81 # v5.5.1
+        uses: stacks-sbtc/actions/docker/metadata-action@095003d35774808f27b29f272976b1e01704ca93
         with:
           images: |
             ${{ env.ghcr_org }}/sbtc
@@ -86,14 +87,13 @@ jobs:
       ## Build docker image for release
       - name: Build and Push ( ${{ matrix.dist }} ${{ matrix.docker_target }} )
         id: docker_build
-        uses: docker/build-push-action@2cdde995de11925a030ce8070c3d77a52ffcf1c0 # v5.3.0
+        uses: stacks-sbtc/actions/docker/build-push-action@095003d35774808f27b29f272976b1e01704ca93
         with:
           file: ./.github/actions/dockerfiles/Dockerfile.${{ matrix.docker_target }}.${{ matrix.dist }}
           platforms: ${{ env.docker_platforms }}
           tags: ${{ steps.docker_metadata.outputs.tags }}
           labels: ${{ steps.docker_metadata.outputs.labels }}
           target: ${{ matrix.docker_target }}
-          no-cache: true
           push: true
           build-args: |
             GIT_COMMIT=${{ github.ref_name }}
@@ -103,13 +103,16 @@ jobs:
         run: echo "${{ matrix.docker_target }}=${{ steps.docker_build.outputs.digest }}" >> "$GITHUB_OUTPUT"
 
       - name: Generate artifact attestation
-        uses: actions/attest-build-provenance@7668571508540a607bdfd90a87a560489fe372eb #v2.1.0
+        id: generate_attestation
+        uses: stacks-sbtc/actions/attest-build-provenance@095003d35774808f27b29f272976b1e01704ca93
         with:
           subject-name: ${{ env.ghcr_org }}/sbtc
           subject-digest: ${{ steps.docker_build.outputs.digest }}
-          push-to-registry: true
 
-      - name: Download artifact attestation 
+      - name: Download artifact attestation
+        id: download_attestation
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh attestation download oci://${{ env.ghcr_org }}/sbtc:${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }}-${{ matrix.dist }} -R ${{ github.repository_owner }}/sbtc
           
@@ -120,11 +123,10 @@ jobs:
           
           # Generate trusted root
           gh attestation trusted-root > trusted_root.jsonl
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Attestation Files as Artifacts
-        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 #v4.6.1
+        id: upload_attestation
+        uses: stacks-sbtc/actions/upload-artifact@095003d35774808f27b29f272976b1e01704ca93
         with:
           name: attestation-files
           overwrite: true
@@ -137,28 +139,28 @@ jobs:
     runs-on: ubuntu-latest
     needs: image
     steps:
-
       - name: Set TAG_NAME
+        id: set_env
         run: echo "TAG_NAME=${{ github.event.client_payload.tag_name }}" >> "$GITHUB_ENV"
 
       - name: Generate Release Notes
-        id: generate-release-notes
+        id: generate_release_notes
         run: |
           cat <<EOF > release_notes.md
           <A manual one-liner with changes>Fill the section.
-  
+
           [Highlights](#highlights) • [Images](#images) • [Upgrade Instructions](#upgrade-instructions)
-  
+
           ## ✨ Highlights <a id="highlights">
-  
+
           __✏️ Complete the highlights section with a brief list of notable changes__
           - Highlight 1
           - Highlight 2
           - etc...
-  
+
           ## 🐳 Images: <a id="images">
           ⚠️ Always use [immutable image tags](https://docs.docker.com/reference/cli/docker/image/pull/#pull-an-image-by-digest-immutable-identifier) - the image digests are provided below. Verify the attestation of these images using this [guide](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds#verifying-artifact-attestations-with-the-github-cli).
-  
+
           We publish our images on [GitHub Container Registry](https://github.com/${{ github.repository_owner }}/sbtc/pkgs/container/sbtc).
 
           ### sBTC Signer
@@ -172,13 +174,13 @@ jobs:
           - 🔒 \`${{ needs.image.outputs.blocklist-client }}\`
 
           ## 📙 Database migrations
-  
+
           Database migrations may be found at [\`signer/migrations\`](https://github.com/stacks-network/sbtc/tree/${{ env.TAG_NAME }}/signer/migrations).
 
           **Important:** If you run your signer using the \`--migrate-db\` flag (which is the default when using the official docker images), the database will be automatically migrated to the latest version. If you do not use this flag, you must manually apply the migrations.
-  
+
           ## 🛠️ Upgrade Instructions: <a id="upgrade-instructions">
-  
+
           1. Stop your sBTC signer
           2. Backup your database
           3. Edit your configuration as instructed
@@ -205,16 +207,17 @@ jobs:
 
           __✏️ Move the "Full Changelog" link here.__
           EOF
-  
+
       - name: Create GitHub Release
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea #v7.0.01
+        id: create_release
+        uses: stacks-sbtc/actions/github-script@095003d35774808f27b29f272976b1e01704ca93
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           script: |
             const fs = require('fs');
             const releaseNotes = fs.readFileSync('release_notes.md', 'utf8');
-    
+
             const release = await github.rest.repos.createRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -224,5 +227,5 @@ jobs:
               draft: true,
               generate_release_notes: true
             });
-    
+
             console.log(`Created release: ${release.data.html_url}`);

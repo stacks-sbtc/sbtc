@@ -150,7 +150,6 @@ impl EmilyContext {
         })
     }
     /// Create a local testing instance.
-    #[cfg(feature = "testing")]
     pub async fn local_instance(dynamodb_endpoint: &str) -> Result<Self, Error> {
         use std::collections::HashMap;
 
