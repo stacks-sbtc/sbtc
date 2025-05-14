@@ -4,7 +4,10 @@ use crate::{
         handlers::internal::{ExecuteReorgRequest, execute_reorg_handler},
         models::chainstate::Chainstate,
     },
-    common::error::{Error, Inconsistency},
+    common::{
+        NO_REORG_DEPTH,
+        error::{Error, Inconsistency},
+    },
     context::EmilyContext,
     database::{accessors, entries::chainstate::ChainstateEntry},
 };
@@ -180,13 +183,9 @@ pub async fn add_chainstate_entry_or_reorg(
         .chaintip()
         .bitcoin_height;
 
-    // 6 block confirmations are considered as industry standard for considering that this block
-    // will not be reorged. See https://en.bitcoin.it/wiki/Confirmation
-    let no_reorg_depth = 6;
-
     if let Some(current_bitcoin_tip_height) = current_bitcoin_tip_height {
         if let Some(new_bitcoin_tip_height) = new_bitcoin_tip_height {
-            if new_bitcoin_tip_height < current_bitcoin_tip_height.saturating_sub(no_reorg_depth) {
+            if new_bitcoin_tip_height < current_bitcoin_tip_height.saturating_sub(NO_REORG_DEPTH) {
                 return Err(Error::TooOldChaintipToReorg(
                     new_bitcoin_tip_height,
                     current_bitcoin_tip_height,
