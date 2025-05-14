@@ -4396,7 +4396,6 @@ async fn coordinator_skip_onchain_completed_deposits_inner(deposit_completed: bo
         .update_current_signer_set(signers.signer_keys().iter().copied().collect());
     ctx.state().set_current_aggregate_key(aggregate_key);
 
-
     ctx.with_stacks_client(|client| {
         client
             .expect_estimate_fees()
