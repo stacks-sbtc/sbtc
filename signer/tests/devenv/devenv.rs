@@ -234,19 +234,44 @@ async fn getrawtransaction_simple_fork() {
     // The tx should be in mempool
     let tx = bitcoin.get_tx(txid).await.unwrap().unwrap();
     assert!(tx.confirmations.is_none());
+    assert!(tx.block_hash.is_none());
 
     let block_1a = faucet.generate_block();
 
     // And now it should be confirmed
     let tx = bitcoin.get_tx(txid).await.unwrap().unwrap();
     assert_eq!(tx.confirmations, Some(1));
+    assert!(tx.block_hash.is_some());
 
     // Now we fork by invalidating the tip and creating a 2 blocks branch
     rpc.invalidate_block(&block_1a).unwrap();
 
-    // As it's invalidated, the tx is back to mempool
+    // As it's invalidated, the tx is back to mempool; we don't get
+    // confirmations since the tx, while existing in another (forked) block, is
+    // also a valid tx in the mempool.
     let tx = bitcoin.get_tx(txid).await.unwrap().unwrap();
     assert!(tx.confirmations.is_none());
+    assert!(tx.block_hash.is_none());
+
+    // Generate two blocks, with only coinbases, to get a canonical chain
+    // excluding the fork.
+    for _ in 0..2 {
+        rpc.call::<GenerateBlockJson>(
+            "generateblock",
+            &[
+                faucet.address.to_string().into(),
+                to_value::<&[String; 0]>(&[]).unwrap(),
+            ],
+        )
+        .unwrap();
+    }
+
+    // Even after the forked block is no longer the chain tip, as the tx is
+    // valid in the mempool we get no confirmations nor mention of the forked
+    // block hash.
+    let tx = bitcoin.get_tx(txid).await.unwrap().unwrap();
+    assert!(tx.confirmations.is_none());
+    assert!(tx.block_hash.is_none());
 
     // And we send a new tx invalidating the previous one
     let mut tx = Transaction {
@@ -282,6 +307,7 @@ async fn getrawtransaction_simple_fork() {
     // And the original one also is back to unconfirmed
     let tx = bitcoin.get_tx(txid).await.unwrap().unwrap();
     assert_eq!(tx.confirmations, Some(0));
+    assert!(tx.block_hash.is_some());
 
     let block_1b = faucet.generate_block();
     assert_ne!(block_1a, block_1b);
@@ -293,6 +319,7 @@ async fn getrawtransaction_simple_fork() {
     // And the original tx is still unconfirmed
     let tx = bitcoin.get_tx(txid).await.unwrap().unwrap();
     assert_eq!(tx.confirmations, Some(0));
+    assert!(tx.block_hash.is_some());
 
     // One more block to make this the canonical one
     faucet.generate_block();
@@ -304,6 +331,7 @@ async fn getrawtransaction_simple_fork() {
     // And the original tx is still unconfirmed
     let tx = bitcoin.get_tx(txid).await.unwrap().unwrap();
     assert_eq!(tx.confirmations, Some(0));
+    assert!(tx.block_hash.is_some());
 }
 
 /// Same as `make_deposit_request`, but with a recipient (and no dust change)
