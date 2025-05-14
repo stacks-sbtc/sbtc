@@ -202,9 +202,15 @@ pub async fn pull_and_update_deposit_with_retry(
         if update.is_unnecessary(&deposit_entry) {
             return Ok(deposit_entry);
         }
+        // We don't want to add a new entry if the status is already accepted.
+        // Updates Accepted -> Accepted occurs usually due to RBF.
+        if update.event.status == StatusEntry::Accepted
+            && deposit_entry.status == Status::Accepted
+        {
+            return Ok(deposit_entry);
+        }
         let is_valid_untrusted_status_update = update.event.status == StatusEntry::Accepted
-            && (deposit_entry.status == Status::Pending
-                || deposit_entry.status == Status::Accepted);
+            && deposit_entry.status == Status::Pending;
         if !is_trusted_key && !is_valid_untrusted_status_update {
             return Err(Error::Forbidden);
         }
