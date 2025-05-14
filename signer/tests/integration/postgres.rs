@@ -7058,6 +7058,8 @@ mod get_pending_accepted_withdrawal_requests {
             .expect("failed to query db");
 
         assert_eq!(requests.len(), 0);
+
+        storage::drop_db(db).await;
     }
 
     /// In this test, the request is confirmed in S2, but the request's
@@ -7163,5 +7165,7 @@ mod get_pending_accepted_withdrawal_requests {
             .expect("failed to query db");
 
         assert_eq!(requests.len(), 0);
+
+        storage::drop_db(db).await;
     }
 }
