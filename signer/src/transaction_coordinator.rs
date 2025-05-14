@@ -296,6 +296,8 @@ where
             return Ok(());
         }
 
+        tracing::debug!("{:#?}", self.context.state());
+
         let bitcoin_processing_delay = self.context.config().signer.bitcoin_processing_delay;
         if bitcoin_processing_delay > Duration::ZERO {
             tracing::debug!("sleeping before processing new bitcoin block");

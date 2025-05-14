@@ -49,12 +49,8 @@ use signer::message::Payload;
 use signer::network::MessageTransfer;
 use signer::storage::model::WithdrawalTxOutput;
 use signer::testing::get_rng;
-<<<<<<< HEAD
 use signer::transaction_coordinator::should_coordinate_dkg;
 use signer::transaction_signer::assert_allow_dkg_begin;
-=======
-
->>>>>>> main
 use testing_emily_client::apis::chainstate_api;
 use testing_emily_client::apis::testing_api;
 use testing_emily_client::apis::withdrawal_api;
@@ -4361,28 +4357,16 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
 #[test_case(true; "deposit completed")]
 #[test_case(false; "deposit not completed")]
 #[tokio::test]
-async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
-    // We use this loop for just one purpose:
-    // Restart the test if was chosen different coordinator from one we want.
-    // It is hacky and not so nice, but I didn't find a nice way to grant necessary signer
-    // a coordinator role.
-    // In terms of performance it is not a problem, because if we chose wrong coordinator we restart pretty fast, and,
-    // probability of chosing correct coordinator is 50%.
-    loop {
-        let need_break = coordinator_skip_onchain_completed_deposits_inner(deposit_completed).await;
-        if need_break {
-            break;
-        }
-    }
-}
-
-async fn coordinator_skip_onchain_completed_deposits_inner(deposit_completed: bool) -> bool {
+async fn coordinator_skip_onchain_completed_deposits_inner(deposit_completed: bool) {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let db = testing::storage::new_test_database().await;
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.bootstrap_signatures_required = 1;
+        })
         .build();
     let network = WanNetwork::default();
     let signer_network = network.connect(&ctx);
@@ -4395,6 +4379,10 @@ async fn coordinator_skip_onchain_completed_deposits_inner(deposit_completed: bo
     };
     let aggregate_key = signers.aggregate_key();
 
+    ctx.state().set_current_aggregate_key(aggregate_key);
+    ctx.state()
+        .update_current_signer_set([signer_kp.public_key().into()].into_iter().collect());
+
     ctx.state().set_sbtc_contracts_deployed();
     // When the signer binary starts up in main(), it sets the current
     // signer set public keys in the context state using the values in
@@ -4402,9 +4390,6 @@ async fn coordinator_skip_onchain_completed_deposits_inner(deposit_completed: bo
     // state gets updated in the block observer. We're not running a
     // block observer in this test, nor are we going through main, so
     // we manually update the state here.
-    ctx.state()
-        .update_current_signer_set(signers.signer_keys().iter().copied().collect());
-    ctx.state().set_current_aggregate_key(aggregate_key);
 
     ctx.with_stacks_client(|client| {
         client
@@ -4469,36 +4454,7 @@ async fn coordinator_skip_onchain_completed_deposits_inner(deposit_completed: bo
 
     // We will use network messages to detect the coordinator attempt, so we
     // need to connect to the network
-    let mut fake_ctx = TestContext::default_mocked();
-
-    let new_pubkey = fake_ctx.config().signer.public_key();
-
-    ctx.config_mut()
-        .signer
-        .bootstrap_signing_set
-        .insert(new_pubkey);
-    fake_ctx.config_mut().signer.bootstrap_signing_set =
-        ctx.config().signer.bootstrap_signing_set.clone();
-
-    ctx.state()
-        .update_current_signer_set(ctx.config().signer.bootstrap_signing_set.clone());
-    fake_ctx
-        .state()
-        .update_current_signer_set(ctx.config().signer.bootstrap_signing_set.clone());
-
-    // We want signer with [`signer_kp`] to be the coordinator in this test.
-    // Coordinator is choosed based on bitcoin tip hash, so, if coordinator is different from what we want we simply restart test.
-
-    let chaintip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
-    let is_coordinator = given_key_is_coordinator(
-        signer_kp.public_key().into(),
-        &chaintip,
-        &ctx.config().signer.bootstrap_signing_set,
-    );
-
-    if !is_coordinator {
-        return false;
-    }
+    let fake_ctx = ctx.clone();
 
     let signing_round_max_duration = Duration::from_secs(2);
     let ev = TxCoordinatorEventLoop {
@@ -4547,7 +4503,7 @@ async fn coordinator_skip_onchain_completed_deposits_inner(deposit_completed: bo
     }
 
     testing::storage::drop_db(db).await;
-    return true;
+    // return true;
 }
 
 /// Module containing a test suite and helpers specific to
