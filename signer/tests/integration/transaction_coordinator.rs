@@ -4379,10 +4379,6 @@ async fn coordinator_skip_onchain_completed_deposits_inner(deposit_completed: bo
     };
     let aggregate_key = signers.aggregate_key();
 
-    ctx.state().set_current_aggregate_key(aggregate_key);
-    ctx.state()
-        .update_current_signer_set([signer_kp.public_key().into()].into_iter().collect());
-
     ctx.state().set_sbtc_contracts_deployed();
     // When the signer binary starts up in main(), it sets the current
     // signer set public keys in the context state using the values in
@@ -4390,6 +4386,16 @@ async fn coordinator_skip_onchain_completed_deposits_inner(deposit_completed: bo
     // state gets updated in the block observer. We're not running a
     // block observer in this test, nor are we going through main, so
     // we manually update the state here.
+    // When the signer binary starts up in main(), it sets the current
+    // signer set public keys in the context state using the values in
+    // the bootstrap_signing_set configuration parameter. Later, the
+    // state gets updated in the block observer. We're not running a
+    // block observer in this test, nor are we going through main, so
+    // we manually update the state here.
+    ctx.state()
+        .update_current_signer_set(signers.signer_keys().iter().copied().collect());
+    ctx.state().set_current_aggregate_key(aggregate_key);
+
 
     ctx.with_stacks_client(|client| {
         client
@@ -4503,7 +4509,6 @@ async fn coordinator_skip_onchain_completed_deposits_inner(deposit_completed: bo
     }
 
     testing::storage::drop_db(db).await;
-    // return true;
 }
 
 /// Module containing a test suite and helpers specific to
