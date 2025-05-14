@@ -211,11 +211,9 @@ impl<Storage, Bitcoin, Stacks>
     }
 }
 
-/// DKG can be triggered if last dkg signer set differ from one in config.
-/// However, we don't want to test this functionality in some tests, so
-/// this function makes sure that dkg won't be triggered because of changes in signer set.
-/// Warn: in some cases dkg still can be triggered on changed signer set even if you used
-/// this function.
+/// DKG can be triggered if the last DKG signer set differs from the one in config.
+/// However, we don't want to test this functionality in some of our tests, so
+/// this function makes sure that DKG won't be triggered because of changes in signer set.
 pub fn prevent_dkg_on_changed_signer_set<Storage, Bitcoin, Stacks, Emily>(
     context: &mut TestContext<Storage, Bitcoin, Stacks, Emily>,
 ) where
