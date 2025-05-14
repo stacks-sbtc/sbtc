@@ -501,6 +501,9 @@ mod tests {
     use super::*;
     use bitvec::array::BitArray;
     use bitvec::field::BitField;
+    use rand::Rng;
+    use rand::prelude::SliceRandom;
+    use signer::testing::get_rng;
     use test_case::test_case;
 
     impl<T> BestFitPackager<T>
@@ -541,7 +544,7 @@ mod tests {
         }
     }
 
-    #[derive(Debug, Default, Copy, Clone)]
+    #[derive(Debug, Default, Copy, Clone, PartialEq)]
     struct RequestItem {
         // Votes _against_ the request. A `true` value means a vote against.
         votes: [bool; 5],
@@ -591,6 +594,28 @@ mod tests {
             let mut votes = [false; 5];
             votes[signer - 1] = true;
             Self { votes, ..Default::default() }
+        }
+
+        /// Create a new request item with random votes against.
+        fn with_rng(rng: &mut impl Rng) -> Self {
+            let mut votes = [false; 5];
+            for vote in &mut votes {
+                *vote = rng.gen_bool(0.5);
+            }
+            let needs_signature = rng.gen_bool(0.5);
+            let vsize = rng.gen_range(1..=10000);
+            let withdrawal_id = if rng.gen_bool(0.5) {
+                Some(rng.gen_range(1..=100))
+            } else {
+                None
+            };
+
+            Self {
+                votes,
+                needs_signature,
+                vsize,
+                withdrawal_id,
+            }
         }
 
         /// Set the `needs_signature` field to true, indicating that signing
@@ -749,8 +774,6 @@ mod tests {
         assert!(!bag.can_fit_withdrawal_ids(&large_set));
     }
 
-    use rand::prelude::SliceRandom;
-
     #[test]
     fn item_order_matters_in_compute_optimal_packages() {
         let mut rng = get_rng();
@@ -762,20 +785,15 @@ mod tests {
 
         let max_needs_signature = 100;
         let max_votes_against = 3;
-        let packages1 = compute_optimal_packages(
-            items.clone(),
-            max_votes_against,
-            max_needs_signature,
-        ).collect::<Vec<_>>();
+        let packages1 =
+            compute_optimal_packages(items.clone(), max_votes_against, max_needs_signature)
+                .collect::<Vec<_>>();
 
         items.shuffle(&mut rng);
 
-        let packages2 = compute_optimal_packages(
-            items,
-            max_votes_against,
-            max_needs_signature,
-        ).collect::<Vec<_>>();
-        
+        let packages2 = compute_optimal_packages(items, max_votes_against, max_needs_signature)
+            .collect::<Vec<_>>();
+
         assert_ne!(packages1, packages2);
     }
 
