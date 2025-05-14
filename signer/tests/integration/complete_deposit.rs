@@ -48,7 +48,7 @@ pub fn make_complete_deposit(data: &TestSweepSetup) -> (CompleteDepositV1, ReqCo
         deployer: StacksAddress::burn_address(false),
         // The sweep transaction ID must point to a transaction on
         // the canonical bitcoin blockchain.
-        sweep_txid: data.sweep_tx_info.txid.into(),
+        sweep_txid: data.sweep_tx_info.compute_txid().into(),
         // The block hash of the block that includes the above sweep
         // transaction. It must be on the canonical bitcoin blockchain.
         sweep_block_hash: data.sweep_block_hash.into(),
@@ -110,7 +110,7 @@ pub fn make_complete_deposit2(data: &TestSweepSetup2) -> (CompleteDepositV1, Req
         deployer: StacksAddress::burn_address(false),
         // The sweep transaction ID must point to a transaction on
         // the canonical bitcoin blockchain.
-        sweep_txid: sweep_tx_info.tx_info.txid.into(),
+        sweep_txid: sweep_tx_info.tx_info.compute_txid().into(),
         // The block hash of the block that includes the above sweep
         // transaction. It must be on the canonical bitcoin blockchain.
         sweep_block_hash: sweep_tx_info.block_hash,
@@ -505,7 +505,7 @@ async fn complete_deposit_validation_fee_too_low() {
     let deposit_amount = setup
         .sweep_tx_info
         .as_ref()
-        .map(|info| info.tx_info.fee.to_sat() + DEPOSIT_DUST_LIMIT - 1)
+        .and_then(|info| Some(info.tx_info.fee?.to_sat() + DEPOSIT_DUST_LIMIT - 1))
         .expect("sweep_tx_info not set");
 
     sqlx::query(
