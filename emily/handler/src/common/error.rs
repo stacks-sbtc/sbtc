@@ -225,13 +225,6 @@ pub enum Error {
     #[cfg(feature = "testing")]
     #[error("{0}")]
     AwsSdkDynamoDbBatchWriteItem(#[from] SdkError<BatchWriteItemError>),
-
-    /// This happens when we try to do reorg but new chaintip candidate is too
-    /// old comparing to current chaintip. If we have this error we don't do a
-    /// reorg, because usually it means we reconnected to new not fully synced
-    /// stacks node, rather then actual reorg.
-    #[error("New chaintip {0} is too old to reorg. Current chaintip {1}")]
-    TooOldChaintipToReorg(u64, u64),
 }
 
 /// Error implementation.
@@ -272,7 +265,6 @@ impl Error {
             Error::DynamoDbBuild(_) => StatusCode::INTERNAL_SERVER_ERROR,
             #[cfg(feature = "testing")]
             Error::AwsSdkDynamoDbBatchWriteItem(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::TooOldChaintipToReorg(_, _) => StatusCode::UNPROCESSABLE_ENTITY,
         }
     }
     /// Converts the error into a warp response.
