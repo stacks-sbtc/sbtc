@@ -7,7 +7,7 @@ edition = "2024"
 ignored = []
 
 [features]
-default = ["testing"]
+default = []
 testing = []
 populate = ["testing"]
 

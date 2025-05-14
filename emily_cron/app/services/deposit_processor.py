@@ -1,20 +1,104 @@
 import logging
-from itertools import chain
+from itertools import chain, groupby
 from typing import Iterable
 
-from ..clients import PrivateEmilyAPI, HiroAPI, MempoolAPI
+from ..clients import PrivateEmilyAPI, MempoolAPI
 from ..models import (
     DepositUpdate,
     EnrichedDepositInfo,
     RequestStatus,
     DepositInfo,
 )
+from .. import settings
 
 logger = logging.getLogger(__name__)
 
 
 class DepositProcessor:
     """Service for processing deposits."""
+
+    def process_rbf_transactions(
+        self,
+        enriched_deposits: list[EnrichedDepositInfo],
+        bitcoin_chaintip_height: int,
+    ) -> list[DepositUpdate]:
+        """Identifies and handles confirmed RBF scenarios.
+
+        This function scans the provided deposits to find groups of transactions
+        linked by RBF (where one transaction attempts to replace another).
+
+        If a group of RBF-related transactions contains at least one transaction
+        that has been confirmed on the Bitcoin blockchain, this function generates
+        updates to mark all other unconfirmed transactions within that same
+        RBF group as FAILED. This signifies that they were successfully replaced
+        by the confirmed transaction.
+
+        Args:
+            enriched_deposits: List of enriched deposit information
+        Returns:
+            A list of DepositUpdate objects, specifically for those deposits
+            that were identified as unconfirmed parts of an RBF chain where
+            another transaction in the chain got confirmed. Returns an empty
+            list if no such scenarios are found.
+        """
+        updates = []
+
+        # Find transactions with RBF replacements
+        rbf_txs = [tx for tx in enriched_deposits if tx.rbf_txids]
+        if not rbf_txs:
+            return updates
+
+        logger.info(f"Found {len(rbf_txs)} transactions with RBF replacements")
+
+        # Group txs by RBF chain. All txs in a group have the same RBF chain.
+        for rbf_key, group_iter in groupby(rbf_txs, key=lambda tx: ",".join(sorted(tx.rbf_txids))):
+
+            confirmed_txid_in_group: str | None = None
+            unconfirmed_txs_in_group: list[EnrichedDepositInfo] = []
+
+            # Identify confirmed tx and collect unconfirmed ones
+            for tx in group_iter:
+                if tx.confirmed_height is not None:
+                    # Should ideally only be one confirmed tx per RBF group
+                    if confirmed_txid_in_group is not None:
+                        logger.warning(
+                            f"Multiple confirmed transactions found in RBF group {rbf_key}: "
+                            f"{confirmed_txid_in_group} and {tx.bitcoin_txid}. Using first found."
+                        )
+                    elif (
+                        bitcoin_chaintip_height
+                        < tx.confirmed_height + settings.MIN_BLOCK_CONFIRMATIONS
+                    ):
+                        logger.warning(
+                            f"Confirmed transaction {tx.bitcoin_txid} is not yet eligible for RBF replacement"
+                        )
+                    else:
+                        confirmed_txid_in_group = tx.bitcoin_txid
+                else:
+                    unconfirmed_txs_in_group.append(tx)
+
+            if confirmed_txid_in_group is None:
+                logger.debug(f"No confirmed transactions found for RBF group {rbf_key}")
+                continue
+
+            logger.info(
+                f"Confirmed transaction {confirmed_txid_in_group} found for RBF group {rbf_key}"
+            )
+            # Mark all collected unconfirmed transactions as FAILED
+            for tx in unconfirmed_txs_in_group:
+                logger.info(
+                    f"Marking RBF'd transaction {tx.bitcoin_txid} as FAILED (replaced by confirmed tx {confirmed_txid_in_group})"
+                )
+                updates.append(
+                    DepositUpdate(
+                        bitcoin_txid=tx.bitcoin_txid,
+                        bitcoin_tx_output_index=tx.bitcoin_tx_output_index,
+                        status=RequestStatus.FAILED.value,
+                        status_message=f"Replaced by confirmed tx {confirmed_txid_in_group}",
+                    )
+                )
+
+        return updates
 
     def process_expired_locktime(
         self,
@@ -149,6 +233,10 @@ class DepositProcessor:
         locktime_updates = self.process_expired_locktime(enriched_deposits, bitcoin_chaintip_height)
         updates.extend(locktime_updates)
 
+        # Process RBF transactions
+        rbf_updates = self.process_rbf_transactions(enriched_deposits, bitcoin_chaintip_height)
+        updates.extend(rbf_updates)
+
         # Apply updates
         if updates:
             logger.info(f"Updating {len(updates)} deposit statuses")
@@ -184,6 +272,10 @@ class DepositProcessor:
                 "confirmed_height": tx_data.get("status", {}).get("block_height"),
                 "confirmed_time": tx_data.get("status", {}).get("block_time"),
             }
+
+            # Only check for RBF if not confirmed
+            if additional_info["confirmed_height"] is None:
+                additional_info["rbf_txids"] = MempoolAPI.check_for_rbf(deposit.bitcoin_txid)
 
             transaction_details.append(
                 EnrichedDepositInfo.from_deposit_info(deposit, additional_info)

@@ -33,7 +33,8 @@ RUN make install-pnpm && make build
 
 # Build Emily Server.
 # --------------------
-RUN cargo build --bin emily-server
+ARG EMILY_SERVER_BUILD_ARGS=""
+RUN cargo build --bin emily-server $EMILY_SERVER_BUILD_ARGS
 
 # Build Emily AWS setup.
 # -----------------------
