@@ -284,9 +284,7 @@ impl Error {
             | Error::NotFound
             | Error::TooManyInternalRetries
             | Error::InconsistentState(_)
-            | Error::Deserialization(_)
             | Error::WithdrawalRequestIdMismatch(_, _)
-            | Error::InvalidStacksAddress(_)
             | Error::MissingAttributesDeposit(_)
             | Error::MissingAttributesWithdrawal(_)
             | Error::TooManyWithdrawalEntries(_)
