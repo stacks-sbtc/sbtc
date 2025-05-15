@@ -2555,7 +2555,7 @@ pub async fn should_coordinate_dkg(
         .has_same_pubkeys(&config.signer.bootstrap_signing_set);
 
     if signer_set_changed {
-        tracing::info!("signer set has changed, proceeding with DKG");
+        tracing::info!("signer set has changed; proceeding with DKG");
         return Ok(true);
     }
 
