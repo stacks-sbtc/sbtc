@@ -23,7 +23,6 @@ use sbtc::testing::regtest::Recipient;
 use signer::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
 use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::bitcoin::rpc::BitcoinTxInfo;
-use signer::bitcoin::rpc::GetTxResponse;
 use signer::bitcoin::utxo;
 use signer::bitcoin::utxo::Fees;
 use signer::bitcoin::utxo::SbtcRequests;
@@ -282,7 +281,7 @@ impl TestSweepSetup {
     /// Store the deposit transaction into the database
     pub async fn store_deposit_tx(&self, db: &PgStore) {
         let bitcoin_tx_ref = BitcoinTxRef {
-            txid: self.deposit_tx_info.txid.into(),
+            txid: self.deposit_tx_info.compute_txid().into(),
             block_hash: self.deposit_block_hash.into(),
         };
 
@@ -292,7 +291,7 @@ impl TestSweepSetup {
     /// into the database
     pub async fn store_sweep_tx(&self, db: &PgStore) {
         let bitcoin_tx_ref = BitcoinTxRef {
-            txid: self.sweep_tx_info.txid.into(),
+            txid: self.sweep_tx_info.compute_txid().into(),
             block_hash: self.sweep_block_hash.into(),
         };
 
@@ -321,6 +320,7 @@ impl TestSweepSetup {
         let deposit = Deposit {
             tx_info: self.deposit_tx_info.clone(),
             info: self.deposit_info.clone(),
+            block_hash: self.deposit_block_hash,
         };
         let deposit_request = model::DepositRequest::from(deposit);
         db.write_deposit_request(&deposit_request).await.unwrap();
@@ -664,6 +664,8 @@ pub struct TestSweepSetup2 {
     pub deposits: Vec<(DepositInfo, utxo::DepositRequest, BitcoinTxInfo)>,
     /// And initial donation to make to the signers.
     pub donation: OutPoint,
+    /// And initial donation to make to the signers.
+    pub donation_block_hash: bitcoin::BlockHash,
     /// The transaction that swept in the deposit transaction.
     pub sweep_tx_info: Option<SweepTxInfo>,
     /// Information about the sweep transaction when it was broadcast.
@@ -723,7 +725,7 @@ impl TestSweepSetup2 {
         // Start off with some initial UTXOs to work with.
 
         let donation = faucet.send_to(Amount::ONE_BTC.to_sat(), &signer.address);
-        faucet.generate_blocks(1);
+        let donation_block_hash = faucet.generate_blocks(1)[0];
 
         let mut deposits = Vec::new();
 
@@ -798,6 +800,7 @@ impl TestSweepSetup2 {
             sweep_tx_info: None,
             broadcast_info: None,
             donation,
+            donation_block_hash,
             signers,
             stacks_blocks,
             withdrawals,
@@ -846,15 +849,15 @@ impl TestSweepSetup2 {
 
         // We fetch the entire block, to feed to the block observer. It's
         // easier this way.
-        let GetTxResponse { tx, block_hash, .. } = context
+        let tx_info = context
             .bitcoin_client
-            .get_tx(&self.donation.txid)
+            .get_tx_info(&self.donation.txid, &&self.donation_block_hash)
             .unwrap()
             .unwrap();
         let block_observer = BlockObserver { context, bitcoin_blocks: () };
 
         block_observer
-            .extract_sbtc_transactions(block_hash.unwrap(), &[tx])
+            .extract_sbtc_transactions(self.donation_block_hash, &[tx_info])
             .await
             .unwrap();
     }
@@ -967,7 +970,7 @@ impl TestSweepSetup2 {
     pub async fn store_deposit_txs(&self, db: &PgStore) {
         for (_, _, tx_info) in self.deposits.iter() {
             let bitcoin_tx_ref = BitcoinTxRef {
-                txid: tx_info.txid.into(),
+                txid: tx_info.compute_txid().into(),
                 block_hash: self.deposit_block_hash.into(),
             };
 
@@ -1046,7 +1049,7 @@ impl TestSweepSetup2 {
         let sweep = self.sweep_tx_info.as_ref().expect("no sweep tx info set");
 
         let bitcoin_tx_ref = BitcoinTxRef {
-            txid: sweep.tx_info.txid.into(),
+            txid: sweep.tx_info.compute_txid().into(),
             block_hash: sweep.block_hash,
         };
 
@@ -1077,6 +1080,7 @@ impl TestSweepSetup2 {
             let deposit = Deposit {
                 tx_info: tx_info.clone(),
                 info: info.clone(),
+                block_hash: self.deposit_block_hash,
             };
             let deposit_request = model::DepositRequest::from(deposit);
             db.write_deposit_request(&deposit_request).await.unwrap();
