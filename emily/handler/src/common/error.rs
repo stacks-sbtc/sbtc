@@ -282,28 +282,20 @@ impl Error {
     /// production ready.
     pub fn into_production_error(self) -> Error {
         match self {
-            Error::Network(_)
-            | Error::VersionConflict(_)
-            | Error::Reorganizing(_)
-            | Error::Base64Decode(_)
-            | Error::EnvVariable(_)
-            | Error::SerdeJson(_)
-            | Error::SerdeDynamo(_)
-            | Error::EnvParseInt(_)
-            | Error::InvalidDepositEntry(_, _)
-            | Error::InvalidWithdrawalEntry(_, _)
-            | Error::AwsSdkDynamoDbDeleteItem(_)
-            | Error::AwsSdkDynamoDbGetItem(_)
-            | Error::AwsSdkDynamoDbPutItem(_)
-            | Error::AwsSdkDynamoDbQuery(_)
-            | Error::AwsSdkDynamoDbScan(_)
-            | Error::AwsSdkDynamoDbUpdateItem(_)
-            | Error::InternalServer => Error::InternalServer,
-            #[cfg(feature = "testing")]
-            Error::DynamoDbBuild(_) | Error::AwsSdkDynamoDbBatchWriteItem(_) => {
-                Error::InternalServer
-            }
-            err => err,
+            Error::DepositOutputMismatch(_, _)
+            | Error::Forbidden
+            | Error::NotFound
+            | Error::TooManyInternalRetries
+            | Error::InconsistentState(_)
+            | Error::Deserialization(_)
+            | Error::WithdrawalRequestIdMismatch(_, _)
+            | Error::InvalidStacksAddress(_)
+            | Error::MissingAttributesDeposit(_)
+            | Error::MissingAttributesWithdrawal(_)
+            | Error::TooManyWithdrawalEntries(_)
+            | Error::HttpRequest(_, _) => self,
+
+            _ => Error::InternalServer,
         }
     }
     /// Makes an inconsistency error from a vector of chainstate entries.
