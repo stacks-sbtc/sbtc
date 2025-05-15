@@ -440,16 +440,6 @@ pub async fn update_deposits_signer(
         let api_state = accessors::get_api_state(&context).await?;
         api_state.error_if_reorganizing()?;
 
-        // Signers are only allowed to update deposits to the accepted state.
-        let is_allowed = !body
-            .deposits
-            .iter()
-            .any(|deposit| deposit.status != Status::Accepted);
-
-        if !is_allowed {
-            return Err(Error::Forbidden);
-        }
-
         update_deposits(api_state, context, body, false).await
     }
     // Handle and respond.
@@ -601,13 +591,6 @@ async fn update_deposits(
                 status: StatusCode::OK.as_u16(),
             },
         ));
-    }
-
-    if updated_deposits
-        .iter()
-        .all(|(_, deposit)| deposit.status == StatusCode::NOT_FOUND.as_u16())
-    {
-        return Err(Error::NotFound);
     }
 
     updated_deposits.sort_by_key(|(index, _)| *index);
