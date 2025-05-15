@@ -4386,12 +4386,6 @@ async fn coordinator_skip_onchain_completed_deposits_inner(deposit_completed: bo
     // state gets updated in the block observer. We're not running a
     // block observer in this test, nor are we going through main, so
     // we manually update the state here.
-    // When the signer binary starts up in main(), it sets the current
-    // signer set public keys in the context state using the values in
-    // the bootstrap_signing_set configuration parameter. Later, the
-    // state gets updated in the block observer. We're not running a
-    // block observer in this test, nor are we going through main, so
-    // we manually update the state here.
     ctx.state()
         .update_current_signer_set(signers.signer_keys().iter().copied().collect());
     ctx.state().set_current_aggregate_key(aggregate_key);
