@@ -120,26 +120,9 @@ async fn too_old_chaintip_to_reorg(min_height: u64, reorg_height: u64, max_heigh
         .await
         .expect("Received an error after making a valid get chaintip api call.");
 
-    let gotten_err = apis::chainstate_api::set_chainstate(&configuration, reorg_chaintip.clone())
+    let _res = apis::chainstate_api::set_chainstate(&configuration, reorg_chaintip.clone())
         .await
-        .expect_err("This chaintip is too old for a reorg.");
-
-    let old_bitcoin_tip = gotten_pre_reorg_chaintip
-        .bitcoin_block_height
-        .unwrap()
-        .unwrap();
-    let reorg_bitcoin_tip = reorg_chaintip.bitcoin_block_height.unwrap().unwrap();
-
-    match gotten_err {
-        testing_emily_client::apis::Error::ResponseError(err) => {
-            assert_eq!(err.status, 422);
-            let expected_content = format!(
-                "{{\"message\":\"TooOldChaintipToReorg({reorg_bitcoin_tip}, {old_bitcoin_tip})\"}}"
-            );
-            assert_eq!(err.content, expected_content);
-        }
-        _ => panic!("Expected a ResponseError, but got: {:?}", gotten_err),
-    }
+        .expect("Even if we ignore reorg we return 200 ok");
 
     let gotten_post_reorg_chaintip = apis::chainstate_api::get_chain_tip(&configuration)
         .await
