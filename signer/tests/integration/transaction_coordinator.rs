@@ -4457,10 +4457,6 @@ async fn coordinator_skip_onchain_completed_deposits_inner(deposit_completed: bo
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
-    // We will use network messages to detect the coordinator attempt, so we
-    // need to connect to the network
-    let fake_ctx = ctx.clone();
-
     let signing_round_max_duration = Duration::from_secs(2);
     let ev = TxCoordinatorEventLoop {
         network: signer_network.spawn(),
@@ -4482,6 +4478,9 @@ async fn coordinator_skip_onchain_completed_deposits_inner(deposit_completed: bo
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
+    // We will use network messages to detect the coordinator attempt, so we
+    // need to connect to the network
+    let fake_ctx = ctx.clone();
     let mut fake_signer = network.connect(&fake_ctx).spawn();
 
     // Finally, set the deposit status according in the smart contract
