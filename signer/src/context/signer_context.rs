@@ -166,7 +166,6 @@ where
     }
 }
 
-// in context/signer_context.rs
 #[cfg(any(test, feature = "testing"))]
 impl<Storage, Bitcoin, Stacks, Emily> SignerContext<Storage, Bitcoin, Stacks, Emily> {
     /// Get a mutable reference to the config.
