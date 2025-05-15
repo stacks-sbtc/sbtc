@@ -334,6 +334,91 @@ async fn getrawtransaction_simple_fork() {
     assert!(tx.block_hash.is_some());
 }
 
+/// Test checking `getrawtransaction` behaviour when querying for a specific tx
+/// between reorgs.
+#[test_log::test(tokio::test)]
+async fn getrawtransaction_single_tx_regorged() {
+    // We don't really need a context, we just need the bitcoin client
+    let ctx = TestContext::builder()
+        .with_in_memory_storage()
+        .with_first_bitcoin_core_client()
+        .with_mocked_stacks_client()
+        .with_mocked_emily_client()
+        .build();
+    let bitcoin = ctx.get_bitcoin_client();
+
+    let (rpc, faucet) = regtest::initialize_blockchain_devenv();
+
+    // Start from a clean mempool
+    faucet.generate_block();
+
+    // Create a tx
+    let txid = &faucet.send_to(10_000, &faucet.address).txid;
+
+    // The tx should be in mempool
+    let tx = bitcoin.get_tx(txid).await.unwrap().unwrap();
+    assert!(tx.confirmations.is_none());
+    assert!(tx.block_hash.is_none());
+
+    let block_1a = faucet.generate_block();
+
+    // And now it should be confirmed
+    let tx = bitcoin.get_tx(txid).await.unwrap().unwrap();
+    assert_eq!(tx.confirmations, Some(1));
+    assert_eq!(tx.block_hash, Some(block_1a));
+
+    faucet.generate_block();
+
+    let tx = bitcoin.get_tx(txid).await.unwrap().unwrap();
+    assert_eq!(tx.confirmations, Some(2));
+    assert_eq!(tx.block_hash, Some(block_1a));
+
+    // Now we fork
+    rpc.invalidate_block(&block_1a).unwrap();
+
+    // As it's invalidated, the tx is back to mempool; we don't get
+    // confirmations since the tx, while existing in another (forked) block, is
+    // also a valid tx in the mempool.
+    let tx = bitcoin.get_tx(txid).await.unwrap().unwrap();
+    assert!(tx.confirmations.is_none());
+    assert!(tx.block_hash.is_none());
+
+    // Generate two blocks, with only coinbases, to get a canonical chain
+    // excluding the fork.
+    for _ in 0..2 {
+        rpc.call::<GenerateBlockJson>(
+            "generateblock",
+            &[
+                faucet.address.to_string().into(),
+                to_value::<&[String; 0]>(&[]).unwrap(),
+            ],
+        )
+        .unwrap();
+    }
+
+    // Even after the forked block is no longer the chain tip, as the tx is
+    // valid in the mempool we get no confirmations nor mention of the forked
+    // block hash.
+    let tx = bitcoin.get_tx(txid).await.unwrap().unwrap();
+    assert!(tx.confirmations.is_none());
+    assert!(tx.block_hash.is_none());
+
+    let block_1b = faucet.generate_block();
+    assert_ne!(block_1a, block_1b);
+
+    // Now, which block are we getting? The second one (the "tallest" one), even
+    // if the other had 2 confirmations, which is nice.
+    let tx = bitcoin.get_tx(txid).await.unwrap().unwrap();
+    assert_eq!(tx.confirmations, Some(1));
+    assert_eq!(tx.block_hash, Some(block_1b));
+
+    faucet.generate_block();
+
+    let tx = bitcoin.get_tx(txid).await.unwrap().unwrap();
+    assert_eq!(tx.confirmations, Some(2));
+    assert_eq!(tx.block_hash, Some(block_1b));
+}
+
 /// Same as `make_deposit_request`, but with a recipient (and no dust change)
 fn make_deposit_request<U>(
     depositor: &Recipient,
