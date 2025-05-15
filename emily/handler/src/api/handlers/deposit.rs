@@ -551,6 +551,21 @@ async fn update_deposits(
                 ));
                 continue;
             }
+            Err(Error::Forbidden) => {
+                tracing::warn!(
+                    %bitcoin_txid,
+                    bitcoin_tx_output_index,
+                    "failed to update deposit. Such type of update is not allowed for the caller"
+                );
+                updated_deposits.push((
+                    index,
+                    DepositWithStatus {
+                        deposit: Deposit::default(),
+                        status: StatusCode::FORBIDDEN.as_u16(),
+                    },
+                ));
+                continue;
+            }
             Err(error) => {
                 tracing::error!(
                     %bitcoin_txid,

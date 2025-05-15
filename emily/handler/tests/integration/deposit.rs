@@ -1020,17 +1020,14 @@ async fn update_deposits_is_forbidden_for_signer(
     .await;
 
     if is_forbidden {
-        assert!(response.is_err());
-        match response.unwrap_err() {
-            testing_emily_client::apis::Error::ResponseError(ResponseContent {
-                status, ..
-            }) => {
-                assert_eq!(status, 403);
-            }
+        // Check responce correctness
+        let response = response.expect("Batch update should return 207 Multistatus");
+        let deposits = response.deposits;
+        assert_eq!(deposits.len(), 1);
+        let deposit = deposits.first().unwrap();
+        assert_eq!(deposit.status, 403);
 
-            e => panic!("Expected a 403 error, got {:#?}", e),
-        }
-
+        // Check that deposit wasn't updated
         let response = apis::deposit_api::get_deposit(
             &user_configuration,
             &bitcoin_txid,
