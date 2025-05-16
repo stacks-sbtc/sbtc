@@ -747,6 +747,10 @@ pub enum Error {
             amounts = .0.amounts, cap = .0.cap, cap_blocks = .0.cap_blocks, withdrawn_total = .0.withdrawn_total)]
     ExceedsWithdrawalCap(WithdrawalCapContext),
 
+    /// Overflow occurred when manipulating a system time value
+    #[error("overflow occurred when manipulating a system time value")]
+    SystemTimeOverflow,
+
     /// An error which can be used in test code instead of `unimplemented!()` or
     /// other alternatives, so that an an actual error is returned instead of
     /// panicking.

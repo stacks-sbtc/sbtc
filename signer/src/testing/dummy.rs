@@ -15,6 +15,7 @@ use clarity::util::secp256k1::Secp256k1PublicKey;
 use fake::Dummy;
 use fake::Fake;
 use fake::Faker;
+use libp2p::Multiaddr;
 use p256k1::point::Point;
 use p256k1::scalar::Scalar;
 use polynomial::Polynomial;
@@ -85,6 +86,8 @@ use crate::storage::model::StacksPrincipal;
 use crate::storage::model::StacksTxId;
 use crate::storage::model::WithdrawalAcceptEvent;
 use crate::storage::model::WithdrawalRejectEvent;
+
+use super::network::RandomMemoryMultiaddr;
 
 /// Dummy block
 pub fn block<R: rand::RngCore + ?Sized>(
@@ -771,6 +774,21 @@ impl fake::Dummy<fake::Faker> for BitcoinPreSignAck {
         BitcoinPreSignAck {}
     }
 }
+
+impl fake::Dummy<fake::Faker> for model::P2pPeer {
+    fn dummy_with_rng<R: rand::RngCore + ?Sized>(config: &fake::Faker, rng: &mut R) -> Self {
+        let public_key: PublicKey = config.fake_with_rng(rng);
+        let address = Multiaddr::random_memory();
+
+        model::P2pPeer {
+            peer_id: public_key.into(),
+            public_key,
+            address: address.into(),
+            last_updated_at: Faker.fake_with_rng(rng),
+        }
+    }
+}
+
 /// A struct to help with creating dummy values for testing
 pub struct Unit;
 

@@ -23,6 +23,8 @@ use crate::storage::model::StacksBlockHeight;
 use crate::storage::model::StacksPrincipal;
 use crate::storage::model::StacksTxId;
 
+use super::model::UnixTimestamp;
+
 // For the [`ScriptPubKey`]
 
 impl<'r> sqlx::Decode<'r, sqlx::Postgres> for ScriptPubKey {
@@ -328,5 +330,53 @@ impl<'r> sqlx::Encode<'r, sqlx::Postgres> for SigHash {
 impl sqlx::postgres::PgHasArrayType for SigHash {
     fn array_type_info() -> sqlx::postgres::PgTypeInfo {
         <[u8; 32] as sqlx::postgres::PgHasArrayType>::array_type_info()
+    }
+}
+
+// --- sqlx Type implementations for UnixTimestamp ---
+// This implementation assumes UnixTimestamp(u64) in Rust will be stored
+// or retrieved as a BIGINT (i64) in PostgreSQL. This aligns with using
+// `EXTRACT(EPOCH FROM some_timestamptz_column)::BIGINT` for reading,
+// and `to_timestamp(some_bigint_column)` for writing.
+
+impl sqlx::Type<sqlx::Postgres> for UnixTimestamp {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        // We are treating UnixTimestamp as a BIGINT (i64) in the database.
+        <i64 as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+
+    fn compatible(ty: &sqlx::postgres::PgTypeInfo) -> bool {
+        // Ensure compatibility with PostgreSQL's BIGINT type.
+        <i64 as sqlx::Type<sqlx::Postgres>>::compatible(ty)
+    }
+}
+
+impl<'q> sqlx::Encode<'q, sqlx::Postgres> for UnixTimestamp {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<IsNull, BoxDynError> {
+        // Unix timestamps (seconds since epoch) are non-negative and fit in i64.
+        // PostgreSQL's to_timestamp(integer) function interprets the integer as epoch seconds.
+        let seconds_i64 = self.0 as i64;
+        seconds_i64.encode_by_ref(buf)
+    }
+
+    fn size_hint(&self) -> usize {
+        (self.0 as i64).size_hint()
+    }
+}
+
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for UnixTimestamp {
+    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, BoxDynError> {
+        // We expect a BIGINT from the database (e.g., from EXTRACT(...)::BIGINT).
+        let seconds_i64 = <i64 as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        if seconds_i64 < 0 {
+            // This case should ideally not be reached if the source is a valid TIMESTAMPTZ.
+            return Err(Box::new(sqlx::Error::Decode(
+                "Received negative value for UnixTimestamp from database".into(),
+            )));
+        }
+        Ok(UnixTimestamp(seconds_i64 as u64))
     }
 }

@@ -6,12 +6,14 @@ use std::convert::From;
 use std::num::TryFromIntError;
 use std::ops::Deref;
 use std::ops::{Add, Sub};
+use std::time::{SystemTime, SystemTimeError, UNIX_EPOCH};
 
 use bitcoin::OutPoint;
 use bitcoin::hashes::Hash as _;
 use bitvec::array::BitArray;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
 use clarity::vm::types::PrincipalData;
+use libp2p::{Multiaddr, PeerId};
 use serde::{Deserialize, Serialize};
 use stacks_common::types::chainstate::BurnchainHeaderHash;
 use stacks_common::types::chainstate::StacksBlockId;
@@ -24,6 +26,58 @@ use crate::block_observer::Deposit;
 use crate::error::Error;
 use crate::keys::PublicKey;
 use crate::keys::PublicKeyXOnly;
+
+/// Represents a UNIX timestamp in seconds since the UNIX epoch ([`UNIX_EPOCH`]).
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "testing", derive(fake::Dummy))]
+pub struct UnixTimestamp(pub u64);
+
+impl UnixTimestamp {
+    /// Returns the current time as a Unix timestamp (seconds since epoch).
+    pub fn now() -> Result<Self, SystemTimeError> {
+        let secs = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+        Ok(UnixTimestamp(secs))
+    }
+
+    /// Gets the inner value as a [`SystemTime`].
+    pub fn as_system_time(&self) -> Result<SystemTime, Error> {
+        SystemTime::UNIX_EPOCH
+            .checked_add(std::time::Duration::from_secs(self.0))
+            .ok_or(Error::SystemTimeOverflow)
+    }
+}
+
+impl From<u64> for UnixTimestamp {
+    fn from(secs: u64) -> Self {
+        UnixTimestamp(secs)
+    }
+}
+
+impl From<UnixTimestamp> for u64 {
+    fn from(ts: UnixTimestamp) -> Self {
+        ts.0
+    }
+}
+
+impl Deref for UnixTimestamp {
+    type Target = u64;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A P2P peer which the signer has successfully connected to.
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
+pub struct P2pPeer {
+    /// The peer ID of the connected peer.
+    pub peer_id: PeerId,
+    /// The public key of the connected peer.
+    pub public_key: PublicKey,
+    /// The address of the connected peer.
+    pub address: Multiaddr,
+    /// The timestamp of the last successful dial to the peer.
+    pub last_updated_at: UnixTimestamp,
+}
 
 /// A bitcoin transaction output (TXO) relevant for the sBTC signers.
 ///
