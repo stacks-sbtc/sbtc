@@ -616,7 +616,7 @@ pub enum DkgSharesStatus {
 #[sqlx(type_name = "output_type", rename_all = "snake_case")]
 #[derive(serde::Serialize, serde::Deserialize)]
 #[strum(serialize_all = "snake_case")]
-#[cfg_attr(feature = "testing", derive(fake::Dummy))]
+#[cfg_attr(feature = "testing", derive(fake::Dummy, strum::EnumIter))]
 pub enum TxOutputType {
     /// An output created by the signers as the TXO containing all of the
     /// swept funds.

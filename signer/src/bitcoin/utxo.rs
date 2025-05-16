@@ -1445,13 +1445,6 @@ pub trait TxDeconstructor: BitcoinInputsOutputs {
     /// sBTC transaction, and only outputs that the signers can sign for
     /// otherwise.
     fn to_tx_outputs(&self, signer_script_pubkeys: &HashSet<ScriptBuf>) -> Vec<TxOutput> {
-        // This transaction might not be related to the signers at all. If
-        // not then we can exit early.
-        let mut outputs = self.outputs().iter();
-        if !outputs.any(|tx_out| signer_script_pubkeys.contains(&tx_out.script_pubkey)) {
-            return Vec::new();
-        }
-
         // If the signers did not create this transaction, but the signers
         // control at least one output then the outputs that the signers
         // control are donations. So we scan the outputs and exit early.

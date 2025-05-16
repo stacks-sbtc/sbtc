@@ -152,7 +152,13 @@ impl Recipient {
     /// Generate a new public-private key pair and address of the given
     /// kind.
     pub fn new(kind: AddressType) -> Self {
-        let keypair = secp256k1::Keypair::new_global(&mut rand::rngs::OsRng);
+        Self::new_with_rng(kind, &mut rand::rngs::OsRng)
+    }
+
+    /// Generate a new public-private key pair and address of the given
+    /// kind using the given random number generator.
+    pub fn new_with_rng<R: rand::Rng>(kind: AddressType, rng: &mut R) -> Self {
+        let keypair = secp256k1::Keypair::new_global(rng);
         let pk = keypair.public_key();
         let script_pubkey = match kind {
             AddressType::P2wpkh => ScriptBuf::new_p2wpkh(&CompressedPublicKey(pk).wpubkey_hash()),

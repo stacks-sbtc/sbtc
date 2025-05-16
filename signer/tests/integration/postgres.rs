@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::io::Read as _;
 use std::ops::Deref;
@@ -28,6 +29,7 @@ use signer::storage::model::SweptWithdrawalRequest;
 use signer::storage::model::WithdrawalRequest;
 use signer::testing::IterTestExt as _;
 use signer::testing::storage::DbReadTestExt;
+use strum::IntoEnumIterator;
 use time::OffsetDateTime;
 
 use signer::bitcoin::MockBitcoinInteract;
@@ -1828,6 +1830,64 @@ async fn get_signers_script_pubkeys_returns_non_empty_vec_old_rows() {
     assert_eq!(keys.len(), 1);
 
     signer::testing::storage::drop_db(db).await;
+}
+
+/// The [`DbRead::get_signers_script_pubkeys`] should return scriptPubKeys
+/// from the dkg_shares table, as well as ones for the signer's (non
+/// OP_RETURN) outputs in the `bitcoin_tx_outputs` table.
+#[tokio::test]
+async fn get_signers_script_pubkeys_also_uses_bitcoin_tx_outputs() {
+    let db = testing::storage::new_test_database().await;
+
+    let mut rng = get_rng();
+
+    let shares: model::EncryptedDkgShares = Faker.fake_with_rng(&mut rng);
+    let mut tx_output: model::TxOutput = Faker.fake_with_rng(&mut rng);
+    // Let's make sure that the query does not pick up non-signer output
+    // scriptPubKeys. We do that by making sure that the output that we
+    // write is not the signers output.
+    let output_type = model::TxOutputType::iter()
+        .filter(|variant| variant != &model::TxOutputType::SignersOutput)
+        .collect::<Vec<_>>()
+        .choose(&mut rng)
+        .copied()
+        .unwrap();
+    tx_output.output_type = output_type;
+
+    db.write_encrypted_dkg_shares(&shares).await.unwrap();
+    db.write_tx_output(&tx_output).await.unwrap();
+
+    let keys = db
+        .get_signers_script_pubkeys()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(ScriptPubKey::from_bytes)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(keys.len(), 1);
+
+    assert!(keys.contains(&shares.script_pubkey));
+    assert!(!keys.contains(&tx_output.script_pubkey));
+
+    // Okay, now let's add a row for the signers' output and make sure that
+    // it gets picked up.
+    tx_output.output_type = model::TxOutputType::SignersOutput;
+    tx_output.txid = Faker.fake_with_rng(&mut rng);
+    db.write_tx_output(&tx_output).await.unwrap();
+
+    let keys = db
+        .get_signers_script_pubkeys()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(ScriptPubKey::from_bytes)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(keys.len(), 2);
+
+    assert!(keys.contains(&shares.script_pubkey));
+    assert!(keys.contains(&tx_output.script_pubkey));
+
+    testing::storage::drop_db(db).await;
 }
 
 /// The [`DbRead::get_last_encrypted_dkg_shares`] function is supposed to
