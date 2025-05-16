@@ -25,7 +25,7 @@ impl SignerSignal {
 #[derive(Debug, Clone, PartialEq)]
 pub enum SignerCommand {
     /// Signals to the application to publish a message to the P2P network.
-    P2PPublish(crate::network::Msg),
+    P2PPublish(Box<crate::network::Msg>),
     /// Signal to shut down the application
     Shutdown,
 }

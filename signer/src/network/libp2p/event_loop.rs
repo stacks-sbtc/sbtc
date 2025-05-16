@@ -46,7 +46,7 @@ pub async fn run(ctx: &impl Context, swarm: Arc<Mutex<Swarm<SignerBehavior>>>) {
                 continue;
             };
 
-            outbox.lock().await.push(payload);
+            outbox.lock().await.push(*payload);
         }
     };
 
