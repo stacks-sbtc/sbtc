@@ -219,7 +219,7 @@ impl BitcoinInteract for TestHarness {
             .map(|block| BitcoinBlockHeader {
                 hash: *block_hash,
                 height: block.height,
-                time: block.time as u64,
+                time: block.time,
                 previous_block_hash: block.previous_block_hash,
             }))
     }
