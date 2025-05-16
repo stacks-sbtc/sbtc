@@ -356,14 +356,15 @@ pub struct InMemoryTransaction {
 
 impl TransactionHandle for InMemoryTransaction {
     async fn commit(self) -> Result<(), Error> {
+        // Lock the transaction's clone of the store and get a guard
+        let store = self.store.lock().await.clone();
+
         if self.completed.load(std::sync::atomic::Ordering::SeqCst) {
             return Err(Error::InMemoryDatabase(
                 "Transaction already completed".into(),
             ));
         }
 
-        // Lock the transaction's clone of the store and get a guard
-        let store = self.store.lock().await.clone();
         // Lock the original store and get a guard
         let mut original_store = self.original_store_mutex.lock().await;
 
@@ -391,6 +392,10 @@ impl TransactionHandle for InMemoryTransaction {
     }
 
     async fn rollback(self) -> Result<(), Error> {
+        // Lock the transaction's inner store to ensure we can't get any interleaving
+        // commits or rolbacks.
+        let _store = self.store.lock().await;
+
         if self.completed.load(std::sync::atomic::Ordering::SeqCst) {
             return Err(Error::InMemoryDatabase(
                 "Transaction already completed".into(),
@@ -401,6 +406,7 @@ impl TransactionHandle for InMemoryTransaction {
         // Just mark the transaction as completed.
         self.completed
             .store(true, std::sync::atomic::Ordering::SeqCst);
+
         Ok(())
     }
 }
