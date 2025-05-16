@@ -50,7 +50,8 @@ use signer::message::Payload;
 use signer::network::MessageTransfer;
 use signer::storage::model::WithdrawalTxOutput;
 use signer::testing::get_rng;
-
+use signer::transaction_coordinator::should_coordinate_dkg;
+use signer::transaction_signer::assert_allow_dkg_begin;
 use testing_emily_client::apis::chainstate_api;
 use testing_emily_client::apis::testing_api;
 use testing_emily_client::apis::withdrawal_api;
@@ -568,6 +569,8 @@ async fn process_complete_deposit() {
     // Get the private key of the coordinator of the signer set.
     let private_key = select_coordinator(&setup.sweep_block_hash.into(), &signer_info);
 
+    prevent_dkg_on_changed_signer_set(&mut context);
+
     // Bootstrap the tx coordinator event loop
     context.state().set_sbtc_contracts_deployed();
     let tx_coordinator = transaction_coordinator::TxCoordinatorEventLoop {
@@ -1048,6 +1051,102 @@ async fn run_dkg_from_scratch() {
     for (_ctx, db, _, _) in signers {
         testing::storage::drop_db(db).await;
     }
+}
+
+/// Tests that dkg will not be triggered if signer set didn't change
+#[test(tokio::test)]
+async fn dont_run_dkg_if_signer_set_didnt_change() {
+    let mut rng = get_rng();
+    let db = testing::storage::new_test_database().await;
+    let ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.dkg_target_rounds = std::num::NonZero::<u32>::new(1).unwrap();
+        })
+        .build();
+    let config_signer_set = ctx.config().signer.bootstrap_signing_set.clone();
+
+    // Sanity check
+    assert!(!config_signer_set.is_empty());
+
+    // Write dkg shares so it won't be a reason to trigger dkg.
+    let dkg_shares = model::EncryptedDkgShares {
+        dkg_shares_status: model::DkgSharesStatus::Verified,
+        ..Faker.fake_with_rng(&mut rng)
+    };
+    db.write_encrypted_dkg_shares(&dkg_shares)
+        .await
+        .expect("failed to write dkg shares");
+
+    // We need to construct chaintip
+    let bitcoin_block: model::BitcoinBlock = Faker.fake_with_rng(&mut rng);
+    db.write_bitcoin_block(&bitcoin_block)
+        .await
+        .expect("failed to write bitcoin block");
+
+    // Check that with correct rotate keys tx we won't proceed with dkg.
+    let chaintip = db
+        .get_bitcoin_canonical_chain_tip_ref()
+        .await
+        .expect("failed to get chain tip")
+        .expect("no chain tip");
+
+    ctx.inner
+        .state()
+        .update_current_signer_set(config_signer_set.iter().cloned().collect());
+    assert!(!should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+    assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_err());
+}
+
+/// Tests that dkg will be triggered if signer set changes
+#[test(tokio::test)]
+async fn run_dkg_if_signer_set_changes() {
+    let mut rng = get_rng();
+    let db = testing::storage::new_test_database().await;
+    let ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.dkg_target_rounds = std::num::NonZero::<u32>::new(1).unwrap();
+        })
+        .build();
+    let mut config_signer_set = ctx.config().signer.bootstrap_signing_set.clone();
+
+    // Sanity check
+    assert!(!config_signer_set.is_empty());
+
+    // Write dkg shares so it won't be a reason to trigger dkg.
+    let dkg_shares = model::EncryptedDkgShares {
+        dkg_shares_status: model::DkgSharesStatus::Verified,
+        ..Faker.fake_with_rng(&mut rng)
+    };
+    db.write_encrypted_dkg_shares(&dkg_shares)
+        .await
+        .expect("failed to write dkg shares");
+
+    // Remove one signer
+    let _removed_signer = config_signer_set
+        .pop_first()
+        .expect("This signer set should not be empty");
+    // Create chaintip
+    let bitcoin_block: model::BitcoinBlock = Faker.fake_with_rng(&mut rng);
+    db.write_bitcoin_block(&bitcoin_block)
+        .await
+        .expect("failed to write bitcoin block");
+
+    // Check that with correct rotate keys tx we won't proceed with dkg.
+    let chaintip = db
+        .get_bitcoin_canonical_chain_tip_ref()
+        .await
+        .expect("failed to get chain tip")
+        .expect("no chain tip");
+
+    ctx.inner
+        .state()
+        .update_current_signer_set(config_signer_set.iter().cloned().collect());
+    assert!(should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+    assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_ok());
 }
 
 /// Test that we can run multiple DKG rounds.
@@ -4166,6 +4265,8 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
     // Get the private key of the coordinator of the signer set.
     let private_key = select_coordinator(&bitcoin_chain_tip.block_hash, &signer_info);
 
+    prevent_dkg_on_changed_signer_set(&mut context);
+
     // Bootstrap the tx coordinator event loop
     context.state().set_sbtc_contracts_deployed();
     let tx_coordinator = transaction_coordinator::TxCoordinatorEventLoop {
@@ -4262,13 +4363,16 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
 #[test_case(true; "deposit completed")]
 #[test_case(false; "deposit not completed")]
 #[tokio::test]
-async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
+async fn coordinator_skip_onchain_completed_deposits_inner(deposit_completed: bool) {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let db = testing::storage::new_test_database().await;
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.bootstrap_signatures_required = 1;
+        })
         .build();
     let network = WanNetwork::default();
     let signer_network = network.connect(&ctx);
@@ -4334,6 +4438,8 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
     setup.store_deposit_decisions(&db).await;
     setup.store_sweep_tx(&db).await;
 
+    prevent_dkg_on_changed_signer_set(&mut ctx);
+
     let (bitcoin_chain_tip, _) = db.get_chain_tips().await;
     ctx.state().set_bitcoin_chain_tip(bitcoin_chain_tip);
     // If we try to sign a complete deposit, we will ask the bitcoin node to
@@ -4374,7 +4480,7 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
 
     // We will use network messages to detect the coordinator attempt, so we
     // need to connect to the network
-    let fake_ctx = TestContext::default_mocked();
+    let fake_ctx = ctx.clone();
     let mut fake_signer = network.connect(&fake_ctx).spawn();
 
     // Finally, set the deposit status according in the smart contract
