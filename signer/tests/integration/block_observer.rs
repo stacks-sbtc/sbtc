@@ -807,7 +807,7 @@ async fn block_observer_picks_up_chained_unordered_sweeps() {
 
     // Let's generate a new block with the sweep transactions and feed it
     // to the block observer
-    let block_hash = faucet.generate_blocks(1).pop().unwrap();
+    let block_hash = faucet.generate_block();
     let block_info = ctx.bitcoin_client.get_block(&block_hash).unwrap().unwrap();
 
     // We need to make sure that we populate the `bitcoin_blocks` table.
