@@ -357,7 +357,9 @@ pub struct InMemoryTransaction {
 impl TransactionHandle for InMemoryTransaction {
     async fn commit(self) -> Result<(), Error> {
         if self.completed.load(std::sync::atomic::Ordering::SeqCst) {
-            panic!("Transaction already completed");
+            return Err(Error::InMemoryDatabase(
+                "Transaction already completed".into(),
+            ));
         }
 
         // Lock the transaction's clone of the store and get a guard
@@ -390,7 +392,9 @@ impl TransactionHandle for InMemoryTransaction {
 
     async fn rollback(self) -> Result<(), Error> {
         if self.completed.load(std::sync::atomic::Ordering::SeqCst) {
-            panic!("Transaction already completed");
+            return Err(Error::InMemoryDatabase(
+                "Transaction already completed".into(),
+            ));
         }
 
         // Rollback is a no-op for in-memory transactions.
