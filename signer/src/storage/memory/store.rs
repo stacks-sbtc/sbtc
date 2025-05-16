@@ -357,7 +357,7 @@ pub struct InMemoryTransaction {
 impl TransactionHandle for InMemoryTransaction {
     async fn commit(self) -> Result<(), Error> {
         // Lock the transaction's clone of the store and get a guard
-        let store = self.store.lock().await.clone();
+        let store = self.store.lock().await;
 
         if self.completed.load(std::sync::atomic::Ordering::SeqCst) {
             return Err(Error::InMemoryDatabase(
