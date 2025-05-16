@@ -25,7 +25,6 @@ pub mod testing;
 pub mod withdrawal;
 
 /// Central error handler for Warp rejections, converting them to appropriate HTTP responses.
-/// TODO(131): Alter handler for Emily API.
 pub async fn handle_rejection(err: Rejection) -> Result<impl Reply, Infallible> {
     if err.is_not_found() {
         let json = warp::reply::json(&ErrorResponse {

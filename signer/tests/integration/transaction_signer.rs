@@ -246,6 +246,8 @@ async fn signer_rejects_stacks_txns_with_too_high_a_fee(
         // and ensure that it is the correct one.
         assert!(matches!(result, Err(Error::StacksFeeLimitExceeded(_, _))));
     }
+
+    testing::storage::drop_db(db).await;
 }
 
 #[tokio::test]
@@ -785,6 +787,8 @@ mod validate_dkg_verification_message {
 
         let result = params.execute(&db).await.unwrap_err();
         assert!(matches!(result, Error::NoDkgShares));
+
+        testing::storage::drop_db(db).await;
     }
 
     #[tokio::test]
@@ -821,6 +825,8 @@ mod validate_dkg_verification_message {
         } else {
             panic!("Expected an AggregateKeyMismatch error, got: {:?}", result);
         }
+
+        testing::storage::drop_db(db).await;
     }
 
     #[tokio::test]
@@ -847,7 +853,9 @@ mod validate_dkg_verification_message {
         assert!(matches!(
             result,
             Error::DkgVerificationFailed(key) if aggregate_key_x_only == key
-        ))
+        ));
+
+        testing::storage::drop_db(db).await;
     }
 
     #[tokio::test]
@@ -883,7 +891,9 @@ mod validate_dkg_verification_message {
         assert!(matches!(
             result,
             Error::DkgVerificationWindowElapsed(key) if aggregate_key == key
-        ))
+        ));
+
+        testing::storage::drop_db(db).await;
     }
 
     #[tokio::test]
@@ -916,6 +926,8 @@ mod validate_dkg_verification_message {
         };
 
         params.execute(&db).await.unwrap();
+
+        testing::storage::drop_db(db).await;
     }
 
     #[tokio::test]
@@ -945,6 +957,8 @@ mod validate_dkg_verification_message {
         };
 
         params.execute(&db).await.unwrap();
+
+        testing::storage::drop_db(db).await;
     }
 
     #[tokio::test]
@@ -977,5 +991,7 @@ mod validate_dkg_verification_message {
         let result = params.execute(&db).await.unwrap_err();
 
         assert!(matches!(result, Error::InvalidSigHash(_)));
+
+        testing::storage::drop_db(db).await;
     }
 }

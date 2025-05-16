@@ -2083,7 +2083,7 @@ async fn get_swept_deposit_requests_returns_swept_deposit_requests() {
     assert_eq!(req.recipient, setup.deposit_recipient.into());
     assert_eq!(req.sweep_block_hash, setup.sweep_block_hash.into());
     assert_eq!(req.sweep_block_height, setup.sweep_block_height);
-    assert_eq!(req.sweep_txid, setup.sweep_tx_info.txid.into());
+    assert_eq!(req.sweep_txid, setup.sweep_tx_info.compute_txid().into());
 
     signer::testing::storage::drop_db(db).await;
 }
@@ -7058,6 +7058,8 @@ mod get_pending_accepted_withdrawal_requests {
             .expect("failed to query db");
 
         assert_eq!(requests.len(), 0);
+
+        storage::drop_db(db).await;
     }
 
     /// In this test, the request is confirmed in S2, but the request's
@@ -7163,5 +7165,7 @@ mod get_pending_accepted_withdrawal_requests {
             .expect("failed to query db");
 
         assert_eq!(requests.len(), 0);
+
+        storage::drop_db(db).await;
     }
 }
