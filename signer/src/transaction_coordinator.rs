@@ -261,7 +261,7 @@ where
     async fn to_signed_message(event: SignerSignal) -> Option<Signed<SignerMessage>> {
         match event {
             SignerSignal::Event(SignerEvent::TxSigner(TxSignerEvent::MessageGenerated(msg)))
-            | SignerSignal::Event(SignerEvent::P2P(P2PEvent::MessageReceived(msg))) => Some(msg),
+            | SignerSignal::Event(SignerEvent::P2P(P2PEvent::MessageReceived(msg))) => Some(*msg),
             _ => None,
         }
     }
@@ -2223,7 +2223,7 @@ where
 
         self.network.broadcast(msg.clone()).await?;
         self.context
-            .signal(TxCoordinatorEvent::MessageGenerated(msg).into())?;
+            .signal(TxCoordinatorEvent::MessageGenerated(Box::new(msg)).into())?;
 
         Ok(())
     }

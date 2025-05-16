@@ -87,7 +87,7 @@ impl MessageTransfer for P2PNetwork {
                 recv = self.signal_rx.recv() => {
                     match recv {
                         Ok(SignerSignal::Event(SignerEvent::P2P(P2PEvent::MessageReceived(msg)))) => {
-                            return Ok(msg);
+                            return Ok(*msg);
                         },
                         Err(_) => {
                             return Err(Error::SignerShutdown);

@@ -136,7 +136,7 @@ pub enum Error {
     /// This means that the stacks address in the environment for the
     /// signers multisig address is invalid.
     #[error("Could not parse a stacks address from a string")]
-    InvalidStacksAddress(#[source] clarity::vm::errors::Error),
+    InvalidStacksAddress(#[source] Box<clarity::vm::errors::Error>),
 
     /// This happens when the request to DynamoDB succeeds but does not
     /// return any values. This happens when the request instructs the
@@ -185,7 +185,7 @@ pub enum Error {
 
     /// This happens when attempting to read an item from DynamoDB.
     #[error("Could not retrieve an item from DynamoDB; {0}")]
-    AwsSdkDynamoDbGetItem(#[from] SdkError<GetItemError>),
+    AwsSdkDynamoDbGetItem(#[from] Box<SdkError<GetItemError>>),
 
     /// This error occurs when storing an item in DynamoDB. Note that
     /// precondition errors on a PutItem operation are returned in the
@@ -195,11 +195,11 @@ pub enum Error {
 
     /// This happens when attempting the "Query" operation in DynamoDB.
     #[error("Could not complete Query operation on DynamoDB; {0}")]
-    AwsSdkDynamoDbQuery(#[from] SdkError<QueryError>),
+    AwsSdkDynamoDbQuery(#[from] Box<SdkError<QueryError>>),
 
     /// This happens when attempting the "Scan" operation in DynamoDB.
     #[error("Could not complete Scan operation on DynamoDB; {0}")]
-    AwsSdkDynamoDbScan(#[from] SdkError<ScanError>),
+    AwsSdkDynamoDbScan(#[from] Box<SdkError<ScanError>>),
 
     /// This happens when attempting to update a stored item in DynamoDB.
     /// Note that precondition errors on an UpdateItem operation are
@@ -224,7 +224,7 @@ pub enum Error {
     /// This happens during the BatchWrite operation on DynamoDB.
     #[cfg(feature = "testing")]
     #[error("{0}")]
-    AwsSdkDynamoDbBatchWriteItem(#[from] SdkError<BatchWriteItemError>),
+    AwsSdkDynamoDbBatchWriteItem(#[from] Box<SdkError<BatchWriteItemError>>),
 }
 
 /// Error implementation.
