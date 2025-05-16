@@ -367,10 +367,10 @@ impl TransactionHandle for InMemoryTransaction {
 
         // Naive optimistic concurrency check
         if self.version != original_store.version {
-            return Err(Error::OptimisticConcurrencyViolation {
-                transaction_version: self.version,
-                store_version: original_store.version,
-            });
+            return Err(Error::InMemoryDatabase(format!(
+                "Optimistic concurrency check failed: expected version {}, found version {}",
+                self.version, original_store.version
+            )));
         }
 
         // Commit the changes from the transactional store to the original store.

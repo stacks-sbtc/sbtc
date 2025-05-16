@@ -214,6 +214,6 @@ async fn test_in_memory_transaction_optimistic_concurrency_violation() {
     // updated it to 1.
     assert_matches!(
         tx1.commit().await,
-        Err(Error::OptimisticConcurrencyViolation { .. })
+        Err(Error::InMemoryDatabase(msg)) if msg.contains("Optimistic concurrency")
     );
 }

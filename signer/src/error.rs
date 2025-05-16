@@ -752,26 +752,16 @@ pub enum Error {
             amounts = .0.amounts, cap = .0.cap, cap_blocks = .0.cap_blocks, withdrawn_total = .0.withdrawn_total)]
     ExceedsWithdrawalCap(WithdrawalCapContext),
 
+    /// An error was raised by the in-memory database.
+    #[error("In-memory database error: {0}")]
+    InMemoryDatabase(String),
+
     /// An error which can be used in test code instead of `unimplemented!()` or
     /// other alternatives, so that an an actual error is returned instead of
     /// panicking.
     #[cfg(test)]
     #[error("Dummy (for testing purposes)")]
     Dummy,
-
-    /// An optimistic concurrency violation occurred. This is currently used in
-    /// the in-memory database implementation.
-    #[error(
-        "Optimistic concurrency violation: attempted to commit in-memory \
-        DB transaction where the store is at another version than the current transaction.\
-        Store version: {store_version}, transaction version: {transaction_version}"
-    )]
-    OptimisticConcurrencyViolation {
-        /// The version of the store at the time of the transaction.
-        store_version: usize,
-        /// The version of the transaction.
-        transaction_version: usize,
-    },
 }
 
 impl From<std::convert::Infallible> for Error {
