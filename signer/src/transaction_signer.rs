@@ -1514,7 +1514,7 @@ where
 
         self.network.broadcast(msg.clone()).await?;
         self.context
-            .signal(TxSignerEvent::MessageGenerated(msg).into())?;
+            .signal(TxSignerEvent::MessageGenerated(Box::new(msg)).into())?;
 
         Ok(())
     }

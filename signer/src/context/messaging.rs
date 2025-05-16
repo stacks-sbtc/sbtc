@@ -15,7 +15,7 @@ impl SignerSignal {
     /// task and None otherwise.
     pub fn tx_signer_generated(self) -> Option<crate::network::Msg> {
         match self {
-            Self::Event(SignerEvent::TxSigner(TxSignerEvent::MessageGenerated(msg))) => Some(msg),
+            Self::Event(SignerEvent::TxSigner(TxSignerEvent::MessageGenerated(msg))) => Some(*msg),
             _ => None,
         }
     }
@@ -25,7 +25,7 @@ impl SignerSignal {
 #[derive(Debug, Clone, PartialEq)]
 pub enum SignerCommand {
     /// Signals to the application to publish a message to the P2P network.
-    P2PPublish(crate::network::Msg),
+    P2PPublish(Box<crate::network::Msg>),
     /// Signal to shut down the application
     Shutdown,
 }
@@ -54,7 +54,7 @@ pub enum P2PEvent {
     /// was successful.
     PublishSuccess(crate::network::MsgId),
     /// Signals to the application that a message was received from the P2P network.
-    MessageReceived(crate::network::Msg),
+    MessageReceived(Box<crate::network::Msg>),
     /// Signals to the application that a new peer has connected to the P2P network.
     PeerConnected(libp2p::PeerId),
     /// Event which occurs when the P2P network has started its event loop.
@@ -85,7 +85,7 @@ pub enum RequestDeciderEvent {
 pub enum TxSignerEvent {
     /// Event which occurs when the transaction signer has sent a message to
     /// the P2P network.
-    MessageGenerated(crate::network::Msg),
+    MessageGenerated(Box<crate::network::Msg>),
     /// Event which occurs when the transaction signer has started its event
     /// loop.
     EventLoopStarted,
@@ -96,7 +96,7 @@ pub enum TxSignerEvent {
 pub enum TxCoordinatorEvent {
     /// Event which occurs when the transaction coordinator has sent a message
     /// to the P2P network.
-    MessageGenerated(crate::network::Msg),
+    MessageGenerated(Box<crate::network::Msg>),
     /// The coordinator is finished processing requests for the bitcoin
     /// block.
     TenureCompleted,

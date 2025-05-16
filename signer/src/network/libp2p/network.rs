@@ -59,7 +59,9 @@ impl MessageTransfer for P2PNetwork {
     /// in-flight requests.
     async fn broadcast(&mut self, msg: Msg) -> Result<(), Error> {
         self.signal_tx
-            .send(SignerSignal::Command(SignerCommand::P2PPublish(msg)))
+            .send(SignerSignal::Command(SignerCommand::P2PPublish(Box::new(
+                msg,
+            ))))
             .map_err(|_| Error::SignerShutdown)
             .map(|_| ())
     }
@@ -87,7 +89,7 @@ impl MessageTransfer for P2PNetwork {
                 recv = self.signal_rx.recv() => {
                     match recv {
                         Ok(SignerSignal::Event(SignerEvent::P2P(P2PEvent::MessageReceived(msg)))) => {
-                            return Ok(msg);
+                            return Ok(*msg);
                         },
                         Err(_) => {
                             return Err(Error::SignerShutdown);

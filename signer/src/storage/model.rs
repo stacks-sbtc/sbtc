@@ -961,7 +961,8 @@ impl std::fmt::Display for StacksPrincipal {
 impl std::str::FromStr for StacksPrincipal {
     type Err = Error;
     fn from_str(literal: &str) -> Result<Self, Self::Err> {
-        let principal = PrincipalData::parse(literal).map_err(Error::ParsePrincipalData)?;
+        let principal = PrincipalData::parse(literal)
+            .map_err(|source| Error::ParsePrincipalData(Box::new(source)))?;
         Ok(Self(principal))
     }
 }

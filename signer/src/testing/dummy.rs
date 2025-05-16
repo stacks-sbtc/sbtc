@@ -661,7 +661,7 @@ impl fake::Dummy<fake::Faker> for CompleteDepositV1 {
                 vout: rng.next_u32(),
             },
             amount: config.fake_with_rng(rng),
-            recipient: config.fake_with_rng::<StacksPrincipal, R>(rng).into(),
+            recipient: Box::new(config.fake_with_rng::<StacksPrincipal, R>(rng).into()),
             deployer: address,
             sweep_txid: config.fake_with_rng(rng),
             sweep_block_hash: config.fake_with_rng(rng),

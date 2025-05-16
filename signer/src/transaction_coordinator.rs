@@ -261,7 +261,7 @@ where
     async fn to_signed_message(event: SignerSignal) -> Option<Signed<SignerMessage>> {
         match event {
             SignerSignal::Event(SignerEvent::TxSigner(TxSignerEvent::MessageGenerated(msg)))
-            | SignerSignal::Event(SignerEvent::P2P(P2PEvent::MessageReceived(msg))) => Some(msg),
+            | SignerSignal::Event(SignerEvent::P2P(P2PEvent::MessageReceived(msg))) => Some(*msg),
             _ => None,
         }
     }
@@ -1256,7 +1256,7 @@ where
         let contract_call = ContractCall::CompleteDepositV1(CompleteDepositV1 {
             amount: req.amount - assessed_bitcoin_fee.to_sat(),
             outpoint,
-            recipient: req.recipient.into(),
+            recipient: Box::new(req.recipient.into()),
             deployer: self.context.config().signer.deployer,
             sweep_txid: req.sweep_txid,
             sweep_block_hash: req.sweep_block_hash,
@@ -1314,7 +1314,7 @@ where
             .ok_or_else(|| Error::VoutMissing(outpoint.txid, outpoint.vout))?;
 
         let contract_call = ContractCall::AcceptWithdrawalV1(AcceptWithdrawalV1 {
-            id: qualified_id,
+            id: Box::new(qualified_id),
             outpoint,
             tx_fee: assessed_bitcoin_fee.to_sat(),
             signer_bitmap: 0,
@@ -1351,7 +1351,7 @@ where
         wallet: &SignerWallet,
     ) -> Result<(StacksTransactionSignRequest, MultisigTx), Error> {
         let contract_call = ContractCall::RejectWithdrawalV1(RejectWithdrawalV1 {
-            id: req.qualified_id(),
+            id: req.qualified_id().into(),
             signer_bitmap: 0,
             deployer: self.context.config().signer.deployer,
         });
@@ -2223,7 +2223,7 @@ where
 
         self.network.broadcast(msg.clone()).await?;
         self.context
-            .signal(TxCoordinatorEvent::MessageGenerated(msg).into())?;
+            .signal(TxCoordinatorEvent::MessageGenerated(Box::new(msg)).into())?;
 
         Ok(())
     }

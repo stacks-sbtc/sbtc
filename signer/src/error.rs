@@ -280,7 +280,7 @@ pub enum Error {
     /// This happens when parsing a string, usually from the database, into
     /// a PrincipalData.
     #[error("could not parse the string into PrincipalData: {0}")]
-    ParsePrincipalData(#[source] clarity::vm::errors::Error),
+    ParsePrincipalData(#[source] Box<clarity::vm::errors::Error>),
 
     /// Could not send a message
     #[error("could not send a message from the in-memory MessageTransfer broadcast function")]
@@ -295,7 +295,7 @@ pub enum Error {
     /// For some reason, InterpreterError does not implement
     /// std::fmt::Display or std::error::Error, hence the debug log.
     #[error("receive error: {0:?}")]
-    ClarityValueSerialization(clarity::vm::errors::InterpreterError),
+    ClarityValueSerialization(Box<clarity::vm::errors::InterpreterError>),
 
     /// Thrown when doing [`i64::try_from`] or [`i32::try_from`] before
     /// inserting a value into the database. This only happens if the value
