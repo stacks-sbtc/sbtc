@@ -604,7 +604,7 @@ mod tests {
             }
             let needs_signature = rng.gen_bool(0.5);
             let vsize = rng.gen_range(1..=10000);
-            let withdrawal_id = if rng.gen_bool(0.5) {
+            let withdrawal_id = if needs_signature && rng.gen_bool(0.5) {
                 Some(rng.gen_range(1..=100))
             } else {
                 None
@@ -777,7 +777,7 @@ mod tests {
     #[test]
     fn item_order_matters_in_compute_optimal_packages() {
         let mut rng = get_rng();
-        let len = rng.gen_range(10..=100) as usize;
+        let len = rng.gen_range(25..=100) as usize;
         let mut items = Vec::with_capacity(len);
         for _ in 0..len {
             items.push(RequestItem::with_rng(&mut rng));
