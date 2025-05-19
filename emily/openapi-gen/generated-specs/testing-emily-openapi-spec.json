@@ -557,7 +557,7 @@
           "required": true
         },
         "responses": {
-          "207": {
+          "200": {
             "description": "Deposits updated successfully",
             "content": {
               "application/json": {
@@ -1170,7 +1170,7 @@
           "required": true
         },
         "responses": {
-          "207": {
+          "200": {
             "description": "Deposits updated successfully",
             "content": {
               "application/json": {

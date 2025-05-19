@@ -10,7 +10,6 @@ use test_case::test_case;
 
 use sbtc::testing;
 use sbtc::testing::deposits::TxSetup;
-use testing_emily_client::apis::ResponseContent;
 use testing_emily_client::apis::chainstate_api::set_chainstate;
 use testing_emily_client::models::{Chainstate, Fulfillment, Status, UpdateDepositsRequestBody};
 use testing_emily_client::{
@@ -1021,7 +1020,7 @@ async fn update_deposits_is_forbidden_for_signer(
 
     if is_forbidden {
         // Check responce correctness
-        let response = response.expect("Batch update should return 207 Multistatus");
+        let response = response.expect("Batch update should return 200 OK");
         let deposits = response.deposits;
         assert_eq!(deposits.len(), 1);
         let deposit = deposits.first().unwrap();
