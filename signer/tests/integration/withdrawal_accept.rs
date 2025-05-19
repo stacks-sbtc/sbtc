@@ -49,7 +49,7 @@ fn make_withdrawal_accept(data: &TestSweepSetup2) -> (AcceptWithdrawalV1, ReqCon
             vout: 2,
         },
         // This points to the withdrawal request transaction.
-        id: data.withdrawal_ids()[0].into(),
+        id: data.withdrawal_ids()[0],
         // This is the assessed transaction fee for fulfilling the withdrawal
         // request.
         tx_fee: fee,

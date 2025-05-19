@@ -1147,11 +1147,12 @@ where
     ) -> Result<StacksTxId, Error> {
         // TODO: we should validate the contract call before asking others
         // to sign it.
-        let contract_call = ContractCall::RotateKeysV1(RotateKeysV1::new(
+        let rotate_keys_v1 = RotateKeysV1::new(
             wallet,
             self.context.config().signer.deployer,
             rotate_key_aggregate_key,
-        ));
+        );
+        let contract_call = ContractCall::RotateKeysV1(Box::new(rotate_keys_v1));
 
         // Rotate key transactions should be done as soon as possible, so
         // we set the fee rate to the high priority fee. We also require
@@ -1253,15 +1254,16 @@ where
 
         // TODO: we should validate the contract call before asking others
         // to sign it.
-        let contract_call = ContractCall::CompleteDepositV1(CompleteDepositV1 {
+        let complete_deposit_v1 = CompleteDepositV1 {
             amount: req.amount - assessed_bitcoin_fee.to_sat(),
             outpoint,
-            recipient: Box::new(req.recipient.into()),
+            recipient: req.recipient.into(),
             deployer: self.context.config().signer.deployer,
             sweep_txid: req.sweep_txid,
             sweep_block_hash: req.sweep_block_hash,
             sweep_block_height: req.sweep_block_height,
-        });
+        };
+        let contract_call = ContractCall::CompleteDepositV1(complete_deposit_v1.into());
 
         // Complete deposit requests should be done as soon as possible, so
         // we set the fee rate to the high priority fee.
@@ -1313,15 +1315,16 @@ where
             .assess_output_fee(outpoint.vout as usize)
             .ok_or_else(|| Error::VoutMissing(outpoint.txid, outpoint.vout))?;
 
-        let contract_call = ContractCall::AcceptWithdrawalV1(AcceptWithdrawalV1 {
-            id: Box::new(qualified_id),
+        let accept_withdrawal_v1 = AcceptWithdrawalV1 {
+            id: qualified_id,
             outpoint,
             tx_fee: assessed_bitcoin_fee.to_sat(),
             signer_bitmap: 0,
             deployer: self.context.config().signer.deployer,
             sweep_block_hash: req.sweep_block_hash,
             sweep_block_height: req.sweep_block_height,
-        });
+        };
+        let contract_call = ContractCall::AcceptWithdrawalV1(Box::new(accept_withdrawal_v1));
 
         // Estimate the fee for the stacks transaction
         let tx_fee = self
@@ -1350,11 +1353,12 @@ where
         bitcoin_aggregate_key: &PublicKey,
         wallet: &SignerWallet,
     ) -> Result<(StacksTransactionSignRequest, MultisigTx), Error> {
-        let contract_call = ContractCall::RejectWithdrawalV1(RejectWithdrawalV1 {
-            id: req.qualified_id().into(),
+        let reject_withdrawal_v1 = RejectWithdrawalV1 {
+            id: req.qualified_id(),
             signer_bitmap: 0,
             deployer: self.context.config().signer.deployer,
-        });
+        };
+        let contract_call = ContractCall::RejectWithdrawalV1(Box::new(reject_withdrawal_v1));
 
         // Estimate the fee for the stacks transaction
         let tx_fee = self

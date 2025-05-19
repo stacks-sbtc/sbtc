@@ -144,7 +144,7 @@ pub async fn deploy_smart_contracts() -> &'static SignerStxState {
 #[test_case(ContractCallWrapper(CompleteDepositV1 {
     outpoint: bitcoin::OutPoint::null(),
     amount: 123654789,
-    recipient: PrincipalData::parse("SN2V7WTJ7BHR03MPHZ1C9A9ZR6NZGR4WM8HT4V67Y").unwrap().into(),
+    recipient: PrincipalData::parse("SN2V7WTJ7BHR03MPHZ1C9A9ZR6NZGR4WM8HT4V67Y").unwrap(),
     deployer: *testing::wallet::WALLET.0.address(),
     sweep_txid: BitcoinTxId::from([0; 32]),
     sweep_block_hash: BitcoinBlockHash::from([0; 32]),
@@ -153,7 +153,7 @@ pub async fn deploy_smart_contracts() -> &'static SignerStxState {
 #[test_case(ContractCallWrapper(CompleteDepositV1 {
     outpoint: bitcoin::OutPoint::null(),
     amount: 123654,
-    recipient: PrincipalData::parse("ST1RQHF4VE5CZ6EK3MZPZVQBA0JVSMM9H5PMHMS1Y.my-contract-name").unwrap().into(),
+    recipient: PrincipalData::parse("ST1RQHF4VE5CZ6EK3MZPZVQBA0JVSMM9H5PMHMS1Y.my-contract-name").unwrap(),
     deployer: *testing::wallet::WALLET.0.address(),
     sweep_txid: BitcoinTxId::from([0; 32]),
     sweep_block_hash: BitcoinBlockHash::from([0; 32]),
@@ -164,7 +164,7 @@ pub async fn deploy_smart_contracts() -> &'static SignerStxState {
 	    request_id: 2,
 	    txid: StacksTxId::from([0; 32]),
 	    block_hash: StacksBlockHash::from([0; 32]),
-    }.into(),
+    },
     outpoint: bitcoin::OutPoint::null(),
     tx_fee: 2500,
     signer_bitmap: 0,
@@ -183,7 +183,7 @@ pub async fn deploy_smart_contracts() -> &'static SignerStxState {
 	    request_id: 2,
 	    txid: StacksTxId::from([0; 32]),
 	    block_hash: StacksBlockHash::from([0; 32]),
-    }.into(),
+    },
     signer_bitmap: 0,
     deployer: *testing::wallet::WALLET.0.address(),
 }); "reject-withdrawal")]
@@ -220,9 +220,7 @@ async fn estimate_tx_fees() {
     let contract_call = CompleteDepositV1 {
         outpoint: bitcoin::OutPoint::null(),
         amount: 123654,
-        recipient: PrincipalData::parse("ST1RQHF4VE5CZ6EK3MZPZVQBA0JVSMM9H5PMHMS1Y")
-            .unwrap()
-            .into(),
+        recipient: PrincipalData::parse("ST1RQHF4VE5CZ6EK3MZPZVQBA0JVSMM9H5PMHMS1Y").unwrap(),
         deployer: StacksAddress::burn_address(false),
         sweep_txid: BitcoinTxId::from([0; 32]),
         sweep_block_hash: BitcoinBlockHash::from([0; 32]),
@@ -272,9 +270,7 @@ async fn is_deposit_completed_works() {
     let complete_deposit = CompleteDepositV1 {
         outpoint,
         amount: 123654789,
-        recipient: PrincipalData::parse("SN2V7WTJ7BHR03MPHZ1C9A9ZR6NZGR4WM8HT4V67Y")
-            .unwrap()
-            .into(),
+        recipient: PrincipalData::parse("SN2V7WTJ7BHR03MPHZ1C9A9ZR6NZGR4WM8HT4V67Y").unwrap(),
         deployer: *testing::wallet::WALLET.0.address(),
         sweep_txid: BitcoinTxId::from([0; 32]),
         sweep_block_hash: BitcoinBlockHash::from(chain_tip_info.best_block_hash),
@@ -316,7 +312,7 @@ async fn is_withdrawal_completed_rejection_works() {
     let mint_sbtc = ContractCallWrapper(CompleteDepositV1 {
         outpoint: bitcoin::OutPoint::new(txid.into(), 0),
         amount: 123654789,
-        recipient: PrincipalData::from(*testing::wallet::WALLET.0.address()).into(),
+        recipient: PrincipalData::from(*testing::wallet::WALLET.0.address()),
         deployer: *testing::wallet::WALLET.0.address(),
         sweep_txid: BitcoinTxId::from([0; 32]),
         sweep_block_hash: chain_tip_info.best_block_hash.into(),
@@ -346,8 +342,7 @@ async fn is_withdrawal_completed_rejection_works() {
             request_id: 1,
             block_hash: StacksBlockHash::from([0; 32]),
             txid: StacksTxId::from([0; 32]),
-        }
-        .into(),
+        },
         signer_bitmap: 0,
         deployer: *testing::wallet::WALLET.0.address(),
     });

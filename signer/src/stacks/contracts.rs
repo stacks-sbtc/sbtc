@@ -243,16 +243,16 @@ impl From<SmartContract> for StacksTx {
 pub enum ContractCall {
     /// Call the `complete-deposit-wrapper` function in the `sbtc-deposit`
     /// smart contract
-    CompleteDepositV1(CompleteDepositV1),
+    CompleteDepositV1(Box<CompleteDepositV1>),
     /// Call the `accept-withdrawal-request` function in the
     /// `sbtc-withdrawal` smart contract.
-    AcceptWithdrawalV1(AcceptWithdrawalV1),
+    AcceptWithdrawalV1(Box<AcceptWithdrawalV1>),
     /// Call the `reject-withdrawal-request` function in the
     /// `sbtc-withdrawal` smart contract.
-    RejectWithdrawalV1(RejectWithdrawalV1),
+    RejectWithdrawalV1(Box<RejectWithdrawalV1>),
     /// Call the `rotate-keys-wrapper` function in the
     /// `sbtc-bootstrap-signers` smart contract.
-    RotateKeysV1(RotateKeysV1),
+    RotateKeysV1(Box<RotateKeysV1>),
 }
 
 impl AsTxPayload for ContractCall {
@@ -266,10 +266,18 @@ impl AsTxPayload for ContractCall {
     }
     fn post_conditions(&self) -> StacksTxPostConditions {
         match self {
-            ContractCall::AcceptWithdrawalV1(contract) => AsContractCall::post_conditions(contract),
-            ContractCall::CompleteDepositV1(contract) => AsContractCall::post_conditions(contract),
-            ContractCall::RejectWithdrawalV1(contract) => AsContractCall::post_conditions(contract),
-            ContractCall::RotateKeysV1(contract) => AsContractCall::post_conditions(contract),
+            ContractCall::AcceptWithdrawalV1(contract) => {
+                AsContractCall::post_conditions(contract.deref())
+            }
+            ContractCall::CompleteDepositV1(contract) => {
+                AsContractCall::post_conditions(contract.deref())
+            }
+            ContractCall::RejectWithdrawalV1(contract) => {
+                AsContractCall::post_conditions(contract.deref())
+            }
+            ContractCall::RotateKeysV1(contract) => {
+                AsContractCall::post_conditions(contract.deref())
+            }
         }
     }
 }
@@ -289,7 +297,7 @@ pub struct CompleteDepositV1 {
     /// above UTXO because of bitcoin mining fees.
     pub amount: u64,
     /// The address where the newly minted sBTC will be deposited.
-    pub recipient: Box<PrincipalData>,
+    pub recipient: PrincipalData,
     /// The address that deployed the contract.
     pub deployer: StacksAddress,
     /// The transaction ID for the sweep transaction that moved the deposit
@@ -337,7 +345,7 @@ impl AsContractCall for CompleteDepositV1 {
             ClarityValue::Sequence(SequenceData::Buffer(txid)),
             ClarityValue::UInt(self.outpoint.vout as u128),
             ClarityValue::UInt(self.amount as u128),
-            ClarityValue::Principal(*self.recipient.clone()),
+            ClarityValue::Principal(self.recipient.clone()),
             ClarityValue::Sequence(SequenceData::Buffer(burn_hash_buff)),
             ClarityValue::UInt(self.sweep_block_height.into()),
             ClarityValue::Sequence(SequenceData::Buffer(sweep_txid)),
@@ -433,7 +441,7 @@ impl CompleteDepositV1 {
 
         // 5. Check that the recipients in the transaction matches that of
         //    the deposit request.
-        if &*self.recipient != deposit_request.recipient.deref() {
+        if &self.recipient != deposit_request.recipient.deref() {
             return Err(DepositErrorMsg::RecipientMismatch.into_error(req_ctx, self));
         }
         // 6. Check that the amount to mint is above the dust amount
@@ -628,7 +636,7 @@ pub struct AcceptWithdrawalV1 {
     /// contract along with the transaction ID of the transaction that
     /// generated the request and block hash of the Stacks block that
     /// confirmed the transaction.
-    pub id: Box<QualifiedRequestId>,
+    pub id: QualifiedRequestId,
     /// The outpoint of the bitcoin UTXO that was spent to fulfill the
     /// withdrawal request.
     pub outpoint: OutPoint,
@@ -1067,7 +1075,7 @@ pub struct RejectWithdrawalV1 {
     /// contract along with the transaction ID of the transaction that
     /// generated the request and block hash of the Stacks block that
     /// confirmed the transaction.
-    pub id: Box<QualifiedRequestId>,
+    pub id: QualifiedRequestId,
     /// A bitmap of how the signers voted. This structure supports up to
     /// 128 distinct signers. Here, we assume that a 1 (or true) implies
     /// that the signer voted *against* the transaction.
@@ -1573,7 +1581,7 @@ mod tests {
         let call = CompleteDepositV1 {
             outpoint: OutPoint::null(),
             amount: 15000,
-            recipient: PrincipalData::from(StacksAddress::burn_address(true)).into(),
+            recipient: PrincipalData::from(StacksAddress::burn_address(true)),
             deployer: StacksAddress::burn_address(false),
             sweep_txid: BitcoinTxId::from([0; 32]),
             sweep_block_hash: BitcoinBlockHash::from([0; 32]),
@@ -1592,8 +1600,7 @@ mod tests {
                 request_id: 43,
                 txid: StacksTxId::from([0; 32]),
                 block_hash: StacksBlockHash::from([0; 32]),
-            }
-            .into(),
+            },
             outpoint: OutPoint::null(),
             tx_fee: 125,
             signer_bitmap: 0,
@@ -1614,8 +1621,7 @@ mod tests {
                 request_id: 1,
                 txid: StacksTxId::from([0; 32]),
                 block_hash: StacksBlockHash::from([0; 32]),
-            }
-            .into(),
+            },
             signer_bitmap: 0,
             deployer: StacksAddress::burn_address(false),
         };

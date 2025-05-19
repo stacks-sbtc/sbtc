@@ -40,7 +40,7 @@ async fn make_withdrawal_reject(
     // `RejectWithdrawalV1` type.
     let complete_withdrawal_tx = RejectWithdrawalV1 {
         // This points to the withdrawal request transaction.
-        id: data.withdrawals[0].request.qualified_id().into(),
+        id: data.withdrawals[0].request.qualified_id(),
         signer_bitmap: 0,
         // The deployer must match what is in the signers' context.
         deployer: StacksAddress::burn_address(false),

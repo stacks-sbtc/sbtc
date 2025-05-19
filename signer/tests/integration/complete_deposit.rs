@@ -43,7 +43,7 @@ pub fn make_complete_deposit(data: &TestSweepSetup) -> (CompleteDepositV1, ReqCo
         amount: data.deposit_request.amount - fee,
         // The recipient must match what was indicated in the deposit
         // request.
-        recipient: Box::new(data.deposit_recipient.clone()),
+        recipient: data.deposit_recipient.clone(),
         // The deployer must match what is in the signers' context.
         deployer: StacksAddress::burn_address(false),
         // The sweep transaction ID must point to a transaction on
@@ -105,7 +105,7 @@ pub fn make_complete_deposit2(data: &TestSweepSetup2) -> (CompleteDepositV1, Req
         amount: deposit.1.amount - fee,
         // The recipient must match what was indicated in the deposit
         // request.
-        recipient: Box::new(deposit.0.recipient.clone()),
+        recipient: deposit.0.recipient.clone(),
         // The deployer must match what is in the signers' context.
         deployer: StacksAddress::burn_address(false),
         // The sweep transaction ID must point to a transaction on
@@ -385,11 +385,9 @@ async fn complete_deposit_validation_recipient_mismatch() {
     // and the corresponding request context.
     let (mut complete_deposit_tx, req_ctx) = make_complete_deposit(&setup);
     // Different: Okay, let's make sure we the recipients do not match.
-    complete_deposit_tx.recipient = Box::new(
-        fake::Faker
-            .fake_with_rng::<StacksPrincipal, _>(&mut rng)
-            .into(),
-    );
+    complete_deposit_tx.recipient = fake::Faker
+        .fake_with_rng::<StacksPrincipal, _>(&mut rng)
+        .into();
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())

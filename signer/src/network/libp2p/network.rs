@@ -58,10 +58,9 @@ impl MessageTransfer for P2PNetwork {
     /// events, which will provide you with the [`MsgId`] to match against your
     /// in-flight requests.
     async fn broadcast(&mut self, msg: Msg) -> Result<(), Error> {
+        let boxed_msg = Box::new(msg);
         self.signal_tx
-            .send(SignerSignal::Command(SignerCommand::P2PPublish(Box::new(
-                msg,
-            ))))
+            .send(SignerSignal::Command(SignerCommand::P2PPublish(boxed_msg)))
             .map_err(|_| Error::SignerShutdown)
             .map(|_| ())
     }

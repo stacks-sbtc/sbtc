@@ -384,7 +384,7 @@ impl From<CompleteDepositV1> for proto::CompleteDeposit {
         proto::CompleteDeposit {
             outpoint: Some(value.outpoint.into()),
             amount: value.amount,
-            recipient: Some(StacksPrincipal::from(*value.recipient).into()),
+            recipient: Some(StacksPrincipal::from(value.recipient).into()),
             deployer: Some(value.deployer.into()),
             sweep_txid: Some(value.sweep_txid.into()),
             sweep_block_hash: Some(value.sweep_block_hash.into()),
@@ -399,7 +399,7 @@ impl TryFrom<proto::CompleteDeposit> for CompleteDepositV1 {
         Ok(CompleteDepositV1 {
             outpoint: value.outpoint.required()?.try_into()?,
             amount: value.amount,
-            recipient: Box::new(StacksPrincipal::try_from(value.recipient.required()?)?.into()),
+            recipient: StacksPrincipal::try_from(value.recipient.required()?)?.into(),
             deployer: value.deployer.required()?.try_into()?,
             sweep_txid: value.sweep_txid.required()?.try_into()?,
             sweep_block_hash: value.sweep_block_hash.required()?.try_into()?,
@@ -411,7 +411,7 @@ impl TryFrom<proto::CompleteDeposit> for CompleteDepositV1 {
 impl From<AcceptWithdrawalV1> for proto::AcceptWithdrawal {
     fn from(value: AcceptWithdrawalV1) -> Self {
         proto::AcceptWithdrawal {
-            id: Some((*value.id).into()),
+            id: Some(value.id.into()),
             outpoint: Some(value.outpoint.into()),
             tx_fee: value.tx_fee,
             signer_bitmap: Vec::new(),
@@ -426,7 +426,7 @@ impl TryFrom<proto::AcceptWithdrawal> for AcceptWithdrawalV1 {
     type Error = Error;
     fn try_from(value: proto::AcceptWithdrawal) -> Result<Self, Self::Error> {
         Ok(AcceptWithdrawalV1 {
-            id: Box::new(value.id.required()?.try_into()?),
+            id: value.id.required()?.try_into()?,
             outpoint: value.outpoint.required()?.try_into()?,
             tx_fee: value.tx_fee,
             signer_bitmap: 0,
@@ -440,7 +440,7 @@ impl TryFrom<proto::AcceptWithdrawal> for AcceptWithdrawalV1 {
 impl From<RejectWithdrawalV1> for proto::RejectWithdrawal {
     fn from(value: RejectWithdrawalV1) -> Self {
         proto::RejectWithdrawal {
-            id: Some((*value.id).into()),
+            id: Some(value.id.into()),
             signer_bitmap: Vec::new(),
             deployer: Some(value.deployer.into()),
         }
@@ -451,7 +451,7 @@ impl TryFrom<proto::RejectWithdrawal> for RejectWithdrawalV1 {
     type Error = Error;
     fn try_from(value: proto::RejectWithdrawal) -> Result<Self, Self::Error> {
         Ok(RejectWithdrawalV1 {
-            id: Box::new(value.id.required()?.try_into()?),
+            id: value.id.required()?.try_into()?,
             signer_bitmap: 0,
             deployer: value.deployer.required()?.try_into()?,
         })
@@ -520,21 +520,21 @@ impl From<StacksTransactionSignRequest> for proto::StacksTransactionSignRequest 
             StacksTx::ContractCall(contract_call) => match contract_call {
                 ContractCall::CompleteDepositV1(inner) => {
                     proto::stacks_transaction_sign_request::ContractTx::CompleteDeposit(
-                        inner.into(),
+                        (*inner).into(),
                     )
                 }
                 ContractCall::AcceptWithdrawalV1(inner) => {
                     proto::stacks_transaction_sign_request::ContractTx::AcceptWithdrawal(
-                        inner.into(),
+                        (*inner).into(),
                     )
                 }
                 ContractCall::RejectWithdrawalV1(inner) => {
                     proto::stacks_transaction_sign_request::ContractTx::RejectWithdrawal(
-                        inner.into(),
+                        (*inner).into(),
                     )
                 }
                 ContractCall::RotateKeysV1(inner) => {
-                    proto::stacks_transaction_sign_request::ContractTx::RotateKeys(inner.into())
+                    proto::stacks_transaction_sign_request::ContractTx::RotateKeys((*inner).into())
                 }
             },
             StacksTx::SmartContract(inner) => {
@@ -558,16 +558,16 @@ impl TryFrom<proto::StacksTransactionSignRequest> for StacksTransactionSignReque
     fn try_from(value: proto::StacksTransactionSignRequest) -> Result<Self, Self::Error> {
         let contract_tx = match value.contract_tx.required()? {
             proto::ContractTx::CompleteDeposit(inner) => {
-                StacksTx::ContractCall(ContractCall::CompleteDepositV1(inner.try_into()?))
+                StacksTx::ContractCall(ContractCall::CompleteDepositV1(Box::new(inner.try_into()?)))
             }
-            proto::ContractTx::AcceptWithdrawal(inner) => {
-                StacksTx::ContractCall(ContractCall::AcceptWithdrawalV1(inner.try_into()?))
-            }
-            proto::ContractTx::RejectWithdrawal(inner) => {
-                StacksTx::ContractCall(ContractCall::RejectWithdrawalV1(inner.try_into()?))
-            }
+            proto::ContractTx::AcceptWithdrawal(inner) => StacksTx::ContractCall(
+                ContractCall::AcceptWithdrawalV1(Box::new(inner.try_into()?)),
+            ),
+            proto::ContractTx::RejectWithdrawal(inner) => StacksTx::ContractCall(
+                ContractCall::RejectWithdrawalV1(Box::new(inner.try_into()?)),
+            ),
             proto::ContractTx::RotateKeys(inner) => {
-                StacksTx::ContractCall(ContractCall::RotateKeysV1(inner.try_into()?))
+                StacksTx::ContractCall(ContractCall::RotateKeysV1(Box::new(inner.try_into()?)))
             }
             proto::ContractTx::SmartContract(inner) => StacksTx::SmartContract(
                 proto::SmartContract::try_from(inner)

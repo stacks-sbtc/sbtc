@@ -161,7 +161,7 @@ impl AsContractCall for InitiateWithdrawalRequest {
 #[test_case(ContractCallWrapper(CompleteDepositV1 {
     outpoint: bitcoin::OutPoint::null(),
     amount: 123654,
-    recipient: PrincipalData::parse("ST1RQHF4VE5CZ6EK3MZPZVQBA0JVSMM9H5PMHMS1Y").unwrap().into(),
+    recipient: PrincipalData::parse("ST1RQHF4VE5CZ6EK3MZPZVQBA0JVSMM9H5PMHMS1Y").unwrap(),
     deployer: *testing::wallet::WALLET.0.address(),
     sweep_txid: BitcoinTxId::from([0; 32]),
     sweep_block_hash: BitcoinBlockHash::from([0; 32]),
@@ -170,7 +170,7 @@ impl AsContractCall for InitiateWithdrawalRequest {
 #[test_case(ContractCallWrapper(CompleteDepositV1 {
     outpoint: bitcoin::OutPoint::null(),
     amount: 123654,
-    recipient: PrincipalData::parse("ST1RQHF4VE5CZ6EK3MZPZVQBA0JVSMM9H5PMHMS1Y.my-contract-name").unwrap().into(),
+    recipient: PrincipalData::parse("ST1RQHF4VE5CZ6EK3MZPZVQBA0JVSMM9H5PMHMS1Y.my-contract-name").unwrap(),
     deployer: *testing::wallet::WALLET.0.address(),
     sweep_txid: BitcoinTxId::from([0; 32]),
     sweep_block_hash: BitcoinBlockHash::from([0; 32]),
@@ -181,7 +181,7 @@ impl AsContractCall for InitiateWithdrawalRequest {
 	    request_id: 0,
 	    txid: StacksTxId::from([0; 32]),
 	    block_hash: StacksBlockHash::from([0; 32]),
-    }.into(),
+    },
     outpoint: bitcoin::OutPoint::null(),
     tx_fee: 3500,
     signer_bitmap: 0,
@@ -194,7 +194,7 @@ impl AsContractCall for InitiateWithdrawalRequest {
 	request_id: 0,
 	txid: StacksTxId::from([0; 32]),
 	block_hash: StacksBlockHash::from([0; 32]),
-    }.into(),
+    },
     signer_bitmap: 0,
     deployer: *testing::wallet::WALLET.0.address(),
 }); "reject-withdrawal")]
