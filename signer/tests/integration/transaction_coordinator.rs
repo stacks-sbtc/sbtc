@@ -1052,9 +1052,11 @@ async fn run_dkg_from_scratch() {
     }
 }
 
-/// Tests that dkg will not be triggered if signer set didn't change
-#[test(tokio::test)]
-async fn dont_run_dkg_if_signer_set_didnt_change() {
+/// Tests that dkg will be triggered if signer set changes
+#[test_case(true; "signatures_required_changed")]
+#[test_case(false; "signatures_required_unchanged")]
+#[tokio::test]
+async fn run_dkg_if_signer_set_changes(signer_set_changed: bool) {
     let mut rng = get_rng();
     let db = testing::storage::new_test_database().await;
     let ctx = TestContext::builder()
@@ -1064,7 +1066,7 @@ async fn dont_run_dkg_if_signer_set_didnt_change() {
             settings.signer.dkg_target_rounds = std::num::NonZero::<u32>::new(1).unwrap();
         })
         .build();
-    let config_signer_set = ctx.config().signer.bootstrap_signing_set.clone();
+    let mut config_signer_set = ctx.config().signer.bootstrap_signing_set.clone();
 
     // Sanity check
     assert!(!config_signer_set.is_empty());
@@ -1078,7 +1080,13 @@ async fn dont_run_dkg_if_signer_set_didnt_change() {
         .await
         .expect("failed to write dkg shares");
 
-    // We need to construct chaintip
+    // Remove one signer
+    if signer_set_changed {
+        let _removed_signer = config_signer_set
+            .pop_first()
+            .expect("This signer set should not be empty");
+    }
+    // Create chaintip
     let bitcoin_block: model::BitcoinBlock = Faker.fake_with_rng(&mut rng);
     db.write_bitcoin_block(&bitcoin_block)
         .await
@@ -1094,11 +1102,17 @@ async fn dont_run_dkg_if_signer_set_didnt_change() {
     ctx.inner
         .state()
         .update_current_signer_set(config_signer_set.iter().cloned().collect());
-    assert!(!should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
-    assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_err());
+
+    if signer_set_changed {
+        assert!(should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+        assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_ok());
+    } else {
+        assert!(!should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+        assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_err());
+    }
 }
 
-/// Tests that dkg will be triggered if signer set changes
+/// Tests that dkg will be triggered if signatures required parameter changes
 #[test_case(true; "signatures_required_changed")]
 #[test_case(false; "signatures_required_unchanged")]
 #[tokio::test]
