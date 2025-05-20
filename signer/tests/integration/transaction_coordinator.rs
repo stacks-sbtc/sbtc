@@ -568,7 +568,14 @@ async fn process_complete_deposit() {
     // Get the private key of the coordinator of the signer set.
     let private_key = select_coordinator(&setup.sweep_block_hash.into(), &signer_info);
 
+    let chaintip = context
+        .get_storage()
+        .get_bitcoin_canonical_chain_tip()
+        .await
+        .expect("failed to get bitcoin chain tip")
+        .expect("no chain tip");
     prevent_dkg_on_changed_signer_set(&mut context);
+    prevent_dkg_on_changed_signatures_required(&mut context, &chaintip).await;
 
     // Bootstrap the tx coordinator event loop
     context.state().set_sbtc_contracts_deployed();
@@ -4308,7 +4315,14 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
     // Get the private key of the coordinator of the signer set.
     let private_key = select_coordinator(&bitcoin_chain_tip.block_hash, &signer_info);
 
+    let chaintip = context
+        .get_storage()
+        .get_bitcoin_canonical_chain_tip()
+        .await
+        .unwrap()
+        .unwrap();
     prevent_dkg_on_changed_signer_set(&mut context);
+    prevent_dkg_on_changed_signatures_required(&mut context, &chaintip).await;
 
     // Bootstrap the tx coordinator event loop
     context.state().set_sbtc_contracts_deployed();
