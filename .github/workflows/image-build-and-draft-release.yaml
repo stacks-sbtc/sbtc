@@ -46,7 +46,7 @@ jobs:
     steps:
       - name: Log in to GHCR
         id: ghcr_login
-        uses: stacks-sbtc/actions/docker/login-action@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/docker/login-action@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -56,7 +56,7 @@ jobs:
       ## This requires that a release branch exists for the tag.
       - name: Checkout Repository
         id: checkout_repository
-        uses: stacks-sbtc/actions/checkout@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/checkout@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           ref: refs/tags/${{ github.event.client_payload.tag_name }}
 
@@ -74,7 +74,7 @@ jobs:
       ## ex. debian will have this tag: `type=ref,event=tag,enable=${{ matrix.dist == 'debian' }}`
       - name: Docker Metadata ( ${{ matrix.dist }} )
         id: docker_metadata
-        uses: stacks-sbtc/actions/docker/metadata-action@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/docker/metadata-action@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           images: |
             ${{ env.ghcr_org }}/sbtc
@@ -87,7 +87,7 @@ jobs:
       ## Build docker image for release
       - name: Build and Push ( ${{ matrix.dist }} ${{ matrix.docker_target }} )
         id: docker_build
-        uses: stacks-sbtc/actions/docker/build-push-action@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/docker/build-push-action@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           file: ./.github/actions/dockerfiles/Dockerfile.${{ matrix.docker_target }}.${{ matrix.dist }}
           platforms: ${{ env.docker_platforms }}
@@ -104,7 +104,7 @@ jobs:
 
       - name: Generate artifact attestation
         id: generate_attestation
-        uses: stacks-sbtc/actions/attest-build-provenance@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/attest-build-provenance@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           subject-name: ${{ env.ghcr_org }}/sbtc
           subject-digest: ${{ steps.docker_build.outputs.digest }}
@@ -126,7 +126,7 @@ jobs:
 
       - name: Upload Attestation Files as Artifacts
         id: upload_attestation
-        uses: stacks-sbtc/actions/upload-artifact@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/upload-artifact@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           name: attestation-files
           overwrite: true
@@ -210,7 +210,7 @@ jobs:
 
       - name: Create GitHub Release
         id: create_release
-        uses: stacks-sbtc/actions/github-script@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/github-script@181f8c67da2707c66b5e31f24e7418c47adefdd1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
