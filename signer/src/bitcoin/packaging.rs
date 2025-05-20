@@ -604,7 +604,7 @@ mod tests {
             }
             let needs_signature = rng.gen_bool(0.5);
             let vsize = rng.gen_range(1..=10000);
-            let withdrawal_id = if needs_signature && rng.gen_bool(0.5) {
+            let withdrawal_id = if !needs_signature {
                 Some(rng.gen_range(1..=100))
             } else {
                 None
