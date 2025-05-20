@@ -11,6 +11,9 @@ use bitcoin::TxOut;
 use bitcoin::Witness;
 use bitcoin::consensus::encode::serialize_hex;
 
+use bitcoincore_rpc::Client;
+use bitcoincore_rpc::RpcApi as _;
+use bitcoincore_rpc_json::GetChainTipsResultTip;
 use emily_client::models::CreateDepositRequestBody;
 use futures::StreamExt as _;
 use tokio_stream::wrappers::ReceiverStream;
@@ -88,4 +91,14 @@ pub async fn new_zmq_block_hash_stream(endpoint: &str) -> ReceiverStream<Result<
     });
 
     ReceiverStream::new(receiver)
+}
+
+/// Return the canonical (tallest) chain tip from `get_chain_tips`
+pub fn get_canonical_chain_tip(rpc: &Client) -> GetChainTipsResultTip {
+    rpc.get_chain_tips()
+        .unwrap()
+        .iter()
+        .max_by_key(|t| t.height)
+        .unwrap()
+        .clone()
 }

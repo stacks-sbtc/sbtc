@@ -39,7 +39,7 @@ async fn getrawtransaction_simple_fork() {
         .build();
     let bitcoin = ctx.get_bitcoin_client();
 
-    let (rpc, faucet) = regtest::initialize_blockchain_devenv();
+    let (rpc, faucet) = regtest::initialize_blockchain();
 
     // Start from a clean mempool
     faucet.generate_block();
@@ -196,7 +196,7 @@ async fn getrawtransaction_single_tx_regorged() {
         .build();
     let bitcoin = ctx.get_bitcoin_client();
 
-    let (rpc, faucet) = regtest::initialize_blockchain_devenv();
+    let (rpc, faucet) = regtest::initialize_blockchain();
 
     // Start from a clean mempool
     faucet.generate_block();

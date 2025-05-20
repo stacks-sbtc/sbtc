@@ -209,7 +209,7 @@ where
     }];
 
     let change = utxo.amount() - Amount::from_sat(amount + fee);
-    if change.to_sat() > 546 as u64 {
+    if change.to_sat() > 546 {
         tx_outs.push(TxOut {
             value: change,
             script_pubkey: depositor.address.script_pubkey(),
@@ -314,7 +314,7 @@ where
 {
     let client = Client::new();
     client
-        .get(&format!("{DEVENV_STACKS_API}{path}"))
+        .get(format!("{DEVENV_STACKS_API}{path}"))
         .send()
         .await
         .unwrap()
