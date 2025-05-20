@@ -663,6 +663,11 @@ class TestLongPendingProcessor(TestDepositProcessorBase):
             len(updates), 1, "Transaction should be marked as failed with reduced timeout"
         )
         self.assertEqual(updates[0].bitcoin_txid, "edge_case")
+        self.assertEqual(updates[0].status, RequestStatus.FAILED.value)
+        self.assertEqual(
+            updates[0].status_message,
+            f"Pending for too long ({settings.MAX_UNCONFIRMED_TIME} seconds)",
+        )
 
 
 class TestDepositProcessor(TestDepositProcessorBase):
