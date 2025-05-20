@@ -85,7 +85,7 @@ impl Settings {
     pub fn from_env() -> Result<Self, Error> {
         let deployer_address = env::var("DEPLOYER_ADDRESS")?;
         let deployer_address = PrincipalData::parse_standard_principal(&deployer_address)
-            .map_err(Error::InvalidStacksAddress)?;
+            .map_err(|source| Error::InvalidStacksAddress(Box::new(source)))?;
 
         Ok(Settings {
             is_local: env::var("IS_LOCAL")?.to_lowercase() == "true",

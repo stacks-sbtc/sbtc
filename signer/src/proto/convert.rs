@@ -520,21 +520,21 @@ impl From<StacksTransactionSignRequest> for proto::StacksTransactionSignRequest 
             StacksTx::ContractCall(contract_call) => match contract_call {
                 ContractCall::CompleteDepositV1(inner) => {
                     proto::stacks_transaction_sign_request::ContractTx::CompleteDeposit(
-                        inner.into(),
+                        (*inner).into(),
                     )
                 }
                 ContractCall::AcceptWithdrawalV1(inner) => {
                     proto::stacks_transaction_sign_request::ContractTx::AcceptWithdrawal(
-                        inner.into(),
+                        (*inner).into(),
                     )
                 }
                 ContractCall::RejectWithdrawalV1(inner) => {
                     proto::stacks_transaction_sign_request::ContractTx::RejectWithdrawal(
-                        inner.into(),
+                        (*inner).into(),
                     )
                 }
                 ContractCall::RotateKeysV1(inner) => {
-                    proto::stacks_transaction_sign_request::ContractTx::RotateKeys(inner.into())
+                    proto::stacks_transaction_sign_request::ContractTx::RotateKeys((*inner).into())
                 }
             },
             StacksTx::SmartContract(inner) => {
@@ -558,16 +558,16 @@ impl TryFrom<proto::StacksTransactionSignRequest> for StacksTransactionSignReque
     fn try_from(value: proto::StacksTransactionSignRequest) -> Result<Self, Self::Error> {
         let contract_tx = match value.contract_tx.required()? {
             proto::ContractTx::CompleteDeposit(inner) => {
-                StacksTx::ContractCall(ContractCall::CompleteDepositV1(inner.try_into()?))
+                StacksTx::ContractCall(ContractCall::CompleteDepositV1(Box::new(inner.try_into()?)))
             }
-            proto::ContractTx::AcceptWithdrawal(inner) => {
-                StacksTx::ContractCall(ContractCall::AcceptWithdrawalV1(inner.try_into()?))
-            }
-            proto::ContractTx::RejectWithdrawal(inner) => {
-                StacksTx::ContractCall(ContractCall::RejectWithdrawalV1(inner.try_into()?))
-            }
+            proto::ContractTx::AcceptWithdrawal(inner) => StacksTx::ContractCall(
+                ContractCall::AcceptWithdrawalV1(Box::new(inner.try_into()?)),
+            ),
+            proto::ContractTx::RejectWithdrawal(inner) => StacksTx::ContractCall(
+                ContractCall::RejectWithdrawalV1(Box::new(inner.try_into()?)),
+            ),
             proto::ContractTx::RotateKeys(inner) => {
-                StacksTx::ContractCall(ContractCall::RotateKeysV1(inner.try_into()?))
+                StacksTx::ContractCall(ContractCall::RotateKeysV1(Box::new(inner.try_into()?)))
             }
             proto::ContractTx::SmartContract(inner) => StacksTx::SmartContract(
                 proto::SmartContract::try_from(inner)
