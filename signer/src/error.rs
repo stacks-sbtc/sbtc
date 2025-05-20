@@ -187,6 +187,11 @@ pub enum Error {
     #[error("detailed transaction object from bitcoin-core is missing vin data; txid: {0}")]
     BitcoinTxMissingData(bitcoin::Txid),
 
+    /// The returned transaction from bitcoin core is invalid because it
+    /// does not have any outputs. This should be impossible.
+    #[error("transaction from bitcoin-core has no outputs; txid: {0}")]
+    BitcoinTxNoOutputs(bitcoin::Txid),
+
     /// The returned detailed transaction object from bitcoin core is
     /// invalid because the inputs and vin data do not align.
     #[error("detailed transaction object from bitcoin-core has mismatched vin data; txid: {0}")]
