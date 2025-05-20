@@ -39,7 +39,7 @@ use crate::{
     },
     storage::{
         DbRead, DbWrite,
-        in_memory::{SharedStore, Store},
+        memory::{SharedStore, Store},
     },
 };
 

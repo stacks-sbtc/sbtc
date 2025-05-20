@@ -590,7 +590,7 @@ mod tests {
 
     #[tokio::test]
     async fn check_simple_chain() {
-        let store = storage::in_memory::Store::new_shared();
+        let store = storage::memory::Store::new_shared();
         let mut rng = get_rng();
 
         let test_model_params = Params {
