@@ -504,6 +504,7 @@ mod tests {
     use rand::Rng;
     use rand::prelude::SliceRandom;
     use signer::testing::get_rng;
+    use std::sync::atomic::AtomicU64;
     use test_case::test_case;
 
     impl<T> BestFitPackager<T>
@@ -556,6 +557,8 @@ mod tests {
         withdrawal_id: Option<u64>,
     }
 
+    static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(0);
+
     impl RequestItem {
         /// Create a new request item with no votes against.
         fn no_votes() -> Self {
@@ -605,7 +608,7 @@ mod tests {
             let needs_signature = rng.gen_bool(0.5);
             let vsize = rng.gen_range(1..=10000);
             let withdrawal_id = if !needs_signature {
-                Some(rng.gen_range(1..=100))
+                Some(NEXT_REQUEST_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
             } else {
                 None
             };
