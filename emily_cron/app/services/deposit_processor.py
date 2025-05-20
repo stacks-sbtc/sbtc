@@ -234,7 +234,7 @@ class DepositProcessor:
 
             try:
                 # and have been pending for too long
-                if current_time - tx.deposit_last_update > settings.MAX_UNCONFIRMED_TIME:
+                if current_time - tx.deposit_last_update() > settings.MAX_UNCONFIRMED_TIME:
                     long_pending_txs.append(tx)
             except (RequestException, ValueError, JSONDecodeError) as e:
                 logger.warning(

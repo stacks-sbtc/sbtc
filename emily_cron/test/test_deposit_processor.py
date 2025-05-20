@@ -56,7 +56,7 @@ class TestDepositProcessorBase(unittest.TestCase):
         deposit.rbf_txids = rbf_txids or []
         deposit.is_expired = lambda x: EnrichedDepositInfo.is_expired(deposit, x)
         deposit.in_mempool = in_mempool
-        deposit.deposit_last_update = deposit_last_update or int(datetime.now().timestamp())
+        deposit.deposit_last_update = lambda: deposit_last_update or int(datetime.now().timestamp())
         deposit.status = status
         return deposit
 
@@ -830,7 +830,7 @@ class TestDepositProcessor(TestDepositProcessorBase):
             },
         )
         # mock deposit time
-        long_pending_enriched.deposit_last_update = (
+        long_pending_enriched.deposit_last_update = lambda: (
             self.current_time - settings.MAX_UNCONFIRMED_TIME - 1
         )
         mock_enrich.return_value = [
