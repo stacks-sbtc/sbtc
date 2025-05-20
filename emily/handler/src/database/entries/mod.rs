@@ -226,7 +226,8 @@ pub(crate) trait TableIndexTrait {
             .table_name(Self::table_name(settings))
             .set_key(Some(key_item.into()))
             .send()
-            .await?;
+            .await
+            .map_err(Box::new)?;
         // Get DynamoDB item.
         let item = get_item_output.item.ok_or(Error::NotFound)?;
         // Convert item into entry.
@@ -261,7 +262,8 @@ pub(crate) trait TableIndexTrait {
             .expression_attribute_values(":v", serde_dynamo::to_attribute_value(partition_key)?)
             .scan_index_forward(false)
             .send()
-            .await?;
+            .await
+            .map_err(Box::new)?;
         // Convert data into output format.
         let entries: Vec<Self::Entry> =
             serde_dynamo::from_items(query_output.items.unwrap_or_default())?;
@@ -306,7 +308,8 @@ pub(crate) trait TableIndexTrait {
             .expression_attribute_values(":sk", serde_dynamo::to_attribute_value(sort_key)?)
             .scan_index_forward(false)
             .send()
-            .await?;
+            .await
+            .map_err(Box::new)?;
         // Convert data into output format.
         let entries: Vec<Self::Entry> =
             serde_dynamo::from_items(query_output.items.unwrap_or_default())?;
@@ -348,7 +351,12 @@ pub(crate) trait TableIndexTrait {
         // Create vector to aggregate items in.
         let mut all_entries: Vec<Self::Entry> = Vec::new();
         // Scan the table for as many entries as possible.
-        let mut scan_output = dynamodb_client.scan().table_name(table_name).send().await?;
+        let mut scan_output = dynamodb_client
+            .scan()
+            .table_name(table_name)
+            .send()
+            .await
+            .map_err(Box::new)?;
         // Put items into aggregate list.
         all_entries.extend(serde_dynamo::from_items(
             scan_output.items.unwrap_or_default(),
@@ -360,7 +368,8 @@ pub(crate) trait TableIndexTrait {
                 .table_name(table_name)
                 .set_exclusive_start_key(Some(exclusive_start_key))
                 .send()
-                .await?;
+                .await
+                .map_err(Box::new)?;
             all_entries.extend(serde_dynamo::from_items(
                 scan_output.items.unwrap_or_default(),
             )?);
@@ -415,7 +424,8 @@ pub(crate) trait TableIndexTrait {
                 .batch_write_item()
                 .request_items(table_name, chunk.to_vec())
                 .send()
-                .await?;
+                .await
+                .map_err(Box::new)?;
         }
         // Return.
         Ok(())
