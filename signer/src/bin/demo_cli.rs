@@ -644,10 +644,8 @@ async fn exec_generate_block(ctx: &Context, args: GenerateBlockArgs) -> Result<(
     // Integration tests faucet
     let recipient = Address::from_str("bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080")?
         .require_network(ctx.network)?;
-    dbg!(
-        ctx.bitcoin_client
-            .generate_to_address(args.count, &recipient)
-            .expect("failed generate blocks")
-    );
+    ctx.bitcoin_client
+        .generate_to_address(args.count, &recipient)
+        .expect("failed generate blocks");
     Ok(())
 }
