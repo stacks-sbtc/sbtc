@@ -1110,6 +1110,7 @@ async fn run_dkg_if_signer_set_changes(signer_set_changed: bool) {
         assert!(!should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
         assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_err());
     }
+    testing::storage::drop_db(db).await;
 }
 
 /// Tests that dkg will be triggered if signatures required parameter changes
@@ -1193,6 +1194,7 @@ async fn run_dkg_if_signatures_required_changes(change_signatures_required: bool
         assert!(!should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
         assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_err());
     }
+    testing::storage::drop_db(db).await;
 }
 
 /// Test that we can run multiple DKG rounds.
