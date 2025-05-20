@@ -851,7 +851,7 @@ impl TestSweepSetup2 {
         // easier this way.
         let tx_info = context
             .bitcoin_client
-            .get_tx_info(&self.donation.txid, &&self.donation_block_hash)
+            .get_tx_info(&self.donation.txid, &self.donation_block_hash)
             .unwrap()
             .unwrap();
         let block_observer = BlockObserver { context, bitcoin_blocks: () };
