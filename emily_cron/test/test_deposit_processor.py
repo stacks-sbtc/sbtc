@@ -1,7 +1,7 @@
 import unittest
 import json
 import os
-from datetime import datetime
+from datetime import datetime, UTC
 from unittest.mock import patch, MagicMock
 
 from app.models import EnrichedDepositInfo, RequestStatus, DepositInfo
@@ -32,7 +32,7 @@ class TestDepositProcessorBase(unittest.TestCase):
 
     def setUp(self):
         self.processor = DepositProcessor()
-        self.current_time = int(datetime.now().timestamp())
+        self.current_time = int(datetime.now(UTC).timestamp())
 
         # Mock blockchain state
         self.bitcoin_chaintip_height = 1000
@@ -580,7 +580,7 @@ class TestLongPendingProcessor(TestDepositProcessorBase):
         super().setUp()
 
         # Set current time for testing
-        self.current_time = int(datetime.now().timestamp())
+        self.current_time = int(datetime.now(UTC).timestamp())
 
         # Create test deposits
         self.long_pending = self._create_mock_deposit(

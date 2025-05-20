@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, UTC
 from itertools import chain, groupby
 from json import JSONDecodeError
 from typing import Iterable
@@ -221,7 +221,7 @@ class DepositProcessor:
         """
         updates = []
 
-        current_time = int(datetime.now().timestamp())
+        current_time = int(datetime.now(UTC).timestamp())
 
         long_pending_txs = []
         for tx in enriched_deposits:
