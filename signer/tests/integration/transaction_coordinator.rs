@@ -1099,21 +1099,29 @@ async fn dont_run_dkg_if_signer_set_didnt_change() {
 }
 
 /// Tests that dkg will be triggered if signer set changes
-#[test(tokio::test)]
-async fn run_dkg_if_signer_set_changes() {
+#[test_case(true; "signatures_required_changed")]
+#[test_case(false; "signatures_required_unchanged")]
+#[tokio::test]
+async fn run_dkg_if_signatures_required_changes(change_signatures_required: bool) {
     let mut rng = get_rng();
     let db = testing::storage::new_test_database().await;
-    let ctx = TestContext::builder()
+    let mut ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_mocked_clients()
         .modify_settings(|settings| {
             settings.signer.dkg_target_rounds = std::num::NonZero::<u32>::new(1).unwrap();
+            settings.signer.bootstrap_signatures_required = 1;
         })
         .build();
-    let mut config_signer_set = ctx.config().signer.bootstrap_signing_set.clone();
+    let config_signer_set = ctx.config().signer.bootstrap_signing_set.clone();
 
-    // Sanity check
-    assert!(!config_signer_set.is_empty());
+    // Sanity check, since we want change bootstrap_signatures_required during this test
+    // we need at least two valid values.
+    assert!(config_signer_set.len() > 1);
+
+    // We want current signer set be same as bootstrap_signer_set to prevent DKG trigger
+    // because of changed signer set. Also we want this signer set be at least 2 signers
+    ctx.state().update_current_signer_set(config_signer_set);
 
     // Write dkg shares so it won't be a reason to trigger dkg.
     let dkg_shares = model::EncryptedDkgShares {
@@ -1124,15 +1132,34 @@ async fn run_dkg_if_signer_set_changes() {
         .await
         .expect("failed to write dkg shares");
 
-    // Remove one signer
-    let _removed_signer = config_signer_set
-        .pop_first()
-        .expect("This signer set should not be empty");
     // Create chaintip
     let bitcoin_block: model::BitcoinBlock = Faker.fake_with_rng(&mut rng);
+    let stacks_block = model::StacksBlock {
+        bitcoin_anchor: bitcoin_block.block_hash,
+        ..Faker.fake_with_rng(&mut rng)
+    };
+    // Write rotate keys transaction with signatures_required = 1
+    let key_rotation_tx = model::KeyRotationEvent {
+        block_hash: stacks_block.block_hash,
+        signatures_required: 1,
+        signer_set: ctx
+            .config()
+            .signer
+            .bootstrap_signing_set
+            .iter()
+            .cloned()
+            .collect(),
+        ..Faker.fake_with_rng(&mut rng)
+    };
     db.write_bitcoin_block(&bitcoin_block)
         .await
         .expect("failed to write bitcoin block");
+    db.write_stacks_block(&stacks_block)
+        .await
+        .expect("failed to write stacks block");
+    db.write_rotate_keys_transaction(&key_rotation_tx)
+        .await
+        .expect("failed to write rotate keys transaction");
 
     // Check that with correct rotate keys tx we won't proceed with dkg.
     let chaintip = db
@@ -1141,11 +1168,17 @@ async fn run_dkg_if_signer_set_changes() {
         .expect("failed to get chain tip")
         .expect("no chain tip");
 
-    ctx.inner
-        .state()
-        .update_current_signer_set(config_signer_set.iter().cloned().collect());
-    assert!(should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
-    assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_ok());
+    // Change bootstrap_signatures_required to trigger dkg
+    if change_signatures_required {
+        ctx.config_mut().signer.bootstrap_signatures_required = 2;
+    }
+    if change_signatures_required {
+        assert!(should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+        assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_ok());
+    } else {
+        assert!(!should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+        assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_err());
+    }
 }
 
 /// Test that we can run multiple DKG rounds.
