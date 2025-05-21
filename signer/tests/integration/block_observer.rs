@@ -51,6 +51,7 @@ use signer::storage::model::TxOutputType;
 use signer::storage::model::TxPrevout;
 use signer::storage::model::TxPrevoutType;
 use signer::storage::postgres::PgStore;
+use signer::testing::btc::get_canonical_chain_tip;
 use signer::testing::stacks::DUMMY_SORTITION_INFO;
 use signer::testing::stacks::DUMMY_TENURE_INFO;
 use testing_emily_client::apis::testing_api;
@@ -191,7 +192,7 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
-    let chain_tip_info = rpc.get_chain_tips().unwrap().pop().unwrap();
+    let chain_tip_info = get_canonical_chain_tip(rpc);
     let deposit_requests = db2
         .get_deposit_requests(&chain_tip_info.hash.into(), 100)
         .await
@@ -379,7 +380,7 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
         .await
         .unwrap();
 
-    let chain_tip_info = rpc.get_chain_tips().unwrap().pop().unwrap();
+    let chain_tip_info = get_canonical_chain_tip(rpc);
 
     // 1. Create a database, an associated context for the block observer.
 
@@ -1615,7 +1616,7 @@ async fn block_observer_ignores_coinbase() {
     // Generate a block to ensure we start with an empty mempool
     faucet.generate_block();
 
-    let chain_tip_info = rpc.get_chain_tips().unwrap().pop().unwrap();
+    let chain_tip_info = get_canonical_chain_tip(rpc);
 
     // 1. Create a database, an associated context for the block observer.
 

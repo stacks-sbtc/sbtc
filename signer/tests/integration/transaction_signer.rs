@@ -15,6 +15,7 @@ use signer::stacks::api::MockStacksInteract;
 use signer::storage::DbRead;
 use signer::storage::DbWrite;
 use signer::storage::postgres::PgStore;
+use signer::testing::btc::get_canonical_chain_tip;
 use test_case::test_case;
 
 use signer::bitcoin::utxo::RequestRef;
@@ -622,7 +623,7 @@ async fn max_one_state_machine_per_bitcoin_block_hash_for_dkg() {
 
     // Let's make sure that the database has the chain tip.
     let (rpc, _) = sbtc::testing::regtest::initialize_blockchain();
-    let headers = &rpc.get_chain_tips().unwrap()[0];
+    let headers = &get_canonical_chain_tip(rpc);
     let chain_tip = BitcoinBlockRef {
         block_hash: headers.hash.into(),
         block_height: headers.height.into(),

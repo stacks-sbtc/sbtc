@@ -1,6 +1,7 @@
 use std::sync::atomic::AtomicU16;
 
 mod bitcoin_client;
+mod bitcoin_forks;
 mod bitcoin_rpc;
 mod bitcoin_validation;
 mod block_observer;
