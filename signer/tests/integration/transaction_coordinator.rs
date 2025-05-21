@@ -1163,6 +1163,10 @@ async fn run_dkg_if_signatures_required_changes(change_signatures_required: bool
     // Create chaintip
     let chaintip: model::BitcoinBlockRef = Faker.fake_with_rng(&mut rng);
 
+    // Before we actually change the signatures_required, the DKG won't be triggered
+    assert!(!should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+    assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_err());
+
     // Change bootstrap_signatures_required to trigger dkg
     if change_signatures_required {
         ctx.config_mut().signer.bootstrap_signatures_required = 2;
