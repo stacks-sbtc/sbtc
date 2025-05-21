@@ -1,7 +1,5 @@
 //! This module contains implementations of structs that make reading from
 //! and writing from postgres easy.
-//!
-//!
 
 use std::ops::Deref;
 use std::str::FromStr as _;
@@ -374,9 +372,7 @@ impl<'q> sqlx::Encode<'q, sqlx::Postgres> for Timestamp {
         let pg_epoch_micros = (unix_seconds - PG_EPOCH_SECONDS_FROM_UNIX_EPOCH)
             .checked_mul(MICROS_PER_SECOND)
             .ok_or_else(|| {
-                sqlx::Error::Encode(
-                    "timestamp value out of range for PostgreSQL TIMESTAMPTZ".into(),
-                )
+                sqlx::Error::Encode("timestamp value out of range for postgres TIMESTAMPTZ".into())
             })?;
 
         pg_epoch_micros.encode_by_ref(buf)
@@ -392,9 +388,17 @@ impl<'r> sqlx::Decode<'r, sqlx::Postgres> for Timestamp {
         // Decode the i64 representing microseconds since PostgreSQL epoch.
         let pg_epoch_micros = <i64 as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
 
-        // Convert microseconds since PostgreSQL epoch to seconds since Unix epoch.
-        // Integer division is used as UnixTimestamp stores whole seconds.
-        let unix_seconds = (pg_epoch_micros / MICROS_PER_SECOND) + PG_EPOCH_SECONDS_FROM_UNIX_EPOCH;
+        // Convert microseconds since PostgreSQL epoch to seconds since Unix
+        // epoch.
+        // SAFETY: MICROS_PER_SECOND is a non-zero constant, so division by zero
+        // is not possible here.
+        let unix_seconds = (pg_epoch_micros / MICROS_PER_SECOND)
+            .checked_add(PG_EPOCH_SECONDS_FROM_UNIX_EPOCH)
+            .ok_or_else(|| {
+                sqlx::Error::Decode(
+                    "timestamp value out of range for conversion to unix timestamp".into(),
+                )
+            })?;
 
         if unix_seconds < 0 {
             return Err(Box::new(sqlx::Error::Decode(

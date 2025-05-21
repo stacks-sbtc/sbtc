@@ -355,6 +355,9 @@ pub struct SignerConfig {
     pub dkg_verification_window: u16,
     /// The maximum stacks fee in microSTX that the signer will accept for any stacks transaction.
     pub stacks_fees_max_ustx: NonZeroU64,
+    /// The aggregate key constructed during the signers' first DKG. It was
+    /// used to lock the first UTXO created by the signers.
+    pub bootstrap_aggregate_key: Option<PublicKey>,
 }
 
 impl Validatable for SignerConfig {
@@ -850,6 +853,25 @@ mod tests {
         set_var("SIGNER_SIGNER__DKG_VERIFICATION_WINDOW", "42");
         let settings = Settings::new_from_default_config().unwrap();
         assert_eq!(settings.signer.dkg_verification_window, 42);
+    }
+
+    #[test]
+    fn loading_bootstrap_aggregate_key() {
+        clear_env();
+
+        let settings = Settings::new_from_default_config().unwrap();
+        assert!(settings.signer.bootstrap_aggregate_key.is_none());
+
+        let public_key_str = "03A9B4E455FABECF0E8CF423DD519A6EA5968CF365F4E65C4FEAB5589DA1F84895";
+        let public_key_bytes = hex::decode(public_key_str).unwrap();
+        let expected_public_key = PublicKey::from_slice(&public_key_bytes).unwrap();
+
+        set_var("SIGNER_SIGNER__BOOTSTRAP_AGGREGATE_KEY", public_key_str);
+        let settings = Settings::new_from_default_config().unwrap();
+        assert_eq!(
+            settings.signer.bootstrap_aggregate_key,
+            Some(expected_public_key)
+        );
     }
 
     #[test]

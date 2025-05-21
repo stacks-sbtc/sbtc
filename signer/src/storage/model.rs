@@ -630,7 +630,7 @@ pub enum DkgSharesStatus {
 #[sqlx(type_name = "output_type", rename_all = "snake_case")]
 #[derive(serde::Serialize, serde::Deserialize)]
 #[strum(serialize_all = "snake_case")]
-#[cfg_attr(feature = "testing", derive(fake::Dummy))]
+#[cfg_attr(feature = "testing", derive(fake::Dummy, strum::EnumIter))]
 pub enum TxOutputType {
     /// An output created by the signers as the TXO containing all of the
     /// swept funds.
@@ -1518,6 +1518,30 @@ pub struct BitcoinBlockHeight(u64);
 #[serde(transparent)]
 pub struct StacksBlockHeight(u64);
 
+/// A newtype over [`time::OffsetDateTime`] which implements encode/decode for sqlx
+/// and integrates seamlessly with the Postgres `TIMESTAMPTZ` type.
+#[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Timestamp(time::OffsetDateTime);
+
+impl std::fmt::Debug for Timestamp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl Deref for Timestamp {
+    type Target = time::OffsetDateTime;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<time::OffsetDateTime> for Timestamp {
+    fn from(value: time::OffsetDateTime) -> Self {
+        Self(value)
+    }
+}
+
 /// A newtype over [`PeerId`] which implements encode/decode for sqlx.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct DbPeerId(PeerId);
@@ -1549,30 +1573,6 @@ impl Deref for DbMultiaddr {
     type Target = Multiaddr;
     fn deref(&self) -> &Self::Target {
         &self.0
-    }
-}
-
-/// A newtype over [`time::OffsetDateTime`] which implements encode/decode for sqlx
-/// and integrates seamlessly with the Postgres `TIMESTAMPTZ` type.
-#[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Timestamp(time::OffsetDateTime);
-
-impl std::fmt::Debug for Timestamp {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl Deref for Timestamp {
-    type Target = time::OffsetDateTime;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl From<time::OffsetDateTime> for Timestamp {
-    fn from(value: time::OffsetDateTime) -> Self {
-        Self(value)
     }
 }
 
