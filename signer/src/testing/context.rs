@@ -240,23 +240,15 @@ pub fn prevent_dkg_on_changed_signer_set<Storage, Bitcoin, Stacks, Emily>(
 /// Note: this function changes bootstrap_signatures_required config parameter.
 pub async fn prevent_dkg_on_changed_signatures_required<Storage, Bitcoin, Stacks, Emily>(
     context: &mut TestContext<Storage, Bitcoin, Stacks, Emily>,
-    chaintip: &crate::storage::model::BitcoinBlockHash,
 ) where
     Storage: DbRead + DbWrite + Clone + Sync + Send + 'static,
     Bitcoin: BitcoinInteract + Clone + Send + Sync + 'static,
     Stacks: StacksInteract + Clone + Send + Sync + 'static,
     Emily: EmilyInteract + Clone + Send + Sync + 'static,
 {
-    if let Some(last_dkg_signatures_required) = context
-        .get_storage()
-        .get_last_key_rotation(chaintip)
-        .await
-        .unwrap()
-        .map(|kre| kre.signatures_required)
-    {
-        let config = context.config_mut();
-        config.signer.bootstrap_signatures_required = last_dkg_signatures_required;
-    }
+    let context_signeratures_required = context.state().current_signatures_required();
+    let config = context.config_mut();
+    config.signer.bootstrap_signatures_required = context_signeratures_required;
 }
 
 impl<Storage, Bitcoin, Stacks, Emily> Context for TestContext<Storage, Bitcoin, Stacks, Emily>

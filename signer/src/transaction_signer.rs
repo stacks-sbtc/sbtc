@@ -1534,16 +1534,10 @@ pub async fn assert_allow_dkg_begin(
     let config = context.config();
 
     // Trigger dkg if signatures_required has changed
-    if let Some(last_key_rotation_signatures_required) = context
-        .get_storage()
-        .get_last_key_rotation(&bitcoin_chain_tip.block_hash)
-        .await?
-        .map(|last_key_rotation| last_key_rotation.signatures_required)
+    if context.state().current_signatures_required() != config.signer.bootstrap_signatures_required
     {
-        if last_key_rotation_signatures_required != config.signer.bootstrap_signatures_required {
-            tracing::info!("signatures required has changed; proceeding with DKG");
-            return Ok(());
-        }
+        tracing::info!("signatures required has changed; proceeding with DKG");
+        return Ok(());
     }
 
     // Trigger dkg if signer set changes
