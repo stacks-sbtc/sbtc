@@ -1757,6 +1757,7 @@ mod tests {
             .unwrap();
 
         prevent_dkg_on_changed_signer_set(&mut context);
+        prevent_dkg_on_changed_signatures_required(&mut context);
 
         // Test the case
         let result = assert_allow_dkg_begin(&context, &bitcoin_chain_tip).await;
@@ -1802,6 +1803,7 @@ mod tests {
             .unwrap();
 
         prevent_dkg_on_changed_signer_set(&mut context);
+        prevent_dkg_on_changed_signatures_required(&mut context);
 
         // Create our signer instance.
         let mut signer = TxSignerEventLoop {

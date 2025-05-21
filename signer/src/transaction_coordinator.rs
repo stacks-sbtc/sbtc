@@ -2814,6 +2814,7 @@ mod tests {
             .unwrap();
 
         prevent_dkg_on_changed_signer_set(&mut context);
+        prevent_dkg_on_changed_signatures_required(&mut context);
 
         // Test the case
         let result = should_coordinate_dkg(&context, &bitcoin_chain_tip)
