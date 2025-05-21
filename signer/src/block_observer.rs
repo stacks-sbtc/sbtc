@@ -31,6 +31,7 @@ use crate::context::SignerEvent;
 use crate::emily_client::EmilyInteract;
 use crate::error::Error;
 use crate::keys::PublicKey;
+use crate::keys::SignerScriptPubKey as _;
 use crate::metrics::BITCOIN_BLOCKCHAIN;
 use crate::metrics::Metrics;
 use crate::stacks::api::GetNakamotoStartHeight as _;
@@ -43,7 +44,6 @@ use crate::storage::model::EncryptedDkgShares;
 use bitcoin::Amount;
 use bitcoin::BlockHash;
 use bitcoin::ScriptBuf;
-use bitcoin::Transaction;
 use futures::stream::Stream;
 use futures::stream::StreamExt;
 use sbtc::deposits::CreateDepositRequest;
@@ -69,6 +69,8 @@ pub struct Deposit {
     /// The deposit information included in one of the output
     /// `scriptPubKey`s of the above transaction.
     pub info: DepositInfo,
+    /// The block hash of the Bitcoin block that includes this transaction.
+    pub block_hash: BlockHash,
 }
 
 impl DepositRequestValidator for CreateDepositRequest {
@@ -98,13 +100,14 @@ impl DepositRequestValidator for CreateDepositRequest {
             return Ok(None);
         };
 
-        // TODO(515): After the transaction passes validation, we need to
-        // check whether we know about the public key in the deposit
-        // script.
+        // Check that the necessary data is present for the transaction
+        // info struct.
+        tx_info.validate()?;
 
         Ok(Some(Deposit {
             info: self.validate_tx(&tx_info.tx, is_mainnet)?,
             tx_info,
+            block_hash,
         }))
     }
 }
@@ -234,12 +237,12 @@ impl<C: Context, B> BlockObserver<C, B> {
             Metrics::increment_deposit_total(&deposit);
             let Ok(Some(deposit)) = deposit else { continue };
 
-            self.process_bitcoin_blocks_until(deposit.tx_info.block_hash)
+            self.process_bitcoin_blocks_until(deposit.block_hash)
                 .await?;
 
             let tx = model::BitcoinTxRef {
-                txid: deposit.tx_info.txid.into(),
-                block_hash: deposit.tx_info.block_hash.into(),
+                txid: deposit.tx_info.compute_txid().into(),
+                block_hash: deposit.block_hash.into(),
             };
 
             deposit_requests.push(model::DepositRequest::from(deposit));
@@ -368,7 +371,7 @@ impl<C: Context, B> BlockObserver<C, B> {
             .get_storage_mut()
             .write_bitcoin_block(&db_block)
             .await?;
-        self.extract_sbtc_transactions(block_header.hash, &block.txdata)
+        self.extract_sbtc_transactions(block_header.hash, &block.transactions)
             .await?;
 
         tracing::debug!("finished processing bitcoin block");
@@ -413,9 +416,45 @@ impl<C: Context, B> BlockObserver<C, B> {
     pub async fn extract_sbtc_transactions(
         &self,
         block_hash: BlockHash,
-        txs: &[Transaction],
+        txs: &[BitcoinTxInfo],
+    ) -> Result<(), Error> {
+        // The first time, we get all sweep transactions with inputs that
+        // we know about. However, we could have locked the UTXO with a new
+        // scriptPubKey, and we have no way of knowing that ahead of time.
+        // The first pass over will populate the database with the new
+        // scriptPubKeys.
+        self.extract_sbtc_transactions_inner(block_hash, txs)
+            .await?;
+        // This will catch cases where the signers have locked up their
+        // UTXO with a new scriptPubKey and there are a chain of
+        // transactions in the block.
+        self.extract_sbtc_transactions_inner(block_hash, txs).await
+    }
+
+    /// Extract all BTC transactions from the block where one of the UTXOs
+    /// can be spent by the signers.
+    ///
+    /// # Note
+    ///
+    /// When using the postgres storage, we need to make sure that this
+    /// function is called after the `Self::write_bitcoin_block` function
+    /// because of the foreign key constraints.
+    pub async fn extract_sbtc_transactions_inner(
+        &self,
+        block_hash: BlockHash,
+        txs: &[BitcoinTxInfo],
     ) -> Result<(), Error> {
         let db = self.context.get_storage_mut();
+        // When a signer is not part of the bootstrap signing set but is
+        // joining the set as a new signer, it will not have the signers
+        // original scriptPubKey in its database, so it relies on the config
+        // to inform them of what it is.
+        let bootstrap_script_pubkey = self
+            .context
+            .config()
+            .signer
+            .bootstrap_aggregate_key
+            .map(|key| key.signers_script_pubkey());
         // We store all the scriptPubKeys associated with the signers'
         // aggregate public key. Let's get the last years worth of them.
         let signer_script_pubkeys: HashSet<ScriptBuf> = db
@@ -423,42 +462,49 @@ impl<C: Context, B> BlockObserver<C, B> {
             .await?
             .into_iter()
             .map(ScriptBuf::from_bytes)
+            .chain(bootstrap_script_pubkey)
             .collect();
 
-        let btc_rpc = self.context.get_bitcoin_client();
         // Look through all the UTXOs in the given transaction slice and
         // keep the transactions where a UTXO is locked with a
         // `scriptPubKey` controlled by the signers.
         let mut sbtc_txs = Vec::new();
-        for tx in txs {
-            tracing::trace!(txid = %tx.compute_txid(), "attempting to extract sbtc transaction");
-            // If any of the outputs are spent to one of the signers'
-            // addresses, then we care about it
-            let outputs_spent_to_signers = tx
-                .output
-                .iter()
-                .any(|tx_out| signer_script_pubkeys.contains(&tx_out.script_pubkey));
-
-            if !outputs_spent_to_signers {
-                continue;
-            }
-
-            let txid = tx.compute_txid();
-            if tx.is_coinbase() {
+        for tx_info in txs {
+            let txid = tx_info.compute_txid();
+            tracing::trace!(%txid, "attempting to extract sbtc transaction");
+            if tx_info.tx.is_coinbase() {
                 tracing::warn!(%txid, "ignoring coinbase tx when extracting sbtc transaction");
                 continue;
             }
 
-            // This function is called after we have received a
-            // notification of a bitcoin block, and we are iterating
-            // through all of the transactions within that block. This
-            // means the `get_tx_info` call below should not fail.
-            let tx_info = btc_rpc
-                .get_tx_info(&txid, &block_hash)
-                .await?
-                .ok_or(Error::BitcoinTxMissing(txid, None))?;
+            // Bail if bitcoin-core doesn't return all the data that we
+            // care about for a non-coinbase transaction. This will happen
+            // if bitcoin core hasn't computed the undo data for the block
+            // with these transactions, of it there is a bug in bitcoin
+            // core.
+            tx_info.validate()?;
 
-            let txid = tx.compute_txid();
+            // If any of the outputs are spent to one of the signers'
+            // addresses, then we care about it
+            let outputs_spent_to_signers = tx_info
+                .tx
+                .output
+                .iter()
+                .any(|tx_out| signer_script_pubkeys.contains(&tx_out.script_pubkey));
+
+            // We might not know about the new scriptPubKey, but we are
+            // supposed to know about all existing scriptPubKeys, so we
+            // check the inputs as well.
+            let inputs_spent_by_signers = tx_info
+                .vin
+                .iter()
+                .filter_map(|vin| vin.prevout.as_ref())
+                .any(|prevout| signer_script_pubkeys.contains(&prevout.script_pubkey.script));
+
+            if !outputs_spent_to_signers && !inputs_spent_by_signers {
+                continue;
+            }
+
             sbtc_txs.push(model::BitcoinTxRef {
                 txid: txid.into(),
                 block_hash: block_hash.into(),
@@ -782,12 +828,12 @@ mod tests {
 
         for block in test_harness.bitcoin_blocks() {
             let persisted = storage
-                .get_bitcoin_block(&block.block_hash().into())
+                .get_bitcoin_block(&block.block_hash.into())
                 .await
                 .expect("storage error")
                 .expect("block wasn't persisted");
 
-            assert_eq!(persisted.block_hash, block.block_hash().into())
+            assert_eq!(persisted.block_hash, block.block_hash.into())
         }
 
         handle.abort();
@@ -806,7 +852,7 @@ mod tests {
         let block_hash = test_harness
             .bitcoin_blocks()
             .first()
-            .map(|block| block.block_hash());
+            .map(|block| block.block_hash);
 
         let lock_time = 150;
         let max_fee = 32000;
@@ -936,7 +982,7 @@ mod tests {
         let block_hash = test_harness
             .bitcoin_blocks()
             .first()
-            .map(|block| block.block_hash());
+            .map(|block| block.block_hash);
         let lock_time = 150;
         let max_fee = 32000;
         let amount = 500_000;
@@ -1087,7 +1133,7 @@ mod tests {
 
         // First we try extracting the transactions from a block that does
         // not contain any transactions spent to the signers
-        let txs = [tx_setup1.tx.clone()];
+        let txs = [tx_setup1.tx.fake_with_rng(&mut rng)];
         block_observer
             .extract_sbtc_transactions(block_hash, &txs)
             .await
@@ -1107,7 +1153,10 @@ mod tests {
 
         // Now we try again, but we include the transaction that spends to
         // the signer. This one should turn out differently.
-        let txs = [tx_setup0.tx.clone(), tx_setup1.tx.clone()];
+        let txs = [
+            tx_setup0.tx.fake_with_rng(&mut rng),
+            tx_setup1.tx.fake_with_rng(&mut rng),
+        ];
         block_observer
             .extract_sbtc_transactions(block_hash, &txs)
             .await
@@ -1121,6 +1170,6 @@ mod tests {
         let tx_ids = stored_transactions.unwrap();
         let expected_tx_id = tx_setup0.tx.compute_txid().into();
         assert_eq!(tx_ids.len(), 1);
-        assert_eq!(tx_ids[0], expected_tx_id);
+        assert!(tx_ids.contains(&expected_tx_id));
     }
 }

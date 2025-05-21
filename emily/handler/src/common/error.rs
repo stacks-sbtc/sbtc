@@ -136,7 +136,7 @@ pub enum Error {
     /// This means that the stacks address in the environment for the
     /// signers multisig address is invalid.
     #[error("Could not parse a stacks address from a string")]
-    InvalidStacksAddress(#[source] clarity::vm::errors::Error),
+    InvalidStacksAddress(#[source] Box<clarity::vm::errors::Error>),
 
     /// This happens when the request to DynamoDB succeeds but does not
     /// return any values. This happens when the request instructs the
@@ -185,7 +185,7 @@ pub enum Error {
 
     /// This happens when attempting to read an item from DynamoDB.
     #[error("Could not retrieve an item from DynamoDB; {0}")]
-    AwsSdkDynamoDbGetItem(#[from] SdkError<GetItemError>),
+    AwsSdkDynamoDbGetItem(#[from] Box<SdkError<GetItemError>>),
 
     /// This error occurs when storing an item in DynamoDB. Note that
     /// precondition errors on a PutItem operation are returned in the
@@ -195,11 +195,11 @@ pub enum Error {
 
     /// This happens when attempting the "Query" operation in DynamoDB.
     #[error("Could not complete Query operation on DynamoDB; {0}")]
-    AwsSdkDynamoDbQuery(#[from] SdkError<QueryError>),
+    AwsSdkDynamoDbQuery(#[from] Box<SdkError<QueryError>>),
 
     /// This happens when attempting the "Scan" operation in DynamoDB.
     #[error("Could not complete Scan operation on DynamoDB; {0}")]
-    AwsSdkDynamoDbScan(#[from] SdkError<ScanError>),
+    AwsSdkDynamoDbScan(#[from] Box<SdkError<ScanError>>),
 
     /// This happens when attempting to update a stored item in DynamoDB.
     /// Note that precondition errors on an UpdateItem operation are
@@ -224,7 +224,7 @@ pub enum Error {
     /// This happens during the BatchWrite operation on DynamoDB.
     #[cfg(feature = "testing")]
     #[error("{0}")]
-    AwsSdkDynamoDbBatchWriteItem(#[from] SdkError<BatchWriteItemError>),
+    AwsSdkDynamoDbBatchWriteItem(#[from] Box<SdkError<BatchWriteItemError>>),
 }
 
 /// Error implementation.
@@ -270,40 +270,27 @@ impl Error {
     /// Converts the error into a warp response.
     pub fn into_response(self) -> warp::reply::Response {
         warp::reply::with_status(
-            warp::reply::json(&ErrorResponse { message: format!("{self:?}") }),
+            warp::reply::json(&ErrorResponse { message: format!("{self}") }),
             self.status_code(),
         )
         .into_response()
     }
     /// Convert error into a presentable version of the error that can be
     /// provided to a client in production.
-    ///
-    /// TODO(131): Scrutinize the outputs of the error messages to ensure they're
-    /// production ready.
     pub fn into_production_error(self) -> Error {
         match self {
-            Error::Network(_)
-            | Error::VersionConflict(_)
-            | Error::Reorganizing(_)
-            | Error::Base64Decode(_)
-            | Error::EnvVariable(_)
-            | Error::SerdeJson(_)
-            | Error::SerdeDynamo(_)
-            | Error::EnvParseInt(_)
-            | Error::InvalidDepositEntry(_, _)
-            | Error::InvalidWithdrawalEntry(_, _)
-            | Error::AwsSdkDynamoDbDeleteItem(_)
-            | Error::AwsSdkDynamoDbGetItem(_)
-            | Error::AwsSdkDynamoDbPutItem(_)
-            | Error::AwsSdkDynamoDbQuery(_)
-            | Error::AwsSdkDynamoDbScan(_)
-            | Error::AwsSdkDynamoDbUpdateItem(_)
-            | Error::InternalServer => Error::InternalServer,
-            #[cfg(feature = "testing")]
-            Error::DynamoDbBuild(_) | Error::AwsSdkDynamoDbBatchWriteItem(_) => {
-                Error::InternalServer
-            }
-            err => err,
+            Error::DepositOutputMismatch(_, _)
+            | Error::Forbidden
+            | Error::NotFound
+            | Error::TooManyInternalRetries
+            | Error::InconsistentState(_)
+            | Error::WithdrawalRequestIdMismatch(_, _)
+            | Error::MissingAttributesDeposit(_)
+            | Error::MissingAttributesWithdrawal(_)
+            | Error::TooManyWithdrawalEntries(_)
+            | Error::HttpRequest(_, _) => self,
+
+            _ => Error::InternalServer,
         }
     }
     /// Makes an inconsistency error from a vector of chainstate entries.
