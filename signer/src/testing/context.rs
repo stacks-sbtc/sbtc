@@ -238,7 +238,7 @@ pub fn prevent_dkg_on_changed_signer_set<Storage, Bitcoin, Stacks, Emily>(
 /// the one in config. However, we don't want to test this functionality in some of our tests,
 /// so this function makes sure that DKG won't be triggered because of changes in this parameter.
 /// Note: this function changes bootstrap_signatures_required config parameter.
-pub async fn prevent_dkg_on_changed_signatures_required<Storage, Bitcoin, Stacks, Emily>(
+pub fn prevent_dkg_on_changed_signatures_required<Storage, Bitcoin, Stacks, Emily>(
     context: &mut TestContext<Storage, Bitcoin, Stacks, Emily>,
 ) where
     Storage: DbRead + DbWrite + Clone + Sync + Send + 'static,

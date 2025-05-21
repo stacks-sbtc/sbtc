@@ -893,7 +893,7 @@ async fn next_headers_to_process_ignores_known_headers() {
 /// This tests that we prefer rotate keys transactions if it's available
 /// but will use the DKG shares behavior is indeed the case.
 #[tokio::test]
-async fn get_signer_public_keys_and_aggregate_key_falls_back() {
+async fn get_signer_set_info_falls_back() {
     let db = testing::storage::new_test_database().await;
 
     let mut rng = get_rng();
@@ -921,9 +921,14 @@ async fn get_signer_public_keys_and_aggregate_key_falls_back() {
     // We have no rows in the DKG shares table and no rotate-keys
     // transactions, so there should be no aggregate key, since that only
     // happens after DKG, but we should always know the current signer set.
+    // Signatures required should fall back to config value.
     let info = get_signer_set_info(&ctx, chain_tip).await.unwrap();
     assert!(info.maybe_aggregate_key.is_none());
     assert!(!info.signer_set.is_empty());
+    assert_eq!(
+        info.signatures_required,
+        ctx.config().signer.bootstrap_signatures_required
+    );
 
     // Alright, lets write some DKG shares into the database. When we do
     // that the signer set should be considered whatever the signer set is
@@ -939,6 +944,11 @@ async fn get_signer_public_keys_and_aggregate_key_falls_back() {
 
     assert_eq!(shares.aggregate_key, info.maybe_aggregate_key.unwrap());
     assert_eq!(shares_signer_set, info.signer_set);
+    // signatures required still should fall back to config value.
+    assert_eq!(
+        info.signatures_required,
+        ctx.config().signer.bootstrap_signatures_required
+    );
 
     // Okay now we write a rotate-keys transaction into the database. To do
     // that we need the stacks chain tip, and a something in 3 different
@@ -961,6 +971,7 @@ async fn get_signer_public_keys_and_aggregate_key_falls_back() {
 
     assert_eq!(rotate_keys.aggregate_key, info.maybe_aggregate_key.unwrap());
     assert_eq!(rotate_keys_signer_set, info.signer_set);
+    assert_eq!(info.signatures_required, rotate_keys.signatures_required);
 
     testing::storage::drop_db(db).await;
 }

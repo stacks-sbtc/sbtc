@@ -568,14 +568,8 @@ async fn process_complete_deposit() {
     // Get the private key of the coordinator of the signer set.
     let private_key = select_coordinator(&setup.sweep_block_hash.into(), &signer_info);
 
-    let chaintip = context
-        .get_storage()
-        .get_bitcoin_canonical_chain_tip()
-        .await
-        .expect("failed to get bitcoin chain tip")
-        .expect("no chain tip");
     prevent_dkg_on_changed_signer_set(&mut context);
-    prevent_dkg_on_changed_signatures_required(&mut context, &chaintip).await;
+    prevent_dkg_on_changed_signatures_required(&mut context);
 
     // Bootstrap the tx coordinator event loop
     context.state().set_sbtc_contracts_deployed();
@@ -1154,41 +1148,11 @@ async fn run_dkg_if_signatures_required_changes(change_signatures_required: bool
         .await
         .expect("failed to write dkg shares");
 
-    // Create chaintip
-    let bitcoin_block: model::BitcoinBlock = Faker.fake_with_rng(&mut rng);
-    let stacks_block = model::StacksBlock {
-        bitcoin_anchor: bitcoin_block.block_hash,
-        ..Faker.fake_with_rng(&mut rng)
-    };
-    // Write rotate keys transaction with signatures_required = 1
-    let key_rotation_tx = model::KeyRotationEvent {
-        block_hash: stacks_block.block_hash,
-        signatures_required: 1,
-        signer_set: ctx
-            .config()
-            .signer
-            .bootstrap_signing_set
-            .iter()
-            .cloned()
-            .collect(),
-        ..Faker.fake_with_rng(&mut rng)
-    };
-    db.write_bitcoin_block(&bitcoin_block)
-        .await
-        .expect("failed to write bitcoin block");
-    db.write_stacks_block(&stacks_block)
-        .await
-        .expect("failed to write stacks block");
-    db.write_rotate_keys_transaction(&key_rotation_tx)
-        .await
-        .expect("failed to write rotate keys transaction");
+    // Update state with signatures_required = 1
+    ctx.state().set_current_signatures_required(1);
 
-    // Check that with correct rotate keys tx we won't proceed with dkg.
-    let chaintip = db
-        .get_bitcoin_canonical_chain_tip_ref()
-        .await
-        .expect("failed to get chain tip")
-        .expect("no chain tip");
+    // Create chaintip
+    let chaintip: model::BitcoinBlockRef = Faker.fake_with_rng(&mut rng);
 
     // Change bootstrap_signatures_required to trigger dkg
     if change_signatures_required {
@@ -4315,14 +4279,8 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
     // Get the private key of the coordinator of the signer set.
     let private_key = select_coordinator(&bitcoin_chain_tip.block_hash, &signer_info);
 
-    let chaintip = context
-        .get_storage()
-        .get_bitcoin_canonical_chain_tip()
-        .await
-        .unwrap()
-        .unwrap();
     prevent_dkg_on_changed_signer_set(&mut context);
-    prevent_dkg_on_changed_signatures_required(&mut context, &chaintip).await;
+    prevent_dkg_on_changed_signatures_required(&mut context);
 
     // Bootstrap the tx coordinator event loop
     context.state().set_sbtc_contracts_deployed();
@@ -4420,7 +4378,7 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
 #[test_case(true; "deposit completed")]
 #[test_case(false; "deposit not completed")]
 #[tokio::test]
-async fn coordinator_skip_onchain_completed_deposits_inner(deposit_completed: bool) {
+async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let db = testing::storage::new_test_database().await;
@@ -4452,6 +4410,8 @@ async fn coordinator_skip_onchain_completed_deposits_inner(deposit_completed: bo
     ctx.state()
         .update_current_signer_set(signers.signer_keys().iter().copied().collect());
     ctx.state().set_current_aggregate_key(aggregate_key);
+    ctx.state()
+        .set_current_signatures_required(ctx.config().signer.bootstrap_signatures_required);
 
     ctx.with_stacks_client(|client| {
         client
@@ -4496,6 +4456,7 @@ async fn coordinator_skip_onchain_completed_deposits_inner(deposit_completed: bo
     setup.store_sweep_tx(&db).await;
 
     prevent_dkg_on_changed_signer_set(&mut ctx);
+    prevent_dkg_on_changed_signatures_required(&mut ctx);
 
     let (bitcoin_chain_tip, _) = db.get_chain_tips().await;
     ctx.state().set_bitcoin_chain_tip(bitcoin_chain_tip);
