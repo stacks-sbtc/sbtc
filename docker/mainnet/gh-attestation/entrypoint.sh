@@ -8,8 +8,8 @@ if [[ -z "$BUNDLE_PATH" || -z "$TRUSTED_ROOT_PATH" || -z "$TAG" ]]; then
 fi
 
 # Define the image and repo (since they are fixed)
-IMAGE="index.docker.io/blockstack/sbtc:$TAG"
-REPO="stacks-network/sbtc"
+IMAGE="ghcr.io/stacks-sbtc/sbtc:$TAG"
+REPO="stacks-sbtc/sbtc"
 
 # Verifying attestation
 echo "✅ Verifying attestation for image: $IMAGE..."
