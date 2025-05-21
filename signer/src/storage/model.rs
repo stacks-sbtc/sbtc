@@ -1504,6 +1504,30 @@ pub struct BitcoinBlockHeight(u64);
 #[serde(transparent)]
 pub struct StacksBlockHeight(u64);
 
+/// A newtype over [`time::OffsetDateTime`] which implements encode/decode for sqlx
+/// and integrates seamlessly with the Postgres `TIMESTAMPTZ` type.
+#[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Timestamp(time::OffsetDateTime);
+
+impl std::fmt::Debug for Timestamp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl Deref for Timestamp {
+    type Target = time::OffsetDateTime;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<time::OffsetDateTime> for Timestamp {
+    fn from(value: time::OffsetDateTime) -> Self {
+        Self(value)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use fake::Fake;
