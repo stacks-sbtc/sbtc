@@ -37,7 +37,7 @@ pub struct UpdateDepositsResponse {
 #[derive(Clone, Default, Debug, PartialEq, Hash, Serialize, Deserialize, ToSchema, ToResponse)]
 #[serde(rename_all = "camelCase")]
 pub struct DepositWithStatus {
-    /// Deposit itself.
+    /// The fully extracted and validated deposit request.
     pub deposit: Deposit,
     /// HTTP status code, returned as part of multi-status responses.
     pub status: u16,
