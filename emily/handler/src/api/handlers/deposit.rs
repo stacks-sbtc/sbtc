@@ -599,7 +599,7 @@ async fn update_deposits(
         .map(|(_, deposit)| deposit)
         .collect();
     let response = UpdateDepositsResponse { deposits };
-    Ok(with_status(json(&response), StatusCode::MULTI_STATUS))
+    Ok(with_status(json(&response), StatusCode::OK))
 }
 
 const OP_DROP: u8 = opcodes::OP_DROP.to_u8();
