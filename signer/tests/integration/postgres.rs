@@ -28,6 +28,7 @@ use signer::storage::model::SweptWithdrawalRequest;
 use signer::storage::model::WithdrawalRequest;
 use signer::testing::IterTestExt as _;
 use signer::testing::storage::DbReadTestExt;
+use sqlx::Executor;
 use time::OffsetDateTime;
 
 use signer::bitcoin::MockBitcoinInteract;
@@ -5988,6 +5989,65 @@ async fn writing_key_rotation_transactions() {
     assert_ne!(stored_event, key_rotation3);
 
     testing::storage::drop_db(db).await;
+}
+
+#[tokio::test]
+async fn timestamps() {
+    let db = testing::storage::new_test_database().await;
+    let pool = db.pool();
+    let mut rng = get_rng();
+
+    #[derive(sqlx::FromRow, Debug, PartialEq)]
+    struct TimestampTest {
+        ts: model::Timestamp,
+    }
+
+    let timestamp: model::Timestamp = Faker.fake_with_rng(&mut rng);
+    pool.execute("CREATE TABLE IF NOT EXISTS timestamp_test (ts TIMESTAMPTZ)")
+        .await
+        .unwrap();
+
+    sqlx::query("INSERT INTO timestamp_test (ts) VALUES ($1)")
+        .bind(timestamp)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    let fetched_ts: TimestampTest = sqlx::query_as("SELECT ts FROM timestamp_test WHERE ts = $1")
+        .bind(timestamp)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+
+    assert_eq!(fetched_ts.ts, timestamp);
+
+    testing::storage::drop_db(db).await;
+}
+
+mod p2p_peers {
+    use super::*;
+
+    #[tokio::test]
+    async fn write_p2p_peer() {
+        let db = testing::storage::new_test_database().await;
+        let mut rng = get_rng();
+
+        let peer: model::P2PPeer = Faker.fake_with_rng(&mut rng);
+        db.upsert_p2p_peer(&peer)
+            .await
+            .expect("failed to write p2p peer");
+
+        let peers = db.get_p2p_peers().await.unwrap();
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0], peer);
+        assert_eq!(peers[0].public_key, peer.public_key);
+        assert_eq!(peers[0].last_updated_at, peer.last_updated_at);
+
+        dbg!(&peers);
+        dbg!(&peers[0].last_updated_at);
+
+        testing::storage::drop_db(db).await;
+    }
 }
 
 /// Module containing a test suite and helpers specific to

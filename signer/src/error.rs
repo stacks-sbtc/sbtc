@@ -748,8 +748,8 @@ pub enum Error {
     ExceedsWithdrawalCap(WithdrawalCapContext),
 
     /// Overflow occurred when manipulating a system time value
-    #[error("overflow occurred when manipulating a system time value")]
-    SystemTimeOverflow,
+    #[error("an error occurred while converting to/from time types")]
+    TimeConversion,
 
     /// An error which can be used in test code instead of `unimplemented!()` or
     /// other alternatives, so that an an actual error is returned instead of

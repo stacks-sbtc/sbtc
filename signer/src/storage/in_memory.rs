@@ -2,6 +2,7 @@
 
 use bitcoin::OutPoint;
 use blockstack_lib::types::chainstate::StacksBlockId;
+use libp2p::PeerId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
@@ -112,6 +113,9 @@ pub struct Store {
     /// Bitcoin withdrawal outputs
     pub bitcoin_withdrawal_outputs:
         HashMap<(u64, model::StacksBlockHash), model::BitcoinWithdrawalOutput>,
+
+    /// Stored P2P peers
+    pub p2p_peers: HashMap<PeerId, model::P2PPeer>,
 }
 
 impl Store {
@@ -1070,6 +1074,14 @@ impl super::DbRead for SharedStore {
 
         Ok(result)
     }
+
+    async fn get_p2p_peers(&self) -> Result<Vec<model::P2PPeer>, Error> {
+        let store = self.lock().await;
+
+        let peers = store.p2p_peers.values().map(|peer| peer.clone()).collect();
+
+        Ok(peers)
+    }
 }
 
 impl super::DbWrite for SharedStore {
@@ -1366,5 +1378,13 @@ impl super::DbWrite for SharedStore {
             }
         }
         Ok(false)
+    }
+
+    async fn upsert_p2p_peer(&self, peer: &model::P2PPeer) -> Result<(), Error> {
+        let mut store = self.lock().await;
+
+        store.p2p_peers.entry(*peer.peer_id).or_insert(peer.clone());
+
+        Ok(())
     }
 }

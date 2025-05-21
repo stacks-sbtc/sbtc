@@ -6,7 +6,6 @@ use std::convert::From;
 use std::num::TryFromIntError;
 use std::ops::Deref;
 use std::ops::{Add, Sub};
-use std::time::{SystemTime, SystemTimeError, UNIX_EPOCH};
 
 use bitcoin::OutPoint;
 use bitcoin::hashes::Hash as _;
@@ -27,56 +26,17 @@ use crate::error::Error;
 use crate::keys::PublicKey;
 use crate::keys::PublicKeyXOnly;
 
-/// Represents a UNIX timestamp in seconds since the UNIX epoch ([`UNIX_EPOCH`]).
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-#[cfg_attr(feature = "testing", derive(fake::Dummy))]
-pub struct UnixTimestamp(pub u64);
-
-impl UnixTimestamp {
-    /// Returns the current time as a Unix timestamp (seconds since epoch).
-    pub fn now() -> Result<Self, SystemTimeError> {
-        let secs = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
-        Ok(UnixTimestamp(secs))
-    }
-
-    /// Gets the inner value as a [`SystemTime`].
-    pub fn as_system_time(&self) -> Result<SystemTime, Error> {
-        SystemTime::UNIX_EPOCH
-            .checked_add(std::time::Duration::from_secs(self.0))
-            .ok_or(Error::SystemTimeOverflow)
-    }
-}
-
-impl From<u64> for UnixTimestamp {
-    fn from(secs: u64) -> Self {
-        UnixTimestamp(secs)
-    }
-}
-
-impl From<UnixTimestamp> for u64 {
-    fn from(ts: UnixTimestamp) -> Self {
-        ts.0
-    }
-}
-
-impl Deref for UnixTimestamp {
-    type Target = u64;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
 /// A P2P peer which the signer has successfully connected to.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
-pub struct P2pPeer {
+pub struct P2PPeer {
     /// The peer ID of the connected peer.
-    pub peer_id: PeerId,
+    pub peer_id: DbPeerId,
     /// The public key of the connected peer.
     pub public_key: PublicKey,
     /// The address of the connected peer.
-    pub address: Multiaddr,
+    pub multiaddress: DbMultiaddr,
     /// The timestamp of the last successful dial to the peer.
-    pub last_updated_at: UnixTimestamp,
+    pub last_updated_at: Timestamp,
 }
 
 /// A bitcoin transaction output (TXO) relevant for the sBTC signers.
@@ -1557,6 +1517,64 @@ pub struct BitcoinBlockHeight(u64);
 )]
 #[serde(transparent)]
 pub struct StacksBlockHeight(u64);
+
+/// A newtype over [`PeerId`] which implements encode/decode for sqlx.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct DbPeerId(PeerId);
+
+impl From<PeerId> for DbPeerId {
+    fn from(value: PeerId) -> Self {
+        Self(value)
+    }
+}
+
+impl Deref for DbPeerId {
+    type Target = PeerId;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A newtype over [`Multiaddr`] which implements encode/decode for sqlx.
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct DbMultiaddr(Multiaddr);
+
+impl From<Multiaddr> for DbMultiaddr {
+    fn from(value: Multiaddr) -> Self {
+        Self(value)
+    }
+}
+
+impl Deref for DbMultiaddr {
+    type Target = Multiaddr;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A newtype over [`time::OffsetDateTime`] which implements encode/decode for sqlx
+/// and integrates seamlessly with the Postgres `TIMESTAMPTZ` type.
+#[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Timestamp(time::OffsetDateTime);
+
+impl std::fmt::Debug for Timestamp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl Deref for Timestamp {
+    type Target = time::OffsetDateTime;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<time::OffsetDateTime> for Timestamp {
+    fn from(value: time::OffsetDateTime) -> Self {
+        Self(value)
+    }
+}
 
 #[cfg(test)]
 mod tests {

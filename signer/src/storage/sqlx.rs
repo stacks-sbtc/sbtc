@@ -7,9 +7,14 @@ use std::ops::Deref;
 use std::str::FromStr as _;
 
 use bitcoin::hashes::Hash as _;
+use libp2p::Multiaddr;
+use libp2p::PeerId;
 use sqlx::encode::IsNull;
 use sqlx::error::BoxDynError;
 use sqlx::postgres::PgArgumentBuffer;
+use sqlx::postgres::PgTypeInfo;
+use sqlx::postgres::types::Oid;
+use time::OffsetDateTime;
 
 use crate::keys::PublicKey;
 use crate::keys::PublicKeyXOnly;
@@ -23,7 +28,19 @@ use crate::storage::model::StacksBlockHeight;
 use crate::storage::model::StacksPrincipal;
 use crate::storage::model::StacksTxId;
 
-use super::model::UnixTimestamp;
+use super::model::DbMultiaddr;
+use super::model::DbPeerId;
+use super::model::Timestamp;
+
+/// Seconds between 1970-01-01 00:00:00 UTC (Unix epoch)
+/// and 2000-01-01 00:00:00 UTC (PostgreSQL epoch for TIMESTAMPTZ).
+const PG_EPOCH_SECONDS_FROM_UNIX_EPOCH: i64 = 946_684_800;
+
+/// Number of microseconds in a second (as an `i64`).
+const MICROS_PER_SECOND: i64 = 1_000_000;
+
+/// OID for PostgreSQL's TIMESTAMPTZ type.
+const TIMESTAMPTZ_OID: Oid = Oid(1184);
 
 // For the [`ScriptPubKey`]
 
@@ -333,50 +350,142 @@ impl sqlx::postgres::PgHasArrayType for SigHash {
     }
 }
 
-// --- sqlx Type implementations for UnixTimestamp ---
-// This implementation assumes UnixTimestamp(u64) in Rust will be stored
-// or retrieved as a BIGINT (i64) in PostgreSQL. This aligns with using
-// `EXTRACT(EPOCH FROM some_timestamptz_column)::BIGINT` for reading,
-// and `to_timestamp(some_bigint_column)` for writing.
+// --- sqlx Type implementation for Timestamp --
 
-impl sqlx::Type<sqlx::Postgres> for UnixTimestamp {
-    fn type_info() -> sqlx::postgres::PgTypeInfo {
-        // We are treating UnixTimestamp as a BIGINT (i64) in the database.
-        <i64 as sqlx::Type<sqlx::Postgres>>::type_info()
+impl sqlx::Type<sqlx::Postgres> for Timestamp {
+    fn type_info() -> PgTypeInfo {
+        PgTypeInfo::with_oid(TIMESTAMPTZ_OID)
     }
 
-    fn compatible(ty: &sqlx::postgres::PgTypeInfo) -> bool {
-        // Ensure compatibility with PostgreSQL's BIGINT type.
-        <i64 as sqlx::Type<sqlx::Postgres>>::compatible(ty)
+    fn compatible(ty: &PgTypeInfo) -> bool {
+        // Ensure compatibility with PostgreSQL's TIMESTAMPTZ type.
+        ty.oid() == Some(TIMESTAMPTZ_OID)
     }
 }
 
-impl<'q> sqlx::Encode<'q, sqlx::Postgres> for UnixTimestamp {
+impl<'q> sqlx::Encode<'q, sqlx::Postgres> for Timestamp {
     fn encode_by_ref(
         &self,
         buf: &mut sqlx::postgres::PgArgumentBuffer,
     ) -> Result<IsNull, BoxDynError> {
-        // Unix timestamps (seconds since epoch) are non-negative and fit in i64.
-        // PostgreSQL's to_timestamp(integer) function interprets the integer as epoch seconds.
-        let seconds_i64 = self.0 as i64;
-        seconds_i64.encode_by_ref(buf)
+        let unix_seconds = self.unix_timestamp();
+
+        // Convert Unix seconds to microseconds since PostgreSQL epoch.
+        let pg_epoch_micros = (unix_seconds - PG_EPOCH_SECONDS_FROM_UNIX_EPOCH)
+            .checked_mul(MICROS_PER_SECOND)
+            .ok_or_else(|| {
+                sqlx::Error::Encode(
+                    "timestamp value out of range for PostgreSQL TIMESTAMPTZ".into(),
+                )
+            })?;
+
+        pg_epoch_micros.encode_by_ref(buf)
     }
 
     fn size_hint(&self) -> usize {
-        (self.0 as i64).size_hint()
+        std::mem::size_of::<i64>()
     }
 }
 
-impl<'r> sqlx::Decode<'r, sqlx::Postgres> for UnixTimestamp {
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for Timestamp {
     fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, BoxDynError> {
-        // We expect a BIGINT from the database (e.g., from EXTRACT(...)::BIGINT).
-        let seconds_i64 = <i64 as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
-        if seconds_i64 < 0 {
-            // This case should ideally not be reached if the source is a valid TIMESTAMPTZ.
+        // Decode the i64 representing microseconds since PostgreSQL epoch.
+        let pg_epoch_micros = <i64 as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+
+        // Convert microseconds since PostgreSQL epoch to seconds since Unix epoch.
+        // Integer division is used as UnixTimestamp stores whole seconds.
+        let unix_seconds = (pg_epoch_micros / MICROS_PER_SECOND) + PG_EPOCH_SECONDS_FROM_UNIX_EPOCH;
+
+        if unix_seconds < 0 {
             return Err(Box::new(sqlx::Error::Decode(
-                "Received negative value for UnixTimestamp from database".into(),
+                "received PostgreSQL TIMESTAMPTZ value that results in a negative unix timestamp"
+                    .into(),
             )));
         }
-        Ok(UnixTimestamp(seconds_i64 as u64))
+
+        let datetime = OffsetDateTime::from_unix_timestamp(unix_seconds)
+            .map_err(|e| sqlx::Error::Decode(format!("invalid timestamp: {e}").into()))?;
+        Ok(datetime.into())
+    }
+}
+
+// --- sqlx Type implementations for DbPeerId ---
+
+impl sqlx::Type<sqlx::Postgres> for DbPeerId {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        // Stored as TEXT, so delegate to String's type info
+        <String as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+
+    fn compatible(ty: &sqlx::postgres::PgTypeInfo) -> bool {
+        <String as sqlx::Type<sqlx::Postgres>>::compatible(ty)
+    }
+}
+
+impl<'q> sqlx::Encode<'q, sqlx::Postgres> for DbPeerId {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<IsNull, BoxDynError> {
+        // Convert PeerId to its base58 string representation for storage
+        let peer_id_str = self.to_base58();
+        peer_id_str.encode_by_ref(buf)
+    }
+
+    fn size_hint(&self) -> usize {
+        // Provide a reasonable estimate or delegate if possible.
+        // For dynamic strings, an exact hint is hard.
+        // This is often optional but can help with performance.
+        self.to_base58().size_hint()
+    }
+}
+
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for DbPeerId {
+    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, BoxDynError> {
+        // Decode the TEXT from the database as a String
+        let peer_id_str = <String as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        // Parse the string back into a PeerId
+        PeerId::from_str(&peer_id_str)
+            .map(DbPeerId::from)
+            .map_err(|e| format!("Failed to parse PeerId from database string: {}", e).into())
+    }
+}
+
+// --- sqlx Type implementations for DbMultiaddr ---
+
+impl sqlx::Type<sqlx::Postgres> for DbMultiaddr {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        // Stored as TEXT, so delegate to String's type info
+        <String as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+
+    fn compatible(ty: &sqlx::postgres::PgTypeInfo) -> bool {
+        <String as sqlx::Type<sqlx::Postgres>>::compatible(ty)
+    }
+}
+
+impl<'q> sqlx::Encode<'q, sqlx::Postgres> for DbMultiaddr {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<IsNull, BoxDynError> {
+        // Convert Multiaddr to its string representation for storage
+        let multiaddr_str = self.to_string();
+        multiaddr_str.encode_by_ref(buf)
+    }
+
+    fn size_hint(&self) -> usize {
+        self.to_string().size_hint()
+    }
+}
+
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for DbMultiaddr {
+    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, BoxDynError> {
+        // Decode the TEXT from the database as a String
+        let multiaddr_str = <String as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        // Parse the string back into a Multiaddr
+        Multiaddr::from_str(&multiaddr_str)
+            .map(DbMultiaddr::from)
+            .map_err(|e| format!("Failed to parse Multiaddr from database string: {}", e).into())
     }
 }

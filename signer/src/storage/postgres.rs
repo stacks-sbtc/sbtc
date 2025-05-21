@@ -2471,6 +2471,39 @@ impl super::DbRead for PgStore {
         .await
         .map_err(Error::SqlxQuery)
     }
+
+    /*
+    CREATE TABLE p2p_peers (
+        -- The libp2p PeerId of the peer (base58 encoded multihash).
+        peer_id TEXT PRIMARY KEY,
+        -- The public key of the peer (hex-encoded string).
+        -- We're storing this here and as a string primarily for monitoring and ergonomics.
+        -- (The peer id is derived from the peer's keypair)
+        public_key TEXT NOT NULL,
+        -- The last known reachable multiaddress for this peer.
+        multiaddress TEXT NOT NULL,
+        -- Timestamp of when this peer was first added.
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        -- Timestamp of the last update to this peer''s record (e.g. a successful dial).
+        last_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    ); */
+    async fn get_p2p_peers(&self) -> Result<Vec<model::P2PPeer>, Error> {
+        sqlx::query_as::<_, model::P2PPeer>(
+            r#"
+            SELECT 
+                peer_id, 
+                public_key, 
+                multiaddress, 
+                created_at, 
+                last_updated_at
+            FROM 
+                sbtc_signer.p2p_peers
+            "#,
+        )
+        .fetch_all(&self.0)
+        .await
+        .map_err(Error::SqlxQuery)
+    }
 }
 
 impl super::DbWrite for PgStore {
@@ -3332,5 +3365,46 @@ impl super::DbWrite for PgStore {
         .await
         .map(|res| res.rows_affected() > 0)
         .map_err(Error::SqlxQuery)
+    }
+
+    /*
+    CREATE TABLE p2p_peers (
+        -- The libp2p PeerId of the peer (base58 encoded multihash).
+        peer_id TEXT PRIMARY KEY,
+        -- The public key of the peer (hex-encoded string).
+        -- We're storing this here and as a string primarily for monitoring and ergonomics.
+        -- (The peer id is derived from the peer's keypair)
+        public_key TEXT NOT NULL,
+        -- The last known reachable multiaddress for this peer.
+        multiaddress TEXT NOT NULL,
+        -- Timestamp of when this peer was first added.
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        -- Timestamp of the last update to this peer''s record (e.g. a successful dial).
+        last_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );*/
+    async fn upsert_p2p_peer(&self, peer: &model::P2PPeer) -> Result<(), Error> {
+        sqlx::query(
+            r#"
+            INSERT INTO sbtc_signer.p2p_peers (
+                peer_id
+              , public_key
+              , multiaddress
+              , last_updated_at
+            )
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (peer_id, public_key) DO UPDATE SET
+                multiaddress = EXCLUDED.multiaddress
+              , last_updated_at = EXCLUDED.last_updated_at
+            "#,
+        )
+        .bind(peer.peer_id)
+        .bind(&peer.public_key)
+        .bind(&peer.multiaddress)
+        .bind(&peer.last_updated_at)
+        .execute(&self.0)
+        .await
+        .map_err(Error::SqlxQuery)?;
+
+        Ok(())
     }
 }

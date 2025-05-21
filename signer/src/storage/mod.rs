@@ -428,6 +428,9 @@ pub trait DbRead {
         &self,
         sighash: &model::SigHash,
     ) -> impl Future<Output = Result<Option<(bool, PublicKeyXOnly)>, Error>> + Send;
+
+    /// Returns the list of stored peers.
+    fn get_p2p_peers(&self) -> impl Future<Output = Result<Vec<model::P2PPeer>, Error>> + Send;
 }
 
 /// Represents the ability to write data to the signer storage.
@@ -573,4 +576,11 @@ pub trait DbWrite {
     ) -> impl Future<Output = Result<bool, Error>> + Send
     where
         X: Into<PublicKeyXOnly> + Send;
+
+    /// Upserts a P2P peer, updating the last seen time and address if the peer
+    /// already exists.
+    fn upsert_p2p_peer(
+        &self,
+        peer: &model::P2PPeer,
+    ) -> impl Future<Output = Result<(), Error>> + Send;
 }
