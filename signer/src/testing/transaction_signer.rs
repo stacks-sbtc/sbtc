@@ -275,7 +275,7 @@ async fn run_dkg_and_store_results_for_signers<'s: 'r, 'r, S, Rng>(
 
     for (storage, encrypted_dkg_shares) in stores.into_iter().zip(all_dkg_shares) {
         testing_signer_set
-            .write_as_rotate_keys_tx(&storage, chain_tip, &encrypted_dkg_shares, rng)
+            .write_as_rotate_keys_tx(&storage, chain_tip, &encrypted_dkg_shares, None, rng)
             .await;
 
         storage

@@ -111,7 +111,13 @@ where
 
     let encrypted_dkg_shares = all_dkg_shares.first().unwrap();
     signer_set
-        .write_as_rotate_keys_tx(&storage, &bitcoin_chain_tip, encrypted_dkg_shares, rng)
+        .write_as_rotate_keys_tx(
+            &storage,
+            &bitcoin_chain_tip,
+            encrypted_dkg_shares,
+            None,
+            rng,
+        )
         .await;
 
     storage

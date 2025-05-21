@@ -182,7 +182,13 @@ where
 
     let encrypted_dkg_shares = all_dkg_shares.first().unwrap();
     signer_set
-        .write_as_rotate_keys_tx(&storage, &bitcoin_chain_tip, encrypted_dkg_shares, rng)
+        .write_as_rotate_keys_tx(
+            &storage,
+            &bitcoin_chain_tip,
+            encrypted_dkg_shares,
+            None,
+            rng,
+        )
         .await;
 
     let encrypted_dkg_shares = all_dkg_shares.first().unwrap();
@@ -3237,6 +3243,10 @@ async fn test_conservative_initial_sbtc_limits() {
             .with_first_bitcoin_core_client()
             .with_mocked_stacks_client()
             .with_mocked_emily_client()
+            .modify_settings(|settings| {
+                settings.signer.bootstrap_signing_set = signer_set_public_keys.clone();
+                settings.signer.bootstrap_signatures_required = signatures_required;
+            })
             .build();
 
         // When the signer binary starts up in main(), it sets the current
@@ -3247,6 +3257,8 @@ async fn test_conservative_initial_sbtc_limits() {
         // we manually update the necessary state here.
         ctx.state()
             .update_current_signer_set(signer_set_public_keys.clone());
+        ctx.state()
+            .set_current_signatures_required(signatures_required);
 
         let network = network.connect(&ctx);
 
@@ -3267,7 +3279,13 @@ async fn test_conservative_initial_sbtc_limits() {
     for ((_, db, _, _), dkg_shares) in signers.iter_mut().zip(encrypted_shares.iter_mut()) {
         dkg_shares.dkg_shares_status = DkgSharesStatus::Verified;
         signer_set
-            .write_as_rotate_keys_tx(db, &chain_tip, dkg_shares, &mut rng)
+            .write_as_rotate_keys_tx(
+                db,
+                &chain_tip,
+                dkg_shares,
+                Some(signatures_required),
+                &mut rng,
+            )
             .await;
 
         db.write_encrypted_dkg_shares(dkg_shares)

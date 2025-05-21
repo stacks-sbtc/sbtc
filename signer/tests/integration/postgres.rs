@@ -938,11 +938,11 @@ async fn should_return_the_same_last_key_rotation_as_in_memory_store() {
 
     let shares = all_shares.first().unwrap();
     testing_signer_set
-        .write_as_rotate_keys_tx(&in_memory_store, &chain_tip, shares, &mut rng)
+        .write_as_rotate_keys_tx(&in_memory_store, &chain_tip, shares, None, &mut rng)
         .await;
 
     testing_signer_set
-        .write_as_rotate_keys_tx(&pg_store, &chain_tip, shares, &mut rng)
+        .write_as_rotate_keys_tx(&pg_store, &chain_tip, shares, None, &mut rng)
         .await;
 
     let last_key_rotation_in_memory = in_memory_store
