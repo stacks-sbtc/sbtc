@@ -6086,6 +6086,9 @@ async fn writing_key_rotation_transactions() {
 }
 
 mod p2p_peers {
+    use libp2p::{Multiaddr, PeerId};
+    use signer::testing::network::RandomMemoryMultiaddr;
+
     use super::*;
 
     #[tokio::test]
@@ -6093,19 +6096,26 @@ mod p2p_peers {
         let db = testing::storage::new_test_database().await;
         let mut rng = get_rng();
 
-        let peer: model::P2PPeer = Faker.fake_with_rng(&mut rng);
-        db.upsert_p2p_peer(&peer)
+        let pub_key: PublicKey = Faker.fake_with_rng(&mut rng);
+        let peer_id: PeerId = pub_key.into();
+        let multiaddr = Multiaddr::random_memory();
+        let utc_now = time::OffsetDateTime::now_utc();
+
+        db.update_peer_connection(&pub_key, &peer_id, multiaddr.clone())
             .await
-            .expect("failed to write p2p peer");
+            .expect("Failed to insert peer connection");
 
         let peers = db.get_p2p_peers().await.unwrap();
         assert_eq!(peers.len(), 1);
-        assert_eq!(peers[0], peer);
-        assert_eq!(peers[0].public_key, peer.public_key);
-        assert_eq!(peers[0].last_updated_at, peer.last_updated_at);
+        assert_eq!(*peers[0].peer_id, peer_id);
+        assert_eq!(peers[0].public_key, pub_key);
+        assert_eq!(*peers[0].address, multiaddr);
+        // Ensure that the last_dialed_at timestamp is within a reasonable
+        // timespan from utc_now.
+        assert!(*peers[0].last_dialed_at - utc_now < time::Duration::seconds(5));
 
         dbg!(&peers);
-        dbg!(&peers[0].last_updated_at);
+        dbg!(&peers[0].last_dialed_at);
 
         testing::storage::drop_db(db).await;
     }

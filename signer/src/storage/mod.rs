@@ -17,6 +17,8 @@ use std::collections::BTreeSet;
 use std::future::Future;
 
 use blockstack_lib::types::chainstate::StacksBlockId;
+use libp2p::Multiaddr;
+use libp2p::PeerId;
 
 use crate::bitcoin::utxo::SignerUtxo;
 use crate::bitcoin::validation::DepositRequestReport;
@@ -579,8 +581,10 @@ pub trait DbWrite {
 
     /// Upserts a P2P peer, updating the last seen time and address if the peer
     /// already exists.
-    fn upsert_p2p_peer(
+    fn update_peer_connection(
         &self,
-        peer: &model::P2PPeer,
+        pub_key: &PublicKey,
+        peer_id: &PeerId,
+        address: Multiaddr,
     ) -> impl Future<Output = Result<(), Error>> + Send;
 }

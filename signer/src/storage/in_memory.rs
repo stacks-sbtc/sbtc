@@ -116,7 +116,7 @@ pub struct Store {
         HashMap<(u64, model::StacksBlockHash), model::BitcoinWithdrawalOutput>,
 
     /// Stored P2P peers
-    pub p2p_peers: HashMap<PeerId, model::P2PPeer>,
+    pub p2p_peers: HashMap<(PeerId, PublicKey), model::P2PPeer>,
 }
 
 impl Store {
@@ -1078,9 +1078,7 @@ impl super::DbRead for SharedStore {
 
     async fn get_p2p_peers(&self) -> Result<Vec<model::P2PPeer>, Error> {
         let store = self.lock().await;
-
         let peers = store.p2p_peers.values().cloned().collect();
-
         Ok(peers)
     }
 }
@@ -1381,10 +1379,30 @@ impl super::DbWrite for SharedStore {
         Ok(false)
     }
 
-    async fn upsert_p2p_peer(&self, peer: &model::P2PPeer) -> Result<(), Error> {
+    async fn update_peer_connection(
+        &self,
+        pub_key: &PublicKey,
+        peer_id: &PeerId,
+        address: libp2p::Multiaddr,
+    ) -> Result<(), Error> {
         let mut store = self.lock().await;
 
-        store.p2p_peers.entry(*peer.peer_id).or_insert(peer.clone());
+        let now = time::OffsetDateTime::now_utc().into();
+        match store.p2p_peers.entry((*peer_id, *pub_key)) {
+            std::collections::hash_map::Entry::Occupied(mut occupied_entry) => {
+                let peer = occupied_entry.get_mut();
+                peer.address = address.into();
+                peer.last_dialed_at = now;
+            }
+            std::collections::hash_map::Entry::Vacant(vacant_entry) => {
+                vacant_entry.insert(model::P2PPeer {
+                    public_key: *pub_key,
+                    peer_id: (*peer_id).into(),
+                    address: address.into(),
+                    last_dialed_at: now,
+                });
+            }
+        }
 
         Ok(())
     }

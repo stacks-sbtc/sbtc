@@ -785,8 +785,8 @@ impl fake::Dummy<fake::Faker> for model::P2PPeer {
         model::P2PPeer {
             peer_id: peer_id.into(),
             public_key,
-            multiaddress: multiaddr.into(),
-            last_updated_at: Faker.fake_with_rng(rng),
+            address: multiaddr.into(),
+            last_dialed_at: Faker.fake_with_rng(rng),
         }
     }
 }

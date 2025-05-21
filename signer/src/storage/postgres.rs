@@ -29,6 +29,9 @@ use crate::MAX_MEMPOOL_PACKAGE_TX_COUNT;
 use crate::MAX_REORG_BLOCK_COUNT;
 use crate::WITHDRAWAL_BLOCKS_EXPIRY;
 
+use super::model::DbMultiaddr;
+use super::model::DbPeerId;
+
 /// All migration scripts from the `signer/migrations` directory.
 static PGSQL_MIGRATIONS: include_dir::Dir =
     include_dir::include_dir!("$CARGO_MANIFEST_DIR/migrations");
@@ -2500,9 +2503,8 @@ impl super::DbRead for PgStore {
             SELECT 
                 peer_id, 
                 public_key, 
-                multiaddress, 
-                created_at, 
-                last_updated_at
+                address,
+                last_dialed_at
             FROM 
                 sbtc_signer.p2p_peers
             "#,
@@ -3389,25 +3391,27 @@ impl super::DbWrite for PgStore {
         -- Timestamp of the last update to this peer''s record (e.g. a successful dial).
         last_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );*/
-    async fn upsert_p2p_peer(&self, peer: &model::P2PPeer) -> Result<(), Error> {
+    async fn update_peer_connection(
+        &self,
+        pub_key: &PublicKey,
+        peer_id: &libp2p::PeerId,
+        address: libp2p::Multiaddr,
+    ) -> Result<(), Error> {
         sqlx::query(
             r#"
             INSERT INTO sbtc_signer.p2p_peers (
                 peer_id
               , public_key
-              , multiaddress
-              , last_updated_at
+              , address
             )
-            VALUES ($1, $2, $3, $4)
+            VALUES ($1, $2, $3)
             ON CONFLICT (peer_id, public_key) DO UPDATE SET
-                multiaddress = EXCLUDED.multiaddress
-              , last_updated_at = EXCLUDED.last_updated_at
+                address = EXCLUDED.address
             "#,
         )
-        .bind(peer.peer_id)
-        .bind(peer.public_key)
-        .bind(&peer.multiaddress)
-        .bind(peer.last_updated_at)
+        .bind(DbPeerId::from(*peer_id))
+        .bind(pub_key)
+        .bind(DbMultiaddr::from(address))
         .execute(&self.0)
         .await
         .map_err(Error::SqlxQuery)?;

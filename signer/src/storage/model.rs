@@ -34,9 +34,9 @@ pub struct P2PPeer {
     /// The public key of the connected peer.
     pub public_key: PublicKey,
     /// The address of the connected peer.
-    pub multiaddress: DbMultiaddr,
+    pub address: DbMultiaddr,
     /// The timestamp of the last successful dial to the peer.
-    pub last_updated_at: Timestamp,
+    pub last_dialed_at: Timestamp,
 }
 
 /// A bitcoin transaction output (TXO) relevant for the sBTC signers.
@@ -1522,6 +1522,13 @@ pub struct StacksBlockHeight(u64);
 /// and integrates seamlessly with the Postgres `TIMESTAMPTZ` type.
 #[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Timestamp(time::OffsetDateTime);
+
+impl Timestamp {
+    /// Creates a new [`Timestamp`] instance with the current UTC time.
+    pub fn utc_now() -> Self {
+        Self(time::OffsetDateTime::now_utc())
+    }
+}
 
 impl std::fmt::Debug for Timestamp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
