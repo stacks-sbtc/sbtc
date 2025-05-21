@@ -28,7 +28,7 @@ use clarity::vm::types::PrincipalData;
 use clarity::vm::types::SequenceData;
 use clarity::vm::types::StandardPrincipalData;
 use emily_client::apis::deposit_api;
-use fake::Fake as _;
+use fake::Fake;
 use fake::Faker;
 use futures::StreamExt as _;
 use lru::LruCache;
@@ -1060,17 +1060,22 @@ async fn run_dkg_from_scratch() {
 async fn run_dkg_if_signer_set_changes(signer_set_changed: bool) {
     let mut rng = get_rng();
     let db = testing::storage::new_test_database().await;
-    let ctx = TestContext::builder()
+    let mut ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_mocked_clients()
         .modify_settings(|settings| {
             settings.signer.dkg_target_rounds = std::num::NonZero::<u32>::new(1).unwrap();
         })
         .build();
-    let mut config_signer_set = ctx.config().signer.bootstrap_signing_set.clone();
 
+    let mut config_signer_set = ctx.config().signer.bootstrap_signing_set.clone();
     // Sanity check
     assert!(!config_signer_set.is_empty());
+
+    // Make sure that in very beginning of the test config and context signer sets are same.
+    ctx.inner
+        .state()
+        .update_current_signer_set(config_signer_set.iter().cloned().collect());
 
     // Write dkg shares so it won't be a reason to trigger dkg.
     let dkg_shares = model::EncryptedDkgShares {
@@ -1088,18 +1093,15 @@ async fn run_dkg_if_signer_set_changes(signer_set_changed: bool) {
             .expect("This signer set should not be empty");
     }
     // Create chaintip
-    let bitcoin_block: model::BitcoinBlock = Faker.fake_with_rng(&mut rng);
-    db.write_bitcoin_block(&bitcoin_block)
-        .await
-        .expect("failed to write bitcoin block");
+    let chaintip: model::BitcoinBlockRef = Faker.fake_with_rng(&mut rng);
 
-    // Check that with correct rotate keys tx we won't proceed with dkg.
-    let chaintip = db
-        .get_bitcoin_canonical_chain_tip_ref()
-        .await
-        .expect("failed to get chain tip")
-        .expect("no chain tip");
+    prevent_dkg_on_changed_signatures_required(&mut ctx);
 
+    // Before we actually change the signer set, the DKG won't be triggered
+    assert!(!should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+    assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_err());
+
+    // Now we change context signer set.
     ctx.inner
         .state()
         .update_current_signer_set(config_signer_set.iter().cloned().collect());
