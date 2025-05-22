@@ -182,13 +182,7 @@ where
 
     let encrypted_dkg_shares = all_dkg_shares.first().unwrap();
     signer_set
-        .write_as_rotate_keys_tx(
-            &storage,
-            &bitcoin_chain_tip,
-            encrypted_dkg_shares,
-            None,
-            rng,
-        )
+        .write_as_rotate_keys_tx(&storage, &bitcoin_chain_tip, encrypted_dkg_shares, rng)
         .await;
 
     let encrypted_dkg_shares = all_dkg_shares.first().unwrap();
@@ -3281,14 +3275,9 @@ async fn test_conservative_initial_sbtc_limits() {
 
     for ((_, db, _, _), dkg_shares) in signers.iter_mut().zip(encrypted_shares.iter_mut()) {
         dkg_shares.dkg_shares_status = DkgSharesStatus::Verified;
+        dkg_shares.signature_share_threshold = signatures_required;
         signer_set
-            .write_as_rotate_keys_tx(
-                db,
-                &chain_tip,
-                dkg_shares,
-                Some(signatures_required),
-                &mut rng,
-            )
+            .write_as_rotate_keys_tx(db, &chain_tip, dkg_shares, &mut rng)
             .await;
 
         db.write_encrypted_dkg_shares(dkg_shares)

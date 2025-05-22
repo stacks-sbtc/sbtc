@@ -474,13 +474,11 @@ impl SignerSet {
         storage: &S,
         chain_tip: &model::BitcoinBlockHash,
         shares: &EncryptedDkgShares,
-        signatures_required: Option<u16>,
         rng: &mut Rng,
     ) where
         S: storage::DbWrite + storage::DbRead,
         Rng: rand::RngCore + rand::CryptoRng,
     {
-        let signatures_required = signatures_required.unwrap_or(self.signers.len() as u16);
         let stacks_chain_tip = storage
             .get_stacks_chain_tip(chain_tip)
             .await
@@ -507,7 +505,7 @@ impl SignerSet {
             address,
             txid,
             signer_set: self.signer_keys(),
-            signatures_required,
+            signatures_required: shares.signature_share_threshold,
         };
 
         storage

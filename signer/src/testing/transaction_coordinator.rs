@@ -1457,7 +1457,6 @@ where
                 &self.context.get_storage_mut(),
                 &bitcoin_chain_tip,
                 encrypted_dkg_shares,
-                None,
                 rng,
             )
             .await;
