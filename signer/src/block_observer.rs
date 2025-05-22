@@ -583,8 +583,8 @@ impl<C: Context, B> BlockObserver<C, B> {
         Ok(())
     }
 
-    /// Update the `SignerState` object with current signer set, signatures
-    /// required and aggregate key data.
+    /// Update the `SignerState` object with the current signer set, signatures
+    /// required, and aggregate key data.
     ///
     /// # Notes
     ///
