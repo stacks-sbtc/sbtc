@@ -760,7 +760,7 @@ where
                 Ok(SignerSetInfo {
                     maybe_aggregate_key: Some(shares.aggregate_key),
                     signer_set,
-                    signatures_required: context.config().signer.bootstrap_signatures_required,
+                    signatures_required: share.signature_share_threshold,
                 })
             }
             None => Ok(SignerSetInfo {
