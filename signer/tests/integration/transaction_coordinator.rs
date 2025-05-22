@@ -1170,8 +1170,7 @@ async fn run_dkg_if_signatures_required_changes(change_signatures_required: bool
     // Change bootstrap_signatures_required to trigger dkg
     if change_signatures_required {
         ctx.config_mut().signer.bootstrap_signatures_required = 2;
-    }
-    if change_signatures_required {
+
         assert!(should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
         assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_ok());
     } else {
