@@ -1137,11 +1137,7 @@ async fn get_signer_set_info_falls_back() {
 
     assert_eq!(shares.aggregate_key, info.maybe_aggregate_key.unwrap());
     assert_eq!(shares_signer_set, info.signer_set);
-    // signatures required still should fall back to config value.
-    assert_eq!(
-        info.signatures_required,
-        ctx.config().signer.bootstrap_signatures_required
-    );
+    assert_eq!(info.signatures_required, shares.signature_share_threshold);
 
     // Okay now we write a rotate-keys transaction into the database. To do
     // that we need the stacks chain tip, and a something in 3 different
