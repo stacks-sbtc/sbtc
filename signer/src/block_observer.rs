@@ -706,8 +706,10 @@ pub struct SignerSetInfo {
     /// The set of sBTC signers public keys.
     pub signer_set: BTreeSet<PublicKey>,
     /// The number of signatures required to sign a transaction.
-    /// This is a number of signer who must sign the transaction to spend the
-    /// aggregated signers UTXO.
+    /// This is the number of signature shares necessary to successfully sign a 
+    /// bitcoin transaction spending a UTXO locked with the above aggregate key, 
+    /// or the number of signers necessary to sign a Stacks transaction under
+    /// the signers' principal.
     pub signatures_required: u16,
 }
 
