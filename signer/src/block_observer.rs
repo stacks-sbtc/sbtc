@@ -698,7 +698,7 @@ impl<C: Context, B> BlockObserver<C, B> {
 
 /// Structure describing the extended info about signer set.
 pub struct SignerSetInfo {
-    /// The aggregate key of the most recently confirmed key rotation 
+    /// The aggregate key of the most recently confirmed key rotation
     /// contract call on Stacks. If no such transaction exists, then this
     /// is the aggregate key of the most recent successful DKG run. If DKG
     /// has never successfully completed, then this is None.
@@ -706,8 +706,8 @@ pub struct SignerSetInfo {
     /// The set of sBTC signers public keys.
     pub signer_set: BTreeSet<PublicKey>,
     /// The number of signatures required to sign a transaction.
-    /// This is the number of signature shares necessary to successfully sign a 
-    /// bitcoin transaction spending a UTXO locked with the above aggregate key, 
+    /// This is the number of signature shares necessary to successfully sign a
+    /// bitcoin transaction spending a UTXO locked with the above aggregate key,
     /// or the number of signers necessary to sign a Stacks transaction under
     /// the signers' principal.
     pub signatures_required: u16,
@@ -760,7 +760,7 @@ where
                 Ok(SignerSetInfo {
                     maybe_aggregate_key: Some(shares.aggregate_key),
                     signer_set,
-                    signatures_required: share.signature_share_threshold,
+                    signatures_required: shares.signature_share_threshold,
                 })
             }
             None => Ok(SignerSetInfo {
