@@ -698,8 +698,10 @@ impl<C: Context, B> BlockObserver<C, B> {
 
 /// Structure describing the extended info about signer set.
 pub struct SignerSetInfo {
-    /// The aggregate key used for signing, aggregate public key of all signers
-    /// which was produced during the DKG.
+    /// The aggregate key of the most recently confirmed key rotation 
+    /// contract call on Stacks. If no such transaction exists, then this
+    /// is the aggregate key of the most recent successful DKG run. If DKG
+    /// has never successfully completed, then this is None.
     pub maybe_aggregate_key: Option<PublicKey>,
     /// The set of sBTC signers public keys.
     pub signer_set: BTreeSet<PublicKey>,
