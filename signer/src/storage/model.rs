@@ -1520,21 +1520,8 @@ pub struct StacksBlockHeight(u64);
 
 /// A newtype over [`time::OffsetDateTime`] which implements encode/decode for sqlx
 /// and integrates seamlessly with the Postgres `TIMESTAMPTZ` type.
-#[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Timestamp(time::OffsetDateTime);
-
-impl Timestamp {
-    /// Creates a new [`Timestamp`] instance with the current UTC time.
-    pub fn utc_now() -> Self {
-        Self(time::OffsetDateTime::now_utc())
-    }
-}
-
-impl std::fmt::Debug for Timestamp {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
 
 impl Deref for Timestamp {
     type Target = time::OffsetDateTime;

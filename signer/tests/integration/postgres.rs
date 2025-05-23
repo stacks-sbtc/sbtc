@@ -5864,23 +5864,27 @@ async fn timestamps() {
 
     let timestamp: model::Timestamp = Faker.fake_with_rng(&mut rng);
 
+    // Create a new table specifically for this test
     sqlx::query("CREATE TABLE IF NOT EXISTS timestamp_test (ts TIMESTAMPTZ)")
         .execute(pool)
         .await
         .unwrap();
 
+    // Attempt to insert a `Timestamp` into the table
     sqlx::query("INSERT INTO timestamp_test (ts) VALUES ($1)")
         .bind(timestamp)
         .execute(pool)
         .await
         .unwrap();
 
+    // Attempt to fetch the `Timestamp` back from the table
     let fetched_ts: TimestampTest = sqlx::query_as("SELECT ts FROM timestamp_test WHERE ts = $1")
         .bind(timestamp)
         .fetch_one(pool)
         .await
         .unwrap();
 
+    // Check that the fetched timestamp matches the original
     assert_eq!(fetched_ts.ts, timestamp);
 
     testing::storage::drop_db(db).await;
