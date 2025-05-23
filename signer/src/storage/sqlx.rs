@@ -36,6 +36,7 @@ const PG_EPOCH_SECONDS_FROM_UNIX_EPOCH: i64 = 946_684_800;
 const MICROS_PER_SECOND: i64 = 1_000_000;
 
 /// OID for PostgreSQL's TIMESTAMPTZ type.
+/// https://github.com/postgres/postgres/blob/5d6eac80cdce7aa7c5f4ec74208ddc1feea9eef3/src/include/catalog/pg_type.dat#L306
 const TIMESTAMPTZ_OID: Oid = Oid(1184);
 
 // For the [`ScriptPubKey`]
