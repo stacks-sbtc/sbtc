@@ -12,6 +12,7 @@ use crate::codec::Encode;
 use crate::context::{Context, P2PEvent, SignerCommand, SignerSignal};
 use crate::error::Error;
 use crate::network::Msg;
+use crate::network::libp2p::MultiaddrExt;
 use crate::storage::DbWrite;
 
 use super::TOPIC;
@@ -113,6 +114,8 @@ pub async fn run(ctx: &impl Context, swarm: Arc<Mutex<Swarm<SignerBehavior>>>) {
                         } else {
                             tracing::debug!(%peer_id, ?endpoint, "connected to peer");
 
+                            // Perform operations that are only needed/possible when we are the
+                            // dialer and have peer's confirmed dialable address.
                             if let ConnectedPoint::Dialer { address, .. } = endpoint {
                                 // If we are the dialer, we know that the address is reachable
                                 // from the outside, so we add it to the Kademlia routing table
@@ -138,6 +141,7 @@ pub async fn run(ctx: &impl Context, swarm: Arc<Mutex<Swarm<SignerBehavior>>>) {
                                 // our peer storage with the latest address information. This *should*
                                 // always work.
                                 if let Some(pubkey) = peer_pubkey {
+                                    let address = address.without_p2p_protocol();
                                     tracing::debug!(%peer_id, %pubkey, %address, "updating peer connection entry in storage");
                                     // Update the peer's connection entry.
                                     let _ = ctx.get_storage_mut()

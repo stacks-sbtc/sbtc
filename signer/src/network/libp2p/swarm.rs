@@ -62,6 +62,7 @@ pub struct SignerSwarmConfig {
     pub enable_autonat: bool,
     pub initial_bootstrap_delay: Duration,
     pub seed_addresses: Vec<Multiaddr>,
+    pub known_peers: Vec<(PeerId, Multiaddr)>,
     pub num_signers: u16,
 }
 
@@ -103,7 +104,8 @@ impl SignerBehavior {
 
         let bootstrap_config = bootstrap::Config::new(local_peer_id)
             .with_initial_delay(config.initial_bootstrap_delay)
-            .add_seed_addresses(&config.seed_addresses);
+            .add_seed_addresses(&config.seed_addresses)
+            .with_known_peers(&config.known_peers);
         let bootstrap = bootstrap::Behavior::new(bootstrap_config);
 
         Ok(Self {
@@ -202,6 +204,7 @@ pub struct SignerSwarmBuilder<'a> {
     private_key: &'a PrivateKey,
     listen_on: Vec<Multiaddr>,
     seed_addrs: Vec<Multiaddr>,
+    known_peers: Vec<(PeerId, Multiaddr)>,
     external_addresses: Vec<Multiaddr>,
     enable_mdns: bool,
     enable_kademlia: bool,
@@ -219,6 +222,7 @@ impl<'a> SignerSwarmBuilder<'a> {
             private_key,
             listen_on: Vec::new(),
             seed_addrs: Vec::new(),
+            known_peers: Vec::new(),
             external_addresses: Vec::new(),
             enable_mdns: false,
             enable_kademlia: true,
@@ -305,6 +309,19 @@ impl<'a> SignerSwarmBuilder<'a> {
         self
     }
 
+    /// Add known peers to the builder.
+    pub fn add_known_peers(mut self, peers: &[(PeerId, Multiaddr)]) -> Self {
+        for (peer_id, addr) in peers {
+            if !self.seed_addrs.contains(addr) {
+                self.seed_addrs.push(addr.clone());
+            }
+            if !self.known_peers.contains(&(*peer_id, addr.clone())) {
+                self.known_peers.push((*peer_id, addr.clone()));
+            }
+        }
+        self
+    }
+
     /// Add an external address to the builder.
     pub fn add_external_address(mut self, addr: Multiaddr) -> Self {
         if !self.external_addresses.contains(&addr) {
@@ -338,6 +355,7 @@ impl<'a> SignerSwarmBuilder<'a> {
             enable_autonat: self.enable_autonat,
             initial_bootstrap_delay: self.initial_bootstrap_delay,
             seed_addresses: self.seed_addrs,
+            known_peers: self.known_peers,
             num_signers: self.num_signers,
         };
         let behavior = SignerBehavior::new(keypair.clone(), behavior_config)?;
@@ -453,9 +471,10 @@ impl SignerSwarm {
 
             // Start listening on the listen addresses.
             for addr in self.listen_addrs.iter() {
-                swarm
-                    .listen_on(addr.clone())
-                    .map_err(|e| SignerSwarmError::LibP2P(Box::new(e)))?;
+                swarm.listen_on(addr.clone()).map_err(|error| {
+                    tracing::error!(address = %addr, %error, "failed to listen on address");
+                    SignerSwarmError::LibP2P(Box::new(error))
+                })?;
             }
 
             for addr in self.external_addresses.iter() {

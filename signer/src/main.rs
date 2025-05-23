@@ -24,10 +24,12 @@ use signer::network::P2PNetwork;
 use signer::network::libp2p::SignerSwarmBuilder;
 use signer::request_decider::RequestDeciderEventLoop;
 use signer::stacks::api::StacksClient;
+use signer::storage::DbRead;
 use signer::storage::postgres::PgStore;
 use signer::transaction_coordinator;
 use signer::transaction_signer;
 use signer::util::ApiFallbackClient;
+use time::OffsetDateTime;
 use tokio::signal;
 use tower_http::trace::TraceLayer;
 use tracing::Instrument;
@@ -38,6 +40,14 @@ use tracing::Span;
 // value, giving the swarm a few seconds to start up and bind listener(s)
 // before proceeding.
 const INITIAL_BOOTSTRAP_DELAY_SECS: u64 = 3;
+
+/// The window of time in which we consider a peer to be known and valid for
+/// inclusion in bootstrapping.
+const KNOWN_PEER_WINDOW: u64 = 60 * 60 * 24 * 30; // 30 days
+
+/// The maximum number of known peers we will attempt to bootstrap from, in
+/// addition to the seed peers.
+const MAX_KNOWN_PEERS: usize = 6;
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum LogOutputFormat {
@@ -248,10 +258,45 @@ async fn run_libp2p_swarm(ctx: impl Context) -> Result<(), Error> {
         .try_into()
         .unwrap_or(signer::MAX_KEYS);
 
+    // Look for known peers in the database which will be included as part of
+    // the bootstrapping process. We will only include peers that have been
+    // dialed within the last 30 days, and we will limit the number of peers
+    // to 6. This is to prevent the swarm from trying to connect to a large
+    // number of peers that are no longer valid.
+    //
+    // NOTE: We specify seed and known peers separately as seed peers are part
+    // of the static configuration, are generally considered trusted/more stable
+    // and as such are dialed first. Known peers are gathered from the network
+    // and are dialed using their explicit peer ID for added security.
+    let known_peers = {
+        let mut db_peers = ctx.get_storage().get_p2p_peers().await.unwrap_or_default();
+        db_peers.sort_unstable_by(|a, b| a.last_dialed_at.cmp(&b.last_dialed_at));
+        db_peers
+            .into_iter()
+            .filter_map(|peer| {
+                if OffsetDateTime::now_utc() - *peer.last_dialed_at
+                    > Duration::from_secs(KNOWN_PEER_WINDOW)
+                {
+                    // Filter out peers that have not been dialed in the last 30 days.
+                    None
+                } else if config.signer.p2p.seeds.contains(&*peer.address) {
+                    // Filter out seed peers, as they will be added separately.
+                    None
+                } else {
+                    let peer_id = *peer.peer_id;
+                    let peer_address = (*peer.address).clone();
+                    Some((peer_id, peer_address))
+                }
+            })
+            .take(MAX_KNOWN_PEERS)
+            .collect::<Vec<_>>()
+    };
+
     // Build the swarm.
     let mut swarm = SignerSwarmBuilder::new(&config.signer.private_key)
         .add_listen_endpoints(&ctx.config().signer.p2p.listen_on)
         .add_seed_addrs(&ctx.config().signer.p2p.seeds)
+        .add_known_peers(&known_peers)
         .add_external_addresses(&ctx.config().signer.p2p.public_endpoints)
         .enable_mdns(config.signer.p2p.enable_mdns)
         .enable_quic_transport(enable_quic)
