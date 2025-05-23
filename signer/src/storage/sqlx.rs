@@ -11,6 +11,7 @@ use sqlx::postgres::PgArgumentBuffer;
 use sqlx::postgres::PgTypeInfo;
 use sqlx::postgres::types::Oid;
 use time::OffsetDateTime;
+use time::macros::datetime;
 
 use crate::keys::PublicKey;
 use crate::keys::PublicKeyXOnly;
@@ -28,12 +29,7 @@ use super::model::Timestamp;
 
 /// The PostgreSQL epoch is 2000-01-01 00:00:00 UTC
 /// (https://en.wikipedia.org/wiki/Epoch_(computing)).
-/// This constant is the number of seconds between `1970-01-01 00:00:00 UTC`
-/// (Unix epoch) and `2000-01-01 00:00:00 UTC` (PostgreSQL epoch).
-const PG_EPOCH_SECONDS_FROM_UNIX_EPOCH: i64 = 946_684_800;
-
-/// Number of microseconds in a second (as an `i64`).
-const MICROS_PER_SECOND: i64 = 1_000_000;
+const POSTGRES_EPOCH_DATETIME: OffsetDateTime = datetime!(2000-01-01 00:00:00 UTC);
 
 /// OID for PostgreSQL's TIMESTAMPTZ type.
 /// https://github.com/postgres/postgres/blob/5d6eac80cdce7aa7c5f4ec74208ddc1feea9eef3/src/include/catalog/pg_type.dat#L306
@@ -365,16 +361,19 @@ impl<'q> sqlx::Encode<'q, sqlx::Postgres> for Timestamp {
         &self,
         buf: &mut sqlx::postgres::PgArgumentBuffer,
     ) -> Result<IsNull, BoxDynError> {
-        let unix_seconds = self.unix_timestamp();
+        let duration_since_pg_epoch = **self - POSTGRES_EPOCH_DATETIME;
+        let pg_epoch_micros_i128 = duration_since_pg_epoch.whole_microseconds();
 
-        // Convert Unix seconds to microseconds since PostgreSQL epoch.
-        let pg_epoch_micros = (unix_seconds - PG_EPOCH_SECONDS_FROM_UNIX_EPOCH)
-            .checked_mul(MICROS_PER_SECOND)
-            .ok_or_else(|| {
-                sqlx::Error::Encode("timestamp value out of range for postgres TIMESTAMPTZ".into())
-            })?;
+        // PostgreSQL TIMESTAMPTZ stores microseconds as an i64.
+        // We need to try to convert our i128 microseconds to i64.
+        let pg_epoch_micros_i64: i64 = pg_epoch_micros_i128.try_into().map_err(|_| {
+            sqlx::Error::Encode(
+                "timestamp value (microseconds) out of range for PostgreSQL TIMESTAMPTZ (i64)"
+                    .into(),
+            )
+        })?;
 
-        pg_epoch_micros.encode_by_ref(buf)
+        pg_epoch_micros_i64.encode_by_ref(buf)
     }
 
     fn size_hint(&self) -> usize {
@@ -385,29 +384,22 @@ impl<'q> sqlx::Encode<'q, sqlx::Postgres> for Timestamp {
 impl<'r> sqlx::Decode<'r, sqlx::Postgres> for Timestamp {
     fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, BoxDynError> {
         // Decode the i64 representing microseconds since PostgreSQL epoch.
-        let pg_epoch_micros = <i64 as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        let pg_epoch_micros_i64 = <i64 as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
 
-        // Convert microseconds since PostgreSQL epoch to seconds since Unix
-        // epoch.
-        // SAFETY: MICROS_PER_SECOND is a non-zero constant, so division by zero
-        // is not possible here.
-        let unix_seconds = (pg_epoch_micros / MICROS_PER_SECOND)
-            .checked_add(PG_EPOCH_SECONDS_FROM_UNIX_EPOCH)
+        // Create a Duration from these microseconds.
+        let duration_from_pg_epoch = time::Duration::microseconds(pg_epoch_micros_i64);
+
+        // Add this duration to the PostgreSQL epoch datetime.
+        // checked_add handles potential overflow/underflow if the resulting datetime
+        // is outside the representable range of OffsetDateTime.
+        let datetime = POSTGRES_EPOCH_DATETIME
+            .checked_add(duration_from_pg_epoch)
             .ok_or_else(|| {
                 sqlx::Error::Decode(
-                    "timestamp value out of range for conversion to unix timestamp".into(),
+                    "failed to construct OffsetDateTime from decoded TIMESTAMPTZ value due to overflow/underflow".into(),
                 )
             })?;
 
-        if unix_seconds < 0 {
-            return Err(Box::new(sqlx::Error::Decode(
-                "received PostgreSQL TIMESTAMPTZ value that results in a negative unix timestamp"
-                    .into(),
-            )));
-        }
-
-        let datetime = OffsetDateTime::from_unix_timestamp(unix_seconds)
-            .map_err(|e| sqlx::Error::Decode(format!("invalid timestamp: {e}").into()))?;
-        Ok(datetime.into())
+        Ok(datetime.into()) // Convert OffsetDateTime to Timestamp
     }
 }
