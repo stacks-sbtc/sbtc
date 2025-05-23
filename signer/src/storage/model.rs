@@ -1506,14 +1506,8 @@ pub struct StacksBlockHeight(u64);
 
 /// A newtype over [`time::OffsetDateTime`] which implements encode/decode for sqlx
 /// and integrates seamlessly with the Postgres `TIMESTAMPTZ` type.
-#[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Timestamp(time::OffsetDateTime);
-
-impl std::fmt::Debug for Timestamp {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
 
 impl Deref for Timestamp {
     type Target = time::OffsetDateTime;

@@ -26,9 +26,9 @@ use crate::storage::model::StacksTxId;
 
 use super::model::Timestamp;
 
-/// The PostgreSQL epoch is 2000-01-01 00:00:00 UTC 
+/// The PostgreSQL epoch is 2000-01-01 00:00:00 UTC
 /// (https://en.wikipedia.org/wiki/Epoch_(computing)).
-/// This constant is the number of seconds between `1970-01-01 00:00:00 UTC` 
+/// This constant is the number of seconds between `1970-01-01 00:00:00 UTC`
 /// (Unix epoch) and `2000-01-01 00:00:00 UTC` (PostgreSQL epoch).
 const PG_EPOCH_SECONDS_FROM_UNIX_EPOCH: i64 = 946_684_800;
 
