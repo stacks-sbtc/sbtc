@@ -813,6 +813,7 @@ async fn update_deposits() {
 #[test_case(Status::Confirmed; "confirmed")]
 #[test_case(Status::Failed; "failed")]
 #[test_case(Status::Accepted; "accepted")]
+#[test_case(Status::Rbf; "rbf")]
 #[tokio::test]
 async fn create_deposit_handles_duplicates(status: Status) {
     let configuration = clean_setup().await;
@@ -865,6 +866,11 @@ async fn create_deposit_handles_duplicates(status: Status) {
             stacks_txid: "test_fulfillment_stacks_txid".to_string(),
         })));
     }
+    let replaced_by_tx = if status == Status::Rbf {
+        Some(Some("replaced_by_txid".to_string()))
+    } else {
+        None
+    };
 
     apis::deposit_api::update_deposits_sidecar(
         &configuration,
@@ -875,7 +881,7 @@ async fn create_deposit_handles_duplicates(status: Status) {
                 fulfillment,
                 status,
                 status_message: "foo".into(),
-                replaced_by_tx: None,
+                replaced_by_tx,
             }],
         },
     )
