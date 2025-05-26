@@ -224,6 +224,16 @@ impl DepositEntry {
         } else {
             self.fulfillment = None;
         }
+        tracing::info!("latest event {:#?}", latest_event);
+        tracing::info!("self: {:#?}", self);
+        if new_status == Status::RBF {
+            self.replaced_by_tx = match &latest_event.status {
+                StatusEntry::RBF(replaced_by_tx) => Some(replaced_by_tx.clone()),
+                _ => None,
+            };
+        } else {
+            self.replaced_by_tx = None;
+        }
         self.status = new_status;
         self.last_update_height = new_last_update_height;
         self.last_update_block_hash = latest_event.stacks_block_hash;
@@ -247,6 +257,10 @@ impl TryFrom<DepositEntry> for Deposit {
             StatusEntry::Confirmed(fulfillment) => Some(fulfillment.clone()),
             _ => None,
         };
+        let replaced_by_tx = match &latest_event.status {
+            StatusEntry::RBF(replaced_by_tx) => Some(replaced_by_tx.clone()),
+            _ => None,
+        };
 
         // Create deposit from table entry.
         Ok(Deposit {
@@ -265,7 +279,7 @@ impl TryFrom<DepositEntry> for Deposit {
             reclaim_script: deposit_entry.reclaim_script,
             deposit_script: deposit_entry.deposit_script,
             fulfillment,
-            replaced_by_tx: deposit_entry.replaced_by_tx,
+            replaced_by_tx,
         })
     }
 }
