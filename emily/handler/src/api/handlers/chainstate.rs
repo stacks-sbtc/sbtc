@@ -174,9 +174,11 @@ pub async fn add_chainstate_entry_or_reorg(
     context: &EmilyContext,
     chainstate: &Chainstate,
 ) -> Result<(), Error> {
-    // We don't want to do reorg for too old chainstates, because it highly
-    // likely means that we reconnected to new stacks node which is not fully synced,
-    // rather then actual reorg happen.
+    // We don't want to reorg when given an old chainstate, because it is
+    // unlikely that an actual reorg has taken place. It's much more likely
+    // that something else is going on instead, such as Emily being connected
+    // to a stacks node that has not fully synced with the canonical
+    // stacks blockchain.
     let new_bitcoin_tip_height = chainstate.bitcoin_block_height;
     let current_bitcoin_tip_height = accessors::get_api_state(context)
         .await?
