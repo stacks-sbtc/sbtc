@@ -21,6 +21,7 @@ use tokio::time::error::Elapsed;
 use crate::bitcoin::GetTransactionFeeResult;
 use crate::bitcoin::rpc::{BitcoinBlockHeader, BitcoinBlockInfo};
 use crate::context::SbtcLimits;
+use crate::keys::PrivateKey;
 use crate::stacks::api::TenureBlocks;
 use crate::stacks::wallet::SignerWallet;
 use crate::storage::model::BitcoinTxId;
@@ -645,6 +646,17 @@ where
         let mut config = self.get_config();
         f(&mut config.settings);
         ContextBuilder { config }
+    }
+
+    /// Helper for configuring the context's settings with the specified signer
+    /// private key.
+    fn with_private_key(
+        self,
+        private_key: PrivateKey,
+    ) -> ContextBuilder<Storage, Bitcoin, Stacks, Emily> {
+        self.modify_settings(|settings| {
+            settings.signer.private_key = private_key;
+        })
     }
 }
 

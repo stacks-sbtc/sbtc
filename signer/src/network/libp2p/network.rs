@@ -118,7 +118,7 @@ mod tests {
     use crate::{
         keys::{PrivateKey, PublicKey},
         network::libp2p::SignerSwarmBuilder,
-        testing::{self, clear_env, context::*, get_rng, network::RandomMemoryMultiaddr},
+        testing::{self, clear_env, context::*, get_rng, network::MultiaddrExt as _},
     };
 
     #[test(tokio::test)]

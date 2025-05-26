@@ -29,6 +29,9 @@ use crate::MAX_MEMPOOL_PACKAGE_TX_COUNT;
 use crate::MAX_REORG_BLOCK_COUNT;
 use crate::WITHDRAWAL_BLOCKS_EXPIRY;
 
+use super::model::DbMultiaddr;
+use super::model::DbPeerId;
+
 /// All migration scripts from the `signer/migrations` directory.
 static PGSQL_MIGRATIONS: include_dir::Dir =
     include_dir::include_dir!("$CARGO_MANIFEST_DIR/migrations");
@@ -2478,6 +2481,38 @@ impl super::DbRead for PgStore {
         .await
         .map_err(Error::SqlxQuery)
     }
+
+    /*
+    CREATE TABLE p2p_peers (
+        -- The libp2p PeerId of the peer (base58 encoded multihash).
+        peer_id TEXT PRIMARY KEY,
+        -- The public key of the peer (hex-encoded string).
+        -- We're storing this here and as a string primarily for monitoring and ergonomics.
+        -- (The peer id is derived from the peer's keypair)
+        public_key TEXT NOT NULL,
+        -- The last known reachable multiaddress for this peer.
+        multiaddress TEXT NOT NULL,
+        -- Timestamp of when this peer was first added.
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        -- Timestamp of the last update to this peer''s record (e.g. a successful dial).
+        last_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    ); */
+    async fn get_p2p_peers(&self) -> Result<Vec<model::P2PPeer>, Error> {
+        sqlx::query_as::<_, model::P2PPeer>(
+            r#"
+            SELECT 
+                peer_id, 
+                public_key, 
+                address,
+                last_dialed_at
+            FROM 
+                sbtc_signer.p2p_peers
+            "#,
+        )
+        .fetch_all(&self.0)
+        .await
+        .map_err(Error::SqlxQuery)
+    }
 }
 
 impl super::DbWrite for PgStore {
@@ -3339,5 +3374,48 @@ impl super::DbWrite for PgStore {
         .await
         .map(|res| res.rows_affected() > 0)
         .map_err(Error::SqlxQuery)
+    }
+
+    /*
+    CREATE TABLE p2p_peers (
+        -- The libp2p PeerId of the peer (base58 encoded multihash).
+        peer_id TEXT PRIMARY KEY,
+        -- The public key of the peer (hex-encoded string).
+        -- We're storing this here and as a string primarily for monitoring and ergonomics.
+        -- (The peer id is derived from the peer's keypair)
+        public_key TEXT NOT NULL,
+        -- The last known reachable multiaddress for this peer.
+        multiaddress TEXT NOT NULL,
+        -- Timestamp of when this peer was first added.
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        -- Timestamp of the last update to this peer''s record (e.g. a successful dial).
+        last_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );*/
+    async fn update_peer_connection(
+        &self,
+        pub_key: &PublicKey,
+        peer_id: &libp2p::PeerId,
+        address: libp2p::Multiaddr,
+    ) -> Result<(), Error> {
+        sqlx::query(
+            r#"
+            INSERT INTO sbtc_signer.p2p_peers (
+                peer_id
+              , public_key
+              , address
+            )
+            VALUES ($1, $2, $3)
+            ON CONFLICT (peer_id, public_key) DO UPDATE SET
+                address = EXCLUDED.address
+            "#,
+        )
+        .bind(DbPeerId::from(*peer_id))
+        .bind(pub_key)
+        .bind(DbMultiaddr::from(address))
+        .execute(&self.0)
+        .await
+        .map_err(Error::SqlxQuery)?;
+
+        Ok(())
     }
 }

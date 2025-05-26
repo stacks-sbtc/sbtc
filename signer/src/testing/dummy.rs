@@ -15,6 +15,8 @@ use clarity::util::secp256k1::Secp256k1PublicKey;
 use fake::Dummy;
 use fake::Fake;
 use fake::Faker;
+use libp2p::Multiaddr;
+use libp2p::PeerId;
 use p256k1::point::Point;
 use p256k1::scalar::Scalar;
 use polynomial::Polynomial;
@@ -85,6 +87,8 @@ use crate::storage::model::StacksPrincipal;
 use crate::storage::model::StacksTxId;
 use crate::storage::model::WithdrawalAcceptEvent;
 use crate::storage::model::WithdrawalRejectEvent;
+
+use super::network::MultiaddrExt as _;
 
 /// Dummy block
 pub fn block<R: rand::RngCore + ?Sized>(
@@ -771,6 +775,37 @@ impl fake::Dummy<fake::Faker> for BitcoinPreSignAck {
         BitcoinPreSignAck {}
     }
 }
+
+impl fake::Dummy<fake::Faker> for model::P2PPeer {
+    fn dummy_with_rng<R: rand::RngCore + ?Sized>(config: &fake::Faker, rng: &mut R) -> Self {
+        let public_key: PublicKey = config.fake_with_rng(rng);
+        let multiaddr = Multiaddr::random_memory();
+        let peer_id: PeerId = public_key.into();
+
+        model::P2PPeer {
+            peer_id: peer_id.into(),
+            public_key,
+            address: multiaddr.into(),
+            last_dialed_at: Faker.fake_with_rng(rng),
+        }
+    }
+}
+
+impl fake::Dummy<fake::Faker> for model::Timestamp {
+    fn dummy_with_rng<R: rand::RngCore + ?Sized>(_: &fake::Faker, rng: &mut R) -> Self {
+        // The PostgreSQL epoch is 2000-01-01 00:00:00 UTC
+        const PG_UNIX_EPOCH: i64 = 946_684_800;
+        // Let's try to be somewhat realistic: 2050-01-01 00:00:00 UTC
+        const TIMESTAMP_MAX: i64 = 2_524_608_000;
+        // Generate a random timestamp between the PostgreSQL epoch and TIMESTAMP_MAX (2050-01-01 00:00:00 UTC)
+        // to avoid PG overflow.
+        let unix_timestamp: i64 = rng.gen_range(PG_UNIX_EPOCH..TIMESTAMP_MAX);
+        time::OffsetDateTime::from_unix_timestamp(unix_timestamp)
+            .expect("failed to create OffsetDateTime")
+            .into()
+    }
+}
+
 /// A struct to help with creating dummy values for testing
 pub struct Unit;
 

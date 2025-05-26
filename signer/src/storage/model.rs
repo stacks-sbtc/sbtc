@@ -12,6 +12,7 @@ use bitcoin::hashes::Hash as _;
 use bitvec::array::BitArray;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
 use clarity::vm::types::PrincipalData;
+use libp2p::{Multiaddr, PeerId};
 use serde::{Deserialize, Serialize};
 use stacks_common::types::chainstate::BurnchainHeaderHash;
 use stacks_common::types::chainstate::StacksBlockId;
@@ -24,6 +25,19 @@ use crate::block_observer::Deposit;
 use crate::error::Error;
 use crate::keys::PublicKey;
 use crate::keys::PublicKeyXOnly;
+
+/// A P2P peer which the signer has successfully connected to.
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
+pub struct P2PPeer {
+    /// The peer ID of the connected peer.
+    pub peer_id: DbPeerId,
+    /// The public key of the connected peer.
+    pub public_key: PublicKey,
+    /// The address of the connected peer.
+    pub address: DbMultiaddr,
+    /// The timestamp of the last successful dial to the peer.
+    pub last_dialed_at: Timestamp,
+}
 
 /// A bitcoin transaction output (TXO) relevant for the sBTC signers.
 ///
@@ -1503,6 +1517,58 @@ pub struct BitcoinBlockHeight(u64);
 )]
 #[serde(transparent)]
 pub struct StacksBlockHeight(u64);
+
+/// A newtype over [`time::OffsetDateTime`] which implements encode/decode for sqlx
+/// and integrates seamlessly with the Postgres `TIMESTAMPTZ` type.
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Timestamp(time::OffsetDateTime);
+
+impl Deref for Timestamp {
+    type Target = time::OffsetDateTime;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<time::OffsetDateTime> for Timestamp {
+    fn from(value: time::OffsetDateTime) -> Self {
+        Self(value)
+    }
+}
+
+/// A newtype over [`PeerId`] which implements encode/decode for sqlx.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct DbPeerId(PeerId);
+
+impl From<PeerId> for DbPeerId {
+    fn from(value: PeerId) -> Self {
+        Self(value)
+    }
+}
+
+impl Deref for DbPeerId {
+    type Target = PeerId;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A newtype over [`Multiaddr`] which implements encode/decode for sqlx.
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct DbMultiaddr(Multiaddr);
+
+impl From<Multiaddr> for DbMultiaddr {
+    fn from(value: Multiaddr) -> Self {
+        Self(value)
+    }
+}
+
+impl Deref for DbMultiaddr {
+    type Target = Multiaddr;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 #[cfg(test)]
 mod tests {
