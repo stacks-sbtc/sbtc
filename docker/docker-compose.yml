@@ -155,7 +155,7 @@ services:
       target: emily-cron
     restart: on-failure
     environment:
-      - API_KEY=testApiKey
+      - EMILY_API_KEY=testApiKey
       - EMILY_ENDPOINT=http://emily-server:3031
       - PRIVATE_EMILY_ENDPOINT=http://emily-server:3031
       - MEMPOOL_API_URL=http://mempool-web:8083/api
