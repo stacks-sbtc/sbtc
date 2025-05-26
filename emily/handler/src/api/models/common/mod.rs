@@ -48,6 +48,8 @@ pub enum Status {
     Confirmed,
     /// The operation was not fulfilled.
     Failed,
+    /// Transaction was replaced during an RBF.
+    RBF,
 }
 
 /// Data about the fulfillment of an sBTC Operation.

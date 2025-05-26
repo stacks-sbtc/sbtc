@@ -13,6 +13,7 @@ use crate::common::error::{Error, Inconsistency};
 
 use crate::{api::models::common::Status, context::EmilyContext};
 
+use super::entries::StatusEntry;
 use super::entries::deposit::{
     DepositInfoByRecipientEntry, DepositInfoByReclaimPubkeysEntry,
     DepositTableByRecipientSecondaryIndex, DepositTableByReclaimPubkeysSecondaryIndex,
@@ -229,6 +230,11 @@ pub async fn update_deposit(
     context: &EmilyContext,
     update: &DepositUpdatePackage,
 ) -> Result<DepositEntry, Error> {
+    // Get txid of the transaction that replaced this deposit, if any.
+    let replaced_by_tx = match &update.event.status {
+        StatusEntry::RBF(txid) => Some(txid),
+        _ => None,
+    };
     // Setup the update procedure.
     let update_expression: &str = " SET
         History = list_append(History, :new_event),
@@ -237,6 +243,11 @@ pub async fn update_deposit(
         LastUpdateHeight = :new_height,
         LastUpdateBlockHash = :new_hash
     ";
+    let update_expression = if replaced_by_tx.is_some() {
+        &format!("{update_expression},\n        ReplacedByTx = :new_replaced_by_tx")
+    } else {
+        update_expression
+    };
     // Ensure the version field is what we expect it to be.
     let condition_expression = "attribute_exists(Version) AND Version = :expected_version";
     // Make the key item.
@@ -244,7 +255,7 @@ pub async fn update_deposit(
     // Get simplified status enum.
     let status: Status = (&update.event.status).into();
     // Build the update.
-    context
+    let query = context
         .dynamodb_client
         .update_item()
         .table_name(&context.settings.deposit_table_name)
@@ -266,7 +277,18 @@ pub async fn update_deposit(
             ":expected_version",
             serde_dynamo::to_attribute_value(update.version)?,
         )
-        .expression_attribute_values(":one", AttributeValue::N(1.to_string()))
+        .expression_attribute_values(":one", AttributeValue::N(1.to_string()));
+
+    // TODO: pipe crate can make this more elegant, but I don't think it worth adding a dependency.
+    let query = if let Some(txid) = replaced_by_tx {
+        query.expression_attribute_values(
+            ":new_replaced_by_tx",
+            serde_dynamo::to_attribute_value(txid)?,
+        )
+    } else {
+        query
+    };
+    query
         .condition_expression(condition_expression)
         .return_values(aws_sdk_dynamodb::types::ReturnValue::AllNew)
         .update_expression(update_expression)

@@ -75,6 +75,9 @@ pub struct DepositEntry {
     /// If the reclaim script is in unknown format, this field will be None.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reclaim_pubkeys_hash: Option<String>,
+    /// Transaction ID of transaction which replaced this transaction during an RBF.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replaced_by_tx: Option<String>,
 }
 
 /// Implements versioned entry trait for the deposit entry.
@@ -262,6 +265,7 @@ impl TryFrom<DepositEntry> for Deposit {
             reclaim_script: deposit_entry.reclaim_script,
             deposit_script: deposit_entry.deposit_script,
             fulfillment,
+            replaced_by_tx: deposit_entry.replaced_by_tx,
         })
     }
 }
@@ -737,6 +741,7 @@ mod tests {
             fulfillment: None,
             history: vec![pending, accepted.clone()],
             reclaim_pubkeys_hash: None,
+            replaced_by_tx: None,
         };
 
         let update = ValidatedDepositUpdate {
@@ -777,6 +782,7 @@ mod tests {
             fulfillment: None,
             history: vec![pending.clone()],
             reclaim_pubkeys_hash: None,
+            replaced_by_tx: None,
         };
 
         let update = ValidatedDepositUpdate {
@@ -835,6 +841,7 @@ mod tests {
             fulfillment: Some(fulfillment.clone()),
             history: vec![pending.clone(), accepted.clone(), confirmed.clone()],
             reclaim_pubkeys_hash: Some(hex::encode([1u8; 32])),
+            replaced_by_tx: None,
         };
 
         // Ensure the deposit is valid.

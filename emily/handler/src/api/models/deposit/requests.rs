@@ -130,6 +130,9 @@ pub struct DepositUpdate {
     /// Details about the on chain artifacts that fulfilled the deposit.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fulfillment: Option<Fulfillment>,
+    /// Transaction ID of transaction which replaced this transaction during an RBF.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replaced_by_tx: Option<String>,
 }
 
 impl DepositUpdate {
@@ -147,6 +150,7 @@ impl DepositUpdate {
             bitcoin_tx_output_index: self.bitcoin_tx_output_index,
             bitcoin_txid: self.bitcoin_txid,
         };
+        let replaced_by = self.replaced_by_tx.ok_or(Error::RbfNoReplacementTx)?;
         // Make status entry.
         let status_entry: StatusEntry = match self.status {
             Status::Confirmed => {
@@ -162,6 +166,7 @@ impl DepositUpdate {
             Status::Pending => StatusEntry::Pending,
             Status::Reprocessing => StatusEntry::Reprocessing,
             Status::Failed => StatusEntry::Failed,
+            Status::RBF => StatusEntry::RBF(replaced_by),
         };
         // Make the new event.
         let event = DepositEvent {

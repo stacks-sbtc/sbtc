@@ -181,6 +181,7 @@ async fn create_and_get_deposit_happy_path() {
         recipient,
         status: testing_emily_client::models::Status::Pending,
         status_message: INITIAL_DEPOSIT_STATUS_MESSAGE.into(),
+        replaced_by_tx: None,
     };
 
     // Act.
@@ -308,6 +309,7 @@ async fn get_deposits_for_transaction() {
             recipient: recipient.clone(),
             status: testing_emily_client::models::Status::Pending,
             status_message: INITIAL_DEPOSIT_STATUS_MESSAGE.into(),
+            replaced_by_tx: None,
         };
         expected_deposits.push(expected_deposit);
     }
@@ -755,6 +757,7 @@ async fn update_deposits() {
                 fulfillment: Some(Some(Box::new(update_fulfillment.clone()))),
                 status: update_status,
                 status_message: update_status_message.into(),
+                replaced_by_tx: None,
             };
             deposit_updates.push(deposit_update);
 
@@ -774,6 +777,7 @@ async fn update_deposits() {
                 recipient: recipient.clone(),
                 status: update_status,
                 status_message: update_status_message.into(),
+                replaced_by_tx: None,
             };
             expected_deposits.push(expected_deposit);
         }
@@ -871,6 +875,7 @@ async fn create_deposit_handles_duplicates(status: Status) {
                 fulfillment,
                 status,
                 status_message: "foo".into(),
+                replaced_by_tx: None,
             }],
         },
     )
@@ -981,6 +986,7 @@ async fn update_deposits_is_forbidden_for_signer(
                     fulfillment,
                     status: previous_status,
                     status_message: "foo".into(),
+                    replaced_by_tx: None,
                 }],
             },
         )
@@ -1010,6 +1016,7 @@ async fn update_deposits_is_forbidden_for_signer(
                 fulfillment,
                 status: new_status,
                 status_message: "foo".into(),
+                replaced_by_tx: None,
             }],
         },
     )
@@ -1110,6 +1117,7 @@ async fn update_deposits_is_not_forbidden_for_sidecar(previous_status: Status, n
                     fulfillment,
                     status: previous_status,
                     status_message: "foo".into(),
+                    replaced_by_tx: None,
                 }],
             },
         )
@@ -1139,6 +1147,7 @@ async fn update_deposits_is_not_forbidden_for_sidecar(previous_status: Status, n
                 fulfillment,
                 status: new_status,
                 status_message: "foo".into(),
+                replaced_by_tx: None,
             }],
         },
     )
@@ -1149,4 +1158,76 @@ async fn update_deposits_is_not_forbidden_for_sidecar(previous_status: Status, n
     let deposit = response.deposits.first().expect("No deposit in response");
     assert_eq!(deposit.bitcoin_txid, bitcoin_txid);
     assert_eq!(deposit.status, new_status);
+}
+
+#[tokio::test]
+async fn rbf_status_saved_successfully() {
+    // the testing configuration has privileged access to all endpoints.
+    let testing_configuration = clean_setup().await;
+
+    // the user configuration access depends on the api_key.
+    let user_configuration = testing_configuration.clone();
+    // Arrange.
+    // --------
+    let bitcoin_tx_output_index = 0;
+
+    // Setup test deposit transaction.
+    let DepositTxnData {
+        reclaim_scripts,
+        deposit_scripts,
+        bitcoin_txid,
+        transaction_hex,
+        ..
+    } = DepositTxnData::new(DEPOSIT_LOCK_TIME, DEPOSIT_MAX_FEE, &[DEPOSIT_AMOUNT_SATS]);
+    let reclaim_script = reclaim_scripts.first().unwrap().clone();
+    let deposit_script = deposit_scripts.first().unwrap().clone();
+
+    let txid = bitcoin_txid.clone();
+    let index = bitcoin_tx_output_index.to_string();
+
+    let create_deposit_body = CreateDepositRequestBody {
+        bitcoin_tx_output_index,
+        bitcoin_txid: bitcoin_txid.clone(),
+        deposit_script: deposit_script.clone(),
+        reclaim_script: reclaim_script.clone(),
+        transaction_hex: transaction_hex.clone(),
+    };
+
+    // Update the deposit status with the privileged configuration.
+    apis::deposit_api::create_deposit(&testing_configuration, create_deposit_body.clone())
+        .await
+        .expect("Received an error after making a valid create deposit request api call.");
+
+    // Update deposit setting status to rbf.
+    let update_body = UpdateDepositsRequestBody {
+        deposits: vec![DepositUpdate {
+            bitcoin_tx_output_index,
+            bitcoin_txid: bitcoin_txid.clone(),
+            fulfillment: None,
+            status: Status::Rbf,
+            status_message: "RBF initiated".into(),
+            replaced_by_tx: Some(Some("replaced_by_txid".to_string())),
+        }],
+    };
+
+    // Check that response to update request is correct.
+    let response =
+        apis::deposit_api::update_deposits_sidecar(&user_configuration, update_body).await;
+
+    assert!(response.is_ok());
+    let response = response.unwrap();
+    let deposit = response.deposits.first().expect("No deposit in response");
+    assert_eq!(deposit.bitcoin_txid, bitcoin_txid);
+    assert_eq!(deposit.status, Status::Rbf);
+
+    // Check that the deposit can be retrieved with the correct status.
+    let response = apis::deposit_api::get_deposit(&user_configuration, &txid, &index)
+        .await
+        .expect("Deposit with this txid and index should be available");
+    assert_eq!(response.bitcoin_txid, bitcoin_txid);
+    assert_eq!(response.status, Status::Rbf);
+    assert_eq!(
+        response.replaced_by_tx,
+        Some(Some("replaced_by_txid".to_string()))
+    );
 }

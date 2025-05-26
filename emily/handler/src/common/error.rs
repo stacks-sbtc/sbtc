@@ -225,6 +225,15 @@ pub enum Error {
     #[cfg(feature = "testing")]
     #[error("{0}")]
     AwsSdkDynamoDbBatchWriteItem(#[from] Box<SdkError<BatchWriteItemError>>),
+
+    /// This error returned in places where we found an RBF transaction
+    /// while we don't expect to see one.
+    #[error("RBF transaction found where it was not expected")]
+    UnexpectedRbfTransaction,
+
+    /// No information about replacement tx for rbf transaction.
+    #[error("No information about replacement tx for rbf transaction")]
+    RbfNoReplacementTx,
 }
 
 /// Error implementation.
@@ -265,6 +274,8 @@ impl Error {
             Error::DynamoDbBuild(_) => StatusCode::INTERNAL_SERVER_ERROR,
             #[cfg(feature = "testing")]
             Error::AwsSdkDynamoDbBatchWriteItem(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::UnexpectedRbfTransaction => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::RbfNoReplacementTx => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
     /// Converts the error into a warp response.
