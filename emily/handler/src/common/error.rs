@@ -231,9 +231,9 @@ pub enum Error {
     #[error("deposit with replaced_by_tx is only valid if status is RBF, but got status {status:?} for txid: {txid}, vout: {vout}")]
     InvalidReplacedByTxStatus(Status, String, u32)
 
-    /// No information about replacement tx for rbf transaction.
-    #[error("No information about replacement tx for rbf transaction")]
-    RbfNoReplacementTx,
+    /// The deposit has status RBF but is missing the replaced_by_tx field.
+    #[error("missing replaced_by_tx for RBF deposit with txid: {0}, vout: {1}")]
+    DepositMissingReplacementTx(String, u32),
 }
 
 /// Error implementation.
