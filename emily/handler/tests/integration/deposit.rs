@@ -1278,3 +1278,79 @@ async fn rbf_status_saved_successfully() {
         Some(Some("replaced_by_txid".to_string()))
     );
 }
+
+#[test_case(Status::Pending; "pending")]
+#[test_case(Status::Accepted; "accepted")]
+#[test_case(Status::Reprocessing; "reprocessing")]
+#[test_case(Status::Confirmed; "confirmed")]
+#[test_case(Status::Failed; "failed")]
+#[tokio::test]
+async fn replaced_by_tx_for_not_rbf_transactions_is_bad_request(status: Status) {
+    // the testing configuration has privileged access to all endpoints.
+    let testing_configuration = clean_setup().await;
+
+    // the user configuration access depends on the api_key.
+    let user_configuration = testing_configuration.clone();
+    // Arrange.
+    // --------
+    let bitcoin_tx_output_index = 0;
+
+    // Setup test deposit transaction.
+    let DepositTxnData {
+        reclaim_scripts,
+        deposit_scripts,
+        bitcoin_txid,
+        transaction_hex,
+        ..
+    } = DepositTxnData::new(DEPOSIT_LOCK_TIME, DEPOSIT_MAX_FEE, &[DEPOSIT_AMOUNT_SATS]);
+    let reclaim_script = reclaim_scripts.first().unwrap().clone();
+    let deposit_script = deposit_scripts.first().unwrap().clone();
+
+    let txid = bitcoin_txid.clone();
+    let index = bitcoin_tx_output_index.to_string();
+
+    let create_deposit_body = CreateDepositRequestBody {
+        bitcoin_tx_output_index,
+        bitcoin_txid: bitcoin_txid.clone(),
+        deposit_script: deposit_script.clone(),
+        reclaim_script: reclaim_script.clone(),
+        transaction_hex: transaction_hex.clone(),
+    };
+
+    // Update the deposit status with the privileged configuration.
+    apis::deposit_api::create_deposit(&testing_configuration, create_deposit_body.clone())
+        .await
+        .expect("Received an error after making a valid create deposit request api call.");
+
+    // Update deposit setting status to rbf.
+    let update_body = UpdateDepositsRequestBody {
+        deposits: vec![DepositUpdate {
+            bitcoin_tx_output_index,
+            bitcoin_txid: bitcoin_txid.clone(),
+            fulfillment: None,
+            status,
+            status_message: "dummy".into(),
+            replaced_by_tx: Some(Some("replaced_by_txid".to_string())),
+        }],
+    };
+
+    // Check that response to update request is correct.
+    let response =
+        apis::deposit_api::update_deposits_sidecar(&user_configuration, update_body).await;
+
+    // Expect a bad request error because the transaction is not in RBF status.
+    assert!(response.is_err());
+    let response = response.unwrap_err();
+    let status_code = match response {
+        testing_emily_client::apis::Error::ResponseError(ResponseContent { status, .. }) => status,
+        _ => panic!("Expected a ResponseError with a status code"),
+    };
+    assert_eq!(status_code, 400);
+
+    // Check that the deposit status wasn't updated.
+    let response = apis::deposit_api::get_deposit(&user_configuration, &txid, &index)
+        .await
+        .expect("Deposit with this txid and index should be available");
+    assert_eq!(response.bitcoin_txid, bitcoin_txid);
+    assert_eq!(response.status, Status::Pending);
+}

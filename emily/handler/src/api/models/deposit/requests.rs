@@ -150,6 +150,10 @@ impl DepositUpdate {
             bitcoin_tx_output_index: self.bitcoin_tx_output_index,
             bitcoin_txid: self.bitcoin_txid,
         };
+        // Only RBF transactions can have a replaced_by_tx.
+        if self.status != Status::RBF && self.replaced_by_tx.is_some() {
+            return Err(error::Error::UnexpectedRbfTransaction);
+        }
         // Make status entry.
         let status_entry: StatusEntry = match self.status {
             Status::Confirmed => {

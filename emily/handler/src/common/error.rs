@@ -274,8 +274,8 @@ impl Error {
             Error::DynamoDbBuild(_) => StatusCode::INTERNAL_SERVER_ERROR,
             #[cfg(feature = "testing")]
             Error::AwsSdkDynamoDbBatchWriteItem(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::UnexpectedRbfTransaction => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::RbfNoReplacementTx => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::UnexpectedRbfTransaction => StatusCode::BAD_REQUEST,
+            Error::RbfNoReplacementTx => StatusCode::BAD_REQUEST,
         }
     }
     /// Converts the error into a warp response.
