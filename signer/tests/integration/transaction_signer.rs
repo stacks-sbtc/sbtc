@@ -123,7 +123,7 @@ async fn signing_set_validation_check_for_stacks_transactions() {
     // Let's create a proper sign request.
     let request = StacksTransactionSignRequest {
         aggregate_key: setup.aggregated_signer.keypair.public_key().into(),
-        contract_tx: ContractCall::CompleteDepositV1(req).into(),
+        contract_tx: ContractCall::CompleteDepositV1(Box::new(req)).into(),
         // The nonce and tx_fee aren't really validated against anything at
         // the moment.
         nonce: 1,
@@ -223,7 +223,7 @@ async fn signer_rejects_stacks_txns_with_too_high_a_fee(
     // Let's create a proper sign request.
     let request = StacksTransactionSignRequest {
         aggregate_key: setup.aggregated_signer.keypair.public_key().into(),
-        contract_tx: ContractCall::CompleteDepositV1(req).into(),
+        contract_tx: ContractCall::CompleteDepositV1(Box::new(req)).into(),
         // The nonce isn't really validated against anything at the moment.
         nonce: 1,
         tx_fee,

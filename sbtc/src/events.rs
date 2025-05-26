@@ -109,7 +109,7 @@ pub enum EventError {
     ClarityUnexpectedEventTopic(String),
     /// This happens when we expect one clarity variant but got another.
     #[error("Got an unexpected clarity value: {0:?}; {1}")]
-    ClarityUnexpectedValue(ClarityValue, TxInfo),
+    ClarityUnexpectedValue(Box<ClarityValue>, TxInfo),
     /// This should never happen, since  our witness programs are under the
     /// maximum length.
     #[error("tried to create an invalid witness program {0}")]
@@ -175,7 +175,7 @@ impl RegistryEvent {
                     _ => Err(EventError::ClarityUnexpectedEventTopic(topic)),
                 }
             }
-            value => Err(EventError::ClarityUnexpectedValue(value, tx_info)),
+            value => Err(EventError::ClarityUnexpectedValue(value.into(), tx_info)),
         }
     }
 }
@@ -725,7 +725,7 @@ impl RawTupleData {
                 ClarityValue::Sequence(SequenceData::Buffer(buf)) => {
                     PublicKey::from_slice(&buf.data).map_err(EventError::ClarityPublicKeyConversion)
                 }
-                _ => Err(EventError::ClarityUnexpectedValue(val, self.tx_info)),
+                _ => Err(EventError::ClarityUnexpectedValue(val.into(), self.tx_info)),
             })
             .collect::<Result<Vec<PublicKey>, EventError>>()?;
 

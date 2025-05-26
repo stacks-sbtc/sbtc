@@ -616,7 +616,7 @@ pub enum DkgSharesStatus {
 #[sqlx(type_name = "output_type", rename_all = "snake_case")]
 #[derive(serde::Serialize, serde::Deserialize)]
 #[strum(serialize_all = "snake_case")]
-#[cfg_attr(feature = "testing", derive(fake::Dummy))]
+#[cfg_attr(feature = "testing", derive(fake::Dummy, strum::EnumIter))]
 pub enum TxOutputType {
     /// An output created by the signers as the TXO containing all of the
     /// swept funds.
@@ -961,7 +961,8 @@ impl std::fmt::Display for StacksPrincipal {
 impl std::str::FromStr for StacksPrincipal {
     type Err = Error;
     fn from_str(literal: &str) -> Result<Self, Self::Err> {
-        let principal = PrincipalData::parse(literal).map_err(Error::ParsePrincipalData)?;
+        let principal = PrincipalData::parse(literal)
+            .map_err(|source| Error::ParsePrincipalData(Box::new(source)))?;
         Ok(Self(principal))
     }
 }

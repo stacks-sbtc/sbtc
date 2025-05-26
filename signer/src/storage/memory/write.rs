@@ -31,7 +31,7 @@ impl DbWrite for SharedStore {
                 .bitcoin_block_to_transactions
                 .entry(bitcoin_transaction.block_hash)
                 .or_default()
-                .push(bitcoin_transaction.txid);
+                .insert(bitcoin_transaction.txid);
 
             store
                 .bitcoin_transactions_to_blocks
@@ -159,7 +159,7 @@ impl DbWrite for SharedStore {
             .bitcoin_block_to_transactions
             .entry(bitcoin_transaction.block_hash)
             .or_default()
-            .push(bitcoin_transaction.txid);
+            .insert(bitcoin_transaction.txid);
 
         store
             .bitcoin_transactions_to_blocks

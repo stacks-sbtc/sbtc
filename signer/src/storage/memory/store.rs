@@ -2,6 +2,7 @@
 
 use bitcoin::OutPoint;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -59,7 +60,8 @@ pub struct Store {
     pub withdrawal_request_to_signers: HashMap<WithdrawalRequestPk, Vec<model::WithdrawalSigner>>,
 
     /// Bitcoin blocks to transactions
-    pub bitcoin_block_to_transactions: HashMap<model::BitcoinBlockHash, Vec<model::BitcoinTxId>>,
+    pub bitcoin_block_to_transactions:
+        HashMap<model::BitcoinBlockHash, BTreeSet<model::BitcoinTxId>>,
 
     /// Bitcoin transactions to blocks
     pub bitcoin_transactions_to_blocks: HashMap<model::BitcoinTxId, Vec<model::BitcoinBlockHash>>,
@@ -248,7 +250,7 @@ impl Store {
                     .bitcoin_block_to_transactions
                     .get(*block_hash)
                     .cloned()
-                    .unwrap_or_else(Vec::new);
+                    .unwrap_or_else(BTreeSet::new);
 
                 let block = self.bitcoin_blocks.get(*block_hash)?;
                 *block_hash = &block.parent_hash;

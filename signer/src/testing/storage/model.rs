@@ -363,7 +363,7 @@ impl TestData {
         stacks_block.block_height = stacks_parent_block_summary.block_height + 1;
 
         let num_stacks_blocks = params.num_stacks_blocks_per_bitcoin_block;
-        let stacks_blocks = (1..num_stacks_blocks).fold(vec![stacks_block], |mut blocks, _| {
+        (1..num_stacks_blocks).fold(vec![stacks_block], |mut blocks, _| {
             let parent = blocks.last().unwrap(); // Guaranteed to be at least one block
 
             let mut stacks_block: model::StacksBlock = fake::Faker.fake_with_rng(rng);
@@ -374,9 +374,7 @@ impl TestData {
             blocks.push(stacks_block);
 
             blocks
-        });
-
-        stacks_blocks
+        })
     }
 
     /// Fetch the parent block given the hash.

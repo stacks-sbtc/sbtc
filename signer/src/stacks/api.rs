@@ -644,6 +644,7 @@ impl StacksClient {
             .iter()
             .map(|value| value.serialize_to_hex())
             .collect::<Result<Vec<String>, _>>()
+            .map_err(Box::new)
             .map_err(Error::ClarityValueSerialization)?;
 
         let body = CallReadRequest {
@@ -756,6 +757,7 @@ impl StacksClient {
 
         let body = map_entry
             .serialize_to_hex()
+            .map_err(Box::new)
             .map_err(Error::ClarityValueSerialization)?;
 
         let response = self
