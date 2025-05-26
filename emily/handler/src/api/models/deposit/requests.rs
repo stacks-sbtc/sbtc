@@ -150,7 +150,6 @@ impl DepositUpdate {
             bitcoin_tx_output_index: self.bitcoin_tx_output_index,
             bitcoin_txid: self.bitcoin_txid,
         };
-        let replaced_by = self.replaced_by_tx.ok_or(Error::RbfNoReplacementTx)?;
         // Make status entry.
         let status_entry: StatusEntry = match self.status {
             Status::Confirmed => {
@@ -166,7 +165,7 @@ impl DepositUpdate {
             Status::Pending => StatusEntry::Pending,
             Status::Reprocessing => StatusEntry::Reprocessing,
             Status::Failed => StatusEntry::Failed,
-            Status::RBF => StatusEntry::RBF(replaced_by),
+            Status::RBF => StatusEntry::RBF(self.replaced_by_tx.ok_or(Error::RbfNoReplacementTx)?),
         };
         // Make the new event.
         let event = DepositEvent {

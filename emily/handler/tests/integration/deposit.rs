@@ -923,6 +923,16 @@ async fn create_deposit_handles_duplicates(status: Status) {
 #[test_case(Status::Failed, Status::Accepted, true; "failed_to_accepted")]
 #[test_case(Status::Reprocessing, Status::Accepted, true; "reprocessing_to_accepted")]
 #[test_case(Status::Confirmed, Status::Accepted, true; "confirmed_to_accepted")]
+#[test_case(Status::Pending, Status::Rbf, true; "pending_to_rbf")]
+#[test_case(Status::Accepted, Status::Rbf, true; "accepted_to_rbf")]
+#[test_case(Status::Reprocessing, Status::Rbf, true; "reprocessing_to_rbf")]
+#[test_case(Status::Confirmed, Status::Rbf, true; "confirmed_to_rbf")]
+#[test_case(Status::Failed, Status::Rbf, true; "failed_to_rbf")]
+#[test_case(Status::Rbf, Status::Pending, true; "rbf_to_pending")]
+#[test_case(Status::Rbf, Status::Accepted, true; "rbf_to_accepted")]
+#[test_case(Status::Rbf, Status::Reprocessing, true; "rbf_to_reprocessing")]
+#[test_case(Status::Rbf, Status::Confirmed, true; "rbf_to_confirmed")]
+#[test_case(Status::Rbf, Status::Failed, true; "rbf_to_failed")]
 #[tokio::test]
 async fn update_deposits_is_forbidden_for_signer(
     previous_status: Status,
@@ -977,6 +987,12 @@ async fn update_deposits_is_forbidden_for_signer(
             })));
         }
 
+        let replaced_by_tx = if previous_status == Status::Rbf {
+            Some(Some("replaced_by_txid".to_string()))
+        } else {
+            None
+        };
+
         apis::deposit_api::update_deposits_sidecar(
             &testing_configuration,
             UpdateDepositsRequestBody {
@@ -986,7 +1002,7 @@ async fn update_deposits_is_forbidden_for_signer(
                     fulfillment,
                     status: previous_status,
                     status_message: "foo".into(),
-                    replaced_by_tx: None,
+                    replaced_by_tx,
                 }],
             },
         )
@@ -1006,6 +1022,11 @@ async fn update_deposits_is_forbidden_for_signer(
             stacks_txid: "test_fulfillment_stacks_txid".to_string(),
         })));
     }
+    let replaced_by_tx = if new_status == Status::Rbf {
+        Some(Some("replaced_by_txid".to_string()))
+    } else {
+        None
+    };
 
     let response = apis::deposit_api::update_deposits_signer(
         &user_configuration,
@@ -1016,7 +1037,7 @@ async fn update_deposits_is_forbidden_for_signer(
                 fulfillment,
                 status: new_status,
                 status_message: "foo".into(),
-                replaced_by_tx: None,
+                replaced_by_tx,
             }],
         },
     )
@@ -1058,6 +1079,16 @@ async fn update_deposits_is_forbidden_for_signer(
 #[test_case(Status::Pending, Status::Confirmed; "pending_to_confirmed")]
 #[test_case(Status::Pending, Status::Failed; "pending_to_failed")]
 #[test_case(Status::Confirmed, Status::Pending; "confirmed_to_pending")]
+#[test_case(Status::Pending, Status::Rbf; "pending_to_rbf")]
+#[test_case(Status::Accepted, Status::Rbf; "accepted_to_rbf")]
+#[test_case(Status::Reprocessing, Status::Rbf; "reprocessing_to_rbf")]
+#[test_case(Status::Confirmed, Status::Rbf; "confirmed_to_rbf")]
+#[test_case(Status::Failed, Status::Rbf; "failed_to_rbf")]
+#[test_case(Status::Rbf, Status::Pending; "rbf_to_pending")]
+#[test_case(Status::Rbf, Status::Accepted; "rbf_to_accepted")]
+#[test_case(Status::Rbf, Status::Reprocessing; "rbf_to_reprocessing")]
+#[test_case(Status::Rbf, Status::Confirmed; "rbf_to_confirmed")]
+#[test_case(Status::Rbf, Status::Failed; "rbf_to_failed")]
 #[tokio::test]
 async fn update_deposits_is_not_forbidden_for_sidecar(previous_status: Status, new_status: Status) {
     // the testing configuration has privileged access to all endpoints.
@@ -1107,6 +1138,11 @@ async fn update_deposits_is_not_forbidden_for_sidecar(previous_status: Status, n
                 stacks_txid: "test_fulfillment_stacks_txid".to_string(),
             })));
         }
+        let replaced_by_tx = if previous_status == Status::Rbf {
+            Some(Some("replaced_by_txid".to_string()))
+        } else {
+            None
+        };
 
         apis::deposit_api::update_deposits_sidecar(
             &testing_configuration,
@@ -1117,7 +1153,7 @@ async fn update_deposits_is_not_forbidden_for_sidecar(previous_status: Status, n
                     fulfillment,
                     status: previous_status,
                     status_message: "foo".into(),
-                    replaced_by_tx: None,
+                    replaced_by_tx,
                 }],
             },
         )
@@ -1137,6 +1173,11 @@ async fn update_deposits_is_not_forbidden_for_sidecar(previous_status: Status, n
             stacks_txid: "test_fulfillment_stacks_txid".to_string(),
         })));
     }
+    let replaced_by_tx = if new_status == Status::Rbf {
+        Some(Some("replaced_by_txid".to_string()))
+    } else {
+        None
+    };
 
     let response = apis::deposit_api::update_deposits_sidecar(
         &user_configuration,
@@ -1147,7 +1188,7 @@ async fn update_deposits_is_not_forbidden_for_sidecar(previous_status: Status, n
                 fulfillment,
                 status: new_status,
                 status_message: "foo".into(),
-                replaced_by_tx: None,
+                replaced_by_tx,
             }],
         },
     )
