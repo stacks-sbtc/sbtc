@@ -2829,7 +2829,7 @@
           },
           "replacedByTx": {
             "type": "string",
-            "description": "Transaction ID of transaction which replaced this transaction during an RBF.",
+            "description": "Transaction ID of the transaction that replaced this one via RBF.",
             "nullable": true
           },
           "status": {
@@ -2951,7 +2951,7 @@
           },
           "replacedByTx": {
             "type": "string",
-            "description": "Transaction ID of transaction which replaced this transaction during an RBF.",
+            "description": "Transaction ID of the transaction that replaced this one via RBF.",
             "nullable": true
           },
           "status": {

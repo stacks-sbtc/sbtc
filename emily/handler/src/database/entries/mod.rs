@@ -98,7 +98,7 @@ pub enum StatusEntry {
     Confirmed(Fulfillment),
     /// The operation was not fulfilled.
     Failed,
-    /// Transaction was replaced during an RBF.
+    /// Transaction was replaced by another transaction via RBF.
     /// Inner string in transaction ID of replacement transaction.
     RBF(String),
 }

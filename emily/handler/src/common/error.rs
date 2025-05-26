@@ -19,7 +19,7 @@ use utoipa::ToSchema;
 use warp::{reject::Reject, reply::Reply};
 
 use crate::{
-    api::models::chainstate::Chainstate,
+    api::models::{chainstate::Chainstate, common::Status},
     database::entries::{
         chainstate::ChainstateEntry, deposit::DepositEntryKey, withdrawal::WithdrawalEntryKey,
     },
@@ -228,8 +228,17 @@ pub enum Error {
 
     /// The deposit includes a replaced_by_tx field, but its status is not RBF.
     /// Only deposits with status RBF may include a replaced_by_tx.
-    #[error("deposit with replaced_by_tx is only valid if status is RBF, but got status {status:?} for txid: {txid}, vout: {vout}")]
-    InvalidReplacedByTxStatus(Status, String, u32)
+    #[error(
+        "deposit with replaced_by_tx is only valid if status is RBF, but got status {0:?} for txid: {1}, vout: {2}"
+    )]
+    InvalidReplacedByTxStatus(Status, String, u32),
+
+    /// In current implementation, withdrawals can't have RBF status. However, since we have same Status enum
+    /// for both deposits and withdrawals, we need to handle this case.
+    #[error(
+        "withdrawal related transaction have RBF status, but this should never happen. request_id: {0}"
+    )]
+    WithdrawalRBF(u64),
 
     /// The deposit has status RBF but is missing the replaced_by_tx field.
     #[error("missing replaced_by_tx for RBF deposit with txid: {0}, vout: {1}")]
@@ -274,8 +283,9 @@ impl Error {
             Error::DynamoDbBuild(_) => StatusCode::INTERNAL_SERVER_ERROR,
             #[cfg(feature = "testing")]
             Error::AwsSdkDynamoDbBatchWriteItem(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::UnexpectedRbfTransaction => StatusCode::BAD_REQUEST,
-            Error::RbfNoReplacementTx => StatusCode::BAD_REQUEST,
+            Error::InvalidReplacedByTxStatus(..) => StatusCode::BAD_REQUEST,
+            Error::DepositMissingReplacementTx(..) => StatusCode::BAD_REQUEST,
+            Error::WithdrawalRBF(..) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
     /// Converts the error into a warp response.

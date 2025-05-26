@@ -148,11 +148,15 @@ impl DepositUpdate {
         // Make key.
         let key = DepositEntryKey {
             bitcoin_tx_output_index: self.bitcoin_tx_output_index,
-            bitcoin_txid: self.bitcoin_txid,
+            bitcoin_txid: self.bitcoin_txid.clone(),
         };
         // Only RBF transactions can have a replaced_by_tx.
         if self.status != Status::RBF && self.replaced_by_tx.is_some() {
-            return Err(error::Error::UnexpectedRbfTransaction);
+            return Err(error::Error::InvalidReplacedByTxStatus(
+                self.status,
+                self.bitcoin_txid,
+                self.bitcoin_tx_output_index,
+            ));
         }
         // Make status entry.
         let status_entry: StatusEntry = match self.status {
@@ -169,7 +173,9 @@ impl DepositUpdate {
             Status::Pending => StatusEntry::Pending,
             Status::Reprocessing => StatusEntry::Reprocessing,
             Status::Failed => StatusEntry::Failed,
-            Status::RBF => StatusEntry::RBF(self.replaced_by_tx.ok_or(Error::RbfNoReplacementTx)?),
+            Status::RBF => StatusEntry::RBF(self.replaced_by_tx.ok_or(
+                Error::DepositMissingReplacementTx(self.bitcoin_txid, self.bitcoin_tx_output_index),
+            )?),
         };
         // Make the new event.
         let event = DepositEvent {
