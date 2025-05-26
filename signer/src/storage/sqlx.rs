@@ -362,18 +362,12 @@ impl<'q> sqlx::Encode<'q, sqlx::Postgres> for Timestamp {
         buf: &mut sqlx::postgres::PgArgumentBuffer,
     ) -> Result<IsNull, BoxDynError> {
         let duration_since_pg_epoch = **self - POSTGRES_EPOCH_DATETIME;
-        let pg_epoch_micros_i128 = duration_since_pg_epoch.whole_microseconds();
+        let pg_epoch_micros: i64 = duration_since_pg_epoch
+            .whole_microseconds()
+            .try_into()
+            .map_err(|_| "timestamp could not be encoded as a PostgreSQL TIMESTAMPTZ")?;
 
-        // PostgreSQL TIMESTAMPTZ stores microseconds as an i64.
-        // We need to try to convert our i128 microseconds to i64.
-        let pg_epoch_micros_i64: i64 = pg_epoch_micros_i128.try_into().map_err(|_| {
-            sqlx::Error::Encode(
-                "timestamp value (microseconds) out of range for PostgreSQL TIMESTAMPTZ (i64)"
-                    .into(),
-            )
-        })?;
-
-        pg_epoch_micros_i64.encode_by_ref(buf)
+        pg_epoch_micros.encode_by_ref(buf)
     }
 
     fn size_hint(&self) -> usize {
@@ -394,11 +388,7 @@ impl<'r> sqlx::Decode<'r, sqlx::Postgres> for Timestamp {
         // is outside the representable range of OffsetDateTime.
         let datetime = POSTGRES_EPOCH_DATETIME
             .checked_add(duration_from_pg_epoch)
-            .ok_or_else(|| {
-                sqlx::Error::Decode(
-                    "failed to construct OffsetDateTime from decoded TIMESTAMPTZ value due to overflow/underflow".into(),
-                )
-            })?;
+            .ok_or("failed to construct OffsetDateTime from decoded TIMESTAMPTZ value")?;
 
         Ok(datetime.into()) // Convert OffsetDateTime to Timestamp
     }
