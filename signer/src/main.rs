@@ -43,7 +43,7 @@ const INITIAL_BOOTSTRAP_DELAY_SECS: u64 = 3;
 
 /// The window of time in which we consider a peer to be known and valid for
 /// inclusion in bootstrapping.
-const KNOWN_PEER_WINDOW: u64 = 60 * 60 * 24 * 30; // 30 days
+const KNOWN_PEER_WINDOW: Duration = Duration::from_secs(60 * 60 * 24 * 30); // 30 days
 
 /// The maximum number of known peers we will attempt to bootstrap from, in
 /// addition to the seed peers.
@@ -260,27 +260,34 @@ async fn run_libp2p_swarm(ctx: impl Context) -> Result<(), Error> {
 
     // Look for known peers in the database which will be included as part of
     // the bootstrapping process. We will only include peers that have been
-    // dialed within the last 30 days, and we will limit the number of peers
-    // to 6. This is to prevent the swarm from trying to connect to a large
-    // number of peers that are no longer valid.
+    // dialed within the KNOWN_PEER_WINDOW, and we will limit the number of
+    // peers to MAX_KNOWN_PEERS. This filtering is done to give the signer a
+    // reasonable list of peers to connect to, increasing its likelihood of
+    // successfully bootstrapping and joining the network despite seed peer
+    // failures.
     //
     // NOTE: We specify seed and known peers separately as seed peers are part
     // of the static configuration, are generally considered trusted/more stable
     // and as such are dialed first. Known peers are gathered from the network
-    // and are dialed using their explicit peer ID for added security.
+    // and are dialed using their explicit known/verified peer ID for added
+    // security.
     let known_peers = {
+        // Fetch known peers from the database.
         let mut db_peers = ctx.get_storage().get_p2p_peers().await.unwrap_or_default();
-        db_peers.sort_unstable_by(|a, b| a.last_dialed_at.cmp(&b.last_dialed_at));
+
+        // Sort the peers by last successful dialed time, duration-ascending.
+        db_peers.sort_unstable_by(|a, b| b.last_dialed_at.cmp(&a.last_dialed_at));
+
+        // Create a list of known peers, filtering out those that have not been
+        // dialed within the KNOWN_PEER_WINDOW or are already included as seed
+        // addresses.
         db_peers
             .into_iter()
             .filter_map(|peer| {
-                if OffsetDateTime::now_utc() - *peer.last_dialed_at
-                    > Duration::from_secs(KNOWN_PEER_WINDOW)
-                {
-                    // Filter out peers that have not been dialed in the last 30 days.
-                    None
-                } else if config.signer.p2p.seeds.contains(&*peer.address) {
-                    // Filter out seed peers, as they will be added separately.
+                let time_since_last_dialed = OffsetDateTime::now_utc() - *peer.last_dialed_at;
+                let is_seed_addr = config.signer.p2p.seeds.contains(&*peer.address);
+
+                if time_since_last_dialed > KNOWN_PEER_WINDOW || is_seed_addr {
                     None
                 } else {
                     let peer_id = *peer.peer_id;

@@ -88,7 +88,7 @@ use crate::storage::model::StacksTxId;
 use crate::storage::model::WithdrawalAcceptEvent;
 use crate::storage::model::WithdrawalRejectEvent;
 
-use super::network::RandomMemoryMultiaddr;
+use super::network::MultiaddrExt as _;
 
 /// Dummy block
 pub fn block<R: rand::RngCore + ?Sized>(

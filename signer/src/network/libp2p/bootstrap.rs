@@ -59,7 +59,7 @@ impl Config {
         self.known_peers.extend(
             known_peers
                 .into_iter()
-                .map(|(peer_id, addr)| (peer_id.clone(), addr.clone())),
+                .map(|(peer_id, addr)| (*peer_id, addr.clone())),
         );
         self
     }
@@ -467,11 +467,12 @@ impl NetworkBehaviour for Behavior {
         // that we queue a dial event for each known peer, regardless of our
         // current connection count (which will then be propagated in
         // subsequent polls). The overall swarm connection/concurrent dialing
-        // limits will ensure we don't dial too many peers at once.
+        // limits will ensure we don't dial too many peers at once and limit the
+        // total number of connections.
         self.config.known_peers.iter().for_each(|(peer_id, addr)| {
             // Construct the dialing options and `Dial` event which will be
             // sent to the swarm.
-            let dial_opts = DialOpts::peer_id(peer_id.clone())
+            let dial_opts = DialOpts::peer_id(*peer_id)
                 .condition(PeerCondition::DisconnectedAndNotDialing)
                 .addresses(vec![addr.clone()])
                 .build();

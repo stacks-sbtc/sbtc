@@ -6091,12 +6091,12 @@ async fn writing_key_rotation_transactions() {
 
 mod p2p_peers {
     use libp2p::{Multiaddr, PeerId};
-    use signer::testing::network::RandomMemoryMultiaddr;
+    use signer::testing::network::MultiaddrExt as _;
 
     use super::*;
 
     #[tokio::test]
-    async fn write_p2p_peer() {
+    async fn write_read_p2p_peer() {
         let db = testing::storage::new_test_database().await;
         let mut rng = get_rng();
 

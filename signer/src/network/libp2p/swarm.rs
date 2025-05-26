@@ -501,7 +501,13 @@ impl SignerSwarm {
 
 #[cfg(test)]
 mod tests {
-    use crate::testing::{context::*, network::RandomMemoryMultiaddr};
+    use rand::RngCore;
+
+    use crate::{
+        keys::PublicKey,
+        storage::DbRead,
+        testing::{context::*, get_rng, network::MultiaddrExt as _},
+    };
 
     use super::*;
 
@@ -676,5 +682,209 @@ mod tests {
 
         let result = handle.await.unwrap().unwrap_err();
         assert!(result.to_string().contains(MULTIADDR_NOT_SUPPORTED));
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn libp2p_swarm_stores_peer_connections() {
+        let mut rng = get_rng();
+        let swarm1_addr = Multiaddr::memory(rng.next_u64());
+        let swarm2_addr = Multiaddr::memory(rng.next_u64());
+
+        // PeerId = 16Uiu2HAm46BSFWYYWzMjhTRDRwXHpDWpQ32iu93nzDwd1F4Tt256
+        let key1 = PrivateKey::from_slice(
+            hex::decode("ab0893ecf683dc188c3fb219dd6489dc304bb5babb8151a41245a70e60cb7258")
+                .unwrap()
+                .as_slice(),
+        )
+        .unwrap();
+        let key1_pub = PublicKey::from_private_key(&key1);
+
+        // PeerId = 16Uiu2HAkuyB8ECXxACm8hzQj4vZ2iWrYMF3xcKNf1oJJ1NuQEMvQ
+        let key2 = PrivateKey::from_slice(
+            hex::decode("0dd4077c8bcec09c803f9ba23a0f5b56eba75769b2d1b96a33b579dbbe5055ce")
+                .unwrap()
+                .as_slice(),
+        )
+        .unwrap();
+        let key2_pub = PublicKey::from_private_key(&key2);
+
+        // Create two contexts with different keys but in same signer set.
+        let context1 = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .with_private_key(key1)
+            .build();
+        let context2 = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .with_private_key(key2)
+            .build();
+
+        // Add each key to the other's signer set so they can connect.
+        context1.state().current_signer_set().add_signer(key2_pub);
+        context2.state().current_signer_set().add_signer(key1_pub);
+
+        let term1 = context1.get_termination_handle();
+        let term2 = context2.get_termination_handle();
+
+        let swarm1 = SignerSwarmBuilder::new(&key1)
+            .enable_mdns(false)
+            .enable_kademlia(false)
+            .enable_autonat(false)
+            .enable_memory_transport(true)
+            .with_initial_bootstrap_delay(Duration::MAX) // We manually dial below
+            .add_listen_endpoint(swarm1_addr.clone())
+            .build()
+            .expect("Failed to build swarm 1");
+
+        let swarm2 = SignerSwarmBuilder::new(&key2)
+            .enable_mdns(false)
+            .enable_kademlia(false)
+            .enable_autonat(false)
+            .enable_memory_transport(true)
+            .with_initial_bootstrap_delay(Duration::MAX) // We manually dial below
+            .add_listen_endpoint(swarm2_addr.clone())
+            .build()
+            .expect("Failed to build swarm 2");
+
+        // For timestamp assertion later
+        let utc_now = time::OffsetDateTime::now_utc();
+
+        // Start the two swarms.
+        let mut swarm1_clone = swarm1.clone();
+        let context1_clone = context1.clone();
+        tokio::spawn(async move {
+            swarm1_clone.start(&context1_clone).await.unwrap();
+        });
+
+        let mut swarm2_clone = swarm2.clone();
+        let context2_clone = context2.clone();
+        tokio::spawn(async move {
+            swarm2_clone.start(&context2_clone).await.unwrap();
+        });
+
+        // Wait for the swarms to start.
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        swarm1.dial(swarm2_addr.clone()).await.unwrap();
+        swarm2.dial(swarm1_addr.clone()).await.unwrap();
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // Get the peers stored in context 1 after connection
+        let p2p_peers_1a = context1.get_storage().get_p2p_peers().await.unwrap();
+        let p2p_peers_2a = context2.get_storage().get_p2p_peers().await.unwrap();
+
+        // Verify that context 1 has the peer from context 2.
+        assert_eq!(p2p_peers_1a.len(), 1);
+        assert_eq!(*p2p_peers_1a[0].peer_id, key2_pub.into());
+        assert_eq!(p2p_peers_1a[0].public_key, key2_pub);
+        assert_eq!(*p2p_peers_1a[0].address, swarm2_addr.clone());
+        assert!(*p2p_peers_1a[0].last_dialed_at - utc_now < time::Duration::seconds(5));
+
+        // Verify that context 2 has the peer from context 1.
+        assert_eq!(p2p_peers_2a.len(), 1);
+        assert_eq!(*p2p_peers_2a[0].peer_id, key1_pub.into());
+        assert_eq!(p2p_peers_2a[0].public_key, key1_pub);
+        assert_eq!(*p2p_peers_2a[0].address, swarm1_addr.clone());
+        assert!(*p2p_peers_2a[0].last_dialed_at - utc_now < time::Duration::seconds(5));
+
+        // Trigger shutdown
+        term1.signal_shutdown();
+        term2.signal_shutdown();
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn libp2p_swarm_bootstraps_with_known_peers() {
+        let mut rng = get_rng();
+        let swarm1_addr = Multiaddr::memory(rng.next_u64());
+        let swarm2_addr = Multiaddr::memory(rng.next_u64());
+
+        // PeerId = 16Uiu2HAm46BSFWYYWzMjhTRDRwXHpDWpQ32iu93nzDwd1F4Tt256
+        let key1 = PrivateKey::from_slice(
+            hex::decode("ab0893ecf683dc188c3fb219dd6489dc304bb5babb8151a41245a70e60cb7258")
+                .unwrap()
+                .as_slice(),
+        )
+        .unwrap();
+        let key1_pub = PublicKey::from_private_key(&key1);
+
+        // PeerId = 16Uiu2HAkuyB8ECXxACm8hzQj4vZ2iWrYMF3xcKNf1oJJ1NuQEMvQ
+        let key2 = PrivateKey::from_slice(
+            hex::decode("0dd4077c8bcec09c803f9ba23a0f5b56eba75769b2d1b96a33b579dbbe5055ce")
+                .unwrap()
+                .as_slice(),
+        )
+        .unwrap();
+        let key2_pub = PublicKey::from_private_key(&key2);
+
+        // Create two contexts with different keys but in same signer set.
+        let context1 = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .with_private_key(key1)
+            .build();
+
+        let context2 = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .with_private_key(key2)
+            .build();
+
+        // Add each key to the other's signer set so they can connect.
+        context1.state().current_signer_set().add_signer(key2_pub);
+        context2.state().current_signer_set().add_signer(key1_pub);
+
+        // Create the swarms. Swarm 1 will bootstrap to swarm 2 via known peers.
+        let swarm1 = SignerSwarmBuilder::new(&key1)
+            .enable_mdns(false)
+            .enable_kademlia(false)
+            .enable_autonat(false)
+            .enable_memory_transport(true)
+            .with_initial_bootstrap_delay(Duration::ZERO) // Connect immediately
+            .add_known_peers(&[(key2_pub.into(), swarm2_addr.clone())])
+            .add_listen_endpoint(swarm1_addr.clone())
+            .build()
+            .expect("Failed to build swarm 1");
+        let swarm2 = SignerSwarmBuilder::new(&key2)
+            .enable_mdns(false)
+            .enable_kademlia(false)
+            .enable_autonat(false)
+            .enable_memory_transport(true)
+            .with_initial_bootstrap_delay(Duration::MAX) // Let swarm1 bootstrap
+            .add_listen_endpoint(swarm2_addr.clone())
+            .build()
+            .expect("Failed to build swarm 2");
+
+        // For timestamp assertion later
+        let utc_now = time::OffsetDateTime::now_utc();
+
+        // Start the two swarms (swarm 2 first as swarm 1 will bootstrap to it).
+        let mut swarm2_clone = swarm2.clone();
+        let context2_clone = context2.clone();
+        tokio::spawn(async move {
+            swarm2_clone.start(&context2_clone).await.unwrap();
+        });
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await; // Quick pause to ensure swarm2 is ready
+        let mut swarm1_clone = swarm1.clone();
+        let context1_clone = context1.clone();
+        tokio::spawn(async move {
+            swarm1_clone.start(&context1_clone).await.unwrap();
+        });
+
+        // Wait for the swarms to start.
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // Get the peers stored in context 1 after bootstrapping
+        let p2p_peers_1a = context1.get_storage().get_p2p_peers().await.unwrap();
+
+        // Verify that context 1 has the peer from signer 2. We only only validate
+        // context 1's storage because signer 1 is the dialer (incoming connections
+        // do not update stored known peers due to the risk of ephemeral ports/NAT).
+        assert_eq!(p2p_peers_1a.len(), 1);
+        assert_eq!(*p2p_peers_1a[0].peer_id, key2_pub.into());
+        assert_eq!(p2p_peers_1a[0].public_key, key2_pub);
+        assert_eq!(*p2p_peers_1a[0].address, swarm2_addr);
+        assert!(*p2p_peers_1a[0].last_dialed_at - utc_now < time::Duration::seconds(5));
     }
 }
