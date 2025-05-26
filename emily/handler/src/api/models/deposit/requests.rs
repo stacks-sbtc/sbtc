@@ -152,11 +152,12 @@ impl DepositUpdate {
         };
         // Only RBF transactions can have a replaced_by_tx.
         if self.status != Status::RBF && self.replaced_by_tx.is_some() {
-            return Err(error::Error::InvalidReplacedByTxStatus(
+            return Err(error::ValidationError::InvalidReplacedByTxStatus(
                 self.status,
                 self.bitcoin_txid,
                 self.bitcoin_tx_output_index,
-            ));
+            )
+            .into());
         }
         // Make status entry.
         let status_entry: StatusEntry = match self.status {
@@ -174,7 +175,10 @@ impl DepositUpdate {
             Status::Reprocessing => StatusEntry::Reprocessing,
             Status::Failed => StatusEntry::Failed,
             Status::RBF => StatusEntry::RBF(self.replaced_by_tx.ok_or(
-                Error::DepositMissingReplacementTx(self.bitcoin_txid, self.bitcoin_tx_output_index),
+                ValidationError::DepositMissingReplacementTx(
+                    self.bitcoin_txid,
+                    self.bitcoin_tx_output_index,
+                ),
             )?),
         };
         // Make the new event.

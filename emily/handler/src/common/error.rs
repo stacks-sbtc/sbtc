@@ -60,6 +60,24 @@ pub enum ValidationError {
         "incomplete withdrawal limit configuration: rolling_withdrawal_blocks and rolling_withdrawal_cap must be provided together"
     )]
     IncompleteWithdrawalLimitConfig,
+
+    /// The deposit includes a replaced_by_tx field, but its status is not RBF.
+    /// Only deposits with status RBF may include a replaced_by_tx.
+    #[error(
+        "deposit with replaced_by_tx is only valid if status is RBF, but got status {0:?} for txid: {1}, vout: {2}"
+    )]
+    InvalidReplacedByTxStatus(Status, String, u32),
+
+    /// In current implementation, withdrawals can't have RBF status. However, since we have same Status enum
+    /// for both deposits and withdrawals, we need to handle this case.
+    #[error(
+        "withdrawal related transaction have RBF status, but this should never happen. request_id: {0}"
+    )]
+    WithdrawalRBF(u64),
+
+    /// The deposit has status RBF but is missing the replaced_by_tx field.
+    #[error("missing replaced_by_tx for RBF deposit with txid: {0}, vout: {1}")]
+    DepositMissingReplacementTx(String, u32),
 }
 
 /// Errors from the internal API logic.
@@ -225,24 +243,6 @@ pub enum Error {
     #[cfg(feature = "testing")]
     #[error("{0}")]
     AwsSdkDynamoDbBatchWriteItem(#[from] Box<SdkError<BatchWriteItemError>>),
-
-    /// The deposit includes a replaced_by_tx field, but its status is not RBF.
-    /// Only deposits with status RBF may include a replaced_by_tx.
-    #[error(
-        "deposit with replaced_by_tx is only valid if status is RBF, but got status {0:?} for txid: {1}, vout: {2}"
-    )]
-    InvalidReplacedByTxStatus(Status, String, u32),
-
-    /// In current implementation, withdrawals can't have RBF status. However, since we have same Status enum
-    /// for both deposits and withdrawals, we need to handle this case.
-    #[error(
-        "withdrawal related transaction have RBF status, but this should never happen. request_id: {0}"
-    )]
-    WithdrawalRBF(u64),
-
-    /// The deposit has status RBF but is missing the replaced_by_tx field.
-    #[error("missing replaced_by_tx for RBF deposit with txid: {0}, vout: {1}")]
-    DepositMissingReplacementTx(String, u32),
 }
 
 /// Error implementation.
@@ -283,9 +283,6 @@ impl Error {
             Error::DynamoDbBuild(_) => StatusCode::INTERNAL_SERVER_ERROR,
             #[cfg(feature = "testing")]
             Error::AwsSdkDynamoDbBatchWriteItem(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::InvalidReplacedByTxStatus(..) => StatusCode::BAD_REQUEST,
-            Error::DepositMissingReplacementTx(..) => StatusCode::BAD_REQUEST,
-            Error::WithdrawalRBF(..) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
     /// Converts the error into a warp response.
