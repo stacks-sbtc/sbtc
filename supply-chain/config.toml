@@ -1809,10 +1809,6 @@ criteria = "safe-to-deploy"
 version = "0.1.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.tinyvec_macros]]
-version = "0.1.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.tokio]]
 version = "1.43.0"
 criteria = "safe-to-deploy"
