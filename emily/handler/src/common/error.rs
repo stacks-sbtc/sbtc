@@ -226,10 +226,10 @@ pub enum Error {
     #[error("{0}")]
     AwsSdkDynamoDbBatchWriteItem(#[from] Box<SdkError<BatchWriteItemError>>),
 
-    /// This error returned in places where we found an RBF transaction
-    /// while we don't expect to see one.
-    #[error("RBF transaction found where it was not expected")]
-    UnexpectedRbfTransaction,
+    /// The deposit includes a replaced_by_tx field, but its status is not RBF.
+    /// Only deposits with status RBF may include a replaced_by_tx.
+    #[error("deposit with replaced_by_tx is only valid if status is RBF, but got status {status:?} for txid: {txid}, vout: {vout}")]
+    InvalidReplacedByTxStatus(Status, String, u32)
 
     /// No information about replacement tx for rbf transaction.
     #[error("No information about replacement tx for rbf transaction")]
