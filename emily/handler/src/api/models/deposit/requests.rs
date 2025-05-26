@@ -217,6 +217,8 @@ impl UpdateDepositsRequestBody {
             }
         }
 
+        // TODO: now we have more possible errors here, and missing fullfillment is not always true.
+        // TODO: #1653 should rework this, so leaving TODO here for now.
         // If there are failed conversions, return an error.
         if !failed_txs.is_empty() {
             return Err(ValidationError::DepositsMissingFulfillment(failed_txs).into());
