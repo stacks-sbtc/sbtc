@@ -124,6 +124,7 @@ const ALL_STATUSES: &[Status] = &[
     Status::Failed,
     Status::Pending,
     Status::Reprocessing,
+    Status::RBF
 ];
 
 /// Gets all deposit entries modified from (on or after) a given height.
