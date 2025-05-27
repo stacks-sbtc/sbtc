@@ -605,9 +605,9 @@ impl PgRead {
     {
         sqlx::query_as::<_, model::BitcoinBlock>(
             "SELECT
-                block_hash,
-                block_height,
-                parent_hash
+                block_hash
+              , block_height
+              , parent_hash
             FROM sbtc_signer.bitcoin_blocks
             WHERE block_hash = $1;",
         )
