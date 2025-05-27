@@ -1,4 +1,3 @@
-use crate::storage::model::StacksBlockHeight;
 use crate::storage::{Transactable, TransactionHandle};
 use crate::{
     error::Error,
@@ -11,6 +10,8 @@ use sqlx::Executor;
 use sqlx::pool::PoolConnection;
 use sqlx::{PgExecutor, postgres::PgPoolOptions};
 use tokio::sync::Mutex;
+
+use super::read::PgRead;
 
 /// A wrapper around a [`sqlx::PgPool`] which implements
 /// [`crate::storage::DbRead`] and [`crate::storage::DbWrite`].
@@ -173,47 +174,23 @@ impl PgStore {
     }
 
     /// Check whether the given block hash is a part of the stacks
-    /// blockchain identified by the given chain-tip.
+    /// blockchain identified by the given chain-tip. Used by tests which use
+    /// a `PgStore` directly. Included here due to `PgRead` being an internal
+    /// concern of the `pgsql` module and not available in the public API.
+    #[cfg(any(test, feature = "testing"))]
     pub async fn in_canonical_stacks_blockchain(
         &self,
         chain_tip: &model::StacksBlockHash,
         block_hash: &model::StacksBlockHash,
-        block_height: StacksBlockHeight,
+        block_height: model::StacksBlockHeight,
     ) -> Result<bool, Error> {
-        sqlx::query_scalar::<_, bool>(
-            r#"
-            WITH RECURSIVE tx_block_chain AS (
-                SELECT
-                    block_hash
-                  , block_height
-                  , parent_hash
-                FROM sbtc_signer.stacks_blocks
-                WHERE block_hash = $1
-
-                UNION ALL
-
-                SELECT
-                    parent.block_hash
-                  , parent.block_height
-                  , parent.parent_hash
-                FROM sbtc_signer.stacks_blocks AS parent
-                JOIN tx_block_chain AS child
-                  ON parent.block_hash = child.parent_hash
-                WHERE child.block_height > $2
-            )
-            SELECT EXISTS (
-                SELECT TRUE
-                FROM tx_block_chain AS tbc
-                WHERE tbc.block_hash = $3
-            );
-        "#,
+        PgRead::in_canonical_stacks_blockchain(
+            self.get_connection().await?.as_mut(),
+            chain_tip,
+            block_hash,
+            block_height,
         )
-        .bind(chain_tip)
-        .bind(i64::try_from(block_height).map_err(Error::ConversionDatabaseInt)?)
-        .bind(block_hash)
-        .fetch_one(self.get_connection().await?.as_mut())
         .await
-        .map_err(Error::SqlxQuery)
     }
 }
 
