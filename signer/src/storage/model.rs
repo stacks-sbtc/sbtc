@@ -17,6 +17,7 @@ use stacks_common::types::chainstate::BurnchainHeaderHash;
 use stacks_common::types::chainstate::StacksBlockId;
 
 use crate::bitcoin::rpc::BitcoinBlockHeader;
+use crate::bitcoin::rpc::BitcoinBlockInfo;
 use crate::bitcoin::validation::InputValidationResult;
 use crate::bitcoin::validation::WithdrawalValidationResult;
 use crate::block_observer::Deposit;
@@ -126,6 +127,16 @@ impl From<&bitcoin::Block> for BitcoinBlock {
     }
 }
 
+impl From<&BitcoinBlockInfo> for BitcoinBlock {
+    fn from(block: &BitcoinBlockInfo) -> Self {
+        BitcoinBlock {
+            block_hash: block.block_hash.into(),
+            block_height: block.height,
+            parent_hash: block.previous_block_hash.into(),
+        }
+    }
+}
+
 impl From<BitcoinBlockHeader> for BitcoinBlock {
     fn from(header: BitcoinBlockHeader) -> Self {
         BitcoinBlock {
@@ -215,7 +226,7 @@ impl From<Deposit> for DepositRequest {
         // It's most likely the case that each of the inputs "came" from
         // the same Address, so we filter out duplicates.
         let sender_script_pub_keys: BTreeSet<ScriptPubKey> = tx_input_iter
-            .map(|tx_in| tx_in.prevout.script_pub_key.script.into())
+            .filter_map(|tx_in| Some(tx_in.prevout?.script_pubkey.script.into()))
             .collect();
 
         Self {
@@ -605,7 +616,7 @@ pub enum DkgSharesStatus {
 #[sqlx(type_name = "output_type", rename_all = "snake_case")]
 #[derive(serde::Serialize, serde::Deserialize)]
 #[strum(serialize_all = "snake_case")]
-#[cfg_attr(feature = "testing", derive(fake::Dummy))]
+#[cfg_attr(feature = "testing", derive(fake::Dummy, strum::EnumIter))]
 pub enum TxOutputType {
     /// An output created by the signers as the TXO containing all of the
     /// swept funds.
@@ -950,7 +961,8 @@ impl std::fmt::Display for StacksPrincipal {
 impl std::str::FromStr for StacksPrincipal {
     type Err = Error;
     fn from_str(literal: &str) -> Result<Self, Self::Err> {
-        let principal = PrincipalData::parse(literal).map_err(Error::ParsePrincipalData)?;
+        let principal = PrincipalData::parse(literal)
+            .map_err(|source| Error::ParsePrincipalData(Box::new(source)))?;
         Ok(Self(principal))
     }
 }

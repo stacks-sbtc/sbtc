@@ -172,7 +172,6 @@ class TestRbfProcessor(unittest.TestCase):
         )
 
 
-
 class TestMempoolRbfApi(unittest.TestCase):
     """Tests for the MempoolAPI.check_for_rbf method."""
 

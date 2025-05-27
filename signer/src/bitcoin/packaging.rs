@@ -64,23 +64,13 @@ where
     I: IntoIterator<Item = T>,
     T: Weighted,
 {
-    // This is a variant of the Best-Fit-Decreasing algorithm, so we sort
-    // by "weight" decreasing. We use the votes against as the weight, but
-    // vsize is a reasonable weight metric as well.
-    let mut item_vec: Vec<(u32, T)> = items
-        .into_iter()
-        .map(|item| (item.votes().count_ones(), item))
-        .collect();
-
-    item_vec.sort_by_key(|(vote_count, _)| std::cmp::Reverse(*vote_count));
-
     // Now we just add each item into a bag, and return the
     // collection of bags afterward.
     // Create config and packager
     let config = PackagerConfig::new(max_votes_against, max_needs_signature);
     let mut packager = BestFitPackager::new(config);
 
-    for (_, item) in item_vec {
+    for item in items {
         packager.insert_item(item);
     }
 
@@ -511,6 +501,10 @@ mod tests {
     use super::*;
     use bitvec::array::BitArray;
     use bitvec::field::BitField;
+    use rand::Rng;
+    use rand::prelude::SliceRandom;
+    use signer::testing::get_rng;
+    use std::sync::atomic::AtomicU64;
     use test_case::test_case;
 
     impl<T> BestFitPackager<T>
@@ -551,7 +545,7 @@ mod tests {
         }
     }
 
-    #[derive(Debug, Default, Copy, Clone)]
+    #[derive(Debug, Default, Copy, Clone, PartialEq)]
     struct RequestItem {
         // Votes _against_ the request. A `true` value means a vote against.
         votes: [bool; 5],
@@ -562,6 +556,8 @@ mod tests {
         /// The withdrawal request ID for this item, if it's a withdrawal.
         withdrawal_id: Option<u64>,
     }
+
+    static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(0);
 
     impl RequestItem {
         /// Create a new request item with no votes against.
@@ -601,6 +597,28 @@ mod tests {
             let mut votes = [false; 5];
             votes[signer - 1] = true;
             Self { votes, ..Default::default() }
+        }
+
+        /// Create a new request item with random votes against.
+        fn with_rng(rng: &mut impl Rng) -> Self {
+            let mut votes = [false; 5];
+            for vote in &mut votes {
+                *vote = rng.gen_bool(0.5);
+            }
+            let needs_signature = rng.gen_bool(0.5);
+            let vsize = rng.gen_range(1..=10000);
+            let withdrawal_id = if !needs_signature {
+                Some(NEXT_REQUEST_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+            } else {
+                None
+            };
+
+            Self {
+                votes,
+                needs_signature,
+                vsize,
+                withdrawal_id,
+            }
         }
 
         /// Set the `needs_signature` field to true, indicating that signing
@@ -757,6 +775,29 @@ mod tests {
         // (values spaced far apart won't compress efficiently with bitmap encoding)
         let large_set: Vec<u64> = (0..75).map(|i| i * 1000).collect();
         assert!(!bag.can_fit_withdrawal_ids(&large_set));
+    }
+
+    #[test]
+    fn item_order_matters_in_compute_optimal_packages() {
+        let mut rng = get_rng();
+        let len = rng.gen_range(25..=100) as usize;
+        let mut items = Vec::with_capacity(len);
+        for _ in 0..len {
+            items.push(RequestItem::with_rng(&mut rng));
+        }
+
+        let max_needs_signature = 100;
+        let max_votes_against = 3;
+        let packages1 =
+            compute_optimal_packages(items.clone(), max_votes_against, max_needs_signature)
+                .collect::<Vec<_>>();
+
+        items.shuffle(&mut rng);
+
+        let packages2 = compute_optimal_packages(items, max_votes_against, max_needs_signature)
+            .collect::<Vec<_>>();
+
+        assert_ne!(packages1, packages2);
     }
 
     /// Tests that bags correctly collect, sort, and deduplicate withdrawal IDs.

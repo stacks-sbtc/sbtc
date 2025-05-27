@@ -21,13 +21,17 @@ use emily_client::apis::deposit_api;
 use emily_client::models::CreateDepositRequestBody;
 use fake::Fake as _;
 use fake::Faker;
+use rand::seq::SliceRandom;
 use sbtc::deposits::CreateDepositRequest;
 use sbtc::deposits::DepositScriptInputs;
 use sbtc::deposits::ReclaimScriptInputs;
 use sbtc::testing::regtest;
+use sbtc::testing::regtest::Faucet;
 use sbtc::testing::regtest::Recipient;
+use signer::bitcoin::utxo::DepositRequest;
 use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
+use signer::bitcoin::utxo::SignerUtxo;
 use signer::block_observer::get_signer_set_and_aggregate_key;
 use signer::context::SbtcLimits;
 use signer::emily_client::EmilyClient;
@@ -639,6 +643,195 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     assert_eq!(amount, deposit_amount);
     assert_eq!(prevout_txid.deref(), &deposit_tx.compute_txid());
     assert_eq!(txid.deref(), &unsigned.tx.compute_txid());
+
+    testing::storage::drop_db(db).await;
+}
+
+/// Generates a random deposit request transaction with the input amount
+/// that is locked by the given aggregate key.
+///
+/// Note: The deposit transaction will be in the mempool when this function
+/// returns.
+fn generate_deposit_request<R: rand::Rng>(
+    faucet: &Faucet,
+    amount: u64,
+    signers_public_key: bitcoin::XOnlyPublicKey,
+    rng: &mut R,
+) -> DepositRequest {
+    let depositor = Recipient::new_with_rng(AddressType::P2tr, rng);
+    faucet.send_to(amount + amount / 2, &depositor.address);
+    faucet.generate_block();
+
+    let utxo = depositor.get_utxos(faucet.rpc, None).pop().unwrap();
+    let max_fee = amount / 2;
+
+    let (deposit_tx, deposit_request, _) =
+        make_deposit_request(&depositor, amount, utxo, max_fee, signers_public_key);
+
+    faucet.rpc.send_raw_transaction(&deposit_tx).unwrap();
+    deposit_request
+}
+
+/// This tests that a new signer, when they are coming online, can
+/// successfully pick up transactions given a bootstrap aggregate key when
+/// there is a key rotation.
+///
+/// In this test we start off with a bootstrap aggregate key of the signers
+/// where:
+/// 1. The sweep transaction moves the signers UTXO to a new scriptPubKey,
+/// 2. There are three sweep transactions confirmed within one bitcoin
+///    block.
+///
+/// All three transactions should be picked up so long as we know the
+/// scriptPubKey of the signers bootstrap UTXO. Note that we do not need to
+/// worry about the signers scriptPubKey changing more than once because
+/// that case is impossible.
+#[tokio::test]
+async fn block_observer_picks_up_chained_unordered_sweeps() {
+    let (rpc, faucet) = regtest::initialize_blockchain();
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
+
+    let signer = Recipient::new_with_rng(AddressType::P2tr, &mut rng);
+    let aggregate_key = signer.keypair.public_key().into();
+    let signers_public_key1 = signer.keypair.x_only_public_key().0;
+
+    // Start off with some initial UTXOs to work with.
+    let signers_amount = 56_780_000;
+    let signer_outpoint = faucet.send_to(signers_amount, &signer.address);
+    faucet.generate_block();
+
+    let new_signer = Recipient::new_with_rng(AddressType::P2tr, &mut rng);
+    let signers_public_key2 = PublicKey::from(new_signer.keypair.public_key()).into();
+
+    // Now lets make three deposit transactions, one for each sweep
+    // transaction.
+    let mut deposit_request1 =
+        generate_deposit_request(faucet, 950_000, signers_public_key1, &mut rng);
+    let mut deposit_request2 =
+        generate_deposit_request(faucet, 875_000, signers_public_key2, &mut rng);
+    let mut deposit_request3 =
+        generate_deposit_request(faucet, 725_000, signers_public_key2, &mut rng);
+
+    // We want to construct three sweep transactions in order to
+    // demonstrate that the transactions are picked up, even in the case
+    // where the scriptPubKey has changed for the first one.
+    deposit_request1.signer_bitmap.set(0, true);
+    deposit_request2.signer_bitmap.set(1, true);
+    deposit_request3.signer_bitmap.set(2, true);
+
+    let requests = SbtcRequests {
+        deposits: vec![deposit_request1, deposit_request2, deposit_request3],
+        withdrawals: Vec::new(),
+        signer_state: SignerBtcState {
+            utxo: SignerUtxo {
+                outpoint: signer_outpoint,
+                amount: signers_amount,
+                public_key: signers_public_key1,
+            },
+            fee_rate: 2.0,
+            // This ensures that the new signer UTXO is locked by the new
+            // aggregate key.
+            public_key: signers_public_key2,
+            last_fees: None,
+            magic_bytes: [b'T', b'3'],
+        },
+        accept_threshold: 2,
+        num_signers: 3,
+        sbtc_limits: SbtcLimits::unlimited(),
+        max_deposits_per_bitcoin_tx: 25,
+    };
+
+    // By playing around with the votes above, we set things up so that we
+    // get three transactions.
+    let mut transactions = requests.construct_transactions().unwrap();
+    assert_eq!(transactions.len(), 3);
+
+    // We depend on the fact that `construct_transactions` does not sort
+    // the items. In the first transaction, all inputs are locked by the
+    // second key, while the other ones are locked by the new aggregate
+    // key.
+    //
+    // TODO(1661): Technically the packager tries to sort things right now,
+    // but all requests have the same number of votes against so the
+    // current sorting implementation leaves the elements unchanged (we use
+    // a stable sorting algorithm).
+    testing::set_witness_data(&mut transactions[0], signer.keypair);
+    testing::set_witness_data(&mut transactions[1], new_signer.keypair);
+    testing::set_witness_data(&mut transactions[2], new_signer.keypair);
+
+    rpc.send_raw_transaction(&transactions[0].tx).unwrap();
+    rpc.send_raw_transaction(&transactions[1].tx).unwrap();
+    rpc.send_raw_transaction(&transactions[2].tx).unwrap();
+
+    let ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_first_bitcoin_core_client()
+        .with_mocked_emily_client()
+        .with_mocked_stacks_client()
+        .modify_settings(|settings| settings.signer.bootstrap_aggregate_key = Some(aggregate_key))
+        .build();
+
+    let block_observer = BlockObserver {
+        context: ctx.clone(),
+        bitcoin_blocks: (),
+    };
+
+    // Let's make sure the relevant tables are empty
+    let sql = r#"
+        SELECT COUNT(*)::INTEGER
+        FROM bitcoin_tx_inputs
+        WHERE prevout_type = 'signers_input'
+
+        UNION ALL
+
+        SELECT COUNT(*)::INTEGER
+        FROM bitcoin_tx_inputs
+        WHERE prevout_type = 'deposit'
+
+        UNION ALL
+
+        SELECT COUNT(*)::INTEGER
+        FROM bitcoin_tx_outputs
+        WHERE output_type = 'signers_output'"#;
+
+    let num_rows = sqlx::query_scalar::<_, i32>(sql)
+        .fetch_all(db.pool())
+        .await
+        .unwrap();
+
+    assert_eq!(num_rows[0], 0);
+    assert_eq!(num_rows[1], 0);
+    assert_eq!(num_rows[2], 0);
+    assert_eq!(num_rows.len(), 3);
+
+    // Let's generate a new block with the sweep transactions and feed it
+    // to the block observer
+    let block_hash = faucet.generate_block();
+    let block_info = ctx.bitcoin_client.get_block(&block_hash).unwrap().unwrap();
+
+    // We need to make sure that we populate the `bitcoin_blocks` table.
+    let db_block = model::BitcoinBlock::from(&block_info);
+    db.write_bitcoin_block(&db_block).await.unwrap();
+
+    let mut transactions = block_info.transactions;
+    transactions.shuffle(&mut rng);
+
+    block_observer
+        .extract_sbtc_transactions(block_hash, &transactions)
+        .await
+        .unwrap();
+
+    // Okay, now the tables should be populated with all three
+    // transactions.
+    let num_rows = sqlx::query_scalar::<_, i32>(sql)
+        .fetch_all(db.pool())
+        .await
+        .unwrap();
+
+    assert_eq!(num_rows[0], 3);
+    assert_eq!(num_rows[1], 3);
+    assert_eq!(num_rows[2], 3);
 
     testing::storage::drop_db(db).await;
 }

@@ -214,6 +214,43 @@ async fn test_in_memory_transaction_optimistic_concurrency_violation() {
     // updated it to 1.
     assert_matches!(
         tx1.commit().await,
-        Err(Error::OptimisticConcurrencyViolation { .. })
+        Err(Error::InMemoryDatabase(msg)) if msg.contains("Optimistic concurrency")
+    );
+}
+
+#[tokio::test]
+async fn test_in_memory_transaction_optimistic_concurrency_violation_with_direct_write() {
+    let shared_store = Store::new_shared();
+
+    // Create some dummy block data
+    let bitcoin_chain = BitcoinChain::default();
+    let btc_block1 = bitcoin_chain.first_block();
+    let btc_block2 = btc_block1.new_child();
+
+    // Start a transaction (tx1)
+    // Tx1 captures the initial version of shared_store (e.g., version 0)
+    let tx1 = shared_store
+        .begin_transaction()
+        .await
+        .expect("Failed to begin transaction 1");
+
+    // Perform a write operation within tx1. This modifies tx1's internal copy.
+    tx1.write_bitcoin_block(btc_block1)
+        .await
+        .expect("Failed to write bitcoin block in tx1");
+
+    // Simulate a concurrent write directly to the SharedStore (outside of any explicit transaction)
+    // This will increment the version of the shared_store (e.g., to version 1)
+    shared_store
+        .write_bitcoin_block(&btc_block2)
+        .await
+        .expect("Failed to perform direct write on shared_store");
+
+    // Attempt to commit transaction 1
+    // This should fail with an optimistic concurrency error because tx1's captured version (0)
+    // no longer matches the shared_store's current version (1).
+    assert_matches!(
+        tx1.commit().await,
+        Err(Error::InMemoryDatabase(msg)) if msg.contains("Optimistic concurrency")
     );
 }

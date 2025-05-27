@@ -43,6 +43,7 @@ use signer::bitcoin::BitcoinInteract as _;
 use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::bitcoin::utxo::BitcoinInputsOutputs;
 use signer::bitcoin::utxo::Fees;
+use signer::bitcoin::utxo::TxDeconstructor as _;
 use signer::bitcoin::validation::WithdrawalValidationResult;
 use signer::block_observer;
 use signer::context::RequestDeciderEvent;
@@ -1697,7 +1698,7 @@ async fn sign_bitcoin_transaction() {
         .unwrap()
         .unwrap();
     // We check that the scriptPubKey of the first input is the signers'
-    let actual_script_pub_key = tx_info.vin[0].prevout.script_pub_key.script.as_bytes();
+    let actual_script_pub_key = tx_info.prevout(0).unwrap().script_pubkey.as_bytes();
 
     assert_eq!(actual_script_pub_key, script_pub_key.as_bytes());
     assert_eq!(&tx_info.tx.output[0].script_pubkey, &script_pub_key);
@@ -2109,7 +2110,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
         .unwrap()
         .unwrap();
     // We check that the scriptPubKey of the first input is the signers'
-    let actual_script_pub_key = tx_info.vin[0].prevout.script_pub_key.script.as_bytes();
+    let actual_script_pub_key = tx_info.prevout(0).unwrap().script_pubkey.as_bytes();
 
     assert_eq!(actual_script_pub_key, script_pub_key1.as_bytes());
     assert_eq!(&tx_info.tx.output[0].script_pubkey, &script_pub_key1);
@@ -2335,7 +2336,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
         .unwrap();
     // We check that the scriptPubKey of the first input is the signers'
     // old ScriptPubkey
-    let actual_script_pub_key = tx_info.vin[0].prevout.script_pub_key.script.as_bytes();
+    let actual_script_pub_key = tx_info.prevout(0).unwrap().script_pubkey.as_bytes();
     assert_eq!(actual_script_pub_key, script_pub_key1.as_bytes());
 
     // The scriptPubkey of the new signer UTXO should be from the new
@@ -3012,7 +3013,7 @@ fn create_test_setup(
     )
     .unwrap();
     let donation = faucet.send_to(100_000, &signer_address);
-    faucet.generate_blocks(1);
+    let donation_block_hash = faucet.generate_blocks(1)[0];
 
     let utxo = depositor.get_utxos(rpc, None).pop().unwrap();
     let (deposit_tx, deposit_request, deposit_info) = make_deposit_request(
@@ -3048,6 +3049,7 @@ fn create_test_setup(
         sweep_tx_info: None,
         broadcast_info: None,
         donation,
+        donation_block_hash,
         stacks_blocks: vec![stacks_block],
         signers: test_signers,
         withdrawals: vec![WithdrawalTriple {
@@ -3891,7 +3893,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
         .unwrap()
         .unwrap();
     // We check that the scriptPubKey of the first input is the signers'
-    let actual_script_pub_key = tx_info.vin[0].prevout.script_pub_key.script.as_bytes();
+    let actual_script_pub_key = tx_info.prevout(0).unwrap().script_pubkey.as_bytes();
 
     assert_eq!(actual_script_pub_key, script_pub_key.as_bytes());
     assert_eq!(&tx_info.tx.output[0].script_pubkey, &script_pub_key);
@@ -4025,7 +4027,11 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
     let bitcoin_chain_tip = rpc.get_blockchain_info().unwrap().best_block_hash;
     backfill_bitcoin_blocks(&db, rpc, &bitcoin_chain_tip).await;
 
-    let tx = rpc.get_raw_transaction(&donation.txid, None).unwrap();
+    let tx = context
+        .bitcoin_client
+        .get_tx_info(&donation.txid, &bitcoin_chain_tip)
+        .unwrap()
+        .unwrap();
     block_observer::extract_sbtc_transactions(&db, &bitcoin_client, bitcoin_chain_tip, &[tx])
         .await
         .unwrap();

@@ -2,7 +2,7 @@
 
 [![License: GPL v3][gpl-v3-badge]][gpl-v3-link]
 
-### Links
+## Links
 
 - [sBTC Landing Page](https://sbtc.tech/)
 - [sBTC Docs](https://docs.stacks.co/concepts/sbtc)
@@ -45,7 +45,7 @@ installer](https://github.com/DeterminateSystems/nix-installer)), running the
 following command will enter a shell with all dependencies installed:
 
 ```bash
-$ nix develop
+nix develop
 ```
 
 #### Tool Versions
@@ -64,13 +64,13 @@ echo "\n--- sBTC tool versions ---" \
 
 Below is the output on a machine that is able to build and run all the sources and tests.
 
-```
+```text
 --- sBTC tool versions ---
-cargo 1.86.0 (adf9b6ad1 2025-02-28)
-cargo-lambda 1.2.1 (12f9b61 2024-04-05Z)
+cargo 1.87.0 (99624be96 2025-05-06)
+cargo-lambda 1.6.2 (2025-01-17Z)
 pnpm 9.1.0
 GNU Make 3.81
-uv 0.6.3
+uv 0.7.3 (Homebrew 2025-05-07)
 ```
 
 ### Building
@@ -83,8 +83,8 @@ To build the sources we recommend you use the `Makefile` commands; they'll build
 - `make clean` - Cleans workspace
 - `make test` - Run non-integration tests
 - `make integration-test` - Run integration tests.
-    - Before running integration tests you must run `make integration-env-up`
-    - After running integration tests you must run `make integration-env-down`
+  - Before running integration tests you must run `make integration-env-up`
+  - After running integration tests you must run `make integration-env-down`
 
 For other commands read the `Makefile` at repository root.
 
@@ -107,6 +107,7 @@ Once running, the following services are available:
 #### Update local docker builds
 
 To rebuild the containers from your current branch you can use:
+
 ```bash
 # Build signers + emily (~2m, if `sbtc-build` was already built)
 docker compose -f docker/docker-compose.yml --profile default --profile bitcoin-mempool --profile sbtc-signer build
@@ -121,30 +122,34 @@ Note: you may need to disable buildkit (prefixing the commands above with `DOCKE
 To interact with the local devenv, ensure you have built latest version (see above) and run devenv with `make devenv-up`.
 
 Then, wait for everything to be ready:
- - Wait for Nakamoto: check the stacks explorer and wait for Nakamoto (usually around block #30). Explorer links:
-   - Stacks: http://localhost:3020/?chain=testnet&api=http://localhost:3999
-   - Bitcoin: http://localhost:8083/
- - Wait for sBTC signers bootstrap: on stacks explorer, check the deployer account (`SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS`) for contract deployment and the first rotate key transaction.
+
+- Wait for Nakamoto: check the stacks explorer and wait for Nakamoto (usually around block #30). Explorer links:
+  - Stacks: <http://localhost:3020/?chain=testnet&api=http://localhost:3999>
+  - Bitcoin: <http://localhost:8083/>
+- Wait for sBTC signers bootstrap: on stacks explorer, check the deployer account (`SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS`) for contract deployment and the first rotate key transaction.
 
 Once you see the rotate key transaction, everything is ready! Now you can create a deposit request in two ways.
 
 To programmatically fund the signers aggregate key and create a new deposit request, you can run:
+
 ```bash
 ./signers.sh demo
 ```
 
-To use the bridge webapp, you can go to (http://localhost:3010). You will need to get signers info using `./signers.sh info`, then ensure that on the settings tab you have the correct settings:
- - bitcoin: http://bitcoin:18443/
- - emily: http://emily-server:3031
- - signers pubkey: the pubkey from the command above.
+To use the bridge webapp, you can go to (<http://localhost:3010>). You will need to get signers info using `./signers.sh info`, then ensure that on the settings tab you have the correct settings:
+
+- bitcoin: <http://bitcoin:18443/>
+- emily: <http://emily-server:3031>
+- signers pubkey: the pubkey from the command above.
 
 Now go to transfer and fund (eg, sending `1` btc) the signers aggregate key bitcoin address (from the command above). You can use the transfer tab to fund the wallet you want to use for the deposits as well.
 
 Finally, go to the deposit tab and issue a new deposit.
 
 Once you submitted a deposit request (either ways), you can follow it:
- - First, on the bitcoin explorer, you can see the deposit tx, and a block later the sweep tx from the signers consuming its output
- - Then, on the stacks explorer, you can see the `complete-deposit` contract call (to `SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS`), minting the net sBTC to the recipient account.
+
+- First, on the bitcoin explorer, you can see the deposit tx, and a block later the sweep tx from the signers consuming its output
+- Then, on the stacks explorer, you can see the `complete-deposit` contract call (to `SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS`), minting the net sBTC to the recipient account.
 
 ### Cargo Vet CI
 
@@ -168,7 +173,6 @@ cargo vet suggest > audit-suggestions.txt
 ```
 
 Review the suggestions in audit-suggestions.txt and manually update your supply-chain.toml file to approve or reject dependencies based on your audit.
-
 
 ### Git hooks
 

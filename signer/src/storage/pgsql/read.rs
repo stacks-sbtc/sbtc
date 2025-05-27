@@ -1836,7 +1836,14 @@ impl PgRead {
 
             SELECT script_pubkey
             FROM sbtc_signer.dkg_shares
-            WHERE created_at > CURRENT_TIMESTAMP - INTERVAL '365 DAYS';
+            WHERE created_at > CURRENT_TIMESTAMP - INTERVAL '365 DAYS'
+
+            UNION
+
+            SELECT script_pubkey
+            FROM sbtc_signer.bitcoin_tx_outputs
+            WHERE output_type = 'signers_output'
+              AND created_at > CURRENT_TIMESTAMP - INTERVAL '365 DAYS'
             "#,
         )
         .fetch_all(executor)

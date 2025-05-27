@@ -52,7 +52,7 @@ const DEMO_DEPLOYER: &str = "SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS";
 #[allow(clippy::enum_variant_names)]
 enum Error {
     #[error("Signer error: {0}")]
-    SignerError(#[from] signer::error::Error),
+    SignerError(#[from] Box<signer::error::Error>),
     #[error("Config error: {0}")]
     ConfigError(ConfigError),
     #[error("Bitcoin RPC error: {0}")]
@@ -66,7 +66,7 @@ enum Error {
     #[error("SBTC error: {0}")]
     SbtcError(#[from] sbtc::error::Error),
     #[error("Emily deposit error: {0}")]
-    EmilyDeposit(#[from] emily_client::apis::Error<deposit_api::CreateDepositError>),
+    EmilyDeposit(#[from] Box<emily_client::apis::Error<deposit_api::CreateDepositError>>),
     #[error("Invalid stacks address: {0}")]
     InvalidStacksAddress(String),
     #[error("Invalid deployer: {0}")]
@@ -232,6 +232,7 @@ impl Context {
         self.stacks_client
             .get_current_signers_aggregate_key(&self.deployer)
             .await
+            .map_err(Box::new)
             .map_err(Error::SignerError)
     }
 }
@@ -334,7 +335,8 @@ async fn exec_deposit(ctx: &Context, args: DepositArgs) -> Result<(), Error> {
             transaction_hex: serialize_hex(&unsigned_tx),
         },
     )
-    .await?;
+    .await
+    .map_err(Box::new)?;
 
     println!("Deposit request created: {:?}", emily_deposit);
 
@@ -415,7 +417,9 @@ async fn create_stacks_tx(
     payload: TransactionPayload,
     sender_sk: String,
 ) -> Result<StacksTransaction, Error> {
-    let private_key = PrivateKey::from_str(&sender_sk).map_err(Error::SignerError)?;
+    let private_key = PrivateKey::from_str(&sender_sk)
+        .map_err(Box::new)
+        .map_err(Error::SignerError)?;
     let public_key = PublicKey::from_private_key(&private_key);
 
     let (tx_version, chain_id, addr_version) = match ctx.network {
@@ -442,6 +446,7 @@ async fn create_stacks_tx(
         .stacks_client
         .get_account(&sender_addr)
         .await
+        .map_err(Box::new)
         .map_err(Error::SignerError)?
         .nonce;
 

@@ -2,6 +2,7 @@
 
 use bitcoin::OutPoint;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -59,7 +60,8 @@ pub struct Store {
     pub withdrawal_request_to_signers: HashMap<WithdrawalRequestPk, Vec<model::WithdrawalSigner>>,
 
     /// Bitcoin blocks to transactions
-    pub bitcoin_block_to_transactions: HashMap<model::BitcoinBlockHash, Vec<model::BitcoinTxId>>,
+    pub bitcoin_block_to_transactions:
+        HashMap<model::BitcoinBlockHash, BTreeSet<model::BitcoinTxId>>,
 
     /// Bitcoin transactions to blocks
     pub bitcoin_transactions_to_blocks: HashMap<model::BitcoinTxId, Vec<model::BitcoinBlockHash>>,
@@ -248,7 +250,7 @@ impl Store {
                     .bitcoin_block_to_transactions
                     .get(*block_hash)
                     .cloned()
-                    .unwrap_or_else(Vec::new);
+                    .unwrap_or_else(BTreeSet::new);
 
                 let block = self.bitcoin_blocks.get(*block_hash)?;
                 *block_hash = &block.parent_hash;
@@ -356,21 +358,24 @@ pub struct InMemoryTransaction {
 
 impl TransactionHandle for InMemoryTransaction {
     async fn commit(self) -> Result<(), Error> {
+        // Lock the transaction's clone of the store and get a guard
+        let store = self.store.lock().await;
+
         if self.completed.load(std::sync::atomic::Ordering::SeqCst) {
-            panic!("Transaction already completed");
+            return Err(Error::InMemoryDatabase(
+                "Transaction already completed".into(),
+            ));
         }
 
-        // Lock the transaction's clone of the store and get a guard
-        let store = self.store.lock().await.clone();
         // Lock the original store and get a guard
         let mut original_store = self.original_store_mutex.lock().await;
 
         // Naive optimistic concurrency check
         if self.version != original_store.version {
-            return Err(Error::OptimisticConcurrencyViolation {
-                transaction_version: self.version,
-                store_version: original_store.version,
-            });
+            return Err(Error::InMemoryDatabase(format!(
+                "Optimistic concurrency check failed: expected version {}, found version {}",
+                self.version, original_store.version
+            )));
         }
 
         // Commit the changes from the transactional store to the original store.
@@ -389,14 +394,21 @@ impl TransactionHandle for InMemoryTransaction {
     }
 
     async fn rollback(self) -> Result<(), Error> {
+        // Lock the transaction's inner store to ensure we can't get any interleaving
+        // commits or rolbacks.
+        let _store = self.store.lock().await;
+
         if self.completed.load(std::sync::atomic::Ordering::SeqCst) {
-            panic!("Transaction already completed");
+            return Err(Error::InMemoryDatabase(
+                "Transaction already completed".into(),
+            ));
         }
 
         // Rollback is a no-op for in-memory transactions.
         // Just mark the transaction as completed.
         self.completed
             .store(true, std::sync::atomic::Ordering::SeqCst);
+
         Ok(())
     }
 }
