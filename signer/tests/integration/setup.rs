@@ -859,9 +859,15 @@ impl TestSweepSetup2 {
             .unwrap()
             .unwrap();
 
-        block_observer::extract_sbtc_transactions(db, &bitcoin_client, self.donation_block_hash, &[tx_info])
-            .await
-            .unwrap();
+        let bootstrap_script_pubkey = context.config().signer.bootstrap_aggregate_key;
+        block_observer::extract_sbtc_transactions(
+            db,
+            bootstrap_script_pubkey,
+            self.donation_block_hash,
+            &[tx_info],
+        )
+        .await
+        .unwrap();
     }
 
     /// This function generates a sweep transaction that sweeps in the

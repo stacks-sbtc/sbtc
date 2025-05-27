@@ -3956,8 +3956,6 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
         .with_mocked_emily_client()
         .build();
 
-    let bitcoin_client = context.get_bitcoin_client();
-
     let expect_tx = !is_completed && !is_in_mempool;
 
     let nonce = 12;
@@ -4032,9 +4030,15 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
         .get_tx_info(&donation.txid, &bitcoin_chain_tip)
         .unwrap()
         .unwrap();
-    block_observer::extract_sbtc_transactions(&db, &bitcoin_client, bitcoin_chain_tip, &[tx])
-        .await
-        .unwrap();
+    let bootstrap_script_pubkey = context.config().signer.bootstrap_aggregate_key;
+    block_observer::extract_sbtc_transactions(
+        &db,
+        bootstrap_script_pubkey,
+        bitcoin_chain_tip,
+        &[tx],
+    )
+    .await
+    .unwrap();
 
     // When the signer binary starts up in main(), it sets the current
     // signer set public keys in the context state using the values in the

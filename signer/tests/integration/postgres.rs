@@ -7243,7 +7243,7 @@ mod sqlx_transactions {
     use test_log::test;
 
     #[tokio::test]
-    async fn test_pgsql_transaction_commit() -> Result<(), Error> {
+    async fn test_pgsql_transaction_commit() -> Result<(), Box<Error>> {
         let db = storage::new_test_database().await;
 
         let bitcoin_chain = BitcoinChain::default();
@@ -7295,7 +7295,7 @@ mod sqlx_transactions {
     }
 
     #[tokio::test]
-    async fn test_pgsql_transaction_rollback() -> Result<(), Error> {
+    async fn test_pgsql_transaction_rollback() -> Result<(), Box<Error>> {
         let db = storage::new_test_database().await;
 
         let bitcoin_chain = BitcoinChain::default();
@@ -7321,7 +7321,7 @@ mod sqlx_transactions {
     }
 
     #[test(tokio::test)]
-    async fn test_pgsql_transaction_implicit_rollback_on_drop() -> Result<(), Error> {
+    async fn test_pgsql_transaction_implicit_rollback_on_drop() -> Result<(), Box<Error>> {
         let db = storage::new_test_database().await;
 
         let bitcoin_chain = BitcoinChain::default();
