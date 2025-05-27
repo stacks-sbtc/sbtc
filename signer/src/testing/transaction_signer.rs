@@ -61,6 +61,7 @@ where
                 rng,
                 dkg_begin_pause: None,
                 dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
+                stacks_sign_request: LruCache::new(NonZeroUsize::new(2).unwrap()),
             },
             context,
         }
