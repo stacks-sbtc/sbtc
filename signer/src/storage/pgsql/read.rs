@@ -2674,18 +2674,10 @@ impl DbRead for PgStore {
         PgRead::get_latest_verified_dkg_shares(self.get_connection().await?.as_mut()).await
     }
 
-    /// Returns the number of non-failed rows in the `dkg_shares` table.
     async fn get_encrypted_dkg_shares_count(&self) -> Result<u32, Error> {
         PgRead::get_encrypted_dkg_shares_count(self.get_connection().await?.as_mut()).await
     }
 
-    /// Find the last key rotation by iterating backwards from the stacks
-    /// chain tip scanning all transactions until we encounter a key
-    /// rotation transactions.
-    ///
-    /// This might become quite inefficient for long chains with infrequent
-    /// key rotations, so we might have to consider data model updates to
-    /// allow more efficient querying of the last key rotation.
     async fn get_last_key_rotation(
         &self,
         chain_tip: &model::BitcoinBlockHash,
