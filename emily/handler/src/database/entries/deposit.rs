@@ -224,8 +224,6 @@ impl DepositEntry {
         } else {
             self.fulfillment = None;
         }
-        tracing::info!("latest event {:#?}", latest_event);
-        tracing::info!("self: {:#?}", self);
         if new_status == Status::RBF {
             self.replaced_by_tx = match &latest_event.status {
                 StatusEntry::RBF(replaced_by_tx) => Some(replaced_by_tx.clone()),

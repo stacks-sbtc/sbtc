@@ -938,6 +938,7 @@ async fn create_deposit_handles_duplicates(status: Status) {
 #[test_case(Status::Rbf, Status::Accepted, true; "rbf_to_accepted")]
 #[test_case(Status::Rbf, Status::Reprocessing, true; "rbf_to_reprocessing")]
 #[test_case(Status::Rbf, Status::Confirmed, true; "rbf_to_confirmed")]
+#[test_case(Status::Rbf, Status::Rbf, true; "rbf_to_rbf")]
 #[test_case(Status::Rbf, Status::Failed, true; "rbf_to_failed")]
 #[tokio::test]
 async fn update_deposits_is_forbidden_for_signer(
