@@ -7,7 +7,7 @@ from unittest.mock import patch, MagicMock
 from app.models import EnrichedDepositInfo, RequestStatus, DepositInfo
 from app.services.deposit_processor import DepositProcessor
 from app import settings
-from app.clients.mempool import MempoolAPI, ElectrsAPI
+from app.clients import MempoolAPI, ElectrsAPI
 
 
 # Load fixtures from JSON file
