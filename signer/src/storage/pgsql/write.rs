@@ -1107,167 +1107,152 @@ impl DbWrite for PgStore {
 }
 
 impl DbWrite for PgTransaction<'_> {
-    async fn write_bitcoin_block(
-        &self,
-        block: &crate::storage::model::BitcoinBlock,
-    ) -> Result<(), crate::error::Error> {
+    async fn write_bitcoin_block(&self, block: &model::BitcoinBlock) -> Result<(), Error> {
         let mut tx = self.tx.lock().await;
         PgWrite::write_bitcoin_block(tx.as_mut(), block).await
     }
 
-    async fn write_stacks_block(
-        &self,
-        block: &crate::storage::model::StacksBlock,
-    ) -> Result<(), crate::error::Error> {
+    async fn write_stacks_block(&self, block: &model::StacksBlock) -> Result<(), Error> {
         let mut tx = self.tx.lock().await;
         PgWrite::write_stacks_block(tx.as_mut(), block).await
     }
 
     async fn write_deposit_request(
         &self,
-        deposit_request: &crate::storage::model::DepositRequest,
-    ) -> Result<(), crate::error::Error> {
+        deposit_request: &model::DepositRequest,
+    ) -> Result<(), Error> {
         let mut tx = self.tx.lock().await;
         PgWrite::write_deposit_request(tx.as_mut(), deposit_request).await
     }
 
     async fn write_deposit_requests(
         &self,
-        deposit_requests: Vec<crate::storage::model::DepositRequest>,
-    ) -> Result<(), crate::error::Error> {
+        deposit_requests: Vec<model::DepositRequest>,
+    ) -> Result<(), Error> {
         let mut tx = self.tx.lock().await;
         PgWrite::write_deposit_requests(tx.as_mut(), deposit_requests).await
     }
 
     async fn write_withdrawal_request(
         &self,
-        request: &crate::storage::model::WithdrawalRequest,
-    ) -> Result<(), crate::error::Error> {
+        request: &model::WithdrawalRequest,
+    ) -> Result<(), Error> {
         let mut tx = self.tx.lock().await;
         PgWrite::write_withdrawal_request(tx.as_mut(), request).await
     }
 
     async fn write_deposit_signer_decision(
         &self,
-        decision: &crate::storage::model::DepositSigner,
-    ) -> Result<(), crate::error::Error> {
+        decision: &model::DepositSigner,
+    ) -> Result<(), Error> {
         let mut tx = self.tx.lock().await;
         PgWrite::write_deposit_signer_decision(tx.as_mut(), decision).await
     }
 
     async fn write_withdrawal_signer_decision(
         &self,
-        decision: &crate::storage::model::WithdrawalSigner,
-    ) -> Result<(), crate::error::Error> {
+        decision: &model::WithdrawalSigner,
+    ) -> Result<(), Error> {
         let mut tx = self.tx.lock().await;
         PgWrite::write_withdrawal_signer_decision(tx.as_mut(), decision).await
     }
 
     async fn write_bitcoin_transaction(
         &self,
-        bitcoin_transaction: &crate::storage::model::BitcoinTxRef,
-    ) -> Result<(), crate::error::Error> {
+        bitcoin_transaction: &model::BitcoinTxRef,
+    ) -> Result<(), Error> {
         let mut tx = self.tx.lock().await;
         PgWrite::write_bitcoin_transaction(tx.as_mut(), bitcoin_transaction).await
     }
 
-    async fn write_bitcoin_transactions(
-        &self,
-        txs: Vec<crate::storage::model::BitcoinTxRef>,
-    ) -> Result<(), crate::error::Error> {
+    async fn write_bitcoin_transactions(&self, txs: Vec<model::BitcoinTxRef>) -> Result<(), Error> {
         let mut tx = self.tx.lock().await;
         PgWrite::write_bitcoin_transactions(tx.as_mut(), txs).await
     }
 
     async fn write_stacks_block_headers(
         &self,
-        headers: Vec<crate::storage::model::StacksBlock>,
-    ) -> Result<(), crate::error::Error> {
+        headers: Vec<model::StacksBlock>,
+    ) -> Result<(), Error> {
         let mut tx = self.tx.lock().await;
         PgWrite::write_stacks_block_headers(tx.as_mut(), headers).await
     }
 
     async fn write_encrypted_dkg_shares(
         &self,
-        shares: &crate::storage::model::EncryptedDkgShares,
-    ) -> Result<(), crate::error::Error> {
+        shares: &model::EncryptedDkgShares,
+    ) -> Result<(), Error> {
         let mut tx = self.tx.lock().await;
         PgWrite::write_encrypted_dkg_shares(tx.as_mut(), shares).await
     }
 
     async fn write_rotate_keys_transaction(
         &self,
-        key_rotation: &crate::storage::model::KeyRotationEvent,
-    ) -> Result<(), crate::error::Error> {
+        key_rotation: &model::KeyRotationEvent,
+    ) -> Result<(), Error> {
         let mut tx = self.tx.lock().await;
         PgWrite::write_rotate_keys_transaction(tx.as_mut(), key_rotation).await
     }
 
     async fn write_withdrawal_reject_event(
         &self,
-        event: &crate::storage::model::WithdrawalRejectEvent,
-    ) -> Result<(), crate::error::Error> {
+        event: &model::WithdrawalRejectEvent,
+    ) -> Result<(), Error> {
         let mut tx = self.tx.lock().await;
         PgWrite::write_withdrawal_reject_event(tx.as_mut(), event).await
     }
 
     async fn write_withdrawal_accept_event(
         &self,
-        event: &crate::storage::model::WithdrawalAcceptEvent,
-    ) -> Result<(), crate::error::Error> {
+        event: &model::WithdrawalAcceptEvent,
+    ) -> Result<(), Error> {
         let mut tx = self.tx.lock().await;
         PgWrite::write_withdrawal_accept_event(tx.as_mut(), event).await
     }
 
     async fn write_completed_deposit_event(
         &self,
-        event: &crate::storage::model::CompletedDepositEvent,
-    ) -> Result<(), crate::error::Error> {
+        event: &model::CompletedDepositEvent,
+    ) -> Result<(), Error> {
         let mut tx = self.tx.lock().await;
         PgWrite::write_completed_deposit_event(tx.as_mut(), event).await
     }
 
-    async fn write_tx_output(
-        &self,
-        output: &crate::storage::model::TxOutput,
-    ) -> Result<(), crate::error::Error> {
+    async fn write_tx_output(&self, output: &model::TxOutput) -> Result<(), Error> {
         let mut tx = self.tx.lock().await;
         PgWrite::write_tx_output(tx.as_mut(), output).await
     }
 
     async fn write_withdrawal_tx_output(
         &self,
-        output: &crate::storage::model::WithdrawalTxOutput,
-    ) -> Result<(), crate::error::Error> {
+        output: &model::WithdrawalTxOutput,
+    ) -> Result<(), Error> {
         let mut tx = self.tx.lock().await;
         PgWrite::write_withdrawal_tx_output(tx.as_mut(), output).await
     }
 
-    async fn write_tx_prevout(
-        &self,
-        prevout: &crate::storage::model::TxPrevout,
-    ) -> Result<(), crate::error::Error> {
+    async fn write_tx_prevout(&self, prevout: &model::TxPrevout) -> Result<(), Error> {
         let mut tx = self.tx.lock().await;
         PgWrite::write_tx_prevout(tx.as_mut(), prevout).await
     }
 
     async fn write_bitcoin_txs_sighashes(
         &self,
-        sighashes: &[crate::storage::model::BitcoinTxSigHash],
-    ) -> Result<(), crate::error::Error> {
+        sighashes: &[model::BitcoinTxSigHash],
+    ) -> Result<(), Error> {
         let mut tx = self.tx.lock().await;
         PgWrite::write_bitcoin_txs_sighashes(tx.as_mut(), sighashes).await
     }
 
     async fn write_bitcoin_withdrawals_outputs(
         &self,
-        withdrawals_outputs: &[crate::storage::model::BitcoinWithdrawalOutput],
-    ) -> Result<(), crate::error::Error> {
+        withdrawals_outputs: &[model::BitcoinWithdrawalOutput],
+    ) -> Result<(), Error> {
         let mut tx = self.tx.lock().await;
         PgWrite::write_bitcoin_withdrawals_outputs(tx.as_mut(), withdrawals_outputs).await
     }
 
-    async fn revoke_dkg_shares<X>(&self, aggregate_key: X) -> Result<bool, crate::error::Error>
+    async fn revoke_dkg_shares<X>(&self, aggregate_key: X) -> Result<bool, Error>
     where
         X: Into<crate::keys::PublicKeyXOnly> + Send,
     {
@@ -1275,7 +1260,7 @@ impl DbWrite for PgTransaction<'_> {
         PgWrite::revoke_dkg_shares(tx.as_mut(), aggregate_key).await
     }
 
-    async fn verify_dkg_shares<X>(&self, aggregate_key: X) -> Result<bool, crate::error::Error>
+    async fn verify_dkg_shares<X>(&self, aggregate_key: X) -> Result<bool, Error>
     where
         X: Into<crate::keys::PublicKeyXOnly> + Send,
     {

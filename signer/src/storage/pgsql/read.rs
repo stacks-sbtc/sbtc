@@ -2844,39 +2844,39 @@ impl DbRead for PgTransaction<'_> {
 
     async fn get_stacks_block(
         &self,
-        block_hash: &crate::storage::model::StacksBlockHash,
-    ) -> Result<Option<crate::storage::model::StacksBlock>, crate::error::Error> {
+        block_hash: &model::StacksBlockHash,
+    ) -> Result<Option<model::StacksBlock>, Error> {
         PgRead::get_stacks_block(self.tx.lock().await.as_mut(), block_hash).await
     }
 
     async fn get_bitcoin_canonical_chain_tip(
         &self,
-    ) -> Result<Option<crate::storage::model::BitcoinBlockHash>, crate::error::Error> {
+    ) -> Result<Option<model::BitcoinBlockHash>, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::get_bitcoin_canonical_chain_tip(tx.as_mut()).await
     }
 
     async fn get_bitcoin_canonical_chain_tip_ref(
         &self,
-    ) -> Result<Option<crate::storage::model::BitcoinBlockRef>, crate::error::Error> {
+    ) -> Result<Option<model::BitcoinBlockRef>, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::get_bitcoin_canonical_chain_tip_ref(tx.as_mut()).await
     }
 
     async fn get_stacks_chain_tip(
         &self,
-        bitcoin_chain_tip: &crate::storage::model::BitcoinBlockHash,
-    ) -> Result<Option<crate::storage::model::StacksBlock>, crate::error::Error> {
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+    ) -> Result<Option<model::StacksBlock>, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::get_stacks_chain_tip(tx.as_mut(), bitcoin_chain_tip).await
     }
 
     async fn get_pending_deposit_requests(
         &self,
-        chain_tip: &crate::storage::model::BitcoinBlockHash,
+        chain_tip: &model::BitcoinBlockHash,
         context_window: u16,
         signer_public_key: &crate::keys::PublicKey,
-    ) -> Result<Vec<crate::storage::model::DepositRequest>, crate::error::Error> {
+    ) -> Result<Vec<model::DepositRequest>, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::get_pending_deposit_requests(
             tx.as_mut(),
@@ -2889,10 +2889,10 @@ impl DbRead for PgTransaction<'_> {
 
     async fn get_pending_accepted_deposit_requests(
         &self,
-        chain_tip: &crate::storage::model::BitcoinBlockHash,
+        chain_tip: &model::BitcoinBlockHash,
         context_window: u16,
         signatures_required: u16,
-    ) -> Result<Vec<crate::storage::model::DepositRequest>, crate::error::Error> {
+    ) -> Result<Vec<model::DepositRequest>, Error> {
         PgRead::get_pending_accepted_deposit_requests(
             self.tx.lock().await.as_mut(),
             chain_tip,
@@ -2904,20 +2904,20 @@ impl DbRead for PgTransaction<'_> {
 
     async fn deposit_request_exists(
         &self,
-        txid: &crate::storage::model::BitcoinTxId,
+        txid: &model::BitcoinTxId,
         output_index: u32,
-    ) -> Result<bool, crate::error::Error> {
+    ) -> Result<bool, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::deposit_request_exists(tx.as_mut(), txid, output_index).await
     }
 
     async fn get_deposit_request_report(
         &self,
-        chain_tip: &crate::storage::model::BitcoinBlockHash,
-        txid: &crate::storage::model::BitcoinTxId,
+        chain_tip: &model::BitcoinBlockHash,
+        txid: &model::BitcoinTxId,
         output_index: u32,
         signer_public_key: &crate::keys::PublicKey,
-    ) -> Result<Option<crate::bitcoin::validation::DepositRequestReport>, crate::error::Error> {
+    ) -> Result<Option<crate::bitcoin::validation::DepositRequestReport>, Error> {
         PgRead::get_deposit_request_report(
             self.tx.lock().await.as_mut(),
             chain_tip,
@@ -2930,19 +2930,19 @@ impl DbRead for PgTransaction<'_> {
 
     async fn get_deposit_signers(
         &self,
-        txid: &crate::storage::model::BitcoinTxId,
+        txid: &model::BitcoinTxId,
         output_index: u32,
-    ) -> Result<Vec<crate::storage::model::DepositSigner>, crate::error::Error> {
+    ) -> Result<Vec<model::DepositSigner>, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::get_deposit_signers(tx.as_mut(), txid, output_index).await
     }
 
     async fn get_deposit_signer_decisions(
         &self,
-        chain_tip: &crate::storage::model::BitcoinBlockHash,
+        chain_tip: &model::BitcoinBlockHash,
         context_window: u16,
         signer_public_key: &crate::keys::PublicKey,
-    ) -> Result<Vec<crate::storage::model::DepositSigner>, crate::error::Error> {
+    ) -> Result<Vec<model::DepositSigner>, Error> {
         PgRead::get_deposit_signer_decisions(
             self.tx.lock().await.as_mut(),
             chain_tip,
@@ -2954,10 +2954,10 @@ impl DbRead for PgTransaction<'_> {
 
     async fn get_withdrawal_signer_decisions(
         &self,
-        chain_tip: &crate::storage::model::BitcoinBlockHash,
+        chain_tip: &model::BitcoinBlockHash,
         context_window: u16,
         signer_public_key: &crate::keys::PublicKey,
-    ) -> Result<Vec<crate::storage::model::WithdrawalSigner>, crate::error::Error> {
+    ) -> Result<Vec<model::WithdrawalSigner>, Error> {
         PgRead::get_withdrawal_signer_decisions(
             self.tx.lock().await.as_mut(),
             chain_tip,
@@ -2969,10 +2969,10 @@ impl DbRead for PgTransaction<'_> {
 
     async fn can_sign_deposit_tx(
         &self,
-        txid: &crate::storage::model::BitcoinTxId,
+        txid: &model::BitcoinTxId,
         output_index: u32,
         signer_public_key: &crate::keys::PublicKey,
-    ) -> Result<Option<bool>, crate::error::Error> {
+    ) -> Result<Option<bool>, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::can_sign_deposit_tx(tx.as_mut(), txid, output_index, signer_public_key).await
     }
@@ -2980,18 +2980,18 @@ impl DbRead for PgTransaction<'_> {
     async fn get_withdrawal_signers(
         &self,
         request_id: u64,
-        block_hash: &crate::storage::model::StacksBlockHash,
-    ) -> Result<Vec<crate::storage::model::WithdrawalSigner>, crate::error::Error> {
+        block_hash: &model::StacksBlockHash,
+    ) -> Result<Vec<model::WithdrawalSigner>, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::get_withdrawal_signers(tx.as_mut(), request_id, block_hash).await
     }
 
     async fn get_pending_withdrawal_requests(
         &self,
-        chain_tip: &crate::storage::model::BitcoinBlockHash,
+        chain_tip: &model::BitcoinBlockHash,
         context_window: u16,
         signer_public_key: &crate::keys::PublicKey,
-    ) -> Result<Vec<crate::storage::model::WithdrawalRequest>, crate::error::Error> {
+    ) -> Result<Vec<model::WithdrawalRequest>, Error> {
         PgRead::get_pending_withdrawal_requests(
             self.tx.lock().await.as_mut(),
             chain_tip,
@@ -3003,11 +3003,11 @@ impl DbRead for PgTransaction<'_> {
 
     async fn get_pending_accepted_withdrawal_requests(
         &self,
-        bitcoin_chain_tip: &crate::storage::model::BitcoinBlockHash,
-        stacks_chain_tip: &crate::storage::model::StacksBlockHash,
-        min_bitcoin_height: crate::storage::model::BitcoinBlockHeight,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+        stacks_chain_tip: &model::StacksBlockHash,
+        min_bitcoin_height: model::BitcoinBlockHeight,
         signature_threshold: u16,
-    ) -> Result<Vec<crate::storage::model::WithdrawalRequest>, crate::error::Error> {
+    ) -> Result<Vec<model::WithdrawalRequest>, Error> {
         PgRead::get_pending_accepted_withdrawal_requests(
             self.tx.lock().await.as_mut(),
             bitcoin_chain_tip,
@@ -3020,9 +3020,9 @@ impl DbRead for PgTransaction<'_> {
 
     async fn get_pending_rejected_withdrawal_requests(
         &self,
-        chain_tip: &crate::storage::model::BitcoinBlockRef,
+        chain_tip: &model::BitcoinBlockRef,
         context_window: u16,
-    ) -> Result<Vec<crate::storage::model::WithdrawalRequest>, crate::error::Error> {
+    ) -> Result<Vec<model::WithdrawalRequest>, Error> {
         PgRead::get_pending_rejected_withdrawal_requests(
             self.tx.lock().await.as_mut(),
             chain_tip,
@@ -3033,12 +3033,11 @@ impl DbRead for PgTransaction<'_> {
 
     async fn get_withdrawal_request_report(
         &self,
-        bitcoin_chain_tip: &crate::storage::model::BitcoinBlockHash,
-        stacks_chain_tip: &crate::storage::model::StacksBlockHash,
-        id: &crate::storage::model::QualifiedRequestId,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+        stacks_chain_tip: &model::StacksBlockHash,
+        id: &model::QualifiedRequestId,
         signer_public_key: &crate::keys::PublicKey,
-    ) -> Result<Option<crate::bitcoin::validation::WithdrawalRequestReport>, crate::error::Error>
-    {
+    ) -> Result<Option<crate::bitcoin::validation::WithdrawalRequestReport>, Error> {
         PgRead::get_withdrawal_request_report(
             self.tx.lock().await.as_mut(),
             bitcoin_chain_tip,
@@ -3051,17 +3050,17 @@ impl DbRead for PgTransaction<'_> {
 
     async fn compute_withdrawn_total(
         &self,
-        bitcoin_chain_tip: &crate::storage::model::BitcoinBlockHash,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
         context_window: u16,
-    ) -> Result<u64, crate::error::Error> {
+    ) -> Result<u64, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::compute_withdrawn_total(tx.as_mut(), bitcoin_chain_tip, context_window).await
     }
 
     async fn get_bitcoin_blocks_with_transaction(
         &self,
-        txid: &crate::storage::model::BitcoinTxId,
-    ) -> Result<Vec<crate::storage::model::BitcoinBlockHash>, crate::error::Error> {
+        txid: &model::BitcoinTxId,
+    ) -> Result<Vec<model::BitcoinBlockHash>, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::get_bitcoin_blocks_with_transaction(tx.as_mut(), txid).await
     }
@@ -3069,7 +3068,7 @@ impl DbRead for PgTransaction<'_> {
     async fn stacks_block_exists(
         &self,
         block_id: clarity::types::chainstate::StacksBlockId,
-    ) -> Result<bool, crate::error::Error> {
+    ) -> Result<bool, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::stacks_block_exists(tx.as_mut(), block_id).await
     }
@@ -3077,7 +3076,7 @@ impl DbRead for PgTransaction<'_> {
     async fn get_encrypted_dkg_shares<X>(
         &self,
         aggregate_key: X,
-    ) -> Result<Option<crate::storage::model::EncryptedDkgShares>, crate::error::Error>
+    ) -> Result<Option<model::EncryptedDkgShares>, Error>
     where
         X: Into<crate::keys::PublicKeyXOnly> + Send,
     {
@@ -3087,38 +3086,38 @@ impl DbRead for PgTransaction<'_> {
 
     async fn get_latest_encrypted_dkg_shares(
         &self,
-    ) -> Result<Option<crate::storage::model::EncryptedDkgShares>, crate::error::Error> {
+    ) -> Result<Option<model::EncryptedDkgShares>, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::get_latest_encrypted_dkg_shares(tx.as_mut()).await
     }
 
     async fn get_latest_verified_dkg_shares(
         &self,
-    ) -> Result<Option<crate::storage::model::EncryptedDkgShares>, crate::error::Error> {
+    ) -> Result<Option<model::EncryptedDkgShares>, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::get_latest_verified_dkg_shares(tx.as_mut()).await
     }
 
-    async fn get_encrypted_dkg_shares_count(&self) -> Result<u32, crate::error::Error> {
+    async fn get_encrypted_dkg_shares_count(&self) -> Result<u32, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::get_encrypted_dkg_shares_count(tx.as_mut()).await
     }
 
     async fn get_last_key_rotation(
         &self,
-        chain_tip: &crate::storage::model::BitcoinBlockHash,
-    ) -> Result<Option<crate::storage::model::KeyRotationEvent>, crate::error::Error> {
+        chain_tip: &model::BitcoinBlockHash,
+    ) -> Result<Option<model::KeyRotationEvent>, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::get_last_key_rotation(tx.as_mut(), chain_tip).await
     }
 
     async fn key_rotation_exists(
         &self,
-        chain_tip: &crate::storage::model::BitcoinBlockHash,
+        chain_tip: &model::BitcoinBlockHash,
         signer_set: &std::collections::BTreeSet<crate::keys::PublicKey>,
         aggregate_key: &crate::keys::PublicKey,
         signatures_required: u16,
-    ) -> Result<bool, crate::error::Error> {
+    ) -> Result<bool, Error> {
         PgRead::key_rotation_exists(
             self.tx.lock().await.as_mut(),
             chain_tip,
@@ -3129,26 +3128,24 @@ impl DbRead for PgTransaction<'_> {
         .await
     }
 
-    async fn get_signers_script_pubkeys(
-        &self,
-    ) -> Result<Vec<crate::storage::model::Bytes>, crate::error::Error> {
+    async fn get_signers_script_pubkeys(&self) -> Result<Vec<model::Bytes>, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::get_signers_script_pubkeys(tx.as_mut()).await
     }
 
     async fn get_signer_utxo(
         &self,
-        chain_tip: &crate::storage::model::BitcoinBlockHash,
-    ) -> Result<Option<crate::bitcoin::utxo::SignerUtxo>, crate::error::Error> {
+        chain_tip: &model::BitcoinBlockHash,
+    ) -> Result<Option<crate::bitcoin::utxo::SignerUtxo>, Error> {
         PgRead::get_signer_utxo(self.tx.lock().await.as_mut(), chain_tip).await
     }
 
     async fn get_deposit_request_signer_votes(
         &self,
-        txid: &crate::storage::model::BitcoinTxId,
+        txid: &model::BitcoinTxId,
         output_index: u32,
         aggregate_key: &crate::keys::PublicKey,
-    ) -> Result<crate::storage::model::SignerVotes, crate::error::Error> {
+    ) -> Result<model::SignerVotes, Error> {
         PgRead::get_deposit_request_signer_votes(
             self.tx.lock().await.as_mut(),
             txid,
@@ -3160,9 +3157,9 @@ impl DbRead for PgTransaction<'_> {
 
     async fn get_withdrawal_request_signer_votes(
         &self,
-        id: &crate::storage::model::QualifiedRequestId,
+        id: &model::QualifiedRequestId,
         aggregate_key: &crate::keys::PublicKey,
-    ) -> Result<crate::storage::model::SignerVotes, crate::error::Error> {
+    ) -> Result<model::SignerVotes, Error> {
         PgRead::get_withdrawal_request_signer_votes(
             self.tx.lock().await.as_mut(),
             id,
@@ -3173,43 +3170,40 @@ impl DbRead for PgTransaction<'_> {
 
     async fn is_known_bitcoin_block_hash(
         &self,
-        block_hash: &crate::storage::model::BitcoinBlockHash,
-    ) -> Result<bool, crate::error::Error> {
+        block_hash: &model::BitcoinBlockHash,
+    ) -> Result<bool, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::is_known_bitcoin_block_hash(tx.as_mut(), block_hash).await
     }
 
     async fn in_canonical_bitcoin_blockchain(
         &self,
-        chain_tip: &crate::storage::model::BitcoinBlockRef,
-        block_ref: &crate::storage::model::BitcoinBlockRef,
-    ) -> Result<bool, crate::error::Error> {
+        chain_tip: &model::BitcoinBlockRef,
+        block_ref: &model::BitcoinBlockRef,
+    ) -> Result<bool, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::in_canonical_bitcoin_blockchain(tx.as_mut(), chain_tip, block_ref).await
     }
 
-    async fn is_signer_script_pub_key(
-        &self,
-        script: &crate::storage::model::ScriptPubKey,
-    ) -> Result<bool, crate::error::Error> {
+    async fn is_signer_script_pub_key(&self, script: &model::ScriptPubKey) -> Result<bool, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::is_signer_script_pub_key(tx.as_mut(), script).await
     }
 
     async fn is_withdrawal_inflight(
         &self,
-        id: &crate::storage::model::QualifiedRequestId,
-        bitcoin_chain_tip: &crate::storage::model::BitcoinBlockHash,
-    ) -> Result<bool, crate::error::Error> {
+        id: &model::QualifiedRequestId,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+    ) -> Result<bool, Error> {
         PgRead::is_withdrawal_inflight(self.tx.lock().await.as_mut(), id, bitcoin_chain_tip).await
     }
 
     async fn is_withdrawal_active(
         &self,
-        id: &crate::storage::model::QualifiedRequestId,
-        bitcoin_chain_tip: &crate::storage::model::BitcoinBlockRef,
+        id: &model::QualifiedRequestId,
+        bitcoin_chain_tip: &model::BitcoinBlockRef,
         min_confirmations: u64,
-    ) -> Result<bool, crate::error::Error> {
+    ) -> Result<bool, Error> {
         PgRead::is_withdrawal_active(
             self.tx.lock().await.as_mut(),
             id,
@@ -3221,18 +3215,18 @@ impl DbRead for PgTransaction<'_> {
 
     async fn get_swept_deposit_requests(
         &self,
-        chain_tip: &crate::storage::model::BitcoinBlockHash,
+        chain_tip: &model::BitcoinBlockHash,
         context_window: u16,
-    ) -> Result<Vec<crate::storage::model::SweptDepositRequest>, crate::error::Error> {
+    ) -> Result<Vec<model::SweptDepositRequest>, Error> {
         PgRead::get_swept_deposit_requests(self.tx.lock().await.as_mut(), chain_tip, context_window)
             .await
     }
 
     async fn get_swept_withdrawal_requests(
         &self,
-        chain_tip: &crate::storage::model::BitcoinBlockHash,
+        chain_tip: &model::BitcoinBlockHash,
         context_window: u16,
-    ) -> Result<Vec<crate::storage::model::SweptWithdrawalRequest>, crate::error::Error> {
+    ) -> Result<Vec<model::SweptWithdrawalRequest>, Error> {
         PgRead::get_swept_withdrawal_requests(
             self.tx.lock().await.as_mut(),
             chain_tip,
@@ -3243,17 +3237,17 @@ impl DbRead for PgTransaction<'_> {
 
     async fn get_deposit_request(
         &self,
-        txid: &crate::storage::model::BitcoinTxId,
+        txid: &model::BitcoinTxId,
         output_index: u32,
-    ) -> Result<Option<crate::storage::model::DepositRequest>, crate::error::Error> {
+    ) -> Result<Option<model::DepositRequest>, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::get_deposit_request(tx.as_mut(), txid, output_index).await
     }
 
     async fn will_sign_bitcoin_tx_sighash(
         &self,
-        sighash: &crate::storage::model::SigHash,
-    ) -> Result<Option<(bool, crate::keys::PublicKeyXOnly)>, crate::error::Error> {
+        sighash: &model::SigHash,
+    ) -> Result<Option<(bool, crate::keys::PublicKeyXOnly)>, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::will_sign_bitcoin_tx_sighash(tx.as_mut(), sighash).await
     }

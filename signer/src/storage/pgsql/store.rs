@@ -250,22 +250,20 @@ impl<'a> PgTransaction<'a> {
 }
 
 impl TransactionHandle for PgTransaction<'_> {
-    async fn commit(self) -> Result<(), crate::error::Error> {
+    async fn commit(self) -> Result<(), Error> {
         let tx = self.tx.into_inner();
 
-        tx.commit()
-            .await
-            .map_err(crate::error::Error::SqlxCommitTransaction)?;
+        tx.commit().await.map_err(Error::SqlxCommitTransaction)?;
 
         Ok(())
     }
 
-    async fn rollback(self) -> Result<(), crate::error::Error> {
+    async fn rollback(self) -> Result<(), Error> {
         let tx = self.tx.into_inner();
 
         tx.rollback()
             .await
-            .map_err(crate::error::Error::SqlxRollbackTransaction)?;
+            .map_err(Error::SqlxRollbackTransaction)?;
 
         Ok(())
     }
