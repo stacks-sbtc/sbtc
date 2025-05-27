@@ -771,6 +771,22 @@ impl fake::Dummy<fake::Faker> for BitcoinPreSignAck {
         BitcoinPreSignAck {}
     }
 }
+
+impl fake::Dummy<fake::Faker> for model::Timestamp {
+    fn dummy_with_rng<R: rand::RngCore + ?Sized>(_: &fake::Faker, rng: &mut R) -> Self {
+        // The PostgreSQL epoch is 2000-01-01 00:00:00 UTC
+        const PG_UNIX_EPOCH: i64 = 946_684_800;
+        // Let's try to be somewhat realistic: 2050-01-01 00:00:00 UTC
+        const TIMESTAMP_MAX: i64 = 2_524_608_000;
+        // Generate a random timestamp between the PostgreSQL epoch and TIMESTAMP_MAX (2050-01-01 00:00:00 UTC)
+        // to avoid PG overflow.
+        let unix_timestamp: i64 = rng.gen_range(PG_UNIX_EPOCH..TIMESTAMP_MAX);
+        time::OffsetDateTime::from_unix_timestamp(unix_timestamp)
+            .expect("failed to create OffsetDateTime")
+            .into()
+    }
+}
+
 /// A struct to help with creating dummy values for testing
 pub struct Unit;
 
