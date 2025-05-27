@@ -623,7 +623,7 @@ where
 
         let txid = tx.compute_txid();
         if tx.is_coinbase() {
-            tracing::warn!(%txid, "ignoring coinbase tx when extracting sbtc transaction");
+            tracing::trace!(%txid, "ignoring coinbase tx when extracting sbtc transaction");
             continue;
         }
 
