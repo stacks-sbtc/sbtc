@@ -508,6 +508,18 @@ async fn update_deposits(
 
     // Loop through all updates and execute.
     for (index, update) in validated_request.deposits {
+        if update.is_err() {
+            updated_deposits.push((
+                index,
+                DepositWithStatus {
+                    deposit: Deposit::default(),
+                    status: StatusCode::BAD_REQUEST.as_u16(),
+                },
+            ));
+            continue;
+        }
+        let update = update.unwrap();
+
         let bitcoin_txid = update.key.bitcoin_txid.clone();
         let bitcoin_tx_output_index = update.key.bitcoin_tx_output_index;
 

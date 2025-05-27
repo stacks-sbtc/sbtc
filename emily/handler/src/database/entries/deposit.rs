@@ -639,7 +639,7 @@ impl From<DepositInfoByReclaimPubkeysEntry> for DepositInfo {
 // -----------------------------------------------------------------------------
 
 /// Validated version of the update deposit request.
-#[derive(Clone, Default, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ValidatedUpdateDepositsRequest {
     /// Validated deposit update requests where each update request is in chronological order
     /// of when the update should have occurred, but where the first value of the tuple is the
@@ -647,7 +647,10 @@ pub struct ValidatedUpdateDepositsRequest {
     ///
     /// This allows the updates to be executed in chronological order but returned in the order
     /// that the client sent them.
-    pub deposits: Vec<(usize, ValidatedDepositUpdate)>,
+    pub deposits: Vec<(
+        usize,
+        Result<ValidatedDepositUpdate, crate::common::error::ValidationError>,
+    )>,
 }
 
 /// Validated deposit update.

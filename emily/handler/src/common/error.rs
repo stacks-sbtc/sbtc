@@ -38,7 +38,7 @@ pub enum Inconsistency {
 }
 
 /// Errors from the internal API logic.
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ValidationError {
     /// The withdrawal is confirmed but missing the fulfillment data.
     #[error("missing fulfillment for confirmed withdrawal request with id: {0}")]
@@ -50,9 +50,6 @@ pub enum ValidationError {
     /// The deposit is confirmed but missing the fulfillment data.
     #[error("missing fulfillment for confirmed deposit request with txid: {0}, vout: {1}")]
     DepositMissingFulfillment(String, u32),
-    /// The deposits are confirmed but missing the fulfillment data.
-    #[error("missing fulfillment for confirmed deposit requests with txid:vout pairs: {0:?}")]
-    DepositsMissingFulfillment(Vec<String>),
 
     /// One of rolling_withdrawal_blocks or rolling_withdrawal_cap is missing while the other is set.
     /// Fields must be provided together to configure withdrawal limits.
