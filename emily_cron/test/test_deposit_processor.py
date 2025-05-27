@@ -1145,7 +1145,7 @@ class TestMempoolAPI(unittest.TestCase):
         self.assertEqual(tx_data["txid"], ACCEPTED_DEPOSIT_DATA["bitcoin_txid"])
         self.assertEqual(tx_data["vout"][0]["value"], ACCEPTED_DEPOSIT_DATA["amount"])
         mock_get.assert_called_once_with(
-            f"/tx/{ACCEPTED_DEPOSIT_DATA['bitcoin_txid']}", ignore_errors=True
+            f"/v1/tx/{ACCEPTED_DEPOSIT_DATA['bitcoin_txid']}", ignore_errors=True
         )
 
         # Test getting a spending transaction
@@ -1155,7 +1155,7 @@ class TestMempoolAPI(unittest.TestCase):
         self.assertEqual(tx_data["txid"], ACCEPTED_SPENDING_TX_DATA["txid"])
         self.assertEqual(len(tx_data["vin"]), 2)  # Has two inputs
         mock_get.assert_called_once_with(
-            f"/tx/{ACCEPTED_SPENDING_TX_DATA['txid']}", ignore_errors=True
+            f"/v1/tx/{ACCEPTED_SPENDING_TX_DATA['txid']}", ignore_errors=True
         )
 
 

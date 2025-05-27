@@ -20,10 +20,10 @@ RUN chmod +x /app/main.py
 RUN touch /var/log/cron.log
 
 # Environment variables
-ENV EMILY_API_KEY=testApiKey
+ENV EMILY_API_KEY=
 ENV EMILY_ENDPOINT=http://emily-server:3031
 ENV PRIVATE_EMILY_ENDPOINT=http://emily-server:3031
-ENV MEMPOOL_API_URL=http://mempool-api:8083/api
+ENV MEMPOOL_API_URL=http://mempool-api:8999/api
 ENV ELECTRS_API_URL=http://electrs:3002
 ENV HIRO_API_URL=https://api.hiro.so
 ENV MIN_BLOCK_CONFIRMATIONS=6
