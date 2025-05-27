@@ -69,6 +69,7 @@ jobs:
         run: |
           echo "Building emily-lambda..."
           cargo lambda build \
+            --locked \
             --bin emily-lambda \
             --release \
             --output-format zip \
@@ -168,6 +169,7 @@ jobs:
         run: |
           echo "Building emily-lambda..."
           cargo lambda build \
+            --locked \
             --bin emily-lambda \
             --release \
             --output-format zip \
