@@ -147,7 +147,7 @@ pub struct TxSignerEventLoop<Context, Network, Rng> {
     /// during DKG using the FROST algorithm. This is then used during the
     /// verification of the Stacks rotate-keys transaction.
     pub dkg_verification_state_machines: LruCache<StateMachineId, dkg::verification::StateMachine>,
-    /// Stacks transactions signed during a bitcoin tenures. We don't allow
+    /// Stacks transactions signed during a bitcoin tenure. We don't allow
     /// signing for the same request multiple times in a tenure.
     pub stacks_sign_request: LruCache<model::BitcoinBlockHash, HashSet<StacksSignRequestId>>,
 }
