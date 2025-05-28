@@ -636,7 +636,10 @@ pub struct ValidatedUpdateWithdrawalRequest {
     ///
     /// This allows the updates to be executed in chronological order but returned in the order
     /// that the client sent them.
-    pub withdrawals: Vec<(usize, ValidatedWithdrawalUpdate)>,
+    pub withdrawals: Vec<(
+        usize,
+        Result<ValidatedWithdrawalUpdate, crate::common::error::ValidationError>,
+    )>,
 }
 
 /// Validated withdrawal update.

@@ -43,9 +43,6 @@ pub enum ValidationError {
     /// The withdrawal is confirmed but missing the fulfillment data.
     #[error("missing fulfillment for confirmed withdrawal request with id: {0}")]
     WithdrawalMissingFulfillment(u64),
-    /// The withdrawals are confirmed but missing the fulfillment data.
-    #[error("missing fulfillment for confirmed withdrawals requests with ids: {0:?}")]
-    WithdrawalsMissingFulfillment(Vec<u64>),
 
     /// The deposit is confirmed but missing the fulfillment data.
     #[error("missing fulfillment for confirmed deposit request with txid: {0}, vout: {1}")]

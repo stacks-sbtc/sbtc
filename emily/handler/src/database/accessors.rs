@@ -443,7 +443,14 @@ pub async fn pull_and_update_withdrawal_with_retry(
             return Ok(entry);
         }
 
-        if !is_trusted_key && entry.status != Status::Pending {
+        // We don't want to add a new entry if the status is already accepted.
+        // Updates Accepted -> Accepted occurs usually due to RBF.
+        if update.event.status == StatusEntry::Accepted && entry.status == Status::Accepted {
+            return Ok(entry);
+        }
+        let is_valid_untrusted_status_update =
+            update.event.status == StatusEntry::Accepted && entry.status == Status::Pending;
+        if !is_trusted_key && !is_valid_untrusted_status_update {
             return Err(Error::Forbidden);
         }
 

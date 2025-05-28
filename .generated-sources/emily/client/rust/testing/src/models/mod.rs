@@ -48,3 +48,5 @@ pub mod withdrawal_parameters;
 pub use self::withdrawal_parameters::WithdrawalParameters;
 pub mod withdrawal_update;
 pub use self::withdrawal_update::WithdrawalUpdate;
+pub mod withdrawal_with_status;
+pub use self::withdrawal_with_status::WithdrawalWithStatus;

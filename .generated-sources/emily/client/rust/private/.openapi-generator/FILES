@@ -34,6 +34,7 @@ docs/WithdrawalApi.md
 docs/WithdrawalInfo.md
 docs/WithdrawalParameters.md
 docs/WithdrawalUpdate.md
+docs/WithdrawalWithStatus.md
 git_push.sh
 src/apis/chainstate_api.rs
 src/apis/configuration.rs
@@ -71,3 +72,4 @@ src/models/withdrawal.rs
 src/models/withdrawal_info.rs
 src/models/withdrawal_parameters.rs
 src/models/withdrawal_update.rs
+src/models/withdrawal_with_status.rs
