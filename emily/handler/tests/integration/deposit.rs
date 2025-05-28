@@ -1238,9 +1238,20 @@ async fn emily_process_deposit_updates_when_some_of_them_already_accepted() {
             status_message: "First update".into(),
         }],
     };
-    apis::deposit_api::update_deposits_signer(&testing_configuration, update_deposits_request_body)
-        .await
-        .expect("Received an error after making a valid update deposit request api call.");
+    let response = apis::deposit_api::update_deposits_signer(
+        &testing_configuration,
+        update_deposits_request_body,
+    )
+    .await
+    .expect("Received an error after making a valid update deposit request api call.");
+
+    assert!(
+        response
+            .deposits
+            .iter()
+            .all(|deposit| deposit.status == 200)
+    );
+    assert_eq!(response.deposits.len(), 1);
 
     // Now we should have 1 pending and 1 accepted deposit.
     let deposits =
@@ -1273,9 +1284,20 @@ async fn emily_process_deposit_updates_when_some_of_them_already_accepted() {
             },
         ],
     };
-    apis::deposit_api::update_deposits_signer(&testing_configuration, update_deposits_request_body)
-        .await
-        .expect("Received an error after making a valid update deposit request api call.");
+    let response = apis::deposit_api::update_deposits_signer(
+        &testing_configuration,
+        update_deposits_request_body,
+    )
+    .await
+    .expect("Received an error after making a valid update deposit request api call.");
+
+    assert!(
+        response
+            .deposits
+            .iter()
+            .all(|deposit| deposit.status == 200)
+    );
+    assert_eq!(response.deposits.len(), 2);
 
     // Now we should have 2 accepted deposits.
     let deposits =
