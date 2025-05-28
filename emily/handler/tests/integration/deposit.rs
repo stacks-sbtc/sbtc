@@ -1343,7 +1343,7 @@ async fn emily_process_deposit_updates_when_some_of_them_are_unknown() {
         .await
         .expect("Received an error after making a valid create deposit request api call.");
 
-    // Now we should have 2 pending deposits.
+    // Now we should have 1 pending deposit.
     let deposits =
         apis::deposit_api::get_deposits(&testing_configuration, Status::Pending, None, None)
             .await
@@ -1386,7 +1386,7 @@ async fn emily_process_deposit_updates_when_some_of_them_are_unknown() {
         }
     }));
 
-    // Now we should have 2 accepted deposits.
+    // Now we should have 1 accepted deposit.
     let deposits =
         apis::deposit_api::get_deposits(&testing_configuration, Status::Accepted, None, None)
             .await
