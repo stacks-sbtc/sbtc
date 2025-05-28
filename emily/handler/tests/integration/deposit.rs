@@ -1019,7 +1019,7 @@ async fn update_deposits_is_forbidden_for_signer(
     .await;
 
     if is_forbidden {
-        // Check responce correctness
+        // Check response correctness
         let response = response.expect("Batch update should return 200 OK");
         let deposits = response.deposits;
         assert_eq!(deposits.len(), 1);
