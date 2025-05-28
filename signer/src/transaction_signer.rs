@@ -59,6 +59,10 @@ use wsts::net::DkgEnd;
 use wsts::net::DkgStatus;
 use wsts::net::Message as WstsNetMessage;
 
+/// LRU cache max size for the stacks signature requests. This is the number of
+/// bitcoin tenures for which we keep track of the signed stacks transactions.
+pub const STACKS_SIGN_REQUEST_LRU_SIZE: NonZeroUsize = NonZeroUsize::new(2).expect("2 is non zero");
+
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// # Transaction signer event loop
 ///
@@ -247,7 +251,7 @@ where
             dkg_verification_state_machines: LruCache::new(
                 NonZeroUsize::new(5).ok_or(Error::TypeConversion)?,
             ),
-            stacks_sign_request: LruCache::new(NonZeroUsize::new(2).ok_or(Error::TypeConversion)?),
+            stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
         })
     }
 
@@ -1850,7 +1854,7 @@ mod tests {
             rng: rand::rngs::OsRng,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
-            stacks_sign_request: LruCache::new(NonZeroUsize::new(2).unwrap()),
+            stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
         };
 
         // Create a DkgBegin message to be handled by the signer.
@@ -1918,7 +1922,7 @@ mod tests {
             rng: rand::rngs::OsRng,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
-            stacks_sign_request: LruCache::new(NonZeroUsize::new(2).unwrap()),
+            stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
         };
 
         // Create a DkgBegin message to be handled by the signer.
@@ -2004,7 +2008,7 @@ mod tests {
             rng: rand::rngs::OsRng,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
-            stacks_sign_request: LruCache::new(NonZeroUsize::new(2).unwrap()),
+            stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
         };
 
         let msg = message::WstsMessage {

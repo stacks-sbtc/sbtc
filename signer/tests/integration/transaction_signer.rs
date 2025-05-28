@@ -17,6 +17,7 @@ use signer::stacks::wallet::SignerWallet;
 use signer::storage::DbRead;
 use signer::storage::DbWrite;
 use signer::storage::postgres::PgStore;
+use signer::transaction_signer::STACKS_SIGN_REQUEST_LRU_SIZE;
 use test_case::test_case;
 
 use signer::bitcoin::utxo::RequestRef;
@@ -121,7 +122,7 @@ async fn signing_set_validation_check_for_stacks_transactions() {
         rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
-        stacks_sign_request: LruCache::new(NonZeroUsize::new(2).unwrap()),
+        stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
     };
 
     // Let's create a proper sign request.
@@ -217,7 +218,7 @@ async fn signer_rejects_stacks_txns_with_too_high_a_fee(
         rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
-        stacks_sign_request: LruCache::new(NonZeroUsize::new(2).unwrap()),
+        stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
     };
 
     // Setup the transaction fee to be the maximum fee configured plus one, so that it
@@ -303,7 +304,7 @@ async fn signer_rejects_multiple_attempts_in_tenure() {
         rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
-        stacks_sign_request: LruCache::new(NonZeroUsize::new(2).unwrap()),
+        stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
     };
 
     // We need this so that there is a live "network". Otherwise will error when
@@ -446,7 +447,7 @@ pub async fn assert_should_be_able_to_handle_sbtc_requests() {
         rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
-        stacks_sign_request: LruCache::new(NonZeroUsize::new(2).unwrap()),
+        stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
     };
 
     let sbtc_requests: TxRequestIds = TxRequestIds {
@@ -592,7 +593,7 @@ pub async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is
         rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
-        stacks_sign_request: LruCache::new(NonZeroUsize::new(2).unwrap()),
+        stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
     };
 
     let sbtc_requests: TxRequestIds = TxRequestIds {
@@ -658,7 +659,7 @@ async fn new_state_machine_per_valid_sighash() {
         rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
-        stacks_sign_request: LruCache::new(NonZeroUsize::new(2).unwrap()),
+        stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
     };
 
     // We need to convince the signer event loop that it should accept the
@@ -786,7 +787,7 @@ async fn max_one_state_machine_per_bitcoin_block_hash_for_dkg() {
         rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
-        stacks_sign_request: LruCache::new(NonZeroUsize::new(2).unwrap()),
+        stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
     };
 
     // We need to convince the signer event loop that it should accept the
