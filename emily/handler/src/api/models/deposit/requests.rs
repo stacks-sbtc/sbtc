@@ -202,34 +202,28 @@ impl UpdateDepositsRequestBody {
                 .try_into_validated_deposit_update(chainstate.clone())
             {
                 Ok(validated_update) => deposits.push((index, Ok(validated_update))),
-                Err(err) => match err {
-                    ValidationError::DepositMissingFulfillment(
-                        bitcoin_txid,
+                Err(
+                    ref err @ ValidationError::DepositMissingFulfillment(
+                        ref bitcoin_txid,
                         bitcoin_tx_output_index,
-                    ) => {
-                        tracing::warn!(
-                            %bitcoin_txid,
-                            bitcoin_tx_output_index,
-                            "failed to update deposit: request missing fulfillment for completed request."
-                        );
-                        deposits.push((
-                            index,
-                            Err(ValidationError::DepositMissingFulfillment(
-                                bitcoin_txid,
-                                bitcoin_tx_output_index,
-                            )),
-                        ));
-                    }
-                    other => {
-                        tracing::error!(
-                            bitcoin_txid = update.bitcoin_txid,
-                            bitcoin_tx_output_index = update.bitcoin_tx_output_index,
-                            error = format!("{other:?}"),
-                            "unexpected error while validating deposit update: this error should never happen during a deposit update validation.",
-                        );
-                        deposits.push((index, Err(other)));
-                    }
-                },
+                    ),
+                ) => {
+                    tracing::warn!(
+                        %bitcoin_txid,
+                        bitcoin_tx_output_index,
+                        "failed to update deposit: request missing fulfillment for completed request."
+                    );
+                    deposits.push((index, Err(err.clone())));
+                }
+                Err(err) => {
+                    tracing::error!(
+                        bitcoin_txid = update.bitcoin_txid,
+                        bitcoin_tx_output_index = update.bitcoin_tx_output_index,
+                        error = format!("{err:?}"),
+                        "unexpected error while validating deposit update: this error should never happen during a deposit update validation.",
+                    );
+                    deposits.push((index, Err(err)));
+                }
             }
         }
 
