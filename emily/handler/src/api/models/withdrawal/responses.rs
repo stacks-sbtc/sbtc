@@ -27,7 +27,7 @@ pub struct UpdateWithdrawalsResponse {
 #[derive(Clone, Default, Debug, PartialEq, Hash, Serialize, Deserialize, ToSchema, ToResponse)]
 #[serde(rename_all = "camelCase")]
 pub struct WithdrawalWithStatus {
-    /// The fully extracted and validated deposit withdrawal.
+    /// The fully extracted and validated withdrawal.
     pub withdrawal: Withdrawal,
     /// HTTP status code, returned as part of multi-status responses.
     pub status: u16,
