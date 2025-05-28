@@ -639,7 +639,7 @@ impl From<DepositInfoByReclaimPubkeysEntry> for DepositInfo {
 // -----------------------------------------------------------------------------
 
 /// Validated version of the update deposit request.
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Default, Debug, Eq, PartialEq, Hash)]
 pub struct ValidatedUpdateDepositsRequest {
     /// Validated deposit update requests where each update request is in chronological order
     /// of when the update should have occurred, but where the first value of the tuple is the
