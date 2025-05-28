@@ -5851,6 +5851,45 @@ async fn compute_withdrawn_total_gets_all_amounts_in_chain() {
     signer::testing::storage::drop_db(db).await;
 }
 
+#[tokio::test]
+async fn timestamps() {
+    let db = testing::storage::new_test_database().await;
+    let pool = db.pool();
+    let mut rng = get_rng();
+
+    #[derive(sqlx::FromRow, Debug, PartialEq)]
+    struct TimestampTest {
+        ts: model::Timestamp,
+    }
+
+    let timestamp: model::Timestamp = Faker.fake_with_rng(&mut rng);
+
+    // Create a new table specifically for this test
+    sqlx::query("CREATE TABLE IF NOT EXISTS timestamp_test (ts TIMESTAMPTZ)")
+        .execute(pool)
+        .await
+        .unwrap();
+
+    // Attempt to insert a `Timestamp` into the table
+    sqlx::query("INSERT INTO timestamp_test (ts) VALUES ($1)")
+        .bind(timestamp)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    // Attempt to fetch the `Timestamp` back from the table
+    let fetched_ts: TimestampTest = sqlx::query_as("SELECT ts FROM timestamp_test WHERE ts = $1")
+        .bind(timestamp)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+
+    // Check that the fetched timestamp matches the original
+    assert_eq!(fetched_ts.ts, timestamp);
+
+    testing::storage::drop_db(db).await;
+}
+
 /// Check that the query in `compute_withdrawn_total` returns the total
 /// amount of withdrawal amounts on the identified blockchain.
 ///
