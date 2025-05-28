@@ -6,7 +6,7 @@ on:
       - 'environment/*'
 
 concurrency:
-  group: docker-image-${{ github.head_ref || github.ref || github.run_id }}
+  group: deploy-emily-${{ github.ref || github.run_id }}
   cancel-in-progress: true
 
 env:
