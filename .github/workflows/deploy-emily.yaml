@@ -61,7 +61,7 @@ jobs:
       - name: Install Zig
         id: install_zig
         run: |
-          npm install -g @ziglang/cli -y
+          npm install -g @ziglang/cli
 
       - name: Build Emily
         id: build_emily
