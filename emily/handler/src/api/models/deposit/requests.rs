@@ -210,7 +210,7 @@ impl UpdateDepositsRequestBody {
                         tracing::warn!(
                             %bitcoin_txid,
                             bitcoin_tx_output_index,
-                            "failed to update deposit. Request missing fullfillment for completed request."
+                            "failed to update deposit: request missing fulfillment for completed request."
                         );
                         deposits.push((
                             index,
