@@ -219,7 +219,7 @@ impl UpdateDepositsRequestBody {
                     tracing::error!(
                         bitcoin_txid = update.bitcoin_txid,
                         bitcoin_tx_output_index = update.bitcoin_tx_output_index,
-                        error = format!("{err:?}"),
+                        ?err,
                         "unexpected error while validating deposit update: this error should never happen during a deposit update validation.",
                     );
                     deposits.push((index, Err(err)));
