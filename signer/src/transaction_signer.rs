@@ -177,7 +177,7 @@ pub enum StacksSignRequestId {
 }
 
 impl StacksSignRequestId {
-    fn new(request: &StacksTransactionSignRequest) -> Option<Self> {
+    fn from_sign_request(request: &StacksTransactionSignRequest) -> Option<Self> {
         match &request.contract_tx {
             StacksTx::ContractCall(ContractCall::CompleteDepositV1(contract)) => {
                 Some(StacksSignRequestId::CompleteDeposit(contract.outpoint))
@@ -513,7 +513,7 @@ where
         self.send_message(msg, &chain_tip.block_hash).await?;
 
         // Mark as signed if the request needs tracking
-        if let Some(request_id) = StacksSignRequestId::new(request) {
+        if let Some(request_id) = StacksSignRequestId::from_sign_request(request) {
             self.stacks_sign_request
                 .get_or_insert_mut(chain_tip.block_hash, Default::default)
                 .insert(request_id);
@@ -532,7 +532,7 @@ where
         origin_public_key: &PublicKey,
     ) -> Result<(), Error> {
         // Ensure we didn't already sign for this request
-        if let Some(request_id) = StacksSignRequestId::new(request) {
+        if let Some(request_id) = StacksSignRequestId::from_sign_request(request) {
             let already_signed = self
                 .stacks_sign_request
                 .get(&chain_tip.block_hash)

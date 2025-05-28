@@ -333,9 +333,7 @@ async fn signer_rejects_multiple_attempts_in_tenure() {
         .tx()
         .txid();
 
-    // In this test we use `handle_stacks_transaction_sign_request` instead of
-    // `assert_valid_stacks_tx_sign_request` since we mark requests as signed
-    // only after the successful broadcast of the message.
+    // Try to sign the sign request for the first time in this tenure
     let result = tx_signer
         .handle_stacks_transaction_sign_request(&request, &chain_tip, &origin_public_key)
         .await;
@@ -358,7 +356,7 @@ async fn signer_rejects_multiple_attempts_in_tenure() {
     assert_ne!(new_request.nonce, request.nonce);
     assert_ne!(new_request.txid, request.txid);
 
-    // And try to sign it
+    // And try to sign it in the same tenure as the previous attempt
     let result = tx_signer
         .handle_stacks_transaction_sign_request(&new_request, &chain_tip, &origin_public_key)
         .await;
