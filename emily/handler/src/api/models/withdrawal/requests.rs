@@ -144,7 +144,7 @@ impl UpdateWithdrawalsRequestBody {
                     tracing::error!(
                         request_id = update.request_id,
                         ?err,
-                        "unexpected error while validating deposit update: this error should never happen during a deposit update validation.",
+                        "unexpected error while validating withdrawal update: this error should never happen during a withdrawal update validation.",
                     );
                     withdrawals.push((index, Err(err)));
                 }
