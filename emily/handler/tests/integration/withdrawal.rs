@@ -3,9 +3,9 @@ use std::collections::HashMap;
 
 use test_case::test_case;
 
+use testing_emily_client::apis;
 use testing_emily_client::apis::chainstate_api::set_chainstate;
 use testing_emily_client::apis::configuration::Configuration;
-use testing_emily_client::apis::{self, ResponseContent};
 use testing_emily_client::models::{
     Chainstate, CreateWithdrawalRequestBody, Fulfillment, Status, UpdateWithdrawalsRequestBody,
     Withdrawal, WithdrawalInfo, WithdrawalParameters, WithdrawalUpdate,
