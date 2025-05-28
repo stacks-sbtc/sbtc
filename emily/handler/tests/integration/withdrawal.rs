@@ -620,17 +620,14 @@ async fn update_withdrawals_is_forbidden_for_signer(
     .await;
 
     if is_forbidden {
-        assert!(response.is_err());
+        // Check response correctness.
+        let response = response.expect("Batch update should return 200 OK");
+        let withdrawals = response.withdrawals;
+        assert_eq!(withdrawals.len(), 1);
+        let withdrawal = withdrawals.first().unwrap();
+        assert_eq!(withdrawal.status, 403);
 
-        match response.unwrap_err() {
-            testing_emily_client::apis::Error::ResponseError(ResponseContent {
-                status, ..
-            }) => {
-                assert_eq!(status, 403);
-            }
-            e => panic!("Expected a 403 error, got {e:#?}"),
-        }
-
+        // Check withdrawal wasn't updated
         let response = apis::withdrawal_api::get_withdrawal(&user_configuration, request_id)
             .await
             .expect("Received an error after making a valid get withdrawal api call.");
