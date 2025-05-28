@@ -399,7 +399,7 @@ async fn get_withdrawals_by_sender() {
         expected_withdrawal_infos.sort_by(arbitrary_withdrawal_info_partial_cmp);
         let mut actual_withdrawal_infos = actual_sender_data.get(recipient).unwrap().clone();
         actual_withdrawal_infos.sort_by(arbitrary_withdrawal_info_partial_cmp);
-        // Assert that the expected and actual deposit infos are the same.
+        // Assert that the expected and actual withdrawal infos are the same.
         assert_eq!(expected_withdrawal_infos, actual_withdrawal_infos);
     }
 }
@@ -803,7 +803,7 @@ async fn emily_process_withdrawal_updates_when_some_of_them_already_accepted() {
         txid: "test_txid2".to_string(),
     };
 
-    // Sanity check that the two deposits are different.
+    // Sanity check that the two withdrawals are different.
     assert_ne!(
         create_withdrawal_body1.request_id, create_withdrawal_body2.request_id,
         "The two withdrawals should have different request ids."
@@ -833,7 +833,7 @@ async fn emily_process_withdrawal_updates_when_some_of_them_already_accepted() {
             .expect("Received an error after making a valid get withdrawals api call.");
     assert_eq!(withdrawals.withdrawals.len(), 2);
 
-    // Update first deposit to Accepted.
+    // Update first withdrawal to Accepted.
     let update_withdrawals_request_body = UpdateWithdrawalsRequestBody {
         withdrawals: vec![WithdrawalUpdate {
             request_id: create_withdrawal_body1.request_id,
@@ -853,7 +853,7 @@ async fn emily_process_withdrawal_updates_when_some_of_them_already_accepted() {
         response
             .withdrawals
             .iter()
-            .all(|deposit| deposit.status == 200)
+            .all(|withdrawal| withdrawal.status == 200)
     );
     assert_eq!(response.withdrawals.len(), 1);
 
@@ -947,7 +947,7 @@ async fn emily_process_withdrawal_updates_when_some_of_them_are_unknown() {
         txid: "test_txid2".to_string(),
     };
 
-    // Sanity check that the two deposits are different.
+    // Sanity check that the two withdrawals are different.
     assert_ne!(
         create_withdrawal_body1.request_id, create_withdrawal_body2.request_id,
         "The two withdrawals should have different request ids."
