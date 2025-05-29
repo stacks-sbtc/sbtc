@@ -133,20 +133,20 @@ impl UpdateWithdrawalsRequestBody {
                 .try_into_validated_withdrawal_update(chainstate.clone())
             {
                 Ok(validated_update) => withdrawals.push((index, Ok(validated_update))),
-                Err(ref err @ ValidationError::WithdrawalMissingFulfillment(request_id)) => {
+                Err(ref error @ ValidationError::WithdrawalMissingFulfillment(request_id)) => {
                     tracing::warn!(
                         request_id,
                         "failed to update withdrawal: request missing fulfillment for completed request."
                     );
-                    withdrawals.push((index, Err(err.clone())));
+                    withdrawals.push((index, Err(error.clone())));
                 }
-                Err(err) => {
+                Err(error) => {
                     tracing::error!(
                         request_id = update.request_id,
-                        ?err,
+                        %error,
                         "unexpected error while validating withdrawal update: this error should never happen during a withdrawal update validation.",
                     );
-                    withdrawals.push((index, Err(err)));
+                    withdrawals.push((index, Err(error)));
                 }
             }
         }

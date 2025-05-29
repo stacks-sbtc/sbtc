@@ -203,7 +203,7 @@ impl UpdateDepositsRequestBody {
             {
                 Ok(validated_update) => deposits.push((index, Ok(validated_update))),
                 Err(
-                    ref err @ ValidationError::DepositMissingFulfillment(
+                    ref error @ ValidationError::DepositMissingFulfillment(
                         ref bitcoin_txid,
                         bitcoin_tx_output_index,
                     ),
@@ -213,16 +213,16 @@ impl UpdateDepositsRequestBody {
                         bitcoin_tx_output_index,
                         "failed to update deposit: request missing fulfillment for completed request."
                     );
-                    deposits.push((index, Err(err.clone())));
+                    deposits.push((index, Err(error.clone())));
                 }
-                Err(err) => {
+                Err(error) => {
                     tracing::error!(
                         bitcoin_txid = update.bitcoin_txid,
                         bitcoin_tx_output_index = update.bitcoin_tx_output_index,
-                        ?err,
+                        %error,
                         "unexpected error while validating deposit update: this error should never happen during a deposit update validation.",
                     );
-                    deposits.push((index, Err(err)));
+                    deposits.push((index, Err(error)));
                 }
             }
         }
