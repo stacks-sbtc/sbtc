@@ -583,8 +583,8 @@ impl<C: Context, B> BlockObserver<C, B> {
         Ok(())
     }
 
-    /// Update the `SignerState` object with current signer set and
-    /// aggregate key data.
+    /// Update the `SignerState` object with the current signer set, signatures
+    /// required, and aggregate key data.
     ///
     /// # Notes
     ///
@@ -601,16 +601,19 @@ impl<C: Context, B> BlockObserver<C, B> {
     /// * The current aggregate key. It gets this information from the last
     ///   successful key-rotation contract call if it exists, and from the
     ///   latest DKG shares if no such contract call can be found.
-    async fn set_signer_set_and_aggregate_key(&self, chain_tip: BlockHash) -> Result<(), Error> {
-        let (aggregate_key, public_keys) =
-            get_signer_set_and_aggregate_key(&self.context, chain_tip).await?;
+    /// * The current signatures required. It gets this information from the
+    ///   last successful key-rotation contract call if it exists, and from
+    ///   bootstrap_signatures_required config parameter if it's not.
+    async fn set_signer_set_info(&self, chain_tip: BlockHash) -> Result<(), Error> {
+        let info = get_signer_set_info(&self.context, chain_tip).await?;
 
         let state = self.context.state();
-        if let Some(aggregate_key) = aggregate_key {
+        if let Some(aggregate_key) = info.maybe_aggregate_key {
             state.set_current_aggregate_key(aggregate_key);
         }
 
-        state.update_current_signer_set(public_keys);
+        state.update_current_signer_set(info.signer_set);
+        state.set_current_signatures_required(info.signatures_required);
         Ok(())
     }
 
@@ -641,7 +644,7 @@ impl<C: Context, B> BlockObserver<C, B> {
         self.update_sbtc_limits(chain_tip).await?;
 
         tracing::info!("updating the signer state with the current signer set");
-        self.set_signer_set_and_aggregate_key(chain_tip).await?;
+        self.set_signer_set_info(chain_tip).await?;
 
         tracing::info!("updating the signer state with the current bitcoin chain tip");
         self.update_bitcoin_chain_tip().await
@@ -693,6 +696,23 @@ impl<C: Context, B> BlockObserver<C, B> {
     }
 }
 
+/// Structure describing the extended info about signer set.
+pub struct SignerSetInfo {
+    /// The aggregate key of the most recently confirmed key rotation
+    /// contract call on Stacks. If no such transaction exists, then this
+    /// is the aggregate key of the most recent successful DKG run. If DKG
+    /// has never successfully completed, then this is None.
+    pub maybe_aggregate_key: Option<PublicKey>,
+    /// The set of sBTC signers public keys.
+    pub signer_set: BTreeSet<PublicKey>,
+    /// The number of signatures required to sign a transaction.
+    /// This is the number of signature shares necessary to successfully sign a
+    /// bitcoin transaction spending a UTXO locked with the above aggregate key,
+    /// or the number of signers necessary to sign a Stacks transaction under
+    /// the signers' principal.
+    pub signatures_required: u16,
+}
+
 /// Return the signing set that can make sBTC related contract calls along
 /// with the current aggregate key to use for locking UTXOs on bitcoin.
 ///
@@ -703,11 +723,10 @@ impl<C: Context, B> BlockObserver<C, B> {
 /// fall back on the last known DKG shares row in our database, and return
 /// None as the aggregate key if no DKG shares can be found, implying that
 /// this signer has not participated in DKG.
+/// The signatures_required parameter fetched here from the last `rotate-keys`
+/// contract call. None if no such call exists.
 #[tracing::instrument(skip_all)]
-pub async fn get_signer_set_and_aggregate_key<C, B>(
-    context: &C,
-    chain_tip: B,
-) -> Result<(Option<PublicKey>, BTreeSet<PublicKey>), Error>
+pub async fn get_signer_set_info<C, B>(context: &C, chain_tip: B) -> Result<SignerSetInfo, Error>
 where
     C: Context,
     B: Into<model::BitcoinBlockHash>,
@@ -728,14 +747,27 @@ where
         Some(last_key) => {
             let aggregate_key = last_key.aggregate_key;
             let signer_set = last_key.signer_set.into_iter().collect();
-            Ok((Some(aggregate_key), signer_set))
+            let signatures_required = last_key.signatures_required;
+            Ok(SignerSetInfo {
+                maybe_aggregate_key: Some(aggregate_key),
+                signer_set,
+                signatures_required,
+            })
         }
         None => match db.get_latest_encrypted_dkg_shares().await? {
             Some(shares) => {
                 let signer_set = shares.signer_set_public_keys.into_iter().collect();
-                Ok((Some(shares.aggregate_key), signer_set))
+                Ok(SignerSetInfo {
+                    maybe_aggregate_key: Some(shares.aggregate_key),
+                    signer_set,
+                    signatures_required: shares.signature_share_threshold,
+                })
             }
-            None => Ok((None, context.config().signer.bootstrap_signing_set.clone())),
+            None => Ok(SignerSetInfo {
+                maybe_aggregate_key: None,
+                signer_set: context.config().signer.bootstrap_signing_set.clone(),
+                signatures_required: context.config().signer.bootstrap_signatures_required,
+            }),
         },
     }
 }

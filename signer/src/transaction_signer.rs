@@ -1533,6 +1533,24 @@ pub async fn assert_allow_dkg_begin(
     let storage = context.get_storage();
     let config = context.config();
 
+    // Trigger dkg if signatures_required has changed
+    if context.state().current_signatures_required() != config.signer.bootstrap_signatures_required
+    {
+        tracing::info!("signatures required has changed; proceeding with DKG");
+        return Ok(());
+    }
+
+    // Trigger dkg if signer set changes
+    let signer_set_changed = !context
+        .state()
+        .current_signer_set()
+        .has_same_pubkeys(&config.signer.bootstrap_signing_set);
+
+    if signer_set_changed {
+        tracing::info!("signer set has changed; proceeding with DKG");
+        return Ok(());
+    }
+
     // Get the number of DKG shares that have been stored
     let dkg_shares_entry_count = storage.get_encrypted_dkg_shares_count().await?;
 
@@ -1702,7 +1720,7 @@ mod tests {
     ) {
         let chain_tip_height = chain_tip_height.into();
         let dkg_min_bitcoin_block_height = dkg_min_bitcoin_block_height.map(Into::into);
-        let context = TestContext::builder()
+        let mut context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
             .modify_settings(|s| {
@@ -1738,6 +1756,9 @@ mod tests {
             .await
             .unwrap();
 
+        prevent_dkg_on_changed_signer_set(&mut context);
+        prevent_dkg_on_changed_signatures_required(&mut context);
+
         // Test the case
         let result = assert_allow_dkg_begin(&context, &bitcoin_chain_tip).await;
 
@@ -1750,7 +1771,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_wsts_message_asserts_dkg_begin() {
-        let context = TestContext::builder()
+        let mut context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
             .build();
@@ -1780,6 +1801,9 @@ mod tests {
             })
             .await
             .unwrap();
+
+        prevent_dkg_on_changed_signer_set(&mut context);
+        prevent_dkg_on_changed_signatures_required(&mut context);
 
         // Create our signer instance.
         let mut signer = TxSignerEventLoop {
