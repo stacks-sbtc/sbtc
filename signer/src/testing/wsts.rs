@@ -468,7 +468,6 @@ impl SignerSet {
     }
 
     /// Dump the current signer set as a dummy rotate-keys transaction to the given storage
-    /// `None` for `signatures_required` defaults to the number of signers
     pub async fn write_as_rotate_keys_tx<S, Rng>(
         &self,
         storage: &S,
