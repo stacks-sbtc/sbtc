@@ -1145,6 +1145,28 @@ mod tests {
     }
 
     #[test]
+    fn bootstrap_signing_set_of_16_signers_is_not_an_error() {
+        let mut rng = get_rng();
+        clear_env();
+
+        // We need have self public key in the bootstrap set to not fail with different reason
+        let self_key = "035249137286c077ccee65ecc43e724b9b9e5a588e3d7f51e3b62f9624c2a49e46";
+
+        let keys = (0..15)
+            .map(|_| Faker.fake_with_rng(&mut rng))
+            .map(|key: PublicKey| key.to_string())
+            .chain(std::iter::once(self_key.to_string()))
+            .collect::<Vec<_>>();
+        assert_eq!(keys.len(), MAX_SIGNERS as usize);
+        let keys = keys.join(",");
+
+        set_var("SIGNER_SIGNER__BOOTSTRAP_SIGNING_SET", keys);
+
+        let settings = Settings::new_from_default_config();
+        assert!(settings.is_ok());
+    }
+
+    #[test]
     fn invalid_bitcoin_processing_delay_returns_correct_error() {
         clear_env();
 
