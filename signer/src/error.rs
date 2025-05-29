@@ -15,6 +15,7 @@ use crate::stacks::contracts::DepositValidationError;
 use crate::stacks::contracts::RotateKeysValidationError;
 use crate::stacks::contracts::WithdrawalAcceptValidationError;
 use crate::stacks::contracts::WithdrawalRejectValidationError;
+use crate::storage::memory::MemoryStoreError;
 use crate::storage::model::SigHash;
 use crate::wsts_state_machine::StateMachineId;
 
@@ -758,8 +759,9 @@ pub enum Error {
     ExceedsWithdrawalCap(WithdrawalCapContext),
 
     /// An error was raised by the in-memory database.
+    #[cfg(any(test, feature = "testing"))]
     #[error("In-memory database error: {0}")]
-    InMemoryDatabase(String),
+    InMemoryDatabase(MemoryStoreError),
 
     /// An error which can be used in test code instead of `unimplemented!()` or
     /// other alternatives, so that an an actual error is returned instead of
