@@ -49,6 +49,7 @@ use signer::context::RequestDeciderEvent;
 use signer::message::Payload;
 use signer::network::MessageTransfer;
 use signer::storage::model::WithdrawalTxOutput;
+use signer::testing::btc::get_canonical_chain_tip;
 use signer::testing::get_rng;
 
 use testing_emily_client::apis::chainstate_api;
@@ -1348,7 +1349,7 @@ async fn sign_bitcoin_transaction() {
 
     let network = WanNetwork::default();
 
-    let chain_tip_info = rpc.get_chain_tips().unwrap().pop().unwrap();
+    let chain_tip_info = get_canonical_chain_tip(rpc);
 
     // =========================================================================
     // Step 1 - Create a database, an associated context, and a Keypair for
@@ -1775,7 +1776,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
 
     let network = WanNetwork::default();
 
-    let chain_tip_info = rpc.get_chain_tips().unwrap().pop().unwrap();
+    let chain_tip_info = get_canonical_chain_tip(rpc);
     // This is the height where the signers will run DKG afterward. We
     // create 4 bitcoin blocks between now and when we want DKG to run a
     // second time:
@@ -2389,7 +2390,7 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
 
     let network = WanNetwork::default();
 
-    let chain_tip_info = rpc.get_chain_tips().unwrap().pop().unwrap();
+    let chain_tip_info = get_canonical_chain_tip(rpc);
 
     // =========================================================================
     // Step 1 - Create a database, an associated context, and a Keypair for
@@ -3088,7 +3089,7 @@ async fn test_conservative_initial_sbtc_limits() {
 
     let network = WanNetwork::default();
 
-    let chain_tip_info = rpc.get_chain_tips().unwrap().pop().unwrap();
+    let chain_tip_info = get_canonical_chain_tip(rpc);
 
     // =========================================================================
     // Create a database, an associated context, and a Keypair for each of the
@@ -3466,7 +3467,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
 
     let network = WanNetwork::default();
 
-    let chain_tip_info = rpc.get_chain_tips().unwrap().pop().unwrap();
+    let chain_tip_info = get_canonical_chain_tip(rpc);
 
     // =========================================================================
     // Step 1 - Create a database, an associated context, and a Keypair for
