@@ -29,9 +29,7 @@ use crate::message::BitcoinPreSignAck;
 use crate::message::Payload;
 use crate::message::StacksTransactionSignRequest;
 use crate::message::WstsMessageId;
-use crate::metrics::BITCOIN_BLOCKCHAIN;
 use crate::metrics::Metrics;
-use crate::metrics::STACKS_BLOCKCHAIN;
 use crate::network;
 use crate::stacks::contracts::AsContractCall as _;
 use crate::stacks::contracts::ContractCall;
@@ -289,31 +287,12 @@ where
 
             (Payload::BitcoinPreSignRequest(requests), true, ChainTipStatus::Canonical) => {
                 let instant = std::time::Instant::now();
-                let pre_validation_status = self
+                let presign_result = self
                     .handle_bitcoin_pre_sign_request(requests, &chain_tip)
                     .await;
 
-                let status = if pre_validation_status.is_ok() {
-                    "success"
-                } else {
-                    "failure"
-                };
-                metrics::histogram!(
-                    Metrics::ValidationDurationSeconds,
-                    "blockchain" => BITCOIN_BLOCKCHAIN,
-                    "kind" => "sweep-presign",
-                    "status" => status,
-                )
-                .record(instant.elapsed());
-
-                metrics::counter!(
-                    Metrics::SignRequestsTotal,
-                    "blockchain" => BITCOIN_BLOCKCHAIN,
-                    "kind" => "sweep-presign",
-                    "status" => status,
-                )
-                .increment(1);
-                pre_validation_status?;
+                Metrics::increment_presign_validation(instant, &presign_result);
+                presign_result?;
             }
             // Message types ignored by the transaction signer
             (Payload::StacksTransactionSignature(_), _, _)
@@ -439,24 +418,12 @@ where
         origin_public_key: &PublicKey,
     ) -> Result<(), Error> {
         let instant = std::time::Instant::now();
-        let validation_status = self
+        let validation_result = self
             .assert_valid_stacks_tx_sign_request(request, chain_tip, origin_public_key)
             .await;
 
-        metrics::histogram!(
-            Metrics::ValidationDurationSeconds,
-            "blockchain" => STACKS_BLOCKCHAIN,
-            "kind" => request.tx_kind(),
-        )
-        .record(instant.elapsed());
-        metrics::counter!(
-            Metrics::SignRequestsTotal,
-            "blockchain" => STACKS_BLOCKCHAIN,
-            "kind" => request.tx_kind(),
-            "status" => if validation_status.is_ok() { "success" } else { "failed" },
-        )
-        .increment(1);
-        validation_status?;
+        Metrics::increment_stacks_validation(instant, request, &validation_result);
+        validation_result?;
 
         // We need to set the nonce in order to get the exact transaction
         // that we need to sign.
@@ -765,21 +732,8 @@ where
                         let accepted_sighash =
                             Self::validate_bitcoin_sign_request(&db, &request.message).await;
 
-                        let validation_status = match &accepted_sighash {
-                            Ok(_) => "success",
-                            Err(Error::SigHashConversion(_)) => "improper-sighash",
-                            Err(Error::UnknownSigHash(_)) => "unknown-sighash",
-                            Err(Error::InvalidSigHash(_)) => "invalid-sighash",
-                            Err(_) => "unexpected-failure",
-                        };
-
-                        metrics::counter!(
-                            Metrics::SignRequestsTotal,
-                            "blockchain" => BITCOIN_BLOCKCHAIN,
-                            "kind" => "sweep",
-                            "status" => validation_status,
-                        )
-                        .increment(1);
+                        let sighash_result = accepted_sighash.as_ref().map(|_| ());
+                        Metrics::increment_bitcoin_validation(sighash_result);
 
                         let accepted_sighash = accepted_sighash?;
                         let id = StateMachineId::BitcoinSign(accepted_sighash.sighash);
