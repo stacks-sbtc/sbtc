@@ -1120,7 +1120,7 @@ mod tests {
     }
 
     #[test]
-    fn too_much_signers_returns_correct_error() {
+    fn too_many_signers_returns_correct_error() {
         let mut rng = get_rng();
         clear_env();
 
