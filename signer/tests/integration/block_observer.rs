@@ -50,7 +50,7 @@ use signer::storage::model::TxOutput;
 use signer::storage::model::TxOutputType;
 use signer::storage::model::TxPrevout;
 use signer::storage::model::TxPrevoutType;
-use signer::storage::postgres::PgStore;
+use signer::storage::pgsql::PgStore;
 use signer::testing::btc::get_canonical_chain_tip;
 use signer::testing::stacks::DUMMY_SORTITION_INFO;
 use signer::testing::stacks::DUMMY_TENURE_INFO;
@@ -773,11 +773,6 @@ async fn block_observer_picks_up_chained_unordered_sweeps() {
         .modify_settings(|settings| settings.signer.bootstrap_aggregate_key = Some(aggregate_key))
         .build();
 
-    let block_observer = BlockObserver {
-        context: ctx.clone(),
-        bitcoin_blocks: (),
-    };
-
     // Let's make sure the relevant tables are empty
     let sql = r#"
         SELECT COUNT(*)::INTEGER
@@ -818,10 +813,14 @@ async fn block_observer_picks_up_chained_unordered_sweeps() {
     let mut transactions = block_info.transactions;
     transactions.shuffle(&mut rng);
 
-    block_observer
-        .extract_sbtc_transactions(block_hash, &transactions)
-        .await
-        .unwrap();
+    signer::block_observer::extract_sbtc_transactions(
+        &db,
+        Some(aggregate_key),
+        block_hash,
+        &transactions,
+    )
+    .await
+    .unwrap();
 
     // Okay, now the tables should be populated with all three
     // transactions.

@@ -10,7 +10,7 @@ use crate::{
     emily_client::EmilyInteract,
     error::Error,
     stacks::api::StacksInteract,
-    storage::{DbRead, DbWrite},
+    storage::{DbRead, DbWrite, Transactable},
 };
 
 use super::{Context, SignerSignal, SignerState, TerminationHandle};
@@ -106,7 +106,7 @@ where
 
 impl<S, BC, ST, EM> Context for SignerContext<S, BC, ST, EM>
 where
-    S: DbRead + DbWrite + Clone + Sync + Send + 'static,
+    S: DbRead + DbWrite + Transactable + Clone + Sync + Send + 'static,
     BC: BitcoinInteract + Clone + 'static,
     ST: StacksInteract + Clone + Sync + Send + 'static,
     EM: EmilyInteract + Clone + Sync + Send + 'static,
@@ -149,7 +149,9 @@ where
         self.storage.clone()
     }
 
-    fn get_storage_mut(&self) -> impl DbRead + DbWrite + Clone + Sync + Send + 'static {
+    fn get_storage_mut(
+        &self,
+    ) -> impl DbRead + DbWrite + Transactable + Clone + Sync + Send + 'static {
         self.storage.clone()
     }
 

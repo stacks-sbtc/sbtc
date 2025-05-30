@@ -14,7 +14,7 @@ use signer::network::in_memory2::SignerNetworkInstance;
 use signer::stacks::api::MockStacksInteract;
 use signer::storage::DbRead;
 use signer::storage::DbWrite;
-use signer::storage::postgres::PgStore;
+use signer::storage::pgsql::PgStore;
 use signer::testing::btc::get_canonical_chain_tip;
 use test_case::test_case;
 

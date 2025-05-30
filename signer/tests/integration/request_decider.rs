@@ -26,7 +26,7 @@ use signer::request_decider::RequestDeciderEventLoop;
 use signer::stacks::api::MockStacksInteract;
 use signer::storage::DbRead as _;
 use signer::storage::model::BitcoinBlockHash;
-use signer::storage::postgres::PgStore;
+use signer::storage::pgsql::PgStore;
 use signer::testing;
 use signer::testing::context::*;
 use signer::testing::get_rng;

@@ -16,6 +16,7 @@ use crate::error::Error;
 use crate::stacks::api::StacksInteract;
 use crate::storage::DbRead;
 use crate::storage::DbWrite;
+use crate::storage::Transactable;
 
 pub use messaging::*;
 pub use signer_context::SignerContext;
@@ -40,7 +41,9 @@ pub trait Context: Clone + Sync + Send {
     /// Get a read-only handle to the signer storage.
     fn get_storage(&self) -> impl DbRead + Clone + Sync + Send + 'static;
     /// Get a read-write handle to the signer storage.
-    fn get_storage_mut(&self) -> impl DbRead + DbWrite + Clone + Sync + Send + 'static;
+    fn get_storage_mut(
+        &self,
+    ) -> impl DbRead + DbWrite + Transactable + Clone + Sync + Send + 'static;
     /// Get a handle to a Bitcoin client.
     fn get_bitcoin_client(&self) -> impl BitcoinInteract + Clone + 'static;
     /// Get a handler to the Stacks client.

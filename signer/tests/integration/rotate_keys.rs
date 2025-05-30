@@ -19,7 +19,7 @@ use signer::storage::model::KeyRotationEvent;
 use signer::storage::model::StacksBlockHash;
 use signer::storage::model::StacksPrincipal;
 use signer::storage::model::StacksTxId;
-use signer::storage::postgres::PgStore;
+use signer::storage::pgsql::PgStore;
 use signer::testing;
 use signer::testing::context::*;
 use signer::testing::get_rng;

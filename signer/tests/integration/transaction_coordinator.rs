@@ -45,6 +45,7 @@ use signer::bitcoin::utxo::BitcoinInputsOutputs;
 use signer::bitcoin::utxo::Fees;
 use signer::bitcoin::utxo::TxDeconstructor as _;
 use signer::bitcoin::validation::WithdrawalValidationResult;
+use signer::block_observer;
 use signer::context::RequestDeciderEvent;
 use signer::message::Payload;
 use signer::network::MessageTransfer;
@@ -80,7 +81,7 @@ use signer::storage::model::BitcoinTxSigHash;
 use signer::storage::model::DkgSharesStatus;
 use signer::storage::model::StacksTxId;
 use signer::storage::model::WithdrawalRequest;
-use signer::storage::postgres::PgStore;
+use signer::storage::pgsql::PgStore;
 use signer::testing::IterTestExt;
 use signer::testing::stacks::DUMMY_SORTITION_INFO;
 use signer::testing::stacks::DUMMY_TENURE_INFO;
@@ -4156,20 +4157,20 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
     let bitcoin_chain_tip = rpc.get_blockchain_info().unwrap().best_block_hash;
     backfill_bitcoin_blocks(&db, rpc, &bitcoin_chain_tip).await;
 
-    let block_observer = BlockObserver {
-        context: context.clone(),
-        bitcoin_blocks: (),
-    };
-
     let tx = context
         .bitcoin_client
         .get_tx_info(&donation.txid, &bitcoin_chain_tip)
         .unwrap()
         .unwrap();
-    block_observer
-        .extract_sbtc_transactions(bitcoin_chain_tip, &[tx])
-        .await
-        .unwrap();
+    let bootstrap_script_pubkey = context.config().signer.bootstrap_aggregate_key;
+    block_observer::extract_sbtc_transactions(
+        &db,
+        bootstrap_script_pubkey,
+        bitcoin_chain_tip,
+        &[tx],
+    )
+    .await
+    .unwrap();
 
     // When the signer binary starts up in main(), it sets the current
     // signer set public keys in the context state using the values in the
