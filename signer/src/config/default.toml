@@ -129,6 +129,9 @@ db_endpoint = "postgresql://postgres:postgres@127.0.0.1:5432/signer"
 
 # A complete list of (compressed) public keys for known bootstrap signer
 # peers who are approved to be in the sBTC signer set.
+# Bootstrap signer set can be at most 16 signers, see
+# https://github.com/stacks-sbtc/sbtc/issues/1694 for more info.
+# Bootstrap signer set must contain the public key of the signer itself.
 #
 # Required: true Environment: SIGNER_SIGNER__BOOTSTRAP_SIGNING_SET
 # TODO(715): Change after initial signing set has been determined.
