@@ -615,7 +615,7 @@ pub struct SignerSetInfo {
 /// because of the foreign key constraints.
 pub async fn extract_sbtc_transactions<Storage>(
     db: &Storage,
-    bootstrap_script_pubkey: Option<PublicKey>,
+    bootstrap_aggregate_key: Option<PublicKey>,
     block_hash: BlockHash,
     txs: &[BitcoinTxInfo],
 ) -> Result<(), Error>
@@ -625,8 +625,7 @@ where
     // Convert the bootstrap script public key to a `ScriptBuf` if it is
     // provided. This is used to check if the transaction outputs are
     // spent to the bootstrap signers' addresses.
-    let bootstrap_script_pubkey_scriptbuf =
-        bootstrap_script_pubkey.map(|key| key.signers_script_pubkey());
+    let bootstrap_script_pubkey = bootstrap_aggregate_key.map(|key| key.signers_script_pubkey());
 
     // Define a closure to extract the sBTC transactions from the given
     // transactions and write them to the database.
@@ -638,7 +637,7 @@ where
             .await?
             .into_iter()
             .map(ScriptBuf::from_bytes)
-            .chain(bootstrap_script_pubkey_scriptbuf.clone())
+            .chain(bootstrap_script_pubkey.clone())
             .collect();
 
         // Look through all the UTXOs in the given transaction slice and
@@ -649,7 +648,6 @@ where
             let txid = tx_info.compute_txid();
             tracing::trace!(%txid, "attempting to extract sbtc transaction");
             if tx_info.tx.is_coinbase() {
-                tracing::warn!(%txid, "ignoring coinbase tx when extracting sbtc transaction");
                 continue;
             }
 
