@@ -28,7 +28,7 @@ use clarity::vm::types::PrincipalData;
 use clarity::vm::types::SequenceData;
 use clarity::vm::types::StandardPrincipalData;
 use emily_client::apis::deposit_api;
-use fake::Fake as _;
+use fake::Fake;
 use fake::Faker;
 use futures::StreamExt as _;
 use lru::LruCache;
@@ -51,7 +51,8 @@ use signer::network::MessageTransfer;
 use signer::storage::model::WithdrawalTxOutput;
 use signer::testing::btc::get_canonical_chain_tip;
 use signer::testing::get_rng;
-
+use signer::transaction_coordinator::should_coordinate_dkg;
+use signer::transaction_signer::assert_allow_dkg_begin;
 use testing_emily_client::apis::chainstate_api;
 use testing_emily_client::apis::testing_api;
 use testing_emily_client::apis::withdrawal_api;
@@ -569,6 +570,9 @@ async fn process_complete_deposit() {
     // Get the private key of the coordinator of the signer set.
     let private_key = select_coordinator(&setup.sweep_block_hash.into(), &signer_info);
 
+    prevent_dkg_on_changed_signer_set(&mut context);
+    prevent_dkg_on_changed_signatures_required(&mut context);
+
     // Bootstrap the tx coordinator event loop
     context.state().set_sbtc_contracts_deployed();
     let tx_coordinator = transaction_coordinator::TxCoordinatorEventLoop {
@@ -1049,6 +1053,126 @@ async fn run_dkg_from_scratch() {
     for (_ctx, db, _, _) in signers {
         testing::storage::drop_db(db).await;
     }
+}
+
+/// Tests that dkg will be triggered if signer set changes
+#[test_case(true; "signatures_required_changed")]
+#[test_case(false; "signatures_required_unchanged")]
+#[tokio::test]
+async fn run_dkg_if_signer_set_changes(signer_set_changed: bool) {
+    let mut rng = get_rng();
+    let db = testing::storage::new_test_database().await;
+    let mut ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.dkg_target_rounds = std::num::NonZero::<u32>::new(1).unwrap();
+        })
+        .build();
+
+    let mut config_signer_set = ctx.config().signer.bootstrap_signing_set.clone();
+    // Sanity check
+    assert!(!config_signer_set.is_empty());
+
+    // Make sure that in very beginning of the test config and context signer sets are same.
+    ctx.inner
+        .state()
+        .update_current_signer_set(config_signer_set.iter().cloned().collect());
+
+    // Write dkg shares so it won't be a reason to trigger dkg.
+    let dkg_shares = model::EncryptedDkgShares {
+        dkg_shares_status: model::DkgSharesStatus::Verified,
+        ..Faker.fake_with_rng(&mut rng)
+    };
+    db.write_encrypted_dkg_shares(&dkg_shares)
+        .await
+        .expect("failed to write dkg shares");
+
+    // Remove one signer
+    if signer_set_changed {
+        let _removed_signer = config_signer_set
+            .pop_first()
+            .expect("This signer set should not be empty");
+    }
+    // Create chaintip
+    let chaintip: model::BitcoinBlockRef = Faker.fake_with_rng(&mut rng);
+
+    prevent_dkg_on_changed_signatures_required(&mut ctx);
+
+    // Before we actually change the signer set, the DKG won't be triggered
+    assert!(!should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+    assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_err());
+
+    // Now we change context signer set.
+    ctx.inner
+        .state()
+        .update_current_signer_set(config_signer_set.iter().cloned().collect());
+
+    if signer_set_changed {
+        assert!(should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+        assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_ok());
+    } else {
+        assert!(!should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+        assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_err());
+    }
+    testing::storage::drop_db(db).await;
+}
+
+/// Tests that dkg will be triggered if signatures required parameter changes
+#[test_case(true; "signatures_required_changed")]
+#[test_case(false; "signatures_required_unchanged")]
+#[tokio::test]
+async fn run_dkg_if_signatures_required_changes(change_signatures_required: bool) {
+    let mut rng = get_rng();
+    let db = testing::storage::new_test_database().await;
+    let mut ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.dkg_target_rounds = std::num::NonZero::<u32>::new(1).unwrap();
+            settings.signer.bootstrap_signatures_required = 1;
+        })
+        .build();
+    let config_signer_set = ctx.config().signer.bootstrap_signing_set.clone();
+
+    // Sanity check, since we want change bootstrap_signatures_required during this test
+    // we need at least two valid values.
+    assert!(config_signer_set.len() > 1);
+
+    // We want current signer set be same as bootstrap_signer_set to prevent DKG trigger
+    // because of changed signer set. Also we want this signer set be at least 2 signers
+    ctx.state().update_current_signer_set(config_signer_set);
+
+    // Write dkg shares so it won't be a reason to trigger dkg.
+    let dkg_shares = model::EncryptedDkgShares {
+        dkg_shares_status: model::DkgSharesStatus::Verified,
+        ..Faker.fake_with_rng(&mut rng)
+    };
+    db.write_encrypted_dkg_shares(&dkg_shares)
+        .await
+        .expect("failed to write dkg shares");
+
+    // Update state with signatures_required = 1
+    ctx.state().set_current_signatures_required(1);
+
+    // Create chaintip
+    let chaintip: model::BitcoinBlockRef = Faker.fake_with_rng(&mut rng);
+
+    // Before we actually change the signatures_required, the DKG won't be triggered
+    assert!(!should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+    assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_err());
+
+    // Change bootstrap_signatures_required to trigger dkg
+    if change_signatures_required {
+        ctx.config_mut().signer.bootstrap_signatures_required = 2;
+
+        assert!(should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+        assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_ok());
+    } else {
+        assert!(!should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+        assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_err());
+    }
+    testing::storage::drop_db(db).await;
 }
 
 /// Test that we can run multiple DKG rounds.
@@ -3117,6 +3241,10 @@ async fn test_conservative_initial_sbtc_limits() {
             .with_first_bitcoin_core_client()
             .with_mocked_stacks_client()
             .with_mocked_emily_client()
+            .modify_settings(|settings| {
+                settings.signer.bootstrap_signing_set = signer_set_public_keys.clone();
+                settings.signer.bootstrap_signatures_required = signatures_required;
+            })
             .build();
 
         // When the signer binary starts up in main(), it sets the current
@@ -3127,6 +3255,8 @@ async fn test_conservative_initial_sbtc_limits() {
         // we manually update the necessary state here.
         ctx.state()
             .update_current_signer_set(signer_set_public_keys.clone());
+        ctx.state()
+            .set_current_signatures_required(signatures_required);
 
         let network = network.connect(&ctx);
 
@@ -3146,6 +3276,7 @@ async fn test_conservative_initial_sbtc_limits() {
 
     for ((_, db, _, _), dkg_shares) in signers.iter_mut().zip(encrypted_shares.iter_mut()) {
         dkg_shares.dkg_shares_status = DkgSharesStatus::Verified;
+        dkg_shares.signature_share_threshold = signatures_required;
         signer_set
             .write_as_rotate_keys_tx(db, &chain_tip, dkg_shares, &mut rng)
             .await;
@@ -4167,6 +4298,9 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
     // Get the private key of the coordinator of the signer set.
     let private_key = select_coordinator(&bitcoin_chain_tip.block_hash, &signer_info);
 
+    prevent_dkg_on_changed_signer_set(&mut context);
+    prevent_dkg_on_changed_signatures_required(&mut context);
+
     // Bootstrap the tx coordinator event loop
     context.state().set_sbtc_contracts_deployed();
     let tx_coordinator = transaction_coordinator::TxCoordinatorEventLoop {
@@ -4270,6 +4404,9 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.bootstrap_signatures_required = 1;
+        })
         .build();
     let network = WanNetwork::default();
     let signer_network = network.connect(&ctx);
@@ -4292,6 +4429,8 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
     ctx.state()
         .update_current_signer_set(signers.signer_keys().iter().copied().collect());
     ctx.state().set_current_aggregate_key(aggregate_key);
+    ctx.state()
+        .set_current_signatures_required(ctx.config().signer.bootstrap_signatures_required);
 
     ctx.with_stacks_client(|client| {
         client
@@ -4335,6 +4474,9 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
     setup.store_deposit_decisions(&db).await;
     setup.store_sweep_tx(&db).await;
 
+    prevent_dkg_on_changed_signer_set(&mut ctx);
+    prevent_dkg_on_changed_signatures_required(&mut ctx);
+
     let (bitcoin_chain_tip, _) = db.get_chain_tips().await;
     ctx.state().set_bitcoin_chain_tip(bitcoin_chain_tip);
     // If we try to sign a complete deposit, we will ask the bitcoin node to
@@ -4375,7 +4517,7 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
 
     // We will use network messages to detect the coordinator attempt, so we
     // need to connect to the network
-    let fake_ctx = TestContext::default_mocked();
+    let fake_ctx = ctx.clone();
     let mut fake_signer = network.connect(&fake_ctx).spawn();
 
     // Finally, set the deposit status according in the smart contract

@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 use std::sync::{
     RwLock,
-    atomic::{AtomicBool, AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering},
 };
 
 use bitcoin::Amount;
@@ -23,6 +23,7 @@ pub struct SignerState {
     current_signer_set: SignerSet,
     current_limits: RwLock<SbtcLimits>,
     current_aggregate_key: RwLock<Option<PublicKey>>,
+    current_signatures_required: AtomicU16,
     sbtc_contracts_deployed: AtomicBool,
     sbtc_bitcoin_start_height: AtomicU64,
     is_sbtc_bitcoin_start_height_set: AtomicBool,
@@ -35,6 +36,17 @@ impl SignerState {
     /// Get the current signer set.
     pub fn current_signer_set(&self) -> &SignerSet {
         &self.current_signer_set
+    }
+
+    /// Get the current number of signatures required.
+    pub fn current_signatures_required(&self) -> u16 {
+        self.current_signatures_required.load(Ordering::SeqCst)
+    }
+
+    /// Set the current number of signatures required.
+    pub fn set_current_signatures_required(&self, signatures_required: u16) {
+        self.current_signatures_required
+            .store(signatures_required, Ordering::SeqCst);
     }
 
     /// Return the public keys of the current signer set.
@@ -139,6 +151,7 @@ impl Default for SignerState {
     fn default() -> Self {
         Self {
             current_signer_set: Default::default(),
+            current_signatures_required: AtomicU16::new(0),
             current_limits: RwLock::new(SbtcLimits::zero()),
             current_aggregate_key: RwLock::new(None),
             sbtc_contracts_deployed: Default::default(),
@@ -536,6 +549,13 @@ impl SignerSet {
             .read()
             .expect("BUG: Failed to acquire read lock")
             .len()
+    }
+
+    /// Returns true if the two signer sets have the same public keys.
+    pub fn has_same_pubkeys(&self, other: &BTreeSet<PublicKey>) -> bool {
+        let self_pubkeys: BTreeSet<PublicKey> =
+            self.get_signers().iter().map(|s| *s.public_key()).collect();
+        &self_pubkeys == other
     }
 }
 
