@@ -40,7 +40,7 @@ pub const MAX_REQUESTS_PROCESSING_DELAY_SECONDS: u64 = 300;
 
 /// Maximum amount of signers supported by our smart contracts
 /// See https://github.com/stacks-sbtc/sbtc/issues/1694
-pub const MAX_SIGNERS: u64 = 16;
+pub const MAX_SIGNERS: usize = 16;
 
 /// Trait for validating configuration values.
 trait Validatable {
@@ -373,8 +373,8 @@ impl Validatable for SignerConfig {
             return Err(ConfigError::Message(err.to_string()));
         }
 
-        if self.bootstrap_signing_set.len() > MAX_SIGNERS as usize {
-            let err = SignerConfigError::TooManySigners(self.bootstrap_signing_set.len() as u64);
+        if self.bootstrap_signing_set.len() > MAX_SIGNERS {
+            let err = SignerConfigError::TooManySigners(self.bootstrap_signing_set.len());
             return Err(ConfigError::Message(err.to_string()));
         }
 
@@ -1157,7 +1157,7 @@ mod tests {
             .map(|key: PublicKey| key.to_string())
             .chain(std::iter::once(self_key.to_string()))
             .collect::<Vec<_>>();
-        assert_eq!(keys.len(), MAX_SIGNERS as usize);
+        assert_eq!(keys.len(), MAX_SIGNERS);
         let keys = keys.join(",");
 
         set_var("SIGNER_SIGNER__BOOTSTRAP_SIGNING_SET", keys);

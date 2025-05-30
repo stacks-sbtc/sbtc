@@ -91,5 +91,5 @@ pub enum SignerConfigError {
     /// Currently our stacks contracts don't allow more than 16 signers.
     /// See https://github.com/stacks-sbtc/sbtc/issues/1694
     #[error("Bootstrap signer set must be at most 16 signers, but it contains {0} signers")]
-    TooManySigners(u64),
+    TooManySigners(usize),
 }
