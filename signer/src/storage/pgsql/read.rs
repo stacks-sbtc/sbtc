@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use bitcoin::OutPoint;
 use clarity::types::chainstate::StacksBlockId;
 
 use crate::{
@@ -20,10 +21,88 @@ use crate::{
     },
 };
 
-use super::{
-    DepositStatusSummary, PgSignerUtxo, PgStore, WithdrawalStatusSummary, store::PgTransaction,
-};
+use super::{PgStore, PgTransaction};
 
+/// A convenience struct for retrieving a deposit request report
+#[derive(sqlx::FromRow)]
+struct DepositStatusSummary {
+    /// The current signer may not have a record of their vote for
+    /// the deposit. When that happens the `can_accept` and
+    /// `can_sign` fields will be None.
+    can_accept: Option<bool>,
+    /// Whether this signer is a member of the signing set that generated
+    /// the public key locking the deposit.
+    can_sign: Option<bool>,
+    /// The height of the block that confirmed the deposit request
+    /// transaction.
+    block_height: Option<BitcoinBlockHeight>,
+    /// The block hash that confirmed the deposit request.
+    block_hash: Option<model::BitcoinBlockHash>,
+    /// The bitcoin consensus encoded locktime in the reclaim script.
+    #[sqlx(try_from = "i64")]
+    lock_time: u32,
+    /// The amount associated with the deposit UTXO in sats.
+    #[sqlx(try_from = "i64")]
+    amount: u64,
+    /// The maximum amount to spend for the bitcoin miner fee when sweeping
+    /// in the funds.
+    #[sqlx(try_from = "i64")]
+    max_fee: u64,
+    /// The deposit script used so that the signers' can spend funds.
+    deposit_script: model::ScriptPubKey,
+    /// The reclaim script for the deposit.
+    reclaim_script: model::ScriptPubKey,
+    /// The public key used in the deposit script.
+    signers_public_key: PublicKeyXOnly,
+}
+
+/// A convenience struct for retrieving a withdrawal request report
+#[derive(sqlx::FromRow)]
+struct WithdrawalStatusSummary {
+    /// The current signer may not have a record of their vote for the
+    /// withdrawal. When that happens the `is_accepted` field will be
+    /// [`None`].
+    is_accepted: Option<bool>,
+    /// The height of the bitcoin chain tip during the execution of the
+    /// contract call that generated the withdrawal request.
+    bitcoin_block_height: BitcoinBlockHeight,
+    /// The amount associated with the deposit UTXO in sats.
+    #[sqlx(try_from = "i64")]
+    amount: u64,
+    /// The maximum amount to spend for the bitcoin miner fee when sweeping
+    /// in the funds.
+    #[sqlx(try_from = "i64")]
+    max_fee: u64,
+    /// The recipient scriptPubKey of the withdrawn funds.
+    recipient: model::ScriptPubKey,
+    /// Stacks block ID of the block that includes the transaction
+    /// associated with this withdrawal request.
+    stacks_block_hash: model::StacksBlockHash,
+    /// Stacks block ID of the block that includes the transaction
+    /// associated with this withdrawal request.
+    stacks_block_height: StacksBlockHeight,
+}
+
+// A convenience struct for retrieving the signers' UTXO
+#[derive(sqlx::FromRow)]
+struct PgSignerUtxo {
+    txid: model::BitcoinTxId,
+    #[sqlx(try_from = "i32")]
+    output_index: u32,
+    #[sqlx(try_from = "i64")]
+    amount: u64,
+    aggregate_key: PublicKey,
+}
+
+impl From<PgSignerUtxo> for SignerUtxo {
+    fn from(pg_txo: PgSignerUtxo) -> Self {
+        SignerUtxo {
+            outpoint: OutPoint::new(pg_txo.txid.into(), pg_txo.output_index),
+            amount: pg_txo.amount,
+            public_key: pg_txo.aggregate_key.into(),
+        }
+    }
+}
 /// Read-accessors to the Postgres database.
 pub struct PgRead;
 
@@ -31,7 +110,7 @@ impl PgRead {
     /// This function returns the bitcoin block height of the first
     /// confirmed sweep that happened on or after the given minimum block
     /// height.
-    pub(super) async fn get_least_txo_height<'e, E>(
+    async fn get_least_txo_height<'e, E>(
         executor: &'e mut E,
         chain_tip: &model::BitcoinBlockHash,
         min_block_height: BitcoinBlockHeight,
@@ -62,7 +141,7 @@ impl PgRead {
         .map_err(Error::SqlxQuery)
     }
 
-    pub(super) async fn get_utxo<'e, E>(
+    async fn get_utxo<'e, E>(
         executor: &'e mut E,
         chain_tip: &model::BitcoinBlockHash,
         output_type: model::TxOutputType,
@@ -144,7 +223,7 @@ impl PgRead {
     }
 
     /// Return a donation UTXO with minimum height.
-    pub(super) async fn get_donation_utxo<'e, E>(
+    async fn get_donation_utxo<'e, E>(
         executor: &'e mut E,
         chain_tip: &model::BitcoinBlockHash,
     ) -> Result<Option<SignerUtxo>, Error>
@@ -165,7 +244,7 @@ impl PgRead {
     /// `None` is returned if there is no transaction sweeping out the
     /// funds that has been confirmed on the blockchain identified by the
     /// given chain-tip.
-    pub(super) async fn get_withdrawal_sweep_info<'e, E>(
+    async fn get_withdrawal_sweep_info<'e, E>(
         executor: &'e mut E,
         chain_tip: &model::BitcoinBlockHash,
         id: &model::QualifiedRequestId,
@@ -207,7 +286,7 @@ impl PgRead {
     /// `None` is returned if withdrawal request is not in the database or
     /// if the withdrawal request is not associated with a stacks block in
     /// the database.
-    pub(super) async fn get_withdrawal_request_status_summary<'e, E>(
+    async fn get_withdrawal_request_status_summary<'e, E>(
         executor: &'e mut E,
         id: &model::QualifiedRequestId,
         signer_public_key: &PublicKey,
@@ -295,7 +374,7 @@ impl PgRead {
     /// always write the associated transaction to the database for each
     /// deposit so that cannot be the reason for why the query here returns
     /// `None`).
-    pub(super) async fn get_deposit_request_status_summary<'e, E>(
+    async fn get_deposit_request_status_summary<'e, E>(
         executor: &'e mut E,
         chain_tip: &model::BitcoinBlockHash,
         txid: &model::BitcoinTxId,
@@ -357,7 +436,7 @@ impl PgRead {
     ///
     /// This query only looks back at transactions that are confirmed at or
     /// after the given `min_block_height`.
-    pub(super) async fn get_deposit_sweep_txid<'e, E>(
+    async fn get_deposit_sweep_txid<'e, E>(
         executor: &'e mut E,
         chain_tip: &model::BitcoinBlockHash,
         txid: &model::BitcoinTxId,
@@ -403,7 +482,7 @@ impl PgRead {
     ///   to the height returned here should contain the transaction with
     ///   the signers' UTXO, and won't if there is a reorg spanning more
     ///   than [`MAX_REORG_BLOCK_COUNT`] blocks.
-    pub(super) async fn minimum_utxo_height<'e, E>(
+    async fn minimum_utxo_height<'e, E>(
         executor: &'e mut E,
     ) -> Result<Option<BitcoinBlockHeight>, Error>
     where
