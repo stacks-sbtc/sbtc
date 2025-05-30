@@ -219,7 +219,7 @@ impl<Storage, Bitcoin, Stacks>
 pub fn prevent_dkg_on_changed_signer_set<Storage, Bitcoin, Stacks, Emily>(
     context: &mut TestContext<Storage, Bitcoin, Stacks, Emily>,
 ) where
-    Storage: DbRead + DbWrite + Clone + Sync + Send + 'static,
+    Storage: DbRead + DbWrite + Transactable + Clone + Sync + Send + 'static,
     Bitcoin: BitcoinInteract + Clone + Send + Sync + 'static,
     Stacks: StacksInteract + Clone + Send + Sync + 'static,
     Emily: EmilyInteract + Clone + Send + Sync + 'static,
@@ -242,7 +242,7 @@ pub fn prevent_dkg_on_changed_signer_set<Storage, Bitcoin, Stacks, Emily>(
 pub fn prevent_dkg_on_changed_signatures_required<Storage, Bitcoin, Stacks, Emily>(
     context: &mut TestContext<Storage, Bitcoin, Stacks, Emily>,
 ) where
-    Storage: DbRead + DbWrite + Clone + Sync + Send + 'static,
+    Storage: DbRead + DbWrite + Transactable + Clone + Sync + Send + 'static,
     Bitcoin: BitcoinInteract + Clone + Send + Sync + 'static,
     Stacks: StacksInteract + Clone + Send + Sync + 'static,
     Emily: EmilyInteract + Clone + Send + Sync + 'static,
