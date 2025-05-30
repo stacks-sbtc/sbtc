@@ -17,7 +17,7 @@ impl PgWrite {
         block: &model::BitcoinBlock,
     ) -> Result<(), Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query(
             "INSERT INTO sbtc_signer.bitcoin_blocks
@@ -43,7 +43,7 @@ impl PgWrite {
         block: &model::StacksBlock,
     ) -> Result<(), Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query(
             "INSERT INTO sbtc_signer.stacks_blocks
@@ -71,7 +71,7 @@ impl PgWrite {
         deposit_request: &model::DepositRequest,
     ) -> Result<(), Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query(
             "INSERT INTO sbtc_signer.deposit_requests
@@ -111,7 +111,7 @@ impl PgWrite {
         deposit_requests: Vec<model::DepositRequest>,
     ) -> Result<(), Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         if deposit_requests.is_empty() {
             return Ok(());
@@ -220,7 +220,7 @@ impl PgWrite {
         request: &model::WithdrawalRequest,
     ) -> Result<(), Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query(
             "INSERT INTO sbtc_signer.withdrawal_requests
@@ -257,7 +257,7 @@ impl PgWrite {
         decision: &model::DepositSigner,
     ) -> Result<(), Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query(
             "INSERT INTO sbtc_signer.deposit_signers
@@ -287,7 +287,7 @@ impl PgWrite {
         decision: &model::WithdrawalSigner,
     ) -> Result<(), Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query(
             "INSERT INTO sbtc_signer.withdrawal_signers
@@ -317,7 +317,7 @@ impl PgWrite {
         tx_ref: &model::BitcoinTxRef,
     ) -> Result<(), Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query(
             "INSERT INTO sbtc_signer.bitcoin_transactions (txid, block_hash)
@@ -338,7 +338,7 @@ impl PgWrite {
         txs: Vec<model::BitcoinTxRef>,
     ) -> Result<(), Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         if txs.is_empty() {
             return Ok(());
@@ -384,7 +384,7 @@ impl PgWrite {
         blocks: Vec<model::StacksBlock>,
     ) -> Result<(), Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         if blocks.is_empty() {
             return Ok(());
@@ -450,7 +450,7 @@ impl PgWrite {
         shares: &model::EncryptedDkgShares,
     ) -> Result<(), Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         let started_at_bitcoin_block_height = i64::try_from(shares.started_at_bitcoin_block_height)
             .map_err(Error::ConversionDatabaseInt)?;
@@ -494,7 +494,7 @@ impl PgWrite {
         key_rotation: &model::KeyRotationEvent,
     ) -> Result<(), Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query(
             r#"
@@ -527,7 +527,7 @@ impl PgWrite {
         event: &CompletedDepositEvent,
     ) -> Result<(), Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query(
             "
@@ -563,7 +563,7 @@ impl PgWrite {
         event: &WithdrawalAcceptEvent,
     ) -> Result<(), Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query(
             "
@@ -603,7 +603,7 @@ impl PgWrite {
         event: &WithdrawalRejectEvent,
     ) -> Result<(), Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query(
             "
@@ -631,7 +631,7 @@ impl PgWrite {
         output: &model::TxOutput,
     ) -> Result<(), Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query(
             r#"
@@ -663,7 +663,7 @@ impl PgWrite {
         output: &model::WithdrawalTxOutput,
     ) -> Result<(), Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query(
             r#"
@@ -691,7 +691,7 @@ impl PgWrite {
         prevout: &model::TxPrevout,
     ) -> Result<(), Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query(
             r#"
@@ -725,7 +725,7 @@ impl PgWrite {
         sighashes: &[model::BitcoinTxSigHash],
     ) -> Result<(), Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         if sighashes.is_empty() {
             return Ok(());
@@ -827,7 +827,7 @@ impl PgWrite {
         withdrawal_outputs: &[model::BitcoinWithdrawalOutput],
     ) -> Result<(), Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         if withdrawal_outputs.is_empty() {
             return Ok(());
@@ -917,8 +917,8 @@ impl PgWrite {
         aggregate_key: X,
     ) -> Result<bool, Error>
     where
-        X: Into<PublicKeyXOnly> + Send,
-        &'e mut E: sqlx::PgExecutor<'e> + Send + 'e,
+        X: Into<PublicKeyXOnly>,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query(
             r#"
@@ -940,8 +940,8 @@ impl PgWrite {
         aggregate_key: X,
     ) -> Result<bool, Error>
     where
-        X: Into<PublicKeyXOnly> + Send,
-        &'e mut E: sqlx::PgExecutor<'e> + Send + 'e,
+        X: Into<PublicKeyXOnly>,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query(
             r#"
@@ -1093,14 +1093,14 @@ impl DbWrite for PgStore {
 
     async fn revoke_dkg_shares<X>(&self, aggregate_key: X) -> Result<bool, Error>
     where
-        X: Into<PublicKeyXOnly> + Send,
+        X: Into<PublicKeyXOnly>,
     {
         PgWrite::revoke_dkg_shares(self.get_connection().await?.as_mut(), aggregate_key).await
     }
 
     async fn verify_dkg_shares<X>(&self, aggregate_key: X) -> Result<bool, Error>
     where
-        X: Into<PublicKeyXOnly> + Send,
+        X: Into<PublicKeyXOnly>,
     {
         PgWrite::verify_dkg_shares(self.get_connection().await?.as_mut(), aggregate_key).await
     }
@@ -1254,7 +1254,7 @@ impl DbWrite for PgTransaction<'_> {
 
     async fn revoke_dkg_shares<X>(&self, aggregate_key: X) -> Result<bool, Error>
     where
-        X: Into<crate::keys::PublicKeyXOnly> + Send,
+        X: Into<crate::keys::PublicKeyXOnly>,
     {
         let mut tx = self.tx.lock().await;
         PgWrite::revoke_dkg_shares(tx.as_mut(), aggregate_key).await
@@ -1262,7 +1262,7 @@ impl DbWrite for PgTransaction<'_> {
 
     async fn verify_dkg_shares<X>(&self, aggregate_key: X) -> Result<bool, Error>
     where
-        X: Into<crate::keys::PublicKeyXOnly> + Send,
+        X: Into<crate::keys::PublicKeyXOnly>,
     {
         let mut tx = self.tx.lock().await;
         PgWrite::verify_dkg_shares(tx.as_mut(), aggregate_key).await

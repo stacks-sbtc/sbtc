@@ -116,7 +116,7 @@ impl PgRead {
         min_block_height: BitcoinBlockHeight,
     ) -> Result<Option<BitcoinBlockHeight>, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query_scalar::<_, BitcoinBlockHeight>(
             r#"
@@ -148,7 +148,7 @@ impl PgRead {
         min_block_height: BitcoinBlockHeight,
     ) -> Result<Option<SignerUtxo>, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         let pg_utxo = sqlx::query_as::<_, PgSignerUtxo>(
             r#"
@@ -204,7 +204,7 @@ impl PgRead {
         executor: &'e mut E,
     ) -> Result<Option<BitcoinBlockHeight>, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query_scalar::<_, BitcoinBlockHeight>(
             r#"
@@ -229,7 +229,7 @@ impl PgRead {
     ) -> Result<Option<SignerUtxo>, Error>
     where
         E: 'static,
-        for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
     {
         let Some(min_block_height) = Self::minimum_donation_txo_height(executor).await? else {
             return Ok(None);
@@ -250,7 +250,7 @@ impl PgRead {
         id: &model::QualifiedRequestId,
     ) -> Result<Option<model::BitcoinTxRef>, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query_as::<_, model::BitcoinTxRef>(
             r#"
@@ -292,7 +292,7 @@ impl PgRead {
         signer_public_key: &PublicKey,
     ) -> Result<Option<WithdrawalStatusSummary>, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query_as::<_, WithdrawalStatusSummary>(
             r#"
@@ -338,7 +338,7 @@ impl PgRead {
         output_index: u32,
     ) -> Result<Option<BitcoinBlockHeight>, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         // Before the deposit request is written a signer also stores the
         // bitcoin transaction and (after #731) the bitcoin block
@@ -383,7 +383,7 @@ impl PgRead {
     ) -> Result<Option<DepositStatusSummary>, Error>
     where
         E: 'static,
-        for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
     {
         // We first get the least height for when the deposit request was
         // confirmed. This height serves as the stopping criteria for the
@@ -444,7 +444,7 @@ impl PgRead {
         min_block_height: BitcoinBlockHeight,
     ) -> Result<Option<model::BitcoinTxId>, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query_scalar::<_, model::BitcoinTxId>(
             r#"
@@ -487,7 +487,7 @@ impl PgRead {
     ) -> Result<Option<BitcoinBlockHeight>, Error>
     where
         E: 'static,
-        for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
     {
         #[derive(sqlx::FromRow)]
         struct PgCandidateUtxo {
@@ -637,7 +637,7 @@ impl PgRead {
         block_height: StacksBlockHeight,
     ) -> Result<bool, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query_scalar::<_, bool>(
             r#"
@@ -680,7 +680,7 @@ impl PgRead {
         block_hash: &model::BitcoinBlockHash,
     ) -> Result<Option<model::BitcoinBlock>, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query_as::<_, model::BitcoinBlock>(
             "SELECT
@@ -701,7 +701,7 @@ impl PgRead {
         block_hash: &model::StacksBlockHash,
     ) -> Result<Option<model::StacksBlock>, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query_as::<_, model::StacksBlock>(
             "SELECT
@@ -722,7 +722,7 @@ impl PgRead {
         executor: &'e mut E,
     ) -> Result<Option<model::BitcoinBlockHash>, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query_as::<_, model::BitcoinBlock>(
             "SELECT
@@ -743,7 +743,7 @@ impl PgRead {
         executor: &'e mut E,
     ) -> Result<Option<model::BitcoinBlockRef>, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query_as::<_, model::BitcoinBlockRef>(
             "SELECT
@@ -763,7 +763,7 @@ impl PgRead {
         bitcoin_chain_tip: &model::BitcoinBlockHash,
     ) -> Result<Option<model::StacksBlock>, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         // TODO: stop recursion after the first bitcoin block having stacks block anchored?
         // Note that in tests generated data we may get a taller stacks chain anchored to a
@@ -813,7 +813,7 @@ impl PgRead {
         signer_public_key: &PublicKey,
     ) -> Result<Vec<model::DepositRequest>, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query_as::<_, model::DepositRequest>(
             r#"
@@ -874,7 +874,7 @@ impl PgRead {
     ) -> Result<Vec<model::DepositRequest>, Error>
     where
         E: 'static,
-        for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
     {
         // Add one to the acceptable unlock height because the chain tip is at height one less
         // than the height of the next block, which is the block for which we are assessing
@@ -959,7 +959,7 @@ impl PgRead {
         aggregate_key: &PublicKey,
     ) -> Result<model::SignerVotes, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query_as::<_, model::SignerVote>(
             r#"
@@ -999,7 +999,7 @@ impl PgRead {
         aggregate_key: &PublicKey,
     ) -> Result<model::SignerVotes, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query_as::<_, model::SignerVote>(
             r#"
@@ -1044,7 +1044,7 @@ impl PgRead {
     ) -> Result<Option<DepositRequestReport>, Error>
     where
         E: 'static,
-        for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
     {
         // Now fetch the deposit summary
         let summary_fut = Self::get_deposit_request_status_summary(
@@ -1114,7 +1114,7 @@ impl PgRead {
         output_index: u32,
     ) -> Result<Vec<model::DepositSigner>, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query_as::<_, model::DepositSigner>(
             "SELECT
@@ -1140,7 +1140,7 @@ impl PgRead {
         signer_public_key: &PublicKey,
     ) -> Result<Option<bool>, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query_scalar::<_, bool>(
             r#"
@@ -1174,7 +1174,7 @@ impl PgRead {
         output_index: u32,
     ) -> Result<bool, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query_scalar::<_, bool>(
             r#"
@@ -1199,7 +1199,7 @@ impl PgRead {
         block_hash: &model::StacksBlockHash,
     ) -> Result<Vec<model::WithdrawalSigner>, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query_as::<_, model::WithdrawalSigner>(
             "SELECT
@@ -1227,7 +1227,7 @@ impl PgRead {
     ) -> Result<Vec<model::WithdrawalRequest>, Error>
     where
         E: 'static,
-        for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
     {
         let Some(stacks_chain_tip) = Self::get_stacks_chain_tip(executor, chain_tip).await? else {
             return Ok(Vec::new());
@@ -1307,7 +1307,7 @@ impl PgRead {
         signature_threshold: u16,
     ) -> Result<Vec<model::WithdrawalRequest>, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query_as::<_, model::WithdrawalRequest>(
             r#"
@@ -1448,7 +1448,7 @@ impl PgRead {
     ) -> Result<Vec<model::WithdrawalRequest>, Error>
     where
         E: 'static,
-        for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
     {
         let Some(stacks_chain_tip) =
             Self::get_stacks_chain_tip(executor, &chain_tip.block_hash).await?
@@ -1560,7 +1560,7 @@ impl PgRead {
     ) -> Result<Option<WithdrawalRequestReport>, Error>
     where
         E: 'static,
-        for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
     {
         let summary_fut =
             Self::get_withdrawal_request_status_summary(executor, id, signer_public_key);
@@ -1603,7 +1603,7 @@ impl PgRead {
         context_window: u16,
     ) -> Result<u64, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         let total_amount = sqlx::query_scalar::<_, Option<i64>>(
             r#"
@@ -1632,7 +1632,7 @@ impl PgRead {
         txid: &model::BitcoinTxId,
     ) -> Result<Vec<model::BitcoinBlockHash>, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query_as::<_, model::BitcoinTxRef>(
             "SELECT txid, block_hash FROM sbtc_signer.bitcoin_transactions WHERE txid = $1",
@@ -1653,7 +1653,7 @@ impl PgRead {
         block_id: StacksBlockId,
     ) -> Result<bool, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query_scalar::<_, bool>(
             r#"
@@ -1673,8 +1673,8 @@ impl PgRead {
         aggregate_key: X,
     ) -> Result<Option<model::EncryptedDkgShares>, Error>
     where
-        X: Into<PublicKeyXOnly> + Send,
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        X: Into<PublicKeyXOnly>,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         // The aggregate_key column stores compressed public keys, which
         // always include a parity byte. Since the input here is an x-only
@@ -1708,7 +1708,7 @@ impl PgRead {
         executor: &'e mut E,
     ) -> Result<Option<model::EncryptedDkgShares>, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query_as::<_, model::EncryptedDkgShares>(
             r#"
@@ -1737,7 +1737,7 @@ impl PgRead {
         executor: &'e mut E,
     ) -> Result<Option<model::EncryptedDkgShares>, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query_as::<_, model::EncryptedDkgShares>(
             r#"
@@ -1766,7 +1766,7 @@ impl PgRead {
     /// Returns the number of non-failed rows in the `dkg_shares` table.
     async fn get_encrypted_dkg_shares_count<'e, E>(executor: &'e mut E) -> Result<u32, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         let count: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM sbtc_signer.dkg_shares WHERE dkg_shares_status != 'failed';",
@@ -1791,7 +1791,7 @@ impl PgRead {
     ) -> Result<Option<model::KeyRotationEvent>, Error>
     where
         E: 'static,
-        for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
     {
         let Some(stacks_chain_tip) = Self::get_stacks_chain_tip(executor, chain_tip).await? else {
             return Ok(None);
@@ -1847,7 +1847,7 @@ impl PgRead {
     ) -> Result<bool, Error>
     where
         E: 'static,
-        for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
     {
         let Some(stacks_chain_tip) = Self::get_stacks_chain_tip(executor, chain_tip).await? else {
             return Err(Error::NoStacksChainTip);
@@ -1898,7 +1898,7 @@ impl PgRead {
         executor: &'e mut E,
     ) -> Result<Vec<model::Bytes>, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query_scalar::<_, model::Bytes>(
             r#"
@@ -1936,7 +1936,7 @@ impl PgRead {
     ) -> Result<Option<SignerUtxo>, Error>
     where
         E: 'static,
-        for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
     {
         // If we've swept funds before, then will have a signer output and
         // a minimum UTXO height, so let's try that first.
@@ -1964,7 +1964,7 @@ impl PgRead {
         block_hash: &model::BitcoinBlockHash,
     ) -> Result<bool, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query_scalar::<_, bool>(
             r#"
@@ -1987,7 +1987,7 @@ impl PgRead {
         block_ref: &model::BitcoinBlockRef,
     ) -> Result<bool, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         let height_diff: u64 = *chain_tip
             .block_height
@@ -2038,7 +2038,7 @@ impl PgRead {
         script: &model::ScriptPubKey,
     ) -> Result<bool, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query_scalar::<_, bool>(
             r#"
@@ -2062,7 +2062,7 @@ impl PgRead {
     ) -> Result<bool, Error>
     where
         E: 'static,
-        for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
     {
         let Some(signer_utxo) = Self::get_signer_utxo(executor, bitcoin_chain_tip).await? else {
             return Ok(false);
@@ -2118,7 +2118,7 @@ impl PgRead {
     ) -> Result<bool, Error>
     where
         E: 'static,
-        for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
     {
         // We want to find the first sweep transaction that happened
         // *after* the last time the signers considered sweeping the
@@ -2180,7 +2180,7 @@ impl PgRead {
     ) -> Result<Vec<model::SweptDepositRequest>, Error>
     where
         E: 'static,
-        for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
     {
         // The following tests define the criteria for this query:
         // - [X] get_swept_deposit_requests_returns_swept_deposit_requests
@@ -2273,7 +2273,7 @@ impl PgRead {
     ) -> Result<Vec<model::SweptWithdrawalRequest>, Error>
     where
         E: 'static,
-        for<'c> &'c mut E: sqlx::PgExecutor<'c, Database = sqlx::Postgres> + Send + 'c,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
     {
         // The following tests define the criteria for this query:
         // - [X] get_swept_withdrawal_requests_returns_swept_withdrawal_requests
@@ -2373,7 +2373,7 @@ impl PgRead {
         output_index: u32,
     ) -> Result<Option<model::DepositRequest>, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query_as::<_, model::DepositRequest>(
             r#"
@@ -2404,7 +2404,7 @@ impl PgRead {
         sighash: &model::SigHash,
     ) -> Result<Option<(bool, PublicKeyXOnly)>, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query_as::<_, (bool, PublicKeyXOnly)>(
             r#"
@@ -2428,7 +2428,7 @@ impl PgRead {
         signer_public_key: &PublicKey,
     ) -> Result<Vec<model::WithdrawalSigner>, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query_as::<_, model::WithdrawalSigner>(
             r#"
@@ -2466,7 +2466,7 @@ impl PgRead {
         signer_public_key: &PublicKey,
     ) -> Result<Vec<model::DepositSigner>, Error>
     where
-        &'e mut E: sqlx::PgExecutor<'e, Database = sqlx::Postgres> + Send + 'e,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         sqlx::query_as::<_, model::DepositSigner>(
             r#"
@@ -2743,7 +2743,7 @@ impl DbRead for PgStore {
         aggregate_key: X,
     ) -> Result<Option<model::EncryptedDkgShares>, Error>
     where
-        X: Into<PublicKeyXOnly> + Send,
+        X: Into<PublicKeyXOnly>,
     {
         PgRead::get_encrypted_dkg_shares(self.get_connection().await?.as_mut(), aggregate_key).await
     }
@@ -3164,7 +3164,7 @@ impl DbRead for PgTransaction<'_> {
         aggregate_key: X,
     ) -> Result<Option<model::EncryptedDkgShares>, Error>
     where
-        X: Into<crate::keys::PublicKeyXOnly> + Send,
+        X: Into<crate::keys::PublicKeyXOnly>,
     {
         let mut tx = self.tx.lock().await;
         PgRead::get_encrypted_dkg_shares(tx.as_mut(), aggregate_key).await
