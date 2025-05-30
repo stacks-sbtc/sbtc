@@ -30,5 +30,15 @@ pub struct GetDepositsResponse {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateDepositsResponse {
     /// Deposit infos: deposits with a little less data.
-    pub deposits: Vec<Deposit>,
+    pub deposits: Vec<DepositWithStatus>,
+}
+
+/// Wrapper for deposit with status code. Used for multi-status responses.
+#[derive(Clone, Default, Debug, PartialEq, Hash, Serialize, Deserialize, ToSchema, ToResponse)]
+#[serde(rename_all = "camelCase")]
+pub struct DepositWithStatus {
+    /// The fully extracted and validated deposit request.
+    pub deposit: Deposit,
+    /// HTTP status code, returned as part of multi-status responses.
+    pub status: u16,
 }

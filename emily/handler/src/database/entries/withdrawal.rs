@@ -8,7 +8,7 @@ use crate::{
         common::Status,
         withdrawal::{Withdrawal, WithdrawalInfo, WithdrawalParameters},
     },
-    common::error::{Error, Inconsistency},
+    common::error::{Error, Inconsistency, ValidationError},
 };
 
 use super::{
@@ -636,7 +636,7 @@ pub struct ValidatedUpdateWithdrawalRequest {
     ///
     /// This allows the updates to be executed in chronological order but returned in the order
     /// that the client sent them.
-    pub withdrawals: Vec<(usize, ValidatedWithdrawalUpdate)>,
+    pub withdrawals: Vec<(usize, Result<ValidatedWithdrawalUpdate, ValidationError>)>,
 }
 
 /// Validated withdrawal update.
