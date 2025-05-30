@@ -37,6 +37,7 @@ use crate::network;
 use crate::stacks::contracts::AsContractCall as _;
 use crate::stacks::contracts::ContractCall;
 use crate::stacks::contracts::ReqContext;
+use crate::stacks::contracts::SmartContract;
 use crate::stacks::contracts::StacksTx;
 use crate::stacks::wallet::MultisigTx;
 use crate::stacks::wallet::SignerWallet;
@@ -174,25 +175,48 @@ struct AcceptedSigHash {
 pub enum StacksSignRequestId {
     /// A complete deposit transaction
     CompleteDeposit(bitcoin::OutPoint),
-    /// An accept withdrawal for a request id
-    AcceptWithdrawal(u64),
-    /// A reject withdrawal for a request id
-    RejectWithdrawal(u64),
+    /// An accept or reject withdrawal for a request id. Since we can only sign
+    /// for one of them at any time, we don't differentiate.
+    CompleteWithdrawal(u64),
+    /// A rotate keys transaction for an aggregate key
+    RotateKeys(PublicKey),
+    /// A new contract deployment
+    SmartContract(SmartContract),
 }
 
 impl StacksSignRequestId {
-    fn from_sign_request(request: &StacksTransactionSignRequest) -> Option<Self> {
+    fn from_sign_request(request: &StacksTransactionSignRequest) -> Self {
         match &request.contract_tx {
             StacksTx::ContractCall(ContractCall::CompleteDepositV1(contract)) => {
-                Some(StacksSignRequestId::CompleteDeposit(contract.outpoint))
+                StacksSignRequestId::CompleteDeposit(contract.outpoint)
             }
-            StacksTx::ContractCall(ContractCall::AcceptWithdrawalV1(contract)) => Some(
-                StacksSignRequestId::AcceptWithdrawal(contract.id.request_id),
-            ),
-            StacksTx::ContractCall(ContractCall::RejectWithdrawalV1(contract)) => Some(
-                StacksSignRequestId::RejectWithdrawal(contract.id.request_id),
-            ),
-            _ => None,
+            StacksTx::ContractCall(ContractCall::AcceptWithdrawalV1(contract)) => {
+                StacksSignRequestId::CompleteWithdrawal(contract.id.request_id)
+            }
+            StacksTx::ContractCall(ContractCall::RejectWithdrawalV1(contract)) => {
+                StacksSignRequestId::CompleteWithdrawal(contract.id.request_id)
+            }
+            StacksTx::ContractCall(ContractCall::RotateKeysV1(contract)) => {
+                StacksSignRequestId::RotateKeys(contract.aggregate_key)
+            }
+            StacksTx::SmartContract(contract) => StacksSignRequestId::SmartContract(*contract),
+        }
+    }
+}
+
+impl std::fmt::Display for StacksSignRequestId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StacksSignRequestId::CompleteDeposit(outpoint) => {
+                write!(f, "CompleteDeposit({outpoint}")
+            }
+            StacksSignRequestId::CompleteWithdrawal(request_id) => {
+                write!(f, "CompleteWithdrawal({request_id}")
+            }
+            StacksSignRequestId::RotateKeys(public_key) => write!(f, "RotateKeys({public_key}"),
+            StacksSignRequestId::SmartContract(smart_contract) => {
+                write!(f, "SmartContract({smart_contract}")
+            }
         }
     }
 }
@@ -516,12 +540,11 @@ where
 
         self.send_message(msg, &chain_tip.block_hash).await?;
 
-        // Mark as signed if the request needs tracking
-        if let Some(request_id) = StacksSignRequestId::from_sign_request(request) {
-            self.stacks_sign_request
-                .get_or_insert_mut(chain_tip.block_hash, Default::default)
-                .insert(request_id);
-        }
+        // Mark the sign request as signed for this tenure
+        let request_id = StacksSignRequestId::from_sign_request(request);
+        self.stacks_sign_request
+            .get_or_insert_mut(chain_tip.block_hash, Default::default)
+            .insert(request_id);
 
         Ok(())
     }
@@ -536,18 +559,17 @@ where
         origin_public_key: &PublicKey,
     ) -> Result<(), Error> {
         // Ensure we didn't already sign for this request
-        if let Some(request_id) = StacksSignRequestId::from_sign_request(request) {
-            let already_signed = self
-                .stacks_sign_request
-                .get(&chain_tip.block_hash)
-                .map(|set| set.contains(&request_id))
-                .unwrap_or(false);
-            if already_signed {
-                return Err(Error::StacksRequestAlreadySigned(
-                    request_id,
-                    *chain_tip.block_hash,
-                ));
-            }
+        let request_id = StacksSignRequestId::from_sign_request(request);
+        let already_signed = self
+            .stacks_sign_request
+            .get(&chain_tip.block_hash)
+            .map(|set| set.contains(&request_id))
+            .unwrap_or(false);
+        if already_signed {
+            return Err(Error::StacksRequestAlreadySigned(
+                request_id,
+                *chain_tip.block_hash,
+            ));
         }
 
         // Ensure that the Stacks fee is within the acceptable range.

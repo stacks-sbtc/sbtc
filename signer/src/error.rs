@@ -509,7 +509,7 @@ pub enum Error {
     InvalidStacksResponse(&'static str),
 
     /// The stacks request was already signed in this tenure
-    #[error("stacks request for {0:?} was already signed in tenure {1}")]
+    #[error("stacks request for {0} was already signed in tenure {1}")]
     StacksRequestAlreadySigned(StacksSignRequestId, bitcoin::BlockHash),
 
     /// Taproot error
