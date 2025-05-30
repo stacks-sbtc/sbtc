@@ -1,17 +1,9 @@
 use crate::storage::{Transactable, TransactionHandle};
-use crate::{
-    error::Error,
-    storage::{
-        model::{self},
-        pgsql::PGSQL_MIGRATIONS,
-    },
-};
+use crate::{error::Error, storage::pgsql::PGSQL_MIGRATIONS};
 use sqlx::Executor;
 use sqlx::pool::PoolConnection;
 use sqlx::{PgExecutor, postgres::PgPoolOptions};
 use tokio::sync::Mutex;
-
-use super::read::PgRead;
 
 /// A wrapper around a [`sqlx::PgPool`] which implements
 /// [`crate::storage::DbRead`] and [`crate::storage::DbWrite`].
@@ -177,11 +169,11 @@ impl PgStore {
     #[cfg(any(test, feature = "testing"))]
     pub async fn in_canonical_stacks_blockchain(
         &self,
-        chain_tip: &model::StacksBlockHash,
-        block_hash: &model::StacksBlockHash,
-        block_height: model::StacksBlockHeight,
+        chain_tip: &crate::storage::model::StacksBlockHash,
+        block_hash: &crate::storage::model::StacksBlockHash,
+        block_height: crate::storage::model::StacksBlockHeight,
     ) -> Result<bool, Error> {
-        PgRead::in_canonical_stacks_blockchain(
+        super::read::PgRead::in_canonical_stacks_blockchain(
             self.get_connection().await?.as_mut(),
             chain_tip,
             block_hash,
