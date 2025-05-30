@@ -758,8 +758,9 @@ pub enum Error {
     ExceedsWithdrawalCap(WithdrawalCapContext),
 
     /// An error was raised by the in-memory database.
+    #[cfg(any(test, feature = "testing"))]
     #[error("In-memory database error: {0}")]
-    InMemoryDatabase(String),
+    InMemoryDatabase(crate::storage::memory::MemoryStoreError),
 
     /// An error which can be used in test code instead of `unimplemented!()` or
     /// other alternatives, so that an an actual error is returned instead of

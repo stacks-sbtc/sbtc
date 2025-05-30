@@ -23,6 +23,8 @@ use crate::storage::model::WithdrawalRejectEvent;
 use crate::storage::TransactionHandle;
 use crate::storage::util::get_utxo;
 
+use super::MemoryStoreError;
+
 /// A store wrapped in an Arc<Mutex<...>> for interior mutability
 pub type SharedStore = Arc<Mutex<Store>>;
 
@@ -361,21 +363,17 @@ impl TransactionHandle for InMemoryTransaction {
         // Lock the transaction's clone of the store and get a guard
         let store = self.store.lock().await;
 
-        if self.completed.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err(Error::InMemoryDatabase(
-                "Transaction already completed".into(),
-            ));
-        }
-
         // Lock the original store and get a guard
         let mut original_store = self.original_store_mutex.lock().await;
 
         // Naive optimistic concurrency check
         if self.version != original_store.version {
-            return Err(Error::InMemoryDatabase(format!(
-                "Optimistic concurrency check failed: expected version {}, found version {}",
-                self.version, original_store.version
-            )));
+            return Err(Error::InMemoryDatabase(
+                MemoryStoreError::OptimisticConcurrency {
+                    actual_version: original_store.version,
+                    expected_version: self.version,
+                },
+            ));
         }
 
         // Commit the changes from the transactional store to the original store.
@@ -394,16 +392,6 @@ impl TransactionHandle for InMemoryTransaction {
     }
 
     async fn rollback(self) -> Result<(), Error> {
-        // Lock the transaction's inner store to ensure we can't get any interleaving
-        // commits or rolbacks.
-        let _store = self.store.lock().await;
-
-        if self.completed.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err(Error::InMemoryDatabase(
-                "Transaction already completed".into(),
-            ));
-        }
-
         // Rollback is a no-op for in-memory transactions.
         // Just mark the transaction as completed.
         self.completed

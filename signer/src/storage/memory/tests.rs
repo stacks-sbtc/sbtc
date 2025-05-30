@@ -1,4 +1,5 @@
 use crate::error::Error;
+use crate::storage::memory::MemoryStoreError;
 use crate::storage::memory::store::Store;
 use crate::storage::{DbRead, DbWrite, Transactable, TransactionHandle};
 use crate::testing::blocks::{BitcoinChain, StacksChain};
@@ -214,7 +215,9 @@ async fn test_in_memory_transaction_optimistic_concurrency_violation() {
     // updated it to 1.
     assert_matches!(
         tx1.commit().await,
-        Err(Error::InMemoryDatabase(msg)) if msg.contains("Optimistic concurrency")
+        Err(Error::InMemoryDatabase(
+            MemoryStoreError::OptimisticConcurrency { .. }
+        ))
     );
 }
 
@@ -251,6 +254,8 @@ async fn test_in_memory_transaction_optimistic_concurrency_violation_with_direct
     // no longer matches the shared_store's current version (1).
     assert_matches!(
         tx1.commit().await,
-        Err(Error::InMemoryDatabase(msg)) if msg.contains("Optimistic concurrency")
+        Err(Error::InMemoryDatabase(
+            MemoryStoreError::OptimisticConcurrency { .. }
+        ))
     );
 }
