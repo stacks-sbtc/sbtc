@@ -17,6 +17,7 @@ use signer::stacks::wallet::SignerWallet;
 use signer::storage::DbRead;
 use signer::storage::DbWrite;
 use signer::storage::postgres::PgStore;
+use signer::testing::btc::get_canonical_chain_tip;
 use signer::transaction_signer::STACKS_SIGN_REQUEST_LRU_SIZE;
 use test_case::test_case;
 
@@ -24,7 +25,7 @@ use signer::bitcoin::utxo::RequestRef;
 use signer::bitcoin::utxo::Requests;
 use signer::bitcoin::utxo::UnsignedTransaction;
 use signer::bitcoin::validation::TxRequestIds;
-use signer::block_observer::get_signer_set_and_aggregate_key;
+use signer::block_observer::get_signer_set_info;
 use signer::context::Context;
 use signer::context::SbtcLimits;
 use signer::error::Error;
@@ -424,14 +425,14 @@ pub async fn assert_should_be_able_to_handle_sbtc_requests() {
     setup.store_deposit_request(&db).await;
     setup.store_deposit_decisions(&db).await;
 
-    let (aggregate_key, signer_set_public_keys) =
-        get_signer_set_and_aggregate_key(&ctx, chain_tip.block_hash)
-            .await
-            .unwrap();
+    let info = get_signer_set_info(&ctx, chain_tip.block_hash)
+        .await
+        .unwrap();
 
     let state = ctx.state();
-    state.set_current_aggregate_key(aggregate_key.unwrap());
-    state.update_current_signer_set(signer_set_public_keys);
+    state.set_current_aggregate_key(info.maybe_aggregate_key.unwrap());
+    state.update_current_signer_set(info.signer_set);
+    state.set_current_signatures_required(info.signatures_required);
 
     // Initialize the transaction signer event loop
     let network = WanNetwork::default();
@@ -760,16 +761,17 @@ async fn max_one_state_machine_per_bitcoin_block_hash_for_dkg() {
 
     // Let's make sure that the database has the chain tip.
     let (rpc, _) = sbtc::testing::regtest::initialize_blockchain();
-    let headers = &rpc.get_chain_tips().unwrap()[0];
+    let headers = &get_canonical_chain_tip(rpc);
     let chain_tip = BitcoinBlockRef {
         block_hash: headers.hash.into(),
         block_height: headers.height.into(),
     };
     backfill_bitcoin_blocks(&db, rpc, &chain_tip.block_hash).await;
 
-    let (_, signer_set_public_keys) = get_signer_set_and_aggregate_key(&ctx, chain_tip.block_hash)
+    let signer_set_public_keys = get_signer_set_info(&ctx, chain_tip.block_hash)
         .await
-        .unwrap();
+        .unwrap()
+        .signer_set;
 
     ctx.state()
         .update_current_signer_set(signer_set_public_keys);
