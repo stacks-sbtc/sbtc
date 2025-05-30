@@ -298,6 +298,22 @@ impl WstsMessage {
             wsts::net::Message::SignatureShareResponse(_) => "signature-share-response",
         }
     }
+
+    /// Extract the signer_id from the inner message if it is there
+    pub fn extract_signer_id(&self) -> Option<u32> {
+        match &self.inner {
+            wsts::net::Message::DkgBegin(_) => None,
+            wsts::net::Message::DkgEndBegin(_) => None,
+            wsts::net::Message::DkgEnd(_) => None,
+            wsts::net::Message::DkgPrivateBegin(_) => None,
+            wsts::net::Message::DkgPrivateShares(msg) => Some(msg.signer_id),
+            wsts::net::Message::DkgPublicShares(msg) => Some(msg.signer_id),
+            wsts::net::Message::NonceRequest(_) => None,
+            wsts::net::Message::NonceResponse(msg) => Some(msg.signer_id),
+            wsts::net::Message::SignatureShareRequest(_) => None,
+            wsts::net::Message::SignatureShareResponse(msg) => Some(msg.signer_id),
+        }
+    }
 }
 
 #[cfg(test)]

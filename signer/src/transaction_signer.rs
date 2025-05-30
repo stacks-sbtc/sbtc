@@ -56,6 +56,12 @@ use wsts::net::DkgEnd;
 use wsts::net::DkgStatus;
 use wsts::net::Message as WstsNetMessage;
 
+/// Constants for tracing.
+const WSTS_DKG_ID: &str = "wsts_dkg_id";
+const WSTS_SIGNER_ID: &str = "wsts_signer_id";
+const WSTS_SIGN_ID: &str = "wsts_sign_id";
+const WSTS_SIGN_ITER_ID: &str = "wsts_sign_iter_id";
+
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// # Transaction signer event loop
 ///
@@ -280,10 +286,16 @@ where
                 .await?;
             }
 
-            (Payload::WstsMessage(wsts_msg), _, ChainTipStatus::Canonical) => {
-                self.handle_wsts_message(wsts_msg, msg.signer_public_key, &chain_tip_report)
-                    .await?;
-            }
+            (Payload::WstsMessage(wsts_msg), _, ChainTipStatus::Canonical) => match wsts_msg.id {
+                WstsMessageId::Dkg(_) => {
+                    self.handle_dkg_message(wsts_msg, msg.signer_public_key, &chain_tip_report)
+                        .await?
+                }
+                WstsMessageId::DkgVerification(_) | WstsMessageId::Sweep(_) => {
+                    self.handle_wsts_message(wsts_msg, msg.signer_public_key, &chain_tip_report)
+                        .await?
+                }
+            },
 
             (Payload::BitcoinPreSignRequest(requests), true, ChainTipStatus::Canonical) => {
                 let instant = std::time::Instant::now();
@@ -522,21 +534,14 @@ where
         wsts_msg_type = %msg.type_id(),
         wsts_signer_id = tracing::field::Empty,
         wsts_dkg_id = tracing::field::Empty,
-        wsts_sign_id = tracing::field::Empty,
-        wsts_sign_iter_id = tracing::field::Empty,
-        sender_public_key = %msg_public_key,
+        sender_public_key = %sender,
     ))]
-    pub async fn handle_wsts_message(
+    pub async fn handle_dkg_message(
         &mut self,
         msg: &message::WstsMessage,
-        msg_public_key: PublicKey,
+        sender: PublicKey,
         chain_tip_report: &MsgChainTipReport,
     ) -> Result<(), Error> {
-        // Constants for tracing.
-        const WSTS_DKG_ID: &str = "wsts_dkg_id";
-        const WSTS_SIGNER_ID: &str = "wsts_signer_id";
-        const WSTS_SIGN_ID: &str = "wsts_sign_id";
-        const WSTS_SIGN_ITER_ID: &str = "wsts_sign_iter_id";
         // Get the current tracing span.
         let span = tracing::Span::current();
 
@@ -574,22 +579,13 @@ where
                 // If a DKG-begin pause is configured, sleep for a bit before
                 // processing the message and broadcasting our responses.
                 if let Some(pause) = self.dkg_begin_pause {
-                    tracing::debug!(
-                        "sleeping a bit to give the other peers some slack to get dkg-begin"
-                    );
+                    tracing::debug!("sleeping to give the other peers some time to get dkg-begin");
                     tokio::time::sleep(pause).await;
                 }
 
                 // Process the message.
-                self.relay_message(
-                    &state_machine_id,
-                    msg.id,
-                    msg_public_key,
-                    None,
-                    &msg.inner,
-                    &chain_tip.block_hash,
-                )
-                .await?;
+                self.relay_message(&state_machine_id, msg, sender, &chain_tip.block_hash)
+                    .await?;
             }
 
             // === DKG PRIVATE BEGIN ===
@@ -606,15 +602,8 @@ where
 
                 tracing::debug!("processing message");
                 let state_machine_id = StateMachineId::Dkg(*chain_tip);
-                self.relay_message(
-                    &state_machine_id,
-                    msg.id,
-                    msg_public_key,
-                    None,
-                    &msg.inner,
-                    &chain_tip.block_hash,
-                )
-                .await?;
+                self.relay_message(&state_machine_id, msg, sender, &chain_tip.block_hash)
+                    .await?;
             }
 
             // === DKG PUBLIC SHARES ===
@@ -624,15 +613,8 @@ where
 
                 tracing::debug!("processing message");
                 let state_machine_id = StateMachineId::Dkg(*chain_tip);
-                self.relay_message(
-                    &state_machine_id,
-                    msg.id,
-                    msg_public_key,
-                    Some(request.signer_id),
-                    &msg.inner,
-                    &chain_tip.block_hash,
-                )
-                .await?;
+                self.relay_message(&state_machine_id, msg, sender, &chain_tip.block_hash)
+                    .await?;
             }
 
             // === DKG PRIVATE SHARES ===
@@ -642,15 +624,8 @@ where
 
                 tracing::debug!("processing message");
                 let state_machine_id = StateMachineId::Dkg(*chain_tip);
-                self.relay_message(
-                    &state_machine_id,
-                    msg.id,
-                    msg_public_key,
-                    Some(request.signer_id),
-                    &msg.inner,
-                    &chain_tip.block_hash,
-                )
-                .await?;
+                self.relay_message(&state_machine_id, msg, sender, &chain_tip.block_hash)
+                    .await?;
             }
 
             // === DKG END-BEGIN ===
@@ -667,15 +642,8 @@ where
 
                 tracing::debug!("processing message");
                 let state_machine_id = StateMachineId::Dkg(*chain_tip);
-                self.relay_message(
-                    &state_machine_id,
-                    msg.id,
-                    msg_public_key,
-                    None,
-                    &msg.inner,
-                    &chain_tip.block_hash,
-                )
-                .await?;
+                self.relay_message(&state_machine_id, msg, sender, &chain_tip.block_hash)
+                    .await?;
             }
 
             // === DKG END ===
@@ -700,6 +668,34 @@ where
                 }
             }
 
+            _ => tracing::warn!("unexpected message, likely programmer error"),
+        }
+
+        Ok(())
+    }
+
+    /// Process WSTS messages
+    #[tracing::instrument(skip_all, fields(
+        wsts_msg_id = %msg.id,
+        wsts_msg_type = %msg.type_id(),
+        wsts_signer_id = tracing::field::Empty,
+        wsts_dkg_id = tracing::field::Empty,
+        wsts_sign_id = tracing::field::Empty,
+        wsts_sign_iter_id = tracing::field::Empty,
+        sender_public_key = %sender,
+    ))]
+    pub async fn handle_wsts_message(
+        &mut self,
+        msg: &message::WstsMessage,
+        sender: PublicKey,
+        chain_tip_report: &MsgChainTipReport,
+    ) -> Result<(), Error> {
+        // Get the current tracing span.
+        let span = tracing::Span::current();
+
+        let MsgChainTipReport { chain_tip, .. } = chain_tip_report;
+
+        match &msg.inner {
             // === NONCE REQUEST ===
             WstsNetMessage::NonceRequest(request) => {
                 span.record(WSTS_DKG_ID, request.dkg_id);
@@ -780,15 +776,8 @@ where
                     .put(state_machine_id, state_machine);
 
                 // Process the message.
-                self.relay_message(
-                    &state_machine_id,
-                    msg.id,
-                    msg_public_key,
-                    None,
-                    &msg.inner,
-                    &chain_tip.block_hash,
-                )
-                .await?;
+                self.relay_message(&state_machine_id, msg, sender, &chain_tip.block_hash)
+                    .await?;
             }
 
             // === SIGNATURE-SHARE REQUEST ===
@@ -860,14 +849,7 @@ where
 
                 // Process the message in the signer state machine.
                 let response = self
-                    .relay_message(
-                        &state_machine_id,
-                        msg.id,
-                        msg_public_key,
-                        None,
-                        &msg.inner,
-                        &chain_tip.block_hash,
-                    )
+                    .relay_message(&state_machine_id, msg, sender, &chain_tip.block_hash)
                     .await;
 
                 // If the state machine is not a DKG verification state machine,
@@ -922,7 +904,7 @@ where
                 // it in our DKG verification state machine for tracking purposes.
                 self.process_dkg_verification_message(
                     state_machine_id,
-                    msg_public_key,
+                    sender,
                     Some(request.signer_id),
                     &msg.inner,
                 )
@@ -969,12 +951,15 @@ where
                 // it in our DKG verification state machine for tracking purposes.
                 self.process_dkg_verification_message(
                     state_machine_id,
-                    msg_public_key,
+                    sender,
                     Some(request.signer_id),
                     &msg.inner,
                 )
                 .await?;
             }
+
+            // It would be nice to split this stuff up
+            _ => tracing::error!("programmer error"),
         }
 
         Ok(())
@@ -1369,16 +1354,16 @@ where
     async fn relay_message(
         &mut self,
         state_machine_id: &StateMachineId,
-        wsts_id: WstsMessageId,
+        message: &message::WstsMessage,
         sender: PublicKey,
-        signer_id: Option<u32>,
-        msg: &WstsNetMessage,
         bitcoin_chain_tip: &model::BitcoinBlockHash,
     ) -> Result<(), Error> {
         let mut rng = OsRng;
+        let msg = &message.inner;
 
         // Validate that the sender is a valid member of the signing set and
         // has the correct id according to the signer state machine.
+        let signer_id = message.extract_signer_id();
         if let Some(signer_id) = signer_id {
             self.validate_sender(state_machine_id, signer_id, &sender)?;
         }
@@ -1446,7 +1431,10 @@ where
             }
 
             // Publish the message to the network.
-            let msg = message::WstsMessage { id: wsts_id, inner: outbound };
+            let msg = message::WstsMessage {
+                id: message.id,
+                inner: outbound,
+            };
             self.send_message(msg, bitcoin_chain_tip).await?;
         }
 
