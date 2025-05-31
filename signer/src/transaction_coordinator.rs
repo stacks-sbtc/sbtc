@@ -2635,7 +2635,7 @@ mod tests {
     use crate::error::Error;
     use crate::keys::{PrivateKey, PublicKey};
     use crate::stacks::api::MockStacksInteract;
-    use crate::storage::in_memory::SharedStore;
+    use crate::storage::memory::SharedStore;
     use crate::storage::model::BitcoinBlockHeight;
     use crate::storage::{DbWrite, model};
     use crate::testing;

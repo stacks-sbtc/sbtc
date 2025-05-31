@@ -1656,7 +1656,7 @@ mod tests {
     use crate::context::Context;
     use crate::emily_client::MockEmilyInteract;
     use crate::stacks::api::MockStacksInteract;
-    use crate::storage::in_memory::SharedStore;
+    use crate::storage::memory::SharedStore;
     use crate::storage::{DbWrite, model};
     use crate::testing;
     use crate::testing::context::*;

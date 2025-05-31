@@ -547,7 +547,7 @@ mod tests {
     use crate::bitcoin::MockBitcoinInteract;
     use crate::emily_client::MockEmilyInteract;
     use crate::stacks::api::MockStacksInteract;
-    use crate::storage::in_memory::SharedStore;
+    use crate::storage::memory::SharedStore;
     use crate::testing;
     use crate::testing::context::*;
 

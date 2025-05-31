@@ -799,7 +799,7 @@ mod tests {
     #[test(tokio::test)]
     async fn should_be_able_to_extract_bitcoin_blocks_given_a_block_header_stream() {
         let mut rng = get_rng();
-        let storage = storage::in_memory::Store::new_shared();
+        let storage = storage::memory::Store::new_shared();
         let test_harness = TestHarness::generate(&mut rng, 20, 0..5);
         let min_height = test_harness.min_block_height();
         let ctx = TestContext::builder()
@@ -939,7 +939,7 @@ mod tests {
         let min_height = test_harness.min_block_height();
 
         // Now we finish setting up the block observer.
-        let storage = storage::in_memory::Store::new_shared();
+        let storage = storage::memory::Store::new_shared();
         let ctx = TestContext::builder()
             .with_storage(storage.clone())
             .with_stacks_client(test_harness.clone())
@@ -1024,7 +1024,7 @@ mod tests {
 
         let min_height = test_harness.min_block_height();
         // Now we finish setting up the block observer.
-        let storage = storage::in_memory::Store::new_shared();
+        let storage = storage::memory::Store::new_shared();
         let ctx = TestContext::builder()
             .with_storage(storage.clone())
             .with_stacks_client(test_harness.clone())
@@ -1076,7 +1076,7 @@ mod tests {
         let signers_script_pubkey: ScriptPubKey = fake::Faker.fake_with_rng(&mut rng);
 
         // We start by storing our `scriptPubKey`.
-        let storage = storage::in_memory::Store::new_shared();
+        let storage = storage::memory::Store::new_shared();
         let aggregate_key = PublicKey::dummy_with_rng(&fake::Faker, &mut rng);
         let shares = model::EncryptedDkgShares {
             aggregate_key,
