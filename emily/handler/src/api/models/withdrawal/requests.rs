@@ -89,6 +89,9 @@ impl WithdrawalUpdate {
             Status::Pending => StatusEntry::Pending,
             Status::Reprocessing => StatusEntry::Reprocessing,
             Status::Failed => StatusEntry::Failed,
+            Status::RBF => {
+                return Err(error::ValidationError::WithdrawalRBF(self.request_id).into());
+            }
         };
         // Make the new event.
         let event = WithdrawalEvent {

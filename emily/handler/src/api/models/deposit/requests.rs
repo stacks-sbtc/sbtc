@@ -130,6 +130,9 @@ pub struct DepositUpdate {
     /// Details about the on chain artifacts that fulfilled the deposit.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fulfillment: Option<Fulfillment>,
+    /// Transaction ID of the transaction that replaced this one via RBF.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replaced_by_tx: Option<String>,
 }
 
 impl DepositUpdate {
@@ -145,8 +148,17 @@ impl DepositUpdate {
         // Make key.
         let key = DepositEntryKey {
             bitcoin_tx_output_index: self.bitcoin_tx_output_index,
-            bitcoin_txid: self.bitcoin_txid,
+            bitcoin_txid: self.bitcoin_txid.clone(),
         };
+        // Only RBF transactions can have a replaced_by_tx.
+        if self.status != Status::RBF && self.replaced_by_tx.is_some() {
+            return Err(error::ValidationError::InvalidReplacedByTxStatus(
+                self.status,
+                self.bitcoin_txid,
+                self.bitcoin_tx_output_index,
+            )
+            .into());
+        }
         // Make status entry.
         let status_entry: StatusEntry = match self.status {
             Status::Confirmed => {
@@ -162,6 +174,12 @@ impl DepositUpdate {
             Status::Pending => StatusEntry::Pending,
             Status::Reprocessing => StatusEntry::Reprocessing,
             Status::Failed => StatusEntry::Failed,
+            Status::RBF => StatusEntry::RBF(self.replaced_by_tx.ok_or(
+                ValidationError::DepositMissingReplacementTx(
+                    self.bitcoin_txid,
+                    self.bitcoin_tx_output_index,
+                ),
+            )?),
         };
         // Make the new event.
         let event = DepositEvent {
@@ -213,6 +231,8 @@ impl UpdateDepositsRequestBody {
             }
         }
 
+        // TODO: now we have more possible errors here, and missing fullfillment is not always true.
+        // TODO: #1653 should rework this, so leaving TODO here for now.
         // If there are failed conversions, return an error.
         if !failed_txs.is_empty() {
             return Err(ValidationError::DepositsMissingFulfillment(failed_txs).into());
