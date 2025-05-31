@@ -1445,7 +1445,7 @@ impl RotateKeysErrorMsg {
 
 /// A wrapper type for smart contract deployment that implements
 /// AsTxPayload.
-#[derive(Clone, Copy, Debug, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, strum::Display)]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
 pub enum SmartContract {
     /// The sbtc-registry contract. This contract needs to be deployed
