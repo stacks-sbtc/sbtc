@@ -426,8 +426,7 @@ impl SignerStateMachine {
     /// # Notes
     ///
     /// When a new state machine is created, a new private polynomial is
-    /// generated using a random number generator to generate a secret
-    /// polynomial. However, this
+    /// generated, however this polynomial is regenerated during DKG.
     pub fn new(
         signers: impl IntoIterator<Item = PublicKey>,
         threshold: u32,
@@ -497,6 +496,8 @@ impl SignerStateMachine {
         Ok(Self { inner, started_at, private_key })
     }
 
+    /// Create a random number generator seeded with the given bitcoin
+    /// block reference and a private key.
     fn create_rng(started_at: &BitcoinBlockRef, private_key: PrivateKey) -> StdRng {
         let seed_bytes: [u8; 32] = sha2::Sha256::new_with_prefix("DKG_RNG")
             .chain_update(started_at.block_hash.into_bytes())
