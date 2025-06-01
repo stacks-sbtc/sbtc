@@ -931,7 +931,6 @@ async fn should_return_the_same_last_key_rotation_as_in_memory_store() {
         .run_dkg(
             chain_tip,
             dkg_txid.into(),
-            &mut rng,
             model::DkgSharesStatus::Verified,
         )
         .await;

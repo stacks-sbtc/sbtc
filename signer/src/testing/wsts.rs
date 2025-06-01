@@ -400,11 +400,10 @@ impl SignerSet {
 
     /// Run DKG and return the private and public shares
     /// for all signers
-    pub async fn run_dkg<Rng: rand::RngCore + rand::CryptoRng>(
+    pub async fn run_dkg(
         &mut self,
         bitcoin_chain_tip: model::BitcoinBlockHash,
         id: WstsMessageId,
-        rng: &mut Rng,
         dkg_shares_status: model::DkgSharesStatus,
     ) -> (PublicKey, Vec<model::EncryptedDkgShares>) {
         let mut signer_handles = Vec::new();
@@ -420,11 +419,6 @@ impl SignerSet {
             self.signers.push(signer)
         }
 
-        let started_at = model::BitcoinBlockRef {
-            block_hash: bitcoin_chain_tip,
-            block_height: 0u64.into(),
-        };
-
         (
             aggregate_key,
             self.signers
@@ -432,7 +426,7 @@ impl SignerSet {
                 .map(|signer| {
                     let mut shares = signer
                         .wsts_signer
-                        .get_encrypted_dkg_shares(rng, &started_at)
+                        .get_encrypted_dkg_shares()
                         .expect("failed to get encrypted shares");
                     shares.dkg_shares_status = dkg_shares_status;
                     shares
@@ -544,7 +538,6 @@ mod tests {
             .run_dkg(
                 bitcoin_chain_tip,
                 txid.into(),
-                &mut rng,
                 model::DkgSharesStatus::Unverified,
             )
             .await;

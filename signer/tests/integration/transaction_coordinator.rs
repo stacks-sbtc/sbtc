@@ -176,7 +176,6 @@ where
         .run_dkg(
             bitcoin_chain_tip,
             dkg_txid.into(),
-            rng,
             model::DkgSharesStatus::Verified,
         )
         .await;
@@ -3271,7 +3270,7 @@ async fn test_conservative_initial_sbtc_limits() {
     let chain_tip = chain_tip_info.hash.into();
 
     let (aggregate_key, mut encrypted_shares) = signer_set
-        .run_dkg(chain_tip, dkg_txid, &mut rng, DkgSharesStatus::Verified)
+        .run_dkg(chain_tip, dkg_txid, DkgSharesStatus::Verified)
         .await;
 
     for ((_, db, _, _), dkg_shares) in signers.iter_mut().zip(encrypted_shares.iter_mut()) {

@@ -1153,12 +1153,11 @@ where
             .get(state_machine_id)
             .ok_or_else(|| Error::MissingStateMachine(*state_machine_id))?;
 
-        let StateMachineId::Dkg(started_at) = state_machine_id else {
+        let StateMachineId::Dkg(_) = state_machine_id else {
             return Err(Error::UnexpectedStateMachineId(*state_machine_id));
         };
 
-        let encrypted_dkg_shares =
-            state_machine.get_encrypted_dkg_shares(&mut self.rng, started_at)?;
+        let encrypted_dkg_shares = state_machine.get_encrypted_dkg_shares()?;
 
         tracing::debug!("🔐 storing DKG shares");
         self.context
