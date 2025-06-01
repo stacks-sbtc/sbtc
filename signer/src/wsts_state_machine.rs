@@ -13,12 +13,16 @@ use crate::keys::PublicKeyXOnly;
 use crate::keys::SignerScriptPubKey as _;
 use crate::storage;
 use crate::storage::model;
+use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::DkgSharesStatus;
 use crate::storage::model::SigHash;
 
 use hashbrown::HashMap;
 use hashbrown::HashSet;
+use rand::SeedableRng as _;
 use rand::rngs::OsRng;
+use rand::rngs::StdRng;
+use sha2::Digest as _;
 use wsts::common::PolyCommitment;
 use wsts::net::Message;
 use wsts::net::Packet;
@@ -408,19 +412,29 @@ impl WstsCoordinator for FrostCoordinator {
 
 /// Wrapper around a WSTS signer state machine
 #[derive(Debug, Clone, PartialEq)]
-pub struct SignerStateMachine(wsts::state_machine::signer::Signer<wsts::v2::Party>);
+pub struct SignerStateMachine {
+    inner: wsts::state_machine::signer::Signer<wsts::v2::Party>,
+    created_at: BitcoinBlockRef,
+    private_key: PrivateKey,
+}
 
 type WstsSigner = wsts::state_machine::signer::Signer<wsts::v2::Party>;
 
 impl SignerStateMachine {
     /// Create a new state machine
+    ///
+    /// # Notes
+    ///
+    /// When a new state machine is created, a new private polynomial is
+    /// generated using a random number generator to generate a secret
+    /// polynomial. However, this
     pub fn new(
         signers: impl IntoIterator<Item = PublicKey>,
         threshold: u32,
-        signer_private_key: PrivateKey,
-    ) -> Result<Self, error::Error> {
-        let mut rng = OsRng;
-        let signer_pub_key = PublicKey::from_private_key(&signer_private_key);
+        created_at: BitcoinBlockRef,
+        private_key: PrivateKey,
+    ) -> Result<Self, Error> {
+        let signer_pub_key = PublicKey::from_private_key(&private_key);
         let signers: hashbrown::HashMap<u32, _> = signers
             .into_iter()
             .enumerate()
@@ -467,20 +481,77 @@ impl SignerStateMachine {
             return Err(error::Error::InvalidConfiguration);
         };
 
-        let state_machine = WstsSigner::new(
+        let inner = WstsSigner::new(
             threshold,
             dkg_threshold,
             num_parties,
             num_keys,
             id,
             key_ids,
-            signer_private_key.into(),
+            private_key.into(),
             public_keys,
-            &mut rng,
+            &mut OsRng,
         )
         .map_err(Error::Wsts)?;
 
-        Ok(Self(state_machine))
+        Ok(Self { inner, created_at, private_key })
+    }
+
+    fn create_rng(created_at: &BitcoinBlockRef, private_key: PrivateKey) -> StdRng {
+        let seed_bytes: [u8; 32] = sha2::Sha256::new_with_prefix("DKG_RNG")
+            .chain_update(created_at.block_hash.into_bytes())
+            .chain_update(created_at.block_height.to_le_bytes())
+            .chain_update(private_key.to_bytes())
+            .finalize()
+            .into();
+
+        StdRng::from_seed(seed_bytes)
+    }
+
+    /// Process the passed incoming message, and return any outgoing
+    /// messages.
+    ///
+    /// # Notes
+    ///
+    /// This function processes messages in such a way where the generated
+    /// secrets for DKG are deterministic given the bitcoin block ref and
+    /// private keys used to create this state machine. Here is how.
+    ///
+    /// The underlying WSTS state machine generates a new polynomial when
+    /// it receives a DKG begin message using the given random number
+    /// generator. This polynomial is the same one generated in the FROST
+    /// scheme, which is used for creating secret shares. So this function
+    /// intercepts `DkgBegin` messages and uses a random number generator
+    /// that was seeded with a bitcoin block hash, the corresponding
+    /// bitcoin block height, and the signer's private key. This ensures
+    /// that secret shares are generated in a pseudo-random way.
+    /// 
+    /// All other messages are processed with the OS random number
+    /// generated.
+    pub fn process(&mut self, message: &Message) -> Result<Vec<Message>, Error> {
+        let response = match message {
+            Message::DkgBegin(_) => {
+                let mut rng = Self::create_rng(&self.created_at, self.private_key);
+                self.inner.process(message, &mut rng)
+            }
+            _ => self.inner.process(message, &mut OsRng),
+        };
+
+        response.map_err(Error::Wsts)
+    }
+
+    ///
+    pub fn get_signer_public_key(&self, signer_id: u32) -> Option<PublicKey> {
+        self.inner
+            .public_keys
+            .signers
+            .get(&signer_id)
+            .map(PublicKey::from)
+    }
+
+    ///
+    pub fn dkg_id(&self) -> u64 {
+        self.inner.dkg_id
     }
 
     /// Create a state machine from loaded DKG shares for the given aggregate key
@@ -512,9 +583,14 @@ impl SignerStateMachine {
         let signer = wsts::v2::Party::load(&saved_state);
         let signers = encrypted_shares.signer_set_public_keys;
 
-        let mut state_machine = Self::new(signers, threshold, signer_private_key)?;
+        let created_at = BitcoinBlockRef {
+            block_hash: encrypted_shares.started_at_bitcoin_block_hash,
+            block_height: encrypted_shares.started_at_bitcoin_block_height,
+        };
 
-        state_machine.0.signer = signer;
+        let mut state_machine = Self::new(signers, threshold, created_at, signer_private_key)?;
+
+        state_machine.inner.signer = signer;
 
         Ok(state_machine)
     }
@@ -525,7 +601,7 @@ impl SignerStateMachine {
         rng: &mut Rng,
         started_at: &model::BitcoinBlockRef,
     ) -> Result<model::EncryptedDkgShares, error::Error> {
-        let saved_state = self.signer.save();
+        let saved_state = self.inner.signer.save();
         let aggregate_key = PublicKey::try_from(&saved_state.group_key)?;
 
         // When creating a new Self, the `public_keys` field gets populated
@@ -533,6 +609,7 @@ impl SignerStateMachine {
         // keys for all signers in the signing set for DKG, including the
         // coordinator.
         let mut signer_set_public_keys = self
+            .inner
             .public_keys
             .signers
             .values()
@@ -543,14 +620,15 @@ impl SignerStateMachine {
         signer_set_public_keys.sort();
 
         let encoded = saved_state.encode_to_vec();
-        let public_shares = self.dkg_public_shares.clone().encode_to_vec();
+        let public_shares = self.inner.dkg_public_shares.clone().encode_to_vec();
 
         // After DKG, each of the signers will have "new public keys".
         let encrypted_private_shares =
-            wsts::util::encrypt(&self.0.network_private_key.to_bytes(), &encoded, rng)
+            wsts::util::encrypt(&self.inner.network_private_key.to_bytes(), &encoded, rng)
                 .map_err(|_| error::Error::Encryption)?;
 
         let signature_share_threshold: u16 = self
+            .inner
             .threshold
             .try_into()
             .map_err(|_| Error::TypeConversion)?;
@@ -567,19 +645,5 @@ impl SignerStateMachine {
             started_at_bitcoin_block_hash: started_at.block_hash,
             started_at_bitcoin_block_height: started_at.block_height,
         })
-    }
-}
-
-impl std::ops::Deref for SignerStateMachine {
-    type Target = WstsSigner;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl std::ops::DerefMut for SignerStateMachine {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
     }
 }
