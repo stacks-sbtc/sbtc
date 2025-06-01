@@ -683,7 +683,7 @@ async fn max_one_state_machine_per_bitcoin_block_hash_for_dkg() {
     // request message that we just received.
     let id1 = StateMachineId::from(&chain_tip);
     let state_machine = tx_signer.wsts_state_machines.get(&id1).unwrap();
-    assert_eq!(state_machine.dkg_id, dkg_id);
+    assert_eq!(state_machine.dkg_id(), dkg_id);
     assert_eq!(tx_signer.wsts_state_machines.len(), 1);
 
     // Now let's see what happens when we receive another dkg message with
@@ -701,7 +701,7 @@ async fn max_one_state_machine_per_bitcoin_block_hash_for_dkg() {
         .unwrap();
 
     let state_machine = tx_signer.wsts_state_machines.get(&id1).unwrap();
-    assert_eq!(state_machine.dkg_id, dkg_id);
+    assert_eq!(state_machine.dkg_id(), dkg_id);
     assert_eq!(tx_signer.wsts_state_machines.len(), 1);
 
     // If we say the current chain tip is something else, a new state
@@ -715,7 +715,7 @@ async fn max_one_state_machine_per_bitcoin_block_hash_for_dkg() {
 
     let id2 = StateMachineId::from(&report.chain_tip);
     let state_machine = tx_signer.wsts_state_machines.get(&id2).unwrap();
-    assert_eq!(state_machine.dkg_id, dkg_id);
+    assert_eq!(state_machine.dkg_id(), dkg_id);
     assert_eq!(tx_signer.wsts_state_machines.len(), 2);
 
     testing::storage::drop_db(db).await;
