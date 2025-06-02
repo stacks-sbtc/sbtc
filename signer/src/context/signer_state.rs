@@ -541,7 +541,6 @@ impl SignerSet {
     /// Gets the signer public key for the given peer ID, returning `None` if
     /// the peer ID is not in the signer set or otherwise unknown.
     pub fn get_pubkey_for_peer(&self, peer_id: &PeerId) -> Option<PublicKey> {
-        #[allow(clippy::expect_used)]
         self.signers
             .read()
             .ok()?
