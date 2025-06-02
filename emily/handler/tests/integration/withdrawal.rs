@@ -3,9 +3,9 @@ use std::collections::HashMap;
 
 use test_case::test_case;
 
+use testing_emily_client::apis;
 use testing_emily_client::apis::chainstate_api::set_chainstate;
 use testing_emily_client::apis::configuration::Configuration;
-use testing_emily_client::apis::{self, ResponseContent};
 use testing_emily_client::models::{
     Chainstate, CreateWithdrawalRequestBody, Fulfillment, Status, UpdateWithdrawalsRequestBody,
     Withdrawal, WithdrawalInfo, WithdrawalParameters, WithdrawalUpdate,
@@ -399,7 +399,7 @@ async fn get_withdrawals_by_sender() {
         expected_withdrawal_infos.sort_by(arbitrary_withdrawal_info_partial_cmp);
         let mut actual_withdrawal_infos = actual_sender_data.get(recipient).unwrap().clone();
         actual_withdrawal_infos.sort_by(arbitrary_withdrawal_info_partial_cmp);
-        // Assert that the expected and actual deposit infos are the same.
+        // Assert that the expected and actual withdrawal infos are the same.
         assert_eq!(expected_withdrawal_infos, actual_withdrawal_infos);
     }
 }
@@ -498,7 +498,11 @@ async fn update_withdrawals() {
 
     // Assert.
     // -------
-    let mut updated_withdrawals = update_withdrawals_response.withdrawals;
+    let mut updated_withdrawals = update_withdrawals_response
+        .withdrawals
+        .iter()
+        .map(|withdrawal| *withdrawal.withdrawal.clone())
+        .collect::<Vec<_>>();
     updated_withdrawals.sort_by(arbitrary_withdrawal_partial_cmp);
     expected_withdrawals.sort_by(arbitrary_withdrawal_partial_cmp);
     assert_eq!(expected_withdrawals, updated_withdrawals);
@@ -616,17 +620,14 @@ async fn update_withdrawals_is_forbidden_for_signer(
     .await;
 
     if is_forbidden {
-        assert!(response.is_err());
+        // Check response correctness.
+        let response = response.expect("Batch update should return 200 OK");
+        let withdrawals = response.withdrawals;
+        assert_eq!(withdrawals.len(), 1);
+        let withdrawal = withdrawals.first().unwrap();
+        assert_eq!(withdrawal.status, 403);
 
-        match response.unwrap_err() {
-            testing_emily_client::apis::Error::ResponseError(ResponseContent {
-                status, ..
-            }) => {
-                assert_eq!(status, 403);
-            }
-            e => panic!("Expected a 403 error, got {e:#?}"),
-        }
-
+        // Check withdrawal wasn't updated
         let response = apis::withdrawal_api::get_withdrawal(&user_configuration, request_id)
             .await
             .expect("Received an error after making a valid get withdrawal api call.");
@@ -638,7 +639,9 @@ async fn update_withdrawals_is_forbidden_for_signer(
         let withdrawal = response
             .withdrawals
             .first()
-            .expect("No withdrawal in response");
+            .expect("No withdrawal in response")
+            .withdrawal
+            .clone();
         assert_eq!(withdrawal.request_id, request_id);
         assert_eq!(withdrawal.status, new_status);
     }
@@ -752,7 +755,257 @@ async fn update_withdrawals_is_not_forbidden_for_sidecar(
     let withdrawal = response
         .withdrawals
         .first()
-        .expect("No withdrawal in response");
+        .expect("No withdrawal in response")
+        .withdrawal
+        .clone();
     assert_eq!(withdrawal.request_id, request_id);
     assert_eq!(withdrawal.status, new_status);
+}
+
+#[tokio::test]
+async fn emily_process_withdrawal_updates_when_some_of_them_already_accepted() {
+    // the testing configuration has privileged access to all endpoints.
+    let testing_configuration = clean_setup().await;
+
+    // Create two withdrawals
+    let chainstate = Chainstate {
+        stacks_block_hash: "test_block_hash".to_string(),
+        stacks_block_height: 1,
+        bitcoin_block_height: Some(Some(1)),
+    };
+
+    set_chainstate(&testing_configuration, chainstate.clone())
+        .await
+        .expect("Received an error after making a valid set chainstate api call.");
+
+    let create_withdrawal_body1 = CreateWithdrawalRequestBody {
+        amount: 10000,
+        parameters: Box::new(WithdrawalParameters { max_fee: 100 }),
+        recipient: RECIPIENT.into(),
+        sender: SENDER.into(),
+        request_id: 1,
+        stacks_block_hash: chainstate.stacks_block_hash.clone(),
+        stacks_block_height: chainstate.stacks_block_height,
+        txid: "test_txid".to_string(),
+    };
+
+    let create_withdrawal_body2 = CreateWithdrawalRequestBody {
+        amount: 10000,
+        parameters: Box::new(WithdrawalParameters { max_fee: 100 }),
+        recipient: RECIPIENT.into(),
+        sender: SENDER.into(),
+        request_id: 2,
+        stacks_block_hash: chainstate.stacks_block_hash.clone(),
+        stacks_block_height: chainstate.stacks_block_height,
+        txid: "test_txid2".to_string(),
+    };
+
+    // Sanity check that the two withdrawals are different.
+    assert_ne!(
+        create_withdrawal_body1.request_id, create_withdrawal_body2.request_id,
+        "The two withdrawals should have different request ids."
+    );
+    assert_ne!(
+        create_withdrawal_body1.txid, create_withdrawal_body2.txid,
+        "The two withdrawals should have different transaction hex."
+    );
+
+    apis::withdrawal_api::create_withdrawal(
+        &testing_configuration,
+        create_withdrawal_body1.clone(),
+    )
+    .await
+    .expect("Received an error after making a valid create withdrawal request api call.");
+    apis::withdrawal_api::create_withdrawal(
+        &testing_configuration,
+        create_withdrawal_body2.clone(),
+    )
+    .await
+    .expect("Received an error after making a valid create withdrawal request api call.");
+
+    // Now we should have 2 pending withdrawals.
+    let withdrawals =
+        apis::withdrawal_api::get_withdrawals(&testing_configuration, Status::Pending, None, None)
+            .await
+            .expect("Received an error after making a valid get withdrawals api call.");
+    assert_eq!(withdrawals.withdrawals.len(), 2);
+
+    // Update first withdrawal to Accepted.
+    let update_withdrawals_request_body = UpdateWithdrawalsRequestBody {
+        withdrawals: vec![WithdrawalUpdate {
+            request_id: create_withdrawal_body1.request_id,
+            fulfillment: None,
+            status: Status::Accepted,
+            status_message: "First update".into(),
+        }],
+    };
+    let response = apis::withdrawal_api::update_withdrawals_signer(
+        &testing_configuration,
+        update_withdrawals_request_body,
+    )
+    .await
+    .expect("Received an error after making a valid update withdrawal request api call.");
+
+    assert!(
+        response
+            .withdrawals
+            .iter()
+            .all(|withdrawal| withdrawal.status == 200)
+    );
+    assert_eq!(response.withdrawals.len(), 1);
+
+    // Now we should have 1 pending and 1 accepted withdrawal.
+    let withdrawals =
+        apis::withdrawal_api::get_withdrawals(&testing_configuration, Status::Pending, None, None)
+            .await
+            .expect("Received an error after making a valid get withdrawals api call.");
+    assert_eq!(withdrawals.withdrawals.len(), 1);
+    let withdrawals =
+        apis::withdrawal_api::get_withdrawals(&testing_configuration, Status::Accepted, None, None)
+            .await
+            .expect("Received an error after making a valid get withdrawals api call.");
+    assert_eq!(withdrawals.withdrawals.len(), 1);
+
+    // Now we update both withdrawals to Accepted in a batch. This still should be a valid api call.
+    let update_withdrawals_request_body = UpdateWithdrawalsRequestBody {
+        withdrawals: vec![
+            WithdrawalUpdate {
+                request_id: create_withdrawal_body1.request_id,
+                fulfillment: None,
+                status: Status::Accepted,
+                status_message: "Second update".into(),
+            },
+            WithdrawalUpdate {
+                request_id: create_withdrawal_body2.request_id,
+                fulfillment: None,
+                status: Status::Accepted,
+                status_message: "Second update".into(),
+            },
+        ],
+    };
+    let response = apis::withdrawal_api::update_withdrawals_signer(
+        &testing_configuration,
+        update_withdrawals_request_body,
+    )
+    .await
+    .expect("Received an error after making a valid update withdrawal request api call.");
+
+    assert!(
+        response
+            .withdrawals
+            .iter()
+            .all(|withdrawal| withdrawal.status == 200)
+    );
+    assert_eq!(response.withdrawals.len(), 2);
+
+    // Now we should have 2 accepted withdrawals.
+    let withdrawals =
+        apis::withdrawal_api::get_withdrawals(&testing_configuration, Status::Accepted, None, None)
+            .await
+            .expect("Received an error after making a valid get withdrawals api call.");
+    assert_eq!(withdrawals.withdrawals.len(), 2);
+}
+
+#[tokio::test]
+async fn emily_process_withdrawal_updates_when_some_of_them_are_unknown() {
+    // the testing configuration has privileged access to all endpoints.
+    let testing_configuration = clean_setup().await;
+
+    // Create two withdrawals
+    let chainstate = Chainstate {
+        stacks_block_hash: "test_block_hash".to_string(),
+        stacks_block_height: 1,
+        bitcoin_block_height: Some(Some(1)),
+    };
+
+    set_chainstate(&testing_configuration, chainstate.clone())
+        .await
+        .expect("Received an error after making a valid set chainstate api call.");
+
+    let create_withdrawal_body1 = CreateWithdrawalRequestBody {
+        amount: 10000,
+        parameters: Box::new(WithdrawalParameters { max_fee: 100 }),
+        recipient: RECIPIENT.into(),
+        sender: SENDER.into(),
+        request_id: 1,
+        stacks_block_hash: chainstate.stacks_block_hash.clone(),
+        stacks_block_height: chainstate.stacks_block_height,
+        txid: "test_txid".to_string(),
+    };
+
+    let create_withdrawal_body2 = CreateWithdrawalRequestBody {
+        amount: 10000,
+        parameters: Box::new(WithdrawalParameters { max_fee: 100 }),
+        recipient: RECIPIENT.into(),
+        sender: SENDER.into(),
+        request_id: 2,
+        stacks_block_hash: chainstate.stacks_block_hash.clone(),
+        stacks_block_height: chainstate.stacks_block_height,
+        txid: "test_txid2".to_string(),
+    };
+
+    // Sanity check that the two withdrawals are different.
+    assert_ne!(
+        create_withdrawal_body1.request_id, create_withdrawal_body2.request_id,
+        "The two withdrawals should have different request ids."
+    );
+    assert_ne!(
+        create_withdrawal_body1.txid, create_withdrawal_body2.txid,
+        "The two withdrawals should have different transaction hex."
+    );
+
+    apis::withdrawal_api::create_withdrawal(
+        &testing_configuration,
+        create_withdrawal_body1.clone(),
+    )
+    .await
+    .expect("Received an error after making a valid create withdrawal request api call.");
+
+    // Now we should have 1 pending withdrawal.
+    let withdrawals =
+        apis::withdrawal_api::get_withdrawals(&testing_configuration, Status::Pending, None, None)
+            .await
+            .expect("Received an error after making a valid get withdrawals api call.");
+    assert_eq!(withdrawals.withdrawals.len(), 1);
+
+    // Now we update both withdrawals to Accepted in a batch. This still should be a valid api call
+    // and existing withdrawal should be updated.
+    let update_withdrawals_request_body = UpdateWithdrawalsRequestBody {
+        withdrawals: vec![
+            WithdrawalUpdate {
+                request_id: create_withdrawal_body1.request_id,
+                fulfillment: None,
+                status: Status::Accepted,
+                status_message: "Second update".into(),
+            },
+            WithdrawalUpdate {
+                request_id: create_withdrawal_body2.request_id,
+                fulfillment: None,
+                status: Status::Accepted,
+                status_message: "Second update".into(),
+            },
+        ],
+    };
+    let update_responce = apis::withdrawal_api::update_withdrawals_signer(
+        &testing_configuration,
+        update_withdrawals_request_body,
+    )
+    .await
+    .expect("Received an error after making a valid update withdrawal request api call.");
+
+    // Check that multistatus response is returned correctly.
+    assert!(update_responce.withdrawals.iter().all(|withdrawal| {
+        if withdrawal.withdrawal.request_id == create_withdrawal_body1.request_id {
+            withdrawal.status == 200
+        } else {
+            withdrawal.status == 404
+        }
+    }));
+
+    // Now we should have 1 accepted withdrawal.
+    let withdrawals =
+        apis::withdrawal_api::get_withdrawals(&testing_configuration, Status::Accepted, None, None)
+            .await
+            .expect("Received an error after making a valid get withdrawals api call.");
+    assert_eq!(withdrawals.withdrawals.len(), 1);
 }
