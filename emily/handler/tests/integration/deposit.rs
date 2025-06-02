@@ -13,7 +13,7 @@ use sbtc::testing::deposits::TxSetup;
 use testing_emily_client::apis::chainstate_api::set_chainstate;
 use testing_emily_client::models::{Chainstate, Fulfillment, Status, UpdateDepositsRequestBody};
 use testing_emily_client::{
-    apis::{self, configuration::Configuration},
+    apis::{self, ResponseContent, configuration::Configuration},
     models::{CreateDepositRequestBody, Deposit, DepositInfo, DepositParameters, DepositUpdate},
 };
 
@@ -1275,8 +1275,8 @@ async fn rbf_status_saved_successfully() {
     assert!(response.is_ok());
     let response = response.unwrap();
     let deposit = response.deposits.first().expect("No deposit in response");
-    assert_eq!(deposit.bitcoin_txid, bitcoin_txid);
-    assert_eq!(deposit.status, Status::Rbf);
+    assert_eq!(deposit.deposit.bitcoin_txid, bitcoin_txid);
+    assert_eq!(deposit.deposit.status, Status::Rbf);
 
     // Check that the deposit can be retrieved with the correct status.
     let response = apis::deposit_api::get_deposit(&user_configuration, &txid, &index)
@@ -1441,6 +1441,7 @@ async fn emily_process_deposit_updates_when_some_of_them_already_accepted() {
             fulfillment: None,
             status: Status::Accepted,
             status_message: "First update".into(),
+            replaced_by_tx: None,
         }],
     };
     let response = apis::deposit_api::update_deposits_signer(
@@ -1479,6 +1480,7 @@ async fn emily_process_deposit_updates_when_some_of_them_already_accepted() {
                 fulfillment: None,
                 status: Status::Accepted,
                 status_message: "Second update".into(),
+                replaced_by_tx: None,
             },
             DepositUpdate {
                 bitcoin_tx_output_index,
@@ -1486,6 +1488,7 @@ async fn emily_process_deposit_updates_when_some_of_them_already_accepted() {
                 fulfillment: None,
                 status: Status::Accepted,
                 status_message: "Second update".into(),
+                replaced_by_tx: None,
             },
         ],
     };
@@ -1587,6 +1590,7 @@ async fn emily_process_deposit_updates_when_some_of_them_are_unknown() {
                 fulfillment: None,
                 status: Status::Accepted,
                 status_message: "Second update".into(),
+                replaced_by_tx: None,
             },
             DepositUpdate {
                 bitcoin_tx_output_index,
@@ -1594,6 +1598,7 @@ async fn emily_process_deposit_updates_when_some_of_them_are_unknown() {
                 fulfillment: None,
                 status: Status::Accepted,
                 status_message: "Second update".into(),
+                replaced_by_tx: None,
             },
         ],
     };

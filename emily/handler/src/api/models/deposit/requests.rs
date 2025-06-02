@@ -156,8 +156,7 @@ impl DepositUpdate {
                 self.status,
                 self.bitcoin_txid,
                 self.bitcoin_tx_output_index,
-            )
-            .into());
+            ));
         }
         // Make status entry.
         let status_entry: StatusEntry = match self.status {
