@@ -13,7 +13,7 @@ use sbtc::testing::deposits::TxSetup;
 use testing_emily_client::apis::chainstate_api::set_chainstate;
 use testing_emily_client::models::{Chainstate, Fulfillment, Status, UpdateDepositsRequestBody};
 use testing_emily_client::{
-    apis::{self, ResponseContent, configuration::Configuration},
+    apis::{self, configuration::Configuration},
     models::{CreateDepositRequestBody, Deposit, DepositInfo, DepositParameters, DepositUpdate},
 };
 
@@ -1349,14 +1349,14 @@ async fn replaced_by_tx_for_not_rbf_transactions_is_bad_request(status: Status) 
     let response =
         apis::deposit_api::update_deposits_sidecar(&user_configuration, update_body).await;
 
+    // Response itself should be ok since update_deposits is a batch request with multistatus.
+    assert!(response.is_ok());
+    let deposits = response.unwrap();
+    assert_eq!(deposits.deposits.len(), 1);
+    let deposit = deposits.deposits.first().expect("No deposit in response");
+
     // Expect a bad request error because the transaction is not in RBF status.
-    assert!(response.is_err());
-    let response = response.unwrap_err();
-    let status_code = match response {
-        testing_emily_client::apis::Error::ResponseError(ResponseContent { status, .. }) => status,
-        _ => panic!("Expected a ResponseError with a status code"),
-    };
-    assert_eq!(status_code, 400);
+    assert!(deposit.status == 400, "Expected a 400 Bad Request status code");
 
     // Check that the deposit status wasn't updated.
     let response = apis::deposit_api::get_deposit(&user_configuration, &txid, &index)

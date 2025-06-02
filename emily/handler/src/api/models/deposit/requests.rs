@@ -206,10 +206,10 @@ impl UpdateDepositsRequestBody {
     /// # Errors
     ///
     /// - `ValidationError::DepositsMissingFulfillment`: If any of the deposit updates are missing a fulfillment.
-    pub fn try_into_validated_update_request(
+    pub fn into_validated_update_request(
         self,
         chainstate: Chainstate,
-    ) -> Result<ValidatedUpdateDepositsRequest, error::Error> {
+    ) -> ValidatedUpdateDepositsRequest {
         // Validate all the deposit updates.
         let mut deposits: Vec<(usize, Result<ValidatedDepositUpdate, ValidationError>)> = vec![];
 
@@ -250,7 +250,7 @@ impl UpdateDepositsRequestBody {
             Err(_) => u64::MAX, // Place errors at the end
         });
 
-        Ok(ValidatedUpdateDepositsRequest { deposits })
+        ValidatedUpdateDepositsRequest { deposits }
     }
 }
 

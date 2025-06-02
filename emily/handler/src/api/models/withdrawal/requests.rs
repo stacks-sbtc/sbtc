@@ -122,10 +122,10 @@ impl UpdateWithdrawalsRequestBody {
     /// # Errors
     ///
     /// - `ValidationError::WithdrawalsMissingFulfillment`: If any of the withdrawal updates are missing a fulfillment.
-    pub fn try_into_validated_update_request(
+    pub fn into_validated_update_request(
         self,
         chainstate: Chainstate,
-    ) -> Result<ValidatedUpdateWithdrawalRequest, error::ValidationError> {
+    ) -> ValidatedUpdateWithdrawalRequest {
         // Validate all the withdrawal updates.
         let mut withdrawals: Vec<(usize, Result<ValidatedWithdrawalUpdate, ValidationError>)> =
             vec![];
@@ -160,6 +160,6 @@ impl UpdateWithdrawalsRequestBody {
             Err(_) => u64::MAX, // Place errors at the end
         });
 
-        Ok(ValidatedUpdateWithdrawalRequest { withdrawals })
+        ValidatedUpdateWithdrawalRequest { withdrawals }
     }
 }

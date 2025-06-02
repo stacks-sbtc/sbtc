@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use test_case::test_case;
 
 use testing_emily_client::apis;
-use testing_emily_client::apis::ResponseContent;
 use testing_emily_client::apis::chainstate_api::set_chainstate;
 use testing_emily_client::apis::configuration::Configuration;
 use testing_emily_client::models::{
@@ -814,13 +813,18 @@ async fn withdrawal_cant_be_rbf() {
     )
     .await;
 
-    assert!(response.is_err());
-    match response.unwrap_err() {
-        testing_emily_client::apis::Error::ResponseError(ResponseContent { status, .. }) => {
-            assert_eq!(status, 400);
-        }
-        e => panic!("Expected a 400 error, got {e:#?}"),
-    }
+    // Update withdrawal is always a batch with multistatus.
+    assert!(response.is_ok());
+    let response = response.unwrap();
+    assert_eq!(response.withdrawals.len(), 1);
+    let withdrawal = response
+        .withdrawals
+        .first()
+        .expect("No withdrawal in response")
+        .clone();
+
+    // Withdrawal can not be RBF, so it is BAD REQUEST.
+    assert_eq!(withdrawal.status, 400);
 }
 
 #[tokio::test]
