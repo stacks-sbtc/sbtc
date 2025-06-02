@@ -1033,7 +1033,7 @@ async fn update_deposits_is_forbidden_for_signer(
         })));
     }
     let replaced_by_tx = if new_status == Status::Rbf {
-        Some(Some("replaced_by_txid".to_string()))
+        Some(Some("replaced_by_txid2".to_string()))
     } else {
         None
     };
@@ -1356,7 +1356,10 @@ async fn replaced_by_tx_for_not_rbf_transactions_is_bad_request(status: Status) 
     let deposit = deposits.deposits.first().expect("No deposit in response");
 
     // Expect a bad request error because the transaction is not in RBF status.
-    assert!(deposit.status == 400, "Expected a 400 Bad Request status code");
+    assert!(
+        deposit.status == 400,
+        "Expected a 400 Bad Request status code"
+    );
 
     // Check that the deposit status wasn't updated.
     let response = apis::deposit_api::get_deposit(&user_configuration, &txid, &index)
