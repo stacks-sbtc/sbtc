@@ -2,7 +2,7 @@
 //!
 
 use std::net::SocketAddr;
-use std::time::Instant;
+use std::time::Duration;
 
 use metrics_exporter_prometheus::PrometheusBuilder;
 
@@ -84,7 +84,7 @@ impl Metrics {
     /// itself included deposits and withdrawals that we know about and
     /// that there were no duplicates with the request. There could still
     /// be deposits and withdrawals that failed validation.
-    pub fn increment_presign_validation(instant: Instant, presign_result: &Result<(), Error>) {
+    pub fn increment_presign_validation(elapsed: Duration, presign_result: &Result<(), Error>) {
         let status = if presign_result.is_ok() {
             "success"
         } else {
@@ -96,7 +96,7 @@ impl Metrics {
             "kind" => "sweep-presign",
             "status" => status,
         )
-        .record(instant.elapsed());
+        .record(elapsed);
 
         metrics::counter!(
             Metrics::SignRequestsTotal,
@@ -110,7 +110,7 @@ impl Metrics {
     /// Increment the result of a request to sign stacks transaction after
     /// validation has run. Also note the time it took to run validation.
     pub fn increment_stacks_validation(
-        instant: Instant,
+        elapsed: Duration,
         request: &StacksTransactionSignRequest,
         validation_result: &Result<(), Error>,
     ) {
@@ -119,7 +119,7 @@ impl Metrics {
             "blockchain" => STACKS_BLOCKCHAIN,
             "kind" => request.tx_kind(),
         )
-        .record(instant.elapsed());
+        .record(elapsed);
         metrics::counter!(
             Metrics::SignRequestsTotal,
             "blockchain" => STACKS_BLOCKCHAIN,

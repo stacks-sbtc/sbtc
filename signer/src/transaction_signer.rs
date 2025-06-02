@@ -291,7 +291,7 @@ where
                     .handle_bitcoin_pre_sign_request(requests, &chain_tip)
                     .await;
 
-                Metrics::increment_presign_validation(instant, &presign_result);
+                Metrics::increment_presign_validation(instant.elapsed(), &presign_result);
                 presign_result?;
             }
             // Message types ignored by the transaction signer
@@ -422,7 +422,7 @@ where
             .assert_valid_stacks_tx_sign_request(request, chain_tip, origin_public_key)
             .await;
 
-        Metrics::increment_stacks_validation(instant, request, &validation_result);
+        Metrics::increment_stacks_validation(instant.elapsed(), request, &validation_result);
         validation_result?;
 
         // We need to set the nonce in order to get the exact transaction
