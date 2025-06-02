@@ -2482,21 +2482,6 @@ impl super::DbRead for PgStore {
         .map_err(Error::SqlxQuery)
     }
 
-    /*
-    CREATE TABLE p2p_peers (
-        -- The libp2p PeerId of the peer (base58 encoded multihash).
-        peer_id TEXT PRIMARY KEY,
-        -- The public key of the peer (hex-encoded string).
-        -- We're storing this here and as a string primarily for monitoring and ergonomics.
-        -- (The peer id is derived from the peer's keypair)
-        public_key TEXT NOT NULL,
-        -- The last known reachable multiaddress for this peer.
-        multiaddress TEXT NOT NULL,
-        -- Timestamp of when this peer was first added.
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        -- Timestamp of the last update to this peer''s record (e.g. a successful dial).
-        last_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    ); */
     async fn get_p2p_peers(&self) -> Result<Vec<model::P2PPeer>, Error> {
         sqlx::query_as::<_, model::P2PPeer>(
             r#"
@@ -3376,21 +3361,6 @@ impl super::DbWrite for PgStore {
         .map_err(Error::SqlxQuery)
     }
 
-    /*
-    CREATE TABLE p2p_peers (
-        -- The libp2p PeerId of the peer (base58 encoded multihash).
-        peer_id TEXT PRIMARY KEY,
-        -- The public key of the peer (hex-encoded string).
-        -- We're storing this here and as a string primarily for monitoring and ergonomics.
-        -- (The peer id is derived from the peer's keypair)
-        public_key TEXT NOT NULL,
-        -- The last known reachable multiaddress for this peer.
-        multiaddress TEXT NOT NULL,
-        -- Timestamp of when this peer was first added.
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        -- Timestamp of the last update to this peer''s record (e.g. a successful dial).
-        last_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );*/
     async fn update_peer_connection(
         &self,
         pub_key: &PublicKey,
@@ -3407,6 +3377,7 @@ impl super::DbWrite for PgStore {
             VALUES ($1, $2, $3)
             ON CONFLICT (peer_id, public_key) DO UPDATE SET
                 address = EXCLUDED.address
+              , last_dialed_at = NOW()
             "#,
         )
         .bind(DbPeerId::from(*peer_id))
