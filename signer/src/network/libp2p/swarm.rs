@@ -312,9 +312,6 @@ impl<'a> SignerSwarmBuilder<'a> {
     /// Add known peers to the builder.
     pub fn add_known_peers(mut self, peers: &[(PeerId, Multiaddr)]) -> Self {
         for (peer_id, addr) in peers {
-            if !self.seed_addrs.contains(addr) {
-                self.seed_addrs.push(addr.clone());
-            }
             if !self.known_peers.contains(&(*peer_id, addr.clone())) {
                 self.known_peers.push((*peer_id, addr.clone()));
             }
