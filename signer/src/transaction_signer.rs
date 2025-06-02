@@ -6,6 +6,7 @@
 //! For more details, see the [`TxSignerEventLoop`] documentation.
 
 use std::collections::BTreeSet;
+use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::time::Duration;
 
@@ -36,6 +37,7 @@ use crate::network;
 use crate::stacks::contracts::AsContractCall as _;
 use crate::stacks::contracts::ContractCall;
 use crate::stacks::contracts::ReqContext;
+use crate::stacks::contracts::SmartContract;
 use crate::stacks::contracts::StacksTx;
 use crate::stacks::wallet::MultisigTx;
 use crate::stacks::wallet::SignerWallet;
@@ -56,6 +58,10 @@ use lru::LruCache;
 use wsts::net::DkgEnd;
 use wsts::net::DkgStatus;
 use wsts::net::Message as WstsNetMessage;
+
+/// LRU cache max size for the stacks signature requests. This is the number of
+/// bitcoin tenures for which we keep track of the signed stacks transactions.
+pub const STACKS_SIGN_REQUEST_LRU_SIZE: NonZeroUsize = NonZeroUsize::new(2).expect("2 is non zero");
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// # Transaction signer event loop
@@ -145,6 +151,9 @@ pub struct TxSignerEventLoop<Context, Network, Rng> {
     /// during DKG using the FROST algorithm. This is then used during the
     /// verification of the Stacks rotate-keys transaction.
     pub dkg_verification_state_machines: LruCache<StateMachineId, dkg::verification::StateMachine>,
+    /// Stacks transactions signed during a bitcoin tenure. We don't allow
+    /// signing for the same request multiple times in a tenure.
+    pub stacks_sign_request: LruCache<model::BitcoinBlockHash, HashSet<StacksSignRequestId>>,
 }
 
 /// This struct represents a signature hash and the public key that locks
@@ -157,6 +166,58 @@ struct AcceptedSigHash {
     sighash: SigHash,
     /// The public key that is used to lock the above signature hash.
     public_key: PublicKeyXOnly,
+}
+
+/// An enum identifying requests for which we can sign for on stacks only once
+/// per tenure.
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub enum StacksSignRequestId {
+    /// A complete deposit transaction
+    CompleteDeposit(bitcoin::OutPoint),
+    /// An accept or reject withdrawal for a request id. Since we can only sign
+    /// for one of them at any time, we don't differentiate.
+    CompleteWithdrawal(u64),
+    /// A rotate keys transaction for an aggregate key
+    RotateKeys(PublicKey),
+    /// A new contract deployment
+    SmartContract(SmartContract),
+}
+
+impl StacksSignRequestId {
+    fn from_sign_request(request: &StacksTransactionSignRequest) -> Self {
+        match &request.contract_tx {
+            StacksTx::ContractCall(ContractCall::CompleteDepositV1(contract)) => {
+                StacksSignRequestId::CompleteDeposit(contract.outpoint)
+            }
+            StacksTx::ContractCall(ContractCall::AcceptWithdrawalV1(contract)) => {
+                StacksSignRequestId::CompleteWithdrawal(contract.id.request_id)
+            }
+            StacksTx::ContractCall(ContractCall::RejectWithdrawalV1(contract)) => {
+                StacksSignRequestId::CompleteWithdrawal(contract.id.request_id)
+            }
+            StacksTx::ContractCall(ContractCall::RotateKeysV1(contract)) => {
+                StacksSignRequestId::RotateKeys(contract.aggregate_key)
+            }
+            StacksTx::SmartContract(contract) => StacksSignRequestId::SmartContract(*contract),
+        }
+    }
+}
+
+impl std::fmt::Display for StacksSignRequestId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StacksSignRequestId::CompleteDeposit(outpoint) => {
+                write!(f, "CompleteDeposit({outpoint}")
+            }
+            StacksSignRequestId::CompleteWithdrawal(request_id) => {
+                write!(f, "CompleteWithdrawal({request_id}")
+            }
+            StacksSignRequestId::RotateKeys(public_key) => write!(f, "RotateKeys({public_key}"),
+            StacksSignRequestId::SmartContract(smart_contract) => {
+                write!(f, "SmartContract({smart_contract}")
+            }
+        }
+    }
 }
 
 /// This function defines which messages this event loop is interested
@@ -213,6 +274,7 @@ where
             dkg_verification_state_machines: LruCache::new(
                 NonZeroUsize::new(5).ok_or(Error::TypeConversion)?,
             ),
+            stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
         })
     }
 
@@ -430,8 +492,10 @@ where
         Ok(())
     }
 
+    /// Processes the [`StacksTransactionSignRequest`] message.
+    /// Validate the request and if valid then sign and broadcast the signed tx.
     #[tracing::instrument(skip_all)]
-    async fn handle_stacks_transaction_sign_request(
+    pub async fn handle_stacks_transaction_sign_request(
         &mut self,
         request: &StacksTransactionSignRequest,
         chain_tip: &model::BitcoinBlockRef,
@@ -475,6 +539,12 @@ where
 
         self.send_message(msg, &chain_tip.block_hash).await?;
 
+        // Mark the sign request as signed for this tenure
+        let request_id = StacksSignRequestId::from_sign_request(request);
+        self.stacks_sign_request
+            .get_or_insert_mut(chain_tip.block_hash, Default::default)
+            .insert(request_id);
+
         Ok(())
     }
 
@@ -482,11 +552,25 @@ where
     /// are run depend on the transaction being signed.
     #[tracing::instrument(skip_all, fields(sender = %origin_public_key, txid = %request.txid), err)]
     pub async fn assert_valid_stacks_tx_sign_request(
-        &self,
+        &mut self,
         request: &StacksTransactionSignRequest,
         chain_tip: &model::BitcoinBlockRef,
         origin_public_key: &PublicKey,
     ) -> Result<(), Error> {
+        // Ensure we didn't already sign for this request
+        let request_id = StacksSignRequestId::from_sign_request(request);
+        let already_signed = self
+            .stacks_sign_request
+            .get(&chain_tip.block_hash)
+            .map(|set| set.contains(&request_id))
+            .unwrap_or(false);
+        if already_signed {
+            return Err(Error::StacksRequestAlreadySigned(
+                request_id,
+                *chain_tip.block_hash,
+            ));
+        }
+
         // Ensure that the Stacks fee is within the acceptable range.
         let highest_acceptable_fee = self.context.config().signer.stacks_fees_max_ustx.get();
         if request.tx_fee > highest_acceptable_fee {
@@ -1810,6 +1894,7 @@ mod tests {
             rng: rand::rngs::OsRng,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
+            stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
         };
 
         // Create a DkgBegin message to be handled by the signer.
@@ -1877,6 +1962,7 @@ mod tests {
             rng: rand::rngs::OsRng,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
+            stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
         };
 
         // Create a DkgBegin message to be handled by the signer.
@@ -1962,6 +2048,7 @@ mod tests {
             rng: rand::rngs::OsRng,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
+            stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
         };
 
         let msg = message::WstsMessage {
