@@ -22,6 +22,7 @@ use crate::testing;
 use crate::testing::get_rng;
 use crate::testing::storage::model::TestData;
 use crate::transaction_signer;
+use crate::transaction_signer::STACKS_SIGN_REQUEST_LRU_SIZE;
 
 use lru::LruCache;
 use tokio::sync::broadcast;
@@ -61,6 +62,7 @@ where
                 rng,
                 dkg_begin_pause: None,
                 dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
+                stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
             },
             context,
         }
