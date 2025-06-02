@@ -10,7 +10,6 @@ use test_case::test_case;
 
 use sbtc::testing;
 use sbtc::testing::deposits::TxSetup;
-use testing_emily_client::apis::ResponseContent;
 use testing_emily_client::apis::chainstate_api::set_chainstate;
 use testing_emily_client::models::{Chainstate, Fulfillment, Status, UpdateDepositsRequestBody};
 use testing_emily_client::{
@@ -802,7 +801,11 @@ async fn update_deposits() {
 
     // Assert.
     // -------
-    let mut updated_deposits = update_deposits_response.deposits;
+    let mut updated_deposits = update_deposits_response
+        .deposits
+        .iter()
+        .map(|deposit| *deposit.deposit.clone())
+        .collect::<Vec<_>>();
     updated_deposits.sort_by(arbitrary_deposit_partial_cmp);
     expected_deposits.sort_by(arbitrary_deposit_partial_cmp);
     assert_eq!(expected_deposits, updated_deposits);
@@ -1051,17 +1054,14 @@ async fn update_deposits_is_forbidden_for_signer(
     .await;
 
     if is_forbidden {
-        assert!(response.is_err());
-        match response.unwrap_err() {
-            testing_emily_client::apis::Error::ResponseError(ResponseContent {
-                status, ..
-            }) => {
-                assert_eq!(status, 403);
-            }
+        // Check response correctness
+        let response = response.expect("Batch update should return 200 OK");
+        let deposits = response.deposits;
+        assert_eq!(deposits.len(), 1);
+        let deposit = deposits.first().unwrap();
+        assert_eq!(deposit.status, 403);
 
-            e => panic!("Expected a 403 error, got {:#?}", e),
-        }
-
+        // Check that deposit wasn't updated
         let response = apis::deposit_api::get_deposit(
             &user_configuration,
             &bitcoin_txid,
@@ -1074,7 +1074,12 @@ async fn update_deposits_is_forbidden_for_signer(
     } else {
         assert!(response.is_ok());
         let response = response.unwrap();
-        let deposit = response.deposits.first().expect("No deposit in response");
+        let deposit = *response
+            .deposits
+            .first()
+            .expect("No deposit in response")
+            .deposit
+            .clone();
         assert_eq!(deposit.bitcoin_txid, bitcoin_txid);
         assert_eq!(deposit.status, new_status);
     }
@@ -1203,7 +1208,12 @@ async fn update_deposits_is_not_forbidden_for_sidecar(previous_status: Status, n
 
     assert!(response.is_ok());
     let response = response.unwrap();
-    let deposit = response.deposits.first().expect("No deposit in response");
+    let deposit = *response
+        .deposits
+        .first()
+        .expect("No deposit in response")
+        .deposit
+        .clone();
     assert_eq!(deposit.bitcoin_txid, bitcoin_txid);
     assert_eq!(deposit.status, new_status);
 }

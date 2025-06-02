@@ -4,6 +4,7 @@ use warp::reply::{Reply, json, with_status};
 
 use crate::api::models::common::Status;
 use crate::api::models::common::requests::BasicPaginationQuery;
+use crate::api::models::withdrawal::responses::WithdrawalWithStatus;
 use crate::api::models::withdrawal::{Withdrawal, WithdrawalInfo};
 use crate::api::models::withdrawal::{
     requests::{CreateWithdrawalRequestBody, GetWithdrawalsQuery, UpdateWithdrawalsRequestBody},
@@ -307,7 +308,7 @@ pub async fn create_withdrawal(
     tag = "withdrawal",
     request_body = UpdateWithdrawalsRequestBody,
     responses(
-        (status = 201, description = "Withdrawals updated successfully", body = UpdateWithdrawalsResponse),
+        (status = 200, description = "Withdrawals updated successfully", body = UpdateWithdrawalsResponse),
         (status = 400, description = "Invalid request body", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
         (status = 404, description = "Address not found", body = ErrorResponse),
@@ -335,16 +336,6 @@ pub async fn update_withdrawals_signer(
         let api_state = accessors::get_api_state(&context).await?;
         api_state.error_if_reorganizing()?;
 
-        // Signers are only allowed to update withdrawals to the accepted state.
-        let is_allowed = body
-            .withdrawals
-            .iter()
-            .all(|withdrawal| withdrawal.status == Status::Accepted);
-
-        if !is_allowed {
-            return Err(Error::Forbidden);
-        }
-
         update_withdrawals(api_state, context, body, false).await
     }
     // Handle and respond.
@@ -361,7 +352,7 @@ pub async fn update_withdrawals_signer(
     tag = "withdrawal",
     request_body = UpdateWithdrawalsRequestBody,
     responses(
-        (status = 201, description = "Withdrawals updated successfully", body = UpdateWithdrawalsResponse),
+        (status = 200, description = "Withdrawals updated successfully", body = UpdateWithdrawalsResponse),
         (status = 400, description = "Invalid request body", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
         (status = 404, description = "Address not found", body = ErrorResponse),
@@ -408,28 +399,78 @@ async fn update_withdrawals(
         body.try_into_validated_update_request(api_state.chaintip().into())?;
 
     // Create aggregator.
-    let mut updated_withdrawals: Vec<(usize, Withdrawal)> =
+    let mut updated_withdrawals: Vec<(usize, WithdrawalWithStatus)> =
         Vec::with_capacity(validated_request.withdrawals.len());
 
     // Loop through all updates and execute.
     for (index, update) in validated_request.withdrawals {
+        if update.is_err() {
+            updated_withdrawals.push((
+                index,
+                WithdrawalWithStatus {
+                    withdrawal: Withdrawal::default(),
+                    status: StatusCode::BAD_REQUEST.as_u16(),
+                },
+            ));
+            continue;
+        }
+        let update = update.unwrap();
         let request_id = update.request_id;
         debug!(request_id, "updating withdrawal");
 
-        let updated_withdrawal = accessors::pull_and_update_withdrawal_with_retry(
+        let updated_withdrawal = match accessors::pull_and_update_withdrawal_with_retry(
             &context,
             update,
             15,
             is_from_trusted_source,
         )
         .await
-        .inspect_err(|error| {
-            tracing::error!(
-                request_id,
-                %error,
-                "failed to update withdrawal",
-            );
-        })?;
+        {
+            Ok(withdrawal_entry) => withdrawal_entry,
+            Err(Error::NotFound) => {
+                tracing::warn!(
+                    request_id,
+                    "failed to update withdrawal. Withdrawal not found in the database"
+                );
+                updated_withdrawals.push((
+                    index,
+                    WithdrawalWithStatus {
+                        withdrawal: Withdrawal::default(),
+                        status: StatusCode::NOT_FOUND.as_u16(),
+                    },
+                ));
+                continue;
+            }
+            Err(Error::Forbidden) => {
+                tracing::warn!(
+                    request_id,
+                    "failed to update withdrawal. Such type of update is not allowed for the caller"
+                );
+                updated_withdrawals.push((
+                    index,
+                    WithdrawalWithStatus {
+                        withdrawal: Withdrawal::default(),
+                        status: StatusCode::FORBIDDEN.as_u16(),
+                    },
+                ));
+                continue;
+            }
+            Err(error) => {
+                tracing::error!(
+                    request_id,
+                    %error,
+                    "failed to update withdrawal"
+                );
+                updated_withdrawals.push((
+                    index,
+                    WithdrawalWithStatus {
+                        withdrawal: Withdrawal::default(),
+                        status: StatusCode::INTERNAL_SERVER_ERROR.as_u16(),
+                    },
+                ));
+                continue;
+            }
+        };
 
         let withdrawal: Withdrawal = updated_withdrawal.try_into().inspect_err(|error| {
             // This should never happen, because the withdrawal was
@@ -440,8 +481,13 @@ async fn update_withdrawals(
                 "failed to convert updated withdrawal",
             );
         })?;
-
-        updated_withdrawals.push((index, withdrawal));
+        updated_withdrawals.push((
+            index,
+            WithdrawalWithStatus {
+                withdrawal,
+                status: StatusCode::OK.as_u16(),
+            },
+        ));
     }
     updated_withdrawals.sort_by_key(|(index, _)| *index);
     let withdrawals = updated_withdrawals
@@ -449,7 +495,7 @@ async fn update_withdrawals(
         .map(|(_, withdrawal)| withdrawal)
         .collect();
     let response = UpdateWithdrawalsResponse { withdrawals };
-    Ok(with_status(json(&response), StatusCode::CREATED))
+    Ok(with_status(json(&response), StatusCode::OK))
 }
 
 // TODO(393): Add handler unit tests.

@@ -12,6 +12,7 @@ docs/DepositApi.md
 docs/DepositInfo.md
 docs/DepositParameters.md
 docs/DepositUpdate.md
+docs/DepositWithStatus.md
 docs/ErrorResponse.md
 docs/Fulfillment.md
 docs/GetDepositsForTransactionResponse.md
@@ -31,6 +32,7 @@ docs/WithdrawalApi.md
 docs/WithdrawalInfo.md
 docs/WithdrawalParameters.md
 docs/WithdrawalUpdate.md
+docs/WithdrawalWithStatus.md
 git_push.sh
 src/apis/chainstate_api.rs
 src/apis/configuration.rs
@@ -48,6 +50,7 @@ src/models/deposit.rs
 src/models/deposit_info.rs
 src/models/deposit_parameters.rs
 src/models/deposit_update.rs
+src/models/deposit_with_status.rs
 src/models/error_response.rs
 src/models/fulfillment.rs
 src/models/get_deposits_for_transaction_response.rs
@@ -65,3 +68,4 @@ src/models/withdrawal.rs
 src/models/withdrawal_info.rs
 src/models/withdrawal_parameters.rs
 src/models/withdrawal_update.rs
+src/models/withdrawal_with_status.rs

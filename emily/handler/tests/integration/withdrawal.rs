@@ -3,9 +3,9 @@ use std::collections::HashMap;
 
 use test_case::test_case;
 
+use testing_emily_client::apis;
 use testing_emily_client::apis::chainstate_api::set_chainstate;
 use testing_emily_client::apis::configuration::Configuration;
-use testing_emily_client::apis::{self, ResponseContent};
 use testing_emily_client::models::{
     Chainstate, CreateWithdrawalRequestBody, Fulfillment, Status, UpdateWithdrawalsRequestBody,
     Withdrawal, WithdrawalInfo, WithdrawalParameters, WithdrawalUpdate,
@@ -399,7 +399,7 @@ async fn get_withdrawals_by_sender() {
         expected_withdrawal_infos.sort_by(arbitrary_withdrawal_info_partial_cmp);
         let mut actual_withdrawal_infos = actual_sender_data.get(recipient).unwrap().clone();
         actual_withdrawal_infos.sort_by(arbitrary_withdrawal_info_partial_cmp);
-        // Assert that the expected and actual deposit infos are the same.
+        // Assert that the expected and actual withdrawal infos are the same.
         assert_eq!(expected_withdrawal_infos, actual_withdrawal_infos);
     }
 }
@@ -498,7 +498,11 @@ async fn update_withdrawals() {
 
     // Assert.
     // -------
-    let mut updated_withdrawals = update_withdrawals_response.withdrawals;
+    let mut updated_withdrawals = update_withdrawals_response
+        .withdrawals
+        .iter()
+        .map(|withdrawal| *withdrawal.withdrawal.clone())
+        .collect::<Vec<_>>();
     updated_withdrawals.sort_by(arbitrary_withdrawal_partial_cmp);
     expected_withdrawals.sort_by(arbitrary_withdrawal_partial_cmp);
     assert_eq!(expected_withdrawals, updated_withdrawals);
@@ -616,17 +620,14 @@ async fn update_withdrawals_is_forbidden_for_signer(
     .await;
 
     if is_forbidden {
-        assert!(response.is_err());
+        // Check response correctness.
+        let response = response.expect("Batch update should return 200 OK");
+        let withdrawals = response.withdrawals;
+        assert_eq!(withdrawals.len(), 1);
+        let withdrawal = withdrawals.first().unwrap();
+        assert_eq!(withdrawal.status, 403);
 
-        match response.unwrap_err() {
-            testing_emily_client::apis::Error::ResponseError(ResponseContent {
-                status, ..
-            }) => {
-                assert_eq!(status, 403);
-            }
-            e => panic!("Expected a 403 error, got {e:#?}"),
-        }
-
+        // Check withdrawal wasn't updated
         let response = apis::withdrawal_api::get_withdrawal(&user_configuration, request_id)
             .await
             .expect("Received an error after making a valid get withdrawal api call.");
@@ -638,7 +639,9 @@ async fn update_withdrawals_is_forbidden_for_signer(
         let withdrawal = response
             .withdrawals
             .first()
-            .expect("No withdrawal in response");
+            .expect("No withdrawal in response")
+            .withdrawal
+            .clone();
         assert_eq!(withdrawal.request_id, request_id);
         assert_eq!(withdrawal.status, new_status);
     }
@@ -752,7 +755,9 @@ async fn update_withdrawals_is_not_forbidden_for_sidecar(
     let withdrawal = response
         .withdrawals
         .first()
-        .expect("No withdrawal in response");
+        .expect("No withdrawal in response")
+        .withdrawal
+        .clone();
     assert_eq!(withdrawal.request_id, request_id);
     assert_eq!(withdrawal.status, new_status);
 }
