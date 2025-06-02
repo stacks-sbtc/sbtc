@@ -413,8 +413,14 @@ impl WstsCoordinator for FrostCoordinator {
 /// Wrapper around a WSTS signer state machine
 #[derive(Debug, Clone, PartialEq)]
 pub struct SignerStateMachine {
+    /// The inner WSTS state machine that this type wraps
     inner: wsts::state_machine::signer::Signer<wsts::v2::Party>,
+    /// The bitcoin block hash and height at the time that this state
+    /// machine was created. This is used to seed the random number
+    /// generator used to create the secret polynomial during DKG.
     started_at: BitcoinBlockRef,
+    /// The signer's private key. This is also used to seed the random
+    /// number generated used to create the secret polynomial during DKG.
     private_key: PrivateKey,
 }
 
