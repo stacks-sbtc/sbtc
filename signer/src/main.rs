@@ -286,8 +286,12 @@ async fn run_libp2p_swarm(ctx: impl Context) -> Result<(), Error> {
             .filter_map(|peer| {
                 let time_since_last_dialed = OffsetDateTime::now_utc() - *peer.last_dialed_at;
                 let is_seed_addr = config.signer.p2p.seeds.contains(&*peer.address);
+                let is_allowed_peer = ctx
+                    .state()
+                    .current_signer_set()
+                    .is_allowed_peer(&peer.peer_id);
 
-                if time_since_last_dialed > KNOWN_PEER_WINDOW || is_seed_addr {
+                if time_since_last_dialed > KNOWN_PEER_WINDOW || is_seed_addr || !is_allowed_peer {
                     None
                 } else {
                     let peer_id = *peer.peer_id;
