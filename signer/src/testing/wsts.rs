@@ -262,12 +262,12 @@ impl Signer {
                     continue;
                 };
 
-                let outbound_packets = self
+                let outbound_messages = self
                     .wsts_signer
                     .process(&wsts_msg.inner)
                     .expect("message processing failed");
 
-                for message in outbound_packets {
+                for message in outbound_messages {
                     self.wsts_signer
                         .process(&message)
                         .expect("message processing failed");
@@ -299,12 +299,12 @@ impl Signer {
                     continue;
                 };
 
-                let outbound_packets = self
+                let outbound_messages = self
                     .wsts_signer
                     .process(&wsts_msg.inner)
                     .expect("message processing failed");
 
-                for message in outbound_packets {
+                for message in outbound_messages {
                     self.wsts_signer
                         .process(&message)
                         .expect("message processing failed");
