@@ -9,6 +9,7 @@ use metrics_exporter_prometheus::PrometheusBuilder;
 use crate::block_observer::Deposit;
 use crate::error::Error;
 use crate::message::StacksTransactionSignRequest;
+use crate::transaction_signer::AcceptedSigHash;
 
 /// The buckets used for metric histograms
 const METRIC_BUCKETS: [f64; 9] = [1e-4, 1e-3, 1e-2, 0.1, 0.5, 1.0, 5.0, 20.0, f64::INFINITY];
@@ -131,7 +132,7 @@ impl Metrics {
 
     /// Increment the result of a request to sign a particular sighash of a
     /// bitcoin transaction.
-    pub fn increment_bitcoin_validation(sighash_result: Result<(), &Error>) {
+    pub fn increment_bitcoin_validation(sighash_result: &Result<AcceptedSigHash, Error>) {
         let validation_status = match &sighash_result {
             Ok(_) => "success",
             Err(Error::SigHashConversion(_)) => "improper-sighash",

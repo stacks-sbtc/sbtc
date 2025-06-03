@@ -151,7 +151,7 @@ pub struct TxSignerEventLoop<Context, Network, Rng> {
 ///
 /// The struct is only created when the signer has validated the bitcoin
 /// transaction and has agreed to sign the sighash.
-struct AcceptedSigHash {
+pub struct AcceptedSigHash {
     /// The signature hash to be signed.
     sighash: SigHash,
     /// The public key that is used to lock the above signature hash.
@@ -732,8 +732,7 @@ where
                         let accepted_sighash =
                             Self::validate_bitcoin_sign_request(&db, &request.message).await;
 
-                        let sighash_result = accepted_sighash.as_ref().map(|_| ());
-                        Metrics::increment_bitcoin_validation(sighash_result);
+                        Metrics::increment_bitcoin_validation(&accepted_sighash);
 
                         let accepted_sighash = accepted_sighash?;
                         let id = StateMachineId::BitcoinSign(accepted_sighash.sighash);
