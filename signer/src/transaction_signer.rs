@@ -1617,6 +1617,15 @@ pub async fn assert_allow_dkg_begin(
     let storage = context.get_storage();
     let config = context.config();
 
+    // If the latest shares are unverified, we want to prioritize verifying them
+    // instead of doing new DKG rounds. If we fail to do so they will eventually
+    // be marked as failed, and we will resume DKG-ing.
+    let latest_dkg_shares = storage.get_latest_encrypted_dkg_shares().await?;
+    if latest_dkg_shares.map(|s| s.dkg_shares_status) == Some(model::DkgSharesStatus::Unverified) {
+        tracing::warn!("latest shares are unverified; aborting");
+        return Err(Error::DkgHasAlreadyRun);
+    }
+
     // Trigger dkg if signatures_required has changed
     if context.state().current_signatures_required() != config.signer.bootstrap_signatures_required
     {
