@@ -1,6 +1,5 @@
 //! LibP2P behavior for bootstrapping the node against the network using
 //! the known seed addresses.
-use crate::metrics::Metrics;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     task::Poll,
