@@ -2549,7 +2549,7 @@ impl super::DbWrite for PgStore {
               , signers_public_key
               , sender_script_pub_keys
               )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             ON CONFLICT DO NOTHING",
         )
         .bind(deposit_request.txid)
@@ -2621,13 +2621,13 @@ impl super::DbWrite for PgStore {
             , output_index        AS (SELECT ROW_NUMBER() OVER (), output_index FROM UNNEST($2::INTEGER[]) AS output_index)
             , spend_script        AS (SELECT ROW_NUMBER() OVER (), spend_script FROM UNNEST($3::BYTEA[]) AS spend_script)
             , reclaim_script      AS (SELECT ROW_NUMBER() OVER (), reclaim_script FROM UNNEST($4::BYTEA[]) AS reclaim_script)
-            , reclaim_script_hash AS (SELECT ROW_NUMBER() OVER (), reclaim_script_hash FROM UNNEST($4::BYTEA[]) AS reclaim_script_hash)
-            , recipient           AS (SELECT ROW_NUMBER() OVER (), recipient FROM UNNEST($5::TEXT[]) AS recipient)
-            , amount              AS (SELECT ROW_NUMBER() OVER (), amount FROM UNNEST($6::BIGINT[]) AS amount)
-            , max_fee             AS (SELECT ROW_NUMBER() OVER (), max_fee FROM UNNEST($7::BIGINT[]) AS max_fee)
-            , lock_time           AS (SELECT ROW_NUMBER() OVER (), lock_time FROM UNNEST($8::BIGINT[]) AS lock_time)
-            , signer_pub_keys     AS (SELECT ROW_NUMBER() OVER (), signers_public_key FROM UNNEST($9::BYTEA[]) AS signers_public_key)
-            , script_pub_keys     AS (SELECT ROW_NUMBER() OVER (), senders FROM UNNEST($10::VARCHAR[]) AS senders)
+            , reclaim_script_hash AS (SELECT ROW_NUMBER() OVER (), reclaim_script_hash FROM UNNEST($5::BYTEA[]) AS reclaim_script_hash)
+            , recipient           AS (SELECT ROW_NUMBER() OVER (), recipient FROM UNNEST($6::TEXT[]) AS recipient)
+            , amount              AS (SELECT ROW_NUMBER() OVER (), amount FROM UNNEST($7::BIGINT[]) AS amount)
+            , max_fee             AS (SELECT ROW_NUMBER() OVER (), max_fee FROM UNNEST($8::BIGINT[]) AS max_fee)
+            , lock_time           AS (SELECT ROW_NUMBER() OVER (), lock_time FROM UNNEST($9::BIGINT[]) AS lock_time)
+            , signer_pub_keys     AS (SELECT ROW_NUMBER() OVER (), signers_public_key FROM UNNEST($10::BYTEA[]) AS signers_public_key)
+            , script_pub_keys     AS (SELECT ROW_NUMBER() OVER (), senders FROM UNNEST($11::VARCHAR[]) AS senders)
             INSERT INTO sbtc_signer.deposit_requests (
                   txid
                 , output_index
