@@ -6,6 +6,7 @@ use bitcoin::Network;
 use bitcoin::OutPoint;
 use bitcoin::Script;
 use bitcoin::ScriptBuf;
+use bitcoin::TapNodeHash;
 use bitcoin::Transaction;
 use bitcoin::XOnlyPublicKey;
 use bitcoin::locktime::relative::LockTime;
@@ -104,6 +105,8 @@ pub struct DepositInfo {
     pub deposit_script: ScriptBuf,
     /// The reclaim script for the deposit.
     pub reclaim_script: ScriptBuf,
+    /// The hash of the reclaim script:
+    pub reclaim_script_hash: TapNodeHash,
     /// The public key used in the deposit script. The signers public key
     /// is for Schnorr signatures.
     pub signers_public_key: XOnlyPublicKey,
@@ -171,10 +174,13 @@ impl CreateDepositRequest {
             return Err(Error::RecipientNetworkMismatch(deposit.recipient));
         }
 
+        let reclaim_script_hash = TapNodeHash::from_script(&reclaim_script, LeafVersion::TapScript);
+
         Ok(DepositInfo {
             max_fee: deposit.max_fee,
             deposit_script,
             reclaim_script,
+            reclaim_script_hash,
             signers_public_key: deposit.signers_public_key,
             recipient: deposit.recipient,
             lock_time: reclaim.lock_time,

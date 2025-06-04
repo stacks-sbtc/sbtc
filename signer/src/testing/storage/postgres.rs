@@ -20,6 +20,7 @@ impl PgStore {
               , dr.output_index
               , dr.spend_script
               , dr.reclaim_script
+              , dr.reclaim_script_hash
               , dr.recipient
               , dr.amount
               , dr.max_fee
