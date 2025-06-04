@@ -47,6 +47,8 @@ pub enum Metrics {
     /// The amount of time, in seconds for running bitcoin or stacks
     /// validation.
     ValidationDurationSeconds,
+    /// The number of peers connected in the libp2p network.
+    PeersConnectedTotal,
 }
 
 impl From<Metrics> for metrics::KeyName {
