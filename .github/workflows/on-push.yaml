@@ -45,35 +45,35 @@ jobs:
     steps:
       - name: Setup Mold
         id: setup_mold
-        uses: stacks-sbtc/actions/setup-mold@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/setup-mold@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           make-default: true
 
       - name: Checkout Repository
         id: checkout_Repository
-        uses: stacks-sbtc/actions/checkout@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/checkout@181f8c67da2707c66b5e31f24e7418c47adefdd1
 
       - name: Setup Pnpm
         id: setup_pnpm
-        uses: stacks-sbtc/actions/setup-pnpm@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/setup-pnpm@181f8c67da2707c66b5e31f24e7418c47adefdd1
 
       - name: Setup Node
         id: setup_node
-        uses: stacks-sbtc/actions/setup-node@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/setup-node@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "pnpm"
 
       - name: Setup Buf
         id: setup_buf
-        uses: stacks-sbtc/actions/setup-buf@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/setup-buf@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           version: ${{ env.BUF_VERSION }}
           setup_only: true
 
       - name: Setup Rust
         id: setup_rust
-        uses: stacks-sbtc/actions/setup-rust-toolchain@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/setup-rust-toolchain@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           components: clippy, rustfmt
           cache-key: "rust-tests"
@@ -114,23 +114,23 @@ jobs:
     steps:
       - name: Setup Mold
         id: setup_mold
-        uses: stacks-sbtc/actions/setup-mold@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/setup-mold@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           make-default: true
 
       - name: Checkout Repository
         id: checkout_Repository
-        uses: stacks-sbtc/actions/checkout@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/checkout@181f8c67da2707c66b5e31f24e7418c47adefdd1
 
       - name: Setup Rust
         id: setup_rust
-        uses: stacks-sbtc/actions/setup-rust-toolchain@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/setup-rust-toolchain@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           cache-key: "rust-tests"
 
       - name: Install Action
         id: install_action
-        uses: stacks-sbtc/actions/install-action@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/install-action@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           tool: nextest@${{ env.NEXTEST_VERSION }}
 
@@ -144,7 +144,7 @@ jobs:
 
       - name: Upload Nextest Archives
         id: upload_nextest_archives
-        uses: stacks-sbtc/actions/upload-artifact@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/upload-artifact@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           name: nextest-archives
           path: ./target/nextest/*.tar.zst
@@ -160,28 +160,28 @@ jobs:
     steps:
       - name: Checkout Repository
         id: checkout_Repository
-        uses: stacks-sbtc/actions/checkout@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/checkout@181f8c67da2707c66b5e31f24e7418c47adefdd1
 
       - name: Setup Pnpm
         id: setup_pnpm
-        uses: stacks-sbtc/actions/setup-pnpm@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/setup-pnpm@181f8c67da2707c66b5e31f24e7418c47adefdd1
 
       - name: Setup Node
         id: setup_node
-        uses: stacks-sbtc/actions/setup-node@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/setup-node@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "pnpm"
 
       - name: Install Action
         id: install_action
-        uses: stacks-sbtc/actions/install-action@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/install-action@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           tool: nextest@${{ env.NEXTEST_VERSION }}
 
       - name: Install uv
         id: install_uv
-        uses: stacks-sbtc/actions/setup-uv@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/setup-uv@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           version: "0.6.5"
 
@@ -191,7 +191,7 @@ jobs:
 
       - name: Download Nextest Archives
         id: download_nextest_archives
-        uses: stacks-sbtc/actions/download-artifact@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/download-artifact@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           name: nextest-archives
           path: .
@@ -226,28 +226,28 @@ jobs:
     steps:
       - name: Checkout Repository
         id: checkout_Repository
-        uses: stacks-sbtc/actions/checkout@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/checkout@181f8c67da2707c66b5e31f24e7418c47adefdd1
 
       - name: Setup Rust
         id: setup_rust
-        uses: stacks-sbtc/actions/setup-rust-toolchain@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/setup-rust-toolchain@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           cache-key: "rust-tests"
 
       - name: Setup Pnpm
         id: setup_pnpm
-        uses: stacks-sbtc/actions/setup-pnpm@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/setup-pnpm@181f8c67da2707c66b5e31f24e7418c47adefdd1
 
       - name: Setup Node
         id: setup_node
-        uses: stacks-sbtc/actions/setup-node@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/setup-node@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "pnpm"
 
       - name: Setup Python
         id: setup_python
-        uses: stacks-sbtc/actions/setup-python@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/setup-python@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -257,13 +257,13 @@ jobs:
 
       - name: Install Action
         id: install_action
-        uses: stacks-sbtc/actions/install-action@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/install-action@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           tool: nextest@${{ env.NEXTEST_VERSION }}
 
       - name: Install uv
         id: install_uv
-        uses: stacks-sbtc/actions/setup-uv@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/setup-uv@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           version: "0.6.5"
 
@@ -277,7 +277,7 @@ jobs:
 
       - name: Wait for Test Artifacts
         id: wait_test_artifacts
-        uses: stacks-sbtc/actions/wait-other-jobs@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/wait-other-jobs@181f8c67da2707c66b5e31f24e7418c47adefdd1
         timeout-minutes: 5
         with:
           retry-method: "equal_intervals"
@@ -297,7 +297,7 @@ jobs:
 
       - name: Download Nextest Archives
         id: download_nextest_archives
-        uses: stacks-sbtc/actions/download-artifact@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/download-artifact@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           name: nextest-archives
           path: .
@@ -324,21 +324,21 @@ jobs:
     steps:
       - name: Checkout Repository
         id: checkout_Repository
-        uses: stacks-sbtc/actions/checkout@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/checkout@181f8c67da2707c66b5e31f24e7418c47adefdd1
 
       - name: Setup Rust
         id: setup_rust
-        uses: stacks-sbtc/actions/setup-rust-toolchain@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/setup-rust-toolchain@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           cache-key: "rust-tests"
 
       - name: Setup Pnpm
         id: setup_pnpm
-        uses: stacks-sbtc/actions/setup-pnpm@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/setup-pnpm@181f8c67da2707c66b5e31f24e7418c47adefdd1
 
       - name: Setup Node
         id: setup_node
-        uses: stacks-sbtc/actions/setup-node@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/setup-node@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "pnpm"
@@ -407,11 +407,11 @@ jobs:
     steps:
       - name: Checkout Repository
         id: checkout_Repository
-        uses: stacks-sbtc/actions/checkout@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/checkout@181f8c67da2707c66b5e31f24e7418c47adefdd1
 
       - name: Cargo Vet Cache
         id: cargo_vet_cache
-        uses: stacks-sbtc/actions/cache@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/cache@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           path: ${{ runner.tool_cache }}/cargo-vet
           key: cargo-vet-bin-${{ env.CARGO_VET_VERSION }}
@@ -422,7 +422,7 @@ jobs:
 
       - name: Ensure that the tool cache is populated with the cargo-vet binary
         id: ensure_tool_cache_is_populated
-        if: steps.cargo_vet_cache.outputs.cache-hit != 'true'
+        if: steps.cargo_vet_cache.outputs.cache_hit != 'true'
         run: cargo install --root ${{ runner.tool_cache }}/cargo-vet --version ${{ env.CARGO_VET_VERSION }} --locked cargo-vet
 
       - name: Run Cargo Vet
@@ -459,7 +459,7 @@ jobs:
       - name: Upload Audit Report
         id: upload_audit_report
         if: failure()
-        uses: stacks-sbtc/actions/upload-artifact@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/upload-artifact@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           name: cargo-vet-audit-report
           path: audit-suggestions.txt

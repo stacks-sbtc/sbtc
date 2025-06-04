@@ -33,22 +33,22 @@ jobs:
     steps:
       - name: Configure AWS Credentials via OIDC
         id: configure_aws
-        uses: stacks-sbtc/actions/aws/configure-aws-credentials@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/aws/configure-aws-credentials@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           role-to-assume: ${{ secrets['AWS_ROLE_ARN'] }}
           aws-region: ${{ vars['AWS_REGION'] }}
 
       - name: Login to Amazon ECR
         id: ecr_login
-        uses: stacks-sbtc/actions/aws/amazon-ecr-login@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/aws/amazon-ecr-login@181f8c67da2707c66b5e31f24e7418c47adefdd1
 
       - name: Checkout Repository
         id: checkout_repository
-        uses: stacks-sbtc/actions/checkout@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/checkout@181f8c67da2707c66b5e31f24e7418c47adefdd1
 
       - name: Docker Metadata (${{ matrix.dist }})
         id: docker_metadata
-        uses: stacks-sbtc/actions/docker/metadata-action@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/docker/metadata-action@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           images: |
             ${{ steps.ecr_login.outputs.registry }}/${{ vars['AWS_ECR'] }}
@@ -59,7 +59,7 @@ jobs:
 
       - name: Build and Push (${{ matrix.dist }} ${{ matrix.docker_target }})
         id: docker_build
-        uses: stacks-sbtc/actions/docker/build-push-action@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/docker/build-push-action@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           file: ./.github/actions/dockerfiles/Dockerfile.${{ matrix.docker_target }}.${{ matrix.dist }}
           platforms: ${{ env.docker_platforms }}
@@ -76,7 +76,7 @@ jobs:
 
       - name: Generate artifact attestation
         id: generate_attestation
-        uses: stacks-sbtc/actions/attest-build-provenance@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/attest-build-provenance@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           subject-name: ${{ steps.ecr_login.outputs.registry }}/${{ vars['AWS_ECR'] }}
           subject-digest: ${{ steps.docker_build.outputs.digest }}

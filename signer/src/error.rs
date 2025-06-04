@@ -16,6 +16,7 @@ use crate::stacks::contracts::RotateKeysValidationError;
 use crate::stacks::contracts::WithdrawalAcceptValidationError;
 use crate::stacks::contracts::WithdrawalRejectValidationError;
 use crate::storage::model::SigHash;
+use crate::transaction_signer::StacksSignRequestId;
 use crate::wsts_state_machine::StateMachineId;
 
 /// Top-level signer error
@@ -511,6 +512,10 @@ pub enum Error {
     /// The response from the Stacks node was invalid or malformed.
     #[error("invalid stacks response: {0}")]
     InvalidStacksResponse(&'static str),
+
+    /// The stacks request was already signed in this tenure
+    #[error("stacks request for {0} was already signed in tenure {1}")]
+    StacksRequestAlreadySigned(StacksSignRequestId, bitcoin::BlockHash),
 
     /// Taproot error
     #[error("an error occurred when constructing the taproot signing digest: {0}")]
