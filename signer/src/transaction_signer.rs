@@ -1292,7 +1292,6 @@ where
         let coordinator = FrostCoordinator::load(
             storage,
             aggregate_key,
-            signing_set,
             dkg_shares.signature_share_threshold,
             signer_private_key,
         )

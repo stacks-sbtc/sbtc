@@ -168,7 +168,6 @@ where
     fn load<S>(
         storage: &S,
         aggregate_key: PublicKeyXOnly,
-        signer_public_keys: impl IntoIterator<Item = PublicKey> + Send,
         threshold: u16,
         signer_private_key: PrivateKey,
     ) -> impl Future<Output = Result<Self, error::Error>> + Send
@@ -248,7 +247,6 @@ impl WstsCoordinator for FireCoordinator {
     async fn load<S>(
         storage: &S,
         aggregate_key: PublicKeyXOnly,
-        signer_public_keys: impl IntoIterator<Item = PublicKey> + Send,
         threshold: u16,
         signer_private_key: PrivateKey,
     ) -> Result<Self, error::Error>
@@ -267,6 +265,7 @@ impl WstsCoordinator for FireCoordinator {
             .flat_map(|(_, share)| share.comms.clone())
             .collect::<Vec<(u32, PolyCommitment)>>();
 
+        let signer_public_keys = encrypted_shares.signer_set_public_keys();
         let mut coordinator = Self::new(signer_public_keys, threshold, signer_private_key);
 
         let aggregate_key = encrypted_shares.aggregate_key.into();
@@ -352,7 +351,6 @@ impl WstsCoordinator for FrostCoordinator {
     async fn load<S>(
         storage: &S,
         aggregate_key: PublicKeyXOnly,
-        signer_public_keys: impl IntoIterator<Item = PublicKey> + Send,
         threshold: u16,
         signer_private_key: PrivateKey,
     ) -> Result<Self, error::Error>
@@ -371,6 +369,7 @@ impl WstsCoordinator for FrostCoordinator {
             .flat_map(|(_, share)| share.comms.clone())
             .collect::<Vec<(u32, PolyCommitment)>>();
 
+        let signer_public_keys = encrypted_shares.signer_set_public_keys();
         let mut coordinator = Self::new(signer_public_keys, threshold, signer_private_key);
 
         let aggregate_key = encrypted_shares.aggregate_key.into();

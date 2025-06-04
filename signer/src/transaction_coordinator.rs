@@ -649,12 +649,8 @@ where
 
         // Construct, sign and broadcast the bitcoin transactions.
         for mut transaction in transaction_package {
-            self.sign_and_broadcast(
-                bitcoin_chain_tip.as_ref(),
-                signer_public_keys,
-                &mut transaction,
-            )
-            .await?;
+            self.sign_and_broadcast(bitcoin_chain_tip.as_ref(), &mut transaction)
+                .await?;
 
             // TODO: if this (considering also fallback clients) fails, we will
             // need to handle the inconsistency of having the sweep tx confirmed
@@ -1086,7 +1082,6 @@ where
         let mut frost_coordinator = FrostCoordinator::load(
             &self.context.get_storage(),
             aggregate_key.into(),
-            wallet.public_keys().iter().cloned(),
             wallet.signatures_required(),
             self.private_key,
         )
@@ -1453,14 +1448,12 @@ where
     async fn sign_and_broadcast(
         &mut self,
         bitcoin_chain_tip: &model::BitcoinBlockHash,
-        signer_public_keys: &BTreeSet<PublicKey>,
         transaction: &mut utxo::UnsignedTransaction<'_>,
     ) -> Result<(), Error> {
         let sighashes = transaction.construct_digests()?;
         let mut fire_coordinator = FireCoordinator::load(
             &self.context.get_storage(),
             sighashes.signers_aggregate_key.into(),
-            signer_public_keys.clone(),
             self.threshold,
             self.private_key,
         )
@@ -1504,7 +1497,6 @@ where
             let mut fire_coordinator = FireCoordinator::load(
                 &self.context.get_storage(),
                 deposit.signers_public_key.into(),
-                signer_public_keys.clone(),
                 self.threshold,
                 self.private_key,
             )
