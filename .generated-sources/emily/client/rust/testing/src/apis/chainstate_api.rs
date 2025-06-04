@@ -41,7 +41,6 @@ pub enum SetChainstateError {
     Status400(models::ErrorResponse),
     Status404(models::ErrorResponse),
     Status405(models::ErrorResponse),
-    Status422(models::ErrorResponse),
     Status500(models::ErrorResponse),
     UnknownValue(serde_json::Value),
 }
@@ -53,7 +52,6 @@ pub enum UpdateChainstateError {
     Status400(models::ErrorResponse),
     Status404(models::ErrorResponse),
     Status405(models::ErrorResponse),
-    Status422(models::ErrorResponse),
     Status500(models::ErrorResponse),
     UnknownValue(serde_json::Value),
 }
