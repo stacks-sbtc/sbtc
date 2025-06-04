@@ -193,6 +193,8 @@ pub struct DepositRequest {
     pub spend_script: Bytes,
     /// Script spendable by the depositor.
     pub reclaim_script: Bytes,
+    /// SHA-256 hash of the reclaim script.
+    pub reclaim_script_hash: Bytes,
     /// The address of which the sBTC should be minted,
     /// can be a smart contract address.
     pub recipient: StacksPrincipal,
@@ -234,6 +236,7 @@ impl From<Deposit> for DepositRequest {
             output_index: deposit.info.outpoint.vout,
             spend_script: deposit.info.deposit_script.to_bytes(),
             reclaim_script: deposit.info.reclaim_script.to_bytes(),
+            reclaim_script_hash: deposit.info.reclaim_script_hash.to_byte_array().to_vec(),
             recipient: deposit.info.recipient.into(),
             amount: deposit.info.amount,
             max_fee: deposit.info.max_fee,
@@ -1003,6 +1006,41 @@ impl PartialOrd for StacksPrincipal {
 /// A ScriptPubkey of a UTXO.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ScriptPubKey(bitcoin::ScriptBuf);
+
+/// A taproot script hash.
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TaprootScriptHash(bitcoin::TapNodeHash);
+
+impl Deref for TaprootScriptHash {
+    type Target = bitcoin::TapNodeHash;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<bitcoin::TapNodeHash> for TaprootScriptHash {
+    fn from(value: bitcoin::TapNodeHash) -> Self {
+        Self(value)
+    }
+}
+
+impl TaprootScriptHash {
+    /// Return the inner bytes for the taproot script hash
+    pub fn into_bytes(&self) -> [u8; 32] {
+        self.0.to_byte_array()
+    }
+
+    /// Convert a byte array into a taproot script hash.
+    pub fn from_byte_array(bytes: [u8; 32]) -> Self {
+        bitcoin::TapNodeHash::from_byte_array(bytes).into()
+    }
+
+    /// Compute a taproot script hash from a script pubkey.
+    pub fn from_script_pubkey(script_pubkey: &ScriptPubKey) -> Self {
+        // TODO: I have no idea what this LeafVersion means atm
+        bitcoin::TapNodeHash::from_script(script_pubkey, bitcoin::taproot::LeafVersion::TapScript).into()
+    }
+}
 
 impl Deref for ScriptPubKey {
     type Target = bitcoin::ScriptBuf;
