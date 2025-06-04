@@ -194,7 +194,7 @@ pub struct DepositRequest {
     /// Script spendable by the depositor.
     pub reclaim_script: Bytes,
     /// SHA-256 hash of the reclaim script.
-    pub reclaim_script_hash: Bytes,
+    pub reclaim_script_hash: TaprootScriptHash,
     /// The address of which the sBTC should be minted,
     /// can be a smart contract address.
     pub recipient: StacksPrincipal,
@@ -236,7 +236,7 @@ impl From<Deposit> for DepositRequest {
             output_index: deposit.info.outpoint.vout,
             spend_script: deposit.info.deposit_script.to_bytes(),
             reclaim_script: deposit.info.reclaim_script.to_bytes(),
-            reclaim_script_hash: deposit.info.reclaim_script_hash.to_byte_array().to_vec(),
+            reclaim_script_hash: TaprootScriptHash::from_byte_array(deposit.info.reclaim_script_hash.to_byte_array()),
             recipient: deposit.info.recipient.into(),
             amount: deposit.info.amount,
             max_fee: deposit.info.max_fee,
@@ -1025,6 +1025,10 @@ impl From<bitcoin::TapNodeHash> for TaprootScriptHash {
 }
 
 impl TaprootScriptHash {
+    /// Create a new taproot script hash with all zeroes
+    pub fn new() -> Self {
+        TaprootScriptHash::from_byte_array([0; 32])
+    }
     /// Return the inner bytes for the taproot script hash
     pub fn into_bytes(&self) -> [u8; 32] {
         self.0.to_byte_array()

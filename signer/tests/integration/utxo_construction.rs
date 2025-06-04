@@ -34,6 +34,7 @@ use signer::bitcoin::utxo::SignerBtcState;
 use signer::bitcoin::utxo::SignerUtxo;
 use signer::bitcoin::utxo::TxDeconstructor;
 use signer::bitcoin::utxo::WithdrawalRequest;
+use signer::storage::model::TaprootScriptHash;
 use signer::config::Settings;
 use signer::context::SbtcLimits;
 use signer::keys::SignerScriptPubKey;
@@ -128,6 +129,7 @@ where
         amount: dep.amount,
         deposit_script: dep.deposit_script.clone(),
         reclaim_script: dep.reclaim_script.clone(),
+        reclaim_script_hash: TaprootScriptHash::new(),
         signers_public_key: dep.signers_public_key,
     };
     (deposit_tx, req, dep)
