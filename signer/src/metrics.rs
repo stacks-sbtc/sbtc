@@ -73,6 +73,16 @@ impl Metrics {
         )
         .increment(1);
     }
+
+    /// Increment the gauge for the number of connected peers
+    pub fn increment_peers_connected_total() {
+        metrics::gauge!(Metrics::PeersConnectedTotal).increment(1.0);
+    }
+
+    /// Decrement the gauge for the number of connected peers
+    pub fn decrement_peers_connected_total() {
+        metrics::gauge!(Metrics::PeersConnectedTotal).decrement(1.0);
+    }
 }
 
 /// Label for bitcoin blockchain based metrics
