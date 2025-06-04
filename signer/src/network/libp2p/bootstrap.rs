@@ -16,6 +16,7 @@ use libp2p::{
 };
 
 use super::MultiaddrExt;
+use crate::metrics::Metrics;
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -221,7 +222,7 @@ impl Behavior {
 
         // Only increment the gauge if this is a new peer
         if is_new_peer {
-            metrics::gauge!(crate::metrics::Metrics::PeersConnectedTotal).increment(1.0);
+            Metrics::increment_peers_connected_total();
         }
         Some(peer_info)
     }
@@ -249,7 +250,7 @@ impl Behavior {
         // connected peers map and return the peer info record.
         if remove_peer {
             // Decrement the gauge for connected peers
-            metrics::gauge!(crate::metrics::Metrics::PeersConnectedTotal).decrement(1.0);
+            Metrics::decrement_peers_connected_total();
             return self.connected_peers.remove(&peer_id);
         }
 
