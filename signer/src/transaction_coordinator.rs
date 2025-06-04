@@ -433,7 +433,7 @@ where
             tracing::info!(
                 "🔐 beginning DKG verification before submitting rotate-key transaction"
             );
-            self.perform_dkg_verification(bitcoin_chain_tip, &last_dkg.aggregate_key, wallet)
+            self.perform_dkg_verification(bitcoin_chain_tip, &last_dkg.aggregate_key)
                 .await?;
             tracing::info!("🔐 DKG verification successful");
         }
@@ -1071,7 +1071,6 @@ where
         &mut self,
         bitcoin_chain_tip: &model::BitcoinBlockHash,
         aggregate_key: &PublicKey,
-        wallet: &SignerWallet,
     ) -> Result<(), Error> {
         let (x_only_pubkey, _) = aggregate_key.x_only_public_key();
 
@@ -1082,7 +1081,6 @@ where
         let mut frost_coordinator = FrostCoordinator::load(
             &self.context.get_storage(),
             aggregate_key.into(),
-            wallet.signatures_required(),
             self.private_key,
         )
         .await?;
@@ -1450,11 +1448,11 @@ where
         bitcoin_chain_tip: &model::BitcoinBlockHash,
         transaction: &mut utxo::UnsignedTransaction<'_>,
     ) -> Result<(), Error> {
+        let db = self.context.get_storage();
         let sighashes = transaction.construct_digests()?;
         let mut fire_coordinator = FireCoordinator::load(
-            &self.context.get_storage(),
+            &db,
             sighashes.signers_aggregate_key.into(),
-            self.threshold,
             self.private_key,
         )
         .await?;
@@ -1494,13 +1492,9 @@ where
         for (deposit, sighash) in sighashes.deposits.into_iter() {
             let msg = sighash.to_raw_hash().to_byte_array();
 
-            let mut fire_coordinator = FireCoordinator::load(
-                &self.context.get_storage(),
-                deposit.signers_public_key.into(),
-                self.threshold,
-                self.private_key,
-            )
-            .await?;
+            let locking_public_key = deposit.signers_public_key.into();
+            let mut fire_coordinator =
+                FireCoordinator::load(&db, locking_public_key, self.private_key).await?;
 
             let instant = std::time::Instant::now();
             let signature = self
