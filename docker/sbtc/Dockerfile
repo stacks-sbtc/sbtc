@@ -30,9 +30,7 @@ RUN make install-pnpm && make build
 # -------------------------------------------
 # We first remove the existing sources so that the there is no conflict
 # when building from the sources copied over.
-RUN find sbtc signer emily emily_sidecar emily_cron blocklist-client \
-    -mindepth 1 -maxdepth 1 \
-    -exec rm -rf {} +
+RUN rm -rf sbtc signer emily emily_sidecar emily_cron blocklist-client
 COPY . /code/sbtc/
 RUN make install-pnpm && make build
 
