@@ -327,7 +327,7 @@ where
         // If we are not the coordinator, then we have no business
         // coordinating DKG or constructing bitcoin and stacks
         // transactions, might as well return early.
-        if !self.is_coordinator(bitcoin_chain_tip.as_ref(), &signer_public_keys) {
+        if !self.is_coordinator(bitcoin_chain_tip.as_ref()) {
             // Before returning, we also check if all the smart contracts are
             // deployed: we do this as some other coordinator could have deployed
             // them, in which case we need to updated our state.
@@ -1821,15 +1821,11 @@ where
     // Ideally the code should be formulated in a way to guarantee
     // it being infallible without relying on sequentially coupling
     // expressions. However, that is left for future work.
-    fn is_coordinator(
-        &self,
-        bitcoin_chain_tip: &model::BitcoinBlockHash,
-        signer_public_keys: &BTreeSet<PublicKey>,
-    ) -> bool {
+    fn is_coordinator(&self, bitcoin_chain_tip: &model::BitcoinBlockHash) -> bool {
         given_key_is_coordinator(
             self.signer_public_key(),
             bitcoin_chain_tip,
-            signer_public_keys,
+            &self.context.config().signer.bootstrap_signing_set,
         )
     }
 
