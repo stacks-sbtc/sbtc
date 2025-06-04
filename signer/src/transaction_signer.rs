@@ -677,11 +677,14 @@ where
                 assert_allow_dkg_begin(&self.context, chain_tip).await?;
 
                 tracing::debug!("processing message");
-                let signer_public_keys = self.context.state().current_signer_public_keys();
+                let signer_public_keys = self.context.config().signer.bootstrap_signing_set.clone();
+                // The as _ cast is okay because we are going from a u16 to
+                // a u32, which is always okay.
+                let threshold = self.context.config().signer.bootstrap_signatures_required as u32;
 
                 let state_machine = SignerStateMachine::new(
                     signer_public_keys,
-                    self.threshold,
+                    threshold,
                     self.signer_private_key,
                 )?;
                 let state_machine_id = StateMachineId::Dkg(*chain_tip);
