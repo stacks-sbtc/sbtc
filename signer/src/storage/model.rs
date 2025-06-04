@@ -236,7 +236,9 @@ impl From<Deposit> for DepositRequest {
             output_index: deposit.info.outpoint.vout,
             spend_script: deposit.info.deposit_script.to_bytes(),
             reclaim_script: deposit.info.reclaim_script.to_bytes(),
-            reclaim_script_hash: TaprootScriptHash::from_byte_array(deposit.info.reclaim_script_hash.to_byte_array()),
+            reclaim_script_hash: TaprootScriptHash::from_byte_array(
+                deposit.info.reclaim_script_hash.to_byte_array(),
+            ),
             recipient: deposit.info.recipient.into(),
             amount: deposit.info.amount,
             max_fee: deposit.info.max_fee,
@@ -1024,10 +1026,16 @@ impl From<bitcoin::TapNodeHash> for TaprootScriptHash {
     }
 }
 
+impl Default for TaprootScriptHash {
+    fn default() -> Self {
+        TaprootScriptHash::from_byte_array([0; 32])
+    }
+}
+
 impl TaprootScriptHash {
     /// Create a new taproot script hash with all zeroes
     pub fn new() -> Self {
-        TaprootScriptHash::from_byte_array([0; 32])
+        Default::default()
     }
     /// Return the inner bytes for the taproot script hash
     pub fn into_bytes(&self) -> [u8; 32] {
@@ -1042,7 +1050,8 @@ impl TaprootScriptHash {
     /// Compute a taproot script hash from a script pubkey.
     pub fn from_script_pubkey(script_pubkey: &ScriptPubKey) -> Self {
         // TODO: I have no idea what this LeafVersion means atm
-        bitcoin::TapNodeHash::from_script(script_pubkey, bitcoin::taproot::LeafVersion::TapScript).into()
+        bitcoin::TapNodeHash::from_script(script_pubkey, bitcoin::taproot::LeafVersion::TapScript)
+            .into()
     }
 }
 

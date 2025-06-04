@@ -34,10 +34,10 @@ use signer::bitcoin::utxo::SignerBtcState;
 use signer::bitcoin::utxo::SignerUtxo;
 use signer::bitcoin::utxo::TxDeconstructor;
 use signer::bitcoin::utxo::WithdrawalRequest;
-use signer::storage::model::TaprootScriptHash;
 use signer::config::Settings;
 use signer::context::SbtcLimits;
 use signer::keys::SignerScriptPubKey;
+use signer::storage::model::TaprootScriptHash;
 use stacks_common::types::chainstate::StacksAddress;
 
 use regtest::Recipient;

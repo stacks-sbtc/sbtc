@@ -1201,7 +1201,7 @@ impl super::DbRead for PgStore {
             outpoint: bitcoin::OutPoint::new((*txid).into(), output_index),
             deposit_script: summary.deposit_script.into(),
             reclaim_script: summary.reclaim_script.into(),
-            reclaim_script_hash: summary.reclaim_script_hash.into(),
+            reclaim_script_hash: summary.reclaim_script_hash,
             signers_public_key: summary.signers_public_key.into(),
             dkg_shares_status: dkg_shares.map(|shares| shares.dkg_shares_status),
         }))

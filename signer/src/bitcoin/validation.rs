@@ -9,7 +9,6 @@ use bitcoin::ScriptBuf;
 use bitcoin::XOnlyPublicKey;
 use bitcoin::relative::LockTime;
 
-use crate::storage::model::TaprootScriptHash;
 use crate::DEPOSIT_DUST_LIMIT;
 use crate::DEPOSIT_LOCKTIME_BLOCK_BUFFER;
 use crate::WITHDRAWAL_BLOCKS_EXPIRY;
@@ -31,6 +30,7 @@ use crate::storage::model::BitcoinWithdrawalOutput;
 use crate::storage::model::DkgSharesStatus;
 use crate::storage::model::QualifiedRequestId;
 use crate::storage::model::SignerVotes;
+use crate::storage::model::TaprootScriptHash;
 
 use super::utxo::DepositRequest;
 use super::utxo::RequestRef;
