@@ -448,7 +448,7 @@ where
         let aggregate_key = self
             .context
             .state()
-            .current_aggregate_key()
+            .registry_current_aggregate_key()
             .ok_or(Error::NoDkgShares)?;
 
         let dkg_shares = db.get_encrypted_dkg_shares(aggregate_key).await?;
@@ -1610,19 +1610,19 @@ pub async fn assert_allow_dkg_begin(
     let config = context.config();
 
     // Trigger dkg if signatures_required has changed
-    if context.state().current_signatures_required() != config.signer.bootstrap_signatures_required
-    {
+    let bootstrap_signatures_required = Some(config.signer.bootstrap_signatures_required);
+    if context.state().registry_signatures_required() != bootstrap_signatures_required {
         tracing::info!("signatures required has changed; proceeding with DKG");
         return Ok(());
     }
 
     // Trigger dkg if signer set changes
-    let signer_set_changed = !context
+    let signer_set_unchanged = context
         .state()
-        .current_signer_set()
-        .has_same_pubkeys(&config.signer.bootstrap_signing_set);
+        .registry_current_signer_set()
+        .is_some_and(|signer_set| signer_set == config.signer.bootstrap_signing_set);
 
-    if signer_set_changed {
+    if !signer_set_unchanged {
         tracing::info!("signer set has changed; proceeding with DKG");
         return Ok(());
     }
