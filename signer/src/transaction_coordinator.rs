@@ -1683,7 +1683,7 @@ where
         // this assumes that the signer set doesn't change for the duration of this call,
         // but we're already assuming that the bitcoin chain tip doesn't change
         // alternately we could hit the DB every time we get a new message
-        let signer_set = self.context.state().current_signer_public_keys();
+        let signer_set = self.context.config().signer.bootstrap_signing_set.clone();
         tokio::pin!(signal_stream);
 
         // Let's get the next message from the network or the
