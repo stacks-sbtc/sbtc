@@ -12,8 +12,6 @@
 ;; regardless of the target contract's state, the moment in time (blocks), and
 ;; considering the target contract alone, without any external dependencies.
 
-(define-constant deployer tx-sender)
-
 ;; This invariant checks that, at any point in time, whatever operations are
 ;; performed on the stxc-registry contract alone, the governance role is always
 ;; held by the sbtc-bootstrap-signers contract.
@@ -137,6 +135,8 @@
   )
 )
 
+(define-constant deployer tx-sender)
+
 ;; This invariant checks that the current signer principal is unchanged during
 ;; the invariant testing run, unless the `rotate-keys` function has been called.
 (define-read-only (invariant-current-sig-principal-unchanged)
@@ -182,7 +182,6 @@
 ;; remain valid, regardless of the arbitrary arguments that are passed to the
 ;; test functions.
 
-(define-constant ERR_WRONG_ERROR_CODE (err u1000))
 (define-constant ERR_ASSERTION_FAILED (err u1001))
 
 ;; This property checks that the `create-withdrawal-request` function returns
