@@ -45,6 +45,7 @@ use signer::bitcoin::utxo::BitcoinInputsOutputs;
 use signer::bitcoin::utxo::Fees;
 use signer::bitcoin::utxo::TxDeconstructor as _;
 use signer::bitcoin::validation::WithdrawalValidationResult;
+use signer::block_observer::SignerSetInfo;
 use signer::context::RequestDeciderEvent;
 use signer::message::Payload;
 use signer::network::MessageTransfer;
@@ -520,10 +521,16 @@ async fn process_complete_deposit() {
     // key gets set in the block observer. We're not running a block
     // observer in this test, nor are we going through main, so we manually
     // update the state here.
-    let signer_set_public_keys = testing_signer_set.signer_keys().into_iter().collect();
+    let signer_set_public_keys: BTreeSet<PublicKey> =
+        testing_signer_set.signer_keys().into_iter().collect();
     let state = context.state();
+    let signer_set_info = SignerSetInfo {
+        aggregate_key,
+        signer_set: signer_set_public_keys.clone(),
+        signatures_required: signing_threshold as u16,
+    };
+    state.update_registry_signer_set_info(signer_set_info);
     state.update_current_signer_set(signer_set_public_keys);
-    state.set_current_aggregate_key(aggregate_key);
     state.set_bitcoin_chain_tip(bitcoin_chain_tip);
 
     // Ensure we have a signers UTXO (as a donation, to not mess with the current
@@ -1143,7 +1150,8 @@ async fn run_dkg_if_signatures_required_changes(change_signatures_required: bool
 
     // We want current signer set be same as bootstrap_signer_set to prevent DKG trigger
     // because of changed signer set. Also we want this signer set be at least 2 signers
-    ctx.state().update_current_signer_set(config_signer_set);
+    ctx.state()
+        .update_current_signer_set(config_signer_set.clone());
 
     // Write dkg shares so it won't be a reason to trigger dkg.
     let dkg_shares = model::EncryptedDkgShares {
@@ -1154,8 +1162,15 @@ async fn run_dkg_if_signatures_required_changes(change_signatures_required: bool
         .await
         .expect("failed to write dkg shares");
 
+    let signer_set_info = SignerSetInfo {
+        aggregate_key: dkg_shares.aggregate_key,
+        // This matches the value we set for the bootstrap_signatures_required
+        signatures_required: 1,
+        signer_set: config_signer_set,
+    };
+
     // Update state with signatures_required = 1
-    ctx.state().set_current_signatures_required(1);
+    ctx.state().update_registry_signer_set_info(signer_set_info);
 
     // Create chaintip
     let chaintip: model::BitcoinBlockRef = Faker.fake_with_rng(&mut rng);
@@ -3259,10 +3274,16 @@ async fn test_conservative_initial_sbtc_limits() {
         // state gets updated in the block observer. We're not running a
         // block observer in this test, nor are we going through main, so
         // we manually update the necessary state here.
+        let signer_set_info = SignerSetInfo {
+            aggregate_key: Faker.fake_with_rng(&mut rng),
+            // This matches the value we set for the bootstrap_signatures_required
+            signatures_required: signatures_required,
+            signer_set: signer_set_public_keys.clone(),
+        };
+
+        ctx.state().update_registry_signer_set_info(signer_set_info);
         ctx.state()
             .update_current_signer_set(signer_set_public_keys.clone());
-        ctx.state()
-            .set_current_signatures_required(signatures_required);
 
         let network = network.connect(&ctx);
 
@@ -4188,10 +4209,18 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
     //
     // We hold off from updating the bitcoin chain tip for now, because we
     // are about to generate some more blocks.
-    let signer_set_public_keys = testing_signer_set.signer_keys().into_iter().collect();
+    let signer_set_public_keys: BTreeSet<PublicKey> =
+        testing_signer_set.signer_keys().into_iter().collect();
+
+    let signer_set_info = SignerSetInfo {
+        aggregate_key,
+        signatures_required: signing_threshold as u16,
+        signer_set: signer_set_public_keys.clone(),
+    };
+
     let state = context.state();
+    state.update_registry_signer_set_info(signer_set_info);
     state.update_current_signer_set(signer_set_public_keys);
-    state.set_current_aggregate_key(aggregate_key);
 
     let (bitcoin_chain_tip, stacks_chain_tip) = db.get_chain_tips().await;
     assert_eq!(stacks_chain_tip, genesis_block.block_hash);
@@ -4434,11 +4463,16 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
     // state gets updated in the block observer. We're not running a
     // block observer in this test, nor are we going through main, so
     // we manually update the state here.
-    ctx.state()
-        .update_current_signer_set(signers.signer_keys().iter().copied().collect());
-    ctx.state().set_current_aggregate_key(aggregate_key);
-    ctx.state()
-        .set_current_signatures_required(ctx.config().signer.bootstrap_signatures_required);
+    let signers_public_keys: BTreeSet<PublicKey> =
+        signers.signer_keys().into_iter().copied().collect();
+    let signer_set_info = SignerSetInfo {
+        aggregate_key,
+        signatures_required: 1,
+        signer_set: signers_public_keys.clone(),
+    };
+
+    ctx.state().update_registry_signer_set_info(signer_set_info);
+    ctx.state().update_current_signer_set(signers_public_keys);
 
     ctx.with_stacks_client(|client| {
         client
@@ -4823,7 +4857,7 @@ mod get_eligible_pending_withdrawal_requests {
         // allow for 1-based indexing in the parameters above (the blockchain
         // starts at block height 0, so the chain tip of a chain with 10 blocks
         // has a height of 9).
-        let (bitcoin_chain, stacks_chain, signer_set, signer_keys) =
+        let (bitcoin_chain, stacks_chain, signer_set, _) =
             test_setup(&db, params.chain_length + 1).await;
 
         let (bitcoin_chain_tip, stacks_chain_tip) = db.get_chain_tips().await;
@@ -4835,7 +4869,6 @@ mod get_eligible_pending_withdrawal_requests {
             stacks_chain_tip: &stacks_chain_tip,
             signature_threshold: params.signature_threshold,
             sbtc_limits: &params.sbtc_limits,
-            signer_public_keys: &signer_keys,
         };
 
         // Create a request below the dust limit.

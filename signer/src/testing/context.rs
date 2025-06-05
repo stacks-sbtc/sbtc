@@ -246,9 +246,9 @@ pub fn prevent_dkg_on_changed_signatures_required<Storage, Bitcoin, Stacks, Emil
     Stacks: StacksInteract + Clone + Send + Sync + 'static,
     Emily: EmilyInteract + Clone + Send + Sync + 'static,
 {
-    let context_signeratures_required = context.state().current_signatures_required();
+    let context_signeratures_required = context.state().registry_signatures_required();
     let config = context.config_mut();
-    config.signer.bootstrap_signatures_required = context_signeratures_required;
+    config.signer.bootstrap_signatures_required = context_signeratures_required.unwrap();
 }
 
 impl<Storage, Bitcoin, Stacks, Emily> Context for TestContext<Storage, Bitcoin, Stacks, Emily>
