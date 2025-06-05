@@ -4,6 +4,7 @@
 
 pub mod api_clients;
 pub mod block_observer;
+pub mod blocks;
 pub mod btc;
 pub mod context;
 pub mod dummy;
@@ -17,10 +18,14 @@ pub mod transaction_signer;
 pub mod wallet;
 pub mod wsts;
 
-use bitcoin::key::TapTweak;
 use bitcoin::TapSighashType;
 use bitcoin::Witness;
+use bitcoin::key::TapTweak;
 use secp256k1::SECP256K1;
+
+use rand::RngCore;
+use rand::SeedableRng;
+use rand::rngs::{OsRng, StdRng};
 
 use crate::bitcoin::utxo::UnsignedTransaction;
 use crate::config::Settings;
@@ -45,11 +50,19 @@ impl Settings {
 pub fn clear_env() {
     for var in std::env::vars() {
         if var.0.starts_with("SIGNER_") {
-            std::env::remove_var(var.0);
+            unsafe {
+                std::env::remove_var(var.0);
+            }
         }
     }
 }
 
+/// A wrapper for setting environment variables in tests
+pub fn set_var<K: AsRef<std::ffi::OsStr>, V: AsRef<std::ffi::OsStr>>(key: K, value: V) {
+    unsafe {
+        std::env::set_var(key, value);
+    }
+}
 /// A helper function for correctly setting witness data
 pub fn set_witness_data(unsigned: &mut UnsignedTransaction, keypair: secp256k1::Keypair) {
     let sighash_type = TapSighashType::All;
@@ -80,4 +93,37 @@ pub fn set_witness_data(unsigned: &mut UnsignedTransaction, keypair: secp256k1::
         .for_each(|(tx_in, witness)| {
             tx_in.witness = witness;
         });
+}
+
+/// Testing helpers for [`Vec`].
+pub trait IterTestExt<T>
+where
+    Self: IntoIterator<Item = T> + Sized,
+{
+    /// Asserts that the iterator contains exactly one element and returns it. Panics if
+    /// the iterator is empty or contains more than one element.
+    fn single(self) -> T {
+        let mut iter = self.into_iter();
+        let item = iter
+            .next()
+            .expect("expected exactly one element, but got none");
+        assert!(
+            iter.next().is_none(),
+            "expected exactly one element, but got more"
+        );
+        item
+    }
+}
+
+impl<I, T> IterTestExt<T> for I where I: IntoIterator<Item = T> + Sized {}
+
+/// Returns a seedable rng with random seed. Prints the seed to
+/// stderr so that it can be used to reproduce the test
+pub fn get_rng() -> StdRng {
+    let seed = OsRng.next_u64();
+
+    // Nextest prints stderr only for failing tests, so this message
+    // will only appear if the test fails (by default).
+    eprintln!("Test executed with seed: {seed}");
+    StdRng::seed_from_u64(seed)
 }

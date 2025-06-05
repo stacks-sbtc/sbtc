@@ -3,9 +3,9 @@
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::sync::LazyLock;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
-use std::sync::LazyLock;
 
 use blockstack_lib::address::C32_ADDRESS_VERSION_MAINNET_MULTISIG;
 use blockstack_lib::address::C32_ADDRESS_VERSION_TESTNET_MULTISIG;
@@ -22,9 +22,10 @@ use blockstack_lib::core::CHAIN_ID_TESTNET;
 use blockstack_lib::types::chainstate::StacksAddress;
 use blockstack_lib::util::secp256k1::Secp256k1PublicKey;
 use rand::SeedableRng as _;
-use secp256k1::ecdsa::RecoverableSignature;
 use secp256k1::Message;
+use secp256k1::ecdsa::RecoverableSignature;
 
+use crate::MAX_KEYS;
 use crate::config::NetworkKind;
 use crate::config::SignerConfig;
 use crate::context::Context;
@@ -33,11 +34,9 @@ use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
 use crate::signature::RecoverableEcdsaSignature as _;
 use crate::signature::SighashDigest as _;
-use crate::stacks::contracts::AsContractCall;
 use crate::stacks::contracts::AsTxPayload;
-use crate::storage::model::BitcoinBlockHash;
 use crate::storage::DbRead;
-use crate::MAX_KEYS;
+use crate::storage::model::BitcoinBlockHash;
 
 /// Stacks multisig addresses are Hash160 hashes of bitcoin Scripts (more
 /// or less). The enum value below defines which Script will be used to
@@ -161,7 +160,7 @@ impl SignerWallet {
         })
     }
 
-    /// Load the multi-sig wallet from the last rotate-keys-trasnaction
+    /// Load the multi-sig wallet from the last rotate-keys transaction
     /// stored in the database. If it's not there, fall back to the
     /// bootstrap multi-sig wallet in the signer's config.
     ///
@@ -191,7 +190,7 @@ impl SignerWallet {
     /// Load the bootstrap wallet implicitly defined in the signer config.
     pub fn load_boostrap_wallet(config: &SignerConfig) -> Result<SignerWallet, Error> {
         let network_kind = config.network;
-        let public_keys = config.bootstrap_signing_set();
+        let public_keys = config.bootstrap_signing_set.clone();
         let signatures_required = config.bootstrap_signatures_required;
 
         SignerWallet::new(&public_keys, signatures_required, network_kind, 0)
@@ -329,17 +328,6 @@ impl MultisigTx {
         Self { digest, signatures, tx }
     }
 
-    /// Create a new Stacks transaction for a contract call that can be
-    /// signed by the signers' multi-sig wallet.
-    #[cfg(any(test, feature = "testing"))]
-    pub fn new_contract_call<T>(contract: T, wallet: &SignerWallet, tx_fee: u64) -> Self
-    where
-        T: AsContractCall,
-    {
-        use crate::testing::wallet::ContractCallWrapper;
-        Self::new_tx(&ContractCallWrapper(contract), wallet, tx_fee)
-    }
-
     /// Return a reference to the underlying transaction
     pub fn tx(&self) -> &StacksTransaction {
         &self.tx
@@ -381,9 +369,11 @@ impl MultisigTx {
     /// Creates a signed transaction with the available signatures
     pub fn finalize_transaction(mut self) -> StacksTransaction {
         use TransactionSpendingCondition::OrderIndependentMultisig;
-        let cond = match &mut self.tx.auth {
-            TransactionAuth::Standard(OrderIndependentMultisig(cond)) => cond,
-            _ => unreachable!("spending condition invariant not upheld"),
+        // This struct maintains the fact that it only uses the
+        // TransactionSpendingCondition::OrderIndependentMultisig variant
+        // for the transaction auth.
+        let TransactionAuth::Standard(OrderIndependentMultisig(cond)) = &mut self.tx.auth else {
+            unreachable!("spending condition invariant not upheld");
         };
         let key_encoding = TransactionPublicKeyEncoding::Compressed;
 
@@ -398,7 +388,7 @@ impl MultisigTx {
     }
 }
 
-/// Get the number of bytes for a fully signed stacks trasnaction with the
+/// Get the number of bytes for a fully signed stacks transaction with the
 /// given payload.
 ///
 /// This function is very unlikely to fail in practice.
@@ -422,7 +412,9 @@ where
         .collect();
 
     // This will only fail if we get very unlucky with private keys that we
-    // generate.
+    // generate. We create a new wallet so that we don't alter the state of the
+    // wallet that was passed in, which will increment nonces for new
+    // transactions.
     let wallet = SignerWallet::new(
         &public_keys,
         wallet.signatures_required,
@@ -450,7 +442,6 @@ mod tests {
     use fake::Fake;
     use rand::rngs::OsRng;
     use rand::seq::SliceRandom;
-    use rand::SeedableRng as _;
     use secp256k1::Keypair;
     use secp256k1::SECP256K1;
 
@@ -459,20 +450,34 @@ mod tests {
 
     use crate::context::Context;
     use crate::signature::sign_stacks_tx;
+    use crate::stacks::contracts::AsContractCall;
     use crate::stacks::contracts::ReqContext;
-    use crate::storage::model;
-    use crate::storage::model::RotateKeysTransaction;
-    use crate::storage::model::StacksPrincipal;
     use crate::storage::DbWrite;
+    use crate::storage::model::KeyRotationEvent;
+    use crate::storage::model::StacksPrincipal;
     use crate::testing::context::ConfigureMockedClients;
     use crate::testing::context::TestContext;
     use crate::testing::context::*;
+    use crate::testing::get_rng;
+    use crate::testing::storage::DbReadTestExt;
     use crate::testing::storage::model::TestData;
 
     use super::*;
 
     // This is the transaction fee. It doesn't matter what value we choose.
     const TX_FEE: u64 = 25;
+
+    impl MultisigTx {
+        /// Create a new Stacks transaction for a contract call that can be
+        /// signed by the signers' multi-sig wallet.
+        pub fn new_contract_call<T>(contract: T, wallet: &SignerWallet, tx_fee: u64) -> Self
+        where
+            T: AsContractCall,
+        {
+            use crate::testing::wallet::ContractCallWrapper;
+            Self::new_tx(&ContractCallWrapper(contract), wallet, tx_fee)
+        }
+    }
 
     struct TestContractCall;
 
@@ -599,7 +604,7 @@ mod tests {
             // This message is unlikely to be the digest of the transaction
             Message::from_digest([1; 32])
         };
-        let signature = SECP256K1.sign_ecdsa_recoverable(&msg, &secret_key).into();
+        let signature = SECP256K1.sign_ecdsa_recoverable(&msg, &secret_key);
 
         // Now let's try to add a bad signature. We skip the case where we
         // have a correct key and the correct digest so this should always
@@ -615,7 +620,7 @@ mod tests {
         // things update correctly.
         let secret_key = key_pairs[0].secret_key();
         let msg = tx_signer.digest;
-        let signature = SECP256K1.sign_ecdsa_recoverable(&msg, &secret_key).into();
+        let signature = SECP256K1.sign_ecdsa_recoverable(&msg, &secret_key);
         tx_signer.add_signature(signature).unwrap();
         assert!(!tx_signer.signatures.values().all(Option::is_none));
     }
@@ -661,7 +666,7 @@ mod tests {
     ///    "stacks-node" (in this test it just returns a nonce of zero).
     #[tokio::test]
     async fn loading_signer_wallet_from_context() {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+        let mut rng = get_rng();
 
         let ctx = TestContext::builder()
             .with_in_memory_storage()
@@ -692,44 +697,38 @@ mod tests {
         let network = NetworkKind::Regtest;
         let wallet1 = SignerWallet::new(&signer_keys, signatures_required, network, 0).unwrap();
 
+        let (bitcoin_chain_tip, stacks_chain_tip) = db.get_chain_tips().await;
+
         // Let's store the key information about this wallet into the database
-        let rotate_keys = RotateKeysTransaction {
+        let rotate_keys = KeyRotationEvent {
             txid: fake::Faker.fake_with_rng(&mut rng),
+            block_hash: stacks_chain_tip,
             address: StacksPrincipal::from(clarity::vm::types::PrincipalData::from(
-                wallet1.address().clone(),
+                *wallet1.address(),
             )),
             aggregate_key: *wallet1.stacks_aggregate_key(),
             signer_set: signer_keys.clone(),
             signatures_required: wallet1.signatures_required,
         };
 
-        let bitcoin_chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
-        let stacks_chain_tip = db
-            .get_stacks_chain_tip(&bitcoin_chain_tip)
-            .await
-            .unwrap()
-            .unwrap();
-
         // We haven't stored any RotateKeysTransactions into the database
         // yet, so it will try to load the wallet from the context.
-        let wallet0 = SignerWallet::load(&ctx, &bitcoin_chain_tip).await.unwrap();
+        let wallet0 = SignerWallet::load(&ctx, &bitcoin_chain_tip.block_hash)
+            .await
+            .unwrap();
         let config = &ctx.config().signer;
         let bootstrap_aggregate_key =
-            PublicKey::combine_keys(&config.bootstrap_signing_set()).unwrap();
+            PublicKey::combine_keys(&config.bootstrap_signing_set).unwrap();
         assert_eq!(wallet0.aggregate_key, bootstrap_aggregate_key);
 
-        let tx = model::StacksTransaction {
-            txid: rotate_keys.txid,
-            block_hash: stacks_chain_tip.block_hash,
-        };
-
-        db.write_stacks_transaction(&tx).await.unwrap();
         db.write_rotate_keys_transaction(&rotate_keys)
             .await
             .unwrap();
 
         // Okay, now let's load it up and make sure things match.
-        let wallet2 = SignerWallet::load(&ctx, &bitcoin_chain_tip).await.unwrap();
+        let wallet2 = SignerWallet::load(&ctx, &bitcoin_chain_tip.block_hash)
+            .await
+            .unwrap();
 
         assert_eq!(wallet1.address(), wallet2.address());
         assert_eq!(wallet1.public_keys(), wallet2.public_keys());

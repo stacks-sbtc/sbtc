@@ -49,7 +49,7 @@ use std::{collections::HashMap, fmt::Debug};
 use aws_sdk_dynamodb::types::AttributeValue;
 #[cfg(feature = "testing")]
 use aws_sdk_dynamodb::types::{DeleteRequest, WriteRequest};
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
 use serde_dynamo::Item;
 
@@ -226,7 +226,8 @@ pub(crate) trait TableIndexTrait {
             .table_name(Self::table_name(settings))
             .set_key(Some(key_item.into()))
             .send()
-            .await?;
+            .await
+            .map_err(Box::new)?;
         // Get DynamoDB item.
         let item = get_item_output.item.ok_or(Error::NotFound)?;
         // Convert item into entry.
@@ -261,7 +262,8 @@ pub(crate) trait TableIndexTrait {
             .expression_attribute_values(":v", serde_dynamo::to_attribute_value(partition_key)?)
             .scan_index_forward(false)
             .send()
-            .await?;
+            .await
+            .map_err(Box::new)?;
         // Convert data into output format.
         let entries: Vec<Self::Entry> =
             serde_dynamo::from_items(query_output.items.unwrap_or_default())?;
@@ -306,7 +308,8 @@ pub(crate) trait TableIndexTrait {
             .expression_attribute_values(":sk", serde_dynamo::to_attribute_value(sort_key)?)
             .scan_index_forward(false)
             .send()
-            .await?;
+            .await
+            .map_err(Box::new)?;
         // Convert data into output format.
         let entries: Vec<Self::Entry> =
             serde_dynamo::from_items(query_output.items.unwrap_or_default())?;
@@ -339,7 +342,6 @@ pub(crate) trait TableIndexTrait {
     }
 
     /// Get all entries from a dynamodb table.
-    #[cfg(feature = "testing")]
     async fn get_all_entries(
         dynamodb_client: &aws_sdk_dynamodb::Client,
         settings: &Settings,
@@ -349,7 +351,12 @@ pub(crate) trait TableIndexTrait {
         // Create vector to aggregate items in.
         let mut all_entries: Vec<Self::Entry> = Vec::new();
         // Scan the table for as many entries as possible.
-        let mut scan_output = dynamodb_client.scan().table_name(table_name).send().await?;
+        let mut scan_output = dynamodb_client
+            .scan()
+            .table_name(table_name)
+            .send()
+            .await
+            .map_err(Box::new)?;
         // Put items into aggregate list.
         all_entries.extend(serde_dynamo::from_items(
             scan_output.items.unwrap_or_default(),
@@ -361,7 +368,8 @@ pub(crate) trait TableIndexTrait {
                 .table_name(table_name)
                 .set_exclusive_start_key(Some(exclusive_start_key))
                 .send()
-                .await?;
+                .await
+                .map_err(Box::new)?;
             all_entries.extend(serde_dynamo::from_items(
                 scan_output.items.unwrap_or_default(),
             )?);
@@ -371,7 +379,6 @@ pub(crate) trait TableIndexTrait {
     }
 
     /// Generic delete table entry.
-    #[cfg(feature = "testing")]
     async fn delete_entry(
         dynamodb_client: &aws_sdk_dynamodb::Client,
         settings: &Settings,
@@ -417,7 +424,8 @@ pub(crate) trait TableIndexTrait {
                 .batch_write_item()
                 .request_items(table_name, chunk.to_vec())
                 .send()
-                .await?;
+                .await
+                .map_err(Box::new)?;
         }
         // Return.
         Ok(())
@@ -588,7 +596,7 @@ fn detokenize<T>(token: String) -> Result<T, Error>
 where
     T: for<'de> Deserialize<'de>,
 {
-    let decoded = URL_SAFE_NO_PAD.decode(token)?;
+    let decoded = URL_SAFE_NO_PAD.decode(token).map_err(Error::Base64Decode)?;
     let deserialized = serde_json::from_slice::<T>(&decoded)?;
     Ok(deserialized)
 }

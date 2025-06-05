@@ -92,7 +92,8 @@ impl SignerNetwork {
                                 continue;
                             }
                         };
-                        if let Err(error) = tx.send(P2PEvent::MessageReceived(msg).into()) {
+                        if let Err(error) = tx.send(P2PEvent::MessageReceived(Box::new(msg)).into())
+                        {
                             tracing::error!(%error, "instance channel has been closed");
                         };
                     }
@@ -167,7 +168,7 @@ impl MessageTransfer for SignerNetworkInstance {
             if let Ok(SignerSignal::Event(SignerEvent::P2P(P2PEvent::MessageReceived(msg)))) =
                 self.instance_rx.recv().await
             {
-                return Ok(msg);
+                return Ok(*msg);
             }
             interval.tick().await;
         }
@@ -176,8 +177,8 @@ impl MessageTransfer for SignerNetworkInstance {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicU16, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU16, Ordering};
 
     use futures::future::join_all;
     use rand::rngs::OsRng;

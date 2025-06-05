@@ -3,10 +3,10 @@
 use std::collections::HashMap;
 use std::ops::Deref;
 
-use bitcoin::hashes::Hash;
 use bitcoin::Amount;
 use bitcoin::BlockHash;
 use bitcoin::Txid;
+use bitcoin::hashes::Hash;
 use bitcoincore_rpc_json::GetTxOutResult;
 use blockstack_lib::chainstate::burn::ConsensusHash;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
@@ -23,19 +23,18 @@ use blockstack_lib::types::chainstate::StacksBlockId;
 use clarity::types::chainstate::BurnchainHeaderHash;
 use clarity::types::chainstate::SortitionId;
 use clarity::vm::costs::ExecutionCost;
-use emily_client::models::Chainstate;
-use emily_client::models::CreateWithdrawalRequestBody;
-use emily_client::models::Withdrawal;
+use emily_client::models::Status;
 use rand::seq::IteratorRandom;
 use sbtc::deposits::CreateDepositRequest;
 
-use crate::bitcoin::rpc::BitcoinBlockHeader;
-use crate::bitcoin::rpc::BitcoinTxInfo;
-use crate::bitcoin::rpc::GetTxResponse;
-use crate::bitcoin::utxo;
 use crate::bitcoin::BitcoinInteract;
 use crate::bitcoin::GetTransactionFeeResult;
 use crate::bitcoin::TransactionLookupHint;
+use crate::bitcoin::rpc::BitcoinBlockHeader;
+use crate::bitcoin::rpc::BitcoinBlockInfo;
+use crate::bitcoin::rpc::BitcoinTxInfo;
+use crate::bitcoin::rpc::GetTxResponse;
+use crate::bitcoin::utxo;
 use crate::context::SbtcLimits;
 use crate::emily_client::EmilyInteract;
 use crate::error::Error;
@@ -47,13 +46,14 @@ use crate::stacks::api::SubmitTxResponse;
 use crate::stacks::api::TenureBlocks;
 use crate::stacks::wallet::SignerWallet;
 use crate::storage::model;
+use crate::storage::model::BitcoinBlockHeight;
 use crate::testing::dummy;
 use crate::util::ApiFallbackClient;
 
 /// A test harness for the block observer.
 #[derive(Debug, Clone)]
 pub struct TestHarness {
-    bitcoin_blocks: Vec<bitcoin::Block>,
+    bitcoin_blocks: Vec<BitcoinBlockInfo>,
     /// This represents the Stacks blockchain. The bitcoin::BlockHash
     /// is used to identify tenures. That is, all NakamotoBlocks that
     /// have the same bitcoin::BlockHash occur within the same tenure.
@@ -67,16 +67,13 @@ pub struct TestHarness {
 
 impl TestHarness {
     /// Get the Bitcoin blocks in the test harness.
-    pub fn bitcoin_blocks(&self) -> &[bitcoin::Block] {
+    pub fn bitcoin_blocks(&self) -> &[BitcoinBlockInfo] {
         &self.bitcoin_blocks
     }
 
     /// The minimum block height amount blocks in this blockchain
-    pub fn min_block_height(&self) -> Option<u64> {
-        self.bitcoin_blocks
-            .iter()
-            .map(|block| block.bip34_block_height().unwrap())
-            .min()
+    pub fn min_block_height(&self) -> Option<BitcoinBlockHeight> {
+        self.bitcoin_blocks.iter().map(|block| block.height).min()
     }
 
     /// Get the Stacks blocks in the test harness.
@@ -92,20 +89,9 @@ impl TestHarness {
     /// Add a single deposit transaction to the test harness.
     pub fn add_deposit(&mut self, txid: Txid, response: GetTxResponse) {
         let tx_info = BitcoinTxInfo {
-            in_active_chain: response.block_hash.is_some(),
-            fee: bitcoin::Amount::from_sat(1000),
+            fee: Some(bitcoin::Amount::from_sat(1000)),
             tx: response.tx.clone(),
-            txid: response.tx.compute_txid(),
-            hash: response.tx.compute_wtxid(),
-            size: response.tx.total_size() as u64,
-            vsize: response.tx.vsize() as u64,
             vin: Vec::new(),
-            vout: Vec::new(),
-            block_hash: response
-                .block_hash
-                .unwrap_or_else(bitcoin::BlockHash::all_zeros),
-            confirmations: 0,
-            block_time: 0,
         };
         self.deposits.insert(txid, (response, tx_info));
     }
@@ -138,15 +124,17 @@ impl TestHarness {
         num_bitcoin_blocks: usize,
         num_stacks_blocks_per_bitcoin_block: std::ops::Range<usize>,
     ) -> Self {
-        // There is some issue with using heights less than 17, probably
-        // minimal pushes or something.
-        let mut bitcoin_blocks: Vec<_> = std::iter::successors(Some(17), |height| Some(height + 1))
-            .map(|height| dummy::block(&fake::Faker, rng, height))
+        // There is an issue with using heights less than 17. Bitcoin
+        // mainnet doesn't have this issue because the block height was not
+        // originally included anywhere until much later.
+        let height = Some(BitcoinBlockHeight::from(17u64));
+        let mut bitcoin_blocks: Vec<_> = std::iter::successors(height, |&height| Some(height + 1))
+            .map(|height| BitcoinBlockInfo::random_with_height(height, rng))
             .take(num_bitcoin_blocks)
             .collect();
 
         for idx in 1..bitcoin_blocks.len() {
-            bitcoin_blocks[idx].header.prev_blockhash = bitcoin_blocks[idx - 1].block_hash();
+            bitcoin_blocks[idx].previous_block_hash = bitcoin_blocks[idx - 1].block_hash;
         }
 
         let first_header = NakamotoBlockHeader::empty();
@@ -165,7 +153,7 @@ impl TestHarness {
                             stx_block.header.parent_block_id = last_stx_block_header.block_id();
                             stx_block.header.chain_length = last_stx_block_header.chain_length + 1;
                             *last_stx_block_header = stx_block.header.clone();
-                            Some((stx_block.block_id(), stx_block, btc_block.block_hash()))
+                            Some((stx_block.block_id(), stx_block, btc_block.block_hash))
                         })
                         .collect();
 
@@ -193,7 +181,7 @@ impl TestHarness {
         let headers: Vec<_> = self
             .bitcoin_blocks
             .iter()
-            .map(|block| Ok(block.block_hash()))
+            .map(|block| Ok(block.block_hash))
             .collect();
 
         let (tx, rx) = tokio::sync::mpsc::channel(128);
@@ -227,12 +215,12 @@ impl BitcoinInteract for TestHarness {
         Ok(self
             .bitcoin_blocks
             .iter()
-            .find(|block| &block.block_hash() == block_hash)
+            .find(|block| &block.block_hash == block_hash)
             .map(|block| BitcoinBlockHeader {
                 hash: *block_hash,
-                height: block.bip34_block_height().unwrap(),
-                time: block.header.time as u64,
-                previous_block_hash: block.header.prev_blockhash,
+                height: block.height,
+                time: block.time,
+                previous_block_hash: block.previous_block_hash,
             }))
     }
 
@@ -247,11 +235,11 @@ impl BitcoinInteract for TestHarness {
     async fn get_block(
         &self,
         block_hash: &bitcoin::BlockHash,
-    ) -> Result<Option<bitcoin::Block>, Error> {
+    ) -> Result<Option<BitcoinBlockInfo>, Error> {
         Ok(self
             .bitcoin_blocks
             .iter()
-            .find(|block| &block.block_hash() == block_hash)
+            .find(|block| &block.block_hash == block_hash)
             .cloned())
     }
 
@@ -323,6 +311,16 @@ impl StacksInteract for TestHarness {
         // issue #118
         todo!()
     }
+    async fn is_deposit_completed(
+        &self,
+        _: &StacksAddress,
+        _: &bitcoin::OutPoint,
+    ) -> Result<bool, Error> {
+        unimplemented!()
+    }
+    async fn is_withdrawal_completed(&self, _: &StacksAddress, _: u64) -> Result<bool, Error> {
+        unimplemented!()
+    }
     async fn get_account(&self, _address: &StacksAddress) -> Result<AccountInfo, Error> {
         // issue #118
         todo!()
@@ -391,7 +389,7 @@ impl StacksInteract for TestHarness {
         let bitcoin_block = self.bitcoin_blocks.last().unwrap();
         Ok(SortitionInfo {
             burn_block_hash: BurnchainHeaderHash::from_bytes_be(
-                bitcoin_block.block_hash().as_byte_array(),
+                bitcoin_block.block_hash.as_byte_array(),
             )
             .ok_or(Error::MissingBlock)?,
             burn_block_height: 0,
@@ -490,6 +488,16 @@ impl EmilyInteract for TestHarness {
         Ok(self.pending_deposits.clone())
     }
 
+    async fn get_deposits_with_status(
+        &self,
+        status: Status,
+    ) -> Result<Vec<CreateDepositRequest>, Error> {
+        match status {
+            Status::Pending => Ok(self.pending_deposits.clone()),
+            _ => Ok(Vec::new()),
+        }
+    }
+
     async fn update_deposits(
         &self,
         _update_deposits: Vec<emily_client::models::DepositUpdate>,
@@ -500,15 +508,14 @@ impl EmilyInteract for TestHarness {
     async fn accept_deposits<'a>(
         &'a self,
         _transaction: &'a utxo::UnsignedTransaction<'a>,
-        _stacks_chain_tip: &'a model::StacksBlock,
     ) -> Result<emily_client::models::UpdateDepositsResponse, Error> {
         unimplemented!()
     }
 
-    async fn create_withdrawals(
-        &self,
-        _create_withdrawals: Vec<CreateWithdrawalRequestBody>,
-    ) -> Vec<Result<Withdrawal, Error>> {
+    async fn accept_withdrawals<'a>(
+        &'a self,
+        _transaction: &'a utxo::UnsignedTransaction<'a>,
+    ) -> Result<emily_client::models::UpdateWithdrawalsResponse, Error> {
         unimplemented!()
     }
 
@@ -517,10 +524,6 @@ impl EmilyInteract for TestHarness {
         _update_withdrawals: Vec<emily_client::models::WithdrawalUpdate>,
     ) -> Result<emily_client::models::UpdateWithdrawalsResponse, Error> {
         unimplemented!()
-    }
-
-    async fn set_chainstate(&self, chainstate: Chainstate) -> Result<Chainstate, Error> {
-        Ok(chainstate)
     }
 
     async fn get_limits(&self) -> Result<SbtcLimits, Error> {

@@ -1,8 +1,7 @@
-use std::num::NonZeroUsize;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use std::time::Duration;
 
 use axum::http::Request;
@@ -10,7 +9,6 @@ use axum::http::Response;
 use cfg_if::cfg_if;
 use clap::Parser;
 use clap::ValueEnum;
-use lru::LruCache;
 use signer::api;
 use signer::api::ApiState;
 use signer::bitcoin::rpc::BitcoinCoreClient;
@@ -22,8 +20,8 @@ use signer::context::Context;
 use signer::context::SignerContext;
 use signer::emily_client::EmilyClient;
 use signer::error::Error;
-use signer::network::libp2p::SignerSwarmBuilder;
 use signer::network::P2PNetwork;
+use signer::network::libp2p::SignerSwarmBuilder;
 use signer::request_decider::RequestDeciderEventLoop;
 use signer::stacks::api::StacksClient;
 use signer::storage::postgres::PgStore;
@@ -34,6 +32,12 @@ use tokio::signal;
 use tower_http::trace::TraceLayer;
 use tracing::Instrument;
 use tracing::Span;
+
+// This is how many seconds the P2P swarm will wait before attempting to
+// bootstrap (i.e. connect to other peers). Three seconds is a sane default
+// value, giving the swarm a few seconds to start up and bind listener(s)
+// before proceeding.
+const INITIAL_BOOTSTRAP_DELAY_SECS: u64 = 3;
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum LogOutputFormat {
@@ -78,15 +82,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Load the configuration file and/or environment variables.
-    let settings = Settings::new(args.config)?;
+    let settings = Settings::new(args.config).inspect_err(|error| {
+        tracing::error!(%error, "failed to construct the configuration");
+    })?;
+
+    let signer_public_key = settings.signer.public_key();
+    tracing::info!(%signer_public_key, "config loaded successfully");
+
     signer::metrics::setup_metrics(settings.signer.prometheus_exporter_endpoint);
 
     // Open a connection to the signer db.
-    let db = PgStore::connect(settings.signer.db_endpoint.as_str()).await?;
+    let db = PgStore::connect(settings.signer.db_endpoint.as_str())
+        .await
+        .inspect_err(|err| {
+            tracing::error!(%err, "failed to connect to the database");
+        })?;
 
     // Apply any pending migrations if automatic migrations are enabled.
     if args.migrate_db {
-        db.apply_migrations().await?;
+        db.apply_migrations().await.inspect_err(|err| {
+            tracing::error!(%err, "failed to apply database migrations");
+        })?;
     }
 
     // Initialize the signer context.
@@ -95,14 +111,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ApiFallbackClient<BitcoinCoreClient>,
         ApiFallbackClient<StacksClient>,
         ApiFallbackClient<EmilyClient>,
-    >::init(settings, db)?;
+    >::init(settings, db)
+    .inspect_err(|err| {
+        tracing::error!(%err, "failed to initialize the signer context");
+    })?;
 
     // TODO: We should first check "another source of truth" for the current
     // signing set, and only assume we are bootstrapping if that source is
     // empty.
     let settings = context.config();
-    for signer in settings.signer.bootstrap_signing_set() {
-        context.state().current_signer_set().add_signer(signer);
+    for signer in &settings.signer.bootstrap_signing_set {
+        context.state().current_signer_set().add_signer(*signer);
     }
 
     // Run the application components concurrently. We're `join!`ing them
@@ -214,18 +233,30 @@ async fn run_shutdown_signal_watcher(ctx: impl Context) -> Result<(), Error> {
 async fn run_libp2p_swarm(ctx: impl Context) -> Result<(), Error> {
     tracing::info!("initializing the p2p network");
 
-    // Build the swarm.
     tracing::debug!("building the libp2p swarm");
     let config = ctx.config();
 
     let enable_quic = config.signer.p2p.is_quic_used();
 
+    // Limit the number of signers to the maximum number of signer pubkeys we
+    // can support. Note that this value is used as a base value for swarm
+    // connection limit calculations.
+    let num_signers = ctx
+        .state()
+        .current_signer_set()
+        .num_signers()
+        .try_into()
+        .unwrap_or(signer::MAX_KEYS);
+
+    // Build the swarm.
     let mut swarm = SignerSwarmBuilder::new(&config.signer.private_key)
         .add_listen_endpoints(&ctx.config().signer.p2p.listen_on)
         .add_seed_addrs(&ctx.config().signer.p2p.seeds)
         .add_external_addresses(&ctx.config().signer.p2p.public_endpoints)
         .enable_mdns(config.signer.p2p.enable_mdns)
         .enable_quic_transport(enable_quic)
+        .with_initial_bootstrap_delay(Duration::from_secs(INITIAL_BOOTSTRAP_DELAY_SECS))
+        .with_num_signers(num_signers)
         .build()?;
 
     // Start the libp2p swarm. This will run until either the shutdown signal is
@@ -299,12 +330,10 @@ async fn run_block_observer(ctx: impl Context) -> Result<(), Error> {
 
     // TODO: Need to handle multiple endpoints, so some sort of
     // failover-stream-wrapper.
-    let stream = BitcoinCoreMessageStream::new_from_endpoint(
-        config.bitcoin.block_hash_stream_endpoints[0].as_str(),
-        &["hashblock"],
-    )
-    .await
-    .unwrap();
+    let endpoint = config.bitcoin.block_hash_stream_endpoints[0].as_str();
+    let stream = BitcoinCoreMessageStream::new_from_endpoint(endpoint)
+        .await
+        .unwrap();
 
     // TODO: We should have a new() method that builds from the context
     let block_observer = block_observer::BlockObserver {
@@ -317,25 +346,9 @@ async fn run_block_observer(ctx: impl Context) -> Result<(), Error> {
 
 /// Run the transaction signer event-loop.
 async fn run_transaction_signer(ctx: impl Context) -> Result<(), Error> {
-    let config = ctx.config().clone();
     let network = P2PNetwork::new(&ctx);
 
-    // The _ as usize cast is fine, since we know that
-    // MAX_SIGNER_STATE_MACHINES is less than u32::MAX, and we only support
-    // running this binary on 32 or 64-bit CPUs.
-    let max_state_machines = NonZeroUsize::new(signer::MAX_SIGNER_STATE_MACHINES as usize)
-        .ok_or(Error::TypeConversion)?;
-
-    let signer = transaction_signer::TxSignerEventLoop {
-        network,
-        context: ctx.clone(),
-        context_window: config.signer.context_window,
-        threshold: config.signer.bootstrap_signatures_required.into(),
-        rng: rand::thread_rng(),
-        signer_private_key: config.signer.private_key,
-        wsts_state_machines: LruCache::new(max_state_machines),
-        dkg_begin_pause: config.signer.dkg_begin_pause.map(Duration::from_secs),
-    };
+    let signer = transaction_signer::TxSignerEventLoop::new(ctx, network, rand::thread_rng())?;
 
     signer.run().await
 }
@@ -371,7 +384,8 @@ async fn run_request_decider(ctx: impl Context) -> Result<(), Error> {
         context: ctx.clone(),
         context_window: config.signer.context_window,
         deposit_decisions_retry_window: config.signer.deposit_decisions_retry_window,
-        blocklist_checker: BlocklistClient::new(&ctx),
+        withdrawal_decisions_retry_window: config.signer.withdrawal_decisions_retry_window,
+        blocklist_checker: config.blocklist_client.as_ref().map(BlocklistClient::new),
         signer_private_key: config.signer.private_key,
     };
 

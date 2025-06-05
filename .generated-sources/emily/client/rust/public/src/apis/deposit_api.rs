@@ -20,7 +20,6 @@ pub enum CreateDepositError {
     Status400(models::ErrorResponse),
     Status404(models::ErrorResponse),
     Status405(models::ErrorResponse),
-    Status409(models::ErrorResponse),
     Status500(models::ErrorResponse),
     UnknownValue(serde_json::Value),
 }
@@ -58,6 +57,17 @@ pub enum GetDepositsForRecipientError {
     UnknownValue(serde_json::Value),
 }
 
+/// struct for typed errors of method [`get_deposits_for_reclaim_pubkeys`]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum GetDepositsForReclaimPubkeysError {
+    Status400(models::ErrorResponse),
+    Status404(models::ErrorResponse),
+    Status405(models::ErrorResponse),
+    Status500(models::ErrorResponse),
+    UnknownValue(serde_json::Value),
+}
+
 /// struct for typed errors of method [`get_deposits_for_transaction`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -69,11 +79,12 @@ pub enum GetDepositsForTransactionError {
     UnknownValue(serde_json::Value),
 }
 
-/// struct for typed errors of method [`update_deposits`]
+/// struct for typed errors of method [`update_deposits_signer`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum UpdateDepositsError {
+pub enum UpdateDepositsSignerError {
     Status400(models::ErrorResponse),
+    Status403(models::ErrorResponse),
     Status404(models::ErrorResponse),
     Status405(models::ErrorResponse),
     Status500(models::ErrorResponse),
@@ -165,7 +176,7 @@ pub async fn get_deposits(
     configuration: &configuration::Configuration,
     status: models::Status,
     next_token: Option<&str>,
-    page_size: Option<i32>,
+    page_size: Option<u32>,
 ) -> Result<models::GetDepositsResponse, Error<GetDepositsError>> {
     let local_var_configuration = configuration;
 
@@ -213,7 +224,7 @@ pub async fn get_deposits_for_recipient(
     configuration: &configuration::Configuration,
     recipient: &str,
     next_token: Option<&str>,
-    page_size: Option<i32>,
+    page_size: Option<u32>,
 ) -> Result<models::GetDepositsResponse, Error<GetDepositsForRecipientError>> {
     let local_var_configuration = configuration;
 
@@ -260,11 +271,62 @@ pub async fn get_deposits_for_recipient(
     }
 }
 
+pub async fn get_deposits_for_reclaim_pubkeys(
+    configuration: &configuration::Configuration,
+    reclaim_pubkeys: &str,
+    next_token: Option<&str>,
+    page_size: Option<u32>,
+) -> Result<models::GetDepositsResponse, Error<GetDepositsForReclaimPubkeysError>> {
+    let local_var_configuration = configuration;
+
+    let local_var_client = &local_var_configuration.client;
+
+    let local_var_uri_str = format!(
+        "{}/deposit/reclaim-pubkeys/{reclaimPubkeys}",
+        local_var_configuration.base_path,
+        reclaimPubkeys = crate::apis::urlencode(reclaim_pubkeys)
+    );
+    let mut local_var_req_builder =
+        local_var_client.request(reqwest::Method::GET, local_var_uri_str.as_str());
+
+    if let Some(ref local_var_str) = next_token {
+        local_var_req_builder =
+            local_var_req_builder.query(&[("nextToken", &local_var_str.to_string())]);
+    }
+    if let Some(ref local_var_str) = page_size {
+        local_var_req_builder =
+            local_var_req_builder.query(&[("pageSize", &local_var_str.to_string())]);
+    }
+    if let Some(ref local_var_user_agent) = local_var_configuration.user_agent {
+        local_var_req_builder =
+            local_var_req_builder.header(reqwest::header::USER_AGENT, local_var_user_agent.clone());
+    }
+
+    let local_var_req = local_var_req_builder.build()?;
+    let local_var_resp = local_var_client.execute(local_var_req).await?;
+
+    let local_var_status = local_var_resp.status();
+    let local_var_content = local_var_resp.text().await?;
+
+    if !local_var_status.is_client_error() && !local_var_status.is_server_error() {
+        serde_json::from_str(&local_var_content).map_err(Error::from)
+    } else {
+        let local_var_entity: Option<GetDepositsForReclaimPubkeysError> =
+            serde_json::from_str(&local_var_content).ok();
+        let local_var_error = ResponseContent {
+            status: local_var_status,
+            content: local_var_content,
+            entity: local_var_entity,
+        };
+        Err(Error::ResponseError(local_var_error))
+    }
+}
+
 pub async fn get_deposits_for_transaction(
     configuration: &configuration::Configuration,
     txid: &str,
     next_token: Option<&str>,
-    page_size: Option<i32>,
+    page_size: Option<u32>,
 ) -> Result<models::GetDepositsForTransactionResponse, Error<GetDepositsForTransactionError>> {
     let local_var_configuration = configuration;
 
@@ -311,10 +373,10 @@ pub async fn get_deposits_for_transaction(
     }
 }
 
-pub async fn update_deposits(
+pub async fn update_deposits_signer(
     configuration: &configuration::Configuration,
     update_deposits_request_body: models::UpdateDepositsRequestBody,
-) -> Result<models::UpdateDepositsResponse, Error<UpdateDepositsError>> {
+) -> Result<models::UpdateDepositsResponse, Error<UpdateDepositsSignerError>> {
     let local_var_configuration = configuration;
 
     let local_var_client = &local_var_configuration.client;
@@ -346,7 +408,7 @@ pub async fn update_deposits(
     if !local_var_status.is_client_error() && !local_var_status.is_server_error() {
         serde_json::from_str(&local_var_content).map_err(Error::from)
     } else {
-        let local_var_entity: Option<UpdateDepositsError> =
+        let local_var_entity: Option<UpdateDepositsSignerError> =
             serde_json::from_str(&local_var_content).ok();
         let local_var_error = ResponseContent {
             status: local_var_status,

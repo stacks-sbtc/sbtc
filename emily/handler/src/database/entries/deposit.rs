@@ -1,24 +1,18 @@
 //! Entries into the deposit table.
 
-use std::collections::HashSet;
-
 use serde::{Deserialize, Serialize};
-
-use crate::{
-    api::models::{
-        chainstate::Chainstate,
-        common::{Fulfillment, Status},
-        deposit::{
-            requests::{DepositUpdate, UpdateDepositsRequestBody},
-            Deposit, DepositInfo, DepositParameters,
-        },
-    },
-    common::error::{Error, Inconsistency},
-};
 
 use super::{
     EntryTrait, KeyTrait, PrimaryIndex, PrimaryIndexTrait, SecondaryIndex, SecondaryIndexTrait,
     StatusEntry, VersionedEntryTrait,
+};
+use crate::{
+    api::models::{
+        chainstate::Chainstate,
+        common::{Fulfillment, Status},
+        deposit::{Deposit, DepositInfo, DepositParameters},
+    },
+    common::error::{Error, Inconsistency, ValidationError},
 };
 
 // Deposit entry ---------------------------------------------------------------
@@ -33,6 +27,12 @@ pub struct DepositEntryKey {
     pub bitcoin_tx_output_index: u32,
 }
 
+impl std::fmt::Display for DepositEntryKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.bitcoin_txid, self.bitcoin_tx_output_index)
+    }
+}
+
 /// Deposit table entry.
 #[derive(Clone, Default, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -42,7 +42,7 @@ pub struct DepositEntry {
     pub key: DepositEntryKey,
     /// Table entry version. Updated on each alteration.
     pub version: u64,
-    /// Stacks address to received the deposited sBTC.
+    /// Stacks address to received the deposited sBTC encoded in hex.
     pub recipient: String,
     /// Amount of BTC being deposited in satoshis.
     pub amount: u64,
@@ -69,6 +69,11 @@ pub struct DepositEntry {
     pub fulfillment: Option<Fulfillment>,
     /// History of this deposit transaction.
     pub history: Vec<DepositEvent>,
+    /// The ordered SHA-256 hash of x-only pubkeys used to create
+    /// the reclaim script of the deposit.
+    /// If the reclaim script is in unknown format, this field will be None.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reclaim_pubkeys_hash: Option<String>,
 }
 
 /// Implements versioned entry trait for the deposit entry.
@@ -126,27 +131,26 @@ impl PrimaryIndexTrait for DepositTablePrimaryIndexInner {
 impl DepositEntry {
     /// Implement validate.
     pub fn validate(&self) -> Result<(), Error> {
-        let stringy_self = serde_json::to_string(self)?;
-
         // Get latest event.
-        let latest_event: &DepositEvent = self.history.last().ok_or(Error::Debug(format!(
-            "Failed getting the last history element for deposit. {stringy_self:?}"
-        )))?;
+        let latest_event: &DepositEvent = self.latest_event()?;
 
         // Verify that the latest event is the current one shown in the entry.
         if self.last_update_block_hash != latest_event.stacks_block_hash {
-            return Err(Error::Debug(
-                format!("last update block hash is inconsistent between history and top level data. {stringy_self:?}")
+            return Err(Error::InvalidDepositEntry(
+                "last update block hash is inconsistent between history and top level data",
+                self.key.clone(),
             ));
         }
         if self.last_update_height != latest_event.stacks_block_height {
-            return Err(Error::Debug(
-                format!("last update block height is inconsistent between history and top level data. {stringy_self:?}")
+            return Err(Error::InvalidDepositEntry(
+                "last update block height is inconsistent between history and top level data",
+                self.key.clone(),
             ));
         }
         if self.status != (&latest_event.status).into() {
-            return Err(Error::Debug(
-                format!("most recent status is inconsistent between history and top level data. {stringy_self:?}")
+            return Err(Error::InvalidDepositEntry(
+                "most recent status is inconsistent between history and top level data",
+                self.key.clone(),
             ));
         }
         Ok(())
@@ -154,10 +158,10 @@ impl DepositEntry {
 
     /// Gets the latest event.
     pub fn latest_event(&self) -> Result<&DepositEvent, Error> {
-        self.history.last().ok_or(Error::Debug(format!(
-            "Deposit entry must always have at least one event, but entry with id {:?} did not.",
-            self.key(),
-        )))
+        self.history.last().ok_or(Error::InvalidDepositEntry(
+            "Deposit entry must always have at least one event but did not",
+            self.key.clone(),
+        ))
     }
 
     /// Reorgs around a given chainstate.
@@ -281,7 +285,7 @@ pub struct DepositEvent {
     pub status: StatusEntry,
     /// Status message.
     pub message: String,
-    /// Stacks block heigh at the time of this update.
+    /// Stacks block height at the time of this update.
     pub stacks_block_height: u64,
     /// Stacks block hash associated with the height of this update.
     pub stacks_block_hash: String,
@@ -293,21 +297,24 @@ impl DepositEvent {
     pub fn ensure_following_event_is_valid(&self, next_event: &DepositEvent) -> Result<(), Error> {
         // Determine if event is valid.
         if self.stacks_block_height > next_event.stacks_block_height {
-            let err_msg = format!(
-                "Attempting to update a deposit with a block height earlier than it should be.\n
-                latest_existing_event:\n{self:?}\n
-                newest_event:\n{next_event:?}"
+            let message =
+                "Attempting to update a deposit with a block height earlier than it should be";
+            tracing::warn!(
+                new_event = ?next_event,
+                last_existing_event = ?self,
+                message,
             );
-            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(err_msg)));
+            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(message)));
         } else if self.stacks_block_height == next_event.stacks_block_height
             && self.stacks_block_hash != next_event.stacks_block_hash
         {
-            let err_msg = format!(
-                "Attempting to update a deposit with a block height and hash that conflicts with its current history.\n
-                latest_existing_event:\n{self:?}\n
-                newest_event:\n{next_event:?}"
+            let message = "Attempting to update a deposit with a block height and hash that conflicts with its current history";
+            tracing::warn!(
+                new_event = ?next_event,
+                last_existing_event = ?self,
+                message
             );
-            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(err_msg)));
+            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(message)));
         }
 
         Ok(())
@@ -351,7 +358,7 @@ pub struct DepositInfoEntry {
     /// Primary index key data.
     #[serde(flatten)]
     pub primary_index_key: DepositEntryKey,
-    /// Stacks address to received the deposited sBTC.
+    /// Stacks address to received the deposited sBTC encoded in hex.
     pub recipient: String,
     /// Amount of BTC being deposited in satoshis.
     pub amount: u64,
@@ -436,7 +443,7 @@ pub struct DepositInfoByRecipientEntrySearchToken {
 #[derive(Clone, Default, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct DepositInfoByRecipientEntryKey {
-    /// The recipient of the deposit.
+    /// The recipient of the deposit encoded in hex.
     pub recipient: String,
     /// The most recent Stacks block height the API was aware of when the deposit was last
     /// updated. If the most recent update is tied to an artifact on the Stacks blockchain
@@ -523,6 +530,111 @@ impl From<DepositInfoByRecipientEntry> for DepositInfo {
     }
 }
 
+/// Search token for reclaim pubkey GSI.
+#[derive(Clone, Default, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct DepositInfoByReclaimPubkeysEntrySearchToken {
+    /// Primary index key.
+    #[serde(flatten)]
+    pub primary_index_key: DepositEntryKey,
+    /// Global secondary index key.
+    #[serde(flatten)]
+    pub secondary_index_key: DepositInfoByReclaimPubkeysEntryKey,
+}
+
+/// Key for deposit info entry that's indexed by reclaim pubkeys hash.
+#[derive(Clone, Default, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct DepositInfoByReclaimPubkeysEntryKey {
+    /// The hashed reclaim pubkeys of the deposit.
+    pub reclaim_pubkeys_hash: String,
+    /// The most recent Stacks block height the API was aware of when the deposit was last
+    /// updated. If the most recent update is tied to an artifact on the Stacks blockchain
+    /// then this height is the Stacks block height that contains that artifact.
+    pub last_update_height: u64,
+}
+
+/// Reduced version of the deposit data that is indexed by reclaim_pubkeys_hash.
+#[derive(Clone, Default, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct DepositInfoByReclaimPubkeysEntry {
+    /// Gsi key data.
+    #[serde(flatten)]
+    pub key: DepositInfoByReclaimPubkeysEntryKey,
+    /// Primary index key data.
+    #[serde(flatten)]
+    pub primary_index_key: DepositEntryKey,
+    /// The status of the entry.
+    #[serde(rename = "OpStatus")]
+    pub status: Status,
+    /// The recipient of the deposit encoded in hex.
+    pub recipient: String,
+    /// Amount of BTC being deposited in satoshis.
+    pub amount: u64,
+    /// The raw reclaim script.
+    pub reclaim_script: String,
+    /// The raw deposit script.
+    pub deposit_script: String,
+    /// The most recent Stacks block hash the API was aware of when the deposit was last
+    /// updated. If the most recent update is tied to an artifact on the Stacks blockchain
+    /// then this hash is the Stacks block hash that contains that artifact.
+    pub last_update_block_hash: String,
+}
+
+/// Implements the key trait for the deposit entry key.
+impl KeyTrait for DepositInfoByReclaimPubkeysEntryKey {
+    /// The type of the partition key.
+    type PartitionKey = String;
+    /// the type of the sort key.
+    type SortKey = u64;
+    /// The table field name of the partition key.
+    const PARTITION_KEY_NAME: &'static str = "ReclaimPubkeysHash";
+    /// The table field name of the sort key.
+    const SORT_KEY_NAME: &'static str = "LastUpdateHeight";
+}
+
+/// Implements the entry trait for the deposit entry.
+impl EntryTrait for DepositInfoByReclaimPubkeysEntry {
+    /// The type of the key for this entry type.
+    type Key = DepositInfoByReclaimPubkeysEntryKey;
+    /// Extract the key from the deposit info entry.
+    fn key(&self) -> Self::Key {
+        DepositInfoByReclaimPubkeysEntryKey {
+            reclaim_pubkeys_hash: self.key.reclaim_pubkeys_hash.clone(),
+            last_update_height: self.key.last_update_height,
+        }
+    }
+}
+
+/// Primary index struct.
+pub struct DepositTableByReclaimPubkeysSecondaryIndexInner;
+/// Deposit table primary index type.
+pub type DepositTableByReclaimPubkeysSecondaryIndex =
+    SecondaryIndex<DepositTableByReclaimPubkeysSecondaryIndexInner>;
+/// Definition of Primary index trait.
+impl SecondaryIndexTrait for DepositTableByReclaimPubkeysSecondaryIndexInner {
+    type PrimaryIndex = DepositTablePrimaryIndex;
+    type Entry = DepositInfoByReclaimPubkeysEntry;
+    const INDEX_NAME: &'static str = "DepositReclaimPubkeysHashIndex";
+}
+
+impl From<DepositInfoByReclaimPubkeysEntry> for DepositInfo {
+    fn from(deposit_info_entry: DepositInfoByReclaimPubkeysEntry) -> Self {
+        // Create deposit info resource from deposit info table entry.
+        DepositInfo {
+            bitcoin_txid: deposit_info_entry.primary_index_key.bitcoin_txid,
+            bitcoin_tx_output_index: deposit_info_entry.primary_index_key.bitcoin_tx_output_index,
+            recipient: deposit_info_entry.recipient,
+            amount: deposit_info_entry.amount,
+            last_update_height: deposit_info_entry.key.last_update_height,
+            last_update_block_hash: deposit_info_entry.last_update_block_hash,
+            status: deposit_info_entry.status,
+            reclaim_script: deposit_info_entry.reclaim_script,
+            deposit_script: deposit_info_entry.deposit_script,
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 
 /// Validated version of the update deposit request.
@@ -534,57 +646,7 @@ pub struct ValidatedUpdateDepositsRequest {
     ///
     /// This allows the updates to be executed in chronological order but returned in the order
     /// that the client sent them.
-    pub deposits: Vec<(usize, ValidatedDepositUpdate)>,
-}
-
-/// Implement try from for the validated deposit requests.
-impl TryFrom<UpdateDepositsRequestBody> for ValidatedUpdateDepositsRequest {
-    type Error = Error;
-    fn try_from(update_request: UpdateDepositsRequestBody) -> Result<Self, Self::Error> {
-        // Validate all the deposit updates.
-        let mut deposits: Vec<(usize, ValidatedDepositUpdate)> = update_request
-            .deposits
-            .into_iter()
-            .enumerate()
-            .map(|(index, update)| {
-                update
-                    .try_into()
-                    .map(|validated_update| (index, validated_update))
-            })
-            .collect::<Result<_, Error>>()?;
-
-        // Order the updates by order of when they occur so that it's as though we got them in
-        // chronological order.
-        deposits.sort_by_key(|(_, update)| update.event.stacks_block_height);
-
-        Ok(ValidatedUpdateDepositsRequest { deposits })
-    }
-}
-
-impl ValidatedUpdateDepositsRequest {
-    /// Infers all chainstates that need to be present in the API for the
-    /// deposit updates to be valid.
-    pub fn inferred_chainstates(&self) -> Result<Vec<Chainstate>, Error> {
-        // TODO(TBD): Error if the inferred chainstates have conflicting block hashes
-        // for a the same block height.
-        let mut inferred_chainstates = self
-            .deposits
-            .clone()
-            .into_iter()
-            .map(|(_, update)| Chainstate {
-                stacks_block_hash: update.event.stacks_block_hash,
-                stacks_block_height: update.event.stacks_block_height,
-            })
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
-
-        // Sort the chainstates in the order that they should come in.
-        inferred_chainstates.sort_by_key(|chainstate| chainstate.stacks_block_height);
-
-        // Return.
-        Ok(inferred_chainstates)
-    }
+    pub deposits: Vec<(usize, Result<ValidatedDepositUpdate, ValidationError>)>,
 }
 
 /// Validated deposit update.
@@ -594,37 +656,6 @@ pub struct ValidatedDepositUpdate {
     pub key: DepositEntryKey,
     /// Deposit event.
     pub event: DepositEvent,
-}
-
-impl TryFrom<DepositUpdate> for ValidatedDepositUpdate {
-    type Error = Error;
-    fn try_from(update: DepositUpdate) -> Result<Self, Self::Error> {
-        // Make key.
-        let key = DepositEntryKey {
-            bitcoin_tx_output_index: update.bitcoin_tx_output_index,
-            bitcoin_txid: update.bitcoin_txid,
-        };
-        // Make status entry.
-        let status_entry: StatusEntry = match update.status {
-            Status::Confirmed => {
-                let fulfillment = update.fulfillment.ok_or(Error::InternalServer)?;
-                StatusEntry::Confirmed(fulfillment)
-            }
-            Status::Accepted => StatusEntry::Accepted,
-            Status::Pending => StatusEntry::Pending,
-            Status::Reprocessing => StatusEntry::Reprocessing,
-            Status::Failed => StatusEntry::Failed,
-        };
-        // Make the new event.
-        let event = DepositEvent {
-            status: status_entry,
-            message: update.status_message,
-            stacks_block_height: update.last_update_height,
-            stacks_block_hash: update.last_update_block_hash,
-        };
-        // Return the validated update.
-        Ok(ValidatedDepositUpdate { key, event })
-    }
 }
 
 impl ValidatedDepositUpdate {
@@ -655,9 +686,7 @@ impl DepositUpdatePackage {
     pub fn try_from(entry: &DepositEntry, update: ValidatedDepositUpdate) -> Result<Self, Error> {
         // Ensure the keys are equal.
         if update.key != entry.key {
-            return Err(Error::Debug(
-                "Attempted to update deposit txid + output index combo".into(),
-            ));
+            return Err(Error::DepositOutputMismatch(entry.key.clone(), update.key));
         }
         // Ensure that this event is valid if it follows the current latest event.
         entry
@@ -706,6 +735,7 @@ mod tests {
             last_update_block_hash: "".to_string(),
             fulfillment: None,
             history: vec![pending, accepted.clone()],
+            reclaim_pubkeys_hash: None,
         };
 
         let update = ValidatedDepositUpdate {
@@ -745,6 +775,7 @@ mod tests {
             last_update_block_hash: "".to_string(),
             fulfillment: None,
             history: vec![pending.clone()],
+            reclaim_pubkeys_hash: None,
         };
 
         let update = ValidatedDepositUpdate {
@@ -802,6 +833,7 @@ mod tests {
             last_update_block_hash: "hash6".to_string(),
             fulfillment: Some(fulfillment.clone()),
             history: vec![pending.clone(), accepted.clone(), confirmed.clone()],
+            reclaim_pubkeys_hash: Some(hex::encode([1u8; 32])),
         };
 
         // Ensure the deposit is valid.
@@ -814,6 +846,7 @@ mod tests {
         let chainstate = Chainstate {
             stacks_block_height: reorg_height,
             stacks_block_hash: reorg_hash.to_string(),
+            bitcoin_block_height: Some(0),
         };
         deposit.reorganize_around(&chainstate).unwrap();
 

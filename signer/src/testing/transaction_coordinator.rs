@@ -1,13 +1,16 @@
 //! Test utilities for the transaction coordinator
 
 use std::cell::RefCell;
+use std::collections::HashSet;
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use std::time::Duration;
 
-use crate::bitcoin::utxo::SignerUtxo;
+use super::get_rng;
 use crate::bitcoin::MockBitcoinInteract;
+use crate::bitcoin::rpc::BitcoinTxInfo;
+use crate::bitcoin::utxo::SignerUtxo;
 use crate::context::Context;
 use crate::context::RequestDeciderEvent;
 use crate::emily_client::MockEmilyInteract;
@@ -21,27 +24,44 @@ use crate::network::in_memory2::SignerNetwork;
 use crate::stacks::api::AccountInfo;
 use crate::stacks::api::MockStacksInteract;
 use crate::stacks::api::SubmitTxResponse;
-use crate::storage::model;
-use crate::storage::model::StacksTxId;
+use crate::stacks::contracts::AcceptWithdrawalV1;
+use crate::stacks::contracts::AsContractCall;
+use crate::stacks::contracts::ContractCall;
+use crate::stacks::contracts::RejectWithdrawalV1;
+use crate::stacks::contracts::StacksTx;
 use crate::storage::DbRead;
 use crate::storage::DbWrite;
+use crate::storage::model;
+use crate::storage::model::StacksBlock;
+use crate::storage::model::StacksTxId;
+use crate::storage::model::ToLittleEndianOrder as _;
 use crate::testing;
+use crate::testing::storage::DbReadTestExt as _;
+use crate::testing::storage::model::TestBitcoinTxInfo;
 use crate::testing::storage::model::TestData;
 use crate::testing::wsts::SignerSet;
 use crate::transaction_coordinator;
-use crate::transaction_coordinator::coordinator_public_key;
 use crate::transaction_coordinator::TxCoordinatorEventLoop;
+use crate::transaction_coordinator::coordinator_public_key;
+use bitcoin::hashes::Hash as _;
 
+use bitcoin::Amount;
+use blockstack_lib::chainstate::stacks::TransactionContractCall;
+use blockstack_lib::chainstate::stacks::TransactionPayload;
 use blockstack_lib::net::api::getcontractsrc::ContractSrcResponse;
+use clarity::vm::Value;
+use clarity::vm::types::BuffData;
+use clarity::vm::types::SequenceData;
 use fake::Fake as _;
 use fake::Faker;
-use rand::SeedableRng as _;
+use rand::seq::IteratorRandom;
 
 use super::context::TestContext;
 use super::context::WrappedMock;
+use super::wallet::WALLET;
 
 const EMPTY_BITCOIN_TX: bitcoin::Transaction = bitcoin::Transaction {
-    version: bitcoin::transaction::Version::ONE,
+    version: bitcoin::transaction::Version::TWO,
     lock_time: bitcoin::absolute::LockTime::ZERO,
     input: vec![],
     output: vec![],
@@ -159,11 +179,14 @@ impl<Storage>
 where
     Storage: DbRead + DbWrite + Clone + Sync + Send + 'static,
 {
-    /// Asserts that TxCoordinatorEventLoop::get_pending_requests ignores withdrawals
-    pub async fn assert_ignore_withdrawals(mut self) {
+    /// Asserts that TxCoordinatorEventLoop::get_pending_requests processes withdrawals
+    pub async fn assert_processes_withdrawals(mut self) {
         // Setup network and signer info
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+
+        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
+        let context = self.context.clone();
+        let storage = context.get_storage();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
         let mut testing_signer_set =
             testing::wsts::SignerSet::new(&signer_info, self.signing_threshold as u32, || {
@@ -172,6 +195,7 @@ where
         let (aggregate_key, bitcoin_chain_tip, mut test_data) = self
             .prepare_database_and_run_dkg(&mut rng, &mut testing_signer_set)
             .await;
+        let original_test_data = test_data.clone();
 
         // Add signer utxo to storage
         let tx_1 = bitcoin::Transaction {
@@ -181,10 +205,49 @@ where
             }],
             ..EMPTY_BITCOIN_TX
         };
-        test_data.push_bitcoin_txs(
-            &bitcoin_chain_tip,
-            vec![(model::TransactionType::SbtcTransaction, tx_1.clone())],
-        );
+        let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
+        let tx_info = TestBitcoinTxInfo {
+            tx: tx_1.clone(),
+            prevouts: Vec::new(),
+        };
+        test_data.push_bitcoin_txs(&bitcoin_chain_tip, vec![tx_info], &signer_script_pubkeys);
+
+        // Also ensure one valid withdrawal exists for test consistency
+        let stacks_blocks = test_data
+            .stacks_blocks
+            .iter()
+            .filter_map(|b| {
+                if b.bitcoin_anchor == bitcoin_chain_tip.block_hash {
+                    Some(b.block_hash)
+                } else {
+                    None
+                }
+            })
+            .collect::<HashSet<_>>();
+        let mut withdrawal = test_data
+            .withdraw_requests
+            .iter()
+            .find(|w| stacks_blocks.contains(&w.block_hash))
+            .unwrap()
+            .clone();
+
+        let mut withdrawal_votes = test_data
+            .withdraw_signers
+            .iter()
+            .filter(|ws| ws.qualified_id() == withdrawal.qualified_id())
+            .cloned()
+            .collect::<Vec<_>>();
+
+        withdrawal.request_id *= 100;
+        withdrawal_votes.iter_mut().for_each(|ws| {
+            ws.is_accepted = true;
+            ws.request_id = withdrawal.request_id;
+        });
+
+        test_data.withdraw_requests.push(withdrawal);
+        test_data.withdraw_signers.append(&mut withdrawal_votes);
+
+        test_data.remove(original_test_data);
         self.write_test_data(&test_data).await;
 
         // Add estimate_fee_rate
@@ -198,8 +261,9 @@ where
             .await;
 
         // Create the coordinator
-        self.context.state().set_sbtc_contracts_deployed();
-        let signer_network = SignerNetwork::single(&self.context);
+        context.state().set_sbtc_contracts_deployed();
+        let signer_network = SignerNetwork::single(&context);
+
         let coordinator = TxCoordinatorEventLoop {
             context: self.context,
             network: signer_network.spawn(),
@@ -212,44 +276,97 @@ where
             is_epoch3: true,
         };
 
+        let signer_public_keys = &signer_info
+            .last()
+            .expect("Empty signer set!")
+            .signer_public_keys;
+
+        // Get the chain tips from storage.
+        let (bitcoin_chain_tip, stacks_chain_tip) = storage.get_chain_tips().await;
+
         // Get pending withdrawals from coordinator
         let pending_requests = coordinator
             .get_pending_requests(
-                &bitcoin_chain_tip.block_hash,
+                &bitcoin_chain_tip,
+                &stacks_chain_tip,
                 &aggregate_key,
-                &signer_info
-                    .last()
-                    .expect("Empty signer set!")
-                    .signer_public_keys,
+                signer_public_keys,
             )
             .await
             .expect("Error getting pending requests")
             .expect("Empty pending requests");
         let withdrawals = pending_requests.withdrawals;
 
-        // Get pending withdrawals from storage
-        let withdrawals_in_storage = coordinator
-            .context
-            .get_storage()
+        // Calculate the minimum processable block height for withdrawals.
+        let min_withdrawal_block_height = bitcoin_chain_tip
+            .block_height
+            .saturating_sub(crate::WITHDRAWAL_BLOCKS_EXPIRY);
+
+        // Get pending withdrawals from storage.
+        let withdrawals_in_storage = storage
             .get_pending_accepted_withdrawal_requests(
-                &bitcoin_chain_tip.block_hash,
-                self.context_window,
+                bitcoin_chain_tip.as_ref(),
+                &stacks_chain_tip,
+                min_withdrawal_block_height,
                 self.signing_threshold,
             )
             .await
             .expect("Error extracting withdrawals from db");
 
-        // Assert that there are some withdrawals in storage while get_pending_requests return 0 withdrawals
-        assert!(withdrawals.is_empty());
+        let max_processable_height = bitcoin_chain_tip
+            .block_height
+            .saturating_sub(crate::WITHDRAWAL_MIN_CONFIRMATIONS);
+        let min_processable_height = bitcoin_chain_tip
+            .block_height
+            .saturating_sub(crate::WITHDRAWAL_BLOCKS_EXPIRY)
+            .saturating_add(crate::WITHDRAWAL_EXPIRY_BUFFER);
+
+        // Assert that there are some withdrawals for test consistency
         assert!(!withdrawals_in_storage.is_empty());
+        for withdrawal in withdrawals_in_storage {
+            if withdrawal.bitcoin_block_height > max_processable_height {
+                assert!(!withdrawals
+                    .iter()
+                    .any(|w| w.request_id == withdrawal.request_id && w.txid == withdrawal.txid));
+                tracing::info!(
+                    request_id = %withdrawal.request_id,
+                    block_height = %withdrawal.bitcoin_block_height,
+                    %max_processable_height,
+                    "skipping asserting withdrawal exists as it doesn't have enough confirmations");
+                continue;
+            }
+
+            if withdrawal.bitcoin_block_height <= min_processable_height {
+                assert!(!withdrawals
+                    .iter()
+                    .any(|w| w.request_id == withdrawal.request_id && w.txid == withdrawal.txid));
+                tracing::info!(
+                    request_id = %withdrawal.request_id,
+                    block_height = %withdrawal.bitcoin_block_height,
+                    %min_processable_height,
+                    "skipping asserting withdrawal exists as it is expired");
+                continue;
+            }
+
+            tracing::info!(
+                request_id = %withdrawal.request_id,
+                block_height = %withdrawal.bitcoin_block_height,
+                %max_processable_height,
+                "checking withdrawal");
+            assert!(
+                withdrawals
+                    .iter()
+                    .any(|w| w.request_id == withdrawal.request_id && w.txid == withdrawal.txid)
+            );
+        }
     }
 
-    /// Assert that a coordinator should be able to coordiante a signing round
+    /// Assert that a coordinator should be able to coordinate a signing round
     pub async fn assert_should_be_able_to_coordinate_signing_rounds(
         mut self,
         delay_to_process_new_blocks: Duration,
     ) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
@@ -269,12 +386,18 @@ where
                 value: bitcoin::Amount::from_sat(1_337_000_000_000),
                 script_pubkey: aggregate_key.signers_script_pubkey(),
             }],
+            input: vec![TestBitcoinTxInfo::random_prevout(&mut rng)],
             ..EMPTY_BITCOIN_TX
         };
-        test_data.push_bitcoin_txs(
-            &bitcoin_chain_tip,
-            vec![(model::TransactionType::SbtcTransaction, tx_1.clone())],
-        );
+        let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
+        let tx_info = TestBitcoinTxInfo {
+            tx: tx_1.clone(),
+            prevouts: vec![bitcoin::TxOut {
+                value: bitcoin::Amount::from_sat(1000),
+                script_pubkey: aggregate_key.signers_script_pubkey(),
+            }],
+        };
+        test_data.push_bitcoin_txs(&bitcoin_chain_tip, vec![tx_info], &signer_script_pubkeys);
 
         test_data.remove(original_test_data);
         self.write_test_data(&test_data).await;
@@ -290,14 +413,11 @@ where
 
         self.context
             .with_emily_client(|client| {
-                client
-                    .expect_accept_deposits()
-                    .times(1..)
-                    .returning(|_, _| {
-                        Box::pin(async {
-                            Ok(emily_client::models::UpdateDepositsResponse { deposits: vec![] })
-                        })
-                    });
+                client.expect_accept_deposits().times(1..).returning(|_| {
+                    Box::pin(async {
+                        Ok(emily_client::models::UpdateDepositsResponse { deposits: vec![] })
+                    })
+                });
             })
             .await;
 
@@ -315,7 +435,7 @@ where
         // This is because the coordinator will produce multiple transactions after
         // the first, and it will panic trying to send to the channel if it is closed
         // (even though we don't use those transactions).
-        let (broadcasted_transaction_tx, _broadcasted_transaction_rxeiver) =
+        let (broadcasted_transaction_tx, _broadcasted_transaction_rx) =
             tokio::sync::broadcast::channel(1);
 
         // This task logs all transactions broadcasted by the coordinator.
@@ -399,7 +519,7 @@ where
     /// Assert that a coordinator should be able to skip the deployment the sbtc contracts
     /// if they are already deployed.
     pub async fn assert_skips_deploy_sbtc_contracts(mut self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
@@ -419,12 +539,18 @@ where
                 value: bitcoin::Amount::from_sat(1_337_000_000_000),
                 script_pubkey: aggregate_key.signers_script_pubkey(),
             }],
+            input: vec![TestBitcoinTxInfo::random_prevout(&mut rng)],
             ..EMPTY_BITCOIN_TX
         };
-        test_data.push_bitcoin_txs(
-            &bitcoin_chain_tip,
-            vec![(model::TransactionType::SbtcTransaction, tx_1.clone())],
-        );
+        let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
+        let tx_info = TestBitcoinTxInfo {
+            tx: tx_1.clone(),
+            prevouts: vec![bitcoin::TxOut {
+                value: bitcoin::Amount::from_sat(1000),
+                script_pubkey: aggregate_key.signers_script_pubkey(),
+            }],
+        };
+        test_data.push_bitcoin_txs(&bitcoin_chain_tip, vec![tx_info], &signer_script_pubkeys);
 
         test_data.remove(original_test_data);
         self.write_test_data(&test_data).await;
@@ -440,14 +566,11 @@ where
 
         self.context
             .with_emily_client(|client| {
-                client
-                    .expect_accept_deposits()
-                    .times(1..)
-                    .returning(|_, _| {
-                        Box::pin(async {
-                            Ok(emily_client::models::UpdateDepositsResponse { deposits: vec![] })
-                        })
-                    });
+                client.expect_accept_deposits().times(1..).returning(|_| {
+                    Box::pin(async {
+                        Ok(emily_client::models::UpdateDepositsResponse { deposits: vec![] })
+                    })
+                });
             })
             .await;
 
@@ -465,7 +588,7 @@ where
         // This is because the coordinator will produce multiple transactions after
         // the first, and it will panic trying to send to the channel if it is closed
         // (even though we don't use those transactions).
-        let (broadcasted_transaction_tx, _broadcasted_transaction_rxeiver) =
+        let (broadcasted_transaction_tx, _broadcasted_transaction_rx) =
             tokio::sync::broadcast::channel(1);
 
         // This task logs all transactions broadcasted by the coordinator.
@@ -520,7 +643,7 @@ where
                         Ok(AccountInfo {
                             balance: 1_000_000,
                             locked: 0,
-                            unlock_height: 0,
+                            unlock_height: 0u64.into(),
                             nonce: 1,
                         })
                     })
@@ -583,6 +706,246 @@ where
         // Perform assertions
         assert_eq!(first_script_pubkey, aggregate_key.signers_script_pubkey());
     }
+
+    /// Assert we get a withdrawal accept tx
+    pub async fn assert_construct_withdrawal_accept_stacks_sign_request(mut self) {
+        let mut rng = get_rng();
+        let signer_network = SignerNetwork::single(&self.context);
+        let private_key = PrivateKey::new(&mut rng);
+        let bitcoin_aggregate_key = PublicKey::from_private_key(&private_key);
+
+        // Create test data for the withdrawal request
+        let stacks_block: StacksBlock = fake::Faker.fake_with_rng(&mut rng);
+        let withdrawal_req = model::WithdrawalRequest {
+            block_hash: stacks_block.block_hash,
+            ..fake::Faker.fake_with_rng::<model::WithdrawalRequest, _>(&mut rng)
+        };
+
+        // Too big outindex will make this test slow and don't really happen in practice
+        // Output index smaller than 2 is invalid in our case
+        let output_index: u32 = (2..200).choose(&mut rng).unwrap();
+
+        let mut output = vec![bitcoin::TxOut::NULL; output_index as usize];
+        output.push(bitcoin::TxOut {
+            value: bitcoin::Amount::from_sat(withdrawal_req.amount),
+            script_pubkey: bitcoin_aggregate_key.signers_script_pubkey(),
+        });
+
+        // Create test data for the withdrawal sweep tx
+        let sweep_block_hash = bitcoin::BlockHash::all_zeros();
+        let sweep_tx = bitcoin::Transaction {
+            input: vec![],
+            output,
+            version: bitcoin::transaction::Version::TWO,
+            lock_time: bitcoin::absolute::LockTime::ZERO,
+        };
+
+        let store = self.context.get_storage_mut();
+        store.write_stacks_block(&stacks_block).await.unwrap();
+        store
+            .write_withdrawal_request(&withdrawal_req)
+            .await
+            .unwrap();
+
+        let sweep_tx_info = BitcoinTxInfo {
+            fee: Some(bitcoin::Amount::from_sat(1000)),
+            tx: sweep_tx.clone(),
+            vin: Vec::new(),
+        };
+
+        let withdrawal_req = model::SweptWithdrawalRequest {
+            output_index,
+            request_id: withdrawal_req.request_id,
+            txid: withdrawal_req.txid,
+            block_hash: stacks_block.block_hash,
+            sweep_txid: sweep_tx_info.compute_txid().into(),
+            sweep_block_hash: sweep_block_hash.into(),
+            sweep_block_height: 0u64.into(),
+            ..fake::Faker.fake_with_rng(&mut rng)
+        };
+
+        let withdrawal_fee = sweep_tx_info
+            .assess_output_fee(output_index as usize)
+            .unwrap()
+            .to_sat();
+
+        // Add estimate_fee_rate
+        self.context
+            .with_stacks_client(|client| {
+                client
+                    .expect_estimate_fees()
+                    .times(1)
+                    .returning(|_, _, _| Box::pin(async { Ok(123000) }));
+            })
+            .await;
+
+        self.context
+            .with_bitcoin_client(|client| {
+                client.expect_get_tx_info().times(1).returning(move |_, _| {
+                    let sweep_tx_info = sweep_tx_info.clone();
+                    Box::pin(async { Ok(Some(sweep_tx_info)) })
+                });
+            })
+            .await;
+        let coordinator = TxCoordinatorEventLoop {
+            context: self.context,
+            network: signer_network.spawn(),
+            private_key,
+            threshold: self.signing_threshold,
+            context_window: self.context_window,
+            signing_round_max_duration: Duration::from_millis(500),
+            bitcoin_presign_request_max_duration: Duration::from_millis(500),
+            dkg_max_duration: Duration::from_millis(500),
+            is_epoch3: true,
+        };
+        let (sign_request, multi_tx) = coordinator
+            .construct_withdrawal_accept_stacks_sign_request(
+                withdrawal_req.clone(),
+                &bitcoin_aggregate_key,
+                &WALLET.0,
+            )
+            .await
+            .expect("Failed to construct withdrawal accept stacks sign request");
+
+        let outpoint = withdrawal_req.withdrawal_outpoint();
+        assert_eq!(sign_request.tx_fee, 123000);
+        assert_eq!(sign_request.aggregate_key, bitcoin_aggregate_key);
+        assert_eq!(sign_request.txid, multi_tx.tx().txid());
+        assert_eq!(sign_request.nonce, multi_tx.tx().get_origin_nonce());
+        if let StacksTx::ContractCall(ContractCall::AcceptWithdrawalV1(call)) =
+            sign_request.contract_tx
+        {
+            assert_eq!(call.tx_fee, withdrawal_fee);
+            assert_eq!(call.id.request_id, withdrawal_req.request_id);
+            assert_eq!(call.outpoint, outpoint);
+            assert_eq!(call.signer_bitmap, 0);
+            assert_eq!(call.sweep_block_hash, withdrawal_req.sweep_block_hash);
+            assert_eq!(call.sweep_block_height, withdrawal_req.sweep_block_height);
+        } else {
+            panic!("Expected ContractCall::AcceptWithdrawalV1");
+        }
+
+        if let TransactionPayload::ContractCall(TransactionContractCall {
+            address,
+            contract_name,
+            function_name,
+            function_args,
+        }) = &multi_tx.tx().payload
+        {
+            assert_eq!(*address, *WALLET.0.address());
+            assert_eq!(contract_name.to_string(), AcceptWithdrawalV1::CONTRACT_NAME);
+            assert_eq!(function_name.to_string(), AcceptWithdrawalV1::FUNCTION_NAME);
+            assert_eq!(
+                *function_args,
+                vec![
+                    Value::UInt(withdrawal_req.request_id as u128),
+                    Value::Sequence(SequenceData::Buffer(BuffData {
+                        data: outpoint.txid.to_le_bytes().to_vec()
+                    })),
+                    Value::UInt(0),
+                    Value::UInt(outpoint.vout as u128),
+                    Value::UInt(withdrawal_fee as u128),
+                    Value::Sequence(SequenceData::Buffer(BuffData {
+                        data: withdrawal_req.sweep_block_hash.to_le_bytes().to_vec()
+                    })),
+                    Value::UInt(withdrawal_req.sweep_block_height.into()),
+                    Value::Sequence(SequenceData::Buffer(BuffData {
+                        data: outpoint.txid.to_le_bytes().to_vec()
+                    })),
+                ]
+            );
+        } else {
+            panic!("Expected TransactionPayload::ContractCall(TransactionContractCall)");
+        }
+    }
+
+    /// Assert we get a withdrawal reject tx
+    pub async fn assert_construct_withdrawal_reject_stacks_sign_request(mut self) {
+        let mut rng = get_rng();
+        let signer_network = SignerNetwork::single(&self.context);
+        let private_key = PrivateKey::new(&mut rng);
+        let bitcoin_aggregate_key = PublicKey::from_private_key(&private_key);
+
+        // Create test data for the withdrawal request
+        let stacks_block: StacksBlock = fake::Faker.fake_with_rng(&mut rng);
+        let withdrawal_req = model::WithdrawalRequest {
+            block_hash: stacks_block.block_hash,
+            ..fake::Faker.fake_with_rng(&mut rng)
+        };
+
+        let store = self.context.get_storage_mut();
+        store.write_stacks_block(&stacks_block).await.unwrap();
+        store
+            .write_withdrawal_request(&withdrawal_req)
+            .await
+            .unwrap();
+
+        // Add estimate_fee_rate
+        self.context
+            .with_stacks_client(|client| {
+                client
+                    .expect_estimate_fees()
+                    .times(1)
+                    .returning(|_, _, _| Box::pin(async { Ok(123000) }));
+            })
+            .await;
+
+        let coordinator = TxCoordinatorEventLoop {
+            context: self.context,
+            network: signer_network.spawn(),
+            private_key,
+            threshold: self.signing_threshold,
+            context_window: self.context_window,
+            signing_round_max_duration: Duration::from_millis(500),
+            bitcoin_presign_request_max_duration: Duration::from_millis(500),
+            dkg_max_duration: Duration::from_millis(500),
+            is_epoch3: true,
+        };
+
+        let (sign_request, multi_tx) = coordinator
+            .construct_withdrawal_reject_stacks_sign_request(
+                &withdrawal_req,
+                &bitcoin_aggregate_key,
+                &WALLET.0,
+            )
+            .await
+            .expect("Failed to construct withdrawal reject stacks sign request");
+
+        assert_eq!(sign_request.tx_fee, 123000);
+        assert_eq!(sign_request.aggregate_key, bitcoin_aggregate_key);
+        assert_eq!(sign_request.txid, multi_tx.tx().txid());
+        assert_eq!(sign_request.nonce, multi_tx.tx().get_origin_nonce());
+
+        let StacksTx::ContractCall(ContractCall::RejectWithdrawalV1(call)) =
+            sign_request.contract_tx
+        else {
+            panic!("Expected ContractCall::RejectWithdrawalV1");
+        };
+
+        assert_eq!(call.id, withdrawal_req.qualified_id());
+        assert_eq!(call.signer_bitmap, 0);
+
+        let TransactionPayload::ContractCall(TransactionContractCall {
+            address,
+            contract_name,
+            function_name,
+            function_args,
+        }) = &multi_tx.tx().payload
+        else {
+            panic!("Expected TransactionPayload::ContractCall(TransactionContractCall)");
+        };
+
+        assert_eq!(*address, *WALLET.0.address());
+        assert_eq!(contract_name.to_string(), RejectWithdrawalV1::CONTRACT_NAME);
+        assert_eq!(function_name.to_string(), RejectWithdrawalV1::FUNCTION_NAME);
+        assert_eq!(
+            *function_args,
+            vec![
+                Value::UInt(withdrawal_req.request_id as u128),
+                Value::UInt(0),
+            ]
+        );
+    }
 }
 
 impl<C> TestEnvironment<C>
@@ -591,7 +954,7 @@ where
 {
     /// Assert we get the correct UTXO in a simple case
     pub async fn assert_get_signer_utxo_simple(mut self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
@@ -607,16 +970,11 @@ where
         let original_test_data = test_data.clone();
 
         let tx = bitcoin::Transaction {
-            output: vec![
-                bitcoin::TxOut {
-                    value: bitcoin::Amount::from_sat(42),
-                    script_pubkey: aggregate_key.signers_script_pubkey(),
-                },
-                bitcoin::TxOut {
-                    value: bitcoin::Amount::from_sat(123),
-                    script_pubkey: bitcoin::ScriptBuf::new(),
-                },
-            ],
+            output: vec![bitcoin::TxOut {
+                value: bitcoin::Amount::from_sat(42),
+                script_pubkey: aggregate_key.signers_script_pubkey(),
+            }],
+            input: vec![TestBitcoinTxInfo::random_prevout(&mut rng)],
             ..EMPTY_BITCOIN_TX
         };
 
@@ -626,11 +984,17 @@ where
             &self.test_model_parameters,
             Some(&bitcoin_chain_tip),
         );
+
+        let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
+        let tx_info = TestBitcoinTxInfo {
+            tx: tx.clone(),
+            prevouts: vec![bitcoin::TxOut {
+                value: bitcoin::Amount::from_sat(1000),
+                script_pubkey: aggregate_key.signers_script_pubkey(),
+            }],
+        };
+        test_data.push_bitcoin_txs(&block_ref, vec![tx_info], &signer_script_pubkeys);
         test_data.push(block);
-        test_data.push_bitcoin_txs(
-            &block_ref,
-            vec![(model::TransactionType::SbtcTransaction, tx.clone())],
-        );
 
         let expected = SignerUtxo {
             outpoint: bitcoin::OutPoint::new(tx.compute_txid(), 0),
@@ -661,7 +1025,7 @@ where
 
     /// Assert we get the correct UTXO in a fork
     pub async fn assert_get_signer_utxo_fork(mut self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
@@ -677,9 +1041,10 @@ where
         let original_test_data = test_data.clone();
 
         let test_data_rc = RefCell::new(test_data);
-        let mut push_block = |parent| {
+        let rng_rc = RefCell::new(rng);
+        let push_block = |parent| {
             let (block, block_ref) = test_data_rc.borrow_mut().new_block(
-                &mut rng,
+                &mut *rng_rc.borrow_mut(),
                 &signer_set.signer_keys(),
                 &self.test_model_parameters,
                 Some(parent),
@@ -687,17 +1052,29 @@ where
             test_data_rc.borrow_mut().push(block);
             block_ref
         };
+        let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
         let push_utxo = |block_ref, sat_amt| {
+            // These are sweep transactions, so they need inputs so that
+            // they get labeled as such.
             let tx = bitcoin::Transaction {
                 output: vec![bitcoin::TxOut {
                     value: bitcoin::Amount::from_sat(sat_amt),
                     script_pubkey: aggregate_key.signers_script_pubkey(),
                 }],
+                input: vec![TestBitcoinTxInfo::random_prevout(&mut *rng_rc.borrow_mut())],
                 ..EMPTY_BITCOIN_TX
+            };
+            let tx_info = TestBitcoinTxInfo {
+                tx: tx.clone(),
+                prevouts: vec![bitcoin::TxOut {
+                    value: bitcoin::Amount::from_sat(1000),
+                    script_pubkey: aggregate_key.signers_script_pubkey(),
+                }],
             };
             test_data_rc.borrow_mut().push_bitcoin_txs(
                 block_ref,
-                vec![(model::TransactionType::SbtcTransaction, tx.clone())],
+                vec![tx_info],
+                &signer_script_pubkeys,
             );
             tx
         };
@@ -758,16 +1135,18 @@ where
         }
 
         // Check context window
-        assert!(storage
-            .get_signer_utxo(&block_c2.block_hash)
-            .await
-            .unwrap()
-            .is_some());
+        assert!(
+            storage
+                .get_signer_utxo(&block_c2.block_hash)
+                .await
+                .unwrap()
+                .is_some()
+        );
     }
 
     /// Assert we get the correct UTXO with a spending chain in a block
     pub async fn assert_get_signer_utxo_unspent(mut self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
@@ -787,6 +1166,7 @@ where
                 value: bitcoin::Amount::from_sat(1),
                 script_pubkey: aggregate_key.signers_script_pubkey(),
             }],
+            input: vec![TestBitcoinTxInfo::random_prevout(&mut rng)],
             ..EMPTY_BITCOIN_TX
         };
         let tx_2 = bitcoin::Transaction {
@@ -794,6 +1174,7 @@ where
                 value: bitcoin::Amount::from_sat(2),
                 script_pubkey: aggregate_key.signers_script_pubkey(),
             }],
+            input: vec![TestBitcoinTxInfo::random_prevout(&mut rng)],
             ..EMPTY_BITCOIN_TX
         };
         let tx_3 = bitcoin::Transaction {
@@ -803,6 +1184,7 @@ where
                         txid: tx_1.compute_txid(),
                         vout: 0,
                     },
+                    sequence: bitcoin::Sequence::ZERO,
                     ..Default::default()
                 },
                 bitcoin::TxIn {
@@ -810,6 +1192,7 @@ where
                         txid: tx_2.compute_txid(),
                         vout: 0,
                     },
+                    sequence: bitcoin::Sequence::ZERO,
                     ..Default::default()
                 },
             ],
@@ -825,15 +1208,42 @@ where
             &self.test_model_parameters,
             Some(&bitcoin_chain_tip),
         );
-        test_data.push(block);
+
+        let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
+        let tx_info_1 = TestBitcoinTxInfo {
+            tx: tx_1.clone(),
+            prevouts: vec![bitcoin::TxOut {
+                value: bitcoin::Amount::from_sat(1000),
+                script_pubkey: aggregate_key.signers_script_pubkey(),
+            }],
+        };
+        let tx_info_2 = TestBitcoinTxInfo {
+            tx: tx_2.clone(),
+            prevouts: vec![bitcoin::TxOut {
+                value: bitcoin::Amount::from_sat(2000),
+                script_pubkey: aggregate_key.signers_script_pubkey(),
+            }],
+        };
+        let tx_info_3 = TestBitcoinTxInfo {
+            tx: tx_3.clone(),
+            prevouts: vec![
+                bitcoin::TxOut {
+                    value: bitcoin::Amount::from_sat(3000),
+                    script_pubkey: aggregate_key.signers_script_pubkey(),
+                },
+                bitcoin::TxOut {
+                    value: bitcoin::Amount::from_sat(4000),
+                    script_pubkey: bitcoin::ScriptBuf::new(),
+                },
+            ],
+        };
         test_data.push_bitcoin_txs(
             &block_ref,
-            vec![
-                (model::TransactionType::SbtcTransaction, tx_1.clone()),
-                (model::TransactionType::SbtcTransaction, tx_3.clone()),
-                (model::TransactionType::SbtcTransaction, tx_2.clone()),
-            ],
+            vec![tx_info_1, tx_info_2, tx_info_3],
+            &signer_script_pubkeys,
         );
+
+        test_data.push(block);
 
         let expected = SignerUtxo {
             outpoint: bitcoin::OutPoint::new(tx_3.compute_txid(), 0),
@@ -864,7 +1274,7 @@ where
 
     /// Assert we get the correct UTXO in case of donations
     pub async fn assert_get_signer_utxo_donations(mut self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
@@ -894,13 +1304,19 @@ where
                 value: bitcoin::Amount::from_sat(0xA1),
                 script_pubkey: aggregate_key.signers_script_pubkey(),
             }],
+            input: vec![TestBitcoinTxInfo::random_prevout(&mut rng)],
             ..EMPTY_BITCOIN_TX
         };
+        let signer_script_pubkeys = HashSet::from([aggregate_key.signers_script_pubkey()]);
+        let tx_info = TestBitcoinTxInfo {
+            tx: tx_a1.clone(),
+            prevouts: vec![bitcoin::TxOut {
+                value: Amount::from_sat(0xA1),
+                script_pubkey: aggregate_key.signers_script_pubkey(),
+            }],
+        };
+        test_data.push_bitcoin_txs(&block_a1, vec![tx_info], &signer_script_pubkeys);
         test_data.push(block);
-        test_data.push_bitcoin_txs(
-            &block_a1,
-            vec![(model::TransactionType::SbtcTransaction, tx_a1.clone())],
-        );
 
         let (block, block_a2) = test_data.new_block(
             &mut rng,
@@ -908,6 +1324,9 @@ where
             &self.test_model_parameters,
             Some(&block_a1),
         );
+        // This is a donation. It should be labeled as such since the first
+        // input (which doesn't exist), is not locked by the signers
+        // scriptPubKey.
         let tx_a2 = bitcoin::Transaction {
             output: vec![bitcoin::TxOut {
                 value: bitcoin::Amount::from_sat(0xA2),
@@ -915,11 +1334,12 @@ where
             }],
             ..EMPTY_BITCOIN_TX
         };
+        let tx_info = TestBitcoinTxInfo {
+            tx: tx_a2.clone(),
+            prevouts: Vec::new(),
+        };
+        test_data.push_bitcoin_txs(&block_a2, vec![tx_info], &signer_script_pubkeys);
         test_data.push(block);
-        test_data.push_bitcoin_txs(
-            &block_a2,
-            vec![(model::TransactionType::Donation, tx_a2.clone())],
-        );
 
         let (block, block_b1) = test_data.new_block(
             &mut rng,
@@ -927,6 +1347,7 @@ where
             &self.test_model_parameters,
             Some(&bitcoin_chain_tip),
         );
+        // This is a donation as well
         let tx_b1 = bitcoin::Transaction {
             output: vec![bitcoin::TxOut {
                 value: bitcoin::Amount::from_sat(0xB1),
@@ -934,11 +1355,12 @@ where
             }],
             ..EMPTY_BITCOIN_TX
         };
+        let tx_info = TestBitcoinTxInfo {
+            tx: tx_b1.clone(),
+            prevouts: Vec::new(),
+        };
+        test_data.push_bitcoin_txs(&block_b1, vec![tx_info], &signer_script_pubkeys);
         test_data.push(block);
-        test_data.push_bitcoin_txs(
-            &block_b1,
-            vec![(model::TransactionType::Donation, tx_b1.clone())],
-        );
 
         test_data.remove(original_test_data);
         self.write_test_data(&test_data).await;
@@ -1019,8 +1441,14 @@ where
             .into();
 
         let dkg_txid = testing::dummy::txid(&fake::Faker, rng);
-        let (aggregate_key, all_dkg_shares) =
-            signer_set.run_dkg(bitcoin_chain_tip, dkg_txid, rng).await;
+        let (aggregate_key, all_dkg_shares) = signer_set
+            .run_dkg(
+                bitcoin_chain_tip,
+                dkg_txid.into(),
+                rng,
+                model::DkgSharesStatus::Verified,
+            )
+            .await;
 
         let encrypted_dkg_shares = all_dkg_shares.first().unwrap();
 

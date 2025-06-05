@@ -1,30 +1,31 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
+
+use bitcoin::ScriptBuf;
+use bitcoin::consensus::encode::serialize_hex;
+use bitcoin::opcodes::all as opcodes;
+use stacks_common::codec::StacksMessageCodec as _;
+use stacks_common::types::chainstate::StacksAddress;
 use test_case::test_case;
 
 use sbtc::testing;
 use sbtc::testing::deposits::TxSetup;
-use stacks_common::codec::StacksMessageCodec as _;
-use stacks_common::types::chainstate::StacksAddress;
-use testing_emily_client::models::{Fulfillment, Status, UpdateDepositsRequestBody};
+use testing_emily_client::apis::chainstate_api::set_chainstate;
+use testing_emily_client::models::{Chainstate, Fulfillment, Status, UpdateDepositsRequestBody};
 use testing_emily_client::{
     apis::{self, configuration::Configuration},
     models::{CreateDepositRequestBody, Deposit, DepositInfo, DepositParameters, DepositUpdate},
 };
 
-use crate::common::{clean_setup, StandardError};
+use crate::common::{StandardError, clean_setup};
 
-const BLOCK_HASH: &'static str = "";
+const BLOCK_HASH: &str = "";
 const BLOCK_HEIGHT: u64 = 0;
-const INITIAL_DEPOSIT_STATUS_MESSAGE: &'static str = "Just received deposit";
+const INITIAL_DEPOSIT_STATUS_MESSAGE: &str = "Just received deposit";
 
-const DEPOSIT_LOCK_TIME: u32 = 12345;
+const DEPOSIT_LOCK_TIME: u32 = 14;
 const DEPOSIT_MAX_FEE: u64 = 30;
-
-// TODO(TBD): This is the only value that will work at the moment because the
-// API needs to take in more information in order to get the amount from the
-// create deposit data. We need to fix this before launch.
-const DEPOSIT_AMOUNT_SATS: u64 = 0;
+const DEPOSIT_AMOUNT_SATS: u64 = 1_000_000;
 
 /// An arbitrary fully ordered partial cmp comparator for DepositInfos.
 /// This is useful for sorting vectors of deposit infos so that vectors with
@@ -56,7 +57,7 @@ async fn batch_create_deposits(
     let mut created_deposits: Vec<Deposit> = Vec::with_capacity(create_requests.len());
     for request in create_requests {
         created_deposits.push(
-            apis::deposit_api::create_deposit(&configuration, request)
+            apis::deposit_api::create_deposit(configuration, request)
                 .await
                 .expect("Received an error after making a valid create deposit request api call."),
         );
@@ -66,29 +67,71 @@ async fn batch_create_deposits(
 
 /// Test deposit txn information. This is useful for testing.
 struct DepositTxnData {
-    pub recipient: String,
-    pub reclaim_script: String,
-    pub deposit_script: String,
+    pub bitcoin_txid: String,
+    pub transaction_hex: String,
+    pub recipients: Vec<String>,
+    pub reclaim_scripts: Vec<String>,
+    pub deposit_scripts: Vec<String>,
 }
 
 impl DepositTxnData {
-    pub fn new(lock_time: u32, max_fee: u64, amount_sats: u64, recipient: u8) -> Self {
-        let test_deposit_tx: TxSetup = testing::deposits::tx_setup_with_recipient(
+    fn from_tx_setup(test_deposit_tx: TxSetup) -> Self {
+        Self {
+            bitcoin_txid: test_deposit_tx.tx.compute_txid().to_string(),
+            transaction_hex: serialize_hex(&test_deposit_tx.tx),
+            recipients: test_deposit_tx
+                .deposits
+                .iter()
+                .map(|d| hex::encode(d.recipient.serialize_to_vec()))
+                .collect(),
+            reclaim_scripts: test_deposit_tx
+                .reclaims
+                .iter()
+                .map(|r| r.reclaim_script().to_hex_string())
+                .collect(),
+            deposit_scripts: test_deposit_tx
+                .deposits
+                .iter()
+                .map(|d| d.deposit_script().to_hex_string())
+                .collect(),
+        }
+    }
+
+    pub fn new_with_recipient(
+        lock_time: u32,
+        max_fee: u64,
+        amounts: &[u64],
+        recipient: u8,
+    ) -> Self {
+        let tx_setup = testing::deposits::tx_setup_with_recipient(
             lock_time,
             max_fee,
-            amount_sats,
+            amounts,
             StacksAddress {
                 version: 0,
                 bytes: stacks_common::util::hash::Hash160([recipient; 20]),
             },
         );
-        let recipient_hex_string =
-            hex::encode(&test_deposit_tx.deposit.recipient.serialize_to_vec());
-        Self {
-            recipient: recipient_hex_string,
-            reclaim_script: test_deposit_tx.reclaim.reclaim_script().to_hex_string(),
-            deposit_script: test_deposit_tx.deposit.deposit_script().to_hex_string(),
-        }
+        Self::from_tx_setup(tx_setup)
+    }
+
+    pub fn new_with_reclaim_user_script(
+        lock_time: u32,
+        max_fee: u64,
+        amounts: &[u64],
+        reclaim_user_script: &ScriptBuf,
+    ) -> Self {
+        let tx_setup = testing::deposits::tx_setup_with_reclaim_user_script(
+            lock_time,
+            max_fee,
+            amounts,
+            reclaim_user_script,
+        );
+        Self::from_tx_setup(tx_setup)
+    }
+    pub fn new(lock_time: u32, max_fee: u64, amounts: &[u64]) -> Self {
+        let tx_setup = testing::deposits::tx_setup(lock_time, max_fee, amounts);
+        Self::from_tx_setup(tx_setup)
     }
 }
 
@@ -98,27 +141,33 @@ async fn create_and_get_deposit_happy_path() {
 
     // Arrange.
     // --------
-    let bitcoin_txid: &str = "bitcoin_txid";
-    let bitcoin_tx_output_index = 12;
+    let bitcoin_tx_output_index = 0;
 
     // Setup test deposit transaction.
     let DepositTxnData {
-        recipient: expected_recipient,
-        reclaim_script,
-        deposit_script,
-    } = DepositTxnData::new(DEPOSIT_LOCK_TIME, DEPOSIT_MAX_FEE, DEPOSIT_AMOUNT_SATS, 0);
+        recipients,
+        reclaim_scripts,
+        deposit_scripts,
+        bitcoin_txid,
+        transaction_hex,
+    } = DepositTxnData::new(DEPOSIT_LOCK_TIME, DEPOSIT_MAX_FEE, &[DEPOSIT_AMOUNT_SATS]);
+
+    let recipient = recipients.first().unwrap().clone();
+    let reclaim_script = reclaim_scripts.first().unwrap().clone();
+    let deposit_script = deposit_scripts.first().unwrap().clone();
 
     let request = CreateDepositRequestBody {
         bitcoin_tx_output_index,
-        bitcoin_txid: bitcoin_txid.into(),
+        bitcoin_txid: bitcoin_txid.clone(),
         reclaim_script: reclaim_script.clone(),
         deposit_script: deposit_script.clone(),
+        transaction_hex: transaction_hex.clone(),
     };
 
     let expected_deposit = Deposit {
         amount: DEPOSIT_AMOUNT_SATS,
         bitcoin_tx_output_index,
-        bitcoin_txid: bitcoin_txid.into(),
+        bitcoin_txid: bitcoin_txid.clone(),
         fulfillment: None,
         last_update_block_hash: BLOCK_HASH.into(),
         last_update_height: BLOCK_HEIGHT,
@@ -128,7 +177,7 @@ async fn create_and_get_deposit_happy_path() {
             lock_time: DEPOSIT_LOCK_TIME,
             max_fee: DEPOSIT_MAX_FEE,
         }),
-        recipient: expected_recipient,
+        recipient,
         status: testing_emily_client::models::Status::Pending,
         status_message: INITIAL_DEPOSIT_STATUS_MESSAGE.into(),
     };
@@ -142,7 +191,7 @@ async fn create_and_get_deposit_happy_path() {
     let bitcoin_tx_output_index_string = bitcoin_tx_output_index.to_string();
     let gotten_deposit = apis::deposit_api::get_deposit(
         &configuration,
-        bitcoin_txid,
+        &bitcoin_txid,
         &bitcoin_tx_output_index_string,
     )
     .await
@@ -160,21 +209,26 @@ async fn wipe_databases_test() {
 
     // Arrange.
     // --------
-    let bitcoin_txid: &str = "bitcoin_txid";
-    let bitcoin_tx_output_index = 12;
+    let bitcoin_tx_output_index = 0;
 
     // Setup test deposit transaction.
     let DepositTxnData {
-        recipient: _,
-        reclaim_script,
-        deposit_script,
-    } = DepositTxnData::new(DEPOSIT_LOCK_TIME, DEPOSIT_MAX_FEE, DEPOSIT_AMOUNT_SATS, 0);
+        recipients: _,
+        reclaim_scripts,
+        deposit_scripts,
+        bitcoin_txid,
+        transaction_hex,
+    } = DepositTxnData::new(DEPOSIT_LOCK_TIME, DEPOSIT_MAX_FEE, &[DEPOSIT_AMOUNT_SATS]);
+
+    let reclaim_script = reclaim_scripts.first().unwrap().clone();
+    let deposit_script = deposit_scripts.first().unwrap().clone();
 
     let request = CreateDepositRequestBody {
         bitcoin_tx_output_index,
-        bitcoin_txid: bitcoin_txid.into(),
-        reclaim_script: reclaim_script.clone(),
-        deposit_script: deposit_script.clone(),
+        transaction_hex,
+        reclaim_script,
+        deposit_script,
+        bitcoin_txid: bitcoin_txid.clone(),
     };
 
     // Act.
@@ -190,7 +244,7 @@ async fn wipe_databases_test() {
     let bitcoin_tx_output_index_string = bitcoin_tx_output_index.to_string();
     let attempted_get: StandardError = apis::deposit_api::get_deposit(
         &configuration,
-        bitcoin_txid,
+        &bitcoin_txid,
         &bitcoin_tx_output_index_string,
     )
     .await
@@ -208,32 +262,39 @@ async fn get_deposits_for_transaction() {
 
     // Arrange.
     // --------
-    let bitcoin_txid: &str = "bitcoin_txid";
-    let bitcoin_tx_output_indices = vec![1, 3, 2, 4]; // unordered.
-
+    let bitcoin_tx_output_indices: Vec<u32> = vec![0, 2, 1, 3]; // unordered.
+    let amounts = vec![DEPOSIT_AMOUNT_SATS; 4];
     // Setup test deposit transaction.
     let DepositTxnData {
-        recipient: expected_recipient,
-        reclaim_script,
-        deposit_script,
-    } = DepositTxnData::new(DEPOSIT_LOCK_TIME, DEPOSIT_MAX_FEE, DEPOSIT_AMOUNT_SATS, 0);
+        recipients,
+        reclaim_scripts,
+        deposit_scripts,
+        bitcoin_txid,
+        transaction_hex,
+    } = DepositTxnData::new(DEPOSIT_LOCK_TIME, DEPOSIT_MAX_FEE, &amounts);
 
     let mut create_requests: Vec<CreateDepositRequestBody> = Vec::new();
     let mut expected_deposits: Vec<Deposit> = Vec::new();
 
     for bitcoin_tx_output_index in bitcoin_tx_output_indices {
+        let tx_output_index = bitcoin_tx_output_index as usize;
+        let recipient = recipients.get(tx_output_index).unwrap().clone();
+        let reclaim_script = reclaim_scripts.get(tx_output_index).unwrap().clone();
+        let deposit_script = deposit_scripts.get(tx_output_index).unwrap().clone();
+
         let request = CreateDepositRequestBody {
             bitcoin_tx_output_index,
-            bitcoin_txid: bitcoin_txid.into(),
+            bitcoin_txid: bitcoin_txid.clone(),
             deposit_script: deposit_script.clone(),
             reclaim_script: reclaim_script.clone(),
+            transaction_hex: transaction_hex.clone(),
         };
         create_requests.push(request);
 
         let expected_deposit = Deposit {
             amount: DEPOSIT_AMOUNT_SATS,
             bitcoin_tx_output_index,
-            bitcoin_txid: bitcoin_txid.into(),
+            bitcoin_txid: bitcoin_txid.clone(),
             fulfillment: None,
             last_update_block_hash: BLOCK_HASH.into(),
             last_update_height: BLOCK_HEIGHT,
@@ -243,7 +304,7 @@ async fn get_deposits_for_transaction() {
                 lock_time: DEPOSIT_LOCK_TIME,
                 max_fee: DEPOSIT_MAX_FEE,
             }),
-            recipient: expected_recipient.clone(),
+            recipient: recipient.clone(),
             status: testing_emily_client::models::Status::Pending,
             status_message: INITIAL_DEPOSIT_STATUS_MESSAGE.into(),
         };
@@ -255,7 +316,7 @@ async fn get_deposits_for_transaction() {
     batch_create_deposits(&configuration, create_requests).await;
 
     let gotten_deposits =
-        apis::deposit_api::get_deposits_for_transaction(&configuration, bitcoin_txid, None, None)
+        apis::deposit_api::get_deposits_for_transaction(&configuration, &bitcoin_txid, None, None)
             .await
             .expect(
                 "Received an error after making a valid get deposits for transaction api call.",
@@ -279,36 +340,46 @@ async fn get_deposits() {
 
     // Arrange.
     // --------
-    let bitcoin_txids: Vec<&str> = vec!["bitcoin_txid_1", "bitcoin_txid_2"];
-    let bitcoin_tx_output_indices = vec![1, 3, 2, 4]; // unordered.
+    let bitcoin_tx_output_indices: Vec<u32> = vec![0, 2, 1, 3]; // unordered.
 
+    let amounts = vec![DEPOSIT_AMOUNT_SATS; 4];
     // Setup test deposit transaction.
-    let DepositTxnData {
-        recipient: expected_recipient,
-        reclaim_script,
-        deposit_script,
-    } = DepositTxnData::new(DEPOSIT_LOCK_TIME, DEPOSIT_MAX_FEE, DEPOSIT_AMOUNT_SATS, 0);
+    let deposit_txn_data =
+        (0..2).map(|_| DepositTxnData::new(DEPOSIT_LOCK_TIME, DEPOSIT_MAX_FEE, &amounts));
 
     let mut create_requests: Vec<CreateDepositRequestBody> = Vec::new();
     let mut expected_deposit_infos: Vec<DepositInfo> = Vec::new();
 
-    for bitcoin_txid in bitcoin_txids {
+    for deposit_tx in deposit_txn_data {
+        let DepositTxnData {
+            recipients,
+            reclaim_scripts,
+            deposit_scripts,
+            bitcoin_txid,
+            transaction_hex,
+        } = deposit_tx;
         for &bitcoin_tx_output_index in bitcoin_tx_output_indices.iter() {
+            let tx_output_index = bitcoin_tx_output_index as usize;
+            let recipient = recipients.get(tx_output_index).unwrap().clone();
+            let reclaim_script = reclaim_scripts.get(tx_output_index).unwrap().clone();
+            let deposit_script = deposit_scripts.get(tx_output_index).unwrap().clone();
+
             let request = CreateDepositRequestBody {
                 bitcoin_tx_output_index,
-                bitcoin_txid: bitcoin_txid.into(),
+                bitcoin_txid: bitcoin_txid.clone(),
                 deposit_script: deposit_script.clone(),
                 reclaim_script: reclaim_script.clone(),
+                transaction_hex: transaction_hex.clone(),
             };
             create_requests.push(request);
 
             let expected_deposit_info = DepositInfo {
                 amount: DEPOSIT_AMOUNT_SATS,
                 bitcoin_tx_output_index,
-                bitcoin_txid: bitcoin_txid.into(),
+                bitcoin_txid: bitcoin_txid.clone(),
                 last_update_block_hash: BLOCK_HASH.into(),
                 last_update_height: BLOCK_HEIGHT,
-                recipient: expected_recipient.clone(),
+                recipient: recipient.clone(),
                 status: testing_emily_client::models::Status::Pending,
                 reclaim_script: reclaim_script.clone(),
                 deposit_script: deposit_script.clone(),
@@ -317,45 +388,45 @@ async fn get_deposits() {
         }
     }
 
-    let chunksize: u16 = 2;
+    let chunksize = 2;
     // If the number of elements is an exact multiple of the chunk size the "final"
     // query will still have a next token, and the next query will now have a next
     // token and will return no additional data.
-    let expected_chunks: u16 = expected_deposit_infos.len() as u16 / chunksize + 1;
+    let expected_chunks = expected_deposit_infos.len() / chunksize + 1;
 
     // Act.
     // ----
     batch_create_deposits(&configuration, create_requests).await;
 
     let status = testing_emily_client::models::Status::Pending;
-    let mut next_token: Option<Option<String>> = None;
+    let mut next_token: Option<String> = None;
     let mut gotten_deposit_info_chunks: Vec<Vec<DepositInfo>> = Vec::new();
     loop {
         let response = apis::deposit_api::get_deposits(
             &configuration,
             status,
-            next_token.as_ref().and_then(|o| o.as_deref()),
-            Some(chunksize as i32),
+            next_token.as_deref(),
+            Some(chunksize as u32),
         )
         .await
         .expect("Received an error after making a valid get deposits api call.");
         gotten_deposit_info_chunks.push(response.deposits);
         // If there's no next token then break.
-        next_token = response.next_token;
-        if !next_token.as_ref().is_some_and(|inner| inner.is_some()) {
-            break;
-        }
+        next_token = match response.next_token.flatten() {
+            Some(token) => Some(token),
+            None => break,
+        };
     }
 
     // Assert.
     // -------
-    assert_eq!(expected_chunks, gotten_deposit_info_chunks.len() as u16);
+    assert_eq!(expected_chunks, gotten_deposit_info_chunks.len());
     let max_chunk_size = gotten_deposit_info_chunks
         .iter()
         .map(|chunk| chunk.len())
         .max()
         .unwrap();
-    assert!(chunksize >= max_chunk_size as u16);
+    assert!(chunksize >= max_chunk_size);
 
     let mut gotten_deposit_infos = gotten_deposit_info_chunks
         .into_iter()
@@ -367,11 +438,6 @@ async fn get_deposits() {
     assert_eq!(expected_deposit_infos, gotten_deposit_infos);
 }
 
-struct RecipientTestSetupData {
-    num_deposits: u32,
-    bitcoin_txid: String,
-}
-
 #[tokio::test]
 async fn get_deposits_for_recipient() {
     let configuration = clean_setup().await;
@@ -380,57 +446,54 @@ async fn get_deposits_for_recipient() {
     // --------
 
     // Setup the test information that we'll use to arrange the test.
-    let recipient_test_setup: Vec<RecipientTestSetupData> = vec![
-        RecipientTestSetupData {
-            num_deposits: 3,
-            bitcoin_txid: "test_bitcoin_txid_1".into(),
-        },
-        RecipientTestSetupData {
-            num_deposits: 1,
-            bitcoin_txid: "test_bitcoin_txid_2".into(),
-        },
-        RecipientTestSetupData {
-            num_deposits: 4,
-            bitcoin_txid: "test_bitcoin_txid_3".into(),
-        },
-    ];
+    let deposits_per_tx = [2, 3, 4];
 
     let mut expected_recipient_data: HashMap<String, Vec<DepositInfo>> = HashMap::new();
     let mut create_requests: Vec<CreateDepositRequestBody> = Vec::new();
-    for (recipient_number, recipient_test_setup) in recipient_test_setup.iter().enumerate() {
+    for (recipient_number, num_deposits) in deposits_per_tx.iter().enumerate() {
+        let amounts = vec![DEPOSIT_AMOUNT_SATS; *num_deposits as usize];
         // Setup test deposit transaction.
         let DepositTxnData {
-            recipient,
-            reclaim_script,
-            deposit_script,
-        } = DepositTxnData::new(
+            recipients,
+            reclaim_scripts,
+            deposit_scripts,
+            bitcoin_txid,
+            transaction_hex,
+        } = DepositTxnData::new_with_recipient(
             DEPOSIT_LOCK_TIME,
             DEPOSIT_MAX_FEE,
-            DEPOSIT_AMOUNT_SATS,
+            &amounts,
             recipient_number as u8,
         );
+
         // Make create requests.
         let mut expected_deposit_infos: Vec<DepositInfo> = Vec::new();
-        for bitcoin_tx_output_index in 0..recipient_test_setup.num_deposits {
+        let mut recipient = recipients.first().unwrap();
+        for bitcoin_tx_output_index in 0..*num_deposits {
+            let tx_output_index = bitcoin_tx_output_index as usize;
+            recipient = &recipients[tx_output_index];
+            let reclaim_script = reclaim_scripts[tx_output_index].clone();
+            let deposit_script = deposit_scripts[tx_output_index].clone();
             // Make the create request.
             let request = CreateDepositRequestBody {
                 bitcoin_tx_output_index,
-                bitcoin_txid: recipient_test_setup.bitcoin_txid.clone(),
+                bitcoin_txid: bitcoin_txid.clone(),
                 deposit_script: deposit_script.clone(),
                 reclaim_script: reclaim_script.clone(),
+                transaction_hex: transaction_hex.clone(),
             };
             create_requests.push(request);
             // Store the expected deposit info that should come from it.
             let expected_deposit_info = DepositInfo {
                 amount: DEPOSIT_AMOUNT_SATS,
                 bitcoin_tx_output_index,
-                bitcoin_txid: recipient_test_setup.bitcoin_txid.clone(),
+                bitcoin_txid: bitcoin_txid.clone(),
                 last_update_block_hash: BLOCK_HASH.into(),
                 last_update_height: BLOCK_HEIGHT,
                 recipient: recipient.clone(),
                 status: testing_emily_client::models::Status::Pending,
-                reclaim_script: reclaim_script.clone(),
-                deposit_script: deposit_script.clone(),
+                reclaim_script,
+                deposit_script,
             };
             expected_deposit_infos.push(expected_deposit_info);
         }
@@ -440,7 +503,7 @@ async fn get_deposits_for_recipient() {
     }
 
     // The size of the chunks to grab from the api.
-    let chunksize: u16 = 2;
+    let chunksize = 2;
 
     // Act.
     // ----
@@ -450,29 +513,27 @@ async fn get_deposits_for_recipient() {
     for recipient in expected_recipient_data.keys() {
         // Loop over the api calls to get all the deposits for the recipient.
         let mut gotten_deposit_info_chunks: Vec<Vec<DepositInfo>> = Vec::new();
-        let mut next_token: Option<Option<String>> = None;
+        let mut next_token: Option<String> = None;
         loop {
             let response = apis::deposit_api::get_deposits_for_recipient(
                 &configuration,
                 recipient,
-                next_token.as_ref().and_then(|o| o.as_deref()),
-                Some(chunksize as i32),
+                next_token.as_deref(),
+                Some(chunksize),
             )
             .await
             .expect("Received an error after making a valid get deposits for recipient api call.");
             gotten_deposit_info_chunks.push(response.deposits);
-            next_token = response.next_token;
-            if !next_token.as_ref().is_some_and(|inner| inner.is_some()) {
-                break;
-            }
+            // If there's no next token then break.
+            next_token = match response.next_token.flatten() {
+                Some(token) => Some(token),
+                None => break,
+            };
         }
         // Store the actual data received from the api.
         actual_recipient_data.insert(
             recipient.clone(),
-            gotten_deposit_info_chunks
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>(),
+            gotten_deposit_info_chunks.into_iter().flatten().collect(),
         );
     }
 
@@ -489,24 +550,165 @@ async fn get_deposits_for_recipient() {
 }
 
 #[tokio::test]
-async fn update_deposits() {
+async fn get_deposits_for_reclaim_pubkeys() {
     let configuration = clean_setup().await;
-
     // Arrange.
     // --------
-    let bitcoin_txids: Vec<&str> = vec!["bitcoin_txid_1", "bitcoin_txid_2"];
-    let bitcoin_tx_output_indices = vec![1, 2];
 
+    // Setup the test information that we'll use to arrange the test.
+    let deposits_per_transaction = [3, 4, 0];
+    let reclaim_pubkeys = [
+        vec![[1u8; 32]],
+        vec![[2u8; 32]],
+        vec![[1u8; 32], [2u8; 32]],
+        (0u8..16u8).map(|i| [i; 32]).collect(), // 16 reclaim pubkeys.
+    ];
+
+    let mut expected_pubkey_data: HashMap<String, Vec<DepositInfo>> = HashMap::new();
+    let mut create_requests: Vec<CreateDepositRequestBody> = Vec::new();
+    for pubkeys in reclaim_pubkeys.iter() {
+        let mut iter = pubkeys.iter();
+        let pubkey = iter.next().unwrap();
+        let mut reclaim_user_script = ScriptBuf::builder()
+            .push_opcode(opcodes::OP_DROP)
+            .push_slice(pubkey)
+            .push_opcode(opcodes::OP_CHECKSIG);
+
+        // Asigna reclaim script
+        if pubkeys.len() > 1 {
+            for pubkey in iter {
+                reclaim_user_script = reclaim_user_script
+                    .push_slice(pubkey)
+                    .push_opcode(opcodes::OP_CHECKSIGADD);
+            }
+            reclaim_user_script = reclaim_user_script
+                .push_int(pubkeys.len() as i64)
+                .push_opcode(opcodes::OP_NUMEQUAL);
+        }
+
+        let reclaim_user_script = reclaim_user_script.into_script();
+        let pubkey = pubkeys
+            .iter()
+            .map(hex::encode)
+            .collect::<Vec<String>>()
+            .join("-");
+        // Make create requests.
+        let mut expected_deposit_infos: Vec<DepositInfo> = Vec::new();
+        for num_deposits in deposits_per_transaction.iter() {
+            let amounts = vec![DEPOSIT_AMOUNT_SATS; *num_deposits as usize];
+            // Setup test deposit transaction.
+            let DepositTxnData {
+                recipients,
+                reclaim_scripts,
+                deposit_scripts,
+                bitcoin_txid,
+                transaction_hex,
+            } = DepositTxnData::new_with_reclaim_user_script(
+                DEPOSIT_LOCK_TIME,
+                DEPOSIT_MAX_FEE,
+                &amounts,
+                &reclaim_user_script,
+            );
+
+            for bitcoin_tx_output_index in 0..*num_deposits {
+                let tx_output_index = bitcoin_tx_output_index as usize;
+                let recipient = recipients[tx_output_index].clone();
+                let reclaim_script = reclaim_scripts[tx_output_index].clone();
+                let deposit_script = deposit_scripts[tx_output_index].clone();
+                // Make the create request.
+                let request = CreateDepositRequestBody {
+                    bitcoin_tx_output_index,
+                    bitcoin_txid: bitcoin_txid.clone(),
+                    deposit_script: deposit_script.clone(),
+                    reclaim_script: reclaim_script.clone(),
+                    transaction_hex: transaction_hex.clone(),
+                };
+                create_requests.push(request);
+                // Store the expected deposit info that should come from it.
+                let expected_deposit_info = DepositInfo {
+                    amount: DEPOSIT_AMOUNT_SATS,
+                    bitcoin_tx_output_index,
+                    bitcoin_txid: bitcoin_txid.clone(),
+                    last_update_block_hash: BLOCK_HASH.into(),
+                    last_update_height: BLOCK_HEIGHT,
+                    recipient: recipient.clone(),
+                    status: testing_emily_client::models::Status::Pending,
+                    reclaim_script,
+                    deposit_script,
+                };
+                expected_deposit_infos.push(expected_deposit_info);
+            }
+        }
+        // Add the pubkey data to the pubkey data hashmap that stores what
+        // we expect to see from the pubkey.
+        expected_pubkey_data.insert(pubkey, expected_deposit_infos.clone());
+    }
+
+    // The size of the chunks to grab from the api.
+    let chunksize = 2;
+
+    // Act.
+    // ----
+    batch_create_deposits(&configuration, create_requests).await;
+
+    let mut actual_pubkey_data: HashMap<String, Vec<DepositInfo>> = HashMap::new();
+    for pubkey in expected_pubkey_data.keys() {
+        // Loop over the api calls to get all the deposits for the pubkey.
+        let mut gotten_deposit_info_chunks: Vec<Vec<DepositInfo>> = Vec::new();
+        let mut next_token: Option<String> = None;
+        loop {
+            let response = apis::deposit_api::get_deposits_for_reclaim_pubkeys(
+                &configuration,
+                pubkey,
+                next_token.as_deref(),
+                Some(chunksize),
+            )
+            .await
+            .expect("Received an error after making a valid get deposits for pubkey api call.");
+            gotten_deposit_info_chunks.push(response.deposits);
+            // If there's no next token then break.
+            next_token = match response.next_token.flatten() {
+                Some(token) => Some(token),
+                None => break,
+            };
+        }
+        // Store the actual data received from the api.
+        actual_pubkey_data.insert(
+            pubkey.clone(),
+            gotten_deposit_info_chunks.into_iter().flatten().collect(),
+        );
+    }
+
+    // Assert.
+    // -------
+    for pubkey in expected_pubkey_data.keys() {
+        let mut expected_deposit_infos = expected_pubkey_data.get(pubkey).unwrap().clone();
+        expected_deposit_infos.sort_by(arbitrary_deposit_info_partial_cmp);
+        let mut actual_deposit_infos = actual_pubkey_data.get(pubkey).unwrap().clone();
+        actual_deposit_infos.sort_by(arbitrary_deposit_info_partial_cmp);
+        // Assert that the expected and actual deposit infos are the same.
+        assert_eq!(expected_deposit_infos.len(), actual_deposit_infos.len());
+        assert_eq!(expected_deposit_infos, actual_deposit_infos);
+    }
+}
+
+#[tokio::test]
+async fn update_deposits() {
+    let configuration = clean_setup().await;
+    // Arrange.
+    // --------
+    let amounts = vec![DEPOSIT_AMOUNT_SATS; 2];
     // Setup test deposit transaction.
-    let DepositTxnData {
-        recipient: expected_recipient,
-        reclaim_script,
-        deposit_script,
-    } = DepositTxnData::new(DEPOSIT_LOCK_TIME, DEPOSIT_MAX_FEE, DEPOSIT_AMOUNT_SATS, 0);
+    let deposits_txs =
+        (0..2).map(|_| DepositTxnData::new(DEPOSIT_LOCK_TIME, DEPOSIT_MAX_FEE, &amounts));
 
     let update_status_message: &str = "test_status_message";
-    let update_block_hash: &str = "update_block_hash";
-    let update_block_height: u64 = 34;
+    let update_chainstate = Chainstate {
+        stacks_block_hash: "update_block_hash".to_string(),
+        stacks_block_height: 42,
+        bitcoin_block_height: Some(Some(42)),
+    };
+
     let update_status: Status = Status::Confirmed;
 
     let update_fulfillment: Fulfillment = Fulfillment {
@@ -518,46 +720,58 @@ async fn update_deposits() {
         stacks_txid: "test_fulfillment_stacks_txid".to_string(),
     };
 
-    let num_deposits = bitcoin_tx_output_indices.len() * bitcoin_txids.len();
+    let num_deposits = amounts.len() * deposits_txs.len();
     let mut create_requests: Vec<CreateDepositRequestBody> = Vec::with_capacity(num_deposits);
     let mut deposit_updates: Vec<DepositUpdate> = Vec::with_capacity(num_deposits);
     let mut expected_deposits: Vec<Deposit> = Vec::with_capacity(num_deposits);
-    for bitcoin_txid in bitcoin_txids {
-        for &bitcoin_tx_output_index in bitcoin_tx_output_indices.iter() {
+
+    for tx in deposits_txs {
+        let DepositTxnData {
+            recipients,
+            reclaim_scripts,
+            deposit_scripts,
+            bitcoin_txid,
+            transaction_hex,
+        } = tx;
+        for (i, ((recipient, reclaim_script), deposit_script)) in recipients
+            .iter()
+            .zip(reclaim_scripts.iter())
+            .zip(deposit_scripts.iter())
+            .enumerate()
+        {
             let create_request = CreateDepositRequestBody {
-                bitcoin_tx_output_index,
-                bitcoin_txid: bitcoin_txid.into(),
+                bitcoin_tx_output_index: i as u32,
+                bitcoin_txid: bitcoin_txid.clone(),
                 deposit_script: deposit_script.clone(),
                 reclaim_script: reclaim_script.clone(),
+                transaction_hex: transaction_hex.clone(),
             };
             create_requests.push(create_request);
 
             let deposit_update = DepositUpdate {
-                bitcoin_tx_output_index: bitcoin_tx_output_index,
-                bitcoin_txid: bitcoin_txid.into(),
+                bitcoin_tx_output_index: i as u32,
+                bitcoin_txid: bitcoin_txid.clone(),
                 fulfillment: Some(Some(Box::new(update_fulfillment.clone()))),
-                last_update_block_hash: update_block_hash.into(),
-                last_update_height: update_block_height,
-                status: update_status.clone(),
+                status: update_status,
                 status_message: update_status_message.into(),
             };
             deposit_updates.push(deposit_update);
 
             let expected_deposit = Deposit {
                 amount: DEPOSIT_AMOUNT_SATS,
-                bitcoin_tx_output_index,
-                bitcoin_txid: bitcoin_txid.into(),
+                bitcoin_tx_output_index: i as u32,
+                bitcoin_txid: bitcoin_txid.clone(),
                 fulfillment: Some(Some(Box::new(update_fulfillment.clone()))),
-                last_update_block_hash: update_block_hash.into(),
-                last_update_height: update_block_height,
+                last_update_block_hash: update_chainstate.stacks_block_hash.clone(),
+                last_update_height: update_chainstate.stacks_block_height,
                 reclaim_script: reclaim_script.clone(),
                 deposit_script: deposit_script.clone(),
                 parameters: Box::new(DepositParameters {
                     lock_time: DEPOSIT_LOCK_TIME,
                     max_fee: DEPOSIT_MAX_FEE,
                 }),
-                recipient: expected_recipient.clone(),
-                status: update_status.clone(),
+                recipient: recipient.clone(),
+                status: update_status,
                 status_message: update_status_message.into(),
             };
             expected_deposits.push(expected_deposit);
@@ -570,134 +784,58 @@ async fn update_deposits() {
     // Act.
     // ----
     batch_create_deposits(&configuration, create_requests).await;
+    // Not strictly necessary, but we do it to make sure that the updates
+    // are connected with the current chainstate.
+    set_chainstate(&configuration, update_chainstate.clone())
+        .await
+        .expect("Received an error after making a valid set chainstate api call.");
+
     let update_deposits_response =
-        apis::deposit_api::update_deposits(&configuration, update_request)
+        apis::deposit_api::update_deposits_sidecar(&configuration, update_request)
             .await
             .expect("Received an error after making a valid update deposits api call.");
 
     // Assert.
     // -------
-    let mut updated_deposits = update_deposits_response.deposits;
+    let mut updated_deposits = update_deposits_response
+        .deposits
+        .iter()
+        .map(|deposit| *deposit.deposit.clone())
+        .collect::<Vec<_>>();
     updated_deposits.sort_by(arbitrary_deposit_partial_cmp);
     expected_deposits.sort_by(arbitrary_deposit_partial_cmp);
     assert_eq!(expected_deposits, updated_deposits);
 }
 
+#[test_case(Status::Pending; "pending")]
+#[test_case(Status::Reprocessing; "reprocessing")]
+#[test_case(Status::Confirmed; "confirmed")]
+#[test_case(Status::Failed; "failed")]
+#[test_case(Status::Accepted; "accepted")]
 #[tokio::test]
-async fn update_deposits_updates_chainstate() {
-    let configuration = clean_setup().await;
-
-    // Arrange.
-    // --------
-    let bitcoin_txid = "bitcoin_txid_1";
-    let bitcoin_tx_output_index = 1;
-
-    // Setup test deposit transaction.
-    let DepositTxnData {
-        recipient: _,
-        reclaim_script,
-        deposit_script,
-    } = DepositTxnData::new(DEPOSIT_LOCK_TIME, DEPOSIT_MAX_FEE, DEPOSIT_AMOUNT_SATS, 0);
-
-    let create_request = CreateDepositRequestBody {
-        bitcoin_tx_output_index,
-        bitcoin_txid: bitcoin_txid.into(),
-        deposit_script: deposit_script.clone(),
-        reclaim_script: reclaim_script.clone(),
-    };
-
-    // It's okay to say it's accepted over and over.
-    let update_status: Status = Status::Accepted;
-    let update_status_message: &str = "test_status_message";
-
-    let min_height: i64 = 20;
-    let max_height: i64 = 30;
-    let range = min_height..max_height;
-
-    let mut deposit_updates = Vec::new();
-    for update_block_height in range.clone() {
-        let deposit_update = DepositUpdate {
-            bitcoin_tx_output_index: bitcoin_tx_output_index,
-            bitcoin_txid: bitcoin_txid.into(),
-            fulfillment: None,
-            last_update_block_hash: format!("hash_{}", update_block_height),
-            last_update_height: update_block_height as u64,
-            status: update_status.clone(),
-            status_message: update_status_message.into(),
-        };
-        deposit_updates.push(deposit_update);
-    }
-
-    // Order the updates pecularily so that they are not in order.
-    deposit_updates.sort_by_key(|update| {
-        (update.last_update_height as i64 - (min_height + (max_height - min_height) / 2)).abs()
-    });
-
-    let expected_last_update_height_at_output_index: Vec<(usize, u64)> = deposit_updates
-        .iter()
-        .enumerate()
-        .map(|(index, update)| (index, update.last_update_height))
-        .collect();
-
-    // Create the deposits here.
-    let update_request = UpdateDepositsRequestBody { deposits: deposit_updates };
-
-    // Act.
-    // ----
-
-    // Create deposit.
-    apis::deposit_api::create_deposit(&configuration, create_request)
-        .await
-        .expect("Received an error after making a valid create deposit request api call.");
-
-    // Send it a bunch of updates.
-    let update_deposits_response =
-        apis::deposit_api::update_deposits(&configuration, update_request.clone())
-            .await
-            .expect("Received an error after making a valid update deposits api call.");
-
-    for height in range {
-        let chainstate =
-            apis::chainstate_api::get_chainstate_at_height(&configuration, height as u64)
-                .await
-                .expect(
-                    "Received an error after making a valid get chainstate at height api call.",
-                );
-        assert_eq!(chainstate.stacks_block_height, height as u64);
-        assert_eq!(chainstate.stacks_block_hash, format!("hash_{}", height));
-    }
-
-    for (index, last_update_height) in expected_last_update_height_at_output_index {
-        assert_eq!(
-            update_deposits_response.deposits[index].last_update_height,
-            last_update_height
-        );
-    }
-}
-
-#[tokio::test]
-#[test_case(Status::Pending, false; "Should not reject pending duplicate")]
-#[test_case(Status::Reprocessing, false; "Should not reject reprocessing duplicate")]
-#[test_case(Status::Confirmed, true; "Should reject confirmed duplicate")]
-#[test_case(Status::Failed, true; "Should reject failed duplicate")]
-#[test_case(Status::Accepted, true; "Should reject accepted duplicate")]
-async fn overwrite_deposit(status: Status, should_reject: bool) {
+async fn create_deposit_handles_duplicates(status: Status) {
     let configuration = clean_setup().await;
     // Arrange.
     // --------
-    let bitcoin_txid: &str = "bitcoin_txid_overwrite_deposit";
     let bitcoin_tx_output_index = 0;
 
     // Setup test deposit transaction.
     let DepositTxnData {
-        reclaim_script, deposit_script, ..
-    } = DepositTxnData::new(DEPOSIT_LOCK_TIME, DEPOSIT_MAX_FEE, DEPOSIT_AMOUNT_SATS, 0);
+        reclaim_scripts,
+        deposit_scripts,
+        bitcoin_txid,
+        transaction_hex,
+        ..
+    } = DepositTxnData::new(DEPOSIT_LOCK_TIME, DEPOSIT_MAX_FEE, &[DEPOSIT_AMOUNT_SATS]);
+    let reclaim_script = reclaim_scripts.first().unwrap().clone();
+    let deposit_script = deposit_scripts.first().unwrap().clone();
 
     let create_deposit_body = CreateDepositRequestBody {
         bitcoin_tx_output_index,
-        bitcoin_txid: bitcoin_txid.into(),
+        bitcoin_txid: bitcoin_txid.clone(),
         deposit_script: deposit_script.clone(),
         reclaim_script: reclaim_script.clone(),
+        transaction_hex: transaction_hex.clone(),
     };
 
     apis::deposit_api::create_deposit(&configuration, create_deposit_body.clone())
@@ -706,7 +844,7 @@ async fn overwrite_deposit(status: Status, should_reject: bool) {
 
     let response = apis::deposit_api::get_deposit(
         &configuration,
-        bitcoin_txid,
+        &bitcoin_txid,
         &bitcoin_tx_output_index.to_string(),
     )
     .await
@@ -727,15 +865,13 @@ async fn overwrite_deposit(status: Status, should_reject: bool) {
         })));
     }
 
-    apis::deposit_api::update_deposits(
+    apis::deposit_api::update_deposits_sidecar(
         &configuration,
         UpdateDepositsRequestBody {
             deposits: vec![DepositUpdate {
-                bitcoin_tx_output_index: bitcoin_tx_output_index,
-                bitcoin_txid: bitcoin_txid.into(),
+                bitcoin_tx_output_index,
+                bitcoin_txid: bitcoin_txid.clone(),
                 fulfillment,
-                last_update_block_hash: "update_block_hash".into(),
-                last_update_height: 34,
                 status,
                 status_message: "foo".into(),
             }],
@@ -746,7 +882,7 @@ async fn overwrite_deposit(status: Status, should_reject: bool) {
 
     let response = apis::deposit_api::get_deposit(
         &configuration,
-        bitcoin_txid,
+        &bitcoin_txid,
         &bitcoin_tx_output_index.to_string(),
     )
     .await
@@ -754,25 +890,528 @@ async fn overwrite_deposit(status: Status, should_reject: bool) {
     assert_eq!(response.bitcoin_txid, bitcoin_txid);
     assert_eq!(response.status, status);
 
-    assert_eq!(
-        apis::deposit_api::create_deposit(&configuration, create_deposit_body)
-            .await
-            .is_err(),
-        should_reject
-    );
+    let duplicate_deposit =
+        apis::deposit_api::create_deposit(&configuration, create_deposit_body).await;
+
+    assert!(duplicate_deposit.is_ok());
+
+    assert_eq!(response, duplicate_deposit.unwrap());
 
     let response = apis::deposit_api::get_deposit(
         &configuration,
-        bitcoin_txid,
+        &bitcoin_txid,
         &bitcoin_tx_output_index.to_string(),
     )
     .await
     .expect("Received an error after making a valid get deposit api call.");
     assert_eq!(response.bitcoin_txid, bitcoin_txid);
-    let expected_status = if status == Status::Reprocessing {
-        Status::Pending
-    } else {
-        status
+    assert_eq!(response.status, status);
+}
+
+#[test_case(Status::Pending, Status::Pending, true; "pending_to_pending")]
+#[test_case(Status::Pending, Status::Accepted, false; "pending_to_accepted")]
+#[test_case(Status::Pending, Status::Reprocessing, true; "pending_to_reprocessing")]
+#[test_case(Status::Pending, Status::Confirmed, true; "pending_to_confirmed")]
+#[test_case(Status::Pending, Status::Failed, true; "pending_to_failed")]
+#[test_case(Status::Accepted, Status::Pending, true; "accepted_to_pending")]
+#[test_case(Status::Failed, Status::Pending, true; "failed_to_pending")]
+#[test_case(Status::Reprocessing, Status::Pending, true; "reprocessing_to_pending")]
+#[test_case(Status::Confirmed, Status::Pending, true; "confirmed_to_pending")]
+#[test_case(Status::Accepted, Status::Accepted, false; "accepted_to_accepted")]
+#[test_case(Status::Failed, Status::Accepted, true; "failed_to_accepted")]
+#[test_case(Status::Reprocessing, Status::Accepted, true; "reprocessing_to_accepted")]
+#[test_case(Status::Confirmed, Status::Accepted, true; "confirmed_to_accepted")]
+#[tokio::test]
+async fn update_deposits_is_forbidden_for_signer(
+    previous_status: Status,
+    new_status: Status,
+    is_forbidden: bool,
+) {
+    // the testing configuration has privileged access to all endpoints.
+    let testing_configuration = clean_setup().await;
+
+    // the user configuration access depends on the api_key.
+    let user_configuration = testing_configuration.clone();
+    // Arrange.
+    // --------
+    let bitcoin_tx_output_index = 0;
+
+    // Setup test deposit transaction.
+    let DepositTxnData {
+        reclaim_scripts,
+        deposit_scripts,
+        bitcoin_txid,
+        transaction_hex,
+        ..
+    } = DepositTxnData::new(DEPOSIT_LOCK_TIME, DEPOSIT_MAX_FEE, &[DEPOSIT_AMOUNT_SATS]);
+    let reclaim_script = reclaim_scripts.first().unwrap().clone();
+    let deposit_script = deposit_scripts.first().unwrap().clone();
+
+    let create_deposit_body = CreateDepositRequestBody {
+        bitcoin_tx_output_index,
+        bitcoin_txid: bitcoin_txid.clone(),
+        deposit_script: deposit_script.clone(),
+        reclaim_script: reclaim_script.clone(),
+        transaction_hex: transaction_hex.clone(),
     };
-    assert_eq!(response.status, expected_status);
+
+    // Update the deposit status with the privileged configuration.
+    apis::deposit_api::create_deposit(&testing_configuration, create_deposit_body.clone())
+        .await
+        .expect("Received an error after making a valid create deposit request api call.");
+
+    // Update the deposit status with the privileged configuration.
+    if previous_status != Status::Pending {
+        let mut fulfillment: Option<Option<Box<Fulfillment>>> = None;
+
+        if previous_status == Status::Confirmed {
+            fulfillment = Some(Some(Box::new(Fulfillment {
+                bitcoin_block_hash: "bitcoin_block_hash".to_string(),
+                bitcoin_block_height: 23,
+                bitcoin_tx_index: 45,
+                bitcoin_txid: "test_fulfillment_bitcoin_txid".to_string(),
+                btc_fee: 2314,
+                stacks_txid: "test_fulfillment_stacks_txid".to_string(),
+            })));
+        }
+
+        apis::deposit_api::update_deposits_sidecar(
+            &testing_configuration,
+            UpdateDepositsRequestBody {
+                deposits: vec![DepositUpdate {
+                    bitcoin_tx_output_index,
+                    bitcoin_txid: bitcoin_txid.clone(),
+                    fulfillment,
+                    status: previous_status,
+                    status_message: "foo".into(),
+                }],
+            },
+        )
+        .await
+        .expect("Received an error after making a valid update deposit request api call.");
+    }
+
+    let mut fulfillment: Option<Option<Box<Fulfillment>>> = None;
+
+    if new_status == Status::Confirmed {
+        fulfillment = Some(Some(Box::new(Fulfillment {
+            bitcoin_block_hash: "bitcoin_block_hash".to_string(),
+            bitcoin_block_height: 23,
+            bitcoin_tx_index: 45,
+            bitcoin_txid: "test_fulfillment_bitcoin_txid".to_string(),
+            btc_fee: 2314,
+            stacks_txid: "test_fulfillment_stacks_txid".to_string(),
+        })));
+    }
+
+    let response = apis::deposit_api::update_deposits_signer(
+        &user_configuration,
+        UpdateDepositsRequestBody {
+            deposits: vec![DepositUpdate {
+                bitcoin_tx_output_index,
+                bitcoin_txid: bitcoin_txid.clone(),
+                fulfillment,
+                status: new_status,
+                status_message: "foo".into(),
+            }],
+        },
+    )
+    .await;
+
+    if is_forbidden {
+        // Check response correctness
+        let response = response.expect("Batch update should return 200 OK");
+        let deposits = response.deposits;
+        assert_eq!(deposits.len(), 1);
+        let deposit = deposits.first().unwrap();
+        assert_eq!(deposit.status, 403);
+
+        // Check that deposit wasn't updated
+        let response = apis::deposit_api::get_deposit(
+            &user_configuration,
+            &bitcoin_txid,
+            &bitcoin_tx_output_index.to_string(),
+        )
+        .await
+        .expect("Received an error after making a valid get deposit api call.");
+        assert_eq!(response.bitcoin_txid, bitcoin_txid);
+        assert_eq!(response.status, previous_status);
+    } else {
+        assert!(response.is_ok());
+        let response = response.unwrap();
+        let deposit = *response
+            .deposits
+            .first()
+            .expect("No deposit in response")
+            .deposit
+            .clone();
+        assert_eq!(deposit.bitcoin_txid, bitcoin_txid);
+        assert_eq!(deposit.status, new_status);
+    }
+}
+
+#[test_case(Status::Pending, Status::Accepted; "pending_to_accepted")]
+#[test_case(Status::Pending, Status::Pending; "pending_to_pending")]
+#[test_case(Status::Pending, Status::Reprocessing; "pending_to_reprocessing")]
+#[test_case(Status::Pending, Status::Confirmed; "pending_to_confirmed")]
+#[test_case(Status::Pending, Status::Failed; "pending_to_failed")]
+#[test_case(Status::Confirmed, Status::Pending; "confirmed_to_pending")]
+#[tokio::test]
+async fn update_deposits_is_not_forbidden_for_sidecar(previous_status: Status, new_status: Status) {
+    // the testing configuration has privileged access to all endpoints.
+    let testing_configuration = clean_setup().await;
+
+    // the user configuration access depends on the api_key.
+    let user_configuration = testing_configuration.clone();
+    // Arrange.
+    // --------
+    let bitcoin_tx_output_index = 0;
+
+    // Setup test deposit transaction.
+    let DepositTxnData {
+        reclaim_scripts,
+        deposit_scripts,
+        bitcoin_txid,
+        transaction_hex,
+        ..
+    } = DepositTxnData::new(DEPOSIT_LOCK_TIME, DEPOSIT_MAX_FEE, &[DEPOSIT_AMOUNT_SATS]);
+    let reclaim_script = reclaim_scripts.first().unwrap().clone();
+    let deposit_script = deposit_scripts.first().unwrap().clone();
+
+    let create_deposit_body = CreateDepositRequestBody {
+        bitcoin_tx_output_index,
+        bitcoin_txid: bitcoin_txid.clone(),
+        deposit_script: deposit_script.clone(),
+        reclaim_script: reclaim_script.clone(),
+        transaction_hex: transaction_hex.clone(),
+    };
+
+    // Update the deposit status with the privileged configuration.
+    apis::deposit_api::create_deposit(&testing_configuration, create_deposit_body.clone())
+        .await
+        .expect("Received an error after making a valid create deposit request api call.");
+
+    // Update the deposit status with the privileged configuration.
+    if previous_status != Status::Pending {
+        let mut fulfillment: Option<Option<Box<Fulfillment>>> = None;
+
+        if previous_status == Status::Confirmed {
+            fulfillment = Some(Some(Box::new(Fulfillment {
+                bitcoin_block_hash: "bitcoin_block_hash".to_string(),
+                bitcoin_block_height: 23,
+                bitcoin_tx_index: 45,
+                bitcoin_txid: "test_fulfillment_bitcoin_txid".to_string(),
+                btc_fee: 2314,
+                stacks_txid: "test_fulfillment_stacks_txid".to_string(),
+            })));
+        }
+
+        apis::deposit_api::update_deposits_sidecar(
+            &testing_configuration,
+            UpdateDepositsRequestBody {
+                deposits: vec![DepositUpdate {
+                    bitcoin_tx_output_index,
+                    bitcoin_txid: bitcoin_txid.clone(),
+                    fulfillment,
+                    status: previous_status,
+                    status_message: "foo".into(),
+                }],
+            },
+        )
+        .await
+        .expect("Received an error after making a valid update deposit request api call.");
+    }
+
+    let mut fulfillment: Option<Option<Box<Fulfillment>>> = None;
+
+    if new_status == Status::Confirmed {
+        fulfillment = Some(Some(Box::new(Fulfillment {
+            bitcoin_block_hash: "bitcoin_block_hash".to_string(),
+            bitcoin_block_height: 23,
+            bitcoin_tx_index: 45,
+            bitcoin_txid: "test_fulfillment_bitcoin_txid".to_string(),
+            btc_fee: 2314,
+            stacks_txid: "test_fulfillment_stacks_txid".to_string(),
+        })));
+    }
+
+    let response = apis::deposit_api::update_deposits_sidecar(
+        &user_configuration,
+        UpdateDepositsRequestBody {
+            deposits: vec![DepositUpdate {
+                bitcoin_tx_output_index,
+                bitcoin_txid: bitcoin_txid.clone(),
+                fulfillment,
+                status: new_status,
+                status_message: "foo".into(),
+            }],
+        },
+    )
+    .await;
+
+    assert!(response.is_ok());
+    let response = response.unwrap();
+    let deposit = *response
+        .deposits
+        .first()
+        .expect("No deposit in response")
+        .deposit
+        .clone();
+    assert_eq!(deposit.bitcoin_txid, bitcoin_txid);
+    assert_eq!(deposit.status, new_status);
+}
+
+#[tokio::test]
+async fn emily_process_deposit_updates_when_some_of_them_already_accepted() {
+    // the testing configuration has privileged access to all endpoints.
+    let testing_configuration = clean_setup().await;
+
+    // Create two deposits.
+    let bitcoin_tx_output_index = 0;
+
+    let DepositTxnData {
+        reclaim_scripts,
+        deposit_scripts,
+        bitcoin_txid,
+        transaction_hex,
+        ..
+    } = DepositTxnData::new(DEPOSIT_LOCK_TIME, DEPOSIT_MAX_FEE, &[DEPOSIT_AMOUNT_SATS]);
+    let reclaim_script = reclaim_scripts.first().unwrap().clone();
+    let deposit_script = deposit_scripts.first().unwrap().clone();
+
+    let create_deposit_body1 = CreateDepositRequestBody {
+        bitcoin_tx_output_index,
+        bitcoin_txid: bitcoin_txid.clone(),
+        deposit_script: deposit_script.clone(),
+        reclaim_script: reclaim_script.clone(),
+        transaction_hex: transaction_hex.clone(),
+    };
+
+    let DepositTxnData {
+        reclaim_scripts,
+        deposit_scripts,
+        bitcoin_txid,
+        transaction_hex,
+        ..
+    } = DepositTxnData::new(DEPOSIT_LOCK_TIME, DEPOSIT_MAX_FEE, &[DEPOSIT_AMOUNT_SATS]);
+    let reclaim_script = reclaim_scripts.first().unwrap().clone();
+    let deposit_script = deposit_scripts.first().unwrap().clone();
+    let create_deposit_body2 = CreateDepositRequestBody {
+        bitcoin_tx_output_index,
+        bitcoin_txid: bitcoin_txid.clone(),
+        deposit_script: deposit_script.clone(),
+        reclaim_script: reclaim_script.clone(),
+        transaction_hex: transaction_hex.clone(),
+    };
+
+    // Sanity check that the two deposits are different.
+    assert_ne!(
+        create_deposit_body1.bitcoin_txid, create_deposit_body2.bitcoin_txid,
+        "The two deposits should have different bitcoin txids."
+    );
+    assert_ne!(
+        create_deposit_body1.transaction_hex, create_deposit_body2.transaction_hex,
+        "The two deposits should have different transaction hex."
+    );
+
+    apis::deposit_api::create_deposit(&testing_configuration, create_deposit_body1.clone())
+        .await
+        .expect("Received an error after making a valid create deposit request api call.");
+    apis::deposit_api::create_deposit(&testing_configuration, create_deposit_body2.clone())
+        .await
+        .expect("Received an error after making a valid create deposit request api call.");
+
+    // Now we should have 2 pending deposits.
+    let deposits =
+        apis::deposit_api::get_deposits(&testing_configuration, Status::Pending, None, None)
+            .await
+            .expect("Received an error after making a valid get deposits api call.");
+    assert_eq!(deposits.deposits.len(), 2);
+
+    // Update first deposit to Accepted.
+    let update_deposits_request_body = UpdateDepositsRequestBody {
+        deposits: vec![DepositUpdate {
+            bitcoin_tx_output_index: create_deposit_body1.bitcoin_tx_output_index,
+            bitcoin_txid: create_deposit_body1.bitcoin_txid.clone(),
+            fulfillment: None,
+            status: Status::Accepted,
+            status_message: "First update".into(),
+        }],
+    };
+    let response = apis::deposit_api::update_deposits_signer(
+        &testing_configuration,
+        update_deposits_request_body,
+    )
+    .await
+    .expect("Received an error after making a valid update deposit request api call.");
+
+    assert!(
+        response
+            .deposits
+            .iter()
+            .all(|deposit| deposit.status == 200)
+    );
+    assert_eq!(response.deposits.len(), 1);
+
+    // Now we should have 1 pending and 1 accepted deposit.
+    let deposits =
+        apis::deposit_api::get_deposits(&testing_configuration, Status::Pending, None, None)
+            .await
+            .expect("Received an error after making a valid get deposits api call.");
+    assert_eq!(deposits.deposits.len(), 1);
+    let deposits =
+        apis::deposit_api::get_deposits(&testing_configuration, Status::Accepted, None, None)
+            .await
+            .expect("Received an error after making a valid get deposits api call.");
+    assert_eq!(deposits.deposits.len(), 1);
+
+    // Now we update both deposits to Accepted in a batch. This still should be a valid api call.
+    let update_deposits_request_body = UpdateDepositsRequestBody {
+        deposits: vec![
+            DepositUpdate {
+                bitcoin_tx_output_index,
+                bitcoin_txid: create_deposit_body2.bitcoin_txid.clone(),
+                fulfillment: None,
+                status: Status::Accepted,
+                status_message: "Second update".into(),
+            },
+            DepositUpdate {
+                bitcoin_tx_output_index,
+                bitcoin_txid: create_deposit_body1.bitcoin_txid.clone(),
+                fulfillment: None,
+                status: Status::Accepted,
+                status_message: "Second update".into(),
+            },
+        ],
+    };
+    let response = apis::deposit_api::update_deposits_signer(
+        &testing_configuration,
+        update_deposits_request_body,
+    )
+    .await
+    .expect("Received an error after making a valid update deposit request api call.");
+
+    assert!(
+        response
+            .deposits
+            .iter()
+            .all(|deposit| deposit.status == 200)
+    );
+    assert_eq!(response.deposits.len(), 2);
+
+    // Now we should have 2 accepted deposits.
+    let deposits =
+        apis::deposit_api::get_deposits(&testing_configuration, Status::Accepted, None, None)
+            .await
+            .expect("Received an error after making a valid get deposits api call.");
+    assert_eq!(deposits.deposits.len(), 2);
+}
+
+#[tokio::test]
+async fn emily_process_deposit_updates_when_some_of_them_are_unknown() {
+    // the testing configuration has privileged access to all endpoints.
+    let testing_configuration = clean_setup().await;
+
+    // Create two deposits, but sending only one of them to Emily.
+    let bitcoin_tx_output_index = 0;
+
+    let DepositTxnData {
+        reclaim_scripts,
+        deposit_scripts,
+        bitcoin_txid,
+        transaction_hex,
+        ..
+    } = DepositTxnData::new(DEPOSIT_LOCK_TIME, DEPOSIT_MAX_FEE, &[DEPOSIT_AMOUNT_SATS]);
+    let reclaim_script = reclaim_scripts.first().unwrap().clone();
+    let deposit_script = deposit_scripts.first().unwrap().clone();
+
+    let create_deposit_body1 = CreateDepositRequestBody {
+        bitcoin_tx_output_index,
+        bitcoin_txid: bitcoin_txid.clone(),
+        deposit_script: deposit_script.clone(),
+        reclaim_script: reclaim_script.clone(),
+        transaction_hex: transaction_hex.clone(),
+    };
+
+    let DepositTxnData {
+        reclaim_scripts,
+        deposit_scripts,
+        bitcoin_txid,
+        transaction_hex,
+        ..
+    } = DepositTxnData::new(DEPOSIT_LOCK_TIME, DEPOSIT_MAX_FEE, &[DEPOSIT_AMOUNT_SATS]);
+    let reclaim_script = reclaim_scripts.first().unwrap().clone();
+    let deposit_script = deposit_scripts.first().unwrap().clone();
+    let create_deposit_body2 = CreateDepositRequestBody {
+        bitcoin_tx_output_index,
+        bitcoin_txid: bitcoin_txid.clone(),
+        deposit_script: deposit_script.clone(),
+        reclaim_script: reclaim_script.clone(),
+        transaction_hex: transaction_hex.clone(),
+    };
+
+    // Sanity check that the two deposits are different.
+    assert_ne!(
+        create_deposit_body1.bitcoin_txid, create_deposit_body2.bitcoin_txid,
+        "The two deposits should have different bitcoin txids."
+    );
+    assert_ne!(
+        create_deposit_body1.transaction_hex, create_deposit_body2.transaction_hex,
+        "The two deposits should have different transaction hex."
+    );
+
+    // Here we intentionally don't create one of deposits.
+    apis::deposit_api::create_deposit(&testing_configuration, create_deposit_body1.clone())
+        .await
+        .expect("Received an error after making a valid create deposit request api call.");
+
+    // Now we should have 1 pending deposit.
+    let deposits =
+        apis::deposit_api::get_deposits(&testing_configuration, Status::Pending, None, None)
+            .await
+            .expect("Received an error after making a valid get deposits api call.");
+    assert_eq!(deposits.deposits.len(), 1);
+
+    // Now we update both deposits to Accepted in a batch. This still should be a valid api call
+    // and existing deposit should be updated.
+    let update_deposits_request_body = UpdateDepositsRequestBody {
+        deposits: vec![
+            DepositUpdate {
+                bitcoin_tx_output_index,
+                bitcoin_txid: create_deposit_body2.bitcoin_txid.clone(),
+                fulfillment: None,
+                status: Status::Accepted,
+                status_message: "Second update".into(),
+            },
+            DepositUpdate {
+                bitcoin_tx_output_index,
+                bitcoin_txid: create_deposit_body1.bitcoin_txid.clone(),
+                fulfillment: None,
+                status: Status::Accepted,
+                status_message: "Second update".into(),
+            },
+        ],
+    };
+    let update_responce = apis::deposit_api::update_deposits_signer(
+        &testing_configuration,
+        update_deposits_request_body,
+    )
+    .await
+    .expect("Received an error after making a valid update deposit request api call.");
+
+    // Check that multistatus response is returned correctly.
+    assert!(update_responce.deposits.iter().all(|deposit| {
+        if deposit.deposit.bitcoin_txid == create_deposit_body1.bitcoin_txid {
+            deposit.status == 200
+        } else {
+            deposit.status == 404
+        }
+    }));
+
+    // Now we should have 1 accepted deposit.
+    let deposits =
+        apis::deposit_api::get_deposits(&testing_configuration, Status::Accepted, None, None)
+            .await
+            .expect("Received an error after making a valid get deposits api call.");
+    assert_eq!(deposits.deposits.len(), 1);
 }

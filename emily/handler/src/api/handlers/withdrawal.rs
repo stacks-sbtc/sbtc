@@ -1,21 +1,24 @@
 //! Handlers for withdrawal endpoints.
-use tracing::instrument;
-use warp::reply::{json, with_status, Reply};
+use tracing::{debug, instrument};
+use warp::reply::{Reply, json, with_status};
 
 use crate::api::models::common::Status;
+use crate::api::models::common::requests::BasicPaginationQuery;
+use crate::api::models::withdrawal::responses::WithdrawalWithStatus;
+use crate::api::models::withdrawal::{Withdrawal, WithdrawalInfo};
 use crate::api::models::withdrawal::{
     requests::{CreateWithdrawalRequestBody, GetWithdrawalsQuery, UpdateWithdrawalsRequestBody},
     responses::{GetWithdrawalsResponse, UpdateWithdrawalsResponse},
 };
-use crate::api::models::withdrawal::{Withdrawal, WithdrawalInfo};
 use crate::common::error::Error;
 use crate::context::EmilyContext;
 use crate::database::accessors;
+use crate::database::entries::StatusEntry;
+use crate::database::entries::chainstate::ApiStateEntry;
 use crate::database::entries::withdrawal::{
     ValidatedUpdateWithdrawalRequest, WithdrawalEntry, WithdrawalEntryKey, WithdrawalEvent,
     WithdrawalParametersEntry,
 };
-use crate::database::entries::StatusEntry;
 use warp::http::StatusCode;
 
 /// Get withdrawal handler.
@@ -62,9 +65,9 @@ pub async fn get_withdrawal(context: EmilyContext, request_id: u64) -> impl warp
     operation_id = "getWithdrawals",
     path = "/withdrawal",
     params(
-        ("status" = Status, Query, description = "the status to search by when getting all deposits."),
+        ("status" = Status, Query, description = "the status to search by when getting all withdrawals."),
         ("nextToken" = Option<String>, Query, description = "the next token value from the previous return of this api call."),
-        ("pageSize" = Option<i32>, Query, description = "the maximum number of items in the response list.")
+        ("pageSize" = Option<u16>, Query, description = "the maximum number of items in the response list.")
     ),
     tag = "withdrawal",
     responses(
@@ -103,6 +106,112 @@ pub async fn get_withdrawals(
     }
     // Handle and respond.
     handler(context, query)
+        .await
+        .map_or_else(Reply::into_response, Reply::into_response)
+}
+
+/// Get withdrawals by recipient handler.
+#[utoipa::path(
+    get,
+    operation_id = "getWithdrawalsForRecipient",
+    path = "/withdrawal/recipient/{recipient}",
+    params(
+        ("recipient" = String, Path, description = "The recipient's hex-encoded scriptPubKey, used to filter withdrawals."),
+        ("nextToken" = Option<String>, Query, description = "the next token value from the previous return of this api call."),
+        ("pageSize" = Option<u16>, Query, description = "the maximum number of items in the response list.")
+    ),
+    tag = "withdrawal",
+    responses(
+        (status = 200, description = "Withdrawals retrieved successfully", body = GetWithdrawalsResponse),
+        (status = 400, description = "Invalid request body", body = ErrorResponse),
+        (status = 404, description = "Address not found", body = ErrorResponse),
+        (status = 405, description = "Method not allowed", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    )
+)]
+#[instrument(skip(context))]
+pub async fn get_withdrawals_for_recipient(
+    context: EmilyContext,
+    recipient: String,
+    query: BasicPaginationQuery,
+) -> impl warp::reply::Reply {
+    debug!("in get_withdrawals_for_recipient: {recipient}");
+    // Internal handler so `?` can be used correctly while still returning a reply.
+    async fn handler(
+        context: EmilyContext,
+        recipient: String,
+        query: BasicPaginationQuery,
+    ) -> Result<impl warp::reply::Reply, Error> {
+        let (entries, next_token) = accessors::get_withdrawal_entries_by_recipient(
+            &context,
+            &recipient,
+            query.next_token,
+            query.page_size,
+        )
+        .await?;
+        // Convert data into resource types.
+        let withdrawals: Vec<WithdrawalInfo> =
+            entries.into_iter().map(|entry| entry.into()).collect();
+        // Create response.
+        let response = GetWithdrawalsResponse { withdrawals, next_token };
+        // Respond.
+        Ok(with_status(json(&response), StatusCode::OK))
+    }
+    // Handle and respond.
+    handler(context, recipient, query)
+        .await
+        .map_or_else(Reply::into_response, Reply::into_response)
+}
+
+/// Get withdrawals by sender handler.
+#[utoipa::path(
+    get,
+    operation_id = "getWithdrawalsForSender",
+    path = "/withdrawal/sender/{sender}",
+    params(
+        ("sender" = String, Path, description = "The sender's Stacks principal, used to filter withdrawals."),
+        ("nextToken" = Option<String>, Query, description = "the next token value from the previous return of this api call."),
+        ("pageSize" = Option<u16>, Query, description = "the maximum number of items in the response list.")
+    ),
+    tag = "withdrawal",
+    responses(
+        (status = 200, description = "Withdrawals retrieved successfully", body = GetWithdrawalsResponse),
+        (status = 400, description = "Invalid request body", body = ErrorResponse),
+        (status = 404, description = "Address not found", body = ErrorResponse),
+        (status = 405, description = "Method not allowed", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    )
+)]
+#[instrument(skip(context))]
+pub async fn get_withdrawals_for_sender(
+    context: EmilyContext,
+    sender: String,
+    query: BasicPaginationQuery,
+) -> impl warp::reply::Reply {
+    debug!("in get_withdrawals_for_sender: {sender}");
+    // Internal handler so `?` can be used correctly while still returning a reply.
+    async fn handler(
+        context: EmilyContext,
+        sender: String,
+        query: BasicPaginationQuery,
+    ) -> Result<impl warp::reply::Reply, Error> {
+        let (entries, next_token) = accessors::get_withdrawal_entries_by_sender(
+            &context,
+            &sender,
+            query.next_token,
+            query.page_size,
+        )
+        .await?;
+        // Convert data into resource types.
+        let withdrawals: Vec<WithdrawalInfo> =
+            entries.into_iter().map(|entry| entry.into()).collect();
+        // Create response.
+        let response = GetWithdrawalsResponse { withdrawals, next_token };
+        // Respond.
+        Ok(with_status(json(&response), StatusCode::OK))
+    }
+    // Handle and respond.
+    handler(context, sender, query)
         .await
         .map_or_else(Reply::into_response, Reply::into_response)
 }
@@ -146,8 +255,10 @@ pub async fn create_withdrawal(
             stacks_block_hash,
             stacks_block_height,
             recipient,
+            sender,
             amount,
             parameters,
+            txid,
         } = body;
 
         let status = Status::Pending;
@@ -158,7 +269,9 @@ pub async fn create_withdrawal(
                 request_id,
                 stacks_block_hash: stacks_block_hash.clone(),
             },
+            stacks_block_height,
             recipient,
+            sender,
             amount,
             parameters: WithdrawalParametersEntry { max_fee: parameters.max_fee },
             history: vec![WithdrawalEvent {
@@ -170,6 +283,7 @@ pub async fn create_withdrawal(
             status,
             last_update_block_hash: stacks_block_hash,
             last_update_height: stacks_block_height,
+            txid,
             ..Default::default()
         };
         // Validate withdrawal entry.
@@ -189,13 +303,14 @@ pub async fn create_withdrawal(
 /// Update withdrawals handler.
 #[utoipa::path(
     put,
-    operation_id = "updateWithdrawals",
+    operation_id = "updateWithdrawalsSigner",
     path = "/withdrawal",
     tag = "withdrawal",
     request_body = UpdateWithdrawalsRequestBody,
     responses(
-        (status = 201, description = "Withdrawals updated successfully", body = UpdateWithdrawalsResponse),
+        (status = 200, description = "Withdrawals updated successfully", body = UpdateWithdrawalsResponse),
         (status = 400, description = "Invalid request body", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
         (status = 404, description = "Address not found", body = ErrorResponse),
         (status = 405, description = "Method not allowed", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
@@ -203,15 +318,14 @@ pub async fn create_withdrawal(
     security(("ApiGatewayKey" = []))
 )]
 #[instrument(skip(context))]
-pub async fn update_withdrawals(
+pub async fn update_withdrawals_signer(
     context: EmilyContext,
-    api_key: String,
     body: UpdateWithdrawalsRequestBody,
 ) -> impl warp::reply::Reply {
+    tracing::debug!("in update withdrawals");
     // Internal handler so `?` can be used correctly while still returning a reply.
     async fn handler(
         context: EmilyContext,
-        api_key: String,
         body: UpdateWithdrawalsRequestBody,
     ) -> Result<impl warp::reply::Reply, Error> {
         // Get the api state and error if the api state is claimed by a reorg.
@@ -221,47 +335,167 @@ pub async fn update_withdrawals(
         // in order to enforce added stability to the API during a reorg.
         let api_state = accessors::get_api_state(&context).await?;
         api_state.error_if_reorganizing()?;
-        // Validate request.
-        let validated_request: ValidatedUpdateWithdrawalRequest = body.try_into()?;
 
-        // Infer the new chainstates that would come from these deposit updates and then
-        // attempt to update the chainstates.
-        let inferred_chainstates = validated_request.inferred_chainstates()?;
-        let can_reorg = context.settings.trusted_reorg_api_key == api_key;
-        for chainstate in inferred_chainstates {
-            // TODO(TBD): Determine what happens if this occurs in multiple lambda
-            // instances at once.
-            crate::api::handlers::chainstate::add_chainstate_entry_or_reorg(
-                &context,
-                can_reorg,
-                &chainstate,
-            )
-            .await?;
-        }
-
-        // Create aggregator.
-        let mut updated_withdrawals: Vec<(usize, Withdrawal)> =
-            Vec::with_capacity(validated_request.withdrawals.len());
-
-        // Loop through all updates and execute.
-        for (index, update) in validated_request.withdrawals {
-            let updated_withdrawal =
-                accessors::pull_and_update_withdrawal_with_retry(&context, update, 15).await?;
-            updated_withdrawals.push((index, updated_withdrawal.try_into()?));
-        }
-
-        updated_withdrawals.sort_by_key(|(index, _)| *index);
-        let withdrawals = updated_withdrawals
-            .into_iter()
-            .map(|(_, withdrawal)| withdrawal)
-            .collect();
-        let response = UpdateWithdrawalsResponse { withdrawals };
-        Ok(with_status(json(&response), StatusCode::CREATED))
+        update_withdrawals(api_state, context, body, false).await
     }
     // Handle and respond.
-    handler(context, api_key, body)
+    handler(context, body)
         .await
         .map_or_else(Reply::into_response, Reply::into_response)
+}
+
+/// Update withdrawals handler.
+#[utoipa::path(
+    put,
+    operation_id = "updateWithdrawalsSidecar",
+    path = "/withdrawal_private",
+    tag = "withdrawal",
+    request_body = UpdateWithdrawalsRequestBody,
+    responses(
+        (status = 200, description = "Withdrawals updated successfully", body = UpdateWithdrawalsResponse),
+        (status = 400, description = "Invalid request body", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 404, description = "Address not found", body = ErrorResponse),
+        (status = 405, description = "Method not allowed", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    security(("ApiGatewayKey" = []))
+)]
+#[instrument(skip(context))]
+pub async fn update_withdrawals_sidecar(
+    context: EmilyContext,
+    body: UpdateWithdrawalsRequestBody,
+) -> impl warp::reply::Reply {
+    tracing::debug!("in update withdrawals");
+    // Internal handler so `?` can be used correctly while still returning a reply.
+    async fn handler(
+        context: EmilyContext,
+        body: UpdateWithdrawalsRequestBody,
+    ) -> Result<impl warp::reply::Reply, Error> {
+        // Get the api state and error if the api state is claimed by a reorg.
+        //
+        // Note: This may not be necessary due to the implied order of events
+        // that the API can receive from stacks nodes, but it's being added here
+        // in order to enforce added stability to the API during a reorg.
+        let api_state = accessors::get_api_state(&context).await?;
+        api_state.error_if_reorganizing()?;
+
+        update_withdrawals(api_state, context, body, true).await
+    }
+    // Handle and respond.
+    handler(context, body)
+        .await
+        .map_or_else(Reply::into_response, Reply::into_response)
+}
+
+async fn update_withdrawals(
+    api_state: ApiStateEntry,
+    context: EmilyContext,
+    body: UpdateWithdrawalsRequestBody,
+    is_from_trusted_source: bool,
+) -> Result<impl warp::reply::Reply, Error> {
+    // Validate request.
+    let validated_request: ValidatedUpdateWithdrawalRequest =
+        body.try_into_validated_update_request(api_state.chaintip().into())?;
+
+    // Create aggregator.
+    let mut updated_withdrawals: Vec<(usize, WithdrawalWithStatus)> =
+        Vec::with_capacity(validated_request.withdrawals.len());
+
+    // Loop through all updates and execute.
+    for (index, update) in validated_request.withdrawals {
+        if update.is_err() {
+            updated_withdrawals.push((
+                index,
+                WithdrawalWithStatus {
+                    withdrawal: Withdrawal::default(),
+                    status: StatusCode::BAD_REQUEST.as_u16(),
+                },
+            ));
+            continue;
+        }
+        let update = update.unwrap();
+        let request_id = update.request_id;
+        debug!(request_id, "updating withdrawal");
+
+        let updated_withdrawal = match accessors::pull_and_update_withdrawal_with_retry(
+            &context,
+            update,
+            15,
+            is_from_trusted_source,
+        )
+        .await
+        {
+            Ok(withdrawal_entry) => withdrawal_entry,
+            Err(Error::NotFound) => {
+                tracing::warn!(
+                    request_id,
+                    "failed to update withdrawal. Withdrawal not found in the database"
+                );
+                updated_withdrawals.push((
+                    index,
+                    WithdrawalWithStatus {
+                        withdrawal: Withdrawal::default(),
+                        status: StatusCode::NOT_FOUND.as_u16(),
+                    },
+                ));
+                continue;
+            }
+            Err(Error::Forbidden) => {
+                tracing::warn!(
+                    request_id,
+                    "failed to update withdrawal. Such type of update is not allowed for the caller"
+                );
+                updated_withdrawals.push((
+                    index,
+                    WithdrawalWithStatus {
+                        withdrawal: Withdrawal::default(),
+                        status: StatusCode::FORBIDDEN.as_u16(),
+                    },
+                ));
+                continue;
+            }
+            Err(error) => {
+                tracing::error!(
+                    request_id,
+                    %error,
+                    "failed to update withdrawal"
+                );
+                updated_withdrawals.push((
+                    index,
+                    WithdrawalWithStatus {
+                        withdrawal: Withdrawal::default(),
+                        status: StatusCode::INTERNAL_SERVER_ERROR.as_u16(),
+                    },
+                ));
+                continue;
+            }
+        };
+
+        let withdrawal: Withdrawal = updated_withdrawal.try_into().inspect_err(|error| {
+            // This should never happen, because the withdrawal was
+            // validated before being updated.
+            tracing::error!(
+                request_id,
+                %error,
+                "failed to convert updated withdrawal",
+            );
+        })?;
+        updated_withdrawals.push((
+            index,
+            WithdrawalWithStatus {
+                withdrawal,
+                status: StatusCode::OK.as_u16(),
+            },
+        ));
+    }
+    updated_withdrawals.sort_by_key(|(index, _)| *index);
+    let withdrawals = updated_withdrawals
+        .into_iter()
+        .map(|(_, withdrawal)| withdrawal)
+        .collect();
+    let response = UpdateWithdrawalsResponse { withdrawals };
+    Ok(with_status(json(&response), StatusCode::OK))
 }
 
 // TODO(393): Add handler unit tests.

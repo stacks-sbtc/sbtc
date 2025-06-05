@@ -1,14 +1,5 @@
 //! Test deposit validation against bitcoin-core
 
-use bitcoin::absolute::LockTime;
-use bitcoin::opcodes;
-use bitcoin::script::PushBytes;
-use bitcoin::sighash::Prevouts;
-use bitcoin::sighash::SighashCache;
-use bitcoin::taproot::LeafVersion;
-use bitcoin::taproot::NodeInfo;
-use bitcoin::taproot::TaprootSpendInfo;
-use bitcoin::transaction::Version;
 use bitcoin::AddressType;
 use bitcoin::Amount;
 use bitcoin::OutPoint;
@@ -20,10 +11,19 @@ use bitcoin::Transaction;
 use bitcoin::TxIn;
 use bitcoin::TxOut;
 use bitcoin::Witness;
-use bitcoincore_rpc::jsonrpc::error::Error as JsonRpcError;
-use bitcoincore_rpc::jsonrpc::error::RpcError;
+use bitcoin::absolute::LockTime;
+use bitcoin::opcodes;
+use bitcoin::script::PushBytes;
+use bitcoin::sighash::Prevouts;
+use bitcoin::sighash::SighashCache;
+use bitcoin::taproot::LeafVersion;
+use bitcoin::taproot::NodeInfo;
+use bitcoin::taproot::TaprootSpendInfo;
+use bitcoin::transaction::Version;
 use bitcoincore_rpc::Error as BtcRpcError;
 use bitcoincore_rpc::RpcApi;
+use bitcoincore_rpc::jsonrpc::error::Error as JsonRpcError;
+use bitcoincore_rpc::jsonrpc::error::RpcError;
 
 use clarity::types::chainstate::StacksAddress;
 use clarity::vm::types::PrincipalData;
@@ -35,8 +35,8 @@ use sbtc::testing::deposits::TxSetup;
 use sbtc::testing::regtest;
 use sbtc::testing::regtest::AsUtxo;
 use sbtc::testing::regtest::Recipient;
-use secp256k1::SecretKey;
 use secp256k1::SECP256K1;
+use secp256k1::SecretKey;
 
 /// Test the CreateDepositRequest::validate function.
 ///
@@ -48,7 +48,7 @@ fn tx_validation_from_mempool() {
     let amount_sats = 49_900_000;
     let lock_time = 150;
 
-    let mut setup: TxSetup = sbtc::testing::deposits::tx_setup(lock_time, max_fee, amount_sats);
+    let mut setup: TxSetup = sbtc::testing::deposits::tx_setup(lock_time, max_fee, &[amount_sats]);
 
     let (rpc, faucet) = regtest::initialize_blockchain();
     let depositor = Recipient::new(AddressType::P2tr);
@@ -66,11 +66,11 @@ fn tx_validation_from_mempool() {
         script_sig: ScriptBuf::new(),
         witness: Witness::new(),
     }];
-
+    let deposit = setup.deposits.first().unwrap();
     let request = CreateDepositRequest {
         outpoint: OutPoint::new(setup.tx.compute_txid(), 0),
-        reclaim_script: setup.reclaim.reclaim_script(),
-        deposit_script: setup.deposit.deposit_script(),
+        reclaim_script: setup.reclaims.first().unwrap().reclaim_script(),
+        deposit_script: deposit.deposit_script(),
     };
 
     regtest::p2tr_sign_transaction(&mut setup.tx, 0, &utxos, &depositor.keypair);
@@ -82,8 +82,8 @@ fn tx_validation_from_mempool() {
     assert_eq!(parsed.deposit_script, request.deposit_script);
     assert_eq!(parsed.reclaim_script, request.reclaim_script);
     assert_eq!(parsed.amount, amount_sats);
-    assert_eq!(parsed.signers_public_key, setup.deposit.signers_public_key);
-    assert_eq!(parsed.recipient, setup.deposit.recipient);
+    assert_eq!(parsed.signers_public_key, deposit.signers_public_key);
+    assert_eq!(parsed.recipient, deposit.recipient);
 
     let lock_time_height = bitcoin::relative::LockTime::from_height(lock_time as u16);
     assert_eq!(parsed.lock_time, lock_time_height);
@@ -368,7 +368,7 @@ fn op_csv_disabled() {
     // the pushed data is within the limits, so we have to do this dance.
     let locking_script: &PushBytes = script_pubkey.as_bytes().try_into().unwrap();
     let script_sig = ScriptBuf::builder()
-        .push_slice(&locking_script)
+        .push_slice(locking_script)
         .into_script();
 
     let tx3 = Transaction {

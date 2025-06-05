@@ -9,20 +9,22 @@ use crate::context::Context;
 use crate::context::SignerEvent;
 use crate::context::SignerSignal;
 use crate::context::TxSignerEvent;
+use crate::error::Error;
 use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
 use crate::network;
 use crate::network::MessageTransfer;
 use crate::storage;
-use crate::storage::model;
 use crate::storage::DbRead;
 use crate::storage::DbWrite;
+use crate::storage::model;
 use crate::testing;
+use crate::testing::get_rng;
 use crate::testing::storage::model::TestData;
 use crate::transaction_signer;
+use crate::transaction_signer::STACKS_SIGN_REQUEST_LRU_SIZE;
 
 use lru::LruCache;
-use rand::SeedableRng as _;
 use tokio::sync::broadcast;
 use tokio::time::error::Elapsed;
 
@@ -59,6 +61,8 @@ where
                 threshold,
                 rng,
                 dkg_begin_pause: None,
+                dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
+                stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
             },
             context,
         }
@@ -116,11 +120,7 @@ where
 type EventLoop<Context, M, Rng> = transaction_signer::TxSignerEventLoop<Context, M, Rng>;
 
 impl blocklist_client::BlocklistChecker for () {
-    async fn can_accept(
-        &self,
-        _address: &str,
-    ) -> Result<bool, blocklist_api::apis::Error<blocklist_api::apis::address_api::CheckAddressError>>
-    {
+    async fn can_accept(&self, _address: &str) -> Result<bool, Error> {
         Ok(true)
     }
 }
@@ -146,7 +146,7 @@ where
     /// Assert that a group of transaction signers together can
     /// participate successfully in a DKG round
     pub async fn assert_should_be_able_to_participate_in_dkg(self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers);
         let coordinator_signer_info = signer_info.first().unwrap().clone();
@@ -216,16 +216,20 @@ where
             coordinator_signer_info,
             self.signing_threshold,
         );
-        let aggregate_key = coordinator.run_dkg(bitcoin_chain_tip, dummy_txid).await;
+        let aggregate_key = coordinator
+            .run_dkg(bitcoin_chain_tip, dummy_txid.into())
+            .await;
 
         for handle in event_loop_handles.into_iter() {
-            assert!(handle
-                .context
-                .get_storage()
-                .get_encrypted_dkg_shares(&aggregate_key)
-                .await
-                .expect("storage error")
-                .is_some());
+            assert!(
+                handle
+                    .context
+                    .get_storage()
+                    .get_encrypted_dkg_shares(&aggregate_key)
+                    .await
+                    .expect("storage error")
+                    .is_some()
+            );
         }
     }
 
@@ -263,7 +267,12 @@ async fn run_dkg_and_store_results_for_signers<'s: 'r, 'r, S, Rng>(
     let dkg_txid = testing::dummy::txid(&fake::Faker, rng);
     let bitcoin_chain_tip = *chain_tip;
     let (_, all_dkg_shares) = testing_signer_set
-        .run_dkg(bitcoin_chain_tip, dkg_txid, rng)
+        .run_dkg(
+            bitcoin_chain_tip,
+            dkg_txid.into(),
+            rng,
+            model::DkgSharesStatus::Verified,
+        )
         .await;
 
     for (storage, encrypted_dkg_shares) in stores.into_iter().zip(all_dkg_shares) {

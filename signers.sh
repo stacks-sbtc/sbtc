@@ -7,8 +7,8 @@
 LC_CTYPE=en_US.UTF-8
 
 # Colors
-GRAY='\e[0;90m'        # Gray
-RED='\e[0;31m'          # Red
+GRAY='\e[0;90m' # Gray
+RED='\e[0;31m' # Red
 NC='\e[0m' # No Color
 BOLD='\e[1m' # Bold
 
@@ -25,6 +25,18 @@ LOG_SETTINGS="$LOG_SETTINGS,reqwest=info" # Reqwest
 # LibP2P
 LOG_SETTINGS="$LOG_SETTINGS,netlink_proto=info,libp2p_autonat=info,libp2p_gossipsub=info,multistream_select=info,yamux=info,libp2p_ping=info,libp2p_kad=info,libp2p_swarm=info,libp2p_tcp=info,libp2p_identify=info,libp2p_dns=info"
 
+# Display help information
+exec_help() {
+  printf "${BOLD}Usage:${NC} ./signers.sh <command> [arguments]\n\n"
+  printf "${BOLD}Available commands:${NC}\n"
+  printf "  ${BOLD}run <number>${NC}              Run the specified number of signers (e.g., ./signers.sh run 3)\n"
+  printf "  ${BOLD}demo${NC}                      Execute predefined demo operations (donation, deposit)\n"
+  printf "  ${BOLD}fund-btc <addr> <sats>${NC}    Fund a Bitcoin address from the regtest wallet (e.g., ./signers.sh fund-btc <address> 100000)\n"
+  printf "  ${BOLD}info${NC}                      Get signer info from the database\n"
+  printf "  ${BOLD}stop${NC}                      Stop all running signer processes\n"
+  printf "  ${BOLD}help${NC}                      Display this help message\n"
+}
+
 # Run the specified number of signers
 exec_run() {
   if [ "$1" -eq 1 ]; then
@@ -35,7 +47,6 @@ exec_run() {
   printf "${GRAY}Running ${NC}${BOLD}$*${NC} signers\n"
 
   # Turn all the relevant postgres instances off and on.
-  docker compose -f "$DOCKER_COMPOSE_PATH" --profile sbtc-postgres down
   docker compose -f "$DOCKER_COMPOSE_PATH" --profile sbtc-postgres up --detach
 
   # Wait for the postgres instances to start (can get ssl handshake errors etc. otherwise)
@@ -58,6 +69,7 @@ exec_run() {
   printf "${BOLD}Using bootstrap signer set:${NC} $BOOTSTRAP_SIGNER_SET\n"
 
   # Spin up the specified number of signers.
+  cargo build --bin  signer
   i=1
   while [ $i -le "$1" ]
   do
@@ -75,24 +87,35 @@ exec_run() {
 }
 
 exec_demo() {
-  if [ -z "$1" ]; then
-    pubkey=$(psql postgresql://postgres:postgres@localhost:5432/signer -c "SELECT aggregate_key FROM sbtc_signer.dkg_shares ORDER BY created_at DESC LIMIT 1" --no-align --quiet --tuples-only)
-    pubkey=$(echo "$pubkey" | cut -c 2-)
-    echo "Signers aggregate_key: $pubkey"
-  else
-    pubkey="$1"
-  fi
-
-  cargo run -p signer --bin demo-cli donation --amount 2000000 --signer-key "$pubkey"
-  cargo run -p signer --bin demo-cli deposit --amount 42 --max-fee 20000 --lock-time 50 --stacks-addr ST2SBXRBJJTH7GV5J93HJ62W2NRRQ46XYBK92Y039 --signer-key "$pubkey"
+  cargo run -p signer --bin demo-cli donation --amount 10000
+  cargo run -p signer --bin demo-cli deposit --amount 10000000 # 0.1 BTC
 }
 
 exec_info() {
-  pubkey=$(psql postgresql://postgres:postgres@localhost:5432/signer -c "SELECT aggregate_key FROM sbtc_signer.dkg_shares ORDER BY created_at DESC LIMIT 1" --no-align --quiet --tuples-only)
-  pubkey=$(echo "$pubkey" | cut -c 2-)
-  echo "Signers aggregate_key: $pubkey"
+  cargo run -p signer --bin demo-cli info
+}
 
-  cargo run -p signer --bin demo-cli info --signer-key "$pubkey"
+exec_fund_btc() {
+  # Check if recipient and sats arguments are provided
+  if [ -z "$1" ] || [ -z "$2" ]; then
+    printf "${RED}ERROR:${NC} Missing arguments for fund-btc. Usage: fund-btc <recipient_address> <sats_amount>\n"
+    exit 1
+  fi
+  # Fund the BTC address using the provided arguments, capturing output
+  printf "${GRAY}Attempting to fund BTC address ${BOLD}%s${NC} with ${BOLD}%s${NC} sats...${NC}\n" "$1" "$2"
+  # Capture stdout and stderr
+  output=$(cargo run -p signer --bin demo-cli fund-btc --recipient "$1" --amount "$2" 2>&1)
+  status=$? # Capture the exit status
+
+  if [ $status -eq 0 ]; then
+    # On success, print only the last line of the output (which should contain the tx_id)
+    printf "%s\n" "$output" | tail -n 1
+  else
+    # On error, print an error line and exit with status 1
+    printf "${RED}ERROR:${NC} Failed to fund BTC address.\n"
+    printf "%s\n" "$output" | tail -n 1
+    exit 1
+  fi
 }
 
 # The main function
@@ -114,6 +137,10 @@ main() {
       shift # Shift the command off the argument list
       exec_demo "$@"
       ;;
+    "fund-btc")
+      shift # Shift the command off the argument list
+      exec_fund_btc "$@"
+      ;;
     # Get signers info from db
     "info")
       shift # Shift the command off the argument list
@@ -123,8 +150,13 @@ main() {
     "stop")
       ps -ef | awk '/[s]igner --config/{print $2}' | xargs kill -9
     ;;
+    # Display help
+    "help")
+      exec_help
+    ;;
     *)
       printf "${RED}ERROR:${NC} Unknown command: $1\n"
+      exec_help # Show help on unknown command
       exit 1
   esac
 }

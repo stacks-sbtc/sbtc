@@ -1,19 +1,93 @@
 //! Top-level error type for the signer
 use std::borrow::Cow;
 
+use bitcoin::script::PushBytesError;
 use blockstack_lib::types::chainstate::StacksBlockId;
 
+use crate::bitcoin::validation::WithdrawalCapContext;
+use crate::blocklist_client::BlocklistClientError;
 use crate::codec;
+use crate::dkg;
 use crate::emily_client::EmilyClientError;
 use crate::keys::PublicKey;
+use crate::keys::PublicKeyXOnly;
 use crate::stacks::contracts::DepositValidationError;
 use crate::stacks::contracts::RotateKeysValidationError;
 use crate::stacks::contracts::WithdrawalAcceptValidationError;
+use crate::stacks::contracts::WithdrawalRejectValidationError;
 use crate::storage::model::SigHash;
+use crate::transaction_signer::StacksSignRequestId;
+use crate::wsts_state_machine::StateMachineId;
 
 /// Top-level signer error
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// The length of bytes to write to an OP_RETURN output exceeds the maximum allowed size.
+    #[error("OP_RETURN output size limit exceeded: {size} bytes, max allowed: {max_size} bytes")]
+    OpReturnSizeLimitExceeded {
+        /// The size of the OP_RETURN output in bytes.
+        size: usize,
+        /// The maximum allowed size of the OP_RETURN output in bytes.
+        max_size: usize,
+    },
+
+    /// An error occurred while attempting to perform withdrawal ID segmentation.
+    #[error("idpack segmenter error: {0}")]
+    IdPackSegmenter(#[from] sbtc::idpack::SegmenterError),
+
+    /// IdPack segments decode error
+    #[error("idpack segments decode error: {0}")]
+    IdPackDecode(#[from] sbtc::idpack::DecodeError),
+
+    /// The DKG verification state machine raised an error.
+    #[error("the dkg verification state machine raised an error: {0}")]
+    DkgVerification(#[source] dkg::verification::Error),
+
+    /// Unexpected [`StateMachineId`] in the given context.
+    #[error("unexpected state machine id in the given context: {0:?}")]
+    UnexpectedStateMachineId(crate::wsts_state_machine::StateMachineId),
+
+    /// An IO error was returned from the [`bitcoin`] library. This is usually an
+    /// error that occurred during encoding/decoding of bitcoin types.
+    #[error("an io error was returned from the bitcoin library: {0}")]
+    BitcoinIo(#[source] bitcoin::io::Error),
+
+    /// An error was returned from the bitcoinconsensus library.
+    #[error("error returned from libbitcoinconsensus: {0}")]
+    BitcoinConsensus(bitcoinconsensus::Error),
+
+    /// We have received a request/response which has been deemed invalid in
+    /// the current context.
+    #[error("invalid signing request")]
+    InvalidSigningOperation,
+
+    /// The DKG verification state machine is in an end-state and can't be used
+    /// for the requested operation.
+    #[error(
+        "DKG verification state machine is in an end-state and cannot be used for the requested operation: {0}"
+    )]
+    DkgVerificationEnded(PublicKeyXOnly, Box<dkg::verification::State>),
+
+    /// The rotate-key frost verification signing round failed for the aggregate
+    /// key.
+    #[error("DKG verification signing failed for aggregate key: {0}")]
+    DkgVerificationFailed(PublicKeyXOnly),
+
+    /// Cannot verify the aggregate key outside the verification window
+    #[error("cannot verify the aggregate key outside the verification window: {0}")]
+    DkgVerificationWindowElapsed(PublicKey),
+
+    /// Expected two aggregate keys to match, but they did not.
+    #[error(
+        "two aggregate keys were expected to match but did not: actual={actual}, expected={expected}"
+    )]
+    AggregateKeyMismatch {
+        /// The aggregate key being compared to the `expected` aggregate key.
+        actual: Box<PublicKeyXOnly>,
+        /// The expected aggregate key.
+        expected: Box<PublicKeyXOnly>,
+    },
+
     /// The aggregate key for the given block hash could not be determined.
     #[error("the signer set aggregate key could not be determined for bitcoin block {0}")]
     MissingAggregateKey(bitcoin::BlockHash),
@@ -71,6 +145,10 @@ pub enum Error {
     #[error("emily API error: {0}")]
     EmilyApi(#[from] EmilyClientError),
 
+    /// An error occurred while communicating with the blocklist client
+    #[error("blocklist client error: {0}")]
+    BlocklistClient(#[from] BlocklistClientError),
+
     /// Attempt to fetch a bitcoin blockhash ended in an unexpected error.
     /// This is not triggered if the block is missing.
     #[error("bitcoin-core getblock RPC error for hash {1}: {0}")]
@@ -100,10 +178,40 @@ pub enum Error {
     #[error("transaction is missing, txid: {0}, block hash {1:?}")]
     BitcoinTxMissing(bitcoin::Txid, Option<bitcoin::BlockHash>),
 
+    /// The bitcoin transaction is a coinbase (that we don't support)
+    #[error("transaction is coinbase, txid: {0}")]
+    BitcoinTxCoinbase(bitcoin::Txid),
+
+    /// The returned detailed transaction object from bitcoin core is
+    /// invalid because it is missing prevout data for some transaction
+    /// inputs, or it is missing transaction inputs.
+    #[error("detailed transaction object from bitcoin-core is missing vin data; txid: {0}")]
+    BitcoinTxMissingData(bitcoin::Txid),
+
+    /// The returned transaction from bitcoin core is invalid because it
+    /// does not have any outputs. This should be impossible.
+    #[error("transaction from bitcoin-core has no outputs; txid: {0}")]
+    BitcoinTxNoOutputs(bitcoin::Txid),
+
+    /// The returned detailed transaction object from bitcoin core is
+    /// invalid because the inputs and vin data do not align.
+    #[error("detailed transaction object from bitcoin-core has mismatched vin data; txid: {0}")]
+    BitcoinTxInvalidData(bitcoin::Txid),
+
+    /// The returned detailed transaction object is missing fields that
+    /// should not be missing.
+    #[error("detailed transaction object from bitcoin-core is missing fields; txid: {0}")]
+    BitcoinTxMissingFields(bitcoin::Txid),
+
     /// This is the error that is returned when validating a bitcoin
-    /// trasnaction.
+    /// transaction.
     #[error("bitcoin validation error: {0}")]
     BitcoinValidation(#[from] Box<crate::bitcoin::validation::BitcoinValidationError>),
+
+    /// An error occurred while attempting to push bytes into a bitcoin
+    /// `PushBytes` type.
+    #[error("bitcoin push-bytes error: {0}")]
+    BitcoinPushBytes(#[from] PushBytesError),
 
     /// This can only be thrown when the number of bytes for a sighash or
     /// not exactly equal to 32. This should never occur.
@@ -177,16 +285,23 @@ pub enum Error {
 
     /// This happens when parsing a string, usually from the database, into
     /// a PrincipalData.
-    #[error("Could not parse the string into PrincipalData: {0}")]
-    ParsePrincipalData(#[source] clarity::vm::errors::Error),
+    #[error("could not parse the string into PrincipalData: {0}")]
+    ParsePrincipalData(#[source] Box<clarity::vm::errors::Error>),
 
     /// Could not send a message
-    #[error("Could not send a message from the in-memory MessageTransfer broadcast function")]
+    #[error("could not send a message from the in-memory MessageTransfer broadcast function")]
     SendMessage,
 
     /// Could not receive a message from the channel.
     #[error("receive error: {0}")]
     ChannelReceive(#[source] tokio::sync::broadcast::error::RecvError),
+
+    /// Could not serialize the clarity value to bytes.
+    ///
+    /// For some reason, InterpreterError does not implement
+    /// std::fmt::Display or std::error::Error, hence the debug log.
+    #[error("receive error: {0:?}")]
+    ClarityValueSerialization(Box<clarity::vm::errors::InterpreterError>),
 
     /// Thrown when doing [`i64::try_from`] or [`i32::try_from`] before
     /// inserting a value into the database. This only happens if the value
@@ -272,12 +387,12 @@ pub enum Error {
     InvalidEcdsaSignatureBytes(#[source] secp256k1::Error),
 
     /// This happens when we attempt to convert a `[u8; 65]` into a
-    /// recoverable EDCSA signature.
+    /// recoverable ECDSA signature.
     #[error("could not recover the public key from the signature: {0}")]
     InvalidRecoverableSignatureBytes(#[source] secp256k1::Error),
 
     /// This happens when we attempt to recover a public key from a
-    /// recoverable EDCSA signature.
+    /// recoverable ECDSA signature.
     #[error("could not recover the public key from the signature: {0}, digest: {1}")]
     InvalidRecoverableSignature(#[source] secp256k1::Error, secp256k1::Message),
 
@@ -297,6 +412,10 @@ pub enum Error {
     /// This should never happen.
     #[error("outpoint missing from transaction when assessing fee {0}")]
     OutPointMissing(bitcoin::OutPoint),
+
+    /// This should never happen.
+    #[error("output_index missing from block when assessing fee, txid: {0}, vout: {1}")]
+    VoutMissing(bitcoin::Txid, u32),
 
     /// This is thrown when failing to parse a hex string into an integer.
     #[error("could not parse the hex string into an integer")]
@@ -342,6 +461,11 @@ pub enum Error {
     #[error("encountered an error while rolling back an sqlx transaction: {0}")]
     SqlxRollbackTransaction(#[source] sqlx::Error),
 
+    /// An error occurred while attempting to acquire a connection to the
+    /// database.
+    #[error("encountered an error while attempting to acquire a connection to the database: {0}")]
+    SqlxAcquireConnection(#[source] sqlx::Error),
+
     /// An error when attempting to read a migration script.
     #[error("failed to read migration script: {0}")]
     ReadSqlMigration(Cow<'static, str>),
@@ -377,6 +501,10 @@ pub enum Error {
     #[error("stacks transaction rejected: {0}")]
     StacksTxRejection(#[from] crate::stacks::api::TxRejection),
 
+    /// The stacks fee was too high.
+    #[error("coordinator Stacks txn with fee too high: {0}. Highest acceptable fee: {1}")]
+    StacksFeeLimitExceeded(u64, u64),
+
     /// Reqwest error
     #[error("response from stacks node did not conform to the expected schema: {0}")]
     UnexpectedStacksResponse(#[source] reqwest::Error),
@@ -384,6 +512,10 @@ pub enum Error {
     /// The response from the Stacks node was invalid or malformed.
     #[error("invalid stacks response: {0}")]
     InvalidStacksResponse(&'static str),
+
+    /// The stacks request was already signed in this tenure
+    #[error("stacks request for {0} was already signed in tenure {1}")]
+    StacksRequestAlreadySigned(StacksSignRequestId, bitcoin::BlockHash),
 
     /// Taproot error
     #[error("an error occurred when constructing the taproot signing digest: {0}")]
@@ -414,8 +546,8 @@ pub enum Error {
     MissingPublicKey,
 
     /// Missing state machine
-    #[error("missing state machine")]
-    MissingStateMachine,
+    #[error("missing state machine: {0}")]
+    MissingStateMachine(StateMachineId),
 
     /// Missing key rotation
     #[error("missing key rotation")]
@@ -441,6 +573,12 @@ pub enum Error {
     /// been.
     #[error("DKG has not been run")]
     NoDkgShares,
+
+    /// This arises when a signer gets a message that requires DKG to have
+    /// been run with output shares that have passed verification, but no
+    /// such shares exist.
+    #[error("no DKG shares exist that have passed verification")]
+    NoVerifiedDkgShares,
 
     /// TODO: We don't want to be able to run DKG more than once. Soon this
     /// restriction will be lifted.
@@ -477,7 +615,7 @@ pub enum Error {
 
     /// We throw this when signer produced txid and coordinator produced txid differ.
     #[error(
-        "Signer and coordinator txid mismatch. Signer produced txid {0}, but coordinator send txid {1}"
+        "signer and coordinator txid mismatch. Signer produced txid {0}, but coordinator send txid {1}"
     )]
     SignerCoordinatorTxidMismatch(
         blockstack_lib::burnchains::Txid,
@@ -504,13 +642,18 @@ pub enum Error {
 
     /// This is thrown when there is a deposit that parses correctly but
     /// the public key in the deposit script is not known to the signer.
-    #[error("Unknown x-only public key in deposit outpoint: {0}, public key {1}")]
+    #[error("unknown x-only public key in deposit outpoint: {0}, public key {1}")]
     UnknownAggregateKey(bitcoin::OutPoint, secp256k1::XOnlyPublicKey),
 
     /// The error for when the request to sign a withdrawal-accept
     /// transaction fails at the validation step.
     #[error("withdrawal accept validation error: {0}")]
     WithdrawalAcceptValidation(#[source] Box<WithdrawalAcceptValidationError>),
+
+    /// The error for when the request to sign a withdrawal-reject
+    /// transaction fails at the validation step.
+    #[error("withdrawal reject validation error: {0}")]
+    WithdrawalRejectValidation(#[source] Box<WithdrawalRejectValidationError>),
 
     /// WSTS error.
     #[error("WSTS error: {0}")]
@@ -531,9 +674,18 @@ pub enum Error {
     /// Bitcoin error when attempting to construct an address from a
     /// scriptPubKey.
     #[error("bitcoin address parse error: {0}; txid {txid}, vout: {vout}", txid = .1.txid, vout = .1.vout)]
-    BitcoinAddressFromScript(
+    DepositBitcoinAddressFromScript(
         #[source] bitcoin::address::FromScriptError,
         bitcoin::OutPoint,
+    ),
+
+    /// Bitcoin error when attempting to construct an address from a
+    /// scriptPubKey.
+    #[error("bitcoin address parse error: {0}; Request id: {1}, BlockHash: {2}")]
+    WithdrawalBitcoinAddressFromScript(
+        #[source] bitcoin::address::FromScriptError,
+        u64,
+        StacksBlockId,
     ),
 
     /// Could not parse hex script.
@@ -567,32 +719,53 @@ pub enum Error {
     NotChainTipCoordinator,
 
     /// Indicates that the request packages contain duplicate deposit or withdrawal entries.
-    #[error("The request packages contain duplicate deposit or withdrawal entries.")]
+    #[error("the request packages contain duplicate deposit or withdrawal entries.")]
     DuplicateRequests,
 
     /// Indicates that the BitcoinPreSignRequest object does not contain
     /// any deposit or withdrawal requests.
-    #[error("The BitcoinPreSignRequest object does not contain deposit or withdrawal requests")]
+    #[error("the BitcoinPreSignRequest object does not contain deposit or withdrawal requests")]
     PreSignContainsNoRequests,
 
     /// Indicates that we tried to create an UnsignedTransaction object
     /// without any deposit or withdrawal requests.
-    #[error("The UnsignedTransaction must contain deposit or withdrawal requests")]
+    #[error("the UnsignedTransaction must contain deposit or withdrawal requests")]
     BitcoinNoRequests,
 
     /// Indicates that the BitcoinPreSignRequest object contains a fee rate
     /// that is less than or equal to zero.
-    #[error("The fee rate in the BitcoinPreSignRequest object is not greater than zero: {0}")]
+    #[error("the fee rate in the BitcoinPreSignRequest object is not greater than zero: {0}")]
     PreSignInvalidFeeRate(f64),
 
     /// Error when deposit requests would exceed sBTC supply cap
-    #[error("Total deposit amount ({total_amount} sats) would exceed sBTC supply cap (current max mintable is {max_mintable} sats)")]
+    #[error(
+        "total deposit amount ({total_amount} sats) would exceed sBTC supply cap (current max mintable is {max_mintable} sats)"
+    )]
     ExceedsSbtcSupplyCap {
         /// Total deposit amount in sats
         total_amount: u64,
         /// Maximum sBTC mintable
         max_mintable: u64,
     },
+
+    /// sBTC transaction is malformed
+    #[error("sbtc transaction is malformed")]
+    SbtcTxMalformed,
+
+    /// sBTC transaction op return format error
+    #[error("sbtc transaction op return format error")]
+    SbtcTxOpReturnFormatError,
+
+    /// Error when withdrawal requests would exceed sBTC's rolling withdrawal caps
+    #[error("total withdrawal amounts ({amounts}) exceeds rolling caps ({cap} over
+            {cap_blocks}) with the currently withdrawn total {withdrawn_total})",
+            amounts = .0.amounts, cap = .0.cap, cap_blocks = .0.cap_blocks, withdrawn_total = .0.withdrawn_total)]
+    ExceedsWithdrawalCap(WithdrawalCapContext),
+
+    /// An error was raised by the in-memory database.
+    #[cfg(any(test, feature = "testing"))]
+    #[error("In-memory database error: {0}")]
+    InMemoryDatabase(crate::storage::memory::MemoryStoreError),
 
     /// An error which can be used in test code instead of `unimplemented!()` or
     /// other alternatives, so that an an actual error is returned instead of

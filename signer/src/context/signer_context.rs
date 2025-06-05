@@ -4,13 +4,13 @@ use tokio::sync::broadcast::Sender;
 use url::Url;
 
 use crate::{
+    SIGNER_CHANNEL_CAPACITY,
     bitcoin::BitcoinInteract,
     config::{EmilyClientConfig, Settings},
     emily_client::EmilyInteract,
     error::Error,
     stacks::api::StacksInteract,
     storage::{DbRead, DbWrite},
-    SIGNER_CHANNEL_CAPACITY,
 };
 
 use super::{Context, SignerSignal, SignerState, TerminationHandle};
@@ -166,11 +166,19 @@ where
     }
 }
 
+#[cfg(any(test, feature = "testing"))]
+impl<Storage, Bitcoin, Stacks, Emily> SignerContext<Storage, Bitcoin, Stacks, Emily> {
+    /// Get a mutable reference to the config.
+    pub fn config_mut(&mut self) -> &mut Settings {
+        &mut self.config
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{
-        atomic::{AtomicU8, Ordering},
         Arc,
+        atomic::{AtomicU8, Ordering},
     };
 
     use tokio::sync::Notify;

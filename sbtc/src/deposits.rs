@@ -1,12 +1,6 @@
 //! This is the transaction analysis module
 //!
 
-use bitcoin::locktime::relative::LockTime;
-use bitcoin::opcodes::all as opcodes;
-use bitcoin::script::PushBytesBuf;
-use bitcoin::taproot::LeafVersion;
-use bitcoin::taproot::NodeInfo;
-use bitcoin::taproot::TaprootSpendInfo;
 use bitcoin::Address;
 use bitcoin::Network;
 use bitcoin::OutPoint;
@@ -14,6 +8,12 @@ use bitcoin::Script;
 use bitcoin::ScriptBuf;
 use bitcoin::Transaction;
 use bitcoin::XOnlyPublicKey;
+use bitcoin::locktime::relative::LockTime;
+use bitcoin::opcodes::all as opcodes;
+use bitcoin::script::PushBytesBuf;
+use bitcoin::taproot::LeafVersion;
+use bitcoin::taproot::NodeInfo;
+use bitcoin::taproot::TaprootSpendInfo;
 use clarity::codec::StacksMessageCodec;
 use clarity::types::chainstate::StacksAddress;
 use clarity::vm::types::PrincipalData;
@@ -342,7 +342,7 @@ impl DepositScriptInputs {
                 data
             }
             [OP_PUSHDATA1, n, data @ ..] if data.len() == *n as usize && *n < 76 => {
-                return Err(Error::NonMinimalPushDepositScript)
+                return Err(Error::NonMinimalPushDepositScript);
             }
             // This branch can be a standard (non-contract) Stacks
             // addresses when n == 30 (8 byte max fee + 22 byte address)
@@ -568,9 +568,9 @@ fn scriptint_parse(v: &[u8]) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use bitcoin::hashes::Hash as _;
     use bitcoin::AddressType;
     use bitcoin::Txid;
+    use bitcoin::hashes::Hash as _;
     use rand::rngs::OsRng;
     use secp256k1::SecretKey;
     use stacks_common::codec::StacksMessageCodec;
@@ -679,7 +679,7 @@ mod tests {
 
     #[test]
     fn deposit_script_128_byte_contract_name() {
-        let contract_name = std::iter::repeat('a').take(128).collect::<String>();
+        let contract_name = "a".repeat(128);
         let principal_str = format!("{}.{contract_name}", StacksAddress::burn_address(false));
         let secret_key = SecretKey::new(&mut OsRng);
 
@@ -793,7 +793,7 @@ mod tests {
         .push_opcode(opcodes::OP_CSV)
         .into_script() ; "start with 0")]
     #[test_case(ScriptBuf::builder()
-        .push_int(1 << 31 + 15)
+        .push_int(1 << (31 + 15))
         .push_opcode(opcodes::OP_CSV)
         .into_script() ; "is a lock-disabling number")]
     #[test_case(ScriptBuf::builder()
@@ -836,12 +836,12 @@ mod tests {
         let amount_sats = 500_000;
         let lock_time = 150;
 
-        let setup: TxSetup = testing::deposits::tx_setup(lock_time, max_fee, amount_sats);
+        let setup: TxSetup = testing::deposits::tx_setup(lock_time, max_fee, &[amount_sats]);
 
         let request = CreateDepositRequest {
             outpoint: OutPoint::new(setup.tx.compute_txid(), 0),
-            reclaim_script: setup.reclaim.reclaim_script(),
-            deposit_script: setup.deposit.deposit_script(),
+            reclaim_script: setup.reclaims.first().unwrap().reclaim_script(),
+            deposit_script: setup.deposits.first().unwrap().deposit_script(),
         };
 
         let parsed = request.validate_tx(&setup.tx, false).unwrap();
@@ -850,9 +850,12 @@ mod tests {
         assert_eq!(parsed.deposit_script, request.deposit_script);
         assert_eq!(parsed.reclaim_script, request.reclaim_script);
         assert_eq!(parsed.amount, amount_sats);
-        assert_eq!(parsed.signers_public_key, setup.deposit.signers_public_key);
+        assert_eq!(
+            parsed.signers_public_key,
+            setup.deposits.first().unwrap().signers_public_key
+        );
         assert_eq!(parsed.lock_time, LockTime::from_height(lock_time as u16));
-        assert_eq!(parsed.recipient, setup.deposit.recipient);
+        assert_eq!(parsed.recipient, setup.deposits.first().unwrap().recipient);
     }
 
     #[test_case(true ; "is mainnet address")]
@@ -860,12 +863,12 @@ mod tests {
     fn tx_validation_network(is_mainnet: bool) {
         let recipient = StacksAddress::burn_address(is_mainnet);
         let setup: TxSetup =
-            testing::deposits::tx_setup_with_recipient(150, 2500, 35000, recipient);
+            testing::deposits::tx_setup_with_recipient(150, 2500, &[35000], recipient);
 
         let request = CreateDepositRequest {
             outpoint: OutPoint::new(setup.tx.compute_txid(), 0),
-            reclaim_script: setup.reclaim.reclaim_script(),
-            deposit_script: setup.deposit.deposit_script(),
+            reclaim_script: setup.reclaims.first().unwrap().reclaim_script(),
+            deposit_script: setup.deposits.first().unwrap().deposit_script(),
         };
 
         assert!(request.validate_tx(&setup.tx, is_mainnet).is_ok());
@@ -878,16 +881,16 @@ mod tests {
         let amount_sats = 500_000;
         let lock_time = 150;
 
-        let mut setup: TxSetup = testing::deposits::tx_setup(lock_time, max_fee, amount_sats);
+        let mut setup: TxSetup = testing::deposits::tx_setup(lock_time, max_fee, &[amount_sats]);
 
         // Let's modify the max_fee of the deposit script and send that in
         // the request.
-        setup.deposit.max_fee = 3000;
+        setup.deposits.first_mut().unwrap().max_fee = 3000;
 
         let request = CreateDepositRequest {
             outpoint: OutPoint::new(setup.tx.compute_txid(), 0),
-            deposit_script: setup.deposit.deposit_script(),
-            reclaim_script: setup.reclaim.reclaim_script(),
+            deposit_script: setup.deposits.first().unwrap().deposit_script(),
+            reclaim_script: setup.reclaims.first().unwrap().reclaim_script(),
         };
 
         let error = request.validate_tx(&setup.tx, false).unwrap_err();
@@ -900,16 +903,16 @@ mod tests {
         let amount_sats = 500_000;
         let lock_time = 0;
 
-        let mut setup: TxSetup = testing::deposits::tx_setup(lock_time, max_fee, amount_sats);
+        let mut setup: TxSetup = testing::deposits::tx_setup(lock_time, max_fee, &[amount_sats]);
 
         // Let's modify the lock time of the reclaim script to look more
         // reasonable in the request.
-        setup.reclaim.lock_time = LockTime::from_height(150);
+        setup.reclaims.first_mut().unwrap().lock_time = LockTime::from_height(150);
 
         let request = CreateDepositRequest {
             outpoint: OutPoint::new(setup.tx.compute_txid(), 0),
-            deposit_script: setup.deposit.deposit_script(),
-            reclaim_script: setup.reclaim.reclaim_script(),
+            deposit_script: setup.deposits.first().unwrap().deposit_script(),
+            reclaim_script: setup.reclaims.first().unwrap().reclaim_script(),
         };
 
         let error = request.validate_tx(&setup.tx, false).unwrap_err();
@@ -922,13 +925,13 @@ mod tests {
         let amount_sats = 500_000;
         let lock_time = 150;
 
-        let setup: TxSetup = testing::deposits::tx_setup(lock_time, max_fee, amount_sats);
+        let setup: TxSetup = testing::deposits::tx_setup(lock_time, max_fee, &[amount_sats]);
 
         let request = CreateDepositRequest {
             // This output index is guaranteed to always be incorrect.
             outpoint: OutPoint::new(setup.tx.compute_txid(), setup.tx.output.len() as u32),
-            deposit_script: setup.deposit.deposit_script(),
-            reclaim_script: setup.reclaim.reclaim_script(),
+            deposit_script: setup.deposits.first().unwrap().deposit_script(),
+            reclaim_script: setup.reclaims.first().unwrap().reclaim_script(),
         };
 
         let error = request.validate_tx(&setup.tx, false).unwrap_err();
@@ -937,8 +940,8 @@ mod tests {
         let request = CreateDepositRequest {
             // This txid is almost certainly incorrect.
             outpoint: OutPoint::new(Txid::all_zeros(), 0),
-            deposit_script: setup.deposit.deposit_script(),
-            reclaim_script: setup.reclaim.reclaim_script(),
+            deposit_script: setup.deposits.first().unwrap().deposit_script(),
+            reclaim_script: setup.reclaims.first().unwrap().reclaim_script(),
         };
 
         let error = request.validate_tx(&setup.tx, false).unwrap_err();
@@ -951,7 +954,7 @@ mod tests {
         let amount_sats = 500_000;
         let lock_time = 150;
 
-        let setup: TxSetup = testing::deposits::tx_setup(lock_time, max_fee, amount_sats);
+        let setup: TxSetup = testing::deposits::tx_setup(lock_time, max_fee, &[amount_sats]);
 
         let request = CreateDepositRequest {
             outpoint: OutPoint::new(setup.tx.compute_txid(), 0),
@@ -959,7 +962,7 @@ mod tests {
             // they told us a lie and sent us an invalid deposit script in
             // their request.
             deposit_script: ScriptBuf::new(),
-            reclaim_script: setup.reclaim.reclaim_script(),
+            reclaim_script: setup.reclaims.first().unwrap().reclaim_script(),
         };
 
         let error = request.validate_tx(&setup.tx, false).unwrap_err();
@@ -967,7 +970,7 @@ mod tests {
 
         let request = CreateDepositRequest {
             outpoint: OutPoint::new(setup.tx.compute_txid(), 0),
-            deposit_script: setup.deposit.deposit_script(),
+            deposit_script: setup.deposits.first().unwrap().deposit_script(),
             // The actual reclaim script in the transaction is fine, but
             // they told us a lie, and sent us an invalid reclaim script in
             // their request.

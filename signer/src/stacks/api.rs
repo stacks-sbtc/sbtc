@@ -5,13 +5,15 @@ use std::future::Future;
 use std::time::Duration;
 
 use bitcoin::Amount;
+use bitcoin::OutPoint;
 use blockstack_lib::burnchains::Txid;
 use blockstack_lib::chainstate::burn::ConsensusHash;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
-use blockstack_lib::chainstate::stacks::db::blocks::MINIMUM_TX_FEE_RATE_PER_BYTE;
+use blockstack_lib::chainstate::nakamoto::NakamotoBlockHeader;
 use blockstack_lib::chainstate::stacks::StacksTransaction;
 use blockstack_lib::chainstate::stacks::TokenTransferMemo;
 use blockstack_lib::chainstate::stacks::TransactionPayload;
+use blockstack_lib::chainstate::stacks::db::blocks::MINIMUM_TX_FEE_RATE_PER_BYTE;
 use blockstack_lib::clarity::vm::types::PrincipalData;
 use blockstack_lib::clarity::vm::types::StandardPrincipalData;
 use blockstack_lib::codec::StacksMessageCodec;
@@ -27,8 +29,10 @@ use blockstack_lib::net::api::postfeerate::RPCFeeEstimateResponse;
 use blockstack_lib::types::chainstate::StacksAddress;
 use blockstack_lib::types::chainstate::StacksBlockId;
 use clarity::types::StacksEpochId;
+use clarity::vm::types::OptionalData;
 use clarity::vm::types::{BuffData, ListData, SequenceData};
 use clarity::vm::{ClarityName, ContractName, Value};
+use reqwest::StatusCode;
 use reqwest::header::CONTENT_LENGTH;
 use reqwest::header::CONTENT_TYPE;
 use serde::{Deserialize, Deserializer};
@@ -37,9 +41,12 @@ use url::Url;
 use crate::config::Settings;
 use crate::error::Error;
 use crate::keys::PublicKey;
-use crate::storage::model::BitcoinBlockHash;
-use crate::storage::model::StacksBlock;
 use crate::storage::DbRead;
+use crate::storage::model::BitcoinBlockHash;
+use crate::storage::model::BitcoinBlockHeight;
+use crate::storage::model::StacksBlock;
+use crate::storage::model::StacksBlockHeight;
+use crate::storage::model::ToLittleEndianOrder as _;
 use crate::util::ApiFallbackClient;
 
 use super::contracts::AsTxPayload;
@@ -54,6 +61,14 @@ const TX_FEE_TX_SIZE_MULTIPLIER: u64 = 2 * MINIMUM_TX_FEE_RATE_PER_BYTE;
 /// The max fee in microSTX for a stacks transaction. Used as a backstop in
 /// case the stacks node returns wonky values. This is 10 STX.
 const MAX_TX_FEE: u64 = 10_000_000;
+
+/// This is the name of the MAP in the sbtc-registry smart contract that
+/// stores the status of a withdrawal request.
+const WITHDRAWAL_STATUS_MAP_NAME: &str = "withdrawal-status";
+
+/// This is the name of the read-only function in the sbtc-registry smart
+/// contract that returns the status of a deposit request.
+const DEPOSIT_STATUS_READ_ONLY_FUNCTION_NAME: &str = "get-deposit-status";
 
 /// This is a dummy STX transfer payload used only for estimating STX
 /// transfer costs.
@@ -140,6 +155,29 @@ pub trait StacksInteract: Send + Sync {
         &self,
         contract_principal: &StacksAddress,
     ) -> impl Future<Output = Result<Option<PublicKey>, Error>> + Send;
+
+    /// Retrieve a boolean value from the stacks node indicating whether
+    /// sBTC has been minted for the deposit request.
+    ///
+    /// The request is made to `POST
+    /// /v2/contracts/call-read/<contract-principal>/sbtc-registry/get-deposit-status`.
+    fn is_deposit_completed(
+        &self,
+        contract_principal: &StacksAddress,
+        outpoint: &OutPoint,
+    ) -> impl Future<Output = Result<bool, Error>> + Send;
+
+    /// Retrieve a boolean value from the stacks node indicating whether
+    /// the withdrawal request has a response transaction either accepting
+    /// or rejecting the request.
+    ///
+    /// The request is made to `POST
+    /// /v2/map_entry/<contract-principal>/<contract-name>/<map-name>`
+    fn is_withdrawal_completed(
+        &self,
+        contract_principal: &StacksAddress,
+        request_id: u64,
+    ) -> impl Future<Output = Result<bool, Error>> + Send;
 
     /// Get the latest account info for the given address.
     fn get_account(
@@ -229,14 +267,14 @@ pub trait StacksInteract: Send + Sync {
 pub trait GetNakamotoStartHeight {
     /// Get the start height of the first EPOCH 3.0 block on the Stacks
     /// blockchain.
-    fn nakamoto_start_height(&self) -> Option<u64>;
+    fn nakamoto_start_height(&self) -> Option<BitcoinBlockHeight>;
 }
 
 impl GetNakamotoStartHeight for RPCPoxInfoData {
-    fn nakamoto_start_height(&self) -> Option<u64> {
+    fn nakamoto_start_height(&self) -> Option<BitcoinBlockHeight> {
         self.epochs.iter().find_map(|epoch| {
             if epoch.epoch_id == StacksEpochId::Epoch30 {
-                Some(epoch.start_height)
+                Some(epoch.start_height.into())
             } else {
                 None
             }
@@ -255,7 +293,7 @@ pub struct TenureBlocks {
     pub anchor_block_hash: BitcoinBlockHash,
     /// The height of the bitcoin block associated with the above block
     /// hash.
-    pub anchor_block_height: u64,
+    pub anchor_block_height: BitcoinBlockHeight,
 }
 
 impl TenureBlocks {
@@ -267,7 +305,7 @@ impl TenureBlocks {
         Ok(Self {
             blocks,
             anchor_block_hash: info.burn_block_hash.into(),
-            anchor_block_height: info.burn_block_height,
+            anchor_block_height: info.burn_block_height.into(),
         })
     }
 
@@ -285,16 +323,109 @@ impl TenureBlocks {
     /// # Note
     ///
     /// The struct doesn't need to contain all the blocks in a tenure.
+    #[cfg(any(test, feature = "testing"))]
     pub fn into_blocks(self) -> Vec<NakamotoBlock> {
         self.blocks
     }
+}
 
-    /// Return an iterator of Stacks blocks included in this object.
-    pub fn as_stacks_blocks(&self) -> impl Iterator<Item = StacksBlock> + '_ {
-        let bitcoin_anchor = &self.anchor_block_hash;
-        self.blocks
-            .iter()
-            .map(|block| StacksBlock::from_nakamoto_block(block, bitcoin_anchor))
+/// A slimmed down [`NakamotoBlockHeader`]
+#[derive(Debug, Clone, PartialEq)]
+pub struct StacksBlockHeader {
+    /// The total number of StacksBlocks and NakamotoBlocks preceding this
+    /// block in this block's history.
+    pub block_height: StacksBlockHeight,
+    /// The identifier for a block. It is the hash of the this block's
+    /// header hash and the block's consensus hash.
+    pub block_id: StacksBlockId,
+    /// The index block hash of the immediate parent of this block. This is
+    /// the hash of the parent block's hash and consensus hash.
+    pub parent_block_id: StacksBlockId,
+}
+
+impl From<NakamotoBlockHeader> for StacksBlockHeader {
+    fn from(value: NakamotoBlockHeader) -> Self {
+        StacksBlockHeader {
+            block_height: value.chain_length.into(),
+            block_id: value.block_id(),
+            parent_block_id: value.parent_block_id,
+        }
+    }
+}
+
+impl From<TenureBlocks> for TenureBlockHeaders {
+    fn from(value: TenureBlocks) -> Self {
+        let headers = value
+            .blocks
+            .into_iter()
+            .map(|block| StacksBlockHeader::from(block.header))
+            .collect();
+
+        TenureBlockHeaders {
+            headers,
+            anchor_block_hash: value.anchor_block_hash,
+            anchor_block_height: value.anchor_block_height,
+        }
+    }
+}
+
+/// This struct represents a non-empty subset of the Stacks block headers
+/// that were created during a tenure.
+#[derive(Debug)]
+pub struct TenureBlockHeaders {
+    /// The subset of Stacks block headers that of Nakamoto blocks that
+    /// were created during a tenure. This is always non-empty.
+    headers: Vec<StacksBlockHeader>,
+    /// The bitcoin block that this tenure builds off of.
+    pub anchor_block_hash: BitcoinBlockHash,
+    /// The height of the bitcoin block associated with the above block
+    /// hash.
+    pub anchor_block_height: BitcoinBlockHeight,
+}
+
+impl TenureBlockHeaders {
+    /// Get all the headers contained in this object.
+    ///
+    /// # Note
+    ///
+    /// * The returned slice is nonempty.
+    /// * The struct doesn't need to contain all the headers of stacks
+    ///   blocks in a tenure.
+    pub fn headers(&self) -> &[StacksBlockHeader] {
+        &self.headers
+    }
+}
+
+/// An iterator over [`StacksBlock`]s
+pub struct StacksBlockIter {
+    /// The underlying iterator
+    iter: std::vec::IntoIter<StacksBlockHeader>,
+    /// The bitcoin block that this tenure builds off of.
+    anchor_block_hash: BitcoinBlockHash,
+}
+
+impl Iterator for StacksBlockIter {
+    type Item = StacksBlock;
+    fn next(&mut self) -> Option<Self::Item> {
+        let header = self.iter.next()?;
+        Some(StacksBlock {
+            block_hash: header.block_id.into(),
+            block_height: header.block_height,
+            parent_hash: header.parent_block_id.into(),
+            bitcoin_anchor: self.anchor_block_hash,
+        })
+    }
+}
+
+impl std::iter::IntoIterator for TenureBlockHeaders {
+    type Item = StacksBlock;
+    type IntoIter = StacksBlockIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        StacksBlockIter {
+            iter: self.headers.into_iter(),
+            anchor_block_hash: self.anchor_block_hash,
+        }
     }
 }
 
@@ -417,7 +548,7 @@ pub struct AccountInfo {
     pub locked: u128,
     /// The height of the stacks block where the above locked micro-STX
     /// will be unlocked.
-    pub unlock_height: u64,
+    pub unlock_height: StacksBlockHeight,
     /// The next nonce for the account.
     pub nonce: u64,
 }
@@ -447,7 +578,7 @@ pub struct CallReadResponse {
     pub result: Value,
 }
 
-/// Helper function for converting a hexidecimal string into an integer.
+/// Helper function for converting a hexadecimal string into an integer.
 fn parse_hex_u128(hex: &str) -> Result<u128, Error> {
     let hex_str = hex.trim_start_matches("0x");
     u128::from_str_radix(hex_str, 16).map_err(Error::ParseHexInt)
@@ -461,7 +592,7 @@ impl TryFrom<AccountEntryResponse> for AccountInfo {
             balance: parse_hex_u128(&value.balance)?,
             locked: parse_hex_u128(&value.locked)?,
             nonce: value.nonce,
-            unlock_height: value.unlock_height,
+            unlock_height: value.unlock_height.into(),
         })
     }
 }
@@ -494,6 +625,7 @@ impl StacksClient {
         contract_name: &ContractName,
         fn_name: &ClarityName,
         sender: &StacksAddress,
+        arguments: &[Value],
     ) -> Result<Value, Error> {
         let path = format!(
             "/v2/contracts/call-read/{}/{}/{}?tip=latest",
@@ -505,9 +637,19 @@ impl StacksClient {
             .join(&path)
             .map_err(|err| Error::PathJoin(err, self.endpoint.clone(), Cow::Owned(path)))?;
 
+        // Turns out that serializing clarity values to hex can panic. One
+        // such case happens when the buff-data is too large, more than one
+        // MBs worth. For our uses this should never happen.
+        let arguments = arguments
+            .iter()
+            .map(|value| value.serialize_to_hex())
+            .collect::<Result<Vec<String>, _>>()
+            .map_err(Box::new)
+            .map_err(Error::ClarityValueSerialization)?;
+
         let body = CallReadRequest {
             sender: sender.to_string(),
-            arguments: vec![], // TODO: Add when needed
+            arguments,
         };
 
         tracing::debug!(
@@ -580,6 +722,67 @@ impl StacksClient {
             .await
             .map_err(Error::UnexpectedStacksResponse)
             .map(|x| x.data)
+    }
+
+    /// Retrieve the value of a map entry from the specified contract.
+    ///
+    /// This is done by making a `POST
+    /// /v2/map_entry/<contract-principal>/<contract-name>/<map-name>`
+    /// request. In the request we specify that the proof should not be
+    /// included in the response.
+    ///
+    /// See here for the source handler of this endpoint:
+    /// https://github.com/stacks-network/stacks-core/blob/c1a1f50fddcbc11054fae537103423e21221665a/stackslib/src/net/api/getmapentry.rs#L82-L97
+    #[tracing::instrument(skip_all)]
+    pub async fn get_map_entry(
+        &self,
+        contract_principal: &StacksAddress,
+        contract_name: &ContractName,
+        map_name: &ClarityName,
+        map_entry: &Value,
+    ) -> Result<Option<Value>, Error> {
+        let path = format!("/v2/map_entry/{contract_principal}/{contract_name}/{map_name}?proof=0");
+
+        let url = self
+            .endpoint
+            .join(&path)
+            .map_err(|err| Error::PathJoin(err, self.endpoint.clone(), Cow::Owned(path)))?;
+
+        tracing::debug!(
+            %contract_principal,
+            %contract_name,
+            %map_name,
+            "fetching contract map entry"
+        );
+
+        let body = map_entry
+            .serialize_to_hex()
+            .map_err(Box::new)
+            .map_err(Error::ClarityValueSerialization)?;
+
+        let response = self
+            .client
+            .post(url)
+            .timeout(REQUEST_TIMEOUT)
+            .json(&serde_json::Value::String(body))
+            .send()
+            .await
+            .map_err(Error::StacksNodeRequest)?;
+
+        // It looks like the stacks node returns a 404 if the data is not
+        // available, see
+        // https://github.com/stacks-network/stacks-core/blob/c1a1f50fddcbc11054fae537103423e21221665a/stackslib/src/net/api/getmapentry.rs#L223-L225C22
+        if response.status() == StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+
+        response
+            .error_for_status()
+            .map_err(Error::StacksNodeResponse)?
+            .json::<DataVarResponse>()
+            .await
+            .map_err(Error::UnexpectedStacksResponse)
+            .map(|x| Some(x.data))
     }
 
     /// Get the latest account info for the given address.
@@ -814,7 +1017,7 @@ impl StacksClient {
             match blocks.first().map(|b| b.block_id()) {
                 Some(received_id) if received_id == last_block_id => {}
                 Some(received_id) => {
-                    return Err(Error::GetTenureRawMismatch(received_id, last_block_id))
+                    return Err(Error::GetTenureRawMismatch(received_id, last_block_id));
                 }
                 None => return Err(Error::EmptyStacksTenure),
             }
@@ -1011,24 +1214,28 @@ impl StacksClient {
     }
 }
 
-/// Fetch all Nakamoto blocks that are not already stored in the
-/// datastore.
+/// Fetch all Nakamoto block headers that are not already stored in the
+/// datastore, starting at the given [`StacksBlockId`].
+///
+/// This function returns the headers sorted in ascending order. So entries
+/// at lower indices correspond to Stacks block with lower block height.
 pub async fn fetch_unknown_ancestors<S, D>(
     stacks: &S,
     db: &D,
     block_id: StacksBlockId,
-) -> Result<Vec<TenureBlocks>, Error>
+) -> Result<Vec<TenureBlockHeaders>, Error>
 where
     S: StacksInteract,
     D: DbRead + Send + Sync,
 {
-    let mut blocks = vec![stacks.get_tenure(block_id).await?];
+    let starting_tenure = stacks.get_tenure(block_id).await?;
+    let mut headers: Vec<TenureBlockHeaders> = vec![starting_tenure.into()];
     let pox_info = stacks.get_pox_info().await?;
     let nakamoto_start_height = pox_info
         .nakamoto_start_height()
         .ok_or(Error::MissingNakamotoStartHeight)?;
 
-    while let Some(tenure) = blocks.last() {
+    while let Some(tenure) = headers.last() {
         // We won't get anymore Nakamoto blocks before this point, so
         // time to stop.
         if tenure.anchor_block_height <= nakamoto_start_height {
@@ -1041,20 +1248,21 @@ where
         }
         // Tenure blocks are always non-empty, and this invariant is upheld
         // by the type. So no need to worry about the early break.
-        let Some(block) = tenure.blocks().last() else {
+        let Some(header) = tenure.headers().last() else {
             break;
         };
         // We've seen this parent already, so time to stop.
-        if db.stacks_block_exists(block.header.parent_block_id).await? {
+        if db.stacks_block_exists(header.parent_block_id).await? {
             tracing::debug!("parent block known in the database");
             break;
         }
         // There are more blocks to fetch, so let's get them.
-        let tenure_blocks = stacks.get_tenure(block.header.parent_block_id).await?;
-        blocks.push(tenure_blocks);
+        let tenure_blocks = stacks.get_tenure(header.parent_block_id).await?;
+        headers.push(tenure_blocks.into());
     }
 
-    Ok(blocks)
+    headers.reverse();
+    Ok(headers)
 }
 
 /// A deserializer for Clarity's [`Value`] type that deserializes a hex-encoded
@@ -1135,6 +1343,68 @@ impl StacksInteract for StacksClient {
             _ => Err(Error::InvalidStacksResponse(
                 "expected a buffer but got something else",
             )),
+        }
+    }
+
+    async fn is_deposit_completed(
+        &self,
+        deployer: &StacksAddress,
+        outpoint: &OutPoint,
+    ) -> Result<bool, Error> {
+        // Both ContractName::from and ClarityName::from can panic when
+        // given the "wrong" strings. These particular strings do not
+        // panic, and we test this fact in our unit tests.
+        let contract_name = ContractName::from(SmartContract::SbtcRegistry.contract_name());
+        let fn_name = ClarityName::from(DEPOSIT_STATUS_READ_ONLY_FUNCTION_NAME);
+
+        // The transaction IDs are written in little endian format when
+        // making the contract call that sets the deposit status, so we
+        // need to do that here to make sure that it works as expected.
+        let txid_data = outpoint.txid.to_le_bytes().to_vec();
+        let txid = BuffData { data: txid_data };
+        let arguments = [
+            Value::Sequence(SequenceData::Buffer(txid)),
+            Value::UInt(outpoint.vout as u128),
+        ];
+        let result = self
+            .call_read(deployer, &contract_name, &fn_name, deployer, &arguments)
+            .await?;
+
+        // The `get-deposit-status` read-only function retrieves values
+        // from a map in the smart contract using the `map-get?` Clarity
+        // function. This map stores boolean values, setting them to `true`
+        // when a deposit is completed and not setting them otherwise.
+        // Therefore, a missing value implicitly means `false`.
+        match result {
+            Value::Optional(OptionalData { data }) => Ok(data.is_some()),
+            _ => Err(Error::InvalidStacksResponse("did not get optional data")),
+        }
+    }
+
+    async fn is_withdrawal_completed(
+        &self,
+        deployer: &StacksAddress,
+        request_id: u64,
+    ) -> Result<bool, Error> {
+        // Both ContractName::from and ClarityName::from can panic when
+        // given the "wrong" strings. These particular strings do not
+        // panic, and we test this fact in our unit tests.
+        let contract_name = ContractName::from(SmartContract::SbtcRegistry.contract_name());
+        let map_name = ClarityName::from(WITHDRAWAL_STATUS_MAP_NAME);
+
+        let map_entry = Value::UInt(request_id as u128);
+        let result = self
+            .get_map_entry(deployer, &contract_name, &map_name, &map_entry)
+            .await?;
+
+        // This map `withdrawal-status` in the smart contract stores
+        // boolean values, setting them to `true` when a withdrawal is
+        // accepted and `false` when rejected. Either value means the
+        // request has been completed, while a missing value implicitly
+        // means that the request has not been completed.
+        match result {
+            Some(Value::Optional(OptionalData { data })) => Ok(data.is_some()),
+            _ => Err(Error::InvalidStacksResponse("did not get optional data")),
         }
     }
 
@@ -1286,6 +1556,7 @@ impl StacksInteract for StacksClient {
                 &ContractName::from(SmartContract::SbtcToken.contract_name()),
                 &ClarityName::from("get-total-supply"),
                 deployer,
+                &[],
             )
             .await?;
 
@@ -1326,6 +1597,36 @@ impl StacksInteract for ApiFallbackClient<StacksClient> {
         self.exec(|client, retry| async move {
             let result = client
                 .get_current_signers_aggregate_key(contract_principal)
+                .await;
+            retry.abort_if(|| matches!(result, Err(Error::InvalidStacksResponse(_))));
+            result
+        })
+        .await
+    }
+
+    async fn is_deposit_completed(
+        &self,
+        contract_principal: &StacksAddress,
+        outpoint: &OutPoint,
+    ) -> Result<bool, Error> {
+        self.exec(|client, retry| async move {
+            let result = client
+                .is_deposit_completed(contract_principal, outpoint)
+                .await;
+            retry.abort_if(|| matches!(result, Err(Error::InvalidStacksResponse(_))));
+            result
+        })
+        .await
+    }
+
+    async fn is_withdrawal_completed(
+        &self,
+        contract_principal: &StacksAddress,
+        request_id: u64,
+    ) -> Result<bool, Error> {
+        self.exec(|client, retry| async move {
+            let result = client
+                .is_withdrawal_completed(contract_principal, request_id)
                 .await;
             retry.abort_if(|| matches!(result, Err(Error::InvalidStacksResponse(_))));
             result
@@ -1424,8 +1725,8 @@ mod tests {
     use crate::config::NetworkKind;
     use crate::keys::{PrivateKey, PublicKey};
     use crate::stacks::wallet::get_full_tx_size;
-    use crate::storage::in_memory::Store;
     use crate::storage::DbWrite;
+    use crate::storage::memory::Store;
 
     use clarity::types::Address;
     use clarity::vm::types::{
@@ -1466,8 +1767,8 @@ mod tests {
 
         let blocks = tenures.unwrap();
         let headers = blocks
-            .iter()
-            .flat_map(TenureBlocks::as_stacks_blocks)
+            .into_iter()
+            .flat_map(TenureBlockHeaders::into_iter)
             .collect::<Vec<_>>();
         db.write_stacks_block_headers(headers).await.unwrap();
 
@@ -1536,7 +1837,7 @@ mod tests {
             .expect(1)
             .create();
 
-        let path = format!("tests/fixtures/stacksapi-v3-sortitions.json");
+        let path = "tests/fixtures/stacksapi-v3-sortitions.json";
         let mut file = std::fs::File::open(path).unwrap();
         let mut buf = Vec::new();
         file.read_to_end(&mut buf).unwrap();
@@ -1899,6 +2200,83 @@ mod tests {
         mock.assert();
     }
 
+    #[test_case(Some(true); "complete-deposit")]
+    #[test_case(None; "incomplete-deposit")]
+    #[tokio::test]
+    async fn is_deposit_completed_works(expected_response: Option<bool>) {
+        // Create our simulated response JSON.
+        let data = expected_response.map(|x| Box::new(Value::Bool(x)));
+        let clarity_value = Value::Optional(OptionalData { data });
+        let json_response = serde_json::json!({
+            "okay": true,
+            "result": format!("0x{}", clarity_value.serialize_to_hex().unwrap()),
+        });
+        let raw_json_response = serde_json::to_string(&json_response).unwrap();
+
+        // Setup our mock server
+        // POST /v2/contracts/call-read/<contract-principal>/sbtc-registry/get-deposit-status
+        let mut stacks_node_server = mockito::Server::new_async().await;
+        let mock = stacks_node_server
+            .mock("POST", "/v2/contracts/call-read/ST000000000000000000002AMW42H/sbtc-registry/get-deposit-status?tip=latest")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(&raw_json_response)
+            .expect(1)
+            .create();
+
+        let client =
+            StacksClient::new(url::Url::parse(stacks_node_server.url().as_str()).unwrap()).unwrap();
+
+        // Make the request to the mock server
+        let response = client
+            .is_deposit_completed(
+                &StacksAddress::burn_address(false),
+                &bitcoin::OutPoint::null(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response, expected_response.unwrap_or(false));
+        mock.assert();
+    }
+
+    #[test_case(Some(true); "accepted-withdrawal")]
+    #[test_case(Some(false); "rejected-withdrawal")]
+    #[test_case(None; "incomplete-withdrawal")]
+    #[tokio::test]
+    async fn is_withdrawal_completed_works(expected_response: Option<bool>) {
+        // Create our simulated response JSON.
+        let data = expected_response.map(|x| Box::new(Value::Bool(x)));
+        let clarity_value = Value::Optional(OptionalData { data });
+        let json_response = serde_json::json!({
+            "data": format!("0x{}", clarity_value.serialize_to_hex().unwrap()),
+        });
+        let raw_json_response = serde_json::to_string(&json_response).unwrap();
+
+        // Setup our mock server
+        // POST /v2/map_entry/<contract-principal>/sbtc-registry/withdrawal-status
+        let mut stacks_node_server = mockito::Server::new_async().await;
+        let mock = stacks_node_server
+            .mock("POST", "/v2/map_entry/ST000000000000000000002AMW42H/sbtc-registry/withdrawal-status?proof=0")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(&raw_json_response)
+            .expect(1)
+            .create();
+
+        let client =
+            StacksClient::new(url::Url::parse(stacks_node_server.url().as_str()).unwrap()).unwrap();
+
+        // Make the request to the mock server
+        let response = client
+            .is_withdrawal_completed(&StacksAddress::burn_address(false), 1)
+            .await
+            .unwrap();
+
+        assert_eq!(response, expected_response.is_some());
+        mock.assert();
+    }
+
     // Check that if we don't get valid responses from the Stacks node for both
     // the transaction and STX transfer fee estimation requests, we fallback to
     // estimating the fee based on the size of the transaction payload.
@@ -2027,7 +2405,7 @@ mod tests {
 
         let nakamoto_start_height = resp.nakamoto_start_height();
         assert!(nakamoto_start_height.is_some());
-        assert_eq!(nakamoto_start_height.unwrap(), 232);
+        assert_eq!(nakamoto_start_height.unwrap(), 232u64.into());
     }
 
     #[tokio::test]
