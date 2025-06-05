@@ -1,7 +1,6 @@
 ;; Properties
 
 (define-constant ERR_ASSERTION_FAILED (err u1001))
-(define-constant ERR_UNWRAP_FAILURE (err u1002))
 
 (define-constant registry-withdrawal-role 0x02)
 
