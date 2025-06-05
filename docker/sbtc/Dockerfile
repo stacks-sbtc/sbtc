@@ -16,7 +16,7 @@ RUN npm install -g pnpm@9
 # Download the sbtc code base so that the initial build is done with
 # an appropriate version of the code and the result can be cached.
 WORKDIR /code
-RUN git clone https://github.com/stacks-network/sbtc.git
+RUN git clone https://github.com/stacks-sbtc/sbtc.git
 WORKDIR /code/sbtc
 
 ARG GIT_BRANCH=main
