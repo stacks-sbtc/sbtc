@@ -30,7 +30,7 @@ RUN make install-pnpm && make build
 # -------------------------------------------
 # We first remove the existing sources so that the there is no conflict
 # when building from the sources copied over.
-RUN rm -rf sbtc signer emily emily_sidecar emily_cron blocklist-client
+RUN rm -rf sbtc signer emily emily_sidecar emily_cron blocklist-client blocklist-openapi-gen .generated-sources protobufs
 COPY . /code/sbtc/
 RUN make install-pnpm && make build
 
