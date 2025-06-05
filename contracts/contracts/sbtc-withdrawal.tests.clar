@@ -3,19 +3,25 @@
 (define-constant ERR_ASSERTION_FAILED (err u1001))
 (define-constant ERR_UNWRAP_FAILURE (err u1002))
 
-(define-constant deployer tx-sender)
-(define-constant dust_limit_error_code u502)
+(define-constant registry-withdrawal-role 0x02)
 
 ;; This is a test utility, not an assertion. It randomly mints sbtc-tokens to
-;; users, supporting other tests.
+;; users, supporting other tests. During the property testing routine, it will
+;; be eventually picked up by rendezous and executed, resulting in a random
+;; mint of sbtc-tokens to a random user.
 (define-public (test-mint (amount uint) (recipient principal))
   (if
-    (or 
-      (not (is-eq deployer tx-sender))
-      (is-eq amount u0)
-    )
+    (is-eq amount u0)
     (ok false)
-    (contract-call? .sbtc-token protocol-mint amount recipient)))
+    (contract-call?
+      .sbtc-token
+      protocol-mint
+      amount
+      recipient
+      registry-withdrawal-role
+    )
+  )
+)
 
 (define-public (test-initiate-withdrawal-locked-balance
     (amount uint)
@@ -24,7 +30,6 @@
   )
   (if
     (or
-      (is-eq amount u0)
       (<= amount DUST_LIMIT)
       (<
         (unwrap-panic
@@ -65,7 +70,6 @@
   )
   (if
     (or
-      (is-eq amount u0)
       (<= amount DUST_LIMIT)
       (<
         (unwrap-panic
@@ -116,19 +120,11 @@
       )
     )
     (ok false)
-    (let
-      (
-        (withdrawal-request-result
-          (initiate-withdrawal-request amount recipient max-fee)
-        )
-      )
+    (begin
       (asserts!
-        (and
-          (is-err withdrawal-request-result)
-          (is-eq
-            (unwrap-err! withdrawal-request-result ERR_UNWRAP_FAILURE)
-            dust_limit_error_code
-          )
+        (is-eq
+          (initiate-withdrawal-request amount recipient max-fee)
+          ERR_DUST_LIMIT
         )
         ERR_ASSERTION_FAILED
       )
