@@ -106,146 +106,93 @@
 (define-constant ERR_WRONG_ERROR_CODE (err u1000))
 (define-constant ERR_ASSERTION_FAILED (err u1001))
 
-;; (define-public (test-is-protocol-caller-ok (caller principal))
-;;   (if
-;;     (not (is-eq deployer caller))
-;;     (ok false)
-;;     (let
-;;       (
-;;         (is-protocol-caller-result (validate-protocol-caller caller))
-;;       )
-;;       (asserts! (is-ok is-protocol-caller-result) ERR_ASSERTION_FAILED)
-;;       (ok true)
-;;     )
-;;   )
-;; )
+(define-public (test-standard-principal-sender-withdrawal-unauthorized
+    (amount uint)
+    (max-fee uint)
+    (sender principal)
+    (recipient { version: (buff 1), hashbytes: (buff 32) })
+    (height uint)
+  )
+  (begin
+    (asserts!
+        (is-eq
+          (create-withdrawal-request amount max-fee sender recipient height)
+          ERR_UNAUTHORIZED
+        )
+        ERR_ASSERTION_FAILED
+      )
+    (ok true)
+  )
+)
 
-;; (define-public (test-is-protocol-caller-err (caller principal))
-;;   (if
-;;     (is-eq deployer caller)
-;;     (ok false)
-;;     (let
-;;       (
-;;         (unwrap-error (err u9999))
-;;         (is-protocol-caller-result (validate-protocol-caller caller))
-;;       )
-;;       (asserts!
-;;         (and
-;;           (is-err is-protocol-caller-result)
-;;           (is-eq
-;;             (unwrap-err! is-protocol-caller-result unwrap-error)
-;;             u400
-;;           )
-;;         )
-;;         ERR_ASSERTION_FAILED
-;;       )
-;;       (ok true)
-;;     )
-;;   )
-;; )
+(define-public (test-standard-principal-sender-withdrawal-req-id-not-updated
+    (amount uint)
+    (max-fee uint)
+    (sender principal)
+    (recipient { version: (buff 1), hashbytes: (buff 32) })
+    (height uint)
+  )
+  (let
+    (
+      (last-withdrawal-req-id-before (var-get last-withdrawal-request-id))
+      (withdrawal-request-result
+        (create-withdrawal-request amount max-fee sender recipient height)
+      )
+    )
+    (asserts!
+      (is-eq
+        (var-get last-withdrawal-request-id)
+        last-withdrawal-req-id-before
+      )
+      ERR_ASSERTION_FAILED
+    )
+    (ok true)
+  )
+)
 
-(define-public (test-complete-withdrawal-reject
+(define-public (test-standard-principal-sender-withdrawal-accept-unauthorized
+    (request-id uint)
+		(bitcoin-txid (buff 32))
+		(output-index uint)
+		(signer-bitmap uint)
+		(fee uint)
+		(burn-hash (buff 32))
+		(burn-height uint)
+		(sweep-txid (buff 32))
+  )
+  (begin
+    (asserts!
+      (is-eq
+        (complete-withdrawal-accept
+          request-id
+          bitcoin-txid
+          output-index
+          signer-bitmap
+          fee
+          burn-hash
+          burn-height
+          sweep-txid
+        )
+        ERR_UNAUTHORIZED
+      )
+      ERR_ASSERTION_FAILED
+    )
+    (ok true)
+  )
+)
+
+(define-public (test-standard-principal-sender-withdrawal-reject-unauthorized
     (request-id uint)
     (signer-bitmap uint)
   )
-  (if
-    (not (is-eq deployer contract-caller))
-    (ok false)
-    (begin
-      (try! (complete-withdrawal-reject request-id signer-bitmap))
-      (asserts!
-        (is-eq
-          (unwrap-panic (map-get? withdrawal-status request-id))
-          false
-        )
-        ERR_ASSERTION_FAILED
+  (begin
+    (asserts!
+      (is-eq
+        (complete-withdrawal-reject request-id signer-bitmap)
+        ERR_UNAUTHORIZED
       )
-      (ok true)
+      ERR_ASSERTION_FAILED
     )
-  )
-)
-
-(define-public (test-withdrawal-req-id-incremented
-    (amount uint)
-    (max-fee uint)
-    (sender principal)
-    (recipient { version: (buff 1), hashbytes: (buff 32) })
-    (height uint)
-  )
-  (if
-    (not (is-eq deployer contract-caller))
-    (ok false)
-    (let
-      (
-        (last-withdrawal-req-id-before (var-get last-withdrawal-request-id))
-      )
-      (try! (create-withdrawal-request amount max-fee sender recipient height))
-      (asserts!
-        (is-eq
-          (var-get last-withdrawal-request-id)
-          (+ last-withdrawal-req-id-before u1)
-        )
-        ERR_ASSERTION_FAILED
-      )
-      (ok true)
-    )
-  )
-)
-
-(define-public (test-withdrawal-req-id-non-deployer
-    (amount uint)
-    (max-fee uint)
-    (sender principal)
-    (recipient { version: (buff 1), hashbytes: (buff 32) })
-    (height uint)
-  )
-  (if
-    (is-eq deployer contract-caller)
-    (ok false)
-    (let
-      (
-        (unwrap-error (err u9999))
-        (withdrawal-request-result
-          (create-withdrawal-request amount max-fee sender recipient height)
-        )
-      )
-      (asserts!
-        (is-eq
-          (unwrap-err! withdrawal-request-result unwrap-error)
-          u400
-        )
-        ERR_ASSERTION_FAILED
-      )
-      (ok true)
-    )
-  )
-)
-
-(define-public (test-withdrawal-req-id-not-updated-non-deployer
-    (amount uint)
-    (max-fee uint)
-    (sender principal)
-    (recipient { version: (buff 1), hashbytes: (buff 32) })
-    (height uint)
-  )
-  (if
-    (is-eq deployer contract-caller)
-    (ok false)
-    (let
-      (
-        (last-withdrawal-req-id-before (var-get last-withdrawal-request-id))
-        (withdrawal-request-result
-          (create-withdrawal-request amount max-fee sender recipient height)
-        )
-      )
-      (asserts!
-        (is-eq
-          (var-get last-withdrawal-request-id)
-          last-withdrawal-req-id-before
-        )
-        ERR_ASSERTION_FAILED
-      )
-      (ok true)
-    )
+    (ok true)
   )
 )
