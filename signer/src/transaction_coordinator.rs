@@ -185,8 +185,6 @@ pub struct GetPendingRequestsParams<'a> {
     pub stacks_chain_tip: &'a model::StacksBlockHash,
     /// The current signers' aggregate key.
     pub aggregate_key: &'a PublicKey,
-    /// The public keys of the current signer set.
-    pub signer_public_keys: &'a BTreeSet<PublicKey>,
     /// The current sBTC limits.
     pub sbtc_limits: &'a SbtcLimits,
     /// The threshold for the minimum number of 'accept' votes required for a
@@ -321,8 +319,7 @@ where
         // we need to know the aggregate key for constructing bitcoin
         // transactions. We need to know the current signing set and the
         // current aggregate key.
-        let maybe_aggregate_key = self.context.state().current_aggregate_key();
-        let signer_public_keys = self.context.state().current_signer_public_keys();
+        let maybe_aggregate_key = self.context.state().registry_current_aggregate_key();
 
         // If we are not the coordinator, then we have no business
         // coordinating DKG or constructing bitcoin and stacks
@@ -366,6 +363,12 @@ where
 
         self.check_and_submit_rotate_key_transaction(chain_tip_hash, &wallet, &aggregate_key)
             .await?;
+
+        let signer_public_keys = self
+            .context
+            .state()
+            .registry_current_signer_set()
+            .ok_or_else(|| Error::NoDkgShares)?;
 
         let bitcoin_processing_fut = self.construct_and_sign_bitcoin_sbtc_transactions(
             &bitcoin_chain_tip,
@@ -2130,7 +2133,6 @@ where
             bitcoin_chain_tip,
             stacks_chain_tip,
             aggregate_key,
-            signer_public_keys,
             signature_threshold: self.threshold,
             sbtc_limits: &sbtc_limits,
         };
@@ -2544,19 +2546,20 @@ pub async fn should_coordinate_dkg(
     }
 
     // Trigger dkg if signatures_required has changed
-    if context.state().current_signatures_required() != config.signer.bootstrap_signatures_required
-    {
+    let bootstrap_signatures_required = Some(config.signer.bootstrap_signatures_required);
+    if context.state().registry_signatures_required() != bootstrap_signatures_required {
         tracing::info!("signatures required has changed; proceeding with DKG");
         return Ok(true);
     }
 
-    // Trigger dkg if signer set changes
-    let signer_set_changed = !context
+    // Trigger dkg if signer set changes. This also triggers DKG if we do
+    // not have a key rotation event in the database.
+    let signer_set_unchanged = context
         .state()
-        .current_signer_set()
-        .has_same_pubkeys(&config.signer.bootstrap_signing_set);
+        .registry_current_signer_set()
+        .is_some_and(|signer_set| signer_set == config.signer.bootstrap_signing_set);
 
-    if signer_set_changed {
+    if !signer_set_unchanged {
         tracing::info!("signer set has changed; proceeding with DKG");
         return Ok(true);
     }
