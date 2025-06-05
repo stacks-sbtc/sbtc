@@ -70,7 +70,7 @@
         (or (not (is-eq tx-sender deployer)) (is-eq amount u0))
         false
         (begin
-          (try! (protocol-mint amount address))
+          (try! (protocol-mint amount address 0x00))
           (asserts!
             (is-eq
               (unwrap-panic (get-balance-available address))
@@ -91,7 +91,7 @@
           (> amount initial-balance))
         false
         (begin
-          (try! (protocol-burn amount address))
+          (try! (protocol-burn amount address 0x00))
           (asserts!
             (is-eq
               (unwrap-panic (get-balance-available address))
@@ -166,7 +166,7 @@
           (> amount initial-balance))
         false
         (begin
-          (try! (protocol-lock amount address))
+          (try! (protocol-lock amount address 0x00))
           (asserts!
             (is-eq
               (unwrap-panic (get-balance-locked address))
@@ -188,7 +188,7 @@
           (> amount initial-balance))
         false
         (begin
-          (try! (protocol-lock amount address))
+          (try! (protocol-lock amount address 0x00))
           (asserts!
             (is-eq
               (unwrap-panic (get-balance-available address))
@@ -210,7 +210,7 @@
           (> amount initial-locked-balance))
         false
         (begin
-          (try! (protocol-unlock amount address))
+          (try! (protocol-unlock amount address 0x00))
           (asserts!
             (is-eq
               (unwrap-panic (get-balance-locked address))
@@ -232,7 +232,7 @@
           (> amount initial-locked-balance))
         false
         (begin
-          (try! (protocol-unlock amount address))
+          (try! (protocol-unlock amount address 0x00))
           (asserts!
             (is-eq
               (unwrap-panic (get-balance-available address))
@@ -254,7 +254,7 @@
           (> amount initial-locked-balance))
         false
         (begin
-          (try! (protocol-burn-locked amount address))
+          (try! (protocol-burn-locked amount address 0x00))
           (asserts!
             (is-eq
               (unwrap-panic (get-balance-locked address))
@@ -274,7 +274,7 @@
           (is-eq new-name initial-name))
         false
         (begin
-          (try! (protocol-set-name new-name))
+          (try! (protocol-set-name new-name 0x00))
           (asserts!
             (is-eq
               (unwrap-panic (get-name))
@@ -294,7 +294,7 @@
           (is-eq initial-uri new-uri))
         false
         (begin
-          (try! (protocol-set-token-uri new-uri))
+          (try! (protocol-set-token-uri new-uri 0x00))
           (asserts!
             (is-eq
               (unwrap-panic (get-token-uri))
@@ -314,7 +314,7 @@
           (is-eq new-symbol initial-symbol))
         false
         (begin
-          (try! (protocol-set-symbol new-symbol))
+          (try! (protocol-set-symbol new-symbol 0x00))
           (asserts!
             (is-eq
               (unwrap-panic (get-symbol))
