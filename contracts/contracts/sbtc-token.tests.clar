@@ -173,15 +173,28 @@
 )
 
 ;; Protocol Lock
-(define-public (test-protocol-lock-unauthorized-governance-role
-    (owner principal)
+
+(define-data-var amount-lock-tmp uint u0)
+(define-data-var owner-lock-tmp principal tx-sender)
+
+(define-public (test-protocol-lock-unauthorized
     (amount uint)
+    (owner principal)
   )
   (begin
+    (var-set amount-lock-tmp amount)
+    (var-set owner-lock-tmp owner)
     (asserts!
       (is-eq
-        (protocol-lock amount owner registry-governance-role)
-        REGISTRY_ERR_UNAUTHORIZED
+        (map
+          test-protocol-lock-unauthorized-inner
+          (list
+            registry-governance-role
+            registry-deposit-role
+            registry-withdrawal-role
+          )
+        )
+        (list (ok true) (ok true) (ok true))
       )
       ERR_ASSERTION_FAILED
     )
@@ -189,30 +202,17 @@
   )
 )
 
-(define-public (test-protocol-lock-unauthorized-deposit-role
-    (owner principal)
-    (amount uint)
+(define-private (test-protocol-lock-unauthorized-inner
+    (contract-flag (buff 1))
   )
   (begin
     (asserts!
       (is-eq
-        (protocol-lock amount owner registry-deposit-role)
-        REGISTRY_ERR_UNAUTHORIZED
-      )
-      ERR_ASSERTION_FAILED
-    )
-    (ok true)
-  )
-)
-
-(define-public (test-protocol-lock-unauthorized-withdrawal-role
-    (owner principal)
-    (amount uint)
-  )
-  (begin
-    (asserts!
-      (is-eq
-        (protocol-lock amount owner registry-withdrawal-role)
+        (protocol-lock
+          (var-get amount-lock-tmp)
+          (var-get owner-lock-tmp)
+          contract-flag
+        )
         REGISTRY_ERR_UNAUTHORIZED
       )
       ERR_ASSERTION_FAILED
@@ -373,7 +373,7 @@
     (asserts!
       (is-eq
         (map
-          set-token-uri-unauthorized-inner
+          test-set-token-uri-unauthorized-inner
           (list
             registry-governance-role
             registry-deposit-role
@@ -388,7 +388,7 @@
   )
 )
 
-(define-private (set-token-uri-unauthorized-inner (contract-flag (buff 1)))
+(define-private (test-set-token-uri-unauthorized-inner (contract-flag (buff 1)))
   (begin
     (asserts!
       (is-eq
@@ -413,7 +413,7 @@
     (asserts!
       (is-eq
         (map
-          set-symbol-unauthorized-inner
+          test-set-symbol-unauthorized-inner
           (list
             registry-governance-role
             registry-deposit-role
@@ -428,7 +428,7 @@
   )
 )
 
-(define-private (set-symbol-unauthorized-inner (contract-flag (buff 1)))
+(define-private (test-set-symbol-unauthorized-inner (contract-flag (buff 1)))
   (begin
     (asserts!
       (is-eq
