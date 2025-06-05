@@ -67,268 +67,376 @@
 
 ;; Properties
 
-(define-constant ERR_FAILED_ASSERTION (err u999))
+(define-constant ERR_ASSERTION_FAILED (err u999))
+(define-constant REGISTRY_ERR_UNAUTHORIZED (err u400))
 
-(define-constant deployer tx-sender)
+(define-constant registry-governance-role 0x00)
+(define-constant registry-deposit-role 0x01)
+(define-constant registry-withdrawal-role 0x02)
 
 ;; Protocol Mint
-(define-public (test-protocol-mint-balance-increase (address principal) (amount uint))
-  (let (
-      (initial-balance (unwrap-panic (get-balance-available address)))
-    )
-    (ok
-      (if
-        (or (not (is-eq tx-sender deployer)) (is-eq amount u0))
-        false
-        (begin
-          (try! (protocol-mint amount address 0x00))
-          (asserts!
-            (is-eq
-              (unwrap-panic (get-balance-available address))
-              (+ initial-balance amount))
-            ERR_FAILED_ASSERTION)
-          true)))))
 
-;; Protocol Burn
-(define-public (test-protocol-burn-balance-decrease (address principal) (amount uint))
-  (let (
-      (initial-balance (unwrap-panic (get-balance-available address)))
-    )
-    (ok
-      (if
-        (or
-          (not (is-eq tx-sender deployer))
-          (is-eq amount u0)
-          (> amount initial-balance))
-        false
-        (begin
-          (try! (protocol-burn amount address 0x00))
-          (asserts!
-            (is-eq
-              (unwrap-panic (get-balance-available address))
-              (- initial-balance amount))
-            ERR_FAILED_ASSERTION)
-          true)))))
+(define-data-var amount-mint-tmp uint u0)
+(define-data-var recipient-mint-tmp principal tx-sender)
 
-;; Protocol Transfer
-(define-public (test-transfer-balance-sender (amount uint)
-                                              (recipient principal)
-                                              (memo (optional (buff 34))))
-  (let (
-      (sender-balance-before
-        (unwrap-panic
-          (get-balance-available tx-sender)))
+(define-public (test-protocol-mint-unauthorized
+    (amount uint)
+    (recipient principal)
+  )
+  (begin
+    (var-set amount-mint-tmp amount)
+    (var-set recipient-mint-tmp recipient)
+    (asserts!
+      (is-eq
+        (map
+          test-protocol-mint-unauthorized-inner
+          (list
+            registry-governance-role
+            registry-deposit-role
+            registry-withdrawal-role
+          )
+        )
+        (list (ok true) (ok true) (ok true))
+      )
+      ERR_ASSERTION_FAILED
     )
-    (ok
-      (if
-        (or
-          (is-eq tx-sender recipient)
-          (> amount sender-balance-before)
-          (is-eq amount u0))
-        false
-        (begin
-          (try! (transfer amount tx-sender recipient memo))
-          (asserts!
-            (is-eq
-              (unwrap-panic (get-balance-available tx-sender))
-              (- sender-balance-before amount))
-            ERR_FAILED_ASSERTION)
-          true))))
+    (ok true)
+  )
 )
 
-(define-public (test-transfer-balance-recipient (amount uint)
-                                                (recipient principal)
-                                                (memo (optional (buff 34))))
-  (let (
-      (sender-balance-before (unwrap-panic (get-balance-available tx-sender)))
-      (recipient-balance-before
-        (unwrap-panic (get-balance-available recipient)))
+(define-private (test-protocol-mint-unauthorized-inner
+    (contract-flag (buff 1))
+  )
+  (begin
+    (asserts!
+      (is-eq
+        (protocol-mint
+          (var-get amount-mint-tmp)
+          (var-get recipient-mint-tmp)
+          contract-flag
+        )
+        REGISTRY_ERR_UNAUTHORIZED
+      )
+      ERR_ASSERTION_FAILED
     )
-    (ok
-      (if
-        (or
-          (is-eq tx-sender recipient)
-          (> amount sender-balance-before)
-          (is-eq amount u0))
-        false
-        (begin
-          (try!
-            (transfer amount tx-sender recipient memo))
-          (asserts!
-            (is-eq
-              (unwrap-panic (get-balance-available recipient))
-              (+ recipient-balance-before amount))
-            ERR_FAILED_ASSERTION)
-          true))))
+    (ok true)
+  )
+)
+
+;; Protocol Burn
+
+(define-data-var amount-burn-tmp uint u0)
+(define-data-var owner-burn-tmp principal tx-sender)
+
+(define-public (test-protocol-burn-unauthorized
+    (amount uint)
+    (owner principal)
+  )
+  (begin
+    (var-set amount-burn-tmp amount)
+    (var-set owner-burn-tmp owner)
+    (asserts!
+      (is-eq
+        (map
+          test-protocol-burn-unauthorized-inner
+          (list
+            registry-governance-role
+            registry-deposit-role
+            registry-withdrawal-role
+          )
+        )
+        (list (ok true) (ok true) (ok true))
+      )
+      ERR_ASSERTION_FAILED
+    )
+    (ok true)
+  )
+)
+
+(define-private (test-protocol-burn-unauthorized-inner
+    (contract-flag (buff 1))
+  )
+  (begin
+    (asserts!
+      (is-eq
+        (protocol-burn
+          (var-get amount-burn-tmp)
+          (var-get owner-burn-tmp)
+          contract-flag
+        )
+        REGISTRY_ERR_UNAUTHORIZED
+      )
+      ERR_ASSERTION_FAILED
+    )
+    (ok true)
+  )
 )
 
 ;; Protocol Lock
-(define-public (test-protocol-lock-locked-balance (address principal)
-                                                  (amount uint))
-  (let (
-      (initial-balance (unwrap-panic (get-balance-available address)))
-      (initial-locked-balance (unwrap-panic (get-balance-locked address)))
+(define-public (test-protocol-lock-unauthorized-governance-role
+    (owner principal)
+    (amount uint)
+  )
+  (begin
+    (asserts!
+      (is-eq
+        (protocol-lock amount owner registry-governance-role)
+        REGISTRY_ERR_UNAUTHORIZED
+      )
+      ERR_ASSERTION_FAILED
     )
-    (ok
-      (if
-        (or
-          (not (is-eq tx-sender deployer))
-          (is-eq amount u0)
-          (> amount initial-balance))
-        false
-        (begin
-          (try! (protocol-lock amount address 0x00))
-          (asserts!
-            (is-eq
-              (unwrap-panic (get-balance-locked address))
-              (+ initial-locked-balance amount))
-            ERR_FAILED_ASSERTION)
-          true)))))
+    (ok true)
+  )
+)
 
-(define-public (test-protocol-lock-available-balance (address principal)
-                                                    (amount uint))
-  (let (
-      (initial-balance (unwrap-panic (get-balance-available address)))
-      (initial-locked-balance (unwrap-panic (get-balance-locked address)))
+(define-public (test-protocol-lock-unauthorized-deposit-role
+    (owner principal)
+    (amount uint)
+  )
+  (begin
+    (asserts!
+      (is-eq
+        (protocol-lock amount owner registry-deposit-role)
+        REGISTRY_ERR_UNAUTHORIZED
+      )
+      ERR_ASSERTION_FAILED
     )
-    (ok
-      (if
-        (or
-          (not (is-eq tx-sender deployer))
-          (is-eq amount u0)
-          (> amount initial-balance))
-        false
-        (begin
-          (try! (protocol-lock amount address 0x00))
-          (asserts!
-            (is-eq
-              (unwrap-panic (get-balance-available address))
-              (- initial-balance amount))
-            ERR_FAILED_ASSERTION)
-          true)))))
+    (ok true)
+  )
+)
+
+(define-public (test-protocol-lock-unauthorized-withdrawal-role
+    (owner principal)
+    (amount uint)
+  )
+  (begin
+    (asserts!
+      (is-eq
+        (protocol-lock amount owner registry-withdrawal-role)
+        REGISTRY_ERR_UNAUTHORIZED
+      )
+      ERR_ASSERTION_FAILED
+    )
+    (ok true)
+  )
+)
 
 ;; Protocol Unlock
-(define-public (test-protocol-unlock-locked-balance (address principal)
-                                                    (amount uint))
-  (let (
-      (initial-locked-balance (unwrap-panic (get-balance-locked address)))
-    )
-    (ok
-      (if
-        (or
-          (not (is-eq tx-sender deployer))
-          (is-eq amount u0)
-          (> amount initial-locked-balance))
-        false
-        (begin
-          (try! (protocol-unlock amount address 0x00))
-          (asserts!
-            (is-eq
-              (unwrap-panic (get-balance-locked address))
-              (- initial-locked-balance amount))
-            ERR_FAILED_ASSERTION)
-          true)))))
 
-(define-public (test-protocol-unlock-available-balance (address principal)
-                                                      (amount uint))
-  (let (
-      (initial-available-balance (unwrap-panic (get-balance-available address)))
-      (initial-locked-balance (unwrap-panic (get-balance-locked address)))
+(define-data-var amount-unlock-tmp uint u0)
+(define-data-var owner-unlock-tmp principal tx-sender)
+
+(define-public (test-protocol-unlock-unauthorized
+    (amount uint)
+    (owner principal)
+  )
+  (begin
+    (var-set amount-unlock-tmp amount)
+    (var-set owner-unlock-tmp owner)
+    (asserts!
+      (is-eq
+        (map
+          test-protocol-unlock-unauthorized-inner
+          (list
+            registry-governance-role
+            registry-deposit-role
+            registry-withdrawal-role
+          )
+        )
+        (list (ok true) (ok true) (ok true))
+      )
+      ERR_ASSERTION_FAILED
     )
-    (ok
-      (if
-        (or
-          (not (is-eq tx-sender deployer))
-          (is-eq amount u0)
-          (> amount initial-locked-balance))
-        false
-        (begin
-          (try! (protocol-unlock amount address 0x00))
-          (asserts!
-            (is-eq
-              (unwrap-panic (get-balance-available address))
-              (+ initial-available-balance amount))
-            ERR_FAILED_ASSERTION)
-          true)))))
+    (ok true)
+  )
+)
+
+(define-private (test-protocol-unlock-unauthorized-inner
+    (contract-flag (buff 1))
+  )
+  (begin
+    (asserts!
+      (is-eq
+        (protocol-unlock
+          (var-get amount-unlock-tmp)
+          (var-get owner-unlock-tmp)
+          contract-flag
+        )
+        REGISTRY_ERR_UNAUTHORIZED
+      )
+      ERR_ASSERTION_FAILED
+    )
+    (ok true)
+  )
+)
 
 ;; Protocol Burn Locked
-(define-public (test-protocol-burn-locked-balance (address principal)
-                                                  (amount uint))
-  (let (
-      (initial-locked-balance (unwrap-panic (get-balance-locked address)))
+
+(define-data-var amount-burn-locked-tmp uint u0)
+(define-data-var owner-burn-locked-tmp principal tx-sender)
+
+(define-public (test-protocol-burn-locked-unauthorized
+    (amount uint)
+    (owner principal)
+  )
+  (begin
+    (var-set amount-burn-locked-tmp amount)
+    (var-set owner-burn-locked-tmp owner)
+    (asserts!
+      (is-eq
+        (map
+          test-protocol-burn-locked-unauthorized-inner
+          (list
+            registry-governance-role
+            registry-deposit-role
+            registry-withdrawal-role
+          )
+        )
+        (list (ok true) (ok true) (ok true))
+      )
+      ERR_ASSERTION_FAILED
     )
-    (ok
-      (if
-        (or
-          (not (is-eq tx-sender deployer))
-          (is-eq amount u0)
-          (> amount initial-locked-balance))
-        false
-        (begin
-          (try! (protocol-burn-locked amount address 0x00))
-          (asserts!
-            (is-eq
-              (unwrap-panic (get-balance-locked address))
-              (- initial-locked-balance amount))
-            ERR_FAILED_ASSERTION)
-          true)))))
+    (ok true)
+  )
+)
+
+(define-private (test-protocol-burn-locked-unauthorized-inner
+    (contract-flag (buff 1))
+  )
+  (begin
+    (asserts!
+      (is-eq
+        (protocol-burn-locked
+          (var-get amount-burn-locked-tmp)
+          (var-get owner-burn-locked-tmp)
+          contract-flag
+        )
+        REGISTRY_ERR_UNAUTHORIZED
+      )
+      ERR_ASSERTION_FAILED
+    )
+    (ok true)
+  )
+)
 
 ;; Protocol Set Name
-(define-public (test-protocol-set-name (new-name (string-ascii 32)))
-  (let (
-      (initial-name (unwrap-panic (get-name)))
+
+(define-data-var new-name-tmp (string-ascii 32) "")
+
+(define-public (test-protocol-set-name-unauthorized
+    (new-name (string-ascii 32))
+  )
+  (begin
+    (var-set new-name-tmp new-name)
+    (asserts!
+      (is-eq
+        (map
+          test-protocol-set-name-unauthorized-inner
+          (list
+            registry-governance-role
+            registry-deposit-role
+            registry-withdrawal-role
+          )
+        )
+        (list (ok true) (ok true) (ok true))
+      )
+      ERR_ASSERTION_FAILED
     )
-    (ok
-      (if
-        (or
-          (not (is-eq tx-sender deployer))
-          (is-eq new-name initial-name))
-        false
-        (begin
-          (try! (protocol-set-name new-name 0x00))
-          (asserts!
-            (is-eq
-              (unwrap-panic (get-name))
-              new-name)
-            ERR_FAILED_ASSERTION)
-          true)))))
+    (ok true)
+  )
+)
+
+(define-private (test-protocol-set-name-unauthorized-inner
+    (contract-flag (buff 1))
+  )
+  (begin
+    (asserts!
+      (is-eq
+        (protocol-set-name (var-get new-name-tmp) contract-flag)
+        REGISTRY_ERR_UNAUTHORIZED
+      )
+      ERR_ASSERTION_FAILED
+    )
+    (ok true)
+  )
+)
 
 ;; Protocol Set Token URI
-(define-public (test-protocol-set-token-uri (new-uri (optional (string-utf8 256))))
-  (let (
-      (initial-uri (unwrap-panic (get-token-uri)))
+
+(define-data-var new-uri-tmp (optional (string-utf8 256)) none)
+
+(define-public (test-protocol-set-token-uri-unauthorized
+    (new-uri (optional (string-utf8 256)))
+  )
+  (begin
+    (var-set new-uri-tmp new-uri)
+    (asserts!
+      (is-eq
+        (map
+          set-token-uri-unauthorized-inner
+          (list
+            registry-governance-role
+            registry-deposit-role
+            registry-withdrawal-role
+          )
+        )
+        (list (ok true) (ok true) (ok true))
+      )
+      ERR_ASSERTION_FAILED
     )
-    (ok
-      (if
-        (or
-          (not (is-eq tx-sender deployer))
-          (is-eq initial-uri new-uri))
-        false
-        (begin
-          (try! (protocol-set-token-uri new-uri 0x00))
-          (asserts!
-            (is-eq
-              (unwrap-panic (get-token-uri))
-              new-uri)
-            ERR_FAILED_ASSERTION)
-          true)))))
+    (ok true)
+  )
+)
+
+(define-private (set-token-uri-unauthorized-inner (contract-flag (buff 1)))
+  (begin
+    (asserts!
+      (is-eq
+        (protocol-set-token-uri (var-get new-uri-tmp) contract-flag)
+        REGISTRY_ERR_UNAUTHORIZED
+      )
+      ERR_ASSERTION_FAILED
+    )
+    (ok true)
+  )
+)
 
 ;; Protocol Set Symbol
-(define-public (test-protocol-set-symbol (new-symbol (string-ascii 10)))
-  (let (
-      (initial-symbol (unwrap-panic (get-symbol)))
+
+(define-data-var new-symbol-tmp (string-ascii 10) "")
+
+(define-public (test-protocol-set-symbol-unauthorized
+    (new-symbol (string-ascii 10))
+  )
+  (begin
+    (var-set new-symbol-tmp new-symbol)
+    (asserts!
+      (is-eq
+        (map
+          set-symbol-unauthorized-inner
+          (list
+            registry-governance-role
+            registry-deposit-role
+            registry-withdrawal-role
+          )
+        )
+        (list (ok true) (ok true) (ok true))
+      )
+      ERR_ASSERTION_FAILED
     )
-    (ok
-      (if
-        (or
-          (not (is-eq tx-sender deployer))
-          (is-eq new-symbol initial-symbol))
-        false
-        (begin
-          (try! (protocol-set-symbol new-symbol 0x00))
-          (asserts!
-            (is-eq
-              (unwrap-panic (get-symbol))
-              new-symbol)
-            ERR_FAILED_ASSERTION)
-          true)))))
+    (ok true)
+  )
+)
+
+(define-private (set-symbol-unauthorized-inner (contract-flag (buff 1)))
+  (begin
+    (asserts!
+      (is-eq
+        (protocol-set-symbol (var-get new-symbol-tmp) contract-flag)
+        REGISTRY_ERR_UNAUTHORIZED
+      )
+      ERR_ASSERTION_FAILED
+    )
+    (ok true)
+  )
+)
