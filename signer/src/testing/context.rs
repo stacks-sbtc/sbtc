@@ -217,7 +217,7 @@ impl<Storage, Bitcoin, Stacks>
 /// functionality in some of our tests, so this function makes sure that
 /// DKG won't be triggered because of changes in this parameter.
 pub fn prevent_dkg_on_changed_signer_set_info<Storage, Bitcoin, Stacks, Emily>(
-    context: &mut TestContext<Storage, Bitcoin, Stacks, Emily>,
+    context: &TestContext<Storage, Bitcoin, Stacks, Emily>,
     aggregate_key: PublicKey,
 ) where
     Storage: DbRead + DbWrite + Clone + Sync + Send + 'static,
@@ -225,7 +225,7 @@ pub fn prevent_dkg_on_changed_signer_set_info<Storage, Bitcoin, Stacks, Emily>(
     Stacks: StacksInteract + Clone + Send + Sync + 'static,
     Emily: EmilyInteract + Clone + Send + Sync + 'static,
 {
-    let config = context.config_mut();
+    let config = context.config();
     let signer_set_info = SignerSetInfo {
         aggregate_key,
         signatures_required: config.signer.bootstrap_signatures_required,

@@ -73,6 +73,7 @@ use url::Url;
 
 use crate::setup::IntoEmilyTestingConfig as _;
 use crate::setup::TestSweepSetup;
+use crate::setup::backfill_bitcoin_blocks;
 use crate::transaction_coordinator::mock_reqwests_status_code_error;
 use crate::utxo_construction::make_deposit_request;
 use crate::zmq::BITCOIN_CORE_ZMQ_ENDPOINT;
@@ -1315,7 +1316,7 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
     // We start with the typical setup with a fresh database and context
     // with a real bitcoin core client and a real connection to our
     // database.
-    let (_, faucet) = regtest::initialize_blockchain();
+    let (rpc, faucet) = regtest::initialize_blockchain();
     let db = testing::storage::new_test_database().await;
     let verification_window = 5;
     let mut ctx = TestContext::builder()
@@ -1325,6 +1326,11 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
         .with_mocked_emily_client()
         .with_mocked_stacks_client()
         .build();
+
+    // We backfill the blockchain data in the database so that the block
+    // observer doesn't need do it, speeding up the test.
+    let chain_tip_info = get_canonical_chain_tip(rpc);
+    backfill_bitcoin_blocks(&db, rpc, &chain_tip_info.hash).await;
 
     // We need to set up the stacks client as well. We use it to fetch
     // information about the Stacks blockchain, so we need to prep it, even
@@ -1444,6 +1450,9 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
 
     // Now we have a DKG shares entry
     assert_eq!(storage.get_encrypted_dkg_shares_count().await.unwrap(), 1);
+    // We want to make sure that we don't allow DKG because of the signer
+    // set info being unset, so we set it now.
+    prevent_dkg_on_changed_signer_set_info(&ctx, dkg_shares.aggregate_key);
 
     // Signers and coordinator should NOT allow DKG
     assert!(!should_coordinate_dkg(&ctx, &db_chain_tip).await.unwrap());
@@ -1477,8 +1486,6 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
             .expect("missing latest dkg shares");
         assert_eq!(latest_dkg, dkg_shares);
         assert_eq!(storage.get_encrypted_dkg_shares_count().await.unwrap(), 1);
-
-        prevent_dkg_on_changed_signer_set_info(&mut ctx, latest_dkg.aggregate_key);
 
         // Signers and coordinator should NOT allow DKG
         assert!(!should_coordinate_dkg(&ctx, &db_chain_tip).await.unwrap());
