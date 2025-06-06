@@ -1832,8 +1832,8 @@ mod tests {
             .await
             .unwrap();
 
-        prevent_dkg_on_changed_signer_set(&mut context);
-        prevent_dkg_on_changed_signatures_required(&mut context);
+        let aggregate_key = Faker.fake();
+        prevent_dkg_on_changed_signer_set_info(&mut context, aggregate_key);
 
         // Test the case
         let result = assert_allow_dkg_begin(&context, &bitcoin_chain_tip).await;
@@ -1878,8 +1878,8 @@ mod tests {
             .await
             .unwrap();
 
-        prevent_dkg_on_changed_signer_set(&mut context);
-        prevent_dkg_on_changed_signatures_required(&mut context);
+        let aggregate_key = Faker.fake();
+        prevent_dkg_on_changed_signer_set_info(&mut context, aggregate_key);
 
         // Create our signer instance.
         let mut signer = TxSignerEventLoop {

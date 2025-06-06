@@ -1478,8 +1478,7 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
         assert_eq!(latest_dkg, dkg_shares);
         assert_eq!(storage.get_encrypted_dkg_shares_count().await.unwrap(), 1);
 
-        prevent_dkg_on_changed_signer_set(&mut ctx);
-        prevent_dkg_on_changed_signatures_required(&mut ctx);
+        prevent_dkg_on_changed_signer_set_info(&mut ctx, latest_dkg.aggregate_key);
 
         // Signers and coordinator should NOT allow DKG
         assert!(!should_coordinate_dkg(&ctx, &db_chain_tip).await.unwrap());
