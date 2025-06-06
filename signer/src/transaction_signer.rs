@@ -390,11 +390,11 @@ where
             .is_some();
         let is_canonical = msg_bitcoin_chain_tip == &chain_tip.block_hash;
 
-        let signer_set = self.context.state().current_signer_public_keys();
+        let signer_set = &self.context.config().signer.bootstrap_signing_set;
         let sender_is_coordinator = crate::transaction_coordinator::given_key_is_coordinator(
             msg_sender,
             &chain_tip.block_hash,
-            &signer_set,
+            signer_set,
         );
 
         let chain_tip_status = match (is_known, is_canonical) {
@@ -644,11 +644,14 @@ where
                 assert_allow_dkg_begin(&self.context, chain_tip).await?;
 
                 tracing::debug!("processing message");
-                let signer_public_keys = self.context.state().current_signer_public_keys();
+                let signer_public_keys = self.context.config().signer.bootstrap_signing_set.clone();
+                // The as _ cast is okay because we are going from a u16 to
+                // a u32, which is always okay.
+                let threshold = self.context.config().signer.bootstrap_signatures_required as u32;
 
                 let state_machine = SignerStateMachine::new(
                     signer_public_keys,
-                    self.threshold,
+                    threshold,
                     self.signer_private_key,
                 )?;
                 let state_machine_id = StateMachineId::Dkg(*chain_tip);
@@ -850,13 +853,8 @@ where
                 };
 
                 // Create a new `SignerStateMachine`.
-                let state_machine = SignerStateMachine::load(
-                    &db,
-                    aggregate_key,
-                    self.threshold,
-                    self.signer_private_key,
-                )
-                .await?;
+                let state_machine =
+                    SignerStateMachine::load(&db, aggregate_key, self.signer_private_key).await?;
 
                 // Put the state machine into the cache.
                 self.wsts_state_machines
@@ -1242,14 +1240,8 @@ where
         );
 
         // Create the WSTS FROST coordinator.
-        let coordinator = FrostCoordinator::load(
-            storage,
-            aggregate_key,
-            signing_set,
-            dkg_shares.signature_share_threshold,
-            signer_private_key,
-        )
-        .await?;
+        let coordinator =
+            FrostCoordinator::load(storage, aggregate_key, signer_private_key).await?;
 
         // Create the DKG verification state machine using the above coordinator.
         let state_machine = dkg::verification::StateMachine::new(coordinator, aggregate_key, None)

@@ -327,7 +327,7 @@ where
         // If we are not the coordinator, then we have no business
         // coordinating DKG or constructing bitcoin and stacks
         // transactions, might as well return early.
-        if !self.is_coordinator(bitcoin_chain_tip.as_ref(), &signer_public_keys) {
+        if !self.is_coordinator(bitcoin_chain_tip.as_ref()) {
             // Before returning, we also check if all the smart contracts are
             // deployed: we do this as some other coordinator could have deployed
             // them, in which case we need to updated our state.
@@ -433,7 +433,7 @@ where
             tracing::info!(
                 "🔐 beginning DKG verification before submitting rotate-key transaction"
             );
-            self.perform_dkg_verification(bitcoin_chain_tip, &last_dkg.aggregate_key, wallet)
+            self.perform_dkg_verification(bitcoin_chain_tip, &last_dkg.aggregate_key)
                 .await?;
             tracing::info!("🔐 DKG verification successful");
         }
@@ -649,12 +649,8 @@ where
 
         // Construct, sign and broadcast the bitcoin transactions.
         for mut transaction in transaction_package {
-            self.sign_and_broadcast(
-                bitcoin_chain_tip.as_ref(),
-                signer_public_keys,
-                &mut transaction,
-            )
-            .await?;
+            self.sign_and_broadcast(bitcoin_chain_tip.as_ref(), &mut transaction)
+                .await?;
 
             // TODO: if this (considering also fallback clients) fails, we will
             // need to handle the inconsistency of having the sweep tx confirmed
@@ -1075,7 +1071,6 @@ where
         &mut self,
         bitcoin_chain_tip: &model::BitcoinBlockHash,
         aggregate_key: &PublicKey,
-        wallet: &SignerWallet,
     ) -> Result<(), Error> {
         let (x_only_pubkey, _) = aggregate_key.x_only_public_key();
 
@@ -1086,8 +1081,6 @@ where
         let mut frost_coordinator = FrostCoordinator::load(
             &self.context.get_storage(),
             aggregate_key.into(),
-            wallet.public_keys().iter().cloned(),
-            wallet.signatures_required(),
             self.private_key,
         )
         .await?;
@@ -1453,15 +1446,13 @@ where
     async fn sign_and_broadcast(
         &mut self,
         bitcoin_chain_tip: &model::BitcoinBlockHash,
-        signer_public_keys: &BTreeSet<PublicKey>,
         transaction: &mut utxo::UnsignedTransaction<'_>,
     ) -> Result<(), Error> {
+        let db = self.context.get_storage();
         let sighashes = transaction.construct_digests()?;
         let mut fire_coordinator = FireCoordinator::load(
-            &self.context.get_storage(),
+            &db,
             sighashes.signers_aggregate_key.into(),
-            signer_public_keys.clone(),
-            self.threshold,
             self.private_key,
         )
         .await?;
@@ -1501,14 +1492,9 @@ where
         for (deposit, sighash) in sighashes.deposits.into_iter() {
             let msg = sighash.to_raw_hash().to_byte_array();
 
-            let mut fire_coordinator = FireCoordinator::load(
-                &self.context.get_storage(),
-                deposit.signers_public_key.into(),
-                signer_public_keys.clone(),
-                self.threshold,
-                self.private_key,
-            )
-            .await?;
+            let locking_public_key = deposit.signers_public_key.into();
+            let mut fire_coordinator =
+                FireCoordinator::load(&db, locking_public_key, self.private_key).await?;
 
             let instant = std::time::Instant::now();
             let signature = self
@@ -1627,14 +1613,14 @@ where
         tracing::info!("Coordinating DKG");
         // Get the current signer set for running DKG.
         //
-        // Also, note that in order to change the signing set we must first
-        // run DKG (which the current function is doing), and DKG requires
-        // us to define signing set (which is returned in the next
-        // non-comment line). That function essentially uses the signing
-        // set of the last DKG (either through the last rotate-keys
-        // contract call or from the `dkg_shares` table) so we wind up
-        // never changing the signing set.
-        let signer_set = self.context.state().current_signer_public_keys();
+        // Also, note that in order to change the signing set in the
+        // SignerState we must first run DKG (which the current function is
+        // doing), and DKG requires us to define signing set (which is
+        // returned in the next non-comment line). The bootstrap signing
+        // set need not be the same set in the state, since a signer
+        // operator can change their config. When they do so, that signals
+        // that they want to run DKG and change the signer set.
+        let signer_set = self.context.config().signer.bootstrap_signing_set.clone();
 
         let mut state_machine = FireCoordinator::new(signer_set, self.threshold, self.private_key);
 
@@ -1697,7 +1683,7 @@ where
         // this assumes that the signer set doesn't change for the duration of this call,
         // but we're already assuming that the bitcoin chain tip doesn't change
         // alternately we could hit the DB every time we get a new message
-        let signer_set = self.context.state().current_signer_public_keys();
+        let signer_set = self.context.config().signer.bootstrap_signing_set.clone();
         tokio::pin!(signal_stream);
 
         // Let's get the next message from the network or the
@@ -1835,15 +1821,11 @@ where
     // Ideally the code should be formulated in a way to guarantee
     // it being infallible without relying on sequentially coupling
     // expressions. However, that is left for future work.
-    fn is_coordinator(
-        &self,
-        bitcoin_chain_tip: &model::BitcoinBlockHash,
-        signer_public_keys: &BTreeSet<PublicKey>,
-    ) -> bool {
+    fn is_coordinator(&self, bitcoin_chain_tip: &model::BitcoinBlockHash) -> bool {
         given_key_is_coordinator(
             self.signer_public_key(),
             bitcoin_chain_tip,
-            signer_public_keys,
+            &self.context.config().signer.bootstrap_signing_set,
         )
     }
 
