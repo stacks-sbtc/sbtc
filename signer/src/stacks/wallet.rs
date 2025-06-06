@@ -713,7 +713,8 @@ mod tests {
             PublicKey::combine_keys(&config.bootstrap_signing_set).unwrap();
         assert_eq!(wallet0.aggregate_key, bootstrap_aggregate_key);
 
-        ctx.state().update_registry_signer_set_info(rotate_keys.into());
+        ctx.state()
+            .update_registry_signer_set_info(rotate_keys.into());
 
         // Okay, now let's load it up and make sure things match.
         let wallet2 = SignerWallet::load(&ctx).await.unwrap();
