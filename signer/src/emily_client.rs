@@ -365,6 +365,7 @@ impl EmilyInteract for EmilyClient {
                 status: Status::Accepted,
                 fulfillment: None,
                 status_message: "".to_string(),
+                replaced_by_tx: None,
             })
             .collect();
 

@@ -500,7 +500,7 @@ async fn update_deposits(
 ) -> Result<impl warp::reply::Reply, Error> {
     // Validate request.
     let validated_request: ValidatedUpdateDepositsRequest =
-        body.try_into_validated_update_request(api_state.chaintip().into())?;
+        body.into_validated_update_request(api_state.chaintip().into());
 
     // Create aggregator.
     let mut updated_deposits: Vec<(usize, DepositWithStatus)> =
