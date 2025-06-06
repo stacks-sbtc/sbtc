@@ -2762,7 +2762,7 @@ mod tests {
         let chain_tip_height = chain_tip_height.into();
         let dkg_min_bitcoin_block_height =
             dkg_min_bitcoin_block_height.map(BitcoinBlockHeight::from);
-        let mut context = TestContext::builder()
+        let context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
             .modify_settings(|s| {
@@ -2799,7 +2799,7 @@ mod tests {
             .unwrap();
 
         let aggregate_key = Faker.fake();
-        prevent_dkg_on_changed_signer_set_info(&mut context, aggregate_key);
+        prevent_dkg_on_changed_signer_set_info(&context, aggregate_key);
 
         // Test the case
         let result = should_coordinate_dkg(&context, &bitcoin_chain_tip)

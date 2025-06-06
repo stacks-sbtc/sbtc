@@ -1796,7 +1796,7 @@ mod tests {
     ) {
         let chain_tip_height = chain_tip_height.into();
         let dkg_min_bitcoin_block_height = dkg_min_bitcoin_block_height.map(Into::into);
-        let mut context = TestContext::builder()
+        let context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
             .modify_settings(|s| {
@@ -1833,7 +1833,7 @@ mod tests {
             .unwrap();
 
         let aggregate_key = Faker.fake();
-        prevent_dkg_on_changed_signer_set_info(&mut context, aggregate_key);
+        prevent_dkg_on_changed_signer_set_info(&context, aggregate_key);
 
         // Test the case
         let result = assert_allow_dkg_begin(&context, &bitcoin_chain_tip).await;
@@ -1847,7 +1847,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_wsts_message_asserts_dkg_begin() {
-        let mut context = TestContext::builder()
+        let context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
             .build();
@@ -1879,7 +1879,7 @@ mod tests {
             .unwrap();
 
         let aggregate_key = Faker.fake();
-        prevent_dkg_on_changed_signer_set_info(&mut context, aggregate_key);
+        prevent_dkg_on_changed_signer_set_info(&context, aggregate_key);
 
         // Create our signer instance.
         let mut signer = TxSignerEventLoop {
