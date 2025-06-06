@@ -491,7 +491,7 @@ where
 
         // We need to set the nonce in order to get the exact transaction
         // that we need to sign.
-        let wallet = SignerWallet::load(&self.context, &chain_tip.block_hash).await?;
+        let wallet = SignerWallet::load(&self.context).await?;
         wallet.set_nonce(request.nonce);
 
         let multi_sig = MultisigTx::new_tx(&request.contract_tx, &wallet, request.tx_fee);

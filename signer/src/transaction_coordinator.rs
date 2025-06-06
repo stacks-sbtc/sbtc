@@ -356,7 +356,7 @@ where
         let chain_tip_hash = &bitcoin_chain_tip.block_hash;
 
         tracing::debug!("loading the signer stacks wallet");
-        let wallet = self.get_signer_wallet(chain_tip_hash).await?;
+        let wallet = self.get_signer_wallet().await?;
 
         self.deploy_smart_contracts(chain_tip_hash, &wallet, &aggregate_key)
             .await?;
@@ -2335,11 +2335,8 @@ where
         Ok(true)
     }
 
-    async fn get_signer_wallet(
-        &self,
-        chain_tip: &model::BitcoinBlockHash,
-    ) -> Result<SignerWallet, Error> {
-        let wallet = SignerWallet::load(&self.context, chain_tip).await?;
+    async fn get_signer_wallet(&self) -> Result<SignerWallet, Error> {
+        let wallet = SignerWallet::load(&self.context).await?;
 
         // We need to know the nonce to use, so we reach out to our stacks
         // node for the account information for our multi-sig address.
