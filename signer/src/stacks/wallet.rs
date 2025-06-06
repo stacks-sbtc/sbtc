@@ -447,7 +447,6 @@ mod tests {
     use crate::signature::sign_stacks_tx;
     use crate::stacks::contracts::AsContractCall;
     use crate::stacks::contracts::ReqContext;
-    use crate::storage::DbWrite;
     use crate::storage::model::KeyRotationEvent;
     use crate::storage::model::StacksPrincipal;
     use crate::testing::context::ConfigureMockedClients;
@@ -714,9 +713,7 @@ mod tests {
             PublicKey::combine_keys(&config.bootstrap_signing_set).unwrap();
         assert_eq!(wallet0.aggregate_key, bootstrap_aggregate_key);
 
-        db.write_rotate_keys_transaction(&rotate_keys)
-            .await
-            .unwrap();
+        ctx.state().update_registry_signer_set_info(rotate_keys.into());
 
         // Okay, now let's load it up and make sure things match.
         let wallet2 = SignerWallet::load(&ctx).await.unwrap();
