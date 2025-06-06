@@ -311,6 +311,12 @@ impl StacksInteract for TestHarness {
         // issue #118
         todo!()
     }
+    async fn get_current_signature_threshold(
+        &self,
+        _contract_principal: &StacksAddress,
+    ) -> Result<Option<u16>, Error> {
+        todo!()
+    }
     async fn is_deposit_completed(
         &self,
         _: &StacksAddress,

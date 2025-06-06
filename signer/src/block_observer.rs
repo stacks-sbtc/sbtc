@@ -594,8 +594,8 @@ impl<C: Context, B> BlockObserver<C, B> {
     /// execute them. The cached information is the current signer set
     /// info. It gets this information from the last successful
     /// key-rotation contract call if it exists.
-    async fn set_signer_set_info(&self, chain_tip: BlockHash) -> Result<(), Error> {
-        let info = get_signer_set_info(&self.context, chain_tip).await?;
+    async fn set_signer_set_info(&self) -> Result<(), Error> {
+        let info = get_signer_set_info(&self.context).await?;
 
         let state = self.context.state();
         if let Some(info) = info {
@@ -632,7 +632,7 @@ impl<C: Context, B> BlockObserver<C, B> {
         self.update_sbtc_limits(chain_tip).await?;
 
         tracing::info!("updating the signer state with the current signer set");
-        self.set_signer_set_info(chain_tip).await?;
+        self.set_signer_set_info().await?;
 
         tracing::info!("updating the signer state with the current bitcoin chain tip");
         self.update_bitcoin_chain_tip().await
@@ -720,20 +720,32 @@ impl From<KeyRotationEvent> for SignerSetInfo {
 /// rotate-keys transactions on the canonical stacks blockchain, then we
 /// return None.
 #[tracing::instrument(skip_all)]
-pub async fn get_signer_set_info<C, B>(
-    ctx: &C,
-    chain_tip: B,
-) -> Result<Option<SignerSetInfo>, Error>
+pub async fn get_signer_set_info<C>(ctx: &C) -> Result<Option<SignerSetInfo>, Error>
 where
     C: Context,
-    B: Into<model::BitcoinBlockHash>,
 {
-    let chain_tip = chain_tip.into();
+    let stacks = ctx.get_stacks_client();
+    let address = &ctx.config().signer.deployer;
 
-    ctx.get_storage()
-        .get_last_key_rotation(&chain_tip)
-        .await
-        .map(|event| event.map(SignerSetInfo::from))
+    let Some(aggregate_key) = stacks.get_current_signers_aggregate_key(address).await? else {
+        return Ok(None);
+    };
+
+    let Some(signatures_required) = stacks.get_current_signature_threshold(address).await? else {
+        return Ok(None);
+    };
+
+    let signer_set = stacks.get_current_signer_set(address).await?;
+
+    if signer_set.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(SignerSetInfo {
+        aggregate_key,
+        signer_set: signer_set.into_iter().collect(),
+        signatures_required,
+    }))
 }
 
 #[cfg(test)]

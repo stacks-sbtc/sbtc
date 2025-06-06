@@ -433,6 +433,17 @@ impl StacksInteract for WrappedMock<MockStacksInteract> {
             .await
     }
 
+    async fn get_current_signature_threshold(
+        &self,
+        contract_principal: &StacksAddress,
+    ) -> Result<Option<u16>, Error> {
+        self.inner
+            .lock()
+            .await
+            .get_current_signature_threshold(contract_principal)
+            .await
+    }
+
     async fn is_deposit_completed(
         &self,
         contract_principal: &StacksAddress,
