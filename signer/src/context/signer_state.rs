@@ -40,6 +40,7 @@ impl SignerState {
 
     /// Return the signatures required that is currently stored in the
     /// smart contract.
+    #[allow(clippy::unwrap_in_result)]
     pub fn registry_signatures_required(&self) -> Option<u16> {
         self.registry_signing_set_info
             .read()
@@ -50,6 +51,7 @@ impl SignerState {
 
     /// Return the public keys that are currently stored in the smart
     /// contract.
+    #[allow(clippy::unwrap_in_result)]
     pub fn registry_current_signer_set(&self) -> Option<BTreeSet<PublicKey>> {
         self.registry_signing_set_info
             .read()
@@ -68,6 +70,7 @@ impl SignerState {
 
     /// Return the aggregate key that is currently stored in the smart
     /// contract.
+    #[allow(clippy::unwrap_in_result)]
     pub fn registry_current_aggregate_key(&self) -> Option<PublicKey> {
         self.registry_signing_set_info
             .read()
@@ -78,6 +81,7 @@ impl SignerState {
 
     /// Return the signer set info that is currently stored in the smart
     /// contract.
+    #[allow(clippy::unwrap_in_result)]
     pub fn registry_signer_set_info(&self) -> Option<SignerSetInfo> {
         self.registry_signing_set_info
             .read()
