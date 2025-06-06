@@ -5,7 +5,7 @@ import os
 from datetime import datetime
 from unittest.mock import patch, MagicMock
 
-from app.models import EnrichedDepositInfo, BlockInfo, RequestStatus
+from app.models import EnrichedDepositInfo, RequestStatus
 from app.services.deposit_processor import DepositProcessor
 from app.clients.mempool import _collect_rbf_txids, MempoolAPI
 from app import settings
@@ -170,7 +170,6 @@ class TestRbfProcessor(unittest.TestCase):
         self.assertEqual(
             len(updates), 0, "No transaction should be marked as failed due to recent confirmation"
         )
-
 
 
 class TestMempoolRbfApi(unittest.TestCase):

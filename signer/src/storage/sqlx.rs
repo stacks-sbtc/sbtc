@@ -1,7 +1,5 @@
 //! This module contains implementations of structs that make reading from
 //! and writing from postgres easy.
-//!
-//!
 
 use std::ops::Deref;
 use std::str::FromStr as _;
@@ -10,6 +8,10 @@ use bitcoin::hashes::Hash as _;
 use sqlx::encode::IsNull;
 use sqlx::error::BoxDynError;
 use sqlx::postgres::PgArgumentBuffer;
+use sqlx::postgres::PgTypeInfo;
+use sqlx::postgres::types::Oid;
+use time::OffsetDateTime;
+use time::macros::datetime;
 
 use crate::keys::PublicKey;
 use crate::keys::PublicKeyXOnly;
@@ -22,6 +24,16 @@ use crate::storage::model::StacksBlockHash;
 use crate::storage::model::StacksBlockHeight;
 use crate::storage::model::StacksPrincipal;
 use crate::storage::model::StacksTxId;
+
+use super::model::Timestamp;
+
+/// The PostgreSQL epoch is 2000-01-01 00:00:00 UTC
+/// (https://en.wikipedia.org/wiki/Epoch_(computing)).
+const POSTGRES_EPOCH_DATETIME: OffsetDateTime = datetime!(2000-01-01 00:00:00 UTC);
+
+/// OID for PostgreSQL's TIMESTAMPTZ type.
+/// https://github.com/postgres/postgres/blob/5d6eac80cdce7aa7c5f4ec74208ddc1feea9eef3/src/include/catalog/pg_type.dat#L306
+const TIMESTAMPTZ_OID: Oid = Oid(1184);
 
 // For the [`ScriptPubKey`]
 
@@ -328,5 +340,56 @@ impl<'r> sqlx::Encode<'r, sqlx::Postgres> for SigHash {
 impl sqlx::postgres::PgHasArrayType for SigHash {
     fn array_type_info() -> sqlx::postgres::PgTypeInfo {
         <[u8; 32] as sqlx::postgres::PgHasArrayType>::array_type_info()
+    }
+}
+
+// --- sqlx Type implementation for Timestamp --
+
+impl sqlx::Type<sqlx::Postgres> for Timestamp {
+    fn type_info() -> PgTypeInfo {
+        PgTypeInfo::with_oid(TIMESTAMPTZ_OID)
+    }
+
+    fn compatible(ty: &PgTypeInfo) -> bool {
+        // Ensure compatibility with PostgreSQL's TIMESTAMPTZ type.
+        ty.oid() == Some(TIMESTAMPTZ_OID)
+    }
+}
+
+impl<'q> sqlx::Encode<'q, sqlx::Postgres> for Timestamp {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<IsNull, BoxDynError> {
+        let duration_since_pg_epoch = **self - POSTGRES_EPOCH_DATETIME;
+        let pg_epoch_micros: i64 = duration_since_pg_epoch
+            .whole_microseconds()
+            .try_into()
+            .map_err(|_| "timestamp could not be encoded as a PostgreSQL TIMESTAMPTZ")?;
+
+        pg_epoch_micros.encode_by_ref(buf)
+    }
+
+    fn size_hint(&self) -> usize {
+        std::mem::size_of::<i64>()
+    }
+}
+
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for Timestamp {
+    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, BoxDynError> {
+        // Decode the i64 representing microseconds since PostgreSQL epoch.
+        let pg_epoch_micros_i64 = <i64 as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+
+        // Create a Duration from these microseconds.
+        let duration_from_pg_epoch = time::Duration::microseconds(pg_epoch_micros_i64);
+
+        // Add this duration to the PostgreSQL epoch datetime.
+        // checked_add handles potential overflow/underflow if the resulting datetime
+        // is outside the representable range of OffsetDateTime.
+        let datetime = POSTGRES_EPOCH_DATETIME
+            .checked_add(duration_from_pg_epoch)
+            .ok_or("failed to construct OffsetDateTime from decoded TIMESTAMPTZ value")?;
+
+        Ok(datetime.into()) // Convert OffsetDateTime to Timestamp
     }
 }

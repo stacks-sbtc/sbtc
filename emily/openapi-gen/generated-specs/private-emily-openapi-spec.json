@@ -1079,7 +1079,7 @@
           "required": true
         },
         "responses": {
-          "201": {
+          "200": {
             "description": "Deposits updated successfully",
             "content": {
               "application/json": {
@@ -2141,7 +2141,7 @@
           "required": true
         },
         "responses": {
-          "201": {
+          "200": {
             "description": "Withdrawals updated successfully",
             "content": {
               "application/json": {
@@ -2590,6 +2590,25 @@
           }
         }
       },
+      "DepositWithStatus": {
+        "type": "object",
+        "description": "Wrapper for deposit with status code. Used for multi-status responses.",
+        "required": [
+          "deposit",
+          "status"
+        ],
+        "properties": {
+          "deposit": {
+            "$ref": "#/components/schemas/Deposit"
+          },
+          "status": {
+            "type": "integer",
+            "format": "int32",
+            "description": "HTTP status code, returned as part of multi-status responses.",
+            "minimum": 0
+          }
+        }
+      },
       "ErrorResponse": {
         "type": "object",
         "description": "Structure representing an error response\nThis is used to serialize error messages in HTTP responses",
@@ -2828,7 +2847,7 @@
           "deposits": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Deposit"
+              "$ref": "#/components/schemas/DepositWithStatus"
             },
             "description": "Deposit infos: deposits with a little less data."
           }
@@ -2860,7 +2879,7 @@
           "withdrawals": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Withdrawal"
+              "$ref": "#/components/schemas/WithdrawalWithStatus"
             },
             "description": "Updated withdrawals."
           }
@@ -3057,6 +3076,25 @@
           "statusMessage": {
             "type": "string",
             "description": "The status message of the withdrawal."
+          }
+        }
+      },
+      "WithdrawalWithStatus": {
+        "type": "object",
+        "description": "Wrapper for withdrawal with status code. Used for multi-status responses.",
+        "required": [
+          "withdrawal",
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "integer",
+            "format": "int32",
+            "description": "HTTP status code, returned as part of multi-status responses.",
+            "minimum": 0
+          },
+          "withdrawal": {
+            "$ref": "#/components/schemas/Withdrawal"
           }
         }
       }

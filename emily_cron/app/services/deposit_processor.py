@@ -1,8 +1,12 @@
 import logging
+from datetime import datetime, UTC
 from itertools import chain, groupby
+from json import JSONDecodeError
 from typing import Iterable
 
-from ..clients import PrivateEmilyAPI, MempoolAPI
+from requests.exceptions import RequestException, JSONDecodeError
+
+from ..clients import PrivateEmilyAPI, MempoolAPI, ElectrsAPI
 from ..models import (
     DepositUpdate,
     EnrichedDepositInfo,
@@ -69,7 +73,7 @@ class DepositProcessor:
                         bitcoin_chaintip_height
                         < tx.confirmed_height + settings.MIN_BLOCK_CONFIRMATIONS
                     ):
-                        logger.warning(
+                        logger.info(
                             f"Confirmed transaction {tx.bitcoin_txid} is not yet eligible for RBF replacement"
                         )
                     else:
@@ -127,7 +131,7 @@ class DepositProcessor:
 
             # Step 2: Time has expired, now check UTXO status
             logger.debug(f"Deposit {tx.bitcoin_txid} time expired, checking UTXO status...")
-            utxo_status = MempoolAPI.get_utxo_status(tx.bitcoin_txid, tx.bitcoin_tx_output_index)
+            utxo_status = ElectrsAPI.get_utxo_status(tx.bitcoin_txid, tx.bitcoin_tx_output_index)
             is_utxo_spent = utxo_status.get("spent", False)
             if not is_utxo_spent:
                 # Case 1: Time expired AND UTXO is unspent -> Mark FAILED
@@ -203,6 +207,55 @@ class DepositProcessor:
 
         return updates
 
+    def process_long_pending(
+        self,
+        enriched_deposits: list[EnrichedDepositInfo],
+    ) -> list[DepositUpdate]:
+        """Process long-pending transactions.
+
+        Args:
+            enriched_deposits: List of enriched deposit information
+
+        Returns:
+            list[DepositUpdate]: List of deposit updates
+        """
+        updates = []
+
+        current_time = int(datetime.now(UTC).timestamp())
+
+        long_pending_txs = []
+        for tx in enriched_deposits:
+            # Only check pending transactions
+            if tx.status != RequestStatus.PENDING.value:
+                continue
+            # that we can't find via the mempool API (it might have been dropped)
+            if tx.in_mempool:
+                continue
+
+            try:
+                # and have been pending for too long
+                if current_time - tx.deposit_last_update() > settings.MAX_UNCONFIRMED_TIME:
+                    long_pending_txs.append(tx)
+            except (RequestException, ValueError, JSONDecodeError) as e:
+                logger.warning(
+                    f"Could not check pending status for deposit {tx.bitcoin_txid} due to "
+                    f"API error fetching block {tx.last_update_block_hash}: {e}. Skipping."
+                )
+
+        for tx in long_pending_txs:
+            logger.info(f"Marking long-pending transaction {tx.bitcoin_txid} as FAILED")
+            updates.append(
+                DepositUpdate(
+                    bitcoin_txid=tx.bitcoin_txid,
+                    bitcoin_tx_output_index=tx.bitcoin_tx_output_index,
+                    status=RequestStatus.FAILED.value,
+                    status_message=f"Pending for too long ({settings.MAX_UNCONFIRMED_TIME} seconds)",
+                )
+            )
+
+        logger.info(f"Found {len(long_pending_txs)} long-pending transactions to mark as FAILED")
+        return updates
+
     def update_deposits(self) -> None:
         """Update deposit statuses.
 
@@ -237,6 +290,9 @@ class DepositProcessor:
         rbf_updates = self.process_rbf_transactions(enriched_deposits, bitcoin_chaintip_height)
         updates.extend(rbf_updates)
 
+        # Process long-pending transactions
+        pending_updates = self.process_long_pending(enriched_deposits)
+        updates.extend(pending_updates)
         # Apply updates
         if updates:
             logger.info(f"Updating {len(updates)} deposit statuses")
