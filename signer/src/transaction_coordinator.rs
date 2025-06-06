@@ -368,7 +368,7 @@ where
             .context
             .state()
             .registry_current_signer_set()
-            .ok_or_else(|| Error::NoDkgShares)?;
+            .ok_or_else(|| Error::NoKeyRotationEvent)?;
 
         let bitcoin_processing_fut = self.construct_and_sign_bitcoin_sbtc_transactions(
             &bitcoin_chain_tip,

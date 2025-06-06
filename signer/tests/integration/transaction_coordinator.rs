@@ -49,6 +49,7 @@ use signer::block_observer::SignerSetInfo;
 use signer::context::RequestDeciderEvent;
 use signer::message::Payload;
 use signer::network::MessageTransfer;
+use signer::storage::model::KeyRotationEvent;
 use signer::storage::model::WithdrawalTxOutput;
 use signer::testing::btc::get_canonical_chain_tip;
 use signer::testing::get_rng;
@@ -1112,9 +1113,13 @@ async fn run_dkg_if_signer_set_changes(signer_set_changed: bool) {
     assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_err());
 
     // Now we change context signer set.
-    ctx.inner
-        .state()
-        .update_current_signer_set(config_signer_set.iter().cloned().collect());
+    let signer_set_info = SignerSetInfo {
+        aggregate_key: dkg_shares.aggregate_key,
+        signatures_required: ctx.config().signer.bootstrap_signatures_required,
+        signer_set: config_signer_set,
+    };
+
+    ctx.state().update_registry_signer_set_info(signer_set_info);
 
     if signer_set_changed {
         assert!(should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
@@ -1472,6 +1477,7 @@ async fn run_subsequent_dkg() {
 async fn sign_bitcoin_transaction() {
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let (rpc, faucet) = regtest::initialize_blockchain();
+    let mut rng = get_rng();
 
     // We need to populate our databases, so let's fetch the data.
     let emily_client = EmilyClient::try_new(
@@ -1525,8 +1531,9 @@ async fn sign_bitcoin_transaction() {
     let (broadcast_stacks_tx, rx) = tokio::sync::broadcast::channel(10);
     let stacks_tx_stream = BroadcastStream::new(rx);
 
-    for (ctx, _db, _, _) in signers.iter_mut() {
+    for (ctx, db, _, _) in signers.iter_mut() {
         let broadcast_stacks_tx = broadcast_stacks_tx.clone();
+        let db = db.clone();
 
         ctx.with_stacks_client(|client| {
             client
@@ -1589,13 +1596,18 @@ async fn sign_bitcoin_transaction() {
 
             // The coordinator broadcasts a rotate keys transaction if it
             // is not up-to-date with their view of the current aggregate
-            // key. The response of None means that the stacks node does
-            // not have a record of a rotate keys contract call being
-            // executed, so the coordinator will construct and broadcast
-            // one.
+            // key. The response of here means that the stacks node has a
+            // record of a rotate keys contract call being executed once we
+            // have verified shares.
             client
                 .expect_get_current_signers_aggregate_key()
-                .returning(move |_| Box::pin(std::future::ready(Ok(None))));
+                .returning(move |_| {
+                    let db = db.clone();
+                    Box::pin(async move {
+                        let shares = db.get_latest_verified_dkg_shares().await?;
+                        Ok(shares.map(|sh| sh.aggregate_key))
+                    })
+                });
 
             // Only the client that corresponds to the coordinator will
             // submit a transaction, so we don't make explicit the
@@ -1710,19 +1722,28 @@ async fn sign_bitcoin_transaction() {
     let chain_tip: BitcoinBlockHash = faucet.generate_blocks(1).pop().unwrap().into();
 
     // We first need to wait for bitcoin-core to send us all the
-    // notifications so that we are up-to-date with the chain tip.
-    let db_update_futs = signers
-        .iter()
-        .map(|(_, db, _, _)| testing::storage::wait_for_chain_tip(db, chain_tip));
-    futures::future::join_all(db_update_futs).await;
+    // notifications so that we are up-to-date with the chain tip and DKG.
+    wait_for_signers(&signers).await;
 
-    // Now we wait for DKG to successfully complete. For that we just watch
-    // the dkg_shares table. Also, we need to get the signers' scriptPubKey
-    // so that we can make a donation, and get the party started.
-    let dkg_futs = signers
-        .iter()
-        .map(|(_, db, _, _)| testing::storage::wait_for_dkg(db, 1));
-    futures::future::join_all(dkg_futs).await;
+    // DKG and DKG verification should have finished successfully. We
+    // assume, for now, that the key rotation contract call was submitted.
+    // This assumption gets validated later, but we make the assumption now
+    // and populate the database with a key rotation event.
+    for (ctx, db, _, _) in signers.iter() {
+        let shares = db.get_latest_verified_dkg_shares().await.unwrap().unwrap();
+
+        let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
+        let event = KeyRotationEvent {
+            txid: fake::Faker.fake_with_rng(&mut rng),
+            block_hash: stacks_chain_tip.block_hash,
+            aggregate_key: shares.aggregate_key,
+            signer_set: shares.signer_set_public_keys.clone(),
+            signatures_required: shares.signature_share_threshold,
+            address: PrincipalData::from(ctx.config().signer.deployer).into(),
+        };
+        db.write_rotate_keys_transaction(&event).await.unwrap();
+    }
+
     let (_, db, _, _) = signers.first().unwrap();
     let shares = db.get_latest_encrypted_dkg_shares().await.unwrap().unwrap();
 
@@ -1901,6 +1922,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
+    let mut rng = get_rng();
     // We need to populate our databases, so let's fetch the data.
     let emily_client = EmilyClient::try_new(
         &Url::parse("http://testApiKey@localhost:3031").unwrap(),
@@ -1965,8 +1987,9 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     let (broadcast_stacks_tx, rx) = tokio::sync::broadcast::channel(10);
     let stacks_tx_stream = BroadcastStream::new(rx);
 
-    for (ctx, _db, _, _) in signers.iter_mut() {
+    for (ctx, db, _, _) in signers.iter_mut() {
         let broadcast_stacks_tx = broadcast_stacks_tx.clone();
+        let db = db.clone();
 
         ctx.with_stacks_client(|client| {
             client
@@ -2029,13 +2052,18 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
 
             // The coordinator broadcasts a rotate keys transaction if it
             // is not up-to-date with their view of the current aggregate
-            // key. The response of None means that the stacks node does
-            // not have a record of a rotate keys contract call being
-            // executed, so the coordinator will construct and broadcast
-            // one.
+            // key. The response of here means that the stacks node has a
+            // record of a rotate keys contract call being executed once we
+            // have verified shares.
             client
                 .expect_get_current_signers_aggregate_key()
-                .returning(move |_| Box::pin(std::future::ready(Ok(None))));
+                .returning(move |_| {
+                    let db = db.clone();
+                    Box::pin(async move {
+                        let shares = db.get_latest_verified_dkg_shares().await?;
+                        Ok(shares.map(|sh| sh.aggregate_key))
+                    })
+                });
 
             // Only the client that corresponds to the coordinator will
             // submit a transaction, so we don't make explicit the
@@ -2166,18 +2194,27 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
 
     // We first need to wait for bitcoin-core to send us all the
     // notifications so that we are up-to-date with the chain tip.
-    let db_update_futs = signers
-        .iter()
-        .map(|(_, db, _, _)| testing::storage::wait_for_chain_tip(db, chain_tip));
-    futures::future::join_all(db_update_futs).await;
+    wait_for_signers(&signers).await;
 
-    // Now we wait for DKG to successfully complete. For that we just watch
-    // the dkg_shares table. Also, we need to get the signers' scriptPubKey
-    // so that we can make a donation, and get the party started.
-    let dkg_futs = signers
-        .iter()
-        .map(|(_, db, _, _)| testing::storage::wait_for_dkg(db, 1));
-    futures::future::join_all(dkg_futs).await;
+    // DKG and DKG verification should have finished successfully. We
+    // assume, for now, that the key rotation contract call was submitted.
+    // This assumption gets validated later, but we make the assumption now
+    // and populate the database with a key rotation event.
+    for (ctx, db, _, _) in signers.iter() {
+        let shares = db.get_latest_verified_dkg_shares().await.unwrap().unwrap();
+
+        let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
+        let event = KeyRotationEvent {
+            txid: fake::Faker.fake_with_rng(&mut rng),
+            block_hash: stacks_chain_tip.block_hash,
+            aggregate_key: shares.aggregate_key,
+            signer_set: shares.signer_set_public_keys.clone(),
+            signatures_required: shares.signature_share_threshold,
+            address: PrincipalData::from(ctx.config().signer.deployer).into(),
+        };
+        db.write_rotate_keys_transaction(&event).await.unwrap();
+    }
+
     let (_, db, _, _) = signers.first().unwrap();
     let shares1 = db.get_latest_encrypted_dkg_shares().await.unwrap().unwrap();
 
@@ -3608,6 +3645,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
+    let mut rng = get_rng();
     // We need to populate our databases, so let's fetch the data.
     let emily_client = EmilyClient::try_new(
         &Url::parse("http://testApiKey@localhost:3031").unwrap(),
@@ -3660,8 +3698,9 @@ async fn sign_bitcoin_transaction_withdrawals() {
     let (broadcast_stacks_tx, rx) = tokio::sync::broadcast::channel(10);
     let stacks_tx_stream = BroadcastStream::new(rx);
 
-    for (ctx, _db, _, _) in signers.iter_mut() {
+    for (ctx, db, _, _) in signers.iter_mut() {
         let broadcast_stacks_tx = broadcast_stacks_tx.clone();
+        let db = db.clone();
 
         ctx.with_stacks_client(|client| {
             client
@@ -3716,13 +3755,18 @@ async fn sign_bitcoin_transaction_withdrawals() {
 
             // The coordinator broadcasts a rotate keys transaction if it
             // is not up-to-date with their view of the current aggregate
-            // key. The response of None means that the stacks node does
-            // not have a record of a rotate keys contract call being
-            // executed, so the coordinator will construct and broadcast
-            // one.
+            // key. The response of here means that the stacks node has a
+            // record of a rotate keys contract call being executed once we
+            // have verified shares.
             client
                 .expect_get_current_signers_aggregate_key()
-                .returning(move |_| Box::pin(std::future::ready(Ok(None))));
+                .returning(move |_| {
+                    let db = db.clone();
+                    Box::pin(async move {
+                        let shares = db.get_latest_verified_dkg_shares().await?;
+                        Ok(shares.map(|sh| sh.aggregate_key))
+                    })
+                });
 
             // Only the client that corresponds to the coordinator will
             // submit a transaction, so we don't make explicit the
@@ -3840,18 +3884,27 @@ async fn sign_bitcoin_transaction_withdrawals() {
 
     // We first need to wait for bitcoin-core to send us all the
     // notifications so that we are up-to-date with the chain tip.
-    let db_update_futs = signers
-        .iter()
-        .map(|(_, db, _, _)| testing::storage::wait_for_chain_tip(db, chain_tip));
-    futures::future::join_all(db_update_futs).await;
+    wait_for_signers(&signers).await;
 
-    // Now we wait for DKG to successfully complete. For that we just watch
-    // the dkg_shares table. Also, we need to get the signers' scriptPubKey
-    // so that we can make a donation, and get the party started.
-    let dkg_futs = signers
-        .iter()
-        .map(|(_, db, _, _)| testing::storage::wait_for_dkg(db, 1));
-    futures::future::join_all(dkg_futs).await;
+    // DKG and DKG verification should have finished successfully. We
+    // assume, for now, that the key rotation contract call was submitted.
+    // This assumption gets validated later, but we make the assumption now
+    // and populate the database with a key rotation event.
+    for (ctx, db, _, _) in signers.iter() {
+        let shares = db.get_latest_verified_dkg_shares().await.unwrap().unwrap();
+
+        let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
+        let event = KeyRotationEvent {
+            txid: fake::Faker.fake_with_rng(&mut rng),
+            block_hash: stacks_chain_tip.block_hash,
+            aggregate_key: shares.aggregate_key,
+            signer_set: shares.signer_set_public_keys.clone(),
+            signatures_required: shares.signature_share_threshold,
+            address: PrincipalData::from(ctx.config().signer.deployer).into(),
+        };
+        db.write_rotate_keys_transaction(&event).await.unwrap();
+    }
+
     let (_, db, _, _) = signers.first().unwrap();
     let shares = db.get_latest_encrypted_dkg_shares().await.unwrap().unwrap();
 
@@ -4105,6 +4158,8 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
     let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
+    signer::logging::setup_logging("info,signer=debug", false);
+
     let mut context = TestContext::builder()
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
@@ -4208,14 +4263,14 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
     let signer_set_public_keys: BTreeSet<PublicKey> =
         testing_signer_set.signer_keys().into_iter().collect();
 
-    let signer_set_info = SignerSetInfo {
-        aggregate_key,
-        signatures_required: signing_threshold as u16,
-        signer_set: signer_set_public_keys.clone(),
-    };
+    // let signer_set_info = SignerSetInfo {
+    //     aggregate_key,
+    //     signatures_required: signing_threshold as u16,
+    //     signer_set: signer_set_public_keys.clone(),
+    // };
+    prevent_dkg_on_changed_signer_set_info(&mut context, aggregate_key);
 
     let state = context.state();
-    state.update_registry_signer_set_info(signer_set_info);
     state.update_current_signer_set(signer_set_public_keys);
 
     let (bitcoin_chain_tip, stacks_chain_tip) = db.get_chain_tips().await;
@@ -4430,7 +4485,6 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
 async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
-    signer::logging::setup_logging("info,signer=debug", false);
     let db = testing::storage::new_test_database().await;
 
     let signer = Recipient::new(AddressType::P2tr);

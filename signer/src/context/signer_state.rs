@@ -38,46 +38,50 @@ impl SignerState {
         &self.current_signer_set
     }
 
-    /// Get the current number of signatures required.
+    /// Return the signatures required that is currently stored in the
+    /// smart contract.
     pub fn registry_signatures_required(&self) -> Option<u16> {
         self.registry_signing_set_info
             .read()
-            .expect("")
+            .expect("BUG: Failed to acquire read lock of signer set info")
             .as_ref()
             .map(|info| info.signatures_required)
     }
 
-    /// Return the public keys of the current signer set.
+    /// Return the public keys that are currently stored in the smart
+    /// contract.
     pub fn registry_current_signer_set(&self) -> Option<BTreeSet<PublicKey>> {
         self.registry_signing_set_info
             .read()
-            .expect("")
+            .expect("BUG: Failed to acquire read lock of signer set info")
             .as_ref()
             .map(|signer| signer.signer_set.clone())
     }
 
-    /// Replace the current signer set with the given set of public keys.
+    /// Replace the current signer set info with the given input.
     pub fn update_registry_signer_set_info(&self, info: SignerSetInfo) {
         self.registry_signing_set_info
             .write()
-            .expect("BUG: Failed to acquire read lock")
+            .expect("BUG: Failed to acquire write lock of signer set info")
             .replace(info);
     }
 
-    /// Return the aggregate key currently stored in the smart contract.
+    /// Return the aggregate key that is currently stored in the smart
+    /// contract.
     pub fn registry_current_aggregate_key(&self) -> Option<PublicKey> {
         self.registry_signing_set_info
             .read()
-            .expect("")
+            .expect("BUG: Failed to acquire read lock of signer set info")
             .as_ref()
             .map(|signer| signer.aggregate_key)
     }
 
-    /// Return the aggregate key currently stored in the smart contract.
+    /// Return the signer set info that is currently stored in the smart
+    /// contract.
     pub fn registry_signer_set_info(&self) -> Option<SignerSetInfo> {
         self.registry_signing_set_info
             .read()
-            .expect("")
+            .expect("BUG: Failed to acquire read lock of signer set info")
             .as_ref()
             .cloned()
     }
