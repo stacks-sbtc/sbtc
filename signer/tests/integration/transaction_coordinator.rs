@@ -576,6 +576,12 @@ async fn process_complete_deposit() {
 
     // Get the private key of the coordinator of the signer set.
     let private_key = select_coordinator(&setup.sweep_block_hash.into(), &signer_info);
+    let config = context.config_mut();
+    config.signer.bootstrap_signing_set = signer_info
+        .first()
+        .map(|signer| signer.signer_public_keys.clone())
+        .unwrap();
+    config.signer.bootstrap_signatures_required = signing_threshold as u16;
 
     prevent_dkg_on_changed_signer_set_info(&context, aggregate_key);
 
@@ -2190,7 +2196,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     }
 
     let (_, db, _, _) = signers.first().unwrap();
-    let shares1 = db.get_latest_encrypted_dkg_shares().await.unwrap().unwrap();
+    let shares1 = db.get_latest_verified_dkg_shares().await.unwrap().unwrap();
 
     // =========================================================================
     // Step 6 - Prepare for deposits
@@ -2318,7 +2324,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
         .map(|(_, db, _, _)| testing::storage::wait_for_dkg(db, 2));
     futures::future::join_all(dkg_futs).await;
     let (_, db, _, _) = signers.first().unwrap();
-    let shares2 = db.get_latest_encrypted_dkg_shares().await.unwrap().unwrap();
+    let shares2 = db.get_latest_verified_dkg_shares().await.unwrap().unwrap();
 
     // Check that we have new DKG shares for each of the signers.
     for (_, db, _, _) in signers.iter() {

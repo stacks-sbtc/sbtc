@@ -140,7 +140,7 @@ pub struct TestSweepSetup {
     /// threshold is the bitcoin signature threshold, which for v1 matches
     /// the signatures required on stacks.
     pub signatures_required: u16,
-    ///
+    /// The hash of the first stacks block.
     pub stacks_genesis_block: model::StacksBlockHash,
 }
 
@@ -401,7 +401,8 @@ impl TestSweepSetup {
         db.write_encrypted_dkg_shares(&shares).await.unwrap();
     }
 
-    ///
+    /// Store a rotate keys transaction in the database. The details will
+    /// match the row inserted by the store_dkg_shares function.
     pub async fn store_rotate_keys_event(&self, db: &PgStore) {
         let signer_set = self.signer_keys.clone();
         let wallet = SignerWallet::new(
@@ -1244,7 +1245,8 @@ impl TestSweepSetup2 {
         db.write_encrypted_dkg_shares(&shares).await.unwrap();
     }
 
-    ///
+    /// Store a rotate keys transaction in the database. The details will
+    /// match the row inserted by the store_dkg_shares function.
     pub async fn store_rotate_keys_event(&self, db: &PgStore) {
         let address = self.signers.address(self.signatures_required);
 
