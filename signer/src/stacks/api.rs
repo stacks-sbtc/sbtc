@@ -156,6 +156,15 @@ pub trait StacksInteract: Send + Sync {
         contract_principal: &StacksAddress,
     ) -> impl Future<Output = Result<Option<PublicKey>, Error>> + Send;
 
+    /// Retrieve the current signers' signature threshold from the `sbtc-registry` contract.
+    ///
+    /// This is done by making a `GET /v2/data_var/<contract-principal>/sbtc-registry/current-signature-threshold`
+    /// request.
+    fn get_current_signature_threshold(
+        &self,
+        contract_principal: &StacksAddress,
+    ) -> impl Future<Output = Result<Option<u16>, Error>> + Send;
+
     /// Retrieve a boolean value from the stacks node indicating whether
     /// sBTC has been minted for the deposit request.
     ///
@@ -1346,6 +1355,30 @@ impl StacksInteract for StacksClient {
         }
     }
 
+    async fn get_current_signature_threshold(
+        &self,
+        contract_principal: &StacksAddress,
+    ) -> Result<Option<u16>, Error> {
+        let result = self
+            .get_data_var(
+                contract_principal,
+                &ContractName::from("sbtc-registry"),
+                &ClarityName::from("current-signature-threshold"),
+            )
+            .await?;
+
+        // Check the result and return the aggregate key.
+        match result {
+            Value::UInt(0) => Ok(None),
+            Value::UInt(threshold) => Ok(Some(
+                threshold.try_into().map_err(|_| Error::TypeConversion)?,
+            )),
+            _ => Err(Error::InvalidStacksResponse(
+                "expected a buffer but got something else",
+            )),
+        }
+    }
+
     async fn is_deposit_completed(
         &self,
         deployer: &StacksAddress,
@@ -1597,6 +1630,20 @@ impl StacksInteract for ApiFallbackClient<StacksClient> {
         self.exec(|client, retry| async move {
             let result = client
                 .get_current_signers_aggregate_key(contract_principal)
+                .await;
+            retry.abort_if(|| matches!(result, Err(Error::InvalidStacksResponse(_))));
+            result
+        })
+        .await
+    }
+
+    async fn get_current_signature_threshold(
+        &self,
+        contract_principal: &StacksAddress,
+    ) -> Result<Option<u16>, Error> {
+        self.exec(|client, retry| async move {
+            let result = client
+                .get_current_signature_threshold(contract_principal)
                 .await;
             retry.abort_if(|| matches!(result, Err(Error::InvalidStacksResponse(_))));
             result
