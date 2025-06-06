@@ -3,7 +3,7 @@
 
 use crate::error::Error;
 use crate::storage::model;
-use crate::storage::postgres::PgStore;
+use crate::storage::pgsql::PgStore;
 
 impl PgStore {
     /// Get all deposit requests that have been confirmed within the
