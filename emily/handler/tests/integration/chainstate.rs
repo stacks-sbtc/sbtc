@@ -60,9 +60,9 @@ async fn create_and_get_chainstate_happy_path(min_height: u64, max_height: u64) 
     assert_eq!(expected_chaintip, gotten_chaintip)
 }
 
-#[test_case(1123, 1128, 1133; "standard-reorg")]
+#[test_case(1123, 1124, 1125; "standard-reorg")]
 #[test_case(1123, 1133, 1133; "reorg-to-tip-at-same-height")]
-#[test_case(1123, 1111, 1133; "reorg-to-tip-below-any-existing-entry")]
+#[test_case(1123, 1122, 1124; "reorg-to-tip-below-any-existing-entry")]
 #[tokio::test]
 async fn create_and_get_chainstate_reorg_happy_path(
     min_height: u64,
@@ -96,6 +96,41 @@ async fn create_and_get_chainstate_reorg_happy_path(
     // --------
     assert_eq!(expected_post_reorg_chaintip, created_reorged_chainstate);
     assert_eq!(expected_post_reorg_chaintip, gotten_post_reorg_chaintip);
+}
+
+#[test_case(1110, 1220, 1227; "standard-reorg")]
+#[test_case(1125, 1120, 1127; "reorg-to-tip-below-any-existing-entry")]
+#[tokio::test]
+async fn too_old_chaintip_to_reorg(min_height: u64, reorg_height: u64, max_height: u64) {
+    let configuration = clean_setup().await;
+
+    // Arrange.
+    // --------
+    let original_chainstates: Vec<Chainstate> = (min_height..max_height + 1)
+        .map(|height| new_test_chainstate(height, height, 0))
+        .collect();
+
+    let reorg_chaintip = new_test_chainstate(reorg_height, reorg_height, 1);
+
+    // Act.
+    // --------
+    batch_set_chainstates(&configuration, original_chainstates.clone()).await;
+
+    let gotten_pre_reorg_chaintip = apis::chainstate_api::get_chain_tip(&configuration)
+        .await
+        .expect("Received an error after making a valid get chaintip api call.");
+
+    let _res = apis::chainstate_api::set_chainstate(&configuration, reorg_chaintip.clone())
+        .await
+        .expect("Even if we ignore reorg we return 200 ok");
+
+    let gotten_post_reorg_chaintip = apis::chainstate_api::get_chain_tip(&configuration)
+        .await
+        .expect("Received an error after making a valid get chaintip api call.");
+
+    // Assert.
+    // --------
+    assert_eq!(gotten_pre_reorg_chaintip, gotten_post_reorg_chaintip);
 }
 
 #[test_case(1123, 1128; "replay-5-chainstates-out-of-order")]
