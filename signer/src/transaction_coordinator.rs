@@ -1143,11 +1143,7 @@ where
     ) -> Result<StacksTxId, Error> {
         // TODO: we should validate the contract call before asking others
         // to sign it.
-        let rotate_keys_v1 = RotateKeysV1::new(
-            wallet,
-            self.context.config().signer.deployer,
-            rotate_key_aggregate_key,
-        );
+        let rotate_keys_v1 = RotateKeysV1::load(&self.context, rotate_key_aggregate_key).await?;
         let contract_call = ContractCall::RotateKeysV1(Box::new(rotate_keys_v1));
 
         // Rotate key transactions should be done as soon as possible, so
