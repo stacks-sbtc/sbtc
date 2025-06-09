@@ -224,21 +224,23 @@ pub struct DepositRequest {
 
 impl From<Deposit> for DepositRequest {
     fn from(deposit: Deposit) -> Self {
-        let tx_input_iter = deposit.tx_info.vin.into_iter();
+        let tx_input_iter = deposit.clone().tx_info.vin.into_iter();
         // It's most likely the case that each of the inputs "came" from
         // the same Address, so we filter out duplicates.
         let sender_script_pub_keys: BTreeSet<ScriptPubKey> = tx_input_iter
             .filter_map(|tx_in| Some(tx_in.prevout?.script_pubkey.script.into()))
             .collect();
 
+        let reclaim_script_hash = TaprootScriptHash::from_script_pubkey(&ScriptPubKey(
+            deposit.clone().info.reclaim_script,
+        ));
+
         Self {
             txid: deposit.info.outpoint.txid.into(),
             output_index: deposit.info.outpoint.vout,
             spend_script: deposit.info.deposit_script.to_bytes(),
             reclaim_script: deposit.info.reclaim_script.to_bytes(),
-            reclaim_script_hash: TaprootScriptHash::from_byte_array(
-                deposit.info.reclaim_script_hash.to_byte_array(),
-            ),
+            reclaim_script_hash,
             recipient: deposit.info.recipient.into(),
             amount: deposit.info.amount,
             max_fee: deposit.info.max_fee,
