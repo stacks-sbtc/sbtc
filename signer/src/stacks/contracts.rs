@@ -1251,7 +1251,7 @@ impl RotateKeysV1 {
 
         match db.get_encrypted_dkg_shares(aggregate_key).await? {
             Some(shares) => Ok(Self {
-                aggregate_key: *aggregate_key,
+                aggregate_key: shares.aggregate_key,
                 new_keys: shares.signer_set_public_keys(),
                 deployer: ctx.config().signer.deployer,
                 signatures_required: shares.signature_share_threshold,
