@@ -200,7 +200,7 @@ where
 
     let deposit_script = deposit_inputs.deposit_script();
     let reclaim_script = reclaim_inputs.reclaim_script();
-    let reclaim_script_hash = TaprootScriptHash::from_script_pubkey(&reclaim_script.clone().into());
+    let reclaim_script_hash = TaprootScriptHash::from_script_buf(&reclaim_script);
 
     let mut tx_outs = vec![TxOut {
         value: Amount::from_sat(amount),

@@ -7,8 +7,8 @@ use std::num::TryFromIntError;
 use std::ops::Deref;
 use std::ops::{Add, Sub};
 
-use bitcoin::OutPoint;
 use bitcoin::hashes::Hash as _;
+use bitcoin::{OutPoint, ScriptBuf};
 use bitvec::array::BitArray;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
 use clarity::vm::types::PrincipalData;
@@ -231,9 +231,7 @@ impl From<Deposit> for DepositRequest {
             .filter_map(|tx_in| Some(tx_in.prevout?.script_pubkey.script.into()))
             .collect();
 
-        let reclaim_script_hash = TaprootScriptHash::from_script_pubkey(&ScriptPubKey(
-            deposit.clone().info.reclaim_script,
-        ));
+        let reclaim_script_hash = TaprootScriptHash::from_script_buf(&deposit.info.reclaim_script);
 
         Self {
             txid: deposit.info.outpoint.txid.into(),
@@ -1053,6 +1051,12 @@ impl TaprootScriptHash {
     pub fn from_script_pubkey(script_pubkey: &ScriptPubKey) -> Self {
         // TODO: I have no idea what this LeafVersion means atm
         bitcoin::TapNodeHash::from_script(script_pubkey, bitcoin::taproot::LeafVersion::TapScript)
+            .into()
+    }
+
+    /// Compute a taproot script hash from a scriptbuf
+    pub fn from_script_buf(script_buf: &ScriptBuf) -> Self {
+        bitcoin::TapNodeHash::from_script(script_buf, bitcoin::taproot::LeafVersion::TapScript)
             .into()
     }
 }
