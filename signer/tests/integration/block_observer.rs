@@ -1824,7 +1824,6 @@ fn make_coinbase_deposit_request(
 
     let deposit_script = deposit_inputs.deposit_script();
     let reclaim_script = reclaim_inputs.reclaim_script();
-    // TODO: uuuuugly .clone()
     let reclaim_script_hash = TaprootScriptHash::from_script_pubkey(&reclaim_script.clone().into());
 
     let script_pub_key =
