@@ -421,7 +421,7 @@ pub struct DepositRequest {
     /// The reclaim script for the deposit.
     pub reclaim_script: ScriptBuf,
     /// The hash of the reclaim script for the deposit.
-    pub reclaim_script_hash: TaprootScriptHash,
+    pub reclaim_script_hash: Option<TaprootScriptHash>,
     /// The public key used in the deposit script.
     ///
     /// Note that taproot public keys for Schnorr signatures are slightly
@@ -1739,7 +1739,7 @@ mod tests {
             amount,
             deposit_script: deposit_inputs.deposit_script(),
             reclaim_script: ScriptBuf::new(),
-            reclaim_script_hash: TaprootScriptHash::new(),
+            reclaim_script_hash: Some(TaprootScriptHash::new()),
             signers_public_key,
         }
     }
@@ -1948,7 +1948,7 @@ mod tests {
             amount: 100_000,
             deposit_script: ScriptBuf::new(),
             reclaim_script: ScriptBuf::new(),
-            reclaim_script_hash: TaprootScriptHash::new(),
+            reclaim_script_hash: Some(TaprootScriptHash::new()),
             signers_public_key: XOnlyPublicKey::from_str(X_ONLY_PUBLIC_KEY1).unwrap(),
         };
 
@@ -1966,7 +1966,7 @@ mod tests {
             amount: 100_000,
             deposit_script: ScriptBuf::from_bytes(vec![1, 2, 3]),
             reclaim_script: ScriptBuf::new(),
-            reclaim_script_hash: TaprootScriptHash::new(),
+            reclaim_script_hash: Some(TaprootScriptHash::new()),
             signers_public_key: XOnlyPublicKey::from_str(X_ONLY_PUBLIC_KEY1).unwrap(),
         };
 

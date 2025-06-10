@@ -63,7 +63,7 @@ struct DepositStatusSummary {
     /// The reclaim script for the deposit.
     reclaim_script: model::ScriptPubKey,
     /// The hash of reclaim script for the deposit.
-    reclaim_script_hash: model::TaprootScriptHash,
+    reclaim_script_hash: Option<model::TaprootScriptHash>,
     /// The public key used in the deposit script.
     signers_public_key: PublicKeyXOnly,
 }

@@ -246,7 +246,7 @@ where
         amount: dep.amount,
         deposit_script: dep.deposit_script.clone(),
         reclaim_script: dep.reclaim_script.clone(),
-        reclaim_script_hash,
+        reclaim_script_hash: Some(reclaim_script_hash),
         signers_public_key: dep.signers_public_key,
     };
     (deposit_tx, req, dep)

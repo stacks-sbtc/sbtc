@@ -1847,7 +1847,7 @@ fn make_coinbase_deposit_request(
         amount: deposit_tx.output[0].value.to_sat(),
         deposit_script,
         reclaim_script,
-        reclaim_script_hash,
+        reclaim_script_hash: Some(reclaim_script_hash),
         signers_public_key,
     };
     (deposit_tx, req)

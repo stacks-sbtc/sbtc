@@ -194,7 +194,7 @@ pub struct DepositRequest {
     /// Script spendable by the depositor.
     pub reclaim_script: Bytes,
     /// SHA-256 hash of the reclaim script.
-    pub reclaim_script_hash: TaprootScriptHash,
+    pub reclaim_script_hash: Option<TaprootScriptHash>,
     /// The address of which the sBTC should be minted,
     /// can be a smart contract address.
     pub recipient: StacksPrincipal,
@@ -224,7 +224,7 @@ pub struct DepositRequest {
 
 impl From<Deposit> for DepositRequest {
     fn from(deposit: Deposit) -> Self {
-        let tx_input_iter = deposit.clone().tx_info.vin.into_iter();
+        let tx_input_iter = deposit.tx_info.vin.into_iter();
         // It's most likely the case that each of the inputs "came" from
         // the same Address, so we filter out duplicates.
         let sender_script_pub_keys: BTreeSet<ScriptPubKey> = tx_input_iter
@@ -238,7 +238,7 @@ impl From<Deposit> for DepositRequest {
             output_index: deposit.info.outpoint.vout,
             spend_script: deposit.info.deposit_script.to_bytes(),
             reclaim_script: deposit.info.reclaim_script.to_bytes(),
-            reclaim_script_hash,
+            reclaim_script_hash: Some(reclaim_script_hash),
             recipient: deposit.info.recipient.into(),
             amount: deposit.info.amount,
             max_fee: deposit.info.max_fee,
@@ -1049,9 +1049,7 @@ impl TaprootScriptHash {
 
     /// Compute a taproot script hash from a script pubkey.
     pub fn from_script_pubkey(script_pubkey: &ScriptPubKey) -> Self {
-        // TODO: I have no idea what this LeafVersion means atm
-        bitcoin::TapNodeHash::from_script(script_pubkey, bitcoin::taproot::LeafVersion::TapScript)
-            .into()
+        Self::from_script_buf(*&script_pubkey)
     }
 
     /// Compute a taproot script hash from a scriptbuf
