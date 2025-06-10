@@ -30,9 +30,7 @@ use crate::message::BitcoinPreSignAck;
 use crate::message::Payload;
 use crate::message::StacksTransactionSignRequest;
 use crate::message::WstsMessageId;
-use crate::metrics::BITCOIN_BLOCKCHAIN;
 use crate::metrics::Metrics;
-use crate::metrics::STACKS_BLOCKCHAIN;
 use crate::network;
 use crate::stacks::contracts::AsContractCall as _;
 use crate::stacks::contracts::ContractCall;
@@ -162,7 +160,7 @@ pub struct TxSignerEventLoop<Context, Network, Rng> {
 ///
 /// The struct is only created when the signer has validated the bitcoin
 /// transaction and has agreed to sign the sighash.
-struct AcceptedSigHash {
+pub struct AcceptedSigHash {
     /// The signature hash to be signed.
     sighash: SigHash,
     /// The public key that is used to lock the above signature hash.
@@ -351,31 +349,12 @@ where
 
             (Payload::BitcoinPreSignRequest(requests), true, ChainTipStatus::Canonical) => {
                 let instant = std::time::Instant::now();
-                let pre_validation_status = self
+                let presign_result = self
                     .handle_bitcoin_pre_sign_request(requests, &chain_tip)
                     .await;
 
-                let status = if pre_validation_status.is_ok() {
-                    "success"
-                } else {
-                    "failure"
-                };
-                metrics::histogram!(
-                    Metrics::ValidationDurationSeconds,
-                    "blockchain" => BITCOIN_BLOCKCHAIN,
-                    "kind" => "sweep-presign",
-                    "status" => status,
-                )
-                .record(instant.elapsed());
-
-                metrics::counter!(
-                    Metrics::SignRequestsTotal,
-                    "blockchain" => BITCOIN_BLOCKCHAIN,
-                    "kind" => "sweep-presign",
-                    "status" => status,
-                )
-                .increment(1);
-                pre_validation_status?;
+                Metrics::increment_presign_validation(instant.elapsed(), &presign_result);
+                presign_result?;
             }
             // Message types ignored by the transaction signer
             (Payload::StacksTransactionSignature(_), _, _)
@@ -503,24 +482,12 @@ where
         origin_public_key: &PublicKey,
     ) -> Result<(), Error> {
         let instant = std::time::Instant::now();
-        let validation_status = self
+        let validation_result = self
             .assert_valid_stacks_tx_sign_request(request, chain_tip, origin_public_key)
             .await;
 
-        metrics::histogram!(
-            Metrics::ValidationDurationSeconds,
-            "blockchain" => STACKS_BLOCKCHAIN,
-            "kind" => request.tx_kind(),
-        )
-        .record(instant.elapsed());
-        metrics::counter!(
-            Metrics::SignRequestsTotal,
-            "blockchain" => STACKS_BLOCKCHAIN,
-            "kind" => request.tx_kind(),
-            "status" => if validation_status.is_ok() { "success" } else { "failed" },
-        )
-        .increment(1);
-        validation_status?;
+        Metrics::increment_stacks_validation(instant.elapsed(), request, &validation_result);
+        validation_result?;
 
         // We need to set the nonce in order to get the exact transaction
         // that we need to sign.
@@ -852,21 +819,7 @@ where
                         let accepted_sighash =
                             Self::validate_bitcoin_sign_request(&db, &request.message).await;
 
-                        let validation_status = match &accepted_sighash {
-                            Ok(_) => "success",
-                            Err(Error::SigHashConversion(_)) => "improper-sighash",
-                            Err(Error::UnknownSigHash(_)) => "unknown-sighash",
-                            Err(Error::InvalidSigHash(_)) => "invalid-sighash",
-                            Err(_) => "unexpected-failure",
-                        };
-
-                        metrics::counter!(
-                            Metrics::SignRequestsTotal,
-                            "blockchain" => BITCOIN_BLOCKCHAIN,
-                            "kind" => "sweep",
-                            "status" => validation_status,
-                        )
-                        .increment(1);
+                        Metrics::increment_bitcoin_validation(&accepted_sighash);
 
                         let accepted_sighash = accepted_sighash?;
                         let id = StateMachineId::BitcoinSign(accepted_sighash.sighash);
@@ -1608,6 +1561,15 @@ pub async fn assert_allow_dkg_begin(
 ) -> Result<(), Error> {
     let storage = context.get_storage();
     let config = context.config();
+
+    // If the latest shares are unverified, we want to prioritize verifying them
+    // instead of doing new DKG rounds. If we fail to do so they will eventually
+    // be marked as failed, and we will resume DKG-ing.
+    let latest_dkg_shares = storage.get_latest_encrypted_dkg_shares().await?;
+    if latest_dkg_shares.map(|s| s.dkg_shares_status) == Some(model::DkgSharesStatus::Unverified) {
+        tracing::warn!("latest shares are unverified; aborting");
+        return Err(Error::DkgHasAlreadyRun);
+    }
 
     // Trigger dkg if signatures_required has changed
     if context.state().current_signatures_required() != config.signer.bootstrap_signatures_required

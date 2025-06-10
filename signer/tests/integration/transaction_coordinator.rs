@@ -1177,6 +1177,48 @@ async fn run_dkg_if_signatures_required_changes(change_signatures_required: bool
     testing::storage::drop_db(db).await;
 }
 
+/// Tests that DKG will not run if latest shares are unverified
+#[test_case(DkgSharesStatus::Unverified, false; "unverified")]
+#[test_case(DkgSharesStatus::Verified, true; "verified")]
+#[test_case(DkgSharesStatus::Failed, true; "failed")]
+#[tokio::test]
+async fn skip_dkg_if_latest_shares_unverified(
+    latest_shares_status: DkgSharesStatus,
+    should_run_dkg: bool,
+) {
+    let mut rng = get_rng();
+    let db = testing::storage::new_test_database().await;
+    let ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_mocked_clients()
+        .modify_settings(|settings| {
+            // We want to run DKG twice
+            settings.signer.dkg_target_rounds = std::num::NonZero::<u32>::new(2).unwrap();
+        })
+        .build();
+
+    // First DKG run result
+    let dkg_shares = model::EncryptedDkgShares {
+        dkg_shares_status: latest_shares_status,
+        ..Faker.fake_with_rng(&mut rng)
+    };
+    db.write_encrypted_dkg_shares(&dkg_shares)
+        .await
+        .expect("failed to write dkg shares");
+
+    let chaintip: model::BitcoinBlockRef = Faker.fake_with_rng(&mut rng);
+
+    if should_run_dkg {
+        assert!(should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+        assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_ok());
+    } else {
+        assert!(!should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+        assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_err());
+    }
+
+    testing::storage::drop_db(db).await;
+}
+
 /// Test that we can run multiple DKG rounds.
 /// This test is very similar to the `run_dkg_from_scratch` test, but it
 /// simulates that DKG has been run once before and uses a signer configuration
