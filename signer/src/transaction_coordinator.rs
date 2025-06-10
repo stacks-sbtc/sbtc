@@ -2529,6 +2529,15 @@ pub async fn should_coordinate_dkg(
     let storage = context.get_storage();
     let config = context.config();
 
+    // If the latest shares are unverified, we want to prioritize verifying them
+    // instead of doing new DKG rounds. If we fail to do so they will eventually
+    // be marked as failed, and we will resume DKG-ing.
+    let latest_dkg_shares = storage.get_latest_encrypted_dkg_shares().await?;
+    if latest_dkg_shares.map(|s| s.dkg_shares_status) == Some(model::DkgSharesStatus::Unverified) {
+        tracing::debug!("latest shares are unverified; skipping DKG");
+        return Ok(false);
+    }
+
     // Allow DKG if we do not have a key rotation event in the database.
     let Some(registry_signer_info) = context.state().registry_signer_set_info() else {
         tracing::info!("no signer set information in the registry; proceeding with DKG");
