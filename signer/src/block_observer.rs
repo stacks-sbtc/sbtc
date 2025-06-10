@@ -474,7 +474,6 @@ impl<C: Context, B> BlockObserver<C, B> {
             let txid = tx_info.compute_txid();
             tracing::trace!(%txid, "attempting to extract sbtc transaction");
             if tx_info.tx.is_coinbase() {
-                tracing::warn!(%txid, "ignoring coinbase tx when extracting sbtc transaction");
                 continue;
             }
 
