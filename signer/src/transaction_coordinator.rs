@@ -185,8 +185,6 @@ pub struct GetPendingRequestsParams<'a> {
     pub stacks_chain_tip: &'a model::StacksBlockHash,
     /// The current signers' aggregate key.
     pub aggregate_key: &'a PublicKey,
-    /// The public keys of the current signer set.
-    pub signer_public_keys: &'a BTreeSet<PublicKey>,
     /// The current sBTC limits.
     pub sbtc_limits: &'a SbtcLimits,
     /// The threshold for the minimum number of 'accept' votes required for a
@@ -321,8 +319,7 @@ where
         // we need to know the aggregate key for constructing bitcoin
         // transactions. We need to know the current signing set and the
         // current aggregate key.
-        let maybe_aggregate_key = self.context.state().current_aggregate_key();
-        let signer_public_keys = self.context.state().current_signer_public_keys();
+        let maybe_aggregate_key = self.context.state().registry_current_aggregate_key();
 
         // If we are not the coordinator, then we have no business
         // coordinating DKG or constructing bitcoin and stacks
@@ -359,13 +356,19 @@ where
         let chain_tip_hash = &bitcoin_chain_tip.block_hash;
 
         tracing::debug!("loading the signer stacks wallet");
-        let wallet = self.get_signer_wallet(chain_tip_hash).await?;
+        let wallet = self.get_signer_wallet().await?;
 
         self.deploy_smart_contracts(chain_tip_hash, &wallet, &aggregate_key)
             .await?;
 
         self.check_and_submit_rotate_key_transaction(chain_tip_hash, &wallet, &aggregate_key)
             .await?;
+
+        let signer_public_keys = self
+            .context
+            .state()
+            .registry_current_signer_set()
+            .ok_or_else(|| Error::NoKeyRotationEvent)?;
 
         let bitcoin_processing_fut = self.construct_and_sign_bitcoin_sbtc_transactions(
             &bitcoin_chain_tip,
@@ -1140,11 +1143,7 @@ where
     ) -> Result<StacksTxId, Error> {
         // TODO: we should validate the contract call before asking others
         // to sign it.
-        let rotate_keys_v1 = RotateKeysV1::new(
-            wallet,
-            self.context.config().signer.deployer,
-            rotate_key_aggregate_key,
-        );
+        let rotate_keys_v1 = RotateKeysV1::load(&self.context, rotate_key_aggregate_key).await?;
         let contract_call = ContractCall::RotateKeysV1(Box::new(rotate_keys_v1));
 
         // Rotate key transactions should be done as soon as possible, so
@@ -2130,7 +2129,6 @@ where
             bitcoin_chain_tip,
             stacks_chain_tip,
             aggregate_key,
-            signer_public_keys,
             signature_threshold: self.threshold,
             sbtc_limits: &sbtc_limits,
         };
@@ -2333,11 +2331,8 @@ where
         Ok(true)
     }
 
-    async fn get_signer_wallet(
-        &self,
-        chain_tip: &model::BitcoinBlockHash,
-    ) -> Result<SignerWallet, Error> {
-        let wallet = SignerWallet::load(&self.context, chain_tip).await?;
+    async fn get_signer_wallet(&self) -> Result<SignerWallet, Error> {
+        let wallet = SignerWallet::load(&self.context).await?;
 
         // We need to know the nonce to use, so we reach out to our stacks
         // node for the account information for our multi-sig address.
@@ -2543,20 +2538,20 @@ pub async fn should_coordinate_dkg(
         return Ok(false);
     }
 
-    // Trigger dkg if signatures_required has changed
-    if context.state().current_signatures_required() != config.signer.bootstrap_signatures_required
-    {
+    // Allow DKG if we do not have a key rotation event in the database.
+    let Some(registry_signer_info) = context.state().registry_signer_set_info() else {
+        tracing::info!("no signer set information in the registry; proceeding with DKG");
+        return Ok(true);
+    };
+
+    // Trigger DKG if signatures_required has changed
+    if registry_signer_info.signatures_required != config.signer.bootstrap_signatures_required {
         tracing::info!("signatures required has changed; proceeding with DKG");
         return Ok(true);
     }
 
-    // Trigger dkg if signer set changes
-    let signer_set_changed = !context
-        .state()
-        .current_signer_set()
-        .has_same_pubkeys(&config.signer.bootstrap_signing_set);
-
-    if signer_set_changed {
+    // Trigger DKG if signer set changes
+    if registry_signer_info.signer_set != config.signer.bootstrap_signing_set {
         tracing::info!("signer set has changed; proceeding with DKG");
         return Ok(true);
     }
@@ -2768,7 +2763,7 @@ mod tests {
         let chain_tip_height = chain_tip_height.into();
         let dkg_min_bitcoin_block_height =
             dkg_min_bitcoin_block_height.map(BitcoinBlockHeight::from);
-        let mut context = TestContext::builder()
+        let context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
             .modify_settings(|s| {
@@ -2804,8 +2799,8 @@ mod tests {
             .await
             .unwrap();
 
-        prevent_dkg_on_changed_signer_set(&mut context);
-        prevent_dkg_on_changed_signatures_required(&mut context);
+        let aggregate_key = Faker.fake();
+        prevent_dkg_on_changed_signer_set_info(&context, aggregate_key);
 
         // Test the case
         let result = should_coordinate_dkg(&context, &bitcoin_chain_tip)
