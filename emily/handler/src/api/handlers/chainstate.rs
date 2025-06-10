@@ -188,8 +188,9 @@ pub async fn add_chainstate_entry_or_reorg(
     {
         if new_bitcoin_tip_height < current_bitcoin_tip_height.saturating_sub(NO_REORG_DEPTH) {
             tracing::warn!(
-                "Attempting to add chainstate with bitcoin tip height {new_bitcoin_tip_height} \
-                    which is too old to reorg from current bitcoin tip height {current_bitcoin_tip_height}"
+                %new_bitcoin_tip_height,
+                %current_bitcoin_tip_height,
+                "Will not add chainstate with bitcoin tip height that is too old from the current bitcoin tip height"
             );
             return Ok(());
         }
