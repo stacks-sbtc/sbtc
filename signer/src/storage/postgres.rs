@@ -2056,6 +2056,13 @@ impl super::DbRead for PgStore {
                 SELECT TRUE
                 FROM sbtc_signer.dkg_shares AS ds
                 WHERE ds.script_pubkey = $1
+
+                UNION ALL
+
+                SELECT TRUE
+                FROM sbtc_signer.bitcoin_tx_outputs
+                WHERE output_type = 'signers_output'
+                  AND script_pubkey = $1
             );
         "#,
         )
