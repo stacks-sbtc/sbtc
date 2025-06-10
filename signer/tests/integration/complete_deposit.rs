@@ -976,8 +976,15 @@ async fn complete_deposit_validation_deposit_invalid_sweep() {
 
     // Different: we normally add a row in the dkg_shares table so that we
     // have a record of the scriptPubKey that the signers control. Here we
-    // exclude it, so it looks like the first UTXO in the transaction is not
-    // controlled by the signers.
+    // exclude it, so it looks like the first UTXO in the transaction is
+    // not controlled by the signers.
+    //
+    // We also truncate the bitcoin_tx_outputs table because we use that
+    // table to identify signer inputs and outputs.
+    sqlx::query("TRUNCATE TABLE sbtc_signer.bitcoin_tx_outputs CASCADE")
+        .execute(db.pool())
+        .await
+        .unwrap();
 
     // Normal: the request and how the signers voted needs to be added to
     // the database. Here the bitmap in the deposit request object
