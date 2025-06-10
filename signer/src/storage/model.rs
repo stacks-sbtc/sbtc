@@ -1049,7 +1049,7 @@ impl TaprootScriptHash {
 
     /// Compute a taproot script hash from a script pubkey.
     pub fn from_script_pubkey(script_pubkey: &ScriptPubKey) -> Self {
-        Self::from_script_buf(*&script_pubkey)
+        Self::from_script_buf(script_pubkey)
     }
 
     /// Compute a taproot script hash from a scriptbuf
