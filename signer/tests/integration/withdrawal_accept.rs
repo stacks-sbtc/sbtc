@@ -870,7 +870,7 @@ async fn accept_withdrawal_validation_withdrawal_invalid_sweep() {
     // not controlled by the signers.
     //
     // We also truncate the bitcoin_tx_outputs table because we use that
-    // table to identify signer inputs and outputs.
+    // table to identify the signers' scriptPubKeys.
     sqlx::query("TRUNCATE TABLE sbtc_signer.bitcoin_tx_outputs CASCADE")
         .execute(db.pool())
         .await
