@@ -1561,7 +1561,7 @@ pub async fn assert_allow_dkg_begin(
 ) -> Result<(), Error> {
     let storage = context.get_storage();
     let config = context.config();
-    
+
     // If the latest shares are unverified, we want to prioritize verifying them
     // instead of doing new DKG rounds. If we fail to do so they will eventually
     // be marked as failed, and we will resume DKG-ing.
