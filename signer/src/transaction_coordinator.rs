@@ -2529,21 +2529,20 @@ pub async fn should_coordinate_dkg(
     let storage = context.get_storage();
     let config = context.config();
 
-    // Trigger dkg if signatures_required has changed
-    let bootstrap_signatures_required = Some(config.signer.bootstrap_signatures_required);
-    if context.state().registry_signatures_required() != bootstrap_signatures_required {
+    // Allow DKG if we do not have a key rotation event in the database.
+    let Some(registry_signer_info) = context.state().registry_signer_set_info() else {
+        tracing::info!("no signer set information in the registry; proceeding with DKG");
+        return Ok(true);
+    };
+
+    // Trigger DKG if signatures_required has changed
+    if registry_signer_info.signatures_required != config.signer.bootstrap_signatures_required {
         tracing::info!("signatures required has changed; proceeding with DKG");
         return Ok(true);
     }
 
-    // Trigger dkg if signer set changes. This also triggers DKG if we do
-    // not have a key rotation event in the database.
-    let signer_set_unchanged = context
-        .state()
-        .registry_current_signer_set()
-        .is_some_and(|signer_set| signer_set == config.signer.bootstrap_signing_set);
-
-    if !signer_set_unchanged {
+    // Trigger DKG if signer set changes
+    if registry_signer_info.signer_set != config.signer.bootstrap_signing_set {
         tracing::info!("signer set has changed; proceeding with DKG");
         return Ok(true);
     }

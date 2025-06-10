@@ -1609,20 +1609,19 @@ pub async fn assert_allow_dkg_begin(
     let storage = context.get_storage();
     let config = context.config();
 
+    let Some(registry_signer_info) = context.state().registry_signer_set_info() else {
+        tracing::info!("no signer set information in the registry; proceeding with DKG");
+        return Ok(());
+    };
+
     // Trigger dkg if signatures_required has changed
-    let bootstrap_signatures_required = Some(config.signer.bootstrap_signatures_required);
-    if context.state().registry_signatures_required() != bootstrap_signatures_required {
+    if registry_signer_info.signatures_required != config.signer.bootstrap_signatures_required {
         tracing::info!("signatures required has changed; proceeding with DKG");
         return Ok(());
     }
 
     // Trigger dkg if signer set changes
-    let signer_set_unchanged = context
-        .state()
-        .registry_current_signer_set()
-        .is_some_and(|signer_set| signer_set == config.signer.bootstrap_signing_set);
-
-    if !signer_set_unchanged {
+    if registry_signer_info.signer_set != config.signer.bootstrap_signing_set {
         tracing::info!("signer set has changed; proceeding with DKG");
         return Ok(());
     }
