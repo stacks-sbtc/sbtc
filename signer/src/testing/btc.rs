@@ -57,12 +57,12 @@ pub fn base_signer_transaction() -> Transaction {
 
 impl utxo::DepositRequest {
     /// Transform this deposit request into the body that Emily expects.
-    pub fn as_emily_request(&self, tx: &Transaction) -> CreateDepositRequestBody {
+    pub fn as_emily_request(&self, tx: &Transaction, reclaim_script: ScriptBuf) -> CreateDepositRequestBody {
         CreateDepositRequestBody {
             bitcoin_tx_output_index: self.outpoint.vout,
             bitcoin_txid: self.outpoint.txid.to_string(),
             deposit_script: self.deposit_script.to_hex_string(),
-            reclaim_script: "TODO".to_string(),
+            reclaim_script: reclaim_script.to_hex_string(),
             transaction_hex: serialize_hex(tx),
         }
     }
