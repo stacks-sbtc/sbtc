@@ -73,7 +73,7 @@ use url::Url;
 
 use crate::setup::IntoEmilyTestingConfig as _;
 use crate::setup::TestSweepSetup;
-use crate::setup::backfill_bitcoin_blocks;
+use crate::setup::fetch_canonical_bitcoin_blockchain;
 use crate::transaction_coordinator::mock_reqwests_status_code_error;
 use crate::utxo_construction::make_deposit_request;
 use crate::zmq::BITCOIN_CORE_ZMQ_ENDPOINT;
@@ -1329,8 +1329,7 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
 
     // We backfill the blockchain data in the database so that the block
     // observer doesn't need do it, speeding up the test.
-    let chain_tip_info = get_canonical_chain_tip(rpc);
-    backfill_bitcoin_blocks(&db, rpc, &chain_tip_info.hash).await;
+    fetch_canonical_bitcoin_blockchain(&db, rpc).await;
 
     // We need to set up the stacks client as well. We use it to fetch
     // information about the Stacks blockchain, so we need to prep it, even
