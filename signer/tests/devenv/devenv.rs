@@ -40,6 +40,8 @@ use serde_json::to_value;
 use signer::bitcoin::utxo::DepositRequest;
 use signer::error::Error;
 use signer::stacks::contracts::SmartContract;
+use signer::testing::btc::BlockHashStreamDispatcher;
+use signer::testing::btc::BlockHashStreamProvider;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -112,9 +114,13 @@ async fn process_blocks_simple_fork() {
     })
     .await;
 
+    let block_dispatcher = BlockHashStreamDispatcher::new(BITCOIN_CORE_ZMQ_ENDPOINT)
+        .await
+        .expect("Failed to create block hash stream dispatcher");
+
     let block_observer = BlockObserver {
         context: ctx.clone(),
-        bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT).await,
+        bitcoin_blocks: block_dispatcher.get_block_hash_stream(),
     };
 
     // We need to wait for the block observer to be up

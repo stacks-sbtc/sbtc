@@ -50,6 +50,8 @@ use signer::context::RequestDeciderEvent;
 use signer::message::Payload;
 use signer::network::MessageTransfer as _;
 use signer::storage::model::WithdrawalTxOutput;
+use signer::testing::btc::BlockHashStreamDispatcher;
+use signer::testing::btc::BlockHashStreamProvider;
 use signer::testing::btc::get_canonical_chain_tip;
 use signer::testing::get_rng;
 
@@ -1540,6 +1542,10 @@ async fn sign_bitcoin_transaction() {
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
+    let block_dispatcher = BlockHashStreamDispatcher::new(BITCOIN_CORE_ZMQ_ENDPOINT)
+        .await
+        .expect("Failed to create block hash stream dispatcher");
+
     // We need to populate our databases, so let's fetch the data.
     let emily_client = EmilyClient::try_new(
         &Url::parse("http://testApiKey@localhost:3031").unwrap(),
@@ -1752,9 +1758,9 @@ async fn sign_bitcoin_transaction() {
 
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT)
-                .await,
+            bitcoin_blocks: block_dispatcher.get_block_hash_stream(),
         };
+
         let counter = start_count.clone();
         tokio::spawn(async move {
             counter.fetch_add(1, Ordering::Relaxed);
@@ -1966,6 +1972,10 @@ async fn sign_bitcoin_transaction() {
 async fn sign_bitcoin_transaction_multiple_locking_keys() {
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let (rpc, faucet) = regtest::initialize_blockchain();
+
+    let block_dispatcher = BlockHashStreamDispatcher::new(BITCOIN_CORE_ZMQ_ENDPOINT)
+        .await
+        .expect("Failed to create block hash stream dispatcher");
 
     // We need to populate our databases, so let's fetch the data.
     let emily_client = EmilyClient::try_new(
@@ -2191,8 +2201,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
 
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT)
-                .await,
+            bitcoin_blocks: block_dispatcher.get_block_hash_stream(),
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -2582,6 +2591,10 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
+    let block_dispatcher = BlockHashStreamDispatcher::new(BITCOIN_CORE_ZMQ_ENDPOINT)
+        .await
+        .expect("Failed to create block hash stream dispatcher");
+
     // We need to populate our databases, so let's fetch the data.
     let emily_client: EmilyClient = EmilyClient::try_new(
         &Url::parse("http://testApiKey@localhost:3031").unwrap(),
@@ -2776,8 +2789,7 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
 
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT)
-                .await,
+            bitcoin_blocks: block_dispatcher.get_block_hash_stream(),
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -3266,6 +3278,10 @@ async fn test_conservative_initial_sbtc_limits() {
     let (rpc, faucet) = regtest::initialize_blockchain();
     let mut rng = get_rng();
 
+    let block_dispatcher = BlockHashStreamDispatcher::new(BITCOIN_CORE_ZMQ_ENDPOINT)
+        .await
+        .expect("Failed to create block hash stream dispatcher");
+
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let signatures_required: u16 = 2;
 
@@ -3546,8 +3562,7 @@ async fn test_conservative_initial_sbtc_limits() {
 
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT)
-                .await,
+            bitcoin_blocks: block_dispatcher.get_block_hash_stream(),
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -3641,6 +3656,10 @@ async fn test_conservative_initial_sbtc_limits() {
 async fn sign_bitcoin_transaction_withdrawals() {
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let (rpc, faucet) = regtest::initialize_blockchain();
+
+    let block_dispatcher = BlockHashStreamDispatcher::new(BITCOIN_CORE_ZMQ_ENDPOINT)
+        .await
+        .expect("Failed to create block hash stream dispatcher");
 
     // We need to populate our databases, so let's fetch the data.
     let emily_client = EmilyClient::try_new(
@@ -3848,8 +3867,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
 
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT)
-                .await,
+            bitcoin_blocks: block_dispatcher.get_block_hash_stream(),
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
