@@ -53,7 +53,7 @@ impl sqlx::Type<sqlx::Postgres> for TaprootScriptHash {
 
 impl<'r> sqlx::Encode<'r, sqlx::Postgres> for TaprootScriptHash {
     fn encode_by_ref(&self, buf: &mut PgArgumentBuffer) -> Result<IsNull, BoxDynError> {
-        let bytes = self.into_bytes();
+        let bytes = self.to_byte_array();
         <[u8; 32] as sqlx::Encode<'r, sqlx::Postgres>>::encode_by_ref(&bytes, buf)
     }
 }

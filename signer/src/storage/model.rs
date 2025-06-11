@@ -1040,7 +1040,7 @@ impl TaprootScriptHash {
         Default::default()
     }
     /// Return the inner bytes for the taproot script hash
-    pub fn into_bytes(&self) -> [u8; 32] {
+    pub fn to_byte_array(&self) -> [u8; 32] {
         self.0.to_byte_array()
     }
 
