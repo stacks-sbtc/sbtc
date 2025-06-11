@@ -1814,7 +1814,11 @@ fn make_coinbase_deposit_request(
     rpc: &bitcoincore_rpc::Client,
     max_fee: u64,
     signers_public_key: bitcoin::XOnlyPublicKey,
-) -> (bitcoin::Transaction, signer::bitcoin::utxo::DepositRequest, sbtc::deposits::DepositInfo) {
+) -> (
+    bitcoin::Transaction,
+    signer::bitcoin::utxo::DepositRequest,
+    sbtc::deposits::DepositInfo,
+) {
     let deposit_inputs = DepositScriptInputs {
         signers_public_key,
         max_fee,
