@@ -50,8 +50,8 @@ pub enum Metrics {
     /// The amount of time, in seconds for running bitcoin or stacks
     /// validation.
     ValidationDurationSeconds,
-    /// The number of peers connected in the libp2p network.
-    PeersConnectedTotal,
+    /// The number of peers connected in the p2p network.
+    PeersConnected,
 }
 
 impl From<Metrics> for metrics::KeyName {
@@ -79,12 +79,12 @@ impl Metrics {
 
     /// Increment the gauge for the number of connected peers
     pub fn increment_peers_connected_total() {
-        metrics::gauge!(Metrics::PeersConnectedTotal).increment(1.0);
+        metrics::gauge!(Metrics::PeersConnected).increment(1.0);
     }
 
     /// Decrement the gauge for the number of connected peers
     pub fn decrement_peers_connected_total() {
-        metrics::gauge!(Metrics::PeersConnectedTotal).decrement(1.0);
+        metrics::gauge!(Metrics::PeersConnected).decrement(1.0);
     }
 
     /// Increment number of presign requests that were processed noting
