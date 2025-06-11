@@ -1141,9 +1141,6 @@ async fn run_dkg_if_signatures_required_changes(change_signatures_required: bool
     // we need at least two valid values.
     assert!(config_signer_set.len() > 1);
 
-    // We want current signer set be same as bootstrap_signer_set to prevent DKG trigger
-    // because of changed signer set. Also we want this signer set be at least 2 signers
-
     // Write dkg shares so it won't be a reason to trigger dkg.
     let dkg_shares = model::EncryptedDkgShares {
         dkg_shares_status: model::DkgSharesStatus::Verified,
