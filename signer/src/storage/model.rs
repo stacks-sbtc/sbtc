@@ -1036,7 +1036,7 @@ impl Default for TaprootScriptHash {
 impl TaprootScriptHash {
     /// Create a new taproot script hash with all zeroes
     #[cfg(feature = "testing")]
-    pub fn new() -> Self {
+    pub fn zeros() -> Self {
         Default::default()
     }
     /// Return the inner bytes for the taproot script hash
