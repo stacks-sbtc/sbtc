@@ -1247,7 +1247,7 @@ impl RotateKeysV1 {
     ///
     /// One of the inputs, new-keys, is a (list 128 (buff 33)). This
     /// function represents this data type.
-    fn list_data_type() -> &'static ListTypeData {
+    pub fn list_data_type() -> &'static ListTypeData {
         static KEYS_ARGUMENT_DATA_TYPE: OnceLock<ListTypeData> = OnceLock::new();
         KEYS_ARGUMENT_DATA_TYPE.get_or_init(|| {
             // A Result::Err is returned whenever the "depth" of the type
