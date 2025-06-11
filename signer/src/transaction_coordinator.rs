@@ -1672,9 +1672,6 @@ where
         S: Stream<Item = Signed<SignerMessage>>,
         Coordinator: WstsCoordinator,
     {
-        // this assumes that the signer set doesn't change for the duration of this call,
-        // but we're already assuming that the bitcoin chain tip doesn't change
-        // alternately we could hit the DB every time we get a new message
         let signer_set = self.context.config().signer.bootstrap_signing_set.clone();
         tokio::pin!(signal_stream);
 
