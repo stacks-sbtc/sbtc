@@ -1196,6 +1196,7 @@ async fn skip_dkg_if_latest_shares_unverified(
         .modify_settings(|settings| {
             // We want to run DKG twice
             settings.signer.dkg_target_rounds = std::num::NonZero::<u32>::new(2).unwrap();
+            settings.signer.dkg_min_bitcoin_block_height = Some(0u64.into());
         })
         .build();
 
