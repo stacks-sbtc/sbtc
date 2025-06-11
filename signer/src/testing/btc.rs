@@ -62,7 +62,7 @@ impl utxo::DepositRequest {
             bitcoin_tx_output_index: self.outpoint.vout,
             bitcoin_txid: self.outpoint.txid.to_string(),
             deposit_script: self.deposit_script.to_hex_string(),
-            reclaim_script: self.reclaim_script.to_hex_string(),
+            reclaim_script: "TODO".to_string(),
             transaction_hex: serialize_hex(tx),
         }
     }

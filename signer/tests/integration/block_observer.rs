@@ -589,7 +589,7 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
         bitcoin_tx_output_index: deposit_request.outpoint.vout,
         bitcoin_txid: deposit_request.outpoint.txid.to_string(),
         deposit_script: deposit_request.deposit_script.to_hex_string(),
-        reclaim_script: deposit_request.reclaim_script.to_hex_string(),
+        reclaim_script: "TODO".to_string(),
         transaction_hex: serialize_hex(&deposit_tx),
     };
     deposit_api::create_deposit(emily_client.config(), body)
@@ -1755,7 +1755,7 @@ async fn block_observer_ignores_coinbase() {
         bitcoin_tx_output_index: deposit_request.outpoint.vout,
         bitcoin_txid: deposit_request.outpoint.txid.to_string(),
         deposit_script: deposit_request.deposit_script.to_hex_string(),
-        reclaim_script: deposit_request.reclaim_script.to_hex_string(),
+        reclaim_script: "TODO".to_string(),
         transaction_hex: serialize_hex(&deposit_tx),
     };
     deposit_api::create_deposit(emily_client.config(), body)
@@ -1796,7 +1796,7 @@ async fn block_observer_ignores_coinbase() {
     // expected.
     let request = CreateDepositRequest {
         outpoint: deposit_request.outpoint,
-        reclaim_script: deposit_request.reclaim_script.clone(),
+        reclaim_script: Default::default(),
         deposit_script: deposit_request.deposit_script.clone(),
     };
     let bitcoin_client = ctx.get_bitcoin_client();
@@ -1846,7 +1846,6 @@ fn make_coinbase_deposit_request(
         signer_bitmap: bitvec::array::BitArray::ZERO,
         amount: deposit_tx.output[0].value.to_sat(),
         deposit_script,
-        reclaim_script,
         reclaim_script_hash: Some(reclaim_script_hash),
         signers_public_key,
     };

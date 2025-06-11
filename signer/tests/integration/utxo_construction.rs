@@ -128,7 +128,6 @@ where
         signer_bitmap: BitArray::ZERO,
         amount: dep.amount,
         deposit_script: dep.deposit_script.clone(),
-        reclaim_script: dep.reclaim_script.clone(),
         reclaim_script_hash: Some(TaprootScriptHash::from_script_buf(&dep.reclaim_script)),
         signers_public_key: dep.signers_public_key,
     };

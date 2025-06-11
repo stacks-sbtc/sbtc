@@ -245,7 +245,6 @@ where
         signer_bitmap: BitArray::ZERO,
         amount: dep.amount,
         deposit_script: dep.deposit_script.clone(),
-        reclaim_script: dep.reclaim_script.clone(),
         reclaim_script_hash: Some(reclaim_script_hash),
         signers_public_key: dep.signers_public_key,
     };
@@ -403,7 +402,7 @@ async fn orphaned_deposit() {
         bitcoin_tx_output_index: deposit_request.outpoint.vout,
         bitcoin_txid: deposit_request.outpoint.txid.to_string(),
         deposit_script: deposit_request.deposit_script.to_hex_string(),
-        reclaim_script: deposit_request.reclaim_script.to_hex_string(),
+        reclaim_script: "TODO".to_string(),
         transaction_hex: serialize_hex(&deposit_tx),
     };
 

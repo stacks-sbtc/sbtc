@@ -60,8 +60,6 @@ struct DepositStatusSummary {
     max_fee: u64,
     /// The deposit script used so that the signers' can spend funds.
     deposit_script: model::ScriptPubKey,
-    /// The reclaim script for the deposit.
-    reclaim_script: model::ScriptPubKey,
     /// The hash of reclaim script for the deposit.
     reclaim_script_hash: Option<model::TaprootScriptHash>,
     /// The public key used in the deposit script.
@@ -648,7 +646,6 @@ impl PgStore {
               , dr.max_fee
               , dr.lock_time
               , dr.spend_script AS deposit_script
-              , dr.reclaim_script
               , dr.reclaim_script_hash
               , dr.signers_public_key
               , bc.block_height
@@ -956,7 +953,6 @@ impl super::DbRead for PgStore {
                 deposit_requests.txid
               , deposit_requests.output_index
               , deposit_requests.spend_script
-              , deposit_requests.reclaim_script
               , deposit_requests.reclaim_script_hash
               , deposit_requests.recipient
               , deposit_requests.amount
@@ -1014,7 +1010,6 @@ impl super::DbRead for PgStore {
                     deposit_requests.txid
                   , deposit_requests.output_index
                   , deposit_requests.spend_script
-                  , deposit_requests.reclaim_script
                   , deposit_requests.reclaim_script_hash
                   , deposit_requests.recipient
                   , deposit_requests.amount
@@ -1044,7 +1039,6 @@ impl super::DbRead for PgStore {
                 accepted_deposits.txid
               , accepted_deposits.output_index
               , accepted_deposits.spend_script
-              , accepted_deposits.reclaim_script
               , accepted_deposits.reclaim_script_hash
               , accepted_deposits.recipient
               , accepted_deposits.amount
@@ -1200,7 +1194,6 @@ impl super::DbRead for PgStore {
                 .map_err(Error::DisabledLockTime)?,
             outpoint: bitcoin::OutPoint::new((*txid).into(), output_index),
             deposit_script: summary.deposit_script.into(),
-            reclaim_script: summary.reclaim_script.into(),
             reclaim_script_hash: summary.reclaim_script_hash,
             signers_public_key: summary.signers_public_key.into(),
             dkg_shares_status: dkg_shares.map(|shares| shares.dkg_shares_status),
@@ -2379,7 +2372,6 @@ impl super::DbRead for PgStore {
             SELECT txid
                  , output_index
                  , spend_script
-                 , reclaim_script
                  , reclaim_script_hash
                  , recipient
                  , amount
@@ -2540,7 +2532,6 @@ impl super::DbWrite for PgStore {
               ( txid
               , output_index
               , spend_script
-              , reclaim_script
               , reclaim_script_hash
               , recipient
               , amount
@@ -2555,7 +2546,6 @@ impl super::DbWrite for PgStore {
         .bind(deposit_request.txid)
         .bind(i32::try_from(deposit_request.output_index).map_err(Error::ConversionDatabaseInt)?)
         .bind(&deposit_request.spend_script)
-        .bind(&deposit_request.reclaim_script)
         .bind(&deposit_request.reclaim_script_hash)
         .bind(&deposit_request.recipient)
         .bind(i64::try_from(deposit_request.amount).map_err(Error::ConversionDatabaseInt)?)
@@ -2581,7 +2571,6 @@ impl super::DbWrite for PgStore {
         let mut txid = Vec::with_capacity(deposit_requests.len());
         let mut output_index = Vec::with_capacity(deposit_requests.len());
         let mut spend_script = Vec::with_capacity(deposit_requests.len());
-        let mut reclaim_script = Vec::with_capacity(deposit_requests.len());
         let mut reclaim_script_hash = Vec::with_capacity(deposit_requests.len());
         let mut recipient = Vec::with_capacity(deposit_requests.len());
         let mut amount = Vec::with_capacity(deposit_requests.len());
@@ -2595,7 +2584,6 @@ impl super::DbWrite for PgStore {
             txid.push(req.txid);
             output_index.push(vout);
             spend_script.push(req.spend_script);
-            reclaim_script.push(req.reclaim_script);
             reclaim_script_hash.push(req.reclaim_script_hash);
             recipient.push(req.recipient);
             amount.push(i64::try_from(req.amount).map_err(Error::ConversionDatabaseInt)?);
@@ -2620,19 +2608,17 @@ impl super::DbWrite for PgStore {
             WITH tx_ids           AS (SELECT ROW_NUMBER() OVER (), txid FROM UNNEST($1::BYTEA[]) AS txid)
             , output_index        AS (SELECT ROW_NUMBER() OVER (), output_index FROM UNNEST($2::INTEGER[]) AS output_index)
             , spend_script        AS (SELECT ROW_NUMBER() OVER (), spend_script FROM UNNEST($3::BYTEA[]) AS spend_script)
-            , reclaim_script      AS (SELECT ROW_NUMBER() OVER (), reclaim_script FROM UNNEST($4::BYTEA[]) AS reclaim_script)
-            , reclaim_script_hash AS (SELECT ROW_NUMBER() OVER (), reclaim_script_hash FROM UNNEST($5::BYTEA[]) AS reclaim_script_hash)
-            , recipient           AS (SELECT ROW_NUMBER() OVER (), recipient FROM UNNEST($6::TEXT[]) AS recipient)
-            , amount              AS (SELECT ROW_NUMBER() OVER (), amount FROM UNNEST($7::BIGINT[]) AS amount)
-            , max_fee             AS (SELECT ROW_NUMBER() OVER (), max_fee FROM UNNEST($8::BIGINT[]) AS max_fee)
-            , lock_time           AS (SELECT ROW_NUMBER() OVER (), lock_time FROM UNNEST($9::BIGINT[]) AS lock_time)
-            , signer_pub_keys     AS (SELECT ROW_NUMBER() OVER (), signers_public_key FROM UNNEST($10::BYTEA[]) AS signers_public_key)
-            , script_pub_keys     AS (SELECT ROW_NUMBER() OVER (), senders FROM UNNEST($11::VARCHAR[]) AS senders)
+            , reclaim_script_hash AS (SELECT ROW_NUMBER() OVER (), reclaim_script_hash FROM UNNEST($4::BYTEA[]) AS reclaim_script_hash)
+            , recipient           AS (SELECT ROW_NUMBER() OVER (), recipient FROM UNNEST($5::TEXT[]) AS recipient)
+            , amount              AS (SELECT ROW_NUMBER() OVER (), amount FROM UNNEST($6::BIGINT[]) AS amount)
+            , max_fee             AS (SELECT ROW_NUMBER() OVER (), max_fee FROM UNNEST($7::BIGINT[]) AS max_fee)
+            , lock_time           AS (SELECT ROW_NUMBER() OVER (), lock_time FROM UNNEST($8::BIGINT[]) AS lock_time)
+            , signer_pub_keys     AS (SELECT ROW_NUMBER() OVER (), signers_public_key FROM UNNEST($9::BYTEA[]) AS signers_public_key)
+            , script_pub_keys     AS (SELECT ROW_NUMBER() OVER (), senders FROM UNNEST($10::VARCHAR[]) AS senders)
             INSERT INTO sbtc_signer.deposit_requests (
                   txid
                 , output_index
                 , spend_script
-                , reclaim_script
                 , reclaim_script_hash
                 , recipient
                 , amount
@@ -2644,7 +2630,6 @@ impl super::DbWrite for PgStore {
                 txid
               , output_index
               , spend_script
-              , reclaim_script
               , reclaim_script_hash
               , recipient
               , amount
@@ -2655,7 +2640,6 @@ impl super::DbWrite for PgStore {
             FROM tx_ids
             JOIN output_index USING (row_number)
             JOIN spend_script USING (row_number)
-            JOIN reclaim_script USING (row_number)
             JOIN reclaim_script_hash USING (row_number)
             JOIN recipient USING (row_number)
             JOIN amount USING (row_number)
@@ -2668,7 +2652,6 @@ impl super::DbWrite for PgStore {
         .bind(txid)
         .bind(output_index)
         .bind(spend_script)
-        .bind(reclaim_script)
         .bind(reclaim_script_hash)
         .bind(recipient)
         .bind(amount)

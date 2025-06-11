@@ -418,8 +418,6 @@ pub struct DepositRequest {
     pub amount: u64,
     /// The deposit script used so that the signers' can spend funds.
     pub deposit_script: ScriptBuf,
-    /// The reclaim script for the deposit.
-    pub reclaim_script: ScriptBuf,
     /// The hash of the reclaim script for the deposit.
     pub reclaim_script_hash: Option<TaprootScriptHash>,
     /// The public key used in the deposit script.
@@ -496,20 +494,21 @@ impl DepositRequest {
 
     /// Constructs the taproot spending information for the UTXO associated
     /// with this deposit request.
-    fn construct_taproot_info(&self, ver: LeafVersion) -> TaprootSpendInfo {
-        // For such a simple tree, we construct it by hand.
-        let leaf1 = NodeInfo::new_leaf_with_ver(self.deposit_script.clone(), ver);
-        let leaf2 = NodeInfo::new_leaf_with_ver(self.reclaim_script.clone(), ver);
+    fn construct_taproot_info(&self, _ver: LeafVersion) -> TaprootSpendInfo {
+        todo!()
+        // // For such a simple tree, we construct it by hand.
+        // let leaf1 = NodeInfo::new_leaf_with_ver(self.deposit_script.clone(), ver);
+        // let leaf2 = NodeInfo::new_leaf_with_ver(self.reclaim_script.clone(), ver);
 
-        // A Result::Err is returned by NodeInfo::combine if the depth of
-        // our taproot tree exceeds the maximum depth of taproot trees,
-        // which is 128. We have two nodes so the depth is 1 so this will
-        // never panic.
-        let node =
-            NodeInfo::combine(leaf1, leaf2).expect("This tree depth greater than max of 128");
-        let internal_key = *sbtc::UNSPENDABLE_TAPROOT_KEY;
+        // // A Result::Err is returned by NodeInfo::combine if the depth of
+        // // our taproot tree exceeds the maximum depth of taproot trees,
+        // // which is 128. We have two nodes so the depth is 1 so this will
+        // // never panic.
+        // let node =
+        //     NodeInfo::combine(leaf1, leaf2).expect("This tree depth greater than max of 128");
+        // let internal_key = *sbtc::UNSPENDABLE_TAPROOT_KEY;
 
-        TaprootSpendInfo::from_node_info(SECP256K1, internal_key, node)
+        // TaprootSpendInfo::from_node_info(SECP256K1, internal_key, node)
     }
 
     /// Try convert from a model::DepositRequest with some additional info.
@@ -520,7 +519,6 @@ impl DepositRequest {
             signer_bitmap: votes.into(),
             amount: request.amount,
             deposit_script: ScriptBuf::from_bytes(request.spend_script),
-            reclaim_script: ScriptBuf::from_bytes(request.reclaim_script),
             reclaim_script_hash: request.reclaim_script_hash,
             signers_public_key: request.signers_public_key.into(),
         }
@@ -1738,7 +1736,6 @@ mod tests {
             signer_bitmap: BitArray::new(signer_bitmap.to_le_bytes()),
             amount,
             deposit_script: deposit_inputs.deposit_script(),
-            reclaim_script: ScriptBuf::new(),
             reclaim_script_hash: Some(TaprootScriptHash::new()),
             signers_public_key,
         }
@@ -1947,7 +1944,6 @@ mod tests {
             signer_bitmap: bitmap,
             amount: 100_000,
             deposit_script: ScriptBuf::new(),
-            reclaim_script: ScriptBuf::new(),
             reclaim_script_hash: Some(TaprootScriptHash::new()),
             signers_public_key: XOnlyPublicKey::from_str(X_ONLY_PUBLIC_KEY1).unwrap(),
         };
@@ -1965,7 +1961,6 @@ mod tests {
             signer_bitmap: BitArray::ZERO,
             amount: 100_000,
             deposit_script: ScriptBuf::from_bytes(vec![1, 2, 3]),
-            reclaim_script: ScriptBuf::new(),
             reclaim_script_hash: Some(TaprootScriptHash::new()),
             signers_public_key: XOnlyPublicKey::from_str(X_ONLY_PUBLIC_KEY1).unwrap(),
         };
