@@ -145,7 +145,6 @@ use crate::setup::set_deposit_completed;
 use crate::setup::set_deposit_incomplete;
 use crate::utxo_construction::generate_withdrawal;
 use crate::utxo_construction::make_deposit_request;
-use crate::zmq::BITCOIN_CORE_ZMQ_ENDPOINT;
 
 type IntegrationTestContext =
     TestContext<PgStore, BitcoinCoreClient, WrappedMock<MockStacksInteract>, EmilyClient>;
@@ -1542,9 +1541,7 @@ async fn sign_bitcoin_transaction() {
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
-    let block_dispatcher = BlockHashStreamDispatcher::new(BITCOIN_CORE_ZMQ_ENDPOINT)
-        .await
-        .expect("Failed to create block hash stream dispatcher");
+    let block_dispatcher = BlockHashStreamDispatcher::new_regtest().await.unwrap();
 
     // We need to populate our databases, so let's fetch the data.
     let emily_client = EmilyClient::try_new(
@@ -1973,9 +1970,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
-    let block_dispatcher = BlockHashStreamDispatcher::new(BITCOIN_CORE_ZMQ_ENDPOINT)
-        .await
-        .expect("Failed to create block hash stream dispatcher");
+    let block_dispatcher = BlockHashStreamDispatcher::new_regtest().await.unwrap();
 
     // We need to populate our databases, so let's fetch the data.
     let emily_client = EmilyClient::try_new(
@@ -2591,9 +2586,7 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
-    let block_dispatcher = BlockHashStreamDispatcher::new(BITCOIN_CORE_ZMQ_ENDPOINT)
-        .await
-        .expect("Failed to create block hash stream dispatcher");
+    let block_dispatcher = BlockHashStreamDispatcher::new_regtest().await.unwrap();
 
     // We need to populate our databases, so let's fetch the data.
     let emily_client: EmilyClient = EmilyClient::try_new(
@@ -3278,9 +3271,7 @@ async fn test_conservative_initial_sbtc_limits() {
     let (rpc, faucet) = regtest::initialize_blockchain();
     let mut rng = get_rng();
 
-    let block_dispatcher = BlockHashStreamDispatcher::new(BITCOIN_CORE_ZMQ_ENDPOINT)
-        .await
-        .expect("Failed to create block hash stream dispatcher");
+    let block_dispatcher = BlockHashStreamDispatcher::new_regtest().await.unwrap();
 
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let signatures_required: u16 = 2;
@@ -3657,9 +3648,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
-    let block_dispatcher = BlockHashStreamDispatcher::new(BITCOIN_CORE_ZMQ_ENDPOINT)
-        .await
-        .expect("Failed to create block hash stream dispatcher");
+    let block_dispatcher = BlockHashStreamDispatcher::new_regtest().await.unwrap();
 
     // We need to populate our databases, so let's fetch the data.
     let emily_client = EmilyClient::try_new(

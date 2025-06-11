@@ -76,7 +76,6 @@ use crate::setup::IntoEmilyTestingConfig as _;
 use crate::setup::TestSweepSetup;
 use crate::transaction_coordinator::mock_reqwests_status_code_error;
 use crate::utxo_construction::make_deposit_request;
-use crate::zmq::BITCOIN_CORE_ZMQ_ENDPOINT;
 
 pub const GET_POX_INFO_JSON: &str =
     include_str!("../../tests/fixtures/stacksapi-get-pox-info-test-data.json");
@@ -165,9 +164,7 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
-    let block_dispatcher = BlockHashStreamDispatcher::new(BITCOIN_CORE_ZMQ_ENDPOINT)
-        .await
-        .expect("Failed to create block hash stream dispatcher");
+    let block_dispatcher = BlockHashStreamDispatcher::new_regtest().await.unwrap();
 
     let block_observer = BlockObserver {
         context: ctx.clone(),
@@ -274,9 +271,7 @@ async fn link_blocks() {
     })
     .await;
 
-    let block_dispatcher = BlockHashStreamDispatcher::new(BITCOIN_CORE_ZMQ_ENDPOINT)
-        .await
-        .expect("Failed to create block hash stream dispatcher");
+    let block_dispatcher = BlockHashStreamDispatcher::new_regtest().await.unwrap();
 
     let block_observer = BlockObserver {
         context: ctx.clone(),
@@ -435,9 +430,7 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
-    let block_dispatcher = BlockHashStreamDispatcher::new(BITCOIN_CORE_ZMQ_ENDPOINT)
-        .await
-        .expect("Failed to create block hash stream dispatcher");
+    let block_dispatcher = BlockHashStreamDispatcher::new_regtest().await.unwrap();
 
     let block_observer = BlockObserver {
         context: ctx.clone(),
@@ -944,9 +937,7 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
-    let block_dispatcher = BlockHashStreamDispatcher::new(BITCOIN_CORE_ZMQ_ENDPOINT)
-        .await
-        .expect("Failed to create block hash stream dispatcher");
+    let block_dispatcher = BlockHashStreamDispatcher::new_regtest().await.unwrap();
 
     let block_observer = BlockObserver {
         context: ctx.clone(),
@@ -1245,9 +1236,7 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
-    let block_dispatcher = BlockHashStreamDispatcher::new(BITCOIN_CORE_ZMQ_ENDPOINT)
-        .await
-        .expect("Failed to create block hash stream dispatcher");
+    let block_dispatcher = BlockHashStreamDispatcher::new_regtest().await.unwrap();
 
     let block_observer = BlockObserver {
         context: ctx.clone(),
@@ -1464,9 +1453,7 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
-    let block_dispatcher = BlockHashStreamDispatcher::new(BITCOIN_CORE_ZMQ_ENDPOINT)
-        .await
-        .expect("Failed to create block hash stream dispatcher");
+    let block_dispatcher = BlockHashStreamDispatcher::new_regtest().await.unwrap();
 
     let block_observer = BlockObserver {
         context: ctx.clone(),
@@ -1691,9 +1678,7 @@ async fn block_observer_ignores_coinbase() {
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
-    let block_dispatcher = BlockHashStreamDispatcher::new(BITCOIN_CORE_ZMQ_ENDPOINT)
-        .await
-        .expect("Failed to create block hash stream dispatcher");
+    let block_dispatcher = BlockHashStreamDispatcher::new_regtest().await.unwrap();
 
     let block_observer = BlockObserver {
         context: ctx.clone(),

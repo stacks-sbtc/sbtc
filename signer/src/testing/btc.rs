@@ -505,6 +505,17 @@ impl BlockHashStreamDispatcher<DirectMode> {
         })
     }
 
+    /// Creates a new [`BlockHashStreamDispatcher`] initialized in [`DirectMode`] against the
+    /// default regtest ZMQ endpoint.
+    pub async fn new_regtest() -> Result<Self, TestUtilityError> {
+        use sbtc::testing::regtest::BITCOIN_CORE_ZMQ_ENDPOINT;
+        Self::new(BITCOIN_CORE_ZMQ_ENDPOINT)
+            .await
+            .map_err(|e|
+                format!("Failed to create BlockHashStreamDispatcher against regtest endpoint '{BITCOIN_CORE_ZMQ_ENDPOINT}': {e}").into()
+            )
+    }
+
     /// Transitions a [`BlockHashStreamDispatcher`] from [`BufferedMode`] to [`DirectMode`].
     ///
     /// This involves taking the MPSC receiver from the buffered mode, potentially

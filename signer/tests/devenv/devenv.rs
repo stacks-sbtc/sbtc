@@ -78,7 +78,6 @@ use signer::testing::context::*;
 use signer::testing::storage::DbReadTestExt as _;
 use url::Url;
 
-const BITCOIN_CORE_ZMQ_ENDPOINT: &str = "tcp://localhost:28332";
 const DEVENV_DEPLOYER: &str = "SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS";
 const DEVENV_STACKS_API: &str = "http://127.0.0.1:3999";
 
@@ -113,9 +112,7 @@ async fn process_blocks_simple_fork() {
     })
     .await;
 
-    let block_dispatcher = BlockHashStreamDispatcher::new(BITCOIN_CORE_ZMQ_ENDPOINT)
-        .await
-        .expect("Failed to create block hash stream dispatcher");
+    let block_dispatcher = BlockHashStreamDispatcher::new_regtest().await.unwrap();
 
     let block_observer = BlockObserver {
         context: ctx.clone(),
