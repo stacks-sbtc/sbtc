@@ -28,14 +28,18 @@
 //! [^3]: https://github.com/Trust-Machines/p256k1/blob/3ecb941c1af13741d52335ef911693b6d6fda94b/p256k1/src/scalar.rs#L245-L257
 //! [^4]: https://github.com/bitcoin-core/secp256k1/blob/3fdf146bad042a17f6b2f490ef8bd9d8e774cdbd/src/scalar.h#L31-L36
 
+use std::borrow::Borrow;
+use std::collections::BTreeSet;
 use std::ops::Deref;
 use std::str::FromStr;
 
 use bitcoin::ScriptBuf;
 use bitcoin::TapTweakHash;
+use bitcoin::hashes::Hash as _;
 use secp256k1::SECP256K1;
 use serde::Deserialize;
 use serde::Serialize;
+use sha2::Digest;
 
 use crate::error::Error;
 
@@ -464,6 +468,90 @@ impl SignerScriptPubKey for secp256k1::XOnlyPublicKey {
         }
         let pk = secp256k1::PublicKey::from_x_only_public_key(output_key, parity);
         Ok(PublicKey(pk))
+    }
+}
+
+/// Utility methods for determining the coordinator public key based on the
+/// underlying set of signers and the bitcoin chain tip.
+pub trait CoordinatorPublicKey {
+    /// Find the coordinator public key
+    fn determine_for<B, K>(
+        bitcoin_chain_tip: B,
+        signer_public_keys: &BTreeSet<K>,
+    ) -> Option<PublicKey>
+    where
+        B: Borrow<bitcoin::BlockHash>,
+        K: Copy + Into<PublicKey>,
+    {
+        let num_signers = signer_public_keys.len();
+        if num_signers == 0 {
+            // Handle empty set to avoid panic with % 0
+            return None;
+        }
+
+        // Create a hash of the bitcoin chain tip. SHA256 will always result in
+        // a 32 byte digest.
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(bitcoin_chain_tip.borrow().to_byte_array());
+        let digest: [u8; 32] = hasher.finalize().into();
+
+        // Use the first 4 bytes of the digest to create a u32 index. Since `digest`
+        // is 32 bytes and we explicitly take the first 4 bytes, this is safe.
+        #[allow(clippy::expect_used)]
+        let u32_bytes = digest[..4]
+            .try_into()
+            .expect("BUG: failed to take first 4 bytes of digest");
+
+        // Convert the first 4 bytes of the digest to a u32 index.
+        let index = u32::from_be_bytes(u32_bytes);
+
+        signer_public_keys
+            .iter()
+            .nth((index as usize) % num_signers)
+            .copied()
+            .map(Into::into)
+    }
+
+    /// Determine the coordinator public key for the given bitcoin chain tip.
+    fn determine_coordinator_public_key_for<B>(&self, bitcoin_chain_tip: B) -> Option<PublicKey>
+    where
+        B: Borrow<bitcoin::BlockHash>;
+
+    /// Determine if the given public key is the coordinator public key
+    /// for the given bitcoin chain tip.
+    fn is_public_key_coordinator_for<B, K>(&self, public_key: K, bitcoin_chain_tip: B) -> bool
+    where
+        B: Borrow<bitcoin::BlockHash>,
+        K: Into<PublicKey>,
+    {
+        let coordinator_public_key = self.determine_coordinator_public_key_for(bitcoin_chain_tip);
+        let public_key = public_key.into();
+        coordinator_public_key == Some(public_key)
+    }
+}
+
+/// Implementation of the `CoordinatorPublicKey` trait for `BTreeSet<PublicKey>`.
+impl CoordinatorPublicKey for BTreeSet<PublicKey> {
+    fn determine_coordinator_public_key_for<B>(&self, bitcoin_chain_tip: B) -> Option<PublicKey>
+    where
+        B: Borrow<bitcoin::BlockHash>,
+    {
+        Self::determine_for(bitcoin_chain_tip, self)
+    }
+}
+
+/// Implementation of the `CoordinatorPublicKey` trait for `Vec<PublicKey>`. Note that
+/// this is less performant than the `BTreeSet` implementation, as it requires
+/// collecting the keys into a `BTreeSet` first.
+impl CoordinatorPublicKey for Vec<PublicKey> {
+    fn determine_coordinator_public_key_for<B>(&self, bitcoin_chain_tip: B) -> Option<PublicKey>
+    where
+        B: Borrow<bitcoin::BlockHash>,
+    {
+        self.iter()
+            .copied()
+            .collect::<BTreeSet<PublicKey>>()
+            .determine_coordinator_public_key_for(bitcoin_chain_tip)
     }
 }
 

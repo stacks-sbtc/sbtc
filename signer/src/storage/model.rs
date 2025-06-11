@@ -1,5 +1,6 @@
 //! Database models for the signer.
 
+use std::borrow::Borrow;
 use std::cmp::{PartialEq, PartialOrd};
 use std::collections::BTreeSet;
 use std::convert::From;
@@ -786,6 +787,12 @@ impl AsRef<[u8; 32]> for BitcoinBlockHash {
     }
 }
 
+impl Borrow<bitcoin::BlockHash> for BitcoinBlockHash {
+    fn borrow(&self) -> &bitcoin::BlockHash {
+        &self.0
+    }
+}
+
 impl Deref for BitcoinBlockHash {
     type Target = bitcoin::BlockHash;
     fn deref(&self) -> &Self::Target {
@@ -865,6 +872,12 @@ impl From<&BitcoinBlock> for BitcoinBlockRef {
 
 impl AsRef<BitcoinBlockHash> for BitcoinBlockRef {
     fn as_ref(&self) -> &BitcoinBlockHash {
+        &self.block_hash
+    }
+}
+
+impl Borrow<bitcoin::BlockHash> for BitcoinBlockRef {
+    fn borrow(&self) -> &bitcoin::BlockHash {
         &self.block_hash
     }
 }
