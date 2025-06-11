@@ -231,7 +231,7 @@ impl From<Deposit> for DepositRequest {
             .filter_map(|tx_in| Some(tx_in.prevout?.script_pubkey.script.into()))
             .collect();
 
-        let reclaim_script_hash = TaprootScriptHash::from_script_buf(&deposit.info.reclaim_script);
+        let reclaim_script_hash = TaprootScriptHash::from(&deposit.info.reclaim_script);
 
         Self {
             txid: deposit.info.outpoint.txid.into(),
@@ -1029,7 +1029,7 @@ impl From<bitcoin::TapNodeHash> for TaprootScriptHash {
 #[cfg(feature = "testing")]
 impl Default for TaprootScriptHash {
     fn default() -> Self {
-        Self::from_byte_array([0; 32])
+        Self::from([0; 32])
     }
 }
 
@@ -1043,21 +1043,24 @@ impl TaprootScriptHash {
     pub fn to_byte_array(&self) -> [u8; 32] {
         self.0.to_byte_array()
     }
+}
 
-    /// Convert a byte array into a taproot script hash.
-    pub fn from_byte_array(bytes: [u8; 32]) -> Self {
-        bitcoin::TapNodeHash::from_byte_array(bytes).into()
-    }
-
-    /// Compute a taproot script hash from a script pubkey.
-    pub fn from_script_pubkey(script_pubkey: &ScriptPubKey) -> Self {
-        Self::from_script_buf(script_pubkey)
-    }
-
-    /// Compute a taproot script hash from a scriptbuf
-    pub fn from_script_buf(script_buf: &ScriptBuf) -> Self {
+impl From<&ScriptBuf> for TaprootScriptHash {
+    fn from(script_buf: &ScriptBuf) -> Self {
         bitcoin::TapNodeHash::from_script(script_buf, bitcoin::taproot::LeafVersion::TapScript)
             .into()
+    }
+}
+
+impl From<&ScriptPubKey> for TaprootScriptHash {
+    fn from(script_pub_key: &ScriptPubKey) -> Self {
+        Self::from(&script_pub_key.0)
+    }
+}
+
+impl From<[u8; 32]> for TaprootScriptHash {
+    fn from(bytes: [u8; 32]) -> Self {
+        bitcoin::TapNodeHash::from_byte_array(bytes).into()
     }
 }
 

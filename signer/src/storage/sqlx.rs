@@ -41,7 +41,7 @@ const TIMESTAMPTZ_OID: Oid = Oid(1184);
 impl<'r> sqlx::Decode<'r, sqlx::Postgres> for TaprootScriptHash {
     fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, BoxDynError> {
         let bytes = <[u8; 32] as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
-        Ok(TaprootScriptHash::from_byte_array(bytes))
+        Ok(TaprootScriptHash::from(bytes))
     }
 }
 

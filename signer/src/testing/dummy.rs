@@ -607,7 +607,7 @@ impl fake::Dummy<fake::Faker> for ScriptPubKey {
 impl fake::Dummy<fake::Faker> for TaprootScriptHash {
     fn dummy_with_rng<R: Rng + ?Sized>(config: &fake::Faker, rng: &mut R) -> Self {
         let bytes: [u8; 32] = config.fake_with_rng(rng);
-        TaprootScriptHash::from_byte_array(bytes)
+        TaprootScriptHash::from(bytes)
     }
 }
 

@@ -1824,7 +1824,7 @@ fn make_coinbase_deposit_request(
 
     let deposit_script = deposit_inputs.deposit_script();
     let reclaim_script = reclaim_inputs.reclaim_script();
-    let reclaim_script_hash = TaprootScriptHash::from_script_buf(&reclaim_script);
+    let reclaim_script_hash = TaprootScriptHash::from(&reclaim_script);
 
     let script_pub_key =
         sbtc::deposits::to_script_pubkey(deposit_script.clone(), reclaim_script.clone());
