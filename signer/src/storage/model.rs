@@ -192,7 +192,7 @@ pub struct DepositRequest {
     /// Script spendable by the sBTC signers.
     pub spend_script: Bytes,
     /// SHA-256 hash of the reclaim script.
-    pub reclaim_script_hash: Option<TaprootScriptHash>,
+    pub reclaim_script_hash: TaprootScriptHash,
     /// The address of which the sBTC should be minted,
     /// can be a smart contract address.
     pub recipient: StacksPrincipal,
@@ -235,7 +235,7 @@ impl From<Deposit> for DepositRequest {
             txid: deposit.info.outpoint.txid.into(),
             output_index: deposit.info.outpoint.vout,
             spend_script: deposit.info.deposit_script.to_bytes(),
-            reclaim_script_hash: Some(reclaim_script_hash),
+            reclaim_script_hash,
             recipient: deposit.info.recipient.into(),
             amount: deposit.info.amount,
             max_fee: deposit.info.max_fee,

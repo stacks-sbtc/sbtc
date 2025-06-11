@@ -61,7 +61,7 @@ struct DepositStatusSummary {
     /// The deposit script used so that the signers' can spend funds.
     deposit_script: model::ScriptPubKey,
     /// The hash of reclaim script for the deposit.
-    reclaim_script_hash: Option<model::TaprootScriptHash>,
+    reclaim_script_hash: model::TaprootScriptHash,
     /// The public key used in the deposit script.
     signers_public_key: PublicKeyXOnly,
 }

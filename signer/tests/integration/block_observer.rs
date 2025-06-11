@@ -1850,7 +1850,7 @@ fn make_coinbase_deposit_request(
         signer_bitmap: bitvec::array::BitArray::ZERO,
         amount: deposit_tx.output[0].value.to_sat(),
         deposit_script: deposit_script.clone(),
-        reclaim_script_hash: Some(reclaim_script_hash),
+        reclaim_script_hash,
         signers_public_key,
     };
     let info = sbtc::deposits::DepositInfo {
