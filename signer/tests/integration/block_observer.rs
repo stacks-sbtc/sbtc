@@ -1796,7 +1796,7 @@ async fn block_observer_ignores_coinbase() {
     // expected.
     let request = CreateDepositRequest {
         outpoint: deposit_request.outpoint,
-        reclaim_script: Default::default(),
+        reclaim_script: deposit_info.reclaim_script,
         deposit_script: deposit_request.deposit_script.clone(),
     };
     let bitcoin_client = ctx.get_bitcoin_client();
