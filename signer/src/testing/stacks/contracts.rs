@@ -729,13 +729,13 @@ mod tests {
         let sweep_txid_val = Txid::from_slice(&[3u8; 32]).unwrap();
 
         let args = vec![
-            clarity_buff(&outpoint_txid_clarity_bytes),                         // arg 0: outpoint_txid
-            clarity_uint(vout_val as u128),                                     // arg 1: vout
-            clarity_uint(amount_val as u128),                                   // arg 2: amount
-            clarity_principal(StacksAddress::burn_address(true)),               // arg 3: recipient
-            clarity_buff(&sweep_block_hash_val.to_raw_hash().to_byte_array()),  // arg 4: sweep_block_hash
-            clarity_uint(sweep_block_height_val as u128),                       // arg 5: sweep_block_height
-            clarity_buff(&sweep_txid_val.to_raw_hash().to_byte_array()),        // arg 6: sweep_txid
+            clarity_buff(&outpoint_txid_clarity_bytes), // arg 0: outpoint_txid
+            clarity_uint(vout_val as u128),             // arg 1: vout
+            clarity_uint(amount_val as u128),           // arg 2: amount
+            clarity_principal(StacksAddress::burn_address(true)), // arg 3: recipient
+            clarity_buff(&sweep_block_hash_val.to_raw_hash().to_byte_array()), // arg 4: sweep_block_hash
+            clarity_uint(sweep_block_height_val as u128), // arg 5: sweep_block_height
+            clarity_buff(&sweep_txid_val.to_raw_hash().to_byte_array()), // arg 6: sweep_txid
         ];
 
         let call = create_dummy_complete_deposit_call(
