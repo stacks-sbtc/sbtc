@@ -33,31 +33,17 @@ pub struct SignerState {
 }
 
 impl SignerState {
-    /// Get the current signer set.
+    /// Get the set of signers that this signer is currently configured to
+    /// communicate with in the p2p network.
     pub fn current_signer_set(&self) -> &SignerSet {
         &self.current_signer_set
     }
 
-    /// Return the signatures required that is currently stored in the
-    /// smart contract.
-    #[allow(clippy::unwrap_in_result)]
-    pub fn registry_signatures_required(&self) -> Option<u16> {
-        self.registry_signing_set_info
-            .read()
-            .expect("BUG: Failed to acquire read lock of signer set info")
-            .as_ref()
-            .map(|info| info.signatures_required)
-    }
-
-    /// Return the public keys that are currently stored in the smart
-    /// contract.
-    #[allow(clippy::unwrap_in_result)]
-    pub fn registry_current_signer_set(&self) -> Option<BTreeSet<PublicKey>> {
-        self.registry_signing_set_info
-            .read()
-            .expect("BUG: Failed to acquire read lock of signer set info")
-            .as_ref()
-            .map(|signer| signer.signer_set.clone())
+    /// Set the set of signers that this signer is allow us to communicate
+    /// with.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn update_current_signer_set(&self, public_keys: BTreeSet<PublicKey>) {
+        self.current_signer_set.replace_signers(public_keys);
     }
 
     /// Replace the current signer set info with the given input.
@@ -66,17 +52,6 @@ impl SignerState {
             .write()
             .expect("BUG: Failed to acquire write lock of signer set info")
             .replace(info);
-    }
-
-    /// Return the aggregate key that is currently stored in the smart
-    /// contract.
-    #[allow(clippy::unwrap_in_result)]
-    pub fn registry_current_aggregate_key(&self) -> Option<PublicKey> {
-        self.registry_signing_set_info
-            .read()
-            .expect("BUG: Failed to acquire read lock of signer set info")
-            .as_ref()
-            .map(|signer| signer.aggregate_key)
     }
 
     /// Return the signer set info that is currently stored in the smart
@@ -88,11 +63,6 @@ impl SignerState {
             .expect("BUG: Failed to acquire read lock of signer set info")
             .as_ref()
             .cloned()
-    }
-
-    /// Replace the current signer set with the given set of public keys.
-    pub fn update_current_signer_set(&self, public_keys: BTreeSet<PublicKey>) {
-        self.current_signer_set.replace_signers(public_keys);
     }
 
     /// Get the current bitcoin chain tip.

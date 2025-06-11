@@ -427,7 +427,8 @@ where
         let aggregate_key = self
             .context
             .state()
-            .registry_current_aggregate_key()
+            .registry_signer_set_info()
+            .map(|info| info.aggregate_key)
             .ok_or(Error::NoDkgShares)?;
 
         let dkg_shares = db.get_encrypted_dkg_shares(aggregate_key).await?;

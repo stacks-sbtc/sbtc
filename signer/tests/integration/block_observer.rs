@@ -1212,8 +1212,7 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
     // the block observer.
     let state = ctx.state();
     assert_eq!(state.get_current_limits(), SbtcLimits::zero());
-    assert!(state.registry_current_signer_set().is_none());
-    assert!(state.registry_current_aggregate_key().is_none());
+    assert!(state.registry_signer_set_info().is_none());
 
     tokio::spawn(async move {
         flag.store(true, Ordering::Relaxed);
@@ -1250,9 +1249,7 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
     // contract calls and no DKG shares. But the current signer set should
     // be the bootstrap signing set now.
     assert_eq!(state.get_current_limits(), SbtcLimits::unlimited());
-    assert!(state.registry_current_aggregate_key().is_none());
-    assert!(state.registry_signatures_required().is_none());
-    assert!(state.registry_current_signer_set().is_none());
+    assert!(state.registry_signer_set_info().is_none());
 
     // Okay now we're going to show what happens if we have received a key
     // rotation event. Such events take priority over DKG shares, even if
@@ -1293,17 +1290,15 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
 
     // We expect the signer state to be the same as what is in the rotate
     // keys event in the database.
-    let signer_set = Some(rotate_keys.signer_set.iter().copied().collect());
+    let signer_set = rotate_keys.signer_set.iter().copied().collect();
+    let signer_set_info = state.registry_signer_set_info().unwrap();
     assert_eq!(state.get_current_limits(), SbtcLimits::unlimited());
+    assert_eq!(signer_set_info.aggregate_key, rotate_keys.aggregate_key);
     assert_eq!(
-        state.registry_current_aggregate_key(),
-        Some(rotate_keys.aggregate_key)
+        signer_set_info.signatures_required,
+        rotate_keys.signatures_required
     );
-    assert_eq!(
-        state.registry_signatures_required(),
-        Some(rotate_keys.signatures_required)
-    );
-    assert_eq!(state.registry_current_signer_set(), signer_set);
+    assert_eq!(signer_set_info.signer_set, signer_set);
 
     testing::storage::drop_db(db).await;
 }
@@ -1386,7 +1381,7 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
     // the block observer.
     let state = ctx.state();
     assert_eq!(state.get_current_limits(), SbtcLimits::zero());
-    assert!(state.registry_current_signer_set().is_none());
+    assert!(state.registry_signer_set_info().is_none());
 
     let storage = ctx.get_storage();
 
