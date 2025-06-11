@@ -10,7 +10,7 @@ use crate::context::SignerEvent;
 use crate::context::SignerSignal;
 use crate::context::TxSignerEvent;
 use crate::error::Error;
-use crate::keys::CoordinatorPublicKey;
+use crate::keys::CoordinatorPublicKey as _;
 use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
 use crate::network;

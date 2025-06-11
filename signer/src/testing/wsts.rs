@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use clarity::util::secp256k1::Secp256k1PublicKey;
 use clarity::vm::types::PrincipalData;
-use fake::Fake;
+use fake::Fake as _;
 use rand::rngs::OsRng;
 use stacks_common::address::AddressHashMode;
 use stacks_common::address::C32_ADDRESS_VERSION_TESTNET_MULTISIG;
@@ -19,7 +19,7 @@ use wsts::state_machine::coordinator::Coordinator as _;
 use wsts::state_machine::coordinator::fire;
 
 use crate::ecdsa::SignEcdsa as _;
-use crate::keys::CoordinatorPublicKey;
+use crate::keys::CoordinatorPublicKey as _;
 use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
 use crate::message;
@@ -45,6 +45,7 @@ pub struct SignerInfo {
 /// contain keypairs.
 pub trait SelectCoordinatorPrivateKey {
     /// Select the coordinator's private key based on the given list of `SignerInfo`.
+    #[track_caller]
     fn select_coordinator_private_key<B>(&self, bitcoin_chain_tip: B) -> PrivateKey
     where
         B: Borrow<bitcoin::BlockHash>;
@@ -57,7 +58,6 @@ where
     I: ?Sized,
     for<'a> &'a I: IntoIterator<Item = &'a SignerInfo>,
 {
-    #[track_caller]
     fn select_coordinator_private_key<B>(&self, bitcoin_chain_tip: B) -> PrivateKey
     where
         B: Borrow<bitcoin::BlockHash>,

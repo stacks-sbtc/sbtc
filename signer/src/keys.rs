@@ -39,7 +39,7 @@ use bitcoin::hashes::Hash as _;
 use secp256k1::SECP256K1;
 use serde::Deserialize;
 use serde::Serialize;
-use sha2::Digest;
+use sha2::Digest as _;
 
 use crate::error::Error;
 

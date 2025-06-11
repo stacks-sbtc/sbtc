@@ -39,7 +39,7 @@ use crate::testing;
 use crate::testing::storage::DbReadTestExt as _;
 use crate::testing::storage::model::TestBitcoinTxInfo;
 use crate::testing::storage::model::TestData;
-use crate::testing::wsts::SelectCoordinatorPrivateKey;
+use crate::testing::wsts::SelectCoordinatorPrivateKey as _;
 use crate::testing::wsts::SignerSet;
 use crate::transaction_coordinator;
 use crate::transaction_coordinator::TxCoordinatorEventLoop;

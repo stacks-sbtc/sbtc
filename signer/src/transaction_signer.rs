@@ -22,7 +22,7 @@ use crate::context::TxSignerEvent;
 use crate::dkg;
 use crate::ecdsa::SignEcdsa as _;
 use crate::error::Error;
-use crate::keys::CoordinatorPublicKey;
+use crate::keys::CoordinatorPublicKey as _;
 use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
 use crate::keys::PublicKeyXOnly;
