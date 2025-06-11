@@ -546,7 +546,7 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     let deposit_amount = 2_500_000;
     let max_fee = deposit_amount / 2;
     let signers_public_key = shares.aggregate_key.into();
-    let (deposit_tx, deposit_request, _) = make_deposit_request(
+    let (deposit_tx, deposit_request, deposit_info) = make_deposit_request(
         &depositor,
         deposit_amount,
         depositor_utxo,
@@ -589,7 +589,7 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
         bitcoin_tx_output_index: deposit_request.outpoint.vout,
         bitcoin_txid: deposit_request.outpoint.txid.to_string(),
         deposit_script: deposit_request.deposit_script.to_hex_string(),
-        reclaim_script: "TODO".to_string(),
+        reclaim_script: deposit_info.reclaim_script.to_hex_string(),
         transaction_hex: serialize_hex(&deposit_tx),
     };
     deposit_api::create_deposit(emily_client.config(), body)
@@ -1738,7 +1738,7 @@ async fn block_observer_ignores_coinbase() {
 
     let max_fee = 100_042;
     let signers_public_key = shares.aggregate_key.into();
-    let (deposit_tx, deposit_request) =
+    let (deposit_tx, deposit_request, deposit_info) =
         make_coinbase_deposit_request(rpc, max_fee, signers_public_key);
 
     // `make_coinbase_deposit_request` will generate a block, ensure we process
@@ -1755,7 +1755,7 @@ async fn block_observer_ignores_coinbase() {
         bitcoin_tx_output_index: deposit_request.outpoint.vout,
         bitcoin_txid: deposit_request.outpoint.txid.to_string(),
         deposit_script: deposit_request.deposit_script.to_hex_string(),
-        reclaim_script: "TODO".to_string(),
+        reclaim_script: deposit_info.reclaim_script.to_hex_string(),
         transaction_hex: serialize_hex(&deposit_tx),
     };
     deposit_api::create_deposit(emily_client.config(), body)
@@ -1814,7 +1814,7 @@ fn make_coinbase_deposit_request(
     rpc: &bitcoincore_rpc::Client,
     max_fee: u64,
     signers_public_key: bitcoin::XOnlyPublicKey,
-) -> (bitcoin::Transaction, signer::bitcoin::utxo::DepositRequest) {
+) -> (bitcoin::Transaction, signer::bitcoin::utxo::DepositRequest, sbtc::deposits::DepositInfo) {
     let deposit_inputs = DepositScriptInputs {
         signers_public_key,
         max_fee,
@@ -1845,9 +1845,19 @@ fn make_coinbase_deposit_request(
         max_fee,
         signer_bitmap: bitvec::array::BitArray::ZERO,
         amount: deposit_tx.output[0].value.to_sat(),
-        deposit_script,
+        deposit_script: deposit_script.clone(),
         reclaim_script_hash: Some(reclaim_script_hash),
         signers_public_key,
     };
-    (deposit_tx, req)
+    let info = sbtc::deposits::DepositInfo {
+        outpoint: req.outpoint,
+        max_fee,
+        amount: req.amount,
+        deposit_script,
+        reclaim_script,
+        signers_public_key,
+        recipient: deposit_inputs.recipient,
+        lock_time: bitcoin::relative::LockTime::Blocks((reclaim_inputs.lock_time() as u16).into()),
+    };
+    (deposit_tx, req, info)
 }
