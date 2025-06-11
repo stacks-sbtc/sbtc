@@ -2540,7 +2540,7 @@ impl super::DbWrite for PgStore {
               , signers_public_key
               , sender_script_pub_keys
               )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             ON CONFLICT DO NOTHING",
         )
         .bind(deposit_request.txid)
