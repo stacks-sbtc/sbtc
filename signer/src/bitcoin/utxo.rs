@@ -8,7 +8,6 @@ use bitcoin::OutPoint;
 use bitcoin::ScriptBuf;
 use bitcoin::Sequence;
 use bitcoin::TapLeafHash;
-use bitcoin::TapNodeHash;
 use bitcoin::TapSighash;
 use bitcoin::TapSighashType;
 use bitcoin::Transaction;
@@ -25,6 +24,7 @@ use bitcoin::script::PushBytesBuf;
 use bitcoin::sighash::Prevouts;
 use bitcoin::sighash::SighashCache;
 use bitcoin::taproot::LeafVersion;
+use bitcoin::taproot::NodeInfo;
 use bitcoin::taproot::Signature;
 use bitcoin::taproot::TaprootSpendInfo;
 use bitcoin::transaction::Version;
@@ -495,13 +495,19 @@ impl DepositRequest {
     /// Constructs the taproot spending information for the UTXO associated
     /// with this deposit request.
     fn construct_taproot_info(&self, ver: LeafVersion) -> TaprootSpendInfo {
-        let hash1 = TapNodeHash::from_script(&self.deposit_script, ver);
-        let hash2 = *self.reclaim_script_hash.clone().unwrap();
+        // For such a simple tree, we construct it by hand.
+        let leaf1 = NodeInfo::new_leaf_with_ver(self.deposit_script.clone(), ver);
+        let leaf2 = NodeInfo::new_hidden_node(*self.reclaim_script_hash.clone().unwrap());
 
-        let combined = TapNodeHash::from_node_hashes(hash1, hash2);
+        // A Result::Err is returned by NodeInfo::combine if the depth of
+        // our taproot tree exceeds the maximum depth of taproot trees,
+        // which is 128. We have two nodes so the depth is 1 so this will
+        // never panic.
+        let node =
+            NodeInfo::combine(leaf1, leaf2).expect("This tree depth greater than max of 128");
         let internal_key = *sbtc::UNSPENDABLE_TAPROOT_KEY;
 
-        TaprootSpendInfo::new_key_spend(SECP256K1, internal_key, Some(combined))
+        TaprootSpendInfo::from_node_info(SECP256K1, internal_key, node)
     }
 
     /// Try convert from a model::DepositRequest with some additional info.
