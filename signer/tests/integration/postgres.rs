@@ -319,7 +319,7 @@ async fn checking_stacks_blocks_exists_works() {
 #[tokio::test]
 async fn should_return_the_same_pending_deposit_requests_as_in_memory_store() {
     let pg_store = testing::storage::new_test_database().await;
-    let in_memory_store = storage::in_memory::Store::new_shared();
+    let in_memory_store = storage::memory::Store::new_shared();
 
     let mut rng = get_rng();
 
@@ -492,7 +492,7 @@ async fn get_pending_withdrawal_requests_only_pending() {
 #[tokio::test]
 async fn should_return_the_same_pending_withdraw_requests_as_in_memory_store() {
     let pg_store = testing::storage::new_test_database().await;
-    let in_memory_store = storage::in_memory::Store::new_shared();
+    let in_memory_store = storage::memory::Store::new_shared();
 
     let mut rng = get_rng();
 
@@ -569,7 +569,7 @@ async fn should_return_the_same_pending_withdraw_requests_as_in_memory_store() {
 #[tokio::test]
 async fn should_return_the_same_pending_accepted_deposit_requests_as_in_memory_store() {
     let pg_store = testing::storage::new_test_database().await;
-    let in_memory_store = storage::in_memory::Store::new_shared();
+    let in_memory_store = storage::memory::Store::new_shared();
 
     let mut rng = get_rng();
 
@@ -708,7 +708,7 @@ async fn should_not_return_swept_deposits_as_pending_accepted() {
 #[tokio::test]
 async fn should_return_only_accepted_pending_deposits_that_are_within_reclaim_bounds() {
     let mut pg_store = testing::storage::new_test_database().await;
-    let mut in_memory_store = storage::in_memory::Store::new_shared();
+    let mut in_memory_store = storage::memory::Store::new_shared();
 
     let mut rng = get_rng();
 
@@ -856,7 +856,7 @@ async fn should_return_only_accepted_pending_deposits_that_are_within_reclaim_bo
     // We should only get the ones that are within the reclaim bounds.
     signer::testing::storage::drop_db(pg_store).await;
     pg_store = testing::storage::new_test_database().await;
-    in_memory_store = storage::in_memory::Store::new_shared();
+    in_memory_store = storage::memory::Store::new_shared();
 
     // Initialize the data.
     test_data.write_to(&pg_store).await;
@@ -895,7 +895,7 @@ async fn should_return_only_accepted_pending_deposits_that_are_within_reclaim_bo
 #[tokio::test]
 async fn should_return_the_same_last_key_rotation_as_in_memory_store() {
     let pg_store = testing::storage::new_test_database().await;
-    let in_memory_store = storage::in_memory::Store::new_shared();
+    let in_memory_store = storage::memory::Store::new_shared();
 
     let mut rng = get_rng();
 
@@ -1743,7 +1743,7 @@ async fn block_in_canonical_bitcoin_blockchain_in_other_block_chain() {
 #[tokio::test]
 async fn is_signer_script_pub_key_checks_dkg_shares_for_script_pubkeys() {
     let db = testing::storage::new_test_database().await;
-    let mem = storage::in_memory::Store::new_shared();
+    let mem = storage::memory::Store::new_shared();
 
     let mut rng = get_rng();
 
@@ -4703,7 +4703,7 @@ async fn compare_in_memory_bitcoin_chain_tip() {
     let mut rng = get_rng();
 
     let pg_store = testing::storage::new_test_database().await;
-    let in_memory_store = storage::in_memory::Store::new_shared();
+    let in_memory_store = storage::memory::Store::new_shared();
 
     let root: BitcoinBlock = fake::Faker.fake_with_rng(&mut rng);
     let mut blocks = vec![root.clone()];
@@ -4744,7 +4744,7 @@ async fn compare_in_memory_stacks_chain_tip() {
     let mut rng = get_rng();
 
     let pg_store = testing::storage::new_test_database().await;
-    let in_memory_store = storage::in_memory::Store::new_shared();
+    let in_memory_store = storage::memory::Store::new_shared();
 
     let root_anchor: BitcoinBlock = fake::Faker.fake_with_rng(&mut rng);
 

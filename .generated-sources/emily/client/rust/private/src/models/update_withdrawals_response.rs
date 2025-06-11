@@ -16,12 +16,12 @@ use serde::{Deserialize, Serialize};
 pub struct UpdateWithdrawalsResponse {
     /// Updated withdrawals.
     #[serde(rename = "withdrawals")]
-    pub withdrawals: Vec<models::Withdrawal>,
+    pub withdrawals: Vec<models::WithdrawalWithStatus>,
 }
 
 impl UpdateWithdrawalsResponse {
     /// Response to update withdrawals request.
-    pub fn new(withdrawals: Vec<models::Withdrawal>) -> UpdateWithdrawalsResponse {
+    pub fn new(withdrawals: Vec<models::WithdrawalWithStatus>) -> UpdateWithdrawalsResponse {
         UpdateWithdrawalsResponse { withdrawals }
     }
 }

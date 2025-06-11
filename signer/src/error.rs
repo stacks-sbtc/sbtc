@@ -16,6 +16,7 @@ use crate::stacks::contracts::RotateKeysValidationError;
 use crate::stacks::contracts::WithdrawalAcceptValidationError;
 use crate::stacks::contracts::WithdrawalRejectValidationError;
 use crate::storage::model::SigHash;
+use crate::transaction_signer::StacksSignRequestId;
 use crate::wsts_state_machine::StateMachineId;
 
 /// Top-level signer error
@@ -460,6 +461,11 @@ pub enum Error {
     #[error("encountered an error while rolling back an sqlx transaction: {0}")]
     SqlxRollbackTransaction(#[source] sqlx::Error),
 
+    /// An error occurred while attempting to acquire a connection to the
+    /// database.
+    #[error("encountered an error while attempting to acquire a connection to the database: {0}")]
+    SqlxAcquireConnection(#[source] sqlx::Error),
+
     /// An error when attempting to read a migration script.
     #[error("failed to read migration script: {0}")]
     ReadSqlMigration(Cow<'static, str>),
@@ -506,6 +512,10 @@ pub enum Error {
     /// The response from the Stacks node was invalid or malformed.
     #[error("invalid stacks response: {0}")]
     InvalidStacksResponse(&'static str),
+
+    /// The stacks request was already signed in this tenure
+    #[error("stacks request for {0} was already signed in tenure {1}")]
+    StacksRequestAlreadySigned(StacksSignRequestId, bitcoin::BlockHash),
 
     /// Taproot error
     #[error("an error occurred when constructing the taproot signing digest: {0}")]
@@ -751,6 +761,11 @@ pub enum Error {
             {cap_blocks}) with the currently withdrawn total {withdrawn_total})",
             amounts = .0.amounts, cap = .0.cap, cap_blocks = .0.cap_blocks, withdrawn_total = .0.withdrawn_total)]
     ExceedsWithdrawalCap(WithdrawalCapContext),
+
+    /// An error was raised by the in-memory database.
+    #[cfg(any(test, feature = "testing"))]
+    #[error("In-memory database error: {0}")]
+    InMemoryDatabase(crate::storage::memory::MemoryStoreError),
 
     /// An error which can be used in test code instead of `unimplemented!()` or
     /// other alternatives, so that an an actual error is returned instead of
