@@ -1580,7 +1580,7 @@ pub async fn assert_allow_dkg_begin(
             tracing::info!("signatures required has changed; proceeding with DKG");
             return Ok(());
         }
-    
+
         // Trigger DKG if signer set changes
         if registry_signer_info.signer_set != config.signer.bootstrap_signing_set {
             tracing::info!("signer set has changed; proceeding with DKG");

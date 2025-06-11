@@ -2539,7 +2539,7 @@ pub async fn should_coordinate_dkg(
             tracing::info!("signatures required has changed; proceeding with DKG");
             return Ok(true);
         }
-    
+
         // Trigger DKG if signer set changes
         if registry_signer_info.signer_set != config.signer.bootstrap_signing_set {
             tracing::info!("signer set has changed; proceeding with DKG");
