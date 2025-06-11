@@ -30,7 +30,7 @@ use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use crate::bitcoin::utxo;
 use crate::bitcoin::zmq::BitcoinCoreMessageStream;
 use crate::error::Error;
-use crate::testing::MapTestUtilityError;
+use crate::testing::MapTestUtilityError as _;
 use crate::testing::TestUtilityError;
 
 /// Type alias for a shared result of a block hash notification, used in the dispatcher.

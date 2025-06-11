@@ -42,7 +42,7 @@ use sbtc::testing::regtest::p2wpkh_sign_transaction;
 use secp256k1::Keypair;
 use signer::bitcoin::BitcoinInteract as _;
 use signer::bitcoin::rpc::BitcoinCoreClient;
-use signer::bitcoin::utxo::BitcoinInputsOutputs;
+use signer::bitcoin::utxo::BitcoinInputsOutputs as _;
 use signer::bitcoin::utxo::Fees;
 use signer::bitcoin::utxo::TxDeconstructor as _;
 use signer::bitcoin::validation::WithdrawalValidationResult;
@@ -51,7 +51,7 @@ use signer::message::Payload;
 use signer::network::MessageTransfer as _;
 use signer::storage::model::WithdrawalTxOutput;
 use signer::testing::btc::BlockHashStreamDispatcher;
-use signer::testing::btc::BlockHashStreamProvider;
+use signer::testing::btc::BlockHashStreamProvider as _;
 use signer::testing::btc::get_canonical_chain_tip;
 use signer::testing::get_rng;
 
