@@ -1612,14 +1612,6 @@ where
     ) -> Result<PublicKey, Error> {
         tracing::info!("Coordinating DKG");
         // Get the current signer set for running DKG.
-        //
-        // Also, note that in order to change the signing set in the
-        // SignerState we must first run DKG (which the current function is
-        // doing), and DKG requires us to define signing set (which is
-        // returned in the next non-comment line). The bootstrap signing
-        // set need not be the same set in the state, since a signer
-        // operator can change their config. When they do so, that signals
-        // that they want to run DKG and change the signer set.
         let signer_set = self.context.config().signer.bootstrap_signing_set.clone();
 
         let mut state_machine = FireCoordinator::new(signer_set, self.threshold, self.private_key);
