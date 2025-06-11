@@ -8,12 +8,60 @@ use blockstack_lib::clarity::vm::Value as ClarityValue;
 use clarity::vm::types::PrincipalData;
 
 use crate::{
-    error::Error,
     keys::PublicKey,
     stacks::contracts::{
         AcceptWithdrawalV1, AsContractCall, CompleteDepositV1, RejectWithdrawalV1, RotateKeysV1,
     },
 };
+
+/// An error that can occur when parsing a contract call in the Stacks blockchain.
+#[derive(Debug, thiserror::Error)]
+pub enum ParseContractCallError {
+    /// Error when a contract call is made with an unexpected contract name.
+    #[error("Unexpected contract name: expected {expected}, actual {actual}")]
+    UnexpectedContractName {
+        /// The expected contract name.
+        expected: &'static str,
+        /// The actual contract name received.
+        actual: String,
+    },
+
+    /// Error when a contract call is made with an unexpected function name.
+    #[error("Unexpected contract function name: expected {expected}, actual {actual}")]
+    UnexpectedFunctionName {
+        /// The expected function name.
+        expected: &'static str,
+        /// The actual function name received.
+        actual: String,
+    },
+
+    /// Error when a contract call is missing an expected argument at a specific position.
+    #[error("Missing contract call argument at pos {pos} for {contract_name}.{function_name}()")]
+    MissingContractCallArg {
+        /// The position of the missing argument.
+        pos: usize,
+        /// The name of the contract where the function is defined.
+        contract_name: &'static str,
+        /// The name of the function being called.
+        function_name: &'static str,
+    },
+
+    /// Error when a contract call argument is invalid at a specific position.
+    #[error(
+        "Invalid contract call argument at pos {pos} for {contract_name}.{function_name}() - {source}"
+    )]
+    InvalidContractCallArg {
+        /// The position of the invalid argument.
+        pos: usize,
+        /// The name of the contract where the function is defined.
+        contract_name: &'static str,
+        /// The name of the function being called.
+        function_name: &'static str,
+        /// The source error that explains why the argument is invalid.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+}
 
 /// An enum representing the kinds of contract calls that the signers can make.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -31,12 +79,14 @@ pub enum ContractCallKind {
 /// A trait for parsing a Stacks [`TransactionContractCall`] into one of the
 /// sBTC contract call types.
 pub trait TryFromContractCall<'a>:
-    AsContractCall + TryFrom<&'a TransactionContractCall, Error = Error>
+    AsContractCall + TryFrom<&'a TransactionContractCall, Error = ParseContractCallError>
 {
     /// Validate that the contract call is for the correct contract.
-    fn validate_contract_name(call: &TransactionContractCall) -> Result<(), Error> {
+    fn validate_contract_name(
+        call: &TransactionContractCall,
+    ) -> Result<(), ParseContractCallError> {
         if call.contract_name.as_str() != Self::CONTRACT_NAME {
-            return Err(Error::UnexpectedContractName {
+            return Err(ParseContractCallError::UnexpectedContractName {
                 expected: Self::CONTRACT_NAME,
                 actual: call.contract_name.to_string(),
             });
@@ -45,9 +95,11 @@ pub trait TryFromContractCall<'a>:
     }
 
     /// Validate that the contract call is for the correct function.
-    fn validate_function_name(call: &TransactionContractCall) -> Result<(), Error> {
+    fn validate_function_name(
+        call: &TransactionContractCall,
+    ) -> Result<(), ParseContractCallError> {
         if call.function_name.as_str() != Self::FUNCTION_NAME {
-            return Err(Error::UnexpectedFunctionName {
+            return Err(ParseContractCallError::UnexpectedFunctionName {
                 expected: Self::FUNCTION_NAME,
                 actual: call.function_name.to_string(),
             });
@@ -85,7 +137,7 @@ impl GetContractCallKind for TransactionContractCall {
 impl TryFromContractCall<'_> for CompleteDepositV1 {}
 
 impl TryFrom<&TransactionContractCall> for CompleteDepositV1 {
-    type Error = Error;
+    type Error = ParseContractCallError;
 
     fn try_from(call: &TransactionContractCall) -> Result<Self, Self::Error> {
         Self::validate_contract_name(call)?;
@@ -145,7 +197,7 @@ impl TryFrom<&TransactionContractCall> for CompleteDepositV1 {
 impl TryFromContractCall<'_> for RotateKeysV1 {}
 
 impl TryFrom<&TransactionContractCall> for RotateKeysV1 {
-    type Error = Error;
+    type Error = ParseContractCallError;
 
     fn try_from(call: &TransactionContractCall) -> Result<Self, Self::Error> {
         Self::validate_contract_name(call)?;
@@ -182,8 +234,8 @@ fn map_contract_call_arg_error<E: std::error::Error + Send + Sync + 'static>(
     pos: usize,
     contract_name: &'static str,
     function_name: &'static str,
-) -> Error {
-    Error::InvalidContractCallArg {
+) -> ParseContractCallError {
+    ParseContractCallError::InvalidContractCallArg {
         pos,
         contract_name,
         function_name,
@@ -199,7 +251,7 @@ pub trait ClarityArgsExt {
         pos: usize,
         contract_name: &'static str,
         function_name: &'static str,
-    ) -> Result<&ClarityValue, Error>;
+    ) -> Result<&ClarityValue, ParseContractCallError>;
 
     /// Tries to parse the argument at `pos` as a `PublicKey`.
     fn try_parse_public_key(
@@ -207,12 +259,15 @@ pub trait ClarityArgsExt {
         pos: usize,
         contract_name: &'static str,
         function_name: &'static str,
-    ) -> Result<PublicKey, Error> {
+    ) -> Result<PublicKey, ParseContractCallError> {
         self.try_get_arg(pos, contract_name, function_name)?
             .clone()
             .expect_buff(33) // PublicKey is 33 bytes
             .map_err(|e| map_contract_call_arg_error(e, pos, contract_name, function_name))
-            .map(|bytes| PublicKey::from_slice(&bytes))?
+            .map(|bytes| {
+                PublicKey::from_slice(&bytes)
+                    .map_err(|e| map_contract_call_arg_error(e, pos, contract_name, function_name))
+            })?
     }
 
     /// Tries to parse the argument at `pos` as a `BTreeSet<PublicKey>`.
@@ -221,7 +276,7 @@ pub trait ClarityArgsExt {
         pos: usize,
         contract_name: &'static str,
         function_name: &'static str,
-    ) -> Result<BTreeSet<PublicKey>, Error> {
+    ) -> Result<BTreeSet<PublicKey>, ParseContractCallError> {
         self.try_get_arg(pos, contract_name, function_name)?
             .clone()
             .expect_list()
@@ -233,9 +288,13 @@ pub trait ClarityArgsExt {
                     .map_err(|source| {
                         map_contract_call_arg_error(source, pos, contract_name, function_name)
                     })
-                    .map(|bytes| PublicKey::from_slice(&bytes))?
+                    .map(|bytes| {
+                        PublicKey::from_slice(&bytes).map_err(|e| {
+                            map_contract_call_arg_error(e, pos, contract_name, function_name)
+                        })
+                    })?
             })
-            .collect::<Result<BTreeSet<_>, Error>>()
+            .collect::<Result<BTreeSet<_>, ParseContractCallError>>()
     }
 
     /// Tries to parse the argument at `pos` as a `u16`.
@@ -244,7 +303,7 @@ pub trait ClarityArgsExt {
         pos: usize,
         contract_name: &'static str,
         function_name: &'static str,
-    ) -> Result<u16, Error> {
+    ) -> Result<u16, ParseContractCallError> {
         self.try_get_arg(pos, contract_name, function_name)?
             .clone()
             .expect_u128()
@@ -259,7 +318,7 @@ pub trait ClarityArgsExt {
         pos: usize,
         contract_name: &'static str,
         function_name: &'static str,
-    ) -> Result<u64, Error> {
+    ) -> Result<u64, ParseContractCallError> {
         self.try_get_arg(pos, contract_name, function_name)?
             .clone()
             .expect_u128()
@@ -274,7 +333,7 @@ pub trait ClarityArgsExt {
         pos: usize,
         contract_name: &'static str,
         function_name: &'static str,
-    ) -> Result<PrincipalData, Error> {
+    ) -> Result<PrincipalData, ParseContractCallError> {
         self.try_get_arg(pos, contract_name, function_name)?
             .clone()
             .expect_principal()
@@ -289,11 +348,24 @@ pub trait ClarityArgsExt {
         len: usize,
         contract_name: &'static str,
         function_name: &'static str,
-    ) -> Result<Vec<u8>, Error> {
-        self.try_get_arg(pos, contract_name, function_name)?
+    ) -> Result<Vec<u8>, ParseContractCallError> {
+        let buff = self
+            .try_get_arg(pos, contract_name, function_name)?
             .clone()
             .expect_buff(len)
-            .map_err(|e| map_contract_call_arg_error(e, pos, contract_name, function_name))
+            .map_err(|e| map_contract_call_arg_error(e, pos, contract_name, function_name))?;
+
+        // Apparently `expect_buff` does not guarantee the length, so we check it here.
+        if buff.len() != len {
+            return Err(ParseContractCallError::InvalidContractCallArg {
+                pos,
+                contract_name,
+                function_name,
+                source: format!("Expected buffer of length {}, got {}", len, buff.len()).into(),
+            });
+        }
+
+        Ok(buff)
     }
 
     /// Tries to parse the argument at `pos` as a Bitcoin transaction ID ([`bitcoin::Txid`]).
@@ -302,7 +374,7 @@ pub trait ClarityArgsExt {
         pos: usize,
         contract_name: &'static str,
         function_name: &'static str,
-    ) -> Result<bitcoin::Txid, Error> {
+    ) -> Result<bitcoin::Txid, ParseContractCallError> {
         let outpoint_txid_bytes = self.try_parse_buff(pos, 32, contract_name, function_name)?;
         bitcoin::Txid::from_slice(&outpoint_txid_bytes)
             .map_err(|e| map_contract_call_arg_error(e, pos, contract_name, function_name))
@@ -314,7 +386,7 @@ pub trait ClarityArgsExt {
         pos: usize,
         contract_name: &'static str,
         function_name: &'static str,
-    ) -> Result<bitcoin::BlockHash, Error> {
+    ) -> Result<bitcoin::BlockHash, ParseContractCallError> {
         self.try_get_arg(pos, contract_name, function_name)?
             .clone()
             .expect_buff(32) // StacksBlockHash is 32 bytes
@@ -332,18 +404,20 @@ impl ClarityArgsExt for Vec<ClarityValue> {
         pos: usize,
         contract_name: &'static str,
         function_name: &'static str,
-    ) -> Result<&ClarityValue, Error> {
-        self.get(pos).ok_or_else(|| Error::MissingContractCallArg {
-            pos,
-            contract_name,
-            function_name,
-        })
+    ) -> Result<&ClarityValue, ParseContractCallError> {
+        self.get(pos)
+            .ok_or_else(|| ParseContractCallError::MissingContractCallArg {
+                pos,
+                contract_name,
+                function_name,
+            })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
+    use bitcoin::{BlockHash, Txid};
     use clarity::{
         types::chainstate::StacksAddress,
         vm::{
@@ -376,6 +450,10 @@ mod tests {
         }))
     }
 
+    fn clarity_principal(address: StacksAddress) -> ClarityValue {
+        ClarityValue::Principal(PrincipalData::from(address))
+    }
+
     fn clarity_dummy_public_key() -> ClarityValue {
         let mut rng = get_rng();
         let public_key: PublicKey = Faker.fake_with_rng(&mut rng);
@@ -384,6 +462,20 @@ mod tests {
     }
 
     fn create_dummy_rotate_keys_call(
+        contract_name_str: &'static str,
+        function_name_str: &'static str,
+        args: Vec<ClarityValue>,
+        deployer_addr: StacksAddress,
+    ) -> TransactionContractCall {
+        TransactionContractCall {
+            address: deployer_addr,
+            contract_name: ContractName::from(contract_name_str),
+            function_name: ClarityName::from(function_name_str),
+            function_args: args,
+        }
+    }
+
+    fn create_dummy_complete_deposit_call(
         contract_name_str: &'static str,
         function_name_str: &'static str,
         args: Vec<ClarityValue>,
@@ -410,7 +502,10 @@ mod tests {
     fn get_arg_missing() {
         let args = vec![clarity_uint(123)];
         let result = args.try_get_arg(1, TEST_CONTRACT_NAME, TEST_FUNCTION_NAME);
-        assert_matches!(result, Err(Error::MissingContractCallArg { pos: 1, .. }));
+        assert_matches!(
+            result,
+            Err(ParseContractCallError::MissingContractCallArg { pos: 1, .. })
+        );
     }
 
     #[test_case(vec![clarity_dummy_public_key()], 0, true; "valid public key")]
@@ -425,11 +520,14 @@ mod tests {
         } else {
             assert!(result.is_err());
             if args.is_empty() {
-                assert_matches!(result, Err(Error::MissingContractCallArg { .. }));
+                assert_matches!(
+                    result,
+                    Err(ParseContractCallError::MissingContractCallArg { .. })
+                );
             } else {
                 assert_matches!(
                     result,
-                    Err(Error::InvalidContractCallArg { .. }) | Err(Error::InvalidPublicKey(_))
+                    Err(ParseContractCallError::InvalidContractCallArg { .. })
                 );
             }
         }
@@ -470,11 +568,14 @@ mod tests {
             args.try_parse_btree_set_of_public_keys(pos, TEST_CONTRACT_NAME, TEST_FUNCTION_NAME);
         assert!(result.is_err());
         if args.is_empty() {
-            assert_matches!(result, Err(Error::MissingContractCallArg { .. }));
+            assert_matches!(
+                result,
+                Err(ParseContractCallError::MissingContractCallArg { .. })
+            );
         } else {
             assert_matches!(
                 result,
-                Err(Error::InvalidContractCallArg { .. }) | Err(Error::InvalidPublicKey(_))
+                Err(ParseContractCallError::InvalidContractCallArg { .. })
             );
         }
     }
@@ -606,5 +707,57 @@ mod tests {
         assert_eq!(rotate_keys.signatures_required, 2);
         let expected_keys: BTreeSet<PublicKey> = [pk1, pk2].iter().cloned().collect();
         assert_eq!(rotate_keys.new_keys, expected_keys);
+    }
+
+    #[test]
+    fn complete_deposit_try_from_success() {
+        let deployer = StacksAddress::burn_address(false);
+
+        let outpoint_txid_val = Txid::from_slice(&[1u8; 32]).unwrap();
+        let mut outpoint_txid_clarity_bytes = outpoint_txid_val.to_raw_hash().to_byte_array();
+        outpoint_txid_clarity_bytes.reverse(); // Simulating how it's stored/parsed
+
+        let vout_val = 1u32;
+        let amount_val = 100_000u64;
+        let recipient_val = PrincipalData::from(StacksAddress::burn_address(true));
+        let sweep_block_hash_val = BlockHash::from_slice(&[2u8; 32]).unwrap();
+        let sweep_block_height_val = 123u64;
+        let sweep_txid_val = Txid::from_slice(&[3u8; 32]).unwrap();
+
+        let args = vec![
+            clarity_buff(&outpoint_txid_clarity_bytes), // arg 0: outpoint_txid
+            clarity_uint(vout_val as u128),             // arg 1: vout
+            clarity_uint(amount_val as u128),           // arg 2: amount
+            clarity_principal(StacksAddress::burn_address(true)), // arg 3: recipient
+            clarity_buff(&sweep_block_hash_val.to_raw_hash().to_byte_array()), // arg 4: sweep_block_hash
+            clarity_uint(sweep_block_height_val as u128), // arg 5: sweep_block_height
+            clarity_buff(&sweep_txid_val.to_raw_hash().to_byte_array()), // arg 6: sweep_txid
+        ];
+
+        let call = create_dummy_complete_deposit_call(
+            CompleteDepositV1::CONTRACT_NAME,
+            CompleteDepositV1::FUNCTION_NAME,
+            args,
+            deployer,
+        );
+
+        let result = CompleteDepositV1::try_from(&call);
+        assert!(result.is_ok(), "try_from failed: {:?}", result.err());
+        let complete_deposit = result.unwrap();
+
+        assert_eq!(complete_deposit.deployer, deployer);
+        assert_eq!(complete_deposit.outpoint.txid, outpoint_txid_val);
+        assert_eq!(complete_deposit.outpoint.vout, vout_val);
+        assert_eq!(complete_deposit.amount, amount_val);
+        assert_eq!(complete_deposit.recipient, recipient_val);
+        assert_eq!(
+            complete_deposit.sweep_block_hash,
+            sweep_block_hash_val.into()
+        );
+        assert_eq!(
+            complete_deposit.sweep_block_height,
+            sweep_block_height_val.into()
+        );
+        assert_eq!(complete_deposit.sweep_txid, sweep_txid_val.into());
     }
 }
