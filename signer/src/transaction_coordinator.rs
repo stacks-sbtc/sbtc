@@ -37,6 +37,7 @@ use crate::ecdsa::SignEcdsa as _;
 use crate::ecdsa::Signed;
 use crate::emily_client::EmilyInteract;
 use crate::error::Error;
+use crate::keys::CoordinatorPublicKey;
 use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
 use crate::message;
@@ -324,10 +325,14 @@ where
         let maybe_aggregate_key = self.context.state().current_aggregate_key();
         let signer_public_keys = self.context.state().current_signer_public_keys();
 
+        // Determine whether we are the coordinator for this tenure.
+        let is_coordinator = signer_public_keys
+            .is_public_key_coordinator_for(self.signer_public_key(), bitcoin_chain_tip);
+
         // If we are not the coordinator, then we have no business
         // coordinating DKG or constructing bitcoin and stacks
         // transactions, might as well return early.
-        if !self.is_coordinator(bitcoin_chain_tip.as_ref(), &signer_public_keys) {
+        if !is_coordinator {
             // Before returning, we also check if all the smart contracts are
             // deployed: we do this as some other coordinator could have deployed
             // them, in which case we need to updated our state.
@@ -1720,7 +1725,7 @@ where
             let msg_public_key = msg.signer_public_key;
 
             let sender_is_coordinator =
-                given_key_is_coordinator(msg_public_key, bitcoin_chain_tip, &signer_set);
+                signer_set.is_public_key_coordinator_for(msg_public_key, bitcoin_chain_tip);
 
             let public_keys = &coordinator.get_config().signer_public_keys;
             let public_key_point = p256k1::point::Point::from(msg_public_key);
@@ -1821,30 +1826,6 @@ where
                 check_signer_public_key(sig_share_response.signer_id)
             }
         }
-    }
-
-    // Determine if the current coordinator is the coordinator.
-    //
-    // The coordinator is decided using the hash of the bitcoin
-    // chain tip. We don't use the chain tip directly because
-    // it typically starts with a lot of leading zeros.
-    //
-    // Note that this function is technically not fallible,
-    // but for now we have chosen to return phantom errors
-    // instead of adding expects/unwraps in the code.
-    // Ideally the code should be formulated in a way to guarantee
-    // it being infallible without relying on sequentially coupling
-    // expressions. However, that is left for future work.
-    fn is_coordinator(
-        &self,
-        bitcoin_chain_tip: &model::BitcoinBlockHash,
-        signer_public_keys: &BTreeSet<PublicKey>,
-    ) -> bool {
-        given_key_is_coordinator(
-            self.signer_public_key(),
-            bitcoin_chain_tip,
-            signer_public_keys,
-        )
     }
 
     /// Constructs a new [`utxo::SignerBtcState`] based on the current market
@@ -2502,45 +2483,6 @@ where
 
         Ok(tx_fee)
     }
-}
-
-/// Check if the provided public key is the coordinator for the provided chain
-/// tip
-pub fn given_key_is_coordinator(
-    pub_key: PublicKey,
-    bitcoin_chain_tip: &model::BitcoinBlockHash,
-    signer_public_keys: &BTreeSet<PublicKey>,
-) -> bool {
-    coordinator_public_key(bitcoin_chain_tip, signer_public_keys) == Some(pub_key)
-}
-
-/// Find the coordinator public key
-pub fn coordinator_public_key(
-    bitcoin_chain_tip: &model::BitcoinBlockHash,
-    signer_public_keys: &BTreeSet<PublicKey>,
-) -> Option<PublicKey> {
-    // Create a hash of the bitcoin chain tip. SHA256 will always result in
-    // a 32 byte digest.
-    let mut hasher = sha2::Sha256::new();
-    hasher.update(bitcoin_chain_tip.into_bytes());
-    let digest: [u8; 32] = hasher.finalize().into();
-
-    // Use the first 4 bytes of the digest to create a u32 index. Since `digest`
-    // is 32 bytes and we explicitly take the first 4 bytes, this is safe.
-    #[allow(clippy::expect_used)]
-    let u32_bytes = digest[..4]
-        .try_into()
-        .expect("BUG: failed to take first 4 bytes of digest");
-
-    // Convert the first 4 bytes of the digest to a u32 index.
-    let index = u32::from_be_bytes(u32_bytes);
-
-    let num_signers = signer_public_keys.len();
-
-    signer_public_keys
-        .iter()
-        .nth((index as usize) % num_signers)
-        .copied()
 }
 
 /// Determine, according to the current state of the signer and configuration,

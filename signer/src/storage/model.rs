@@ -793,6 +793,12 @@ impl Borrow<bitcoin::BlockHash> for BitcoinBlockHash {
     }
 }
 
+impl Borrow<bitcoin::BlockHash> for &BitcoinBlockHash {
+    fn borrow(&self) -> &bitcoin::BlockHash {
+        &self.0
+    }
+}
+
 impl Deref for BitcoinBlockHash {
     type Target = bitcoin::BlockHash;
     fn deref(&self) -> &Self::Target {

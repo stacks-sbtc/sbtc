@@ -22,6 +22,7 @@ use crate::context::TxSignerEvent;
 use crate::dkg;
 use crate::ecdsa::SignEcdsa as _;
 use crate::error::Error;
+use crate::keys::CoordinatorPublicKey;
 use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
 use crate::keys::PublicKeyXOnly;
@@ -391,11 +392,7 @@ where
         let is_canonical = msg_bitcoin_chain_tip == &chain_tip.block_hash;
 
         let signer_set = self.context.state().current_signer_public_keys();
-        let sender_is_coordinator = crate::transaction_coordinator::given_key_is_coordinator(
-            msg_sender,
-            &chain_tip.block_hash,
-            &signer_set,
-        );
+        let sender_is_coordinator = signer_set.is_public_key_coordinator_for(msg_sender, chain_tip);
 
         let chain_tip_status = match (is_known, is_canonical) {
             (true, true) => ChainTipStatus::Canonical,
