@@ -314,12 +314,11 @@ where
         );
         span.record("bitcoin_tip_height", *bitcoin_chain_tip.block_height);
 
-        // We first need to determine if we are the coordinator, so we need
-        // to know the current signing set. If we are the coordinator then
-        // we need to know the aggregate key for constructing bitcoin
-        // transactions. We need to know the current signing set and the
-        // current aggregate key.
-        let maybe_aggregate_key = self.context.state().registry_current_aggregate_key();
+        let registry_aggregate_key = self
+            .context
+            .state()
+            .registry_signer_set_info()
+            .map(|info| info.aggregate_key);
 
         // If we are not the coordinator, then we have no business
         // coordinating DKG or constructing bitcoin and stacks
@@ -345,12 +344,13 @@ where
                 Ok(key) => key,
                 Err(error) => {
                     tracing::error!(%error, "failed to coordinate DKG; using existing aggregate key");
-                    maybe_aggregate_key
+                    registry_aggregate_key
                         .ok_or(Error::MissingAggregateKey(*bitcoin_chain_tip.block_hash))?
                 }
             }
         } else {
-            maybe_aggregate_key.ok_or(Error::MissingAggregateKey(*bitcoin_chain_tip.block_hash))?
+            registry_aggregate_key
+                .ok_or(Error::MissingAggregateKey(*bitcoin_chain_tip.block_hash))?
         };
 
         let chain_tip_hash = &bitcoin_chain_tip.block_hash;
@@ -367,7 +367,8 @@ where
         let signer_public_keys = self
             .context
             .state()
-            .registry_current_signer_set()
+            .registry_signer_set_info()
+            .map(|info| info.signer_set)
             .ok_or_else(|| Error::NoKeyRotationEvent)?;
 
         let bitcoin_processing_fut = self.construct_and_sign_bitcoin_sbtc_transactions(
