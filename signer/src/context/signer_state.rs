@@ -563,13 +563,6 @@ impl SignerSet {
             .expect("BUG: Failed to acquire read lock")
             .len()
     }
-
-    /// Returns true if the two signer sets have the same public keys.
-    pub fn has_same_pubkeys(&self, other: &BTreeSet<PublicKey>) -> bool {
-        let self_pubkeys: BTreeSet<PublicKey> =
-            self.get_signers().iter().map(|s| *s.public_key()).collect();
-        &self_pubkeys == other
-    }
 }
 
 #[cfg(test)]
