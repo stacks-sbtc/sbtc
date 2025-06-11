@@ -583,27 +583,17 @@ impl<C: Context, B> BlockObserver<C, B> {
         Ok(())
     }
 
-    /// Update the `SignerState` object with the current signer set, signatures
-    /// required, and aggregate key data.
+    /// Update the `SignerState` object with the current signer set,
+    /// signatures required, and aggregate key data.
     ///
     /// # Notes
     ///
     /// The query used for fetching the cached information can take quite a
     /// lot of some time to complete on mainnet. So this function updates
     /// the signers state once so that the other event loops do not need to
-    /// execute them. The cached information is:
-    ///
-    /// * The current signer set. It gets this information from the last
-    ///   successful key-rotation contract call if it exists. If such a
-    ///   contract call does not exist this function uses the latest DKG
-    ///   shares, and if that doesn't exist it uses the bootstrap signing
-    ///   set from the configuration.
-    /// * The current aggregate key. It gets this information from the last
-    ///   successful key-rotation contract call if it exists, and from the
-    ///   latest DKG shares if no such contract call can be found.
-    /// * The current signatures required. It gets this information from the
-    ///   last successful key-rotation contract call if it exists, and from
-    ///   bootstrap_signatures_required config parameter if it's not.
+    /// execute them. The cached information is the current signer set
+    /// info. It gets this information from the last successful
+    /// key-rotation contract call if it exists.
     async fn set_signer_set_info(&self, chain_tip: BlockHash) -> Result<(), Error> {
         let info = get_signer_set_info(&self.context, chain_tip).await?;
 
