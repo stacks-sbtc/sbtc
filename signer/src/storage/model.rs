@@ -1026,18 +1026,11 @@ impl From<bitcoin::TapNodeHash> for TaprootScriptHash {
     }
 }
 
-#[cfg(feature = "testing")]
-impl Default for TaprootScriptHash {
-    fn default() -> Self {
-        Self::from([0; 32])
-    }
-}
-
 impl TaprootScriptHash {
     /// Create a new taproot script hash with all zeroes
     #[cfg(feature = "testing")]
     pub fn zeros() -> Self {
-        Default::default()
+        Self::from([0; 32])
     }
     /// Return the inner bytes for the taproot script hash
     pub fn to_byte_array(&self) -> [u8; 32] {
