@@ -24,7 +24,6 @@ use bitcoin::script::PushBytesBuf;
 use bitcoin::sighash::Prevouts;
 use bitcoin::sighash::SighashCache;
 use bitcoin::taproot::LeafVersion;
-use bitcoin::taproot::NodeInfo;
 use bitcoin::taproot::Signature;
 use bitcoin::taproot::TaprootSpendInfo;
 use bitcoin::transaction::Version;
