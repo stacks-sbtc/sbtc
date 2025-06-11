@@ -272,6 +272,7 @@ impl TestSweepSetup {
         }
     }
 
+    /// Store a stacks genesis block that is on the canonical Stacks
     /// blockchain identified by the sweep chain tip.
     pub async fn store_stacks_genesis_block(&self, db: &PgStore) {
         let block = model::StacksBlock {
