@@ -2531,22 +2531,20 @@ pub async fn should_coordinate_dkg(
         return Ok(false);
     }
 
-    // Allow DKG if we do not have a key rotation event in the database.
-    let Some(registry_signer_info) = context.state().registry_signer_set_info() else {
-        tracing::info!("no signer set information in the registry; proceeding with DKG");
-        return Ok(true);
-    };
-
-    // Trigger DKG if signatures_required has changed
-    if registry_signer_info.signatures_required != config.signer.bootstrap_signatures_required {
-        tracing::info!("signatures required has changed; proceeding with DKG");
-        return Ok(true);
-    }
-
-    // Trigger DKG if signer set changes
-    if registry_signer_info.signer_set != config.signer.bootstrap_signing_set {
-        tracing::info!("signer set has changed; proceeding with DKG");
-        return Ok(true);
+    // If we do not have a key rotation event in the database, we will
+    // allow DKG below if we have not run DKG yet.
+    if let Some(registry_signer_info) = context.state().registry_signer_set_info() {
+        // Trigger DKG if signatures_required has changed
+        if registry_signer_info.signatures_required != config.signer.bootstrap_signatures_required {
+            tracing::info!("signatures required has changed; proceeding with DKG");
+            return Ok(true);
+        }
+    
+        // Trigger DKG if signer set changes
+        if registry_signer_info.signer_set != config.signer.bootstrap_signing_set {
+            tracing::info!("signer set has changed; proceeding with DKG");
+            return Ok(true);
+        }
     }
 
     // Get the number of DKG shares that have been stored
