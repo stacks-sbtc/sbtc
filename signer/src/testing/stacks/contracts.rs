@@ -66,13 +66,17 @@ pub enum ParseContractCallError {
 /// An enum representing the kinds of contract calls that the signers can make.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ContractCallKind {
-    /// Call the `complete-deposit-wrapper` function in the `sbtc-deposit`
+    /// A `complete-deposit-wrapper` function call in the `sbtc-deposit` smart
+    /// contract
     CompleteDepositV1,
-    /// Call the `accept-withdrawal-request` function in the
+    /// A `accept-withdrawal-request` function call in the `sbtc-withdrawal`
+    /// smart contract.
     AcceptWithdrawalV1,
-    /// Call the `reject-withdrawal-request` function in the
+    /// A `reject-withdrawal-request` function call in the `sbtc-withdrawal`
+    /// smart contract.
     RejectWithdrawalV1,
-    /// Call the `rotate-keys-wrapper` function in the
+    /// A `rotate-keys-wrapper` function call in the `sbtc-bootstrap-signers`
+    /// smart contract.
     RotateKeysV1,
 }
 
@@ -511,7 +515,7 @@ mod tests {
     #[test_case(vec![clarity_dummy_public_key()], 0, true; "valid public key")]
     #[test_case(vec![clarity_uint(1)], 0, false; "wrong type for public key")]
     #[test_case(vec![clarity_buff(&[0;32])], 0, false; "public key wrong length")]
-    #[test_case(vec![clarity_buff(&[0;33])], 0, false; "public key invalid bytes")] // Assuming all zeros is invalid
+    #[test_case(vec![clarity_buff(&[0;33])], 0, false; "public key invalid bytes")] // Counting all-zeroes as invalid
     #[test_case(vec![], 0, false; "public key missing argument")]
     fn test_try_parse_public_key(args: Vec<ClarityValue>, pos: usize, should_succeed: bool) {
         let result = args.try_parse_public_key(pos, TEST_CONTRACT_NAME, TEST_FUNCTION_NAME);
@@ -535,7 +539,7 @@ mod tests {
 
     #[test]
     fn test_try_parse_btree_set_of_public_keys_success_empty() {
-        let list_type = RotateKeysV1::list_data_type().clone(); // Use a valid list type
+        let list_type = RotateKeysV1::list_data_type().clone();
         let args = vec![clarity_list(vec![], list_type)];
         let result =
             args.try_parse_btree_set_of_public_keys(0, TEST_CONTRACT_NAME, TEST_FUNCTION_NAME);
@@ -725,13 +729,13 @@ mod tests {
         let sweep_txid_val = Txid::from_slice(&[3u8; 32]).unwrap();
 
         let args = vec![
-            clarity_buff(&outpoint_txid_clarity_bytes), // arg 0: outpoint_txid
-            clarity_uint(vout_val as u128),             // arg 1: vout
-            clarity_uint(amount_val as u128),           // arg 2: amount
-            clarity_principal(StacksAddress::burn_address(true)), // arg 3: recipient
-            clarity_buff(&sweep_block_hash_val.to_raw_hash().to_byte_array()), // arg 4: sweep_block_hash
-            clarity_uint(sweep_block_height_val as u128), // arg 5: sweep_block_height
-            clarity_buff(&sweep_txid_val.to_raw_hash().to_byte_array()), // arg 6: sweep_txid
+            clarity_buff(&outpoint_txid_clarity_bytes),                         // arg 0: outpoint_txid
+            clarity_uint(vout_val as u128),                                     // arg 1: vout
+            clarity_uint(amount_val as u128),                                   // arg 2: amount
+            clarity_principal(StacksAddress::burn_address(true)),               // arg 3: recipient
+            clarity_buff(&sweep_block_hash_val.to_raw_hash().to_byte_array()),  // arg 4: sweep_block_hash
+            clarity_uint(sweep_block_height_val as u128),                       // arg 5: sweep_block_height
+            clarity_buff(&sweep_txid_val.to_raw_hash().to_byte_array()),        // arg 6: sweep_txid
         ];
 
         let call = create_dummy_complete_deposit_call(
