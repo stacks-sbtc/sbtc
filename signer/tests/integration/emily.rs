@@ -12,6 +12,7 @@ use bitcoincore_rpc_json::Utxo;
 use fake::Fake as _;
 use futures::future::join_all;
 use signer::testing::storage::model::TestBitcoinTxInfo;
+use signer::testing::wsts::SelectCoordinatorPrivateKey as _;
 use test_case::test_case;
 use test_log::test;
 use url::Url;
@@ -44,18 +45,11 @@ use signer::storage::DbWrite;
 use signer::storage::model;
 use signer::storage::model::DepositSigner;
 use signer::testing;
-use signer::testing::context::BuildContext;
-use signer::testing::context::ConfigureBitcoinClient;
-use signer::testing::context::ConfigureEmilyClient;
-use signer::testing::context::ConfigureStacksClient;
-use signer::testing::context::ConfigureStorage;
-use signer::testing::context::TestContext;
-use signer::testing::context::WrappedMock;
+use signer::testing::context::*;
 use signer::testing::get_rng;
 use signer::testing::stacks::DUMMY_SORTITION_INFO;
 use signer::testing::stacks::DUMMY_TENURE_INFO;
 use signer::testing::storage::model::TestData;
-use signer::testing::transaction_coordinator::select_coordinator;
 use signer::testing::wsts::SignerSet;
 use signer::transaction_coordinator;
 use testing_emily_client::apis::testing_api::wipe_databases;
@@ -381,7 +375,7 @@ async fn deposit_flow() {
     let block_observer_handle = tokio::spawn(async move { block_observer.run().await });
 
     // Get the private key of the coordinator of the signer set.
-    let private_key = select_coordinator(&deposit_block_hash.into(), &signer_info);
+    let private_key = signer_info.select_coordinator_private_key(deposit_block_hash);
 
     // Bootstrap the tx coordinator event loop
     context.state().set_sbtc_contracts_deployed();
