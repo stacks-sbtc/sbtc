@@ -13,6 +13,8 @@ use stacks_common::types::chainstate::SortitionId;
 use crate::error::Error;
 use crate::stacks::api::TenureBlocks;
 
+pub mod contracts;
+
 /// Some dummy sortition info
 pub const DUMMY_SORTITION_INFO: SortitionInfo = SortitionInfo {
     burn_block_hash: BurnchainHeaderHash([0; 32]),
