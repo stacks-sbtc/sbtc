@@ -298,13 +298,6 @@ impl BitcoinInteract for TestHarness {
 }
 
 impl StacksInteract for TestHarness {
-    async fn get_current_signer_set(
-        &self,
-        _contract_principal: &StacksAddress,
-    ) -> Result<Vec<PublicKey>, Error> {
-        // issue #118
-        todo!()
-    }
     async fn get_current_signers_aggregate_key(
         &self,
         _contract_principal: &StacksAddress,

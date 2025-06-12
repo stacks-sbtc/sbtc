@@ -139,7 +139,7 @@ pub enum FeePriority {
 
 /// Structure describing the info about signer set currently stored in the
 /// smart contract on Stacks.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
 pub struct SignerSetInfo {
     /// The aggregate key of the most recently confirmed key rotation
@@ -158,15 +158,6 @@ pub struct SignerSetInfo {
 /// A trait detailing the interface with the Stacks API and Stacks Nodes.
 #[cfg_attr(any(test, feature = "testing"), mockall::automock)]
 pub trait StacksInteract: Send + Sync {
-    /// Retrieve the current signer set from the `sbtc-registry` contract.
-    ///
-    /// This is done by making a `GET /v2/data_var/<contract-principal>/sbtc-registry/current-signer-set`
-    /// request.
-    fn get_current_signer_set(
-        &self,
-        contract_principal: &StacksAddress,
-    ) -> impl Future<Output = Result<Vec<PublicKey>, Error>> + Send;
-
     /// Retrieve the current signers' aggregate key from the `sbtc-registry` contract.
     ///
     /// This is done by making a `GET /v2/data_var/<contract-principal>/sbtc-registry/current-aggregate-pubkey`
@@ -1359,53 +1350,11 @@ fn extract_signatures_required(value: Value) -> Result<Option<u16>, Error> {
 }
 
 impl StacksInteract for StacksClient {
-    async fn get_current_signer_set(
-        &self,
-        contract_principal: &StacksAddress,
-    ) -> Result<Vec<PublicKey>, Error> {
-        // Make a request to the sbtc-registry contract to get the current
-        // signer set.
-        let result = self
-            .get_data_var(
-                contract_principal,
-                &ContractName::from("sbtc-registry"),
-                &ClarityName::from("current-signer-set"),
-            )
-            .await?;
-
-        // Check the result and return the signer set. We're expecting a
-        // list of buffers, where each buffer is a public key.
-        match result {
-            Value::Sequence(SequenceData::List(ListData { data, .. })) => {
-                // Iterate through each record in the list and verify that it's a buffer.
-                // If it is a buffer, then convert it to a public key.
-                // Otherwise, return an error.
-                data.into_iter()
-                    .map(|item| match item {
-                        // If the item is a buffer, then convert it to a public key.
-                        Value::Sequence(SequenceData::Buffer(BuffData { data })) => {
-                            PublicKey::from_slice(&data)
-                        }
-                        // Otherwise, return an error.
-                        _ => Err(Error::InvalidStacksResponse(
-                            "expected a buffer but got something else",
-                        )),
-                    })
-                    .collect()
-            }
-            // We expected the top-level value to be a list of buffers,
-            // but we got something else.
-            _ => Err(Error::InvalidStacksResponse(
-                "expected a sequence but got something else",
-            )),
-        }
-    }
-
     async fn get_current_signers_aggregate_key(
         &self,
         contract_principal: &StacksAddress,
     ) -> Result<Option<PublicKey>, Error> {
-        let result = self
+        let value = self
             .get_data_var(
                 contract_principal,
                 &ContractName::from("sbtc-registry"),
@@ -1413,20 +1362,7 @@ impl StacksInteract for StacksClient {
             )
             .await?;
 
-        // Check the result and return the aggregate key.
-        match result {
-            Value::Sequence(SequenceData::Buffer(BuffData { data })) => {
-                // The initial value of the data var is all zeros
-                if data.iter().all(|v| *v == 0) {
-                    Ok(None)
-                } else {
-                    PublicKey::from_slice(&data).map(Some)
-                }
-            }
-            _ => Err(Error::InvalidStacksResponse(
-                "expected a buffer but got something else",
-            )),
-        }
+        extract_aggregate_key(value)
     }
 
     async fn get_current_signer_set_info(
@@ -1436,7 +1372,7 @@ impl StacksInteract for StacksClient {
         let result = self
             .call_read(
                 contract_principal,
-                &ContractName::from(SmartContract::SbtcToken.contract_name()),
+                &ContractName::from(SmartContract::SbtcRegistry.contract_name()),
                 &ClarityName::from("get-current-signer-data"),
                 contract_principal,
                 &[],
@@ -1444,45 +1380,35 @@ impl StacksInteract for StacksClient {
             .await?;
 
         match result {
-            Value::Response(response) => match *response.data {
-                Value::Tuple(TupleData { mut data_map, .. }) => {
-                    let maybe_aggregate_key = data_map
-                        .remove("current-aggregate-pubkey")
-                        .map(extract_aggregate_key)
-                        .transpose()?
-                        .flatten();
-                    let maybe_signer_set = data_map
-                        .remove("current-signer-set")
-                        .map(extract_signer_set)
-                        .transpose()?;
-                    let maybe_signatures_required = data_map
-                        .remove("current-signature-threshold")
-                        .map(extract_signatures_required)
-                        .transpose()?
-                        .flatten();
+            Value::Tuple(TupleData { mut data_map, .. }) => {
+                let maybe_aggregate_key = data_map
+                    .remove("current-aggregate-pubkey")
+                    .map(extract_aggregate_key);
+                let maybe_signer_set = data_map
+                    .remove("current-signer-set")
+                    .map(extract_signer_set);
+                let maybe_signatures_required = data_map
+                    .remove("current-signature-threshold")
+                    .map(extract_signatures_required);
 
-                    let Some(aggregate_key) = maybe_aggregate_key else {
-                        return Ok(None);
-                    };
-                    let Some(signer_set) = maybe_signer_set else {
-                        return Ok(None);
-                    };
-                    let Some(signatures_required) = maybe_signatures_required else {
-                        return Ok(None);
-                    };
+                let Some(Some(aggregate_key)) = maybe_aggregate_key.transpose()? else {
+                    return Ok(None);
+                };
+                let Some(signer_set) = maybe_signer_set.transpose()? else {
+                    return Ok(None);
+                };
+                let Some(Some(signatures_required)) = maybe_signatures_required.transpose()? else {
+                    return Ok(None);
+                };
 
-                    Ok(Some(SignerSetInfo {
-                        aggregate_key,
-                        signatures_required,
-                        signer_set,
-                    }))
-                }
-                _ => Err(Error::InvalidStacksResponse(
-                    "expected a tuple but got something else",
-                )),
-            },
+                Ok(Some(SignerSetInfo {
+                    aggregate_key,
+                    signatures_required,
+                    signer_set,
+                }))
+            }
             _ => Err(Error::InvalidStacksResponse(
-                "expected a response but got something else",
+                "expected a tuple but got something else",
             )),
         }
     }
@@ -1719,18 +1645,6 @@ impl StacksInteract for StacksClient {
 }
 
 impl StacksInteract for ApiFallbackClient<StacksClient> {
-    async fn get_current_signer_set(
-        &self,
-        contract_principal: &StacksAddress,
-    ) -> Result<Vec<PublicKey>, Error> {
-        self.exec(|client, retry| async move {
-            let result = client.get_current_signer_set(contract_principal).await;
-            retry.abort_if(|| matches!(result, Err(Error::InvalidStacksResponse(_))));
-            result
-        })
-        .await
-    }
-
     async fn get_current_signers_aggregate_key(
         &self,
         contract_principal: &StacksAddress,
@@ -2146,36 +2060,31 @@ mod tests {
         F: Fn(Url) -> C,
     {
         let clarity_value = Value::Int(1234);
-        let raw_json_response = format!(
-            r#"{{"data":"0x{}"}}"#,
-            Value::serialize_to_hex(&clarity_value).expect("failed to serialize value")
-        );
-
+        let json_response = serde_json::json!({
+            "okay": true,
+            "result": format!("0x{}", clarity_value.serialize_to_hex().unwrap()),
+        });
+        let raw_json_response = serde_json::to_string(&json_response).unwrap();
         // Setup our mock server
         let mut stacks_node_server = mockito::Server::new_async().await;
         let mock = stacks_node_server
-            .mock("GET", "/v2/data_var/ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM/sbtc-registry/current-signer-set?proof=0")
+            .mock("POST", "/v2/contracts/call-read/ST000000000000000000002AMW42H/sbtc-registry/get-current-signer-data?tip=latest")
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(&raw_json_response)
             .expect(1)
             .create();
 
+        // Setup our Stacks client
         let client = client(url::Url::parse(stacks_node_server.url().as_str()).unwrap());
 
         // Make the request to the mock server
         let resp = client
-            .get_current_signer_set(
-                &StacksAddress::from_string("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM")
-                    .expect("failed to parse stacks address"),
-            )
+            .get_current_signer_set_info(&StacksAddress::burn_address(false))
             .await;
 
         let err = resp.unwrap_err();
-        assert!(matches!(
-            err,
-            Error::InvalidStacksResponse(s) if s == "expected a sequence but got something else"
-        ));
+        assert!(matches!(err, Error::InvalidStacksResponse(_)));
         mock.assert();
     }
 
@@ -2184,7 +2093,7 @@ mod tests {
     #[test_case(0, |url| ApiFallbackClient::new(vec![StacksClient::new(url).unwrap()]).unwrap(); "fallback-client-empty-list")]
     #[test_case(128, |url| ApiFallbackClient::new(vec![StacksClient::new(url).unwrap()]).unwrap(); "fallback-client-list-128")]
     #[tokio::test]
-    async fn get_current_signer_set_works<F, C>(list_size: u16, client: F)
+    async fn get_current_signer_info_works<F, C>(list_size: u16, client: F)
     where
         C: StacksInteract,
         F: Fn(Url) -> C,
@@ -2206,16 +2115,39 @@ mod tests {
             )
             .expect("failed to create list type signature"),
         }));
+        let aggregate_key = generate_pubkeys(list_size.min(1)).pop();
+        let aggregate_key_clarity = Value::Sequence(SequenceData::Buffer(BuffData {
+            data: aggregate_key
+                .map(|pk| pk.serialize().to_vec())
+                .unwrap_or(vec![0; 1]),
+        }));
         // The format of the response JSON is `{"data": "0x<serialized-value>"}` (excluding the proof).
-        let raw_json_response = format!(
-            r#"{{"data":"0x{}"}}"#,
-            Value::serialize_to_hex(&signer_set).expect("failed to serialize value")
-        );
+
+        let tuple_data = [
+            (
+                ClarityName::from("current-signature-threshold"),
+                Value::UInt(list_size as u128),
+            ),
+            (ClarityName::from("current-signer-set"), signer_set),
+            (
+                ClarityName::from("current-aggregate-pubkey"),
+                aggregate_key_clarity,
+            ),
+        ]
+        .to_vec();
+
+        let clarity_value = Value::Tuple(TupleData::from_data(tuple_data).unwrap());
+
+        let json_response = serde_json::json!({
+            "okay": true,
+            "result": format!("0x{}", clarity_value.serialize_to_hex().unwrap()),
+        });
+        let raw_json_response = serde_json::to_string(&json_response).unwrap();
 
         // Setup our mock server
         let mut stacks_node_server = mockito::Server::new_async().await;
         let mock = stacks_node_server
-            .mock("GET", "/v2/data_var/ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM/sbtc-registry/current-signer-set?proof=0")
+            .mock("POST", "/v2/contracts/call-read/ST000000000000000000002AMW42H/sbtc-registry/get-current-signer-data?tip=latest")
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(&raw_json_response)
@@ -2227,15 +2159,18 @@ mod tests {
 
         // Make the request to the mock server
         let resp = client
-            .get_current_signer_set(
-                &StacksAddress::from_string("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM")
-                    .expect("failed to parse stacks address"),
-            )
+            .get_current_signer_set_info(&StacksAddress::burn_address(false))
             .await
             .unwrap();
 
+        let expected = aggregate_key.map(|aggregate_key| SignerSetInfo {
+            aggregate_key,
+            signer_set: public_keys.into_iter().collect(),
+            signatures_required: list_size,
+        });
+
         // Assert that the response is what we expect
-        assert_eq!(&resp, &public_keys);
+        assert_eq!(resp, expected);
         mock.assert();
     }
 
