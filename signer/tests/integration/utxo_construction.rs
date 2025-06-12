@@ -1,7 +1,15 @@
+use emily_client::apis::deposit_api;
+use signer::emily_client::EmilyClient;
+use signer::keys::PublicKeyXOnly;
+use signer::testing::IterTestExt;
+use signer::testing::MapTestUtilityError;
+use signer::testing::TestUtilityError;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 use test_case::test_case;
+use url::Url;
 
 use bitcoin::AddressType;
 use bitcoin::Amount;
@@ -133,6 +141,172 @@ where
         signers_public_key: dep.signers_public_key,
     };
     (deposit_tx, req, dep)
+}
+
+/// A helper struct for submitting deposits to the Bitcoin network and Emily from
+/// a given depositor.
+pub struct DepositHelper<'a> {
+    rpc: &'a bitcoincore_rpc::Client,
+    emily_client: &'a EmilyClient,
+    depositor: &'a Recipient,
+}
+
+impl<'a> DepositHelper<'a> {
+    /// Creates a new `DepositHelper` instance.
+    pub fn new(
+        rpc: &'a bitcoincore_rpc::Client,
+        emily_client: &'a EmilyClient,
+        depositor: &'a Recipient,
+    ) -> Self {
+        Self { rpc, emily_client, depositor }
+    }
+
+    /// Creates a deposit and submits the transaction to Bitcoin and deposit request to Emily.
+    pub async fn submit_deposit<K>(
+        &self,
+        amount_sats: u64,
+        fee_sats: u64,
+        aggregate_key: K,
+    ) -> Result<(Transaction, DepositRequest, DepositInfo), TestUtilityError>
+    where
+        K: Into<PublicKeyXOnly>,
+    {
+        let aggregate_key = aggregate_key.into();
+
+        let utxo_to_spend = self
+            .depositor
+            .get_utxos(self.rpc, Some(amount_sats + fee_sats))
+            .single();
+
+        let (deposit_tx, deposit_request_data, deposit_info) = make_deposit_request(
+            self.depositor,
+            amount_sats,
+            utxo_to_spend,
+            fee_sats,
+            aggregate_key.into(),
+        );
+
+        self.rpc
+            .send_raw_transaction(&deposit_tx)
+            .map_to_test_utility_err()?;
+
+        let emily_request_body = deposit_request_data.as_emily_request(&deposit_tx);
+        deposit_api::create_deposit(self.emily_client.config(), emily_request_body)
+            .await
+            .map_to_test_utility_err()?;
+
+        Ok((deposit_tx, deposit_request_data, deposit_info))
+    }
+}
+
+/// Verifies that the `DepositHelper` correctly creates, submits, and reports a deposit.
+#[tokio::test]
+async fn deposit_helper_submits_deposit_successfully() {
+    let (rpc, faucet) = regtest::initialize_blockchain();
+
+    let emily_client = EmilyClient::try_new(
+        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
+        Duration::from_secs(1),
+        None,
+    )
+    .expect("Failed to create EmilyClient");
+
+    let depositor = Recipient::new(AddressType::P2tr);
+    let signer_for_agg_key = Recipient::new(AddressType::P2tr);
+
+    let initial_depositor_balance_sats = 100_000_000; // 1 BTC
+    faucet.send_to(initial_depositor_balance_sats, &depositor.address);
+    faucet.generate_block();
+
+    assert_eq!(
+        depositor.get_balance(rpc).to_sat(),
+        initial_depositor_balance_sats,
+        "Initial depositor balance mismatch"
+    );
+
+    // Instantiate DepositHelper
+    let deposit_helper = DepositHelper::new(rpc, &emily_client, &depositor);
+
+    // Define deposit parameters
+    let deposit_amount_sats = 5_000_000; // 0.05 BTC
+    let sbtc_max_fee_sats = 10_000; // 0.0001 BTC
+    let aggregate_key = signer_for_agg_key.keypair.x_only_public_key().0;
+
+    // Call submit_deposit
+    let (deposit_tx, deposit_request_data, deposit_info) = deposit_helper
+        .submit_deposit(deposit_amount_sats, sbtc_max_fee_sats, aggregate_key)
+        .await
+        .expect("Failed to submit deposit");
+
+    // Verify mempool contents before mining
+    let mempool = rpc.get_raw_mempool().expect("Failed to get mempool");
+    assert_eq!(
+        mempool.len(),
+        1,
+        "Mempool should contain exactly one transaction (the deposit)"
+    );
+    assert_eq!(
+        mempool[0],
+        deposit_tx.compute_txid(),
+        "Transaction ID in mempool does not match submitted deposit transaction ID"
+    );
+
+    // Mine a block to confirm the Bitcoin transaction
+    faucet.generate_block();
+
+    // Check depositor's balance
+    // The Bitcoin transaction fee is handled by `make_deposit_request` using `regtest::BITCOIN_CORE_FALLBACK_FEE`.
+    let bitcoin_tx_fee_sats = regtest::BITCOIN_CORE_FALLBACK_FEE.to_sat();
+    let expected_depositor_balance_sats =
+        initial_depositor_balance_sats - deposit_amount_sats - bitcoin_tx_fee_sats;
+    let final_depositor_balance_sats = depositor.get_balance(rpc).to_sat();
+
+    assert_eq!(
+        final_depositor_balance_sats, expected_depositor_balance_sats,
+        "Depositor balance mismatch after deposit. Expected {}, got {}",
+        expected_depositor_balance_sats, final_depositor_balance_sats
+    );
+
+    // Verify returned data (basic checks)
+    assert_eq!(
+        deposit_tx.output[0].value.to_sat(),
+        deposit_amount_sats,
+        "Deposit transaction output amount mismatch"
+    );
+    assert_eq!(
+        deposit_request_data.amount, deposit_amount_sats,
+        "DepositRequest amount mismatch"
+    );
+    assert_eq!(
+        deposit_request_data.max_fee, sbtc_max_fee_sats,
+        "DepositRequest max_fee mismatch"
+    );
+    assert_eq!(
+        deposit_request_data.signers_public_key, aggregate_key,
+        "DepositRequest signers_public_key mismatch"
+    );
+
+    assert_eq!(
+        deposit_info.amount, deposit_amount_sats,
+        "DepositInfo amount mismatch"
+    );
+    assert_eq!(
+        deposit_info.max_fee, sbtc_max_fee_sats,
+        "DepositInfo max_fee mismatch"
+    );
+    assert_eq!(
+        deposit_info.signers_public_key, aggregate_key,
+        "DepositInfo signers_public_key mismatch"
+    );
+    assert_eq!(
+        deposit_info.outpoint.txid,
+        deposit_tx.compute_txid(),
+        "DepositInfo outpoint txid mismatch"
+    );
+    assert_eq!(
+        deposit_info.outpoint.vout, 0,
+        "DepositInfo outpoint vout mismatch (expected 0)"
+    );
 }
 
 /// This test just checks that many of the methods on the Recipient struct
