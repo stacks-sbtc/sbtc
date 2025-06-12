@@ -83,6 +83,7 @@ use crate::storage::model::StacksBlockHash;
 use crate::storage::model::StacksBlockHeight;
 use crate::storage::model::StacksPrincipal;
 use crate::storage::model::StacksTxId;
+use crate::storage::model::TaprootScriptHash;
 use crate::storage::model::WithdrawalAcceptEvent;
 use crate::storage::model::WithdrawalRejectEvent;
 
@@ -600,6 +601,13 @@ impl fake::Dummy<fake::Faker> for ScriptPubKey {
         let pk = bitcoin::CompressedPublicKey(public_key.into());
         let script_pubkey = ScriptBuf::new_p2wpkh(&pk.wpubkey_hash());
         ScriptPubKey::from(script_pubkey)
+    }
+}
+
+impl fake::Dummy<fake::Faker> for TaprootScriptHash {
+    fn dummy_with_rng<R: Rng + ?Sized>(config: &fake::Faker, rng: &mut R) -> Self {
+        let bytes: [u8; 32] = config.fake_with_rng(rng);
+        TaprootScriptHash::from(bytes)
     }
 }
 
