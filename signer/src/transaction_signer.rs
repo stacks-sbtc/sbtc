@@ -557,8 +557,8 @@ where
         // that check is that the current signer is in the signing set
         // associated authorized wallet in the sbtc registry. We do this
         // check here. If we are in the bootstrap phase, there may not be
-        // any signer in the registry so we fallback on the information in
-        // latest verified DKG shares.
+        // any signer set info in the registry so we fallback on the
+        // information in latest verified DKG shares in that case.
         let signer_set_info = match self.context.state().registry_signer_set_info() {
             Some(info) => info,
             None => db
