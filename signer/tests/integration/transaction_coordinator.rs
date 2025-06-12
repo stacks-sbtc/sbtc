@@ -55,6 +55,7 @@ use signer::testing::get_rng;
 
 use signer::testing::FutureExt as _;
 use signer::testing::FuturesIterExt as _;
+use signer::testing::IntoOption;
 use signer::testing::Sleep;
 use signer::transaction_coordinator::given_key_is_coordinator;
 use signer::transaction_coordinator::should_coordinate_dkg;
@@ -250,10 +251,15 @@ where
 /// Wait for all signers to finish their coordinator duties and do this
 /// concurrently so that we don't miss anything (not sure if we need to do
 /// it concurrently).
-async fn wait_for_signers(signers: &[(IntegrationTestContext, PgStore, &Keypair, SignerNetwork)]) {
+async fn wait_for_signers<T>(
+    signers: &[(IntegrationTestContext, PgStore, &Keypair, SignerNetwork)],
+    bitcoin_block_hash: T,
+) where
+    T: IntoOption<BitcoinBlockHash>,
+{
     let wait_duration = Duration::from_secs(15);
 
-    let expected = TxCoordinatorEvent::TenureCompleted.into();
+    let expected = TxCoordinatorEvent::TenureCompleted(bitcoin_block_hash.into_option()).into();
     signers
         .iter()
         .map(|(ctx, _, _, _)| async {
@@ -1815,8 +1821,7 @@ async fn sign_bitcoin_transaction() {
     // Start off with some initial UTXOs to work with.
 
     faucet.send_to(50_000_000, &depositor.address);
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
+    wait_for_signers(&signers, faucet.generate_block()).await;
 
     // =========================================================================
     // Step 6 - Make a proper deposit
@@ -1853,15 +1858,14 @@ async fn sign_bitcoin_transaction() {
     // - The coordinator should submit a sweep transaction. We check the
     //   mempool for its existence.
     // =========================================================================
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
+    wait_for_signers(&signers, faucet.generate_block()).await;
 
     let (ctx, _, _, _) = signers.first().unwrap();
     let mut txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
     assert_eq!(txids.len(), 1);
 
     let block_hash = faucet.generate_block();
-    wait_for_signers(&signers).await;
+    wait_for_signers(&signers, block_hash).await;
 
     // =========================================================================
     // Step 8 - Assertions
@@ -2298,15 +2302,14 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     // - The coordinator should submit a sweep transaction. We check the
     //   mempool for its existence.
     // =========================================================================
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
+    wait_for_signers(&signers, faucet.generate_block()).await;
 
     let (ctx, _, _, _) = signers.first().unwrap();
     let mut txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
     assert_eq!(txids.len(), 1);
 
     let block_hash = faucet.generate_block();
-    wait_for_signers(&signers).await;
+    wait_for_signers(&signers, block_hash).await;
 
     // Now lets check the bitcoin transaction, first we get it.
     let txid = txids.pop().unwrap();
@@ -2436,8 +2439,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     // - The coordinator should submit a sweep transaction. We check the
     //   mempool for its existence.
     // =========================================================================
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
+    wait_for_signers(&signers, faucet.generate_block()).await;
 
     let (ctx, _, _, _) = signers.first().unwrap();
     let mut txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
@@ -2445,7 +2447,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     assert_eq!(txids.len(), 1);
 
     let block_hash = faucet.generate_block();
-    wait_for_signers(&signers).await;
+    wait_for_signers(&signers, block_hash).await;
 
     // =========================================================================
     // Step 12 - Assertions
@@ -2841,8 +2843,7 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
     // - DKG has run, and they think the smart contracts are up-to-date, so
     //   they shouldn't do anything
     // =========================================================================
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
+    wait_for_signers(&signers, faucet.generate_block()).await;
 
     // =========================================================================
     // Step 6 - Assertions
@@ -3997,8 +3998,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
     // =========================================================================
     let (ctx, _, _, _) = signers.first().unwrap();
     for _ in 0..WITHDRAWAL_MIN_CONFIRMATIONS - 1 {
-        faucet.generate_block();
-        wait_for_signers(&signers).await;
+        wait_for_signers(&signers, faucet.generate_block()).await;
         // The mempool should be empty, since the signers do not act on the
         // withdrawal unless they've observed WITHDRAWAL_MIN_CONFIRMATIONS
         // from the chain tip of when the withdrawal request was created.
@@ -4006,14 +4006,13 @@ async fn sign_bitcoin_transaction_withdrawals() {
         assert!(txids.is_empty());
     }
 
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
+    wait_for_signers(&signers, faucet.generate_block()).await;
 
     let mut txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
     assert_eq!(txids.len(), 1);
 
     let block_hash = faucet.generate_block();
-    wait_for_signers(&signers).await;
+    wait_for_signers(&signers, block_hash).await;
 
     // =========================================================================
     // Step 8 - Assertions
@@ -4403,7 +4402,8 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
         .expect("failed to signal");
 
     // Await for tenure completion
-    let tenure_completed_signal = TxCoordinatorEvent::TenureCompleted.into();
+    let tenure_completed_signal =
+        TxCoordinatorEvent::TenureCompleted(Some(bitcoin_chain_tip.block_hash)).into();
     context
         .wait_for_signal(Duration::from_secs(5), |signal| {
             signal == &tenure_completed_signal
