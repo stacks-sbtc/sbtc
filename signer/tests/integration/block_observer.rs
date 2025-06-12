@@ -46,6 +46,7 @@ use signer::storage::model::DkgSharesStatus;
 use signer::storage::model::EncryptedDkgShares;
 use signer::storage::model::KeyRotationEvent;
 use signer::storage::model::StacksBlock;
+use signer::storage::model::TaprootScriptHash;
 use signer::storage::model::TxOutput;
 use signer::storage::model::TxOutputType;
 use signer::storage::model::TxPrevout;
@@ -1823,6 +1824,7 @@ fn make_coinbase_deposit_request(
 
     let deposit_script = deposit_inputs.deposit_script();
     let reclaim_script = reclaim_inputs.reclaim_script();
+    let reclaim_script_hash = TaprootScriptHash::from(&reclaim_script);
 
     let script_pub_key =
         sbtc::deposits::to_script_pubkey(deposit_script.clone(), reclaim_script.clone());
@@ -1845,6 +1847,7 @@ fn make_coinbase_deposit_request(
         amount: deposit_tx.output[0].value.to_sat(),
         deposit_script,
         reclaim_script,
+        reclaim_script_hash: Some(reclaim_script_hash),
         signers_public_key,
     };
     (deposit_tx, req)

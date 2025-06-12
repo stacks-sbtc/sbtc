@@ -24,6 +24,7 @@ use crate::storage::model::StacksBlockHash;
 use crate::storage::model::StacksBlockHeight;
 use crate::storage::model::StacksPrincipal;
 use crate::storage::model::StacksTxId;
+use crate::storage::model::TaprootScriptHash;
 
 use super::model::Timestamp;
 
@@ -34,6 +35,34 @@ const POSTGRES_EPOCH_DATETIME: OffsetDateTime = datetime!(2000-01-01 00:00:00 UT
 /// OID for PostgreSQL's TIMESTAMPTZ type.
 /// https://github.com/postgres/postgres/blob/5d6eac80cdce7aa7c5f4ec74208ddc1feea9eef3/src/include/catalog/pg_type.dat#L306
 const TIMESTAMPTZ_OID: Oid = Oid(1184);
+
+// For the [`TaprootScriptHash`]
+
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for TaprootScriptHash {
+    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, BoxDynError> {
+        let bytes = <[u8; 32] as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        Ok(TaprootScriptHash::from(bytes))
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for TaprootScriptHash {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <[u8; 32] as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl<'r> sqlx::Encode<'r, sqlx::Postgres> for TaprootScriptHash {
+    fn encode_by_ref(&self, buf: &mut PgArgumentBuffer) -> Result<IsNull, BoxDynError> {
+        let bytes = self.to_byte_array();
+        <[u8; 32] as sqlx::Encode<'r, sqlx::Postgres>>::encode_by_ref(&bytes, buf)
+    }
+}
+
+impl sqlx::postgres::PgHasArrayType for TaprootScriptHash {
+    fn array_type_info() -> sqlx::postgres::PgTypeInfo {
+        <[u8; 32] as sqlx::postgres::PgHasArrayType>::array_type_info()
+    }
+}
 
 // For the [`ScriptPubKey`]
 
