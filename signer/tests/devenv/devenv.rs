@@ -40,6 +40,7 @@ use serde_json::to_value;
 use signer::bitcoin::utxo::DepositRequest;
 use signer::error::Error;
 use signer::stacks::contracts::SmartContract;
+use signer::storage::model::TaprootScriptHash;
 use signer::testing::btc::BlockHashStreamDispatcher;
 use signer::testing::btc::BlockHashStreamProvider as _;
 use std::sync::Arc;
@@ -201,6 +202,7 @@ where
 
     let deposit_script = deposit_inputs.deposit_script();
     let reclaim_script = reclaim_inputs.reclaim_script();
+    let reclaim_script_hash = TaprootScriptHash::from(&reclaim_script);
 
     let mut tx_outs = vec![TxOut {
         value: Amount::from_sat(amount),
@@ -246,6 +248,7 @@ where
         amount: dep.amount,
         deposit_script: dep.deposit_script.clone(),
         reclaim_script: dep.reclaim_script.clone(),
+        reclaim_script_hash: Some(reclaim_script_hash),
         signers_public_key: dep.signers_public_key,
     };
     (deposit_tx, req, dep)
