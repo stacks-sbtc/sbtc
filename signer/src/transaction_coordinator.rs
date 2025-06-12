@@ -15,6 +15,7 @@ use futures::StreamExt as _;
 use futures::future::try_join_all;
 use sha2::Digest;
 
+use crate::storage::model::BitcoinBlockHash;
 use crate::WITHDRAWAL_BLOCKS_EXPIRY;
 use crate::WITHDRAWAL_DUST_LIMIT;
 use crate::WITHDRAWAL_EXPIRY_BUFFER;
@@ -236,15 +237,21 @@ where
                         event
                     {
                         tracing::debug!("received signal; processing requests");
-                        if let Err(error) = self.process_new_blocks().await {
-                            tracing::error!(
-                                %error,
-                                "error processing requests; skipping this round"
-                            );
-                        }
+                        let processed_until_block = match self.process_new_blocks().await {
+                            Ok(maybe_block_hash) => maybe_block_hash,
+                            Err(error) => {
+                                tracing::error!(
+                                    %error,
+                                    "error processing requests; skipping this round"
+                                );
+                                None
+                            }
+                        };
+
                         tracing::trace!("sending tenure completed signal");
-                        self.context
-                            .signal(TxCoordinatorEvent::TenureCompleted.into())?;
+                        self.context.signal(
+                            TxCoordinatorEvent::TenureCompleted(processed_until_block).into(),
+                        )?;
                     }
                 }
             }
@@ -291,9 +298,9 @@ where
         bitcoin_tip_hash = tracing::field::Empty,
         bitcoin_tip_height = tracing::field::Empty,
     ))]
-    pub async fn process_new_blocks(&mut self) -> Result<(), Error> {
+    pub async fn process_new_blocks(&mut self) -> Result<Option<BitcoinBlockHash>, Error> {
         if !self.is_epoch3().await? {
-            return Ok(());
+            return Ok(None);
         }
 
         let bitcoin_processing_delay = self.context.config().signer.bitcoin_processing_delay;
@@ -334,7 +341,7 @@ where
             self.all_smart_contracts_deployed().await?;
 
             tracing::debug!("we are not the coordinator, so nothing to do");
-            return Ok(());
+            return Ok(Some(bitcoin_chain_tip.block_hash));
         }
 
         tracing::debug!("we are the coordinator");
@@ -385,7 +392,7 @@ where
         .await?;
         tracing::debug!("coordinator tenure completed successfully");
 
-        Ok(())
+        Ok(Some(bitcoin_chain_tip.block_hash))
     }
 
     /// Submit the rotate key tx for the latest DKG shares, if the aggregate key
