@@ -94,7 +94,7 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
     let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
     let db = testing::storage::new_test_database().await;
-    let mut ctx = TestContext::builder()
+    let ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
         .with_mocked_emily_client()
@@ -255,7 +255,7 @@ async fn link_blocks() {
 
     let stacks_client = StacksClient::new(Url::parse("http://localhost:20443").unwrap()).unwrap();
 
-    let mut ctx = TestContext::builder()
+    let ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
         .with_stacks_client(stacks_client.clone())
@@ -386,7 +386,7 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     // 1. Create a database, an associated context for the block observer.
 
     let db = testing::storage::new_test_database().await;
-    let mut ctx = TestContext::builder()
+    let ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
         .with_emily_client(emily_client.clone())
@@ -849,7 +849,7 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
     // database.
     let (_, faucet) = regtest::initialize_blockchain();
     let db = testing::storage::new_test_database().await;
-    let mut ctx = TestContext::builder()
+    let ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
         .with_mocked_emily_client()
@@ -1178,7 +1178,7 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
     // database.
     let (_, faucet) = regtest::initialize_blockchain();
     let db = testing::storage::new_test_database().await;
-    let mut ctx = TestContext::builder()
+    let ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
         .with_mocked_emily_client()
@@ -1626,7 +1626,7 @@ async fn block_observer_ignores_coinbase() {
     // 1. Create a database, an associated context for the block observer.
 
     let db = testing::storage::new_test_database().await;
-    let mut ctx = TestContext::builder()
+    let ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
         .with_emily_client(emily_client.clone())

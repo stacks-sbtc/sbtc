@@ -91,7 +91,7 @@ async fn process_blocks_simple_fork() {
 
     let stacks_client = StacksClient::new(Url::parse("http://127.0.0.1:20443").unwrap()).unwrap();
 
-    let mut ctx = TestContext::builder()
+    let ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
         .with_stacks_client(stacks_client.clone())

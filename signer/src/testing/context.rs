@@ -43,6 +43,13 @@ use crate::{
     },
 };
 
+/// Type alias for a wrapped mock Bitcoin client.
+pub type WrappedMockStacksInteract = WrappedMock<MockStacksInteract>;
+/// Type alias for a wrapped mock Stacks client.
+pub type WrappedMockBitcoinInteract = WrappedMock<MockBitcoinInteract>;
+/// Type alias for a wrapped mock Emily client.
+pub type WrappedMockEmilyInteract = WrappedMock<MockEmilyInteract>;
+
 /// A [`Context`] which can be used for testing.
 ///
 /// This context is opinionated and uses a shared in-memory store and mocked
@@ -168,11 +175,19 @@ impl TestContext<(), (), (), ()> {
     }
 }
 
+impl<Storage, Bitcoin, Stacks, Emily> Deref for TestContext<Storage, Bitcoin, Stacks, Emily> {
+    type Target = SignerContext<Storage, Bitcoin, Stacks, Emily>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
 /// Provide extra methods for when using a mocked bitcoin client.
 impl<Storage, Stacks, Emily> TestContext<Storage, WrappedMock<MockBitcoinInteract>, Stacks, Emily> {
     /// Execute a closure with a mutable reference to the inner mocked
     /// bitcoin client.
-    pub async fn with_bitcoin_client<F>(&mut self, f: F)
+    pub async fn with_bitcoin_client<F>(&self, f: F)
     where
         F: FnOnce(&mut MockBitcoinInteract),
     {
@@ -187,7 +202,7 @@ impl<Storage, Bitcoin, Emily>
 {
     /// Execute a closure with a mutable reference to the inner mocked
     /// stacks client.
-    pub async fn with_stacks_client<F>(&mut self, f: F)
+    pub async fn with_stacks_client<F>(&self, f: F)
     where
         F: FnOnce(&mut MockStacksInteract),
     {
@@ -202,7 +217,7 @@ impl<Storage, Bitcoin, Stacks>
 {
     /// Execute a closure with a mutable reference to the inner mocked
     /// emily client.
-    pub async fn with_emily_client<F>(&mut self, f: F)
+    pub async fn with_emily_client<F>(&self, f: F)
     where
         F: FnOnce(&mut MockEmilyInteract),
     {

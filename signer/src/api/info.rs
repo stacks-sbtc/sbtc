@@ -352,7 +352,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_all_null() {
-        let mut context = TestContext::default_mocked();
+        let context = TestContext::default_mocked();
 
         context
             .with_bitcoin_client(|client| {
@@ -423,7 +423,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_local_chain_info() {
-        let mut context = TestContext::default_mocked();
+        let context = TestContext::default_mocked();
 
         context
             .with_bitcoin_client(|client| {
@@ -489,7 +489,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_bitcoin_node_info() {
-        let mut context = TestContext::default_mocked();
+        let context = TestContext::default_mocked();
 
         let get_network_info_response_json =
             include_str!("../../tests/fixtures/bitcoind-getnetworkinfo-data.json");
@@ -570,7 +570,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stacks_node_info() {
-        let mut context = TestContext::default_mocked();
+        let context = TestContext::default_mocked();
 
         context
             .with_bitcoin_client(|client| {
@@ -641,7 +641,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_config_info() {
-        let mut context = TestContext::builder()
+        let context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
             .modify_settings(|settings| {

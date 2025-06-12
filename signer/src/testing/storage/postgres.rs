@@ -2,6 +2,7 @@
 //!
 
 use crate::error::Error;
+use crate::keys::PublicKey;
 use crate::storage::model;
 use crate::storage::postgres::PgStore;
 
@@ -35,6 +36,30 @@ impl PgStore {
         .bind(chain_tip)
         .bind(i32::from(context_window))
         .fetch_all(self.pool())
+        .await
+        .map_err(Error::SqlxQuery)
+    }
+
+    /// Get all key-rotation events that have been logged in the database.
+    pub async fn get_key_rotation_event_for_aggregate_key(
+        &self,
+        aggregate_key: &PublicKey,
+    ) -> Result<Option<model::KeyRotationEvent>, Error> {
+        sqlx::query_as::<_, model::KeyRotationEvent>(
+            r#"
+            SELECT
+                txid
+              , block_hash
+              , address
+              , aggregate_key
+              , signer_set
+              , signatures_required
+            FROM sbtc_signer.rotate_keys_transactions
+            WHERE aggregate_key = $1
+            "#,
+        )
+        .bind(aggregate_key)
+        .fetch_optional(self.pool())
         .await
         .map_err(Error::SqlxQuery)
     }

@@ -44,6 +44,8 @@ use std::sync::OnceLock;
 pub const BITCOIN_CORE_RPC_USERNAME: &str = "devnet";
 /// The password for RPC calls in bitcoin-core
 pub const BITCOIN_CORE_RPC_PASSWORD: &str = "devnet";
+/// Default ZMQ endpoint for regtest bitcoin-core
+pub const BITCOIN_CORE_ZMQ_ENDPOINT: &str = "tcp://localhost:28332";
 
 /// The fallback fee in bitcoin core
 pub const BITCOIN_CORE_FALLBACK_FEE: Amount = Amount::from_sat(1000);
@@ -284,6 +286,7 @@ impl Faucet {
 
     /// Generate num_blocks blocks with coinbase rewards being sent to this
     /// recipient.
+    #[track_caller]
     pub fn generate_blocks(&self, num_blocks: u64) -> Vec<BlockHash> {
         self.rpc
             .generate_to_address(num_blocks, &self.address)
@@ -291,6 +294,7 @@ impl Faucet {
     }
 
     /// Generates one block with coinbase rewards being sent to this recipient.
+    #[track_caller]
     pub fn generate_block(&self) -> BlockHash {
         self.generate_blocks(1)
             .pop()
@@ -300,6 +304,7 @@ impl Faucet {
     /// Return all UTXOs for this recipient where the amount is greater
     /// than or equal to the given amount. The address must be tracked by
     /// the bitcoin-core wallet.
+    #[track_caller]
     pub fn get_utxos(&self, amount: Option<u64>) -> Vec<ListUnspentResultEntry> {
         let query_options = amount.map(|sats| ListUnspentQueryOptions {
             minimum_amount: Some(Amount::from_sat(sats)),
@@ -313,9 +318,13 @@ impl Faucet {
     /// Send the specified amount to the specific address.
     ///
     /// Note: only P2TR and P2WPKH addresses are supported.
+    #[track_caller]
     pub fn send_to(&self, amount: u64, address: &Address) -> OutPoint {
         let fee = BITCOIN_CORE_FALLBACK_FEE.to_sat();
-        let utxo = self.get_utxos(Some(amount + fee)).pop().unwrap();
+        let utxo = self
+            .get_utxos(Some(amount + fee))
+            .pop()
+            .expect("no UTXO found for the given amount");
 
         let mut tx = Transaction {
             version: Version::ONE,

@@ -3,11 +3,13 @@
 use std::future::Future;
 use std::time::Duration;
 
+use crate::keys::PublicKey;
 use crate::storage::model::{
-    BitcoinBlock, BitcoinBlockHash, BitcoinBlockRef, StacksBlock, StacksBlockHash,
+    BitcoinBlock, BitcoinBlockHash, BitcoinBlockRef, DkgSharesStatus, StacksBlock, StacksBlockHash,
 };
 use crate::storage::postgres::PgStore;
 use crate::storage::{DbRead, DbWrite};
+use crate::testing::{FutureExt, SleepAsyncExt};
 
 pub mod model;
 pub mod postgres;
@@ -137,16 +139,83 @@ where
 /// This is a helper function for waiting for the database to have a row in
 /// the dkg_shares, signaling that DKG has finished successfully.
 pub async fn wait_for_dkg(db: &PgStore, count: u32) {
+    let timeout_duration = Duration::from_secs(10);
+    let poll_interval = Duration::from_millis(100);
+
     let waiting_fut = async {
         let db = db.clone();
         while db.get_encrypted_dkg_shares_count().await.unwrap() < count {
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            poll_interval.sleep().await;
         }
     };
 
-    tokio::time::timeout(Duration::from_secs(10), waiting_fut)
+    waiting_fut
+        .with_timeout(timeout_duration)
         .await
-        .unwrap();
+        .unwrap_or_else(|_| {
+            panic!("timed out waiting for {count} DKG shares entries to be written to the database")
+        });
+}
+
+/// This is a helper function for waiting for the database to have a row in
+/// the dkg_shares, signaling that DKG has finished successfully.
+pub async fn wait_for_latest_dkg_to_become_verified(db: &impl DbRead) {
+    let timeout_duration = Duration::from_secs(10);
+    let poll_interval = Duration::from_millis(100);
+
+    let waiting_fut = async {
+        loop {
+            let maybe_shares = db
+                .get_latest_encrypted_dkg_shares()
+                .await
+                .expect("failed to get latest encrypted DKG shares");
+
+            if matches!(maybe_shares, Some(shares) if shares.dkg_shares_status == DkgSharesStatus::Verified)
+            {
+                break;
+            }
+
+            poll_interval.sleep().await;
+        }
+    };
+
+    waiting_fut
+        .with_timeout(timeout_duration)
+        .await
+        .expect("timed out waiting for latest DKG shares to become verified");
+}
+
+/// Wait for a key rotation event to be recorded in the database.
+pub async fn wait_for_key_rotation_event(
+    db: &impl DbRead,
+    chain_tip: &BitcoinBlockHash,
+    aggregate_key: &PublicKey,
+) {
+    let timeout_duration = Duration::from_secs(15);
+    let poll_interval = Duration::from_millis(100);
+
+    let waiting_fut = async {
+        loop {
+            let maybe_event = db
+                .get_last_key_rotation(chain_tip)
+                .await
+                .expect("failed to get last key rotation event");
+
+            if let Some(event) = maybe_event {
+                //dbg!(&event);
+                if event.aggregate_key == *aggregate_key {
+                    break;
+                }
+            }
+
+            poll_interval.sleep().await;
+        }
+    };
+
+    waiting_fut
+        .with_timeout(timeout_duration)
+        .await
+        .expect("timed out waiting for key rotation event");
 }
 
 /// Extension trait for [`DbWrite`] that provides additional methods for
