@@ -7,8 +7,8 @@ use std::num::TryFromIntError;
 use std::ops::Deref;
 use std::ops::{Add, Sub};
 
-use bitcoin::OutPoint;
 use bitcoin::hashes::Hash as _;
+use bitcoin::{OutPoint, ScriptBuf};
 use bitvec::array::BitArray;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
 use clarity::vm::types::PrincipalData;
@@ -193,6 +193,8 @@ pub struct DepositRequest {
     pub spend_script: Bytes,
     /// Script spendable by the depositor.
     pub reclaim_script: Bytes,
+    /// SHA-256 hash of the reclaim script.
+    pub reclaim_script_hash: Option<TaprootScriptHash>,
     /// The address of which the sBTC should be minted,
     /// can be a smart contract address.
     pub recipient: StacksPrincipal,
@@ -229,11 +231,14 @@ impl From<Deposit> for DepositRequest {
             .filter_map(|tx_in| Some(tx_in.prevout?.script_pubkey.script.into()))
             .collect();
 
+        let reclaim_script_hash = TaprootScriptHash::from(&deposit.info.reclaim_script);
+
         Self {
             txid: deposit.info.outpoint.txid.into(),
             output_index: deposit.info.outpoint.vout,
             spend_script: deposit.info.deposit_script.to_bytes(),
             reclaim_script: deposit.info.reclaim_script.to_bytes(),
+            reclaim_script_hash: Some(reclaim_script_hash),
             recipient: deposit.info.recipient.into(),
             amount: deposit.info.amount,
             max_fee: deposit.info.max_fee,
@@ -1003,6 +1008,54 @@ impl PartialOrd for StacksPrincipal {
 /// A ScriptPubkey of a UTXO.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ScriptPubKey(bitcoin::ScriptBuf);
+
+/// A taproot script hash.
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TaprootScriptHash(bitcoin::TapNodeHash);
+
+impl Deref for TaprootScriptHash {
+    type Target = bitcoin::TapNodeHash;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<bitcoin::TapNodeHash> for TaprootScriptHash {
+    fn from(value: bitcoin::TapNodeHash) -> Self {
+        Self(value)
+    }
+}
+
+impl TaprootScriptHash {
+    /// Create a new taproot script hash with all zeroes
+    #[cfg(feature = "testing")]
+    pub fn zeros() -> Self {
+        Self::from([0; 32])
+    }
+    /// Return the inner bytes for the taproot script hash
+    pub fn to_byte_array(&self) -> [u8; 32] {
+        self.0.to_byte_array()
+    }
+}
+
+impl From<&ScriptBuf> for TaprootScriptHash {
+    fn from(script_buf: &ScriptBuf) -> Self {
+        bitcoin::TapNodeHash::from_script(script_buf, bitcoin::taproot::LeafVersion::TapScript)
+            .into()
+    }
+}
+
+impl From<&ScriptPubKey> for TaprootScriptHash {
+    fn from(script_pub_key: &ScriptPubKey) -> Self {
+        Self::from(&script_pub_key.0)
+    }
+}
+
+impl From<[u8; 32]> for TaprootScriptHash {
+    fn from(bytes: [u8; 32]) -> Self {
+        bitcoin::TapNodeHash::from_byte_array(bytes).into()
+    }
+}
 
 impl Deref for ScriptPubKey {
     type Target = bitcoin::ScriptBuf;
