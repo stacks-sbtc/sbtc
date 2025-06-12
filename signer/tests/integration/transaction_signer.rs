@@ -424,10 +424,7 @@ pub async fn assert_should_be_able_to_handle_sbtc_requests() {
     setup.store_deposit_request(&db).await;
     setup.store_deposit_decisions(&db).await;
 
-    let info = get_signer_set_info(&ctx)
-        .await
-        .unwrap()
-        .unwrap();
+    let info = get_signer_set_info(&ctx).await.unwrap().unwrap();
 
     let state = ctx.state();
     state.update_current_signer_set(info.signer_set.clone());
@@ -575,10 +572,7 @@ pub async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is
 
     set_verification_status(&db, aggregate_key, status).await;
 
-    let signer_set_info = get_signer_set_info(&ctx)
-        .await
-        .unwrap()
-        .unwrap();
+    let signer_set_info = get_signer_set_info(&ctx).await.unwrap().unwrap();
 
     ctx.state().update_registry_signer_set_info(signer_set_info);
     ctx.state().update_current_limits(SbtcLimits::unlimited());

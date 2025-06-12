@@ -20,8 +20,8 @@ use tokio::time::error::Elapsed;
 
 use crate::bitcoin::GetTransactionFeeResult;
 use crate::bitcoin::rpc::{BitcoinBlockHeader, BitcoinBlockInfo};
-use crate::block_observer::SignerSetInfo;
 use crate::context::SbtcLimits;
+use crate::stacks::api::SignerSetInfo;
 use crate::stacks::api::TenureBlocks;
 use crate::stacks::wallet::SignerWallet;
 use crate::storage::model::BitcoinTxId;
@@ -433,14 +433,14 @@ impl StacksInteract for WrappedMock<MockStacksInteract> {
             .await
     }
 
-    async fn get_current_signature_threshold(
+    async fn get_current_signer_set_info(
         &self,
         contract_principal: &StacksAddress,
-    ) -> Result<Option<u16>, Error> {
+    ) -> Result<Option<SignerSetInfo>, Error> {
         self.inner
             .lock()
             .await
-            .get_current_signature_threshold(contract_principal)
+            .get_current_signer_set_info(contract_principal)
             .await
     }
 

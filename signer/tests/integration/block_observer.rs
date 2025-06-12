@@ -45,7 +45,6 @@ use signer::storage::model::BitcoinBlockHash;
 use signer::storage::model::DkgSharesStatus;
 use signer::storage::model::EncryptedDkgShares;
 use signer::storage::model::KeyRotationEvent;
-use signer::storage::model::StacksBlock;
 use signer::storage::model::TxOutput;
 use signer::storage::model::TxOutputType;
 use signer::storage::model::TxPrevout;
@@ -1160,6 +1159,7 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
     // We need to set up the stacks client as well. We use it to fetch
     // information about the Stacks blockchain, so we need to prep it, even
     // though it isn't necessary for our test.
+    let db2 = db.clone();
     ctx.with_stacks_client(|client| {
         client
             .expect_get_tenure_info()
@@ -1182,6 +1182,17 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
         client
             .expect_get_sortition_info()
             .returning(|_| Box::pin(std::future::ready(Ok(DUMMY_SORTITION_INFO.clone()))));
+
+        client
+            .expect_get_current_signer_set_info()
+            .returning(move |_| {
+                let db2 = db2.clone();
+
+                Box::pin(async move {
+                    let info = db2.get_latest_verified_dkg_shares().await?;
+                    Ok(info.map(Into::into))
+                })
+            });
     })
     .await;
 
@@ -1251,27 +1262,18 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
     assert_eq!(state.get_current_limits(), SbtcLimits::unlimited());
     assert!(state.registry_signer_set_info().is_none());
 
-    // Okay now we're going to show what happens if we have received a key
-    // rotation event. Such events take priority over DKG shares, even if
-    // the DKG shares are newer. So let's add such an event to the
-    // database. First we need a stacks block for the join.
-    let stacks_block = StacksBlock {
-        bitcoin_anchor: chain_tip,
-        ..Faker.fake_with_rng(&mut rng)
-    };
+    // Okay now we're going to show what happens if we the stacks node has
+    // received a key-rotation contract call. However, we are mocking
+    // stacks and using entries in the DKG shares table as a proxy for the
+    // key rotation contract call.
+    let mut dkg_shares: EncryptedDkgShares = Faker.fake_with_rng(&mut rng);
+    dkg_shares.dkg_shares_status = model::DkgSharesStatus::Verified;
 
-    db.write_stacks_block(&stacks_block).await.unwrap();
-
-    let mut rotate_keys: KeyRotationEvent = Faker.fake_with_rng(&mut rng);
-    rotate_keys.block_hash = stacks_block.block_hash;
-
-    db.write_rotate_keys_transaction(&rotate_keys)
-        .await
-        .unwrap();
+    db.write_encrypted_dkg_shares(&dkg_shares).await.unwrap();
 
     // Let's generate a new block and wait for our block observer to send a
     // BitcoinBlockObserved signal.
-    let chain_tip = faucet.generate_blocks(1).pop().unwrap().into();
+    let chain_tip = faucet.generate_block().into();
 
     ctx.wait_for_signal(Duration::from_secs(3), |signal| {
         matches!(
@@ -1290,13 +1292,13 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
 
     // We expect the signer state to be the same as what is in the rotate
     // keys event in the database.
-    let signer_set = rotate_keys.signer_set.iter().copied().collect();
+    let signer_set = dkg_shares.signer_set_public_keys();
     let signer_set_info = state.registry_signer_set_info().unwrap();
     assert_eq!(state.get_current_limits(), SbtcLimits::unlimited());
-    assert_eq!(signer_set_info.aggregate_key, rotate_keys.aggregate_key);
+    assert_eq!(signer_set_info.aggregate_key, dkg_shares.aggregate_key);
     assert_eq!(
         signer_set_info.signatures_required,
-        rotate_keys.signatures_required
+        dkg_shares.signature_share_threshold
     );
     assert_eq!(signer_set_info.signer_set, signer_set);
 

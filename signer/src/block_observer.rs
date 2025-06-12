@@ -17,7 +17,6 @@
 //! - Update signer set transactions
 //! - Set aggregate key transactions
 
-use std::collections::BTreeSet;
 use std::future::Future;
 use std::time::Duration;
 
@@ -30,18 +29,17 @@ use crate::context::SbtcLimits;
 use crate::context::SignerEvent;
 use crate::emily_client::EmilyInteract;
 use crate::error::Error;
-use crate::keys::PublicKey;
 use crate::keys::SignerScriptPubKey as _;
 use crate::metrics::BITCOIN_BLOCKCHAIN;
 use crate::metrics::Metrics;
 use crate::stacks::api::GetNakamotoStartHeight as _;
+use crate::stacks::api::SignerSetInfo;
 use crate::stacks::api::StacksInteract;
 use crate::stacks::api::TenureBlockHeaders;
 use crate::storage::DbRead;
 use crate::storage::DbWrite;
 use crate::storage::model;
 use crate::storage::model::EncryptedDkgShares;
-use crate::storage::model::KeyRotationEvent;
 use bitcoin::Amount;
 use bitcoin::BlockHash;
 use bitcoin::ScriptBuf;
@@ -684,33 +682,6 @@ impl<C: Context, B> BlockObserver<C, B> {
     }
 }
 
-/// Structure describing the info about signer set currently stored in the
-/// smart contract on Stacks.
-#[derive(Debug, Clone)]
-pub struct SignerSetInfo {
-    /// The aggregate key of the most recently confirmed key rotation
-    /// contract call on Stacks.
-    pub aggregate_key: PublicKey,
-    /// The set of sBTC signers public keys.
-    pub signer_set: BTreeSet<PublicKey>,
-    /// The number of signatures required to sign a transaction.
-    /// This is the number of signature shares necessary to successfully sign a
-    /// bitcoin transaction spending a UTXO locked with the above aggregate key,
-    /// or the number of signers necessary to sign a Stacks transaction under
-    /// the signers' principal.
-    pub signatures_required: u16,
-}
-
-impl From<KeyRotationEvent> for SignerSetInfo {
-    fn from(value: KeyRotationEvent) -> Self {
-        SignerSetInfo {
-            aggregate_key: value.aggregate_key,
-            signer_set: value.signer_set.into_iter().collect(),
-            signatures_required: value.signatures_required,
-        }
-    }
-}
-
 /// Return the signing set that can make sBTC related contract calls along
 /// with the current aggregate key to use for locking UTXOs on bitcoin.
 ///
@@ -726,26 +697,7 @@ where
 {
     let stacks = ctx.get_stacks_client();
     let address = &ctx.config().signer.deployer;
-
-    let Some(aggregate_key) = stacks.get_current_signers_aggregate_key(address).await? else {
-        return Ok(None);
-    };
-
-    let Some(signatures_required) = stacks.get_current_signature_threshold(address).await? else {
-        return Ok(None);
-    };
-
-    let signer_set = stacks.get_current_signer_set(address).await?;
-
-    if signer_set.is_empty() {
-        return Ok(None);
-    }
-
-    Ok(Some(SignerSetInfo {
-        aggregate_key,
-        signer_set: signer_set.into_iter().collect(),
-        signatures_required,
-    }))
+    stacks.get_current_signer_set_info(address).await
 }
 
 #[cfg(test)]
