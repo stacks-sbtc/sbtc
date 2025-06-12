@@ -1113,7 +1113,7 @@ async fn get_signer_set_info_falls_back() {
     // transactions, so there should be no aggregate key, since that only
     // happens after DKG, but we should always know the current signer set.
     // Signatures required should fall back to config value.
-    let info = get_signer_set_info(&ctx, chain_tip).await.unwrap();
+    let info = get_signer_set_info(&ctx).await.unwrap();
     assert!(info.is_none());
 
     let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
@@ -1127,7 +1127,7 @@ async fn get_signer_set_info_falls_back() {
 
     // Alright, now that we have a rotate-keys transaction, we can check if
     // it is preferred over the DKG shares table.
-    let info = get_signer_set_info(&ctx, chain_tip).await.unwrap().unwrap();
+    let info = get_signer_set_info(&ctx).await.unwrap().unwrap();
 
     let rotate_keys_signer_set: BTreeSet<PublicKey> =
         rotate_keys.signer_set.iter().copied().collect();
