@@ -52,6 +52,8 @@ use signer::storage::model::TxOutputType;
 use signer::storage::model::TxPrevout;
 use signer::storage::model::TxPrevoutType;
 use signer::storage::postgres::PgStore;
+use signer::testing::btc::BlockHashStreamDispatcher;
+use signer::testing::btc::BlockHashStreamProvider as _;
 use signer::testing::btc::get_canonical_chain_tip;
 use signer::testing::stacks::DUMMY_SORTITION_INFO;
 use signer::testing::stacks::DUMMY_TENURE_INFO;
@@ -64,7 +66,6 @@ use signer::context::SignerSignal;
 use signer::stacks::api::StacksClient;
 use signer::storage::DbRead as _;
 use signer::testing;
-use signer::testing::context::TestContext;
 use signer::testing::context::*;
 use signer::testing::get_rng;
 use signer::testing::storage::model::TestData;
@@ -76,7 +77,6 @@ use crate::setup::IntoEmilyTestingConfig as _;
 use crate::setup::TestSweepSetup;
 use crate::transaction_coordinator::mock_reqwests_status_code_error;
 use crate::utxo_construction::make_deposit_request;
-use crate::zmq::BITCOIN_CORE_ZMQ_ENDPOINT;
 
 pub const GET_POX_INFO_JSON: &str =
     include_str!("../../tests/fixtures/stacksapi-get-pox-info-test-data.json");
@@ -165,9 +165,11 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
+    let block_dispatcher = BlockHashStreamDispatcher::new_regtest().await.unwrap();
+
     let block_observer = BlockObserver {
         context: ctx.clone(),
-        bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT).await,
+        bitcoin_blocks: block_dispatcher.get_block_hash_stream(),
     };
 
     // We need at least one receiver
@@ -270,9 +272,11 @@ async fn link_blocks() {
     })
     .await;
 
+    let block_dispatcher = BlockHashStreamDispatcher::new_regtest().await.unwrap();
+
     let block_observer = BlockObserver {
         context: ctx.clone(),
-        bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT).await,
+        bitcoin_blocks: block_dispatcher.get_block_hash_stream(),
     };
 
     let mut signal_rx = ctx.get_signal_receiver();
@@ -427,9 +431,11 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
+    let block_dispatcher = BlockHashStreamDispatcher::new_regtest().await.unwrap();
+
     let block_observer = BlockObserver {
         context: ctx.clone(),
-        bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT).await,
+        bitcoin_blocks: block_dispatcher.get_block_hash_stream(),
     };
 
     tokio::spawn(async move {
@@ -932,9 +938,11 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
+    let block_dispatcher = BlockHashStreamDispatcher::new_regtest().await.unwrap();
+
     let block_observer = BlockObserver {
         context: ctx.clone(),
-        bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT).await,
+        bitcoin_blocks: block_dispatcher.get_block_hash_stream(),
     };
 
     let mut signal_receiver = ctx.get_signal_receiver();
@@ -1229,9 +1237,11 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
+    let block_dispatcher = BlockHashStreamDispatcher::new_regtest().await.unwrap();
+
     let block_observer = BlockObserver {
         context: ctx.clone(),
-        bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT).await,
+        bitcoin_blocks: block_dispatcher.get_block_hash_stream(),
     };
 
     // In this test the signer set public keys start empty. When running
@@ -1444,9 +1454,11 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
+    let block_dispatcher = BlockHashStreamDispatcher::new_regtest().await.unwrap();
+
     let block_observer = BlockObserver {
         context: ctx.clone(),
-        bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT).await,
+        bitcoin_blocks: block_dispatcher.get_block_hash_stream(),
     };
 
     // In this test the signer set public keys start empty. When running
@@ -1667,9 +1679,11 @@ async fn block_observer_ignores_coinbase() {
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
+    let block_dispatcher = BlockHashStreamDispatcher::new_regtest().await.unwrap();
+
     let block_observer = BlockObserver {
         context: ctx.clone(),
-        bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT).await,
+        bitcoin_blocks: block_dispatcher.get_block_hash_stream(),
     };
 
     tokio::spawn(async move {
