@@ -1959,7 +1959,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
             .modify_settings(|settings| {
                 settings.signer.dkg_target_rounds = NonZeroU32::new(2).unwrap();
                 settings.signer.dkg_min_bitcoin_block_height = Some(dkg_run_two_height.into());
-                settings.signer.requests_processing_delay = Duration::from_millis(100);
+                settings.signer.bitcoin_processing_delay = Duration::from_millis(200);
             })
             .build();
 
