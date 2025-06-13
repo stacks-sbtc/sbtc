@@ -33,12 +33,14 @@ use signer::bitcoin::validation::WithdrawalValidationResult;
 use signer::block_observer::BlockObserver;
 use signer::block_observer::Deposit;
 use signer::codec::Encode as _;
+use signer::config::NetworkKind;
 use signer::config::Settings;
 use signer::context::SbtcLimits;
 use signer::keys::PrivateKey;
 use signer::keys::PublicKey;
 use signer::keys::SignerScriptPubKey;
 use signer::stacks::api::MockStacksInteract;
+use signer::stacks::wallet::SignerWallet;
 use signer::storage::DbRead;
 use signer::storage::DbWrite as _;
 use signer::storage::model;
@@ -51,6 +53,7 @@ use signer::storage::model::BitcoinTxSigHash;
 use signer::storage::model::BitcoinWithdrawalOutput;
 use signer::storage::model::DkgSharesStatus;
 use signer::storage::model::EncryptedDkgShares;
+use signer::storage::model::KeyRotationEvent;
 use signer::storage::model::QualifiedRequestId;
 use signer::storage::postgres::PgStore;
 use signer::testing::context::TestContext;
@@ -137,6 +140,8 @@ pub struct TestSweepSetup {
     /// threshold is the bitcoin signature threshold, which for v1 matches
     /// the signatures required on stacks.
     pub signatures_required: u16,
+    /// The hash of the first stacks block.
+    pub stacks_genesis_block: model::StacksBlockHash,
 }
 
 impl TestSweepSetup {
@@ -253,6 +258,7 @@ impl TestSweepSetup {
             withdrawal_request: requests.withdrawals.pop().unwrap(),
             withdrawal_sender: PrincipalData::from(StacksAddress::burn_address(false)),
             signatures_required: 2,
+            stacks_genesis_block: Faker.fake_with_rng(rng),
         }
     }
 
@@ -270,7 +276,7 @@ impl TestSweepSetup {
     /// blockchain identified by the sweep chain tip.
     pub async fn store_stacks_genesis_block(&self, db: &PgStore) {
         let block = model::StacksBlock {
-            block_hash: Faker.fake_with_rng(&mut OsRng),
+            block_hash: self.stacks_genesis_block,
             block_height: 0u64.into(),
             parent_hash: StacksBlockId::first_mined().into(),
             bitcoin_anchor: self.sweep_block_hash.into(),
@@ -394,6 +400,31 @@ impl TestSweepSetup {
             started_at_bitcoin_block_height: 0u64.into(),
         };
         db.write_encrypted_dkg_shares(&shares).await.unwrap();
+    }
+
+    /// Store a rotate keys transaction in the database. The details will
+    /// match the row inserted by the store_dkg_shares function.
+    pub async fn store_rotate_keys_event(&self, db: &PgStore) {
+        let signer_set = self.signer_keys.clone();
+        let wallet = SignerWallet::new(
+            &signer_set,
+            self.signatures_required,
+            NetworkKind::Regtest,
+            0,
+        )
+        .unwrap();
+
+        let address = *wallet.address();
+
+        let event = KeyRotationEvent {
+            txid: fake::Faker.fake(),
+            block_hash: self.stacks_genesis_block,
+            aggregate_key: self.aggregated_signer.keypair.public_key().into(),
+            signer_set,
+            signatures_required: self.signatures_required,
+            address: PrincipalData::from(address).into(),
+        };
+        db.write_rotate_keys_transaction(&event).await.unwrap();
     }
 
     // This is all normal happy path things that need to happen in order to
@@ -584,6 +615,12 @@ impl TestSignerSet {
 
     pub fn private_key(&self) -> PrivateKey {
         self.signer.keypair.secret_key().into()
+    }
+
+    pub fn address(&self, signatures_required: u16) -> StacksAddress {
+        let wallet =
+            SignerWallet::new(&self.keys, signatures_required, NetworkKind::Regtest, 0).unwrap();
+        *wallet.address()
     }
 }
 
@@ -1207,5 +1244,21 @@ impl TestSweepSetup2 {
             started_at_bitcoin_block_height: 0u64.into(),
         };
         db.write_encrypted_dkg_shares(&shares).await.unwrap();
+    }
+
+    /// Store a rotate keys transaction in the database. The details will
+    /// match the row inserted by the store_dkg_shares function.
+    pub async fn store_rotate_keys_event(&self, db: &PgStore) {
+        let address = self.signers.address(self.signatures_required);
+
+        let event = KeyRotationEvent {
+            txid: fake::Faker.fake(),
+            block_hash: self.stacks_blocks.first().unwrap().block_hash,
+            aggregate_key: self.signers.signer.keypair.public_key().into(),
+            signer_set: self.signers.keys.clone(),
+            signatures_required: self.signatures_required,
+            address: PrincipalData::from(address).into(),
+        };
+        db.write_rotate_keys_transaction(&event).await.unwrap();
     }
 }
