@@ -771,7 +771,6 @@ async fn block_observer_picks_up_chained_unordered_sweeps() {
         .with_first_bitcoin_core_client()
         .with_mocked_emily_client()
         .with_mocked_stacks_client()
-        .modify_settings(|settings| settings.signer.bootstrap_aggregate_key = Some(aggregate_key))
         .build();
 
     // Let's make sure the relevant tables are empty
