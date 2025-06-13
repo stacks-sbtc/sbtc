@@ -138,7 +138,7 @@ pub enum FeePriority {
 }
 
 /// Structure describing the info about signer set currently stored in the
-/// smart contract on Stacks.
+/// sbtc-registry smart contract on Stacks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
 pub struct SignerSetInfo {
@@ -158,14 +158,6 @@ pub struct SignerSetInfo {
 /// A trait detailing the interface with the Stacks API and Stacks Nodes.
 #[cfg_attr(any(test, feature = "testing"), mockall::automock)]
 pub trait StacksInteract: Send + Sync {
-    /// Retrieve the current signers' aggregate key from the `sbtc-registry` contract.
-    ///
-    /// This is done by making a `GET /v2/data_var/<contract-principal>/sbtc-registry/current-aggregate-pubkey`
-    /// request.
-    fn get_current_signers_aggregate_key(
-        &self,
-        contract_principal: &StacksAddress,
-    ) -> impl Future<Output = Result<Option<PublicKey>, Error>> + Send;
     /// Retrieve the current signers set data from the `sbtc-registry`
     /// smart contract.
     ///
@@ -175,6 +167,15 @@ pub trait StacksInteract: Send + Sync {
         &self,
         contract_principal: &StacksAddress,
     ) -> impl Future<Output = Result<Option<SignerSetInfo>, Error>> + Send;
+
+    /// Retrieve the current signers' aggregate key from the `sbtc-registry` contract.
+    ///
+    /// This is done by making a `GET /v2/data_var/<contract-principal>/sbtc-registry/current-aggregate-pubkey`
+    /// request.
+    fn get_current_signers_aggregate_key(
+        &self,
+        contract_principal: &StacksAddress,
+    ) -> impl Future<Output = Result<Option<PublicKey>, Error>> + Send;
 
     /// Retrieve a boolean value from the stacks node indicating whether
     /// sBTC has been minted for the deposit request.
@@ -1298,7 +1299,7 @@ where
 /// Extract a set of public keys from a Clarity value.
 ///
 /// The value is expected to be a sequence of 33 byte buffers, each of
-/// which represents a public key.
+/// which represents a compressed public key.
 fn extract_signer_set(value: Value) -> Result<BTreeSet<PublicKey>, Error> {
     match value {
         // Iterate through each record in the list and convert it to a
@@ -1320,7 +1321,8 @@ fn extract_signer_set(value: Value) -> Result<BTreeSet<PublicKey>, Error> {
 /// In the sbtc-registry smart contract, the aggregate key is stored in the
 /// `current-aggregate-pubkey` data var and is initialized to the 0x00
 /// byte, allowing use to distinguish between the initial value and an
-/// actual public key in that case.
+/// actual public key in that case. Ok(None) is returned if the value is
+/// the initial value.
 fn extract_public_key(value: Value) -> Result<Option<PublicKey>, Error> {
     match value {
         Value::Sequence(SequenceData::Buffer(BuffData { data })) => {
@@ -1342,7 +1344,8 @@ fn extract_public_key(value: Value) -> Result<Option<PublicKey>, Error> {
 /// In the sbtc-registry smart contract, the signature threshold is stored
 /// in the `current-signature-threshold` data var and is initialized to 0,
 /// allowing use to distinguish between the initial value and an actual
-/// signature threshold.
+/// signature threshold. Ok(None) is returned if the value is the initial
+/// value.
 fn extract_signatures_required(value: Value) -> Result<Option<u16>, Error> {
     match value {
         Value::UInt(0) => Ok(None),
@@ -1356,21 +1359,6 @@ fn extract_signatures_required(value: Value) -> Result<Option<u16>, Error> {
 }
 
 impl StacksInteract for StacksClient {
-    async fn get_current_signers_aggregate_key(
-        &self,
-        contract_principal: &StacksAddress,
-    ) -> Result<Option<PublicKey>, Error> {
-        let value = self
-            .get_data_var(
-                contract_principal,
-                &ContractName::from("sbtc-registry"),
-                &ClarityName::from("current-aggregate-pubkey"),
-            )
-            .await?;
-
-        extract_public_key(value)
-    }
-
     async fn get_current_signer_set_info(
         &self,
         contract_principal: &StacksAddress,
@@ -1417,6 +1405,21 @@ impl StacksInteract for StacksClient {
                 "expected a tuple but got something else",
             )),
         }
+    }
+
+    async fn get_current_signers_aggregate_key(
+        &self,
+        contract_principal: &StacksAddress,
+    ) -> Result<Option<PublicKey>, Error> {
+        let value = self
+            .get_data_var(
+                contract_principal,
+                &ContractName::from("sbtc-registry"),
+                &ClarityName::from("current-aggregate-pubkey"),
+            )
+            .await?;
+
+        extract_public_key(value)
     }
 
     async fn is_deposit_completed(
@@ -1651,6 +1654,18 @@ impl StacksInteract for StacksClient {
 }
 
 impl StacksInteract for ApiFallbackClient<StacksClient> {
+    async fn get_current_signer_set_info(
+        &self,
+        contract_principal: &StacksAddress,
+    ) -> Result<Option<SignerSetInfo>, Error> {
+        self.exec(|client, retry| async move {
+            let result = client.get_current_signer_set_info(contract_principal).await;
+            retry.abort_if(|| matches!(result, Err(Error::InvalidStacksResponse(_))));
+            result
+        })
+        .await
+    }
+
     async fn get_current_signers_aggregate_key(
         &self,
         contract_principal: &StacksAddress,
@@ -1659,18 +1674,6 @@ impl StacksInteract for ApiFallbackClient<StacksClient> {
             let result = client
                 .get_current_signers_aggregate_key(contract_principal)
                 .await;
-            retry.abort_if(|| matches!(result, Err(Error::InvalidStacksResponse(_))));
-            result
-        })
-        .await
-    }
-
-    async fn get_current_signer_set_info(
-        &self,
-        contract_principal: &StacksAddress,
-    ) -> Result<Option<SignerSetInfo>, Error> {
-        self.exec(|client, retry| async move {
-            let result = client.get_current_signer_set_info(contract_principal).await;
             retry.abort_if(|| matches!(result, Err(Error::InvalidStacksResponse(_))));
             result
         })
