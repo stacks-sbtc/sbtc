@@ -544,7 +544,7 @@ impl From<StacksTransactionSignRequest> for proto::StacksTransactionSignRequest 
             }
         };
         proto::StacksTransactionSignRequest {
-            aggregate_key: Some(value.aggregate_key.into()),
+            aggregate_key: value.aggregate_key.map(Into::into),
             nonce: value.nonce,
             tx_fee: value.tx_fee,
             txid: Some(StacksTxId::from(value.txid).into()),
@@ -576,7 +576,7 @@ impl TryFrom<proto::StacksTransactionSignRequest> for StacksTransactionSignReque
             ),
         };
         Ok(StacksTransactionSignRequest {
-            aggregate_key: value.aggregate_key.required()?.try_into()?,
+            aggregate_key: None,
             nonce: value.nonce,
             tx_fee: value.tx_fee,
             txid: StacksTxId::try_from(value.txid.required()?)?.into(),
