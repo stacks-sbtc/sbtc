@@ -14,9 +14,11 @@ use bitcoin::BlockHash;
 use bitcoin::Transaction;
 use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc::RpcApi as _;
+use bitvec::array::BitArray;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlockHeader;
 use blockstack_lib::chainstate::stacks::StacksTransaction;
+use blockstack_lib::chainstate::stacks::TokenTransferMemo;
 use blockstack_lib::chainstate::stacks::TransactionPayload;
 use blockstack_lib::net::api::getcontractsrc::ContractSrcResponse;
 use blockstack_lib::net::api::getpoxinfo::RPCPoxInfoData;
@@ -26,22 +28,29 @@ use clarity::types::chainstate::StacksBlockId;
 use clarity::vm::Value as ClarityValue;
 use clarity::vm::types::PrincipalData;
 use clarity::vm::types::SequenceData;
+use clarity::vm::types::StacksAddressExtensions;
 use clarity::vm::types::StandardPrincipalData;
 use emily_client::apis::deposit_api;
 use fake::Fake;
 use fake::Faker;
 use futures::StreamExt as _;
 use lru::LruCache;
+use more_asserts::assert_lt;
 use rand::rngs::OsRng;
 
+use sbtc::deposits::CreateDepositRequest;
+use sbtc::deposits::DepositScriptInputs;
+use sbtc::deposits::ReclaimScriptInputs;
 use sbtc::testing::regtest;
 use sbtc::testing::regtest::AsUtxo as _;
 use sbtc::testing::regtest::Recipient;
 use sbtc::testing::regtest::p2wpkh_sign_transaction;
 use secp256k1::Keypair;
+use secp256k1::SECP256K1;
 use signer::bitcoin::BitcoinInteract as _;
 use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::bitcoin::utxo::BitcoinInputsOutputs;
+use signer::bitcoin::utxo::DepositRequest;
 use signer::bitcoin::utxo::Fees;
 use signer::bitcoin::utxo::TxDeconstructor as _;
 use signer::bitcoin::validation::WithdrawalValidationResult;
@@ -49,6 +58,9 @@ use signer::block_observer::SignerSetInfo;
 use signer::context::RequestDeciderEvent;
 use signer::message::Payload;
 use signer::network::MessageTransfer;
+use signer::stacks::api::StacksClient;
+use signer::stacks::api::StacksInteract;
+use signer::stacks::wallet::SignerWallet;
 use signer::storage::model::KeyRotationEvent;
 use signer::storage::model::WithdrawalTxOutput;
 use signer::testing::btc::get_canonical_chain_tip;
@@ -130,6 +142,7 @@ use signer::transaction_signer::TxSignerEventLoop;
 use tokio::sync::broadcast::Sender;
 
 use crate::complete_deposit::make_complete_deposit;
+use crate::contracts::SignerStxState;
 use crate::setup::AsBlockRef as _;
 use crate::setup::IntoEmilyTestingConfig as _;
 use crate::setup::SweepAmounts;
@@ -145,8 +158,7 @@ use crate::utxo_construction::generate_withdrawal;
 use crate::utxo_construction::make_deposit_request;
 use crate::zmq::BITCOIN_CORE_ZMQ_ENDPOINT;
 
-type IntegrationTestContext =
-    TestContext<PgStore, BitcoinCoreClient, WrappedMock<MockStacksInteract>, EmilyClient>;
+type IntegrationTestContext<Stacks> = TestContext<PgStore, BitcoinCoreClient, Stacks, EmilyClient>;
 
 pub const GET_POX_INFO_JSON: &str =
     include_str!("../../tests/fixtures/stacksapi-get-pox-info-test-data.json");
@@ -2863,7 +2875,11 @@ where
 /// Wait for all signers to finish their coordinator duties and do this
 /// concurrently so that we don't miss anything (not sure if we need to do
 /// it concurrently).
-async fn wait_for_signers(signers: &[(IntegrationTestContext, PgStore, &Keypair, SignerNetwork)]) {
+async fn wait_for_signers<S>(
+    signers: &[(IntegrationTestContext<S>, PgStore, &Keypair, SignerNetwork)],
+) where
+    S: StacksInteract + Clone + Send + Sync + 'static,
+{
     let expected = TxCoordinatorEvent::TenureCompleted.into();
     let futures = signers.iter().map(|(ctx, _, _, _)| async {
         ctx.wait_for_signal(Duration::from_secs(15), |signal| signal == &expected)
@@ -5042,4 +5058,467 @@ async fn should_handle_dkg_coordination_failure() {
         result.is_ok(),
         "Should be able to continue processing blocks after DKG failure"
     );
+}
+
+/// Similar to `create_signers_keys` in `wallet.rs`, but returning also the keypairs
+fn generate_random_signers<R>(
+    rng: &mut R,
+    num_signers: usize,
+    signatures_required: u16,
+) -> (regtest::Recipient, SignerWallet, Vec<Keypair>)
+where
+    R: rand::Rng,
+{
+    let aggregated_signer = regtest::Recipient::new(bitcoin::AddressType::P2tr);
+
+    // We only take an odd number of signers so that the math works out.
+    assert_eq!(num_signers % 2, 1);
+
+    // The private keys of half of the other signers
+    let pks: Vec<secp256k1::SecretKey> = std::iter::repeat_with(|| secp256k1::SecretKey::new(rng))
+        .take(num_signers / 2)
+        .collect();
+
+    let mut keypairs: Vec<Keypair> = pks
+        .clone()
+        .into_iter()
+        .chain(pks.into_iter().map(secp256k1::SecretKey::negate))
+        .map(|sk| Keypair::from_secret_key(SECP256K1, &sk))
+        .chain([aggregated_signer.keypair])
+        .collect();
+    keypairs.reverse();
+
+    let mut signer_keys: Vec<PublicKey> =
+        keypairs.iter().map(|kp| kp.public_key().into()).collect();
+    signer_keys.sort();
+
+    let wallet = SignerWallet::new(
+        &signer_keys,
+        signatures_required,
+        signer::config::NetworkKind::Regtest,
+        0,
+    )
+    .unwrap();
+
+    (aggregated_signer, wallet, keypairs)
+}
+
+/// Wait for the next stacks block, assuming someone else keeps producing blocks
+async fn wait_next_stacks_block(stacks_client: &StacksClient) {
+    let initial_height = stacks_client
+        .get_node_info()
+        .await
+        .unwrap()
+        .stacks_tip_height;
+    tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            let height = stacks_client
+                .get_node_info()
+                .await
+                .unwrap()
+                .stacks_tip_height;
+            if height > initial_height {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await
+        }
+    })
+    .await
+    .unwrap()
+}
+
+fn make_deposit_requests<U>(
+    depositor: &Recipient,
+    amounts: &[u64],
+    utxo: U,
+    max_fee: u64,
+    signers_public_key: bitcoin::XOnlyPublicKey,
+) -> (Transaction, Vec<DepositRequest>)
+where
+    U: regtest::AsUtxo,
+{
+    let deposit_inputs = DepositScriptInputs {
+        signers_public_key,
+        max_fee,
+        recipient: PrincipalData::from(StacksAddress::burn_address(false)),
+    };
+    let reclaim_inputs = ReclaimScriptInputs::try_new(50, bitcoin::ScriptBuf::new()).unwrap();
+
+    let deposit_script = deposit_inputs.deposit_script();
+    let reclaim_script = reclaim_inputs.reclaim_script();
+
+    let mut outputs = vec![];
+    for amount in amounts {
+        outputs.push(bitcoin::TxOut {
+            value: Amount::from_sat(*amount),
+            script_pubkey: sbtc::deposits::to_script_pubkey(
+                deposit_script.clone(),
+                reclaim_script.clone(),
+            ),
+        })
+    }
+
+    let fee = regtest::BITCOIN_CORE_FALLBACK_FEE.to_sat();
+    outputs.push(bitcoin::TxOut {
+        value: utxo.amount() - Amount::from_sat(amounts.iter().sum::<u64>() + fee),
+        script_pubkey: depositor.address.script_pubkey(),
+    });
+
+    let mut deposit_tx = Transaction {
+        version: bitcoin::transaction::Version::ONE,
+        lock_time: bitcoin::absolute::LockTime::ZERO,
+        input: vec![bitcoin::TxIn {
+            previous_output: bitcoin::OutPoint::new(utxo.txid(), utxo.vout()),
+            sequence: bitcoin::Sequence::ZERO,
+            script_sig: bitcoin::ScriptBuf::new(),
+            witness: bitcoin::Witness::new(),
+        }],
+        output: outputs,
+    };
+
+    regtest::p2tr_sign_transaction(&mut deposit_tx, 0, &[utxo], &depositor.keypair);
+
+    let mut requests = vec![];
+    for (index, amount) in amounts.iter().enumerate() {
+        let req = CreateDepositRequest {
+            outpoint: bitcoin::OutPoint::new(deposit_tx.compute_txid(), index as u32),
+            deposit_script: deposit_script.clone(),
+            reclaim_script: reclaim_script.clone(),
+        };
+
+        requests.push(DepositRequest {
+            outpoint: req.outpoint,
+            max_fee,
+            signer_bitmap: BitArray::ZERO,
+            amount: *amount,
+            deposit_script: deposit_script.clone(),
+            reclaim_script: reclaim_script.clone(),
+            reclaim_script_hash: Some(model::TaprootScriptHash::from(&reclaim_script)),
+            signers_public_key,
+        });
+    }
+
+    (deposit_tx, requests)
+}
+
+/// This test requires a running stacks node.
+/// To run this test first run devenv:
+/// ```bash
+/// make devenv-up
+/// ```
+/// And wait for nakamoto to kick in; finally, stop the bitcoin miner.
+///
+/// You also need to fund the faucet (after a while it will unlock coinbase):
+/// ```bash
+/// cargo run -p signer --bin demo-cli fund-btc --recipient BCRT1QW508D6QEJXTDG4Y5R3ZARVARY0C5XW7KYGT080 --amount 1000000000
+/// cargo run -p signer --bin demo-cli generate-block
+/// ```
+#[ignore = "This is an integration test that requires devenv running"]
+#[test_log::test(tokio::test)]
+async fn reuse_nonce_attack() {
+    let stacks = StacksClient::new(Url::parse("http://127.0.0.1:20443").unwrap()).unwrap();
+    let (rpc, faucet) = regtest::initialize_blockchain_devenv();
+    let emily_client = EmilyClient::try_new(
+        &Url::parse("http://testApiKey@127.0.0.1:3031").unwrap(),
+        Duration::from_secs(1),
+        None,
+    )
+    .unwrap();
+
+    let mut rng = get_rng();
+
+    let signatures_required = 2;
+    let (_, signer_wallet, signer_key_pairs) =
+        generate_random_signers(&mut rng, 3, signatures_required);
+    let deployer = *signer_wallet.address();
+
+    testing_api::wipe_databases(&emily_client.config().as_testing())
+        .await
+        .unwrap();
+
+    let network = WanNetwork::default();
+
+    // =========================================================================
+    // Funds the (randomized) signer set multisig
+    // =========================================================================
+    let (regtest_signer_wallet, regtest_signer_key_pairs): (_, [Keypair; 3]) =
+        testing::wallet::regtest_bootstrap_wallet();
+    let regtest_signer_wallet_account = stacks
+        .get_account(regtest_signer_wallet.address())
+        .await
+        .unwrap();
+    regtest_signer_wallet.set_nonce(regtest_signer_wallet_account.nonce);
+    let signer_stx_state = SignerStxState {
+        wallet: regtest_signer_wallet,
+        keys: regtest_signer_key_pairs,
+        stacks_client: stacks.clone(),
+    };
+    let stx_funding = TransactionPayload::TokenTransfer(
+        signer_wallet.address().to_account_principal(),
+        100_000_000,
+        TokenTransferMemo([0u8; 34]),
+    );
+    signer_stx_state.sign_and_submit(&stx_funding).await;
+    // To ensure the tx is mined and anchored before we attempt to deploy the
+    // contracts we generate a some blocks
+    for _ in 0..2 {
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        faucet.generate_block();
+    }
+
+    // =========================================================================
+    // Create a database, an associated context, and a Keypair for each of the
+    // signers in the signing set.
+    // =========================================================================
+    let signer_set_public_keys: BTreeSet<PublicKey> = signer_key_pairs
+        .iter()
+        .map(|kp| kp.public_key().into())
+        .collect();
+
+    let mut signers = Vec::new();
+    for kp in signer_key_pairs.iter() {
+        let db = testing::storage::new_test_database().await;
+        let ctx = TestContext::builder()
+            .with_storage(db.clone())
+            .with_first_bitcoin_core_client()
+            .with_emily_client(emily_client.clone())
+            .with_stacks_client(stacks.clone())
+            .modify_settings(|settings| {
+                settings.signer.bootstrap_signatures_required = signatures_required;
+                settings.signer.bootstrap_signing_set = signer_set_public_keys.clone();
+                settings.signer.deployer = deployer;
+                settings.signer.requests_processing_delay = Duration::from_secs(1);
+                settings.signer.bitcoin_processing_delay = Duration::from_secs(1);
+            })
+            .build();
+
+        fetch_canonical_bitcoin_blockchain(&db, rpc).await;
+
+        for signer in &signer_set_public_keys {
+            ctx.state().current_signer_set().add_signer(*signer);
+        }
+        let network = network.connect(&ctx);
+
+        signers.push((ctx, db, kp, network));
+    }
+
+    // We need to inspect the signer status, so we pick the first one for it
+    let (ctx, db, _, _) = signers.first().unwrap();
+
+    // =========================================================================
+    // Start the TxCoordinatorEventLoop, TxSignerEventLoop and BlockObserver
+    // processes for each signer.
+    // -------------------------------------------------------------------------
+    // - We only proceed with the test after all processes have started, and
+    //   we use a counter to notify us when that happens.
+    // =========================================================================
+    let start_count = Arc::new(AtomicU8::new(0));
+
+    for (ctx, _, kp, network) in signers.iter() {
+        let ev = TxCoordinatorEventLoop {
+            network: network.spawn(),
+            context: ctx.clone(),
+            context_window: 10000,
+            private_key: kp.secret_key().into(),
+            signing_round_max_duration: Duration::from_secs(10),
+            bitcoin_presign_request_max_duration: Duration::from_secs(10),
+            threshold: ctx.config().signer.bootstrap_signatures_required,
+            dkg_max_duration: Duration::from_secs(10),
+            is_epoch3: true,
+        };
+        let counter = start_count.clone();
+        tokio::spawn(async move {
+            counter.fetch_add(1, Ordering::Relaxed);
+            ev.run().await
+        });
+
+        let ev = TxSignerEventLoop {
+            network: network.spawn(),
+            threshold: ctx.config().signer.bootstrap_signatures_required as u32,
+            context: ctx.clone(),
+            context_window: 10000,
+            wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
+            signer_private_key: kp.secret_key().into(),
+            rng: rand::rngs::OsRng,
+            dkg_begin_pause: None,
+            dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
+            stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+        };
+        let counter = start_count.clone();
+        tokio::spawn(async move {
+            counter.fetch_add(1, Ordering::Relaxed);
+            ev.run().await
+        });
+
+        let ev = RequestDeciderEventLoop {
+            network: network.spawn(),
+            context: ctx.clone(),
+            context_window: 1000,
+            deposit_decisions_retry_window: 1,
+            withdrawal_decisions_retry_window: 1,
+            blocklist_checker: Some(()),
+            signer_private_key: kp.secret_key().into(),
+        };
+        let counter = start_count.clone();
+        tokio::spawn(async move {
+            counter.fetch_add(1, Ordering::Relaxed);
+            ev.run().await
+        });
+
+        let block_observer = BlockObserver {
+            context: ctx.clone(),
+            bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT)
+                .await,
+        };
+        let counter = start_count.clone();
+        tokio::spawn(async move {
+            counter.fetch_add(1, Ordering::Relaxed);
+            block_observer.run().await
+        });
+    }
+
+    while start_count.load(Ordering::SeqCst) < 12 {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // =========================================================================
+    // Wait for contract deployment
+    // =========================================================================
+    faucet.generate_block();
+    wait_for_signers(&signers).await;
+
+    // =========================================================================
+    // Wait for DKG + key rotation
+    // =========================================================================
+    faucet.generate_block();
+    wait_for_signers(&signers).await;
+
+    let shares = db.get_latest_encrypted_dkg_shares().await.unwrap().unwrap();
+    assert_eq!(shares.dkg_shares_status, DkgSharesStatus::Verified);
+
+    wait_next_stacks_block(&stacks).await;
+    assert!(
+        stacks
+            .get_current_signers_aggregate_key(&deployer)
+            .await
+            .unwrap()
+            .is_some()
+    );
+
+    // =========================================================================
+    // Create signers UTXO
+    // =========================================================================
+    let script_pub_key = shares.aggregate_key.signers_script_pubkey();
+    let address = Address::from_script(&script_pub_key, bitcoin::Network::Regtest).unwrap();
+    faucet.send_to(100_000, &address);
+
+    // =========================================================================
+    // Fund depositor
+    // =========================================================================
+    let depositor = Recipient::new(AddressType::P2tr);
+    faucet.send_to(50_000_000, &depositor.address);
+
+    faucet.generate_block();
+    wait_for_signers(&signers).await;
+
+    // =========================================================================
+    // Create deposits
+    // =========================================================================
+    let utxo = depositor.get_utxos(rpc, None).pop().unwrap();
+
+    let num_deposits = 5;
+    let amounts = vec![100_000; num_deposits];
+    let signers_public_key = shares.aggregate_key.into();
+    let max_fee = 50_000;
+
+    let (deposit_tx, deposit_requests) =
+        make_deposit_requests(&depositor, &amounts, utxo, max_fee, signers_public_key);
+
+    rpc.send_raw_transaction(&deposit_tx).unwrap();
+
+    for request in &deposit_requests {
+        assert_eq!(deposit_tx.compute_txid(), request.outpoint.txid);
+
+        let body = request.as_emily_request(&deposit_tx);
+        let _ = deposit_api::create_deposit(emily_client.config(), body)
+            .await
+            .unwrap();
+    }
+
+    // Confirming the deposits, the signers should fulfill them
+    faucet.generate_block();
+    wait_for_signers(&signers).await;
+
+    // Check that we have the sweep tx in the mempool servicing all deposits
+    let txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
+    // The sweep plus the stacks commitment
+    assert_eq!(txids.len(), 2);
+
+    let sweep_tx = txids
+        .iter()
+        .filter_map(|txid| {
+            let tx = ctx.bitcoin_client.get_tx(txid).unwrap().unwrap();
+            // Stacks commitment txs first output is a op return
+            if tx.tx.output[0].value == Amount::ZERO {
+                None
+            } else {
+                Some(tx)
+            }
+        })
+        .next()
+        .unwrap();
+    assert_eq!(sweep_tx.tx.input.len(), num_deposits + 1);
+
+    // =========================================================================
+    // Preparare concurrent tx
+    // =========================================================================
+    let signer_wallet_account = stacks.get_account(&deployer).await.unwrap();
+    // We want to mess with the third complete-deposit, for no specific reason
+    signer_wallet.set_nonce(signer_wallet_account.nonce + 2);
+
+    let signer_stx_state = SignerStxState {
+        wallet: signer_wallet,
+        keys: signer_key_pairs.clone().try_into().unwrap(),
+        stacks_client: stacks.clone(),
+    };
+    let stx_funding = TransactionPayload::TokenTransfer(
+        PrincipalData::from(StacksAddress::burn_address(false)),
+        50_000_000,
+        TokenTransferMemo([0u8; 34]),
+    );
+    // The tx will be submitted correctly and just wait in the mempool until txs
+    // filling the previous nonces will be mined
+    signer_stx_state.sign_and_submit(&stx_funding).await;
+    // Ensure the signers/miner pick the tx up
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    // =========================================================================
+    // Actual test: process the pending completion deposits with a concurrent tx
+    // already in the mempool
+    // =========================================================================
+    faucet.generate_block();
+    wait_for_signers(&signers).await;
+
+    wait_next_stacks_block(&stacks).await;
+
+    // =========================================================================
+    // Test assertions
+    // =========================================================================
+    // Ensure the concurrent tx (burning some funds) was mined
+    let dpeloyer_balance = stacks.get_account(&deployer).await.unwrap().balance;
+    assert_lt!(dpeloyer_balance, 50_000_000);
+
+    // Check how many deposits we have completed
+    let mut completed_deposits = 0;
+    for request in deposit_requests {
+        completed_deposits += stacks
+            .is_deposit_completed(&deployer, &request.outpoint)
+            .await
+            .unwrap() as usize;
+    }
+    assert_eq!(completed_deposits, num_deposits - 1);
+
+    for (_, db, _, _) in signers {
+        testing::storage::drop_db(db).await;
+    }
 }
