@@ -185,8 +185,6 @@ pub struct GetPendingRequestsParams<'a> {
     pub stacks_chain_tip: &'a model::StacksBlockHash,
     /// The current signers' aggregate key.
     pub aggregate_key: &'a PublicKey,
-    /// The public keys of the current signer set.
-    pub signer_public_keys: &'a BTreeSet<PublicKey>,
     /// The current sBTC limits.
     pub sbtc_limits: &'a SbtcLimits,
     /// The threshold for the minimum number of 'accept' votes required for a
@@ -316,18 +314,16 @@ where
         );
         span.record("bitcoin_tip_height", *bitcoin_chain_tip.block_height);
 
-        // We first need to determine if we are the coordinator, so we need
-        // to know the current signing set. If we are the coordinator then
-        // we need to know the aggregate key for constructing bitcoin
-        // transactions. We need to know the current signing set and the
-        // current aggregate key.
-        let maybe_aggregate_key = self.context.state().current_aggregate_key();
-        let signer_public_keys = self.context.state().current_signer_public_keys();
+        let registry_aggregate_key = self
+            .context
+            .state()
+            .registry_signer_set_info()
+            .map(|info| info.aggregate_key);
 
         // If we are not the coordinator, then we have no business
         // coordinating DKG or constructing bitcoin and stacks
         // transactions, might as well return early.
-        if !self.is_coordinator(bitcoin_chain_tip.as_ref(), &signer_public_keys) {
+        if !self.is_coordinator(bitcoin_chain_tip.as_ref()) {
             // Before returning, we also check if all the smart contracts are
             // deployed: we do this as some other coordinator could have deployed
             // them, in which case we need to updated our state.
@@ -348,24 +344,32 @@ where
                 Ok(key) => key,
                 Err(error) => {
                     tracing::error!(%error, "failed to coordinate DKG; using existing aggregate key");
-                    maybe_aggregate_key
+                    registry_aggregate_key
                         .ok_or(Error::MissingAggregateKey(*bitcoin_chain_tip.block_hash))?
                 }
             }
         } else {
-            maybe_aggregate_key.ok_or(Error::MissingAggregateKey(*bitcoin_chain_tip.block_hash))?
+            registry_aggregate_key
+                .ok_or(Error::MissingAggregateKey(*bitcoin_chain_tip.block_hash))?
         };
 
         let chain_tip_hash = &bitcoin_chain_tip.block_hash;
 
         tracing::debug!("loading the signer stacks wallet");
-        let wallet = self.get_signer_wallet(chain_tip_hash).await?;
+        let wallet = self.get_signer_wallet().await?;
 
         self.deploy_smart_contracts(chain_tip_hash, &wallet, &aggregate_key)
             .await?;
 
         self.check_and_submit_rotate_key_transaction(chain_tip_hash, &wallet, &aggregate_key)
             .await?;
+
+        let signer_public_keys = self
+            .context
+            .state()
+            .registry_signer_set_info()
+            .map(|info| info.signer_set)
+            .ok_or_else(|| Error::NoKeyRotationEvent)?;
 
         let bitcoin_processing_fut = self.construct_and_sign_bitcoin_sbtc_transactions(
             &bitcoin_chain_tip,
@@ -433,7 +437,7 @@ where
             tracing::info!(
                 "🔐 beginning DKG verification before submitting rotate-key transaction"
             );
-            self.perform_dkg_verification(bitcoin_chain_tip, &last_dkg.aggregate_key, wallet)
+            self.perform_dkg_verification(bitcoin_chain_tip, &last_dkg.aggregate_key)
                 .await?;
             tracing::info!("🔐 DKG verification successful");
         }
@@ -649,12 +653,8 @@ where
 
         // Construct, sign and broadcast the bitcoin transactions.
         for mut transaction in transaction_package {
-            self.sign_and_broadcast(
-                bitcoin_chain_tip.as_ref(),
-                signer_public_keys,
-                &mut transaction,
-            )
-            .await?;
+            self.sign_and_broadcast(bitcoin_chain_tip.as_ref(), &mut transaction)
+                .await?;
 
             // TODO: if this (considering also fallback clients) fails, we will
             // need to handle the inconsistency of having the sweep tx confirmed
@@ -1075,7 +1075,6 @@ where
         &mut self,
         bitcoin_chain_tip: &model::BitcoinBlockHash,
         aggregate_key: &PublicKey,
-        wallet: &SignerWallet,
     ) -> Result<(), Error> {
         let (x_only_pubkey, _) = aggregate_key.x_only_public_key();
 
@@ -1086,8 +1085,6 @@ where
         let mut frost_coordinator = FrostCoordinator::load(
             &self.context.get_storage(),
             aggregate_key.into(),
-            wallet.public_keys().iter().cloned(),
-            wallet.signatures_required(),
             self.private_key,
         )
         .await?;
@@ -1147,11 +1144,7 @@ where
     ) -> Result<StacksTxId, Error> {
         // TODO: we should validate the contract call before asking others
         // to sign it.
-        let rotate_keys_v1 = RotateKeysV1::new(
-            wallet,
-            self.context.config().signer.deployer,
-            rotate_key_aggregate_key,
-        );
+        let rotate_keys_v1 = RotateKeysV1::load(&self.context, rotate_key_aggregate_key).await?;
         let contract_call = ContractCall::RotateKeysV1(Box::new(rotate_keys_v1));
 
         // Rotate key transactions should be done as soon as possible, so
@@ -1453,15 +1446,13 @@ where
     async fn sign_and_broadcast(
         &mut self,
         bitcoin_chain_tip: &model::BitcoinBlockHash,
-        signer_public_keys: &BTreeSet<PublicKey>,
         transaction: &mut utxo::UnsignedTransaction<'_>,
     ) -> Result<(), Error> {
+        let db = self.context.get_storage();
         let sighashes = transaction.construct_digests()?;
         let mut fire_coordinator = FireCoordinator::load(
-            &self.context.get_storage(),
+            &db,
             sighashes.signers_aggregate_key.into(),
-            signer_public_keys.clone(),
-            self.threshold,
             self.private_key,
         )
         .await?;
@@ -1501,14 +1492,9 @@ where
         for (deposit, sighash) in sighashes.deposits.into_iter() {
             let msg = sighash.to_raw_hash().to_byte_array();
 
-            let mut fire_coordinator = FireCoordinator::load(
-                &self.context.get_storage(),
-                deposit.signers_public_key.into(),
-                signer_public_keys.clone(),
-                self.threshold,
-                self.private_key,
-            )
-            .await?;
+            let locking_public_key = deposit.signers_public_key.into();
+            let mut fire_coordinator =
+                FireCoordinator::load(&db, locking_public_key, self.private_key).await?;
 
             let instant = std::time::Instant::now();
             let signature = self
@@ -1626,15 +1612,7 @@ where
     ) -> Result<PublicKey, Error> {
         tracing::info!("Coordinating DKG");
         // Get the current signer set for running DKG.
-        //
-        // Also, note that in order to change the signing set we must first
-        // run DKG (which the current function is doing), and DKG requires
-        // us to define signing set (which is returned in the next
-        // non-comment line). That function essentially uses the signing
-        // set of the last DKG (either through the last rotate-keys
-        // contract call or from the `dkg_shares` table) so we wind up
-        // never changing the signing set.
-        let signer_set = self.context.state().current_signer_public_keys();
+        let signer_set = self.context.config().signer.bootstrap_signing_set.clone();
 
         let mut state_machine = FireCoordinator::new(signer_set, self.threshold, self.private_key);
 
@@ -1694,10 +1672,7 @@ where
         S: Stream<Item = Signed<SignerMessage>>,
         Coordinator: WstsCoordinator,
     {
-        // this assumes that the signer set doesn't change for the duration of this call,
-        // but we're already assuming that the bitcoin chain tip doesn't change
-        // alternately we could hit the DB every time we get a new message
-        let signer_set = self.context.state().current_signer_public_keys();
+        let signer_set = self.context.config().signer.bootstrap_signing_set.clone();
         tokio::pin!(signal_stream);
 
         // Let's get the next message from the network or the
@@ -1835,15 +1810,11 @@ where
     // Ideally the code should be formulated in a way to guarantee
     // it being infallible without relying on sequentially coupling
     // expressions. However, that is left for future work.
-    fn is_coordinator(
-        &self,
-        bitcoin_chain_tip: &model::BitcoinBlockHash,
-        signer_public_keys: &BTreeSet<PublicKey>,
-    ) -> bool {
+    fn is_coordinator(&self, bitcoin_chain_tip: &model::BitcoinBlockHash) -> bool {
         given_key_is_coordinator(
             self.signer_public_key(),
             bitcoin_chain_tip,
-            signer_public_keys,
+            &self.context.config().signer.bootstrap_signing_set,
         )
     }
 
@@ -2148,7 +2119,6 @@ where
             bitcoin_chain_tip,
             stacks_chain_tip,
             aggregate_key,
-            signer_public_keys,
             signature_threshold: self.threshold,
             sbtc_limits: &sbtc_limits,
         };
@@ -2351,11 +2321,8 @@ where
         Ok(true)
     }
 
-    async fn get_signer_wallet(
-        &self,
-        chain_tip: &model::BitcoinBlockHash,
-    ) -> Result<SignerWallet, Error> {
-        let wallet = SignerWallet::load(&self.context, chain_tip).await?;
+    async fn get_signer_wallet(&self) -> Result<SignerWallet, Error> {
+        let wallet = SignerWallet::load(&self.context).await?;
 
         // We need to know the nonce to use, so we reach out to our stacks
         // node for the account information for our multi-sig address.
@@ -2561,22 +2528,20 @@ pub async fn should_coordinate_dkg(
         return Ok(false);
     }
 
-    // Trigger dkg if signatures_required has changed
-    if context.state().current_signatures_required() != config.signer.bootstrap_signatures_required
-    {
-        tracing::info!("signatures required has changed; proceeding with DKG");
-        return Ok(true);
-    }
+    // If we do not have a key rotation event in the database, we will
+    // allow DKG below if we have not run DKG yet.
+    if let Some(registry_signer_info) = context.state().registry_signer_set_info() {
+        // Trigger DKG if signatures_required has changed
+        if registry_signer_info.signatures_required != config.signer.bootstrap_signatures_required {
+            tracing::info!("signatures required has changed; proceeding with DKG");
+            return Ok(true);
+        }
 
-    // Trigger dkg if signer set changes
-    let signer_set_changed = !context
-        .state()
-        .current_signer_set()
-        .has_same_pubkeys(&config.signer.bootstrap_signing_set);
-
-    if signer_set_changed {
-        tracing::info!("signer set has changed; proceeding with DKG");
-        return Ok(true);
+        // Trigger DKG if signer set changes
+        if registry_signer_info.signer_set != config.signer.bootstrap_signing_set {
+            tracing::info!("signer set has changed; proceeding with DKG");
+            return Ok(true);
+        }
     }
 
     // Get the number of DKG shares that have been stored
@@ -2786,7 +2751,7 @@ mod tests {
         let chain_tip_height = chain_tip_height.into();
         let dkg_min_bitcoin_block_height =
             dkg_min_bitcoin_block_height.map(BitcoinBlockHeight::from);
-        let mut context = TestContext::builder()
+        let context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
             .modify_settings(|s| {
@@ -2822,8 +2787,8 @@ mod tests {
             .await
             .unwrap();
 
-        prevent_dkg_on_changed_signer_set(&mut context);
-        prevent_dkg_on_changed_signatures_required(&mut context);
+        let aggregate_key = Faker.fake();
+        prevent_dkg_on_changed_signer_set_info(&context, aggregate_key);
 
         // Test the case
         let result = should_coordinate_dkg(&context, &bitcoin_chain_tip)

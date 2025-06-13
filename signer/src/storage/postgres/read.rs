@@ -2057,6 +2057,7 @@ impl PgRead {
                 )
                 
                 OR
+
                 EXISTS (
                     SELECT TRUE
                     FROM sbtc_signer.bitcoin_tx_outputs

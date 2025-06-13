@@ -1782,6 +1782,50 @@ async fn is_signer_script_pub_key_checks_dkg_shares_for_script_pubkeys() {
     signer::testing::storage::drop_db(db).await;
 }
 
+/// Check that `is_signer_script_pub_key` correctly returns whether a
+/// scriptPubKey value exists in the dkg_shares table.
+#[tokio::test]
+async fn is_signer_script_pub_key_checks_bitcoin_tx_outputs_for_script_pubkeys() {
+    let db = testing::storage::new_test_database().await;
+    let mem = storage::memory::Store::new_shared();
+
+    let mut rng = get_rng();
+
+    // We test that only the signers_output type will be used to identify
+    // that a scriptPubKKey is controlled by the signers.
+    for output_type in model::TxOutputType::iter() {
+        let aggregate_key: PublicKey = fake::Faker.fake_with_rng(&mut rng);
+        let script_pubkey: ScriptPubKey = aggregate_key.signers_script_pubkey().into();
+        let tx_output = model::TxOutput {
+            script_pubkey: script_pubkey.clone(),
+            output_type,
+            ..fake::Faker.fake_with_rng(&mut rng)
+        };
+        db.write_tx_output(&tx_output).await.unwrap();
+        mem.write_tx_output(&tx_output).await.unwrap();
+
+        // Now we have a row in the right "tables" with our scriptPubKey,
+        // let's make sure that the query accurately reports whether the
+        // scriptPubKey is associated with the signers.
+        let is_signer_output = output_type == model::TxOutputType::SignersOutput;
+        let db_result = db.is_signer_script_pub_key(&script_pubkey).await.unwrap();
+        let mem_result = mem.is_signer_script_pub_key(&script_pubkey).await.unwrap();
+
+        assert_eq!(db_result, is_signer_output);
+        assert_eq!(mem_result, is_signer_output);
+
+        // Now we try the case where the scriptPubKey is missing from
+        // the database by generating a new one.
+        let aggregate_key: PublicKey = fake::Faker.fake_with_rng(&mut rng);
+        let script_pubkey: ScriptPubKey = aggregate_key.signers_script_pubkey().into();
+
+        assert!(!db.is_signer_script_pub_key(&script_pubkey).await.unwrap());
+        assert!(!mem.is_signer_script_pub_key(&script_pubkey).await.unwrap());
+    }
+
+    signer::testing::storage::drop_db(db).await;
+}
+
 /// The [`DbRead::get_signers_script_pubkeys`] function is only supposed to
 /// fetch the last 365 days worth of scriptPubKeys, but if there are no new
 /// encrypted shares in the database in a year, we should still return the
