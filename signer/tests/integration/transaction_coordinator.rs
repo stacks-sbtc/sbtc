@@ -5074,6 +5074,7 @@ where
     (aggregated_signer, wallet, keypairs)
 }
 
+/// Wait for the next stacks block, assuming someone else keeps producing blocks
 async fn wait_next_stacks_block(stacks_client: &StacksClient) {
     let initial_height = stacks_client
         .get_node_info()

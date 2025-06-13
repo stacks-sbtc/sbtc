@@ -48,7 +48,7 @@ fn make_signatures(tx: &StacksTransaction, keys: &[Keypair]) -> Vec<RecoverableS
         .collect()
 }
 
-pub struct SignerStxState<S: StacksInteract> {
+pub struct SignerStxState<S> {
     /// A multi-sig wallet for the signers.
     pub wallet: SignerWallet,
     /// These are the private keys to public keys in the above wallet.
