@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -38,13 +37,13 @@ use signer::emily_client::EmilyClient;
 use signer::error::Error;
 use signer::keys::PublicKey;
 use signer::keys::SignerScriptPubKey as _;
+use signer::stacks::api::SignerSetInfo;
 use signer::stacks::api::TenureBlocks;
 use signer::storage::DbWrite;
 use signer::storage::model;
 use signer::storage::model::BitcoinBlockHash;
 use signer::storage::model::DkgSharesStatus;
 use signer::storage::model::EncryptedDkgShares;
-use signer::storage::model::KeyRotationEvent;
 use signer::storage::model::TxOutput;
 use signer::storage::model::TxOutputType;
 use signer::storage::model::TxPrevout;
@@ -858,6 +857,7 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
     // We need to set up the stacks client as well. We use it to fetch
     // information about the Stacks blockchain, so we need to prep it, even
     // though it isn't necessary for our test.
+    let db2 = db.clone();
     ctx.with_stacks_client(|client| {
         client
             .expect_get_tenure_info()
@@ -880,6 +880,21 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
         client
             .expect_get_sortition_info()
             .returning(move |_| Box::pin(std::future::ready(Ok(DUMMY_SORTITION_INFO.clone()))));
+
+        // The coordinator broadcasts a rotate keys transaction if it is
+        // not up-to-date with their view of the current aggregate key. The
+        // response of here means that the stacks node has a record of a
+        // rotate keys contract call being executed once we have verified
+        // shares.
+        client
+            .expect_get_current_signer_set_info()
+            .returning(move |_| {
+                let db = db2.clone();
+                Box::pin(async move {
+                    let shares = db.get_latest_verified_dkg_shares().await?;
+                    Ok(shares.map(SignerSetInfo::from))
+                })
+            });
     })
     .await;
 
@@ -1079,16 +1094,16 @@ async fn next_headers_to_process_ignores_known_headers() {
 }
 
 /// The [`get_signer_set_and_aggregate_key`] function is supposed to fetch
-/// the signing set that is in the sbtc-registry by looking for the last
-/// rotate-keys transaction confirmed on the canonical Stacks blockchain.
-/// None if no such contract call exists.
+/// the signing set that is in the sbtc-registry by querying the stacks
+/// node if the smart contracts have been deployed and returning None if
+/// they have not.
 #[tokio::test]
 async fn get_signer_set_info_falls_back() {
     let db = testing::storage::new_test_database().await;
 
     let mut rng = get_rng();
 
-    let ctx = TestContext::builder()
+    let mut ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_mocked_clients()
         .build();
@@ -1105,8 +1120,14 @@ async fn get_signer_set_info_falls_back() {
     let test_data = TestData::generate(&mut rng, &[], &test_params);
     test_data.write_to(&db).await;
 
-    // We always need the chain tip.
-    let chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
+    let signer_set_info: SignerSetInfo = Faker.fake_with_rng(&mut rng);
+    let signer_set_info2 = signer_set_info.clone();
+    ctx.with_stacks_client(|client| {
+        client.expect_get_current_signer_set_info().returning(move |_| {
+            Box::pin(std::future::ready(Ok(Some(signer_set_info2.clone()))))
+        });
+    })
+    .await;
 
     // We have no rows in the DKG shares table and no rotate-keys
     // transactions, so there should be no aggregate key, since that only
@@ -1115,25 +1136,12 @@ async fn get_signer_set_info_falls_back() {
     let info = get_signer_set_info(&ctx).await.unwrap();
     assert!(info.is_none());
 
-    let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
-
-    let mut rotate_keys: KeyRotationEvent = Faker.fake_with_rng(&mut rng);
-    rotate_keys.block_hash = stacks_chain_tip.block_hash;
-
-    db.write_rotate_keys_transaction(&rotate_keys)
-        .await
-        .unwrap();
-
     // Alright, now that we have a rotate-keys transaction, we can check if
     // it is preferred over the DKG shares table.
+    ctx.state().set_sbtc_contracts_deployed();
     let info = get_signer_set_info(&ctx).await.unwrap().unwrap();
 
-    let rotate_keys_signer_set: BTreeSet<PublicKey> =
-        rotate_keys.signer_set.iter().copied().collect();
-
-    assert_eq!(rotate_keys.aggregate_key, info.aggregate_key);
-    assert_eq!(rotate_keys_signer_set, info.signer_set);
-    assert_eq!(rotate_keys.signatures_required, info.signatures_required);
+    assert_eq!(signer_set_info, info);
 
     testing::storage::drop_db(db).await;
 }
@@ -1182,6 +1190,10 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
         client
             .expect_get_sortition_info()
             .returning(|_| Box::pin(std::future::ready(Ok(DUMMY_SORTITION_INFO.clone()))));
+
+        client
+            .expect_get_sbtc_total_supply()
+            .returning(move |_| Box::pin(async move { Ok(Amount::ZERO) }));
 
         client
             .expect_get_current_signer_set_info()
@@ -1270,6 +1282,9 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
     dkg_shares.dkg_shares_status = model::DkgSharesStatus::Verified;
 
     db.write_encrypted_dkg_shares(&dkg_shares).await.unwrap();
+    // We need to set this to true so that the block observer updates the
+    // signer state with the correct signer set info.
+    ctx.state().set_sbtc_contracts_deployed();
 
     // Let's generate a new block and wait for our block observer to send a
     // BitcoinBlockObserved signal.
