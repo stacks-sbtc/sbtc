@@ -411,17 +411,6 @@ impl BitcoinInteract for WrappedMock<MockBitcoinInteract> {
 }
 
 impl StacksInteract for WrappedMock<MockStacksInteract> {
-    async fn get_current_signers_aggregate_key(
-        &self,
-        contract_principal: &StacksAddress,
-    ) -> Result<Option<PublicKey>, Error> {
-        self.inner
-            .lock()
-            .await
-            .get_current_signers_aggregate_key(contract_principal)
-            .await
-    }
-
     async fn get_current_signer_set_info(
         &self,
         contract_principal: &StacksAddress,
@@ -430,6 +419,17 @@ impl StacksInteract for WrappedMock<MockStacksInteract> {
             .lock()
             .await
             .get_current_signer_set_info(contract_principal)
+            .await
+    }
+
+    async fn get_current_signers_aggregate_key(
+        &self,
+        contract_principal: &StacksAddress,
+    ) -> Result<Option<PublicKey>, Error> {
+        self.inner
+            .lock()
+            .await
+            .get_current_signers_aggregate_key(contract_principal)
             .await
     }
 

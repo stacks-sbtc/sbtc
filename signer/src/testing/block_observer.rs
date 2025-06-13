@@ -298,17 +298,17 @@ impl BitcoinInteract for TestHarness {
 }
 
 impl StacksInteract for TestHarness {
+    async fn get_current_signer_set_info(
+        &self,
+        _contract_principal: &StacksAddress,
+    ) -> Result<Option<SignerSetInfo>, Error> {
+        todo!()
+    }
     async fn get_current_signers_aggregate_key(
         &self,
         _contract_principal: &StacksAddress,
     ) -> Result<Option<PublicKey>, Error> {
         // issue #118
-        todo!()
-    }
-    async fn get_current_signer_set_info(
-        &self,
-        _contract_principal: &StacksAddress,
-    ) -> Result<Option<SignerSetInfo>, Error> {
         todo!()
     }
     async fn is_deposit_completed(
