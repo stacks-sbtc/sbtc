@@ -2102,7 +2102,7 @@ mod tests {
     #[test_case(0, |url| ApiFallbackClient::new(vec![StacksClient::new(url).unwrap()]).unwrap(); "fallback-client-empty-list")]
     #[test_case(128, |url| ApiFallbackClient::new(vec![StacksClient::new(url).unwrap()]).unwrap(); "fallback-client-list-128")]
     #[tokio::test]
-    async fn get_current_signer_info_works<F, C>(list_size: u16, client: F)
+    async fn get_current_signer_set_info_works<F, C>(list_size: u16, client: F)
     where
         C: StacksInteract,
         F: Fn(Url) -> C,
@@ -2128,6 +2128,8 @@ mod tests {
         let aggregate_key_clarity = Value::Sequence(SequenceData::Buffer(BuffData {
             data: aggregate_key
                 .map(|pk| pk.serialize().to_vec())
+                // 0x00 is the initial value of the aggregate key in the
+                // sbtc-registry contract.
                 .unwrap_or(vec![0; 1]),
         }));
         // The format of the response JSON is `{"data": "0x<serialized-value>"}` (excluding the proof).
