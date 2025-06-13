@@ -2519,6 +2519,7 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
+    let mut rng = get_rng();
     // We need to populate our databases, so let's fetch the data.
     let emily_client: EmilyClient = EmilyClient::try_new(
         &Url::parse("http://testApiKey@localhost:3031").unwrap(),
@@ -2565,11 +2566,29 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
     // - Set up the mocks to that the block observer fetches at least one
     //   Stacks block. This is necessary because we need the stacks chain
     //   tip in the transaction coordinator.
-    // - Set up the current-aggregate-key response to be `Some(_)`. This means
-    //   that each coordinator will not broadcast a rotate keys transaction.
+    // - Set up the signer set info to be `Some(_)` where the details match
+    //   the bootstrap signer set info.
+    // - Write DKG shares to the database. This, with the above point,
+    //   means that each coordinator will not run DKG or broadcast a rotate
+    //   keys transaction.
     // =========================================================================
+    let (ctx, _, _, _) = signers.first().unwrap();
+    let shares: EncryptedDkgShares = EncryptedDkgShares {
+        signer_set_public_keys: ctx
+            .config()
+            .signer
+            .bootstrap_signing_set
+            .clone()
+            .into_iter()
+            .collect(),
+        signature_share_threshold: ctx.config().signer.bootstrap_signatures_required,
+        dkg_shares_status: DkgSharesStatus::Verified,
+        ..Faker.fake_with_rng(&mut rng)
+    };
     for (ctx, db, _, _) in signers.iter_mut() {
-        let db = db.clone();
+        let signer_set_info: SignerSetInfo = shares.clone().into();
+
+        db.write_encrypted_dkg_shares(&shares).await.unwrap();
         ctx.with_stacks_client(|client| {
             client
                 .expect_get_tenure_info()
@@ -2637,11 +2656,7 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
             client
                 .expect_get_current_signer_set_info()
                 .returning(move |_| {
-                    let db = db.clone();
-                    Box::pin(async move {
-                        let shares = db.get_latest_encrypted_dkg_shares().await?;
-                        Ok(shares.map(SignerSetInfo::from))
-                    })
+                    Box::pin(std::future::ready(Ok(Some(signer_set_info.clone()))))
                 });
 
             // No transactions should be submitted.
@@ -2735,39 +2750,8 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
     // - After they have the same view of the canonical bitcoin blockchain,
     //   the signers should all participate in DKG.
     // =========================================================================
-    let chain_tip: BitcoinBlockHash = faucet.generate_blocks(1).pop().unwrap().into();
-
-    // We first need to wait for bitcoin-core to send us all the
-    // notifications so that we are up-to-date with the chain tip.
-    let db_update_futs = signers
-        .iter()
-        .map(|(_, db, _, _)| testing::storage::wait_for_chain_tip(db, chain_tip));
-    futures::future::join_all(db_update_futs).await;
-
-    // Now we wait for DKG to successfully complete. For that we just watch
-    // the dkg_shares table. Also, we need to get the signers' scriptPubKey
-    // so that we can make a donation, and get the party started.
-    let dkg_futs = signers
-        .iter()
-        .map(|(_, db, _, _)| testing::storage::wait_for_dkg(db, 1));
-    futures::future::join_all(dkg_futs).await;
-
-    // =========================================================================
-    // Step 4 - Wait for DKG
-    // -------------------------------------------------------------------------
-    // - Once they are all running, generate a bitcoin block to kick off
-    //   the database updating process.
-    // - After they have the same view of the canonical bitcoin blockchain,
-    //   the signers should all participate in DKG.
-    // =========================================================================
-    let chain_tip: BitcoinBlockHash = faucet.generate_blocks(1).pop().unwrap().into();
-
-    // We first need to wait for bitcoin-core to send us all the
-    // notifications so that we are up-to-date with the chain tip.
-    let db_update_futs = signers
-        .iter()
-        .map(|(_, db, _, _)| testing::storage::wait_for_chain_tip(db, chain_tip));
-    futures::future::join_all(db_update_futs).await;
+    faucet.generate_block();
+    wait_for_signers(&signers).await;
 
     // =========================================================================
     // Step 5 - Wait some more, maybe the signers will do something
@@ -2775,7 +2759,7 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
     // - DKG has run, and they think the smart contracts are up-to-date, so
     //   they shouldn't do anything
     // =========================================================================
-    faucet.generate_blocks(1);
+    faucet.generate_block();
     wait_for_signers(&signers).await;
 
     // =========================================================================
