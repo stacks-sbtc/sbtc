@@ -697,7 +697,7 @@ where
 {
     let stacks = ctx.get_stacks_client();
     let address = &ctx.config().signer.deployer;
-    // If the sBTC contracts are not deployed, then we don't have any
+    // If the sBTC contracts have not been deployed, then we don't have any
     // signer set info in the registry.
     if !ctx.state().sbtc_contracts_deployed() {
         return Ok(None);
