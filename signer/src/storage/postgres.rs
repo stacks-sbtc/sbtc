@@ -1831,6 +1831,7 @@ impl super::DbRead for PgStore {
     /// This might become quite inefficient for long chains with infrequent
     /// key rotations, so we might have to consider data model updates to
     /// allow more efficient querying of the last key rotation.
+    #[cfg(any(test, feature = "testing"))]
     async fn get_last_key_rotation(
         &self,
         chain_tip: &model::BitcoinBlockHash,
