@@ -1,3 +1,5 @@
+#[cfg(any(test, feature = "testing"))]
+use crate::storage::model::{StacksBlockHash, StacksBlockHeight};
 use crate::storage::{Transactable, TransactionHandle};
 use crate::{error::Error, storage::postgres::PGSQL_MIGRATIONS};
 use sqlx::Executor;
@@ -169,9 +171,9 @@ impl PgStore {
     #[cfg(any(test, feature = "testing"))]
     pub async fn in_canonical_stacks_blockchain(
         &self,
-        chain_tip: &crate::storage::model::StacksBlockHash,
-        block_hash: &crate::storage::model::StacksBlockHash,
-        block_height: crate::storage::model::StacksBlockHeight,
+        chain_tip: &StacksBlockHash,
+        block_hash: &StacksBlockHash,
+        block_height: StacksBlockHeight,
     ) -> Result<bool, Error> {
         super::read::PgRead::in_canonical_stacks_blockchain(
             self.get_connection().await?.as_mut(),
