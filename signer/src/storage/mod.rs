@@ -9,7 +9,7 @@
 #[cfg(any(test, feature = "testing"))]
 pub mod memory;
 pub mod model;
-pub mod pgsql;
+pub mod postgres;
 pub mod sqlx;
 pub mod util;
 

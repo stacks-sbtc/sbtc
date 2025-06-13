@@ -16,7 +16,7 @@ use signer::stacks::wallet::MultisigTx;
 use signer::stacks::wallet::SignerWallet;
 use signer::storage::DbRead;
 use signer::storage::DbWrite;
-use signer::storage::pgsql::PgStore;
+use signer::storage::postgres::PgStore;
 use signer::testing::btc::get_canonical_chain_tip;
 use signer::transaction_signer::STACKS_SIGN_REQUEST_LRU_SIZE;
 use test_case::test_case;

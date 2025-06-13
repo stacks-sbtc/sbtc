@@ -3,7 +3,7 @@
 
 use crate::error::Error;
 use crate::storage::model;
-use crate::storage::pgsql::PgStore;
+use crate::storage::postgres::PgStore;
 
 impl PgStore {
     /// Get all deposit requests that have been confirmed within the
@@ -20,6 +20,7 @@ impl PgStore {
               , dr.output_index
               , dr.spend_script
               , dr.reclaim_script
+              , dr.reclaim_script_hash
               , dr.recipient
               , dr.amount
               , dr.max_fee

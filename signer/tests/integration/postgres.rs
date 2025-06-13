@@ -67,7 +67,7 @@ use signer::storage::model::StacksTxId;
 use signer::storage::model::WithdrawalAcceptEvent;
 use signer::storage::model::WithdrawalRejectEvent;
 use signer::storage::model::WithdrawalSigner;
-use signer::storage::pgsql::PgStore;
+use signer::storage::postgres::PgStore;
 use signer::testing;
 use signer::testing::dummy::SignerSetConfig;
 use signer::testing::storage::model::TestData;
@@ -3079,7 +3079,7 @@ async fn transaction_coordinator_test_environment(
     store: PgStore,
 ) -> testing::transaction_coordinator::TestEnvironment<
     TestContext<
-        storage::pgsql::PgStore,
+        storage::postgres::PgStore,
         WrappedMock<MockBitcoinInteract>,
         WrappedMock<MockStacksInteract>,
         WrappedMock<MockEmilyInteract>,

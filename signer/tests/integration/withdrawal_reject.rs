@@ -11,7 +11,7 @@ use signer::stacks::contracts::WithdrawalRejectErrorMsg;
 use signer::storage::DbWrite;
 use signer::storage::model;
 use signer::storage::model::BitcoinTxSigHash;
-use signer::storage::pgsql::PgStore;
+use signer::storage::postgres::PgStore;
 use signer::testing;
 use signer::testing::get_rng;
 

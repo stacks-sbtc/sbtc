@@ -1,5 +1,5 @@
 use crate::storage::{Transactable, TransactionHandle};
-use crate::{error::Error, storage::pgsql::PGSQL_MIGRATIONS};
+use crate::{error::Error, storage::postgres::PGSQL_MIGRATIONS};
 use sqlx::Executor;
 use sqlx::pool::PoolConnection;
 use sqlx::{PgExecutor, postgres::PgPoolOptions};
