@@ -521,6 +521,14 @@ pub struct EncryptedDkgShares {
     pub started_at_bitcoin_block_height: BitcoinBlockHeight,
 }
 
+impl EncryptedDkgShares {
+    /// Return the public keys of the signers that participated in the DKG
+    /// associated with these shares.
+    pub fn signer_set_public_keys(&self) -> BTreeSet<PublicKey> {
+        self.signer_set_public_keys.iter().copied().collect()
+    }
+}
+
 /// Persisted public DKG shares from other signers
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]

@@ -20,6 +20,7 @@ use tokio::time::error::Elapsed;
 
 use crate::bitcoin::GetTransactionFeeResult;
 use crate::bitcoin::rpc::{BitcoinBlockHeader, BitcoinBlockInfo};
+use crate::block_observer::SignerSetInfo;
 use crate::context::SbtcLimits;
 use crate::stacks::api::TenureBlocks;
 use crate::stacks::wallet::SignerWallet;
@@ -211,44 +212,29 @@ impl<Storage, Bitcoin, Stacks>
     }
 }
 
-/// DKG can be triggered if the last DKG signer set differs from the one in config.
-/// However, we don't want to test this functionality in some of our tests, so
-/// this function makes sure that DKG won't be triggered because of changes in signer set.
-/// Note: this function changes bootstrap_signing_set config parameter.
-pub fn prevent_dkg_on_changed_signer_set<Storage, Bitcoin, Stacks, Emily>(
-    context: &mut TestContext<Storage, Bitcoin, Stacks, Emily>,
+/// DKG can be triggered if the signer set info in the registry differs
+/// from the one in config. However, we don't want to test this
+/// functionality in some of our tests, so this function makes sure that
+/// DKG won't be triggered because of changes in this parameter.
+pub fn prevent_dkg_on_changed_signer_set_info<Storage, Bitcoin, Stacks, Emily>(
+    context: &TestContext<Storage, Bitcoin, Stacks, Emily>,
+    aggregate_key: PublicKey,
 ) where
     Storage: DbRead + DbWrite + Clone + Sync + Send + 'static,
     Bitcoin: BitcoinInteract + Clone + Send + Sync + 'static,
     Stacks: StacksInteract + Clone + Send + Sync + 'static,
     Emily: EmilyInteract + Clone + Send + Sync + 'static,
 {
-    let last_dkg_signer_set = context
-        .state()
-        .current_signer_set()
-        .get_signers()
-        .iter()
-        .map(|signer| *signer.public_key())
-        .collect();
-    let config = context.config_mut();
-    config.signer.bootstrap_signing_set = last_dkg_signer_set;
-}
+    let config = context.config();
+    let signer_set_info = SignerSetInfo {
+        aggregate_key,
+        signatures_required: config.signer.bootstrap_signatures_required,
+        signer_set: config.signer.bootstrap_signing_set.clone(),
+    };
 
-/// DKG can be triggered if the last DKG signatures_required parameter differs from
-/// the one in config. However, we don't want to test this functionality in some of our tests,
-/// so this function makes sure that DKG won't be triggered because of changes in this parameter.
-/// Note: this function changes bootstrap_signatures_required config parameter.
-pub fn prevent_dkg_on_changed_signatures_required<Storage, Bitcoin, Stacks, Emily>(
-    context: &mut TestContext<Storage, Bitcoin, Stacks, Emily>,
-) where
-    Storage: DbRead + DbWrite + Clone + Sync + Send + 'static,
-    Bitcoin: BitcoinInteract + Clone + Send + Sync + 'static,
-    Stacks: StacksInteract + Clone + Send + Sync + 'static,
-    Emily: EmilyInteract + Clone + Send + Sync + 'static,
-{
-    let context_signeratures_required = context.state().current_signatures_required();
-    let config = context.config_mut();
-    config.signer.bootstrap_signatures_required = context_signeratures_required;
+    context
+        .state()
+        .update_registry_signer_set_info(signer_set_info);
 }
 
 impl<Storage, Bitcoin, Stacks, Emily> Context for TestContext<Storage, Bitcoin, Stacks, Emily>

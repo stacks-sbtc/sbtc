@@ -2059,11 +2059,21 @@ impl super::DbRead for PgStore {
     async fn is_signer_script_pub_key(&self, script: &model::ScriptPubKey) -> Result<bool, Error> {
         sqlx::query_scalar::<_, bool>(
             r#"
-            SELECT EXISTS (
-                SELECT TRUE
-                FROM sbtc_signer.dkg_shares AS ds
-                WHERE ds.script_pubkey = $1
-            );
+            SELECT 
+                EXISTS (
+                    SELECT TRUE
+                    FROM sbtc_signer.dkg_shares AS ds
+                    WHERE ds.script_pubkey = $1
+                )
+                
+                OR
+
+                EXISTS (
+                    SELECT TRUE
+                    FROM sbtc_signer.bitcoin_tx_outputs
+                    WHERE output_type = 'signers_output'
+                    AND script_pubkey = $1
+                )
         "#,
         )
         .bind(script)

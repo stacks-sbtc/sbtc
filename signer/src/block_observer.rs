@@ -41,6 +41,7 @@ use crate::storage::DbRead;
 use crate::storage::DbWrite;
 use crate::storage::model;
 use crate::storage::model::EncryptedDkgShares;
+use crate::storage::model::KeyRotationEvent;
 use bitcoin::Amount;
 use bitcoin::BlockHash;
 use bitcoin::ScriptBuf;
@@ -473,7 +474,6 @@ impl<C: Context, B> BlockObserver<C, B> {
             let txid = tx_info.compute_txid();
             tracing::trace!(%txid, "attempting to extract sbtc transaction");
             if tx_info.tx.is_coinbase() {
-                tracing::warn!(%txid, "ignoring coinbase tx when extracting sbtc transaction");
                 continue;
             }
 
@@ -583,37 +583,25 @@ impl<C: Context, B> BlockObserver<C, B> {
         Ok(())
     }
 
-    /// Update the `SignerState` object with the current signer set, signatures
-    /// required, and aggregate key data.
+    /// Update the `SignerState` object with the current signer set,
+    /// signatures required, and aggregate key data.
     ///
     /// # Notes
     ///
     /// The query used for fetching the cached information can take quite a
     /// lot of some time to complete on mainnet. So this function updates
     /// the signers state once so that the other event loops do not need to
-    /// execute them. The cached information is:
-    ///
-    /// * The current signer set. It gets this information from the last
-    ///   successful key-rotation contract call if it exists. If such a
-    ///   contract call does not exist this function uses the latest DKG
-    ///   shares, and if that doesn't exist it uses the bootstrap signing
-    ///   set from the configuration.
-    /// * The current aggregate key. It gets this information from the last
-    ///   successful key-rotation contract call if it exists, and from the
-    ///   latest DKG shares if no such contract call can be found.
-    /// * The current signatures required. It gets this information from the
-    ///   last successful key-rotation contract call if it exists, and from
-    ///   bootstrap_signatures_required config parameter if it's not.
+    /// execute them. The cached information is the current signer set
+    /// info. It gets this information from the last successful
+    /// key-rotation contract call if it exists.
     async fn set_signer_set_info(&self, chain_tip: BlockHash) -> Result<(), Error> {
         let info = get_signer_set_info(&self.context, chain_tip).await?;
 
         let state = self.context.state();
-        if let Some(aggregate_key) = info.maybe_aggregate_key {
-            state.set_current_aggregate_key(aggregate_key);
+        if let Some(info) = info {
+            state.update_registry_signer_set_info(info);
         }
 
-        state.update_current_signer_set(info.signer_set);
-        state.set_current_signatures_required(info.signatures_required);
         Ok(())
     }
 
@@ -696,13 +684,13 @@ impl<C: Context, B> BlockObserver<C, B> {
     }
 }
 
-/// Structure describing the extended info about signer set.
+/// Structure describing the info about signer set currently stored in the
+/// smart contract on Stacks.
+#[derive(Debug, Clone)]
 pub struct SignerSetInfo {
     /// The aggregate key of the most recently confirmed key rotation
-    /// contract call on Stacks. If no such transaction exists, then this
-    /// is the aggregate key of the most recent successful DKG run. If DKG
-    /// has never successfully completed, then this is None.
-    pub maybe_aggregate_key: Option<PublicKey>,
+    /// contract call on Stacks.
+    pub aggregate_key: PublicKey,
     /// The set of sBTC signers public keys.
     pub signer_set: BTreeSet<PublicKey>,
     /// The number of signatures required to sign a transaction.
@@ -713,6 +701,16 @@ pub struct SignerSetInfo {
     pub signatures_required: u16,
 }
 
+impl From<KeyRotationEvent> for SignerSetInfo {
+    fn from(value: KeyRotationEvent) -> Self {
+        SignerSetInfo {
+            aggregate_key: value.aggregate_key,
+            signer_set: value.signer_set.into_iter().collect(),
+            signatures_required: value.signatures_required,
+        }
+    }
+}
+
 /// Return the signing set that can make sBTC related contract calls along
 /// with the current aggregate key to use for locking UTXOs on bitcoin.
 ///
@@ -720,56 +718,22 @@ pub struct SignerSetInfo {
 /// Stacks blockchain as part of a `rotate-keys` contract call. It will be
 /// the public key that is the result of a DKG run. If there are no
 /// rotate-keys transactions on the canonical stacks blockchain, then we
-/// fall back on the last known DKG shares row in our database, and return
-/// None as the aggregate key if no DKG shares can be found, implying that
-/// this signer has not participated in DKG.
-/// The signatures_required parameter fetched here from the last `rotate-keys`
-/// contract call. None if no such call exists.
+/// return None.
 #[tracing::instrument(skip_all)]
-pub async fn get_signer_set_info<C, B>(context: &C, chain_tip: B) -> Result<SignerSetInfo, Error>
+pub async fn get_signer_set_info<C, B>(
+    ctx: &C,
+    chain_tip: B,
+) -> Result<Option<SignerSetInfo>, Error>
 where
     C: Context,
     B: Into<model::BitcoinBlockHash>,
 {
-    let db = context.get_storage();
     let chain_tip = chain_tip.into();
 
-    // We are supposed to submit a rotate-keys transaction after running
-    // DKG, but that transaction may not have been submitted yet (if we
-    // have just run DKG) or it may not have been confirmed on the
-    // canonical Stacks blockchain.
-    //
-    // If the signers have already run DKG, then we know that all
-    // participating signers should have the same view of the latest
-    // aggregate key, so we can fall back on the stored DKG shares for
-    // getting the current aggregate key and associated signing set.
-    match db.get_last_key_rotation(&chain_tip).await? {
-        Some(last_key) => {
-            let aggregate_key = last_key.aggregate_key;
-            let signer_set = last_key.signer_set.into_iter().collect();
-            let signatures_required = last_key.signatures_required;
-            Ok(SignerSetInfo {
-                maybe_aggregate_key: Some(aggregate_key),
-                signer_set,
-                signatures_required,
-            })
-        }
-        None => match db.get_latest_encrypted_dkg_shares().await? {
-            Some(shares) => {
-                let signer_set = shares.signer_set_public_keys.into_iter().collect();
-                Ok(SignerSetInfo {
-                    maybe_aggregate_key: Some(shares.aggregate_key),
-                    signer_set,
-                    signatures_required: shares.signature_share_threshold,
-                })
-            }
-            None => Ok(SignerSetInfo {
-                maybe_aggregate_key: None,
-                signer_set: context.config().signer.bootstrap_signing_set.clone(),
-                signatures_required: context.config().signer.bootstrap_signatures_required,
-            }),
-        },
-    }
+    ctx.get_storage()
+        .get_last_key_rotation(&chain_tip)
+        .await
+        .map(|event| event.map(SignerSetInfo::from))
 }
 
 #[cfg(test)]

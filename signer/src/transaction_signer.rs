@@ -390,11 +390,11 @@ where
             .is_some();
         let is_canonical = msg_bitcoin_chain_tip == &chain_tip.block_hash;
 
-        let signer_set = self.context.state().current_signer_public_keys();
+        let signer_set = &self.context.config().signer.bootstrap_signing_set;
         let sender_is_coordinator = crate::transaction_coordinator::given_key_is_coordinator(
             msg_sender,
             &chain_tip.block_hash,
-            &signer_set,
+            signer_set,
         );
 
         let chain_tip_status = match (is_known, is_canonical) {
@@ -427,7 +427,8 @@ where
         let aggregate_key = self
             .context
             .state()
-            .current_aggregate_key()
+            .registry_signer_set_info()
+            .map(|info| info.aggregate_key)
             .ok_or(Error::NoDkgShares)?;
 
         let dkg_shares = db.get_encrypted_dkg_shares(aggregate_key).await?;
@@ -491,7 +492,7 @@ where
 
         // We need to set the nonce in order to get the exact transaction
         // that we need to sign.
-        let wallet = SignerWallet::load(&self.context, &chain_tip.block_hash).await?;
+        let wallet = SignerWallet::load(&self.context).await?;
         wallet.set_nonce(request.nonce);
 
         let multi_sig = MultisigTx::new_tx(&request.contract_tx, &wallet, request.tx_fee);
@@ -644,11 +645,14 @@ where
                 assert_allow_dkg_begin(&self.context, chain_tip).await?;
 
                 tracing::debug!("processing message");
-                let signer_public_keys = self.context.state().current_signer_public_keys();
+                let signer_public_keys = self.context.config().signer.bootstrap_signing_set.clone();
+                // The as _ cast is okay because we are going from a u16 to
+                // a u32, which is always okay.
+                let threshold = self.context.config().signer.bootstrap_signatures_required as u32;
 
                 let state_machine = SignerStateMachine::new(
                     signer_public_keys,
-                    self.threshold,
+                    threshold,
                     self.signer_private_key,
                 )?;
                 let state_machine_id = StateMachineId::Dkg(*chain_tip);
@@ -850,13 +854,8 @@ where
                 };
 
                 // Create a new `SignerStateMachine`.
-                let state_machine = SignerStateMachine::load(
-                    &db,
-                    aggregate_key,
-                    self.threshold,
-                    self.signer_private_key,
-                )
-                .await?;
+                let state_machine =
+                    SignerStateMachine::load(&db, aggregate_key, self.signer_private_key).await?;
 
                 // Put the state machine into the cache.
                 self.wsts_state_machines
@@ -1242,14 +1241,8 @@ where
         );
 
         // Create the WSTS FROST coordinator.
-        let coordinator = FrostCoordinator::load(
-            storage,
-            aggregate_key,
-            signing_set,
-            dkg_shares.signature_share_threshold,
-            signer_private_key,
-        )
-        .await?;
+        let coordinator =
+            FrostCoordinator::load(storage, aggregate_key, signer_private_key).await?;
 
         // Create the DKG verification state machine using the above coordinator.
         let state_machine = dkg::verification::StateMachine::new(coordinator, aggregate_key, None)
@@ -1579,22 +1572,20 @@ pub async fn assert_allow_dkg_begin(
         return Err(Error::DkgHasAlreadyRun);
     }
 
-    // Trigger dkg if signatures_required has changed
-    if context.state().current_signatures_required() != config.signer.bootstrap_signatures_required
-    {
-        tracing::info!("signatures required has changed; proceeding with DKG");
-        return Ok(());
-    }
+    // If we do not have a key rotation event in the database, we will
+    // allow DKG below if we have not run DKG yet.
+    if let Some(registry_signer_info) = context.state().registry_signer_set_info() {
+        // Trigger DKG if signatures_required has changed
+        if registry_signer_info.signatures_required != config.signer.bootstrap_signatures_required {
+            tracing::info!("signatures required has changed; proceeding with DKG");
+            return Ok(());
+        }
 
-    // Trigger dkg if signer set changes
-    let signer_set_changed = !context
-        .state()
-        .current_signer_set()
-        .has_same_pubkeys(&config.signer.bootstrap_signing_set);
-
-    if signer_set_changed {
-        tracing::info!("signer set has changed; proceeding with DKG");
-        return Ok(());
+        // Trigger DKG if signer set changes
+        if registry_signer_info.signer_set != config.signer.bootstrap_signing_set {
+            tracing::info!("signer set has changed; proceeding with DKG");
+            return Ok(());
+        }
     }
 
     // Get the number of DKG shares that have been stored
@@ -1766,7 +1757,7 @@ mod tests {
     ) {
         let chain_tip_height = chain_tip_height.into();
         let dkg_min_bitcoin_block_height = dkg_min_bitcoin_block_height.map(Into::into);
-        let mut context = TestContext::builder()
+        let context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
             .modify_settings(|s| {
@@ -1802,8 +1793,8 @@ mod tests {
             .await
             .unwrap();
 
-        prevent_dkg_on_changed_signer_set(&mut context);
-        prevent_dkg_on_changed_signatures_required(&mut context);
+        let aggregate_key = Faker.fake();
+        prevent_dkg_on_changed_signer_set_info(&context, aggregate_key);
 
         // Test the case
         let result = assert_allow_dkg_begin(&context, &bitcoin_chain_tip).await;
@@ -1817,7 +1808,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_wsts_message_asserts_dkg_begin() {
-        let mut context = TestContext::builder()
+        let context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
             .build();
@@ -1848,8 +1839,8 @@ mod tests {
             .await
             .unwrap();
 
-        prevent_dkg_on_changed_signer_set(&mut context);
-        prevent_dkg_on_changed_signatures_required(&mut context);
+        let aggregate_key = Faker.fake();
+        prevent_dkg_on_changed_signer_set_info(&context, aggregate_key);
 
         // Create our signer instance.
         let mut signer = TxSignerEventLoop {
