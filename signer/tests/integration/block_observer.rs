@@ -1123,9 +1123,9 @@ async fn get_signer_set_info_falls_back() {
     let signer_set_info: SignerSetInfo = Faker.fake_with_rng(&mut rng);
     let signer_set_info2 = signer_set_info.clone();
     ctx.with_stacks_client(|client| {
-        client.expect_get_current_signer_set_info().returning(move |_| {
-            Box::pin(std::future::ready(Ok(Some(signer_set_info2.clone()))))
-        });
+        client
+            .expect_get_current_signer_set_info()
+            .returning(move |_| Box::pin(std::future::ready(Ok(Some(signer_set_info2.clone())))));
     })
     .await;
 

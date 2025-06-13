@@ -166,9 +166,10 @@ pub trait StacksInteract: Send + Sync {
         &self,
         contract_principal: &StacksAddress,
     ) -> impl Future<Output = Result<Option<PublicKey>, Error>> + Send;
-    /// Retrieve the current signers' signature threshold from the `sbtc-registry` contract.
+    /// Retrieve the current signers set data from the `sbtc-registry`
+    /// smart contract.
     ///
-    /// This is done by making a `GET /v2/data_var/<contract-principal>/sbtc-registry/current-signature-threshold`
+    /// This is done by making a `POST /v2/contracts/call-read/<contract-principal>/sbtc-registry/get-current-signer-data`
     /// request.
     fn get_current_signer_set_info(
         &self,
@@ -1294,25 +1295,18 @@ where
         .map_err(serde::de::Error::custom)
 }
 
+/// Extract a set of public keys from a Clarity value.
+///
+/// The value is expected to be a sequence of 33 byte buffers, each of
+/// which represents a public key.
 fn extract_signer_set(value: Value) -> Result<BTreeSet<PublicKey>, Error> {
     match value {
-        Value::Sequence(SequenceData::List(ListData { data, .. })) => {
-            // Iterate through each record in the list and verify that it's a buffer.
-            // If it is a buffer, then convert it to a public key.
-            // Otherwise, return an error.
-            data.into_iter()
-                .map(|item| match item {
-                    // If the item is a buffer, then convert it to a public key.
-                    Value::Sequence(SequenceData::Buffer(BuffData { data })) => {
-                        PublicKey::from_slice(&data)
-                    }
-                    // Otherwise, return an error.
-                    _ => Err(Error::InvalidStacksResponse(
-                        "expected a buffer but got something else",
-                    )),
-                })
-                .collect()
-        }
+        // Iterate through each record in the list and convert it to a
+        // public key. If the record is not a buffer, then return an error.
+        Value::Sequence(SequenceData::List(ListData { data, .. })) => data
+            .into_iter()
+            .flat_map(|item| extract_public_key(item).transpose())
+            .collect(),
         // We expected the top-level value to be a list of buffers,
         // but we got something else.
         _ => Err(Error::InvalidStacksResponse(
@@ -1321,7 +1315,13 @@ fn extract_signer_set(value: Value) -> Result<BTreeSet<PublicKey>, Error> {
     }
 }
 
-fn extract_aggregate_key(value: Value) -> Result<Option<PublicKey>, Error> {
+/// Extract a public key from a Clarity value.
+///
+/// In the sbtc-registry smart contract, the aggregate key is stored in the
+/// `current-aggregate-pubkey` data var and is initialized to the 0x00
+/// byte, allowing use to distinguish between the initial value and an
+/// actual public key in that case.
+fn extract_public_key(value: Value) -> Result<Option<PublicKey>, Error> {
     match value {
         Value::Sequence(SequenceData::Buffer(BuffData { data })) => {
             // The initial value of the data var is all zeros
@@ -1337,6 +1337,12 @@ fn extract_aggregate_key(value: Value) -> Result<Option<PublicKey>, Error> {
     }
 }
 
+/// Extract a signature threshold from a Clarity value.
+///
+/// In the sbtc-registry smart contract, the signature threshold is stored
+/// in the `current-signature-threshold` data var and is initialized to 0,
+/// allowing use to distinguish between the initial value and an actual
+/// signature threshold.
 fn extract_signatures_required(value: Value) -> Result<Option<u16>, Error> {
     match value {
         Value::UInt(0) => Ok(None),
@@ -1362,7 +1368,7 @@ impl StacksInteract for StacksClient {
             )
             .await?;
 
-        extract_aggregate_key(value)
+        extract_public_key(value)
     }
 
     async fn get_current_signer_set_info(
@@ -1383,7 +1389,7 @@ impl StacksInteract for StacksClient {
             Value::Tuple(TupleData { mut data_map, .. }) => {
                 let maybe_aggregate_key = data_map
                     .remove("current-aggregate-pubkey")
-                    .map(extract_aggregate_key);
+                    .map(extract_public_key);
                 let maybe_signer_set = data_map
                     .remove("current-signer-set")
                     .map(extract_signer_set);
