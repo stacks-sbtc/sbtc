@@ -20,8 +20,8 @@ use tokio::time::error::Elapsed;
 
 use crate::bitcoin::GetTransactionFeeResult;
 use crate::bitcoin::rpc::{BitcoinBlockHeader, BitcoinBlockInfo};
-use crate::block_observer::SignerSetInfo;
 use crate::context::SbtcLimits;
+use crate::stacks::api::SignerSetInfo;
 use crate::stacks::api::TenureBlocks;
 use crate::stacks::wallet::SignerWallet;
 use crate::storage::model::BitcoinTxId;
@@ -411,14 +411,14 @@ impl BitcoinInteract for WrappedMock<MockBitcoinInteract> {
 }
 
 impl StacksInteract for WrappedMock<MockStacksInteract> {
-    async fn get_current_signer_set(
+    async fn get_current_signer_set_info(
         &self,
         contract_principal: &StacksAddress,
-    ) -> Result<Vec<PublicKey>, Error> {
+    ) -> Result<Option<SignerSetInfo>, Error> {
         self.inner
             .lock()
             .await
-            .get_current_signer_set(contract_principal)
+            .get_current_signer_set_info(contract_principal)
             .await
     }
 

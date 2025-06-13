@@ -10,8 +10,8 @@ use bitcoin::Amount;
 use hashbrown::HashSet;
 use libp2p::PeerId;
 
-use crate::block_observer::SignerSetInfo;
 use crate::keys::PublicKey;
+use crate::stacks::api::SignerSetInfo;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::BitcoinBlockRef;
