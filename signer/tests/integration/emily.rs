@@ -705,6 +705,7 @@ async fn test_get_deposits_returns_pending_and_accepted() {
             fulfillment: None,
             status: Status::Accepted,
             status_message: "accepted".to_string(),
+            replaced_by_tx: None,
         })
         .collect();
 

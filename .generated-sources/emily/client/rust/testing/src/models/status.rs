@@ -25,6 +25,8 @@ pub enum Status {
     Confirmed,
     #[serde(rename = "failed")]
     Failed,
+    #[serde(rename = "rbf")]
+    Rbf,
 }
 
 impl std::fmt::Display for Status {
@@ -35,6 +37,7 @@ impl std::fmt::Display for Status {
             Self::Accepted => write!(f, "accepted"),
             Self::Confirmed => write!(f, "confirmed"),
             Self::Failed => write!(f, "failed"),
+            Self::Rbf => write!(f, "rbf"),
         }
     }
 }

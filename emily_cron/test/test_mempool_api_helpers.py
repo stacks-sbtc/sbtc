@@ -145,7 +145,8 @@ class TestRbfProcessor(unittest.TestCase):
         self.assertIn("tx2", txids)
 
         for update in updates:
-            self.assertEqual(update.status, RequestStatus.FAILED.value)
+            self.assertEqual(update.status, RequestStatus.RBF.value)
+            self.assertEqual(update.replaced_by_txid, "tx3")
             self.assertTrue("Replaced by confirmed tx" in update.status_message)
             self.assertTrue("tx3" in update.status_message)
 

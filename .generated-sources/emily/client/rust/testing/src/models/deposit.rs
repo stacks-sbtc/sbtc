@@ -47,6 +47,14 @@ pub struct Deposit {
     /// Raw reclaim script binary in hex.
     #[serde(rename = "reclaimScript")]
     pub reclaim_script: String,
+    /// Transaction ID of the transaction that replaced this one via RBF.
+    #[serde(
+        rename = "replacedByTx",
+        default,
+        with = "::serde_with::rust::double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub replaced_by_tx: Option<Option<String>>,
     #[serde(rename = "status")]
     pub status: models::Status,
     /// The status message of the deposit.
@@ -80,6 +88,7 @@ impl Deposit {
             parameters: Box::new(parameters),
             recipient,
             reclaim_script,
+            replaced_by_tx: None,
             status,
             status_message,
         }
