@@ -206,7 +206,7 @@ impl PgStore {
                     .map_err(Error::SqlxMigrate)?;
 
                 // Save the migration as applied.
-                self.insert_migration(&key).await?;
+                self.insert_migration(&mut *trx, &key).await?;
             } else {
                 // The trx should be rolled back on drop but let's be explicit.
                 trx.rollback()
@@ -251,7 +251,11 @@ impl PgStore {
     }
 
     /// Insert a migration with the given `key`.
-    async fn insert_migration(&self, key: &str) -> Result<(), Error> {
+    async fn insert_migration(
+        &self,
+        executor: impl PgExecutor<'_>,
+        key: &str,
+    ) -> Result<(), Error> {
         sqlx::query(
             r#"
             INSERT INTO public.__sbtc_migrations (key)
@@ -259,7 +263,7 @@ impl PgStore {
             "#,
         )
         .bind(key)
-        .execute(&self.0)
+        .execute(executor)
         .await
         .map_err(Error::SqlxQuery)?;
 
