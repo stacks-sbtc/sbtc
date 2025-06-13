@@ -2573,14 +2573,9 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
     //   keys transaction.
     // =========================================================================
     let (ctx, _, _, _) = signers.first().unwrap();
+    let bootstrap_signing_set = ctx.config().signer.bootstrap_signing_set.clone();
     let shares: EncryptedDkgShares = EncryptedDkgShares {
-        signer_set_public_keys: ctx
-            .config()
-            .signer
-            .bootstrap_signing_set
-            .clone()
-            .into_iter()
-            .collect(),
+        signer_set_public_keys: bootstrap_signing_set.into_iter().collect(),
         signature_share_threshold: ctx.config().signer.bootstrap_signatures_required,
         dkg_shares_status: DkgSharesStatus::Verified,
         ..Faker.fake_with_rng(&mut rng)
