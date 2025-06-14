@@ -24,6 +24,7 @@ use crate::block_observer::SignerSetInfo;
 use crate::context::SbtcLimits;
 use crate::stacks::api::TenureBlocks;
 use crate::stacks::wallet::SignerWallet;
+use crate::storage::Transactable;
 use crate::storage::model::BitcoinTxId;
 use crate::{
     bitcoin::{
@@ -72,7 +73,7 @@ pub struct TestContext<Storage, Bitcoin, Stacks, Emily> {
 
 impl<Storage, Bitcoin, Stacks, Emily> TestContext<Storage, Bitcoin, Stacks, Emily>
 where
-    Storage: DbRead + DbWrite + Clone + Sync + Send + 'static,
+    Storage: DbRead + DbWrite + Transactable + Clone + Sync + Send + 'static,
     Bitcoin: BitcoinInteract + Clone + Send + Sync + 'static,
     Stacks: StacksInteract + Clone + Send + Sync + 'static,
     Emily: EmilyInteract + Clone + Send + Sync + 'static,
@@ -220,7 +221,7 @@ pub fn prevent_dkg_on_changed_signer_set_info<Storage, Bitcoin, Stacks, Emily>(
     context: &TestContext<Storage, Bitcoin, Stacks, Emily>,
     aggregate_key: PublicKey,
 ) where
-    Storage: DbRead + DbWrite + Clone + Sync + Send + 'static,
+    Storage: DbRead + DbWrite + Transactable + Clone + Sync + Send + 'static,
     Bitcoin: BitcoinInteract + Clone + Send + Sync + 'static,
     Stacks: StacksInteract + Clone + Send + Sync + 'static,
     Emily: EmilyInteract + Clone + Send + Sync + 'static,
@@ -239,7 +240,7 @@ pub fn prevent_dkg_on_changed_signer_set_info<Storage, Bitcoin, Stacks, Emily>(
 
 impl<Storage, Bitcoin, Stacks, Emily> Context for TestContext<Storage, Bitcoin, Stacks, Emily>
 where
-    Storage: DbRead + DbWrite + Clone + Sync + Send + 'static,
+    Storage: DbRead + DbWrite + Transactable + Clone + Sync + Send + 'static,
     Bitcoin: BitcoinInteract + Clone + Send + Sync + 'static,
     Stacks: StacksInteract + Clone + Send + Sync + 'static,
     Emily: EmilyInteract + Clone + Send + Sync + 'static,
@@ -274,7 +275,7 @@ where
 
     fn get_storage_mut(
         &self,
-    ) -> impl crate::storage::DbRead + DbWrite + Clone + Sync + Send + 'static {
+    ) -> impl crate::storage::DbRead + DbWrite + Transactable + Clone + Sync + Send + 'static {
         self.inner.get_storage_mut()
     }
 
@@ -914,7 +915,7 @@ impl<Storage, Bitcoin, Stacks, Emily> BuildContext<Storage, Bitcoin, Stacks, Emi
     for ContextBuilder<Storage, Bitcoin, Stacks, Emily>
 where
     Self: BuilderState<Storage, Bitcoin, Stacks, Emily>,
-    Storage: DbRead + DbWrite + Clone + Sync + Send + 'static,
+    Storage: DbRead + DbWrite + Transactable + Clone + Sync + Send + 'static,
     Bitcoin: BitcoinInteract + Clone + Send + Sync + 'static,
     Stacks: StacksInteract + Clone + Send + Sync + 'static,
     Emily: EmilyInteract + Clone + Send + Sync + 'static,

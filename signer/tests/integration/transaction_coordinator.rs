@@ -54,6 +54,7 @@ use signer::bitcoin::utxo::DepositRequest;
 use signer::bitcoin::utxo::Fees;
 use signer::bitcoin::utxo::TxDeconstructor as _;
 use signer::bitcoin::validation::WithdrawalValidationResult;
+use signer::block_observer;
 use signer::block_observer::SignerSetInfo;
 use signer::context::RequestDeciderEvent;
 use signer::message::Payload;
@@ -4271,20 +4272,20 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
     let bitcoin_chain_tip = faucet.generate_block();
     backfill_bitcoin_blocks(&db, rpc, &bitcoin_chain_tip).await;
 
-    let block_observer = BlockObserver {
-        context: context.clone(),
-        bitcoin_blocks: (),
-    };
-
     let tx = context
         .bitcoin_client
         .get_tx_info(&donation.txid, &bitcoin_chain_tip)
         .unwrap()
         .unwrap();
-    block_observer
-        .extract_sbtc_transactions(bitcoin_chain_tip, &[tx])
-        .await
-        .unwrap();
+    let bootstrap_script_pubkey = context.config().signer.bootstrap_aggregate_key;
+    block_observer::extract_sbtc_transactions(
+        &db,
+        bootstrap_script_pubkey,
+        bitcoin_chain_tip,
+        &[tx],
+    )
+    .await
+    .unwrap();
 
     let (bitcoin_chain_tip, stacks_chain_tip) = db.get_chain_tips().await;
     assert_eq!(stacks_chain_tip, genesis_block.block_hash);

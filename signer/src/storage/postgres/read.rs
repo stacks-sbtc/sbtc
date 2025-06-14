@@ -1,37 +1,27 @@
-//! Postgres storage implementation.
-
 use std::collections::BTreeSet;
 
 use bitcoin::OutPoint;
-use bitcoin::hashes::Hash as _;
-use blockstack_lib::types::chainstate::StacksBlockId;
-use sqlx::Executor as _;
-use sqlx::PgExecutor;
-use sqlx::postgres::PgPoolOptions;
+use clarity::types::chainstate::StacksBlockId;
 
-use crate::bitcoin::utxo::SignerUtxo;
-use crate::bitcoin::validation::DepositConfirmationStatus;
-use crate::bitcoin::validation::DepositRequestReport;
-use crate::bitcoin::validation::WithdrawalRequestReport;
-use crate::bitcoin::validation::WithdrawalRequestStatus;
-use crate::error::Error;
-use crate::keys::PublicKey;
-use crate::keys::PublicKeyXOnly;
-use crate::storage::model;
-use crate::storage::model::BitcoinBlockHeight;
-use crate::storage::model::CompletedDepositEvent;
-use crate::storage::model::StacksBlockHeight;
-use crate::storage::model::WithdrawalAcceptEvent;
-use crate::storage::model::WithdrawalRejectEvent;
+use crate::{
+    DEPOSIT_LOCKTIME_BLOCK_BUFFER, MAX_MEMPOOL_PACKAGE_TX_COUNT, MAX_REORG_BLOCK_COUNT,
+    WITHDRAWAL_BLOCKS_EXPIRY,
+    bitcoin::{
+        utxo::SignerUtxo,
+        validation::{
+            DepositConfirmationStatus, DepositRequestReport, WithdrawalRequestReport,
+            WithdrawalRequestStatus,
+        },
+    },
+    error::Error,
+    keys::{PublicKey, PublicKeyXOnly},
+    storage::{
+        DbRead,
+        model::{self, BitcoinBlockHeight, StacksBlockHeight},
+    },
+};
 
-use crate::DEPOSIT_LOCKTIME_BLOCK_BUFFER;
-use crate::MAX_MEMPOOL_PACKAGE_TX_COUNT;
-use crate::MAX_REORG_BLOCK_COUNT;
-use crate::WITHDRAWAL_BLOCKS_EXPIRY;
-
-/// All migration scripts from the `signer/migrations` directory.
-static PGSQL_MIGRATIONS: include_dir::Dir =
-    include_dir::include_dir!("$CARGO_MANIFEST_DIR/migrations");
+use super::{PgStore, PgTransaction};
 
 /// A convenience struct for retrieving a deposit request report
 #[derive(sqlx::FromRow)]
@@ -115,168 +105,53 @@ impl From<PgSignerUtxo> for SignerUtxo {
         }
     }
 }
+/// Read-accessors to the Postgres database.
+pub struct PgRead;
 
-/// A wrapper around a [`sqlx::PgPool`] which implements
-/// [`crate::storage::DbRead`] and [`crate::storage::DbWrite`].
-#[derive(Debug, Clone)]
-pub struct PgStore(sqlx::PgPool);
-
-impl PgStore {
-    /// Connect to the Postgres database at `url`.
-    pub async fn connect(url: &str) -> Result<Self, Error> {
-        let pool = PgPoolOptions::new()
-            .after_connect(|conn, _meta| Box::pin(async move {
-                conn.execute("SET application_name = 'sbtc-signer'; SET search_path = sbtc_signer,public;")
-                    .await?;
-                Ok(())
-            }))
-            .connect(url)
-            .await
-            .map_err(Error::SqlxConnect)?;
-
-        Ok(Self(pool))
-    }
-
-    /// Apply the migrations to the database.
-    pub async fn apply_migrations(&self) -> Result<(), Error> {
-        // Related to https://github.com/stacks-network/sbtc/issues/411
-        // TODO(537) - Revisit this prior to public launch
-        //
-        // Note 1: This could be generalized and moved up to the `storage` module, but
-        // left that for a future exercise if we need to support other databases.
-        //
-        // Note 2: The `sqlx` "migration" feature results in dependency conflicts
-        // with sqlite from the clarity crate.
-        //
-        // Note 3: The migration code paths have no explicit integration tests, but are
-        // implicitly tested by all integration tests using `new_test_database()`.
-        tracing::info!("Preparing to run database migrations");
-
-        sqlx::raw_sql(
+impl PgRead {
+    /// This function returns the bitcoin block height of the first
+    /// confirmed sweep that happened on or after the given minimum block
+    /// height.
+    async fn get_least_txo_height<'e, E>(
+        executor: &'e mut E,
+        chain_tip: &model::BitcoinBlockHash,
+        min_block_height: BitcoinBlockHeight,
+    ) -> Result<Option<BitcoinBlockHeight>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
+        sqlx::query_scalar::<_, BitcoinBlockHeight>(
             r#"
-                CREATE TABLE IF NOT EXISTS public.__sbtc_migrations (
-                    key TEXT PRIMARY KEY
-                );
+            SELECT bb.block_height
+            FROM sbtc_signer.bitcoin_tx_inputs AS bi
+            JOIN sbtc_signer.bitcoin_tx_outputs AS bo
+              ON bo.txid = bi.txid
+            JOIN sbtc_signer.bitcoin_transactions AS bt
+              ON bt.txid = bi.txid
+            JOIN bitcoin_blockchain_until($1, $2) AS bb
+              ON bb.block_hash = bt.block_hash
+            WHERE bo.output_type = 'signers_output'
+              AND bi.prevout_type = 'signers_input'
+            ORDER BY bb.block_height ASC
+            LIMIT 1;
             "#,
         )
-        .execute(&self.0)
+        .bind(chain_tip)
+        .bind(i64::try_from(min_block_height).map_err(Error::ConversionDatabaseInt)?)
+        .fetch_optional(executor)
         .await
-        .map_err(Error::SqlxMigrate)?;
-
-        let mut trx = self
-            .pool()
-            .begin()
-            .await
-            .map_err(Error::SqlxBeginTransaction)?;
-
-        // Collect all migration scripts and sort them by filename. It is important
-        // that the migration scripts are named in a way that they are executed in
-        // the correct order, i.e. the current naming of `0001__`, `0002__`, etc.
-        let mut migrations = PGSQL_MIGRATIONS.files().collect::<Vec<_>>();
-        migrations.sort_by_key(|file| file.path().file_name());
-        for migration in migrations {
-            let key = migration
-                .path()
-                .file_name()
-                .expect("failed to get filename from migration script path")
-                .to_string_lossy();
-
-            // Just in-case we end up with a README.md or some other non-SQL file
-            // in the migrations directory.
-            if !key.ends_with(".sql") {
-                tracing::debug!(migration = %key, "Skipping non-SQL migration file");
-            }
-
-            // Check if the migration has already been applied. If so, we should
-            // be able to safely skip it.
-            if self.check_migration_existence(&mut *trx, &key).await? {
-                tracing::debug!(migration = %key, "Database migration already applied");
-                continue;
-            }
-
-            // Attempt to apply the migration. If we encounter an error, we abort
-            // the entire migration process.
-            if let Some(script) = migration.contents_utf8() {
-                tracing::info!(migration = %key, "Applying database migration");
-
-                // Execute the migration.
-                sqlx::raw_sql(script)
-                    .execute(&mut *trx)
-                    .await
-                    .map_err(Error::SqlxMigrate)?;
-
-                // Save the migration as applied.
-                self.insert_migration(&key).await?;
-            } else {
-                // The trx should be rolled back on drop but let's be explicit.
-                trx.rollback()
-                    .await
-                    .map_err(Error::SqlxRollbackTransaction)?;
-
-                // We failed to read the migration script as valid UTF-8. This
-                // shouldn't happen since it's our own migration scripts, but
-                // just in case...
-                return Err(Error::ReadSqlMigration(
-                    migration.path().as_os_str().to_string_lossy(),
-                ));
-            }
-        }
-
-        trx.commit().await.map_err(Error::SqlxCommitTransaction)?;
-
-        Ok(())
+        .map_err(Error::SqlxQuery)
     }
 
-    /// Check if a migration with the given `key` exists.
-    async fn check_migration_existence(
-        &self,
-        executor: impl PgExecutor<'_>,
-        key: &str,
-    ) -> Result<bool, Error> {
-        let result = sqlx::query_scalar::<_, i64>(
-            // Note: db_name + key are PK so we can only get max 1 row.
-            r#"
-            SELECT COUNT(*) FROM public.__sbtc_migrations
-                WHERE
-                    key = $1
-            ;
-            "#,
-        )
-        .bind(key)
-        .fetch_one(executor)
-        .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(result > 0)
-    }
-
-    /// Insert a migration with the given `key`.
-    async fn insert_migration(&self, key: &str) -> Result<(), Error> {
-        sqlx::query(
-            r#"
-            INSERT INTO public.__sbtc_migrations (key)
-                VALUES ($1)
-            "#,
-        )
-        .bind(key)
-        .execute(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(())
-    }
-
-    /// Get a reference to the underlying pool.
-    pub fn pool(&self) -> &sqlx::PgPool {
-        &self.0
-    }
-
-    async fn get_utxo(
-        &self,
+    async fn get_utxo<'e, E>(
+        executor: &'e mut E,
         chain_tip: &model::BitcoinBlockHash,
         output_type: model::TxOutputType,
         min_block_height: BitcoinBlockHeight,
-    ) -> Result<Option<SignerUtxo>, Error> {
+    ) -> Result<Option<SignerUtxo>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
         let pg_utxo = sqlx::query_as::<_, PgSignerUtxo>(
             r#"
             WITH bitcoin_blockchain AS (
@@ -313,42 +188,11 @@ impl PgStore {
         .bind(chain_tip)
         .bind(i64::try_from(min_block_height).map_err(Error::ConversionDatabaseInt)?)
         .bind(output_type)
-        .fetch_optional(&self.0)
+        .fetch_optional(executor)
         .await
         .map_err(Error::SqlxQuery)?;
 
         Ok(pg_utxo.map(SignerUtxo::from))
-    }
-
-    /// This function returns the bitcoin block height of the first
-    /// confirmed sweep that happened on or after the given minimum block
-    /// height.
-    async fn get_least_txo_height(
-        &self,
-        chain_tip: &model::BitcoinBlockHash,
-        min_block_height: BitcoinBlockHeight,
-    ) -> Result<Option<BitcoinBlockHeight>, Error> {
-        sqlx::query_scalar::<_, BitcoinBlockHeight>(
-            r#"
-            SELECT bb.block_height
-            FROM sbtc_signer.bitcoin_tx_inputs AS bi
-            JOIN sbtc_signer.bitcoin_tx_outputs AS bo
-              ON bo.txid = bi.txid
-            JOIN sbtc_signer.bitcoin_transactions AS bt
-              ON bt.txid = bi.txid
-            JOIN bitcoin_blockchain_until($1, $2) AS bb
-              ON bb.block_hash = bt.block_hash
-            WHERE bo.output_type = 'signers_output'
-              AND bi.prevout_type = 'signers_input'
-            ORDER BY bb.block_height ASC
-            LIMIT 1;
-            "#,
-        )
-        .bind(chain_tip)
-        .bind(i64::try_from(min_block_height).map_err(Error::ConversionDatabaseInt)?)
-        .fetch_optional(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)
     }
 
     /// Return the height of the earliest block in which a donation UTXO
@@ -358,7 +202,12 @@ impl PgStore {
     ///
     /// This function does not check whether the donation output has been
     /// spent.
-    pub async fn minimum_donation_txo_height(&self) -> Result<Option<BitcoinBlockHeight>, Error> {
+    async fn minimum_donation_txo_height<'e, E>(
+        executor: &'e mut E,
+    ) -> Result<Option<BitcoinBlockHeight>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query_scalar::<_, BitcoinBlockHeight>(
             r#"
             SELECT bb.block_height
@@ -370,23 +219,256 @@ impl PgStore {
             LIMIT 1;
             "#,
         )
-        .fetch_optional(&self.0)
+        .fetch_optional(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 
     /// Return a donation UTXO with minimum height.
-    pub async fn get_donation_utxo(
-        &self,
+    async fn get_donation_utxo<'e, E>(
+        executor: &'e mut E,
         chain_tip: &model::BitcoinBlockHash,
-    ) -> Result<Option<SignerUtxo>, Error> {
-        let Some(min_block_height) = self.minimum_donation_txo_height().await? else {
+    ) -> Result<Option<SignerUtxo>, Error>
+    where
+        E: 'static,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
+    {
+        let Some(min_block_height) = Self::minimum_donation_txo_height(executor).await? else {
             return Ok(None);
         };
         let output_type = model::TxOutputType::Donation;
-        self.get_utxo(chain_tip, output_type, min_block_height)
-            .await
+        Self::get_utxo(executor, chain_tip, output_type, min_block_height).await
     }
+
+    /// Fetch the bitcoin transaction ID that swept the withdrawal along
+    /// with the block hash that confirmed the transaction.
+    ///
+    /// `None` is returned if there is no transaction sweeping out the
+    /// funds that has been confirmed on the blockchain identified by the
+    /// given chain-tip.
+    async fn get_withdrawal_sweep_info<'e, E>(
+        executor: &'e mut E,
+        chain_tip: &model::BitcoinBlockHash,
+        id: &model::QualifiedRequestId,
+    ) -> Result<Option<model::BitcoinTxRef>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
+        sqlx::query_as::<_, model::BitcoinTxRef>(
+            r#"
+            SELECT
+                bwo.bitcoin_txid AS txid
+              , bt.block_hash
+            FROM sbtc_signer.withdrawal_requests AS wr
+            JOIN sbtc_signer.bitcoin_withdrawals_outputs AS bwo
+              ON bwo.request_id = wr.request_id
+             AND bwo.stacks_block_hash = wr.block_hash
+            JOIN sbtc_signer.bitcoin_transactions AS bt
+              ON bt.txid = bwo.bitcoin_txid
+            JOIN sbtc_signer.bitcoin_blockchain_until($1, wr.bitcoin_block_height) AS bbu
+              ON bbu.block_hash = bt.block_hash
+            WHERE wr.request_id = $2
+              AND wr.block_hash = $3
+            LIMIT 1
+            "#,
+        )
+        .bind(chain_tip)
+        .bind(i64::try_from(id.request_id).map_err(Error::ConversionDatabaseInt)?)
+        .bind(id.block_hash)
+        .fetch_optional(executor)
+        .await
+        .map_err(Error::SqlxQuery)
+    }
+
+    /// Fetch a status summary of a withdrawal request.
+    ///
+    /// In this query we fetch the raw withdrawal request and add some
+    /// information about whether this signer accepted the request.
+    ///
+    /// `None` is returned if withdrawal request is not in the database or
+    /// if the withdrawal request is not associated with a stacks block in
+    /// the database.
+    async fn get_withdrawal_request_status_summary<'e, E>(
+        executor: &'e mut E,
+        id: &model::QualifiedRequestId,
+        signer_public_key: &PublicKey,
+    ) -> Result<Option<WithdrawalStatusSummary>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
+        sqlx::query_as::<_, WithdrawalStatusSummary>(
+            r#"
+            SELECT
+                ws.is_accepted
+              , wr.amount
+              , wr.max_fee
+              , wr.recipient
+              , wr.bitcoin_block_height
+              , wr.block_hash   AS stacks_block_hash
+              , sb.block_height AS stacks_block_height
+            FROM sbtc_signer.withdrawal_requests AS wr
+            JOIN sbtc_signer.stacks_blocks AS sb
+              ON sb.block_hash = wr.block_hash
+            LEFT JOIN sbtc_signer.withdrawal_signers AS ws
+              ON ws.request_id = wr.request_id
+             AND ws.block_hash = wr.block_hash
+             AND ws.signer_pub_key = $1
+            WHERE wr.request_id = $2
+              AND wr.block_hash = $3
+            LIMIT 1
+            "#,
+        )
+        .bind(signer_public_key)
+        .bind(i64::try_from(id.request_id).map_err(Error::ConversionDatabaseInt)?)
+        .bind(id.block_hash)
+        .fetch_optional(executor)
+        .await
+        .map_err(Error::SqlxQuery)
+    }
+
+    /// Return the least height for which the deposit request was confirmed
+    /// on a bitcoin blockchain.
+    ///
+    /// Transactions can be confirmed on more than one blockchain and this
+    /// function returns the least height out of all bitcoin blocks for
+    /// which the deposit has been confirmed.
+    ///
+    /// None is returned if we do not have a record of the deposit request.
+    async fn get_deposit_request_least_height<'e, E>(
+        executor: &'e mut E,
+        txid: &model::BitcoinTxId,
+        output_index: u32,
+    ) -> Result<Option<BitcoinBlockHeight>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
+        // Before the deposit request is written a signer also stores the
+        // bitcoin transaction and (after #731) the bitcoin block
+        // confirming the deposit to the database. So this will return zero
+        // rows only when we cannot find the deposit request.
+        sqlx::query_scalar::<_, BitcoinBlockHeight>(
+            r#"
+            SELECT block_height
+            FROM sbtc_signer.deposit_requests AS dr
+            JOIN sbtc_signer.bitcoin_transactions USING (txid)
+            JOIN sbtc_signer.bitcoin_blocks USING (block_hash)
+            WHERE dr.txid = $1
+              AND dr.output_index = $2
+            ORDER BY block_height
+            LIMIT 1
+            "#,
+        )
+        .bind(txid)
+        .bind(i32::try_from(output_index).map_err(Error::ConversionDatabaseInt)?)
+        .fetch_optional(executor)
+        .await
+        .map_err(Error::SqlxQuery)
+    }
+
+    /// Fetch a status summary of a deposit request.
+    ///
+    /// In this query we list out the blockchain identified by the chain
+    /// tip as far back as necessary. We then check if this signer accepted
+    /// the deposit request, and whether it was confirmed on the blockchain
+    /// that we just listed out.
+    ///
+    /// `None` is returned if no deposit request is in the database (we
+    /// always write the associated transaction to the database for each
+    /// deposit so that cannot be the reason for why the query here returns
+    /// `None`).
+    async fn get_deposit_request_status_summary<'e, E>(
+        executor: &'e mut E,
+        chain_tip: &model::BitcoinBlockHash,
+        txid: &model::BitcoinTxId,
+        output_index: u32,
+        signer_public_key: &PublicKey,
+    ) -> Result<Option<DepositStatusSummary>, Error>
+    where
+        E: 'static,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
+    {
+        // We first get the least height for when the deposit request was
+        // confirmed. This height serves as the stopping criteria for the
+        // recursive part of the subsequent query.
+        let min_block_height_fut =
+            Self::get_deposit_request_least_height(executor, txid, output_index);
+        // None is only returned if we do not have a record of the deposit
+        // request or the deposit transaction.
+        let Some(min_block_height) = min_block_height_fut.await? else {
+            return Ok(None);
+        };
+        sqlx::query_as::<_, DepositStatusSummary>(
+            r#"
+            SELECT
+                ds.can_accept
+              , ds.can_sign
+              , dr.amount
+              , dr.max_fee
+              , dr.lock_time
+              , dr.spend_script AS deposit_script
+              , dr.reclaim_script
+              , dr.reclaim_script_hash
+              , dr.signers_public_key
+              , bc.block_height
+              , bc.block_hash
+            FROM sbtc_signer.deposit_requests AS dr
+            JOIN sbtc_signer.bitcoin_transactions USING (txid)
+            LEFT JOIN sbtc_signer.bitcoin_blockchain_until($1, $2) AS bc USING (block_hash)
+            LEFT JOIN sbtc_signer.deposit_signers AS ds
+              ON dr.txid = ds.txid
+             AND dr.output_index = ds.output_index
+             AND ds.signer_pub_key = $5
+            WHERE dr.txid = $3
+              AND dr.output_index = $4
+            LIMIT 1
+            "#,
+        )
+        .bind(chain_tip)
+        .bind(min_block_height)
+        .bind(txid)
+        .bind(i32::try_from(output_index).map_err(Error::ConversionDatabaseInt)?)
+        .bind(signer_public_key)
+        .fetch_optional(executor)
+        .await
+        .map_err(Error::SqlxQuery)
+    }
+
+    /// Return the txid of the bitcoin transaction that swept in the
+    /// deposit UTXO. The sweep transaction must be confirmed on the
+    /// blockchain identified by the given chain tip.
+    ///
+    /// This query only looks back at transactions that are confirmed at or
+    /// after the given `min_block_height`.
+    async fn get_deposit_sweep_txid<'e, E>(
+        executor: &'e mut E,
+        chain_tip: &model::BitcoinBlockHash,
+        txid: &model::BitcoinTxId,
+        output_index: u32,
+        min_block_height: BitcoinBlockHeight,
+    ) -> Result<Option<model::BitcoinTxId>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
+        sqlx::query_scalar::<_, model::BitcoinTxId>(
+            r#"
+            SELECT bti.txid
+            FROM sbtc_signer.bitcoin_tx_inputs AS bti
+            JOIN sbtc_signer.bitcoin_transactions AS bt USING (txid)
+            JOIN sbtc_signer.bitcoin_blockchain_until($1, $2) USING (block_hash)
+            WHERE bti.prevout_txid = $3
+              AND bti.prevout_output_index = $4
+            LIMIT 1
+            "#,
+        )
+        .bind(chain_tip)
+        .bind(i64::try_from(min_block_height).map_err(Error::ConversionDatabaseInt)?)
+        .bind(txid)
+        .bind(i32::try_from(output_index).map_err(Error::ConversionDatabaseInt)?)
+        .fetch_optional(executor)
+        .await
+        .map_err(Error::SqlxQuery)
+    }
+
     /// Return a block height that is less than or equal to the block that
     /// confirms the signers' UTXO.
     ///
@@ -403,7 +485,13 @@ impl PgStore {
     ///   to the height returned here should contain the transaction with
     ///   the signers' UTXO, and won't if there is a reorg spanning more
     ///   than [`MAX_REORG_BLOCK_COUNT`] blocks.
-    pub async fn minimum_utxo_height(&self) -> Result<Option<BitcoinBlockHeight>, Error> {
+    async fn minimum_utxo_height<'e, E>(
+        executor: &'e mut E,
+    ) -> Result<Option<BitcoinBlockHeight>, Error>
+    where
+        E: 'static,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
+    {
         #[derive(sqlx::FromRow)]
         struct PgCandidateUtxo {
             txid: model::BitcoinTxId,
@@ -439,7 +527,7 @@ impl PgStore {
             LIMIT 1;
             "#,
         )
-        .fetch_optional(&self.0)
+        .fetch_optional(&mut *executor)
         .await
         .map_err(Error::SqlxQuery)?;
 
@@ -529,7 +617,7 @@ impl PgStore {
         .bind(max_transactions)
         .bind(utxo_candidate.txid)
         .bind(min_block_height_candidate)
-        .fetch_optional(&self.0)
+        .fetch_optional(&mut *executor)
         .await
         .map_err(Error::SqlxQuery)?;
 
@@ -543,146 +631,17 @@ impl PgStore {
         Ok(Some(min_block_height))
     }
 
-    /// Return the least height for which the deposit request was confirmed
-    /// on a bitcoin blockchain.
-    ///
-    /// Transactions can be confirmed on more than one blockchain and this
-    /// function returns the least height out of all bitcoin blocks for
-    /// which the deposit has been confirmed.
-    ///
-    /// None is returned if we do not have a record of the deposit request.
-    pub async fn get_deposit_request_least_height(
-        &self,
-        txid: &model::BitcoinTxId,
-        output_index: u32,
-    ) -> Result<Option<BitcoinBlockHeight>, Error> {
-        // Before the deposit request is written a signer also stores the
-        // bitcoin transaction and (after #731) the bitcoin block
-        // confirming the deposit to the database. So this will return zero
-        // rows only when we cannot find the deposit request.
-        sqlx::query_scalar::<_, BitcoinBlockHeight>(
-            r#"
-            SELECT block_height
-            FROM sbtc_signer.deposit_requests AS dr
-            JOIN sbtc_signer.bitcoin_transactions USING (txid)
-            JOIN sbtc_signer.bitcoin_blocks USING (block_hash)
-            WHERE dr.txid = $1
-              AND dr.output_index = $2
-            ORDER BY block_height
-            LIMIT 1
-            "#,
-        )
-        .bind(txid)
-        .bind(i32::try_from(output_index).map_err(Error::ConversionDatabaseInt)?)
-        .fetch_optional(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)
-    }
-
-    /// Return the txid of the bitcoin transaction that swept in the
-    /// deposit UTXO. The sweep transaction must be confirmed on the
-    /// blockchain identified by the given chain tip.
-    ///
-    /// This query only looks back at transactions that are confirmed at or
-    /// after the given `min_block_height`.
-    async fn get_deposit_sweep_txid(
-        &self,
-        chain_tip: &model::BitcoinBlockHash,
-        txid: &model::BitcoinTxId,
-        output_index: u32,
-        min_block_height: BitcoinBlockHeight,
-    ) -> Result<Option<model::BitcoinTxId>, Error> {
-        sqlx::query_scalar::<_, model::BitcoinTxId>(
-            r#"
-            SELECT bti.txid
-            FROM sbtc_signer.bitcoin_tx_inputs AS bti
-            JOIN sbtc_signer.bitcoin_transactions AS bt USING (txid)
-            JOIN sbtc_signer.bitcoin_blockchain_until($1, $2) USING (block_hash)
-            WHERE bti.prevout_txid = $3
-              AND bti.prevout_output_index = $4
-            LIMIT 1
-            "#,
-        )
-        .bind(chain_tip)
-        .bind(i64::try_from(min_block_height).map_err(Error::ConversionDatabaseInt)?)
-        .bind(txid)
-        .bind(i32::try_from(output_index).map_err(Error::ConversionDatabaseInt)?)
-        .fetch_optional(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)
-    }
-
-    /// Fetch a status summary of a deposit request.
-    ///
-    /// In this query we list out the blockchain identified by the chain
-    /// tip as far back as necessary. We then check if this signer accepted
-    /// the deposit request, and whether it was confirmed on the blockchain
-    /// that we just listed out.
-    ///
-    /// `None` is returned if no deposit request is in the database (we
-    /// always write the associated transaction to the database for each
-    /// deposit so that cannot be the reason for why the query here returns
-    /// `None`).
-    async fn get_deposit_request_status_summary(
-        &self,
-        chain_tip: &model::BitcoinBlockHash,
-        txid: &model::BitcoinTxId,
-        output_index: u32,
-        signer_public_key: &PublicKey,
-    ) -> Result<Option<DepositStatusSummary>, Error> {
-        // We first get the least height for when the deposit request was
-        // confirmed. This height serves as the stopping criteria for the
-        // recursive part of the subsequent query.
-        let min_block_height_fut = self.get_deposit_request_least_height(txid, output_index);
-        // None is only returned if we do not have a record of the deposit
-        // request or the deposit transaction.
-        let Some(min_block_height) = min_block_height_fut.await? else {
-            return Ok(None);
-        };
-        sqlx::query_as::<_, DepositStatusSummary>(
-            r#"
-            SELECT
-                ds.can_accept
-              , ds.can_sign
-              , dr.amount
-              , dr.max_fee
-              , dr.lock_time
-              , dr.spend_script AS deposit_script
-              , dr.reclaim_script
-              , dr.reclaim_script_hash
-              , dr.signers_public_key
-              , bc.block_height
-              , bc.block_hash
-            FROM sbtc_signer.deposit_requests AS dr
-            JOIN sbtc_signer.bitcoin_transactions USING (txid)
-            LEFT JOIN sbtc_signer.bitcoin_blockchain_until($1, $2) AS bc USING (block_hash)
-            LEFT JOIN sbtc_signer.deposit_signers AS ds
-              ON dr.txid = ds.txid
-             AND dr.output_index = ds.output_index
-             AND ds.signer_pub_key = $5
-            WHERE dr.txid = $3
-              AND dr.output_index = $4
-            LIMIT 1
-            "#,
-        )
-        .bind(chain_tip)
-        .bind(min_block_height)
-        .bind(txid)
-        .bind(i32::try_from(output_index).map_err(Error::ConversionDatabaseInt)?)
-        .bind(signer_public_key)
-        .fetch_optional(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)
-    }
-
     /// Check whether the given block hash is a part of the stacks
     /// blockchain identified by the given chain-tip.
-    pub async fn in_canonical_stacks_blockchain(
-        &self,
+    pub async fn in_canonical_stacks_blockchain<'e, E>(
+        executor: &'e mut E,
         chain_tip: &model::StacksBlockHash,
         block_hash: &model::StacksBlockHash,
         block_height: StacksBlockHeight,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query_scalar::<_, bool>(
             r#"
             WITH RECURSIVE tx_block_chain AS (
@@ -714,103 +673,18 @@ impl PgStore {
         .bind(chain_tip)
         .bind(i64::try_from(block_height).map_err(Error::ConversionDatabaseInt)?)
         .bind(block_hash)
-        .fetch_one(&self.0)
+        .fetch_one(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 
-    /// Fetch a status summary of a withdrawal request.
-    ///
-    /// In this query we fetch the raw withdrawal request and add some
-    /// information about whether this signer accepted the request.
-    ///
-    /// `None` is returned if withdrawal request is not in the database or
-    /// if the withdrawal request is not associated with a stacks block in
-    /// the database.
-    async fn get_withdrawal_request_status_summary(
-        &self,
-        id: &model::QualifiedRequestId,
-        signer_public_key: &PublicKey,
-    ) -> Result<Option<WithdrawalStatusSummary>, Error> {
-        sqlx::query_as::<_, WithdrawalStatusSummary>(
-            r#"
-            SELECT
-                ws.is_accepted
-              , wr.amount
-              , wr.max_fee
-              , wr.recipient
-              , wr.bitcoin_block_height
-              , wr.block_hash   AS stacks_block_hash
-              , sb.block_height AS stacks_block_height
-            FROM sbtc_signer.withdrawal_requests AS wr
-            JOIN sbtc_signer.stacks_blocks AS sb
-              ON sb.block_hash = wr.block_hash
-            LEFT JOIN sbtc_signer.withdrawal_signers AS ws
-              ON ws.request_id = wr.request_id
-             AND ws.block_hash = wr.block_hash
-             AND ws.signer_pub_key = $1
-            WHERE wr.request_id = $2
-              AND wr.block_hash = $3
-            LIMIT 1
-            "#,
-        )
-        .bind(signer_public_key)
-        .bind(i64::try_from(id.request_id).map_err(Error::ConversionDatabaseInt)?)
-        .bind(id.block_hash)
-        .fetch_optional(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)
-    }
-
-    /// Fetch the bitcoin transaction ID that swept the withdrawal along
-    /// with the block hash that confirmed the transaction.
-    ///
-    /// `None` is returned if there is no transaction sweeping out the
-    /// funds that has been confirmed on the blockchain identified by the
-    /// given chain-tip.
-    async fn get_withdrawal_sweep_info(
-        &self,
-        chain_tip: &model::BitcoinBlockHash,
-        id: &model::QualifiedRequestId,
-    ) -> Result<Option<model::BitcoinTxRef>, Error> {
-        sqlx::query_as::<_, model::BitcoinTxRef>(
-            r#"
-            SELECT
-                bwo.bitcoin_txid AS txid
-              , bt.block_hash
-            FROM sbtc_signer.withdrawal_requests AS wr
-            JOIN sbtc_signer.bitcoin_withdrawals_outputs AS bwo
-              ON bwo.request_id = wr.request_id
-             AND bwo.stacks_block_hash = wr.block_hash
-            JOIN sbtc_signer.bitcoin_transactions AS bt
-              ON bt.txid = bwo.bitcoin_txid
-            JOIN sbtc_signer.bitcoin_blockchain_until($1, wr.bitcoin_block_height) AS bbu
-              ON bbu.block_hash = bt.block_hash
-            WHERE wr.request_id = $2
-              AND wr.block_hash = $3
-            LIMIT 1
-            "#,
-        )
-        .bind(chain_tip)
-        .bind(i64::try_from(id.request_id).map_err(Error::ConversionDatabaseInt)?)
-        .bind(id.block_hash)
-        .fetch_optional(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)
-    }
-}
-
-impl From<sqlx::PgPool> for PgStore {
-    fn from(value: sqlx::PgPool) -> Self {
-        Self(value)
-    }
-}
-
-impl super::DbRead for PgStore {
-    async fn get_bitcoin_block(
-        &self,
+    pub async fn get_bitcoin_block<'e, E>(
+        executor: &'e mut E,
         block_hash: &model::BitcoinBlockHash,
-    ) -> Result<Option<model::BitcoinBlock>, Error> {
+    ) -> Result<Option<model::BitcoinBlock>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query_as::<_, model::BitcoinBlock>(
             "SELECT
                 block_hash
@@ -820,15 +694,18 @@ impl super::DbRead for PgStore {
             WHERE block_hash = $1;",
         )
         .bind(block_hash)
-        .fetch_optional(&self.0)
+        .fetch_optional(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 
-    async fn get_stacks_block(
-        &self,
+    pub async fn get_stacks_block<'e, E>(
+        executor: &'e mut E,
         block_hash: &model::StacksBlockHash,
-    ) -> Result<Option<model::StacksBlock>, Error> {
+    ) -> Result<Option<model::StacksBlock>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query_as::<_, model::StacksBlock>(
             "SELECT
                 block_hash
@@ -839,14 +716,17 @@ impl super::DbRead for PgStore {
             WHERE block_hash = $1;",
         )
         .bind(block_hash)
-        .fetch_optional(&self.0)
+        .fetch_optional(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 
-    async fn get_bitcoin_canonical_chain_tip(
-        &self,
-    ) -> Result<Option<model::BitcoinBlockHash>, Error> {
+    pub async fn get_bitcoin_canonical_chain_tip<'e, E>(
+        executor: &'e mut E,
+    ) -> Result<Option<model::BitcoinBlockHash>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query_as::<_, model::BitcoinBlock>(
             "SELECT
                 block_hash
@@ -856,15 +736,18 @@ impl super::DbRead for PgStore {
              ORDER BY block_height DESC, block_hash DESC
              LIMIT 1",
         )
-        .fetch_optional(&self.0)
+        .fetch_optional(executor)
         .await
         .map(|maybe_block| maybe_block.map(|block| block.block_hash))
         .map_err(Error::SqlxQuery)
     }
 
-    async fn get_bitcoin_canonical_chain_tip_ref(
-        &self,
-    ) -> Result<Option<model::BitcoinBlockRef>, Error> {
+    async fn get_bitcoin_canonical_chain_tip_ref<'e, E>(
+        executor: &'e mut E,
+    ) -> Result<Option<model::BitcoinBlockRef>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query_as::<_, model::BitcoinBlockRef>(
             "SELECT
                 block_hash
@@ -873,15 +756,18 @@ impl super::DbRead for PgStore {
              ORDER BY block_height DESC, block_hash DESC
              LIMIT 1",
         )
-        .fetch_optional(&self.0)
+        .fetch_optional(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 
-    async fn get_stacks_chain_tip(
-        &self,
+    pub async fn get_stacks_chain_tip<'e, E>(
+        executor: &'e mut E,
         bitcoin_chain_tip: &model::BitcoinBlockHash,
-    ) -> Result<Option<model::StacksBlock>, Error> {
+    ) -> Result<Option<model::StacksBlock>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
         // TODO: stop recursion after the first bitcoin block having stacks block anchored?
         // Note that in tests generated data we may get a taller stacks chain anchored to a
         // bitcoin block that may not be the first one we encounter having stacks block anchored
@@ -918,17 +804,20 @@ impl super::DbRead for PgStore {
             "#,
         )
         .bind(bitcoin_chain_tip)
-        .fetch_optional(&self.0)
+        .fetch_optional(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 
-    async fn get_pending_deposit_requests(
-        &self,
+    pub async fn get_pending_deposit_requests<'e, E>(
+        executor: &'e mut E,
         chain_tip: &model::BitcoinBlockHash,
         context_window: u16,
         signer_public_key: &PublicKey,
-    ) -> Result<Vec<model::DepositRequest>, Error> {
+    ) -> Result<Vec<model::DepositRequest>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query_as::<_, model::DepositRequest>(
             r#"
             WITH RECURSIVE context_window AS (
@@ -976,27 +865,31 @@ impl super::DbRead for PgStore {
         .bind(chain_tip)
         .bind(i32::from(context_window))
         .bind(signer_public_key)
-        .fetch_all(&self.0)
+        .fetch_all(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 
-    async fn get_pending_accepted_deposit_requests(
-        &self,
+    pub async fn get_pending_accepted_deposit_requests<'e, E>(
+        executor: &'e mut E,
         chain_tip: &model::BitcoinBlockHash,
         context_window: u16,
         threshold: u16,
-    ) -> Result<Vec<model::DepositRequest>, Error> {
+    ) -> Result<Vec<model::DepositRequest>, Error>
+    where
+        E: 'static,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
+    {
         // Add one to the acceptable unlock height because the chain tip is at height one less
         // than the height of the next block, which is the block for which we are assessing
         // the threshold.
-        let minimum_acceptable_unlock_height = *self
-            .get_bitcoin_block(chain_tip)
-            .await?
-            .ok_or(Error::MissingBitcoinBlock(*chain_tip))?
-            .block_height as i32
-            + DEPOSIT_LOCKTIME_BLOCK_BUFFER as i32
-            + 1;
+        let minimum_acceptable_unlock_height = {
+            let block_height = Self::get_bitcoin_block(&mut *executor, chain_tip)
+                .await?
+                .ok_or(Error::MissingBitcoinBlock(*chain_tip))?
+                .block_height;
+            *block_height as i32 + DEPOSIT_LOCKTIME_BLOCK_BUFFER as i32 + 1
+        };
 
         sqlx::query_as::<_, model::DepositRequest>(
             r#"
@@ -1060,17 +953,20 @@ impl super::DbRead for PgStore {
         .bind(i32::from(context_window))
         .bind(i32::from(threshold))
         .bind(minimum_acceptable_unlock_height)
-        .fetch_all(&self.0)
+        .fetch_all(&mut *executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 
-    async fn get_deposit_request_signer_votes(
-        &self,
+    pub async fn get_deposit_request_signer_votes<'e, E>(
+        executor: &'e mut E,
         txid: &model::BitcoinTxId,
         output_index: u32,
         aggregate_key: &PublicKey,
-    ) -> Result<model::SignerVotes, Error> {
+    ) -> Result<model::SignerVotes, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query_as::<_, model::SignerVote>(
             r#"
             WITH signer_set_rows AS (
@@ -1097,17 +993,20 @@ impl super::DbRead for PgStore {
         .bind(aggregate_key)
         .bind(txid)
         .bind(i64::from(output_index))
-        .fetch_all(&self.0)
+        .fetch_all(executor)
         .await
         .map(model::SignerVotes::from)
         .map_err(Error::SqlxQuery)
     }
 
-    async fn get_withdrawal_request_signer_votes(
-        &self,
+    async fn get_withdrawal_request_signer_votes<'e, E>(
+        executor: &'e mut E,
         id: &model::QualifiedRequestId,
         aggregate_key: &PublicKey,
-    ) -> Result<model::SignerVotes, Error> {
+    ) -> Result<model::SignerVotes, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query_as::<_, model::SignerVote>(
             r#"
             WITH signer_set_rows AS (
@@ -1136,21 +1035,26 @@ impl super::DbRead for PgStore {
         .bind(id.txid)
         .bind(id.block_hash)
         .bind(i64::try_from(id.request_id).map_err(Error::ConversionDatabaseInt)?)
-        .fetch_all(&self.0)
+        .fetch_all(executor)
         .await
         .map(model::SignerVotes::from)
         .map_err(Error::SqlxQuery)
     }
 
-    async fn get_deposit_request_report(
-        &self,
+    pub async fn get_deposit_request_report<'e, E>(
+        executor: &'e mut E,
         chain_tip: &model::BitcoinBlockHash,
         txid: &model::BitcoinTxId,
         output_index: u32,
         signer_public_key: &PublicKey,
-    ) -> Result<Option<DepositRequestReport>, Error> {
+    ) -> Result<Option<DepositRequestReport>, Error>
+    where
+        E: 'static,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
+    {
         // Now fetch the deposit summary
-        let summary_fut = self.get_deposit_request_status_summary(
+        let summary_fut = Self::get_deposit_request_status_summary(
+            executor,
             chain_tip,
             txid,
             output_index,
@@ -1172,8 +1076,13 @@ impl super::DbRead for PgStore {
             // confirmed for the min height for when a sweep transaction
             // could be confirmed. We could also use block_height + 1.
             Some((block_height, block_hash)) => {
-                let deposit_sweep_txid =
-                    self.get_deposit_sweep_txid(chain_tip, txid, output_index, block_height);
+                let deposit_sweep_txid = Self::get_deposit_sweep_txid(
+                    executor,
+                    chain_tip,
+                    txid,
+                    output_index,
+                    block_height,
+                );
 
                 match deposit_sweep_txid.await? {
                     Some(txid) => DepositConfirmationStatus::Spent(txid),
@@ -1186,9 +1095,8 @@ impl super::DbRead for PgStore {
             None => DepositConfirmationStatus::Unconfirmed,
         };
 
-        let dkg_shares = self
-            .get_encrypted_dkg_shares(summary.signers_public_key)
-            .await?;
+        let dkg_shares =
+            Self::get_encrypted_dkg_shares(executor, summary.signers_public_key).await?;
 
         Ok(Some(DepositRequestReport {
             status,
@@ -1207,11 +1115,14 @@ impl super::DbRead for PgStore {
         }))
     }
 
-    async fn get_deposit_signers(
-        &self,
+    pub async fn get_deposit_signers<'e, E>(
+        executor: &'e mut E,
         txid: &model::BitcoinTxId,
         output_index: u32,
-    ) -> Result<Vec<model::DepositSigner>, Error> {
+    ) -> Result<Vec<model::DepositSigner>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query_as::<_, model::DepositSigner>(
             "SELECT
                 txid
@@ -1224,17 +1135,20 @@ impl super::DbRead for PgStore {
         )
         .bind(txid)
         .bind(i32::try_from(output_index).map_err(Error::ConversionDatabaseInt)?)
-        .fetch_all(&self.0)
+        .fetch_all(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 
-    async fn can_sign_deposit_tx(
-        &self,
+    async fn can_sign_deposit_tx<'e, E>(
+        executor: &'e mut E,
         txid: &model::BitcoinTxId,
         output_index: u32,
         signer_public_key: &PublicKey,
-    ) -> Result<Option<bool>, Error> {
+    ) -> Result<Option<bool>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query_scalar::<_, bool>(
             r#"
             WITH x_only_public_keys AS (
@@ -1256,16 +1170,19 @@ impl super::DbRead for PgStore {
         .bind(txid)
         .bind(i32::try_from(output_index).map_err(Error::ConversionDatabaseInt)?)
         .bind(signer_public_key)
-        .fetch_optional(&self.0)
+        .fetch_optional(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 
-    async fn deposit_request_exists(
-        &self,
+    async fn deposit_request_exists<'e, E>(
+        executor: &'e mut E,
         txid: &model::BitcoinTxId,
         output_index: u32,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query_scalar::<_, bool>(
             r#"
             SELECT EXISTS (
@@ -1278,16 +1195,19 @@ impl super::DbRead for PgStore {
         )
         .bind(txid)
         .bind(i32::try_from(output_index).map_err(Error::ConversionDatabaseInt)?)
-        .fetch_one(&self.0)
+        .fetch_one(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 
-    async fn get_withdrawal_signers(
-        &self,
+    async fn get_withdrawal_signers<'e, E>(
+        executor: &'e mut E,
         request_id: u64,
         block_hash: &model::StacksBlockHash,
-    ) -> Result<Vec<model::WithdrawalSigner>, Error> {
+    ) -> Result<Vec<model::WithdrawalSigner>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query_as::<_, model::WithdrawalSigner>(
             "SELECT
                 request_id
@@ -1301,18 +1221,22 @@ impl super::DbRead for PgStore {
         )
         .bind(i64::try_from(request_id).map_err(Error::ConversionDatabaseInt)?)
         .bind(block_hash)
-        .fetch_all(&self.0)
+        .fetch_all(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 
-    async fn get_pending_withdrawal_requests(
-        &self,
+    async fn get_pending_withdrawal_requests<'e, E>(
+        executor: &'e mut E,
         chain_tip: &model::BitcoinBlockHash,
         context_window: u16,
         signer_public_key: &PublicKey,
-    ) -> Result<Vec<model::WithdrawalRequest>, Error> {
-        let Some(stacks_chain_tip) = self.get_stacks_chain_tip(chain_tip).await? else {
+    ) -> Result<Vec<model::WithdrawalRequest>, Error>
+    where
+        E: 'static,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
+    {
+        let Some(stacks_chain_tip) = Self::get_stacks_chain_tip(executor, chain_tip).await? else {
             return Ok(Vec::new());
         };
         sqlx::query_as::<_, model::WithdrawalRequest>(
@@ -1377,18 +1301,21 @@ impl super::DbRead for PgStore {
         .bind(stacks_chain_tip.block_hash)
         .bind(i32::from(context_window))
         .bind(signer_public_key)
-        .fetch_all(&self.0)
+        .fetch_all(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 
-    async fn get_pending_accepted_withdrawal_requests(
-        &self,
+    async fn get_pending_accepted_withdrawal_requests<'e, E>(
+        executor: &'e mut E,
         bitcoin_chain_tip: &model::BitcoinBlockHash,
         stacks_chain_tip: &model::StacksBlockHash,
         min_bitcoin_height: BitcoinBlockHeight,
         signature_threshold: u16,
-    ) -> Result<Vec<model::WithdrawalRequest>, Error> {
+    ) -> Result<Vec<model::WithdrawalRequest>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query_as::<_, model::WithdrawalRequest>(
             r#"
             -- get_pending_accepted_withdrawal_requests
@@ -1516,17 +1443,23 @@ impl super::DbRead for PgStore {
         .bind(stacks_chain_tip)
         .bind(i64::try_from(min_bitcoin_height).map_err(Error::ConversionDatabaseInt)?)
         .bind(i64::from(signature_threshold))
-        .fetch_all(&self.0)
+        .fetch_all(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 
-    async fn get_pending_rejected_withdrawal_requests(
-        &self,
+    async fn get_pending_rejected_withdrawal_requests<'e, E>(
+        executor: &'e mut E,
         chain_tip: &model::BitcoinBlockRef,
         context_window: u16,
-    ) -> Result<Vec<model::WithdrawalRequest>, Error> {
-        let Some(stacks_chain_tip) = self.get_stacks_chain_tip(&chain_tip.block_hash).await? else {
+    ) -> Result<Vec<model::WithdrawalRequest>, Error>
+    where
+        E: 'static,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
+    {
+        let Some(stacks_chain_tip) =
+            Self::get_stacks_chain_tip(executor, &chain_tip.block_hash).await?
+        else {
             return Ok(Vec::new());
         };
 
@@ -1620,28 +1553,34 @@ impl super::DbRead for PgStore {
         .bind(i32::from(context_window))
         .bind(stacks_chain_tip.block_hash)
         .bind(i64::try_from(expiration_height).map_err(Error::ConversionDatabaseInt)?)
-        .fetch_all(&self.0)
+        .fetch_all(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 
-    async fn get_withdrawal_request_report(
-        &self,
+    async fn get_withdrawal_request_report<'e, E>(
+        executor: &'e mut E,
         bitcoin_chain_tip: &model::BitcoinBlockHash,
         stacks_chain_tip: &model::StacksBlockHash,
         id: &model::QualifiedRequestId,
         signer_public_key: &PublicKey,
-    ) -> Result<Option<WithdrawalRequestReport>, Error> {
-        let summary_fut = self.get_withdrawal_request_status_summary(id, signer_public_key);
+    ) -> Result<Option<WithdrawalRequestReport>, Error>
+    where
+        E: 'static,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
+    {
+        let summary_fut =
+            Self::get_withdrawal_request_status_summary(executor, id, signer_public_key);
         let Some(summary) = summary_fut.await? else {
             return Ok(None);
         };
 
-        let sweep_info_fut = self.get_withdrawal_sweep_info(bitcoin_chain_tip, id);
+        let sweep_info_fut = Self::get_withdrawal_sweep_info(executor, bitcoin_chain_tip, id);
         let status = match sweep_info_fut.await? {
             Some(tx_ref) => WithdrawalRequestStatus::Fulfilled(tx_ref),
             None => {
-                let in_canonical_stacks_blockchain_fut = self.in_canonical_stacks_blockchain(
+                let in_canonical_stacks_blockchain_fut = Self::in_canonical_stacks_blockchain(
+                    executor,
                     stacks_chain_tip,
                     &summary.stacks_block_hash,
                     summary.stacks_block_height,
@@ -1665,11 +1604,14 @@ impl super::DbRead for PgStore {
         }))
     }
 
-    async fn compute_withdrawn_total(
-        &self,
+    async fn compute_withdrawn_total<'e, E>(
+        executor: &'e mut E,
         bitcoin_chain_tip: &model::BitcoinBlockHash,
         context_window: u16,
-    ) -> Result<u64, Error> {
+    ) -> Result<u64, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
         let total_amount = sqlx::query_scalar::<_, Option<i64>>(
             r#"
             SELECT SUM(bto.amount)::BIGINT
@@ -1683,7 +1625,7 @@ impl super::DbRead for PgStore {
         )
         .bind(bitcoin_chain_tip)
         .bind(i32::from(context_window))
-        .fetch_one(&self.0)
+        .fetch_one(executor)
         .await
         .map_err(Error::SqlxQuery)?;
 
@@ -1692,15 +1634,18 @@ impl super::DbRead for PgStore {
         u64::try_from(total_amount.unwrap_or(0)).map_err(|_| Error::TypeConversion)
     }
 
-    async fn get_bitcoin_blocks_with_transaction(
-        &self,
+    async fn get_bitcoin_blocks_with_transaction<'e, E>(
+        executor: &'e mut E,
         txid: &model::BitcoinTxId,
-    ) -> Result<Vec<model::BitcoinBlockHash>, Error> {
+    ) -> Result<Vec<model::BitcoinBlockHash>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query_as::<_, model::BitcoinTxRef>(
             "SELECT txid, block_hash FROM sbtc_signer.bitcoin_transactions WHERE txid = $1",
         )
         .bind(txid)
-        .fetch_all(&self.0)
+        .fetch_all(executor)
         .await
         .map(|res| {
             res.into_iter()
@@ -1710,7 +1655,13 @@ impl super::DbRead for PgStore {
         .map_err(Error::SqlxQuery)
     }
 
-    async fn stacks_block_exists(&self, block_id: StacksBlockId) -> Result<bool, Error> {
+    async fn stacks_block_exists<'e, E>(
+        executor: &'e mut E,
+        block_id: StacksBlockId,
+    ) -> Result<bool, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query_scalar::<_, bool>(
             r#"
             SELECT TRUE AS exists
@@ -1718,18 +1669,19 @@ impl super::DbRead for PgStore {
             WHERE block_hash = $1;"#,
         )
         .bind(block_id.0)
-        .fetch_optional(&self.0)
+        .fetch_optional(executor)
         .await
         .map(|row| row.is_some())
         .map_err(Error::SqlxQuery)
     }
 
-    async fn get_encrypted_dkg_shares<X>(
-        &self,
+    async fn get_encrypted_dkg_shares<'e, X, E>(
+        executor: &'e mut E,
         aggregate_key: X,
     ) -> Result<Option<model::EncryptedDkgShares>, Error>
     where
-        X: Into<PublicKeyXOnly> + Send,
+        X: Into<PublicKeyXOnly>,
+        &'e mut E: sqlx::PgExecutor<'e>,
     {
         // The aggregate_key column stores compressed public keys, which
         // always include a parity byte. Since the input here is an x-only
@@ -1754,14 +1706,17 @@ impl super::DbRead for PgStore {
             "#,
         )
         .bind(key)
-        .fetch_optional(&self.0)
+        .fetch_optional(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 
-    async fn get_latest_encrypted_dkg_shares(
-        &self,
-    ) -> Result<Option<model::EncryptedDkgShares>, Error> {
+    async fn get_latest_encrypted_dkg_shares<'e, E>(
+        executor: &'e mut E,
+    ) -> Result<Option<model::EncryptedDkgShares>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query_as::<_, model::EncryptedDkgShares>(
             r#"
             SELECT
@@ -1780,14 +1735,17 @@ impl super::DbRead for PgStore {
             LIMIT 1;
             "#,
         )
-        .fetch_optional(&self.0)
+        .fetch_optional(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 
-    async fn get_latest_verified_dkg_shares(
-        &self,
-    ) -> Result<Option<model::EncryptedDkgShares>, Error> {
+    async fn get_latest_verified_dkg_shares<'e, E>(
+        executor: &'e mut E,
+    ) -> Result<Option<model::EncryptedDkgShares>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query_as::<_, model::EncryptedDkgShares>(
             r#"
             SELECT
@@ -1807,17 +1765,20 @@ impl super::DbRead for PgStore {
             LIMIT 1;
             "#,
         )
-        .fetch_optional(&self.0)
+        .fetch_optional(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 
     /// Returns the number of non-failed rows in the `dkg_shares` table.
-    async fn get_encrypted_dkg_shares_count(&self) -> Result<u32, Error> {
+    async fn get_encrypted_dkg_shares_count<'e, E>(executor: &'e mut E) -> Result<u32, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
         let count: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM sbtc_signer.dkg_shares WHERE dkg_shares_status != 'failed';",
         )
-        .fetch_one(&self.0)
+        .fetch_one(executor)
         .await
         .map_err(Error::SqlxQuery)?;
 
@@ -1831,11 +1792,15 @@ impl super::DbRead for PgStore {
     /// This might become quite inefficient for long chains with infrequent
     /// key rotations, so we might have to consider data model updates to
     /// allow more efficient querying of the last key rotation.
-    async fn get_last_key_rotation(
-        &self,
+    async fn get_last_key_rotation<'e, E>(
+        executor: &'e mut E,
         chain_tip: &model::BitcoinBlockHash,
-    ) -> Result<Option<model::KeyRotationEvent>, Error> {
-        let Some(stacks_chain_tip) = self.get_stacks_chain_tip(chain_tip).await? else {
+    ) -> Result<Option<model::KeyRotationEvent>, Error>
+    where
+        E: 'static,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
+    {
+        let Some(stacks_chain_tip) = Self::get_stacks_chain_tip(executor, chain_tip).await? else {
             return Ok(None);
         };
 
@@ -1875,19 +1840,23 @@ impl super::DbRead for PgStore {
             "#,
         )
         .bind(stacks_chain_tip.block_hash)
-        .fetch_optional(&self.0)
+        .fetch_optional(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 
-    async fn key_rotation_exists(
-        &self,
+    async fn key_rotation_exists<'e, E>(
+        executor: &'e mut E,
         chain_tip: &model::BitcoinBlockHash,
         signer_set: &BTreeSet<PublicKey>,
         aggregate_key: &PublicKey,
         signatures_required: u16,
-    ) -> Result<bool, Error> {
-        let Some(stacks_chain_tip) = self.get_stacks_chain_tip(chain_tip).await? else {
+    ) -> Result<bool, Error>
+    where
+        E: 'static,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
+    {
+        let Some(stacks_chain_tip) = Self::get_stacks_chain_tip(executor, chain_tip).await? else {
             return Err(Error::NoStacksChainTip);
         };
 
@@ -1927,12 +1896,17 @@ impl super::DbRead for PgStore {
         .bind(signer_set.iter().collect::<Vec<_>>())
         .bind(aggregate_key)
         .bind(i32::from(signatures_required))
-        .fetch_one(&self.0)
+        .fetch_one(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 
-    async fn get_signers_script_pubkeys(&self) -> Result<Vec<model::Bytes>, Error> {
+    async fn get_signers_script_pubkeys<'e, E>(
+        executor: &'e mut E,
+    ) -> Result<Vec<model::Bytes>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query_scalar::<_, model::Bytes>(
             r#"
             WITH last_script_pubkey AS (
@@ -1958,22 +1932,26 @@ impl super::DbRead for PgStore {
               AND created_at > CURRENT_TIMESTAMP - INTERVAL '365 DAYS'
             "#,
         )
-        .fetch_all(&self.0)
+        .fetch_all(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 
-    async fn get_signer_utxo(
-        &self,
+    async fn get_signer_utxo<'e, E>(
+        executor: &'e mut E,
         chain_tip: &model::BitcoinBlockHash,
-    ) -> Result<Option<SignerUtxo>, Error> {
+    ) -> Result<Option<SignerUtxo>, Error>
+    where
+        E: 'static,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
+    {
         // If we've swept funds before, then will have a signer output and
         // a minimum UTXO height, so let's try that first.
-        let Some(min_block_height) = self.minimum_utxo_height().await? else {
+        let Some(min_block_height) = Self::minimum_utxo_height(executor).await? else {
             // If the above function returns None then we know that there
             // have been no confirmed sweep transactions thus far, so let's
             // try looking for a donation UTXO.
-            return self.get_donation_utxo(chain_tip).await;
+            return Self::get_donation_utxo(executor, chain_tip).await;
         };
         // Okay, so we know that there has been at least one sweep
         // transaction. Let's look for the UTXO in a block after our
@@ -1981,17 +1959,20 @@ impl super::DbRead for PgStore {
         // when a reorg has affected all sweep transactions. If this
         // happens we try searching for a donation.
         let output_type = model::TxOutputType::SignersOutput;
-        let fut = self.get_utxo(chain_tip, output_type, min_block_height);
+        let fut = Self::get_utxo(executor, chain_tip, output_type, min_block_height);
         match fut.await? {
             res @ Some(_) => Ok(res),
-            None => self.get_donation_utxo(chain_tip).await,
+            None => Self::get_donation_utxo(executor, chain_tip).await,
         }
     }
 
-    async fn is_known_bitcoin_block_hash(
-        &self,
+    async fn is_known_bitcoin_block_hash<'e, E>(
+        executor: &'e mut E,
         block_hash: &model::BitcoinBlockHash,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query_scalar::<_, bool>(
             r#"
             SELECT EXISTS (
@@ -2002,16 +1983,19 @@ impl super::DbRead for PgStore {
         "#,
         )
         .bind(block_hash)
-        .fetch_one(&self.0)
+        .fetch_one(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 
-    async fn in_canonical_bitcoin_blockchain(
-        &self,
+    async fn in_canonical_bitcoin_blockchain<'e, E>(
+        executor: &'e mut E,
         chain_tip: &model::BitcoinBlockRef,
         block_ref: &model::BitcoinBlockRef,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
         let height_diff: u64 = *chain_tip
             .block_height
             .saturating_sub(block_ref.block_height);
@@ -2051,12 +2035,18 @@ impl super::DbRead for PgStore {
         .bind(block_ref.block_hash)
         .bind(i64::try_from(height_diff).map_err(Error::ConversionDatabaseInt)?)
         .bind(i64::try_from(block_ref.block_height).map_err(Error::ConversionDatabaseInt)?)
-        .fetch_one(&self.0)
+        .fetch_one(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 
-    async fn is_signer_script_pub_key(&self, script: &model::ScriptPubKey) -> Result<bool, Error> {
+    async fn is_signer_script_pub_key<'e, E>(
+        executor: &'e mut E,
+        script: &model::ScriptPubKey,
+    ) -> Result<bool, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query_scalar::<_, bool>(
             r#"
             SELECT 
@@ -2077,17 +2067,21 @@ impl super::DbRead for PgStore {
         "#,
         )
         .bind(script)
-        .fetch_one(&self.0)
+        .fetch_one(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 
-    async fn is_withdrawal_inflight(
-        &self,
+    async fn is_withdrawal_inflight<'e, E>(
+        executor: &'e mut E,
         id: &model::QualifiedRequestId,
         bitcoin_chain_tip: &model::BitcoinBlockHash,
-    ) -> Result<bool, Error> {
-        let Some(signer_utxo) = self.get_signer_utxo(bitcoin_chain_tip).await? else {
+    ) -> Result<bool, Error>
+    where
+        E: 'static,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
+    {
+        let Some(signer_utxo) = Self::get_signer_utxo(executor, bitcoin_chain_tip).await? else {
             return Ok(false);
         };
         let txid: model::BitcoinTxId = signer_utxo.outpoint.txid.into();
@@ -2128,17 +2122,21 @@ impl super::DbRead for PgStore {
         .bind(txid)
         .bind(i64::try_from(id.request_id).map_err(Error::ConversionDatabaseInt)?)
         .bind(id.block_hash)
-        .fetch_one(&self.0)
+        .fetch_one(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 
-    async fn is_withdrawal_active(
-        &self,
+    async fn is_withdrawal_active<'e, E>(
+        executor: &'e mut E,
         id: &model::QualifiedRequestId,
         bitcoin_chain_tip: &model::BitcoinBlockRef,
         min_confirmations: u64,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, Error>
+    where
+        E: 'static,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
+    {
         // We want to find the first sweep transaction that happened
         // *after* the last time the signers considered sweeping the
         // withdrawal request. We do this in two stages:
@@ -2159,7 +2157,7 @@ impl super::DbRead for PgStore {
         )
         .bind(i64::try_from(id.request_id).map_err(Error::ConversionDatabaseInt)?)
         .bind(id.block_hash)
-        .fetch_one(&self.0)
+        .fetch_one(&mut *executor)
         .await
         .map_err(Error::SqlxQuery)?;
 
@@ -2175,9 +2173,8 @@ impl super::DbRead for PgStore {
         // at least once. We now try to find the height of the oldest
         // signer TXO whose height is greater than the height from above.
         let chain_tip_hash = &bitcoin_chain_tip.block_hash;
-        let least_txo_height = self
-            .get_least_txo_height(chain_tip_hash, min_block_height)
-            .await?;
+        let least_txo_height =
+            Self::get_least_txo_height(executor, chain_tip_hash, min_block_height).await?;
         // If this returns None, then the sweep itself could be in the
         // mempool. If that's the case then this is definitely active.
         let Some(least_txo_height) = least_txo_height else {
@@ -2193,11 +2190,15 @@ impl super::DbRead for PgStore {
         Ok(txo_confirmations <= min_confirmations.into())
     }
 
-    async fn get_swept_deposit_requests(
-        &self,
+    async fn get_swept_deposit_requests<'e, E>(
+        executor: &'e mut E,
         chain_tip: &model::BitcoinBlockHash,
         context_window: u16,
-    ) -> Result<Vec<model::SweptDepositRequest>, Error> {
+    ) -> Result<Vec<model::SweptDepositRequest>, Error>
+    where
+        E: 'static,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
+    {
         // The following tests define the criteria for this query:
         // - [X] get_swept_deposit_requests_returns_swept_deposit_requests
         // - [X] get_swept_deposit_requests_does_not_return_unswept_deposit_requests
@@ -2208,7 +2209,7 @@ impl super::DbRead for PgStore {
         // event is anchored to a bitcoin block that is outside the context
         // window, while the sweep is still inside it.
 
-        let Some(stacks_chain_tip) = self.get_stacks_chain_tip(chain_tip).await? else {
+        let Some(stacks_chain_tip) = Self::get_stacks_chain_tip(executor, chain_tip).await? else {
             return Ok(Vec::new());
         };
 
@@ -2277,16 +2278,20 @@ impl super::DbRead for PgStore {
         .bind(chain_tip)
         .bind(i32::from(context_window))
         .bind(stacks_chain_tip.block_hash)
-        .fetch_all(&self.0)
+        .fetch_all(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 
-    async fn get_swept_withdrawal_requests(
-        &self,
+    async fn get_swept_withdrawal_requests<'e, E>(
+        executor: &'e mut E,
         chain_tip: &model::BitcoinBlockHash,
         context_window: u16,
-    ) -> Result<Vec<model::SweptWithdrawalRequest>, Error> {
+    ) -> Result<Vec<model::SweptWithdrawalRequest>, Error>
+    where
+        E: 'static,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
+    {
         // The following tests define the criteria for this query:
         // - [X] get_swept_withdrawal_requests_returns_swept_withdrawal_requests
         // - [X] get_swept_withdrawal_requests_does_not_return_unswept_withdrawal_requests
@@ -2297,7 +2302,7 @@ impl super::DbRead for PgStore {
         // event is anchored to a bitcoin block that is outside the context
         // window, while the sweep is still inside it.
 
-        let Some(stacks_chain_tip) = self.get_stacks_chain_tip(chain_tip).await? else {
+        let Some(stacks_chain_tip) = Self::get_stacks_chain_tip(executor, chain_tip).await? else {
             return Ok(Vec::new());
         };
 
@@ -2374,16 +2379,19 @@ impl super::DbRead for PgStore {
         .bind(chain_tip)
         .bind(i32::from(context_window))
         .bind(stacks_chain_tip.block_hash)
-        .fetch_all(&self.0)
+        .fetch_all(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 
-    async fn get_deposit_request(
-        &self,
+    async fn get_deposit_request<'e, E>(
+        executor: &'e mut E,
         txid: &model::BitcoinTxId,
         output_index: u32,
-    ) -> Result<Option<model::DepositRequest>, Error> {
+    ) -> Result<Option<model::DepositRequest>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query_as::<_, model::DepositRequest>(
             r#"
             SELECT txid
@@ -2404,15 +2412,18 @@ impl super::DbRead for PgStore {
         )
         .bind(txid)
         .bind(i32::try_from(output_index).map_err(Error::ConversionDatabaseInt)?)
-        .fetch_optional(&self.0)
+        .fetch_optional(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 
-    async fn will_sign_bitcoin_tx_sighash(
-        &self,
+    async fn will_sign_bitcoin_tx_sighash<'e, E>(
+        executor: &'e mut E,
         sighash: &model::SigHash,
-    ) -> Result<Option<(bool, PublicKeyXOnly)>, Error> {
+    ) -> Result<Option<(bool, PublicKeyXOnly)>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query_as::<_, (bool, PublicKeyXOnly)>(
             r#"
             SELECT
@@ -2423,17 +2434,20 @@ impl super::DbRead for PgStore {
             "#,
         )
         .bind(sighash)
-        .fetch_optional(&self.0)
+        .fetch_optional(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 
-    async fn get_withdrawal_signer_decisions(
-        &self,
+    async fn get_withdrawal_signer_decisions<'e, E>(
+        executor: &'e mut E,
         chain_tip: &model::BitcoinBlockHash,
         context_window: u16,
         signer_public_key: &PublicKey,
-    ) -> Result<Vec<model::WithdrawalSigner>, Error> {
+    ) -> Result<Vec<model::WithdrawalSigner>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query_as::<_, model::WithdrawalSigner>(
             r#"
             WITH target_block AS (
@@ -2458,17 +2472,20 @@ impl super::DbRead for PgStore {
         .bind(chain_tip)
         .bind(i32::from(context_window))
         .bind(signer_public_key)
-        .fetch_all(&self.0)
+        .fetch_all(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 
-    async fn get_deposit_signer_decisions(
-        &self,
+    async fn get_deposit_signer_decisions<'e, E>(
+        executor: &'e mut E,
         chain_tip: &model::BitcoinBlockHash,
         context_window: u16,
         signer_public_key: &PublicKey,
-    ) -> Result<Vec<model::DepositSigner>, Error> {
+    ) -> Result<Vec<model::DepositSigner>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query_as::<_, model::DepositSigner>(
             r#"
             WITH target_block AS (
@@ -2492,879 +2509,850 @@ impl super::DbRead for PgStore {
         .bind(chain_tip)
         .bind(i32::from(context_window))
         .bind(signer_public_key)
-        .fetch_all(&self.0)
+        .fetch_all(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
 }
 
-impl super::DbWrite for PgStore {
-    async fn write_bitcoin_block(&self, block: &model::BitcoinBlock) -> Result<(), Error> {
-        sqlx::query(
-            "INSERT INTO sbtc_signer.bitcoin_blocks
-              ( block_hash
-              , block_height
-              , parent_hash
-              )
-            VALUES ($1, $2, $3)
-            ON CONFLICT DO NOTHING",
-        )
-        .bind(block.block_hash)
-        .bind(i64::try_from(block.block_height).map_err(Error::ConversionDatabaseInt)?)
-        .bind(block.parent_hash)
-        .execute(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(())
-    }
-
-    async fn write_stacks_block(&self, block: &model::StacksBlock) -> Result<(), Error> {
-        sqlx::query(
-            "INSERT INTO sbtc_signer.stacks_blocks
-              ( block_hash
-              , block_height
-              , parent_hash
-              , bitcoin_anchor
-              )
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT DO NOTHING",
-        )
-        .bind(block.block_hash)
-        .bind(i64::try_from(block.block_height).map_err(Error::ConversionDatabaseInt)?)
-        .bind(block.parent_hash)
-        .bind(block.bitcoin_anchor)
-        .execute(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(())
-    }
-
-    async fn write_deposit_request(
+impl DbRead for PgStore {
+    async fn get_bitcoin_block(
         &self,
-        deposit_request: &model::DepositRequest,
-    ) -> Result<(), Error> {
-        sqlx::query(
-            "INSERT INTO sbtc_signer.deposit_requests
-              ( txid
-              , output_index
-              , spend_script
-              , reclaim_script
-              , reclaim_script_hash
-              , recipient
-              , amount
-              , max_fee
-              , lock_time
-              , signers_public_key
-              , sender_script_pub_keys
-              )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-            ON CONFLICT DO NOTHING",
-        )
-        .bind(deposit_request.txid)
-        .bind(i32::try_from(deposit_request.output_index).map_err(Error::ConversionDatabaseInt)?)
-        .bind(&deposit_request.spend_script)
-        .bind(&deposit_request.reclaim_script)
-        .bind(&deposit_request.reclaim_script_hash)
-        .bind(&deposit_request.recipient)
-        .bind(i64::try_from(deposit_request.amount).map_err(Error::ConversionDatabaseInt)?)
-        .bind(i64::try_from(deposit_request.max_fee).map_err(Error::ConversionDatabaseInt)?)
-        .bind(i64::from(deposit_request.lock_time))
-        .bind(deposit_request.signers_public_key)
-        .bind(&deposit_request.sender_script_pub_keys)
-        .execute(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(())
+        block_hash: &model::BitcoinBlockHash,
+    ) -> Result<Option<model::BitcoinBlock>, Error> {
+        PgRead::get_bitcoin_block(self.get_connection().await?.as_mut(), block_hash).await
     }
 
-    async fn write_deposit_requests(
+    async fn get_stacks_block(
         &self,
-        deposit_requests: Vec<model::DepositRequest>,
-    ) -> Result<(), Error> {
-        if deposit_requests.is_empty() {
-            return Ok(());
-        }
-
-        let mut txid = Vec::with_capacity(deposit_requests.len());
-        let mut output_index = Vec::with_capacity(deposit_requests.len());
-        let mut spend_script = Vec::with_capacity(deposit_requests.len());
-        let mut reclaim_script = Vec::with_capacity(deposit_requests.len());
-        let mut reclaim_script_hash = Vec::with_capacity(deposit_requests.len());
-        let mut recipient = Vec::with_capacity(deposit_requests.len());
-        let mut amount = Vec::with_capacity(deposit_requests.len());
-        let mut max_fee = Vec::with_capacity(deposit_requests.len());
-        let mut lock_time = Vec::with_capacity(deposit_requests.len());
-        let mut signers_public_key = Vec::with_capacity(deposit_requests.len());
-        let mut sender_script_pubkeys = Vec::with_capacity(deposit_requests.len());
-
-        for req in deposit_requests {
-            let vout = i32::try_from(req.output_index).map_err(Error::ConversionDatabaseInt)?;
-            txid.push(req.txid);
-            output_index.push(vout);
-            spend_script.push(req.spend_script);
-            reclaim_script.push(req.reclaim_script);
-            reclaim_script_hash.push(req.reclaim_script_hash);
-            recipient.push(req.recipient);
-            amount.push(i64::try_from(req.amount).map_err(Error::ConversionDatabaseInt)?);
-            max_fee.push(i64::try_from(req.max_fee).map_err(Error::ConversionDatabaseInt)?);
-            lock_time.push(i64::from(req.lock_time));
-            signers_public_key.push(req.signers_public_key);
-            // We need to join the addresses like this (and later split
-            // them), because handling of multidimensional arrays in
-            // postgres is tough. The naive approach of doing
-            // UNNEST($1::VARCHAR[][]) doesn't work, since that completely
-            // flattens the array.
-            let addresses: Vec<String> = req
-                .sender_script_pub_keys
-                .iter()
-                .map(|x| x.to_hex_string())
-                .collect();
-            sender_script_pubkeys.push(addresses.join(","));
-        }
-
-        sqlx::query(
-            r#"
-            WITH tx_ids           AS (SELECT ROW_NUMBER() OVER (), txid FROM UNNEST($1::BYTEA[]) AS txid)
-            , output_index        AS (SELECT ROW_NUMBER() OVER (), output_index FROM UNNEST($2::INTEGER[]) AS output_index)
-            , spend_script        AS (SELECT ROW_NUMBER() OVER (), spend_script FROM UNNEST($3::BYTEA[]) AS spend_script)
-            , reclaim_script      AS (SELECT ROW_NUMBER() OVER (), reclaim_script FROM UNNEST($4::BYTEA[]) AS reclaim_script)
-            , reclaim_script_hash AS (SELECT ROW_NUMBER() OVER (), reclaim_script_hash FROM UNNEST($5::BYTEA[]) AS reclaim_script_hash)
-            , recipient           AS (SELECT ROW_NUMBER() OVER (), recipient FROM UNNEST($6::TEXT[]) AS recipient)
-            , amount              AS (SELECT ROW_NUMBER() OVER (), amount FROM UNNEST($7::BIGINT[]) AS amount)
-            , max_fee             AS (SELECT ROW_NUMBER() OVER (), max_fee FROM UNNEST($8::BIGINT[]) AS max_fee)
-            , lock_time           AS (SELECT ROW_NUMBER() OVER (), lock_time FROM UNNEST($9::BIGINT[]) AS lock_time)
-            , signer_pub_keys     AS (SELECT ROW_NUMBER() OVER (), signers_public_key FROM UNNEST($10::BYTEA[]) AS signers_public_key)
-            , script_pub_keys     AS (SELECT ROW_NUMBER() OVER (), senders FROM UNNEST($11::VARCHAR[]) AS senders)
-            INSERT INTO sbtc_signer.deposit_requests (
-                  txid
-                , output_index
-                , spend_script
-                , reclaim_script
-                , reclaim_script_hash
-                , recipient
-                , amount
-                , max_fee
-                , lock_time
-                , signers_public_key
-                , sender_script_pub_keys)
-            SELECT
-                txid
-              , output_index
-              , spend_script
-              , reclaim_script
-              , reclaim_script_hash
-              , recipient
-              , amount
-              , max_fee
-              , lock_time
-              , signers_public_key
-              , ARRAY(SELECT decode(UNNEST(regexp_split_to_array(senders, ',')), 'hex'))
-            FROM tx_ids
-            JOIN output_index USING (row_number)
-            JOIN spend_script USING (row_number)
-            JOIN reclaim_script USING (row_number)
-            JOIN reclaim_script_hash USING (row_number)
-            JOIN recipient USING (row_number)
-            JOIN amount USING (row_number)
-            JOIN max_fee USING (row_number)
-            JOIN lock_time USING (row_number)
-            JOIN signer_pub_keys USING (row_number)
-            JOIN script_pub_keys USING (row_number)
-            ON CONFLICT DO NOTHING"#,
-        )
-        .bind(txid)
-        .bind(output_index)
-        .bind(spend_script)
-        .bind(reclaim_script)
-        .bind(reclaim_script_hash)
-        .bind(recipient)
-        .bind(amount)
-        .bind(max_fee)
-        .bind(lock_time)
-        .bind(signers_public_key)
-        .bind(sender_script_pubkeys)
-        .execute(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(())
+        block_hash: &model::StacksBlockHash,
+    ) -> Result<Option<model::StacksBlock>, Error> {
+        PgRead::get_stacks_block(self.get_connection().await?.as_mut(), block_hash).await
     }
 
-    async fn write_withdrawal_request(
+    async fn get_bitcoin_canonical_chain_tip(
         &self,
-        request: &model::WithdrawalRequest,
-    ) -> Result<(), Error> {
-        sqlx::query(
-            "INSERT INTO sbtc_signer.withdrawal_requests
-              ( request_id
-              , txid
-              , block_hash
-              , recipient
-              , amount
-              , max_fee
-              , sender_address
-              , bitcoin_block_height
-              )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            ON CONFLICT DO NOTHING",
-        )
-        .bind(i64::try_from(request.request_id).map_err(Error::ConversionDatabaseInt)?)
-        .bind(request.txid)
-        .bind(request.block_hash)
-        .bind(&request.recipient)
-        .bind(i64::try_from(request.amount).map_err(Error::ConversionDatabaseInt)?)
-        .bind(i64::try_from(request.max_fee).map_err(Error::ConversionDatabaseInt)?)
-        .bind(&request.sender_address)
-        .bind(i64::try_from(request.bitcoin_block_height).map_err(Error::ConversionDatabaseInt)?)
-        .execute(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(())
+    ) -> Result<Option<model::BitcoinBlockHash>, Error> {
+        PgRead::get_bitcoin_canonical_chain_tip(self.get_connection().await?.as_mut()).await
     }
 
-    #[tracing::instrument(skip(self))]
-    async fn write_deposit_signer_decision(
+    async fn get_bitcoin_canonical_chain_tip_ref(
         &self,
-        decision: &model::DepositSigner,
-    ) -> Result<(), Error> {
-        sqlx::query(
-            "INSERT INTO sbtc_signer.deposit_signers
-              ( txid
-              , output_index
-              , signer_pub_key
-              , can_accept
-              , can_sign
-              )
-            VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT DO NOTHING",
-        )
-        .bind(decision.txid)
-        .bind(i32::try_from(decision.output_index).map_err(Error::ConversionDatabaseInt)?)
-        .bind(decision.signer_pub_key)
-        .bind(decision.can_accept)
-        .bind(decision.can_sign)
-        .execute(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(())
+    ) -> Result<Option<model::BitcoinBlockRef>, Error> {
+        PgRead::get_bitcoin_canonical_chain_tip_ref(self.get_connection().await?.as_mut()).await
     }
 
-    async fn write_withdrawal_signer_decision(
+    async fn get_stacks_chain_tip(
         &self,
-        decision: &model::WithdrawalSigner,
-    ) -> Result<(), Error> {
-        sqlx::query(
-            "INSERT INTO sbtc_signer.withdrawal_signers
-              ( request_id
-              , txid
-              , block_hash
-              , signer_pub_key
-              , is_accepted
-              )
-            VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT DO NOTHING",
-        )
-        .bind(i64::try_from(decision.request_id).map_err(Error::ConversionDatabaseInt)?)
-        .bind(decision.txid)
-        .bind(decision.block_hash)
-        .bind(decision.signer_pub_key)
-        .bind(decision.is_accepted)
-        .execute(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(())
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+    ) -> Result<Option<model::StacksBlock>, Error> {
+        PgRead::get_stacks_chain_tip(self.get_connection().await?.as_mut(), bitcoin_chain_tip).await
     }
 
-    async fn write_bitcoin_transaction(&self, tx_ref: &model::BitcoinTxRef) -> Result<(), Error> {
-        sqlx::query(
-            "INSERT INTO sbtc_signer.bitcoin_transactions (txid, block_hash)
-            VALUES ($1, $2)
-            ON CONFLICT DO NOTHING",
-        )
-        .bind(tx_ref.txid)
-        .bind(tx_ref.block_hash)
-        .execute(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(())
-    }
-
-    async fn write_bitcoin_transactions(&self, txs: Vec<model::BitcoinTxRef>) -> Result<(), Error> {
-        if txs.is_empty() {
-            return Ok(());
-        }
-
-        let mut tx_ids = Vec::with_capacity(txs.len());
-        let mut block_hashes = Vec::with_capacity(txs.len());
-
-        for tx in txs {
-            tx_ids.push(tx.txid);
-            block_hashes.push(tx.block_hash)
-        }
-
-        sqlx::query(
-            r#"
-            WITH tx_ids AS (
-                SELECT ROW_NUMBER() OVER (), txid
-                FROM UNNEST($1::bytea[]) AS txid
-            )
-            , block_ids AS (
-                SELECT ROW_NUMBER() OVER (), block_id
-                FROM UNNEST($2::bytea[]) AS block_id
-            )
-            INSERT INTO sbtc_signer.bitcoin_transactions (txid, block_hash)
-            SELECT
-                txid
-              , block_id
-            FROM tx_ids
-            JOIN block_ids USING (row_number)
-            ON CONFLICT DO NOTHING"#,
-        )
-        .bind(&tx_ids)
-        .bind(&block_hashes)
-        .execute(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(())
-    }
-
-    async fn write_stacks_block_headers(
+    async fn get_pending_deposit_requests(
         &self,
-        blocks: Vec<model::StacksBlock>,
-    ) -> Result<(), Error> {
-        if blocks.is_empty() {
-            return Ok(());
-        }
-
-        let mut block_ids = Vec::with_capacity(blocks.len());
-        let mut parent_block_ids = Vec::with_capacity(blocks.len());
-        let mut chain_lengths = Vec::<i64>::with_capacity(blocks.len());
-        let mut bitcoin_anchors = Vec::with_capacity(blocks.len());
-
-        for block in blocks {
-            block_ids.push(block.block_hash);
-            parent_block_ids.push(block.parent_hash);
-            let block_height =
-                i64::try_from(block.block_height).map_err(Error::ConversionDatabaseInt)?;
-            chain_lengths.push(block_height);
-            bitcoin_anchors.push(block.bitcoin_anchor);
-        }
-
-        sqlx::query(
-            r#"
-            WITH block_ids AS (
-                SELECT ROW_NUMBER() OVER (), block_id
-                FROM UNNEST($1::bytea[]) AS block_id
-            )
-            , parent_block_ids AS (
-                SELECT ROW_NUMBER() OVER (), parent_block_id
-                FROM UNNEST($2::bytea[]) AS parent_block_id
-            )
-            , chain_lengths AS (
-                SELECT ROW_NUMBER() OVER (), chain_length
-                FROM UNNEST($3::bigint[]) AS chain_length
-            )
-            , bitcoin_anchors AS (
-                SELECT ROW_NUMBER() OVER (), bitcoin_anchor
-                FROM UNNEST($4::bytea[]) AS bitcoin_anchor
-            )
-            INSERT INTO sbtc_signer.stacks_blocks (block_hash, block_height, parent_hash, bitcoin_anchor)
-            SELECT
-                block_id
-              , chain_length
-              , parent_block_id
-              , bitcoin_anchor
-            FROM block_ids
-            JOIN parent_block_ids USING (row_number)
-            JOIN chain_lengths USING (row_number)
-            JOIN bitcoin_anchors USING (row_number)
-            ON CONFLICT DO NOTHING"#,
+        chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+        signer_public_key: &PublicKey,
+    ) -> Result<Vec<model::DepositRequest>, Error> {
+        PgRead::get_pending_deposit_requests(
+            self.get_connection().await?.as_mut(),
+            chain_tip,
+            context_window,
+            signer_public_key,
         )
-        .bind(&block_ids)
-        .bind(&parent_block_ids)
-        .bind(&chain_lengths)
-        .bind(&bitcoin_anchors)
-        .execute(&self.0)
         .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(())
     }
 
-    async fn write_encrypted_dkg_shares(
+    async fn get_pending_accepted_deposit_requests(
         &self,
-        shares: &model::EncryptedDkgShares,
-    ) -> Result<(), Error> {
-        let started_at_bitcoin_block_height = i64::try_from(shares.started_at_bitcoin_block_height)
-            .map_err(Error::ConversionDatabaseInt)?;
-
-        sqlx::query(
-            r#"
-            INSERT INTO sbtc_signer.dkg_shares (
-                aggregate_key
-              , tweaked_aggregate_key
-              , encrypted_private_shares
-              , public_shares
-              , script_pubkey
-              , signer_set_public_keys
-              , signature_share_threshold
-              , dkg_shares_status
-              , started_at_bitcoin_block_hash
-              , started_at_bitcoin_block_height
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-            ON CONFLICT DO NOTHING"#,
+        chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+        threshold: u16,
+    ) -> Result<Vec<model::DepositRequest>, Error> {
+        PgRead::get_pending_accepted_deposit_requests(
+            self.get_connection().await?.as_mut(),
+            chain_tip,
+            context_window,
+            threshold,
         )
-        .bind(shares.aggregate_key)
-        .bind(shares.tweaked_aggregate_key)
-        .bind(&shares.encrypted_private_shares)
-        .bind(&shares.public_shares)
-        .bind(&shares.script_pubkey)
-        .bind(&shares.signer_set_public_keys)
-        .bind(i32::from(shares.signature_share_threshold))
-        .bind(shares.dkg_shares_status)
-        .bind(shares.started_at_bitcoin_block_hash)
-        .bind(started_at_bitcoin_block_height)
-        .execute(&self.0)
         .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(())
     }
 
-    async fn write_rotate_keys_transaction(
+    async fn get_deposit_request_signer_votes(
         &self,
-        key_rotation: &model::KeyRotationEvent,
-    ) -> Result<(), Error> {
-        sqlx::query(
-            r#"
-            INSERT INTO sbtc_signer.rotate_keys_transactions (
-                  txid
-                , block_hash
-                , address
-                , aggregate_key
-                , signer_set
-                , signatures_required)
-            VALUES
-                ($1, $2, $3, $4, $5, $6)
-            ON CONFLICT DO NOTHING"#,
+        txid: &model::BitcoinTxId,
+        output_index: u32,
+        aggregate_key: &PublicKey,
+    ) -> Result<model::SignerVotes, Error> {
+        PgRead::get_deposit_request_signer_votes(
+            self.get_connection().await?.as_mut(),
+            txid,
+            output_index,
+            aggregate_key,
         )
-        .bind(key_rotation.txid)
-        .bind(key_rotation.block_hash)
-        .bind(&key_rotation.address)
-        .bind(key_rotation.aggregate_key)
-        .bind(&key_rotation.signer_set)
-        .bind(i32::from(key_rotation.signatures_required))
-        .execute(&self.0)
         .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(())
     }
 
-    async fn write_completed_deposit_event(
+    async fn get_withdrawal_request_signer_votes(
         &self,
-        event: &CompletedDepositEvent,
-    ) -> Result<(), Error> {
-        sqlx::query(
-            "
-        INSERT INTO sbtc_signer.completed_deposit_events (
-            txid
-          , block_hash
-          , amount
-          , bitcoin_txid
-          , output_index
-          , sweep_block_hash
-          , sweep_block_height
-          , sweep_txid
+        id: &model::QualifiedRequestId,
+        aggregate_key: &PublicKey,
+    ) -> Result<model::SignerVotes, Error> {
+        PgRead::get_withdrawal_request_signer_votes(
+            self.get_connection().await?.as_mut(),
+            id,
+            aggregate_key,
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-        )
-        .bind(event.txid)
-        .bind(event.block_id)
-        .bind(i64::try_from(event.amount).map_err(Error::ConversionDatabaseInt)?)
-        .bind(event.outpoint.txid.to_byte_array())
-        .bind(i64::from(event.outpoint.vout))
-        .bind(event.sweep_block_hash.to_byte_array())
-        .bind(i64::try_from(event.sweep_block_height).map_err(Error::ConversionDatabaseInt)?)
-        .bind(event.sweep_txid.to_byte_array())
-        .execute(&self.0)
         .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(())
     }
 
-    async fn write_withdrawal_accept_event(
+    async fn get_deposit_request_report(
         &self,
-        event: &WithdrawalAcceptEvent,
-    ) -> Result<(), Error> {
-        sqlx::query(
-            "
-        INSERT INTO sbtc_signer.withdrawal_accept_events (
-            txid
-          , block_hash
-          , request_id
-          , signer_bitmap
-          , bitcoin_txid
-          , output_index
-          , fee
-          , sweep_block_hash
-          , sweep_block_height
-          , sweep_txid
+        chain_tip: &model::BitcoinBlockHash,
+        txid: &model::BitcoinTxId,
+        output_index: u32,
+        signer_public_key: &PublicKey,
+    ) -> Result<Option<DepositRequestReport>, Error> {
+        PgRead::get_deposit_request_report(
+            self.get_connection().await?.as_mut(),
+            chain_tip,
+            txid,
+            output_index,
+            signer_public_key,
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
-        )
-        .bind(event.txid)
-        .bind(event.block_id)
-        .bind(i64::try_from(event.request_id).map_err(Error::ConversionDatabaseInt)?)
-        .bind(event.signer_bitmap.into_inner())
-        .bind(event.outpoint.txid.to_byte_array())
-        .bind(i64::from(event.outpoint.vout))
-        .bind(i64::try_from(event.fee).map_err(Error::ConversionDatabaseInt)?)
-        .bind(event.sweep_block_hash.to_byte_array())
-        .bind(i64::try_from(event.sweep_block_height).map_err(Error::ConversionDatabaseInt)?)
-        .bind(event.sweep_txid.to_byte_array())
-        .execute(&self.0)
         .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(())
     }
 
-    async fn write_withdrawal_reject_event(
+    async fn get_deposit_signers(
         &self,
-        event: &WithdrawalRejectEvent,
-    ) -> Result<(), Error> {
-        sqlx::query(
-            "
-        INSERT INTO sbtc_signer.withdrawal_reject_events (
-            txid
-          , block_hash
-          , request_id
-          , signer_bitmap
-        )
-        VALUES ($1, $2, $3, $4)",
-        )
-        .bind(event.txid)
-        .bind(event.block_id)
-        .bind(i64::try_from(event.request_id).map_err(Error::ConversionDatabaseInt)?)
-        .bind(event.signer_bitmap.into_inner())
-        .execute(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(())
+        txid: &model::BitcoinTxId,
+        output_index: u32,
+    ) -> Result<Vec<model::DepositSigner>, Error> {
+        PgRead::get_deposit_signers(self.get_connection().await?.as_mut(), txid, output_index).await
     }
 
-    async fn write_tx_output(&self, output: &model::TxOutput) -> Result<(), Error> {
-        sqlx::query(
-            r#"
-            INSERT INTO bitcoin_tx_outputs (
-                txid
-              , output_index
-              , amount
-              , script_pubkey
-              , output_type
-            )
-            VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT DO NOTHING;
-            "#,
-        )
-        .bind(output.txid)
-        .bind(i32::try_from(output.output_index).map_err(Error::ConversionDatabaseInt)?)
-        .bind(i64::try_from(output.amount).map_err(Error::ConversionDatabaseInt)?)
-        .bind(&output.script_pubkey)
-        .bind(output.output_type)
-        .execute(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(())
-    }
-
-    async fn write_withdrawal_tx_output(
+    async fn can_sign_deposit_tx(
         &self,
-        output: &model::WithdrawalTxOutput,
-    ) -> Result<(), Error> {
-        sqlx::query(
-            r#"
-            INSERT INTO bitcoin_withdrawal_tx_outputs (
-                txid
-              , output_index
-              , request_id
-            )
-            VALUES ($1, $2, $3)
-            ON CONFLICT DO NOTHING;
-            "#,
+        txid: &model::BitcoinTxId,
+        output_index: u32,
+        signer_public_key: &PublicKey,
+    ) -> Result<Option<bool>, Error> {
+        PgRead::can_sign_deposit_tx(
+            self.get_connection().await?.as_mut(),
+            txid,
+            output_index,
+            signer_public_key,
         )
-        .bind(output.txid)
-        .bind(i32::try_from(output.output_index).map_err(Error::ConversionDatabaseInt)?)
-        .bind(i64::try_from(output.request_id).map_err(Error::ConversionDatabaseInt)?)
-        .execute(&self.0)
         .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(())
     }
 
-    async fn write_tx_prevout(&self, prevout: &model::TxPrevout) -> Result<(), Error> {
-        sqlx::query(
-            r#"
-            INSERT INTO bitcoin_tx_inputs (
-                txid
-              , prevout_txid
-              , prevout_output_index
-              , amount
-              , script_pubkey
-              , prevout_type
-            )
-            VALUES ($1, $2, $3, $4, $5, $6)
-            ON CONFLICT DO NOTHING;
-            "#,
-        )
-        .bind(prevout.txid)
-        .bind(prevout.prevout_txid)
-        .bind(i32::try_from(prevout.prevout_output_index).map_err(Error::ConversionDatabaseInt)?)
-        .bind(i64::try_from(prevout.amount).map_err(Error::ConversionDatabaseInt)?)
-        .bind(&prevout.script_pubkey)
-        .bind(prevout.prevout_type)
-        .execute(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(())
-    }
-
-    async fn write_bitcoin_txs_sighashes(
+    async fn deposit_request_exists(
         &self,
-        sighashes: &[model::BitcoinTxSigHash],
-    ) -> Result<(), Error> {
-        if sighashes.is_empty() {
-            return Ok(());
-        }
-
-        let mut txid = Vec::with_capacity(sighashes.len());
-        let mut chain_tip = Vec::with_capacity(sighashes.len());
-        let mut prevout_txid = Vec::with_capacity(sighashes.len());
-        let mut prevout_output_index = Vec::with_capacity(sighashes.len());
-        let mut sighash = Vec::with_capacity(sighashes.len());
-        let mut prevout_type = Vec::with_capacity(sighashes.len());
-        let mut validation_result = Vec::with_capacity(sighashes.len());
-        let mut is_valid_tx = Vec::with_capacity(sighashes.len());
-        let mut will_sign = Vec::with_capacity(sighashes.len());
-        let mut aggregate_key = Vec::with_capacity(sighashes.len());
-
-        for tx_sighash in sighashes {
-            txid.push(tx_sighash.txid);
-            chain_tip.push(tx_sighash.chain_tip);
-            prevout_txid.push(tx_sighash.prevout_txid);
-            prevout_output_index.push(
-                i32::try_from(tx_sighash.prevout_output_index)
-                    .map_err(Error::ConversionDatabaseInt)?,
-            );
-            sighash.push(tx_sighash.sighash);
-            prevout_type.push(tx_sighash.prevout_type);
-            validation_result.push(tx_sighash.validation_result);
-            is_valid_tx.push(tx_sighash.is_valid_tx);
-            will_sign.push(tx_sighash.will_sign);
-            aggregate_key.push(tx_sighash.aggregate_key);
-        }
-
-        sqlx::query(
-            r#"
-            WITH tx_ids             AS (SELECT ROW_NUMBER() OVER (), txid FROM UNNEST($1::BYTEA[]) AS txid)
-            , chain_tip             AS (SELECT ROW_NUMBER() OVER (), chain_tip FROM UNNEST($2::BYTEA[]) AS chain_tip)
-            , prevout_txid          AS (SELECT ROW_NUMBER() OVER (), prevout_txid FROM UNNEST($3::BYTEA[]) AS prevout_txid)
-            , prevout_output_index  AS (SELECT ROW_NUMBER() OVER (), prevout_output_index FROM UNNEST($4::INTEGER[]) AS prevout_output_index)
-            , sighash               AS (SELECT ROW_NUMBER() OVER (), sighash FROM UNNEST($5::BYTEA[]) AS sighash)
-            , prevout_type          AS (SELECT ROW_NUMBER() OVER (), prevout_type FROM UNNEST($6::sbtc_signer.prevout_type[]) AS prevout_type)
-            , validation_result     AS (SELECT ROW_NUMBER() OVER (), validation_result FROM UNNEST($7::TEXT[]) AS validation_result)
-            , is_valid_tx           AS (SELECT ROW_NUMBER() OVER (), is_valid_tx FROM UNNEST($8::BOOLEAN[]) AS is_valid_tx)
-            , will_sign             AS (SELECT ROW_NUMBER() OVER (), will_sign FROM UNNEST($9::BOOLEAN[]) AS will_sign)
-            , x_only_public_key     AS (SELECT ROW_NUMBER() OVER (), x_only_public_key FROM UNNEST($10::BYTEA[]) AS x_only_public_key)
-            INSERT INTO sbtc_signer.bitcoin_tx_sighashes (
-                  txid
-                , chain_tip
-                , prevout_txid
-                , prevout_output_index
-                , sighash
-                , prevout_type
-                , validation_result
-                , is_valid_tx
-                , will_sign
-                , x_only_public_key
-            )
-            SELECT
-                txid
-              , chain_tip
-              , prevout_txid
-              , prevout_output_index
-              , sighash
-              , prevout_type
-              , validation_result
-              , is_valid_tx
-              , will_sign
-              , x_only_public_key
-            FROM tx_ids
-            JOIN chain_tip USING (row_number)
-            JOIN prevout_txid USING (row_number)
-            JOIN prevout_output_index USING (row_number)
-            JOIN sighash USING (row_number)
-            JOIN prevout_type USING (row_number)
-            JOIN validation_result USING (row_number)
-            JOIN is_valid_tx USING (row_number)
-            JOIN will_sign USING (row_number)
-            JOIN x_only_public_key USING (row_number)
-            ON CONFLICT DO NOTHING"#,
-        )
-        .bind(txid)
-        .bind(chain_tip)
-        .bind(prevout_txid)
-        .bind(prevout_output_index)
-        .bind(sighash)
-        .bind(prevout_type)
-        .bind(validation_result)
-        .bind(is_valid_tx)
-        .bind(will_sign)
-        .bind(aggregate_key)
-        .execute(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(())
+        txid: &model::BitcoinTxId,
+        output_index: u32,
+    ) -> Result<bool, Error> {
+        PgRead::deposit_request_exists(self.get_connection().await?.as_mut(), txid, output_index)
+            .await
     }
 
-    async fn write_bitcoin_withdrawals_outputs(
+    async fn get_withdrawal_signers(
         &self,
-        withdrawal_outputs: &[model::BitcoinWithdrawalOutput],
-    ) -> Result<(), Error> {
-        if withdrawal_outputs.is_empty() {
-            return Ok(());
-        }
-
-        let mut bitcoin_txid = Vec::with_capacity(withdrawal_outputs.len());
-        let mut bitcoin_chain_tip = Vec::with_capacity(withdrawal_outputs.len());
-        let mut request_id = Vec::with_capacity(withdrawal_outputs.len());
-        let mut output_index = Vec::with_capacity(withdrawal_outputs.len());
-        let mut stacks_txid = Vec::with_capacity(withdrawal_outputs.len());
-        let mut stacks_block_hash = Vec::with_capacity(withdrawal_outputs.len());
-        let mut validation_result = Vec::with_capacity(withdrawal_outputs.len());
-        let mut is_valid_tx = Vec::with_capacity(withdrawal_outputs.len());
-
-        for withdrawal_output in withdrawal_outputs {
-            bitcoin_txid.push(withdrawal_output.bitcoin_txid);
-            bitcoin_chain_tip.push(withdrawal_output.bitcoin_chain_tip);
-            output_index.push(
-                i32::try_from(withdrawal_output.output_index)
-                    .map_err(Error::ConversionDatabaseInt)?,
-            );
-            request_id.push(
-                i64::try_from(withdrawal_output.request_id)
-                    .map_err(Error::ConversionDatabaseInt)?,
-            );
-            stacks_txid.push(withdrawal_output.stacks_txid);
-            stacks_block_hash.push(withdrawal_output.stacks_block_hash);
-            validation_result.push(withdrawal_output.validation_result);
-            is_valid_tx.push(withdrawal_output.is_valid_tx);
-        }
-
-        sqlx::query(
-            r#"
-            WITH bitcoin_tx_ids     AS (SELECT ROW_NUMBER() OVER (), bitcoin_txid FROM UNNEST($1::BYTEA[]) AS bitcoin_txid)
-            , bitcoin_chain_tip     AS (SELECT ROW_NUMBER() OVER (), bitcoin_chain_tip FROM UNNEST($2::BYTEA[]) AS bitcoin_chain_tip)
-            , output_index          AS (SELECT ROW_NUMBER() OVER (), output_index FROM UNNEST($3::INTEGER[]) AS output_index)
-            , request_id            AS (SELECT ROW_NUMBER() OVER (), request_id FROM UNNEST($4::BIGINT[]) AS request_id)
-            , stacks_txid           AS (SELECT ROW_NUMBER() OVER (), stacks_txid FROM UNNEST($5::BYTEA[]) AS stacks_txid)
-            , stacks_block_hash     AS (SELECT ROW_NUMBER() OVER (), stacks_block_hash FROM UNNEST($6::BYTEA[]) AS stacks_block_hash)
-            , validation_result     AS (SELECT ROW_NUMBER() OVER (), validation_result FROM UNNEST($7::TEXT[]) AS validation_result)
-            , is_valid_tx           AS (SELECT ROW_NUMBER() OVER (), is_valid_tx FROM UNNEST($8::BOOLEAN[]) AS is_valid_tx)
-            INSERT INTO sbtc_signer.bitcoin_withdrawals_outputs (
-                  bitcoin_txid
-                , bitcoin_chain_tip
-                , output_index
-                , request_id
-                , stacks_txid
-                , stacks_block_hash
-                , validation_result
-                , is_valid_tx)
-            SELECT
-                bitcoin_txid
-              , bitcoin_chain_tip
-              , output_index
-              , request_id
-              , stacks_txid
-              , stacks_block_hash
-              , validation_result
-              , is_valid_tx
-            FROM bitcoin_tx_ids
-            JOIN bitcoin_chain_tip USING (row_number)
-            JOIN output_index USING (row_number)
-            JOIN request_id USING (row_number)
-            JOIN stacks_txid USING (row_number)
-            JOIN stacks_block_hash USING (row_number)
-            JOIN validation_result USING (row_number)
-            JOIN is_valid_tx USING (row_number)
-            ON CONFLICT DO NOTHING"#,
+        request_id: u64,
+        block_hash: &model::StacksBlockHash,
+    ) -> Result<Vec<model::WithdrawalSigner>, Error> {
+        PgRead::get_withdrawal_signers(
+            self.get_connection().await?.as_mut(),
+            request_id,
+            block_hash,
         )
-        .bind(bitcoin_txid)
-        .bind(bitcoin_chain_tip)
-        .bind(output_index)
-        .bind(request_id)
-        .bind(stacks_txid)
-        .bind(stacks_block_hash)
-        .bind(validation_result)
-        .bind(is_valid_tx)
-        .execute(&self.0)
         .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(())
     }
 
-    async fn revoke_dkg_shares<X>(&self, aggregate_key: X) -> Result<bool, Error>
+    async fn get_pending_withdrawal_requests(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+        signer_public_key: &PublicKey,
+    ) -> Result<Vec<model::WithdrawalRequest>, Error> {
+        PgRead::get_pending_withdrawal_requests(
+            self.get_connection().await?.as_mut(),
+            chain_tip,
+            context_window,
+            signer_public_key,
+        )
+        .await
+    }
+
+    async fn get_pending_accepted_withdrawal_requests(
+        &self,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+        stacks_chain_tip: &model::StacksBlockHash,
+        min_bitcoin_height: BitcoinBlockHeight,
+        signature_threshold: u16,
+    ) -> Result<Vec<model::WithdrawalRequest>, Error> {
+        PgRead::get_pending_accepted_withdrawal_requests(
+            self.get_connection().await?.as_mut(),
+            bitcoin_chain_tip,
+            stacks_chain_tip,
+            min_bitcoin_height,
+            signature_threshold,
+        )
+        .await
+    }
+
+    async fn get_pending_rejected_withdrawal_requests(
+        &self,
+        chain_tip: &model::BitcoinBlockRef,
+        context_window: u16,
+    ) -> Result<Vec<model::WithdrawalRequest>, Error> {
+        PgRead::get_pending_rejected_withdrawal_requests(
+            self.get_connection().await?.as_mut(),
+            chain_tip,
+            context_window,
+        )
+        .await
+    }
+
+    async fn get_withdrawal_request_report(
+        &self,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+        stacks_chain_tip: &model::StacksBlockHash,
+        id: &model::QualifiedRequestId,
+        signer_public_key: &PublicKey,
+    ) -> Result<Option<WithdrawalRequestReport>, Error> {
+        PgRead::get_withdrawal_request_report(
+            self.get_connection().await?.as_mut(),
+            bitcoin_chain_tip,
+            stacks_chain_tip,
+            id,
+            signer_public_key,
+        )
+        .await
+    }
+
+    async fn compute_withdrawn_total(
+        &self,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+    ) -> Result<u64, Error> {
+        PgRead::compute_withdrawn_total(
+            self.get_connection().await?.as_mut(),
+            bitcoin_chain_tip,
+            context_window,
+        )
+        .await
+    }
+
+    async fn get_bitcoin_blocks_with_transaction(
+        &self,
+        txid: &model::BitcoinTxId,
+    ) -> Result<Vec<model::BitcoinBlockHash>, Error> {
+        PgRead::get_bitcoin_blocks_with_transaction(self.get_connection().await?.as_mut(), txid)
+            .await
+    }
+
+    async fn stacks_block_exists(&self, block_id: StacksBlockId) -> Result<bool, Error> {
+        PgRead::stacks_block_exists(self.get_connection().await?.as_mut(), block_id).await
+    }
+
+    async fn get_encrypted_dkg_shares<X>(
+        &self,
+        aggregate_key: X,
+    ) -> Result<Option<model::EncryptedDkgShares>, Error>
     where
-        X: Into<PublicKeyXOnly> + Send,
+        X: Into<PublicKeyXOnly>,
     {
-        sqlx::query(
-            r#"
-            UPDATE sbtc_signer.dkg_shares
-            SET dkg_shares_status = 'failed'
-            WHERE substring(aggregate_key FROM 2) = $1
-              AND dkg_shares_status = 'unverified'; -- only allow failing pending entries
-            "#,
-        )
-        .bind(aggregate_key.into())
-        .execute(&self.0)
-        .await
-        .map(|res| res.rows_affected() > 0)
-        .map_err(Error::SqlxQuery)
+        PgRead::get_encrypted_dkg_shares(self.get_connection().await?.as_mut(), aggregate_key).await
     }
 
-    async fn verify_dkg_shares<X>(&self, aggregate_key: X) -> Result<bool, Error>
-    where
-        X: Into<PublicKeyXOnly> + Send,
-    {
-        sqlx::query(
-            r#"
-            UPDATE sbtc_signer.dkg_shares
-            SET dkg_shares_status = 'verified'
-            WHERE substring(aggregate_key FROM 2) = $1
-              AND dkg_shares_status = 'unverified'; -- only allow verifying pending entries
-            "#,
+    async fn get_latest_encrypted_dkg_shares(
+        &self,
+    ) -> Result<Option<model::EncryptedDkgShares>, Error> {
+        PgRead::get_latest_encrypted_dkg_shares(self.get_connection().await?.as_mut()).await
+    }
+
+    async fn get_latest_verified_dkg_shares(
+        &self,
+    ) -> Result<Option<model::EncryptedDkgShares>, Error> {
+        PgRead::get_latest_verified_dkg_shares(self.get_connection().await?.as_mut()).await
+    }
+
+    async fn get_encrypted_dkg_shares_count(&self) -> Result<u32, Error> {
+        PgRead::get_encrypted_dkg_shares_count(self.get_connection().await?.as_mut()).await
+    }
+
+    async fn get_last_key_rotation(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+    ) -> Result<Option<model::KeyRotationEvent>, Error> {
+        PgRead::get_last_key_rotation(self.get_connection().await?.as_mut(), chain_tip).await
+    }
+
+    async fn key_rotation_exists(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+        signer_set: &BTreeSet<PublicKey>,
+        aggregate_key: &PublicKey,
+        signatures_required: u16,
+    ) -> Result<bool, Error> {
+        PgRead::key_rotation_exists(
+            self.get_connection().await?.as_mut(),
+            chain_tip,
+            signer_set,
+            aggregate_key,
+            signatures_required,
         )
-        .bind(aggregate_key.into())
-        .execute(&self.0)
         .await
-        .map(|res| res.rows_affected() > 0)
-        .map_err(Error::SqlxQuery)
+    }
+
+    async fn get_signers_script_pubkeys(&self) -> Result<Vec<model::Bytes>, Error> {
+        PgRead::get_signers_script_pubkeys(self.get_connection().await?.as_mut()).await
+    }
+
+    async fn get_signer_utxo(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+    ) -> Result<Option<SignerUtxo>, Error> {
+        PgRead::get_signer_utxo(self.get_connection().await?.as_mut(), chain_tip).await
+    }
+
+    async fn is_known_bitcoin_block_hash(
+        &self,
+        block_hash: &model::BitcoinBlockHash,
+    ) -> Result<bool, Error> {
+        PgRead::is_known_bitcoin_block_hash(self.get_connection().await?.as_mut(), block_hash).await
+    }
+
+    async fn in_canonical_bitcoin_blockchain(
+        &self,
+        chain_tip: &model::BitcoinBlockRef,
+        block_ref: &model::BitcoinBlockRef,
+    ) -> Result<bool, Error> {
+        PgRead::in_canonical_bitcoin_blockchain(
+            self.get_connection().await?.as_mut(),
+            chain_tip,
+            block_ref,
+        )
+        .await
+    }
+
+    async fn is_signer_script_pub_key(&self, script: &model::ScriptPubKey) -> Result<bool, Error> {
+        PgRead::is_signer_script_pub_key(self.get_connection().await?.as_mut(), script).await
+    }
+
+    async fn is_withdrawal_inflight(
+        &self,
+        id: &model::QualifiedRequestId,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+    ) -> Result<bool, Error> {
+        PgRead::is_withdrawal_inflight(self.get_connection().await?.as_mut(), id, bitcoin_chain_tip)
+            .await
+    }
+
+    async fn is_withdrawal_active(
+        &self,
+        id: &model::QualifiedRequestId,
+        bitcoin_chain_tip: &model::BitcoinBlockRef,
+        min_confirmations: u64,
+    ) -> Result<bool, Error> {
+        PgRead::is_withdrawal_active(
+            self.get_connection().await?.as_mut(),
+            id,
+            bitcoin_chain_tip,
+            min_confirmations,
+        )
+        .await
+    }
+
+    async fn get_swept_deposit_requests(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+    ) -> Result<Vec<model::SweptDepositRequest>, Error> {
+        PgRead::get_swept_deposit_requests(
+            self.get_connection().await?.as_mut(),
+            chain_tip,
+            context_window,
+        )
+        .await
+    }
+
+    async fn get_swept_withdrawal_requests(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+    ) -> Result<Vec<model::SweptWithdrawalRequest>, Error> {
+        PgRead::get_swept_withdrawal_requests(
+            self.get_connection().await?.as_mut(),
+            chain_tip,
+            context_window,
+        )
+        .await
+    }
+
+    async fn get_deposit_request(
+        &self,
+        txid: &model::BitcoinTxId,
+        output_index: u32,
+    ) -> Result<Option<model::DepositRequest>, Error> {
+        PgRead::get_deposit_request(self.get_connection().await?.as_mut(), txid, output_index).await
+    }
+
+    async fn will_sign_bitcoin_tx_sighash(
+        &self,
+        sighash: &model::SigHash,
+    ) -> Result<Option<(bool, PublicKeyXOnly)>, Error> {
+        PgRead::will_sign_bitcoin_tx_sighash(self.get_connection().await?.as_mut(), sighash).await
+    }
+
+    async fn get_withdrawal_signer_decisions(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+        signer_public_key: &PublicKey,
+    ) -> Result<Vec<model::WithdrawalSigner>, Error> {
+        PgRead::get_withdrawal_signer_decisions(
+            self.get_connection().await?.as_mut(),
+            chain_tip,
+            context_window,
+            signer_public_key,
+        )
+        .await
+    }
+
+    async fn get_deposit_signer_decisions(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+        signer_public_key: &PublicKey,
+    ) -> Result<Vec<model::DepositSigner>, Error> {
+        PgRead::get_deposit_signer_decisions(
+            self.get_connection().await?.as_mut(),
+            chain_tip,
+            context_window,
+            signer_public_key,
+        )
+        .await
+    }
+}
+
+impl DbRead for PgTransaction<'_> {
+    async fn get_bitcoin_block(
+        &self,
+        block_hash: &model::BitcoinBlockHash,
+    ) -> Result<Option<model::BitcoinBlock>, Error> {
+        let mut tx = self.tx.lock().await;
+        PgRead::get_bitcoin_block(tx.as_mut(), block_hash).await
+    }
+
+    async fn get_stacks_block(
+        &self,
+        block_hash: &model::StacksBlockHash,
+    ) -> Result<Option<model::StacksBlock>, Error> {
+        PgRead::get_stacks_block(self.tx.lock().await.as_mut(), block_hash).await
+    }
+
+    async fn get_bitcoin_canonical_chain_tip(
+        &self,
+    ) -> Result<Option<model::BitcoinBlockHash>, Error> {
+        let mut tx = self.tx.lock().await;
+        PgRead::get_bitcoin_canonical_chain_tip(tx.as_mut()).await
+    }
+
+    async fn get_bitcoin_canonical_chain_tip_ref(
+        &self,
+    ) -> Result<Option<model::BitcoinBlockRef>, Error> {
+        let mut tx = self.tx.lock().await;
+        PgRead::get_bitcoin_canonical_chain_tip_ref(tx.as_mut()).await
+    }
+
+    async fn get_stacks_chain_tip(
+        &self,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+    ) -> Result<Option<model::StacksBlock>, Error> {
+        let mut tx = self.tx.lock().await;
+        PgRead::get_stacks_chain_tip(tx.as_mut(), bitcoin_chain_tip).await
+    }
+
+    async fn get_pending_deposit_requests(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+        signer_public_key: &crate::keys::PublicKey,
+    ) -> Result<Vec<model::DepositRequest>, Error> {
+        let mut tx = self.tx.lock().await;
+        PgRead::get_pending_deposit_requests(
+            tx.as_mut(),
+            chain_tip,
+            context_window,
+            signer_public_key,
+        )
+        .await
+    }
+
+    async fn get_pending_accepted_deposit_requests(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+        signatures_required: u16,
+    ) -> Result<Vec<model::DepositRequest>, Error> {
+        PgRead::get_pending_accepted_deposit_requests(
+            self.tx.lock().await.as_mut(),
+            chain_tip,
+            context_window,
+            signatures_required,
+        )
+        .await
+    }
+
+    async fn deposit_request_exists(
+        &self,
+        txid: &model::BitcoinTxId,
+        output_index: u32,
+    ) -> Result<bool, Error> {
+        let mut tx = self.tx.lock().await;
+        PgRead::deposit_request_exists(tx.as_mut(), txid, output_index).await
+    }
+
+    async fn get_deposit_request_report(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+        txid: &model::BitcoinTxId,
+        output_index: u32,
+        signer_public_key: &crate::keys::PublicKey,
+    ) -> Result<Option<crate::bitcoin::validation::DepositRequestReport>, Error> {
+        PgRead::get_deposit_request_report(
+            self.tx.lock().await.as_mut(),
+            chain_tip,
+            txid,
+            output_index,
+            signer_public_key,
+        )
+        .await
+    }
+
+    async fn get_deposit_signers(
+        &self,
+        txid: &model::BitcoinTxId,
+        output_index: u32,
+    ) -> Result<Vec<model::DepositSigner>, Error> {
+        let mut tx = self.tx.lock().await;
+        PgRead::get_deposit_signers(tx.as_mut(), txid, output_index).await
+    }
+
+    async fn get_deposit_signer_decisions(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+        signer_public_key: &crate::keys::PublicKey,
+    ) -> Result<Vec<model::DepositSigner>, Error> {
+        PgRead::get_deposit_signer_decisions(
+            self.tx.lock().await.as_mut(),
+            chain_tip,
+            context_window,
+            signer_public_key,
+        )
+        .await
+    }
+
+    async fn get_withdrawal_signer_decisions(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+        signer_public_key: &crate::keys::PublicKey,
+    ) -> Result<Vec<model::WithdrawalSigner>, Error> {
+        PgRead::get_withdrawal_signer_decisions(
+            self.tx.lock().await.as_mut(),
+            chain_tip,
+            context_window,
+            signer_public_key,
+        )
+        .await
+    }
+
+    async fn can_sign_deposit_tx(
+        &self,
+        txid: &model::BitcoinTxId,
+        output_index: u32,
+        signer_public_key: &crate::keys::PublicKey,
+    ) -> Result<Option<bool>, Error> {
+        let mut tx = self.tx.lock().await;
+        PgRead::can_sign_deposit_tx(tx.as_mut(), txid, output_index, signer_public_key).await
+    }
+
+    async fn get_withdrawal_signers(
+        &self,
+        request_id: u64,
+        block_hash: &model::StacksBlockHash,
+    ) -> Result<Vec<model::WithdrawalSigner>, Error> {
+        let mut tx = self.tx.lock().await;
+        PgRead::get_withdrawal_signers(tx.as_mut(), request_id, block_hash).await
+    }
+
+    async fn get_pending_withdrawal_requests(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+        signer_public_key: &crate::keys::PublicKey,
+    ) -> Result<Vec<model::WithdrawalRequest>, Error> {
+        PgRead::get_pending_withdrawal_requests(
+            self.tx.lock().await.as_mut(),
+            chain_tip,
+            context_window,
+            signer_public_key,
+        )
+        .await
+    }
+
+    async fn get_pending_accepted_withdrawal_requests(
+        &self,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+        stacks_chain_tip: &model::StacksBlockHash,
+        min_bitcoin_height: model::BitcoinBlockHeight,
+        signature_threshold: u16,
+    ) -> Result<Vec<model::WithdrawalRequest>, Error> {
+        PgRead::get_pending_accepted_withdrawal_requests(
+            self.tx.lock().await.as_mut(),
+            bitcoin_chain_tip,
+            stacks_chain_tip,
+            min_bitcoin_height,
+            signature_threshold,
+        )
+        .await
+    }
+
+    async fn get_pending_rejected_withdrawal_requests(
+        &self,
+        chain_tip: &model::BitcoinBlockRef,
+        context_window: u16,
+    ) -> Result<Vec<model::WithdrawalRequest>, Error> {
+        PgRead::get_pending_rejected_withdrawal_requests(
+            self.tx.lock().await.as_mut(),
+            chain_tip,
+            context_window,
+        )
+        .await
+    }
+
+    async fn get_withdrawal_request_report(
+        &self,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+        stacks_chain_tip: &model::StacksBlockHash,
+        id: &model::QualifiedRequestId,
+        signer_public_key: &crate::keys::PublicKey,
+    ) -> Result<Option<crate::bitcoin::validation::WithdrawalRequestReport>, Error> {
+        PgRead::get_withdrawal_request_report(
+            self.tx.lock().await.as_mut(),
+            bitcoin_chain_tip,
+            stacks_chain_tip,
+            id,
+            signer_public_key,
+        )
+        .await
+    }
+
+    async fn compute_withdrawn_total(
+        &self,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+    ) -> Result<u64, Error> {
+        let mut tx = self.tx.lock().await;
+        PgRead::compute_withdrawn_total(tx.as_mut(), bitcoin_chain_tip, context_window).await
+    }
+
+    async fn get_bitcoin_blocks_with_transaction(
+        &self,
+        txid: &model::BitcoinTxId,
+    ) -> Result<Vec<model::BitcoinBlockHash>, Error> {
+        let mut tx = self.tx.lock().await;
+        PgRead::get_bitcoin_blocks_with_transaction(tx.as_mut(), txid).await
+    }
+
+    async fn stacks_block_exists(
+        &self,
+        block_id: clarity::types::chainstate::StacksBlockId,
+    ) -> Result<bool, Error> {
+        let mut tx = self.tx.lock().await;
+        PgRead::stacks_block_exists(tx.as_mut(), block_id).await
+    }
+
+    async fn get_encrypted_dkg_shares<X>(
+        &self,
+        aggregate_key: X,
+    ) -> Result<Option<model::EncryptedDkgShares>, Error>
+    where
+        X: Into<crate::keys::PublicKeyXOnly>,
+    {
+        let mut tx = self.tx.lock().await;
+        PgRead::get_encrypted_dkg_shares(tx.as_mut(), aggregate_key).await
+    }
+
+    async fn get_latest_encrypted_dkg_shares(
+        &self,
+    ) -> Result<Option<model::EncryptedDkgShares>, Error> {
+        let mut tx = self.tx.lock().await;
+        PgRead::get_latest_encrypted_dkg_shares(tx.as_mut()).await
+    }
+
+    async fn get_latest_verified_dkg_shares(
+        &self,
+    ) -> Result<Option<model::EncryptedDkgShares>, Error> {
+        let mut tx = self.tx.lock().await;
+        PgRead::get_latest_verified_dkg_shares(tx.as_mut()).await
+    }
+
+    async fn get_encrypted_dkg_shares_count(&self) -> Result<u32, Error> {
+        let mut tx = self.tx.lock().await;
+        PgRead::get_encrypted_dkg_shares_count(tx.as_mut()).await
+    }
+
+    async fn get_last_key_rotation(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+    ) -> Result<Option<model::KeyRotationEvent>, Error> {
+        let mut tx = self.tx.lock().await;
+        PgRead::get_last_key_rotation(tx.as_mut(), chain_tip).await
+    }
+
+    async fn key_rotation_exists(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+        signer_set: &std::collections::BTreeSet<crate::keys::PublicKey>,
+        aggregate_key: &crate::keys::PublicKey,
+        signatures_required: u16,
+    ) -> Result<bool, Error> {
+        PgRead::key_rotation_exists(
+            self.tx.lock().await.as_mut(),
+            chain_tip,
+            signer_set,
+            aggregate_key,
+            signatures_required,
+        )
+        .await
+    }
+
+    async fn get_signers_script_pubkeys(&self) -> Result<Vec<model::Bytes>, Error> {
+        let mut tx = self.tx.lock().await;
+        PgRead::get_signers_script_pubkeys(tx.as_mut()).await
+    }
+
+    async fn get_signer_utxo(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+    ) -> Result<Option<crate::bitcoin::utxo::SignerUtxo>, Error> {
+        PgRead::get_signer_utxo(self.tx.lock().await.as_mut(), chain_tip).await
+    }
+
+    async fn get_deposit_request_signer_votes(
+        &self,
+        txid: &model::BitcoinTxId,
+        output_index: u32,
+        aggregate_key: &crate::keys::PublicKey,
+    ) -> Result<model::SignerVotes, Error> {
+        PgRead::get_deposit_request_signer_votes(
+            self.tx.lock().await.as_mut(),
+            txid,
+            output_index,
+            aggregate_key,
+        )
+        .await
+    }
+
+    async fn get_withdrawal_request_signer_votes(
+        &self,
+        id: &model::QualifiedRequestId,
+        aggregate_key: &crate::keys::PublicKey,
+    ) -> Result<model::SignerVotes, Error> {
+        PgRead::get_withdrawal_request_signer_votes(
+            self.tx.lock().await.as_mut(),
+            id,
+            aggregate_key,
+        )
+        .await
+    }
+
+    async fn is_known_bitcoin_block_hash(
+        &self,
+        block_hash: &model::BitcoinBlockHash,
+    ) -> Result<bool, Error> {
+        let mut tx = self.tx.lock().await;
+        PgRead::is_known_bitcoin_block_hash(tx.as_mut(), block_hash).await
+    }
+
+    async fn in_canonical_bitcoin_blockchain(
+        &self,
+        chain_tip: &model::BitcoinBlockRef,
+        block_ref: &model::BitcoinBlockRef,
+    ) -> Result<bool, Error> {
+        let mut tx = self.tx.lock().await;
+        PgRead::in_canonical_bitcoin_blockchain(tx.as_mut(), chain_tip, block_ref).await
+    }
+
+    async fn is_signer_script_pub_key(&self, script: &model::ScriptPubKey) -> Result<bool, Error> {
+        let mut tx = self.tx.lock().await;
+        PgRead::is_signer_script_pub_key(tx.as_mut(), script).await
+    }
+
+    async fn is_withdrawal_inflight(
+        &self,
+        id: &model::QualifiedRequestId,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+    ) -> Result<bool, Error> {
+        PgRead::is_withdrawal_inflight(self.tx.lock().await.as_mut(), id, bitcoin_chain_tip).await
+    }
+
+    async fn is_withdrawal_active(
+        &self,
+        id: &model::QualifiedRequestId,
+        bitcoin_chain_tip: &model::BitcoinBlockRef,
+        min_confirmations: u64,
+    ) -> Result<bool, Error> {
+        PgRead::is_withdrawal_active(
+            self.tx.lock().await.as_mut(),
+            id,
+            bitcoin_chain_tip,
+            min_confirmations,
+        )
+        .await
+    }
+
+    async fn get_swept_deposit_requests(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+    ) -> Result<Vec<model::SweptDepositRequest>, Error> {
+        PgRead::get_swept_deposit_requests(self.tx.lock().await.as_mut(), chain_tip, context_window)
+            .await
+    }
+
+    async fn get_swept_withdrawal_requests(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+    ) -> Result<Vec<model::SweptWithdrawalRequest>, Error> {
+        PgRead::get_swept_withdrawal_requests(
+            self.tx.lock().await.as_mut(),
+            chain_tip,
+            context_window,
+        )
+        .await
+    }
+
+    async fn get_deposit_request(
+        &self,
+        txid: &model::BitcoinTxId,
+        output_index: u32,
+    ) -> Result<Option<model::DepositRequest>, Error> {
+        let mut tx = self.tx.lock().await;
+        PgRead::get_deposit_request(tx.as_mut(), txid, output_index).await
+    }
+
+    async fn will_sign_bitcoin_tx_sighash(
+        &self,
+        sighash: &model::SigHash,
+    ) -> Result<Option<(bool, crate::keys::PublicKeyXOnly)>, Error> {
+        let mut tx = self.tx.lock().await;
+        PgRead::will_sign_bitcoin_tx_sighash(tx.as_mut(), sighash).await
     }
 }

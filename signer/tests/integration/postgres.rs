@@ -7312,3 +7312,118 @@ mod get_pending_accepted_withdrawal_requests {
         storage::drop_db(db).await;
     }
 }
+
+mod sqlx_transactions {
+    use super::*;
+
+    use signer::{
+        storage::{Transactable, TransactionHandle},
+        testing::{
+            blocks::{BitcoinChain, StacksChain},
+            storage,
+        },
+    };
+    use test_log::test;
+
+    #[tokio::test]
+    async fn test_pgsql_transaction_commit() -> Result<(), Box<Error>> {
+        let db = storage::new_test_database().await;
+
+        let bitcoin_chain = BitcoinChain::default();
+        let stacks_chain = StacksChain::new_anchored(&bitcoin_chain);
+        let btc_1 = bitcoin_chain.first_block();
+        let stx_a = stacks_chain.first_block();
+        let stx_b = stx_a.new_child().anchored_to(btc_1);
+        let btc_2 = btc_1.new_child();
+        let stx_c = stx_b.new_child().anchored_to(&btc_2);
+
+        // Start transaction
+        let tx = db.begin_transaction().await?;
+
+        // Write data within transaction
+        tx.write_bitcoin_block(btc_1).await?;
+        tx.write_stacks_block(stx_a).await?;
+        tx.write_stacks_block(&stx_b).await?;
+
+        tx.write_bitcoin_block(&btc_2).await?;
+        tx.write_stacks_block(&stx_c).await?;
+
+        // Commit transaction
+        tx.commit().await?;
+
+        // Verify data in original store
+        assert_eq!(
+            db.get_bitcoin_block(&btc_1.block_hash).await?,
+            Some(btc_1.clone())
+        );
+        assert_eq!(
+            db.get_stacks_block(&stx_a.block_hash).await?,
+            Some(stx_a.clone())
+        );
+        assert_eq!(
+            db.get_stacks_block(&stx_b.block_hash).await?,
+            Some(stx_b.clone())
+        );
+
+        assert_eq!(
+            db.get_bitcoin_block(&btc_2.block_hash).await?,
+            Some(btc_2.clone())
+        );
+        assert_eq!(
+            db.get_stacks_block(&stx_c.block_hash).await?,
+            Some(stx_c.clone())
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_pgsql_transaction_rollback() -> Result<(), Box<Error>> {
+        let db = storage::new_test_database().await;
+
+        let bitcoin_chain = BitcoinChain::default();
+        let stacks_chain = StacksChain::new_anchored(&bitcoin_chain);
+        let btc_1 = bitcoin_chain.first_block();
+        let stx_a = stacks_chain.first_block();
+
+        // Start transaction
+        let tx = db.begin_transaction().await?;
+
+        // Write data within transaction
+        tx.write_bitcoin_block(btc_1).await?;
+        tx.write_stacks_block(stx_a).await?;
+
+        // Rollback transaction
+        tx.rollback().await?;
+
+        // Verify data is NOT in original store
+        assert!(db.get_bitcoin_block(&btc_1.block_hash).await?.is_none());
+        assert!(db.get_stacks_block(&stx_a.block_hash).await?.is_none());
+
+        Ok(())
+    }
+
+    #[test(tokio::test)]
+    async fn test_pgsql_transaction_implicit_rollback_on_drop() -> Result<(), Box<Error>> {
+        let db = storage::new_test_database().await;
+
+        let bitcoin_chain = BitcoinChain::default();
+        let stacks_chain = StacksChain::new_anchored(&bitcoin_chain);
+        let btc_1 = bitcoin_chain.first_block();
+        let stx_a = stacks_chain.first_block();
+
+        // Scope for the transaction. The transaction is dropped at the end of
+        // the scope and should be implicitly rolled-back.
+        {
+            let tx = db.begin_transaction().await?;
+            tx.write_bitcoin_block(btc_1).await?;
+            tx.write_stacks_block(stx_a).await?;
+        }
+
+        // Verify data is NOT in original store
+        assert!(db.get_bitcoin_block(&btc_1.block_hash).await?.is_none());
+        assert!(db.get_stacks_block(&stx_a.block_hash).await?.is_none());
+
+        Ok(())
+    }
+}

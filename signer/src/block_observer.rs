@@ -39,6 +39,8 @@ use crate::stacks::api::StacksInteract;
 use crate::stacks::api::TenureBlockHeaders;
 use crate::storage::DbRead;
 use crate::storage::DbWrite;
+use crate::storage::Transactable;
+use crate::storage::TransactionHandle;
 use crate::storage::model;
 use crate::storage::model::EncryptedDkgShares;
 use crate::storage::model::KeyRotationEvent;
@@ -368,12 +370,32 @@ impl<C: Context, B> BlockObserver<C, B> {
             .ok_or(Error::BitcoinCoreMissingBlock(block_header.hash))?;
         let db_block = model::BitcoinBlock::from(&block);
 
-        self.context
-            .get_storage_mut()
-            .write_bitcoin_block(&db_block)
-            .await?;
-        self.extract_sbtc_transactions(block_header.hash, &block.transactions)
-            .await?;
+        let storage = self.context.get_storage_mut();
+
+        // When a signer is not part of the bootstrap signing set but is
+        // joining the set as a new signer, it will not have the signers
+        // original scriptPubKey in its database, so it relies on the config
+        // to inform them of what it is.
+        let bootstrap_script_pubkey = self.context.config().signer.bootstrap_aggregate_key;
+
+        // Begin a storage transaction.
+        let storage_tx = storage.begin_transaction().await?;
+
+        // Write the bitcoin block to the database (in the transaction).
+        storage_tx.write_bitcoin_block(&db_block).await?;
+
+        // Extract the sBTC-related transactions from the block and write them
+        // to the database (within the transaction).
+        extract_sbtc_transactions(
+            &storage_tx,
+            bootstrap_script_pubkey,
+            block_header.hash,
+            &block.transactions,
+        )
+        .await?;
+
+        // Commit the storage transaction.
+        storage_tx.commit().await?;
 
         tracing::debug!("finished processing bitcoin block");
         Ok(())
@@ -403,135 +425,6 @@ impl<C: Context, B> BlockObserver<C, B> {
         db.write_stacks_block_headers(headers).await?;
 
         tracing::debug!("finished processing stacks block");
-        Ok(())
-    }
-
-    /// Extract all BTC transactions from the block where one of the UTXOs
-    /// can be spent by the signers.
-    ///
-    /// # Note
-    ///
-    /// When using the postgres storage, we need to make sure that this
-    /// function is called after the `Self::write_bitcoin_block` function
-    /// because of the foreign key constraints.
-    pub async fn extract_sbtc_transactions(
-        &self,
-        block_hash: BlockHash,
-        txs: &[BitcoinTxInfo],
-    ) -> Result<(), Error> {
-        // The first time, we get all sweep transactions with inputs that
-        // we know about. However, we could have locked the UTXO with a new
-        // scriptPubKey, and we have no way of knowing that ahead of time.
-        // The first pass over will populate the database with the new
-        // scriptPubKeys.
-        self.extract_sbtc_transactions_inner(block_hash, txs)
-            .await?;
-        // This will catch cases where the signers have locked up their
-        // UTXO with a new scriptPubKey and there are a chain of
-        // transactions in the block.
-        self.extract_sbtc_transactions_inner(block_hash, txs).await
-    }
-
-    /// Extract all BTC transactions from the block where one of the UTXOs
-    /// can be spent by the signers.
-    ///
-    /// # Note
-    ///
-    /// When using the postgres storage, we need to make sure that this
-    /// function is called after the `Self::write_bitcoin_block` function
-    /// because of the foreign key constraints.
-    pub async fn extract_sbtc_transactions_inner(
-        &self,
-        block_hash: BlockHash,
-        txs: &[BitcoinTxInfo],
-    ) -> Result<(), Error> {
-        let db = self.context.get_storage_mut();
-        // When a signer is not part of the bootstrap signing set but is
-        // joining the set as a new signer, it will not have the signers
-        // original scriptPubKey in its database, so it relies on the config
-        // to inform them of what it is.
-        let bootstrap_script_pubkey = self
-            .context
-            .config()
-            .signer
-            .bootstrap_aggregate_key
-            .map(|key| key.signers_script_pubkey());
-        // We store all the scriptPubKeys associated with the signers'
-        // aggregate public key. Let's get the last years worth of them.
-        let signer_script_pubkeys: HashSet<ScriptBuf> = db
-            .get_signers_script_pubkeys()
-            .await?
-            .into_iter()
-            .map(ScriptBuf::from_bytes)
-            .chain(bootstrap_script_pubkey)
-            .collect();
-
-        // Look through all the UTXOs in the given transaction slice and
-        // keep the transactions where a UTXO is locked with a
-        // `scriptPubKey` controlled by the signers.
-        let mut sbtc_txs = Vec::new();
-        for tx_info in txs {
-            let txid = tx_info.compute_txid();
-            tracing::trace!(%txid, "attempting to extract sbtc transaction");
-            if tx_info.tx.is_coinbase() {
-                continue;
-            }
-
-            // Bail if bitcoin-core doesn't return all the data that we
-            // care about for a non-coinbase transaction. This will happen
-            // if bitcoin core hasn't computed the undo data for the block
-            // with these transactions, of it there is a bug in bitcoin
-            // core.
-            tx_info.validate()?;
-
-            // If any of the outputs are spent to one of the signers'
-            // addresses, then we care about it
-            let outputs_spent_to_signers = tx_info
-                .tx
-                .output
-                .iter()
-                .any(|tx_out| signer_script_pubkeys.contains(&tx_out.script_pubkey));
-
-            // We might not know about the new scriptPubKey, but we are
-            // supposed to know about all existing scriptPubKeys, so we
-            // check the inputs as well.
-            let inputs_spent_by_signers = tx_info
-                .vin
-                .iter()
-                .filter_map(|vin| vin.prevout.as_ref())
-                .any(|prevout| signer_script_pubkeys.contains(&prevout.script_pubkey.script));
-
-            if !outputs_spent_to_signers && !inputs_spent_by_signers {
-                continue;
-            }
-
-            sbtc_txs.push(model::BitcoinTxRef {
-                txid: txid.into(),
-                block_hash: block_hash.into(),
-            });
-
-            for prevout in tx_info.to_inputs(&signer_script_pubkeys) {
-                db.write_tx_prevout(&prevout).await?;
-                if prevout.prevout_type == model::TxPrevoutType::Deposit {
-                    metrics::counter!(
-                        Metrics::DepositsSweptTotal,
-                        "blockchain" => BITCOIN_BLOCKCHAIN,
-                    )
-                    .increment(1);
-                }
-            }
-
-            let (tx_outputs, withdrawal_outputs) = tx_info.to_outputs(&signer_script_pubkeys)?;
-            for output in tx_outputs {
-                db.write_tx_output(&output).await?;
-            }
-            for output in withdrawal_outputs {
-                db.write_withdrawal_tx_output(&output).await?;
-            }
-        }
-
-        // Write these transactions into storage.
-        db.write_bitcoin_transactions(sbtc_txs).await?;
         Ok(())
     }
 
@@ -699,6 +592,123 @@ pub struct SignerSetInfo {
     /// or the number of signers necessary to sign a Stacks transaction under
     /// the signers' principal.
     pub signatures_required: u16,
+}
+
+/// Extract all BTC transactions from the block where one of the UTXOs
+/// can be spent by the signers.
+///
+/// # Note
+///
+/// When using the postgres storage, we need to make sure that this
+/// function is called after the `Self::write_bitcoin_block` function
+/// because of the foreign key constraints.
+pub async fn extract_sbtc_transactions<Storage>(
+    db: &Storage,
+    bootstrap_aggregate_key: Option<PublicKey>,
+    block_hash: BlockHash,
+    txs: &[BitcoinTxInfo],
+) -> Result<(), Error>
+where
+    Storage: DbRead + DbWrite,
+{
+    // Convert the bootstrap script public key to a `ScriptBuf` if it is
+    // provided. This is used to check if the transaction outputs are
+    // spent to the bootstrap signers' addresses.
+    let bootstrap_script_pubkey = bootstrap_aggregate_key.map(|key| key.signers_script_pubkey());
+
+    // Define a closure to extract the sBTC transactions from the given
+    // transactions and write them to the database.
+    let extract_fut = || async {
+        // We store all the scriptPubKeys associated with the signers'
+        // aggregate public key. Let's get the last years worth of them.
+        let signer_script_pubkeys: HashSet<ScriptBuf> = db
+            .get_signers_script_pubkeys()
+            .await?
+            .into_iter()
+            .map(ScriptBuf::from_bytes)
+            .chain(bootstrap_script_pubkey.clone())
+            .collect();
+
+        // Look through all the UTXOs in the given transaction slice and
+        // keep the transactions where a UTXO is locked with a
+        // `scriptPubKey` controlled by the signers.
+        let mut sbtc_txs = Vec::new();
+        for tx_info in txs {
+            let txid = tx_info.compute_txid();
+            tracing::trace!(%txid, "attempting to extract sbtc transaction");
+            if tx_info.tx.is_coinbase() {
+                continue;
+            }
+
+            // Bail if bitcoin-core doesn't return all the data that we
+            // care about for a non-coinbase transaction. This will happen
+            // if bitcoin core hasn't computed the undo data for the block
+            // with these transactions, of it there is a bug in bitcoin
+            // core.
+            tx_info.validate()?;
+
+            // If any of the outputs are spent to one of the signers'
+            // addresses, then we care about it
+            let outputs_spent_to_signers = tx_info
+                .tx
+                .output
+                .iter()
+                .any(|tx_out| signer_script_pubkeys.contains(&tx_out.script_pubkey));
+
+            // We might not know about the new scriptPubKey, but we are
+            // supposed to know about all existing scriptPubKeys, so we
+            // check the inputs as well.
+            let inputs_spent_by_signers = tx_info
+                .vin
+                .iter()
+                .filter_map(|vin| vin.prevout.as_ref())
+                .any(|prevout| signer_script_pubkeys.contains(&prevout.script_pubkey.script));
+
+            if !outputs_spent_to_signers && !inputs_spent_by_signers {
+                continue;
+            }
+
+            sbtc_txs.push(model::BitcoinTxRef {
+                txid: txid.into(),
+                block_hash: block_hash.into(),
+            });
+
+            for prevout in tx_info.to_inputs(&signer_script_pubkeys) {
+                db.write_tx_prevout(&prevout).await?;
+                if prevout.prevout_type == model::TxPrevoutType::Deposit {
+                    metrics::counter!(
+                        Metrics::DepositsSweptTotal,
+                        "blockchain" => BITCOIN_BLOCKCHAIN,
+                    )
+                    .increment(1);
+                }
+            }
+
+            let (tx_outputs, withdrawal_outputs) = tx_info.to_outputs(&signer_script_pubkeys)?;
+            for output in tx_outputs {
+                db.write_tx_output(&output).await?;
+            }
+            for output in withdrawal_outputs {
+                db.write_withdrawal_tx_output(&output).await?;
+            }
+        }
+
+        // Write these transactions into storage.
+        db.write_bitcoin_transactions(sbtc_txs).await?;
+        Ok(())
+    };
+
+    // The first time, we get all sweep transactions with inputs that
+    // we know about. However, we could have locked the UTXO with a new
+    // scriptPubKey, and we have no way of knowing that ahead of time.
+    // The first pass over will populate the database with the new
+    // scriptPubKeys.
+    extract_fut().await?;
+
+    // This will catch cases where the signers have locked up their
+    // UTXO with a new scriptPubKey and there are a chain of
+    // transactions in the block.
+    extract_fut().await
 }
 
 impl From<KeyRotationEvent> for SignerSetInfo {
@@ -1087,23 +1097,10 @@ mod tests {
         test_harness.add_deposit(txid0, response0);
         test_harness.add_deposit(txid1, response1);
 
-        let ctx = TestContext::builder()
-            .with_storage(storage.clone())
-            .with_stacks_client(test_harness.clone())
-            .with_emily_client(test_harness.clone())
-            .with_bitcoin_client(test_harness.clone())
-            .build();
-
-        let block_observer = BlockObserver {
-            context: ctx,
-            bitcoin_blocks: (),
-        };
-
         // First we try extracting the transactions from a block that does
         // not contain any transactions spent to the signers
         let txs = [tx_setup1.tx.fake_with_rng(&mut rng)];
-        block_observer
-            .extract_sbtc_transactions(block_hash, &txs)
+        extract_sbtc_transactions(&storage, None, block_hash, &txs)
             .await
             .unwrap();
 
@@ -1125,8 +1122,7 @@ mod tests {
             tx_setup0.tx.fake_with_rng(&mut rng),
             tx_setup1.tx.fake_with_rng(&mut rng),
         ];
-        block_observer
-            .extract_sbtc_transactions(block_hash, &txs)
+        extract_sbtc_transactions(&storage, None, block_hash, &txs)
             .await
             .unwrap();
 

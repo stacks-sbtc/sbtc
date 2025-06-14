@@ -31,6 +31,7 @@ use crate::stacks::contracts::RejectWithdrawalV1;
 use crate::stacks::contracts::StacksTx;
 use crate::storage::DbRead;
 use crate::storage::DbWrite;
+use crate::storage::Transactable;
 use crate::storage::model;
 use crate::storage::model::StacksBlock;
 use crate::storage::model::StacksTxId;
@@ -177,7 +178,7 @@ impl<Storage>
         >,
     >
 where
-    Storage: DbRead + DbWrite + Clone + Sync + Send + 'static,
+    Storage: DbRead + DbWrite + Transactable + Clone + Sync + Send + 'static,
 {
     /// Asserts that TxCoordinatorEventLoop::get_pending_requests processes withdrawals
     pub async fn assert_processes_withdrawals(mut self) {
