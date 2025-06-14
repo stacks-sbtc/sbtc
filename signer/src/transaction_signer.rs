@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use crate::bitcoin::utxo::UnsignedMockTransaction;
 use crate::bitcoin::validation::BitcoinTxContext;
+use crate::block_observer::SignerSetInfo;
 use crate::context::Context;
 use crate::context::P2PEvent;
 use crate::context::SignerCommand;
@@ -552,14 +553,23 @@ where
         let db = self.context.get_storage();
         let public_key = self.signer_public_key();
 
-        let Some(shares) = db.get_encrypted_dkg_shares(&request.aggregate_key).await? else {
-            return Err(Error::MissingDkgShares(request.aggregate_key.into()));
-        };
         // There is one check that applies to all Stacks transactions, and
         // that check is that the current signer is in the signing set
-        // associated with the given aggregate key. We do this check here.
-        if !shares.signer_set_public_keys.contains(&public_key) {
-            return Err(Error::ValidationSignerSet(request.aggregate_key));
+        // associated authorized wallet in the sbtc registry. We do this
+        // check here. If we are in the bootstrap phase, there may not be
+        // any signer set info in the registry so we fallback on the
+        // information in latest verified DKG shares in that case.
+        let signer_set_info = match self.context.state().registry_signer_set_info() {
+            Some(info) => info,
+            None => db
+                .get_latest_verified_dkg_shares()
+                .await?
+                .map(SignerSetInfo::from)
+                .ok_or_else(|| Error::NoDkgShares)?,
+        };
+
+        if !signer_set_info.signer_set.contains(&public_key) {
+            return Err(Error::ValidationSignerSet(signer_set_info.aggregate_key));
         }
 
         let stacks_chain_tip = db
@@ -572,8 +582,8 @@ where
             stacks_chain_tip: stacks_chain_tip.block_hash,
             context_window: self.context_window,
             origin: *origin_public_key,
-            aggregate_key: request.aggregate_key,
-            signatures_required: shares.signature_share_threshold,
+            aggregate_key: signer_set_info.aggregate_key,
+            signatures_required: signer_set_info.signatures_required,
             deployer: self.context.config().signer.deployer,
         };
         let ctx = &self.context;

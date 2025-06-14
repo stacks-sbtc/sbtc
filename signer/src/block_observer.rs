@@ -721,6 +721,16 @@ impl From<KeyRotationEvent> for SignerSetInfo {
     }
 }
 
+impl From<model::EncryptedDkgShares> for SignerSetInfo {
+    fn from(value: model::EncryptedDkgShares) -> Self {
+        SignerSetInfo {
+            aggregate_key: value.aggregate_key,
+            signer_set: value.signer_set_public_keys(),
+            signatures_required: value.signature_share_threshold,
+        }
+    }
+}
+
 /// Return the signing set that can make sBTC related contract calls along
 /// with the current aggregate key to use for locking UTXOs on bitcoin.
 ///
