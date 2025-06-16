@@ -129,7 +129,6 @@ const ALL_STATUSES: &[Status] = &[
     Status::RBF,
 ];
 
-
 /// Gets all deposit entries modified from (on or after) a given height.
 pub async fn get_all_deposit_entries_modified_from_height(
     context: &EmilyContext,
