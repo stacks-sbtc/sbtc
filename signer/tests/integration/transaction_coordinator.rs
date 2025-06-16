@@ -2610,12 +2610,10 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
 /// ```
 ///
 /// then, once everything is up and running, run the test.
-#[tokio::test]
+#[test(tokio::test)]
 async fn skip_signer_activites_after_key_rotation() {
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let (rpc, faucet) = regtest::initialize_blockchain();
-
-    signer::logging::setup_logging("info,signer=debug", false);
 
     let mut rng = get_rng();
     // We need to populate our databases, so let's fetch the data.
