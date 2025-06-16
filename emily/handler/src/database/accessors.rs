@@ -128,7 +128,7 @@ const ALL_DEPOSIT_STATUSES: &[Status] = &[
     Status::RBF,
 ];
 /// Hacky exhaustive list of all possible withdrawal statuses that we will iterate over in order to
-/// get every deposit present.
+/// get every withdrawal present.
 const ALL_WITHDRAWAL_STATUSES: &[Status] = &[
     Status::Accepted,
     Status::Confirmed,
