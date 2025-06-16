@@ -37,7 +37,10 @@ use bitcoincore_rpc::json::Utxo;
 use bitcoincore_rpc::jsonrpc::error::Error as JsonRpcError;
 use bitcoincore_rpc::jsonrpc::error::RpcError;
 use secp256k1::SECP256K1;
+use std::borrow::Borrow;
 use std::sync::OnceLock;
+
+use crate::testing::AsSatoshis;
 
 /// These must match the username and password in bitcoin.conf
 /// The username for RPC calls in bitcoin-core
@@ -290,7 +293,12 @@ impl Faucet {
     pub fn generate_blocks(&self, num_blocks: u64) -> Vec<BlockHash> {
         self.rpc
             .generate_to_address(num_blocks, &self.address)
-            .unwrap()
+            .unwrap_or_else(|e| {
+                panic!(
+                    "failed to generate {num_blocks} bitcoin blocks to '{}': {e}",
+                    self.address
+                )
+            })
     }
 
     /// Generates one block with coinbase rewards being sent to this recipient.
@@ -298,7 +306,7 @@ impl Faucet {
     pub fn generate_block(&self) -> BlockHash {
         self.generate_blocks(1)
             .pop()
-            .expect("failed to generate bitcoin block")
+            .unwrap_or_else(|| panic!("expected at least one block hash after generating a bitcoin block to '{}', but got none", self.address))
     }
 
     /// Return all UTXOs for this recipient where the amount is greater
@@ -312,7 +320,12 @@ impl Faucet {
         });
         self.rpc
             .list_unspent(None, None, Some(&[&self.address]), None, query_options)
-            .unwrap()
+            .unwrap_or_else(|e| {
+                panic!(
+                    "failed to list unspent UTXOs for address '{}': {e}",
+                    self.address
+                )
+            })
     }
 
     /// Send the specified amount to the specific address.
@@ -321,10 +334,13 @@ impl Faucet {
     #[track_caller]
     pub fn send_to(&self, amount: u64, address: &Address) -> OutPoint {
         let fee = BITCOIN_CORE_FALLBACK_FEE.to_sat();
-        let utxo = self
-            .get_utxos(Some(amount + fee))
-            .pop()
-            .expect("no UTXO found for the given amount");
+        let total_amount = amount + fee;
+        let utxo = self.get_utxos(Some(total_amount)).pop().unwrap_or_else(|| {
+            panic!(
+                "no UTXO found for address '{}' with amount >= {total_amount} satoshis",
+                self.address,
+            )
+        });
 
         let mut tx = Transaction {
             version: Version::ONE,
@@ -349,13 +365,44 @@ impl Faucet {
 
         let input_index = 0;
         let keypair = &self.keypair;
-        match self.address.address_type().unwrap() {
-            AddressType::P2wpkh => p2wpkh_sign_transaction(&mut tx, input_index, &utxo, keypair),
-            AddressType::P2tr => p2tr_sign_transaction(&mut tx, input_index, &[utxo], keypair),
-            _ => unimplemented!(),
+        match self.address.address_type() {
+            Some(AddressType::P2wpkh) => {
+                p2wpkh_sign_transaction(&mut tx, input_index, &utxo, keypair)
+            }
+            Some(AddressType::P2tr) => {
+                p2tr_sign_transaction(&mut tx, input_index, &[utxo], keypair)
+            }
+            Some(addr_type) => unimplemented!(
+                "only P2WPKH and P2TR addresses are supported for sending transactions, got {addr_type}"
+            ),
+            None => panic!("could not get address type for address '{}'", self.address),
         };
-        self.rpc.send_raw_transaction(&tx).unwrap();
+        self.rpc.send_raw_transaction(&tx).unwrap_or_else(|e| {
+            panic!(
+                "failed to send raw bitcoin transaction funding address '{}': {e}",
+                address
+            )
+        });
+
         OutPoint::new(tx.compute_txid(), 0)
+    }
+
+    /// Send the specified amount to multiple addresses.
+    #[track_caller]
+    pub fn send_to_many<Amt, AddrIter, Addr>(&self, amount: Amt, to: AddrIter) -> Vec<OutPoint>
+    where
+        Addr: Borrow<Address>,
+        AddrIter: IntoIterator<Item = Addr>,
+        Amt: AsSatoshis,
+    {
+        let mut outpoints = Vec::new();
+        let amount_sats = amount.as_satoshis();
+
+        to.into_iter().for_each(|address| {
+            let outpoint = self.send_to(amount_sats, address.borrow());
+            outpoints.push(outpoint);
+        });
+        outpoints
     }
 }
 
@@ -413,6 +460,7 @@ impl AsUtxo for ListUnspentResultEntry {
 }
 
 /// Provide a signature to the input P2WPKH UTXO
+#[track_caller]
 pub fn p2wpkh_sign_transaction<U>(
     tx: &mut Transaction,
     input_index: usize,
@@ -429,7 +477,9 @@ pub fn p2wpkh_sign_transaction<U>(
             utxo.amount(),
             sighash_type,
         )
-        .expect("failed to create sighash");
+        .unwrap_or_else(|e| {
+            panic!("failed to create sighash for P2WPKH input at index {input_index}: {e}")
+        });
 
     let msg = secp256k1::Message::from(sighash);
     let signature = SECP256K1.sign_ecdsa(&msg, &keys.secret_key());
@@ -439,6 +489,7 @@ pub fn p2wpkh_sign_transaction<U>(
 }
 
 /// Provide a signature to the input P2TR UTXO
+#[track_caller]
 pub fn p2tr_sign_transaction<U>(
     tx: &mut Transaction,
     input_index: usize,
@@ -453,7 +504,11 @@ pub fn p2tr_sign_transaction<U>(
 
     let sighash = SighashCache::new(&*tx)
         .taproot_key_spend_signature_hash(input_index, &prevouts, sighash_type)
-        .expect("failed to create taproot key-spend sighash");
+        .unwrap_or_else(|e| {
+            panic!(
+                "failed to create taproot key-spend sighash for input at index {input_index}: {e}"
+            )
+        });
     let tweaked = keypair.tap_tweak(SECP256K1, None);
 
     let msg = secp256k1::Message::from(sighash);
@@ -461,4 +516,10 @@ pub fn p2tr_sign_transaction<U>(
     let signature = bitcoin::taproot::Signature { signature, sighash_type };
 
     tx.input[input_index].witness = Witness::p2tr_key_spend(&signature);
+}
+
+impl Borrow<Client> for Faucet {
+    fn borrow(&self) -> &Client {
+        self.rpc
+    }
 }
