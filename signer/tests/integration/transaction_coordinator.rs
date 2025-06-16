@@ -1998,6 +1998,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
             .modify_settings(|settings| {
                 settings.signer.dkg_target_rounds = NonZeroU32::new(2).unwrap();
                 settings.signer.dkg_min_bitcoin_block_height = Some(dkg_run_two_height.into());
+                settings.signer.bitcoin_processing_delay = Duration::from_millis(200);
             })
             .build();
 
@@ -2361,32 +2362,36 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
 
     // After the next bitcoin block, each of the signers will think that
     // DKG needs to be run. So we need to wait for it.
-    let chain_tip: BitcoinBlockHash = faucet.generate_blocks(1).pop().unwrap().into();
+    let chain_tip: BitcoinBlockHash = faucet.generate_block().into();
 
     // We first need to wait for bitcoin-core to send us all the
     // notifications so that we are up-to-date with the chain tip.
-    let db_update_futs = signers
-        .iter()
-        .map(|(_, db, _, _)| testing::storage::wait_for_chain_tip(db, chain_tip));
-    futures::future::join_all(db_update_futs).await;
+    wait_for_signers(&signers).await;
 
-    // We wait for DKG to successfully complete again. For that we just
-    // watch the dkg_shares table.
-    let dkg_futs = signers
-        .iter()
-        .map(|(_, db, _, _)| testing::storage::wait_for_dkg(db, 2));
-    futures::future::join_all(dkg_futs).await;
     let (_, db, _, _) = signers.first().unwrap();
     let shares2 = db.get_latest_verified_dkg_shares().await.unwrap().unwrap();
 
     // Check that we have new DKG shares for each of the signers.
-    for (_, db, _, _) in signers.iter() {
+    for (ctx, db, _, _) in signers.iter() {
         let dkg_share_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM dkg_shares;")
             .fetch_one(db.pool())
             .await
             .unwrap();
 
         assert_eq!(dkg_share_count, 2);
+
+        let shares = db.get_latest_verified_dkg_shares().await.unwrap().unwrap();
+
+        let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
+        let event = KeyRotationEvent {
+            txid: fake::Faker.fake_with_rng(&mut rng),
+            block_hash: stacks_chain_tip.block_hash,
+            aggregate_key: shares.aggregate_key,
+            signer_set: shares.signer_set_public_keys.clone(),
+            signatures_required: shares.signature_share_threshold,
+            address: PrincipalData::from(ctx.config().signer.deployer).into(),
+        };
+        db.write_rotate_keys_transaction(&event).await.unwrap();
     }
 
     // =========================================================================
@@ -2438,8 +2443,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     // - The coordinator should submit a sweep transaction. We check the
     //   mempool for its existence.
     // =========================================================================
-    faucet.generate_blocks(1);
-
+    faucet.generate_block();
     wait_for_signers(&signers).await;
 
     let (ctx, _, _, _) = signers.first().unwrap();
@@ -2447,8 +2451,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
 
     assert_eq!(txids.len(), 1);
 
-    let block_hash = faucet.generate_blocks(1).pop().unwrap();
-
+    let block_hash = faucet.generate_block();
     wait_for_signers(&signers).await;
 
     // =========================================================================
