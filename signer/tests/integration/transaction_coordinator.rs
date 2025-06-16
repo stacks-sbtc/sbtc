@@ -2636,7 +2636,7 @@ async fn skip_signer_activites_after_key_rotation() {
     // second time:
     // 1. run DKG
     // 2. confirm a donation and a deposit request,
-    // 3. confirm the sweep, mint sbtc
+    // 3. confirm the sweep
     // 4. run DKG again.
     let dkg_run_two_height = chain_tip_info.height + 4;
 
@@ -2658,7 +2658,7 @@ async fn skip_signer_activites_after_key_rotation() {
             .modify_settings(|settings| {
                 settings.signer.dkg_target_rounds = NonZeroU32::new(2).unwrap();
                 settings.signer.dkg_min_bitcoin_block_height = Some(dkg_run_two_height.into());
-                settings.signer.bitcoin_processing_delay = Duration::from_millis(250);
+                settings.signer.bitcoin_processing_delay = Duration::from_millis(200);
             })
             .build();
 
@@ -3011,6 +3011,14 @@ async fn skip_signer_activites_after_key_rotation() {
     //   submitted a rotate-keys contract call.
     // - The signers should run DKG again after they see the next bitcoin
     //   block, this was configured above.
+    // - Create and confirm the deposit request. This will trigger the
+    //   block observer to reach out to Emily about deposits. It will have
+    //   two so the signers should do basic validations and store the
+    //   deposit request.
+    // - Each TxSigner process should vote on the deposit request and
+    //   submit the votes to each other.
+    // - The coordinator should not submit a sweep transaction because DKG
+    //   has been run again.
     // =========================================================================
     for (_, db, _, _) in signers.iter() {
         let dkg_share_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM dkg_shares;")
@@ -3048,9 +3056,6 @@ async fn skip_signer_activites_after_key_rotation() {
     let txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
     assert_eq!(txids.len(), 0);
 
-    let (_, db, _, _) = signers.first().unwrap();
-    let shares2 = db.get_latest_verified_dkg_shares().await.unwrap().unwrap();
-
     // Check that we have new DKG shares for each of the signers.
     for (ctx, db, _, _) in signers.iter() {
         let dkg_share_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM dkg_shares;")
@@ -3083,11 +3088,6 @@ async fn skip_signer_activites_after_key_rotation() {
     // Step 10 - Confirm the deposit and wait for the signers to do their
     //           job.
     // -------------------------------------------------------------------------
-    // - Confirm the deposit request. This will trigger the block observer
-    //   to reach out to Emily about deposits. It will have two so the
-    //   signers should do basic validations and store the deposit request.
-    // - Each TxSigner process should vote on the deposit request and
-    //   submit the votes to each other.
     // - The coordinator should submit a sweep transaction. We check the
     //   mempool for its existence.
     // =========================================================================
@@ -3187,6 +3187,11 @@ async fn skip_signer_activites_after_key_rotation() {
     // old ScriptPubkey
     let actual_script_pub_key = tx_info.prevout(0).unwrap().script_pubkey.as_bytes();
     assert_eq!(actual_script_pub_key, script_pub_key1.as_bytes());
+
+    let shares2 = {
+        let (_, db, _, _) = signers.first().unwrap();
+        db.get_latest_verified_dkg_shares().await.unwrap().unwrap()
+    };
 
     // The scriptPubkey of the new signer UTXO should be from the new
     // aggregate key.
