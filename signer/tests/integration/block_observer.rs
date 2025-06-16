@@ -74,8 +74,8 @@ use crate::setup::IntoEmilyTestingConfig as _;
 use crate::setup::TestSweepSetup;
 use crate::setup::fetch_canonical_bitcoin_blockchain;
 use crate::transaction_coordinator::mock_reqwests_status_code_error;
-use crate::utxo_construction::DepReq;
 use crate::utxo_construction::DepositHelper;
+use crate::utxo_construction::ReqAmounts;
 use crate::zmq::BITCOIN_CORE_ZMQ_ENDPOINT;
 
 pub const GET_POX_INFO_JSON: &str =
@@ -544,9 +544,12 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     let max_fee = deposit_amount / 2;
     let signers_public_key = shares.aggregate_key.into();
     let deposit = depositor
-        .submit_deposit(DepReq::new(deposit_amount, max_fee), shares.aggregate_key)
+        .submit_deposit(
+            ReqAmounts::new(deposit_amount, max_fee),
+            shares.aggregate_key,
+        )
         .await
-        .expect("Failed to submit deposit");
+        .unwrap();
 
     // Now build the struct with the outstanding peg-in and peg-out requests.
     let requests = SbtcRequests {

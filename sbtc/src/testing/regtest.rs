@@ -523,3 +523,9 @@ impl Borrow<Client> for Faucet {
         self.rpc
     }
 }
+
+impl Borrow<Address> for Recipient {
+    fn borrow(&self) -> &Address {
+        &self.address
+    }
+}

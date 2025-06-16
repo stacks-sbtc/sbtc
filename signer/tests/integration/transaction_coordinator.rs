@@ -5190,7 +5190,7 @@ async fn reuse_nonce_attack() {
     // To ensure the tx is mined and anchored before we attempt to deploy the
     // contracts we generate a some blocks
     for _ in 0..2 {
-        tokio::time::sleep(Duration::from_secs(3)).await;
+        Sleep::for_secs(3).await;
         faucet.generate_block();
     }
 
@@ -5306,7 +5306,7 @@ async fn reuse_nonce_attack() {
     }
 
     while start_count.load(Ordering::SeqCst) < 12 {
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        Sleep::for_millis(10).await;
     }
 
     // =========================================================================
@@ -5418,7 +5418,7 @@ async fn reuse_nonce_attack() {
     // filling the previous nonces will be mined
     signer_stx_state.sign_and_submit(&stx_funding).await;
     // Ensure the signers/miner pick the tx up
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    Sleep::for_secs(1).await;
 
     // =========================================================================
     // Actual test: process the pending completion deposits with a concurrent tx
