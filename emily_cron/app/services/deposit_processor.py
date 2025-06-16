@@ -88,10 +88,10 @@ class DepositProcessor:
             logger.info(
                 f"Confirmed transaction {confirmed_txid_in_group} found for RBF group {rbf_key}"
             )
-            # Mark all collected unconfirmed transactions as FAILED
+            # Mark all collected unconfirmed transactions as RBF'd
             for tx in unconfirmed_txs_in_group:
                 logger.info(
-                    f"Marking RBF'd transaction {tx.bitcoin_txid} as FAILED (replaced by confirmed tx {confirmed_txid_in_group})"
+                    f"Marking RBF'd transaction {tx.bitcoin_txid} as RBF'd (replaced by confirmed tx {confirmed_txid_in_group})"
                 )
                 updates.append(
                     DepositUpdate(
