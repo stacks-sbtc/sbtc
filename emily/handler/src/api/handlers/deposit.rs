@@ -509,10 +509,12 @@ async fn update_deposits(
     // Loop through all updates and execute.
     for (index, update) in validated_request.deposits {
         if update.is_err() {
+            // We just checked that update is err, so this unwrap is fine.
+            let deposit = Err(update.unwrap_err().to_string());
             updated_deposits.push((
                 index,
                 DepositWithStatus {
-                    deposit: Deposit::default(),
+                    deposit,
                     status: StatusCode::BAD_REQUEST.as_u16(),
                 },
             ));
@@ -547,7 +549,7 @@ async fn update_deposits(
                 updated_deposits.push((
                     index,
                     DepositWithStatus {
-                        deposit: Deposit::default(),
+                        deposit: Err(Error::NotFound.to_string()),
                         status: StatusCode::NOT_FOUND.as_u16(),
                     },
                 ));
@@ -562,7 +564,7 @@ async fn update_deposits(
                 updated_deposits.push((
                     index,
                     DepositWithStatus {
-                        deposit: Deposit::default(),
+                        deposit: Err(Error::Forbidden.to_string()),
                         status: StatusCode::FORBIDDEN.as_u16(),
                     },
                 ));
@@ -578,7 +580,7 @@ async fn update_deposits(
                 updated_deposits.push((
                     index,
                     DepositWithStatus {
-                        deposit: Deposit::default(),
+                        deposit: Err(error.to_string()),
                         status: StatusCode::INTERNAL_SERVER_ERROR.as_u16(),
                     },
                 ));
@@ -599,7 +601,7 @@ async fn update_deposits(
         updated_deposits.push((
             index,
             DepositWithStatus {
-                deposit,
+                deposit: Ok(deposit),
                 status: StatusCode::OK.as_u16(),
             },
         ));

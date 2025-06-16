@@ -34,11 +34,13 @@ pub struct UpdateDepositsResponse {
 }
 
 /// Wrapper for deposit with status code. Used for multi-status responses.
-#[derive(Clone, Default, Debug, PartialEq, Hash, Serialize, Deserialize, ToSchema, ToResponse)]
+#[derive(Clone, Debug, PartialEq, Hash, Serialize, Deserialize, ToSchema, ToResponse)]
 #[serde(rename_all = "camelCase")]
 pub struct DepositWithStatus {
-    /// The fully extracted and validated deposit request.
-    pub deposit: Deposit,
+    /// The fully extracted and validated deposit request, or
+    /// an error message.
+    pub deposit: Result<Deposit, String>,
     /// HTTP status code, returned as part of multi-status responses.
     pub status: u16,
 }
+

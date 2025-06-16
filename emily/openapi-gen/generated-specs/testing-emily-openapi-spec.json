@@ -2972,7 +2972,7 @@
         ],
         "properties": {
           "deposit": {
-            "$ref": "#/components/schemas/Deposit"
+            "$ref": "#/components/schemas/Result"
           },
           "status": {
             "type": "integer",

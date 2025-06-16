@@ -405,10 +405,12 @@ async fn update_withdrawals(
     // Loop through all updates and execute.
     for (index, update) in validated_request.withdrawals {
         if update.is_err() {
+            // We just checked that update is err so unwrap here is fine.
+            let withdrawal = update.unwrap_err().to_string();
             updated_withdrawals.push((
                 index,
                 WithdrawalWithStatus {
-                    withdrawal: Withdrawal::default(),
+                    withdrawal,
                     status: StatusCode::BAD_REQUEST.as_u16(),
                 },
             ));
@@ -435,7 +437,7 @@ async fn update_withdrawals(
                 updated_withdrawals.push((
                     index,
                     WithdrawalWithStatus {
-                        withdrawal: Withdrawal::default(),
+                        withdrawal: Err(Error::NotFound.to_string()),
                         status: StatusCode::NOT_FOUND.as_u16(),
                     },
                 ));
@@ -449,7 +451,7 @@ async fn update_withdrawals(
                 updated_withdrawals.push((
                     index,
                     WithdrawalWithStatus {
-                        withdrawal: Withdrawal::default(),
+                        withdrawal: Err(Error::Forbidden.to_string()),
                         status: StatusCode::FORBIDDEN.as_u16(),
                     },
                 ));
@@ -464,7 +466,7 @@ async fn update_withdrawals(
                 updated_withdrawals.push((
                     index,
                     WithdrawalWithStatus {
-                        withdrawal: Withdrawal::default(),
+                        withdrawal: Err(error.to_string()),
                         status: StatusCode::INTERNAL_SERVER_ERROR.as_u16(),
                     },
                 ));
@@ -484,7 +486,7 @@ async fn update_withdrawals(
         updated_withdrawals.push((
             index,
             WithdrawalWithStatus {
-                withdrawal,
+                withdrawal: Ok(withdrawal),
                 status: StatusCode::OK.as_u16(),
             },
         ));

@@ -24,11 +24,11 @@ pub struct UpdateWithdrawalsResponse {
 }
 
 /// Wrapper for withdrawal with status code. Used for multi-status responses.
-#[derive(Clone, Default, Debug, PartialEq, Hash, Serialize, Deserialize, ToSchema, ToResponse)]
+#[derive(Clone, Debug, PartialEq, Hash, Serialize, Deserialize, ToSchema, ToResponse)]
 #[serde(rename_all = "camelCase")]
 pub struct WithdrawalWithStatus {
     /// The fully extracted and validated withdrawal.
-    pub withdrawal: Withdrawal,
+    pub withdrawal: Result<Withdrawal, String>,
     /// HTTP status code, returned as part of multi-status responses.
     pub status: u16,
 }
