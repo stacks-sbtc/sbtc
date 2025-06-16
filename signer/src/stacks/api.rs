@@ -150,7 +150,7 @@ pub struct SignerSetInfo {
     /// The number of signatures required to sign a transaction.
     /// This is the number of signature shares necessary to successfully sign a
     /// bitcoin transaction spending a UTXO locked with the above aggregate key,
-    /// or the number of signers necessary to sign a Stacks transaction under
+    /// and the number of signers necessary to sign a Stacks transaction under
     /// the signers' principal.
     pub signatures_required: u16,
 }
