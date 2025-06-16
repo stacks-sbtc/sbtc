@@ -3103,14 +3103,10 @@ async fn skip_signer_activites_after_key_rotation() {
     wait_for_signers(&signers).await;
 
     // =========================================================================
-    // Step 12 - Assertions
+    // Step 11 - Assertions
     // -------------------------------------------------------------------------
-    // - During each bitcoin block, the signers should sign and broadcast a
-    //   rotate keys contract call. This is because they haven't received a
-    //   rotate-keys event, so they think that they haven't confirmed a
-    //   rotate-keys contract call.
     // - After each sweep transaction is confirmed, the coordinator should
-    //   also broadcast a complete-deposit contract call. There should be
+    //   broadcast a complete-deposit contract call. There should be
     //   duplicates here as well since the signers do not receive events
     //   about the success of the contract call.
     // - They should have sweep transactions in their database.
@@ -3137,7 +3133,7 @@ async fn skip_signer_activites_after_key_rotation() {
         .cloned()
         .collect();
 
-    // We should try to mint for each of the three deposits. But since the
+    // We should try to mint for each of the two deposits. But since the
     // signers continually submit Stacks transaction for each swept
     // deposit, we need to deduplicate the contract calls before checking.
     complete_deposit_txs.sort_by_key(|tx| match &tx.payload {
@@ -3154,10 +3150,7 @@ async fn skip_signer_activites_after_key_rotation() {
         _ => None,
     });
 
-    // We ran DKG twice, so we should observe two distinct rotate-keys
-    // contract calls. Since we call rotate keys with each bitcoin block we
-    // need to filter out the duplicates.
-    let mut rotate_keys_txs: Vec<StacksTransaction> = broadcast_stacks_txs
+    let rotate_keys_txs: Vec<StacksTransaction> = broadcast_stacks_txs
         .iter()
         .filter(|tx| match &tx.payload {
             TransactionPayload::ContractCall(cc) => {
@@ -3167,11 +3160,6 @@ async fn skip_signer_activites_after_key_rotation() {
         })
         .cloned()
         .collect();
-    rotate_keys_txs.dedup_by_key(|tx| match &tx.payload {
-        // The second argument in the contract call is the aggregate key
-        TransactionPayload::ContractCall(cc) => cc.function_args.get(1).cloned(),
-        _ => None,
-    });
 
     // These should all be rotate-keys contract calls.
     for tx in rotate_keys_txs.iter() {
@@ -3184,8 +3172,8 @@ async fn skip_signer_activites_after_key_rotation() {
     for tx in complete_deposit_txs.iter() {
         assert_stacks_transaction_kind::<CompleteDepositV1>(tx);
     }
-    // There were three deposits, so three distinct complete-deposit
-    // contract calls.
+    // There were two deposits, so two distinct complete-deposit contract
+    // calls.
     assert_eq!(complete_deposit_txs.len(), 2);
 
     // Now lets check the bitcoin transaction, first we get it.
