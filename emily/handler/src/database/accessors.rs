@@ -117,9 +117,10 @@ pub async fn get_deposit_entries_by_reclaim_pubkeys_hash(
     .await
 }
 
-/// Hacky exhaustive list of all possible deposit statuses that we will iterate over in order to
+/// Hacky exhaustive list of all possible statuses that we will iterate over in order to
 /// get every deposit present.
-const ALL_DEPOSIT_STATUSES: &[Status] = &[
+/// TODO(https://github.com/stacks-sbtc/sbtc/issues/1693)
+const ALL_STATUSES: &[Status] = &[
     Status::Accepted,
     Status::Confirmed,
     Status::Failed,
@@ -127,15 +128,7 @@ const ALL_DEPOSIT_STATUSES: &[Status] = &[
     Status::Reprocessing,
     Status::RBF,
 ];
-/// Hacky exhaustive list of all possible withdrawal statuses that we will iterate over in order to
-/// get every withdrawal present.
-const ALL_WITHDRAWAL_STATUSES: &[Status] = &[
-    Status::Accepted,
-    Status::Confirmed,
-    Status::Failed,
-    Status::Pending,
-    Status::Reprocessing,
-];
+
 
 /// Gets all deposit entries modified from (on or after) a given height.
 pub async fn get_all_deposit_entries_modified_from_height(
@@ -144,7 +137,7 @@ pub async fn get_all_deposit_entries_modified_from_height(
     maybe_page_size: Option<u16>,
 ) -> Result<Vec<DepositInfoEntry>, Error> {
     let mut all = Vec::new();
-    for status in ALL_DEPOSIT_STATUSES {
+    for status in ALL_STATUSES {
         let mut received = get_all_deposit_entries_modified_from_height_with_status(
             context,
             status,
@@ -401,7 +394,7 @@ pub async fn get_all_withdrawal_entries_modified_from_height(
     maybe_page_size: Option<u16>,
 ) -> Result<Vec<WithdrawalInfoEntry>, Error> {
     let mut all = Vec::new();
-    for status in ALL_WITHDRAWAL_STATUSES {
+    for status in ALL_STATUSES {
         let mut received = get_all_withdrawal_entries_modified_from_height_with_status(
             context,
             status,
@@ -788,7 +781,7 @@ async fn calculate_sbtc_left_for_withdrawals(
     let minimum_stacks_height_in_window =
         get_oldest_stacks_block_in_range(context, bitcoin_end_block, bitcoin_tip).await?;
 
-    let all_statuses_except_failed: Vec<_> = ALL_WITHDRAWAL_STATUSES
+    let all_statuses_except_failed: Vec<_> = ALL_STATUSES
         .iter()
         .filter(|status| **status != Status::Failed)
         .collect();
