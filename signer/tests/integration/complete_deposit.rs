@@ -210,6 +210,73 @@ async fn complete_deposit_validation_happy_path() {
 }
 
 /// For this test we check that the `CompleteDepositV1::validate` function
+/// correctly validates a complete deposit contract call when the signer
+/// was not part of the signing set, so no DKG shares, but has information
+/// about the sweep transaction nonetheless because it has been following
+/// the sweeps using the bootstrap aggregate key.
+#[tokio::test]
+async fn complete_deposit_validation_signer_no_dkg_shares() {
+    // Normal: this generates the blockchain as well as deposit request
+    // transactions and a transaction sweeping in the deposited funds.
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
+    let (rpc, faucet) = regtest::initialize_blockchain();
+    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
+
+    // Normal: the signers' block observer should be getting new block
+    // events from bitcoin-core. We haven't hooked up our block observer,
+    // so we need to manually update the database with new bitcoin block
+    // headers and at least one stacks block.
+    backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash).await;
+    // Normal: This stores a genesis stacks block anchored to the bitcoin
+    // blockchain identified by setup.sweep_block_hash.
+    setup.store_stacks_genesis_block(&db).await;
+
+    // Normal: we take the deposit transaction as is from the test setup
+    // and store it in the database. This is necessary for when we fetch
+    // outstanding unfulfilled deposit requests.
+    setup.store_deposit_tx(&db).await;
+
+    // Normal: we take the sweep transaction as is from the test setup and
+    // store it in the database.
+    setup.store_sweep_tx(&db).await;
+
+    // Different: we normally add a row in the dkg_shares table so that we
+    // have a record of the scriptPubKey that the signers control. Here we
+    // exclude it, so it looks like the first UTXO in the transaction is
+    // not controlled by the signers.
+    //
+    // However, we assume that the signer has been picking up on the
+    // signers' sweep transactions, so there are rows in the
+    // bitcoin_tx_outputs table for the signers' outputs. This allows the
+    // signer to check for whether this is indeed a valid sweep.
+
+    // Normal: the request and how the signers voted needs to be added to
+    // the database. Here the bitmap in the deposit request object
+    // corresponds to how the signers voted.
+    setup.store_deposit_request(&db).await;
+    setup.store_deposit_decisions(&db).await;
+
+    // Normal: create a properly formed complete-deposit transaction object
+    // and the corresponding request context.
+    let (complete_deposit_tx, req_ctx) = make_complete_deposit(&setup);
+
+    let mut ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_first_bitcoin_core_client()
+        .with_mocked_stacks_client()
+        .with_mocked_emily_client()
+        .build();
+
+    // Normal: the request is not completed in the smart contract.
+    set_deposit_incomplete(&mut ctx).await;
+
+    complete_deposit_tx.validate(&ctx, &req_ctx).await.unwrap();
+
+    testing::storage::drop_db(db).await;
+}
+
+/// For this test we check that the `CompleteDepositV1::validate` function
 /// returns a deposit validation error with a DeployerMismatch message when
 /// the deployer doesn't match but everything else is okay.
 #[tokio::test]
@@ -976,8 +1043,15 @@ async fn complete_deposit_validation_deposit_invalid_sweep() {
 
     // Different: we normally add a row in the dkg_shares table so that we
     // have a record of the scriptPubKey that the signers control. Here we
-    // exclude it, so it looks like the first UTXO in the transaction is not
-    // controlled by the signers.
+    // exclude it, so it looks like the first UTXO in the transaction is
+    // not controlled by the signers.
+    //
+    // We also truncate the bitcoin_tx_outputs table because we use that
+    // table to identify the signers' scriptPubKeys.
+    sqlx::query("TRUNCATE TABLE sbtc_signer.bitcoin_tx_outputs CASCADE")
+        .execute(db.pool())
+        .await
+        .unwrap();
 
     // Normal: the request and how the signers voted needs to be added to
     // the database. Here the bitmap in the deposit request object

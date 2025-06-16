@@ -48,16 +48,16 @@ fn make_signatures(tx: &StacksTransaction, keys: &[Keypair]) -> Vec<RecoverableS
         .collect()
 }
 
-pub struct SignerStxState {
+pub struct SignerStxState<S> {
     /// A multi-sig wallet for the signers.
     pub wallet: SignerWallet,
     /// These are the private keys to public keys in the above wallet.
     pub keys: [Keypair; 3],
     /// A stacks client built using the src/config/default.toml config.
-    pub stacks_client: ApiFallbackClient<StacksClient>,
+    pub stacks_client: S,
 }
 
-impl SignerStxState {
+impl<S: StacksInteract> SignerStxState<S> {
     /// Deploy an sBTC smart contract to the stacks node
     async fn deploy_smart_contract(&self, contract: SmartContract) {
         // If the smart contract has been deployed already then there is
@@ -82,7 +82,7 @@ impl SignerStxState {
 
     /// Sign and submit an object that can be turned into the payload of a
     /// Stacks transaction.
-    async fn sign_and_submit<P: AsTxPayload>(&self, payload: &P) -> StacksTxId {
+    pub async fn sign_and_submit<P: AsTxPayload>(&self, payload: &P) -> StacksTxId {
         let mut unsigned = MultisigTx::new_tx(payload, &self.wallet, TX_FEE);
         for signature in make_signatures(unsigned.tx(), &self.keys) {
             unsigned.add_signature(signature).unwrap();
@@ -109,9 +109,10 @@ fn stacks_client() -> ApiFallbackClient<StacksClient> {
 }
 
 /// Deploy all sBTC smart contracts to the stacks node
-pub async fn deploy_smart_contracts() -> &'static SignerStxState {
+pub async fn deploy_smart_contracts() -> &'static SignerStxState<ApiFallbackClient<StacksClient>> {
     static SBTC_DEPLOYMENT: OnceCell<()> = OnceCell::const_new();
-    static SIGNER_STATE: OnceCell<SignerStxState> = OnceCell::const_new();
+    static SIGNER_STATE: OnceCell<SignerStxState<ApiFallbackClient<StacksClient>>> =
+        OnceCell::const_new();
 
     let (signer_wallet, key_pairs) = testing::wallet::regtest_bootstrap_wallet();
 
