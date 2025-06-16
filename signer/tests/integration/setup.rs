@@ -21,6 +21,7 @@ use sbtc::testing::regtest;
 use sbtc::testing::regtest::Faucet;
 use sbtc::testing::regtest::Recipient;
 use signer::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
+use signer::bitcoin::BitcoinInteract;
 use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::bitcoin::rpc::BitcoinTxInfo;
 use signer::bitcoin::utxo;
@@ -30,11 +31,12 @@ use signer::bitcoin::utxo::SignerBtcState;
 use signer::bitcoin::utxo::SignerUtxo;
 use signer::bitcoin::utxo::TxDeconstructor as _;
 use signer::bitcoin::validation::WithdrawalValidationResult;
-use signer::block_observer::BlockObserver;
+use signer::block_observer;
 use signer::block_observer::Deposit;
 use signer::codec::Encode as _;
 use signer::config::NetworkKind;
 use signer::config::Settings;
+use signer::context::Context;
 use signer::context::SbtcLimits;
 use signer::keys::PrivateKey;
 use signer::keys::PublicKey;
@@ -884,19 +886,25 @@ impl TestSweepSetup2 {
             .with_mocked_emily_client()
             .build();
 
+        let bitcoin_client = context.get_bitcoin_client();
+
         // We fetch the entire block, to feed to the block observer. It's
         // easier this way.
-        let tx_info = context
-            .bitcoin_client
+        let tx_info = bitcoin_client
             .get_tx_info(&self.donation.txid, &self.donation_block_hash)
+            .await
             .unwrap()
             .unwrap();
-        let block_observer = BlockObserver { context, bitcoin_blocks: () };
 
-        block_observer
-            .extract_sbtc_transactions(self.donation_block_hash, &[tx_info])
-            .await
-            .unwrap();
+        let bootstrap_script_pubkey = context.config().signer.bootstrap_aggregate_key;
+        block_observer::extract_sbtc_transactions(
+            db,
+            bootstrap_script_pubkey,
+            self.donation_block_hash,
+            &[tx_info],
+        )
+        .await
+        .unwrap();
     }
 
     /// This function generates a sweep transaction that sweeps in the

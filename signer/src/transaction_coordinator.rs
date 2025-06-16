@@ -52,8 +52,10 @@ use crate::network;
 use crate::signature::TaprootSignature;
 use crate::stacks::api::FeePriority;
 use crate::stacks::api::GetNakamotoStartHeight;
+use crate::stacks::api::RejectionReason;
 use crate::stacks::api::StacksInteract;
 use crate::stacks::api::SubmitTxResponse;
+use crate::stacks::api::TxRejection;
 use crate::stacks::contracts::AcceptWithdrawalV1;
 use crate::stacks::contracts::AsTxPayload;
 use crate::stacks::contracts::CompleteDepositV1;
@@ -793,8 +795,8 @@ where
                 }
             };
 
-            // If we fail to sign the transaction for some reason, we
-            // decrement the nonce by one, and try the next transaction.
+            // If we fail to sign the transaction for some reason, we adjust the
+            // nonce and try the next transaction.
             // This is not a fatal error, since we could fail to sign the
             // transaction because someone else is now the coordinator, and
             // all the signers are now ignoring us.
@@ -808,7 +810,7 @@ where
                 }
                 Err(error) => {
                     tracing::warn!(%error, %outpoint, "could not process the stacks sign request for a deposit");
-                    wallet.set_nonce(wallet.get_nonce().saturating_sub(1));
+                    adjust_nonce(wallet, &error);
                     "failure"
                 }
             };
@@ -939,8 +941,8 @@ where
         let (sign_request, multi_tx) = sign_request_fut.await?;
         tracing::debug!("constructed withdrawal accept sign request");
 
-        // If we fail to sign the transaction for some reason, we
-        // decrement the nonce by one, and try the next transaction.
+        // If we fail to sign the transaction for some reason, we adjust the
+        // nonce and try the next transaction.
         // This is not a fatal error, since we could fail to sign the
         // transaction because someone else is now the coordinator, and
         // all the signers are now ignoring us.
@@ -956,7 +958,7 @@ where
             }
             Err(error) => {
                 tracing::warn!(%error, "could not process the stacks sign request for a withdrawal");
-                wallet.set_nonce(wallet.get_nonce().saturating_sub(1));
+                adjust_nonce(wallet, &error);
                 "failure"
             }
         };
@@ -1026,8 +1028,8 @@ where
 
         let (sign_request, multi_tx) = sign_request_fut.await?;
 
-        // If we fail to sign the transaction for some reason, we
-        // decrement the nonce by one, and try the next transaction.
+        // If we fail to sign the transaction for some reason, we adjust the
+        // nonce and try the next transaction.
         // This is not a fatal error, since we could fail to sign the
         // transaction because someone else is now the coordinator, and
         // all the signers are now ignoring us.
@@ -1041,7 +1043,7 @@ where
             }
             Err(error) => {
                 tracing::warn!(%error, "could not process the stacks sign request for a withdrawal reject");
-                wallet.set_nonce(wallet.get_nonce().saturating_sub(1));
+                adjust_nonce(wallet, &error);
                 "failure"
             }
         };
@@ -2230,8 +2232,8 @@ where
 
         let (sign_request, multi_tx) = sign_request_fut.await?;
 
-        // If we fail to sign the transaction for some reason, we
-        // decrement the nonce by one, and try the next transaction.
+        // If we fail to sign the transaction for some reason, we adjust the
+        // nonce and try the next transaction.
         // This is not a fatal error, since we could fail to sign the
         // transaction because someone else is now the coordinator, and
         // all the signers are now ignoring us.
@@ -2248,7 +2250,7 @@ where
                     %error,
                     "could not process the stacks sign request for a contract deploy"
                 );
-                wallet.set_nonce(wallet.get_nonce().saturating_sub(1));
+                adjust_nonce(wallet, &error);
                 Err(error)
             }
         }
@@ -2597,6 +2599,19 @@ pub fn assert_rotate_key_action(
     };
 
     Ok((needs_verification, needs_rotate_key))
+}
+
+/// Adjust the wallet nonce based on the error
+pub fn adjust_nonce(wallet: &SignerWallet, error: &Error) {
+    match error {
+        // For `ConflictingNonceInMempool` we don't want to decrement the nonce
+        // to avoid failing also the following submissions
+        Error::StacksTxRejection(TxRejection {
+            reason: RejectionReason::ConflictingNonceInMempool,
+            ..
+        }) => (),
+        _ => wallet.set_nonce(wallet.get_nonce().saturating_sub(1)),
+    }
 }
 
 #[cfg(test)]
