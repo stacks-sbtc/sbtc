@@ -1792,6 +1792,7 @@ impl PgRead {
     /// This might become quite inefficient for long chains with infrequent
     /// key rotations, so we might have to consider data model updates to
     /// allow more efficient querying of the last key rotation.
+    #[cfg(any(test, feature = "testing"))]
     async fn get_last_key_rotation<'e, E>(
         executor: &'e mut E,
         chain_tip: &model::BitcoinBlockHash,
@@ -2782,6 +2783,7 @@ impl DbRead for PgStore {
         PgRead::get_encrypted_dkg_shares_count(self.get_connection().await?.as_mut()).await
     }
 
+    #[cfg(any(test, feature = "testing"))]
     async fn get_last_key_rotation(
         &self,
         chain_tip: &model::BitcoinBlockHash,
@@ -3207,6 +3209,7 @@ impl DbRead for PgTransaction<'_> {
         PgRead::get_encrypted_dkg_shares_count(tx.as_mut()).await
     }
 
+    #[cfg(any(test, feature = "testing"))]
     async fn get_last_key_rotation(
         &self,
         chain_tip: &model::BitcoinBlockHash,
