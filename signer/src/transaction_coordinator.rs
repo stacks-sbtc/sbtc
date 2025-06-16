@@ -363,8 +363,20 @@ where
         self.deploy_smart_contracts(chain_tip_hash, &wallet, &aggregate_key)
             .await?;
 
-        self.check_and_submit_rotate_key_transaction(chain_tip_hash, &wallet, &aggregate_key)
-            .await?;
+        let rotate_key_txid =
+            self.check_and_submit_rotate_key_transaction(chain_tip_hash, &wallet, &aggregate_key);
+
+        // If a rotate-keys contract call has been submitted, we stop our
+        // tenure to make sure that all signers are up to date with the
+        // same information when signing any transactions. In particular,
+        // signers use the sbtc-registry contract for figuring out the new
+        // signers' scriptPubKey and for bitcoin transactions, and need to
+        // have the same view of the signers wallet for confirming stacks
+        // transactions.
+        if let Some(txid) = rotate_key_txid.await? {
+            tracing::info!(%txid, "a rotate-keys contract call has been successfully submitted; stopping my tenure");
+            return Ok(());
+        }
 
         let signer_public_keys = self
             .context
@@ -402,9 +414,9 @@ where
         bitcoin_chain_tip: &model::BitcoinBlockHash,
         wallet: &SignerWallet,
         aggregate_key: &PublicKey,
-    ) -> Result<(), Error> {
+    ) -> Result<Option<StacksTxId>, Error> {
         if !self.all_smart_contracts_deployed().await? {
-            return Ok(());
+            return Ok(None);
         }
 
         let last_dkg = self
@@ -415,7 +427,7 @@ where
 
         // If we don't have DKG shares nothing to do here
         let Some(last_dkg) = last_dkg else {
-            return Ok(());
+            return Ok(None);
         };
 
         let current_aggregate_key = self
@@ -430,7 +442,7 @@ where
             tracing::debug!(
                 "stacks node is up to date with the current aggregate key and no DKG verification required"
             );
-            return Ok(());
+            return Ok(None);
         }
         tracing::info!(%needs_verification, %needs_rotate_key, "DKG verification and/or key rotation needed");
 
@@ -469,9 +481,10 @@ where
                 )?;
 
             tracing::info!(%txid, "rotate-key transaction submitted successfully");
+            return Ok(Some(txid));
         }
 
-        Ok(())
+        Ok(None)
     }
 
     /// Constructs a BitcoinPreSignRequest from the given transaction package and
