@@ -1101,6 +1101,7 @@ async fn update_deposits_is_forbidden_for_signer(
 #[test_case(Status::Rbf, Status::Reprocessing; "rbf_to_reprocessing")]
 #[test_case(Status::Rbf, Status::Confirmed; "rbf_to_confirmed")]
 #[test_case(Status::Rbf, Status::Failed; "rbf_to_failed")]
+#[test_case(Status::Rbf, Status::Rbf; "rbf_to_rbf")]
 #[tokio::test]
 async fn update_deposits_is_not_forbidden_for_sidecar(previous_status: Status, new_status: Status) {
     // the testing configuration has privileged access to all endpoints.
