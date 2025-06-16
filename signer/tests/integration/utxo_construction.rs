@@ -260,11 +260,12 @@ impl<'a, Bitcoin> DepositHelper<'a, Bitcoin, (), Recipient>
 where
     Bitcoin: Borrow<bitcoincore_rpc::Client>,
 {
-    /// Creates a new `DepositHelper` instance.
+    /// Creates a new `DepositHelper` instance with the specified Bitcoin client and depositor.
     pub fn with_depositor(bitcoin: &'a Bitcoin, depositor: Recipient) -> Self {
         Self { bitcoin, emily: &(), depositor }
     }
 
+    /// Creates a new `DepositHelper` instance with a new depositor generated using the provided RNG.
     pub fn with_new_depositor<R>(bitcoin: &'a Bitcoin, rng: &mut R) -> Self
     where
         R: RngCore,
@@ -275,6 +276,8 @@ where
 }
 
 impl<'a, Bitcoin, Recipient> DepositHelper<'a, Bitcoin, (), Recipient> {
+    /// Sets the Emily client for this `DepositHelper`, enabling deposit submission to Emily.
+    /// Consumes this instance and returns a new one with the Emily client set.
     pub fn with_emily_client(
         self,
         emily: &'a EmilyClient,
