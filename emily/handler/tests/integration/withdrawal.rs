@@ -825,6 +825,12 @@ async fn withdrawal_cant_be_rbf() {
 
     // Withdrawal can not be RBF, so it is BAD REQUEST.
     assert_eq!(withdrawal.status, 400);
+
+    // Check that withdrawal status wasn't changed.
+    let withdrawal = apis::withdrawal_api::get_withdrawal(&user_configuration, request_id)
+        .await
+        .expect("Error during valid API call");
+    assert_eq!(withdrawal.status, Status::Pending);
 }
 
 #[tokio::test]
