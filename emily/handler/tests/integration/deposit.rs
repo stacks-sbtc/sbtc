@@ -1366,6 +1366,7 @@ async fn replaced_by_tx_for_not_rbf_transactions_is_bad_request(status: Status) 
         .await
         .expect("Deposit with this txid and index should be available");
     assert_eq!(response.bitcoin_txid, bitcoin_txid);
+    assert!(response.replaced_by_tx.is_none());
     assert_eq!(response.status, Status::Pending);
 }
 
