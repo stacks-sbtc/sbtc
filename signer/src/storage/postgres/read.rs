@@ -1835,7 +1835,7 @@ impl PgRead {
             FROM sbtc_signer.rotate_keys_transactions rkt
             JOIN stacks_blocks AS sb
               ON rkt.block_hash = sb.block_hash
-            ORDER BY sb.block_height DESC, sb.block_hash DESC, rkt.txid DESC
+            ORDER BY sb.block_height DESC, sb.block_hash DESC, rkt.created_at DESC
             LIMIT 1
             "#,
         )
