@@ -1176,7 +1176,7 @@ where
 
         // We can now proceed with the actual rotate key transaction.
         let sign_request = StacksTransactionSignRequest {
-            aggregate_key: *aggregate_key,
+            aggregate_key: Some(*aggregate_key),
             contract_tx: contract_call.into(),
             nonce: tx.get_origin_nonce(),
             tx_fee: tx.get_tx_fee(),
@@ -1283,7 +1283,7 @@ where
         let tx = multi_tx.tx();
 
         let sign_request = StacksTransactionSignRequest {
-            aggregate_key: *bitcoin_aggregate_key,
+            aggregate_key: Some(*bitcoin_aggregate_key),
             contract_tx: contract_call.into(),
             nonce: tx.get_origin_nonce(),
             tx_fee: tx.get_tx_fee(),
@@ -1343,7 +1343,7 @@ where
         let tx = multi_tx.tx();
 
         let sign_request = StacksTransactionSignRequest {
-            aggregate_key: *bitcoin_aggregate_key,
+            aggregate_key: Some(*bitcoin_aggregate_key),
             contract_tx: contract_call.into(),
             nonce: tx.get_origin_nonce(),
             tx_fee: tx.get_tx_fee(),
@@ -1377,7 +1377,7 @@ where
         let tx = multi_tx.tx();
 
         let sign_request = StacksTransactionSignRequest {
-            aggregate_key: *bitcoin_aggregate_key,
+            aggregate_key: Some(*bitcoin_aggregate_key),
             contract_tx: contract_call.into(),
             nonce: tx.get_origin_nonce(),
             tx_fee: tx.get_tx_fee(),
@@ -2287,7 +2287,7 @@ where
         let tx = multi_tx.tx();
 
         let sign_request = StacksTransactionSignRequest {
-            aggregate_key: *bitcoin_aggregate_key,
+            aggregate_key: Some(*bitcoin_aggregate_key),
             contract_tx: contract_deploy.into(),
             nonce: tx.get_origin_nonce(),
             tx_fee: tx.get_tx_fee(),

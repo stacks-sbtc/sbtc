@@ -810,7 +810,7 @@ where
 
         let outpoint = withdrawal_req.withdrawal_outpoint();
         assert_eq!(sign_request.tx_fee, 123000);
-        assert_eq!(sign_request.aggregate_key, bitcoin_aggregate_key);
+        assert_eq!(sign_request.aggregate_key, Some(bitcoin_aggregate_key));
         assert_eq!(sign_request.txid, multi_tx.tx().txid());
         assert_eq!(sign_request.nonce, multi_tx.tx().get_origin_nonce());
         if let StacksTx::ContractCall(ContractCall::AcceptWithdrawalV1(call)) =
@@ -913,7 +913,7 @@ where
             .expect("Failed to construct withdrawal reject stacks sign request");
 
         assert_eq!(sign_request.tx_fee, 123000);
-        assert_eq!(sign_request.aggregate_key, bitcoin_aggregate_key);
+        assert_eq!(sign_request.aggregate_key, Some(bitcoin_aggregate_key));
         assert_eq!(sign_request.txid, multi_tx.tx().txid());
         assert_eq!(sign_request.nonce, multi_tx.tx().get_origin_nonce());
 
