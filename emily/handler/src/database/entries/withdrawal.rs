@@ -12,8 +12,8 @@ use crate::{
 };
 
 use super::{
-    EntryTrait, KeyTrait, PrimaryIndex, PrimaryIndexTrait, SecondaryIndex,
-    SecondaryIndexTrait, VersionedEntryTrait, WithdrawalStatusEntry,
+    EntryTrait, KeyTrait, PrimaryIndex, PrimaryIndexTrait, SecondaryIndex, SecondaryIndexTrait,
+    VersionedEntryTrait, WithdrawalStatusEntry,
 };
 
 // Withdrawal entry ---------------------------------------------------------------

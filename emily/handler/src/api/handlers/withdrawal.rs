@@ -2,8 +2,8 @@
 use tracing::{debug, instrument};
 use warp::reply::{Reply, json, with_status};
 
-use crate::api::models::common::requests::BasicPaginationQuery;
 use crate::api::models::common::WithdrawalStatus;
+use crate::api::models::common::requests::BasicPaginationQuery;
 use crate::api::models::withdrawal::responses::WithdrawalWithStatus;
 use crate::api::models::withdrawal::{Withdrawal, WithdrawalInfo};
 use crate::api::models::withdrawal::{
@@ -13,12 +13,12 @@ use crate::api::models::withdrawal::{
 use crate::common::error::Error;
 use crate::context::EmilyContext;
 use crate::database::accessors;
+use crate::database::entries::WithdrawalStatusEntry;
 use crate::database::entries::chainstate::ApiStateEntry;
 use crate::database::entries::withdrawal::{
     ValidatedUpdateWithdrawalRequest, WithdrawalEntry, WithdrawalEntryKey, WithdrawalEvent,
     WithdrawalParametersEntry,
 };
-use crate::database::entries::WithdrawalStatusEntry;
 use warp::http::StatusCode;
 
 /// Get withdrawal handler.
