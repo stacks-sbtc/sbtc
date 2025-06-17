@@ -172,8 +172,6 @@ where
     fn load<S>(
         storage: &S,
         aggregate_key: PublicKeyXOnly,
-        signer_public_keys: impl IntoIterator<Item = PublicKey> + Send,
-        threshold: u16,
         signer_private_key: PrivateKey,
     ) -> impl Future<Output = Result<Self, error::Error>> + Send
     where
@@ -252,8 +250,6 @@ impl WstsCoordinator for FireCoordinator {
     async fn load<S>(
         storage: &S,
         aggregate_key: PublicKeyXOnly,
-        signer_public_keys: impl IntoIterator<Item = PublicKey> + Send,
-        threshold: u16,
         signer_private_key: PrivateKey,
     ) -> Result<Self, error::Error>
     where
@@ -271,6 +267,8 @@ impl WstsCoordinator for FireCoordinator {
             .flat_map(|(_, share)| share.comms.clone())
             .collect::<Vec<(u32, PolyCommitment)>>();
 
+        let signer_public_keys = encrypted_shares.signer_set_public_keys();
+        let threshold = encrypted_shares.signature_share_threshold;
         let mut coordinator = Self::new(signer_public_keys, threshold, signer_private_key);
 
         let aggregate_key = encrypted_shares.aggregate_key.into();
@@ -356,8 +354,6 @@ impl WstsCoordinator for FrostCoordinator {
     async fn load<S>(
         storage: &S,
         aggregate_key: PublicKeyXOnly,
-        signer_public_keys: impl IntoIterator<Item = PublicKey> + Send,
-        threshold: u16,
         signer_private_key: PrivateKey,
     ) -> Result<Self, error::Error>
     where
@@ -375,6 +371,8 @@ impl WstsCoordinator for FrostCoordinator {
             .flat_map(|(_, share)| share.comms.clone())
             .collect::<Vec<(u32, PolyCommitment)>>();
 
+        let signer_public_keys = encrypted_shares.signer_set_public_keys();
+        let threshold = encrypted_shares.signature_share_threshold;
         let mut coordinator = Self::new(signer_public_keys, threshold, signer_private_key);
 
         let aggregate_key = encrypted_shares.aggregate_key.into();
@@ -574,7 +572,6 @@ impl SignerStateMachine {
     pub async fn load<S>(
         storage: &S,
         aggregate_key: PublicKeyXOnly,
-        threshold: u32,
         signer_private_key: PrivateKey,
     ) -> Result<Self, Error>
     where
@@ -597,7 +594,9 @@ impl SignerStateMachine {
         // however, that should never be the case since wsts maintains this invariant
         // when we save the state.
         let signer = wsts::v2::Party::load(&saved_state);
-        let signers = encrypted_shares.signer_set_public_keys;
+        let signers = encrypted_shares.signer_set_public_keys();
+        // This as _ cast is a widening of a u16 to a u32, which is always fine.
+        let threshold = encrypted_shares.signature_share_threshold as u32;
 
         let created_at = BitcoinBlockRef {
             block_hash: encrypted_shares.started_at_bitcoin_block_hash,
