@@ -804,7 +804,7 @@ async fn update_deposits() {
     let mut updated_deposits = update_deposits_response
         .deposits
         .iter()
-        .map(|deposit| *deposit.deposit.clone())
+        .map(|deposit| *deposit.deposit.clone().unwrap().unwrap())
         .collect::<Vec<_>>();
     updated_deposits.sort_by(arbitrary_deposit_partial_cmp);
     expected_deposits.sort_by(arbitrary_deposit_partial_cmp);
@@ -1074,12 +1074,14 @@ async fn update_deposits_is_forbidden_for_signer(
     } else {
         assert!(response.is_ok());
         let response = response.unwrap();
-        let deposit = *response
+        let deposit = response
             .deposits
             .first()
             .expect("No deposit in response")
             .deposit
-            .clone();
+            .clone()
+            .unwrap()
+            .unwrap();
         assert_eq!(deposit.bitcoin_txid, bitcoin_txid);
         assert_eq!(deposit.status, new_status);
     }
@@ -1209,12 +1211,14 @@ async fn update_deposits_is_not_forbidden_for_sidecar(previous_status: Status, n
 
     assert!(response.is_ok());
     let response = response.unwrap();
-    let deposit = *response
+    let deposit = response
         .deposits
         .first()
         .expect("No deposit in response")
         .deposit
-        .clone();
+        .clone()
+        .unwrap()
+        .unwrap();
     assert_eq!(deposit.bitcoin_txid, bitcoin_txid);
     assert_eq!(deposit.status, new_status);
 }
@@ -1276,8 +1280,8 @@ async fn rbf_status_saved_successfully() {
     assert!(response.is_ok());
     let response = response.unwrap();
     let deposit = response.deposits.first().expect("No deposit in response");
-    assert_eq!(deposit.deposit.bitcoin_txid, bitcoin_txid);
-    assert_eq!(deposit.deposit.status, Status::Rbf);
+    assert_eq!(deposit.deposit.clone().unwrap().unwrap().bitcoin_txid, bitcoin_txid);
+    assert_eq!(deposit.deposit.clone().unwrap().unwrap().status, Status::Rbf);
 
     // Check that the deposit can be retrieved with the correct status.
     let response = apis::deposit_api::get_deposit(&user_configuration, &txid, &index)
@@ -1616,10 +1620,15 @@ async fn emily_process_deposit_updates_when_some_of_them_are_unknown() {
 
     // Check that multistatus response is returned correctly.
     assert!(update_responce.deposits.iter().all(|deposit| {
-        if deposit.deposit.bitcoin_txid == create_deposit_body1.bitcoin_txid {
-            deposit.status == 200
-        } else {
-            deposit.status == 404
+        match &deposit.deposit {
+            Some(Some(inner)) => {
+                inner.bitcoin_txid == create_deposit_body1.bitcoin_txid
+                && deposit.status == 200
+            }
+            None => {
+                deposit.status == 404
+            }
+            Some(None) => unreachable!()
         }
     }));
 

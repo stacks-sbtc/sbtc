@@ -501,7 +501,7 @@ async fn update_withdrawals() {
     let mut updated_withdrawals = update_withdrawals_response
         .withdrawals
         .iter()
-        .map(|withdrawal| *withdrawal.withdrawal.clone())
+        .map(|withdrawal| *withdrawal.withdrawal.clone().unwrap().unwrap())
         .collect::<Vec<_>>();
     updated_withdrawals.sort_by(arbitrary_withdrawal_partial_cmp);
     expected_withdrawals.sort_by(arbitrary_withdrawal_partial_cmp);
@@ -641,7 +641,9 @@ async fn update_withdrawals_is_forbidden_for_signer(
             .first()
             .expect("No withdrawal in response")
             .withdrawal
-            .clone();
+            .clone()
+            .unwrap()
+            .unwrap();
         assert_eq!(withdrawal.request_id, request_id);
         assert_eq!(withdrawal.status, new_status);
     }
@@ -757,7 +759,9 @@ async fn update_withdrawals_is_not_forbidden_for_sidecar(
         .first()
         .expect("No withdrawal in response")
         .withdrawal
-        .clone();
+        .clone()
+        .unwrap()
+        .unwrap();
     assert_eq!(withdrawal.request_id, request_id);
     assert_eq!(withdrawal.status, new_status);
 }
@@ -1064,12 +1068,19 @@ async fn emily_process_withdrawal_updates_when_some_of_them_are_unknown() {
     .await
     .expect("Received an error after making a valid update withdrawal request api call.");
 
+    
+
     // Check that multistatus response is returned correctly.
     assert!(update_responce.withdrawals.iter().all(|withdrawal| {
-        if withdrawal.withdrawal.request_id == create_withdrawal_body1.request_id {
-            withdrawal.status == 200
-        } else {
-            withdrawal.status == 404
+        match &withdrawal.withdrawal {
+            Some(Some(inner)) => {
+                inner.request_id == create_withdrawal_body1.request_id
+                && withdrawal.status == 200
+            }
+            None => {
+                withdrawal.status == 404
+            }
+            Some(None) => unreachable!()
         }
     }));
 
