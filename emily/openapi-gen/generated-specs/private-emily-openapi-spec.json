@@ -2825,7 +2825,6 @@
         "description": "The status of the in-flight sBTC operation.",
         "enum": [
           "pending",
-          "reprocessing",
           "accepted",
           "confirmed",
           "failed",
