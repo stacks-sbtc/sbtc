@@ -9,7 +9,7 @@ use warp::http::StatusCode;
 use warp::reply::{Reply, json, with_status};
 
 use crate::api::models::common::requests::BasicPaginationQuery;
-use crate::api::models::common::{DepositStatus, WithdrawalStatus};
+use crate::api::models::common::DepositStatus;
 use crate::api::models::deposit::responses::{
     DepositWithStatus, GetDepositsForTransactionResponse, UpdateDepositsResponse,
 };
@@ -29,7 +29,7 @@ use crate::database::entries::deposit::{
     DepositEntry, DepositEntryKey, DepositEvent, DepositParametersEntry,
     ValidatedUpdateDepositsRequest,
 };
-use crate::database::entries::{DepositStatusEntry, WithdrawalStatusEntry};
+use crate::database::entries::DepositStatusEntry;
 
 /// Get deposit handler.
 #[utoipa::path(

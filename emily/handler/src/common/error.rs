@@ -21,7 +21,7 @@ use warp::{reject::Reject, reply::Reply};
 use crate::{
     api::models::{
         chainstate::Chainstate,
-        common::{DepositStatus, WithdrawalStatus},
+        common::DepositStatus,
     },
     database::entries::{
         chainstate::ChainstateEntry, deposit::DepositEntryKey, withdrawal::WithdrawalEntryKey,

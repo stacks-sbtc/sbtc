@@ -4,12 +4,12 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     DepositStatusEntry, EntryTrait, KeyTrait, PrimaryIndex, PrimaryIndexTrait, SecondaryIndex,
-    SecondaryIndexTrait, VersionedEntryTrait, WithdrawalStatusEntry,
+    SecondaryIndexTrait, VersionedEntryTrait,
 };
 use crate::{
     api::models::{
         chainstate::Chainstate,
-        common::{DepositStatus, Fulfillment, WithdrawalStatus},
+        common::{DepositStatus, Fulfillment},
         deposit::{Deposit, DepositInfo, DepositParameters},
     },
     common::error::{Error, Inconsistency, ValidationError},

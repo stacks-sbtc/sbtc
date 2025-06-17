@@ -12,12 +12,12 @@ use utoipa::ToSchema;
 use sbtc::deposits::{CreateDepositRequest, DepositInfo};
 
 use crate::api::models::chainstate::Chainstate;
-use crate::api::models::common::{DepositStatus, Fulfillment, WithdrawalStatus};
+use crate::api::models::common::{DepositStatus, Fulfillment};
 use crate::common::error::{self, Error, ValidationError};
 use crate::database::entries::deposit::{
     DepositEntryKey, DepositEvent, ValidatedDepositUpdate, ValidatedUpdateDepositsRequest,
 };
-use crate::database::entries::{DepositStatusEntry, WithdrawalStatusEntry};
+use crate::database::entries::DepositStatusEntry;
 
 /// Query structure for the GetDepositsQuery struct.
 #[derive(Clone, Default, Debug, PartialEq, Hash, Serialize, Deserialize, ToSchema)]

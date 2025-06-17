@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use utoipa::{ToResponse, ToSchema};
 
-use crate::api::models::common::{DepositStatus, Fulfillment, WithdrawalStatus};
+use crate::api::models::common::{Fulfillment, WithdrawalStatus};
 
 /// Requests.
 pub mod requests;

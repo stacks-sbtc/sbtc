@@ -5,14 +5,14 @@ use serde::{Deserialize, Serialize};
 use crate::{
     api::models::{
         chainstate::Chainstate,
-        common::{DepositStatus, WithdrawalStatus},
+        common::WithdrawalStatus,
         withdrawal::{Withdrawal, WithdrawalInfo, WithdrawalParameters},
     },
     common::error::{Error, Inconsistency, ValidationError},
 };
 
 use super::{
-    DepositStatusEntry, EntryTrait, KeyTrait, PrimaryIndex, PrimaryIndexTrait, SecondaryIndex,
+    EntryTrait, KeyTrait, PrimaryIndex, PrimaryIndexTrait, SecondaryIndex,
     SecondaryIndexTrait, VersionedEntryTrait, WithdrawalStatusEntry,
 };
 
@@ -699,9 +699,9 @@ impl WithdrawalUpdatePackage {
 mod tests {
     use crate::api::models::chainstate::Chainstate;
     use crate::api::models::common::Fulfillment;
-    use crate::database::entries::{DepositStatusEntry, WithdrawalStatusEntry};
+    use crate::database::entries::WithdrawalStatusEntry;
     use crate::{
-        api::models::common::{DepositStatus, WithdrawalStatus},
+        api::models::common::WithdrawalStatus,
         database::entries::withdrawal::{
             ValidatedWithdrawalUpdate, WithdrawalEntry, WithdrawalEntryKey, WithdrawalEvent,
             WithdrawalParametersEntry,
