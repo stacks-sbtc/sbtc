@@ -80,20 +80,25 @@ pub fn make_withdrawal(amount: u64, max_fee: u64) -> (WithdrawalRequest, Recipie
 
 /// Creates a single deposit request and the corresponding Bitcoin transaction,
 /// submitting them to Emily and the Bitcoin node respectively.
-pub fn make_deposit_request<U>(
+pub fn make_deposit_request<U, TxAmt, FeeAmt>(
     depositor: &Recipient,
-    amount: u64,
+    amount: TxAmt,
     utxo: U,
-    max_fee: u64,
+    max_fee: FeeAmt,
     signers_public_key: XOnlyPublicKey,
 ) -> (Transaction, DepositRequest, DepositInfo)
 where
     U: AsUtxo,
+    TxAmt: AsSatoshis,
+    FeeAmt: AsSatoshis,
 {
+    let max_fee_sats = max_fee.as_satoshis();
+    let amount_sats = amount.as_satoshis();
+
     let fee = regtest::BITCOIN_CORE_FALLBACK_FEE.to_sat();
     let deposit_inputs = DepositScriptInputs {
         signers_public_key,
-        max_fee,
+        max_fee: max_fee_sats,
         recipient: PrincipalData::from(StacksAddress::burn_address(false)),
     };
     let reclaim_inputs = ReclaimScriptInputs::try_new(50, ScriptBuf::new()).unwrap();
@@ -112,14 +117,14 @@ where
         }],
         output: vec![
             TxOut {
-                value: Amount::from_sat(amount),
+                value: Amount::from_sat(amount_sats),
                 script_pubkey: sbtc::deposits::to_script_pubkey(
                     deposit_script.clone(),
                     reclaim_script.clone(),
                 ),
             },
             TxOut {
-                value: utxo.amount() - Amount::from_sat(amount + fee),
+                value: utxo.amount() - Amount::from_sat(amount_sats + fee),
                 script_pubkey: depositor.address.script_pubkey(),
             },
         ],
@@ -145,25 +150,31 @@ where
         reclaim_script_hash: Some(TaprootScriptHash::from(&dep.reclaim_script)),
         signers_public_key: dep.signers_public_key,
     };
+
     (deposit_tx, req, dep)
 }
 
 /// Creates multiple deposit requests, one for each amount in the `amounts` slice.
 /// The deposit requests are submitted to Emily, and a single Bitcoin transaction
 /// containing all deposits is submitted to the Bitcoin node.
-pub fn make_deposit_requests<U>(
+pub fn make_deposit_requests<U, TxAmt, FeeAmt>(
     depositor: &Recipient,
-    amounts: &[u64],
+    amounts: &[TxAmt],
     utxo: U,
-    max_fee: u64,
+    max_fee: FeeAmt,
     signers_public_key: bitcoin::XOnlyPublicKey,
 ) -> (Transaction, Vec<DepositRequest>)
 where
     U: regtest::AsUtxo,
+    TxAmt: AsSatoshis,
+    FeeAmt: AsSatoshis,
 {
+    let amounts_sats = amounts.iter().map(|a| a.as_satoshis()).collect::<Vec<_>>();
+    let max_fee_sats = max_fee.as_satoshis();
+
     let deposit_inputs = DepositScriptInputs {
         signers_public_key,
-        max_fee,
+        max_fee: max_fee_sats,
         recipient: PrincipalData::from(StacksAddress::burn_address(false)),
     };
     let reclaim_inputs = ReclaimScriptInputs::try_new(50, bitcoin::ScriptBuf::new()).unwrap();
@@ -174,7 +185,7 @@ where
     let mut outputs = vec![];
     for amount in amounts {
         outputs.push(bitcoin::TxOut {
-            value: Amount::from_sat(*amount),
+            value: Amount::from_sat(amount.as_satoshis()),
             script_pubkey: sbtc::deposits::to_script_pubkey(
                 deposit_script.clone(),
                 reclaim_script.clone(),
@@ -184,7 +195,7 @@ where
 
     let fee = regtest::BITCOIN_CORE_FALLBACK_FEE.to_sat();
     outputs.push(bitcoin::TxOut {
-        value: utxo.amount() - Amount::from_sat(amounts.iter().sum::<u64>() + fee),
+        value: utxo.amount() - Amount::from_sat(amounts_sats.iter().sum::<u64>() + fee),
         script_pubkey: depositor.address.script_pubkey(),
     });
 
@@ -203,7 +214,7 @@ where
     regtest::p2tr_sign_transaction(&mut deposit_tx, 0, &[utxo], &depositor.keypair);
 
     let mut requests = vec![];
-    for (index, amount) in amounts.iter().enumerate() {
+    for (index, &amount) in amounts_sats.iter().enumerate() {
         let req = CreateDepositRequest {
             outpoint: bitcoin::OutPoint::new(deposit_tx.compute_txid(), index as u32),
             deposit_script: deposit_script.clone(),
@@ -212,9 +223,9 @@ where
 
         requests.push(DepositRequest {
             outpoint: req.outpoint,
-            max_fee,
+            max_fee: max_fee_sats,
             signer_bitmap: BitArray::ZERO,
-            amount: *amount,
+            amount,
             deposit_script: deposit_script.clone(),
             reclaim_script: reclaim_script.clone(),
             reclaim_script_hash: Some(model::TaprootScriptHash::from(&reclaim_script)),
@@ -277,7 +288,7 @@ where
     }
 
     /// Creates a new `DepositHelper` instance with a new depositor generated using the provided RNG.
-    pub fn with_new_depositor<R>(bitcoin: &'a Bitcoin, rng: &mut R) -> Self
+    pub fn new_depositor<R>(bitcoin: &'a Bitcoin, rng: &mut R) -> Self
     where
         R: RngCore,
     {
@@ -505,7 +516,7 @@ async fn deposit_helper_submits_deposit_successfully() {
     .expect("Failed to create EmilyClient");
 
     let signer_for_agg_key = Recipient::new(AddressType::P2tr);
-    let depositor = DepositHelper::with_new_depositor(faucet, rng).with_emily_client(&emily_client);
+    let depositor = DepositHelper::new_depositor(faucet, rng).with_emily_client(&emily_client);
 
     let initial_depositor_balance_sats = 100_000_000; // 1 BTC
     depositor.fund(initial_depositor_balance_sats);
@@ -649,7 +660,7 @@ fn deposits_add_to_controlled_amounts() {
     let fee = regtest::BITCOIN_CORE_FALLBACK_FEE.to_sat();
 
     let signer = Recipient::new(AddressType::P2tr);
-    let depositor = DepositHelper::with_new_depositor(faucet, rng);
+    let depositor = DepositHelper::new_depositor(faucet, rng);
     let signers_public_key = signer.keypair.x_only_public_key().0;
 
     // Start off with some initial UTXOs to work with.
@@ -854,7 +865,7 @@ fn parse_withdrawal_ids(withdrawal_numbers: u64) {
     let (rpc, faucet) = regtest::initialize_blockchain();
     let signer = Recipient::new(AddressType::P2tr);
     let signers_public_key = signer.keypair.x_only_public_key().0;
-    let depositor = DepositHelper::with_new_depositor(faucet, rng);
+    let depositor = DepositHelper::new_depositor(faucet, rng);
 
     // Start off with some initial UTXOs to work with.
     let signers_funds = 100_000_000 * (1 + withdrawal_numbers);

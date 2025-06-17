@@ -50,6 +50,7 @@ use signer::storage::model::TxOutputType;
 use signer::storage::model::TxPrevout;
 use signer::storage::model::TxPrevoutType;
 use signer::storage::postgres::PgStore;
+use signer::testing::IterTestExt;
 use signer::testing::btc::get_canonical_chain_tip;
 use signer::testing::stacks::DUMMY_SORTITION_INFO;
 use signer::testing::stacks::DUMMY_TENURE_INFO;
@@ -527,10 +528,10 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     // For a real deposit we need to create a depositor and have them make
     // an actual deposit. For this step we create the sweep transaction
     // "manually".
-    let depositor =
-        DepositHelper::with_new_depositor(rpc, &mut rng).with_emily_client(&emily_client);
-    // Start off with some initial UTXOs to work with.
-    depositor.fund_from(faucet, 50_000_000);
+
+    // Create and fund the depositor.
+    let depositor = DepositHelper::new_depositor(faucet, &mut rng).with_emily_client(&emily_client);
+    depositor.fund(50_000_000);
 
     let chain_tip = faucet.generate_block().into();
 
@@ -568,9 +569,8 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
         max_deposits_per_bitcoin_tx: ctx.config().signer.max_deposits_per_bitcoin_tx.get(),
     };
 
-    let mut transactions = requests.construct_transactions().unwrap();
-    assert_eq!(transactions.len(), 1);
-    let mut unsigned = transactions.pop().unwrap();
+    let transactions = requests.construct_transactions().unwrap();
+    let mut unsigned = transactions.single();
 
     // Add the signature and/or other required information to the witness data.
     signer::testing::set_witness_data(&mut unsigned, signer.keypair);
@@ -676,9 +676,9 @@ async fn block_observer_picks_up_chained_unordered_sweeps() {
     let new_signer = Recipient::new_with_rng(AddressType::P2tr, &mut rng);
     let signers_public_key2 = PublicKey::from(new_signer.keypair.public_key()).into();
 
-    let depositor1 = DepositHelper::with_new_depositor(rpc, &mut rng);
-    let depositor2 = DepositHelper::with_new_depositor(rpc, &mut rng);
-    let depositor3 = DepositHelper::with_new_depositor(rpc, &mut rng);
+    let depositor1 = DepositHelper::new_depositor(rpc, &mut rng);
+    let depositor2 = DepositHelper::new_depositor(rpc, &mut rng);
+    let depositor3 = DepositHelper::new_depositor(rpc, &mut rng);
 
     faucet.send_to_many(1_000_000, [&depositor1, &depositor2, &depositor3]);
     faucet.generate_block();
