@@ -2129,21 +2129,28 @@
           }
         }
       },
-      "DepositWithStatus": {
+      "DepositWithStatusSchemed": {
         "type": "object",
-        "description": "Wrapper for deposit with status code. Used for multi-status responses.",
+        "description": "Workaround to make utopia generate openapi. Used only as last step before sending\nUpdateDepositsResponce",
         "required": [
-          "deposit",
           "status"
         ],
         "properties": {
           "deposit": {
-            "$ref": "#/components/schemas/Result"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Deposit"
+              }
+            ],
+            "nullable": true
+          },
+          "error": {
+            "type": "string",
+            "nullable": true
           },
           "status": {
             "type": "integer",
             "format": "int32",
-            "description": "HTTP status code, returned as part of multi-status responses.",
             "minimum": 0
           }
         }
@@ -2383,7 +2390,7 @@
           "deposits": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/DepositWithStatus"
+              "$ref": "#/components/schemas/DepositWithStatusSchemed"
             },
             "description": "Deposit infos: deposits with a little less data."
           }
@@ -2415,7 +2422,7 @@
           "withdrawals": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/WithdrawalWithStatus"
+              "$ref": "#/components/schemas/WithdrawalWithStatusSchemed"
             },
             "description": "Updated withdrawals."
           }
@@ -2615,22 +2622,29 @@
           }
         }
       },
-      "WithdrawalWithStatus": {
+      "WithdrawalWithStatusSchemed": {
         "type": "object",
-        "description": "Wrapper for withdrawal with status code. Used for multi-status responses.",
+        "description": "Workaround to make utopia generate openapi. Used only as last step before sending\nUpdateWithdrawalsResponce",
         "required": [
-          "withdrawal",
           "status"
         ],
         "properties": {
+          "error": {
+            "type": "string",
+            "nullable": true
+          },
           "status": {
             "type": "integer",
             "format": "int32",
-            "description": "HTTP status code, returned as part of multi-status responses.",
             "minimum": 0
           },
           "withdrawal": {
-            "$ref": "#/components/schemas/Withdrawal"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Withdrawal"
+              }
+            ],
+            "nullable": true
           }
         }
       }

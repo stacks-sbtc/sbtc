@@ -30,11 +30,22 @@ pub struct GetDepositsResponse {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateDepositsResponse {
     /// Deposit infos: deposits with a little less data.
-    pub deposits: Vec<DepositWithStatus>,
+    pub deposits: Vec<DepositWithStatusSchemed>,
+}
+
+impl<T> From<T> for UpdateDepositsResponse
+where
+    T: IntoIterator<Item = DepositWithStatus>,
+{
+    fn from(value: T) -> Self {
+        Self {
+            deposits: value.into_iter().map(Into::into).collect()
+        }
+    }
 }
 
 /// Wrapper for deposit with status code. Used for multi-status responses.
-#[derive(Clone, Debug, PartialEq, Hash, Serialize, Deserialize, ToSchema, ToResponse)]
+#[derive(Clone, Debug, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DepositWithStatus {
     /// The fully extracted and validated deposit request, or
@@ -44,3 +55,23 @@ pub struct DepositWithStatus {
     pub status: u16,
 }
 
+/// Workaround to make utopia generate openapi. Used only as last step before sending
+/// UpdateDepositsResponce
+#[derive(Clone, Default, Debug, PartialEq, Hash, Serialize, Deserialize, ToSchema, ToResponse)]
+#[serde(rename_all = "camelCase")]
+pub struct DepositWithStatusSchemed {
+    deposit: Option<Deposit>,
+    error: Option<String>,
+    status: u16,
+}
+
+
+impl From<DepositWithStatus> for DepositWithStatusSchemed {
+    fn from(value: DepositWithStatus) -> Self {
+        Self {
+            deposit: value.deposit.clone().ok(),
+            error: value.deposit.err(),
+            status: value.status,
+        }
+    }
+}

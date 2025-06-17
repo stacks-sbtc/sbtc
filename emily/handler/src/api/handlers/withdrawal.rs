@@ -406,11 +406,11 @@ async fn update_withdrawals(
     for (index, update) in validated_request.withdrawals {
         if update.is_err() {
             // We just checked that update is err so unwrap here is fine.
-            let withdrawal = update.unwrap_err().to_string();
+            let error = update.unwrap_err().to_string();
             updated_withdrawals.push((
                 index,
                 WithdrawalWithStatus {
-                    withdrawal,
+                    withdrawal: Err(error),
                     status: StatusCode::BAD_REQUEST.as_u16(),
                 },
             ));
@@ -494,9 +494,8 @@ async fn update_withdrawals(
     updated_withdrawals.sort_by_key(|(index, _)| *index);
     let withdrawals = updated_withdrawals
         .into_iter()
-        .map(|(_, withdrawal)| withdrawal)
-        .collect();
-    let response = UpdateWithdrawalsResponse { withdrawals };
+        .map(|(_, withdrawal)| withdrawal);
+    let response = UpdateWithdrawalsResponse::from(withdrawals);
     Ok(with_status(json(&response), StatusCode::OK))
 }
 
