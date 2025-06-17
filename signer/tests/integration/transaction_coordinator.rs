@@ -1816,7 +1816,7 @@ async fn sign_bitcoin_transaction() {
 
     // We first need to wait for bitcoin-core to send us all the
     // notifications so that we are up-to-date with the chain tip and DKG.
-    wait_for_signers(&signers, chain_tip.into()).await.unwrap();
+    wait_for_signers(&signers, Some(chain_tip)).await.unwrap();
 
     // DKG and DKG verification should have finished successfully. We
     // assume, for now, that the key rotation contract call was submitted.
@@ -2282,7 +2282,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     // =========================================================================
 
     // This should kick off DKG.
-    let chain_tip: BitcoinBlockHash = faucet.generate_block().into();
+    let chain_tip = faucet.generate_block().into();
 
     // We first need to wait for bitcoin-core to send us all the
     // notifications so that we are up-to-date with the chain tip.
@@ -2418,7 +2418,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
 
     // After the next bitcoin block, each of the signers will think that
     // DKG needs to be run. So we need to wait for it.
-    let chain_tip: BitcoinBlockHash = faucet.generate_block().into();
+    let chain_tip = faucet.generate_block().into();
 
     // We first need to wait for bitcoin-core to send us all the
     // notifications so that we are up-to-date with the chain tip.
@@ -3509,7 +3509,7 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
     // - After they have the same view of the canonical bitcoin blockchain,
     //   the signers should all participate in DKG.
     // =========================================================================
-    let chain_tip: BitcoinBlockHash = faucet.generate_block().into();
+    let chain_tip = faucet.generate_block().into();
 
     // We first need to wait for bitcoin-core to send us all the
     // notifications so that we are up-to-date with the chain tip.
@@ -4570,7 +4570,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
     // - After they have the same view of the canonical bitcoin blockchain,
     //   the signers should all participate in DKG.
     // =========================================================================
-    let chain_tip: BitcoinBlockHash = faucet.generate_block().into();
+    let chain_tip = faucet.generate_block().into();
 
     // We first need to wait for bitcoin-core to send us all the
     // notifications so that we are up-to-date with the chain tip.
