@@ -626,6 +626,8 @@ async fn update_withdrawals_is_forbidden_for_signer(
         assert_eq!(withdrawals.len(), 1);
         let withdrawal = withdrawals.first().unwrap();
         assert_eq!(withdrawal.status, 403);
+        assert!(withdrawal.withdrawal.clone().unwrap().is_none());
+        assert_eq!(withdrawal.error.clone().unwrap().unwrap(), "Forbidden");
 
         // Check withdrawal wasn't updated
         let response = apis::withdrawal_api::get_withdrawal(&user_configuration, request_id)
@@ -829,6 +831,13 @@ async fn withdrawal_cant_be_rbf() {
 
     // Withdrawal can not be RBF, so it is BAD REQUEST.
     assert_eq!(withdrawal.status, 400);
+    assert!(withdrawal.withdrawal.clone().unwrap().is_none());
+    assert_eq!(
+        withdrawal.error.clone().unwrap().unwrap(),
+        format!(
+            "withdrawal related transaction have RBF status, but this should never happen. request_id: {request_id}"
+        )
+    );
 
     // Check that withdrawal status wasn't changed.
     let withdrawal = apis::withdrawal_api::get_withdrawal(&user_configuration, request_id)
@@ -1069,15 +1078,23 @@ async fn emily_process_withdrawal_updates_when_some_of_them_are_unknown() {
     .expect("Received an error after making a valid update withdrawal request api call.");
 
     // Check that multistatus response is returned correctly.
-    assert!(update_responce.withdrawals.iter().all(|withdrawal| {
-        match &withdrawal.withdrawal {
+    update_responce
+        .withdrawals
+        .iter()
+        .for_each(|withdrawal| match &withdrawal.withdrawal {
             Some(Some(inner)) => {
-                inner.request_id == create_withdrawal_body1.request_id && withdrawal.status == 200
+                assert_eq!(inner.request_id, create_withdrawal_body1.request_id);
+                assert_eq!(withdrawal.status, 200);
             }
-            None => withdrawal.status == 404,
-            Some(None) => unreachable!(),
-        }
-    }));
+            Some(None) => {
+                assert_eq!(withdrawal.status, 404);
+                assert_eq!(
+                    withdrawal.error.clone().unwrap().unwrap(),
+                    "Resource not found"
+                );
+            }
+            None => unreachable!(),
+        });
 
     // Now we should have 1 accepted withdrawal.
     let withdrawals =

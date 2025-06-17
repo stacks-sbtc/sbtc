@@ -1060,6 +1060,8 @@ async fn update_deposits_is_forbidden_for_signer(
         assert_eq!(deposits.len(), 1);
         let deposit = deposits.first().unwrap();
         assert_eq!(deposit.status, 403);
+        assert!(deposit.deposit.clone().unwrap().is_none());
+        assert_eq!(deposit.error.clone().unwrap().unwrap(), "Forbidden");
 
         // Check that deposit wasn't updated
         let response = apis::deposit_api::get_deposit(
@@ -1371,6 +1373,17 @@ async fn replaced_by_tx_for_not_rbf_transactions_is_bad_request(status: Status) 
         deposit.status == 400,
         "Expected a 400 Bad Request status code"
     );
+    assert!(deposit.deposit.clone().unwrap().is_none());
+    let status_str = status.to_string();
+    let mut chars = status_str.chars();
+    let first = chars.next().unwrap().to_ascii_uppercase();
+    let status_str = first.to_string() + chars.as_str();
+    assert_eq!(
+        deposit.error.clone().unwrap().unwrap(),
+        format!(
+            "deposit with replaced_by_tx is only valid if status is RBF, but got status {status_str} for txid: {bitcoin_txid}, vout: {bitcoin_tx_output_index}"
+        )
+    );
 
     // Check that the deposit status wasn't updated.
     let response = apis::deposit_api::get_deposit(&user_configuration, &txid, &index)
@@ -1625,15 +1638,23 @@ async fn emily_process_deposit_updates_when_some_of_them_are_unknown() {
     .expect("Received an error after making a valid update deposit request api call.");
 
     // Check that multistatus response is returned correctly.
-    assert!(update_responce.deposits.iter().all(|deposit| {
-        match &deposit.deposit {
+    update_responce
+        .deposits
+        .iter()
+        .for_each(|deposit| match &deposit.deposit {
             Some(Some(inner)) => {
-                inner.bitcoin_txid == create_deposit_body1.bitcoin_txid && deposit.status == 200
+                assert_eq!(inner.bitcoin_txid, create_deposit_body1.bitcoin_txid);
+                assert_eq!(deposit.status, 200);
             }
-            None => deposit.status == 404,
-            Some(None) => unreachable!(),
-        }
-    }));
+            Some(None) => {
+                assert_eq!(deposit.status, 404);
+                assert_eq!(
+                    deposit.error.clone().unwrap().unwrap(),
+                    "Resource not found"
+                );
+            }
+            None => unreachable!(),
+        });
 
     // Now we should have 1 accepted deposit.
     let deposits =
