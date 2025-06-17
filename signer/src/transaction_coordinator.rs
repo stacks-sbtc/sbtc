@@ -227,6 +227,7 @@ where
     pub async fn run(mut self) -> Result<(), Error> {
         tracing::info!("starting transaction coordinator event loop");
         let mut signal_stream = self.context.as_signal_stream(run_loop_message_filter);
+        let public_key = self.signer_public_key();
 
         while let Some(message) = signal_stream.next().await {
             match message {
@@ -240,15 +241,12 @@ where
                         let processed_until_block = match self.process_new_blocks().await {
                             Ok(maybe_block_hash) => maybe_block_hash,
                             Err(error) => {
-                                tracing::error!(
-                                    %error,
-                                    "error processing requests; skipping this round"
-                                );
+                                tracing::error!(%error, %public_key, "error processing requests; skipping this round");
                                 None
                             }
                         };
 
-                        tracing::trace!("sending tenure completed signal");
+                        tracing::trace!(%public_key, "sending tenure completed signal");
                         self.context.signal(
                             TxCoordinatorEvent::TenureCompleted(processed_until_block).into(),
                         )?;

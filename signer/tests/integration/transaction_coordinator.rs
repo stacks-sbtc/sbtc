@@ -3320,6 +3320,10 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
             .with_first_bitcoin_core_client()
             .with_emily_client(emily_client.clone())
             .with_mocked_stacks_client()
+            .modify_settings(|settings| {
+                settings.signer.bitcoin_processing_delay = Duration::from_millis(200);
+                settings.signer.dkg_target_rounds = NonZeroU32::new(1).unwrap();
+            })
             .build();
 
         backfill_bitcoin_blocks(&db, rpc, &chain_tip_info.hash).await;
@@ -3511,36 +3515,25 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
     // notifications so that we are up-to-date with the chain tip.
     signers
         .iter()
-        .map(|(_, db, _, _)| testing::storage::wait_for_chain_tip(db, chain_tip))
+        .map(|(_, db, _, _)| testing::storage::wait_for_latest_dkg_to_become_verified(db))
         .join_all()
         .await;
 
-    // Now we wait for DKG to successfully complete. For that we just watch
-    // the dkg_shares table. Also, we need to get the signers' scriptPubKey
-    // so that we can make a donation, and get the party started.
-    signers
-        .iter()
-        .map(|(_, db, _, _)| testing::storage::wait_for_dkg(db, 1))
-        .join_all()
-        .await;
+    let mut rng = get_rng();
+    for (ctx, db, _, _) in signers.iter() {
+        let shares = db.get_latest_verified_dkg_shares().await.unwrap().unwrap();
 
-    // =========================================================================
-    // Step 4 - Wait for DKG
-    // -------------------------------------------------------------------------
-    // - Once they are all running, generate a bitcoin block to kick off
-    //   the database updating process.
-    // - After they have the same view of the canonical bitcoin blockchain,
-    //   the signers should all participate in DKG.
-    // =========================================================================
-    let chain_tip: BitcoinBlockHash = faucet.generate_block().into();
-
-    // We first need to wait for bitcoin-core to send us all the
-    // notifications so that we are up-to-date with the chain tip.
-    signers
-        .iter()
-        .map(|(_, db, _, _)| testing::storage::wait_for_chain_tip(db, chain_tip))
-        .join_all()
-        .await;
+        let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
+        let event = KeyRotationEvent {
+            txid: fake::Faker.fake_with_rng(&mut rng),
+            block_hash: stacks_chain_tip.block_hash,
+            aggregate_key: shares.aggregate_key,
+            signer_set: shares.signer_set_public_keys.clone(),
+            signatures_required: shares.signature_share_threshold,
+            address: PrincipalData::from(ctx.config().signer.deployer).into(),
+        };
+        db.write_rotate_keys_transaction(&event).await.unwrap();
+    }
 
     // =========================================================================
     // Step 5 - Wait some more, maybe the signers will do something
