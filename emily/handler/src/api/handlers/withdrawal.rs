@@ -2,8 +2,8 @@
 use tracing::{debug, instrument};
 use warp::reply::{Reply, json, with_status};
 
-use crate::api::models::common::Status;
 use crate::api::models::common::requests::BasicPaginationQuery;
+use crate::api::models::common::{DepositStatus, WithdrawalStatus};
 use crate::api::models::withdrawal::responses::WithdrawalWithStatus;
 use crate::api::models::withdrawal::{Withdrawal, WithdrawalInfo};
 use crate::api::models::withdrawal::{
@@ -13,12 +13,12 @@ use crate::api::models::withdrawal::{
 use crate::common::error::Error;
 use crate::context::EmilyContext;
 use crate::database::accessors;
-use crate::database::entries::StatusEntry;
 use crate::database::entries::chainstate::ApiStateEntry;
 use crate::database::entries::withdrawal::{
     ValidatedUpdateWithdrawalRequest, WithdrawalEntry, WithdrawalEntryKey, WithdrawalEvent,
     WithdrawalParametersEntry,
 };
+use crate::database::entries::{DepositStatusEntry, WithdrawalStatusEntry};
 use warp::http::StatusCode;
 
 /// Get withdrawal handler.
@@ -261,7 +261,7 @@ pub async fn create_withdrawal(
             txid,
         } = body;
 
-        let status = Status::Pending;
+        let status = WithdrawalStatus::Pending;
 
         // Make table entry.
         let withdrawal_entry: WithdrawalEntry = WithdrawalEntry {
@@ -275,7 +275,7 @@ pub async fn create_withdrawal(
             amount,
             parameters: WithdrawalParametersEntry { max_fee: parameters.max_fee },
             history: vec![WithdrawalEvent {
-                status: StatusEntry::Pending,
+                status: WithdrawalStatusEntry::Pending,
                 message: "Just received withdrawal".to_string(),
                 stacks_block_hash: stacks_block_hash.clone(),
                 stacks_block_height,

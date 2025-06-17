@@ -8,8 +8,8 @@ use tracing::instrument;
 use warp::http::StatusCode;
 use warp::reply::{Reply, json, with_status};
 
-use crate::api::models::common::Status;
 use crate::api::models::common::requests::BasicPaginationQuery;
+use crate::api::models::common::{DepositStatus, WithdrawalStatus};
 use crate::api::models::deposit::responses::{
     DepositWithStatus, GetDepositsForTransactionResponse, UpdateDepositsResponse,
 };
@@ -24,12 +24,12 @@ use crate::api::models::{
 use crate::common::error::Error;
 use crate::context::EmilyContext;
 use crate::database::accessors;
-use crate::database::entries::StatusEntry;
 use crate::database::entries::chainstate::ApiStateEntry;
 use crate::database::entries::deposit::{
     DepositEntry, DepositEntryKey, DepositEvent, DepositParametersEntry,
     ValidatedUpdateDepositsRequest,
 };
+use crate::database::entries::{DepositStatusEntry, WithdrawalStatusEntry};
 
 /// Get deposit handler.
 #[utoipa::path(
@@ -376,12 +376,12 @@ pub async fn create_deposit(
                 lock_time: deposit_info.lock_time.to_consensus_u32(),
             },
             history: vec![DepositEvent {
-                status: StatusEntry::Pending,
+                status: DepositStatusEntry::Pending,
                 message: "Just received deposit".to_string(),
                 stacks_block_hash: stacks_block_hash.clone(),
                 stacks_block_height,
             }],
-            status: Status::Pending,
+            status: DepositStatus::Pending,
             last_update_block_hash: stacks_block_hash,
             last_update_height: stacks_block_height,
             amount: deposit_info.amount,

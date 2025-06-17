@@ -4,20 +4,20 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::api::models::chainstate::Chainstate;
-use crate::api::models::common::{Fulfillment, Status};
+use crate::api::models::common::{DepositStatus, Fulfillment, WithdrawalStatus};
 use crate::api::models::withdrawal::WithdrawalParameters;
 use crate::common::error::{self, ValidationError};
-use crate::database::entries::StatusEntry;
 use crate::database::entries::withdrawal::{
     ValidatedUpdateWithdrawalRequest, ValidatedWithdrawalUpdate, WithdrawalEvent,
 };
+use crate::database::entries::{DepositStatusEntry, WithdrawalStatusEntry};
 
 /// Query structure for the get withdrawals request.
 #[derive(Clone, Default, Debug, PartialEq, Hash, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GetWithdrawalsQuery {
     /// Operation status.
-    pub status: Status,
+    pub status: WithdrawalStatus,
     /// Next token for the search.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_token: Option<String>,
@@ -57,7 +57,7 @@ pub struct WithdrawalUpdate {
     /// The id of the Stacks withdrawal request that initiated the sBTC operation.
     pub request_id: u64,
     /// The status of the withdrawal.
-    pub status: Status,
+    pub status: WithdrawalStatus,
     /// The status message of the withdrawal.
     pub status_message: String,
     /// Details about the on chain artifacts that fulfilled the withdrawal.
@@ -76,22 +76,19 @@ impl WithdrawalUpdate {
         chainstate: Chainstate,
     ) -> Result<ValidatedWithdrawalUpdate, error::ValidationError> {
         // Make status entry.
-        let status_entry: StatusEntry = match self.status {
-            Status::Confirmed => {
+        let status_entry: WithdrawalStatusEntry = match self.status {
+            WithdrawalStatus::Confirmed => {
                 let fulfillment =
                     self.fulfillment
                         .ok_or(ValidationError::WithdrawalMissingFulfillment(
                             self.request_id,
                         ))?;
-                StatusEntry::Confirmed(fulfillment)
+                WithdrawalStatusEntry::Confirmed(fulfillment)
             }
-            Status::Accepted => StatusEntry::Accepted,
-            Status::Pending => StatusEntry::Pending,
-            Status::Reprocessing => StatusEntry::Reprocessing,
-            Status::Failed => StatusEntry::Failed,
-            Status::RBF => {
-                return Err(error::ValidationError::WithdrawalRBF(self.request_id));
-            }
+            WithdrawalStatus::Accepted => WithdrawalStatusEntry::Accepted,
+            WithdrawalStatus::Pending => WithdrawalStatusEntry::Pending,
+            WithdrawalStatus::Reprocessing => WithdrawalStatusEntry::Reprocessing,
+            WithdrawalStatus::Failed => WithdrawalStatusEntry::Failed,
         };
         // Make the new event.
         let event = WithdrawalEvent {

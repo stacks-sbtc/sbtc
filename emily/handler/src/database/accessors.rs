@@ -11,9 +11,11 @@ use tracing::{debug, warn};
 use crate::api::models::limits::{AccountLimits, Limits};
 use crate::common::error::{Error, Inconsistency};
 
-use crate::{api::models::common::Status, context::EmilyContext};
+use crate::{
+    api::models::common::{DepositStatus, WithdrawalStatus},
+    context::EmilyContext,
+};
 
-use super::entries::StatusEntry;
 use super::entries::deposit::{
     DepositInfoByRecipientEntry, DepositInfoByReclaimPubkeysEntry,
     DepositTableByRecipientSecondaryIndex, DepositTableByReclaimPubkeysSecondaryIndex,
@@ -26,6 +28,7 @@ use super::entries::withdrawal::{
     ValidatedWithdrawalUpdate, WithdrawalInfoByRecipientEntry, WithdrawalInfoBySenderEntry,
     WithdrawalTableByRecipientSecondaryIndex, WithdrawalTableBySenderSecondaryIndex,
 };
+use super::entries::{DepositStatusEntry, WithdrawalStatusEntry};
 use super::entries::{
     EntryTrait, KeyTrait, TableIndexTrait, VersionedEntryTrait, VersionedTableIndexTrait,
     chainstate::{
@@ -72,7 +75,7 @@ pub async fn get_deposit_entry(
 /// Get deposit entries.
 pub async fn get_deposit_entries(
     context: &EmilyContext,
-    status: &Status,
+    status: &DepositStatus,
     maybe_next_token: Option<String>,
     maybe_page_size: Option<u16>,
 ) -> Result<(Vec<DepositInfoEntry>, Option<String>), Error> {
@@ -119,14 +122,22 @@ pub async fn get_deposit_entries_by_reclaim_pubkeys_hash(
 
 /// Hacky exhaustive list of all possible statuses that we will iterate over in order to
 /// get every deposit present.
-/// TODO(1693): Split Emily status enum for deposits and withdrawals
-const ALL_STATUSES: &[Status] = &[
-    Status::Accepted,
-    Status::Confirmed,
-    Status::Failed,
-    Status::Pending,
-    Status::Reprocessing,
-    Status::RBF,
+const ALL_DEPOSIT_STATUSES: &[DepositStatus] = &[
+    DepositStatus::Accepted,
+    DepositStatus::Confirmed,
+    DepositStatus::Failed,
+    DepositStatus::Pending,
+    DepositStatus::Reprocessing,
+    DepositStatus::RBF,
+];
+/// Hacky exhaustive list of all possible withdrawal statuses that we will iterate over in order to
+/// get every withdrawal present.
+const ALL_WITHDRAWAL_STATUSES: &[WithdrawalStatus] = &[
+    WithdrawalStatus::Accepted,
+    WithdrawalStatus::Confirmed,
+    WithdrawalStatus::Failed,
+    WithdrawalStatus::Pending,
+    WithdrawalStatus::Reprocessing,
 ];
 
 /// Gets all deposit entries modified from (on or after) a given height.
@@ -136,7 +147,7 @@ pub async fn get_all_deposit_entries_modified_from_height(
     maybe_page_size: Option<u16>,
 ) -> Result<Vec<DepositInfoEntry>, Error> {
     let mut all = Vec::new();
-    for status in ALL_STATUSES {
+    for status in ALL_DEPOSIT_STATUSES {
         let mut received = get_all_deposit_entries_modified_from_height_with_status(
             context,
             status,
@@ -153,7 +164,7 @@ pub async fn get_all_deposit_entries_modified_from_height(
 /// Gets all deposit entries modified from (on or after) a given height.
 pub async fn get_all_deposit_entries_modified_from_height_with_status(
     context: &EmilyContext,
-    status: &Status,
+    status: &DepositStatus,
     minimum_height: u64,
     maybe_page_size: Option<u16>,
 ) -> Result<Vec<DepositInfoEntry>, Error> {
@@ -207,12 +218,13 @@ pub async fn pull_and_update_deposit_with_retry(
 
         // We don't want to add a new entry if the status is already accepted.
         // Updates Accepted -> Accepted occurs usually due to RBF.
-        if update.event.status == StatusEntry::Accepted && deposit_entry.status == Status::Accepted
+        if update.event.status == DepositStatusEntry::Accepted
+            && deposit_entry.status == DepositStatus::Accepted
         {
             return Ok(deposit_entry);
         }
-        let is_valid_untrusted_status_update =
-            update.event.status == StatusEntry::Accepted && deposit_entry.status == Status::Pending;
+        let is_valid_untrusted_status_update = update.event.status == DepositStatusEntry::Accepted
+            && deposit_entry.status == DepositStatus::Pending;
         if !is_trusted_key && !is_valid_untrusted_status_update {
             return Err(Error::Forbidden);
         }
@@ -254,7 +266,7 @@ pub async fn update_deposit(
     // Make the key item.
     let key_item: Item = serde_dynamo::to_item(&update.key)?;
     // Get simplified status enum.
-    let status: Status = (&update.event.status).into();
+    let status: DepositStatus = (&update.event.status).into();
     // Build the update.
     context
         .dynamodb_client
@@ -341,7 +353,7 @@ pub async fn get_withdrawal_entry(
 /// Get withdrawal entries.
 pub async fn get_withdrawal_entries(
     context: &EmilyContext,
-    status: &Status,
+    status: &WithdrawalStatus,
     maybe_next_token: Option<String>,
     maybe_page_size: Option<u16>,
 ) -> Result<(Vec<WithdrawalInfoEntry>, Option<String>), Error> {
@@ -393,7 +405,7 @@ pub async fn get_all_withdrawal_entries_modified_from_height(
     maybe_page_size: Option<u16>,
 ) -> Result<Vec<WithdrawalInfoEntry>, Error> {
     let mut all = Vec::new();
-    for status in ALL_STATUSES {
+    for status in ALL_WITHDRAWAL_STATUSES {
         let mut received = get_all_withdrawal_entries_modified_from_height_with_status(
             context,
             status,
@@ -410,7 +422,7 @@ pub async fn get_all_withdrawal_entries_modified_from_height(
 /// Gets all withdrawal entries modified from (on or after) a given height.
 pub async fn get_all_withdrawal_entries_modified_from_height_with_status(
     context: &EmilyContext,
-    status: &Status,
+    status: &WithdrawalStatus,
     minimum_height: u64,
     maybe_page_size: Option<u16>,
 ) -> Result<Vec<WithdrawalInfoEntry>, Error> {
@@ -448,11 +460,14 @@ pub async fn pull_and_update_withdrawal_with_retry(
 
         // We don't want to add a new entry if the status is already accepted.
         // Updates Accepted -> Accepted occurs usually due to RBF.
-        if update.event.status == StatusEntry::Accepted && entry.status == Status::Accepted {
+        if update.event.status == WithdrawalStatusEntry::Accepted
+            && entry.status == WithdrawalStatus::Accepted
+        {
             return Ok(entry);
         }
-        let is_valid_untrusted_status_update =
-            update.event.status == StatusEntry::Accepted && entry.status == Status::Pending;
+        let is_valid_untrusted_status_update = update.event.status
+            == WithdrawalStatusEntry::Accepted
+            && entry.status == WithdrawalStatus::Pending;
         if !is_trusted_key && !is_valid_untrusted_status_update {
             return Err(Error::Forbidden);
         }
@@ -494,7 +509,7 @@ pub async fn update_withdrawal(
     // Make the key item.
     let key_item: Item = serde_dynamo::to_item(&update.key)?;
     // Get simplified status enum.
-    let status: Status = (&update.event.status).into();
+    let status: WithdrawalStatus = (&update.event.status).into();
     // Execute the update.
     context
         .dynamodb_client
@@ -780,9 +795,9 @@ async fn calculate_sbtc_left_for_withdrawals(
     let minimum_stacks_height_in_window =
         get_oldest_stacks_block_in_range(context, bitcoin_end_block, bitcoin_tip).await?;
 
-    let all_statuses_except_failed: Vec<_> = ALL_STATUSES
+    let all_statuses_except_failed: Vec<_> = ALL_WITHDRAWAL_STATUSES
         .iter()
-        .filter(|status| **status != Status::Failed)
+        .filter(|status| **status != WithdrawalStatus::Failed)
         .collect();
 
     let mut total_withdrawn = 0u64;
