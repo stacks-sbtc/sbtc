@@ -18,6 +18,7 @@ pub mod transaction_signer;
 pub mod wallet;
 pub mod wsts;
 
+use std::fmt::Debug;
 use std::time::Duration;
 
 use bitcoin::TapSighashType;
@@ -275,31 +276,5 @@ impl Sleep {
     /// Sleeps for the specified number of milliseconds asynchronously.
     pub async fn for_millis(millis: u64) {
         Duration::from_millis(millis).sleep().await;
-    }
-}
-
-/// Trait for converting a value into an `Option<Target>`.
-///
-/// This is useful for APIs that expect an `Option<Target>` but can
-/// ergonomically accept values that convert `Into<Target>`.
-/// The `Target` defaults to `Self`.
-pub trait IntoOption<Target = Self> {
-    /// Converts a value of type `Source` into an `Option<Dest>`.
-    fn into_option(self) -> Option<Target>;
-}
-
-impl<T, Target> IntoOption<Target> for T
-where
-    T: Into<Target>,
-{
-    /// Converts `self` into `Some(Target)` using `self.into()`.
-    ///
-    /// If `Self` is `T` and `Target` is `U`, this performs `Some(T::into(self): U)`.
-    /// If `Target` defaults to `Self` (e.g., `T`), this performs `Some(T::into(self): T)`.
-    ///
-    /// Note: If `Self` is `Option<X>` and `Target` is also `Option<X>` (due to the
-    /// `Target = Self` default), this will result in `Some(Option<X>)`.
-    fn into_option(self) -> Option<Target> {
-        Some(self.into())
     }
 }

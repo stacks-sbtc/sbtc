@@ -574,6 +574,13 @@ pub enum Error {
     #[error("DKG has not been run")]
     NoDkgShares,
 
+    /// This should only happen during the bootstrap phase of signer set or
+    /// during the addition of a new signer. It arises when a signer is the
+    /// coordinator but doesn't have a key rotation event in their
+    /// database.
+    #[error("no key rotation event in database")]
+    NoKeyRotationEvent,
+
     /// This arises when a signer gets a message that requires DKG to have
     /// been run with output shares that have passed verification, but no
     /// such shares exist.

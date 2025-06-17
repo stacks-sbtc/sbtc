@@ -558,12 +558,20 @@ impl DbRead for SharedStore {
     }
 
     async fn is_signer_script_pub_key(&self, script: &model::ScriptPubKey) -> Result<bool, Error> {
-        Ok(self
-            .lock()
-            .await
+        let store = self.lock().await;
+        let is_known_dkg_shares = store
             .encrypted_dkg_shares
             .values()
-            .any(|(_, share)| &share.script_pubkey == script))
+            .any(|(_, share)| &share.script_pubkey == script);
+
+        let is_known_signer_output = store
+            .bitcoin_outputs
+            .values()
+            .flatten()
+            .filter(|output| output.output_type == model::TxOutputType::SignersOutput)
+            .any(|output| &output.script_pubkey == script);
+
+        Ok(is_known_dkg_shares || is_known_signer_output)
     }
 
     async fn is_withdrawal_inflight(

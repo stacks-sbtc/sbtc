@@ -26,9 +26,7 @@ use sbtc::deposits::CreateDepositRequest;
 use sbtc::deposits::DepositScriptInputs;
 use sbtc::deposits::ReclaimScriptInputs;
 use sbtc::testing::regtest;
-use sbtc::testing::regtest::Faucet;
 use sbtc::testing::regtest::Recipient;
-use signer::bitcoin::utxo::DepositRequest;
 use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
 use signer::bitcoin::utxo::SignerUtxo;
@@ -52,6 +50,7 @@ use signer::storage::model::TxOutputType;
 use signer::storage::model::TxPrevout;
 use signer::storage::model::TxPrevoutType;
 use signer::storage::postgres::PgStore;
+use signer::testing::IterTestExt;
 use signer::testing::btc::get_canonical_chain_tip;
 use signer::testing::stacks::DUMMY_SORTITION_INFO;
 use signer::testing::stacks::DUMMY_TENURE_INFO;
@@ -74,8 +73,10 @@ use url::Url;
 
 use crate::setup::IntoEmilyTestingConfig as _;
 use crate::setup::TestSweepSetup;
+use crate::setup::fetch_canonical_bitcoin_blockchain;
 use crate::transaction_coordinator::mock_reqwests_status_code_error;
-use crate::utxo_construction::make_deposit_request;
+use crate::utxo_construction::DepositHelper;
+use crate::utxo_construction::ReqAmounts;
 use crate::zmq::BITCOIN_CORE_ZMQ_ENDPOINT;
 
 pub const GET_POX_INFO_JSON: &str =
@@ -527,37 +528,33 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     // For a real deposit we need to create a depositor and have them make
     // an actual deposit. For this step we create the sweep transaction
     // "manually".
-    let depositor = Recipient::new(AddressType::P2tr);
 
-    // Start off with some initial UTXOs to work with.
-    faucet.send_to(50_000_000, &depositor.address);
+    // Create and fund the depositor.
+    let depositor = DepositHelper::new_depositor(faucet, &mut rng).with_emily_client(&emily_client);
+    depositor.fund(50_000_000);
 
-    let chain_tip = faucet.generate_blocks(1).pop().unwrap().into();
+    let chain_tip = faucet.generate_block().into();
 
     let signal = signal_receiver.recv();
     let Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved)) = signal.await else {
         panic!("Not the right signal")
     };
 
-    // Now lets make a deposit transaction and submit it. First we get some
-    // sats.
-    let depositor_utxo = depositor.get_utxos(rpc, None).pop().unwrap();
-
+    // Now lets make a deposit transaction and submit it.
     let deposit_amount = 2_500_000;
     let max_fee = deposit_amount / 2;
     let signers_public_key = shares.aggregate_key.into();
-    let (deposit_tx, deposit_request, _) = make_deposit_request(
-        &depositor,
-        deposit_amount,
-        depositor_utxo,
-        max_fee,
-        signers_public_key,
-    );
-    rpc.send_raw_transaction(&deposit_tx).unwrap();
+    let deposit = depositor
+        .submit_deposit(
+            ReqAmounts::new(deposit_amount, max_fee),
+            shares.aggregate_key,
+        )
+        .await
+        .unwrap();
 
     // Now build the struct with the outstanding peg-in and peg-out requests.
     let requests = SbtcRequests {
-        deposits: vec![deposit_request.clone()],
+        deposits: vec![deposit.request.clone()],
         withdrawals: Vec::new(),
         signer_state: SignerBtcState {
             utxo: db.get_signer_utxo(&chain_tip).await.unwrap().unwrap(),
@@ -572,9 +569,8 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
         max_deposits_per_bitcoin_tx: ctx.config().signer.max_deposits_per_bitcoin_tx.get(),
     };
 
-    let mut transactions = requests.construct_transactions().unwrap();
-    assert_eq!(transactions.len(), 1);
-    let mut unsigned = transactions.pop().unwrap();
+    let transactions = requests.construct_transactions().unwrap();
+    let mut unsigned = transactions.single();
 
     // Add the signature and/or other required information to the witness data.
     signer::testing::set_witness_data(&mut unsigned, signer.keypair);
@@ -586,11 +582,11 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     //
     // Inform emily about the deposit
     let body = CreateDepositRequestBody {
-        bitcoin_tx_output_index: deposit_request.outpoint.vout,
-        bitcoin_txid: deposit_request.outpoint.txid.to_string(),
-        deposit_script: deposit_request.deposit_script.to_hex_string(),
-        reclaim_script: deposit_request.reclaim_script.to_hex_string(),
-        transaction_hex: serialize_hex(&deposit_tx),
+        bitcoin_tx_output_index: deposit.request.outpoint.vout,
+        bitcoin_txid: deposit.request.outpoint.txid.to_string(),
+        deposit_script: deposit.request.deposit_script.to_hex_string(),
+        reclaim_script: deposit.request.reclaim_script.to_hex_string(),
+        transaction_hex: serialize_hex(&deposit.tx),
     };
     deposit_api::create_deposit(emily_client.config(), body)
         .await
@@ -599,7 +595,7 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     // ** Step 6 **
     //
     // Check that the block observer populates the tables correctly
-    faucet.generate_blocks(1);
+    faucet.generate_block();
 
     // Okay now there is a deposit, and it has been confirmed. We should
     // pick it up automatically.
@@ -643,35 +639,10 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
         fetch_input(&db, TxPrevoutType::Deposit).await[0];
 
     assert_eq!(amount, deposit_amount);
-    assert_eq!(prevout_txid.deref(), &deposit_tx.compute_txid());
+    assert_eq!(prevout_txid.deref(), &deposit.tx.compute_txid());
     assert_eq!(txid.deref(), &unsigned.tx.compute_txid());
 
     testing::storage::drop_db(db).await;
-}
-
-/// Generates a random deposit request transaction with the input amount
-/// that is locked by the given aggregate key.
-///
-/// Note: The deposit transaction will be in the mempool when this function
-/// returns.
-fn generate_deposit_request<R: rand::Rng>(
-    faucet: &Faucet,
-    amount: u64,
-    signers_public_key: bitcoin::XOnlyPublicKey,
-    rng: &mut R,
-) -> DepositRequest {
-    let depositor = Recipient::new_with_rng(AddressType::P2tr, rng);
-    faucet.send_to(amount + amount / 2, &depositor.address);
-    faucet.generate_block();
-
-    let utxo = depositor.get_utxos(faucet.rpc, None).pop().unwrap();
-    let max_fee = amount / 2;
-
-    let (deposit_tx, deposit_request, _) =
-        make_deposit_request(&depositor, amount, utxo, max_fee, signers_public_key);
-
-    faucet.rpc.send_raw_transaction(&deposit_tx).unwrap();
-    deposit_request
 }
 
 /// This tests that a new signer, when they are coming online, can
@@ -701,29 +672,38 @@ async fn block_observer_picks_up_chained_unordered_sweeps() {
     // Start off with some initial UTXOs to work with.
     let signers_amount = 56_780_000;
     let signer_outpoint = faucet.send_to(signers_amount, &signer.address);
-    faucet.generate_block();
 
     let new_signer = Recipient::new_with_rng(AddressType::P2tr, &mut rng);
     let signers_public_key2 = PublicKey::from(new_signer.keypair.public_key()).into();
 
+    let depositor1 = DepositHelper::new_depositor(rpc, &mut rng);
+    let depositor2 = DepositHelper::new_depositor(rpc, &mut rng);
+    let depositor3 = DepositHelper::new_depositor(rpc, &mut rng);
+
+    faucet.send_to_many(1_000_000, [&depositor1, &depositor2, &depositor3]);
+    faucet.generate_block();
+
     // Now lets make three deposit transactions, one for each sweep
     // transaction.
-    let mut deposit_request1 =
-        generate_deposit_request(faucet, 950_000, signers_public_key1, &mut rng);
-    let mut deposit_request2 =
-        generate_deposit_request(faucet, 875_000, signers_public_key2, &mut rng);
-    let mut deposit_request3 =
-        generate_deposit_request(faucet, 725_000, signers_public_key2, &mut rng);
+    let mut deposit1 = depositor1
+        .submit_deposit_transaction(950_000, 50_000, signers_public_key1)
+        .unwrap();
+    let mut deposit2 = depositor2
+        .submit_deposit_transaction(875_000, 50_000, signers_public_key2)
+        .unwrap();
+    let mut deposit3 = depositor3
+        .submit_deposit_transaction(725_000, 50_000, signers_public_key2)
+        .unwrap();
 
     // We want to construct three sweep transactions in order to
     // demonstrate that the transactions are picked up, even in the case
     // where the scriptPubKey has changed for the first one.
-    deposit_request1.signer_bitmap.set(0, true);
-    deposit_request2.signer_bitmap.set(1, true);
-    deposit_request3.signer_bitmap.set(2, true);
+    deposit1.request.signer_bitmap.set(0, true);
+    deposit2.request.signer_bitmap.set(1, true);
+    deposit3.request.signer_bitmap.set(2, true);
 
     let requests = SbtcRequests {
-        deposits: vec![deposit_request1, deposit_request2, deposit_request3],
+        deposits: vec![deposit1.request, deposit2.request, deposit3.request],
         withdrawals: Vec::new(),
         signer_state: SignerBtcState {
             utxo: SignerUtxo {
@@ -771,13 +751,7 @@ async fn block_observer_picks_up_chained_unordered_sweeps() {
         .with_first_bitcoin_core_client()
         .with_mocked_emily_client()
         .with_mocked_stacks_client()
-        .modify_settings(|settings| settings.signer.bootstrap_aggregate_key = Some(aggregate_key))
         .build();
-
-    let block_observer = BlockObserver {
-        context: ctx.clone(),
-        bitcoin_blocks: (),
-    };
 
     // Let's make sure the relevant tables are empty
     let sql = r#"
@@ -819,10 +793,14 @@ async fn block_observer_picks_up_chained_unordered_sweeps() {
     let mut transactions = block_info.transactions;
     transactions.shuffle(&mut rng);
 
-    block_observer
-        .extract_sbtc_transactions(block_hash, &transactions)
-        .await
-        .unwrap();
+    signer::block_observer::extract_sbtc_transactions(
+        &db,
+        Some(aggregate_key),
+        block_hash,
+        &transactions,
+    )
+    .await
+    .unwrap();
 
     // Okay, now the tables should be populated with all three
     // transactions.
@@ -1080,13 +1058,9 @@ async fn next_headers_to_process_ignores_known_headers() {
 }
 
 /// The [`get_signer_set_and_aggregate_key`] function is supposed to fetch
-/// the "current" signing set and the aggregate key to use for bitcoin
-/// transactions. It attempts to get the latest rotate-keys contract call
-/// transaction confirmed on the canonical Stacks blockchain and falls back
-/// to the DKG shares table if no such transaction can be found.
-///
-/// This tests that we prefer rotate keys transactions if it's available
-/// but will use the DKG shares behavior is indeed the case.
+/// the signing set that is in the sbtc-registry by looking for the last
+/// rotate-keys transaction confirmed on the canonical Stacks blockchain.
+/// None if no such contract call exists.
 #[tokio::test]
 async fn get_signer_set_info_falls_back() {
     let db = testing::storage::new_test_database().await;
@@ -1118,32 +1092,8 @@ async fn get_signer_set_info_falls_back() {
     // happens after DKG, but we should always know the current signer set.
     // Signatures required should fall back to config value.
     let info = get_signer_set_info(&ctx, chain_tip).await.unwrap();
-    assert!(info.maybe_aggregate_key.is_none());
-    assert!(!info.signer_set.is_empty());
-    assert_eq!(
-        info.signatures_required,
-        ctx.config().signer.bootstrap_signatures_required
-    );
+    assert!(info.is_none());
 
-    // Alright, lets write some DKG shares into the database. When we do
-    // that the signer set should be considered whatever the signer set is
-    // from our DKG shares.
-    let mut shares: EncryptedDkgShares = Faker.fake_with_rng(&mut rng);
-    shares.dkg_shares_status = model::DkgSharesStatus::Verified;
-    db.write_encrypted_dkg_shares(&shares).await.unwrap();
-
-    let info = get_signer_set_info(&ctx, chain_tip).await.unwrap();
-
-    let shares_signer_set: BTreeSet<PublicKey> =
-        shares.signer_set_public_keys.iter().copied().collect();
-
-    assert_eq!(shares.aggregate_key, info.maybe_aggregate_key.unwrap());
-    assert_eq!(shares_signer_set, info.signer_set);
-    assert_eq!(info.signatures_required, shares.signature_share_threshold);
-
-    // Okay now we write a rotate-keys transaction into the database. To do
-    // that we need the stacks chain tip, and a something in 3 different
-    // tables...
     let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
 
     let mut rotate_keys: KeyRotationEvent = Faker.fake_with_rng(&mut rng);
@@ -1155,14 +1105,14 @@ async fn get_signer_set_info_falls_back() {
 
     // Alright, now that we have a rotate-keys transaction, we can check if
     // it is preferred over the DKG shares table.
-    let info = get_signer_set_info(&ctx, chain_tip).await.unwrap();
+    let info = get_signer_set_info(&ctx, chain_tip).await.unwrap().unwrap();
 
     let rotate_keys_signer_set: BTreeSet<PublicKey> =
         rotate_keys.signer_set.iter().copied().collect();
 
-    assert_eq!(rotate_keys.aggregate_key, info.maybe_aggregate_key.unwrap());
+    assert_eq!(rotate_keys.aggregate_key, info.aggregate_key);
     assert_eq!(rotate_keys_signer_set, info.signer_set);
-    assert_eq!(info.signatures_required, rotate_keys.signatures_required);
+    assert_eq!(rotate_keys.signatures_required, info.signatures_required);
 
     testing::storage::drop_db(db).await;
 }
@@ -1240,8 +1190,7 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
     // the block observer.
     let state = ctx.state();
     assert_eq!(state.get_current_limits(), SbtcLimits::zero());
-    assert!(state.current_signer_public_keys().is_empty());
-    assert!(state.current_aggregate_key().is_none());
+    assert!(state.registry_signer_set_info().is_none());
 
     tokio::spawn(async move {
         flag.store(true, Ordering::Relaxed);
@@ -1277,53 +1226,8 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
     // There is no aggregate key since there aren't any key rotation
     // contract calls and no DKG shares. But the current signer set should
     // be the bootstrap signing set now.
-    let bootstrap_signing_set = ctx.config().signer.bootstrap_signing_set.clone();
     assert_eq!(state.get_current_limits(), SbtcLimits::unlimited());
-    assert!(state.current_aggregate_key().is_none());
-    assert_eq!(state.current_signer_public_keys(), bootstrap_signing_set);
-
-    // Okay now let's add in some DKG shares into the database. This should
-    // take precedence over what is configured as the bootstrap signing
-    // set.
-    let mut dkg_shares: EncryptedDkgShares = Faker.fake_with_rng(&mut rng);
-    let mut public_keys: Vec<PublicKey> = std::iter::repeat_with(|| Faker.fake_with_rng(&mut rng))
-        .take(12)
-        .collect();
-    public_keys.sort();
-    dkg_shares.signer_set_public_keys = public_keys;
-    dkg_shares.dkg_shares_status = model::DkgSharesStatus::Verified;
-    db.write_encrypted_dkg_shares(&dkg_shares).await.unwrap();
-
-    // Sanity check that the signing set in the DKG shares are different
-    // from the bootstrap signing set.
-    let dkg_public_keys = dkg_shares.signer_set_public_keys.iter().copied().collect();
-    assert_ne!(dkg_public_keys, bootstrap_signing_set);
-
-    // Let's generate a new block and wait for our block observer to send a
-    // BitcoinBlockObserved signal. Then after we received the signal that
-    // a bitcoin block has been observed we check the signer state.
-    let chain_tip = faucet.generate_blocks(1).pop().unwrap().into();
-
-    ctx.wait_for_signal(Duration::from_secs(3), |signal| {
-        matches!(
-            signal,
-            SignerSignal::Event(SignerEvent::BitcoinBlockObserved)
-        )
-    })
-    .await
-    .unwrap();
-
-    // Check that the chain tip has been updated.
-    let db_chain_tip = db
-        .get_bitcoin_canonical_chain_tip()
-        .await
-        .expect("cannot get chain tip");
-    assert_eq!(db_chain_tip, Some(chain_tip));
-
-    let dkg_aggregate_key = Some(dkg_shares.aggregate_key);
-    assert_eq!(state.get_current_limits(), SbtcLimits::unlimited());
-    assert_eq!(state.current_aggregate_key(), dkg_aggregate_key);
-    assert_eq!(state.current_signer_public_keys(), dkg_public_keys);
+    assert!(state.registry_signer_set_info().is_none());
 
     // Okay now we're going to show what happens if we have received a key
     // rotation event. Such events take priority over DKG shares, even if
@@ -1342,12 +1246,6 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
     db.write_rotate_keys_transaction(&rotate_keys)
         .await
         .unwrap();
-
-    // Let's add some DKG shares after the insertion of the rotate keys
-    // transaction.
-    let mut dkg_shares: EncryptedDkgShares = Faker.fake_with_rng(&mut rng);
-    dkg_shares.dkg_shares_status = model::DkgSharesStatus::Verified;
-    db.write_encrypted_dkg_shares(&dkg_shares).await.unwrap();
 
     // Let's generate a new block and wait for our block observer to send a
     // BitcoinBlockObserved signal.
@@ -1370,13 +1268,15 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
 
     // We expect the signer state to be the same as what is in the rotate
     // keys event in the database.
-    let rotate_keys_aggregate_key = Some(rotate_keys.aggregate_key);
-    let rotate_keys_public_keys = rotate_keys.signer_set.iter().copied().collect();
-
-    assert_eq!(state.current_aggregate_key(), rotate_keys_aggregate_key);
-    assert_eq!(state.current_signer_public_keys(), rotate_keys_public_keys);
-    assert_ne!(rotate_keys_public_keys, dkg_public_keys);
-    assert_ne!(rotate_keys_aggregate_key, dkg_aggregate_key);
+    let signer_set = rotate_keys.signer_set.iter().copied().collect();
+    let signer_set_info = state.registry_signer_set_info().unwrap();
+    assert_eq!(state.get_current_limits(), SbtcLimits::unlimited());
+    assert_eq!(signer_set_info.aggregate_key, rotate_keys.aggregate_key);
+    assert_eq!(
+        signer_set_info.signatures_required,
+        rotate_keys.signatures_required
+    );
+    assert_eq!(signer_set_info.signer_set, signer_set);
 
     testing::storage::drop_db(db).await;
 }
@@ -1389,16 +1289,20 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
     // We start with the typical setup with a fresh database and context
     // with a real bitcoin core client and a real connection to our
     // database.
-    let (_, faucet) = regtest::initialize_blockchain();
+    let (rpc, faucet) = regtest::initialize_blockchain();
     let db = testing::storage::new_test_database().await;
     let verification_window = 5;
-    let mut ctx = TestContext::builder()
+    let ctx = TestContext::builder()
         .modify_settings(|config| config.signer.dkg_verification_window = verification_window)
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
         .with_mocked_emily_client()
         .with_mocked_stacks_client()
         .build();
+
+    // We backfill the blockchain data in the database so that the block
+    // observer doesn't need do it, speeding up the test.
+    fetch_canonical_bitcoin_blockchain(&db, rpc).await;
 
     // We need to set up the stacks client as well. We use it to fetch
     // information about the Stacks blockchain, so we need to prep it, even
@@ -1455,18 +1359,13 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
     // the block observer.
     let state = ctx.state();
     assert_eq!(state.get_current_limits(), SbtcLimits::zero());
-    assert!(state.current_signer_public_keys().is_empty());
-    assert!(state.current_aggregate_key().is_none());
+    assert!(state.registry_signer_set_info().is_none());
 
     let storage = ctx.get_storage();
+
     // Initially, we have no dkg shares
-    assert!(
-        storage
-            .get_latest_encrypted_dkg_shares()
-            .await
-            .unwrap()
-            .is_none()
-    );
+    let shares = storage.get_latest_encrypted_dkg_shares().await;
+    assert!(shares.unwrap().is_none());
 
     tokio::spawn(async move {
         flag.store(true, Ordering::Relaxed);
@@ -1523,6 +1422,9 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
 
     // Now we have a DKG shares entry
     assert_eq!(storage.get_encrypted_dkg_shares_count().await.unwrap(), 1);
+    // We want to make sure that we don't allow DKG because of the signer
+    // set info being unset, so we set it now.
+    prevent_dkg_on_changed_signer_set_info(&ctx, dkg_shares.aggregate_key);
 
     // Signers and coordinator should NOT allow DKG
     assert!(!should_coordinate_dkg(&ctx, &db_chain_tip).await.unwrap());
@@ -1556,9 +1458,6 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
             .expect("missing latest dkg shares");
         assert_eq!(latest_dkg, dkg_shares);
         assert_eq!(storage.get_encrypted_dkg_shares_count().await.unwrap(), 1);
-
-        prevent_dkg_on_changed_signer_set(&mut ctx);
-        prevent_dkg_on_changed_signatures_required(&mut ctx);
 
         // Signers and coordinator should NOT allow DKG
         assert!(!should_coordinate_dkg(&ctx, &db_chain_tip).await.unwrap());
