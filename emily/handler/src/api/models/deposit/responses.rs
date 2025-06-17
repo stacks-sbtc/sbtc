@@ -39,7 +39,7 @@ where
 {
     fn from(value: T) -> Self {
         Self {
-            deposits: value.into_iter().map(Into::into).collect()
+            deposits: value.into_iter().map(Into::into).collect(),
         }
     }
 }
@@ -64,7 +64,6 @@ pub struct DepositWithStatusSchemed {
     error: Option<String>,
     status: u16,
 }
-
 
 impl From<DepositWithStatus> for DepositWithStatusSchemed {
     fn from(value: DepositWithStatus) -> Self {

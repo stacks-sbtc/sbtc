@@ -29,7 +29,7 @@ where
 {
     fn from(value: T) -> Self {
         Self {
-            withdrawals: value.into_iter().map(Into::into).collect()
+            withdrawals: value.into_iter().map(Into::into).collect(),
         }
     }
 }
@@ -53,7 +53,6 @@ pub struct WithdrawalWithStatusSchemed {
     error: Option<String>,
     status: u16,
 }
-
 
 impl From<WithdrawalWithStatus> for WithdrawalWithStatusSchemed {
     fn from(value: WithdrawalWithStatus) -> Self {

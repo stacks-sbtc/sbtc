@@ -1280,8 +1280,14 @@ async fn rbf_status_saved_successfully() {
     assert!(response.is_ok());
     let response = response.unwrap();
     let deposit = response.deposits.first().expect("No deposit in response");
-    assert_eq!(deposit.deposit.clone().unwrap().unwrap().bitcoin_txid, bitcoin_txid);
-    assert_eq!(deposit.deposit.clone().unwrap().unwrap().status, Status::Rbf);
+    assert_eq!(
+        deposit.deposit.clone().unwrap().unwrap().bitcoin_txid,
+        bitcoin_txid
+    );
+    assert_eq!(
+        deposit.deposit.clone().unwrap().unwrap().status,
+        Status::Rbf
+    );
 
     // Check that the deposit can be retrieved with the correct status.
     let response = apis::deposit_api::get_deposit(&user_configuration, &txid, &index)
@@ -1622,13 +1628,10 @@ async fn emily_process_deposit_updates_when_some_of_them_are_unknown() {
     assert!(update_responce.deposits.iter().all(|deposit| {
         match &deposit.deposit {
             Some(Some(inner)) => {
-                inner.bitcoin_txid == create_deposit_body1.bitcoin_txid
-                && deposit.status == 200
+                inner.bitcoin_txid == create_deposit_body1.bitcoin_txid && deposit.status == 200
             }
-            None => {
-                deposit.status == 404
-            }
-            Some(None) => unreachable!()
+            None => deposit.status == 404,
+            Some(None) => unreachable!(),
         }
     }));
 

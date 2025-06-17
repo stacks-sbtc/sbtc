@@ -1068,19 +1068,14 @@ async fn emily_process_withdrawal_updates_when_some_of_them_are_unknown() {
     .await
     .expect("Received an error after making a valid update withdrawal request api call.");
 
-    
-
     // Check that multistatus response is returned correctly.
     assert!(update_responce.withdrawals.iter().all(|withdrawal| {
         match &withdrawal.withdrawal {
             Some(Some(inner)) => {
-                inner.request_id == create_withdrawal_body1.request_id
-                && withdrawal.status == 200
+                inner.request_id == create_withdrawal_body1.request_id && withdrawal.status == 200
             }
-            None => {
-                withdrawal.status == 404
-            }
-            Some(None) => unreachable!()
+            None => withdrawal.status == 404,
+            Some(None) => unreachable!(),
         }
     }));
 

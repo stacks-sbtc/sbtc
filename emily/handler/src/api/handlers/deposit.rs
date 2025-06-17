@@ -608,9 +608,7 @@ async fn update_deposits(
     }
 
     updated_deposits.sort_by_key(|(index, _)| *index);
-    let deposits = updated_deposits
-        .into_iter()
-        .map(|(_, deposit)| deposit);
+    let deposits = updated_deposits.into_iter().map(|(_, deposit)| deposit);
     let response = UpdateDepositsResponse::from(deposits);
     Ok(with_status(json(&response), StatusCode::OK))
 }
