@@ -510,16 +510,13 @@ async fn update_withdrawals() {
 
 #[test_case(Status::Pending, Status::Pending, true; "pending_to_pending")]
 #[test_case(Status::Pending, Status::Accepted, false; "pending_to_accepted")]
-#[test_case(Status::Pending, Status::Reprocessing, true; "pending_to_reprocessing")]
 #[test_case(Status::Pending, Status::Confirmed, true; "pending_to_confirmed")]
 #[test_case(Status::Pending, Status::Failed, true; "pending_to_failed")]
 #[test_case(Status::Accepted, Status::Pending, true; "accepted_to_pending")]
 #[test_case(Status::Failed, Status::Pending, true; "failed_to_pending")]
-#[test_case(Status::Reprocessing, Status::Pending, true; "reprocessing_to_pending")]
 #[test_case(Status::Confirmed, Status::Pending, true; "confirmed_to_pending")]
 #[test_case(Status::Accepted, Status::Accepted, false; "accepted_to_accepted")]
 #[test_case(Status::Failed, Status::Accepted, true; "failed_to_accepted")]
-#[test_case(Status::Reprocessing, Status::Accepted, true; "reprocessing_to_accepted")]
 #[test_case(Status::Confirmed, Status::Accepted, true; "confirmed_to_accepted")]
 #[tokio::test]
 async fn update_withdrawals_is_forbidden_for_signer(
@@ -649,7 +646,6 @@ async fn update_withdrawals_is_forbidden_for_signer(
 
 #[test_case(Status::Pending, Status::Accepted; "pending_to_accepted")]
 #[test_case(Status::Pending, Status::Pending; "pending_to_pending")]
-#[test_case(Status::Pending, Status::Reprocessing; "pending_to_reprocessing")]
 #[test_case(Status::Pending, Status::Confirmed; "pending_to_confirmed")]
 #[test_case(Status::Pending, Status::Failed; "pending_to_failed")]
 #[test_case(Status::Confirmed, Status::Pending; "confirmed_to_pending")]

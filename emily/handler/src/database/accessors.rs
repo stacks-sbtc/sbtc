@@ -125,7 +125,6 @@ const ALL_STATUSES: &[Status] = &[
     Status::Confirmed,
     Status::Failed,
     Status::Pending,
-    Status::Reprocessing,
     Status::RBF,
 ];
 
