@@ -1485,7 +1485,7 @@ async fn run_subsequent_dkg() {
 async fn mock_stacks_core<D, B, E>(
     ctx: &mut TestContext<D, B, WrappedMock<MockStacksInteract>, E>,
     chain_tip_info: GetChainTipsResultTip,
-    db: PgPool,
+    db: PgStore,
     broadcast_stacks_tx: Sender<StacksTransaction>,
 ) {
     ctx.with_stacks_client(|client| {
@@ -1633,8 +1633,6 @@ async fn mock_stacks_core<D, B, E>(
 async fn pseudo_random_dkg() {
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let (rpc, faucet) = regtest::initialize_blockchain();
-
-    signer::logging::setup_logging("info,signer=debug", false);
 
     // We need to populate our databases, so let's fetch the data.
     let emily_client = EmilyClient::try_new(
@@ -1793,8 +1791,6 @@ async fn pseudo_random_dkg() {
     let (_, db, _, _) = signers.first().unwrap();
     let original_shares = db.get_latest_encrypted_dkg_shares().await.unwrap().unwrap();
 
-    let negated_aggregate_key = PublicKey::from(original_shares.aggregate_key.negate(SECP256K1));
-
     // =========================================================================
     // Step 5 - Prepare to re-run DKG with the same bitcoin block
     // -------------------------------------------------------------------------
@@ -1806,6 +1802,24 @@ async fn pseudo_random_dkg() {
     //   second row when DKG is re-run.
     // =========================================================================
 
+    // We create a tweak public key which is the generator of the secp256k1
+    // elliptic curve. There is nothing special about the chosen tweak
+    // (TWEAKED_PK), we just need to make sure that it is not the adjusted
+    // aggregate key is neither equal to the original aggregate key nor its
+    // negation.
+    let tweak_secret_key = secp256k1::SecretKey::from_slice(&secp256k1::constants::ONE).unwrap();
+    let tweak_public_key = tweak_secret_key.public_key(SECP256K1);
+    let adjusted_aggregate_key: PublicKey = original_shares
+        .aggregate_key
+        .combine(&tweak_public_key)
+        .unwrap()
+        .into();
+
+    // Here we adjust the aggregate key of the first DKG run. Note that
+    // changing the aggregate key in this way leads to an error if we need
+    // to load these shares in the FROST or FIRE coordinators. But we do
+    // not have any signing rounds or DKG verification rounds with these
+    // shares so we are fine.
     for (_, db, _, _) in signers.iter() {
         let count = db.get_encrypted_dkg_shares_count().await.unwrap();
         assert_eq!(count, 1);
@@ -1817,7 +1831,7 @@ async fn pseudo_random_dkg() {
             WHERE aggregate_key = $2
             "#,
         )
-        .bind(negated_aggregate_key)
+        .bind(adjusted_aggregate_key)
         .bind(original_shares.aggregate_key)
         .execute(db.pool())
         .await
@@ -1859,15 +1873,24 @@ async fn pseudo_random_dkg() {
         let data = &new_shares.encrypted_private_shares;
         let new_decrypted_secrets = wsts::util::decrypt(&keypair.secret_bytes(), data).unwrap();
 
+        // We have adjusted the aggregate key of our first DKG run, so we
+        // load them up using the adjusted aggregate key.
         let first_shares = db
-            .get_encrypted_dkg_shares(negated_aggregate_key)
+            .get_encrypted_dkg_shares(&adjusted_aggregate_key)
             .await
             .unwrap()
             .unwrap();
-        let unnegated_aggregate_key = PublicKey::from(first_shares.aggregate_key.negate(SECP256K1));
+        // The first aggregate key is the adjusted aggregate key minus the
+        // TWEAK_PK. Basically, AK1 = AK2 - TWEAK_PK = AK2 + (-TWEAK_PK).
+        let unadjusted_aggregate_key: PublicKey = first_shares
+            .aggregate_key
+            .combine(&tweak_public_key.negate(SECP256K1))
+            .unwrap()
+            .into();
 
-        // So we have the same aggregate key, so the same scriptPubKey.
-        assert_eq!(new_shares.aggregate_key, unnegated_aggregate_key);
+        // So we should have the same aggregate key, scriptPubKey,
+        // threshold, signing set and so on.
+        assert_eq!(new_shares.aggregate_key, unadjusted_aggregate_key);
         assert_eq!(new_shares.script_pubkey, first_shares.script_pubkey);
         assert_eq!(
             new_shares.signature_share_threshold,
@@ -1924,20 +1947,24 @@ async fn pseudo_random_dkg() {
         .unwrap();
 
         let first_shares = db
-            .get_encrypted_dkg_shares(negated_aggregate_key)
+            .get_encrypted_dkg_shares(&adjusted_aggregate_key)
             .await
             .unwrap()
             .unwrap();
-        let first_aggregate_key = PublicKey::from(first_shares.aggregate_key.negate(SECP256K1));
+        let unadjusted_aggregate_key: PublicKey = first_shares
+            .aggregate_key
+            .combine(&tweak_public_key.negate(SECP256K1))
+            .unwrap()
+            .into();
         let second_shares = db
-            .get_encrypted_dkg_shares(first_aggregate_key)
+            .get_encrypted_dkg_shares(unadjusted_aggregate_key)
             .await
             .unwrap()
             .unwrap();
 
         // We should have a new aggregate key, so new scriptPubKey.
-        assert_ne!(new_shares.aggregate_key, negated_aggregate_key);
-        assert_ne!(new_shares.aggregate_key, first_aggregate_key);
+        assert_ne!(new_shares.aggregate_key, adjusted_aggregate_key);
+        assert_ne!(new_shares.aggregate_key, unadjusted_aggregate_key);
         assert_ne!(new_shares.script_pubkey, first_shares.script_pubkey);
         assert_ne!(new_shares.script_pubkey, second_shares.script_pubkey);
         // Yes, these are different now too.
