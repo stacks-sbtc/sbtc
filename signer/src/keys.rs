@@ -40,9 +40,15 @@ use serde::Serialize;
 use crate::error::Error;
 
 /// The public key type for the secp256k1 elliptic curve.
-#[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct PublicKey(secp256k1::PublicKey);
+
+impl core::fmt::Debug for PublicKey {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "PublicKey({})", self.0)
+    }
+}
 
 impl Deref for PublicKey {
     type Target = secp256k1::PublicKey;
