@@ -99,8 +99,8 @@ pub enum TxCoordinatorEvent {
     /// Event which occurs when the transaction coordinator has sent a message
     /// to the P2P network.
     MessageGenerated(Box<crate::network::Msg>),
-    /// The coordinator is finished processing requests for the bitcoin
-    /// block.
+    /// The coordinator is finished processing requests. The processed bitcoin
+    /// chain tip block hash is provided if processing did not encounter an error.
     TenureCompleted(Option<BitcoinBlockHash>),
 }
 
