@@ -62,13 +62,6 @@ pub enum ValidationError {
     )]
     InvalidReplacedByTxStatus(DepositStatus, String, u32),
 
-    /// In current implementation, withdrawals can't have RBF status. However, since we have same Status enum
-    /// for both deposits and withdrawals, we need to handle this case.
-    #[error(
-        "withdrawal related transaction have RBF status, but this should never happen. request_id: {0}"
-    )]
-    WithdrawalRBF(u64),
-
     /// The deposit has status RBF but is missing the replaced_by_tx field.
     #[error("missing replaced_by_tx for RBF deposit with txid: {0}, vout: {1}")]
     DepositMissingReplacementTx(String, u32),
