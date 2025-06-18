@@ -158,7 +158,7 @@ pub async fn get_withdrawal(
 
 pub async fn get_withdrawals(
     configuration: &configuration::Configuration,
-    status: models::Status,
+    status: models::WithdrawalStatus,
     next_token: Option<&str>,
     page_size: Option<u32>,
 ) -> Result<models::GetWithdrawalsResponse, Error<GetWithdrawalsError>> {

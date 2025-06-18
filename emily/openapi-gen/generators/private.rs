@@ -70,7 +70,8 @@ use super::CorsSupport;
         // Health check datatypes.
         api::models::health::responses::HealthData,
         // Common models.
-        api::models::common::Status,
+        api::models::common::DepositStatus,
+        api::models::common::WithdrawalStatus,
         api::models::common::Fulfillment,
         // Limits models
         api::models::limits::Limits,

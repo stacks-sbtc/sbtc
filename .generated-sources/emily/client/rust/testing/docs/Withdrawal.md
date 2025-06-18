@@ -14,7 +14,7 @@ Name | Type | Description | Notes
 **sender** | **String** | The sender's hex-encoded Stacks principal. | 
 **stacks_block_hash** | **String** | The stacks block hash in which this request id was initiated. | 
 **stacks_block_height** | **u64** | The height of the Stacks block in which this request id was initiated. | 
-**status** | [**models::Status**](Status.md) |  | 
+**status** | [**models::WithdrawalStatus**](WithdrawalStatus.md) |  | 
 **status_message** | **String** | The status message of the withdrawal. | 
 **txid** | **String** | The hex encoded txid of the stacks transaction that generated this event. | 
 

@@ -12,7 +12,7 @@ Name | Type | Description | Notes
 **last_update_height** | **u64** | The most recent Stacks block height the API was aware of when the deposit was last updated. If the most recent update is tied to an artifact on the Stacks blockchain then this height is the Stacks block height that contains that artifact. | 
 **recipient** | **String** | Stacks address to received the deposited sBTC. | 
 **reclaim_script** | **String** | Raw reclaim script binary in hex. | 
-**status** | [**models::Status**](Status.md) |  | 
+**status** | [**models::DepositStatus**](DepositStatus.md) |  | 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

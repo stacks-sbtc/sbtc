@@ -174,7 +174,7 @@ pub async fn get_deposit(
 
 pub async fn get_deposits(
     configuration: &configuration::Configuration,
-    status: models::Status,
+    status: models::DepositStatus,
     next_token: Option<&str>,
     page_size: Option<u32>,
 ) -> Result<models::GetDepositsResponse, Error<GetDepositsError>> {

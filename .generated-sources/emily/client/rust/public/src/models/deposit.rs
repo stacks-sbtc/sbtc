@@ -56,7 +56,7 @@ pub struct Deposit {
     )]
     pub replaced_by_tx: Option<Option<String>>,
     #[serde(rename = "status")]
-    pub status: models::Status,
+    pub status: models::DepositStatus,
     /// The status message of the deposit.
     #[serde(rename = "statusMessage")]
     pub status_message: String,
@@ -74,7 +74,7 @@ impl Deposit {
         parameters: models::DepositParameters,
         recipient: String,
         reclaim_script: String,
-        status: models::Status,
+        status: models::DepositStatus,
         status_message: String,
     ) -> Deposit {
         Deposit {

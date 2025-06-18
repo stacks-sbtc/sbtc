@@ -8,7 +8,8 @@ use sbtc::events::TxInfo;
 use sbtc::webhooks::NewBlockEvent;
 use testing_emily_client::apis::{deposit_api, new_block_api, withdrawal_api};
 use testing_emily_client::models::{
-    CreateDepositRequestBody, CreateWithdrawalRequestBody, Status, WithdrawalParameters,
+    CreateDepositRequestBody, CreateWithdrawalRequestBody, DepositStatus, WithdrawalParameters,
+    WithdrawalStatus,
 };
 
 use crate::common::clean_setup;
@@ -94,7 +95,7 @@ async fn test_new_blocks_sends_update_deposits_to_emily() {
     .expect("Failed to get deposit request");
 
     assert_eq!(resp.bitcoin_txid, bitcoin_txid);
-    assert_eq!(resp.status, Status::Confirmed);
+    assert_eq!(resp.status, DepositStatus::Confirmed);
     assert!(resp.fulfillment.is_some());
 }
 
@@ -137,7 +138,7 @@ async fn test_new_blocks_sends_create_withdrawal_request() {
         withdrawal_event.block_id.to_hex()
     );
     assert_eq!(withdrawal.stacks_block_height, 253);
-    assert_eq!(withdrawal.status, Status::Pending);
+    assert_eq!(withdrawal.status, WithdrawalStatus::Pending);
 }
 
 /// Test that the handler can handle a new block event with a valid payload
@@ -179,7 +180,7 @@ async fn test_new_blocks_sends_withdrawal_accept_update() {
         withdrawal_api::get_withdrawal(&configuration, withdrawal_accept_event.request_id).await;
     assert!(resp.is_ok());
     let withdrawal = resp.unwrap();
-    assert_eq!(withdrawal.status, Status::Confirmed);
+    assert_eq!(withdrawal.status, WithdrawalStatus::Confirmed);
     assert!(withdrawal.fulfillment.is_some());
 }
 
@@ -222,6 +223,6 @@ async fn test_new_blocks_sends_withdrawal_reject_update() {
         withdrawal_api::get_withdrawal(&configuration, withdrawal_reject_event.request_id).await;
     assert!(resp.is_ok());
     let withdrawal = resp.unwrap();
-    assert_eq!(withdrawal.status, Status::Failed);
+    assert_eq!(withdrawal.status, WithdrawalStatus::Failed);
     assert!(withdrawal.fulfillment.is_none());
 }

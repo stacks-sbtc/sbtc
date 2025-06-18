@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     api::models::{
         chainstate::Chainstate,
-        common::Status,
+        common::WithdrawalStatus,
         withdrawal::{Withdrawal, WithdrawalInfo, WithdrawalParameters},
     },
     common::error::{Error, Inconsistency, ValidationError},
@@ -13,7 +13,7 @@ use crate::{
 
 use super::{
     EntryTrait, KeyTrait, PrimaryIndex, PrimaryIndexTrait, SecondaryIndex, SecondaryIndexTrait,
-    StatusEntry, VersionedEntryTrait,
+    VersionedEntryTrait, WithdrawalStatusEntry,
 };
 
 // Withdrawal entry ---------------------------------------------------------------
@@ -56,7 +56,7 @@ pub struct WithdrawalEntry {
     pub parameters: WithdrawalParametersEntry,
     /// The status of the withdrawal.
     #[serde(rename = "OpStatus")]
-    pub status: Status,
+    pub status: WithdrawalStatus,
     /// The most recent Stacks block height the API was aware of when the withdrawal was last
     /// updated. If the most recent update is tied to an artifact on the Stacks blockchain
     /// then this height is the Stacks block height that contains that artifact.
@@ -137,7 +137,7 @@ impl WithdrawalEntry {
         // latest update is the point at which the reorg happened.
         if self.history.is_empty() {
             self.history = vec![WithdrawalEvent {
-                status: StatusEntry::Pending,
+                status: WithdrawalStatusEntry::Pending,
                 message: "Reprocessing withdrawal status after reorg.".to_string(),
                 stacks_block_height: chainstate.stacks_block_height,
                 stacks_block_hash: chainstate.stacks_block_hash.clone(),
@@ -166,7 +166,7 @@ impl WithdrawalEntry {
         // Get latest event.
         let latest_event = self.latest_event()?.clone();
         // Calculate the new values.
-        let new_status: Status = (&latest_event.status).into();
+        let new_status: WithdrawalStatus = (&latest_event.status).into();
         let new_last_update_height: u64 = latest_event.stacks_block_height;
         // Set variables.
         self.status = new_status;
@@ -186,9 +186,9 @@ impl TryFrom<WithdrawalEntry> for Withdrawal {
         // Extract data from the latest event.
         let latest_event = withdrawal_entry.latest_event()?;
         let status_message = latest_event.message.clone();
-        let status: Status = (&latest_event.status).into();
+        let status: WithdrawalStatus = (&latest_event.status).into();
         let fulfillment = match &latest_event.status {
-            StatusEntry::Confirmed(fulfillment) => Some(fulfillment.clone()),
+            WithdrawalStatusEntry::Confirmed(fulfillment) => Some(fulfillment.clone()),
             _ => None,
         };
 
@@ -228,7 +228,7 @@ pub struct WithdrawalParametersEntry {
 pub struct WithdrawalEvent {
     /// Status code.
     #[serde(rename = "OpStatus")]
-    pub status: StatusEntry,
+    pub status: WithdrawalStatusEntry,
     /// Status message.
     pub message: String,
     /// Stacks block height at the time of this update.
@@ -327,7 +327,7 @@ pub struct WithdrawalInfoEntrySearchToken {
 pub struct WithdrawalInfoEntryKey {
     /// The status of the withdrawal.
     #[serde(rename = "OpStatus")]
-    pub status: Status,
+    pub status: WithdrawalStatus,
     /// The most recent Stacks block height the API was aware of when the withdrawal was last
     /// updated. If the most recent update is tied to an artifact on the Stacks blockchain
     /// then this height is the Stacks block height that contains that artifact.
@@ -363,7 +363,7 @@ pub struct WithdrawalInfoEntry {
 /// Implements the key trait for the withdrawal info entry key.
 impl KeyTrait for WithdrawalInfoEntryKey {
     /// The type of the partition key.
-    type PartitionKey = Status;
+    type PartitionKey = WithdrawalStatus;
     /// the type of the sort key.
     type SortKey = u64;
     /// The table field name of the partition key.
@@ -452,7 +452,7 @@ pub struct WithdrawalInfoByRecipientEntry {
     pub stacks_block_height: u64,
     /// The status of the entry.
     #[serde(rename = "OpStatus")]
-    pub status: Status,
+    pub status: WithdrawalStatus,
     /// The sender's Stacks principal.
     pub sender: String,
     /// Amount of BTC being withdrawn in satoshis.
@@ -558,7 +558,7 @@ pub struct WithdrawalInfoBySenderEntry {
     pub stacks_block_height: u64,
     /// The status of the entry.
     #[serde(rename = "OpStatus")]
-    pub status: Status,
+    pub status: WithdrawalStatus,
     /// Recipient's Bitcoin hex-encoded scriptPubKey.
     pub recipient: String,
     /// Amount of BTC being withdrawn in satoshis.
@@ -699,9 +699,9 @@ impl WithdrawalUpdatePackage {
 mod tests {
     use crate::api::models::chainstate::Chainstate;
     use crate::api::models::common::Fulfillment;
-    use crate::database::entries::StatusEntry;
+    use crate::database::entries::WithdrawalStatusEntry;
     use crate::{
-        api::models::common::Status,
+        api::models::common::WithdrawalStatus,
         database::entries::withdrawal::{
             ValidatedWithdrawalUpdate, WithdrawalEntry, WithdrawalEntryKey, WithdrawalEvent,
             WithdrawalParametersEntry,
@@ -713,14 +713,14 @@ mod tests {
     fn withdrawal_update_should_be_unnecessary_when_event_is_present() {
         // Arrange
         let pending = WithdrawalEvent {
-            status: StatusEntry::Pending,
+            status: WithdrawalStatusEntry::Pending,
             message: "message".to_string(),
             stacks_block_height: 1,
             stacks_block_hash: "hash".to_string(),
         };
 
         let failed = WithdrawalEvent {
-            status: StatusEntry::Failed,
+            status: WithdrawalStatusEntry::Failed,
             message: "message".to_string(),
             stacks_block_height: 2,
             stacks_block_hash: "hash".to_string(),
@@ -737,7 +737,7 @@ mod tests {
             sender: "sender".to_string(),
             amount: 1,
             parameters: WithdrawalParametersEntry { max_fee: 1 },
-            status: Status::Pending,
+            status: WithdrawalStatus::Pending,
             last_update_height: 1,
             last_update_block_hash: "hash".to_string(),
             history: vec![pending, failed.clone()],
@@ -757,14 +757,14 @@ mod tests {
     fn withdrawal_update_should_be_necessary_when_event_is_not_present() {
         // Arrange
         let pending = WithdrawalEvent {
-            status: StatusEntry::Pending,
+            status: WithdrawalStatusEntry::Pending,
             message: "message".to_string(),
             stacks_block_height: 1,
             stacks_block_hash: "hash".to_string(),
         };
 
         let failed = WithdrawalEvent {
-            status: StatusEntry::Failed,
+            status: WithdrawalStatusEntry::Failed,
             message: "message".to_string(),
             stacks_block_height: 2,
             stacks_block_hash: "hash".to_string(),
@@ -781,7 +781,7 @@ mod tests {
             sender: "sender".to_string(),
             amount: 1,
             parameters: WithdrawalParametersEntry { max_fee: 1 },
-            status: Status::Pending,
+            status: WithdrawalStatus::Pending,
             last_update_height: 1,
             last_update_block_hash: "hash".to_string(),
             history: vec![pending.clone()],
@@ -797,27 +797,27 @@ mod tests {
         assert!(!is_unnecessary);
     }
 
-    #[test_case(0, "hash0", 0, "hash0", StatusEntry::Pending; "reorg around genesis sets status to pending at genesis")]
-    #[test_case(5, "hash5", 4, "hash4", StatusEntry::Accepted; "reorg goes to earliest canonical event 1")]
-    #[test_case(4, "hash4", 4, "hash4", StatusEntry::Accepted; "reorg setting a height consistent with an event keeps it")]
-    #[test_case(4, "hash4-1", 2, "hash2", StatusEntry::Pending; "reorg setting a height inconsistent with an event removes it")]
-    #[test_case(3, "hash3", 2, "hash2", StatusEntry::Pending; "reorg  goes to earliest canonical event 2")]
+    #[test_case(0, "hash0", 0, "hash0", WithdrawalStatusEntry::Pending; "reorg around genesis sets status to pending at genesis")]
+    #[test_case(5, "hash5", 4, "hash4", WithdrawalStatusEntry::Accepted; "reorg goes to earliest canonical event 1")]
+    #[test_case(4, "hash4", 4, "hash4", WithdrawalStatusEntry::Accepted; "reorg setting a height consistent with an event keeps it")]
+    #[test_case(4, "hash4-1", 2, "hash2", WithdrawalStatusEntry::Pending; "reorg setting a height inconsistent with an event removes it")]
+    #[test_case(3, "hash3", 2, "hash2", WithdrawalStatusEntry::Pending; "reorg  goes to earliest canonical event 2")]
     fn reorganizing_around_a_new_chainstate_results_in_valid_withdrawal(
         reorg_height: u64,
         reorg_hash: &str,
         expected_height: u64,
         expected_hash: &str,
-        expected_status: StatusEntry,
+        expected_status: WithdrawalStatusEntry,
     ) {
         let pending = WithdrawalEvent {
-            status: StatusEntry::Pending,
+            status: WithdrawalStatusEntry::Pending,
             message: "initial test pending".to_string(),
             stacks_block_height: 2,
             stacks_block_hash: "hash2".to_string(),
         };
 
         let accepted = WithdrawalEvent {
-            status: StatusEntry::Accepted,
+            status: WithdrawalStatusEntry::Accepted,
             message: "accepted".to_string(),
             stacks_block_height: 4,
             stacks_block_hash: "hash4".to_string(),
@@ -825,7 +825,7 @@ mod tests {
 
         let fulfillment: Fulfillment = Default::default();
         let confirmed = WithdrawalEvent {
-            status: StatusEntry::Confirmed(fulfillment.clone()),
+            status: WithdrawalStatusEntry::Confirmed(fulfillment.clone()),
             message: "confirmed".to_string(),
             stacks_block_height: 6,
             stacks_block_hash: "hash6".to_string(),
@@ -842,7 +842,7 @@ mod tests {
             sender: "test-sender".to_string(),
             amount: 1,
             parameters: WithdrawalParametersEntry { max_fee: 1 },
-            status: Status::Confirmed,
+            status: WithdrawalStatus::Confirmed,
             last_update_height: 6,
             last_update_block_hash: "hash6".to_string(),
             history: vec![pending.clone(), accepted.clone(), confirmed.clone()],
