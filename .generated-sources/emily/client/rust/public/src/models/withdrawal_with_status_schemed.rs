@@ -11,7 +11,7 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// WithdrawalWithStatusSchemed : Workaround to make utopia generate openapi. Used only as last step before sending UpdateWithdrawalsResponce
+/// WithdrawalWithStatusSchemed : Workaround to make utopia generate openapi. Used only as last step before sending UpdateWithdrawalsResponse
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WithdrawalWithStatusSchemed {
     #[serde(
@@ -33,7 +33,7 @@ pub struct WithdrawalWithStatusSchemed {
 }
 
 impl WithdrawalWithStatusSchemed {
-    /// Workaround to make utopia generate openapi. Used only as last step before sending UpdateWithdrawalsResponce
+    /// Workaround to make utopia generate openapi. Used only as last step before sending UpdateWithdrawalsResponse
     pub fn new(status: u32) -> WithdrawalWithStatusSchemed {
         WithdrawalWithStatusSchemed {
             error: None,

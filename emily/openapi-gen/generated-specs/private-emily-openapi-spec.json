@@ -3099,7 +3099,7 @@
       },
       "WithdrawalWithStatusSchemed": {
         "type": "object",
-        "description": "Workaround to make utopia generate openapi. Used only as last step before sending\nUpdateWithdrawalsResponce",
+        "description": "Workaround to make utopia generate openapi. Used only as last step before sending\nUpdateWithdrawalsResponse",
         "required": [
           "status"
         ],

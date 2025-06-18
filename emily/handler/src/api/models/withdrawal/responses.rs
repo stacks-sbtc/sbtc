@@ -45,7 +45,7 @@ pub struct WithdrawalWithStatus {
 }
 
 /// Workaround to make utopia generate openapi. Used only as last step before sending
-/// UpdateWithdrawalsResponce
+/// UpdateWithdrawalsResponse
 #[derive(Clone, Default, Debug, PartialEq, Hash, Serialize, Deserialize, ToSchema, ToResponse)]
 #[serde(rename_all = "camelCase")]
 pub struct WithdrawalWithStatusSchemed {
