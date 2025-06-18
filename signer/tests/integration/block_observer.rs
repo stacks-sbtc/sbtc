@@ -580,20 +580,6 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
 
     // ** Step 5 **
     //
-    // Inform emily about the deposit
-    let body = CreateDepositRequestBody {
-        bitcoin_tx_output_index: deposit.request.outpoint.vout,
-        bitcoin_txid: deposit.request.outpoint.txid.to_string(),
-        deposit_script: deposit.request.deposit_script.to_hex_string(),
-        reclaim_script: deposit.request.reclaim_script.to_hex_string(),
-        transaction_hex: serialize_hex(&deposit.tx),
-    };
-    deposit_api::create_deposit(emily_client.config(), body)
-        .await
-        .unwrap();
-
-    // ** Step 6 **
-    //
     // Check that the block observer populates the tables correctly
     faucet.generate_block();
 
