@@ -179,16 +179,6 @@ where
     }
 }
 
-/// Represents a submitted deposit.
-pub struct SubmittedDeposit {
-    /// The Bitcoin transaction that was submitted for the deposit.
-    pub tx: Transaction,
-    /// The deposit request that was created for the deposit.
-    pub request: DepositRequest,
-    /// The deposit information.
-    pub info: DepositInfo,
-}
-
 /// Represents a prepared deposit which is ready to be submitted.
 pub struct PreparedDeposit<'a, Bitcoin, Emily, BitcoinTxid = (), EmilyDeposit = ()> {
     /// The Bitcoin transaction that was submitted for the deposit.
