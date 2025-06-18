@@ -46,8 +46,12 @@ lint:
 	pnpm --recursive run lint
 
 fix:
-	cargo $(CARGO_FLAGS) fmt --all
-	cargo $(CARGO_FLAGS) clippy --workspace --all-targets --all-features --no-deps --fix -- -D warnings
+	cargo fmt --all
+	cargo clippy --workspace --all-targets --all-features --no-deps --fix -- -D warnings
+
+fix-uncommited:
+	cargo fmt --all
+	cargo clippy --workspace --all-targets --all-features --no-deps --fix --allow-dirty -- -D warnings
 
 format:
 	cargo $(CARGO_FLAGS) fmt
