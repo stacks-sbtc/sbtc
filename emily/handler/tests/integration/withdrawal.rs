@@ -7,7 +7,7 @@ use testing_emily_client::apis;
 use testing_emily_client::apis::chainstate_api::set_chainstate;
 use testing_emily_client::apis::configuration::Configuration;
 use testing_emily_client::models::{
-    Chainstate, CreateWithdrawalRequestBody, DepositStatus, Fulfillment,
+    Chainstate, CreateWithdrawalRequestBody, Fulfillment,
     UpdateWithdrawalsRequestBody, Withdrawal, WithdrawalInfo, WithdrawalParameters,
     WithdrawalStatus, WithdrawalUpdate,
 };

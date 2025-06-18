@@ -14,7 +14,7 @@ use blockstack_lib::{
     },
 };
 use clarity::types::chainstate::{StacksAddress, StacksBlockId};
-use emily_client::models::{DepositStatus, WithdrawalStatus};
+use emily_client::models::DepositStatus;
 use tokio::sync::{Mutex, broadcast};
 use tokio::time::error::Elapsed;
 

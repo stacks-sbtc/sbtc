@@ -12,7 +12,7 @@ use sbtc::testing;
 use sbtc::testing::deposits::TxSetup;
 use testing_emily_client::apis::chainstate_api::set_chainstate;
 use testing_emily_client::models::{
-    Chainstate, DepositStatus, Fulfillment, UpdateDepositsRequestBody, WithdrawalStatus,
+    Chainstate, DepositStatus, Fulfillment, UpdateDepositsRequestBody,
 };
 use testing_emily_client::{
     apis::{self, configuration::Configuration},

@@ -23,7 +23,7 @@ use emily_client::apis::deposit_api;
 use emily_client::models::CreateDepositRequestBody;
 use emily_client::models::DepositUpdate;
 use emily_client::models::UpdateDepositsRequestBody;
-use emily_client::models::{DepositStatus, WithdrawalStatus};
+use emily_client::models::DepositStatus;
 use sbtc::testing::regtest::Recipient;
 use signer::bitcoin::rpc::BitcoinBlockInfo;
 use signer::bitcoin::rpc::BitcoinTxInfo;

@@ -57,7 +57,6 @@ use testing_emily_client::apis::chainstate_api;
 use testing_emily_client::apis::testing_api;
 use testing_emily_client::apis::withdrawal_api;
 use testing_emily_client::models::Chainstate;
-use testing_emily_client::models::DepositStatus as TestingEmilyDepositStatus;
 use testing_emily_client::models::WithdrawalStatus as TestingEmilyWithdrawalStatus;
 
 use signer::WITHDRAWAL_BLOCKS_EXPIRY;

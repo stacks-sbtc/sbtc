@@ -23,7 +23,7 @@ use blockstack_lib::types::chainstate::StacksBlockId;
 use clarity::types::chainstate::BurnchainHeaderHash;
 use clarity::types::chainstate::SortitionId;
 use clarity::vm::costs::ExecutionCost;
-use emily_client::models::{DepositStatus, WithdrawalStatus};
+use emily_client::models::DepositStatus;
 use rand::seq::IteratorRandom;
 use sbtc::deposits::CreateDepositRequest;
 
