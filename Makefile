@@ -45,6 +45,10 @@ lint:
 	cargo $(CARGO_FLAGS) clippy --workspace --all-targets --all-features --no-deps -- -D warnings
 	pnpm --recursive run lint
 
+fix:
+	cargo $(CARGO_FLAGS) fmt --all
+	cargo $(CARGO_FLAGS) clippy --workspace --all-targets --all-features --no-deps --fix -- -D warnings
+
 format:
 	cargo $(CARGO_FLAGS) fmt
 
