@@ -1,10 +1,12 @@
-# UpdateDepositsResponse
+# DepositWithStatusSchemed
 
 ## Properties
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**deposits** | [**Vec<models::DepositWithStatusSchemed>**](DepositWithStatusSchemed.md) | Deposit infos: deposits with a little less data. | 
+**deposit** | Option<[**models::Deposit**](Deposit.md)> |  | [optional]
+**error** | Option<**String**> |  | [optional]
+**status** | **u32** |  | 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 
