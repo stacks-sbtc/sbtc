@@ -392,7 +392,12 @@ where
             .is_some();
         let is_canonical = msg_bitcoin_chain_tip == &chain_tip.block_hash;
 
-        let sender_is_coordinator = self.context.config().signer.bootstrap_signing_set.is_public_key_coordinator_for(msg_sender, chain_tip);
+        let sender_is_coordinator = self
+            .context
+            .config()
+            .signer
+            .bootstrap_signing_set
+            .is_public_key_coordinator_for(msg_sender, chain_tip);
 
         let chain_tip_status = match (is_known, is_canonical) {
             (true, true) => ChainTipStatus::Canonical,

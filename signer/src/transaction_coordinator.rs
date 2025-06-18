@@ -324,7 +324,11 @@ where
             .map(|info| info.aggregate_key);
 
         // Determine whether we are the coordinator for this tenure.
-        let is_coordinator = self.context.config().signer.bootstrap_signing_set
+        let is_coordinator = self
+            .context
+            .config()
+            .signer
+            .bootstrap_signing_set
             .is_public_key_coordinator_for(self.signer_public_key(), bitcoin_chain_tip);
 
         // If we are not the coordinator, then we have no business
