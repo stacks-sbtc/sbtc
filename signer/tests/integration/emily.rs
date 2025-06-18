@@ -189,7 +189,7 @@ async fn deposit_flow() {
     test_data.write_to(&context.get_storage_mut()).await;
 
     // Setup deposit request
-    let deposit_amount: u64 = fake::Faker.fake_with_rng(&mut rng);
+    let deposit_amount = fake::Faker.fake_with_rng(&mut rng);
     let deposit_max_fee = fake::Faker.fake_with_rng(&mut rng);
     let depositor = Recipient::new(AddressType::P2tr);
     let depositor_utxo = Utxo {

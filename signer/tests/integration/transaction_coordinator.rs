@@ -15,6 +15,7 @@ use bitcoin::BlockHash;
 use bitcoin::Transaction;
 use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc::RpcApi as _;
+use bitvec::array::BitArray;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlockHeader;
 use blockstack_lib::chainstate::stacks::StacksTransaction;
@@ -38,6 +39,9 @@ use lru::LruCache;
 use more_asserts::assert_lt;
 use rand::rngs::OsRng;
 
+use sbtc::deposits::CreateDepositRequest;
+use sbtc::deposits::DepositScriptInputs;
+use sbtc::deposits::ReclaimScriptInputs;
 use sbtc::testing::regtest;
 use sbtc::testing::regtest::AsUtxo as _;
 use sbtc::testing::regtest::Recipient;
@@ -47,6 +51,7 @@ use secp256k1::SECP256K1;
 use signer::bitcoin::BitcoinInteract as _;
 use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::bitcoin::utxo::BitcoinInputsOutputs;
+use signer::bitcoin::utxo::DepositRequest;
 use signer::bitcoin::utxo::Fees;
 use signer::bitcoin::utxo::TxDeconstructor as _;
 use signer::bitcoin::validation::WithdrawalValidationResult;
@@ -154,7 +159,6 @@ use crate::setup::set_deposit_completed;
 use crate::setup::set_deposit_incomplete;
 use crate::utxo_construction::generate_withdrawal;
 use crate::utxo_construction::make_deposit_request;
-use crate::utxo_construction::make_deposit_requests;
 use crate::zmq::BITCOIN_CORE_ZMQ_ENDPOINT;
 
 type IntegrationTestContext<Stacks> = TestContext<PgStore, BitcoinCoreClient, Stacks, EmilyClient>;
@@ -5774,6 +5778,80 @@ async fn wait_next_stacks_block(stacks_client: &StacksClient) {
     })
     .await
     .unwrap()
+}
+
+fn make_deposit_requests<U>(
+    depositor: &Recipient,
+    amounts: &[u64],
+    utxo: U,
+    max_fee: u64,
+    signers_public_key: bitcoin::XOnlyPublicKey,
+) -> (Transaction, Vec<DepositRequest>)
+where
+    U: regtest::AsUtxo,
+{
+    let deposit_inputs = DepositScriptInputs {
+        signers_public_key,
+        max_fee,
+        recipient: PrincipalData::from(StacksAddress::burn_address(false)),
+    };
+    let reclaim_inputs = ReclaimScriptInputs::try_new(50, bitcoin::ScriptBuf::new()).unwrap();
+
+    let deposit_script = deposit_inputs.deposit_script();
+    let reclaim_script = reclaim_inputs.reclaim_script();
+
+    let mut outputs = vec![];
+    for amount in amounts {
+        outputs.push(bitcoin::TxOut {
+            value: Amount::from_sat(*amount),
+            script_pubkey: sbtc::deposits::to_script_pubkey(
+                deposit_script.clone(),
+                reclaim_script.clone(),
+            ),
+        })
+    }
+
+    let fee = regtest::BITCOIN_CORE_FALLBACK_FEE.to_sat();
+    outputs.push(bitcoin::TxOut {
+        value: utxo.amount() - Amount::from_sat(amounts.iter().sum::<u64>() + fee),
+        script_pubkey: depositor.address.script_pubkey(),
+    });
+
+    let mut deposit_tx = Transaction {
+        version: bitcoin::transaction::Version::ONE,
+        lock_time: bitcoin::absolute::LockTime::ZERO,
+        input: vec![bitcoin::TxIn {
+            previous_output: bitcoin::OutPoint::new(utxo.txid(), utxo.vout()),
+            sequence: bitcoin::Sequence::ZERO,
+            script_sig: bitcoin::ScriptBuf::new(),
+            witness: bitcoin::Witness::new(),
+        }],
+        output: outputs,
+    };
+
+    regtest::p2tr_sign_transaction(&mut deposit_tx, 0, &[utxo], &depositor.keypair);
+
+    let mut requests = vec![];
+    for (index, amount) in amounts.iter().enumerate() {
+        let req = CreateDepositRequest {
+            outpoint: bitcoin::OutPoint::new(deposit_tx.compute_txid(), index as u32),
+            deposit_script: deposit_script.clone(),
+            reclaim_script: reclaim_script.clone(),
+        };
+
+        requests.push(DepositRequest {
+            outpoint: req.outpoint,
+            max_fee,
+            signer_bitmap: BitArray::ZERO,
+            amount: *amount,
+            deposit_script: deposit_script.clone(),
+            reclaim_script: reclaim_script.clone(),
+            reclaim_script_hash: Some(model::TaprootScriptHash::from(&reclaim_script)),
+            signers_public_key,
+        });
+    }
+
+    (deposit_tx, requests)
 }
 
 /// This test requires a running stacks node.
