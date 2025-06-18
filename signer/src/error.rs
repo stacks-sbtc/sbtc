@@ -574,6 +574,13 @@ pub enum Error {
     #[error("DKG has not been run")]
     NoDkgShares,
 
+    /// This should only happen during the bootstrap phase of signer set or
+    /// during the addition of a new signer. It arises when a signer is the
+    /// coordinator but doesn't have a key rotation event in their
+    /// database.
+    #[error("no key rotation event in database")]
+    NoKeyRotationEvent,
+
     /// This arises when a signer gets a message that requires DKG to have
     /// been run with output shares that have passed verification, but no
     /// such shares exist.
@@ -615,7 +622,7 @@ pub enum Error {
 
     /// We throw this when signer produced txid and coordinator produced txid differ.
     #[error(
-        "signer and coordinator txid mismatch. Signer produced txid {0}, but coordinator send txid {1}"
+        "signer and coordinator txid mismatch. Signer produced txid {0}, but coordinator sent txid {1}"
     )]
     SignerCoordinatorTxidMismatch(
         blockstack_lib::burnchains::Txid,
@@ -773,6 +780,11 @@ pub enum Error {
     #[cfg(test)]
     #[error("Dummy (for testing purposes)")]
     Dummy,
+
+    /// An error raised by test utility functions.
+    #[cfg(any(test, feature = "testing"))]
+    #[error("Test utility error: {0}")]
+    TestUtility(crate::testing::TestUtilityError),
 }
 
 impl From<std::convert::Infallible> for Error {

@@ -44,9 +44,18 @@ use sha2::Digest as _;
 use crate::error::Error;
 
 /// The public key type for the secp256k1 elliptic curve.
-#[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct PublicKey(secp256k1::PublicKey);
+
+/// Custom implementation to debug-fmt the `PublicKey` newtype as
+/// `PublicKey(SERIALIZED_COMPRESSED)` instead of
+/// `PublicKey(PublicKey(SERIALIZED_UNCOMPRESSED))`.
+impl core::fmt::Debug for PublicKey {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "PublicKey({})", self.0)
+    }
+}
 
 impl Deref for PublicKey {
     type Target = secp256k1::PublicKey;
@@ -537,6 +546,19 @@ impl CoordinatorPublicKey for BTreeSet<PublicKey> {
         B: Borrow<bitcoin::BlockHash>,
     {
         Self::determine_for(bitcoin_chain_tip, self)
+    }
+}
+
+/// Testing implementations/helpers for the keys module.
+#[cfg(any(test, feature = "testing"))]
+pub mod testing {
+    use super::*;
+    use crate::testing::GenerateRandom;
+
+    impl GenerateRandom<secp256k1::Keypair> for secp256k1::Keypair {
+        fn gen_one<R: rand::Rng + ?Sized>(rng: &mut R) -> Self {
+            secp256k1::Keypair::new(SECP256K1, rng)
+        }
     }
 }
 
