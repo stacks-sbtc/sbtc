@@ -14,6 +14,7 @@ use bitcoin::BlockHash;
 use bitcoin::Transaction;
 use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc::RpcApi as _;
+use bitcoincore_rpc_json::GetChainTipsResultTip;
 use bitvec::array::BitArray;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlockHeader;
@@ -1233,6 +1234,118 @@ async fn skip_dkg_if_latest_shares_unverified(
     testing::storage::drop_db(db).await;
 }
 
+/// Mock the stacks client to return dummy data for the given context.
+async fn mock_stacks_core<D, B, E>(
+    ctx: &mut TestContext<D, B, WrappedMock<MockStacksInteract>, E>,
+    chain_tip_info: GetChainTipsResultTip,
+    db: PgStore,
+    broadcast_stacks_tx: Sender<StacksTransaction>,
+) {
+    ctx.with_stacks_client(|client| {
+        client
+            .expect_get_tenure_info()
+            .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
+
+        client.expect_get_block().returning(|_| {
+            let response = Ok(NakamotoBlock {
+                header: NakamotoBlockHeader::empty(),
+                txs: vec![],
+            });
+            Box::pin(std::future::ready(response))
+        });
+
+        let chain_tip = model::BitcoinBlockHash::from(chain_tip_info.hash);
+        client.expect_get_tenure().returning(move |_| {
+            let mut tenure = TenureBlocks::nearly_empty().unwrap();
+            tenure.anchor_block_hash = chain_tip;
+            Box::pin(std::future::ready(Ok(tenure)))
+        });
+
+        client.expect_get_pox_info().returning(|| {
+            let response = serde_json::from_str::<RPCPoxInfoData>(GET_POX_INFO_JSON)
+                .map_err(Error::JsonSerialize);
+            Box::pin(std::future::ready(response))
+        });
+
+        client
+            .expect_estimate_fees()
+            .returning(|_, _, _| Box::pin(std::future::ready(Ok(25))));
+
+        // The coordinator will try to further process the deposit to submit
+        // the stacks tx, but we are not interested (for the current test iteration).
+        client.expect_get_account().returning(|_| {
+            let response = Ok(AccountInfo {
+                balance: 0,
+                locked: 0,
+                unlock_height: 0u64.into(),
+                // this is the only part used to create the Stacks transaction.
+                nonce: 12,
+            });
+            Box::pin(std::future::ready(response))
+        });
+        client.expect_get_sortition_info().returning(move |_| {
+            let response = Ok(SortitionInfo {
+                burn_block_hash: BurnchainHeaderHash::from(chain_tip),
+                burn_block_height: chain_tip_info.height,
+                burn_header_timestamp: 0,
+                sortition_id: SortitionId([0; 32]),
+                parent_sortition_id: SortitionId([0; 32]),
+                consensus_hash: ConsensusHash([0; 20]),
+                was_sortition: true,
+                miner_pk_hash160: None,
+                stacks_parent_ch: None,
+                last_sortition_ch: None,
+                committed_block_hash: None,
+            });
+            Box::pin(std::future::ready(response))
+        });
+
+        // The coordinator broadcasts a rotate keys transaction if it is
+        // not up-to-date with their view of the current aggregate key. The
+        // response of here means that the stacks node has a record of a
+        // rotate keys contract call being executed once we have verified
+        // shares.
+        client
+            .expect_get_current_signer_set_info()
+            .returning(move |_| {
+                let db = db.clone();
+                Box::pin(async move {
+                    let shares = db.get_latest_verified_dkg_shares().await?;
+                    Ok(shares.map(SignerSetInfo::from))
+                })
+            });
+
+        // Only the client that corresponds to the coordinator will
+        // submit a transaction, so we don't make explicit the
+        // expectation here.
+        client.expect_submit_tx().returning(move |tx| {
+            let tx = tx.clone();
+            let txid = tx.txid();
+            let broadcast_stacks_tx = broadcast_stacks_tx.clone();
+            Box::pin(async move {
+                broadcast_stacks_tx.send(tx).unwrap();
+                Ok(SubmitTxResponse::Acceptance(txid))
+            })
+        });
+        // The coordinator will get the total supply of sBTC to
+        // determine the amount of mintable sBTC.
+        client
+            .expect_get_sbtc_total_supply()
+            .returning(move |_| Box::pin(async move { Ok(Amount::ZERO) }));
+
+        client
+            .expect_is_deposit_completed()
+            .returning(move |_, _| Box::pin(async move { Ok(false) }));
+
+        // We use this during validation to check if the withdrawal
+        // request completed in the smart contract.
+        client
+            .expect_is_withdrawal_completed()
+            .returning(|_, _| Box::pin(std::future::ready(Ok(false))));
+    })
+    .await;
+}
+
 /// Test that we can run multiple DKG rounds.
 /// This test is very similar to the `run_dkg_from_scratch` test, but it
 /// simulates that DKG has been run once before and uses a signer configuration
@@ -1562,103 +1675,7 @@ async fn sign_bitcoin_transaction() {
         let broadcast_stacks_tx = broadcast_stacks_tx.clone();
         let db = db.clone();
 
-        ctx.with_stacks_client(|client| {
-            client
-                .expect_get_tenure_info()
-                .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
-
-            client.expect_get_block().returning(|_| {
-                let response = Ok(NakamotoBlock {
-                    header: NakamotoBlockHeader::empty(),
-                    txs: vec![],
-                });
-                Box::pin(std::future::ready(response))
-            });
-
-            let chain_tip = model::BitcoinBlockHash::from(chain_tip_info.hash);
-            client.expect_get_tenure().returning(move |_| {
-                let mut tenure = TenureBlocks::nearly_empty().unwrap();
-                tenure.anchor_block_hash = chain_tip;
-                Box::pin(std::future::ready(Ok(tenure)))
-            });
-
-            client.expect_get_pox_info().returning(|| {
-                let response = serde_json::from_str::<RPCPoxInfoData>(GET_POX_INFO_JSON)
-                    .map_err(Error::JsonSerialize);
-                Box::pin(std::future::ready(response))
-            });
-
-            client
-                .expect_estimate_fees()
-                .returning(|_, _, _| Box::pin(std::future::ready(Ok(25))));
-
-            // The coordinator will try to further process the deposit to submit
-            // the stacks tx, but we are not interested (for the current test iteration).
-            client.expect_get_account().returning(|_| {
-                let response = Ok(AccountInfo {
-                    balance: 0,
-                    locked: 0,
-                    unlock_height: 0u64.into(),
-                    // this is the only part used to create the stacks transaction.
-                    nonce: 12,
-                });
-                Box::pin(std::future::ready(response))
-            });
-            client.expect_get_sortition_info().returning(move |_| {
-                let response = Ok(SortitionInfo {
-                    burn_block_hash: BurnchainHeaderHash::from(chain_tip),
-                    burn_block_height: chain_tip_info.height,
-                    burn_header_timestamp: 0,
-                    sortition_id: SortitionId([0; 32]),
-                    parent_sortition_id: SortitionId([0; 32]),
-                    consensus_hash: ConsensusHash([0; 20]),
-                    was_sortition: true,
-                    miner_pk_hash160: None,
-                    stacks_parent_ch: None,
-                    last_sortition_ch: None,
-                    committed_block_hash: None,
-                });
-                Box::pin(std::future::ready(response))
-            });
-
-            // The coordinator broadcasts a rotate keys transaction if it
-            // is not up-to-date with their view of the current aggregate
-            // key. The response of here means that the stacks node has a
-            // record of a rotate keys contract call being executed once we
-            // have verified shares.
-            client
-                .expect_get_current_signer_set_info()
-                .returning(move |_| {
-                    let db = db.clone();
-                    Box::pin(async move {
-                        let shares = db.get_latest_verified_dkg_shares().await?;
-                        Ok(shares.map(SignerSetInfo::from))
-                    })
-                });
-
-            // Only the client that corresponds to the coordinator will
-            // submit a transaction, so we don't make explicit the
-            // expectation here.
-            client.expect_submit_tx().returning(move |tx| {
-                let tx = tx.clone();
-                let txid = tx.txid();
-                let broadcast_stacks_tx = broadcast_stacks_tx.clone();
-                Box::pin(async move {
-                    broadcast_stacks_tx.send(tx).unwrap();
-                    Ok(SubmitTxResponse::Acceptance(txid))
-                })
-            });
-            // The coordinator will get the total supply of sBTC to
-            // determine the amount of mintable sBTC.
-            client
-                .expect_get_sbtc_total_supply()
-                .returning(move |_| Box::pin(async move { Ok(Amount::ZERO) }));
-
-            client
-                .expect_is_deposit_completed()
-                .returning(move |_, _| Box::pin(async move { Ok(false) }));
-        })
-        .await;
+        mock_stacks_core(ctx, chain_tip_info.clone(), db, broadcast_stacks_tx).await;
     }
 
     // =========================================================================
@@ -1999,103 +2016,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
         let broadcast_stacks_tx = broadcast_stacks_tx.clone();
         let db = db.clone();
 
-        ctx.with_stacks_client(|client| {
-            client
-                .expect_get_tenure_info()
-                .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
-
-            client.expect_get_block().returning(|_| {
-                let response = Ok(NakamotoBlock {
-                    header: NakamotoBlockHeader::empty(),
-                    txs: vec![],
-                });
-                Box::pin(std::future::ready(response))
-            });
-
-            let chain_tip = model::BitcoinBlockHash::from(chain_tip_info.hash);
-            client.expect_get_tenure().returning(move |_| {
-                let mut tenure = TenureBlocks::nearly_empty().unwrap();
-                tenure.anchor_block_hash = chain_tip;
-                Box::pin(std::future::ready(Ok(tenure)))
-            });
-
-            client.expect_get_pox_info().returning(|| {
-                let response = serde_json::from_str::<RPCPoxInfoData>(GET_POX_INFO_JSON)
-                    .map_err(Error::JsonSerialize);
-                Box::pin(std::future::ready(response))
-            });
-
-            client
-                .expect_estimate_fees()
-                .returning(|_, _, _| Box::pin(std::future::ready(Ok(25))));
-
-            // The coordinator will try to further process the deposit to submit
-            // the stacks tx, but we are not interested (for the current test iteration).
-            client.expect_get_account().returning(|_| {
-                let response = Ok(AccountInfo {
-                    balance: 0,
-                    locked: 0,
-                    unlock_height: 0u64.into(),
-                    // this is the only part used to create the Stacks transaction.
-                    nonce: 12,
-                });
-                Box::pin(std::future::ready(response))
-            });
-            client.expect_get_sortition_info().returning(move |_| {
-                let response = Ok(SortitionInfo {
-                    burn_block_hash: BurnchainHeaderHash::from(chain_tip),
-                    burn_block_height: chain_tip_info.height,
-                    burn_header_timestamp: 0,
-                    sortition_id: SortitionId([0; 32]),
-                    parent_sortition_id: SortitionId([0; 32]),
-                    consensus_hash: ConsensusHash([0; 20]),
-                    was_sortition: true,
-                    miner_pk_hash160: None,
-                    stacks_parent_ch: None,
-                    last_sortition_ch: None,
-                    committed_block_hash: None,
-                });
-                Box::pin(std::future::ready(response))
-            });
-
-            // The coordinator broadcasts a rotate keys transaction if it
-            // is not up-to-date with their view of the current aggregate
-            // key. The response of here means that the stacks node has a
-            // record of a rotate keys contract call being executed once we
-            // have verified shares.
-            client
-                .expect_get_current_signer_set_info()
-                .returning(move |_| {
-                    let db = db.clone();
-                    Box::pin(async move {
-                        let shares = db.get_latest_verified_dkg_shares().await?;
-                        Ok(shares.map(SignerSetInfo::from))
-                    })
-                });
-
-            // Only the client that corresponds to the coordinator will
-            // submit a transaction, so we don't make explicit the
-            // expectation here.
-            client.expect_submit_tx().returning(move |tx| {
-                let tx = tx.clone();
-                let txid = tx.txid();
-                let broadcast_stacks_tx = broadcast_stacks_tx.clone();
-                Box::pin(async move {
-                    broadcast_stacks_tx.send(tx).unwrap();
-                    Ok(SubmitTxResponse::Acceptance(txid))
-                })
-            });
-            // The coordinator will get the total supply of sBTC to
-            // determine the amount of mint-able sBTC.
-            client
-                .expect_get_sbtc_total_supply()
-                .returning(move |_| Box::pin(async move { Ok(Amount::ZERO) }));
-
-            client
-                .expect_is_deposit_completed()
-                .returning(move |_, _| Box::pin(async move { Ok(false) }));
-        })
-        .await;
+        mock_stacks_core(ctx, chain_tip_info.clone(), db, broadcast_stacks_tx).await;
     }
 
     // =========================================================================
@@ -2326,26 +2247,13 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     let shares2 = db.get_latest_verified_dkg_shares().await.unwrap().unwrap();
 
     // Check that we have new DKG shares for each of the signers.
-    for (ctx, db, _, _) in signers.iter() {
+    for (_, db, _, _) in signers.iter() {
         let dkg_share_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM dkg_shares;")
             .fetch_one(db.pool())
             .await
             .unwrap();
 
         assert_eq!(dkg_share_count, 2);
-
-        let shares = db.get_latest_verified_dkg_shares().await.unwrap().unwrap();
-
-        let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
-        let event = KeyRotationEvent {
-            txid: fake::Faker.fake_with_rng(&mut rng),
-            block_hash: stacks_chain_tip.block_hash,
-            aggregate_key: shares.aggregate_key,
-            signer_set: shares.signer_set_public_keys.clone(),
-            signatures_required: shares.signature_share_threshold,
-            address: PrincipalData::from(ctx.config().signer.deployer).into(),
-        };
-        db.write_rotate_keys_transaction(&event).await.unwrap();
     }
 
     // =========================================================================
@@ -2572,7 +2480,6 @@ async fn skip_signer_activites_after_key_rotation() {
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
-    let mut rng = get_rng();
     // We need to populate our databases, so let's fetch the data.
     let emily_client = EmilyClient::try_new(
         &Url::parse("http://testApiKey@localhost:3031").unwrap(),
@@ -2642,103 +2549,7 @@ async fn skip_signer_activites_after_key_rotation() {
         let broadcast_stacks_tx = broadcast_stacks_tx.clone();
         let db = db.clone();
 
-        ctx.with_stacks_client(|client| {
-            client
-                .expect_get_tenure_info()
-                .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
-
-            client.expect_get_block().returning(|_| {
-                let response = Ok(NakamotoBlock {
-                    header: NakamotoBlockHeader::empty(),
-                    txs: vec![],
-                });
-                Box::pin(std::future::ready(response))
-            });
-
-            let chain_tip = model::BitcoinBlockHash::from(chain_tip_info.hash);
-            client.expect_get_tenure().returning(move |_| {
-                let mut tenure = TenureBlocks::nearly_empty().unwrap();
-                tenure.anchor_block_hash = chain_tip;
-                Box::pin(std::future::ready(Ok(tenure)))
-            });
-
-            client.expect_get_pox_info().returning(|| {
-                let response = serde_json::from_str::<RPCPoxInfoData>(GET_POX_INFO_JSON)
-                    .map_err(Error::JsonSerialize);
-                Box::pin(std::future::ready(response))
-            });
-
-            client
-                .expect_estimate_fees()
-                .returning(|_, _, _| Box::pin(std::future::ready(Ok(25))));
-
-            // The coordinator will try to further process the deposit to submit
-            // the stacks tx, but we are not interested (for the current test iteration).
-            client.expect_get_account().returning(|_| {
-                let response = Ok(AccountInfo {
-                    balance: 0,
-                    locked: 0,
-                    unlock_height: 0u64.into(),
-                    // this is the only part used to create the Stacks transaction.
-                    nonce: 12,
-                });
-                Box::pin(std::future::ready(response))
-            });
-            client.expect_get_sortition_info().returning(move |_| {
-                let response = Ok(SortitionInfo {
-                    burn_block_hash: BurnchainHeaderHash::from(chain_tip),
-                    burn_block_height: chain_tip_info.height,
-                    burn_header_timestamp: 0,
-                    sortition_id: SortitionId([0; 32]),
-                    parent_sortition_id: SortitionId([0; 32]),
-                    consensus_hash: ConsensusHash([0; 20]),
-                    was_sortition: true,
-                    miner_pk_hash160: None,
-                    stacks_parent_ch: None,
-                    last_sortition_ch: None,
-                    committed_block_hash: None,
-                });
-                Box::pin(std::future::ready(response))
-            });
-
-            // The coordinator broadcasts a rotate keys transaction if it
-            // is not up-to-date with their view of the current aggregate
-            // key. The response of here means that the stacks node has a
-            // record of a rotate keys contract call being executed once we
-            // have verified shares.
-            client
-                .expect_get_current_signers_aggregate_key()
-                .returning(move |_| {
-                    let db = db.clone();
-                    Box::pin(async move {
-                        let shares = db.get_latest_verified_dkg_shares().await?;
-                        Ok(shares.map(|sh| sh.aggregate_key))
-                    })
-                });
-
-            // Only the client that corresponds to the coordinator will
-            // submit a transaction, so we don't make explicit the
-            // expectation here.
-            client.expect_submit_tx().returning(move |tx| {
-                let tx = tx.clone();
-                let txid = tx.txid();
-                let broadcast_stacks_tx = broadcast_stacks_tx.clone();
-                Box::pin(async move {
-                    broadcast_stacks_tx.send(tx).unwrap();
-                    Ok(SubmitTxResponse::Acceptance(txid))
-                })
-            });
-            // The coordinator will get the total supply of sBTC to
-            // determine the amount of mint-able sBTC.
-            client
-                .expect_get_sbtc_total_supply()
-                .returning(move |_| Box::pin(async move { Ok(Amount::ZERO) }));
-
-            client
-                .expect_is_deposit_completed()
-                .returning(move |_, _| Box::pin(async move { Ok(false) }));
-        })
-        .await;
+        mock_stacks_core(ctx, chain_tip_info.clone(), db, broadcast_stacks_tx).await;
     }
 
     // =========================================================================
@@ -2841,30 +2652,11 @@ async fn skip_signer_activites_after_key_rotation() {
     // =========================================================================
 
     // This should kick off DKG.
-    let chain_tip: BitcoinBlockHash = faucet.generate_block().into();
+    faucet.generate_block();
 
     // We first need to wait for bitcoin-core to send us all the
     // notifications so that we are up-to-date with the chain tip.
     wait_for_signers(&signers).await;
-
-    // DKG and DKG verification should have finished successfully. We
-    // assume, for now, that the key rotation contract call was submitted.
-    // This assumption gets validated later, but we make the assumption now
-    // and populate the database with a key rotation event.
-    for (ctx, db, _, _) in signers.iter() {
-        let shares = db.get_latest_verified_dkg_shares().await.unwrap().unwrap();
-
-        let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
-        let event = KeyRotationEvent {
-            txid: fake::Faker.fake_with_rng(&mut rng),
-            block_hash: stacks_chain_tip.block_hash,
-            aggregate_key: shares.aggregate_key,
-            signer_set: shares.signer_set_public_keys.clone(),
-            signatures_required: shares.signature_share_threshold,
-            address: PrincipalData::from(ctx.config().signer.deployer).into(),
-        };
-        db.write_rotate_keys_transaction(&event).await.unwrap();
-    }
 
     let (_, db, _, _) = signers.first().unwrap();
     let shares1 = db.get_latest_verified_dkg_shares().await.unwrap().unwrap();
@@ -3014,31 +2806,13 @@ async fn skip_signer_activites_after_key_rotation() {
     assert_eq!(txids.len(), 0);
 
     // Check that we have new DKG shares for each of the signers.
-    for (ctx, db, _, _) in signers.iter() {
+    for (_, db, _, _) in signers.iter() {
         let dkg_share_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM dkg_shares;")
             .fetch_one(db.pool())
             .await
             .unwrap();
 
         assert_eq!(dkg_share_count, 2);
-
-        // DKG and DKG verification should have finished successfully. We
-        // assume, for now, that the key rotation contract call was
-        // submitted. This assumption gets validated later, but we make the
-        // assumption now and populate the database with a key rotation
-        // event.
-        let shares = db.get_latest_verified_dkg_shares().await.unwrap().unwrap();
-
-        let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
-        let event = KeyRotationEvent {
-            txid: fake::Faker.fake_with_rng(&mut rng),
-            block_hash: stacks_chain_tip.block_hash,
-            aggregate_key: shares.aggregate_key,
-            signer_set: shares.signer_set_public_keys.clone(),
-            signatures_required: shares.signature_share_threshold,
-            address: PrincipalData::from(ctx.config().signer.deployer).into(),
-        };
-        db.write_rotate_keys_transaction(&event).await.unwrap();
     }
 
     // =========================================================================
@@ -4313,97 +4087,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
         let broadcast_stacks_tx = broadcast_stacks_tx.clone();
         let db = db.clone();
 
-        ctx.with_stacks_client(|client| {
-            client
-                .expect_get_tenure_info()
-                .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
-
-            client.expect_get_block().returning(|_| {
-                let response = Ok(NakamotoBlock {
-                    header: NakamotoBlockHeader::empty(),
-                    txs: vec![],
-                });
-                Box::pin(std::future::ready(response))
-            });
-
-            let chain_tip = model::BitcoinBlockHash::from(chain_tip_info.hash);
-            client.expect_get_tenure().returning(move |_| {
-                let mut tenure = TenureBlocks::nearly_empty().unwrap();
-                tenure.anchor_block_hash = chain_tip;
-                Box::pin(std::future::ready(Ok(tenure)))
-            });
-
-            client.expect_get_pox_info().returning(|| {
-                let response = serde_json::from_str::<RPCPoxInfoData>(GET_POX_INFO_JSON)
-                    .map_err(Error::JsonSerialize);
-                Box::pin(std::future::ready(response))
-            });
-
-            client
-                .expect_estimate_fees()
-                .returning(|_, _, _| Box::pin(std::future::ready(Ok(25))));
-
-            // The coordinator will try to further process the deposit to submit
-            // the stacks tx, but we are not interested (for the current test iteration).
-            client.expect_get_account().returning(|_| {
-                let response = Ok(AccountInfo {
-                    balance: 0,
-                    locked: 0,
-                    unlock_height: 0u64.into(),
-                    // this is the only part used to create the stacks transaction.
-                    nonce: 12,
-                });
-                Box::pin(std::future::ready(response))
-            });
-            client.expect_get_sortition_info().returning(move |_| {
-                let response = Ok(SortitionInfo {
-                    burn_block_hash: BurnchainHeaderHash::from(chain_tip),
-                    burn_block_height: chain_tip_info.height,
-                    ..DUMMY_SORTITION_INFO.clone()
-                });
-                Box::pin(std::future::ready(response))
-            });
-
-            // The coordinator broadcasts a rotate keys transaction if it
-            // is not up-to-date with their view of the current aggregate
-            // key. The response of here means that the stacks node has a
-            // record of a rotate keys contract call being executed once we
-            // have verified shares.
-            client
-                .expect_get_current_signer_set_info()
-                .returning(move |_| {
-                    let db = db.clone();
-                    Box::pin(async move {
-                        let shares = db.get_latest_verified_dkg_shares().await?;
-                        Ok(shares.map(SignerSetInfo::from))
-                    })
-                });
-
-            // Only the client that corresponds to the coordinator will
-            // submit a transaction, so we don't make explicit the
-            // expectation here.
-            client.expect_submit_tx().returning(move |tx| {
-                let tx = tx.clone();
-                let txid = tx.txid();
-                let broadcast_stacks_tx = broadcast_stacks_tx.clone();
-                Box::pin(async move {
-                    broadcast_stacks_tx.send(tx).unwrap();
-                    Ok(SubmitTxResponse::Acceptance(txid))
-                })
-            });
-            // The coordinator will get the total supply of sBTC to
-            // determine the amount of mintable sBTC.
-            client
-                .expect_get_sbtc_total_supply()
-                .returning(move |_| Box::pin(async move { Ok(Amount::ZERO) }));
-
-            // We use this during validation to check if the withdrawal
-            // request completed in the smart contract.
-            client
-                .expect_is_withdrawal_completed()
-                .returning(|_, _| Box::pin(std::future::ready(Ok(false))));
-        })
-        .await;
+        mock_stacks_core(ctx, chain_tip_info.clone(), db, broadcast_stacks_tx).await;
     }
 
     // =========================================================================
