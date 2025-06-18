@@ -145,7 +145,7 @@ pub async fn get_deposits_for_transaction(
     operation_id = "getDeposits",
     path = "/deposit",
     params(
-        ("status" = Status, Query, description = "the status to search by when getting all deposits."),
+        ("status" = DepositStatus, Query, description = "the status to search by when getting all deposits."),
         ("nextToken" = Option<String>, Query, description = "the next token value from the previous return of this api call."),
         ("pageSize" = Option<u16>, Query, description = "the maximum number of items in the response list.")
     ),

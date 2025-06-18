@@ -368,7 +368,7 @@
             "description": "the status to search by when getting all deposits.",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/Status"
+              "$ref": "#/components/schemas/DepositStatus"
             }
           },
           {
@@ -1848,7 +1848,7 @@
             "description": "the status to search by when getting all withdrawals.",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/Status"
+              "$ref": "#/components/schemas/WithdrawalStatus"
             }
           },
           {
