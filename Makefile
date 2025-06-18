@@ -49,7 +49,7 @@ fix:
 	cargo fmt --all
 	cargo clippy --workspace --all-targets --all-features --no-deps --fix -- -D warnings
 
-fix-uncommited:
+fix-uncommitted:
 	cargo fmt --all
 	cargo clippy --workspace --all-targets --all-features --no-deps --fix --allow-dirty -- -D warnings
 
