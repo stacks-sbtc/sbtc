@@ -3,13 +3,13 @@ use bitcoin::Amount;
 use bitcoin::OutPoint;
 use bitcoin::ScriptBuf;
 use bitcoin::Txid;
-use bitcoincore_rpc::Client;
 use bitcoincore_rpc::Error as BtcRpcError;
 use bitcoincore_rpc::RpcApi;
 use bitcoincore_rpc::json::GetTxOutResult;
 use bitcoincore_rpc::jsonrpc::error::Error as JsonRpcError;
 use bitcoincore_rpc::jsonrpc::error::RpcError;
 use rand::Rng;
+use rand::RngCore;
 use rand::distributions::Uniform;
 use signer::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
 use signer::bitcoin::utxo::DepositRequest;
@@ -22,13 +22,15 @@ use signer::bitcoin::utxo::UnsignedTransaction;
 use signer::bitcoin::utxo::WithdrawalRequest;
 use signer::context::SbtcLimits;
 use signer::storage::model::ScriptPubKey;
+use signer::testing::get_rng;
+use signer::testing::requests::AmountSpec;
+use signer::testing::requests::DepositHelper;
 
-use crate::utxo_construction::generate_withdrawal;
-use crate::utxo_construction::make_deposit_request;
 use regtest::Recipient;
 use sbtc::testing::regtest;
 use sbtc::testing::regtest::AsUtxo;
 use sbtc::testing::regtest::Faucet;
+use signer::testing::requests::generate_withdrawal;
 
 #[derive(Debug, Clone)]
 pub struct FullUtxo {
@@ -52,17 +54,22 @@ impl AsUtxo for FullUtxo {
     }
 }
 
-fn generate_depositor(rpc: &Client, faucet: &Faucet, signer: &Recipient) -> DepositRequest {
-    let depositor = Recipient::new(AddressType::P2tr);
+fn generate_depositor<R: RngCore>(
+    faucet: &Faucet,
+    signer: &Recipient,
+    rng: &mut R,
+) -> DepositRequest {
+    let depositor = DepositHelper::new_depositor(rng).with_bitcoin(faucet);
     let signers_public_key = signer.keypair.x_only_public_key().0;
 
     // Start off with some initial UTXOs to work with.
-    let outpoint = faucet.send_to(50_000_000, &depositor.address);
-    let amount = rand::rngs::OsRng.sample(Uniform::new(100_000, 500_000));
+    let outpoint = depositor.fund(50_000_000);
+    let amount = rng.sample(Uniform::new(100_000, 500_000));
 
     // Now lets make a deposit transaction and submit it. We need the UTXO
     // that was just sent to us.
-    let tx_out: GetTxOutResult = rpc
+    let tx_out: GetTxOutResult = faucet
+        .rpc
         .get_tx_out(&outpoint.txid, outpoint.vout, Some(true))
         .unwrap()
         .unwrap();
@@ -73,11 +80,11 @@ fn generate_depositor(rpc: &Client, faucet: &Faucet, signer: &Recipient) -> Depo
         tx_out,
     };
 
-    let max_fee = amount / 2;
-    let (deposit_tx, deposit_request, _) =
-        make_deposit_request(&depositor, amount, utxo, max_fee, signers_public_key);
-    rpc.send_raw_transaction(&deposit_tx).unwrap();
-    deposit_request
+    let amount_spec = AmountSpec::with_derived_max_fee(amount, 0.5);
+    depositor
+        .prepare_deposit_transaction_with_utxo(utxo, amount_spec, signers_public_key)
+        .submit_to_bitcoin()
+        .request
 }
 
 fn recreate_request_state(
@@ -143,6 +150,8 @@ pub fn transaction_with_rbf(
     rbf_fee_rate: f64,
     failure_threshold: u16,
 ) {
+    let rng = &mut get_rng();
+
     // This is not a case that we support; why would we replace a
     // submitted transaction without any peg-in or peg-out inputs and
     // outputs? So let's skip this case.
@@ -171,7 +180,7 @@ pub fn transaction_with_rbf(
     // we cannot generate new blocks once we submit the transaction that
     // we want to RBF (since it would then be confirmed).
     let deposits: Vec<DepositRequest> =
-        std::iter::repeat_with(|| generate_depositor(rpc, faucet, &signer))
+        std::iter::repeat_with(|| generate_depositor(faucet, &signer, rng))
             .take(ctx.initial_deposits.max(ctx.rbf_deposits))
             .enumerate()
             .map(|(index, mut req)| {
@@ -191,7 +200,7 @@ pub fn transaction_with_rbf(
         })
         .collect();
 
-    faucet.generate_blocks(1);
+    faucet.generate_block();
     // We deposited the transaction to the signer, but it's not clear to the
     // wallet tracking the signer's address that the deposit is associated
     // with the signer since it's hidden within the merkle tree.

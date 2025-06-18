@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
-use bitcoin::AddressType;
 use bitcoin::Amount;
 use bitcoin::ScriptBuf;
 use bitcoin::Transaction;
@@ -11,6 +10,8 @@ use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc_json::Utxo;
 use fake::Fake as _;
 use futures::future::join_all;
+use signer::testing::requests::AmountSpec;
+use signer::testing::requests::DepositHelper;
 use signer::testing::storage::model::TestBitcoinTxInfo;
 use test_case::test_case;
 use test_log::test;
@@ -24,7 +25,6 @@ use emily_client::models::CreateDepositRequestBody;
 use emily_client::models::DepositUpdate;
 use emily_client::models::Status;
 use emily_client::models::UpdateDepositsRequestBody;
-use sbtc::testing::regtest::Recipient;
 use signer::bitcoin::rpc::BitcoinBlockInfo;
 use signer::bitcoin::rpc::BitcoinTxInfo;
 use signer::bitcoin::rpc::GetTxResponse;
@@ -61,7 +61,6 @@ use signer::transaction_coordinator;
 use testing_emily_client::apis::testing_api::wipe_databases;
 
 use crate::setup::IntoEmilyTestingConfig as _;
-use crate::utxo_construction::make_deposit_request;
 
 async fn run_dkg<Rng, C>(
     ctx: &C,
@@ -189,9 +188,9 @@ async fn deposit_flow() {
     test_data.write_to(&context.get_storage_mut()).await;
 
     // Setup deposit request
-    let deposit_amount = fake::Faker.fake_with_rng(&mut rng);
+    let deposit_amount: u64 = fake::Faker.fake_with_rng(&mut rng);
     let deposit_max_fee = fake::Faker.fake_with_rng(&mut rng);
-    let depositor = Recipient::new(AddressType::P2tr);
+    let depositor = DepositHelper::new_depositor(&mut rng);
     let depositor_utxo = Utxo {
         txid: Txid::all_zeros(),
         vout: 0,
@@ -200,28 +199,25 @@ async fn deposit_flow() {
         amount: Amount::from_sat(deposit_amount + deposit_max_fee),
         height: 0,
     };
-    let max_fee = deposit_amount / 2;
-    let (deposit_tx, deposit_request, _) = make_deposit_request(
-        &depositor,
-        deposit_amount,
+    let deposit = depositor.prepare_deposit_transaction_with_utxo(
         depositor_utxo,
-        max_fee,
-        aggregate_key.into(),
+        AmountSpec::with_derived_max_fee(deposit_amount, 0.5),
+        aggregate_key,
     );
 
     let emily_request = CreateDepositRequestBody {
-        bitcoin_tx_output_index: deposit_request.outpoint.vout,
-        bitcoin_txid: deposit_request.outpoint.txid.to_string(),
-        deposit_script: deposit_request.deposit_script.to_hex_string(),
-        reclaim_script: deposit_request.reclaim_script.to_hex_string(),
-        transaction_hex: serialize_hex(&deposit_tx),
+        bitcoin_tx_output_index: deposit.request.outpoint.vout,
+        bitcoin_txid: deposit.request.outpoint.txid.to_string(),
+        deposit_script: deposit.request.deposit_script.to_hex_string(),
+        reclaim_script: deposit.request.reclaim_script.to_hex_string(),
+        transaction_hex: serialize_hex(&deposit.tx),
     };
 
     // Create a fresh block for the block observer to process
     let mut deposit_block: BitcoinBlockInfo = fake::Faker.fake_with_rng(&mut rng);
     deposit_block
         .transactions
-        .push(deposit_tx.fake_with_rng(&mut rng));
+        .push(deposit.tx.fake_with_rng(&mut rng));
 
     let deposit_block_hash = deposit_block.block_hash;
 
@@ -269,7 +265,7 @@ async fn deposit_flow() {
                 });
 
             // Return the deposit tx
-            let deposit_tx_ = deposit_tx.clone();
+            let deposit_tx_ = deposit.tx.clone();
             client.expect_get_tx().once().returning(move |txid| {
                 let res = if *txid == deposit_tx_.compute_txid() {
                     Ok(Some(GetTxResponse {
@@ -292,10 +288,10 @@ async fn deposit_flow() {
                 .expect_get_tx_info()
                 .once()
                 .returning(move |txid, _| {
-                    let res = if *txid == deposit_tx.compute_txid() {
+                    let res = if *txid == deposit.tx.compute_txid() {
                         Ok(Some(BitcoinTxInfo {
                             fee: Some(bitcoin::Amount::from_sat(deposit_max_fee)),
-                            tx: deposit_tx.clone(),
+                            tx: deposit.tx.clone(),
                             vin: Vec::new(),
                         }))
                     } else {
@@ -460,8 +456,8 @@ async fn deposit_flow() {
         context
             .get_storage_mut()
             .write_deposit_signer_decision(&DepositSigner {
-                txid: deposit_request.outpoint.txid.into(),
-                output_index: deposit_request.outpoint.vout,
+                txid: deposit.request.outpoint.txid.into(),
+                output_index: deposit.request.outpoint.vout,
                 signer_pub_key: *signer_pub_key,
                 can_accept: true,
                 can_sign: true,

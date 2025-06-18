@@ -11,6 +11,7 @@ pub mod dummy;
 pub mod message;
 pub mod network;
 pub mod request_decider;
+pub mod requests;
 pub mod stacks;
 pub mod storage;
 pub mod transaction_coordinator;
@@ -38,6 +39,42 @@ impl Settings {
     /// This is useful for testing.
     pub fn new_from_default_config() -> Result<Self, config::ConfigError> {
         Self::new(DEFAULT_CONFIG_PATH)
+    }
+}
+
+/// A custom error type for testing utilities. This is used to wrap errors
+/// that occur in the testing utilities, allowing them to be easily handled
+/// and reported instead of panicking directly from within the utility code,
+/// which otherwise makes it more difficult to determine the exact call site of
+/// the error.
+#[derive(Debug, thiserror::Error)]
+#[error("Test utility error: {0}")]
+pub struct TestUtilityError(#[source] Box<dyn std::error::Error + Send + Sync + 'static>);
+
+impl TestUtilityError {
+    /// Create a new `TestUtilityError` from an error that implements `std::error::Error`.
+    /// Note that we provide this explicit impl because `From<dyn std::error::Error>` has
+    /// a conflicting blanket implementation.
+    pub fn from_err<E: std::error::Error + Send + Sync + 'static>(err: E) -> Self {
+        Self(Box::new(err))
+    }
+}
+
+impl From<String> for TestUtilityError {
+    fn from(msg: String) -> Self {
+        Self(msg.into())
+    }
+}
+
+impl From<&str> for TestUtilityError {
+    fn from(msg: &str) -> Self {
+        Self(msg.to_string().into())
+    }
+}
+
+impl From<crate::error::Error> for TestUtilityError {
+    fn from(err: crate::error::Error) -> Self {
+        Self(Box::new(err))
     }
 }
 
