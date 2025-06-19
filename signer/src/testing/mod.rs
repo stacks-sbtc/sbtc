@@ -248,3 +248,49 @@ impl Sleep {
         Duration::from_millis(millis).sleep().await;
     }
 }
+
+/// Extension trait for iterators of `Result<T, E>` providing convenient error handling for tests.
+pub trait ResultIterExt<T, E> {
+    /// Asserts that every `Result` in the iterator is `Ok`, returning a
+    /// `Vec<T>` of the unwrapped values. Panics with the given message if any
+    /// `Result` is `Err`.
+    #[must_use = "this collection assertion potentially panics or returns a new collection; its outcome should be handled or assigned to `_`"]
+    #[track_caller]
+    fn expect_all(self, msg: &str) -> Vec<T>
+    where
+        Self: Sized + IntoIterator<Item = Result<T, E>>,
+        E: std::fmt::Display,
+        T: Send + 'static,
+    {
+        let mut oks = Vec::new();
+        let mut errs = Vec::new();
+
+        for item in self.into_iter() {
+            match item {
+                Ok(value) => oks.push(value),
+                Err(err) => errs.push(err),
+            }
+        }
+
+        if !errs.is_empty() {
+            let error_messages = errs
+                .iter()
+                .enumerate()
+                .map(|(i, e)| format!("#{}: {e}", i + 1))
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            panic!("{msg}:\n\n{error_messages}");
+        }
+
+        oks
+    }
+}
+
+impl<I, T, E> ResultIterExt<T, E> for I
+where
+    I: IntoIterator<Item = Result<T, E>>,
+    E: std::fmt::Display,
+    T: Send + 'static,
+{
+}
