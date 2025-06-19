@@ -6,12 +6,12 @@ use std::{
 };
 
 use secp256k1::XOnlyPublicKey;
-use wsts::state_machine::{OperationResult, SignError, coordinator::Coordinator};
+use wsts::state_machine::{OperationResult, SignError, coordinator::Coordinator as _};
 
 use crate::{
     keys::PublicKey,
     signature::TaprootSignature,
-    wsts_state_machine::{FrostCoordinator, WstsCoordinator},
+    wsts_state_machine::{FrostCoordinator, WstsCoordinator as _},
 };
 
 use super::wsts::WstsNetMessageType;
@@ -414,7 +414,7 @@ mod tests {
     use wsts::net::Message;
 
     use crate::testing::get_rng;
-    use crate::{dkg::testing::*, testing::IterTestExt};
+    use crate::{dkg::testing::*, testing::IterTestExt as _};
 
     use super::{
         State, WstsNetMessageType, WstsNetMessageType::NonceRequest,

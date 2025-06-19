@@ -106,9 +106,9 @@ impl MessageTransfer for P2PNetwork {
 #[cfg(test)]
 mod tests {
     use core::panic;
-    use std::{str::FromStr, time::Duration};
+    use std::{str::FromStr as _, time::Duration};
 
-    use futures::StreamExt;
+    use futures::StreamExt as _;
     use libp2p::Multiaddr;
     use test_log::test;
     use tokio_stream::wrappers::BroadcastStream;
@@ -118,7 +118,7 @@ mod tests {
     use crate::{
         keys::{PrivateKey, PublicKey},
         network::libp2p::SignerSwarmBuilder,
-        testing::{self, clear_env, context::*, get_rng, network::RandomMemoryMultiaddr},
+        testing::{self, clear_env, context::*, get_rng, network::RandomMemoryMultiaddr as _},
     };
 
     #[test(tokio::test)]

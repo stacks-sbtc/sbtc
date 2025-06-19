@@ -336,13 +336,13 @@ mod tests {
 
     use blockstack_lib::net::api::{getinfo::RPCPeerInfoData, gettenureinfo::RPCGetTenureInfo};
     use clarity::types::chainstate::StacksAddress;
-    use fake::{Fake, Faker};
+    use fake::{Fake as _, Faker};
 
     use crate::{
         api::ApiState,
         error::Error,
         storage::{
-            DbWrite,
+            DbWrite as _,
             model::{BitcoinBlock, StacksBlock},
         },
         testing::context::*,

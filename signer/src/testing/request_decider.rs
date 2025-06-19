@@ -26,7 +26,7 @@ use crate::testing::get_rng;
 use crate::testing::storage::model::TestData;
 
 use hashbrown::HashSet;
-use rand::SeedableRng;
+use rand::SeedableRng as _;
 use tokio::sync::broadcast;
 use tokio::time::error::Elapsed;
 

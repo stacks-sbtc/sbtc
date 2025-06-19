@@ -7,10 +7,10 @@ use bitcoin::TxOut;
 use bitcoin::Witness;
 use bitcoin::absolute::LockTime;
 use bitcoin::transaction::Version;
-use sbtc::testing::regtest::AsUtxo;
+use sbtc::testing::regtest::AsUtxo as _;
 use serde::Deserialize;
 use serde_json::to_value;
-use signer::bitcoin::BitcoinInteract;
+use signer::bitcoin::BitcoinInteract as _;
 
 use bitcoin::AddressType;
 use bitcoin::Amount;

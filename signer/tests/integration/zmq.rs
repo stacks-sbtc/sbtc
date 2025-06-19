@@ -1,6 +1,6 @@
 use bitcoin::Block;
 use bitcoin::BlockHash;
-use futures::StreamExt;
+use futures::StreamExt as _;
 use sbtc::testing::regtest;
 use signer::bitcoin::zmq::BitcoinCoreMessageStream;
 

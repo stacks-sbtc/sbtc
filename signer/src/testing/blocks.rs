@@ -1,7 +1,7 @@
 //! Various utilities for generating and manipulating chains of bitcoin and
 //! stacks blocks for testing purposes.
 
-use fake::Fake;
+use fake::Fake as _;
 use fake::Faker;
 
 use crate::storage::model::BitcoinBlock;

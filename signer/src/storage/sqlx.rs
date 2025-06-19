@@ -1,7 +1,7 @@
 //! This module contains implementations of structs that make reading from
 //! and writing from postgres easy.
 
-use std::ops::Deref;
+use std::ops::Deref as _;
 use std::str::FromStr as _;
 
 use bitcoin::hashes::Hash as _;

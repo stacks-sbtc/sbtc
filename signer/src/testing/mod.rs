@@ -20,11 +20,11 @@ pub mod wsts;
 
 use bitcoin::TapSighashType;
 use bitcoin::Witness;
-use bitcoin::key::TapTweak;
+use bitcoin::key::TapTweak as _;
 use secp256k1::SECP256K1;
 
-use rand::RngCore;
-use rand::SeedableRng;
+use rand::RngCore as _;
+use rand::SeedableRng as _;
 use rand::rngs::{OsRng, StdRng};
 
 use crate::bitcoin::utxo::UnsignedTransaction;
