@@ -18,6 +18,7 @@ pub mod transaction_signer;
 pub mod wallet;
 pub mod wsts;
 
+use std::fmt::Debug;
 use std::time::Duration;
 
 use bitcoin::TapSighashType;
@@ -246,4 +247,49 @@ impl Sleep {
     pub async fn for_millis(millis: u64) {
         Duration::from_millis(millis).sleep().await;
     }
+}
+
+/// Extension trait for iterators of `Result<T, E>`.
+pub trait ResultIterExt<T, E> {
+    /// Asserts that every `Result` in the iterator is `Ok`, returning a
+    /// `Vec<T>` of the unwrapped values. Panics with the given message and list
+    /// of errors if any `Result` is `Err`.
+    #[track_caller]
+    fn expect_all(self, msg: &str) -> Vec<T>
+    where
+        Self: Sized + IntoIterator<Item = Result<T, E>>,
+        E: std::fmt::Display,
+        T: Send + 'static,
+    {
+        let mut oks = Vec::new();
+        let mut errs = Vec::new();
+
+        for item in self.into_iter() {
+            match item {
+                Ok(value) => oks.push(value),
+                Err(err) => errs.push(err),
+            }
+        }
+
+        if !errs.is_empty() {
+            let error_messages = errs
+                .iter()
+                .enumerate()
+                .map(|(i, error)| format!("#{}: {error}", i + 1))
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            panic!("{msg}:\n\n{error_messages}");
+        }
+
+        oks
+    }
+}
+
+impl<I, T, E> ResultIterExt<T, E> for I
+where
+    I: IntoIterator<Item = Result<T, E>>,
+    E: std::fmt::Display,
+    T: Send + 'static,
+{
 }
