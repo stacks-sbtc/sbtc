@@ -33,9 +33,6 @@ use rand::rngs::{OsRng, StdRng};
 use crate::bitcoin::utxo::UnsignedTransaction;
 use crate::config::Settings;
 
-/// A type alias for `Arc<std::sync::RwLock<T>>`.
-pub type StdArcRwLock<T> = std::sync::Arc<std::sync::RwLock<T>>;
-
 /// The path for the configuration file that we should use during testing.
 pub const DEFAULT_CONFIG_PATH: Option<&str> = Some("./src/config/default");
 
@@ -80,24 +77,6 @@ impl From<&str> for TestUtilityError {
 impl From<crate::error::Error> for TestUtilityError {
     fn from(err: crate::error::Error) -> Self {
         Self(Box::new(err))
-    }
-}
-
-/// A trait for mapping a `Result<T, E>` to a `Result<T, TestUtilityError>`.
-pub trait MapTestUtilityError<T, E>
-where
-    E: std::error::Error + Send + Sync + 'static,
-{
-    /// Maps the error type of a `Result<T, E>` to a `TestUtilityError`.
-    fn map_to_test_utility_err(self) -> Result<T, TestUtilityError>;
-}
-
-impl<T, E> MapTestUtilityError<T, E> for Result<T, E>
-where
-    E: std::error::Error + Send + Sync + 'static,
-{
-    fn map_to_test_utility_err(self) -> Result<T, TestUtilityError> {
-        self.map_err(TestUtilityError::from_err)
     }
 }
 
@@ -219,15 +198,6 @@ pub trait TimeoutAsyncExt {
     fn with_timeout<F>(self, future: F) -> tokio::time::Timeout<F::IntoFuture>
     where
         F: IntoFuture;
-}
-
-impl TimeoutAsyncExt for std::time::Duration {
-    fn with_timeout<F>(self, future: F) -> tokio::time::Timeout<F::IntoFuture>
-    where
-        F: IntoFuture,
-    {
-        tokio::time::timeout(self, future)
-    }
 }
 
 /// Async extensions for `Future` types.

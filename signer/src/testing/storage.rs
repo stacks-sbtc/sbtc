@@ -5,7 +5,8 @@ use std::time::Duration;
 
 use crate::keys::PublicKey;
 use crate::storage::model::{
-    BitcoinBlock, BitcoinBlockHash, BitcoinBlockRef, DkgSharesStatus, StacksBlock, StacksBlockHash,
+    BitcoinBlock, BitcoinBlockHash, BitcoinBlockRef, DkgSharesStatus, EncryptedDkgShares,
+    KeyRotationEvent, StacksBlock, StacksBlockHash,
 };
 use crate::storage::postgres::PgStore;
 use crate::storage::{DbRead, DbWrite};
@@ -153,11 +154,12 @@ pub async fn wait_for_dkg(db: &impl DbRead, count: u32) {
         });
 }
 
-/// This is a helper function for waiting for the database to have a row in
-/// the dkg_shares, signaling that DKG has finished successfully.
+/// Helper function for waiting for the latest DKG shares in the provided `DbRead`
+/// to become verified (as per [`DbRead::get_latest_encrypted_dkg_shares]).
+#[must_use = "The result of this function must be unwrapped to assert that no errors or timeouts occurred."]
 pub async fn wait_for_latest_dkg_to_become_verified(
     db: &impl DbRead,
-) -> Result<crate::storage::model::EncryptedDkgShares, TestUtilityError> {
+) -> Result<EncryptedDkgShares, TestUtilityError> {
     let timeout_duration = Duration::from_secs(10);
     let poll_interval = Duration::from_millis(100);
 
@@ -183,11 +185,12 @@ pub async fn wait_for_latest_dkg_to_become_verified(
 
 /// Wait for a key rotation event to be recorded in the database. Returns the
 /// event if it is found, or an error if the timeout is reached.
+#[must_use = "The result of this function must be unwrapped to assert that no errors or timeouts occurred."]
 pub async fn wait_for_key_rotation_event(
     db: &impl DbRead,
     chain_tip: &BitcoinBlockHash,
     aggregate_key: &PublicKey,
-) -> Result<crate::storage::model::KeyRotationEvent, TestUtilityError> {
+) -> Result<KeyRotationEvent, TestUtilityError> {
     let timeout_duration = Duration::from_secs(15);
     let poll_interval = Duration::from_millis(100);
 
