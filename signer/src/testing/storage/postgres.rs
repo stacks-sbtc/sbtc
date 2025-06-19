@@ -40,11 +40,12 @@ impl PgStore {
         .map_err(Error::SqlxQuery)
     }
 
-    /// Get all key-rotation events that have been logged in the database.
-    pub async fn get_key_rotation_event_for_aggregate_key(
+    /// Get all key-rotation events that have been logged in the database for the
+    /// given aggregate key.
+    pub async fn get_key_rotation_events_for_aggregate_key(
         &self,
         aggregate_key: &PublicKey,
-    ) -> Result<Option<model::KeyRotationEvent>, Error> {
+    ) -> Result<Vec<model::KeyRotationEvent>, Error> {
         sqlx::query_as::<_, model::KeyRotationEvent>(
             r#"
             SELECT
@@ -59,7 +60,7 @@ impl PgStore {
             "#,
         )
         .bind(aggregate_key)
-        .fetch_optional(self.pool())
+        .fetch_all(self.pool())
         .await
         .map_err(Error::SqlxQuery)
     }

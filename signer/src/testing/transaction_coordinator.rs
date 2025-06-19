@@ -31,6 +31,7 @@ use crate::stacks::contracts::RejectWithdrawalV1;
 use crate::stacks::contracts::StacksTx;
 use crate::storage::DbRead;
 use crate::storage::DbWrite;
+use crate::storage::Transactable;
 use crate::storage::model;
 use crate::storage::model::StacksBlock;
 use crate::storage::model::StacksTxId;
@@ -177,7 +178,7 @@ impl<Storage>
         >,
     >
 where
-    Storage: DbRead + DbWrite + Clone + Sync + Send + 'static,
+    Storage: DbRead + DbWrite + Transactable + Clone + Sync + Send + 'static,
 {
     /// Asserts that TxCoordinatorEventLoop::get_pending_requests processes withdrawals
     pub async fn assert_processes_withdrawals(mut self) {
@@ -809,7 +810,7 @@ where
 
         let outpoint = withdrawal_req.withdrawal_outpoint();
         assert_eq!(sign_request.tx_fee, 123000);
-        assert_eq!(sign_request.aggregate_key, bitcoin_aggregate_key);
+        assert_eq!(sign_request.aggregate_key, Some(bitcoin_aggregate_key));
         assert_eq!(sign_request.txid, multi_tx.tx().txid());
         assert_eq!(sign_request.nonce, multi_tx.tx().get_origin_nonce());
         if let StacksTx::ContractCall(ContractCall::AcceptWithdrawalV1(call)) =
@@ -912,7 +913,7 @@ where
             .expect("Failed to construct withdrawal reject stacks sign request");
 
         assert_eq!(sign_request.tx_fee, 123000);
-        assert_eq!(sign_request.aggregate_key, bitcoin_aggregate_key);
+        assert_eq!(sign_request.aggregate_key, Some(bitcoin_aggregate_key));
         assert_eq!(sign_request.txid, multi_tx.tx().txid());
         assert_eq!(sign_request.nonce, multi_tx.tx().get_origin_nonce());
 

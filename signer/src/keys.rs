@@ -49,7 +49,7 @@ pub struct PublicKey(secp256k1::PublicKey);
 /// `PublicKey(PublicKey(SERIALIZED_UNCOMPRESSED))`.
 impl core::fmt::Debug for PublicKey {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_fmt(format_args!("PublicKey({0})", self.0))
+        write!(f, "PublicKey({})", self.0)
     }
 }
 
