@@ -1,6 +1,4 @@
 //! Helper functions for the bitcoin module
-//!
-use std::borrow::Borrow;
 
 use bitcoin::Amount;
 use bitcoin::BlockHash;
@@ -21,16 +19,9 @@ use emily_client::models::CreateDepositRequestBody;
 use futures::StreamExt as _;
 use tokio_stream::wrappers::ReceiverStream;
 
-use crate::bitcoin::rpc::BitcoinCoreClient;
 use crate::bitcoin::utxo;
 use crate::bitcoin::zmq::BitcoinCoreMessageStream;
 use crate::error::Error;
-
-impl Borrow<Client> for BitcoinCoreClient {
-    fn borrow(&self) -> &Client {
-        self.inner_client()
-    }
-}
 
 /// Return a transaction that is kinda like the signers' transaction,
 /// but it does not service any requests, and it does not have any

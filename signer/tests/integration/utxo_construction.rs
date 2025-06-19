@@ -1,17 +1,7 @@
-use emily_client::apis::deposit_api;
-use rand::RngCore;
-use sbtc::testing::regtest::Faucet;
-use signer::emily_client::EmilyClient;
-use signer::storage::model;
-use signer::testing::TestUtilityError;
-use signer::testing::get_rng;
-use std::borrow::Borrow;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
-use std::time::Duration;
 use test_case::test_case;
-use url::Url;
 
 use bitcoin::AddressType;
 use bitcoin::Amount;
@@ -51,7 +41,6 @@ use signer::storage::model::TaprootScriptHash;
 use stacks_common::types::chainstate::StacksAddress;
 
 use regtest::Recipient;
-use sbtc::testing::AsSatoshis;
 use sbtc::testing::regtest;
 use sbtc::testing::regtest::AsUtxo;
 
@@ -78,27 +67,20 @@ pub fn make_withdrawal(amount: u64, max_fee: u64) -> (WithdrawalRequest, Recipie
     (req, recipient)
 }
 
-/// Creates a single deposit request and the corresponding Bitcoin transaction,
-/// submitting them to Emily and the Bitcoin node respectively.
-pub fn make_deposit_request<U, TxAmt, FeeAmt>(
+pub fn make_deposit_request<U>(
     depositor: &Recipient,
-    amount: TxAmt,
+    amount: u64,
     utxo: U,
-    max_fee: FeeAmt,
+    max_fee: u64,
     signers_public_key: XOnlyPublicKey,
 ) -> (Transaction, DepositRequest, DepositInfo)
 where
     U: AsUtxo,
-    TxAmt: AsSatoshis,
-    FeeAmt: AsSatoshis,
 {
-    let max_fee_sats = max_fee.as_satoshis();
-    let amount_sats = amount.as_satoshis();
-
     let fee = regtest::BITCOIN_CORE_FALLBACK_FEE.to_sat();
     let deposit_inputs = DepositScriptInputs {
         signers_public_key,
-        max_fee: max_fee_sats,
+        max_fee,
         recipient: PrincipalData::from(StacksAddress::burn_address(false)),
     };
     let reclaim_inputs = ReclaimScriptInputs::try_new(50, ScriptBuf::new()).unwrap();
@@ -117,14 +99,14 @@ where
         }],
         output: vec![
             TxOut {
-                value: Amount::from_sat(amount_sats),
+                value: Amount::from_sat(amount),
                 script_pubkey: sbtc::deposits::to_script_pubkey(
                     deposit_script.clone(),
                     reclaim_script.clone(),
                 ),
             },
             TxOut {
-                value: utxo.amount() - Amount::from_sat(amount_sats + fee),
+                value: utxo.amount() - Amount::from_sat(amount + fee),
                 script_pubkey: depositor.address.script_pubkey(),
             },
         ],
@@ -152,466 +134,6 @@ where
     };
 
     (deposit_tx, req, dep)
-}
-
-/// Creates multiple deposit requests, one for each amount in the `amounts` slice.
-/// The deposit requests are submitted to Emily, and a single Bitcoin transaction
-/// containing all deposits is submitted to the Bitcoin node.
-pub fn make_deposit_requests<U, TxAmt, FeeAmt>(
-    depositor: &Recipient,
-    amounts: &[TxAmt],
-    utxo: U,
-    max_fee: FeeAmt,
-    signers_public_key: bitcoin::XOnlyPublicKey,
-) -> (Transaction, Vec<DepositRequest>)
-where
-    U: regtest::AsUtxo,
-    TxAmt: AsSatoshis,
-    FeeAmt: AsSatoshis,
-{
-    let amounts_sats = amounts.iter().map(|a| a.as_satoshis()).collect::<Vec<_>>();
-    let max_fee_sats = max_fee.as_satoshis();
-
-    let deposit_inputs = DepositScriptInputs {
-        signers_public_key,
-        max_fee: max_fee_sats,
-        recipient: PrincipalData::from(StacksAddress::burn_address(false)),
-    };
-    let reclaim_inputs = ReclaimScriptInputs::try_new(50, bitcoin::ScriptBuf::new()).unwrap();
-
-    let deposit_script = deposit_inputs.deposit_script();
-    let reclaim_script = reclaim_inputs.reclaim_script();
-
-    let mut outputs = vec![];
-    for amount in amounts {
-        outputs.push(bitcoin::TxOut {
-            value: Amount::from_sat(amount.as_satoshis()),
-            script_pubkey: sbtc::deposits::to_script_pubkey(
-                deposit_script.clone(),
-                reclaim_script.clone(),
-            ),
-        })
-    }
-
-    let fee = regtest::BITCOIN_CORE_FALLBACK_FEE.to_sat();
-    outputs.push(bitcoin::TxOut {
-        value: utxo.amount() - Amount::from_sat(amounts_sats.iter().sum::<u64>() + fee),
-        script_pubkey: depositor.address.script_pubkey(),
-    });
-
-    let mut deposit_tx = Transaction {
-        version: bitcoin::transaction::Version::ONE,
-        lock_time: bitcoin::absolute::LockTime::ZERO,
-        input: vec![bitcoin::TxIn {
-            previous_output: bitcoin::OutPoint::new(utxo.txid(), utxo.vout()),
-            sequence: bitcoin::Sequence::ZERO,
-            script_sig: bitcoin::ScriptBuf::new(),
-            witness: bitcoin::Witness::new(),
-        }],
-        output: outputs,
-    };
-
-    regtest::p2tr_sign_transaction(&mut deposit_tx, 0, &[utxo], &depositor.keypair);
-
-    let mut requests = vec![];
-    for (index, &amount) in amounts_sats.iter().enumerate() {
-        let req = CreateDepositRequest {
-            outpoint: bitcoin::OutPoint::new(deposit_tx.compute_txid(), index as u32),
-            deposit_script: deposit_script.clone(),
-            reclaim_script: reclaim_script.clone(),
-        };
-
-        requests.push(DepositRequest {
-            outpoint: req.outpoint,
-            max_fee: max_fee_sats,
-            signer_bitmap: BitArray::ZERO,
-            amount,
-            deposit_script: deposit_script.clone(),
-            reclaim_script: reclaim_script.clone(),
-            reclaim_script_hash: Some(model::TaprootScriptHash::from(&reclaim_script)),
-            signers_public_key,
-        });
-    }
-
-    (deposit_tx, requests)
-}
-
-/// A simple helper struct representing a deposit/withdrawal request amount and
-/// max fee.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ReqAmounts<TxAmt, FeeAmt> {
-    pub amount: TxAmt,
-    pub max_fee: FeeAmt,
-}
-
-/// Provides a constructor for [`ReqAmounts`] with the specified amount and max
-/// fee which must implement [`AsSatoshis`], allowing amounts to be provided as
-/// e.g. `u64`, `bitcoin::Amount`, etc.
-impl<TxAmt, FeeAmt> ReqAmounts<TxAmt, FeeAmt>
-where
-    TxAmt: AsSatoshis,
-    FeeAmt: AsSatoshis,
-{
-    /// Creates a new `ReqAmounts` instance with the specified amount and max fee.
-    pub fn new(amount: TxAmt, max_fee: FeeAmt) -> Self {
-        Self { amount, max_fee }
-    }
-}
-
-/// Represents a submitted deposit.
-pub struct SubmittedDeposit {
-    pub tx: Transaction,
-    pub request: DepositRequest,
-    pub info: DepositInfo,
-}
-
-/// A helper struct for submitting deposits to the Bitcoin network and Emily from
-/// a given depositor.
-///
-/// This helper uses typestate to provide differing functionality based on the
-/// types of `Bitcoin`, `Emily`, and `Depositor` used.
-pub struct DepositHelper<'a, Bitcoin, Emily = (), Depositor = ()> {
-    bitcoin: &'a Bitcoin,
-    emily: &'a Emily,
-    depositor: Depositor,
-}
-
-/// Provides constructors for creating a `DepositHelper` instance with types
-/// which implement `Borrow<bitcoincore_rpc::Client>` and a [`Recipient`].
-impl<'a, Bitcoin> DepositHelper<'a, Bitcoin, (), Recipient>
-where
-    Bitcoin: Borrow<bitcoincore_rpc::Client>,
-{
-    /// Creates a new `DepositHelper` instance with the specified Bitcoin client and depositor.
-    pub fn with_depositor(bitcoin: &'a Bitcoin, depositor: Recipient) -> Self {
-        Self { bitcoin, emily: &(), depositor }
-    }
-
-    /// Creates a new `DepositHelper` instance with a new depositor generated using the provided RNG.
-    pub fn new_depositor<R>(bitcoin: &'a Bitcoin, rng: &mut R) -> Self
-    where
-        R: RngCore,
-    {
-        let depositor = Recipient::new_with_rng(AddressType::P2tr, rng);
-        Self { bitcoin, emily: &(), depositor }
-    }
-}
-
-/// Provides specialized functionality for `DepositHelper` when:
-/// * the `Bitcoin` type is a [`Faucet`],
-/// * the `Emily` type is any type,
-/// * and the `depositor` is a type that implements `Borrow<bitcoin::Address>`.
-impl<Emily, Depositor> DepositHelper<'_, Faucet, Emily, Depositor>
-where
-    Depositor: Borrow<bitcoin::Address>,
-{
-    /// Funds the inner `Depositor` from the faucet with the specified amount.
-    pub fn fund<Amt>(&self, amount: Amt)
-    where
-        Amt: AsSatoshis,
-    {
-        self.bitcoin
-            .send_to(amount.as_satoshis(), self.depositor.borrow());
-    }
-}
-
-/// Provides specialized functionality for `DepositHelper` when:
-/// * the `Bitcoin` and `Depositor` types are any type,
-/// * and the `Emily` type is unset/default (`()`).
-impl<'a, Bitcoin, Depositor> DepositHelper<'a, Bitcoin, (), Depositor> {
-    /// Sets the Emily client for this `DepositHelper`, enabling deposit submission to Emily.
-    /// Consumes this instance and returns a new one with the Emily client set.
-    pub fn with_emily_client(
-        self,
-        emily: &'a EmilyClient,
-    ) -> DepositHelper<'a, Bitcoin, EmilyClient, Depositor> {
-        DepositHelper {
-            bitcoin: self.bitcoin,
-            emily,
-            depositor: self.depositor,
-        }
-    }
-}
-
-/// Provides specialized functionality for `DepositHelper` when:
-/// * the `Bitcoin` and `Emily` types are any type,
-/// * the `Depositor` type implements `Borrow<bitcoin::Address>`, for example a [`bitcoin::Address`] or [`Recipient`].
-impl<Bitcoin, Emily, Depositor> DepositHelper<'_, Bitcoin, Emily, Depositor>
-where
-    Depositor: Borrow<bitcoin::Address>,
-{
-    /// Gets the [`bitcoin::Address`] for the inner [`Recipient`] (depositor).
-    pub fn address(&self) -> &bitcoin::Address {
-        self.depositor.borrow()
-    }
-
-    /// Funds the inner [`Recipient`] from the faucet with the specified amount.
-    /// This does not implicitly create a bitcoin block, so the funding is not
-    /// immediately visible on the blockchain. You need to generate a block to
-    /// confirm the funding and thus make the new UTXO available.
-    pub fn fund_from<Amt>(&self, faucet: &Faucet, amount: Amt)
-    where
-        Amt: AsSatoshis,
-    {
-        faucet.send_to(amount.as_satoshis(), self.address());
-    }
-}
-
-/// Provides specialized functionality for `DepositHelper` when:
-/// * the `Bitcoin` type implements `Borrow<bitcoincore_rpc::Client>`,
-/// * the `Emily` type is any type,
-/// * and the `depositor` is a [`Recipient`].
-impl<Bitcoin, Emily> DepositHelper<'_, Bitcoin, Emily, Recipient>
-where
-    Bitcoin: Borrow<bitcoincore_rpc::Client>,
-{
-    /// Returns a reference to the inner [`Recipient`] (depositor).
-    pub fn depositor(&self) -> &Recipient {
-        &self.depositor
-    }
-
-    /// Gets the balance of the inner [`Recipient`] (depositor) as a [`bitcoin::Amount`].
-    pub fn get_balance(&self) -> Amount {
-        self.depositor.get_balance(self.bitcoin.borrow())
-    }
-
-    /// Finds a suitable UTXO for the depositor that covers the specified amount.
-    fn find_suitable_utxo<Amt>(&self, amount: Amt) -> Result<impl AsUtxo, TestUtilityError>
-    where
-        Amt: AsSatoshis,
-    {
-        let amount_sats = amount.as_satoshis();
-
-        // Get the UTXOs for the depositor and filter them to find one that covers the amount.
-        // If no suitable UTXO is found, return an error.
-        let utxo = self
-            .depositor
-            .get_utxos(self.bitcoin.borrow(), Some(amount_sats))
-            .pop()
-            .ok_or_else(|| {
-                format!(
-                    "No UTXO found for depositor '{address}' covering {amount_sats} satoshis",
-                    address = self.depositor.address
-                )
-            })?;
-
-        Ok(utxo)
-    }
-
-    /// Creates and submits a deposit transaction to the Bitcoin node, returning
-    /// a [`SubmittedDeposit`] containing the deposit request and Bitcoin
-    /// transaction,
-    pub fn submit_deposit_transaction<TxAmt, FeeAmt>(
-        &self,
-        amount: TxAmt,
-        max_fee: FeeAmt,
-        aggregate_key: impl Into<XOnlyPublicKey>,
-    ) -> Result<SubmittedDeposit, TestUtilityError>
-    where
-        TxAmt: AsSatoshis,
-        FeeAmt: AsSatoshis,
-    {
-        let aggregate_key = aggregate_key.into();
-        let amount_sats = amount.as_satoshis();
-        let max_fee_sats = max_fee.as_satoshis();
-        let total_sats = amount_sats + max_fee_sats;
-
-        let utxo = self.find_suitable_utxo(total_sats)?;
-
-        let (tx, request, info) = make_deposit_request(
-            &self.depositor,
-            amount_sats,
-            utxo,
-            max_fee_sats,
-            aggregate_key,
-        );
-
-        self.bitcoin
-            .borrow()
-            .send_raw_transaction(&tx)
-            .map_err(|e| format!("Failed to submit raw transaction to Bitcoin node: {e}"))?;
-
-        Ok(SubmittedDeposit { tx, request, info })
-    }
-}
-
-/// Provides specialized functionality for `DepositHelper` when:
-/// * the `Bitcoin` type implements `Borrow<Client>`,
-/// * the Emily client is a concrete [`EmilyClient`],
-/// * and the recipient is a [`Recipient`].
-impl<Bitcoin> DepositHelper<'_, Bitcoin, EmilyClient, Recipient>
-where
-    Bitcoin: Borrow<bitcoincore_rpc::Client>,
-{
-    /// For each provided [`DepReq`], creates a deposit request and bitcoin transaction,
-    /// submitting them to Emily and the Bitcoin node respectively.
-    #[allow(unused)] // TODO: Remove when other tests use this
-    pub async fn submit_deposits<I, K, TxAmt, FeeAmt>(
-        &self,
-        requests: I,
-        aggregate_key: K,
-    ) -> Result<Vec<SubmittedDeposit>, TestUtilityError>
-    where
-        K: Into<XOnlyPublicKey>,
-        TxAmt: AsSatoshis,
-        FeeAmt: AsSatoshis,
-        I: IntoIterator<Item = ReqAmounts<TxAmt, FeeAmt>>,
-    {
-        let aggregate_key = aggregate_key.into();
-        let mut submitted_deposits = Vec::new();
-
-        for req in requests {
-            let deposit = self.submit_deposit(req, aggregate_key).await?;
-            submitted_deposits.push(deposit);
-        }
-
-        Ok(submitted_deposits)
-    }
-
-    /// Creates a deposit request and bitcoin transaction containing the deposit,
-    /// submitting them to Emily and the Bitcoin node respectively.
-    pub async fn submit_deposit<K, TxAmt, FeeAmt>(
-        &self,
-        req: ReqAmounts<TxAmt, FeeAmt>,
-        aggregate_key: K,
-    ) -> Result<SubmittedDeposit, TestUtilityError>
-    where
-        K: Into<XOnlyPublicKey>,
-        TxAmt: AsSatoshis,
-        FeeAmt: AsSatoshis,
-    {
-        let deposit = self.submit_deposit_transaction(req.amount, req.max_fee, aggregate_key)?;
-
-        let emily_request_body = deposit.request.as_emily_request(&deposit.tx);
-        deposit_api::create_deposit(self.emily.config(), emily_request_body)
-            .await
-            .map_err(|e| format!("Failed to submit deposit to Emily: {e}"))?;
-
-        Ok(deposit)
-    }
-}
-
-/// Allows `DepositHelper` to be borrowed as a `bitcoin::Address` if the `depositor`
-/// field implements `Borrow<bitcoin::Address>` (e.g. a [`Recipient`]).
-impl<Bitcoin, Emily, Addr> Borrow<bitcoin::Address> for &DepositHelper<'_, Bitcoin, Emily, Addr>
-where
-    Addr: Borrow<bitcoin::Address>,
-{
-    fn borrow(&self) -> &bitcoin::Address {
-        self.depositor.borrow()
-    }
-}
-
-/// Verifies that the `DepositHelper` correctly creates, submits, and reports a deposit.
-#[tokio::test]
-async fn deposit_helper_submits_deposit_successfully() {
-    let rng = &mut get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
-
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(1),
-        None,
-    )
-    .expect("Failed to create EmilyClient");
-
-    let signer_for_agg_key = Recipient::new(AddressType::P2tr);
-    let depositor = DepositHelper::new_depositor(faucet, rng).with_emily_client(&emily_client);
-
-    let initial_depositor_balance_sats = 100_000_000; // 1 BTC
-    depositor.fund(initial_depositor_balance_sats);
-
-    // Confirm the funding transactions
-    faucet.generate_block();
-
-    assert_eq!(
-        depositor.get_balance().to_sat(),
-        initial_depositor_balance_sats,
-        "Initial depositor balance mismatch"
-    );
-    // Define deposit parameters
-    let deposit_amount_sats = 5_000_000; // 0.05 BTC
-    let sbtc_max_fee_sats = 10_000; // 0.0001 BTC
-    let aggregate_key = signer_for_agg_key.keypair.x_only_public_key().0;
-
-    // Call submit_deposit
-    let submitted_deposit = depositor
-        .submit_deposit(
-            ReqAmounts::new(deposit_amount_sats, sbtc_max_fee_sats),
-            aggregate_key,
-        )
-        .await
-        .expect("Failed to submit deposit");
-
-    // Verify mempool contents before mining
-    let mempool = rpc.get_raw_mempool().expect("Failed to get mempool");
-    assert_eq!(
-        mempool.len(),
-        1,
-        "Mempool should contain exactly one transaction (the deposit)"
-    );
-    assert_eq!(
-        mempool[0],
-        submitted_deposit.tx.compute_txid(),
-        "Transaction ID in mempool does not match submitted deposit transaction ID"
-    );
-
-    // Mine a block to confirm the Bitcoin transaction
-    faucet.generate_block();
-
-    // Check depositor's balance
-    // The Bitcoin transaction fee is handled by `make_deposit_request` using `regtest::BITCOIN_CORE_FALLBACK_FEE`.
-    let bitcoin_tx_fee_sats = regtest::BITCOIN_CORE_FALLBACK_FEE.to_sat();
-    let expected_depositor_balance_sats =
-        initial_depositor_balance_sats - deposit_amount_sats - bitcoin_tx_fee_sats;
-    let final_depositor_balance_sats = depositor.get_balance().to_sat();
-
-    assert_eq!(
-        final_depositor_balance_sats, expected_depositor_balance_sats,
-        "Depositor balance mismatch after deposit. Expected {}, got {}",
-        expected_depositor_balance_sats, final_depositor_balance_sats
-    );
-
-    // Verify returned data (basic checks)
-    assert_eq!(
-        submitted_deposit.tx.output[0].value.to_sat(),
-        deposit_amount_sats,
-        "Deposit transaction output amount mismatch"
-    );
-    assert_eq!(
-        submitted_deposit.request.amount, deposit_amount_sats,
-        "DepositRequest amount mismatch"
-    );
-    assert_eq!(
-        submitted_deposit.request.max_fee, sbtc_max_fee_sats,
-        "DepositRequest max_fee mismatch"
-    );
-    assert_eq!(
-        submitted_deposit.request.signers_public_key, aggregate_key,
-        "DepositRequest signers_public_key mismatch"
-    );
-
-    assert_eq!(
-        submitted_deposit.info.amount, deposit_amount_sats,
-        "DepositInfo amount mismatch"
-    );
-    assert_eq!(
-        submitted_deposit.info.max_fee, sbtc_max_fee_sats,
-        "DepositInfo max_fee mismatch"
-    );
-    assert_eq!(
-        submitted_deposit.info.signers_public_key, aggregate_key,
-        "DepositInfo signers_public_key mismatch"
-    );
-    assert_eq!(
-        submitted_deposit.info.outpoint.txid,
-        submitted_deposit.tx.compute_txid(),
-        "DepositInfo outpoint txid mismatch"
-    );
-    assert_eq!(
-        submitted_deposit.info.outpoint.vout, 0,
-        "DepositInfo outpoint vout mismatch (expected 0)"
-    );
 }
 
 /// This test just checks that many of the methods on the Recipient struct
@@ -655,32 +177,38 @@ fn helper_struct_methods_work() {
 /// spent using the transactions generated in the utxo module.
 #[test]
 fn deposits_add_to_controlled_amounts() {
-    let rng = &mut get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
     let fee = regtest::BITCOIN_CORE_FALLBACK_FEE.to_sat();
 
     let signer = Recipient::new(AddressType::P2tr);
-    let depositor = DepositHelper::new_depositor(faucet, rng);
+    let depositor = Recipient::new(AddressType::P2tr);
     let signers_public_key = signer.keypair.x_only_public_key().0;
 
     // Start off with some initial UTXOs to work with.
     faucet.send_to(100_000_000, &signer.address);
-    depositor.fund(50_000_000);
-    faucet.generate_block();
+    faucet.send_to(50_000_000, &depositor.address);
+    faucet.generate_blocks(1);
 
     assert_eq!(signer.get_balance(rpc).to_sat(), 100_000_000);
-    assert_eq!(depositor.get_balance().to_sat(), 50_000_000);
+    assert_eq!(depositor.get_balance(rpc).to_sat(), 50_000_000);
 
     // Now lets make a deposit transaction and submit it
+    let depositor_utxo = depositor.get_utxos(rpc, None).pop().unwrap();
     let deposit_amount = 25_000_000;
     let max_fee = deposit_amount / 2;
-    let deposit = depositor
-        .submit_deposit_transaction(deposit_amount, max_fee, signers_public_key)
-        .unwrap();
-    faucet.generate_block();
+
+    let (deposit_tx, deposit_request, _) = make_deposit_request(
+        &depositor,
+        deposit_amount,
+        depositor_utxo,
+        max_fee,
+        signers_public_key,
+    );
+    rpc.send_raw_transaction(&deposit_tx).unwrap();
+    faucet.generate_blocks(1);
 
     // The depositor's balance should be updated now.
-    let depositor_balance = depositor.get_balance();
+    let depositor_balance = depositor.get_balance(rpc);
     assert_eq!(depositor_balance.to_sat(), 50_000_000 - 25_000_000 - fee);
     // We deposited the transaction to the signer, but it's not clear to the
     // wallet tracking the signer's address that the deposit is associated
@@ -693,7 +221,7 @@ fn deposits_add_to_controlled_amounts() {
 
     // Now build the struct with the outstanding peg-in and peg-out requests.
     let requests = SbtcRequests {
-        deposits: vec![deposit.request],
+        deposits: vec![deposit_request],
         withdrawals: Vec::new(),
         signer_state: SignerBtcState {
             utxo: SignerUtxo {
@@ -860,27 +388,33 @@ fn withdrawals_reduce_to_signers_amounts() {
 #[test_case(11; "multiple withdrawals")]
 fn parse_withdrawal_ids(withdrawal_numbers: u64) {
     const FEE_RATE: f64 = 10.0;
-    let rng = &mut get_rng();
 
     let (rpc, faucet) = regtest::initialize_blockchain();
     let signer = Recipient::new(AddressType::P2tr);
     let signers_public_key = signer.keypair.x_only_public_key().0;
-    let depositor = DepositHelper::new_depositor(faucet, rng);
+    let depositor = Recipient::new(AddressType::P2tr);
 
     // Start off with some initial UTXOs to work with.
     let signers_funds = 100_000_000 * (1 + withdrawal_numbers);
     faucet.send_to(signers_funds, &signer.address);
-    depositor.fund(50_000_000);
+    faucet.send_to(50_000_000, &depositor.address);
     faucet.generate_block();
 
     // Now lets make a deposit transaction and submit it. We do this to ensure
     // we can create a transaction with zero withdrawals
+    let depositor_utxo = depositor.get_utxos(rpc, None).pop().unwrap();
     let deposit_amount = 25_000_000;
     let max_fee = deposit_amount / 2;
-    let deposit = depositor
-        .submit_deposit_transaction(deposit_amount, max_fee, signers_public_key)
-        .unwrap();
-    faucet.generate_block();
+
+    let (deposit_tx, deposit_request, _) = make_deposit_request(
+        &depositor,
+        deposit_amount,
+        depositor_utxo,
+        max_fee,
+        signers_public_key,
+    );
+    rpc.send_raw_transaction(&deposit_tx).unwrap();
+    faucet.generate_blocks(1);
 
     let signer_utxo = signer.get_utxos(rpc, None).pop().unwrap();
 
@@ -897,7 +431,7 @@ fn parse_withdrawal_ids(withdrawal_numbers: u64) {
 
     // Now build the struct with the outstanding peg-in and peg-out requests.
     let requests = SbtcRequests {
-        deposits: vec![deposit.request],
+        deposits: vec![deposit_request],
         withdrawals: withdrawal_requests.clone(),
         signer_state: SignerBtcState {
             utxo: SignerUtxo {

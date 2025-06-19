@@ -26,7 +26,9 @@ use sbtc::deposits::CreateDepositRequest;
 use sbtc::deposits::DepositScriptInputs;
 use sbtc::deposits::ReclaimScriptInputs;
 use sbtc::testing::regtest;
+use sbtc::testing::regtest::Faucet;
 use sbtc::testing::regtest::Recipient;
+use signer::bitcoin::utxo::DepositRequest;
 use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
 use signer::bitcoin::utxo::SignerUtxo;
@@ -50,7 +52,6 @@ use signer::storage::model::TxOutputType;
 use signer::storage::model::TxPrevout;
 use signer::storage::model::TxPrevoutType;
 use signer::storage::postgres::PgStore;
-use signer::testing::IterTestExt;
 use signer::testing::btc::get_canonical_chain_tip;
 use signer::testing::stacks::DUMMY_SORTITION_INFO;
 use signer::testing::stacks::DUMMY_TENURE_INFO;
@@ -75,8 +76,7 @@ use crate::setup::IntoEmilyTestingConfig as _;
 use crate::setup::TestSweepSetup;
 use crate::setup::fetch_canonical_bitcoin_blockchain;
 use crate::transaction_coordinator::mock_reqwests_status_code_error;
-use crate::utxo_construction::DepositHelper;
-use crate::utxo_construction::ReqAmounts;
+use crate::utxo_construction::make_deposit_request;
 use crate::zmq::BITCOIN_CORE_ZMQ_ENDPOINT;
 
 pub const GET_POX_INFO_JSON: &str =
@@ -528,33 +528,37 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     // For a real deposit we need to create a depositor and have them make
     // an actual deposit. For this step we create the sweep transaction
     // "manually".
+    let depositor = Recipient::new(AddressType::P2tr);
 
-    // Create and fund the depositor.
-    let depositor = DepositHelper::new_depositor(faucet, &mut rng).with_emily_client(&emily_client);
-    depositor.fund(50_000_000);
+    // Start off with some initial UTXOs to work with.
+    faucet.send_to(50_000_000, &depositor.address);
 
-    let chain_tip = faucet.generate_block().into();
+    let chain_tip = faucet.generate_blocks(1).pop().unwrap().into();
 
     let signal = signal_receiver.recv();
     let Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved)) = signal.await else {
         panic!("Not the right signal")
     };
 
-    // Now lets make a deposit transaction and submit it.
+    // Now lets make a deposit transaction and submit it. First we get some
+    // sats.
+    let depositor_utxo = depositor.get_utxos(rpc, None).pop().unwrap();
+
     let deposit_amount = 2_500_000;
     let max_fee = deposit_amount / 2;
     let signers_public_key = shares.aggregate_key.into();
-    let deposit = depositor
-        .submit_deposit(
-            ReqAmounts::new(deposit_amount, max_fee),
-            shares.aggregate_key,
-        )
-        .await
-        .unwrap();
+    let (deposit_tx, deposit_request, _) = make_deposit_request(
+        &depositor,
+        deposit_amount,
+        depositor_utxo,
+        max_fee,
+        signers_public_key,
+    );
+    rpc.send_raw_transaction(&deposit_tx).unwrap();
 
     // Now build the struct with the outstanding peg-in and peg-out requests.
     let requests = SbtcRequests {
-        deposits: vec![deposit.request.clone()],
+        deposits: vec![deposit_request.clone()],
         withdrawals: Vec::new(),
         signer_state: SignerBtcState {
             utxo: db.get_signer_utxo(&chain_tip).await.unwrap().unwrap(),
@@ -569,8 +573,9 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
         max_deposits_per_bitcoin_tx: ctx.config().signer.max_deposits_per_bitcoin_tx.get(),
     };
 
-    let transactions = requests.construct_transactions().unwrap();
-    let mut unsigned = transactions.single();
+    let mut transactions = requests.construct_transactions().unwrap();
+    assert_eq!(transactions.len(), 1);
+    let mut unsigned = transactions.pop().unwrap();
 
     // Add the signature and/or other required information to the witness data.
     signer::testing::set_witness_data(&mut unsigned, signer.keypair);
@@ -582,11 +587,11 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     //
     // Inform emily about the deposit
     let body = CreateDepositRequestBody {
-        bitcoin_tx_output_index: deposit.request.outpoint.vout,
-        bitcoin_txid: deposit.request.outpoint.txid.to_string(),
-        deposit_script: deposit.request.deposit_script.to_hex_string(),
-        reclaim_script: deposit.request.reclaim_script.to_hex_string(),
-        transaction_hex: serialize_hex(&deposit.tx),
+        bitcoin_tx_output_index: deposit_request.outpoint.vout,
+        bitcoin_txid: deposit_request.outpoint.txid.to_string(),
+        deposit_script: deposit_request.deposit_script.to_hex_string(),
+        reclaim_script: deposit_request.reclaim_script.to_hex_string(),
+        transaction_hex: serialize_hex(&deposit_tx),
     };
     deposit_api::create_deposit(emily_client.config(), body)
         .await
@@ -639,10 +644,35 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
         fetch_input(&db, TxPrevoutType::Deposit).await[0];
 
     assert_eq!(amount, deposit_amount);
-    assert_eq!(prevout_txid.deref(), &deposit.tx.compute_txid());
+    assert_eq!(prevout_txid.deref(), &deposit_tx.compute_txid());
     assert_eq!(txid.deref(), &unsigned.tx.compute_txid());
 
     testing::storage::drop_db(db).await;
+}
+
+/// Generates a random deposit request transaction with the input amount
+/// that is locked by the given aggregate key.
+///
+/// Note: The deposit transaction will be in the mempool when this function
+/// returns.
+fn generate_deposit_request<R: rand::Rng>(
+    faucet: &Faucet,
+    amount: u64,
+    signers_public_key: bitcoin::XOnlyPublicKey,
+    rng: &mut R,
+) -> DepositRequest {
+    let depositor = Recipient::new_with_rng(AddressType::P2tr, rng);
+    faucet.send_to(amount + amount / 2, &depositor.address);
+    faucet.generate_block();
+
+    let utxo = depositor.get_utxos(faucet.rpc, None).pop().unwrap();
+    let max_fee = amount / 2;
+
+    let (deposit_tx, deposit_request, _) =
+        make_deposit_request(&depositor, amount, utxo, max_fee, signers_public_key);
+
+    faucet.rpc.send_raw_transaction(&deposit_tx).unwrap();
+    deposit_request
 }
 
 /// This tests that a new signer, when they are coming online, can
@@ -672,38 +702,29 @@ async fn block_observer_picks_up_chained_unordered_sweeps() {
     // Start off with some initial UTXOs to work with.
     let signers_amount = 56_780_000;
     let signer_outpoint = faucet.send_to(signers_amount, &signer.address);
+    faucet.generate_block();
 
     let new_signer = Recipient::new_with_rng(AddressType::P2tr, &mut rng);
     let signers_public_key2 = PublicKey::from(new_signer.keypair.public_key()).into();
 
-    let depositor1 = DepositHelper::new_depositor(rpc, &mut rng);
-    let depositor2 = DepositHelper::new_depositor(rpc, &mut rng);
-    let depositor3 = DepositHelper::new_depositor(rpc, &mut rng);
-
-    faucet.send_to_many(1_000_000, [&depositor1, &depositor2, &depositor3]);
-    faucet.generate_block();
-
     // Now lets make three deposit transactions, one for each sweep
     // transaction.
-    let mut deposit1 = depositor1
-        .submit_deposit_transaction(950_000, 50_000, signers_public_key1)
-        .unwrap();
-    let mut deposit2 = depositor2
-        .submit_deposit_transaction(875_000, 50_000, signers_public_key2)
-        .unwrap();
-    let mut deposit3 = depositor3
-        .submit_deposit_transaction(725_000, 50_000, signers_public_key2)
-        .unwrap();
+    let mut deposit_request1 =
+        generate_deposit_request(faucet, 950_000, signers_public_key1, &mut rng);
+    let mut deposit_request2 =
+        generate_deposit_request(faucet, 875_000, signers_public_key2, &mut rng);
+    let mut deposit_request3 =
+        generate_deposit_request(faucet, 725_000, signers_public_key2, &mut rng);
 
     // We want to construct three sweep transactions in order to
     // demonstrate that the transactions are picked up, even in the case
     // where the scriptPubKey has changed for the first one.
-    deposit1.request.signer_bitmap.set(0, true);
-    deposit2.request.signer_bitmap.set(1, true);
-    deposit3.request.signer_bitmap.set(2, true);
+    deposit_request1.signer_bitmap.set(0, true);
+    deposit_request2.signer_bitmap.set(1, true);
+    deposit_request3.signer_bitmap.set(2, true);
 
     let requests = SbtcRequests {
-        deposits: vec![deposit1.request, deposit2.request, deposit3.request],
+        deposits: vec![deposit_request1, deposit_request2, deposit_request3],
         withdrawals: Vec::new(),
         signer_state: SignerBtcState {
             utxo: SignerUtxo {
