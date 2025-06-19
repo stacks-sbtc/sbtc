@@ -1,3 +1,5 @@
+//! The main entrypoint for the sBTC signer binary.
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -30,7 +32,7 @@ use signer::transaction_signer;
 use signer::util::ApiFallbackClient;
 use tokio::signal;
 use tower_http::trace::TraceLayer;
-use tracing::Instrument;
+use tracing::Instrument as _;
 use tracing::Span;
 
 // This is how many seconds the P2P swarm will wait before attempting to
@@ -45,7 +47,7 @@ enum LogOutputFormat {
     Pretty,
 }
 
-/// Command line arguments for the signer.
+// /// Command line arguments for the signer.
 #[derive(Debug, Parser)]
 #[clap(name = "sBTC Signer")]
 struct SignerArgs {

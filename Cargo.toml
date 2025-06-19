@@ -1,5 +1,5 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members = [
     ".generated-sources/blocklist-api",
     ".generated-sources/emily/client/rust/private",
@@ -111,3 +111,14 @@ split-debuginfo = "unpacked"
 lto = "thin"
 codegen-units = 16
 overflow-checks = true
+
+[workspace.lints.rust]
+missing_docs = "deny"
+unused_imports = "deny"
+
+[workspace.lints.clippy]
+unused_trait_names = "warn"
+unwrap_in_result = "deny"
+#unwrap_used = "warn"
+#expect_used = "warn"
+empty_loop = "deny"

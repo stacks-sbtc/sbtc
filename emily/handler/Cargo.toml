@@ -46,3 +46,6 @@ name = "emily-lambda"
 
 [[bin]]
 name = "emily-server"
+
+[lints]
+workspace = true

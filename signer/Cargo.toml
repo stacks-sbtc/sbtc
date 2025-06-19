@@ -87,3 +87,6 @@ assert_matches.workspace = true
 [[bin]]
 name = "demo-cli"
 path = "src/bin/demo_cli.rs"
+
+[lints]
+workspace = true

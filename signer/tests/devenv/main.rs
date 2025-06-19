@@ -1,3 +1,3 @@
-#![warn(clippy::unused_trait_names)]
+//! Integration tests which use the `devenv` local development environment.
 
 mod devenv;

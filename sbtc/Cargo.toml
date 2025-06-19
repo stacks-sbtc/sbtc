@@ -34,3 +34,6 @@ test-case.workspace = true
 proptest.workspace = true
 assert_matches.workspace = true
 more-asserts.workspace = true
+
+[lints]
+workspace = true
