@@ -79,24 +79,6 @@ impl From<crate::error::Error> for TestUtilityError {
     }
 }
 
-/// A trait for mapping a `Result<T, E>` to a `Result<T, TestUtilityError>`.
-pub trait MapTestUtilityError<T, E>
-where
-    E: std::error::Error + Send + Sync + 'static,
-{
-    /// Maps the error type of a `Result<T, E>` to a `TestUtilityError`.
-    fn map_to_test_utility_err(self) -> Result<T, TestUtilityError>;
-}
-
-impl<T, E> MapTestUtilityError<T, E> for Result<T, E>
-where
-    E: std::error::Error + Send + Sync + 'static,
-{
-    fn map_to_test_utility_err(self) -> Result<T, TestUtilityError> {
-        self.map_err(TestUtilityError::from_err)
-    }
-}
-
 /// Clears all signer-specific configuration environment variables. This is needed
 /// for a number of tests which use the `Settings` struct due to the fact that
 /// `cargo test` runs tests in threads, and environment variables are per-process.
