@@ -476,19 +476,6 @@ impl SignerScriptPubKey for secp256k1::XOnlyPublicKey {
     }
 }
 
-/// Testing implementations/helpers for the keys module.
-#[cfg(any(test, feature = "testing"))]
-pub mod testing {
-    use super::*;
-    use crate::testing::GenerateRandom;
-
-    impl GenerateRandom<secp256k1::Keypair> for secp256k1::Keypair {
-        fn gen_one<R: rand::Rng + ?Sized>(rng: &mut R) -> Self {
-            secp256k1::Keypair::new(SECP256K1, rng)
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

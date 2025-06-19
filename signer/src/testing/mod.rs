@@ -168,17 +168,6 @@ pub fn get_rng() -> StdRng {
     StdRng::seed_from_u64(seed)
 }
 
-/// Generic trait for generating random values of type `T`.
-pub trait GenerateRandom<T> {
-    /// Generates a random value of type `T`.
-    fn gen_one<R: RngCore>(rng: &mut R) -> T;
-
-    /// Generates a vector of `n` random values of type `T`.
-    fn gen_many<R: RngCore>(rng: &mut R, n: usize) -> Vec<T> {
-        (0..n).map(|_| Self::gen_one(rng)).collect()
-    }
-}
-
 /// Async sleep extensions.
 pub trait SleepAsyncExt {
     /// Sleeps for the specified duration asynchronously.
