@@ -32,9 +32,6 @@ use rand::rngs::{OsRng, StdRng};
 use crate::bitcoin::utxo::UnsignedTransaction;
 use crate::config::Settings;
 
-/// A type alias for `Arc<std::sync::RwLock<T>>`.
-pub type StdArcRwLock<T> = std::sync::Arc<std::sync::RwLock<T>>;
-
 /// The path for the configuration file that we should use during testing.
 pub const DEFAULT_CONFIG_PATH: Option<&str> = Some("./src/config/default");
 
