@@ -220,15 +220,6 @@ pub trait TimeoutAsyncExt {
         F: IntoFuture;
 }
 
-impl TimeoutAsyncExt for std::time::Duration {
-    fn with_timeout<F>(self, future: F) -> tokio::time::Timeout<F::IntoFuture>
-    where
-        F: IntoFuture,
-    {
-        tokio::time::timeout(self, future)
-    }
-}
-
 /// Async extensions for `Future` types.
 pub trait FutureExt: Future {
     /// Wraps the future with a timeout that expires after the specified duration.
