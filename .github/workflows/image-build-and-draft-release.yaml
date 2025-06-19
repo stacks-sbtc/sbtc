@@ -96,7 +96,7 @@ jobs:
           target: ${{ matrix.docker_target }}
           push: true
           build-args: |
-            GIT_COMMIT=${{ github.ref_name }}
+            GIT_COMMIT=${{ github.event.client_payload.tag_name }}
 
       - name: Save digest as output
         id: save_digest
