@@ -71,6 +71,7 @@ use signer::testing::get_rng;
 
 use signer::testing::FutureExt as _;
 use signer::testing::FuturesIterExt as _;
+use signer::testing::ResultIterExt;
 use signer::testing::Sleep;
 use signer::testing::TestUtilityError;
 use signer::transaction_coordinator::given_key_is_coordinator;
@@ -3521,7 +3522,8 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
         .iter()
         .map(|(_, db, _, _)| testing::storage::wait_for_latest_dkg_to_become_verified(db))
         .join_all()
-        .await;
+        .await
+        .expect_all("Failed waiting for all latest DKG shares to become verified");
 
     let mut rng = get_rng();
     for (ctx, db, _, _) in signers.iter() {
