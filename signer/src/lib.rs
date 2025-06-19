@@ -2,6 +2,7 @@
 #![deny(missing_docs)]
 #![deny(
     clippy::unwrap_in_result,
+    clippy::unused_trait_names,
     // clippy::unwrap_used, // TODO: There's one unwrap left
     // clippy::expect_used, // TODO: There's 14 expects left
 )]

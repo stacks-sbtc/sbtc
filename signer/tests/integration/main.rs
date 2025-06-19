@@ -1,3 +1,5 @@
+#![warn(clippy::unused_trait_names)]
+
 use std::sync::atomic::AtomicU16;
 
 mod bitcoin_client;
