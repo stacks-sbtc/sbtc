@@ -18,6 +18,7 @@ pub mod transaction_signer;
 pub mod wallet;
 pub mod wsts;
 
+use std::fmt::Debug;
 use std::time::Duration;
 
 use bitcoin::TapSighashType;
@@ -31,9 +32,6 @@ use rand::rngs::{OsRng, StdRng};
 
 use crate::bitcoin::utxo::UnsignedTransaction;
 use crate::config::Settings;
-
-/// A type alias for `Arc<std::sync::RwLock<T>>`.
-pub type StdArcRwLock<T> = std::sync::Arc<std::sync::RwLock<T>>;
 
 /// The path for the configuration file that we should use during testing.
 pub const DEFAULT_CONFIG_PATH: Option<&str> = Some("./src/config/default");
@@ -79,24 +77,6 @@ impl From<&str> for TestUtilityError {
 impl From<crate::error::Error> for TestUtilityError {
     fn from(err: crate::error::Error) -> Self {
         Self(Box::new(err))
-    }
-}
-
-/// A trait for mapping a `Result<T, E>` to a `Result<T, TestUtilityError>`.
-pub trait MapTestUtilityError<T, E>
-where
-    E: std::error::Error + Send + Sync + 'static,
-{
-    /// Maps the error type of a `Result<T, E>` to a `TestUtilityError`.
-    fn map_to_test_utility_err(self) -> Result<T, TestUtilityError>;
-}
-
-impl<T, E> MapTestUtilityError<T, E> for Result<T, E>
-where
-    E: std::error::Error + Send + Sync + 'static,
-{
-    fn map_to_test_utility_err(self) -> Result<T, TestUtilityError> {
-        self.map_err(TestUtilityError::from_err)
     }
 }
 
@@ -188,17 +168,6 @@ pub fn get_rng() -> StdRng {
     StdRng::seed_from_u64(seed)
 }
 
-/// Generic trait for generating random values of type `T`.
-pub trait GenerateRandom<T> {
-    /// Generates a random value of type `T`.
-    fn gen_one<R: RngCore>(rng: &mut R) -> T;
-
-    /// Generates a vector of `n` random values of type `T`.
-    fn gen_many<R: RngCore>(rng: &mut R, n: usize) -> Vec<T> {
-        (0..n).map(|_| Self::gen_one(rng)).collect()
-    }
-}
-
 /// Async sleep extensions.
 pub trait SleepAsyncExt {
     /// Sleeps for the specified duration asynchronously.
@@ -208,24 +177,6 @@ pub trait SleepAsyncExt {
 impl SleepAsyncExt for std::time::Duration {
     async fn sleep(self) {
         tokio::time::sleep(self).await;
-    }
-}
-
-/// Async timeout extensions.
-pub trait TimeoutAsyncExt {
-    /// Wraps a future with a timeout that expires after the specified duration.
-    #[track_caller]
-    fn with_timeout<F>(self, future: F) -> tokio::time::Timeout<F::IntoFuture>
-    where
-        F: IntoFuture;
-}
-
-impl TimeoutAsyncExt for std::time::Duration {
-    fn with_timeout<F>(self, future: F) -> tokio::time::Timeout<F::IntoFuture>
-    where
-        F: IntoFuture,
-    {
-        tokio::time::timeout(self, future)
     }
 }
 
@@ -276,4 +227,49 @@ impl Sleep {
     pub async fn for_millis(millis: u64) {
         Duration::from_millis(millis).sleep().await;
     }
+}
+
+/// Extension trait for iterators of `Result<T, E>`.
+pub trait ResultIterExt<T, E>
+where
+    Self: Sized + IntoIterator<Item = Result<T, E>>,
+    E: std::fmt::Display,
+    T: Send + 'static,
+{
+    /// Asserts that every `Result` in the iterator is `Ok`, returning a
+    /// `Vec<T>` of the unwrapped values. Panics with the given message and list
+    /// of errors if any `Result` is `Err`.
+    #[track_caller]
+    fn expect_all(self, msg: &str) -> Vec<T> {
+        let mut oks = Vec::new();
+        let mut errs = Vec::new();
+
+        for item in self.into_iter() {
+            match item {
+                Ok(value) => oks.push(value),
+                Err(err) => errs.push(err),
+            }
+        }
+
+        if !errs.is_empty() {
+            let error_messages = errs
+                .iter()
+                .enumerate()
+                .map(|(i, error)| format!("#{}: {error}", i + 1))
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            panic!("{msg}:\n\n{error_messages}");
+        }
+
+        oks
+    }
+}
+
+impl<I, T, E> ResultIterExt<T, E> for I
+where
+    I: IntoIterator<Item = Result<T, E>>,
+    E: std::fmt::Display,
+    T: Send + 'static,
+{
 }
