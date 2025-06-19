@@ -70,7 +70,6 @@ use crate::storage::DbRead;
 use crate::storage::model;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::StacksTxId;
-use crate::testing::SleepAsyncExt;
 use crate::wsts_state_machine::FireCoordinator;
 use crate::wsts_state_machine::FrostCoordinator;
 use crate::wsts_state_machine::WstsCoordinator;
@@ -351,7 +350,7 @@ where
         let bitcoin_processing_delay = self.context.config().signer.bitcoin_processing_delay;
         if bitcoin_processing_delay > Duration::ZERO {
             tracing::debug!("sleeping before processing new bitcoin block");
-            bitcoin_processing_delay.sleep().await;
+            tokio::time::sleep(bitcoin_processing_delay).await;
         }
 
         // Attempt to retrieve cached signer set information from the context state.
