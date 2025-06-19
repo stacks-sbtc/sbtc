@@ -41,6 +41,7 @@ use crate::error::Error;
 use crate::keys::PublicKey;
 use crate::stacks::api::AccountInfo;
 use crate::stacks::api::FeePriority;
+use crate::stacks::api::SignerSetInfo;
 use crate::stacks::api::StacksInteract;
 use crate::stacks::api::SubmitTxResponse;
 use crate::stacks::api::TenureBlocks;
@@ -297,11 +298,10 @@ impl BitcoinInteract for TestHarness {
 }
 
 impl StacksInteract for TestHarness {
-    async fn get_current_signer_set(
+    async fn get_current_signer_set_info(
         &self,
         _contract_principal: &StacksAddress,
-    ) -> Result<Vec<PublicKey>, Error> {
-        // issue #118
+    ) -> Result<Option<SignerSetInfo>, Error> {
         todo!()
     }
     async fn get_current_signers_aggregate_key(
