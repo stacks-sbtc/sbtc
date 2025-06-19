@@ -230,17 +230,17 @@ impl Sleep {
 }
 
 /// Extension trait for iterators of `Result<T, E>`.
-pub trait ResultIterExt<T, E> {
+pub trait ResultIterExt<T, E>
+where
+    Self: Sized + IntoIterator<Item = Result<T, E>>,
+    E: std::fmt::Display,
+    T: Send + 'static,
+{
     /// Asserts that every `Result` in the iterator is `Ok`, returning a
     /// `Vec<T>` of the unwrapped values. Panics with the given message and list
     /// of errors if any `Result` is `Err`.
     #[track_caller]
-    fn expect_all(self, msg: &str) -> Vec<T>
-    where
-        Self: Sized + IntoIterator<Item = Result<T, E>>,
-        E: std::fmt::Display,
-        T: Send + 'static,
-    {
+    fn expect_all(self, msg: &str) -> Vec<T> {
         let mut oks = Vec::new();
         let mut errs = Vec::new();
 
