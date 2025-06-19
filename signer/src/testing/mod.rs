@@ -180,15 +180,6 @@ impl SleepAsyncExt for std::time::Duration {
     }
 }
 
-/// Async timeout extensions.
-pub trait TimeoutAsyncExt {
-    /// Wraps a future with a timeout that expires after the specified duration.
-    #[track_caller]
-    fn with_timeout<F>(self, future: F) -> tokio::time::Timeout<F::IntoFuture>
-    where
-        F: IntoFuture;
-}
-
 /// Async extensions for `Future` types.
 pub trait FutureExt: Future {
     /// Wraps the future with a timeout that expires after the specified duration.
