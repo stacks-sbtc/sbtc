@@ -249,12 +249,11 @@ impl Sleep {
     }
 }
 
-/// Extension trait for iterators of `Result<T, E>` providing convenient error handling for tests.
+/// Extension trait for iterators of `Result<T, E>`.
 pub trait ResultIterExt<T, E> {
     /// Asserts that every `Result` in the iterator is `Ok`, returning a
-    /// `Vec<T>` of the unwrapped values. Panics with the given message if any
-    /// `Result` is `Err`.
-    #[must_use = "this collection assertion potentially panics or returns a new collection; its outcome should be handled or assigned to `_`"]
+    /// `Vec<T>` of the unwrapped values. Panics with the given message and list
+    /// of errors if any `Result` is `Err`.
     #[track_caller]
     fn expect_all(self, msg: &str) -> Vec<T>
     where
@@ -276,7 +275,7 @@ pub trait ResultIterExt<T, E> {
             let error_messages = errs
                 .iter()
                 .enumerate()
-                .map(|(i, e)| format!("#{}: {e}", i + 1))
+                .map(|(i, error)| format!("#{}: {error}", i + 1))
                 .collect::<Vec<_>>()
                 .join("\n");
 
