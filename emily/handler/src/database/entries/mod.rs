@@ -111,7 +111,7 @@ impl From<&StatusEntry> for Status {
             StatusEntry::Accepted => Status::Accepted,
             StatusEntry::Confirmed(_) => Status::Confirmed,
             StatusEntry::Failed => Status::Failed,
-            StatusEntry::RBF(_) => Status::RBF,
+            StatusEntry::Rbf(_) => Status::Rbf,
         }
     }
 }
