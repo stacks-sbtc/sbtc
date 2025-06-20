@@ -43,8 +43,8 @@ use crate::stacks::wallet::SignerWallet;
 use crate::storage::DbRead;
 use crate::storage::DbWrite as _;
 use crate::storage::model;
+use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::DkgSharesStatus;
-use crate::storage::model::StacksBlockHeight;
 use crate::storage::model::SigHash;
 use crate::wsts_state_machine::FrostCoordinator;
 use crate::wsts_state_machine::SignerStateMachine;
@@ -142,7 +142,7 @@ pub struct TxSignerEventLoop<Context, Network, Rng> {
     /// The threshold for the signer
     pub threshold: u32,
     /// Last Stacks block height for which presign request was processed.
-    pub last_presign_height: StacksBlockHeight,
+    pub last_presign_height: BitcoinBlockHeight,
     /// How many bitcoin blocks back from the chain tip the signer will look for requests.
     pub context_window: u16,
     /// Random number generator used for encryption
@@ -429,16 +429,12 @@ where
     ) -> Result<(), Error> {
         let db = self.context.get_storage_mut();
 
-        let stacks_chain_tip =  db.get_stacks_chain_tip(&chain_tip.block_hash).await?;
-        
-        // Do nothing if we already processed presign request for this chaintip.
-        if let Some(stacks_tip) = &stacks_chain_tip {
-            if stacks_tip.block_height == self.last_presign_height {
-                tracing::debug!(
-                    ?stacks_tip,
-                    "already processed presign request for this stacks chain tip");
-                return Ok(());
-            }
+        if chain_tip.block_height == self.last_presign_height {
+            tracing::debug!(
+                ?chain_tip,
+                "already processed presign request for this stacks chain tip"
+            );
+            return Ok(());
         }
 
         let aggregate_key = self
@@ -488,13 +484,9 @@ where
         self.send_message(BitcoinPreSignAck, &chain_tip.block_hash)
             .await?;
 
-        if let Some(stacks_tip) = stacks_chain_tip {
-            tracing::debug!(
-                ?stacks_tip,
-                "updating last presign height",
-            );
-            self.last_presign_height = stacks_tip.block_height;
-        }
+        tracing::debug!(?chain_tip, "updating last presign height",);
+        self.last_presign_height = chain_tip.block_height;
+
         Ok(())
     }
 
