@@ -91,7 +91,7 @@ class DepositProcessor:
             # Mark all collected unconfirmed transactions as RBF'd
             for tx in unconfirmed_txs_in_group:
                 logger.info(
-                    f"Marking RBF'd transaction {tx.bitcoin_txid} as RBF'd (replaced by confirmed tx {confirmed_txid_in_group})"
+                    f"Marking RBF'd transaction {tx.bitcoin_txid} as RBF (replaced by confirmed tx {confirmed_txid_in_group})"
                 )
                 updates.append(
                     DepositUpdate(
