@@ -10,6 +10,7 @@ use crate::context::SignerEvent;
 use crate::context::SignerSignal;
 use crate::context::TxSignerEvent;
 use crate::error::Error;
+use crate::keys::CoordinatorPublicKey as _;
 use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
 use crate::network;
@@ -187,9 +188,9 @@ where
             .expect("no chain tip");
 
         // now that we have a chain tip, get the real coordinator
-        let coordinator_public_key =
-            crate::transaction_coordinator::coordinator_public_key(&bitcoin_chain_tip, signer_set)
-                .unwrap();
+        let coordinator_public_key = signer_set
+            .determine_coordinator_public_key_for(bitcoin_chain_tip)
+            .unwrap();
         let coordinator_signer_info = signer_info
             .iter()
             .find(|signer| {

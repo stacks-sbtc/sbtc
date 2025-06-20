@@ -1044,7 +1044,7 @@ mod tests {
         let mut rng = get_rng();
         let mut test_harness = TestHarness::generate(&mut rng, 20, 0..5);
 
-        let block_hash = BlockHash::from_byte_array([1u8; 32]);
+        let block_hash: model::BitcoinBlockHash = BlockHash::from_byte_array([1u8; 32]).into();
         // We're going to do the following:
         // 1. pretend that the below bytes represent the signers
         //    `scriptPubKey`. We store it in our datastore along with some
@@ -1071,7 +1071,7 @@ mod tests {
             signer_set_public_keys: vec![aggregate_key],
             signature_share_threshold: 1,
             dkg_shares_status: DkgSharesStatus::Unverified,
-            started_at_bitcoin_block_hash: block_hash.into(),
+            started_at_bitcoin_block_hash: block_hash,
             started_at_bitcoin_block_height: 1u64.into(),
         };
         storage.write_encrypted_dkg_shares(&shares).await.unwrap();
@@ -1094,13 +1094,13 @@ mod tests {
 
         let response0 = GetTxResponse {
             tx: tx_setup0.tx.clone(),
-            block_hash: Some(block_hash),
+            block_hash: Some(*block_hash),
             confirmations: None,
             block_time: None,
         };
         let response1 = GetTxResponse {
             tx: tx_setup1.tx.clone(),
-            block_hash: Some(block_hash),
+            block_hash: Some(*block_hash),
             confirmations: None,
             block_time: None,
         };
@@ -1110,7 +1110,7 @@ mod tests {
         // First we try extracting the transactions from a block that does
         // not contain any transactions spent to the signers
         let txs = [tx_setup1.tx.fake_with_rng(&mut rng)];
-        extract_sbtc_transactions(&storage, None, block_hash, &txs)
+        extract_sbtc_transactions(&storage, None, *block_hash, &txs)
             .await
             .unwrap();
 
@@ -1119,7 +1119,7 @@ mod tests {
             let store = storage.lock().await;
             // Under the hood, bitcoin transactions get stored in the
             // `bitcoin_block_to_transactions` field, so lets check there
-            let stored_transactions = store.bitcoin_block_to_transactions.get(&block_hash.into());
+            let stored_transactions = store.bitcoin_block_to_transactions.get(&block_hash);
 
             // Nothing should be stored so the map get call should return
             // None.
@@ -1132,12 +1132,12 @@ mod tests {
             tx_setup0.tx.fake_with_rng(&mut rng),
             tx_setup1.tx.fake_with_rng(&mut rng),
         ];
-        extract_sbtc_transactions(&storage, None, block_hash, &txs)
+        extract_sbtc_transactions(&storage, None, *block_hash, &txs)
             .await
             .unwrap();
 
         let store = storage.lock().await;
-        let stored_transactions = store.bitcoin_block_to_transactions.get(&block_hash.into());
+        let stored_transactions = store.bitcoin_block_to_transactions.get(&block_hash);
 
         // Is our one transaction stored? This block hash should now have
         // only one transaction with the expected txid.

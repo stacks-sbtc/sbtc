@@ -6302,7 +6302,7 @@ mod get_pending_accepted_withdrawal_requests {
         let (bitcoin_chain_tip, stacks_chain_tip) = db.get_chain_tips().await;
 
         // Assert that the chain tips are what we expect.
-        assert_eq!(bitcoin_chain_tip.as_ref(), &bitcoin_3.block_hash);
+        assert_eq!(bitcoin_chain_tip.block_hash, bitcoin_3.block_hash);
         assert_eq!(&stacks_chain_tip, &stacks_3.block_hash);
 
         // Store a withdrawal request, confirmed in B2/S2.
@@ -6462,7 +6462,7 @@ mod get_pending_accepted_withdrawal_requests {
         let (bitcoin_chain_tip, stacks_chain_tip) = db.get_chain_tips().await;
 
         // Assert that the chain tips are what we expect.
-        assert_eq!(bitcoin_chain_tip.as_ref(), &bitcoin_3a.block_hash);
+        assert_eq!(bitcoin_chain_tip.block_hash, bitcoin_3a.block_hash);
         assert_eq!(&stacks_chain_tip, &stacks_3a.block_hash);
 
         // Store a withdrawal request, confirmed in B1/S1.
@@ -6537,7 +6537,7 @@ mod get_pending_accepted_withdrawal_requests {
         let (bitcoin_chain_tip, stacks_chain_tip) = db.get_chain_tips().await;
 
         // Assert that the chain tips are what we expect.
-        assert_eq!(bitcoin_chain_tip.as_ref(), &bitcoin_3a.block_hash);
+        assert_eq!(bitcoin_chain_tip.block_hash, bitcoin_3a.block_hash);
         assert_eq!(&stacks_chain_tip, &stacks_3a.block_hash);
 
         // Store a withdrawal request, confirmed in B1/S1.
@@ -6741,7 +6741,7 @@ mod get_pending_accepted_withdrawal_requests {
         let (bitcoin_chain_tip, stacks_chain_tip) = db.get_chain_tips().await;
 
         // Assert that the chain tips are what we expect.
-        assert_eq!(bitcoin_chain_tip.as_ref(), &bitcoin_3a.block_hash);
+        assert_eq!(bitcoin_chain_tip.block_hash, bitcoin_3a.block_hash);
         assert_eq!(&stacks_chain_tip, &stacks_3a.block_hash);
 
         // Give all requests enough 'yes' votes.
@@ -6891,7 +6891,7 @@ mod get_pending_accepted_withdrawal_requests {
 
         // Get our chain tips and assert they're what we expect.
         let (bitcoin_chain_tip, stacks_chain_tip) = db.get_chain_tips().await;
-        assert_eq!(bitcoin_chain_tip.as_ref(), &bitcoin_3a.block_hash);
+        assert_eq!(bitcoin_chain_tip.block_hash, bitcoin_3a.block_hash);
         assert_eq!(&stacks_chain_tip, &stacks_1.block_hash);
 
         // Create and store a withdrawal request confirmed in block 1 (both
@@ -6977,7 +6977,7 @@ mod get_pending_accepted_withdrawal_requests {
 
         // Get our chain tips and assert they're what we expect.
         let (bitcoin_chain_tip, stacks_chain_tip) = db.get_chain_tips().await;
-        assert_eq!(bitcoin_chain_tip.as_ref(), &bitcoin_3a.block_hash);
+        assert_eq!(bitcoin_chain_tip.block_hash, bitcoin_3a.block_hash);
         assert_eq!(&stacks_chain_tip, &stacks_3a.block_hash);
 
         // Create and store a withdrawal request confirmed in block 1 (both
@@ -7049,7 +7049,7 @@ mod get_pending_accepted_withdrawal_requests {
 
         // Get our chain tips and assert they're what we expect.
         let (bitcoin_chain_tip, stacks_chain_tip) = db.get_chain_tips().await;
-        assert_eq!(bitcoin_chain_tip.as_ref(), &bitcoin_1.block_hash);
+        assert_eq!(bitcoin_chain_tip.block_hash, bitcoin_1.block_hash);
         assert_eq!(&stacks_chain_tip, &stacks_3a.block_hash);
 
         // Create withdrawal requests in both stacks forks using the same `request_id`.
@@ -7128,7 +7128,7 @@ mod get_pending_accepted_withdrawal_requests {
 
         // Get our chain tips and assert they're what we expect.
         let (bitcoin_chain_tip, stacks_chain_tip) = db.get_chain_tips().await;
-        assert_eq!(bitcoin_chain_tip.as_ref(), &bitcoin_3.block_hash);
+        assert_eq!(bitcoin_chain_tip.block_hash, bitcoin_3.block_hash);
         assert_eq!(&stacks_chain_tip, &stacks_3.block_hash);
 
         // Create a withdrawal request that has a bitcoin block height of `2`,
@@ -7250,7 +7250,7 @@ mod get_pending_accepted_withdrawal_requests {
 
         // Get our chain tips and assert they're what we expect.
         let (bitcoin_chain_tip, stacks_chain_tip) = db.get_chain_tips().await;
-        assert_eq!(bitcoin_chain_tip.as_ref(), &bitcoin_3.block_hash);
+        assert_eq!(bitcoin_chain_tip.block_hash, bitcoin_3.block_hash);
         assert_eq!(&stacks_chain_tip, &stacks_3.block_hash);
 
         // Create a withdrawal request that has a bitcoin block height of `0`,

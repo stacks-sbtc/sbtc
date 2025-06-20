@@ -32,7 +32,7 @@ use clarity::vm::types::SequenceData;
 use clarity::vm::types::StacksAddressExtensions;
 use clarity::vm::types::StandardPrincipalData;
 use emily_client::apis::deposit_api;
-use fake::Fake;
+use fake::Fake as _;
 use fake::Faker;
 use futures::StreamExt as _;
 use lru::LruCache;
@@ -58,6 +58,7 @@ use signer::bitcoin::validation::WithdrawalValidationResult;
 use signer::block_observer;
 use signer::block_observer::SignerSetInfo;
 use signer::context::RequestDeciderEvent;
+use signer::keys::CoordinatorPublicKey as _;
 use signer::message::Payload;
 use signer::network::MessageTransfer as _;
 use signer::stacks::api::StacksClient;
@@ -71,7 +72,7 @@ use signer::testing::get_rng;
 use signer::testing::FutureExt as _;
 use signer::testing::FuturesIterExt as _;
 use signer::testing::Sleep;
-use signer::transaction_coordinator::given_key_is_coordinator;
+use signer::testing::wsts::SelectCoordinatorPrivateKey as _;
 use signer::transaction_coordinator::should_coordinate_dkg;
 use signer::transaction_signer::STACKS_SIGN_REQUEST_LRU_SIZE;
 use signer::transaction_signer::assert_allow_dkg_begin;
@@ -108,7 +109,6 @@ use signer::testing::stacks::DUMMY_SORTITION_INFO;
 use signer::testing::stacks::DUMMY_TENURE_INFO;
 use signer::testing::storage::DbReadTestExt as _;
 use signer::testing::storage::DbWriteTestExt as _;
-use signer::testing::transaction_coordinator::select_coordinator;
 use signer::testing::wsts::SignerInfo;
 use stacks_common::types::chainstate::BurnchainHeaderHash;
 use stacks_common::types::chainstate::ConsensusHash;
@@ -628,7 +628,7 @@ async fn process_complete_deposit() {
         .await;
 
     // Get the private key of the coordinator of the signer set.
-    let private_key = select_coordinator(&setup.sweep_block_hash.into(), &signer_info);
+    let private_key = signer_info.select_coordinator_private_key(setup.sweep_block_hash);
     let config = context.config_mut();
     config.signer.bootstrap_signing_set = signer_info
         .first()
@@ -801,7 +801,7 @@ async fn deploy_smart_contracts_coordinator<F>(
         .await;
 
     // Get the private key of the coordinator of the signer set.
-    let private_key = select_coordinator(&bitcoin_chain_tip.block_hash, &signer_info);
+    let private_key = signer_info.select_coordinator_private_key(bitcoin_chain_tip);
 
     // Bootstrap the tx coordinator event loop
     let tx_coordinator = transaction_coordinator::TxCoordinatorEventLoop {
@@ -4246,10 +4246,11 @@ async fn test_conservative_initial_sbtc_limits() {
     //   in getting deposits (so no signal is sent to request decider and tx
     //   coordinator)
     // =========================================================================
-    let signers_key = setup.signers.signer_keys().iter().cloned().collect();
+    let signers_keys: BTreeSet<PublicKey> = setup.signers.signer_keys().iter().copied().collect();
+    let signer_0_pubkey = signers[0].2.public_key();
     loop {
-        let chain_tip: BitcoinBlockHash = faucet.generate_blocks(1).pop().unwrap().into();
-        if given_key_is_coordinator(signers[0].2.public_key().into(), &chain_tip, &signers_key) {
+        let chain_tip = faucet.generate_block();
+        if signers_keys.is_public_key_coordinator_for(signer_0_pubkey, chain_tip) {
             break;
         }
     }
@@ -5049,7 +5050,7 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
         .await;
 
     // Get the private key of the coordinator of the signer set.
-    let private_key = select_coordinator(&bitcoin_chain_tip.block_hash, &signer_info);
+    let private_key = signer_info.select_coordinator_private_key(bitcoin_chain_tip);
 
     let config = context.config_mut();
     config.signer.private_key = private_key;

@@ -113,7 +113,7 @@ impl DbRead for SharedStore {
         let canonical_bitcoin_blocks = std::iter::successors(Some(chain_tip), |block_hash| {
             store
                 .bitcoin_blocks
-                .get(block_hash)
+                .get(*block_hash)
                 .map(|block| &block.parent_hash)
         })
         .take(context_window as usize)
@@ -600,7 +600,7 @@ impl DbRead for SharedStore {
         // Get the blockchain
         let bitcoin_blocks = std::iter::successors(Some(chain_tip), |block_hash| {
             db.bitcoin_blocks
-                .get(block_hash)
+                .get(*block_hash)
                 .map(|block| &block.parent_hash)
         })
         .take(context_window.max(1) as usize)
@@ -609,7 +609,7 @@ impl DbRead for SharedStore {
         // Get all transactions in the blockchain
         let txs = bitcoin_blocks
             .iter()
-            .flat_map(|block_hash| db.bitcoin_block_to_transactions.get(block_hash))
+            .flat_map(|block_hash| db.bitcoin_block_to_transactions.get(*block_hash))
             .flatten()
             .collect::<HashSet<_>>();
 
