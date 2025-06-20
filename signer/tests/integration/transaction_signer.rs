@@ -721,6 +721,129 @@ pub async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is
     testing::storage::drop_db(db).await;
 }
 
+#[tokio::test]
+pub async fn presign_request_ignore_request_if_already_processed_this_block() {
+    let db = testing::storage::new_test_database().await;
+
+    let mut rng = get_rng();
+    // Build the test context with mocked clients
+    let ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_mocked_bitcoin_client()
+        .with_mocked_emily_client()
+        .with_mocked_stacks_client()
+        .build();
+
+    let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
+
+    let signers = TestSignerSet::new(&mut rng);
+    // Create a test setup object so that we can simply create proper DKG
+    // shares in the database. Note that calling TestSweepSetup2::new_setup
+    // creates two bitcoin block.
+    let amounts = SweepAmounts {
+        amount: 100000,
+        max_fee: 10000,
+        is_deposit: true,
+    };
+    let setup = TestSweepSetup2::new_setup(signers, faucet, &[amounts]);
+
+    let block_header = rpc
+        .get_block_header_info(&setup.deposit_block_hash)
+        .unwrap();
+    let chain_tip = BitcoinBlockRef {
+        block_hash: block_header.hash.into(),
+        block_height: block_header.height.into(),
+    };
+
+    // Store the necessary data for passing validation
+    let aggregate_key = setup.signers.aggregate_key();
+
+    backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
+
+    setup.store_stacks_genesis_block(&db).await;
+    setup.store_dkg_shares(&db).await;
+    setup.store_rotate_keys_event(&db).await;
+    setup.store_donation(&db).await;
+    setup.store_deposit_txs(&db).await;
+    setup.store_deposit_request(&db).await;
+    setup.store_deposit_decisions(&db).await;
+
+    set_verification_status(&db, aggregate_key, DkgSharesStatus::Verified).await;
+
+    let signer_set_info = get_signer_set_info(&ctx, chain_tip.block_hash)
+        .await
+        .unwrap()
+        .unwrap();
+
+    ctx.state().update_registry_signer_set_info(signer_set_info);
+    ctx.state().update_current_limits(SbtcLimits::unlimited());
+
+    // Initialize the transaction signer event loop
+    let network = WanNetwork::default();
+
+    let net = network.connect(&ctx);
+    let mut tx_signer = TxSignerEventLoop {
+        network: net.spawn(),
+        context: ctx.clone(),
+        context_window: 10000,
+        wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
+        // We use this private key because it needs to be associated with
+        // one of the public keys that we stored in the DKG shares table.
+        signer_private_key: setup.signers.private_key(),
+        threshold: 2,
+        rng: rand::rngs::StdRng::seed_from_u64(51),
+        used_presign_blocks: Default::default(),
+        dkg_begin_pause: None,
+        dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
+        stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+    };
+
+    let sbtc_requests: TxRequestIds = TxRequestIds {
+        deposits: setup.deposit_outpoints(),
+        withdrawals: vec![],
+    };
+
+    let sbtc_context = BitcoinPreSignRequest {
+        request_package: vec![sbtc_requests],
+        fee_rate: 2.0,
+        last_fees: None,
+    };
+
+    let result = tx_signer
+        .handle_bitcoin_pre_sign_request(&sbtc_context, &chain_tip)
+        .await;
+
+    // We processing this block with verified shares and thus it should be ok.
+    assert!(result.is_ok());
+
+    // Now we will try to process the same block again, but this time we will
+    // Put unverified shares in the database. Since shares are not verified
+    // it should return an error, but, since we already processed this
+    // block, it should return early with Ok(()).
+    // Seing Ok(()) here indicates that we ignored the request.
+
+    set_verification_status(&db, aggregate_key, DkgSharesStatus::Unverified).await;
+    let result = tx_signer
+        .handle_bitcoin_pre_sign_request(&sbtc_context, &chain_tip)
+        .await;
+
+    assert!(result.is_ok());
+
+    // Sanity check: if we clear information about already processed blocks this returns an error
+
+    tx_signer.used_presign_blocks.clear();
+    let result = tx_signer
+        .handle_bitcoin_pre_sign_request(&sbtc_context, &chain_tip)
+        .await;
+
+    assert!(result.is_err());
+
+    // TODO: to make testing super-tight we should also check that
+    // hashmap with used_presign_blocks don't grow infinitely.
+
+    testing::storage::drop_db(db).await;
+}
+
 #[test_log::test(tokio::test)]
 async fn new_state_machine_per_valid_sighash() {
     let db = testing::storage::new_test_database().await;
