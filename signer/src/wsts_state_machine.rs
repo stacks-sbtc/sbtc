@@ -13,6 +13,7 @@ use crate::keys::PublicKeyXOnly;
 use crate::keys::SignerScriptPubKey as _;
 use crate::storage;
 use crate::storage::model;
+use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::DkgSharesStatus;
 use crate::storage::model::SigHash;
@@ -502,10 +503,9 @@ impl SignerStateMachine {
 
     /// Create a random number generator seeded with the given bitcoin
     /// block reference and a private key.
-    fn create_rng(started_at: &BitcoinBlockRef, private_key: PrivateKey) -> StdRng {
+    fn create_rng(started_at: &BitcoinBlockHash, private_key: PrivateKey) -> StdRng {
         let seed_bytes: [u8; 32] = sha2::Sha256::new_with_prefix("DKG_RNG")
-            .chain_update(started_at.block_hash.into_bytes())
-            .chain_update(started_at.block_height.to_le_bytes())
+            .chain_update(started_at.into_bytes())
             .chain_update(private_key.to_bytes())
             .finalize()
             .into();
@@ -536,7 +536,7 @@ impl SignerStateMachine {
     pub fn process(&mut self, message: &Message) -> Result<Vec<Message>, Error> {
         let response = match message {
             Message::DkgBegin(_) => {
-                let mut rng = Self::create_rng(&self.started_at, self.private_key);
+                let mut rng = Self::create_rng(&self.started_at.block_hash, self.private_key);
                 self.inner.process(message, &mut rng)
             }
             _ => self.inner.process(message, &mut OsRng),
