@@ -22,7 +22,7 @@ use hashbrown::HashMap;
 use hashbrown::HashSet;
 use rand::SeedableRng as _;
 use rand::rngs::OsRng;
-use rand::rngs::StdRng;
+use rand_chacha::ChaCha20Rng;
 use sha2::Digest as _;
 use wsts::common::PolyCommitment;
 use wsts::net::Message;
@@ -503,14 +503,14 @@ impl SignerStateMachine {
 
     /// Create a random number generator seeded with the given bitcoin
     /// block reference and a private key.
-    fn create_rng(started_at: &BitcoinBlockHash, private_key: PrivateKey) -> StdRng {
+    fn create_rng(started_at: &BitcoinBlockHash, private_key: PrivateKey) -> ChaCha20Rng {
         let seed_bytes: [u8; 32] = sha2::Sha256::new_with_prefix("DKG_RNG")
             .chain_update(started_at.into_bytes())
             .chain_update(private_key.to_bytes())
             .finalize()
             .into();
 
-        StdRng::from_seed(seed_bytes)
+        ChaCha20Rng::from_seed(seed_bytes)
     }
 
     /// Process the passed incoming message, and return any outgoing
