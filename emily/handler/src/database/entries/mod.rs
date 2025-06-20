@@ -100,7 +100,7 @@ pub enum StatusEntry {
     Failed,
     /// Transaction was replaced by another transaction via RBF.
     /// Inner string is transaction ID of replacement transaction.
-    RBF(String),
+    Rbf(String),
 }
 
 impl From<&StatusEntry> for Status {
