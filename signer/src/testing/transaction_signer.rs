@@ -59,6 +59,7 @@ where
                 context_window,
                 wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
                 threshold,
+                used_presign_blocks: Default::default(),
                 rng,
                 dkg_begin_pause: None,
                 dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
