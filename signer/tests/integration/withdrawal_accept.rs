@@ -150,6 +150,70 @@ async fn accept_withdrawal_validation_happy_path() {
 }
 
 /// For this test we check that the `AcceptWithdrawalV1::validate` function
+/// correctly validates a complete withdrawal contract call when the signer
+/// was not part of the signing set, so no DKG shares, but has information
+/// about the sweep transaction nonetheless because it has been following
+/// the sweeps using the bootstrap aggregate key.
+#[tokio::test]
+async fn accept_withdrawal_validation_withdrawal_signer_no_dkg_shares() {
+    // Normal: this generates the blockchain as well as a transaction
+    // sweeping out the funds for a withdrawal request.
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
+    let (rpc, faucet) = regtest::initialize_blockchain();
+
+    let signers = TestSignerSet::new(&mut rng);
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+
+    // Normal: The withdrawal must be swept on bitcoin.
+    setup.submit_sweep_tx(rpc, faucet);
+
+    // Normal: the signer follows the bitcoin blockchain and event observer
+    // should be getting new block events from bitcoin-core. We haven't
+    // hooked up our block observer, so we need to manually update the
+    // database with new bitcoin block headers.
+    backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash().unwrap()).await;
+
+    // Normal: we take the sweep transaction as is from the test setup and
+    // store it in the database.
+    setup.store_sweep_tx(&db).await;
+    setup.store_bitcoin_withdrawals_outputs(&db).await;
+
+    // Different: we normally add a row in the dkg_shares table so that we
+    // have a record of the scriptPubKey that the signers control. Here we
+    // exclude it, so it looks like the first UTXO in the transaction is
+    // not controlled by the signers.
+    //
+    // However, we assume that the signer has been picking up on the
+    // signers' sweep transactions, so there are rows in the
+    // bitcoin_tx_outputs table for the signers' outputs. This allows the
+    // signer to check for whether this is indeed a valid sweep.
+
+    // Normal: the request and how the signers voted needs to be added to
+    // the database. Here the bitmap in the withdrawal request object
+    // corresponds to how the signers voted.
+    setup.store_withdrawal_requests(&db).await;
+    setup.store_withdrawal_decisions(&db).await;
+
+    // Generate the transaction and corresponding request context.
+    let (accept_withdrawal_tx, req_ctx) = make_withdrawal_accept(&setup);
+
+    let mut ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_first_bitcoin_core_client()
+        .with_mocked_stacks_client()
+        .with_mocked_emily_client()
+        .build();
+
+    // Normal: the request is not completed in the smart contract.
+    set_withdrawal_incomplete(&mut ctx).await;
+
+    accept_withdrawal_tx.validate(&ctx, &req_ctx).await.unwrap();
+
+    testing::storage::drop_db(db).await;
+}
+
+/// For this test we check that the `AcceptWithdrawalV1::validate` function
 /// returns a withdrawal validation error with a DeployerMismatch message
 /// when the deployer doesn't match but everything else is okay.
 #[tokio::test]
@@ -802,8 +866,15 @@ async fn accept_withdrawal_validation_withdrawal_invalid_sweep() {
 
     // Different: we normally add a row in the dkg_shares table so that we
     // have a record of the scriptPubKey that the signers control. Here we
-    // exclude it, so it looks like the first UTXO in the transaction is not
-    // controlled by the signers.
+    // exclude it, so it looks like the first UTXO in the transaction is
+    // not controlled by the signers.
+    //
+    // We also truncate the bitcoin_tx_outputs table because we use that
+    // table to identify the signers' scriptPubKeys.
+    sqlx::query("TRUNCATE TABLE sbtc_signer.bitcoin_tx_outputs CASCADE")
+        .execute(db.pool())
+        .await
+        .unwrap();
 
     // Normal: the request and how the signers voted needs to be added to
     // the database. Here the bitmap in the withdrawal request object

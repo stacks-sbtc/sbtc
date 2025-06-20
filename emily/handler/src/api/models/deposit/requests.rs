@@ -141,7 +141,7 @@ impl DepositUpdate {
     pub fn try_into_validated_deposit_update(
         self,
         chainstate: Chainstate,
-    ) -> Result<ValidatedDepositUpdate, error::Error> {
+    ) -> Result<ValidatedDepositUpdate, error::ValidationError> {
         // Make key.
         let key = DepositEntryKey {
             bitcoin_tx_output_index: self.bitcoin_tx_output_index,
@@ -194,32 +194,44 @@ impl UpdateDepositsRequestBody {
         chainstate: Chainstate,
     ) -> Result<ValidatedUpdateDepositsRequest, error::Error> {
         // Validate all the deposit updates.
-        let mut deposits: Vec<(usize, ValidatedDepositUpdate)> = vec![];
-        let mut failed_txs: Vec<String> = vec![];
+        let mut deposits: Vec<(usize, Result<ValidatedDepositUpdate, ValidationError>)> = vec![];
 
         for (index, update) in self.deposits.into_iter().enumerate() {
             match update
                 .clone()
                 .try_into_validated_deposit_update(chainstate.clone())
             {
-                Ok(validated_update) => deposits.push((index, validated_update)),
-                Err(_) => {
-                    failed_txs.push(format!(
-                        "{}:{}",
-                        update.bitcoin_txid.clone(),
-                        update.bitcoin_tx_output_index
-                    ));
+                Ok(validated_update) => deposits.push((index, Ok(validated_update))),
+                Err(
+                    ref error @ ValidationError::DepositMissingFulfillment(
+                        ref bitcoin_txid,
+                        bitcoin_tx_output_index,
+                    ),
+                ) => {
+                    tracing::warn!(
+                        %bitcoin_txid,
+                        bitcoin_tx_output_index,
+                        "failed to update deposit: request missing fulfillment for completed request."
+                    );
+                    deposits.push((index, Err(error.clone())));
+                }
+                Err(error) => {
+                    tracing::error!(
+                        bitcoin_txid = update.bitcoin_txid,
+                        bitcoin_tx_output_index = update.bitcoin_tx_output_index,
+                        %error,
+                        "unexpected error while validating deposit update: this error should never happen during a deposit update validation.",
+                    );
+                    deposits.push((index, Err(error)));
                 }
             }
         }
 
-        // If there are failed conversions, return an error.
-        if !failed_txs.is_empty() {
-            return Err(ValidationError::DepositsMissingFulfillment(failed_txs).into());
-        }
-
         // Sort updates by stacks_block_height to process them in chronological order.
-        deposits.sort_by_key(|(_, update)| update.event.stacks_block_height);
+        deposits.sort_by_key(|(_, update)| match update {
+            Ok(validated_update) => validated_update.event.stacks_block_height,
+            Err(_) => u64::MAX, // Place errors at the end
+        });
 
         Ok(ValidatedUpdateDepositsRequest { deposits })
     }

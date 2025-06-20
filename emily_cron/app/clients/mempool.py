@@ -37,6 +37,11 @@ class MempoolAPI(APIClient):
 
     BASE_URL = settings.MEMPOOL_API_URL
 
+    # mempool.space routes /v1/tx to /tx, but locally we don't use an extra routing service.
+    GET_TX_ENDPOINT = (
+        "/tx/{txid}" if "mempool.space" in settings.MEMPOOL_API_URL else "/v1/tx/{txid}"
+    )
+
     @classmethod
     def check_for_rbf(cls, txid: str) -> list[str]:
         """
@@ -83,7 +88,13 @@ class MempoolAPI(APIClient):
         Returns:
             dict: Transaction details or empty dict if not found
         """
-        return cls.get(f"/tx/{txid}", ignore_errors=True)
+        return cls.get(cls.GET_TX_ENDPOINT.format(txid=txid), ignore_errors=True)
+
+
+class ElectrsAPI(APIClient):
+    """Client for interacting with the Electrs API."""
+
+    BASE_URL = settings.ELECTRS_API_URL
 
     @classmethod
     def get_utxo_status(cls, txid: str, vout: int) -> dict[str, Any]:

@@ -1,12 +1,20 @@
 import os
 
 # Environment variables and configuration
-API_KEY = os.getenv("EMILY_API_KEY", "testApiKey")
-EMILY_ENDPOINT = os.getenv("EMILY_ENDPOINT", "https://sbtc-emily.com").removesuffix("/")
+API_KEY = os.getenv("EMILY_API_KEY", "")
+EMILY_ENDPOINT = os.getenv("EMILY_ENDPOINT", "http://emily-server:3031").removesuffix("/")
 PRIVATE_EMILY_ENDPOINT = os.getenv(
-    "PRIVATE_EMILY_ENDPOINT", f"https://private.sbtc-emily.com"
+    "PRIVATE_EMILY_ENDPOINT", f"http://emily-server:3031"
 ).removesuffix("/")
-MEMPOOL_API_URL = os.getenv("MEMPOOL_API_URL", "https://mempool.space/api").removesuffix("/")
+
+MEMPOOL_API_URL = os.getenv("MEMPOOL_API_URL", "http://mempool-api:8999/api").removesuffix("/")
+# Certain endpoints accessible from mempool.space are internally routed to electrs,
+# and not directly exposed by mempool/backend.
+# In our local setup, we don't use an extra routing service, so we directly connect
+# to the electrs instance instead. We need to specify a different base URL for these
+# endpoints.
+ELECTRS_API_URL = os.getenv("ELECTRS_API_URL", "http://electrs:3002").removesuffix("/")
+
 HIRO_API_URL = os.getenv("HIRO_API_URL", "https://api.hiro.so").removesuffix("/")
 
 # The address of the deployer of the sbtc-registry contract
