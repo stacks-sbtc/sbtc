@@ -450,7 +450,7 @@ async fn orphaned_deposit() {
         &depositor,
         depositor_utxo.clone(),
         // must be more than the package (deposit tx + sweep) in mempool to be
-        // accepted as RBF
+        // accepted as Rbf
         Amount::from_sat(deposit_amount - 1000),
     )
     .await;

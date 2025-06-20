@@ -1264,7 +1264,7 @@ async fn rbf_status_saved_successfully() {
             bitcoin_txid: bitcoin_txid.clone(),
             fulfillment: None,
             status: Status::Rbf,
-            status_message: "RBF initiated".into(),
+            status_message: "Rbf initiated".into(),
             replaced_by_tx: Some(Some("replaced_by_txid".to_string())),
         }],
     };
@@ -1356,7 +1356,7 @@ async fn replaced_by_tx_for_not_rbf_transactions_is_bad_request(status: Status) 
     assert_eq!(deposits.deposits.len(), 1);
     let deposit = deposits.deposits.first().expect("No deposit in response");
 
-    // Expect a bad request error because the transaction is not in RBF status.
+    // Expect a bad request error because the transaction is not in Rbf status.
     assert!(
         deposit.status == 400,
         "Expected a 400 Bad Request status code"

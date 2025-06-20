@@ -206,7 +206,7 @@ pub async fn pull_and_update_deposit_with_retry(
         }
 
         // We don't want to add a new entry if the status is already accepted.
-        // Updates Accepted -> Accepted occurs usually due to RBF.
+        // Updates Accepted -> Accepted occurs usually due to Rbf.
         if update.event.status == StatusEntry::Accepted && deposit_entry.status == Status::Accepted
         {
             return Ok(deposit_entry);
@@ -447,7 +447,7 @@ pub async fn pull_and_update_withdrawal_with_retry(
         }
 
         // We don't want to add a new entry if the status is already accepted.
-        // Updates Accepted -> Accepted occurs usually due to RBF.
+        // Updates Accepted -> Accepted occurs usually due to Rbf.
         if update.event.status == StatusEntry::Accepted && entry.status == Status::Accepted {
             return Ok(entry);
         }

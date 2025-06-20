@@ -47,7 +47,7 @@ pub struct Deposit {
     /// Raw reclaim script binary in hex.
     #[serde(rename = "reclaimScript")]
     pub reclaim_script: String,
-    /// Transaction ID of the transaction that replaced this one via RBF.
+    /// Transaction ID of the transaction that replaced this one via Rbf.
     #[serde(
         rename = "replacedByTx",
         default,

@@ -56,7 +56,7 @@ pub struct Deposit {
     /// Details about the on chain artifacts that fulfilled the deposit.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fulfillment: Option<Fulfillment>,
-    /// Transaction ID of the transaction that replaced this one via RBF.
+    /// Transaction ID of the transaction that replaced this one via Rbf.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub replaced_by_tx: Option<String>,
 }

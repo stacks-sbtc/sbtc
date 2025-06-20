@@ -61,7 +61,7 @@ use crate::storage::model::TxPrevout;
 use crate::storage::model::TxPrevoutType;
 use crate::storage::model::WithdrawalTxOutput;
 
-/// The minimum incremental fee rate in sats per virtual byte for RBF
+/// The minimum incremental fee rate in sats per virtual byte for Rbf
 /// transactions.
 const DEFAULT_INCREMENTAL_RELAY_FEE_RATE: f64 =
     bitcoin::policy::DEFAULT_INCREMENTAL_RELAY_FEE as f64 / 1000.0;
@@ -359,7 +359,7 @@ impl SbtcRequests {
 
 /// Calculate the total fee necessary for a transaction of the given size
 /// to be accepted by the network. Supports computing the fee in case this
-/// is a replace-by-fee (RBF) transaction by specifying the fees paid
+/// is a replace-by-fee (Rbf) transaction by specifying the fees paid
 /// in the prior transaction.
 ///
 /// ## Notes
@@ -376,17 +376,17 @@ impl SbtcRequests {
 ///    must pay a fee at least 500 satoshis higher than the sum of the
 ///    originals.
 ///
-/// Also, noteworthy is that the fee rate of the RBF transaction
+/// Also, noteworthy is that the fee rate of the Rbf transaction
 /// must also be greater than the fee rate of the old transaction.
 ///
 /// ## References
 ///
-/// RBF: https://bitcoinops.org/en/topics/replace-by-fee/
+/// Rbf: https://bitcoinops.org/en/topics/replace-by-fee/
 /// BIP-125: https://github.com/bitcoin/bips/blob/master/bip-0125.mediawiki#implementation-details
 fn compute_transaction_fee(tx_vsize: f64, fee_rate: f64, last_fees: Option<Fees>) -> u64 {
     match last_fees {
         Some(Fees { total, rate }) => {
-            // The requirement for an RBF transaction is that the new fee
+            // The requirement for an Rbf transaction is that the new fee
             // amount be greater than the old fee amount.
             let minimum_fee_rate = fee_rate.max(rate + rate * SATS_PER_VBYTE_INCREMENT);
             let fee_increment = tx_vsize * DEFAULT_INCREMENTAL_RELAY_FEE_RATE;
@@ -2580,7 +2580,7 @@ mod tests {
         };
 
         // In the below code, we need to make sure that we take the _first_
-        // transaction in each package as that is the one that will be RBF'd.
+        // transaction in each package as that is the one that will be Rbf'd.
 
         let (old_fee_total, old_fee_rate) = {
             let transactions = requests.construct_transactions().unwrap();
