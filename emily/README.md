@@ -3,6 +3,7 @@
 ## Repo Structure
 
 The Emily API has two parts:
+
 1. The Handler - specified within the `handler` rust crate in this directory
 1. The Infrastructure - specified within the `cdk` via AWS' typescript CDK.
 
@@ -13,6 +14,7 @@ The emily handler is written in a rust crate that utilizes the `warp` and `utoip
 ### Compilation
 
 There are two binaries that this handler can create:
+
 1. `emily-server` - a warp server that expects to run on a host
 2. `emily-lambda` - a warp lambda that expects to run on an AWS lambda
 

@@ -3,6 +3,7 @@
 This repository provides a Docker image that can be used to run a signer application with **attestation verification**. Before running the application, the image verifies its attestation, ensuring that the image and its contents are trusted.
 
 ## **Features**
+
 - **Attestation Verification**: Verifies the integrity of the Docker image before execution using GitHub's attestation tools.
 - **Custom Entry Point**: Uses a custom entry point script to enforce attestation verification before running the signer app.
 - **Supports Local Files for Attestation**: Instead of URLs, this setup uses local file paths for the attestation bundle and trusted root.
@@ -46,10 +47,11 @@ docker run --rm \
 ```
 
 This command will:
+
 1. **Set the environment variables**: `TAG`, `BUNDLE_PATH` and `TRUSTED_ROOT_PATH`
-  
+
 2. **Use [/entrypoint.sh](/docker/mainnet/gh-attestation/entrypoint.sh)**: The entrypoint of the Docker image is overridden to run the `entrypoint.sh` script, which performs the attestation verification before running the application.
-   
+
 3. **Run the signer and the bocklist-client Application**: The signer application is started with the provided configuration file (`/signer-config.toml`).
 
 ---
@@ -89,6 +91,7 @@ services:
 ```
 
 This will:
+
 1. **Set up the Docker container** with the required environment variables for attestation.
 2. **Use [/entrypoint.sh](/docker/mainnet/gh-attestation/entrypoint.sh)**: The entry point script checks the attestation and proceeds if verified.
 3. **Run the signer and the blocklist-client application** with the provided config file and migration option.
@@ -98,11 +101,12 @@ To start the service with Docker Compose, use:
 ```bash
 docker-compose up
 ```
+
 ---
 
 ## **Additional Information**
 
-Remember to run 
+Remember to run
 
 ```bash
 chmod +x entrypoint.sh
@@ -116,4 +120,5 @@ SIGNER_BUNDLE_PATH=sha256_8239bc978fa074360c669823064741587a21a58e359d7cacc4512f
 BLOCKLIST_TAG=signer-test_improve_release_notes_5
 BLOCKLIST_BUNDLE_PATH=sha256_8239bc979fs074360c669824064741587a21a58e359d7cacc4512f3ebe17b643.jsonl
 TRUSTED_ROOT_PATH=trusted_root.jsonl
+
 ```
