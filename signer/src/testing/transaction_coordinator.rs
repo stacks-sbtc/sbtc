@@ -1446,7 +1446,6 @@ where
             .run_dkg(
                 bitcoin_chain_tip,
                 dkg_txid.into(),
-                rng,
                 model::DkgSharesStatus::Verified,
             )
             .await;

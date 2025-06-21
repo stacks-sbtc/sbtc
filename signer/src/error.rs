@@ -613,8 +613,8 @@ pub enum Error {
     TypeConversion,
 
     /// Encryption error
-    #[error("encryption error")]
-    Encryption,
+    #[error("received an error when encrypting the signer state for storage {0}")]
+    Encryption(#[source] wsts::errors::EncryptionError),
 
     /// Invalid configuration
     #[error("invalid configuration")]
