@@ -341,7 +341,8 @@ where
     where
         <Self::Item as Future>::Output: JoinOutputAdapter,
     {
-        // Join on all of the futures, consuming `self` and returning a `Vec` of `Results`s
+        // Join on all of the futures, consuming `self` and returning a `Vec` of
+        // the results from each future.
         let results = futures::future::join_all(self).await;
 
         // Use the adapter to convert Vec<Future::Output> to the final desired type
