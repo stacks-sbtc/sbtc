@@ -409,7 +409,6 @@ mod tests {
         // This should compile without warning because the output is `()`, which
         // is *not* #[must_use].
         futures_vec.into_iter().join_all().await;
-        println!("Joined unit futures");
     }
 
     /// Tests [`FuturesIterExt::join_all`] followed by
