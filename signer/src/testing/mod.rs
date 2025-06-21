@@ -11,6 +11,7 @@ pub mod dummy;
 pub mod message;
 pub mod network;
 pub mod request_decider;
+pub mod requests;
 pub mod stacks;
 pub mod storage;
 pub mod transaction_coordinator;
@@ -340,7 +341,8 @@ where
     where
         <Self::Item as Future>::Output: JoinOutputAdapter,
     {
-        // Join on all of the futures, consuming `self` and returning a `Vec` of `Results`s
+        // Join on all of the futures, consuming `self` and returning a `Vec` of
+        // the results from each future.
         let results = futures::future::join_all(self).await;
 
         // Use the adapter to convert Vec<Future::Output> to the final desired type
@@ -407,7 +409,6 @@ mod tests {
         // This should compile without warning because the output is `()`, which
         // is *not* #[must_use].
         futures_vec.into_iter().join_all().await;
-        println!("Joined unit futures");
     }
 
     /// Tests [`FuturesIterExt::join_all`] followed by

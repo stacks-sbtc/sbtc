@@ -61,12 +61,13 @@ use signer::storage::postgres::PgStore;
 use signer::testing::context::TestContext;
 use signer::testing::context::*;
 use signer::testing::dummy::Unit;
+use signer::testing::get_rng;
+use signer::testing::requests::AmountSpec;
+use signer::testing::requests::DepositHelper;
+use signer::testing::requests::generate_withdrawal;
+use signer::testing::requests::make_withdrawal;
 use testing_emily_client::apis::configuration::ApiKey as TestingEmilyApiKey;
 use testing_emily_client::apis::configuration::Configuration as TestingEmilyApiConfiguration;
-
-use crate::utxo_construction::generate_withdrawal;
-use crate::utxo_construction::make_deposit_request;
-use crate::utxo_construction::make_withdrawal;
 
 pub trait AsBlockRef {
     fn as_block_ref(&self) -> BitcoinBlockRef;
@@ -168,24 +169,23 @@ impl TestSweepSetup {
         R: rand::Rng,
     {
         let signer = Recipient::new(AddressType::P2tr);
-        let depositor = Recipient::new(AddressType::P2tr);
+        let depositor = DepositHelper::new_depositor(rng).with_bitcoin(faucet);
         let signers_public_key = signer.keypair.x_only_public_key().0;
 
         // Start off with some initial UTXOs to work with.
+        more_asserts::assert_lt!(amount, 50_000_000);
         faucet.send_to(100_000_000, &signer.address);
-        faucet.send_to(50_000_000, &depositor.address);
-        faucet.generate_blocks(1);
+        depositor.fund(50_000_000);
+        faucet.generate_block();
 
         // Now lets make a deposit transaction and submit it
-        let utxo = depositor.get_utxos(rpc, None).pop().unwrap();
 
-        more_asserts::assert_lt!(amount, 50_000_000);
-        let max_fee = amount / 2;
+        let amount_spec = AmountSpec::with_derived_max_fee(amount, 0.5);
+        let deposit = depositor
+            .prepare_deposit_transaction(amount_spec, signers_public_key)
+            .submit_to_bitcoin();
 
-        let (deposit_tx, deposit_request, deposit_info) =
-            make_deposit_request(&depositor, amount, utxo, max_fee, signers_public_key);
-        rpc.send_raw_transaction(&deposit_tx).unwrap();
-        let deposit_block_hash = faucet.generate_blocks(1).pop().unwrap();
+        let deposit_block_hash = faucet.generate_block();
 
         // This is randomly generated withdrawal request and the recipient
         // who can sign for the withdrawal UTXO.
@@ -195,7 +195,7 @@ impl TestSweepSetup {
         let signer_utxo = signer.get_utxos(rpc, None).pop().unwrap();
 
         let mut requests = SbtcRequests {
-            deposits: vec![deposit_request],
+            deposits: vec![deposit.request],
             withdrawals: vec![withdrawal_request],
             signer_state: SignerBtcState {
                 utxo: SignerUtxo {
@@ -242,13 +242,13 @@ impl TestSweepSetup {
             .unwrap();
 
         let deposit_tx_info = client
-            .get_tx_info(&deposit_tx.compute_txid(), &deposit_block_hash)
+            .get_tx_info(&deposit.tx.compute_txid(), &deposit_block_hash)
             .unwrap()
             .unwrap();
 
         TestSweepSetup {
             deposit_block_hash,
-            deposit_info,
+            deposit_info: deposit.info,
             deposit_recipient: PrincipalData::from(StacksAddress::burn_address(false)),
             deposit_request: requests.deposits.pop().unwrap(),
             deposit_tx_info,
@@ -678,6 +678,12 @@ pub struct SweepAmounts {
     pub is_deposit: bool,
 }
 
+impl From<SweepAmounts> for AmountSpec<u64, u64> {
+    fn from(val: SweepAmounts) -> Self {
+        AmountSpec::new(val.amount, val.max_fee)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct WithdrawalTriple {
     /// The withdrawal requests.
@@ -746,36 +752,34 @@ impl TestSweepSetup2 {
     ///    signers. Transactions can be signed using only the private keys
     ///    of the "signer" from (1).
     pub fn new_setup(signers: TestSignerSet, faucet: &Faucet, amounts: &[SweepAmounts]) -> Self {
+        let rng = &mut get_rng();
         let signer = &signers.signer;
         let rpc = faucet.rpc;
         let signers_public_key = signer.keypair.x_only_public_key().0;
 
-        let depositors: Vec<_> = amounts
+        let depositors = amounts
             .iter()
             .filter(|dep| dep.is_deposit)
             .map(|dep| {
                 more_asserts::assert_lt!(dep.amount, 50_000_000);
-                let depositor = Recipient::new(AddressType::P2tr);
-                faucet.send_to(50_000_000, &depositor.address);
+                let depositor = DepositHelper::new_depositor(rng).with_bitcoin(faucet);
+                depositor.fund(50_000_000);
                 (depositor, *dep)
             })
-            .collect();
+            .collect::<Vec<_>>();
 
         // Start off with some initial UTXOs to work with.
-
         let donation = faucet.send_to(Amount::ONE_BTC.to_sat(), &signer.address);
-        let donation_block_hash = faucet.generate_blocks(1)[0];
+        let donation_block_hash = faucet.generate_block();
 
         let mut deposits = Vec::new();
 
-        for (depositor, SweepAmounts { amount, max_fee, .. }) in depositors.into_iter() {
+        for (depositor, amounts) in depositors.into_iter() {
             // Now lets make a deposit transaction and submit it
-            let utxo = depositor.get_utxos(rpc, None).pop().unwrap();
-            let (deposit_tx, deposit_request, deposit_info) =
-                make_deposit_request(&depositor, amount, utxo, max_fee, signers_public_key);
-
-            rpc.send_raw_transaction(&deposit_tx).unwrap();
-            deposits.push((deposit_tx, deposit_request, deposit_info));
+            let deposit = depositor
+                .prepare_deposit_transaction(amounts.into(), signers_public_key)
+                .submit_to_bitcoin();
+            deposits.push(deposit);
         }
         let deposit_block_hash = faucet.generate_blocks(1).pop().unwrap();
         let block_ref = rpc
@@ -822,14 +826,14 @@ impl TestSweepSetup2 {
 
         let settings = Settings::new_from_default_config().unwrap();
         let client = BitcoinCoreClient::try_from(&settings.bitcoin.rpc_endpoints[0]).unwrap();
-        let deposits: Vec<(DepositInfo, utxo::DepositRequest, BitcoinTxInfo)> = deposits
+        let deposits = deposits
             .into_iter()
-            .map(|(tx, request, info)| {
+            .map(|deposit| {
                 let tx_info = client
-                    .get_tx_info(&tx.compute_txid(), &deposit_block_hash)
+                    .get_tx_info(&deposit.tx.compute_txid(), &deposit_block_hash)
                     .unwrap()
                     .unwrap();
-                (info, request, tx_info)
+                (deposit.info, deposit.request, tx_info)
             })
             .collect::<Vec<_>>();
 
