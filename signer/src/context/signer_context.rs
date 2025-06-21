@@ -1,5 +1,4 @@
 use std::sync::Arc;
-
 use tokio::sync::broadcast::Sender;
 use url::Url;
 
@@ -173,6 +172,21 @@ impl<Storage, Bitcoin, Stacks, Emily> SignerContext<Storage, Bitcoin, Stacks, Em
     /// Get a mutable reference to the config.
     pub fn config_mut(&mut self) -> &mut Settings {
         &mut self.config
+    }
+
+    /// Resets the termination signal for this context.
+    ///
+    /// This sets the underlying termination state to `false`, allowing
+    /// new `TerminationHandle` instances or existing ones (that haven't
+    /// been dropped) to reflect a non-terminated state. This is primarily
+    /// useful in testing scenarios where a context is reused after a
+    /// simulated shutdown.
+    pub fn reset_termination_signal(&self) {
+        // Send `false` to the watch channel, indicating not terminated.
+        // The result of `send` is ignored here. If all receivers were dropped,
+        // there's no one to signal, but the internal state of the sender
+        // will be updated to `false`.
+        let _ = self.term_tx.send(false);
     }
 }
 
