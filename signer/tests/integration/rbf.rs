@@ -97,7 +97,7 @@ fn recreate_request_state(
     requests
 }
 
-/// A struct to specify the different states/conditions for an RBF
+/// A struct to specify the different states/conditions for an Rbf
 /// transaction.
 struct RbfContext {
     /// The number of outstanding deposit requests for the initial
@@ -108,28 +108,28 @@ struct RbfContext {
     initial_withdrawals: usize,
     /// The market fee rate during the initial transaction.
     initial_fee_rate: f64,
-    /// The number of deposit requests at the time of an RBF transaction.
+    /// The number of deposit requests at the time of an Rbf transaction.
     /// This number can be greater than, less than, or equal to the initial
     /// number of outstanding deposit requests.
     rbf_deposits: usize,
-    /// The number of withdrawal requests at the time of an RBF transaction.
+    /// The number of withdrawal requests at the time of an Rbf transaction.
     /// This number can be greater than, less than, or equal to the initial
     /// number of outstanding withdrawal requests.
     rbf_withdrawals: usize,
-    /// The market fee rate during the RBF transaction.
+    /// The market fee rate during the Rbf transaction.
     rbf_fee_rate: f64,
 }
 
-/// In this test we aim to test RBF handling under different scenarios.
+/// In this test we aim to test Rbf handling under different scenarios.
 /// This is done in 4 steps.
 ///
 /// 1. Create and submit a simple BTC transaction with one deposit and one
 ///    withdrawal.
-/// 2. Submit an RBF transaction that we know will fail.
+/// 2. Submit an Rbf transaction that we know will fail.
 /// 3. Update the number of outstanding deposit and withdrawal requests
 ///    that we want to process, update the market fee rate, and use the
 ///    fees paid for the last successfully submitted transaction to
-///    construct and submit an RBF transaction.
+///    construct and submit an Rbf transaction.
 /// 4. Check that the withdrawal recipients have the expected balance.
 #[test_case::test_matrix(
     [5, 0, 9],
@@ -169,7 +169,7 @@ pub fn transaction_with_rbf(
 
     // We need to generate all deposits that we will need up front, since
     // we cannot generate new blocks once we submit the transaction that
-    // we want to RBF (since it would then be confirmed).
+    // we want to Rbf (since it would then be confirmed).
     let deposits: Vec<DepositRequest> =
         std::iter::repeat_with(|| generate_depositor(rpc, faucet, &signer))
             .take(ctx.initial_deposits.max(ctx.rbf_deposits))
@@ -234,7 +234,7 @@ pub fn transaction_with_rbf(
     };
 
     // Okay, lets submit the transaction. We also do a sanity check where
-    // we try to submit an RBF transaction with an insufficient fee bump.
+    // we try to submit an Rbf transaction with an insufficient fee bump.
     // We need to note the fee for original transaction, so it is returned.
     let fees = {
         // There should only be one transaction here since there is only one
@@ -254,9 +254,9 @@ pub fn transaction_with_rbf(
         });
 
         // ** Step 2 **
-        // Ccreate an RBF transaction that will fail.
+        // Ccreate an Rbf transaction that will fail.
         //
-        // This is a little sanity check where we submit an RBF transaction
+        // This is a little sanity check where we submit an Rbf transaction
         // but where we change the fee but an amount that is too small.
         let mut transactions = requests.construct_transactions().unwrap();
         // We increase the fee paid but not by enough to be accepted
@@ -282,7 +282,7 @@ pub fn transaction_with_rbf(
         }
     };
 
-    // Step 3. Construct an RBF transaction
+    // Step 3. Construct an Rbf transaction
     //
     // Let's update the request state with the new fee rate, the last fee amount paid
     // and modify the outstanding deposits and withdrawals.
@@ -324,7 +324,7 @@ pub fn transaction_with_rbf(
     // Any unused deposits still have their balances adjusted since their
     // deposits were confirmed, we just didn't peg them in. But for
     // withdrawals, the outputs from the requests associated with the
-    // RBF transaction should have their balances adjusted while the
+    // Rbf transaction should have their balances adjusted while the
     // others should not.
     let fee_map: std::collections::HashMap<ScriptPubKey, u64> = transactions
         .iter()

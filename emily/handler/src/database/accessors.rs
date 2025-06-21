@@ -117,14 +117,16 @@ pub async fn get_deposit_entries_by_reclaim_pubkeys_hash(
     .await
 }
 
-/// Hacky exhaustive list of all statuses that we will iterate over in order to
+/// Hacky exhaustive list of all possible statuses that we will iterate over in order to
 /// get every deposit present.
+/// TODO(1693): Split Emily status enum for deposits and withdrawals
 const ALL_STATUSES: &[Status] = &[
     Status::Accepted,
     Status::Confirmed,
     Status::Failed,
     Status::Pending,
     Status::Reprocessing,
+    Status::Rbf,
 ];
 
 /// Gets all deposit entries modified from (on or after) a given height.
@@ -202,8 +204,9 @@ pub async fn pull_and_update_deposit_with_retry(
         if update.is_unnecessary(&deposit_entry) {
             return Ok(deposit_entry);
         }
+
         // We don't want to add a new entry if the status is already accepted.
-        // Updates Accepted -> Accepted occurs usually due to RBF.
+        // Updates Accepted -> Accepted occurs usually due to Rbf.
         if update.event.status == StatusEntry::Accepted && deposit_entry.status == Status::Accepted
         {
             return Ok(deposit_entry);
@@ -444,7 +447,7 @@ pub async fn pull_and_update_withdrawal_with_retry(
         }
 
         // We don't want to add a new entry if the status is already accepted.
-        // Updates Accepted -> Accepted occurs usually due to RBF.
+        // Updates Accepted -> Accepted occurs usually due to Rbf.
         if update.event.status == StatusEntry::Accepted && entry.status == Status::Accepted {
             return Ok(entry);
         }

@@ -396,7 +396,7 @@ async fn update_withdrawals(
 ) -> Result<impl warp::reply::Reply, Error> {
     // Validate request.
     let validated_request: ValidatedUpdateWithdrawalRequest =
-        body.try_into_validated_update_request(api_state.chaintip().into())?;
+        body.into_validated_update_request(api_state.chaintip().into());
 
     // Create aggregator.
     let mut updated_withdrawals: Vec<(usize, WithdrawalWithStatus)> =
