@@ -1,6 +1,8 @@
 //! This module contains types related to the application's internal
 //! messaging via the [`Context`].
 
+use crate::storage::model::BitcoinBlockHash;
+
 /// Signals that can be sent within the signer binary.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SignerSignal {
@@ -97,9 +99,9 @@ pub enum TxCoordinatorEvent {
     /// Event which occurs when the transaction coordinator has sent a message
     /// to the P2P network.
     MessageGenerated(Box<crate::network::Msg>),
-    /// The coordinator is finished processing requests for the bitcoin
-    /// block.
-    TenureCompleted,
+    /// The coordinator is finished processing requests. The processed bitcoin
+    /// chain tip block hash is provided if processing did not encounter an error.
+    TenureCompleted(Option<BitcoinBlockHash>),
 }
 
 impl From<SignerCommand> for SignerSignal {
