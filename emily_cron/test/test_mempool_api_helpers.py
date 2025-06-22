@@ -12,7 +12,7 @@ from app import settings
 
 
 class TestRbfHelpers(unittest.TestCase):
-    """Tests for Rbf helper functions."""
+    """Tests for RBF helper functions."""
 
     def setUp(self):
         # Load test fixtures
@@ -25,7 +25,7 @@ class TestRbfHelpers(unittest.TestCase):
             self.empty_rbf_data = json.load(f)
 
     def test_collect_rbf_txids_complex(self):
-        """Test collecting Rbf txids from a complex replacement chain."""
+        """Test collecting RBF txids from a complex replacement chain."""
         txids = _collect_rbf_txids(self.rbf_data["replacements"])
 
         # Expected txids from the fixture
@@ -43,19 +43,19 @@ class TestRbfHelpers(unittest.TestCase):
         self.assertEqual(txids, expected_txids)
 
     def test_collect_rbf_txids_empty(self):
-        """Test collecting Rbf txids from an empty replacement chain."""
+        """Test collecting RBF txids from an empty replacement chain."""
         txids = _collect_rbf_txids(self.empty_rbf_data["replacements"])
         self.assertEqual(txids, [])
 
     def test_collect_rbf_txids_simple(self):
-        """Test collecting Rbf txids from a simple replacement chain."""
+        """Test collecting RBF txids from a simple replacement chain."""
         simple_data = {"tx": {"txid": "abc123"}, "replaces": []}
 
         txids = _collect_rbf_txids(simple_data)
         self.assertEqual(txids, ["abc123"])
 
     def test_collect_rbf_txids_nested(self):
-        """Test collecting Rbf txids from a nested replacement chain."""
+        """Test collecting RBF txids from a nested replacement chain."""
         nested_data = {
             "tx": {"txid": "parent"},
             "replaces": [
@@ -88,8 +88,8 @@ class TestRbfProcessor(unittest.TestCase):
         return deposit
 
     def test_no_rbf_transactions(self):
-        """Test with no Rbf transactions."""
-        # Unconfirmed with no Rbf
+        """Test with no RBF transactions."""
+        # Unconfirmed with no RBF
         unconfirmed_no_rbf = self._create_mock_deposit(
             txid="unconfirmed_no_rbf", confirmed_height=None, rbf_txids=[]
         )
@@ -121,7 +121,7 @@ class TestRbfProcessor(unittest.TestCase):
         self.assertEqual(len(updates), 0, "No transactions should be marked as failed")
 
     def test_unconfirmed_with_sufficiently_confirmed_replacement(self):
-        """Test with a complex Rbf chain where the final transaction is confirmed."""
+        """Test with a complex RBF chain where the final transaction is confirmed."""
         tx1 = self._create_mock_deposit(
             txid="tx1", confirmed_height=None, rbf_txids=["tx3", "tx2", "tx1"]
         )
@@ -145,13 +145,13 @@ class TestRbfProcessor(unittest.TestCase):
         self.assertIn("tx2", txids)
 
         for update in updates:
-            self.assertEqual(update.status, RequestStatus.Rbf.value)
+            self.assertEqual(update.status, RequestStatus.RBF.value)
             self.assertEqual(update.replaced_by_txid, "tx3")
             self.assertTrue("Replaced by confirmed tx" in update.status_message)
             self.assertTrue("tx3" in update.status_message)
 
     def test_unconfirmed_with_recently_confirmed_replacement(self):
-        """Test Rbf where confirmed replacement is not old enough."""
+        """Test RBF where confirmed replacement is not old enough."""
         tx1 = self._create_mock_deposit(
             txid="tx1", confirmed_height=None, rbf_txids=["tx3", "tx2", "tx1"]
         )
@@ -188,7 +188,7 @@ class TestMempoolRbfApi(unittest.TestCase):
 
     @patch("app.clients.mempool.MempoolAPI.get")
     def test_check_for_rbf_with_replacements(self, mock_get):
-        """Test checking for Rbf with replacements."""
+        """Test checking for RBF with replacements."""
         mock_get.return_value = self.rbf_data
 
         txids = MempoolAPI.check_for_rbf("some_txid")
@@ -199,7 +199,7 @@ class TestMempoolRbfApi(unittest.TestCase):
 
     @patch("app.clients.mempool.MempoolAPI.get")
     def test_check_for_rbf_without_replacements(self, mock_get):
-        """Test checking for Rbf without replacements."""
+        """Test checking for RBF without replacements."""
         mock_get.return_value = self.empty_rbf_data
 
         txids = MempoolAPI.check_for_rbf("some_txid")

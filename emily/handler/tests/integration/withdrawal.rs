@@ -823,7 +823,7 @@ async fn withdrawal_cant_be_rbf() {
         .expect("No withdrawal in response")
         .clone();
 
-    // Withdrawal can not be Rbf, so it is BAD REQUEST.
+    // Withdrawal can not be RBF, so it is BAD REQUEST.
     assert_eq!(withdrawal.status, 400);
 
     // Check that withdrawal status wasn't changed.

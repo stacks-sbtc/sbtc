@@ -27,7 +27,7 @@ pub struct DepositUpdate {
         skip_serializing_if = "Option::is_none"
     )]
     pub fulfillment: Option<Option<Box<models::Fulfillment>>>,
-    /// Transaction ID of the transaction that replaced this one via Rbf.
+    /// Transaction ID of the transaction that replaced this one via RBF.
     #[serde(
         rename = "replacedByTx",
         default,

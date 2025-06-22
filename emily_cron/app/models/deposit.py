@@ -14,7 +14,7 @@ class RequestStatus(Enum):
     CONFIRMED = "confirmed"
     FAILED = "failed"
     REPROCESSING = "reprocessing"
-    Rbf = "rbf"
+    RBF = "rbf"
 
 
 @dataclass
@@ -75,7 +75,7 @@ class EnrichedDepositInfo(DepositInfo):
     """Represents a deposit with additional enriched details."""
 
     in_mempool: bool  # Whether the transaction was found by the mempool API
-    rbf_txids: list[str] = field(default_factory=list)  # All txids in the Rbf replacement chain
+    rbf_txids: list[str] = field(default_factory=list)  # All txids in the RBF replacement chain
     fee: Optional[int] = None
     confirmed_height: Optional[int] = None
     confirmed_time: Optional[int] = None

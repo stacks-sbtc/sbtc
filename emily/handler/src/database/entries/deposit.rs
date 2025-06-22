@@ -74,7 +74,7 @@ pub struct DepositEntry {
     /// If the reclaim script is in unknown format, this field will be None.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reclaim_pubkeys_hash: Option<String>,
-    /// Transaction ID of transaction which replaced this transaction during an Rbf.
+    /// Transaction ID of transaction which replaced this transaction during an RBF.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub replaced_by_tx: Option<String>,
 }

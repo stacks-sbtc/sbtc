@@ -2927,7 +2927,7 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
 
 /// This test asserts that the `get_btc_state` function returns the correct
 /// `SignerBtcState` when there are multiple outstanding sweep transaction
-/// packages available, simulating the case where there has been an Rbf.
+/// packages available, simulating the case where there has been an RBF.
 #[test(tokio::test)]
 async fn test_get_btc_state_with_available_sweep_transactions_and_rbf() {
     let mut rng = get_rng();
@@ -3065,7 +3065,7 @@ async fn test_get_btc_state_with_available_sweep_transactions_and_rbf() {
     assert_eq!(btc_state.last_fees, Some(expected_fees));
     assert_eq!(btc_state.magic_bytes, [b'T', b'3']);
 
-    // Create a 2nd transaction that spends the utxo (simulate Rbf).
+    // Create a 2nd transaction that spends the utxo (simulate RBF).
     let mut tx2 = bitcoin::Transaction {
         version: bitcoin::transaction::Version::ONE,
         lock_time: bitcoin::absolute::LockTime::ZERO,

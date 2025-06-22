@@ -8,13 +8,13 @@ logger = logging.getLogger(__name__)
 
 
 def _collect_rbf_txids(data: dict[str, Any] | None) -> list[str]:
-    """Recursively collect all transaction IDs from an Rbf replacement chain.
+    """Recursively collect all transaction IDs from an RBF replacement chain.
 
     Args:
         data: Transaction replacement data from mempool API
 
     Returns:
-        A list of all transaction IDs found in the Rbf replacement chain
+        A list of all transaction IDs found in the RBF replacement chain
         starting from the given data node.
     """
     txids = []
@@ -45,18 +45,18 @@ class MempoolAPI(APIClient):
     @classmethod
     def check_for_rbf(cls, txid: str) -> list[str]:
         """
-        Check if a Bitcoin transaction was Rbf'd and retrieve
+        Check if a Bitcoin transaction was RBF'd and retrieve
         all transaction IDs in its replacement chain.
 
         The replacement chain includes all transactions that, directly or indirectly,
         replaced the originally queried `txid`.
 
         Args:
-            txid: The transaction ID to check for Rbf replacements.
+            txid: The transaction ID to check for RBF replacements.
 
         Returns:
-            A list of transaction IDs that are part of the Rbf chain replacing the
-            given `txid`. If the `txid` was not replaced by an Rbf transaction,
+            A list of transaction IDs that are part of the RBF chain replacing the
+            given `txid`. If the `txid` was not replaced by an RBF transaction,
             or if replacement information cannot be fetched, an empty list is returned.
         """
         data = cls.get(f"/v1/tx/{txid}/rbf")

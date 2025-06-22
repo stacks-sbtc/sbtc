@@ -133,7 +133,7 @@ async fn getrawtransaction_simple_fork() {
             witness: Witness::new(),
         }],
         output: vec![TxOut {
-            value: Amount::from_sat(8_000), // higher fee to be accepted as Rbf
+            value: Amount::from_sat(8_000), // higher fee to be accepted as RBF
             script_pubkey: faucet.address.script_pubkey(),
         }],
     };

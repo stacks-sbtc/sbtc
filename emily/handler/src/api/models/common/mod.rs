@@ -48,7 +48,7 @@ pub enum Status {
     Confirmed,
     /// The operation was not fulfilled.
     Failed,
-    /// Transaction was replaced by another transaction via Rbf.
+    /// Transaction was replaced by another transaction via RBF.
     Rbf,
 }
 

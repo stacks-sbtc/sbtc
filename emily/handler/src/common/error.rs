@@ -55,22 +55,22 @@ pub enum ValidationError {
     )]
     IncompleteWithdrawalLimitConfig,
 
-    /// The deposit includes a replaced_by_tx field, but its status is not Rbf.
-    /// Only deposits with status Rbf may include a replaced_by_tx.
+    /// The deposit includes a replaced_by_tx field, but its status is not RBF.
+    /// Only deposits with status RBF may include a replaced_by_tx.
     #[error(
-        "deposit with replaced_by_tx is only valid if status is Rbf, but got status {0:?} for txid: {1}, vout: {2}"
+        "deposit with replaced_by_tx is only valid if status is RBF, but got status {0:?} for txid: {1}, vout: {2}"
     )]
     InvalidReplacedByTxStatus(Status, String, u32),
 
-    /// In current implementation, withdrawals can't have Rbf status. However, since we have same Status enum
+    /// In current implementation, withdrawals can't have RBF status. However, since we have same Status enum
     /// for both deposits and withdrawals, we need to handle this case.
     #[error(
-        "withdrawal related transaction have Rbf status, but this should never happen. request_id: {0}"
+        "withdrawal related transaction have RBF status, but this should never happen. request_id: {0}"
     )]
     WithdrawalRbf(u64),
 
-    /// The deposit has status Rbf but is missing the replaced_by_tx field.
-    #[error("missing replaced_by_tx for Rbf deposit with txid: {0}, vout: {1}")]
+    /// The deposit has status RBF but is missing the replaced_by_tx field.
+    #[error("missing replaced_by_tx for RBF deposit with txid: {0}, vout: {1}")]
     DepositMissingReplacementTx(String, u32),
 }
 

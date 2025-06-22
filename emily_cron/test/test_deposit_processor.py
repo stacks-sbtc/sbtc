@@ -373,7 +373,7 @@ def tearDownModule():
 
 
 class TestDepositProcessorWithRbf(TestDepositProcessorBase):
-    """Tests for the DepositProcessor with Rbf functionality."""
+    """Tests for the DepositProcessor with RBF functionality."""
 
     def setUp(self):
         super().setUp()
@@ -412,7 +412,7 @@ class TestDepositProcessorWithRbf(TestDepositProcessorBase):
         mock_update_deposits,
         mock_fetch_deposits,
     ):
-        """Test the complete deposit update workflow with Rbf."""
+        """Test the complete deposit update workflow with RBF."""
         # Set up mocks
         # Ensure chaintip is high enough for rbf_replacement to be considered confirmed
         mock_btc_tip_height.return_value = self.bitcoin_chaintip_height
@@ -463,7 +463,7 @@ class TestDepositProcessorWithRbf(TestDepositProcessorBase):
                 "expired_locktime_tx", update_txids, "Should include expired locktime transaction"
             )
             self.assertIn(
-                "rbf_original_tx", update_txids, "Should include Rbf original transaction"
+                "rbf_original_tx", update_txids, "Should include RBF original transaction"
             )
             self.assertIn(
                 "long_pending_tx", update_txids, "Should include long pending transaction"
@@ -479,7 +479,7 @@ class TestDepositProcessorWithRbf(TestDepositProcessorBase):
             self.assertEqual(
                 len(expired_locktime_updates), 1, "Should have 1 expired locktime update"
             )
-            self.assertEqual(len(rbf_updates), 1, "Should have 1 Rbf update")
+            self.assertEqual(len(rbf_updates), 1, "Should have 1 RBF update")
             self.assertEqual(len(long_pending_updates), 1, "Should have 1 long pending update")
 
             # Check the status messages
@@ -488,7 +488,7 @@ class TestDepositProcessorWithRbf(TestDepositProcessorBase):
                     self.assertTrue("Locktime expired" in update.status_message)
                 elif update.bitcoin_txid == "rbf_original_tx":
                     self.assertTrue("Replaced by confirmed tx" in update.status_message)
-                    self.assertEqual(update.status, RequestStatus.Rbf.value)
+                    self.assertEqual(update.status, RequestStatus.RBF.value)
                     self.assertEqual(update.replaced_by_txid, "rbf_replacement_tx")
                 elif update.bitcoin_txid == "long_pending_tx":
                     self.assertTrue(
@@ -499,7 +499,7 @@ class TestDepositProcessorWithRbf(TestDepositProcessorBase):
     @patch("app.clients.MempoolAPI.get_transaction")
     @patch("app.clients.MempoolAPI.check_for_rbf")
     def test_enrich_deposits_with_rbf(self, mock_check_rbf, mock_get_tx):
-        """Test the deposit enrichment process with Rbf."""
+        """Test the deposit enrichment process with RBF."""
         # Create test deposits
         deposit1 = self._create_mock_deposit(
             txid="replacement1",
@@ -529,7 +529,7 @@ class TestDepositProcessorWithRbf(TestDepositProcessorBase):
 
         mock_get_tx.side_effect = lambda txid: tx1_data if txid == "replacement1" else tx2_data
 
-        # Mock the Rbf check
+        # Mock the RBF check
         mock_check_rbf.side_effect = lambda txid: (
             ["replacement1", "replacement2"] if txid == "replacement1" else []
         )
@@ -555,7 +555,7 @@ class TestDepositProcessorWithRbf(TestDepositProcessorBase):
             mock_get_tx.assert_any_call("replacement1")
             mock_get_tx.assert_any_call("replacement2")
 
-            # Verify Rbf check was called only for the unconfirmed transaction
+            # Verify RBF check was called only for the unconfirmed transaction
             mock_check_rbf.assert_called_once_with("replacement1")
 
             # Verify from_deposit_info was called with the correct parameters
@@ -969,7 +969,7 @@ class TestDepositProcessor(TestDepositProcessorBase):
             },  # Minimal data for deposit4
             "tx5": {"fee": 10000, "status": {"confirmed": False}},  # In-flight
         }.get(txid)
-        # There are no Rbf txids in this test
+        # There are no RBF txids in this test
         mock_check_rbf.side_effect = lambda txid: set()
 
         # Run the _enrich_deposits method

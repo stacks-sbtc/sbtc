@@ -2375,7 +2375,7 @@ where
     }
 
     /// Assesses the total fees paid for any outstanding sweep transactions in
-    /// the mempool which may need to be Rbf'd. If there are no sweep
+    /// the mempool which may need to be RBF'd. If there are no sweep
     /// transactions which are spending the signer's UTXO, then this function
     /// will return [`None`].
     ///
