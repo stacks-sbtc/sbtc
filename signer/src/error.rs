@@ -622,7 +622,7 @@ pub enum Error {
 
     /// We throw this when signer produced txid and coordinator produced txid differ.
     #[error(
-        "signer and coordinator txid mismatch. Signer produced txid {0}, but coordinator send txid {1}"
+        "signer and coordinator txid mismatch. Signer produced txid {0}, but coordinator sent txid {1}"
     )]
     SignerCoordinatorTxidMismatch(
         blockstack_lib::burnchains::Txid,
@@ -780,6 +780,11 @@ pub enum Error {
     #[cfg(test)]
     #[error("Dummy (for testing purposes)")]
     Dummy,
+
+    /// An error raised by test utility functions.
+    #[cfg(any(test, feature = "testing"))]
+    #[error("Test utility error: {0}")]
+    TestUtility(crate::testing::TestUtilityError),
 }
 
 impl From<std::convert::Infallible> for Error {
