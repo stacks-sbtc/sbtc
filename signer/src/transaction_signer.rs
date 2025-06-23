@@ -565,14 +565,14 @@ where
             Some(info) => info,
             None => match db.get_latest_verified_dkg_shares().await? {
                 Some(info) => info.into(),
-                None if !state.sbtc_contracts_deployed() => match &request.contract_tx {
-                    StacksTx::SmartContract(_) => db
-                        .get_latest_encrypted_dkg_shares()
+                None if matches!(request.contract_tx, StacksTx::SmartContract(_))
+                    && !state.sbtc_contracts_deployed() =>
+                {
+                    db.get_latest_encrypted_dkg_shares()
                         .await?
                         .map(SignerSetInfo::from)
-                        .ok_or(Error::NoDkgShares)?,
-                    _ => return Err(Error::NoVerifiedDkgShares),
-                },
+                        .ok_or(Error::NoDkgShares)?
+                }
                 _ => return Err(Error::NoVerifiedDkgShares),
             },
         };
