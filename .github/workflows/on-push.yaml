@@ -288,6 +288,7 @@ jobs:
               {
                 "workflowFile": "on-push.yaml",
                 "jobName": "Build Test Artifacts",
+                "eventName": "${{ github.event_name }}",
                 "optional": false,
                 "startupGracePeriod": {
                   "minutes": 5
