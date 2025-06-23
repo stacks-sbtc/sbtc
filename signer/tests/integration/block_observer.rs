@@ -1102,7 +1102,7 @@ async fn get_signer_set_info_falls_back() {
 
     let mut rng = get_rng();
 
-    let mut ctx = TestContext::builder()
+    let ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_mocked_clients()
         .build();
