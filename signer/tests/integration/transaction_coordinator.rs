@@ -290,6 +290,16 @@ async fn wait_for_signers<S>(
 
 fn mock_deploy_all_contracts() -> Box<dyn FnOnce(&mut MockStacksInteract)> {
     Box::new(move |client: &mut MockStacksInteract| {
+        // TODO: There are a few changes that we plan to make soon that
+        // will require us to add or change the mocks here.
+        // 1. DKG verification should take place immediately after DKG, not
+        //    after the smart contract deployment.
+        // 2. Submitting the rotate keys transaction should take place
+        //    after we have deployed the smart contracts, but separate from
+        //    DKG verification.
+        // 3. We should probably return an error when asking for the
+        //    current aggregate key and the smart contracts have not been
+        //    deployed.
         client.expect_get_contract_source().returning(|_, _| {
             Box::pin(async {
                 Err(Error::StacksNodeResponse(
