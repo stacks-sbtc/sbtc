@@ -573,15 +573,6 @@ async fn mock_stacks_core<D, B, E>(
                     Ok(shares.map(|sh| sh.aggregate_key))
                 })
             });
-        // The coordinator broadcasts a rotate keys transaction if it
-        // is not up-to-date with their view of the current aggregate
-        // key. The response of None means that the stacks node does
-        // not have a record of a rotate keys contract call being
-        // executed, so the coordinator will construct and broadcast
-        // one.
-        client
-            .expect_get_current_signers_aggregate_key()
-            .returning(move |_| Box::pin(std::future::ready(Ok(None))));
 
         // Only the client that corresponds to the coordinator will
         // submit a transaction, so we don't make explicit the
