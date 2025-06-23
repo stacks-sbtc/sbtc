@@ -132,6 +132,7 @@ where
         reclaim_script_hash: Some(TaprootScriptHash::from(&dep.reclaim_script)),
         signers_public_key: dep.signers_public_key,
     };
+
     (deposit_tx, req, dep)
 }
 
@@ -250,7 +251,7 @@ fn deposits_add_to_controlled_amounts() {
 
     // The moment of truth, does the network accept the transaction?
     rpc.send_raw_transaction(&unsigned.tx).unwrap();
-    faucet.generate_blocks(1);
+    faucet.generate_block();
 
     // The signer's balance should now reflect the deposit.
     let signers_balance = signer.get_balance(rpc);
@@ -270,7 +271,7 @@ fn withdrawals_reduce_to_signers_amounts() {
 
     // Start off with some initial UTXOs to work with.
     faucet.send_to(100_000_000, &signer.address);
-    faucet.generate_blocks(1);
+    faucet.generate_block();
 
     assert_eq!(signer.get_balance(rpc).to_sat(), 100_000_000);
 
@@ -367,7 +368,7 @@ fn withdrawals_reduce_to_signers_amounts() {
 
     // Ship it
     rpc.send_raw_transaction(&tx).unwrap();
-    faucet.generate_blocks(1);
+    faucet.generate_block();
 
     // Let's make sure their ending balances are correct. We start with the
     // Withdrawal recipient.

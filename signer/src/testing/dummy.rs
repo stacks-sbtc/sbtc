@@ -798,6 +798,12 @@ impl fake::Dummy<fake::Faker> for model::Timestamp {
 /// A struct to help with creating dummy values for testing
 pub struct Unit;
 
+impl Dummy<Unit> for secp256k1::Keypair {
+    fn dummy_with_rng<R: rand::Rng + ?Sized>(_: &Unit, rng: &mut R) -> Self {
+        secp256k1::Keypair::new(secp256k1::SECP256K1, rng)
+    }
+}
+
 impl Dummy<Unit> for bitcoin::OutPoint {
     fn dummy_with_rng<R: rand::Rng + ?Sized>(_: &Unit, rng: &mut R) -> Self {
         let bytes: [u8; 32] = Faker.fake_with_rng(rng);

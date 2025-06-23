@@ -1,5 +1,5 @@
 //! Helper functions for the bitcoin module
-//!
+
 use bitcoin::Amount;
 use bitcoin::BlockHash;
 use bitcoin::OutPoint;

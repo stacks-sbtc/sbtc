@@ -7,6 +7,7 @@ use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
+use assert_matches::assert_matches;
 use bitcoin::Address;
 use bitcoin::AddressType;
 use bitcoin::Amount;
@@ -68,6 +69,10 @@ use signer::storage::model::WithdrawalTxOutput;
 use signer::testing::btc::get_canonical_chain_tip;
 use signer::testing::get_rng;
 
+use signer::testing::FutureExt as _;
+use signer::testing::FuturesIterExt as _;
+use signer::testing::Sleep;
+use signer::transaction_coordinator::given_key_is_coordinator;
 use signer::transaction_coordinator::should_coordinate_dkg;
 use signer::transaction_signer::STACKS_SIGN_REQUEST_LRU_SIZE;
 use signer::transaction_signer::assert_allow_dkg_begin;
@@ -99,14 +104,13 @@ use signer::storage::model::DkgSharesStatus;
 use signer::storage::model::StacksTxId;
 use signer::storage::model::WithdrawalRequest;
 use signer::storage::postgres::PgStore;
-use signer::testing::IterTestExt;
+use signer::testing::IterTestExt as _;
 use signer::testing::stacks::DUMMY_SORTITION_INFO;
 use signer::testing::stacks::DUMMY_TENURE_INFO;
-use signer::testing::storage::DbReadTestExt;
-use signer::testing::storage::DbWriteTestExt;
+use signer::testing::storage::DbReadTestExt as _;
+use signer::testing::storage::DbWriteTestExt as _;
 use signer::testing::transaction_coordinator::select_coordinator;
 use signer::testing::wsts::SignerInfo;
-use signer::transaction_coordinator::given_key_is_coordinator;
 use stacks_common::types::chainstate::BurnchainHeaderHash;
 use stacks_common::types::chainstate::ConsensusHash;
 use stacks_common::types::chainstate::SortitionId;
@@ -132,8 +136,6 @@ use signer::stacks::contracts::SMART_CONTRACTS;
 use signer::storage::model;
 use signer::storage::model::EncryptedDkgShares;
 use signer::testing;
-use signer::testing::context::TestContext;
-use signer::testing::context::WrappedMock;
 use signer::testing::context::*;
 use signer::testing::storage::model::TestData;
 use signer::testing::transaction_signer::TxSignerEventLoopHarness;
@@ -247,6 +249,44 @@ pub async fn mock_reqwests_status_code_error(status_code: usize) -> reqwest::Err
         .unwrap()
         .error_for_status()
         .expect_err("expected error")
+}
+
+fn assert_stacks_transaction_kind<T>(tx: &StacksTransaction)
+where
+    T: AsContractCall,
+{
+    let TransactionPayload::ContractCall(contract_call) = &tx.payload else {
+        panic!("expected a contract call, got something else");
+    };
+
+    assert_eq!(contract_call.contract_name.as_str(), T::CONTRACT_NAME);
+    assert_eq!(contract_call.function_name.as_str(), T::FUNCTION_NAME);
+}
+
+/// Wait for all signers to finish their coordinator duties and do this
+/// concurrently so that we don't miss anything (not sure if we need to do
+/// it concurrently).
+async fn wait_for_signers<S>(
+    signers: &[(IntegrationTestContext<S>, PgStore, &Keypair, SignerNetwork)],
+) where
+    S: StacksInteract + Clone + Send + Sync + 'static,
+{
+    let wait_duration = Duration::from_secs(15);
+
+    let expected = TxCoordinatorEvent::TenureCompleted.into();
+    signers
+        .iter()
+        .map(|(ctx, _, _, _)| async {
+            ctx.wait_for_signal(wait_duration, |signal| signal == &expected)
+                .await
+                .unwrap();
+        })
+        .join_all()
+        .await;
+
+    // It's not entirely clear why this sleep is helpful, but it appears to
+    // be necessary in CI.
+    Sleep::for_secs(2).await;
 }
 
 fn mock_deploy_all_contracts(
@@ -634,7 +674,7 @@ async fn process_complete_deposit() {
         .collect();
 
     // Yield to get signers ready
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    Sleep::for_millis(100).await;
 
     // Wake coordinator up
     context
@@ -699,7 +739,7 @@ async fn deploy_smart_contracts_coordinator<F>(
     stacks_block.bitcoin_anchor = bitcoin_block.block_hash;
     db.write_stacks_block(&stacks_block).await.unwrap();
 
-    let mut context = TestContext::builder()
+    let context = TestContext::builder()
         .with_storage(db.clone())
         .with_mocked_clients()
         .build();
@@ -750,7 +790,7 @@ async fn deploy_smart_contracts_coordinator<F>(
     // the tx signers and the tx coordinator will use a different stacks mock client.
     // Note that cloning the context will `Arc::clone` the stacks client, so we are
     // instantiating a new one instead
-    let mut tx_coordinator_context = TestContext::new(
+    let tx_coordinator_context = TestContext::new(
         context.config().clone(),
         context.storage.clone(),
         context.bitcoin_client.clone(),
@@ -798,7 +838,7 @@ async fn deploy_smart_contracts_coordinator<F>(
         .collect();
 
     // Yield to get signers ready
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    Sleep::for_millis(100).await;
 
     // Wake coordinator up
     tx_coordinator_context
@@ -895,7 +935,7 @@ async fn run_dkg_from_scratch() {
     for (kp, data) in iter {
         let broadcast_stacks_tx = broadcast_stacks_tx.clone();
         let db = testing::storage::new_test_database().await;
-        let mut ctx = TestContext::builder()
+        let ctx = TestContext::builder()
             .with_storage(db.clone())
             .with_mocked_clients()
             .modify_settings(|config| {
@@ -994,7 +1034,7 @@ async fn run_dkg_from_scratch() {
     });
 
     while start_count.load(Ordering::SeqCst) < 6 {
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        Sleep::for_millis(10).await;
     }
 
     // 5. Once they are all running, signal that DKG should be run. We
@@ -1393,7 +1433,7 @@ async fn run_subsequent_dkg() {
     for (kp, data) in iter {
         let broadcast_stacks_tx = broadcast_stacks_tx.clone();
         let db = testing::storage::new_test_database().await;
-        let mut ctx = TestContext::builder()
+        let ctx = TestContext::builder()
             .with_storage(db.clone())
             .with_mocked_clients()
             .modify_settings(|settings| {
@@ -1508,7 +1548,7 @@ async fn run_subsequent_dkg() {
     });
 
     while start_count.load(Ordering::SeqCst) < 6 {
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        Sleep::for_millis(10).await;
     }
 
     // 5. Once they are all running, signal that DKG should be run. We
@@ -1752,7 +1792,7 @@ async fn sign_bitcoin_transaction() {
     }
 
     while start_count.load(Ordering::SeqCst) < 12 {
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        Sleep::for_millis(10).await;
     }
 
     // =========================================================================
@@ -1792,8 +1832,7 @@ async fn sign_bitcoin_transaction() {
     // Start off with some initial UTXOs to work with.
 
     faucet.send_to(50_000_000, &depositor.address);
-    faucet.generate_blocks(1);
-
+    faucet.generate_block();
     wait_for_signers(&signers).await;
 
     // =========================================================================
@@ -1831,16 +1870,14 @@ async fn sign_bitcoin_transaction() {
     // - The coordinator should submit a sweep transaction. We check the
     //   mempool for its existence.
     // =========================================================================
-    faucet.generate_blocks(1);
-
+    faucet.generate_block();
     wait_for_signers(&signers).await;
 
     let (ctx, _, _, _) = signers.first().unwrap();
     let mut txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
     assert_eq!(txids.len(), 1);
 
-    let block_hash = faucet.generate_blocks(1).pop().unwrap();
-
+    let block_hash = faucet.generate_block();
     wait_for_signers(&signers).await;
 
     // =========================================================================
@@ -1855,7 +1892,7 @@ async fn sign_bitcoin_transaction() {
     // - Is the sweep transaction in our database.
     // - Does the sweep transaction spend to the signers' scriptPubKey.
     // =========================================================================
-    let sleep_fut = tokio::time::sleep(Duration::from_secs(5));
+    let sleep_fut = Sleep::for_secs(5);
     let broadcast_stacks_txs: Vec<StacksTransaction> = stacks_tx_stream
         .take_until(sleep_fut)
         .collect::<Vec<_>>()
@@ -2093,7 +2130,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     }
 
     while start_count.load(Ordering::SeqCst) < 12 {
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        Sleep::for_millis(10).await;
     }
 
     // =========================================================================
@@ -2176,8 +2213,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     // - The coordinator should submit a sweep transaction. We check the
     //   mempool for its existence.
     // =========================================================================
-    faucet.generate_blocks(1);
-
+    faucet.generate_block();
     wait_for_signers(&signers).await;
 
     let (ctx, _, _, _) = signers.first().unwrap();
@@ -2185,7 +2221,6 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     assert_eq!(txids.len(), 1);
 
     let block_hash = faucet.generate_block();
-
     wait_for_signers(&signers).await;
 
     // Now lets check the bitcoin transaction, first we get it.
@@ -2331,7 +2366,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     // - Check that the sweep transaction spend to the signers'
     //   scriptPubKey.
     // =========================================================================
-    let sleep_fut = tokio::time::sleep(Duration::from_secs(5));
+    let sleep_fut = Sleep::for_secs(5);
     let broadcast_stacks_txs: Vec<StacksTransaction> = stacks_tx_stream
         .take_until(sleep_fut)
         .collect::<Vec<_>>()
@@ -2407,8 +2442,8 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     let tx_info = ctx
         .bitcoin_client
         .get_tx_info(&txid, &block_hash)
-        .unwrap()
-        .unwrap();
+        .expect("Error getting transaction info")
+        .expect("Expected to be able to get the transaction info from bitcoin-core");
     // We check that the scriptPubKey of the first input is the signers'
     // old ScriptPubkey
     let actual_script_pub_key = tx_info.prevout(0).unwrap().script_pubkey.as_bytes();
@@ -3176,7 +3211,7 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
     }
 
     while start_count.load(Ordering::SeqCst) < 12 {
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        Sleep::for_millis(10).await;
     }
 
     // =========================================================================
@@ -3206,45 +3241,13 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
     //   submitted.
     // - Couldn't hurt to check one more time that DKG has been run.
     // =========================================================================
-    for (mut ctx, db, _, _) in signers {
+    for (ctx, db, _, _) in signers {
         let dkg_shares = db.get_latest_encrypted_dkg_shares().await.unwrap();
         assert!(dkg_shares.is_some());
 
         ctx.with_stacks_client(|client| client.checkpoint()).await;
         testing::storage::drop_db(db).await;
     }
-}
-
-fn assert_stacks_transaction_kind<T>(tx: &StacksTransaction)
-where
-    T: AsContractCall,
-{
-    let TransactionPayload::ContractCall(contract_call) = &tx.payload else {
-        panic!("expected a contract call, got something else");
-    };
-
-    assert_eq!(contract_call.contract_name.as_str(), T::CONTRACT_NAME);
-    assert_eq!(contract_call.function_name.as_str(), T::FUNCTION_NAME);
-}
-
-/// Wait for all signers to finish their coordinator duties and do this
-/// concurrently so that we don't miss anything (not sure if we need to do
-/// it concurrently).
-async fn wait_for_signers<S>(
-    signers: &[(IntegrationTestContext<S>, PgStore, &Keypair, SignerNetwork)],
-) where
-    S: StacksInteract + Clone + Send + Sync + 'static,
-{
-    let expected = TxCoordinatorEvent::TenureCompleted.into();
-    let futures = signers.iter().map(|(ctx, _, _, _)| async {
-        ctx.wait_for_signal(Duration::from_secs(15), |signal| signal == &expected)
-            .await
-            .unwrap();
-    });
-    futures::future::join_all(futures).await;
-    // It's not entirely clear why this sleep is helpful, but it appears to
-    // be necessary in CI.
-    tokio::time::sleep(Duration::from_secs(2)).await;
 }
 
 /// This test asserts that the `get_btc_state` function returns the correct
@@ -3256,7 +3259,7 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
 
     let db = testing::storage::new_test_database().await;
 
-    let mut context = TestContext::builder()
+    let context = TestContext::builder()
         .with_storage(db.clone())
         .with_mocked_clients()
         .build();
@@ -3421,7 +3424,7 @@ async fn test_get_btc_state_with_available_sweep_transactions_and_rbf() {
 
     // Get some coins to spend (and our "utxo" outpoint).
     let outpoint = faucet.send_to(10_000, &addr.address);
-    let signer_utxo_block_hash = faucet.generate_blocks(1).pop().unwrap();
+    let signer_utxo_block_hash = faucet.generate_block();
 
     let signer_utxo_tx = client.get_tx(&outpoint.txid).unwrap().unwrap();
     let signer_utxo_txid = signer_utxo_tx.tx.compute_txid();
@@ -3574,7 +3577,7 @@ fn create_test_setup(
 ) -> TestSweepSetup2 {
     let depositor = Recipient::new(AddressType::P2tr);
     faucet.send_to(50_000_000, &depositor.address);
-    faucet.generate_blocks(1);
+    faucet.generate_block();
 
     let signer_address = Address::from_script(
         &dkg_shares.script_pubkey,
@@ -3582,7 +3585,7 @@ fn create_test_setup(
     )
     .unwrap();
     let donation = faucet.send_to(100_000, &signer_address);
-    let donation_block_hash = faucet.generate_blocks(1)[0];
+    let donation_block_hash = faucet.generate_block();
 
     let utxo = depositor.get_utxos(rpc, None).pop().unwrap();
     let (deposit_tx, deposit_request, deposit_info) = make_deposit_request(
@@ -3594,7 +3597,7 @@ fn create_test_setup(
     );
     rpc.send_raw_transaction(&deposit_tx).unwrap();
 
-    let deposit_block_hash = faucet.generate_blocks(1).pop().unwrap();
+    let deposit_block_hash = faucet.generate_block();
     let block_header = rpc.get_block_header_info(&deposit_block_hash).unwrap();
     let tx_info = bitcoin_client
         .get_tx_info(&deposit_tx.compute_txid(), &deposit_block_hash)
@@ -3944,7 +3947,7 @@ async fn test_conservative_initial_sbtc_limits() {
     }
 
     while start_count.load(Ordering::SeqCst) < 12 {
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        Sleep::for_millis(10).await;
     }
 
     // =========================================================================
@@ -3957,13 +3960,12 @@ async fn test_conservative_initial_sbtc_limits() {
     let signers_key = setup.signers.signer_keys().iter().cloned().collect();
     loop {
         let chain_tip: BitcoinBlockHash = faucet.generate_blocks(1).pop().unwrap().into();
-
         if given_key_is_coordinator(signers[0].2.public_key().into(), &chain_tip, &signers_key) {
             break;
         }
     }
     // Giving enough time to process the transaction
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    Sleep::for_secs(3).await;
 
     // =========================================================================
     // Check we did NOT process the deposit
@@ -3978,8 +3980,8 @@ async fn test_conservative_initial_sbtc_limits() {
     // =========================================================================
     enable_emily_limits.store(true, Ordering::SeqCst);
 
-    faucet.generate_blocks(1);
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    faucet.generate_block();
+    Sleep::for_secs(3).await;
     // =========================================================================
     // Check we did process the deposit now
     // =========================================================================
@@ -4164,7 +4166,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
     }
 
     while start_count.load(Ordering::SeqCst) < 12 {
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        Sleep::for_millis(10).await;
     }
 
     // =========================================================================
@@ -4175,7 +4177,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
     // - After they have the same view of the canonical bitcoin blockchain,
     //   the signers should all participate in DKG.
     // =========================================================================
-    let chain_tip: BitcoinBlockHash = faucet.generate_block().into();
+    let chain_tip = faucet.generate_block().into();
 
     // We first need to wait for bitcoin-core to send us all the
     // notifications so that we are up-to-date with the chain tip.
@@ -4325,7 +4327,6 @@ async fn sign_bitcoin_transaction_withdrawals() {
     assert_eq!(txids.len(), 1);
 
     let block_hash = faucet.generate_block();
-
     wait_for_signers(&signers).await;
 
     // =========================================================================
@@ -4369,7 +4370,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
     );
     assert_eq!(withdrawal_on_emily.amount, withdrawal_request.amount);
 
-    let sleep_fut = tokio::time::sleep(Duration::from_secs(5));
+    let sleep_fut = Sleep::for_secs(5);
     let broadcast_stacks_txs: Vec<StacksTransaction> = stacks_tx_stream
         .take_until(sleep_fut)
         .collect::<Vec<_>>()
@@ -4719,7 +4720,7 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
         .collect();
 
     // Yield to get signers ready
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    Sleep::for_millis(100).await;
 
     // Wake coordinator up
     context
@@ -4736,8 +4737,9 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
         .unwrap();
 
     // Await the `wait_for_tx_task` to receive the first transaction broadcasted.
-    let broadcasted_tx =
-        tokio::time::timeout(Duration::from_secs(1), wait_for_transaction_task).await;
+    let broadcasted_tx = wait_for_transaction_task
+        .with_timeout(Duration::from_secs(1))
+        .await;
 
     // Stop event loops
     tx_coordinator_handle.abort();
@@ -4894,7 +4896,7 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
     });
 
     while !start_flag.load(Ordering::SeqCst) {
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        Sleep::for_millis(10).await;
     }
 
     // We will use network messages to detect the coordinator attempt, so we
@@ -4919,10 +4921,10 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
         network_msg.expect_err("expected timeout, got something instead");
     } else {
         let network_msg = network_msg.expect("failed to get a msg").unwrap();
-        assert!(matches!(
+        assert_matches!(
             network_msg.payload,
             Payload::StacksTransactionSignRequest(_)
-        ));
+        );
     }
 
     testing::storage::drop_db(db).await;
@@ -5248,7 +5250,7 @@ mod get_eligible_pending_withdrawal_requests {
 #[test_log::test(tokio::test)]
 async fn should_handle_dkg_coordination_failure() {
     let mut rng = get_rng();
-    let mut context = TestContext::builder()
+    let context = TestContext::builder()
         .with_in_memory_storage()
         .with_mocked_clients()
         .build();
@@ -5548,7 +5550,7 @@ async fn reuse_nonce_attack() {
     // To ensure the tx is mined and anchored before we attempt to deploy the
     // contracts we generate a some blocks
     for _ in 0..2 {
-        tokio::time::sleep(Duration::from_secs(3)).await;
+        Sleep::for_secs(3).await;
         faucet.generate_block();
     }
 
@@ -5664,7 +5666,7 @@ async fn reuse_nonce_attack() {
     }
 
     while start_count.load(Ordering::SeqCst) < 12 {
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        Sleep::for_millis(10).await;
     }
 
     // =========================================================================
@@ -5776,7 +5778,7 @@ async fn reuse_nonce_attack() {
     // filling the previous nonces will be mined
     signer_stx_state.sign_and_submit(&stx_funding).await;
     // Ensure the signers/miner pick the tx up
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    Sleep::for_secs(1).await;
 
     // =========================================================================
     // Actual test: process the pending completion deposits with a concurrent tx

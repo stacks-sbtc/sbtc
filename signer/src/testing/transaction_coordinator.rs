@@ -720,7 +720,7 @@ where
     }
 
     /// Assert we get a withdrawal accept tx
-    pub async fn assert_construct_withdrawal_accept_stacks_sign_request(mut self) {
+    pub async fn assert_construct_withdrawal_accept_stacks_sign_request(self) {
         let mut rng = get_rng();
         let signer_network = SignerNetwork::single(&self.context);
         let private_key = PrivateKey::new(&mut rng);
@@ -872,7 +872,7 @@ where
     }
 
     /// Assert we get a withdrawal reject tx
-    pub async fn assert_construct_withdrawal_reject_stacks_sign_request(mut self) {
+    pub async fn assert_construct_withdrawal_reject_stacks_sign_request(self) {
         let mut rng = get_rng();
         let signer_network = SignerNetwork::single(&self.context);
         let private_key = PrivateKey::new(&mut rng);
