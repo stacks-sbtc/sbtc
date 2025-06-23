@@ -250,29 +250,11 @@ pub async fn mock_reqwests_status_code_error(status_code: usize) -> reqwest::Err
 
 fn mock_deploy_all_contracts() -> Box<dyn FnOnce(&mut MockStacksInteract)> {
     Box::new(move |client: &mut MockStacksInteract| {
-        // We expect the contract source to be fetched 5 times, once for
-        // each contract. Each time it will return an error, since the
-        // contracts are not deployed.
         client.expect_get_contract_source().returning(|_, _| {
             Box::pin(async {
                 Err(Error::StacksNodeResponse(
                     mock_reqwests_status_code_error(404).await,
                 ))
-            })
-        });
-
-        client
-            .expect_estimate_fees()
-            .returning(|_, _, _| Box::pin(async { Ok(100) }));
-
-        client.expect_get_account().returning(move |_| {
-            Box::pin(async move {
-                Ok(AccountInfo {
-                    balance: 1_000_000,
-                    locked: 0,
-                    unlock_height: 0u64.into(),
-                    nonce: 16,
-                })
             })
         });
     })
