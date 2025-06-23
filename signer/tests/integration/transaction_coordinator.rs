@@ -307,6 +307,12 @@ fn mock_deploy_all_contracts() -> Box<dyn FnOnce(&mut MockStacksInteract)> {
                 ))
             })
         });
+
+        // TODO: add another mock for get_current_signer_set_info when that
+        // lands on main.
+        client
+            .expect_get_current_signers_aggregate_key()
+            .returning(|_| Box::pin(std::future::ready(Ok(None))));
     })
 }
 
