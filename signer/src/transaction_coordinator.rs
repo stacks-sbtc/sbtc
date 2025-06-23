@@ -351,9 +351,10 @@ where
         } else {
             // If we do not have signer set info in the registry, then we
             // are in the bootstrap phase. Our latest DKG shares may be
-            // 'Unverified', but if we are here then they are not 'Failed',
-            // since we will coordinate DKG if our last DKG shares are
-            // 'Failed'.
+            // 'Unverified', but if we are here then they were not 'Failed'
+            // when we made to call to `should_coordinate_dkg`, since we
+            // will coordinate DKG if our last DKG shares are 'Failed'. But
+            // we could be loading 'Failed' shares here.
             match registry_signer_set_info.as_ref() {
                 Some(info) => info.aggregate_key,
                 None => self
