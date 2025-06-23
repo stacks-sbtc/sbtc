@@ -586,7 +586,7 @@ impl SignerStateMachine {
             &signer_private_key.to_bytes(),
             &encrypted_shares.encrypted_private_shares,
         )
-        .map_err(Error::Encryption)?;
+        .map_err(|error| Error::WstsDecrypt(error, aggregate_key))?;
 
         let saved_state = wsts::traits::SignerState::decode(decrypted.as_slice())?;
 
@@ -640,7 +640,7 @@ impl SignerStateMachine {
             &encoded,
             &mut OsRng,
         )
-        .map_err(Error::Encryption)?;
+        .map_err(|error| Error::WstsEncrypt(error, aggregate_key))?;
 
         let signature_share_threshold: u16 = self
             .inner

@@ -613,8 +613,12 @@ pub enum Error {
     TypeConversion,
 
     /// Encryption error
-    #[error("received an error when encrypting the signer state for storage {0}")]
-    Encryption(#[source] wsts::errors::EncryptionError),
+    #[error("could not encrypt the signer state for storage {0}; aggregate key {1}")]
+    WstsEncrypt(#[source] wsts::errors::EncryptionError, PublicKey),
+
+    /// Got an error when decrypting DKG shares from the database
+    #[error("could not decrypt the signer state from storage {0}; aggregate key {1}")]
+    WstsDecrypt(#[source] wsts::errors::EncryptionError, PublicKeyXOnly),
 
     /// Invalid configuration
     #[error("invalid configuration")]
