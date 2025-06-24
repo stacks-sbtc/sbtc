@@ -300,7 +300,6 @@ where
     /// ## Returns
     ///
     /// * `Ok(Some(block_hash))` with the processed Bitcoin block hash on success,
-    /// * `Ok(None)` if not in the correct Stacks epoch (epoch 3 or later),
     /// * `Err(Error)` if any step fails with an unhandled error.
     #[tracing::instrument(skip_all, fields(
         public_key = %self.signer_public_key(),
