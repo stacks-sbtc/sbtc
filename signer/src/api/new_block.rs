@@ -312,7 +312,7 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::api::get_router;
-    use crate::storage::in_memory::Store;
+    use crate::storage::memory::Store;
     use crate::storage::model::DepositRequest;
     use crate::storage::model::StacksPrincipal;
     use crate::testing::context::*;

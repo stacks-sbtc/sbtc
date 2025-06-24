@@ -38,6 +38,10 @@ pub const MAX_BITCOIN_PROCESSING_DELAY_SECONDS: u64 = 300;
 /// Maximum configurable delay (in seconds) before processing new SBTC requests.
 pub const MAX_REQUESTS_PROCESSING_DELAY_SECONDS: u64 = 300;
 
+/// Maximum amount of signers supported by our smart contracts
+/// See https://github.com/stacks-sbtc/sbtc/issues/1694
+pub const MAX_SIGNERS: usize = 16;
+
 /// Trait for validating configuration values.
 trait Validatable {
     /// Validate the configuration values.
@@ -369,6 +373,11 @@ impl Validatable for SignerConfig {
             return Err(ConfigError::Message(err.to_string()));
         }
 
+        if self.bootstrap_signing_set.len() > MAX_SIGNERS {
+            let err = SignerConfigError::TooManySigners(self.bootstrap_signing_set.len());
+            return Err(ConfigError::Message(err.to_string()));
+        }
+
         if self.deployer.is_mainnet() != self.network.is_mainnet() {
             let err = SignerConfigError::NetworkDeployerMismatch;
             return Err(ConfigError::Message(err.to_string()));
@@ -568,7 +577,11 @@ mod tests {
     use crate::config::serialization::try_parse_p2p_multiaddr;
     use crate::error::Error;
     use crate::testing::clear_env;
+    use crate::testing::get_rng;
     use crate::testing::set_var;
+
+    use fake::Fake;
+    use fake::Faker;
 
     use super::*;
     use test_case::test_case;
@@ -1104,6 +1117,53 @@ mod tests {
             settings.unwrap_err(),
             ConfigError::Message(msg) if msg == SignerConfigError::InvalidStacksPrivateKeyLength(4).to_string()
         ));
+    }
+
+    #[test]
+    fn too_many_signers_returns_correct_error() {
+        let mut rng = get_rng();
+        clear_env();
+
+        // We need have self public key in the bootstrap set to not fail with different reason
+        let self_key = "035249137286c077ccee65ecc43e724b9b9e5a588e3d7f51e3b62f9624c2a49e46";
+
+        let keys = (0..16)
+            .map(|_| Faker.fake_with_rng(&mut rng))
+            .map(|key: PublicKey| key.to_string())
+            .chain(std::iter::once(self_key.to_string()))
+            .collect::<Vec<_>>()
+            .join(",");
+
+        set_var("SIGNER_SIGNER__BOOTSTRAP_SIGNING_SET", keys);
+
+        let settings = Settings::new_from_default_config();
+        assert!(settings.is_err());
+        assert!(matches!(
+            settings.unwrap_err(),
+            ConfigError::Message(msg) if msg == SignerConfigError::TooManySigners(17).to_string()
+        ));
+    }
+
+    #[test]
+    fn bootstrap_signing_set_of_16_signers_is_not_an_error() {
+        let mut rng = get_rng();
+        clear_env();
+
+        // We need have self public key in the bootstrap set to not fail with different reason
+        let self_key = "035249137286c077ccee65ecc43e724b9b9e5a588e3d7f51e3b62f9624c2a49e46";
+
+        let keys = (0..15)
+            .map(|_| Faker.fake_with_rng(&mut rng))
+            .map(|key: PublicKey| key.to_string())
+            .chain(std::iter::once(self_key.to_string()))
+            .collect::<Vec<_>>();
+        assert_eq!(keys.len(), MAX_SIGNERS);
+        let keys = keys.join(",");
+
+        set_var("SIGNER_SIGNER__BOOTSTRAP_SIGNING_SET", keys);
+
+        let settings = Settings::new_from_default_config();
+        assert!(settings.is_ok());
     }
 
     #[test]

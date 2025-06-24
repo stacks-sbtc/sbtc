@@ -1,0 +1,195 @@
+name: Deploy Emily
+
+on:
+  push:
+    branches:
+      - 'environment/*'
+
+concurrency:
+  group: deploy-emily-${{ github.ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  EMILY_HANDLER_PATH: "emily/handler"
+  EMILY_CDK_PATH: "emily/cdk"
+  NODE_VERSION: 20
+
+permissions:
+  id-token: write
+
+jobs:
+  diff:
+    name: Build & Diff Emily
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name }}
+    env:
+      AWS_ACCOUNT: ${{ vars.AWS_ACCOUNT }}
+      AWS_DEPLOYMENT_PROFILE: ${{ vars.AWS_DEPLOYMENT_PROFILE }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      AWS_STAGE: ${{ vars.AWS_STAGE }}
+      CUSTOM_ROOT_DOMAIN_NAME: ${{ vars.CUSTOM_ROOT_DOMAIN_NAME }}
+      DEPLOYER_ADDRESS: ${{ vars.DEPLOYER_ADDRESS }}
+      HOSTED_ZONE_ID: ${{ vars.HOSTED_ZONE_ID }}
+      NUM_SIGNER_API_KEYS: ${{ vars.NUM_SIGNER_API_KEYS }}
+    steps:
+      - name: Checkout Repository
+        id: checkout_repository
+        uses: stacks-sbtc/actions/checkout@181f8c67da2707c66b5e31f24e7418c47adefdd1
+
+      - name: Configure AWS Credentials via OIDC
+        id: configure_aws
+        uses: stacks-sbtc/actions/aws/configure-aws-credentials@181f8c67da2707c66b5e31f24e7418c47adefdd1
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Rust
+        id: setup_rust
+        uses: stacks-sbtc/actions/setup-rust-toolchain@181f8c67da2707c66b5e31f24e7418c47adefdd1
+
+      - name: Install Cargo Lambda
+        id: install_cargo_lambda
+        run: |
+          cargo install cargo-lambda
+
+      - name: Setup Node
+        id: setup_node
+        uses: stacks-sbtc/actions/setup-node@181f8c67da2707c66b5e31f24e7418c47adefdd1
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Zig
+        id: install_zig
+        run: |
+          npm install -g @ziglang/cli
+
+      - name: Build Emily
+        id: build_emily
+        working-directory: ${{ env.EMILY_HANDLER_PATH }}
+        run: |
+          echo "Building emily-lambda..."
+          cargo lambda build \
+            --locked \
+            --bin emily-lambda \
+            --release \
+            --output-format zip \
+            --x86-64
+          echo "Done building emily lambda."
+
+      - name: Install CDK Packages
+        id: install_cdk_packages
+        working-directory: ${{ env.EMILY_CDK_PATH }}
+        run: |
+          npm i
+
+      - name: CDK Bootstrap & Diff
+        id: cdk_bootstrap_diff
+        working-directory: ${{ env.EMILY_CDK_PATH }}
+        run: |
+          echo "Ensuring that CDK is boostraped..."
+          npx aws-cdk bootstrap
+          echo "Done bootstrapping CDK."
+
+          echo "Running CDK diff..."
+          npx aws-cdk diff > cdk-diff-output.txt
+
+          {
+            echo "## CDK Diff Output"
+            echo '```diff'
+            sed -E '
+            s/^(.*)\[\+\]/+ \1[+]/;
+            s/^(.*)\[\-\]/- \1[-]/;
+            /\[\+\]/!{/ \[\-\]/!s/^/  /}
+            ' cdk-diff-output.txt
+            echo '```'
+          } >> $GITHUB_STEP_SUMMARY
+
+  approve:
+    name: Approve Emily Deployment
+    runs-on: ubuntu-latest
+    needs:
+      - diff
+    environment: approve-emily-deployment
+    steps:
+      - name: Approved Deployment
+        id: approved_deployment
+        run: |
+          echo "Emily Deployment Approved!"
+
+  deploy:
+    name: Deploy Emily
+    runs-on: ubuntu-latest
+    needs:
+      - approve
+    environment: ${{ github.ref_name }}
+    env:
+      AWS_ACCOUNT: ${{ vars.AWS_ACCOUNT }}
+      AWS_DEPLOYMENT_PROFILE: ${{ vars.AWS_DEPLOYMENT_PROFILE }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      AWS_STAGE: ${{ vars.AWS_STAGE }}
+      CUSTOM_ROOT_DOMAIN_NAME: ${{ vars.CUSTOM_ROOT_DOMAIN_NAME }}
+      DEPLOYER_ADDRESS: ${{ vars.DEPLOYER_ADDRESS }}
+      HOSTED_ZONE_ID: ${{ vars.HOSTED_ZONE_ID }}
+      NUM_SIGNER_API_KEYS: ${{ vars.NUM_SIGNER_API_KEYS }}
+    steps:
+      - name: Checkout Repository
+        id: checkout_repository
+        uses: stacks-sbtc/actions/checkout@181f8c67da2707c66b5e31f24e7418c47adefdd1
+
+      - name: Configure AWS Credentials via OIDC
+        id: configure_aws
+        uses: stacks-sbtc/actions/aws/configure-aws-credentials@181f8c67da2707c66b5e31f24e7418c47adefdd1
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Rust
+        id: setup_rust
+        uses: stacks-sbtc/actions/setup-rust-toolchain@181f8c67da2707c66b5e31f24e7418c47adefdd1
+
+      - name: Install Cargo Lambda
+        id: install_cargo_lambda
+        run: |
+          cargo install cargo-lambda
+
+      - name: Setup Node
+        id: setup_node
+        uses: stacks-sbtc/actions/setup-node@181f8c67da2707c66b5e31f24e7418c47adefdd1
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Zig
+        id: install_zig
+        run: |
+          npm install -g @ziglang/cli
+
+      - name: Build Emily
+        id: build_emily
+        working-directory: ${{ env.EMILY_HANDLER_PATH }}
+        run: |
+          echo "Building emily-lambda..."
+          cargo lambda build \
+            --locked \
+            --bin emily-lambda \
+            --release \
+            --output-format zip \
+            --x86-64
+          echo "Done building emily lambda."
+
+      - name: Install CDK Packages
+        id: install_cdk_packages
+        working-directory: ${{ env.EMILY_CDK_PATH }}
+        run: |
+          npm i
+
+      - name: Deploy Emily
+        id: deploy_emily
+        working-directory: ${{ env.EMILY_CDK_PATH }}
+        run: |
+          echo "Ensuring that CDK is boostraped..."
+          npx aws-cdk bootstrap
+          echo "Done bootstrapping CDK."
+
+          echo "Deploying the stack..."
+          npx aws-cdk deploy
+          echo "Deployed Emily Successfully!" >> $GITHUB_STEP_SUMMARY

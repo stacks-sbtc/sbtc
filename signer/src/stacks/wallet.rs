@@ -35,8 +35,6 @@ use crate::keys::PublicKey;
 use crate::signature::RecoverableEcdsaSignature as _;
 use crate::signature::SighashDigest as _;
 use crate::stacks::contracts::AsTxPayload;
-use crate::storage::DbRead;
-use crate::storage::model::BitcoinBlockHash;
 
 /// Stacks multisig addresses are Hash160 hashes of bitcoin Scripts (more
 /// or less). The enum value below defines which Script will be used to
@@ -166,24 +164,21 @@ impl SignerWallet {
     ///
     /// The wallet that is loaded is the one that cooresponds to the signer
     /// set defined in the last confirmed key rotation contract call.
-    pub async fn load<C>(ctx: &C, chain_tip: &BitcoinBlockHash) -> Result<SignerWallet, Error>
+    pub async fn load<C>(ctx: &C) -> Result<SignerWallet, Error>
     where
         C: Context,
     {
-        // Get the key rotation transaction from the database. This maps to
-        // what the stacks network thinks the signers' address is.
-        let last_key_rotation = ctx.get_storage().get_last_key_rotation(chain_tip).await?;
-
         let config = &ctx.config().signer;
-        let network_kind = config.network;
 
-        match last_key_rotation {
-            Some(keys) => {
-                let public_keys = keys.signer_set;
-                let signatures_required = keys.signatures_required;
-                SignerWallet::new(&public_keys, signatures_required, network_kind, 0)
+        // This should be the signer set info from the key rotation
+        // transaction that was most recently confirmed.
+        match ctx.state().registry_signer_set_info() {
+            Some(info) => {
+                let public_keys = info.signer_set;
+                let signatures_required = info.signatures_required;
+                SignerWallet::new(&public_keys, signatures_required, config.network, 0)
             }
-            None => Self::load_boostrap_wallet(config),
+            None => Self::load_boostrap_wallet(&ctx.config().signer),
         }
     }
 
@@ -452,7 +447,6 @@ mod tests {
     use crate::signature::sign_stacks_tx;
     use crate::stacks::contracts::AsContractCall;
     use crate::stacks::contracts::ReqContext;
-    use crate::storage::DbWrite;
     use crate::storage::model::KeyRotationEvent;
     use crate::storage::model::StacksPrincipal;
     use crate::testing::context::ConfigureMockedClients;
@@ -697,7 +691,7 @@ mod tests {
         let network = NetworkKind::Regtest;
         let wallet1 = SignerWallet::new(&signer_keys, signatures_required, network, 0).unwrap();
 
-        let (bitcoin_chain_tip, stacks_chain_tip) = db.get_chain_tips().await;
+        let (_, stacks_chain_tip) = db.get_chain_tips().await;
 
         // Let's store the key information about this wallet into the database
         let rotate_keys = KeyRotationEvent {
@@ -713,22 +707,17 @@ mod tests {
 
         // We haven't stored any RotateKeysTransactions into the database
         // yet, so it will try to load the wallet from the context.
-        let wallet0 = SignerWallet::load(&ctx, &bitcoin_chain_tip.block_hash)
-            .await
-            .unwrap();
+        let wallet0 = SignerWallet::load(&ctx).await.unwrap();
         let config = &ctx.config().signer;
         let bootstrap_aggregate_key =
             PublicKey::combine_keys(&config.bootstrap_signing_set).unwrap();
         assert_eq!(wallet0.aggregate_key, bootstrap_aggregate_key);
 
-        db.write_rotate_keys_transaction(&rotate_keys)
-            .await
-            .unwrap();
+        ctx.state()
+            .update_registry_signer_set_info(rotate_keys.into());
 
         // Okay, now let's load it up and make sure things match.
-        let wallet2 = SignerWallet::load(&ctx, &bitcoin_chain_tip.block_hash)
-            .await
-            .unwrap();
+        let wallet2 = SignerWallet::load(&ctx).await.unwrap();
 
         assert_eq!(wallet1.address(), wallet2.address());
         assert_eq!(wallet1.public_keys(), wallet2.public_keys());

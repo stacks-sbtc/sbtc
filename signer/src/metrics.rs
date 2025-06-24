@@ -2,11 +2,14 @@
 //!
 
 use std::net::SocketAddr;
+use std::time::Duration;
 
 use metrics_exporter_prometheus::PrometheusBuilder;
 
 use crate::block_observer::Deposit;
 use crate::error::Error;
+use crate::message::StacksTransactionSignRequest;
+use crate::transaction_signer::AcceptedSigHash;
 
 /// The buckets used for metric histograms
 const METRIC_BUCKETS: [f64; 9] = [1e-4, 1e-3, 1e-2, 0.1, 0.5, 1.0, 5.0, 20.0, f64::INFINITY];
@@ -47,6 +50,8 @@ pub enum Metrics {
     /// The amount of time, in seconds for running bitcoin or stacks
     /// validation.
     ValidationDurationSeconds,
+    /// The number of peers connected in the p2p network.
+    PeersConnected,
 }
 
 impl From<Metrics> for metrics::KeyName {
@@ -68,6 +73,91 @@ impl Metrics {
             Metrics::DepositRequestsTotal,
             "blockchain" => BITCOIN_BLOCKCHAIN,
             "status" => deposit_status,
+        )
+        .increment(1);
+    }
+
+    /// Increment the gauge for the number of connected peers
+    pub fn increment_peers_connected_total() {
+        metrics::gauge!(Metrics::PeersConnected).increment(1.0);
+    }
+
+    /// Decrement the gauge for the number of connected peers
+    pub fn decrement_peers_connected_total() {
+        metrics::gauge!(Metrics::PeersConnected).decrement(1.0);
+    }
+
+    /// Increment number of presign requests that were processed noting
+    /// whether the presign validation finished successfully. Also record
+    /// the amount of time that it took to run the validation.
+    ///
+    /// # Notes
+    ///
+    /// If the presign validation result is Ok, just means that the request
+    /// itself included deposits and withdrawals that we know about and
+    /// that there were no duplicates with the request. There could still
+    /// be deposits and withdrawals that failed validation.
+    pub fn increment_presign_validation(elapsed: Duration, presign_result: &Result<(), Error>) {
+        let status = if presign_result.is_ok() {
+            "success"
+        } else {
+            "failure"
+        };
+        metrics::histogram!(
+            Metrics::ValidationDurationSeconds,
+            "blockchain" => BITCOIN_BLOCKCHAIN,
+            "kind" => "sweep-presign",
+            "status" => status,
+        )
+        .record(elapsed);
+
+        metrics::counter!(
+            Metrics::SignRequestsTotal,
+            "blockchain" => BITCOIN_BLOCKCHAIN,
+            "kind" => "sweep-presign",
+            "status" => status,
+        )
+        .increment(1);
+    }
+
+    /// Increment the result of a request to sign stacks transaction after
+    /// validation has run. Also note the time it took to run validation.
+    pub fn increment_stacks_validation(
+        elapsed: Duration,
+        request: &StacksTransactionSignRequest,
+        validation_result: &Result<(), Error>,
+    ) {
+        metrics::histogram!(
+            Metrics::ValidationDurationSeconds,
+            "blockchain" => STACKS_BLOCKCHAIN,
+            "kind" => request.tx_kind(),
+        )
+        .record(elapsed);
+        metrics::counter!(
+            Metrics::SignRequestsTotal,
+            "blockchain" => STACKS_BLOCKCHAIN,
+            "kind" => request.tx_kind(),
+            "status" => if validation_result.is_ok() { "success" } else { "failed" },
+        )
+        .increment(1);
+    }
+
+    /// Increment the result of a request to sign a particular sighash of a
+    /// bitcoin transaction.
+    pub fn increment_bitcoin_validation(sighash_result: &Result<AcceptedSigHash, Error>) {
+        let validation_status = match &sighash_result {
+            Ok(_) => "success",
+            Err(Error::SigHashConversion(_)) => "improper-sighash",
+            Err(Error::UnknownSigHash(_)) => "unknown-sighash",
+            Err(Error::InvalidSigHash(_)) => "invalid-sighash",
+            Err(_) => "unexpected-failure",
+        };
+
+        metrics::counter!(
+            Metrics::SignRequestsTotal,
+            "blockchain" => BITCOIN_BLOCKCHAIN,
+            "kind" => "sweep",
+            "status" => validation_status,
         )
         .increment(1);
     }
