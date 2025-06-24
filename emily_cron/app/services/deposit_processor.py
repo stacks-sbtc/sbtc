@@ -6,7 +6,7 @@ from typing import Iterable
 
 from requests.exceptions import RequestException, JSONDecodeError
 
-from ..clients import PrivateEmilyAPI, MempoolAPI
+from ..clients import PrivateEmilyAPI, MempoolAPI, ElectrsAPI
 from ..models import (
     DepositUpdate,
     EnrichedDepositInfo,
@@ -131,7 +131,7 @@ class DepositProcessor:
 
             # Step 2: Time has expired, now check UTXO status
             logger.debug(f"Deposit {tx.bitcoin_txid} time expired, checking UTXO status...")
-            utxo_status = MempoolAPI.get_utxo_status(tx.bitcoin_txid, tx.bitcoin_tx_output_index)
+            utxo_status = ElectrsAPI.get_utxo_status(tx.bitcoin_txid, tx.bitcoin_tx_output_index)
             is_utxo_spent = utxo_status.get("spent", False)
             if not is_utxo_spent:
                 # Case 1: Time expired AND UTXO is unspent -> Mark FAILED

@@ -1726,7 +1726,7 @@ mod tests {
     use crate::keys::{PrivateKey, PublicKey};
     use crate::stacks::wallet::get_full_tx_size;
     use crate::storage::DbWrite;
-    use crate::storage::in_memory::Store;
+    use crate::storage::memory::Store;
 
     use clarity::types::Address;
     use clarity::vm::types::{

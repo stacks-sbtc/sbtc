@@ -40,6 +40,7 @@ use super::CorsSupport;
         api::models::chainstate::Chainstate,
         // Deposit models.
         api::models::deposit::Deposit,
+        api::models::deposit::responses::DepositWithStatus,
         api::models::deposit::DepositParameters,
         api::models::deposit::DepositInfo,
         api::models::deposit::requests::CreateDepositRequestBody,
@@ -50,6 +51,7 @@ use super::CorsSupport;
         api::models::deposit::responses::UpdateDepositsResponse, // signers may update the state of deposits to Accepted.
         // Withdrawal Models.
         api::models::withdrawal::Withdrawal,
+        api::models::withdrawal::responses::WithdrawalWithStatus,
         api::models::withdrawal::WithdrawalInfo,
         api::models::withdrawal::WithdrawalParameters,
         api::models::withdrawal::requests::WithdrawalUpdate, // signers may update the state of withdrawals to Accepted.

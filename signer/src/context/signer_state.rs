@@ -10,6 +10,7 @@ use bitcoin::Amount;
 use hashbrown::HashSet;
 use libp2p::PeerId;
 
+use crate::block_observer::SignerSetInfo;
 use crate::keys::PublicKey;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinBlockHeight;
@@ -22,7 +23,7 @@ use crate::storage::model::BitcoinBlockRef;
 pub struct SignerState {
     current_signer_set: SignerSet,
     current_limits: RwLock<SbtcLimits>,
-    current_aggregate_key: RwLock<Option<PublicKey>>,
+    registry_signing_set_info: RwLock<Option<SignerSetInfo>>,
     sbtc_contracts_deployed: AtomicBool,
     sbtc_bitcoin_start_height: AtomicU64,
     is_sbtc_bitcoin_start_height_set: AtomicBool,
@@ -32,41 +33,36 @@ pub struct SignerState {
 }
 
 impl SignerState {
-    /// Get the current signer set.
+    /// Get the set of signers that this signer is currently configured to
+    /// communicate with in the p2p network.
     pub fn current_signer_set(&self) -> &SignerSet {
         &self.current_signer_set
     }
 
-    /// Return the public keys of the current signer set.
-    pub fn current_signer_public_keys(&self) -> BTreeSet<PublicKey> {
-        self.current_signer_set
-            .get_signers()
-            .into_iter()
-            .map(|signer| signer.public_key)
-            .collect()
-    }
-
-    /// Replace the current signer set with the given set of public keys.
+    /// Set the set of signers that this signer is allow us to communicate
+    /// with.
+    #[cfg(any(test, feature = "testing"))]
     pub fn update_current_signer_set(&self, public_keys: BTreeSet<PublicKey>) {
         self.current_signer_set.replace_signers(public_keys);
     }
 
-    /// Return the current aggregate key from the cache.
-    #[allow(clippy::unwrap_in_result)]
-    pub fn current_aggregate_key(&self) -> Option<PublicKey> {
-        self.current_aggregate_key
-            .read()
-            .expect("BUG: Failed to acquire read lock")
-            .as_ref()
-            .copied()
+    /// Replace the current signer set info with the given input.
+    pub fn update_registry_signer_set_info(&self, info: SignerSetInfo) {
+        self.registry_signing_set_info
+            .write()
+            .expect("BUG: Failed to acquire write lock of signer set info")
+            .replace(info);
     }
 
-    /// Set the current aggregate key to the given public key.
-    pub fn set_current_aggregate_key(&self, aggregate_key: PublicKey) {
-        self.current_aggregate_key
-            .write()
-            .expect("BUG: Failed to acquire write lock")
-            .replace(aggregate_key);
+    /// Return the signer set info that is currently stored in the smart
+    /// contract.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn registry_signer_set_info(&self) -> Option<SignerSetInfo> {
+        self.registry_signing_set_info
+            .read()
+            .expect("BUG: Failed to acquire read lock of signer set info")
+            .as_ref()
+            .cloned()
     }
 
     /// Get the current bitcoin chain tip.
@@ -140,7 +136,7 @@ impl Default for SignerState {
         Self {
             current_signer_set: Default::default(),
             current_limits: RwLock::new(SbtcLimits::zero()),
-            current_aggregate_key: RwLock::new(None),
+            registry_signing_set_info: RwLock::new(None),
             sbtc_contracts_deployed: Default::default(),
             sbtc_bitcoin_start_height: Default::default(),
             is_sbtc_bitcoin_start_height_set: Default::default(),

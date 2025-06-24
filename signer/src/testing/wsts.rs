@@ -504,7 +504,7 @@ impl SignerSet {
             address,
             txid,
             signer_set: self.signer_keys(),
-            signatures_required: self.signers.len() as u16,
+            signatures_required: shares.signature_share_threshold,
         };
 
         storage

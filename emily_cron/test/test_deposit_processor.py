@@ -7,7 +7,7 @@ from unittest.mock import patch, MagicMock
 from app.models import EnrichedDepositInfo, RequestStatus, DepositInfo
 from app.services.deposit_processor import DepositProcessor
 from app import settings
-from app.clients.mempool import MempoolAPI
+from app.clients import MempoolAPI, ElectrsAPI
 
 
 # Load fixtures from JSON file
@@ -99,7 +99,7 @@ class TestExpiredLocktimeProcessor(TestDepositProcessorBase):
         """Test case where a deposit is failed because locktime passed and UTXO is unspent."""
         # Mock get_utxo_status to return unspent for the deposit that passes the time check
         with patch(
-            "app.clients.MempoolAPI.get_utxo_status", return_value={"spent": False}
+            "app.clients.ElectrsAPI.get_utxo_status", return_value={"spent": False}
         ) as mock_utxo_status:
             deposits = [self.confirmed_expired]
             updates = self.processor.process_expired_locktime(
@@ -143,7 +143,7 @@ class TestExpiredLocktimeProcessor(TestDepositProcessorBase):
 
         with (
             patch(
-                "app.clients.MempoolAPI.get_utxo_status", return_value=utxo_status_spent
+                "app.clients.ElectrsAPI.get_utxo_status", return_value=utxo_status_spent
             ) as mock_utxo,
             patch(
                 "app.clients.MempoolAPI.get_transaction", return_value=spending_tx_signer
@@ -204,7 +204,7 @@ class TestExpiredLocktimeProcessor(TestDepositProcessorBase):
 
         with (
             patch(
-                "app.clients.MempoolAPI.get_utxo_status", return_value=utxo_status_reclaim
+                "app.clients.ElectrsAPI.get_utxo_status", return_value=utxo_status_reclaim
             ) as mock_utxo,
             patch(
                 "app.clients.MempoolAPI.get_transaction", return_value=spending_tx_reclaim
@@ -289,7 +289,7 @@ class TestExpiredLocktimeProcessor(TestDepositProcessorBase):
         # Patch the API calls
         with (
             patch(
-                "app.clients.MempoolAPI.get_utxo_status", side_effect=mock_get_utxo_status
+                "app.clients.ElectrsAPI.get_utxo_status", side_effect=mock_get_utxo_status
             ) as mock_utxo,
             patch(
                 "app.clients.MempoolAPI.get_transaction", side_effect=mock_get_transaction
@@ -331,7 +331,7 @@ class TestExpiredLocktimeProcessor(TestDepositProcessorBase):
 
         # --- Test Unspent Case ---
         with patch(
-            "app.clients.MempoolAPI.get_utxo_status", return_value={"spent": False}
+            "app.clients.ElectrsAPI.get_utxo_status", return_value={"spent": False}
         ) as mock_utxo_unspent:
             updates_unspent = self.processor.process_expired_locktime(
                 [edge_case_unspent], self.bitcoin_chaintip_height
@@ -351,7 +351,7 @@ class TestExpiredLocktimeProcessor(TestDepositProcessorBase):
 
         with (
             patch(
-                "app.clients.MempoolAPI.get_utxo_status", return_value=utxo_status_edge_spent
+                "app.clients.ElectrsAPI.get_utxo_status", return_value=utxo_status_edge_spent
             ) as mock_utxo_spent,
             patch(
                 "app.clients.MempoolAPI.get_transaction", return_value=spending_tx_edge_signer
@@ -403,7 +403,7 @@ class TestDepositProcessorWithRbf(TestDepositProcessorBase):
 
     @patch("app.clients.PublicEmilyAPI.fetch_deposits")
     @patch("app.clients.PrivateEmilyAPI.update_deposits")
-    @patch("app.clients.MempoolAPI.get_utxo_status")
+    @patch("app.clients.ElectrsAPI.get_utxo_status")
     @patch("app.clients.MempoolAPI.get_tip_height")
     def test_update_deposits_workflow_with_rbf(
         self,
@@ -847,7 +847,7 @@ class TestDepositProcessor(TestDepositProcessorBase):
             return {}
 
         with patch(
-            "app.clients.MempoolAPI.get_utxo_status",
+            "app.clients.ElectrsAPI.get_utxo_status",
             side_effect=mock_utxo_lazy,
         ) as mock_utxo_status_lazy:
             # Run the update_deposits method
@@ -1027,7 +1027,7 @@ class TestDepositProcessorIntegration(unittest.TestCase):
 
     @patch("app.clients.PrivateEmilyAPI.update_deposits")
     @patch("app.clients.MempoolAPI.get_transaction")
-    @patch("app.clients.MempoolAPI.get_utxo_status")
+    @patch("app.clients.ElectrsAPI.get_utxo_status")
     @patch("app.clients.MempoolAPI.get_tip_height")
     @patch("app.clients.PrivateEmilyAPI.fetch_deposits")
     def test_reclaimed_deposit_marked_failed(
@@ -1079,7 +1079,7 @@ class TestDepositProcessorIntegration(unittest.TestCase):
 
     @patch("app.clients.PrivateEmilyAPI.update_deposits")
     @patch("app.clients.MempoolAPI.get_transaction")
-    @patch("app.clients.MempoolAPI.get_utxo_status")
+    @patch("app.clients.ElectrsAPI.get_utxo_status")
     @patch("app.clients.MempoolAPI.get_tip_height")
     @patch("app.clients.PrivateEmilyAPI.fetch_deposits")
     def test_accepted_deposit_not_failed(
@@ -1145,7 +1145,7 @@ class TestMempoolAPI(unittest.TestCase):
         self.assertEqual(tx_data["txid"], ACCEPTED_DEPOSIT_DATA["bitcoin_txid"])
         self.assertEqual(tx_data["vout"][0]["value"], ACCEPTED_DEPOSIT_DATA["amount"])
         mock_get.assert_called_once_with(
-            f"/tx/{ACCEPTED_DEPOSIT_DATA['bitcoin_txid']}", ignore_errors=True
+            f"/v1/tx/{ACCEPTED_DEPOSIT_DATA['bitcoin_txid']}", ignore_errors=True
         )
 
         # Test getting a spending transaction
@@ -1155,15 +1155,22 @@ class TestMempoolAPI(unittest.TestCase):
         self.assertEqual(tx_data["txid"], ACCEPTED_SPENDING_TX_DATA["txid"])
         self.assertEqual(len(tx_data["vin"]), 2)  # Has two inputs
         mock_get.assert_called_once_with(
-            f"/tx/{ACCEPTED_SPENDING_TX_DATA['txid']}", ignore_errors=True
+            f"/v1/tx/{ACCEPTED_SPENDING_TX_DATA['txid']}", ignore_errors=True
         )
+
+
+class TestElectrsAPI(unittest.TestCase):
+    """Tests for the ElectrsAPI client."""
+
+    def setUp(self):
+        self.api = ElectrsAPI()
 
     @patch("app.clients.base.APIClient.get")
     def test_get_utxo_status(self, mock_get):
         """Test getting UTXO status."""
         # Test spent UTXO
         mock_get.return_value = ACCEPTED_UTXO_TX_OUTSPENT
-        utxo_status = MempoolAPI.get_utxo_status(
+        utxo_status = ElectrsAPI.get_utxo_status(
             ACCEPTED_DEPOSIT_DATA["bitcoin_txid"], ACCEPTED_DEPOSIT_DATA["bitcoin_tx_output_index"]
         )
         self.assertTrue(utxo_status["spent"])
@@ -1178,7 +1185,7 @@ class TestMempoolAPI(unittest.TestCase):
         mock_get.reset_mock()
         # Simulate 404 - MempoolAPI expects get(ignore_errors=True) to return empty dict, not raise
         mock_get.return_value = {}
-        utxo_status = MempoolAPI.get_utxo_status(
+        utxo_status = ElectrsAPI.get_utxo_status(
             RECLAIMED_DEPOSIT_DATA["bitcoin_txid"],
             RECLAIMED_DEPOSIT_DATA["bitcoin_tx_output_index"],
         )
@@ -1193,7 +1200,7 @@ class TestMempoolAPI(unittest.TestCase):
         mock_get.reset_mock()
         mock_get.side_effect = None  # Reset side effect
         mock_get.return_value = INFLIGHT_UTXO_STATUS
-        utxo_status = MempoolAPI.get_utxo_status(
+        utxo_status = ElectrsAPI.get_utxo_status(
             INFLIGHT_UTXO_STATUS["txid"], INFLIGHT_UTXO_STATUS["vin"]
         )
         self.assertFalse(utxo_status["spent"])

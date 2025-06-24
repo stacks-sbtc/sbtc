@@ -151,7 +151,7 @@ async fn deposit_flow() {
         .await
         .expect("Wiping Emily database in test setup failed.");
 
-    let mut context = TestContext::builder()
+    let context = TestContext::builder()
         .with_storage(db.clone())
         .with_mocked_bitcoin_client()
         .with_stacks_client(stacks_client.clone())
