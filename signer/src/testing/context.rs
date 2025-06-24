@@ -45,6 +45,13 @@ use crate::{
     },
 };
 
+/// Type alias for a wrapped mock Bitcoin client.
+pub type WrappedMockStacksInteract = WrappedMock<MockStacksInteract>;
+/// Type alias for a wrapped mock Stacks client.
+pub type WrappedMockBitcoinInteract = WrappedMock<MockBitcoinInteract>;
+/// Type alias for a wrapped mock Emily client.
+pub type WrappedMockEmilyInteract = WrappedMock<MockEmilyInteract>;
+
 /// A [`Context`] which can be used for testing.
 ///
 /// This context is opinionated and uses a shared in-memory store and mocked
@@ -159,9 +166,9 @@ impl TestContext<(), (), (), ()> {
     /// `with_in_memory_storage()` and `with_mocked_clients()`.
     pub fn default_mocked() -> TestContext<
         SharedStore,
-        WrappedMock<MockBitcoinInteract>,
-        WrappedMock<MockStacksInteract>,
-        WrappedMock<MockEmilyInteract>,
+        WrappedMockBitcoinInteract,
+        WrappedMockStacksInteract,
+        WrappedMockEmilyInteract,
     > {
         Self::builder()
             .with_in_memory_storage()
@@ -170,11 +177,19 @@ impl TestContext<(), (), (), ()> {
     }
 }
 
+impl<Storage, Bitcoin, Stacks, Emily> Deref for TestContext<Storage, Bitcoin, Stacks, Emily> {
+    type Target = SignerContext<Storage, Bitcoin, Stacks, Emily>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
 /// Provide extra methods for when using a mocked bitcoin client.
-impl<Storage, Stacks, Emily> TestContext<Storage, WrappedMock<MockBitcoinInteract>, Stacks, Emily> {
+impl<Storage, Stacks, Emily> TestContext<Storage, WrappedMockBitcoinInteract, Stacks, Emily> {
     /// Execute a closure with a mutable reference to the inner mocked
     /// bitcoin client.
-    pub async fn with_bitcoin_client<F>(&mut self, f: F)
+    pub async fn with_bitcoin_client<F>(&self, f: F)
     where
         F: FnOnce(&mut MockBitcoinInteract),
     {
@@ -184,12 +199,10 @@ impl<Storage, Stacks, Emily> TestContext<Storage, WrappedMock<MockBitcoinInterac
 }
 
 /// Provide extra methods for when using a mocked stacks client.
-impl<Storage, Bitcoin, Emily>
-    TestContext<Storage, Bitcoin, WrappedMock<MockStacksInteract>, Emily>
-{
+impl<Storage, Bitcoin, Emily> TestContext<Storage, Bitcoin, WrappedMockStacksInteract, Emily> {
     /// Execute a closure with a mutable reference to the inner mocked
     /// stacks client.
-    pub async fn with_stacks_client<F>(&mut self, f: F)
+    pub async fn with_stacks_client<F>(&self, f: F)
     where
         F: FnOnce(&mut MockStacksInteract),
     {
@@ -199,12 +212,10 @@ impl<Storage, Bitcoin, Emily>
 }
 
 /// Provide extra methods for when using a mocked emily client.
-impl<Storage, Bitcoin, Stacks>
-    TestContext<Storage, Bitcoin, Stacks, WrappedMock<MockEmilyInteract>>
-{
+impl<Storage, Bitcoin, Stacks> TestContext<Storage, Bitcoin, Stacks, WrappedMockEmilyInteract> {
     /// Execute a closure with a mutable reference to the inner mocked
     /// emily client.
-    pub async fn with_emily_client<F>(&mut self, f: F)
+    pub async fn with_emily_client<F>(&self, f: F)
     where
         F: FnOnce(&mut MockEmilyInteract),
     {
@@ -329,7 +340,7 @@ where
     }
 }
 
-impl BitcoinInteract for WrappedMock<MockBitcoinInteract> {
+impl BitcoinInteract for WrappedMockBitcoinInteract {
     async fn get_block(
         &self,
         block_hash: &bitcoin::BlockHash,
@@ -411,7 +422,7 @@ impl BitcoinInteract for WrappedMock<MockBitcoinInteract> {
     }
 }
 
-impl StacksInteract for WrappedMock<MockStacksInteract> {
+impl StacksInteract for WrappedMockStacksInteract {
     async fn get_current_signer_set(
         &self,
         contract_principal: &StacksAddress,
@@ -530,7 +541,7 @@ impl StacksInteract for WrappedMock<MockStacksInteract> {
     }
 }
 
-impl EmilyInteract for WrappedMock<MockEmilyInteract> {
+impl EmilyInteract for WrappedMockEmilyInteract {
     async fn get_deposit(
         &self,
         txid: &BitcoinTxId,
@@ -777,7 +788,7 @@ where
     /// Configure the context with a mocked Bitcoin client.
     fn with_mocked_bitcoin_client(
         self,
-    ) -> ContextBuilder<Storage, WrappedMock<MockBitcoinInteract>, Stacks, Emily> {
+    ) -> ContextBuilder<Storage, WrappedMockBitcoinInteract, Stacks, Emily> {
         self.with_bitcoin_client(WrappedMock::default())
     }
 }
@@ -815,7 +826,7 @@ where
     /// Configure the context with a mocked stacks client.
     fn with_mocked_stacks_client(
         self,
-    ) -> ContextBuilder<Storage, Bitcoin, WrappedMock<MockStacksInteract>, Emily> {
+    ) -> ContextBuilder<Storage, Bitcoin, WrappedMockStacksInteract, Emily> {
         self.with_stacks_client(WrappedMock::default())
     }
 }
@@ -853,7 +864,7 @@ where
     /// Configure the context with a mocked Emily client.
     fn with_mocked_emily_client(
         self,
-    ) -> ContextBuilder<Storage, Bitcoin, Stacks, WrappedMock<MockEmilyInteract>> {
+    ) -> ContextBuilder<Storage, Bitcoin, Stacks, WrappedMockEmilyInteract> {
         self.with_emily_client(WrappedMock::default())
     }
 }
@@ -876,9 +887,9 @@ where
         self,
     ) -> ContextBuilder<
         Storage,
-        WrappedMock<MockBitcoinInteract>,
-        WrappedMock<MockStacksInteract>,
-        WrappedMock<MockEmilyInteract>,
+        WrappedMockBitcoinInteract,
+        WrappedMockStacksInteract,
+        WrappedMockEmilyInteract,
     > {
         let config = self.get_config();
         ContextBuilder {
