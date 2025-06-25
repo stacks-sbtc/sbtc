@@ -160,8 +160,6 @@ pub struct TestEnvironment<Context> {
     pub context_window: u16,
     /// Num signers
     pub num_signers: u16,
-    /// Signing threshold
-    pub signing_threshold: u16,
     /// Test model parameters
     pub test_model_parameters: testing::storage::model::Params,
 }
@@ -187,8 +185,9 @@ where
         let context = self.context.clone();
         let storage = context.get_storage();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
+        let signature_threshold = self.signature_threshold();
         let mut testing_signer_set =
-            testing::wsts::SignerSet::new(&signer_info, self.signing_threshold as u32, || {
+            testing::wsts::SignerSet::new(&signer_info, signature_threshold as u32, || {
                 network.connect()
             });
         let (aggregate_key, bitcoin_chain_tip, mut test_data) = self
@@ -306,7 +305,7 @@ where
                 bitcoin_chain_tip.as_ref(),
                 &stacks_chain_tip,
                 min_withdrawal_block_height,
-                self.signing_threshold,
+                signature_threshold,
             )
             .await
             .expect("Error extracting withdrawals from db");
@@ -369,7 +368,7 @@ where
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
         let mut testing_signer_set =
-            testing::wsts::SignerSet::new(&signer_info, self.signing_threshold as u32, || {
+            testing::wsts::SignerSet::new(&signer_info, self.signature_threshold() as u32, || {
                 network.connect()
             });
 
@@ -521,7 +520,7 @@ where
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
         let mut testing_signer_set =
-            testing::wsts::SignerSet::new(&signer_info, self.signing_threshold as u32, || {
+            testing::wsts::SignerSet::new(&signer_info, self.signature_threshold() as u32, || {
                 network.connect()
             });
 
@@ -946,6 +945,11 @@ impl<C> TestEnvironment<C>
 where
     C: Context,
 {
+    /// The signing threshold in the context
+    pub fn signature_threshold(&self) -> u16 {
+        self.context.config().signer.bootstrap_signatures_required
+    }
+
     /// Assert we get the correct UTXO in a simple case
     pub async fn assert_get_signer_utxo_simple(mut self) {
         let mut rng = get_rng();
@@ -953,7 +957,7 @@ where
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
         let mut signer_set =
-            testing::wsts::SignerSet::new(&signer_info, self.signing_threshold as u32, || {
+            testing::wsts::SignerSet::new(&signer_info, self.signature_threshold() as u32, || {
                 network.connect()
             });
 
@@ -1024,7 +1028,7 @@ where
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
         let mut signer_set =
-            testing::wsts::SignerSet::new(&signer_info, self.signing_threshold as u32, || {
+            testing::wsts::SignerSet::new(&signer_info, self.signature_threshold() as u32, || {
                 network.connect()
             });
 
@@ -1145,7 +1149,7 @@ where
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
         let mut signer_set =
-            testing::wsts::SignerSet::new(&signer_info, self.signing_threshold as u32, || {
+            testing::wsts::SignerSet::new(&signer_info, self.signature_threshold() as u32, || {
                 network.connect()
             });
 
@@ -1273,7 +1277,7 @@ where
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
         let mut signer_set =
-            testing::wsts::SignerSet::new(&signer_info, self.signing_threshold as u32, || {
+            testing::wsts::SignerSet::new(&signer_info, self.signature_threshold() as u32, || {
                 network.connect()
             });
 

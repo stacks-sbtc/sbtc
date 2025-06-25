@@ -140,8 +140,8 @@ where
     C: Context + 'static,
 {
     /// The signing threshold in the context
-    pub fn signing_threshold(&self) -> u32 {
-        self.context.config().signer.bootstrap_signatures_required as u32
+    pub fn signature_threshold(&self) -> u16 {
+        self.context.config().signer.bootstrap_signatures_required
     }
 
     /// Assert that a group of transaction signers together can
@@ -151,6 +151,7 @@ where
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers);
         let coordinator_signer_info = signer_info.first().unwrap().clone();
+        let signature_threshold = self.signature_threshold() as u32;
 
         // Create a new event-loop for each signer, based on the number of signers
         // defined in `self.num_signers`.
@@ -201,7 +202,7 @@ where
         run_dkg_and_store_results_for_signers(
             &signer_info,
             &bitcoin_chain_tip,
-            self.signing_threshold(),
+            signature_threshold,
             event_loop_handles
                 .iter_mut()
                 .map(|handle| handle.context.get_storage_mut()),
@@ -214,7 +215,7 @@ where
         let mut coordinator = testing::wsts::Coordinator::new(
             network.connect(),
             coordinator_signer_info,
-            self.signing_threshold(),
+            signature_threshold,
         );
         let aggregate_key = coordinator
             .run_dkg(bitcoin_chain_tip, dummy_txid.into())
