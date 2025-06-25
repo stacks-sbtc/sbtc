@@ -86,4 +86,10 @@ pub enum SignerConfigError {
     /// this signer
     #[error("Bootstrap signer set must contain pubkey of this signer")]
     MissingPubkeyInBootstrapSignerSet,
+
+    /// An error returned if bootstrap_signer_set contains more than 16 signers.
+    /// Currently our stacks contracts don't allow more than 16 signers.
+    /// See https://github.com/stacks-sbtc/sbtc/issues/1694
+    #[error("Bootstrap signer set must be at most 16 signers, but it contains {0} signers")]
+    TooManySigners(usize),
 }

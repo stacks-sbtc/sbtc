@@ -11,7 +11,7 @@ WORKDIR /app
 RUN uv sync --frozen --no-cache
 
 # Environment variables
-ENV EMILY_API_KEY=testApiKey
+ENV EMILY_API_KEY=
 ENV EMILY_ENDPOINT=http://emily-server:3031
 
 # Expose the FastAPI port

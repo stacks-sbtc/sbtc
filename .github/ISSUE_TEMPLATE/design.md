@@ -33,6 +33,7 @@ aren’t beneficial to the previously considered constraints. -->
 ***External Resources***
 
 ## 3. Design
+
 ### 3.1 Proposed Component Design
 
 <!-- Put design and approach here. This should be the largest section.
@@ -57,6 +58,7 @@ What questions need answering that might impact the proposed design? -->
 ---
 
 **Closing Checklist**
+
 - [ ] The design proposed in this issue is clearly documented in the description of this ticket.
 - [ ] Everyone necessary has reviewed the resolution and agrees with the proposal.
 - [ ] This ticket has or links all the information necessary to familiarize a contributor with the design decision, why it was made, and how it'll be included.

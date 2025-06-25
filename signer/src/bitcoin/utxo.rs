@@ -55,6 +55,7 @@ use crate::storage::model::ScriptPubKey;
 use crate::storage::model::SignerVotes;
 use crate::storage::model::StacksBlockHash;
 use crate::storage::model::StacksTxId;
+use crate::storage::model::TaprootScriptHash;
 use crate::storage::model::TxOutput;
 use crate::storage::model::TxOutputType;
 use crate::storage::model::TxPrevout;
@@ -419,6 +420,8 @@ pub struct DepositRequest {
     pub deposit_script: ScriptBuf,
     /// The reclaim script for the deposit.
     pub reclaim_script: ScriptBuf,
+    /// The hash of the reclaim script for the deposit.
+    pub reclaim_script_hash: Option<TaprootScriptHash>,
     /// The public key used in the deposit script.
     ///
     /// Note that taproot public keys for Schnorr signatures are slightly
@@ -518,6 +521,7 @@ impl DepositRequest {
             amount: request.amount,
             deposit_script: ScriptBuf::from_bytes(request.spend_script),
             reclaim_script: ScriptBuf::from_bytes(request.reclaim_script),
+            reclaim_script_hash: request.reclaim_script_hash,
             signers_public_key: request.signers_public_key.into(),
         }
     }
@@ -1735,6 +1739,7 @@ mod tests {
             amount,
             deposit_script: deposit_inputs.deposit_script(),
             reclaim_script: ScriptBuf::new(),
+            reclaim_script_hash: Some(TaprootScriptHash::zeros()),
             signers_public_key,
         }
     }
@@ -1943,6 +1948,7 @@ mod tests {
             amount: 100_000,
             deposit_script: ScriptBuf::new(),
             reclaim_script: ScriptBuf::new(),
+            reclaim_script_hash: Some(TaprootScriptHash::zeros()),
             signers_public_key: XOnlyPublicKey::from_str(X_ONLY_PUBLIC_KEY1).unwrap(),
         };
 
@@ -1960,6 +1966,7 @@ mod tests {
             amount: 100_000,
             deposit_script: ScriptBuf::from_bytes(vec![1, 2, 3]),
             reclaim_script: ScriptBuf::new(),
+            reclaim_script_hash: Some(TaprootScriptHash::zeros()),
             signers_public_key: XOnlyPublicKey::from_str(X_ONLY_PUBLIC_KEY1).unwrap(),
         };
 

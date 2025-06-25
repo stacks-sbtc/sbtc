@@ -2,18 +2,17 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::{
+    EntryTrait, KeyTrait, PrimaryIndex, PrimaryIndexTrait, SecondaryIndex, SecondaryIndexTrait,
+    StatusEntry, VersionedEntryTrait,
+};
 use crate::{
     api::models::{
         chainstate::Chainstate,
         common::{Fulfillment, Status},
         deposit::{Deposit, DepositInfo, DepositParameters},
     },
-    common::error::{Error, Inconsistency},
-};
-
-use super::{
-    EntryTrait, KeyTrait, PrimaryIndex, PrimaryIndexTrait, SecondaryIndex, SecondaryIndexTrait,
-    StatusEntry, VersionedEntryTrait,
+    common::error::{Error, Inconsistency, ValidationError},
 };
 
 // Deposit entry ---------------------------------------------------------------
@@ -647,7 +646,7 @@ pub struct ValidatedUpdateDepositsRequest {
     ///
     /// This allows the updates to be executed in chronological order but returned in the order
     /// that the client sent them.
-    pub deposits: Vec<(usize, ValidatedDepositUpdate)>,
+    pub deposits: Vec<(usize, Result<ValidatedDepositUpdate, ValidationError>)>,
 }
 
 /// Validated deposit update.

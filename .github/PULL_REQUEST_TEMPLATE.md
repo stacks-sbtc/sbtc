@@ -6,7 +6,7 @@ Closes: #?
 
 ## Testing Information
 
-## Checklist:
+## Checklist
 
 - [ ] I have performed a self-review of my code
 - [ ] My changes generate no new warnings
