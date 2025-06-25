@@ -44,13 +44,7 @@ use signer::storage::DbWrite;
 use signer::storage::model;
 use signer::storage::model::DepositSigner;
 use signer::testing;
-use signer::testing::context::BuildContext;
-use signer::testing::context::ConfigureBitcoinClient;
-use signer::testing::context::ConfigureEmilyClient;
-use signer::testing::context::ConfigureStacksClient;
-use signer::testing::context::ConfigureStorage;
-use signer::testing::context::TestContext;
-use signer::testing::context::WrappedMock;
+use signer::testing::context::*;
 use signer::testing::get_rng;
 use signer::testing::stacks::DUMMY_SORTITION_INFO;
 use signer::testing::stacks::DUMMY_TENURE_INFO;
@@ -130,7 +124,7 @@ where
 #[test(tokio::test)]
 async fn deposit_flow() {
     let num_signers = 7;
-    let signing_threshold = 5;
+    let signing_threshold: u32 = 5;
     let context_window = 10;
 
     let db = testing::storage::new_test_database().await;
@@ -156,6 +150,9 @@ async fn deposit_flow() {
         .with_mocked_bitcoin_client()
         .with_stacks_client(stacks_client.clone())
         .with_emily_client(emily_client.clone())
+        .modify_settings(|settings| {
+            settings.signer.bootstrap_signatures_required = signing_threshold as u16;
+        })
         .build();
 
     let mut testing_signer_set =
@@ -390,7 +387,6 @@ async fn deposit_flow() {
         network: network.connect(),
         private_key,
         context_window,
-        threshold: signing_threshold as u16,
         signing_round_max_duration: Duration::from_secs(10),
         dkg_max_duration: Duration::from_secs(10),
         bitcoin_presign_request_max_duration: Duration::from_secs(10),

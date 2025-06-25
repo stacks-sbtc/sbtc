@@ -109,7 +109,6 @@ where
         network: network::in_memory::MpmcBroadcaster,
         context_window: u16,
         private_key: PrivateKey,
-        threshold: u16,
     ) -> Self {
         Self {
             event_loop: transaction_coordinator::TxCoordinatorEventLoop {
@@ -117,7 +116,6 @@ where
                 network,
                 private_key,
                 context_window,
-                threshold,
                 signing_round_max_duration: Duration::from_secs(10),
                 bitcoin_presign_request_max_duration: Duration::from_secs(10),
                 dkg_max_duration: Duration::from_secs(10),
@@ -269,7 +267,6 @@ where
             context: self.context,
             network: signer_network.spawn(),
             private_key: select_coordinator(&bitcoin_chain_tip.block_hash, &signer_info),
-            threshold: self.signing_threshold,
             context_window: self.context_window,
             signing_round_max_duration: Duration::from_millis(500),
             bitcoin_presign_request_max_duration: Duration::from_millis(500),
@@ -474,7 +471,6 @@ where
             network.connect(),
             self.context_window,
             private_key,
-            self.signing_threshold,
         );
 
         // Start the tx coordinator run loop.
@@ -667,7 +663,6 @@ where
             network.connect(),
             self.context_window,
             private_key,
-            self.signing_threshold,
         );
 
         // Start the tx coordinator run loop.
@@ -792,7 +787,6 @@ where
             context: self.context,
             network: signer_network.spawn(),
             private_key,
-            threshold: self.signing_threshold,
             context_window: self.context_window,
             signing_round_max_duration: Duration::from_millis(500),
             bitcoin_presign_request_max_duration: Duration::from_millis(500),
@@ -895,7 +889,6 @@ where
             context: self.context,
             network: signer_network.spawn(),
             private_key,
-            threshold: self.signing_threshold,
             context_window: self.context_window,
             signing_round_max_duration: Duration::from_millis(500),
             bitcoin_presign_request_max_duration: Duration::from_millis(500),
