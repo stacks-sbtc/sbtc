@@ -48,7 +48,6 @@ where
         network: M,
         context_window: u16,
         signer_private_key: PrivateKey,
-        threshold: u32,
         rng: Rng,
     ) -> Self {
         Self {
@@ -58,7 +57,6 @@ where
                 signer_private_key,
                 context_window,
                 wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
-                threshold,
                 rng,
                 dkg_begin_pause: None,
                 dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
@@ -133,8 +131,6 @@ pub struct TestEnvironment<C> {
     pub context_window: u16,
     /// Num signers
     pub num_signers: usize,
-    /// Signing threshold
-    pub signing_threshold: u32,
     /// Test model parameters
     pub test_model_parameters: testing::storage::model::Params,
 }
@@ -143,6 +139,11 @@ impl<C> TestEnvironment<C>
 where
     C: Context + 'static,
 {
+    /// The signing threshold in the context
+    pub fn signing_threshold(&self) -> u32 {
+        self.context.config().signer.bootstrap_signatures_required as u32
+    }
+
     /// Assert that a group of transaction signers together can
     /// participate successfully in a DKG round
     pub async fn assert_should_be_able_to_participate_in_dkg(self) {
@@ -162,7 +163,6 @@ where
                     network.connect(),
                     self.context_window,
                     signer_info.signer_private_key,
-                    self.signing_threshold,
                     rng.clone(),
                 );
 
@@ -201,7 +201,7 @@ where
         run_dkg_and_store_results_for_signers(
             &signer_info,
             &bitcoin_chain_tip,
-            self.signing_threshold,
+            self.signing_threshold(),
             event_loop_handles
                 .iter_mut()
                 .map(|handle| handle.context.get_storage_mut()),
@@ -214,7 +214,7 @@ where
         let mut coordinator = testing::wsts::Coordinator::new(
             network.connect(),
             coordinator_signer_info,
-            self.signing_threshold,
+            self.signing_threshold(),
         );
         let aggregate_key = coordinator
             .run_dkg(bitcoin_chain_tip, dummy_txid.into())

@@ -341,7 +341,7 @@ async fn process_complete_deposit() {
     db.write_stacks_block(&stacks_block).await.unwrap();
 
     let num_signers = 7;
-    let signing_threshold: u32  = 5;
+    let signing_threshold: u32 = 5;
     let context_window: u16 = 10;
 
     let mut context = TestContext::builder()
@@ -482,7 +482,6 @@ async fn process_complete_deposit() {
                 network.connect(),
                 context_window,
                 signer_info.signer_private_key,
-                signing_threshold,  
                 rng.clone(),
             );
 
@@ -1363,7 +1362,6 @@ async fn run_subsequent_dkg() {
         .iter()
         .map(|(context, _, kp, net)| TxSignerEventLoop {
             network: net.spawn(),
-            threshold: context.config().signer.bootstrap_signatures_required as u32,
             context: context.clone(),
             context_window: 10000,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
@@ -1691,7 +1689,6 @@ async fn sign_bitcoin_transaction() {
 
         let ev = TxSignerEventLoop {
             network: network.spawn(),
-            threshold: ctx.config().signer.bootstrap_signatures_required as u32,
             context: ctx.clone(),
             context_window: 10000,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
@@ -2144,7 +2141,6 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
 
         let ev = TxSignerEventLoop {
             network: network.spawn(),
-            threshold: ctx.config().signer.bootstrap_signatures_required as u32,
             context: ctx.clone(),
             context_window: 10000,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
@@ -2804,7 +2800,6 @@ async fn skip_signer_activites_after_key_rotation() {
 
         let ev = TxSignerEventLoop {
             network: network.spawn(),
-            threshold: ctx.config().signer.bootstrap_signatures_required as u32,
             context: ctx.clone(),
             context_window: 10000,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
@@ -3380,7 +3375,6 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
 
         let ev = TxSignerEventLoop {
             network: network.spawn(),
-            threshold: ctx.config().signer.bootstrap_signatures_required as u32,
             context: ctx.clone(),
             context_window: 10000,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
@@ -4140,7 +4134,6 @@ async fn test_conservative_initial_sbtc_limits() {
 
         let ev = TxSignerEventLoop {
             network: network.spawn(),
-            threshold: signatures_required as u32,
             context: ctx.clone(),
             context_window: 10000,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
@@ -4448,7 +4441,6 @@ async fn sign_bitcoin_transaction_withdrawals() {
 
         let ev = TxSignerEventLoop {
             network: network.spawn(),
-            threshold: ctx.config().signer.bootstrap_signatures_required as u32,
             context: ctx.clone(),
             context_window: 10000,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
@@ -5029,7 +5021,6 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
                 network.connect(),
                 context_window,
                 signer_info.signer_private_key,
-                signing_threshold,
                 rng.clone(),
             );
 
@@ -5933,7 +5924,6 @@ async fn reuse_nonce_attack() {
 
         let ev = TxSignerEventLoop {
             network: network.spawn(),
-            threshold: ctx.config().signer.bootstrap_signatures_required as u32,
             context: ctx.clone(),
             context_window: 10000,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
