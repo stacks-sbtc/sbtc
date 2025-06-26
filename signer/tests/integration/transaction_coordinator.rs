@@ -15,7 +15,6 @@ use bitcoin::BlockHash;
 use bitcoin::Transaction;
 use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc::RpcApi as _;
-use bitvec::array::BitArray;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlockHeader;
 use blockstack_lib::chainstate::stacks::StacksTransaction;
@@ -39,9 +38,7 @@ use lru::LruCache;
 use more_asserts::assert_lt;
 use rand::rngs::OsRng;
 
-use sbtc::deposits::CreateDepositRequest;
-use sbtc::deposits::DepositScriptInputs;
-use sbtc::deposits::ReclaimScriptInputs;
+use rand::RngCore;
 use sbtc::testing::regtest;
 use sbtc::testing::regtest::AsUtxo as _;
 use sbtc::testing::regtest::Recipient;
@@ -51,7 +48,6 @@ use secp256k1::SECP256K1;
 use signer::bitcoin::BitcoinInteract as _;
 use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::bitcoin::utxo::BitcoinInputsOutputs;
-use signer::bitcoin::utxo::DepositRequest;
 use signer::bitcoin::utxo::Fees;
 use signer::bitcoin::utxo::TxDeconstructor as _;
 use signer::bitcoin::validation::WithdrawalValidationResult;
@@ -71,6 +67,10 @@ use signer::testing::get_rng;
 use signer::testing::FutureExt as _;
 use signer::testing::FuturesIterExt as _;
 use signer::testing::Sleep;
+use signer::testing::requests::AmountSpec;
+use signer::testing::requests::DepositHelper;
+use signer::testing::requests::generate_withdrawal;
+use signer::testing::requests::make_deposit_requests;
 use signer::transaction_coordinator::given_key_is_coordinator;
 use signer::transaction_coordinator::should_coordinate_dkg;
 use signer::transaction_signer::STACKS_SIGN_REQUEST_LRU_SIZE;
@@ -157,8 +157,6 @@ use crate::setup::backfill_bitcoin_blocks;
 use crate::setup::fetch_canonical_bitcoin_blockchain;
 use crate::setup::set_deposit_completed;
 use crate::setup::set_deposit_incomplete;
-use crate::utxo_construction::generate_withdrawal;
-use crate::utxo_construction::make_deposit_request;
 use crate::zmq::BITCOIN_CORE_ZMQ_ENDPOINT;
 
 type IntegrationTestContext<Stacks> = TestContext<PgStore, BitcoinCoreClient, Stacks, EmilyClient>;
@@ -1835,12 +1833,15 @@ async fn sign_bitcoin_transaction() {
 
     faucet.send_to(100_000, &address);
 
-    let depositor = Recipient::new(AddressType::P2tr);
+    let depositor = DepositHelper::new_depositor(&mut rng)
+        .with_bitcoin(faucet)
+        .with_emily(&emily_client);
 
     // Start off with some initial UTXOs to work with.
 
-    faucet.send_to(50_000_000, &depositor.address);
+    depositor.fund(50_000_000);
     faucet.generate_block();
+
     wait_for_signers(&signers).await;
 
     // =========================================================================
@@ -1850,19 +1851,11 @@ async fn sign_bitcoin_transaction() {
     //   request transaction. Submit it and inform Emily about it.
     // =========================================================================
     // Now lets make a deposit transaction and submit it
-    let utxo = depositor.get_utxos(rpc, None).pop().unwrap();
-
-    let amount = 2_500_000;
-    let signers_public_key = shares.aggregate_key.into();
-    let max_fee = amount / 2;
-    let (deposit_tx, deposit_request, _) =
-        make_deposit_request(&depositor, amount, utxo, max_fee, signers_public_key);
-    rpc.send_raw_transaction(&deposit_tx).unwrap();
-
-    assert_eq!(deposit_tx.compute_txid(), deposit_request.outpoint.txid);
-
-    let body = deposit_request.as_emily_request(&deposit_tx);
-    let _ = deposit_api::create_deposit(emily_client.config(), body)
+    let deposit_amount_spec = AmountSpec::with_derived_max_fee(2_500_000, 0.5);
+    depositor
+        .prepare_deposit_transaction(deposit_amount_spec, shares.aggregate_key)
+        .submit_to_bitcoin()
+        .submit_to_emily()
         .await
         .unwrap();
 
@@ -1989,10 +1982,10 @@ async fn sign_bitcoin_transaction() {
 /// then, once everything is up and running, run the test.
 #[test(tokio::test)]
 async fn sign_bitcoin_transaction_multiple_locking_keys() {
+    let rng = &mut get_rng();
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
-    let mut rng = get_rng();
     // We need to populate our databases, so let's fetch the data.
     let emily_client = EmilyClient::try_new(
         &Url::parse("http://testApiKey@localhost:3031").unwrap(),
@@ -2244,12 +2237,15 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     // - Give "depositors" some UTXOs so that they can make deposits for
     //   sBTC.
     // =========================================================================
-    let depositor1 = Recipient::new(AddressType::P2tr);
-    let depositor2 = Recipient::new(AddressType::P2tr);
+    let depositor1 = DepositHelper::new_depositor(rng)
+        .with_bitcoin(faucet)
+        .with_emily(&emily_client);
+    let depositor2 = DepositHelper::new_depositor(rng)
+        .with_bitcoin(faucet)
+        .with_emily(&emily_client);
 
     // Start off with some initial UTXOs to work with.
-    faucet.send_to(50_000_000, &depositor1.address);
-    faucet.send_to(50_000_000, &depositor2.address);
+    faucet.send_to_many(50_000_000, &[&depositor1, &depositor2]);
 
     // =========================================================================
     // Step 5 - Wait for DKG
@@ -2261,7 +2257,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     // =========================================================================
 
     // This should kick off DKG.
-    let chain_tip = faucet.generate_block().into();
+    let chain_tip: BitcoinBlockHash = faucet.generate_block().into();
 
     // We first need to wait for bitcoin-core to send us all the
     // notifications so that we are up-to-date with the chain tip.
@@ -2276,7 +2272,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
 
         let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
         let event = KeyRotationEvent {
-            txid: fake::Faker.fake_with_rng(&mut rng),
+            txid: fake::Faker.fake_with_rng(rng),
             block_hash: stacks_chain_tip.block_hash,
             aggregate_key: shares.aggregate_key,
             signer_set: shares.signer_set_public_keys.clone(),
@@ -2309,19 +2305,13 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     //   request transaction. Submit it and inform Emily about it.
     // =========================================================================
     // Now lets make a deposit transaction and submit it
-    let utxo = depositor1.get_utxos(rpc, None).pop().unwrap();
 
-    let amount = 2_500_000;
-    let signers_public_key = shares1.aggregate_key.into();
-    let max_fee = amount / 2;
-    let (deposit_tx, deposit_request, _) =
-        make_deposit_request(&depositor1, amount, utxo, max_fee, signers_public_key);
-    rpc.send_raw_transaction(&deposit_tx).unwrap();
-
-    assert_eq!(deposit_tx.compute_txid(), deposit_request.outpoint.txid);
-
-    let body = deposit_request.as_emily_request(&deposit_tx);
-    let _ = deposit_api::create_deposit(emily_client.config(), body)
+    // Deposit #1, locked by aggregate key #1
+    let deposit1_amount_spec = AmountSpec::with_derived_max_fee(2_500_000, 0.5);
+    depositor1
+        .prepare_deposit_transaction(deposit1_amount_spec, shares1.aggregate_key)
+        .submit_to_bitcoin()
+        .submit_to_emily()
         .await
         .unwrap();
 
@@ -2419,7 +2409,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
 
         let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
         let event = KeyRotationEvent {
-            txid: fake::Faker.fake_with_rng(&mut rng),
+            txid: fake::Faker.fake_with_rng(rng),
             block_hash: stacks_chain_tip.block_hash,
             aggregate_key: shares.aggregate_key,
             signer_set: shares.signer_set_public_keys.clone(),
@@ -2439,30 +2429,22 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     //   the old one and the new one.
     // =========================================================================
     // Now lets make a deposit transaction and submit it
-    let utxo = depositor2.get_utxos(rpc, None).pop().unwrap();
 
-    let amount = 3_500_000;
-    let signers_public_key2 = shares2.aggregate_key.into();
-    let max_fee = amount / 2;
-    let (deposit_tx, deposit_request, _) =
-        make_deposit_request(&depositor2, amount, utxo, max_fee, signers_public_key2);
-    rpc.send_raw_transaction(&deposit_tx).unwrap();
-
-    let body = deposit_request.as_emily_request(&deposit_tx);
-    deposit_api::create_deposit(emily_client.config(), body)
+    // Deposit #2, locked with aggregate key #2.
+    let deposit2_amount_spec = AmountSpec::with_derived_max_fee(3_500_000, 0.5);
+    depositor2
+        .prepare_deposit_transaction(deposit2_amount_spec, shares2.aggregate_key)
+        .submit_to_bitcoin()
+        .submit_to_emily()
         .await
         .unwrap();
 
-    let utxo = depositor1.get_utxos(rpc, None).pop().unwrap();
-    let amount = 4_500_000;
-    let signers_public_key1 = shares1.aggregate_key.into();
-    let max_fee = amount / 2;
-    let (deposit_tx, deposit_request, _) =
-        make_deposit_request(&depositor1, amount, utxo, max_fee, signers_public_key1);
-    rpc.send_raw_transaction(&deposit_tx).unwrap();
-
-    let body = deposit_request.as_emily_request(&deposit_tx);
-    deposit_api::create_deposit(emily_client.config(), body)
+    // Deposit #3, locked with aggregate key #1.
+    let deposit3_amount_spec = AmountSpec::with_derived_max_fee(4_500_000, 0.5);
+    depositor1
+        .prepare_deposit_transaction(deposit3_amount_spec, shares1.aggregate_key)
+        .submit_to_bitcoin()
+        .submit_to_emily()
         .await
         .unwrap();
 
@@ -2905,12 +2887,15 @@ async fn skip_signer_activites_after_key_rotation() {
     // - Give "depositors" some UTXOs so that they can make deposits for
     //   sBTC.
     // =========================================================================
-    let depositor1 = Recipient::new(AddressType::P2tr);
-    let depositor2 = Recipient::new(AddressType::P2tr);
+    let depositor1 = DepositHelper::new_depositor(&mut rng)
+        .with_bitcoin(faucet)
+        .with_emily(&emily_client);
+    let depositor2 = DepositHelper::new_depositor(&mut rng)
+        .with_bitcoin(faucet)
+        .with_emily(&emily_client);
 
     // Start off with some initial UTXOs to work with.
-    faucet.send_to(50_000_000, &depositor1.address);
-    faucet.send_to(50_000_000, &depositor2.address);
+    faucet.send_to_many(50_000_000, &[&depositor1, &depositor2]);
 
     // =========================================================================
     // Step 5 - Wait for DKG
@@ -2970,19 +2955,11 @@ async fn skip_signer_activites_after_key_rotation() {
     //   request transaction. Submit it and inform Emily about it.
     // =========================================================================
     // Now lets make a deposit transaction and submit it
-    let utxo = depositor1.get_utxos(rpc, None).pop().unwrap();
-
-    let amount = 2_500_000;
-    let signers_public_key = shares1.aggregate_key.into();
-    let max_fee = amount / 2;
-    let (deposit_tx, deposit_request, _) =
-        make_deposit_request(&depositor1, amount, utxo, max_fee, signers_public_key);
-    rpc.send_raw_transaction(&deposit_tx).unwrap();
-
-    assert_eq!(deposit_tx.compute_txid(), deposit_request.outpoint.txid);
-
-    let body = deposit_request.as_emily_request(&deposit_tx);
-    let _ = deposit_api::create_deposit(emily_client.config(), body)
+    let deposit1_amount_spec = AmountSpec::with_derived_max_fee(2_500_000, 0.5);
+    depositor1
+        .prepare_deposit_transaction(deposit1_amount_spec, shares1.aggregate_key)
+        .submit_to_bitcoin()
+        .submit_to_emily()
         .await
         .unwrap();
 
@@ -3067,16 +3044,11 @@ async fn skip_signer_activites_after_key_rotation() {
         assert_eq!(dkg_share_count, 1);
     }
 
-    let utxo = depositor2.get_utxos(rpc, None).pop().unwrap();
-
-    let amount = 3_500_000;
-    let max_fee = amount / 2;
-    let (deposit_tx, deposit_request, _) =
-        make_deposit_request(&depositor2, amount, utxo, max_fee, signers_public_key);
-    rpc.send_raw_transaction(&deposit_tx).unwrap();
-
-    let body = deposit_request.as_emily_request(&deposit_tx);
-    deposit_api::create_deposit(emily_client.config(), body)
+    let deposit2_amount_spec = AmountSpec::with_derived_max_fee(3_500_000, 0.5);
+    depositor2
+        .prepare_deposit_transaction(deposit2_amount_spec, shares1.aggregate_key)
+        .submit_to_bitcoin()
+        .submit_to_emily()
         .await
         .unwrap();
 
@@ -3864,15 +3836,19 @@ fn create_signer_set(signers: &[Keypair], threshold: u32) -> (SignerSet, InMemor
     )
 }
 
-fn create_test_setup(
+fn create_test_setup<R>(
+    rng: &mut R,
     dkg_shares: &EncryptedDkgShares,
     signatures_required: u16,
     faucet: &regtest::Faucet,
     rpc: &bitcoincore_rpc::Client,
     bitcoin_client: &BitcoinCoreClient,
-) -> TestSweepSetup2 {
-    let depositor = Recipient::new(AddressType::P2tr);
-    faucet.send_to(50_000_000, &depositor.address);
+) -> TestSweepSetup2
+where
+    R: RngCore,
+{
+    let depositor = DepositHelper::new_depositor(rng).with_bitcoin(faucet);
+    depositor.fund(50_000_000);
     faucet.generate_block();
 
     let signer_address = Address::from_script(
@@ -3883,20 +3859,15 @@ fn create_test_setup(
     let donation = faucet.send_to(100_000, &signer_address);
     let donation_block_hash = faucet.generate_block();
 
-    let utxo = depositor.get_utxos(rpc, None).pop().unwrap();
-    let (deposit_tx, deposit_request, deposit_info) = make_deposit_request(
-        &depositor,
-        5_000_000,
-        utxo,
-        100_000,
-        dkg_shares.aggregate_key.x_only_public_key().0,
-    );
-    rpc.send_raw_transaction(&deposit_tx).unwrap();
+    let deposit_amount_spec = AmountSpec::new(5_000_000, 100_000);
+    let deposit = depositor
+        .prepare_deposit_transaction(deposit_amount_spec, dkg_shares.aggregate_key)
+        .submit_to_bitcoin();
 
     let deposit_block_hash = faucet.generate_block();
     let block_header = rpc.get_block_header_info(&deposit_block_hash).unwrap();
     let tx_info = bitcoin_client
-        .get_tx_info(&deposit_tx.compute_txid(), &deposit_block_hash)
+        .get_tx_info(&deposit.tx.compute_txid(), &deposit_block_hash)
         .unwrap()
         .unwrap();
     let test_signers = TestSignerSet {
@@ -3906,14 +3877,14 @@ fn create_test_setup(
     };
     let (request, recipient) = generate_withdrawal();
     let stacks_block = model::StacksBlock {
-        block_hash: Faker.fake_with_rng(&mut OsRng),
+        block_hash: Faker.fake_with_rng(rng),
         block_height: 0u64.into(),
         parent_hash: StacksBlockId::first_mined().into(),
         bitcoin_anchor: deposit_block_hash.into(),
     };
     TestSweepSetup2 {
         deposit_block_hash,
-        deposits: vec![(deposit_info, deposit_request, tx_info)],
+        deposits: vec![(deposit.info, deposit.request, tx_info)],
         sweep_tx_info: None,
         broadcast_info: None,
         donation,
@@ -4147,6 +4118,7 @@ async fn test_conservative_initial_sbtc_limits() {
     let dkg_shares = encrypted_shares.first().cloned().unwrap();
     let bitcoin_client = signers[0].0.clone().bitcoin_client;
     let setup = create_test_setup(
+        &mut rng,
         &dkg_shares,
         signatures_required,
         faucet,
@@ -5778,80 +5750,6 @@ async fn wait_next_stacks_block(stacks_client: &StacksClient) {
     })
     .await
     .unwrap()
-}
-
-fn make_deposit_requests<U>(
-    depositor: &Recipient,
-    amounts: &[u64],
-    utxo: U,
-    max_fee: u64,
-    signers_public_key: bitcoin::XOnlyPublicKey,
-) -> (Transaction, Vec<DepositRequest>)
-where
-    U: regtest::AsUtxo,
-{
-    let deposit_inputs = DepositScriptInputs {
-        signers_public_key,
-        max_fee,
-        recipient: PrincipalData::from(StacksAddress::burn_address(false)),
-    };
-    let reclaim_inputs = ReclaimScriptInputs::try_new(50, bitcoin::ScriptBuf::new()).unwrap();
-
-    let deposit_script = deposit_inputs.deposit_script();
-    let reclaim_script = reclaim_inputs.reclaim_script();
-
-    let mut outputs = vec![];
-    for amount in amounts {
-        outputs.push(bitcoin::TxOut {
-            value: Amount::from_sat(*amount),
-            script_pubkey: sbtc::deposits::to_script_pubkey(
-                deposit_script.clone(),
-                reclaim_script.clone(),
-            ),
-        })
-    }
-
-    let fee = regtest::BITCOIN_CORE_FALLBACK_FEE.to_sat();
-    outputs.push(bitcoin::TxOut {
-        value: utxo.amount() - Amount::from_sat(amounts.iter().sum::<u64>() + fee),
-        script_pubkey: depositor.address.script_pubkey(),
-    });
-
-    let mut deposit_tx = Transaction {
-        version: bitcoin::transaction::Version::ONE,
-        lock_time: bitcoin::absolute::LockTime::ZERO,
-        input: vec![bitcoin::TxIn {
-            previous_output: bitcoin::OutPoint::new(utxo.txid(), utxo.vout()),
-            sequence: bitcoin::Sequence::ZERO,
-            script_sig: bitcoin::ScriptBuf::new(),
-            witness: bitcoin::Witness::new(),
-        }],
-        output: outputs,
-    };
-
-    regtest::p2tr_sign_transaction(&mut deposit_tx, 0, &[utxo], &depositor.keypair);
-
-    let mut requests = vec![];
-    for (index, amount) in amounts.iter().enumerate() {
-        let req = CreateDepositRequest {
-            outpoint: bitcoin::OutPoint::new(deposit_tx.compute_txid(), index as u32),
-            deposit_script: deposit_script.clone(),
-            reclaim_script: reclaim_script.clone(),
-        };
-
-        requests.push(DepositRequest {
-            outpoint: req.outpoint,
-            max_fee,
-            signer_bitmap: BitArray::ZERO,
-            amount: *amount,
-            deposit_script: deposit_script.clone(),
-            reclaim_script: reclaim_script.clone(),
-            reclaim_script_hash: Some(model::TaprootScriptHash::from(&reclaim_script)),
-            signers_public_key,
-        });
-    }
-
-    (deposit_tx, requests)
 }
 
 /// This test requires a running stacks node.
