@@ -67,7 +67,7 @@ pub enum ValidationError {
     #[error(
         "withdrawal related transaction have RBF status, but this should never happen. request_id: {0}"
     )]
-    WithdrawalRBF(u64),
+    WithdrawalRbf(u64),
 
     /// The deposit has status RBF but is missing the replaced_by_tx field.
     #[error("missing replaced_by_tx for RBF deposit with txid: {0}, vout: {1}")]

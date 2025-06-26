@@ -40,6 +40,7 @@ use serde_json::to_value;
 use signer::bitcoin::utxo::DepositRequest;
 use signer::error::Error;
 use signer::stacks::contracts::SmartContract;
+use signer::storage::model::TaprootScriptHash;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -90,7 +91,7 @@ async fn process_blocks_simple_fork() {
 
     let stacks_client = StacksClient::new(Url::parse("http://127.0.0.1:20443").unwrap()).unwrap();
 
-    let mut ctx = TestContext::builder()
+    let ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
         .with_stacks_client(stacks_client.clone())
@@ -199,6 +200,7 @@ where
 
     let deposit_script = deposit_inputs.deposit_script();
     let reclaim_script = reclaim_inputs.reclaim_script();
+    let reclaim_script_hash = TaprootScriptHash::from(&reclaim_script);
 
     let mut tx_outs = vec![TxOut {
         value: Amount::from_sat(amount),
@@ -244,6 +246,7 @@ where
         amount: dep.amount,
         deposit_script: dep.deposit_script.clone(),
         reclaim_script: dep.reclaim_script.clone(),
+        reclaim_script_hash: Some(reclaim_script_hash),
         signers_public_key: dep.signers_public_key,
     };
     (deposit_tx, req, dep)

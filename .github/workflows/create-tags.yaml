@@ -23,7 +23,7 @@ jobs:
     name: Print Tag Info
     runs-on: ubuntu-latest
     outputs:
-      tag_name: ${{ steps.set-output.outputs.tag_name }}
+      tag_name: ${{ steps.set_output.outputs.tag_name }}
     steps:
       - name: Show Tag Name
         id: print_name
@@ -43,11 +43,11 @@ jobs:
     steps:
       - name: Checkout Repository
         id: checkout_repository
-        uses: stacks-sbtc/actions/checkout@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/checkout@181f8c67da2707c66b5e31f24e7418c47adefdd1
 
       - name: Create Tag
         id: create_tag
-        uses: stacks-sbtc/actions/github-script@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/github-script@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           script: |
             const tag = "${{ inputs.tag_name }}";
@@ -72,7 +72,7 @@ jobs:
     steps:
       - name: Trigger Release Workflow
         id: trigger_release
-        uses: stacks-sbtc/actions/github-script@095003d35774808f27b29f272976b1e01704ca93
+        uses: stacks-sbtc/actions/github-script@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           script: |
             const response = await github.request('POST /repos/{owner}/{repo}/dispatches', {

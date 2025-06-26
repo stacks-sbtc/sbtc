@@ -181,9 +181,10 @@ impl From<model::WithdrawalSigner> for SignerWithdrawalDecision {
 /// Represents a request to sign a Stacks transaction.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StacksTransactionSignRequest {
-    /// This is the bitcoin aggregate key that was output from DKG. It is used
-    /// to identify the signing set for the transaction.
-    pub aggregate_key: PublicKey,
+    /// **Deprecated**. This is the aggregate key that was output from DKG.
+    /// It was used to identify the signing set for the transaction, but is
+    /// unnecessary now.
+    pub aggregate_key: Option<PublicKey>,
     /// The contract call transaction to sign.
     pub contract_tx: StacksTx,
     /// The nonce to use for the transaction.

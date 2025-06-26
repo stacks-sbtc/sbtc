@@ -119,14 +119,14 @@ pub async fn get_deposit_entries_by_reclaim_pubkeys_hash(
 
 /// Hacky exhaustive list of all possible statuses that we will iterate over in order to
 /// get every deposit present.
-/// TODO(https://github.com/stacks-sbtc/sbtc/issues/1693)
+/// TODO(1693): Split Emily status enum for deposits and withdrawals
 const ALL_STATUSES: &[Status] = &[
     Status::Accepted,
     Status::Confirmed,
     Status::Failed,
     Status::Pending,
     Status::Reprocessing,
-    Status::RBF,
+    Status::Rbf,
 ];
 
 /// Gets all deposit entries modified from (on or after) a given height.

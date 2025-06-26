@@ -150,8 +150,8 @@ impl DepositUpdate {
             bitcoin_tx_output_index: self.bitcoin_tx_output_index,
             bitcoin_txid: self.bitcoin_txid.clone(),
         };
-        // Only RBF transactions can have a replaced_by_tx.
-        if self.status != Status::RBF && self.replaced_by_tx.is_some() {
+        // Only Rbf transactions can have a replaced_by_tx.
+        if self.status != Status::Rbf && self.replaced_by_tx.is_some() {
             return Err(error::ValidationError::InvalidReplacedByTxStatus(
                 self.status,
                 self.bitcoin_txid,
@@ -173,7 +173,7 @@ impl DepositUpdate {
             Status::Pending => StatusEntry::Pending,
             Status::Reprocessing => StatusEntry::Reprocessing,
             Status::Failed => StatusEntry::Failed,
-            Status::RBF => StatusEntry::RBF(self.replaced_by_tx.ok_or(
+            Status::Rbf => StatusEntry::Rbf(self.replaced_by_tx.ok_or(
                 ValidationError::DepositMissingReplacementTx(
                     self.bitcoin_txid,
                     self.bitcoin_tx_output_index,
