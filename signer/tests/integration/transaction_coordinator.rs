@@ -118,6 +118,7 @@ use stacks_common::types::chainstate::ConsensusHash;
 use stacks_common::types::chainstate::SortitionId;
 use test_case::test_case;
 use test_log::test;
+use tokio::task::JoinHandle;
 use tokio_stream::wrappers::BroadcastStream;
 use url::Url;
 
@@ -644,6 +645,79 @@ async fn mock_stacks_core<D, B, E>(
             .returning(|_, _| Box::pin(std::future::ready(Ok(false))));
     })
     .await;
+}
+
+/// Start the signers event loops and return the join handles.
+async fn start_event_loops<C>(ctx: &C, network: &WanNetwork) -> Vec<JoinHandle<Result<(), Error>>>
+where
+    C: Context + 'static,
+{
+    let start_count = Arc::new(AtomicU8::new(0));
+    let mut handles: Vec<tokio::task::JoinHandle<Result<(), Error>>> = Vec::new();
+
+    let private_key = ctx.config().signer.private_key;
+    let net = network.connect(ctx);
+
+    ctx.state().set_sbtc_contracts_deployed();
+    let ev = TxCoordinatorEventLoop {
+        network: net.spawn(),
+        context: ctx.clone(),
+        context_window: 10000,
+        private_key,
+        signing_round_max_duration: Duration::from_secs(10),
+        bitcoin_presign_request_max_duration: Duration::from_secs(10),
+        dkg_max_duration: Duration::from_secs(10),
+        is_epoch3: true,
+    };
+    let counter = start_count.clone();
+    handles.push(tokio::spawn(async move {
+        counter.fetch_add(1, Ordering::Relaxed);
+        ev.run().await
+    }));
+
+    let ev = TxSignerEventLoop {
+        network: net.spawn(),
+        context: ctx.clone(),
+        context_window: 10000,
+        wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
+        signer_private_key: private_key,
+        rng: rand::rngs::OsRng,
+        dkg_begin_pause: None,
+        dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
+        stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+    };
+    let counter = start_count.clone();
+    handles.push(tokio::spawn(async move {
+        counter.fetch_add(1, Ordering::Relaxed);
+        ev.run().await
+    }));
+
+    let ev = RequestDeciderEventLoop {
+        network: net.spawn(),
+        context: ctx.clone(),
+        context_window: 10000,
+        deposit_decisions_retry_window: 1,
+        withdrawal_decisions_retry_window: 1,
+        blocklist_checker: Some(()),
+        signer_private_key: private_key,
+    };
+    let counter = start_count.clone();
+    handles.push(tokio::spawn(async move {
+        counter.fetch_add(1, Ordering::Relaxed);
+        ev.run().await
+    }));
+
+    let block_observer = BlockObserver {
+        context: ctx.clone(),
+        bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT).await,
+    };
+    let counter = start_count.clone();
+    handles.push(tokio::spawn(async move {
+        counter.fetch_add(1, Ordering::Relaxed);
+        block_observer.run().await
+    }));
+
+    handles
 }
 
 /// Tests that the coordinator deploys the smart contracts in the correct
