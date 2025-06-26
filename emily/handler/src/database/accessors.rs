@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use aws_sdk_dynamodb::types::AttributeValue;
 use aws_sdk_dynamodb::types::error::ConditionalCheckFailedException;
 use serde_dynamo::Item;
+use strum::EnumIter;
 
 use tracing::{debug, warn};
 
@@ -120,26 +121,6 @@ pub async fn get_deposit_entries_by_reclaim_pubkeys_hash(
     .await
 }
 
-/// Hacky exhaustive list of all possible statuses that we will iterate over in order to
-/// get every deposit present.
-const ALL_DEPOSIT_STATUSES: &[DepositStatus] = &[
-    DepositStatus::Accepted,
-    DepositStatus::Confirmed,
-    DepositStatus::Failed,
-    DepositStatus::Pending,
-    DepositStatus::Reprocessing,
-    DepositStatus::Rbf,
-];
-/// Hacky exhaustive list of all possible withdrawal statuses that we will iterate over in order to
-/// get every withdrawal present.
-const ALL_WITHDRAWAL_STATUSES: &[WithdrawalStatus] = &[
-    WithdrawalStatus::Accepted,
-    WithdrawalStatus::Confirmed,
-    WithdrawalStatus::Failed,
-    WithdrawalStatus::Pending,
-    WithdrawalStatus::Reprocessing,
-];
-
 /// Gets all deposit entries modified from (on or after) a given height.
 pub async fn get_all_deposit_entries_modified_from_height(
     context: &EmilyContext,
@@ -147,7 +128,7 @@ pub async fn get_all_deposit_entries_modified_from_height(
     maybe_page_size: Option<u16>,
 ) -> Result<Vec<DepositInfoEntry>, Error> {
     let mut all = Vec::new();
-    for status in ALL_DEPOSIT_STATUSES {
+    for status in DepositStatus::iter() {
         let mut received = get_all_deposit_entries_modified_from_height_with_status(
             context,
             status,
@@ -405,7 +386,7 @@ pub async fn get_all_withdrawal_entries_modified_from_height(
     maybe_page_size: Option<u16>,
 ) -> Result<Vec<WithdrawalInfoEntry>, Error> {
     let mut all = Vec::new();
-    for status in ALL_WITHDRAWAL_STATUSES {
+    for status in WithdrawalStatus::iter() {
         let mut received = get_all_withdrawal_entries_modified_from_height_with_status(
             context,
             status,
@@ -795,7 +776,7 @@ async fn calculate_sbtc_left_for_withdrawals(
     let minimum_stacks_height_in_window =
         get_oldest_stacks_block_in_range(context, bitcoin_end_block, bitcoin_tip).await?;
 
-    let all_statuses_except_failed: Vec<_> = ALL_WITHDRAWAL_STATUSES
+    let all_statuses_except_failed: Vec<_> = WithdrawalStatus::iter()
         .iter()
         .filter(|status| **status != WithdrawalStatus::Failed)
         .collect();

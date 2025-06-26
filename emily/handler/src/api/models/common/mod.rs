@@ -1,6 +1,7 @@
 //! Request structures for deposit api calls.
 
 use serde::{Deserialize, Serialize};
+use strum::EnumIter;
 use utoipa::{ToResponse, ToSchema};
 
 /// Common request structures.
@@ -22,6 +23,7 @@ pub mod requests;
     Deserialize,
     ToSchema,
     ToResponse,
+    EnumIter,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum DepositStatus {
@@ -66,6 +68,7 @@ pub enum DepositStatus {
     Deserialize,
     ToSchema,
     ToResponse,
+    EnumIter,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum WithdrawalStatus {
