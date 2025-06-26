@@ -98,6 +98,9 @@ pub enum StatusEntry {
     Confirmed(Fulfillment),
     /// The operation was not fulfilled.
     Failed,
+    /// Transaction was replaced by another transaction via RBF.
+    /// Inner string is transaction ID of replacement transaction.
+    Rbf(String),
 }
 
 impl From<&StatusEntry> for Status {
@@ -108,6 +111,7 @@ impl From<&StatusEntry> for Status {
             StatusEntry::Accepted => Status::Accepted,
             StatusEntry::Confirmed(_) => Status::Confirmed,
             StatusEntry::Failed => Status::Failed,
+            StatusEntry::Rbf(_) => Status::Rbf,
         }
     }
 }

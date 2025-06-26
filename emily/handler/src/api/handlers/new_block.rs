@@ -276,6 +276,7 @@ async fn handle_completed_deposit(
             stacks_txid: hex::encode(event.txid.0),
         }),
         status_message: format!("Included in block {}", event.block_id.to_hex()),
+        replaced_by_tx: None,
     })
 }
 

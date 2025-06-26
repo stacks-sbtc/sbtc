@@ -74,6 +74,9 @@ pub struct DepositEntry {
     /// If the reclaim script is in unknown format, this field will be None.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reclaim_pubkeys_hash: Option<String>,
+    /// Transaction ID of transaction which replaced this transaction during an RBF.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replaced_by_tx: Option<String>,
 }
 
 /// Implements versioned entry trait for the deposit entry.
@@ -220,6 +223,14 @@ impl DepositEntry {
         } else {
             self.fulfillment = None;
         }
+        if new_status == Status::Rbf {
+            self.replaced_by_tx = match &latest_event.status {
+                StatusEntry::Rbf(replaced_by_tx) => Some(replaced_by_tx.clone()),
+                _ => None,
+            };
+        } else {
+            self.replaced_by_tx = None;
+        }
         self.status = new_status;
         self.last_update_height = new_last_update_height;
         self.last_update_block_hash = latest_event.stacks_block_hash;
@@ -243,6 +254,10 @@ impl TryFrom<DepositEntry> for Deposit {
             StatusEntry::Confirmed(fulfillment) => Some(fulfillment.clone()),
             _ => None,
         };
+        let replaced_by_tx = match &latest_event.status {
+            StatusEntry::Rbf(replaced_by_tx) => Some(replaced_by_tx.clone()),
+            _ => None,
+        };
 
         // Create deposit from table entry.
         Ok(Deposit {
@@ -261,6 +276,7 @@ impl TryFrom<DepositEntry> for Deposit {
             reclaim_script: deposit_entry.reclaim_script,
             deposit_script: deposit_entry.deposit_script,
             fulfillment,
+            replaced_by_tx,
         })
     }
 }
@@ -736,6 +752,7 @@ mod tests {
             fulfillment: None,
             history: vec![pending, accepted.clone()],
             reclaim_pubkeys_hash: None,
+            replaced_by_tx: None,
         };
 
         let update = ValidatedDepositUpdate {
@@ -776,6 +793,7 @@ mod tests {
             fulfillment: None,
             history: vec![pending.clone()],
             reclaim_pubkeys_hash: None,
+            replaced_by_tx: None,
         };
 
         let update = ValidatedDepositUpdate {
@@ -834,6 +852,7 @@ mod tests {
             fulfillment: Some(fulfillment.clone()),
             history: vec![pending.clone(), accepted.clone(), confirmed.clone()],
             reclaim_pubkeys_hash: Some(hex::encode([1u8; 32])),
+            replaced_by_tx: None,
         };
 
         // Ensure the deposit is valid.

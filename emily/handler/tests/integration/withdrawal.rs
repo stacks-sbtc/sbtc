@@ -763,6 +763,77 @@ async fn update_withdrawals_is_not_forbidden_for_sidecar(
 }
 
 #[tokio::test]
+async fn withdrawal_cant_be_rbf() {
+    // the testing configuration has privileged access to all endpoints.
+    let testing_configuration = clean_setup().await;
+
+    // the user configuration access depends on the api_key.
+    let user_configuration = testing_configuration.clone();
+    // Arrange.
+    // --------
+    let request_id = 1;
+
+    let chainstate = Chainstate {
+        stacks_block_hash: "test_block_hash".to_string(),
+        stacks_block_height: 1,
+        bitcoin_block_height: Some(Some(1)),
+    };
+
+    set_chainstate(&testing_configuration, chainstate.clone())
+        .await
+        .expect("Received an error after making a valid set chainstate api call.");
+
+    // Setup test withdrawal transaction.
+    let request = CreateWithdrawalRequestBody {
+        amount: 10000,
+        parameters: Box::new(WithdrawalParameters { max_fee: 100 }),
+        recipient: RECIPIENT.into(),
+        sender: SENDER.into(),
+        request_id,
+        stacks_block_hash: chainstate.stacks_block_hash.clone(),
+        stacks_block_height: chainstate.stacks_block_height,
+        txid: "test_txid".to_string(),
+    };
+
+    // Create the withdrawal with the privileged configuration.
+    apis::withdrawal_api::create_withdrawal(&testing_configuration, request.clone())
+        .await
+        .expect("Received an error after making a valid create withdrawal request api call.");
+
+    let response = apis::withdrawal_api::update_withdrawals_sidecar(
+        &user_configuration,
+        UpdateWithdrawalsRequestBody {
+            withdrawals: vec![WithdrawalUpdate {
+                request_id,
+                fulfillment: None,
+                status: Status::Rbf,
+                status_message: "foo".into(),
+            }],
+        },
+    )
+    .await;
+
+    // Update withdrawal is always a batch with multistatus.
+    assert!(response.is_ok());
+    let response = response.unwrap();
+    assert_eq!(response.withdrawals.len(), 1);
+    let withdrawal = response
+        .withdrawals
+        .first()
+        .expect("No withdrawal in response")
+        .clone();
+
+    // Withdrawal can not be RBF, so it is BAD REQUEST.
+    assert_eq!(withdrawal.status, 400);
+
+    // Check that withdrawal status wasn't changed.
+    let withdrawal = apis::withdrawal_api::get_withdrawal(&user_configuration, request_id)
+        .await
+        .expect("Error during valid API call");
+    assert_eq!(withdrawal.status, Status::Pending);
+}
+
+#[tokio::test]
 async fn emily_process_withdrawal_updates_when_some_of_them_already_accepted() {
     // the testing configuration has privileged access to all endpoints.
     let testing_configuration = clean_setup().await;

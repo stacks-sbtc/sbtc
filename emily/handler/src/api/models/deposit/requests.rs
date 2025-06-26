@@ -130,6 +130,9 @@ pub struct DepositUpdate {
     /// Details about the on chain artifacts that fulfilled the deposit.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fulfillment: Option<Fulfillment>,
+    /// Transaction ID of the transaction that replaced this one via RBF.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replaced_by_tx: Option<String>,
 }
 
 impl DepositUpdate {
@@ -145,8 +148,16 @@ impl DepositUpdate {
         // Make key.
         let key = DepositEntryKey {
             bitcoin_tx_output_index: self.bitcoin_tx_output_index,
-            bitcoin_txid: self.bitcoin_txid,
+            bitcoin_txid: self.bitcoin_txid.clone(),
         };
+        // Only Rbf transactions can have a replaced_by_tx.
+        if self.status != Status::Rbf && self.replaced_by_tx.is_some() {
+            return Err(error::ValidationError::InvalidReplacedByTxStatus(
+                self.status,
+                self.bitcoin_txid,
+                self.bitcoin_tx_output_index,
+            ));
+        }
         // Make status entry.
         let status_entry: StatusEntry = match self.status {
             Status::Confirmed => {
@@ -162,6 +173,12 @@ impl DepositUpdate {
             Status::Pending => StatusEntry::Pending,
             Status::Reprocessing => StatusEntry::Reprocessing,
             Status::Failed => StatusEntry::Failed,
+            Status::Rbf => StatusEntry::Rbf(self.replaced_by_tx.ok_or(
+                ValidationError::DepositMissingReplacementTx(
+                    self.bitcoin_txid,
+                    self.bitcoin_tx_output_index,
+                ),
+            )?),
         };
         // Make the new event.
         let event = DepositEvent {
@@ -189,10 +206,10 @@ impl UpdateDepositsRequestBody {
     /// # Errors
     ///
     /// - `ValidationError::DepositsMissingFulfillment`: If any of the deposit updates are missing a fulfillment.
-    pub fn try_into_validated_update_request(
+    pub fn into_validated_update_request(
         self,
         chainstate: Chainstate,
-    ) -> Result<ValidatedUpdateDepositsRequest, error::Error> {
+    ) -> ValidatedUpdateDepositsRequest {
         // Validate all the deposit updates.
         let mut deposits: Vec<(usize, Result<ValidatedDepositUpdate, ValidationError>)> = vec![];
 
@@ -233,7 +250,7 @@ impl UpdateDepositsRequestBody {
             Err(_) => u64::MAX, // Place errors at the end
         });
 
-        Ok(ValidatedUpdateDepositsRequest { deposits })
+        ValidatedUpdateDepositsRequest { deposits }
     }
 }
 

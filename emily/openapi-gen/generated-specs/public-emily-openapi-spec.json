@@ -1993,6 +1993,11 @@
             "type": "string",
             "description": "Raw reclaim script binary in hex."
           },
+          "replacedByTx": {
+            "type": "string",
+            "description": "Transaction ID of the transaction that replaced this one via RBF.",
+            "nullable": true
+          },
           "status": {
             "$ref": "#/components/schemas/Status"
           },
@@ -2108,6 +2113,11 @@
                 "$ref": "#/components/schemas/Fulfillment"
               }
             ],
+            "nullable": true
+          },
+          "replacedByTx": {
+            "type": "string",
+            "description": "Transaction ID of the transaction that replaced this one via RBF.",
             "nullable": true
           },
           "status": {
@@ -2343,7 +2353,8 @@
           "reprocessing",
           "accepted",
           "confirmed",
-          "failed"
+          "failed",
+          "rbf"
         ]
       },
       "UpdateDepositsRequestBody": {
