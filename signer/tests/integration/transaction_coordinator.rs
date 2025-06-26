@@ -2576,7 +2576,30 @@ struct TestThresholds {
     second: NonZeroU16,
 }
 
+/// Test that three signers can successfully re-run DKG after the signature
+/// threshold changes. 
+/// 
+/// Have three signers run DKG, and sweep a deposit. Then have the three
+/// signers update the signature threshold, run DKG again, and sweep two
+/// deposits in two separate sweep transactions to the new scriptPubKey.
+/// 
+/// The test setup is as follows:
+/// 1. There are three "signers" contexts. Each context points to its own
+///    real postgres database, and they have their own private key. Each
+///    database is populated with the same data.
+/// 2. Each context is given to a block observer, a tx signer, and a tx
+///    coordinator, where these event loops are spawned as separate tasks.
+/// 3. The signers communicate with our in-memory network struct.
+/// 4. A real Emily server is running in the background.
+/// 5. A real bitcoin-core node is running in the background.
+/// 6. Stacks-core is mocked.
 ///
+/// To start the test environment do:
+/// ```bash
+/// make integration-env-up-ci
+/// ```
+///
+/// then, once everything is up and running, run the test.
 #[test_case(TestThresholds {
     first: NonZeroU16::new(2).unwrap(),
     second: NonZeroU16::new(3).unwrap(),
@@ -2585,7 +2608,7 @@ struct TestThresholds {
     first: NonZeroU16::new(3).unwrap(),
     second: NonZeroU16::new(2).unwrap(),
 }; "lower the threshold")]
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) {
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let (rpc, faucet) = regtest::initialize_blockchain();
@@ -3045,7 +3068,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     // Okay, now that someone other than the new signer has been
     // coordinator, we should have successfully signed and submitted a
     // sweep for our last deposit.
-    let sweep_txid: BitcoinTxId = {
+    let sweep_txid1: BitcoinTxId = {
         let (ctx, _, _, _) = signers.first().unwrap();
         let txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
         assert_eq!(txids.len(), 1);
@@ -3055,7 +3078,44 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     // We confirm another block so that the a complete-deposit contract
     // call gets constructed and submitted by the signers. Any should be
     // able to do this part.
-    let block_hash = faucet.generate_block();
+    let block_hash1 = faucet.generate_block();
+    wait_for_signers(&signers).await;
+
+    let utxo = depositor.get_utxos(rpc, None).pop().unwrap();
+
+    let amount = 4_500_000;
+    let signers_public_key = second_dkg_shares.aggregate_key.into();
+    let max_fee = amount / 2;
+    let (deposit_tx, deposit_request, _) =
+        make_deposit_request(&depositor, amount, utxo, max_fee, signers_public_key);
+    rpc.send_raw_transaction(&deposit_tx).unwrap();
+
+    assert_eq!(deposit_tx.compute_txid(), deposit_request.outpoint.txid);
+
+    let body = deposit_request.as_emily_request(&deposit_tx);
+    let _ = deposit_api::create_deposit(emily_client.config(), body)
+        .await
+        .unwrap();
+
+    // We confirm another block so that the a complete-deposit contract
+    // call gets constructed and submitted by the signers. Any should be
+    // able to do this part.
+    faucet.generate_block();
+    wait_for_signers(&signers).await;
+
+    // Okay, now that someone other than the new signer has been
+    // coordinator, we should have successfully signed and submitted a
+    // sweep for our last deposit.
+    let sweep_txid2: BitcoinTxId = {
+        let (ctx, _, _, _) = signers.first().unwrap();
+        let txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
+        assert_eq!(txids.len(), 1);
+        txids[0].into()
+    };
+
+    // We confirm another block so that this complete-deposit contract
+    // call gets constructed and submitted by the signers.
+    let block_hash2 = faucet.generate_block();
     wait_for_signers(&signers).await;
 
     // =========================================================================
@@ -3078,7 +3138,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
 
-    more_asserts::assert_ge!(broadcast_stacks_txs.len(), 2);
+    more_asserts::assert_ge!(broadcast_stacks_txs.len(), 3);
 
     let mut complete_deposit_txs: Vec<StacksTransaction> = broadcast_stacks_txs
         .iter()
@@ -3138,25 +3198,39 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     for tx in complete_deposit_txs.iter() {
         assert_stacks_transaction_kind::<CompleteDepositV1>(tx);
     }
-    // There were two deposits, so two distinct complete-deposit
+    // There were three deposits, so three distinct complete-deposit
     // contract calls.
-    assert_eq!(complete_deposit_txs.len(), 2);
+    assert_eq!(complete_deposit_txs.len(), 3);
 
     // Now lets check the bitcoin transaction, first we get it.
     let (ctx, _, _, _) = signers.first().unwrap();
-    let tx_info = ctx
+    let tx_info1 = ctx
         .bitcoin_client
-        .get_tx_info(&sweep_txid, &block_hash)
+        .get_tx_info(&sweep_txid1, &block_hash1)
         .unwrap()
         .unwrap();
 
     // We check that the scriptPubKey of the first input and output against
     // what is expected from the rows in the database.
-    let signers_prevout_script_pubkey = tx_info.prevout(0).unwrap().script_pubkey;
-    let signer_new_script_pubkey = &tx_info.tx.output[0].script_pubkey;
+    let signers_prevout_script_pubkey = tx_info1.prevout(0).unwrap().script_pubkey;
+    let signer_new_script_pubkey = &tx_info1.tx.output[0].script_pubkey;
     let second_script_pubkey = second_dkg_shares.script_pubkey.deref();
 
     assert_eq!(signers_prevout_script_pubkey, &first_script_pubkey);
+    assert_eq!(signer_new_script_pubkey, second_script_pubkey);
+
+    let tx_info2 = ctx
+        .bitcoin_client
+        .get_tx_info(&sweep_txid2, &block_hash2)
+        .unwrap()
+        .unwrap();
+
+    // We check that the scriptPubKey of the first input and output against
+    // what is expected from the rows in the database.
+    let signers_prevout_script_pubkey = tx_info2.prevout(0).unwrap().script_pubkey;
+    let signer_new_script_pubkey = &tx_info2.tx.output[0].script_pubkey;
+
+    assert_eq!(signers_prevout_script_pubkey, second_script_pubkey);
     assert_eq!(signer_new_script_pubkey, second_script_pubkey);
 
     // Lastly we check that out database has the sweep transaction
@@ -3169,7 +3243,22 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
             AND output_type = 'signers_output'
             "#,
         )
-        .bind(sweep_txid)
+        .bind(sweep_txid1)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+
+        assert!(db.is_signer_script_pub_key(&script_pubkey).await.unwrap());
+
+        let script_pubkey = sqlx::query_scalar::<_, model::ScriptPubKey>(
+            r#"
+            SELECT script_pubkey
+            FROM sbtc_signer.bitcoin_tx_outputs
+            WHERE txid = $1
+            AND output_type = 'signers_output'
+            "#,
+        )
+        .bind(sweep_txid2)
         .fetch_one(db.pool())
         .await
         .unwrap();
@@ -3179,7 +3268,32 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     }
 }
 
+
+/// Test that three signers can successfully re-run DKG after the signature
+/// threshold changes and a new signer is added to the signer set. 
+/// 
+/// Have three signers run DKG, and sweep a deposit. Then have the three
+/// signers update the signature threshold, add a new signer to their
+/// configs, run DKG again, and sweep two deposits in two separate sweep
+/// transactions to the new scriptPubKey.
+/// 
+/// The test setup is as follows:
+/// 1. There are three "signers" contexts. Each context points to its own
+///    real postgres database, and they have their own private key. Each
+///    database is populated with the same data.
+/// 2. Each context is given to a block observer, a tx signer, and a tx
+///    coordinator, where these event loops are spawned as separate tasks.
+/// 3. The signers communicate with our in-memory network struct.
+/// 4. A real Emily server is running in the background.
+/// 5. A real bitcoin-core node is running in the background.
+/// 6. Stacks-core is mocked.
 ///
+/// To start the test environment do:
+/// ```bash
+/// make integration-env-up-ci
+/// ```
+///
+/// then, once everything is up and running, run the test.
 #[test_case(TestThresholds {
     first: NonZeroU16::new(1).unwrap(),
     second: NonZeroU16::new(3).unwrap(),
@@ -3188,13 +3302,11 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     first: NonZeroU16::new(3).unwrap(),
     second: NonZeroU16::new(2).unwrap(),
 }; "lower the threshold")]
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds: TestThresholds) {
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let (rpc, faucet) = regtest::initialize_blockchain();
     let mut rng = get_rng();
-
-    signer::logging::setup_logging("info,signer=debug", false);
 
     // We need to populate our databases, so let's fetch the data.
     let emily_client = EmilyClient::try_new(
@@ -3682,7 +3794,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     // Okay, now that someone other than the new signer has been
     // coordinator, we should have successfully signed and submitted a
     // sweep for our last deposit.
-    let sweep_txid: BitcoinTxId = {
+    let sweep_txid1: BitcoinTxId = {
         let (ctx, _, _, _) = signers.first().unwrap();
         let txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
         assert_eq!(txids.len(), 1);
@@ -3692,7 +3804,44 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     // We confirm another block so that the a complete-deposit contract
     // call gets constructed and submitted by the signers. Any should be
     // able to do this part.
-    let block_hash = faucet.generate_block();
+    let block_hash1 = faucet.generate_block();
+    wait_for_signers(&signers).await;
+
+    let utxo = depositor.get_utxos(rpc, None).pop().unwrap();
+
+    let amount = 4_500_000;
+    let signers_public_key = second_dkg_shares.aggregate_key.into();
+    let max_fee = amount / 2;
+    let (deposit_tx, deposit_request, _) =
+        make_deposit_request(&depositor, amount, utxo, max_fee, signers_public_key);
+    rpc.send_raw_transaction(&deposit_tx).unwrap();
+
+    assert_eq!(deposit_tx.compute_txid(), deposit_request.outpoint.txid);
+
+    let body = deposit_request.as_emily_request(&deposit_tx);
+    let _ = deposit_api::create_deposit(emily_client.config(), body)
+        .await
+        .unwrap();
+
+    // We confirm another block so that the a complete-deposit contract
+    // call gets constructed and submitted by the signers. Any should be
+    // able to do this part.
+    faucet.generate_block();
+    wait_for_signers(&signers).await;
+
+    // Okay, now that someone other than the new signer has been
+    // coordinator, we should have successfully signed and submitted a
+    // sweep for our last deposit.
+    let sweep_txid2: BitcoinTxId = {
+        let (ctx, _, _, _) = signers.first().unwrap();
+        let txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
+        assert_eq!(txids.len(), 1);
+        txids[0].into()
+    };
+
+    // We confirm another block so that this complete-deposit contract
+    // call gets constructed and submitted by the signers.
+    let block_hash2 = faucet.generate_block();
     wait_for_signers(&signers).await;
 
     // =========================================================================
@@ -3715,7 +3864,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
 
-    more_asserts::assert_ge!(broadcast_stacks_txs.len(), 2);
+    more_asserts::assert_ge!(broadcast_stacks_txs.len(), 3);
 
     let mut complete_deposit_txs: Vec<StacksTransaction> = broadcast_stacks_txs
         .iter()
@@ -3775,25 +3924,39 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     for tx in complete_deposit_txs.iter() {
         assert_stacks_transaction_kind::<CompleteDepositV1>(tx);
     }
-    // There were two deposits, so two distinct complete-deposit
+    // There were three deposits, so three distinct complete-deposit
     // contract calls.
-    assert_eq!(complete_deposit_txs.len(), 2);
+    assert_eq!(complete_deposit_txs.len(), 3);
 
     // Now lets check the bitcoin transaction, first we get it.
     let (ctx, _, _, _) = signers.first().unwrap();
-    let tx_info = ctx
+    let tx_info1 = ctx
         .bitcoin_client
-        .get_tx_info(&sweep_txid, &block_hash)
+        .get_tx_info(&sweep_txid1, &block_hash1)
         .unwrap()
         .unwrap();
 
     // We check that the scriptPubKey of the first input and output against
     // what is expected from the rows in the database.
-    let signers_prevout_script_pubkey = tx_info.prevout(0).unwrap().script_pubkey;
-    let signer_new_script_pubkey = &tx_info.tx.output[0].script_pubkey;
+    let signers_prevout_script_pubkey = tx_info1.prevout(0).unwrap().script_pubkey;
+    let signer_new_script_pubkey = &tx_info1.tx.output[0].script_pubkey;
     let second_script_pubkey = second_dkg_shares.script_pubkey.deref();
 
     assert_eq!(signers_prevout_script_pubkey, &first_script_pubkey);
+    assert_eq!(signer_new_script_pubkey, second_script_pubkey);
+
+    let tx_info2 = ctx
+        .bitcoin_client
+        .get_tx_info(&sweep_txid2, &block_hash2)
+        .unwrap()
+        .unwrap();
+
+    // We check that the scriptPubKey of the first input and output against
+    // what is expected from the rows in the database.
+    let signers_prevout_script_pubkey = tx_info2.prevout(0).unwrap().script_pubkey;
+    let signer_new_script_pubkey = &tx_info2.tx.output[0].script_pubkey;
+
+    assert_eq!(signers_prevout_script_pubkey, second_script_pubkey);
     assert_eq!(signer_new_script_pubkey, second_script_pubkey);
 
     // Lastly we check that out database has the sweep transaction
@@ -3806,7 +3969,22 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
             AND output_type = 'signers_output'
             "#,
         )
-        .bind(sweep_txid)
+        .bind(sweep_txid1)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+
+        assert!(db.is_signer_script_pub_key(&script_pubkey).await.unwrap());
+
+        let script_pubkey = sqlx::query_scalar::<_, model::ScriptPubKey>(
+            r#"
+            SELECT script_pubkey
+            FROM sbtc_signer.bitcoin_tx_outputs
+            WHERE txid = $1
+            AND output_type = 'signers_output'
+            "#,
+        )
+        .bind(sweep_txid2)
         .fetch_one(db.pool())
         .await
         .unwrap();
