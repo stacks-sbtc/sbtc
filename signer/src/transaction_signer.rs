@@ -494,7 +494,7 @@ where
         // since it will just some waste of signer time, not a functionality issue.
         if self.used_presign_blocks.len() > crate::BITCOIN_CONFIRMATION_DELAY as usize {
             self.used_presign_blocks.retain(|b| {
-                b.block_height >= chain_tip.block_height - crate::BITCOIN_CONFIRMATION_DELAY
+                b.block_height >= chain_tip.block_height.saturating_sub(crate::BITCOIN_CONFIRMATION_DELAY)
             });
         }
 
