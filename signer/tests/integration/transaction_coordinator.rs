@@ -652,12 +652,11 @@ where
     C: Context + 'static,
 {
     let start_count = Arc::new(AtomicU8::new(0));
-    let mut handles: Vec<tokio::task::JoinHandle<Result<(), Error>>> = Vec::new();
+    let mut handles: Vec<JoinHandle<Result<(), Error>>> = Vec::new();
 
     let private_key = ctx.config().signer.private_key;
     let net = network.connect(ctx);
 
-    ctx.state().set_sbtc_contracts_deployed();
     let ev = TxCoordinatorEventLoop {
         network: net.spawn(),
         context: ctx.clone(),
@@ -1581,6 +1580,7 @@ async fn sign_bitcoin_transaction() {
     //   we use a counter to notify us when that happens.
     // =========================================================================
     for ctx in signers.iter() {
+        ctx.state().set_sbtc_contracts_deployed();
         start_event_loops(ctx, &network).await;
     }
 
@@ -1869,6 +1869,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     //   we use a counter to notify us when that happens.
     // =========================================================================
     for ctx in signers.iter() {
+        ctx.state().set_sbtc_contracts_deployed();
         start_event_loops(ctx, &network).await;
     }
 
@@ -2378,6 +2379,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     let mut handles = Vec::new();
 
     for ctx in signers.iter() {
+        ctx.state().set_sbtc_contracts_deployed();
         handles.extend(start_event_loops(ctx, &network).await);
     }
 
@@ -2517,7 +2519,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
 
     for ctx_old in db_kp {
         let db = ctx_old.inner_storage();
-        let ctx = TestContext::builder()
+        let mut ctx = TestContext::builder()
             .with_storage(db.clone())
             .with_first_bitcoin_core_client()
             .with_emily_client(emily_client.clone())
@@ -2532,7 +2534,12 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
 
         backfill_bitcoin_blocks(&db, rpc, &chain_tip_info.hash).await;
 
+        ctx.state().set_sbtc_contracts_deployed();
         start_event_loops(&ctx, &network).await;
+
+        let broadcast_stacks_tx = broadcast_stacks_tx.clone();
+        let chain_tip_info = chain_tip_info.clone();
+        mock_stacks_core(&mut ctx, chain_tip_info, db.clone(), broadcast_stacks_tx).await;
 
         signers.push(ctx);
     }
@@ -2937,6 +2944,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     let mut handles = Vec::new();
 
     for ctx in signers.iter() {
+        ctx.state().set_sbtc_contracts_deployed();
         handles.extend(start_event_loops(ctx, &network).await);
     }
 
@@ -3108,6 +3116,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
 
         backfill_bitcoin_blocks(&db, rpc, &chain_tip_info.hash).await;
 
+        ctx.state().set_sbtc_contracts_deployed();
         start_event_loops(&ctx, &network).await;
 
         let broadcast_stacks_tx = broadcast_stacks_tx.clone();
@@ -3532,6 +3541,7 @@ async fn skip_signer_activites_after_key_rotation() {
     //   we use a counter to notify us when that happens.
     // =========================================================================
     for ctx in signers.iter() {
+        ctx.state().set_sbtc_contracts_deployed();
         start_event_loops(ctx, &network).await;
     }
 
@@ -3977,6 +3987,7 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
     //   we use a counter to notify us when that happens.
     // =========================================================================
     for ctx in signers.iter() {
+        ctx.state().set_sbtc_contracts_deployed();
         start_event_loops(ctx, &network).await;
     }
 
@@ -4656,6 +4667,7 @@ async fn test_conservative_initial_sbtc_limits() {
     //   we use a counter to notify us when that happens.
     // =========================================================================
     for (ctx, _, _) in signers.iter() {
+        ctx.state().set_sbtc_contracts_deployed();
         start_event_loops(ctx, &network).await;
     }
 
