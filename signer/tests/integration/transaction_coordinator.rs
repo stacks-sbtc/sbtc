@@ -1540,6 +1540,9 @@ async fn sign_bitcoin_transaction() {
             .with_first_bitcoin_core_client()
             .with_emily_client(emily_client.clone())
             .with_mocked_stacks_client()
+            .modify_settings(|settings| {
+                settings.signer.private_key = kp.secret_key().into();
+            })
             .build();
 
         backfill_bitcoin_blocks(&db, rpc, &chain_tip_info.hash).await;
@@ -1824,6 +1827,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
                 settings.signer.dkg_target_rounds = NonZeroU32::new(2).unwrap();
                 settings.signer.dkg_min_bitcoin_block_height = Some(dkg_run_two_height.into());
                 settings.signer.bitcoin_processing_delay = Duration::from_millis(200);
+                settings.signer.private_key = kp.secret_key().into();
             })
             .build();
 
@@ -3463,6 +3467,7 @@ async fn skip_signer_activites_after_key_rotation() {
             .with_emily_client(emily_client.clone())
             .with_mocked_stacks_client()
             .modify_settings(|settings| {
+                settings.signer.private_key = kp.secret_key().into();
                 settings.signer.dkg_target_rounds = NonZeroU32::new(2).unwrap();
                 settings.signer.dkg_min_bitcoin_block_height = Some(dkg_run_two_height.into());
                 settings.signer.bitcoin_processing_delay = Duration::from_millis(200);
@@ -3899,6 +3904,9 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
             .with_first_bitcoin_core_client()
             .with_emily_client(emily_client.clone())
             .with_mocked_stacks_client()
+            .modify_settings(|settings| {
+                settings.signer.private_key = kp.secret_key().into();
+            })
             .build();
 
         backfill_bitcoin_blocks(&db, rpc, &chain_tip_info.hash).await;
@@ -4448,6 +4456,7 @@ async fn test_conservative_initial_sbtc_limits() {
             .with_mocked_stacks_client()
             .with_mocked_emily_client()
             .modify_settings(|settings| {
+                settings.signer.private_key = kp.secret_key().into();
                 settings.signer.bootstrap_signing_set = signer_set_public_keys.clone();
                 settings.signer.bootstrap_signatures_required = signatures_required;
             })
@@ -4458,8 +4467,7 @@ async fn test_conservative_initial_sbtc_limits() {
         let aggregate_key = Faker.fake_with_rng(&mut rng);
         prevent_dkg_on_changed_signer_set_info(&ctx, aggregate_key);
 
-        let network = network.connect(&ctx);
-        signers.push((ctx, db, kp, network));
+        signers.push((ctx, db, kp));
     }
 
     // =========================================================================
@@ -4473,7 +4481,7 @@ async fn test_conservative_initial_sbtc_limits() {
         .run_dkg(chain_tip, dkg_txid, &mut rng, DkgSharesStatus::Verified)
         .await;
 
-    for ((_, db, _, _), dkg_shares) in signers.iter_mut().zip(encrypted_shares.iter_mut()) {
+    for ((_, db, _), dkg_shares) in signers.iter_mut().zip(encrypted_shares.iter_mut()) {
         dkg_shares.dkg_shares_status = DkgSharesStatus::Verified;
         dkg_shares.signature_share_threshold = signatures_required;
         signer_set
@@ -4489,7 +4497,7 @@ async fn test_conservative_initial_sbtc_limits() {
     // Setup the emily client mocks.
     // =========================================================================
     let enable_emily_limits = Arc::new(AtomicBool::new(false));
-    for (i, (ctx, _, _, _)) in signers.iter_mut().enumerate() {
+    for (i, (ctx, _, _)) in signers.iter_mut().enumerate() {
         ctx.with_emily_client(|client| {
             // We already stored the deposit, we don't need it from Emily
             client
@@ -4534,7 +4542,7 @@ async fn test_conservative_initial_sbtc_limits() {
     //   Stacks block. This is necessary because we need the stacks chain
     //   tip in the transaction coordinator.
     // =========================================================================
-    for (ctx, _, _, _) in signers.iter_mut() {
+    for (ctx, _, _) in signers.iter_mut() {
         ctx.with_stacks_client(|client| {
             client
                 .expect_get_tenure_info()
@@ -4615,7 +4623,7 @@ async fn test_conservative_initial_sbtc_limits() {
         rpc,
         &bitcoin_client,
     );
-    for (_, db, _, _) in signers.iter_mut() {
+    for (_, db, _) in signers.iter_mut() {
         backfill_bitcoin_blocks(db, rpc, &setup.deposit_block_hash).await;
         setup.store_stacks_genesis_block(db).await;
         setup.store_donation(db).await;
@@ -4631,72 +4639,8 @@ async fn test_conservative_initial_sbtc_limits() {
     // - We only proceed with the test after all processes have started, and
     //   we use a counter to notify us when that happens.
     // =========================================================================
-    let start_count = Arc::new(AtomicU8::new(0));
-
-    for (ctx, _, kp, network) in signers.iter() {
-        ctx.state().set_sbtc_contracts_deployed();
-        let ev = TxCoordinatorEventLoop {
-            network: network.spawn(),
-            context: ctx.clone(),
-            context_window: 10000,
-            private_key: kp.secret_key().into(),
-            signing_round_max_duration: Duration::from_secs(2),
-            bitcoin_presign_request_max_duration: Duration::from_secs(2),
-            dkg_max_duration: Duration::from_secs(10),
-            is_epoch3: true,
-        };
-        let counter = start_count.clone();
-        tokio::spawn(async move {
-            counter.fetch_add(1, Ordering::Relaxed);
-            ev.run().await
-        });
-
-        let ev = TxSignerEventLoop {
-            network: network.spawn(),
-            context: ctx.clone(),
-            context_window: 10000,
-            wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
-            signer_private_key: kp.secret_key().into(),
-            rng: rand::rngs::OsRng,
-            dkg_begin_pause: None,
-            dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
-            stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
-        };
-        let counter = start_count.clone();
-        tokio::spawn(async move {
-            counter.fetch_add(1, Ordering::Relaxed);
-            ev.run().await
-        });
-
-        let ev = RequestDeciderEventLoop {
-            network: network.spawn(),
-            context: ctx.clone(),
-            context_window: 10000,
-            blocklist_checker: Some(()),
-            signer_private_key: kp.secret_key().into(),
-            deposit_decisions_retry_window: 1,
-            withdrawal_decisions_retry_window: 1,
-        };
-        let counter = start_count.clone();
-        tokio::spawn(async move {
-            counter.fetch_add(1, Ordering::Relaxed);
-            ev.run().await
-        });
-
-        let block_observer = BlockObserver {
-            context: ctx.clone(),
-            bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT)
-                .await,
-        };
-        let counter = start_count.clone();
-        tokio::spawn(async move {
-            counter.fetch_add(1, Ordering::Relaxed);
-            block_observer.run().await
-        });
-    }
-
-    while start_count.load(Ordering::SeqCst) < 12 {
-        Sleep::for_millis(10).await;
+    for (ctx, _, _) in signers.iter() {
+        start_event_loops(ctx, &network).await;
     }
 
     // =========================================================================
@@ -4719,7 +4663,7 @@ async fn test_conservative_initial_sbtc_limits() {
     // =========================================================================
     // Check we did NOT process the deposit
     // =========================================================================
-    let (ctx, _, _, _) = signers.first().unwrap();
+    let (ctx, _, _) = signers.first().unwrap();
     let txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
 
     assert!(txids.is_empty());
@@ -4734,7 +4678,7 @@ async fn test_conservative_initial_sbtc_limits() {
     // =========================================================================
     // Check we did process the deposit now
     // =========================================================================
-    let (ctx, _, _, _) = signers.first().unwrap();
+    let (ctx, _, _) = signers.first().unwrap();
     let txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
 
     assert_eq!(txids.len(), 1);
@@ -4745,7 +4689,7 @@ async fn test_conservative_initial_sbtc_limits() {
         setup.deposit_outpoints()[0]
     );
 
-    for (_, db, _, _) in signers {
+    for (_, db, _) in signers {
         testing::storage::drop_db(db).await;
     }
 }
@@ -4808,6 +4752,9 @@ async fn sign_bitcoin_transaction_withdrawals() {
             .with_first_bitcoin_core_client()
             .with_emily_client(emily_client.clone())
             .with_mocked_stacks_client()
+            .modify_settings(|settings| {
+                settings.signer.private_key = kp.secret_key().into();
+            })
             .build();
 
         backfill_bitcoin_blocks(&db, rpc, &chain_tip_info.hash).await;
