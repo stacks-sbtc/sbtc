@@ -68,6 +68,7 @@ use crate::stacks::wallet::MultisigTx;
 use crate::stacks::wallet::SignerWallet;
 use crate::storage::DbRead;
 use crate::storage::model;
+use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::StacksTxId;
 use crate::wsts_state_machine::FireCoordinator;
 use crate::wsts_state_machine::FrostCoordinator;
@@ -226,6 +227,7 @@ where
     pub async fn run(mut self) -> Result<(), Error> {
         tracing::info!("starting transaction coordinator event loop");
         let mut signal_stream = self.context.as_signal_stream(run_loop_message_filter);
+        let public_key = self.signer_public_key();
 
         while let Some(message) = signal_stream.next().await {
             match message {
@@ -236,15 +238,18 @@ where
                         event
                     {
                         tracing::debug!("received signal; processing requests");
-                        if let Err(error) = self.process_new_blocks().await {
-                            tracing::error!(
-                                %error,
-                                "error processing requests; skipping this round"
-                            );
-                        }
-                        tracing::trace!("sending tenure completed signal");
-                        self.context
-                            .signal(TxCoordinatorEvent::TenureCompleted.into())?;
+                        let processed_until_block = match self.process_new_blocks().await {
+                            Ok(maybe_block_hash) => maybe_block_hash,
+                            Err(error) => {
+                                tracing::error!(%error, %public_key, "error processing requests; skipping this round");
+                                None
+                            }
+                        };
+
+                        tracing::trace!(%public_key, "sending tenure completed signal");
+                        self.context.signal(
+                            TxCoordinatorEvent::TenureCompleted(processed_until_block).into(),
+                        )?;
                     }
                 }
             }
@@ -285,86 +290,105 @@ where
         Ok(is_epoch3)
     }
 
-    /// A function for processing new blocks
+    /// Processes new Bitcoin blocks and coordinates protocol actions.
+    ///
+    /// This function checks if the node is eligible to process new blocks and, if so,
+    /// performs all necessary coordinator duties for the current Bitcoin chain tip.
+    /// These include DKG coordination, smart contract deployment, key rotation,
+    /// and constructing and signing Bitcoin and Stacks transactions as needed.
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(Some(block_hash))` with the processed Bitcoin block hash on success,
+    /// * `Err(Error)` if any step fails with an unhandled error.
     #[tracing::instrument(skip_all, fields(
         public_key = %self.signer_public_key(),
         bitcoin_tip_hash = tracing::field::Empty,
         bitcoin_tip_height = tracing::field::Empty,
     ))]
-    pub async fn process_new_blocks(&mut self) -> Result<(), Error> {
-        if !self.is_epoch3().await? {
-            return Ok(());
-        }
-
-        let bitcoin_processing_delay = self.context.config().signer.bitcoin_processing_delay;
-        if bitcoin_processing_delay > Duration::ZERO {
-            tracing::debug!("sleeping before processing new bitcoin block");
-            tokio::time::sleep(bitcoin_processing_delay).await;
-        }
-
-        let bitcoin_chain_tip = self
+    pub async fn process_new_blocks(&mut self) -> Result<Option<BitcoinBlockHash>, Error> {
+        // Attempt to get the current Bitcoin canonical chain tip from the database.
+        let maybe_bitcoin_chain_tip = self
             .context
             .get_storage()
             .get_bitcoin_canonical_chain_tip_ref()
-            .await?
-            .ok_or(Error::NoChainTip)?;
+            .await?;
 
+        // Return early if we are not in Stacks epoch 3 or later, which sBTC requires.
+        if !self.is_epoch3().await? {
+            return Ok(maybe_bitcoin_chain_tip.map(|tip| tip.block_hash));
+        }
+
+        // Unwrap the chain tip or return an error if it is not available, as we cannot
+        // proceed as coordinator without it.
+        let bitcoin_chain_tip = maybe_bitcoin_chain_tip.ok_or(Error::NoChainTip)?;
+        let chain_tip_hash = bitcoin_chain_tip.block_hash;
+
+        // Record chain tip information in the current tracing span.
         let span = tracing::Span::current();
-        span.record(
-            "bitcoin_tip_hash",
-            tracing::field::display(bitcoin_chain_tip.block_hash),
-        );
+        span.record("bitcoin_tip_hash", tracing::field::display(chain_tip_hash));
         span.record("bitcoin_tip_height", *bitcoin_chain_tip.block_height);
-
-        let registry_aggregate_key = self
-            .context
-            .state()
-            .registry_signer_set_info()
-            .map(|info| info.aggregate_key);
 
         // If we are not the coordinator, then we have no business
         // coordinating DKG or constructing bitcoin and stacks
         // transactions, might as well return early.
-        if !self.is_coordinator(bitcoin_chain_tip.as_ref()) {
+        if !self.is_coordinator(&chain_tip_hash) {
             // Before returning, we also check if all the smart contracts are
             // deployed: we do this as some other coordinator could have deployed
             // them, in which case we need to updated our state.
             self.all_smart_contracts_deployed().await?;
 
             tracing::debug!("we are not the coordinator, so nothing to do");
-            return Ok(());
+            return Ok(Some(chain_tip_hash));
         }
 
         tracing::debug!("we are the coordinator");
         metrics::counter!(Metrics::CoordinatorTenuresTotal).increment(1);
 
+        // If a processing delay is configured, sleep for that duration.
+        let bitcoin_processing_delay = self.context.config().signer.bitcoin_processing_delay;
+        if bitcoin_processing_delay > Duration::ZERO {
+            tracing::debug!("sleeping before processing new bitcoin block");
+            tokio::time::sleep(bitcoin_processing_delay).await;
+        }
+
+        // Attempt to retrieve cached signer set information from the context state.
+        let maybe_registry_signer_set_info = self.context.state().registry_signer_set_info();
+        let maybe_registry_aggregate_key = maybe_registry_signer_set_info
+            .as_ref()
+            .map(|info| info.aggregate_key);
+
+        // Ascertain if we need to coordinate DKG.
         tracing::debug!("determining if we need to coordinate DKG");
         let should_coordinate_dkg =
             should_coordinate_dkg(&self.context, &bitcoin_chain_tip).await?;
+
+        // Attempt to coordinate DKG if necessary, otherwise attempt to use the
+        // existing aggregate key from the registry, erroring if it doesn't exist.
         let aggregate_key = if should_coordinate_dkg {
-            match self.coordinate_dkg(bitcoin_chain_tip.as_ref()).await {
+            match self.coordinate_dkg(&chain_tip_hash).await {
                 Ok(key) => key,
                 Err(error) => {
                     tracing::error!(%error, "failed to coordinate DKG; using existing aggregate key");
-                    registry_aggregate_key
-                        .ok_or(Error::MissingAggregateKey(*bitcoin_chain_tip.block_hash))?
+                    maybe_registry_aggregate_key
+                        .ok_or(Error::MissingAggregateKey(*chain_tip_hash))?
                 }
             }
         } else {
-            registry_aggregate_key
-                .ok_or(Error::MissingAggregateKey(*bitcoin_chain_tip.block_hash))?
+            maybe_registry_aggregate_key.ok_or(Error::MissingAggregateKey(*chain_tip_hash))?
         };
-
-        let chain_tip_hash = &bitcoin_chain_tip.block_hash;
 
         tracing::debug!("loading the signer stacks wallet");
         let wallet = self.get_signer_wallet().await?;
 
-        self.deploy_smart_contracts(chain_tip_hash, &wallet, &aggregate_key)
+        // Attempt to deploy smart contracts if they are not already deployed or if
+        // they are out-of-date.
+        self.deploy_smart_contracts(&chain_tip_hash, &wallet, &aggregate_key)
             .await?;
 
+        // Check if we need to submit a rotate-keys transaction and submit it if necessary.
         let rotate_key_txid =
-            self.check_and_submit_rotate_key_transaction(chain_tip_hash, &wallet, &aggregate_key);
+            self.check_and_submit_rotate_key_transaction(&chain_tip_hash, &wallet, &aggregate_key);
 
         // If a rotate-keys contract call has been submitted, we stop our
         // tenure to make sure that all signers are up to date with the
@@ -375,13 +399,10 @@ where
         // transactions.
         if let Some(txid) = rotate_key_txid.await? {
             tracing::info!(%txid, "a rotate-keys contract call has been successfully submitted; stopping my tenure");
-            return Ok(());
+            return Ok(Some(chain_tip_hash));
         }
 
-        let signer_public_keys = self
-            .context
-            .state()
-            .registry_signer_set_info()
+        let signer_public_keys = maybe_registry_signer_set_info
             .map(|info| info.signer_set)
             .ok_or_else(|| Error::NoKeyRotationEvent)?;
 
@@ -403,7 +424,7 @@ where
         .await?;
         tracing::debug!("coordinator tenure completed successfully");
 
-        Ok(())
+        Ok(Some(chain_tip_hash))
     }
 
     /// Submit the rotate key tx for the latest DKG shares, if the aggregate key
