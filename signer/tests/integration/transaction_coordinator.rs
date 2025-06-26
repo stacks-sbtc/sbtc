@@ -654,12 +654,7 @@ async fn deploy_smart_contracts_coordinator() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     // We need to populate our databases, so let's fetch the data.
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(1),
-        None,
-    )
-    .unwrap();
+    let emily_client = EmilyClient::new_text_client();
 
     testing_api::wipe_databases(&emily_client.config().as_testing())
         .await
@@ -1507,12 +1502,7 @@ async fn sign_bitcoin_transaction() {
     let mut rng = get_rng();
 
     // We need to populate our databases, so let's fetch the data.
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(1),
-        None,
-    )
-    .unwrap();
+    let emily_client = EmilyClient::new_text_client();
 
     testing_api::wipe_databases(&emily_client.config().as_testing())
         .await
@@ -1946,12 +1936,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
 
     let mut rng = get_rng();
     // We need to populate our databases, so let's fetch the data.
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(1),
-        None,
-    )
-    .unwrap();
+    let emily_client = EmilyClient::new_text_client();
 
     testing_api::wipe_databases(&emily_client.config().as_testing())
         .await
@@ -2615,12 +2600,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     let mut rng = get_rng();
 
     // We need to populate our databases, so let's fetch the data.
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(1),
-        None,
-    )
-    .unwrap();
+    let emily_client = EmilyClient::new_text_client();
 
     testing_api::wipe_databases(&emily_client.config().as_testing())
         .await
@@ -3308,12 +3288,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     let mut rng = get_rng();
 
     // We need to populate our databases, so let's fetch the data.
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(1),
-        None,
-    )
-    .unwrap();
+    let emily_client = EmilyClient::new_text_client();
 
     testing_api::wipe_databases(&emily_client.config().as_testing())
         .await
@@ -4031,12 +4006,7 @@ async fn skip_signer_activites_after_key_rotation() {
 
     let mut rng = get_rng();
     // We need to populate our databases, so let's fetch the data.
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(1),
-        None,
-    )
-    .unwrap();
+    let emily_client = EmilyClient::new_text_client();
 
     testing_api::wipe_databases(&emily_client.config().as_testing())
         .await
@@ -4643,12 +4613,7 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     // We need to populate our databases, so let's fetch the data.
-    let emily_client: EmilyClient = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(1),
-        None,
-    )
-    .unwrap();
+    let emily_client: EmilyClient = EmilyClient::new_text_client();
 
     testing_api::wipe_databases(&emily_client.config().as_testing())
         .await
@@ -5691,12 +5656,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
 
     let mut rng = get_rng();
     // We need to populate our databases, so let's fetch the data.
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(1),
-        None,
-    )
-    .unwrap();
+    let emily_client = EmilyClient::new_text_client();
 
     let emily_config = emily_client.config().as_testing();
 
@@ -7236,12 +7196,7 @@ where
 async fn reuse_nonce_attack() {
     let stacks = StacksClient::new(Url::parse("http://127.0.0.1:20443").unwrap()).unwrap();
     let (rpc, faucet) = regtest::initialize_blockchain_devenv();
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@127.0.0.1:3031").unwrap(),
-        Duration::from_secs(1),
-        None,
-    )
-    .unwrap();
+    let emily_client = EmilyClient::new_text_client();
 
     let mut rng = get_rng();
 
@@ -7307,6 +7262,7 @@ async fn reuse_nonce_attack() {
                 settings.signer.deployer = deployer;
                 settings.signer.requests_processing_delay = Duration::from_secs(1);
                 settings.signer.bitcoin_processing_delay = Duration::from_secs(1);
+                settings.signer.private_key = kp.secret_key().into();
             })
             .build();
 
