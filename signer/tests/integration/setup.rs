@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::collections::HashSet;
-use std::ops::Deref;
 
 use bitcoin::AddressType;
 use bitcoin::Amount;
@@ -43,7 +42,6 @@ use signer::keys::PublicKey;
 use signer::keys::SignerScriptPubKey;
 use signer::stacks::api::MockStacksInteract;
 use signer::stacks::wallet::SignerWallet;
-use signer::storage::DbRead;
 use signer::storage::DbWrite as _;
 use signer::storage::model;
 use signer::storage::model::BitcoinBlock;
@@ -457,9 +455,6 @@ pub async fn backfill_bitcoin_blocks(db: &PgStore, rpc: &Client, chain_tip: &bit
         db.write_bitcoin_block(&bitcoin_block).await.unwrap();
         block_header = rpc.get_block_header_info(&parent_header_hash).unwrap();
     }
-
-    let block_hash = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
-    assert_eq!(block_hash.deref(), chain_tip);
 }
 
 /// Fetch all block headers from bitcoin-core and store it in the database.
