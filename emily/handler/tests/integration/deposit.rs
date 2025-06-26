@@ -930,18 +930,10 @@ async fn create_deposit_handles_duplicates(status: Status) {
 #[test_case(Status::Confirmed, Status::Accepted, true; "confirmed_to_accepted")]
 #[test_case(Status::Pending, Status::Rbf, true; "pending_to_rbf")]
 #[test_case(Status::Accepted, Status::Rbf, true; "accepted_to_rbf")]
-<<<<<<< HEAD
-=======
-#[test_case(Status::Reprocessing, Status::Rbf, true; "reprocessing_to_rbf")]
->>>>>>> main
 #[test_case(Status::Confirmed, Status::Rbf, true; "confirmed_to_rbf")]
 #[test_case(Status::Failed, Status::Rbf, true; "failed_to_rbf")]
 #[test_case(Status::Rbf, Status::Pending, true; "rbf_to_pending")]
 #[test_case(Status::Rbf, Status::Accepted, true; "rbf_to_accepted")]
-<<<<<<< HEAD
-=======
-#[test_case(Status::Rbf, Status::Reprocessing, true; "rbf_to_reprocessing")]
->>>>>>> main
 #[test_case(Status::Rbf, Status::Confirmed, true; "rbf_to_confirmed")]
 #[test_case(Status::Rbf, Status::Rbf, true; "rbf_to_rbf")]
 #[test_case(Status::Rbf, Status::Failed, true; "rbf_to_failed")]
@@ -1094,18 +1086,10 @@ async fn update_deposits_is_forbidden_for_signer(
 #[test_case(Status::Confirmed, Status::Pending; "confirmed_to_pending")]
 #[test_case(Status::Pending, Status::Rbf; "pending_to_rbf")]
 #[test_case(Status::Accepted, Status::Rbf; "accepted_to_rbf")]
-<<<<<<< HEAD
-=======
-#[test_case(Status::Reprocessing, Status::Rbf; "reprocessing_to_rbf")]
->>>>>>> main
 #[test_case(Status::Confirmed, Status::Rbf; "confirmed_to_rbf")]
 #[test_case(Status::Failed, Status::Rbf; "failed_to_rbf")]
 #[test_case(Status::Rbf, Status::Pending; "rbf_to_pending")]
 #[test_case(Status::Rbf, Status::Accepted; "rbf_to_accepted")]
-<<<<<<< HEAD
-=======
-#[test_case(Status::Rbf, Status::Reprocessing; "rbf_to_reprocessing")]
->>>>>>> main
 #[test_case(Status::Rbf, Status::Confirmed; "rbf_to_confirmed")]
 #[test_case(Status::Rbf, Status::Failed; "rbf_to_failed")]
 #[test_case(Status::Rbf, Status::Rbf; "rbf_to_rbf")]
@@ -1300,10 +1284,6 @@ async fn rbf_status_saved_successfully() {
 
 #[test_case(Status::Pending; "pending")]
 #[test_case(Status::Accepted; "accepted")]
-<<<<<<< HEAD
-=======
-#[test_case(Status::Reprocessing; "reprocessing")]
->>>>>>> main
 #[test_case(Status::Confirmed; "confirmed")]
 #[test_case(Status::Failed; "failed")]
 #[tokio::test]

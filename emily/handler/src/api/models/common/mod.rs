@@ -46,11 +46,7 @@ pub enum Status {
     /// The operation was not fulfilled.
     Failed,
     /// Transaction was replaced by another transaction via RBF.
-<<<<<<< HEAD
-    RBF,
-=======
     Rbf,
->>>>>>> main
 }
 
 /// Data about the fulfillment of an sBTC Operation.

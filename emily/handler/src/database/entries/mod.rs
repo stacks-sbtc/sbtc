@@ -97,11 +97,7 @@ pub enum StatusEntry {
     Failed,
     /// Transaction was replaced by another transaction via RBF.
     /// Inner string is transaction ID of replacement transaction.
-<<<<<<< HEAD
-    RBF(String),
-=======
     Rbf(String),
->>>>>>> main
 }
 
 impl From<&StatusEntry> for Status {
@@ -111,11 +107,7 @@ impl From<&StatusEntry> for Status {
             StatusEntry::Accepted => Status::Accepted,
             StatusEntry::Confirmed(_) => Status::Confirmed,
             StatusEntry::Failed => Status::Failed,
-<<<<<<< HEAD
-            StatusEntry::RBF(_) => Status::RBF,
-=======
             StatusEntry::Rbf(_) => Status::Rbf,
->>>>>>> main
         }
     }
 }
