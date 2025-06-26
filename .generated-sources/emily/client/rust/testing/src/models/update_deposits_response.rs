@@ -16,12 +16,12 @@ use serde::{Deserialize, Serialize};
 pub struct UpdateDepositsResponse {
     /// Deposit infos: deposits with a little less data.
     #[serde(rename = "deposits")]
-    pub deposits: Vec<models::DepositWithStatus>,
+    pub deposits: Vec<models::DepositWithStatusSchemed>,
 }
 
 impl UpdateDepositsResponse {
     /// Response to update deposits request.
-    pub fn new(deposits: Vec<models::DepositWithStatus>) -> UpdateDepositsResponse {
+    pub fn new(deposits: Vec<models::DepositWithStatusSchemed>) -> UpdateDepositsResponse {
         UpdateDepositsResponse { deposits }
     }
 }
