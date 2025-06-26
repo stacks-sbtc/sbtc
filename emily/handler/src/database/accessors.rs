@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use aws_sdk_dynamodb::types::AttributeValue;
 use aws_sdk_dynamodb::types::error::ConditionalCheckFailedException;
 use serde_dynamo::Item;
-use strum::EnumIter;
+use strum::IntoEnumIterator;
 
 use tracing::{debug, warn};
 
@@ -131,7 +131,7 @@ pub async fn get_all_deposit_entries_modified_from_height(
     for status in DepositStatus::iter() {
         let mut received = get_all_deposit_entries_modified_from_height_with_status(
             context,
-            status,
+            &status,
             minimum_height,
             maybe_page_size,
         )
@@ -389,7 +389,7 @@ pub async fn get_all_withdrawal_entries_modified_from_height(
     for status in WithdrawalStatus::iter() {
         let mut received = get_all_withdrawal_entries_modified_from_height_with_status(
             context,
-            status,
+            &status,
             minimum_height,
             maybe_page_size,
         )
@@ -777,15 +777,14 @@ async fn calculate_sbtc_left_for_withdrawals(
         get_oldest_stacks_block_in_range(context, bitcoin_end_block, bitcoin_tip).await?;
 
     let all_statuses_except_failed: Vec<_> = WithdrawalStatus::iter()
-        .iter()
-        .filter(|status| **status != WithdrawalStatus::Failed)
+        .filter(|status| *status != WithdrawalStatus::Failed)
         .collect();
 
     let mut total_withdrawn = 0u64;
     for status in all_statuses_except_failed {
         let withdrawals = get_all_withdrawal_entries_modified_from_height_with_status(
             context,
-            status,
+            &status,
             minimum_stacks_height_in_window,
             None,
         )
