@@ -1240,6 +1240,26 @@ impl RotateKeysV1 {
         }
     }
 
+    /// Create a rotate-key instance that will be associated with the given
+    /// aggregate key using the associated DKG shares in the database. If
+    /// no such shares exist then return an error.
+    pub async fn load<C>(ctx: &C, aggregate_key: &PublicKey) -> Result<Self, Error>
+    where
+        C: Context,
+    {
+        let db = ctx.get_storage();
+
+        match db.get_encrypted_dkg_shares(aggregate_key).await? {
+            Some(shares) => Ok(Self {
+                aggregate_key: shares.aggregate_key,
+                new_keys: shares.signer_set_public_keys(),
+                deployer: ctx.config().signer.deployer,
+                signatures_required: shares.signature_share_threshold,
+            }),
+            None => Err(Error::MissingDkgShares(aggregate_key.into())),
+        }
+    }
+
     /// This function returns the clarity description of one of the inputs
     /// to the contract call.
     ///
@@ -1445,7 +1465,8 @@ impl RotateKeysErrorMsg {
 
 /// A wrapper type for smart contract deployment that implements
 /// AsTxPayload.
-#[derive(Clone, Copy, Debug, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, strum::Display)]
+#[strum(serialize_all = "snake_case")]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
 pub enum SmartContract {
     /// The sbtc-registry contract. This contract needs to be deployed

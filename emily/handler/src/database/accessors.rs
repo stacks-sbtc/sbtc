@@ -128,7 +128,7 @@ const ALL_DEPOSIT_STATUSES: &[DepositStatus] = &[
     DepositStatus::Failed,
     DepositStatus::Pending,
     DepositStatus::Reprocessing,
-    DepositStatus::RBF,
+    DepositStatus::Rbf,
 ];
 /// Hacky exhaustive list of all possible withdrawal statuses that we will iterate over in order to
 /// get every withdrawal present.

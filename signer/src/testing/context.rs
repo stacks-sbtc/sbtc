@@ -20,9 +20,11 @@ use tokio::time::error::Elapsed;
 
 use crate::bitcoin::GetTransactionFeeResult;
 use crate::bitcoin::rpc::{BitcoinBlockHeader, BitcoinBlockInfo};
+use crate::block_observer::SignerSetInfo;
 use crate::context::SbtcLimits;
 use crate::stacks::api::TenureBlocks;
 use crate::stacks::wallet::SignerWallet;
+use crate::storage::Transactable;
 use crate::storage::model::BitcoinTxId;
 use crate::{
     bitcoin::{
@@ -42,6 +44,13 @@ use crate::{
         memory::{SharedStore, Store},
     },
 };
+
+/// Type alias for a wrapped mock Bitcoin client.
+pub type WrappedMockStacksInteract = WrappedMock<MockStacksInteract>;
+/// Type alias for a wrapped mock Stacks client.
+pub type WrappedMockBitcoinInteract = WrappedMock<MockBitcoinInteract>;
+/// Type alias for a wrapped mock Emily client.
+pub type WrappedMockEmilyInteract = WrappedMock<MockEmilyInteract>;
 
 /// A [`Context`] which can be used for testing.
 ///
@@ -71,7 +80,7 @@ pub struct TestContext<Storage, Bitcoin, Stacks, Emily> {
 
 impl<Storage, Bitcoin, Stacks, Emily> TestContext<Storage, Bitcoin, Stacks, Emily>
 where
-    Storage: DbRead + DbWrite + Clone + Sync + Send + 'static,
+    Storage: DbRead + DbWrite + Transactable + Clone + Sync + Send + 'static,
     Bitcoin: BitcoinInteract + Clone + Send + Sync + 'static,
     Stacks: StacksInteract + Clone + Send + Sync + 'static,
     Emily: EmilyInteract + Clone + Send + Sync + 'static,
@@ -157,9 +166,9 @@ impl TestContext<(), (), (), ()> {
     /// `with_in_memory_storage()` and `with_mocked_clients()`.
     pub fn default_mocked() -> TestContext<
         SharedStore,
-        WrappedMock<MockBitcoinInteract>,
-        WrappedMock<MockStacksInteract>,
-        WrappedMock<MockEmilyInteract>,
+        WrappedMockBitcoinInteract,
+        WrappedMockStacksInteract,
+        WrappedMockEmilyInteract,
     > {
         Self::builder()
             .with_in_memory_storage()
@@ -168,11 +177,19 @@ impl TestContext<(), (), (), ()> {
     }
 }
 
+impl<Storage, Bitcoin, Stacks, Emily> Deref for TestContext<Storage, Bitcoin, Stacks, Emily> {
+    type Target = SignerContext<Storage, Bitcoin, Stacks, Emily>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
 /// Provide extra methods for when using a mocked bitcoin client.
-impl<Storage, Stacks, Emily> TestContext<Storage, WrappedMock<MockBitcoinInteract>, Stacks, Emily> {
+impl<Storage, Stacks, Emily> TestContext<Storage, WrappedMockBitcoinInteract, Stacks, Emily> {
     /// Execute a closure with a mutable reference to the inner mocked
     /// bitcoin client.
-    pub async fn with_bitcoin_client<F>(&mut self, f: F)
+    pub async fn with_bitcoin_client<F>(&self, f: F)
     where
         F: FnOnce(&mut MockBitcoinInteract),
     {
@@ -182,12 +199,10 @@ impl<Storage, Stacks, Emily> TestContext<Storage, WrappedMock<MockBitcoinInterac
 }
 
 /// Provide extra methods for when using a mocked stacks client.
-impl<Storage, Bitcoin, Emily>
-    TestContext<Storage, Bitcoin, WrappedMock<MockStacksInteract>, Emily>
-{
+impl<Storage, Bitcoin, Emily> TestContext<Storage, Bitcoin, WrappedMockStacksInteract, Emily> {
     /// Execute a closure with a mutable reference to the inner mocked
     /// stacks client.
-    pub async fn with_stacks_client<F>(&mut self, f: F)
+    pub async fn with_stacks_client<F>(&self, f: F)
     where
         F: FnOnce(&mut MockStacksInteract),
     {
@@ -197,12 +212,10 @@ impl<Storage, Bitcoin, Emily>
 }
 
 /// Provide extra methods for when using a mocked emily client.
-impl<Storage, Bitcoin, Stacks>
-    TestContext<Storage, Bitcoin, Stacks, WrappedMock<MockEmilyInteract>>
-{
+impl<Storage, Bitcoin, Stacks> TestContext<Storage, Bitcoin, Stacks, WrappedMockEmilyInteract> {
     /// Execute a closure with a mutable reference to the inner mocked
     /// emily client.
-    pub async fn with_emily_client<F>(&mut self, f: F)
+    pub async fn with_emily_client<F>(&self, f: F)
     where
         F: FnOnce(&mut MockEmilyInteract),
     {
@@ -211,49 +224,34 @@ impl<Storage, Bitcoin, Stacks>
     }
 }
 
-/// DKG can be triggered if the last DKG signer set differs from the one in config.
-/// However, we don't want to test this functionality in some of our tests, so
-/// this function makes sure that DKG won't be triggered because of changes in signer set.
-/// Note: this function changes bootstrap_signing_set config parameter.
-pub fn prevent_dkg_on_changed_signer_set<Storage, Bitcoin, Stacks, Emily>(
-    context: &mut TestContext<Storage, Bitcoin, Stacks, Emily>,
+/// DKG can be triggered if the signer set info in the registry differs
+/// from the one in config. However, we don't want to test this
+/// functionality in some of our tests, so this function makes sure that
+/// DKG won't be triggered because of changes in this parameter.
+pub fn prevent_dkg_on_changed_signer_set_info<Storage, Bitcoin, Stacks, Emily>(
+    context: &TestContext<Storage, Bitcoin, Stacks, Emily>,
+    aggregate_key: PublicKey,
 ) where
-    Storage: DbRead + DbWrite + Clone + Sync + Send + 'static,
+    Storage: DbRead + DbWrite + Transactable + Clone + Sync + Send + 'static,
     Bitcoin: BitcoinInteract + Clone + Send + Sync + 'static,
     Stacks: StacksInteract + Clone + Send + Sync + 'static,
     Emily: EmilyInteract + Clone + Send + Sync + 'static,
 {
-    let last_dkg_signer_set = context
-        .state()
-        .current_signer_set()
-        .get_signers()
-        .iter()
-        .map(|signer| *signer.public_key())
-        .collect();
-    let config = context.config_mut();
-    config.signer.bootstrap_signing_set = last_dkg_signer_set;
-}
+    let config = context.config();
+    let signer_set_info = SignerSetInfo {
+        aggregate_key,
+        signatures_required: config.signer.bootstrap_signatures_required,
+        signer_set: config.signer.bootstrap_signing_set.clone(),
+    };
 
-/// DKG can be triggered if the last DKG signatures_required parameter differs from
-/// the one in config. However, we don't want to test this functionality in some of our tests,
-/// so this function makes sure that DKG won't be triggered because of changes in this parameter.
-/// Note: this function changes bootstrap_signatures_required config parameter.
-pub fn prevent_dkg_on_changed_signatures_required<Storage, Bitcoin, Stacks, Emily>(
-    context: &mut TestContext<Storage, Bitcoin, Stacks, Emily>,
-) where
-    Storage: DbRead + DbWrite + Clone + Sync + Send + 'static,
-    Bitcoin: BitcoinInteract + Clone + Send + Sync + 'static,
-    Stacks: StacksInteract + Clone + Send + Sync + 'static,
-    Emily: EmilyInteract + Clone + Send + Sync + 'static,
-{
-    let context_signeratures_required = context.state().current_signatures_required();
-    let config = context.config_mut();
-    config.signer.bootstrap_signatures_required = context_signeratures_required;
+    context
+        .state()
+        .update_registry_signer_set_info(signer_set_info);
 }
 
 impl<Storage, Bitcoin, Stacks, Emily> Context for TestContext<Storage, Bitcoin, Stacks, Emily>
 where
-    Storage: DbRead + DbWrite + Clone + Sync + Send + 'static,
+    Storage: DbRead + DbWrite + Transactable + Clone + Sync + Send + 'static,
     Bitcoin: BitcoinInteract + Clone + Send + Sync + 'static,
     Stacks: StacksInteract + Clone + Send + Sync + 'static,
     Emily: EmilyInteract + Clone + Send + Sync + 'static,
@@ -288,7 +286,7 @@ where
 
     fn get_storage_mut(
         &self,
-    ) -> impl crate::storage::DbRead + DbWrite + Clone + Sync + Send + 'static {
+    ) -> impl crate::storage::DbRead + DbWrite + Transactable + Clone + Sync + Send + 'static {
         self.inner.get_storage_mut()
     }
 
@@ -342,7 +340,7 @@ where
     }
 }
 
-impl BitcoinInteract for WrappedMock<MockBitcoinInteract> {
+impl BitcoinInteract for WrappedMockBitcoinInteract {
     async fn get_block(
         &self,
         block_hash: &bitcoin::BlockHash,
@@ -424,7 +422,7 @@ impl BitcoinInteract for WrappedMock<MockBitcoinInteract> {
     }
 }
 
-impl StacksInteract for WrappedMock<MockStacksInteract> {
+impl StacksInteract for WrappedMockStacksInteract {
     async fn get_current_signer_set(
         &self,
         contract_principal: &StacksAddress,
@@ -543,7 +541,7 @@ impl StacksInteract for WrappedMock<MockStacksInteract> {
     }
 }
 
-impl EmilyInteract for WrappedMock<MockEmilyInteract> {
+impl EmilyInteract for WrappedMockEmilyInteract {
     async fn get_deposit(
         &self,
         txid: &BitcoinTxId,
@@ -790,7 +788,7 @@ where
     /// Configure the context with a mocked Bitcoin client.
     fn with_mocked_bitcoin_client(
         self,
-    ) -> ContextBuilder<Storage, WrappedMock<MockBitcoinInteract>, Stacks, Emily> {
+    ) -> ContextBuilder<Storage, WrappedMockBitcoinInteract, Stacks, Emily> {
         self.with_bitcoin_client(WrappedMock::default())
     }
 }
@@ -828,7 +826,7 @@ where
     /// Configure the context with a mocked stacks client.
     fn with_mocked_stacks_client(
         self,
-    ) -> ContextBuilder<Storage, Bitcoin, WrappedMock<MockStacksInteract>, Emily> {
+    ) -> ContextBuilder<Storage, Bitcoin, WrappedMockStacksInteract, Emily> {
         self.with_stacks_client(WrappedMock::default())
     }
 }
@@ -866,7 +864,7 @@ where
     /// Configure the context with a mocked Emily client.
     fn with_mocked_emily_client(
         self,
-    ) -> ContextBuilder<Storage, Bitcoin, Stacks, WrappedMock<MockEmilyInteract>> {
+    ) -> ContextBuilder<Storage, Bitcoin, Stacks, WrappedMockEmilyInteract> {
         self.with_emily_client(WrappedMock::default())
     }
 }
@@ -889,9 +887,9 @@ where
         self,
     ) -> ContextBuilder<
         Storage,
-        WrappedMock<MockBitcoinInteract>,
-        WrappedMock<MockStacksInteract>,
-        WrappedMock<MockEmilyInteract>,
+        WrappedMockBitcoinInteract,
+        WrappedMockStacksInteract,
+        WrappedMockEmilyInteract,
     > {
         let config = self.get_config();
         ContextBuilder {
@@ -928,7 +926,7 @@ impl<Storage, Bitcoin, Stacks, Emily> BuildContext<Storage, Bitcoin, Stacks, Emi
     for ContextBuilder<Storage, Bitcoin, Stacks, Emily>
 where
     Self: BuilderState<Storage, Bitcoin, Stacks, Emily>,
-    Storage: DbRead + DbWrite + Clone + Sync + Send + 'static,
+    Storage: DbRead + DbWrite + Transactable + Clone + Sync + Send + 'static,
     Bitcoin: BitcoinInteract + Clone + Send + Sync + 'static,
     Stacks: StacksInteract + Clone + Send + Sync + 'static,
     Emily: EmilyInteract + Clone + Send + Sync + 'static,

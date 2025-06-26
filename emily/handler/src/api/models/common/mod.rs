@@ -49,7 +49,7 @@ pub enum DepositStatus {
     /// The operation was not fulfilled.
     Failed,
     /// Transaction was replaced by another transaction via RBF.
-    RBF,
+    Rbf,
 }
 
 /// The status of the in-flight sBTC withdrawal.

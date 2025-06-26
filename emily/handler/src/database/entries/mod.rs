@@ -100,7 +100,7 @@ pub enum DepositStatusEntry {
     Failed,
     /// Transaction was replaced by another transaction via RBF.
     /// Inner string is transaction ID of replacement transaction.
-    RBF(String),
+    Rbf(String),
 }
 
 /// Deposit Status entry.
@@ -140,7 +140,7 @@ impl From<&DepositStatusEntry> for DepositStatus {
             DepositStatusEntry::Accepted => DepositStatus::Accepted,
             DepositStatusEntry::Confirmed(_) => DepositStatus::Confirmed,
             DepositStatusEntry::Failed => DepositStatus::Failed,
-            DepositStatusEntry::RBF(_) => DepositStatus::RBF,
+            DepositStatusEntry::Rbf(_) => DepositStatus::Rbf,
         }
     }
 }

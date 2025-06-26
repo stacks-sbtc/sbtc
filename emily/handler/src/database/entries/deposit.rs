@@ -223,9 +223,9 @@ impl DepositEntry {
         } else {
             self.fulfillment = None;
         }
-        if new_status == DepositStatus::RBF {
+        if new_status == DepositStatus::Rbf {
             self.replaced_by_tx = match &latest_event.status {
-                DepositStatusEntry::RBF(replaced_by_tx) => Some(replaced_by_tx.clone()),
+                DepositStatusEntry::Rbf(replaced_by_tx) => Some(replaced_by_tx.clone()),
                 _ => None,
             };
         } else {
@@ -255,7 +255,7 @@ impl TryFrom<DepositEntry> for Deposit {
             _ => None,
         };
         let replaced_by_tx = match &latest_event.status {
-            DepositStatusEntry::RBF(replaced_by_tx) => Some(replaced_by_tx.clone()),
+            DepositStatusEntry::Rbf(replaced_by_tx) => Some(replaced_by_tx.clone()),
             _ => None,
         };
 
