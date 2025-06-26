@@ -88,8 +88,13 @@ impl WithdrawalUpdate {
             Status::Accepted => StatusEntry::Accepted,
             Status::Pending => StatusEntry::Pending,
             Status::Failed => StatusEntry::Failed,
+<<<<<<< HEAD
             Status::RBF => {
                 return Err(error::ValidationError::WithdrawalRBF(self.request_id));
+=======
+            Status::Rbf => {
+                return Err(error::ValidationError::WithdrawalRbf(self.request_id));
+>>>>>>> main
             }
         };
         // Make the new event.

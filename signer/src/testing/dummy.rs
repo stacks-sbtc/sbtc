@@ -83,6 +83,7 @@ use crate::storage::model::StacksBlockHash;
 use crate::storage::model::StacksBlockHeight;
 use crate::storage::model::StacksPrincipal;
 use crate::storage::model::StacksTxId;
+use crate::storage::model::TaprootScriptHash;
 use crate::storage::model::WithdrawalAcceptEvent;
 use crate::storage::model::WithdrawalRejectEvent;
 
@@ -603,6 +604,13 @@ impl fake::Dummy<fake::Faker> for ScriptPubKey {
     }
 }
 
+impl fake::Dummy<fake::Faker> for TaprootScriptHash {
+    fn dummy_with_rng<R: Rng + ?Sized>(config: &fake::Faker, rng: &mut R) -> Self {
+        let bytes: [u8; 32] = config.fake_with_rng(rng);
+        TaprootScriptHash::from(bytes)
+    }
+}
+
 impl fake::Dummy<fake::Faker> for SigHash {
     fn dummy_with_rng<R: Rng + ?Sized>(config: &fake::Faker, rng: &mut R) -> Self {
         TapSighash::from_byte_array(config.fake_with_rng(rng)).into()
@@ -789,6 +797,12 @@ impl fake::Dummy<fake::Faker> for model::Timestamp {
 
 /// A struct to help with creating dummy values for testing
 pub struct Unit;
+
+impl Dummy<Unit> for secp256k1::Keypair {
+    fn dummy_with_rng<R: rand::Rng + ?Sized>(_: &Unit, rng: &mut R) -> Self {
+        secp256k1::Keypair::new(secp256k1::SECP256K1, rng)
+    }
+}
 
 impl Dummy<Unit> for bitcoin::OutPoint {
     fn dummy_with_rng<R: rand::Rng + ?Sized>(_: &Unit, rng: &mut R) -> Self {
