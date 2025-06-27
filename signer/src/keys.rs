@@ -553,7 +553,7 @@ impl CoordinatorPublicKey for BTreeSet<PublicKey> {
 mod tests {
     use super::*;
 
-    use rand::SeedableRng;
+    use rand::SeedableRng as _;
     use rand::rngs::OsRng;
     use rand::rngs::StdRng;
     use secp256k1::Parity;
@@ -781,14 +781,6 @@ mod tests {
     fn bh_from_seed(seed: u8) -> bitcoin::BlockHash {
         let mut bytes = [0u8; 32];
         bytes[0] = seed; // Simple differentiation
-        // For more varied hashes, could use a simple counter or fill more bytes.
-        // For example, to make it more "hash-like" for testing distribution:
-        let mut full_seed = [0u8; 32];
-        full_seed[0] = seed;
-        full_seed[1] = seed.wrapping_add(1);
-        full_seed[2] = seed.wrapping_add(2);
-        // ... and so on, or use a seeded RNG to fill `bytes`.
-        // For this test, simple differentiation is likely sufficient.
         bitcoin::BlockHash::from_byte_array(bytes)
     }
 
