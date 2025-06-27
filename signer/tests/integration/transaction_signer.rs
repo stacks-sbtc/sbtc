@@ -12,6 +12,7 @@ use signer::bitcoin::MockBitcoinInteract;
 use signer::emily_client::MockEmilyInteract;
 use signer::network::in_memory2::SignerNetworkInstance;
 use signer::stacks::api::MockStacksInteract;
+use signer::stacks::api::SignerSetInfo;
 use signer::stacks::wallet::MultisigTx;
 use signer::stacks::wallet::SignerWallet;
 use signer::storage::DbRead;
@@ -25,7 +26,6 @@ use signer::bitcoin::utxo::RequestRef;
 use signer::bitcoin::utxo::Requests;
 use signer::bitcoin::utxo::UnsignedTransaction;
 use signer::bitcoin::validation::TxRequestIds;
-use signer::block_observer::get_signer_set_info;
 use signer::context::Context;
 use signer::context::SbtcLimits;
 use signer::error::Error;
@@ -474,7 +474,7 @@ async fn signer_rejects_multiple_attempts_in_tenure() {
 }
 
 #[tokio::test]
-pub async fn assert_should_be_able_to_handle_sbtc_requests() {
+async fn assert_should_be_able_to_handle_sbtc_requests() {
     let db = testing::storage::new_test_database().await;
 
     let mut rng = get_rng();
@@ -513,14 +513,12 @@ pub async fn assert_should_be_able_to_handle_sbtc_requests() {
     setup.store_deposit_request(&db).await;
     setup.store_deposit_decisions(&db).await;
 
-    let info = get_signer_set_info(&ctx, chain_tip.block_hash)
-        .await
-        .unwrap()
-        .unwrap();
+    let shares = db.get_latest_encrypted_dkg_shares().await.unwrap().unwrap();
+    let signer_set_info = SignerSetInfo::from(shares);
 
     let state = ctx.state();
-    state.update_current_signer_set(info.signer_set.clone());
-    state.update_registry_signer_set_info(info);
+    state.update_current_signer_set(signer_set_info.signer_set.clone());
+    state.update_registry_signer_set_info(signer_set_info);
 
     // Initialize the transaction signer event loop
     let network = WanNetwork::default();
@@ -616,7 +614,7 @@ pub async fn assert_should_be_able_to_handle_sbtc_requests() {
 #[test_case(DkgSharesStatus::Unverified, false ; "unverified-shares-not-okay")]
 #[test_case(DkgSharesStatus::Failed, false ; "failed-shares-not-okay")]
 #[tokio::test]
-pub async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is_ok: bool) {
+async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is_ok: bool) {
     let db = testing::storage::new_test_database().await;
 
     let mut rng = get_rng();
@@ -664,10 +662,8 @@ pub async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is
 
     set_verification_status(&db, aggregate_key, status).await;
 
-    let signer_set_info = get_signer_set_info(&ctx, chain_tip.block_hash)
-        .await
-        .unwrap()
-        .unwrap();
+    let shares = db.get_latest_encrypted_dkg_shares().await.unwrap().unwrap();
+    let signer_set_info = SignerSetInfo::from(shares);
 
     ctx.state().update_registry_signer_set_info(signer_set_info);
     ctx.state().update_current_limits(SbtcLimits::unlimited());

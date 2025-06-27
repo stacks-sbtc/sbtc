@@ -441,9 +441,9 @@ where
 
         let current_aggregate_key = self
             .context
-            .get_stacks_client()
-            .get_current_signers_aggregate_key(&self.context.config().signer.deployer)
-            .await?;
+            .state()
+            .registry_signer_set_info()
+            .map(|info| info.aggregate_key);
 
         let (needs_verification, needs_rotate_key) =
             assert_rotate_key_action(&last_dkg, current_aggregate_key)?;
