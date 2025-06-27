@@ -43,6 +43,8 @@ use crate::stacks::wallet::SignerWallet;
 use crate::storage::DbRead;
 use crate::storage::DbWrite as _;
 use crate::storage::model;
+use crate::storage::model::BitcoinBlockHash;
+use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::DkgSharesStatus;
 use crate::storage::model::SigHash;
 use crate::wsts_state_machine::FrostCoordinator;
@@ -140,6 +142,9 @@ pub struct TxSignerEventLoop<Context, Network, Rng> {
     pub wsts_state_machines: LruCache<StateMachineId, SignerStateMachine>,
     /// The threshold for the signer
     pub threshold: u32,
+    /// Last bitcoin block for which the signer has already processed
+    /// presign request.
+    pub last_presign_block: BitcoinBlockRef,
     /// How many bitcoin blocks back from the chain tip the signer will look for requests.
     pub context_window: u16,
     /// Random number generator used for encryption
@@ -269,6 +274,10 @@ where
             context_window,
             wsts_state_machines: LruCache::new(max_state_machines),
             threshold,
+            last_presign_block: BitcoinBlockRef {
+                block_hash: BitcoinBlockHash::from([0; 32]),
+                block_height: 0u64.into(),
+            },
             rng,
             dkg_begin_pause,
             dkg_verification_state_machines: LruCache::new(
@@ -425,6 +434,12 @@ where
     ) -> Result<(), Error> {
         let db = self.context.get_storage_mut();
 
+        if &self.last_presign_block == chain_tip {
+            return Err(Error::InvalidPresignRequest(
+                chain_tip.block_hash.to_string(),
+            ));
+        }
+
         let aggregate_key = self
             .context
             .state()
@@ -471,6 +486,9 @@ where
 
         self.send_message(BitcoinPreSignAck, &chain_tip.block_hash)
             .await?;
+
+        self.last_presign_block = *chain_tip;
+
         Ok(())
     }
 
@@ -1869,6 +1887,10 @@ mod tests {
             context_window: 1,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             threshold: 1,
+            last_presign_block: BitcoinBlockRef {
+                block_hash: BitcoinBlockHash::from([0; 32]),
+                block_height: 0u64.into(),
+            },
             rng: rand::rngs::OsRng,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
@@ -1936,6 +1958,10 @@ mod tests {
             signer_private_key: PrivateKey::new(&mut rand::rngs::OsRng),
             context_window: 1,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
+            last_presign_block: BitcoinBlockRef {
+                block_hash: BitcoinBlockHash::from([0; 32]),
+                block_height: 0u64.into(),
+            },
             threshold: 1,
             rng: rand::rngs::OsRng,
             dkg_begin_pause: None,
@@ -2023,6 +2049,10 @@ mod tests {
             context_window: 1,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             threshold: 1,
+            last_presign_block: BitcoinBlockRef {
+                block_hash: BitcoinBlockHash::from([0; 32]),
+                block_height: 0u64.into(),
+            },
             rng: rand::rngs::OsRng,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),

@@ -396,6 +396,11 @@ pub enum Error {
     #[error("could not recover the public key from the signature: {0}, digest: {1}")]
     InvalidRecoverableSignature(#[source] secp256k1::Error, secp256k1::Message),
 
+    /// This is thrown when we attempt to process a presign request for
+    /// a block for which we already processed presign request.
+    #[error("Recieved presign request for already processed block {0}")]
+    InvalidPresignRequest(String),
+
     /// This is thrown when we attempt to create a wallet with:
     /// 1. No public keys.
     /// 2. No required signatures.
