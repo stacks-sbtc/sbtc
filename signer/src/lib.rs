@@ -37,12 +37,6 @@ pub mod wsts_state_machine;
 /// Package version
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// The traditional bitcoin confirmation delay. If after some block X
-/// this many blocks was mined and included in canonical chain, probability
-/// of this block being reorganized considered as very low.
-/// More detailed post about confirmations: https://en.bitcoin.it/wiki/Confirmation
-pub const BITCOIN_CONFIRMATION_DELAY: u64 = 6;
-
 /// The maximum number of keys in the signers multi-sig wallet on Stacks.
 ///
 /// There are a few practical limits on the maximum number of distinct
@@ -122,7 +116,7 @@ pub const WITHDRAWAL_DUST_LIMIT: u64 = 546;
 /// The value here was taken from the last paragraph of the opening comment
 /// of https://github.com/stacks-network/sbtc/discussions/12 and in the
 /// comments of https://github.com/stacks-network/sbtc/issues/16.
-pub const WITHDRAWAL_MIN_CONFIRMATIONS: u64 = BITCOIN_CONFIRMATION_DELAY;
+pub const WITHDRAWAL_MIN_CONFIRMATIONS: u64 = 6;
 
 /// This is the number of bitcoin blocks that a withdrawal request will
 /// remain live before it expires and is considered rejected.
@@ -137,7 +131,7 @@ pub const WITHDRAWAL_BLOCKS_EXPIRY: u64 = 24;
 ///
 /// This is the value in https://github.com/stacks-network/sbtc/issues/1363's
 /// proposed "buffer for expiring requests" section.
-pub const WITHDRAWAL_EXPIRY_BUFFER: u64 = BITCOIN_CONFIRMATION_DELAY;
+pub const WITHDRAWAL_EXPIRY_BUFFER: u64 = 6;
 
 /// This is the default maximum virtual size of a bitcoin transaction
 /// package. This value is the default limit set in bitcoin core, and
