@@ -40,10 +40,22 @@ test:
 test-build:
 	cargo $(CARGO_FLAGS) test build --features "testing"  $(CARGO_EXCLUDES) --no-run --locked ${CARGO_BUILD_ARGS}
 
+CARGO_FMT = cargo $(CARGO_FLAGS) fmt --all
+CARGO_CLIPPY_BASE = cargo $(CARGO_FLAGS) clippy --workspace --all-targets --all-features --no-deps
+CLIPPY_FLAGS = -D warnings
+
 lint:
-	cargo $(CARGO_FLAGS) fmt --all -- --check
-	cargo $(CARGO_FLAGS) clippy --workspace --all-targets --all-features --no-deps -- -D warnings
+	$(CARGO_FMT) -- --check
+	$(CARGO_CLIPPY_BASE) -- $(CLIPPY_FLAGS)
 	pnpm --recursive run lint
+
+fix:
+	$(CARGO_FMT)
+	$(CARGO_CLIPPY_BASE) --fix -- $(CLIPPY_FLAGS)
+
+fix-uncommitted:
+	$(CARGO_FMT)
+	$(CARGO_CLIPPY_BASE) --fix --allow-dirty -- $(CLIPPY_FLAGS)
 
 format:
 	cargo $(CARGO_FLAGS) fmt
