@@ -195,6 +195,17 @@ impl EmilyClient {
                 .map_err(Error::DecodeHexScript)?,
         })
     }
+
+    /// Create a new Emily Client for use in our integration tests.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn new_text_client() -> Self {
+        EmilyClient::try_new(
+            &Url::parse("http://testApiKey@localhost:3031").unwrap(),
+            Duration::from_secs(1),
+            None,
+        )
+        .unwrap()
+    }
 }
 
 impl EmilyInteract for EmilyClient {
