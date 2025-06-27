@@ -651,9 +651,9 @@ pub async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is
     let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    // Create a test setup object so that we can simply create proper DKG
+    // Create a test setup object so that we can easily create proper DKG
     // shares in the database. Note that calling TestSweepSetup2::new_setup
-    // creates two bitcoin block.
+    // creates two bitcoin blocks.
     let amounts = SweepAmounts {
         amount: 100000,
         max_fee: 10000,
@@ -755,9 +755,9 @@ pub async fn presign_request_ignore_request_if_already_processed_this_block() {
     let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    // Create a test setup object so that we can simply create proper DKG
+    // Create a test setup object so that we can easily create proper DKG
     // shares in the database. Note that calling TestSweepSetup2::new_setup
-    // creates two bitcoin block.
+    // creates two bitcoin blocks.
     let amounts = SweepAmounts {
         amount: 100000,
         max_fee: 10000,
@@ -890,9 +890,9 @@ async fn new_state_machine_per_valid_sighash() {
     let (_, faucet) = sbtc::testing::regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    // Create a test setup object so that we can simply create proper DKG
+    // Create a test setup object so that we can easily create proper DKG
     // shares in the database. Note that calling TestSweepSetup2::new_setup
-    // creates two bitcoin block.
+    // creates two bitcoin blocks.
     let setup = TestSweepSetup2::new_setup(signers, faucet, &[]);
 
     setup.store_dkg_shares(&db).await;
