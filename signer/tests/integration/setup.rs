@@ -42,6 +42,7 @@ use signer::keys::PublicKey;
 use signer::keys::SignerScriptPubKey;
 use signer::stacks::api::MockStacksInteract;
 use signer::stacks::wallet::SignerWallet;
+use signer::storage::DbRead as _;
 use signer::storage::DbWrite as _;
 use signer::storage::model;
 use signer::storage::model::BitcoinBlock;
@@ -439,9 +440,11 @@ impl TestSweepSetup {
     }
 }
 
-/// Fetch all block headers from bitcoin-core and store it in the database.
-pub async fn backfill_bitcoin_blocks(db: &PgStore, rpc: &Client, chain_tip: &bitcoin::BlockHash) {
-    let mut block_header = rpc.get_block_header_info(chain_tip).unwrap();
+/// Fetch all block headers of the blockchain from the given block hash to
+/// the minimum blockchain height from bitcoin-core and store it in the
+/// database.
+pub async fn backfill_bitcoin_blocks(db: &PgStore, rpc: &Client, block_hash: &bitcoin::BlockHash) {
+    let mut block_header = rpc.get_block_header_info(block_hash).unwrap();
 
     // There are no non-coinbase transactions below this height.
     while block_header.height as u64 >= regtest::MIN_BLOCKCHAIN_HEIGHT {
@@ -457,11 +460,16 @@ pub async fn backfill_bitcoin_blocks(db: &PgStore, rpc: &Client, chain_tip: &bit
     }
 }
 
-/// Fetch all block headers from bitcoin-core and store it in the database.
+/// Fetch all block headers for the canonical blockchain (from the chain
+/// tip until the minimum blockchain height) from bitcoin-core and store it
+/// in the database.
 pub async fn fetch_canonical_bitcoin_blockchain(db: &PgStore, rpc: &Client) -> BitcoinBlockHash {
     let chain_tip_info = rpc.get_blockchain_info().unwrap();
 
     backfill_bitcoin_blocks(db, rpc, &chain_tip_info.best_block_hash).await;
+
+    let block_hash = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
+    assert_eq!(*block_hash, chain_tip_info.best_block_hash);
 
     chain_tip_info.best_block_hash.into()
 }
