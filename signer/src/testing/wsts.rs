@@ -1,12 +1,13 @@
 //! Test utilities for running a wsts signer and coordinator.
 
+use std::borrow::Borrow;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::time::Duration;
 
 use clarity::util::secp256k1::Secp256k1PublicKey;
 use clarity::vm::types::PrincipalData;
-use fake::Fake;
+use fake::Fake as _;
 use rand::rngs::OsRng;
 use stacks_common::address::AddressHashMode;
 use stacks_common::address::C32_ADDRESS_VERSION_TESTNET_MULTISIG;
@@ -18,6 +19,7 @@ use wsts::state_machine::coordinator::Coordinator as _;
 use wsts::state_machine::coordinator::fire;
 
 use crate::ecdsa::SignEcdsa as _;
+use crate::keys::CoordinatorPublicKey as _;
 use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
 use crate::message;
@@ -37,6 +39,48 @@ pub struct SignerInfo {
     pub signer_private_key: PrivateKey,
     /// Public keys of all signers in the signer set
     pub signer_public_keys: BTreeSet<PublicKey>,
+}
+
+/// Trait for selecting the coordinator's private key from a list of items which
+/// contain keypairs.
+pub trait SelectCoordinatorPrivateKey {
+    /// Select the coordinator's private key.
+    #[track_caller]
+    fn select_coordinator_private_key<B>(&self, bitcoin_chain_tip: B) -> PrivateKey
+    where
+        B: Borrow<bitcoin::BlockHash>;
+}
+
+/// Implementation of `SelectCoordinatorPrivateKey` for any type that can be
+/// converted into an iterator of `SignerInfo`.
+impl<I> SelectCoordinatorPrivateKey for I
+where
+    I: ?Sized,
+    for<'a> &'a I: IntoIterator<Item = &'a SignerInfo>,
+{
+    fn select_coordinator_private_key<B>(&self, bitcoin_chain_tip: B) -> PrivateKey
+    where
+        B: Borrow<bitcoin::BlockHash>,
+    {
+        // Attempt to determine the coordinator's public key from the first
+        // signer info in the iterator.
+        let coordinator_pub_key = self
+            .into_iter()
+            .next()
+            .expect("signer_info cannot be empty")
+            .signer_public_keys
+            .determine_coordinator_public_key_for(bitcoin_chain_tip)
+            .expect("couldn't determine coordinator");
+
+        // Find the coordinator's private key from the signer info based on the
+        // public key we just determined.
+        self.into_iter()
+            .find(|info| {
+                PublicKey::from_private_key(&info.signer_private_key) == coordinator_pub_key
+            })
+            .expect("couldn't find coordinator from public key")
+            .signer_private_key
+    }
 }
 
 /// Generate a set of public keys for a group of signers

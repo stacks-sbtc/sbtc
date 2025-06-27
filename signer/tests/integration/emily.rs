@@ -12,6 +12,7 @@ use bitcoincore_rpc_json::Utxo;
 use fake::Fake as _;
 use futures::future::join_all;
 use signer::testing::storage::model::TestBitcoinTxInfo;
+use signer::testing::wsts::SelectCoordinatorPrivateKey as _;
 use test_case::test_case;
 use test_log::test;
 use url::Url;
@@ -21,8 +22,8 @@ use blockstack_lib::net::api::getsortition::SortitionInfo;
 use clarity::types::chainstate::BurnchainHeaderHash;
 use emily_client::apis::deposit_api;
 use emily_client::models::CreateDepositRequestBody;
+use emily_client::models::DepositStatus;
 use emily_client::models::DepositUpdate;
-use emily_client::models::Status;
 use emily_client::models::UpdateDepositsRequestBody;
 use sbtc::testing::regtest::Recipient;
 use signer::bitcoin::rpc::BitcoinBlockInfo;
@@ -44,18 +45,11 @@ use signer::storage::DbWrite;
 use signer::storage::model;
 use signer::storage::model::DepositSigner;
 use signer::testing;
-use signer::testing::context::BuildContext;
-use signer::testing::context::ConfigureBitcoinClient;
-use signer::testing::context::ConfigureEmilyClient;
-use signer::testing::context::ConfigureStacksClient;
-use signer::testing::context::ConfigureStorage;
-use signer::testing::context::TestContext;
-use signer::testing::context::WrappedMock;
+use signer::testing::context::*;
 use signer::testing::get_rng;
 use signer::testing::stacks::DUMMY_SORTITION_INFO;
 use signer::testing::stacks::DUMMY_TENURE_INFO;
 use signer::testing::storage::model::TestData;
-use signer::testing::transaction_coordinator::select_coordinator;
 use signer::testing::wsts::SignerSet;
 use signer::transaction_coordinator;
 use testing_emily_client::apis::testing_api::wipe_databases;
@@ -381,7 +375,7 @@ async fn deposit_flow() {
     let block_observer_handle = tokio::spawn(async move { block_observer.run().await });
 
     // Get the private key of the coordinator of the signer set.
-    let private_key = select_coordinator(&deposit_block_hash.into(), &signer_info);
+    let private_key = signer_info.select_coordinator_private_key(deposit_block_hash);
 
     // Bootstrap the tx coordinator event loop
     context.state().set_sbtc_contracts_deployed();
@@ -490,7 +484,7 @@ async fn deposit_flow() {
 
     assert_eq!(
         fetched_deposit.status,
-        emily_client::models::Status::Pending
+        emily_client::models::DepositStatus::Pending
     );
 
     // Wake coordinator up (again)
@@ -532,7 +526,7 @@ async fn deposit_flow() {
 
     assert_eq!(
         fetched_deposit.status,
-        emily_client::models::Status::Accepted
+        emily_client::models::DepositStatus::Accepted
     );
     assert_eq!(
         fetched_deposit.last_update_block_hash,
@@ -641,7 +635,7 @@ async fn test_get_deposits_with_status_request_paging(
     }
 
     let deposits = emily_client
-        .get_deposits_with_status(Status::Pending)
+        .get_deposits_with_status(DepositStatus::Pending)
         .await
         .unwrap();
     assert_eq!(deposits.len(), expected_result);
@@ -703,8 +697,9 @@ async fn test_get_deposits_returns_pending_and_accepted() {
             bitcoin_tx_output_index: 0,
             bitcoin_txid: setup.tx.compute_txid().to_string(),
             fulfillment: None,
-            status: Status::Accepted,
+            status: DepositStatus::Accepted,
             status_message: "accepted".to_string(),
+            replaced_by_tx: None,
         })
         .collect();
 
@@ -718,11 +713,11 @@ async fn test_get_deposits_returns_pending_and_accepted() {
     // Check that we get all deposits
     let deposits = emily_client.get_deposits().await.unwrap();
     let accepted_deposits = emily_client
-        .get_deposits_with_status(Status::Accepted)
+        .get_deposits_with_status(DepositStatus::Accepted)
         .await
         .unwrap();
     let pending_deposits = emily_client
-        .get_deposits_with_status(Status::Pending)
+        .get_deposits_with_status(DepositStatus::Pending)
         .await
         .unwrap();
 

@@ -13,13 +13,13 @@ use blockstack_lib::chainstate::stacks::StacksTransaction;
 use futures::Stream;
 use futures::StreamExt as _;
 use futures::future::try_join_all;
-use sha2::Digest;
+use sha2::Digest as _;
 
 use crate::WITHDRAWAL_BLOCKS_EXPIRY;
 use crate::WITHDRAWAL_DUST_LIMIT;
 use crate::WITHDRAWAL_EXPIRY_BUFFER;
 use crate::WITHDRAWAL_MIN_CONFIRMATIONS;
-use crate::bitcoin::BitcoinInteract;
+use crate::bitcoin::BitcoinInteract as _;
 use crate::bitcoin::TransactionLookupHint;
 use crate::bitcoin::utxo;
 use crate::bitcoin::utxo::Fees;
@@ -37,6 +37,7 @@ use crate::ecdsa::SignEcdsa as _;
 use crate::ecdsa::Signed;
 use crate::emily_client::EmilyInteract;
 use crate::error::Error;
+use crate::keys::CoordinatorPublicKey as _;
 use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
 use crate::message;
@@ -51,7 +52,7 @@ use crate::metrics::STACKS_BLOCKCHAIN;
 use crate::network;
 use crate::signature::TaprootSignature;
 use crate::stacks::api::FeePriority;
-use crate::stacks::api::GetNakamotoStartHeight;
+use crate::stacks::api::GetNakamotoStartHeight as _;
 use crate::stacks::api::RejectionReason;
 use crate::stacks::api::StacksInteract;
 use crate::stacks::api::SubmitTxResponse;
@@ -316,16 +317,20 @@ where
         );
         span.record("bitcoin_tip_height", *bitcoin_chain_tip.block_height);
 
-        let registry_aggregate_key = self
+        let registry_signer_set_info = self.context.state().registry_signer_set_info();
+
+        // Determine whether we are the coordinator for this tenure.
+        let is_coordinator = self
             .context
-            .state()
-            .registry_signer_set_info()
-            .map(|info| info.aggregate_key);
+            .config()
+            .signer
+            .bootstrap_signing_set
+            .is_public_key_coordinator_for(self.signer_public_key(), bitcoin_chain_tip);
 
         // If we are not the coordinator, then we have no business
         // coordinating DKG or constructing bitcoin and stacks
         // transactions, might as well return early.
-        if !self.is_coordinator(bitcoin_chain_tip.as_ref()) {
+        if !is_coordinator {
             // Before returning, we also check if all the smart contracts are
             // deployed: we do this as some other coordinator could have deployed
             // them, in which case we need to updated our state.
@@ -346,13 +351,29 @@ where
                 Ok(key) => key,
                 Err(error) => {
                     tracing::error!(%error, "failed to coordinate DKG; using existing aggregate key");
-                    registry_aggregate_key
+                    registry_signer_set_info
+                        .as_ref()
+                        .map(|info| info.aggregate_key)
                         .ok_or(Error::MissingAggregateKey(*bitcoin_chain_tip.block_hash))?
                 }
             }
         } else {
-            registry_aggregate_key
-                .ok_or(Error::MissingAggregateKey(*bitcoin_chain_tip.block_hash))?
+            // If we do not have signer set info in the registry, then we
+            // are in the bootstrap phase. Our latest DKG shares may be
+            // 'Unverified', but if we are here then they were not 'Failed'
+            // when we made to call to `should_coordinate_dkg`, since we
+            // will coordinate DKG if our last DKG shares are 'Failed'. But
+            // we could be loading 'Failed' shares here.
+            match registry_signer_set_info.as_ref() {
+                Some(info) => info.aggregate_key,
+                None => self
+                    .context
+                    .get_storage()
+                    .get_latest_encrypted_dkg_shares()
+                    .await?
+                    .map(|shares| shares.aggregate_key)
+                    .ok_or(Error::NoDkgShares)?,
+            }
         };
 
         let chain_tip_hash = &bitcoin_chain_tip.block_hash;
@@ -378,10 +399,7 @@ where
             return Ok(());
         }
 
-        let signer_public_keys = self
-            .context
-            .state()
-            .registry_signer_set_info()
+        let signer_public_keys = registry_signer_set_info
             .map(|info| info.signer_set)
             .ok_or_else(|| Error::NoKeyRotationEvent)?;
 
@@ -1710,7 +1728,7 @@ where
             let msg_public_key = msg.signer_public_key;
 
             let sender_is_coordinator =
-                given_key_is_coordinator(msg_public_key, bitcoin_chain_tip, &signer_set);
+                signer_set.is_public_key_coordinator_for(msg_public_key, bitcoin_chain_tip);
 
             let public_keys = &coordinator.get_config().signer_public_keys;
             let public_key_point = p256k1::point::Point::from(msg_public_key);
@@ -1811,26 +1829,6 @@ where
                 check_signer_public_key(sig_share_response.signer_id)
             }
         }
-    }
-
-    // Determine if the current coordinator is the coordinator.
-    //
-    // The coordinator is decided using the hash of the bitcoin
-    // chain tip. We don't use the chain tip directly because
-    // it typically starts with a lot of leading zeros.
-    //
-    // Note that this function is technically not fallible,
-    // but for now we have chosen to return phantom errors
-    // instead of adding expects/unwraps in the code.
-    // Ideally the code should be formulated in a way to guarantee
-    // it being infallible without relying on sequentially coupling
-    // expressions. However, that is left for future work.
-    fn is_coordinator(&self, bitcoin_chain_tip: &model::BitcoinBlockHash) -> bool {
-        given_key_is_coordinator(
-            self.signer_public_key(),
-            bitcoin_chain_tip,
-            &self.context.config().signer.bootstrap_signing_set,
-        )
     }
 
     /// Constructs a new [`utxo::SignerBtcState`] based on the current market
@@ -2484,45 +2482,6 @@ where
 
         Ok(tx_fee)
     }
-}
-
-/// Check if the provided public key is the coordinator for the provided chain
-/// tip
-pub fn given_key_is_coordinator(
-    pub_key: PublicKey,
-    bitcoin_chain_tip: &model::BitcoinBlockHash,
-    signer_public_keys: &BTreeSet<PublicKey>,
-) -> bool {
-    coordinator_public_key(bitcoin_chain_tip, signer_public_keys) == Some(pub_key)
-}
-
-/// Find the coordinator public key
-pub fn coordinator_public_key(
-    bitcoin_chain_tip: &model::BitcoinBlockHash,
-    signer_public_keys: &BTreeSet<PublicKey>,
-) -> Option<PublicKey> {
-    // Create a hash of the bitcoin chain tip. SHA256 will always result in
-    // a 32 byte digest.
-    let mut hasher = sha2::Sha256::new();
-    hasher.update(bitcoin_chain_tip.into_bytes());
-    let digest: [u8; 32] = hasher.finalize().into();
-
-    // Use the first 4 bytes of the digest to create a u32 index. Since `digest`
-    // is 32 bytes and we explicitly take the first 4 bytes, this is safe.
-    #[allow(clippy::expect_used)]
-    let u32_bytes = digest[..4]
-        .try_into()
-        .expect("BUG: failed to take first 4 bytes of digest");
-
-    // Convert the first 4 bytes of the digest to a u32 index.
-    let index = u32::from_be_bytes(u32_bytes);
-
-    let num_signers = signer_public_keys.len();
-
-    signer_public_keys
-        .iter()
-        .nth((index as usize) % num_signers)
-        .copied()
 }
 
 /// Determine, according to the current state of the signer and configuration,

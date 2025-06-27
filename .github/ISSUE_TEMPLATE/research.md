@@ -29,6 +29,7 @@ in themselves. -->
 <!-- Explain why this discussion exists and how it relates to the project. -->
 
 ## 3. Research
+
 ### 3.1 Proposed Research Conclusions
 
 <!-- Research and conclusions here. This should be the largest section.
@@ -46,6 +47,7 @@ What questions need answering that are beyond the scope of this research? -->
 ---
 
 **Closing Checklist**
+
 - [ ] The takeaway from this issue is clearly documented in the description of this ticket.
 - [ ] Everyone necessary has reviewed the resolution and agrees with the takeaways.
 - [ ] This ticket has or links all the information necessary to familiarize a contributor with the topic and how it was resolved.

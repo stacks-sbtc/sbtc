@@ -23,6 +23,7 @@ use crate::context::TxSignerEvent;
 use crate::dkg;
 use crate::ecdsa::SignEcdsa as _;
 use crate::error::Error;
+use crate::keys::CoordinatorPublicKey as _;
 use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
 use crate::keys::PublicKeyXOnly;
@@ -391,12 +392,12 @@ where
             .is_some();
         let is_canonical = msg_bitcoin_chain_tip == &chain_tip.block_hash;
 
-        let signer_set = &self.context.config().signer.bootstrap_signing_set;
-        let sender_is_coordinator = crate::transaction_coordinator::given_key_is_coordinator(
-            msg_sender,
-            &chain_tip.block_hash,
-            signer_set,
-        );
+        let sender_is_coordinator = self
+            .context
+            .config()
+            .signer
+            .bootstrap_signing_set
+            .is_public_key_coordinator_for(msg_sender, chain_tip);
 
         let chain_tip_status = match (is_known, is_canonical) {
             (true, true) => ChainTipStatus::Canonical,
@@ -552,20 +553,29 @@ where
 
         let db = self.context.get_storage();
         let public_key = self.signer_public_key();
+        let state = self.context.state();
 
         // There is one check that applies to all Stacks transactions, and
         // that check is that the current signer is in the signing set
-        // associated authorized wallet in the sbtc registry. We do this
-        // check here. If we are in the bootstrap phase, there may not be
-        // any signer set info in the registry so we fallback on the
-        // information in latest verified DKG shares in that case.
-        let signer_set_info = match self.context.state().registry_signer_set_info() {
+        // associated authorized wallet in the sbtc registry.
+        //
+        // If the sbtc-registry has not been deployed yet, then we allow
+        // any DKG shares for smart contract deployments, but require
+        // verified DKG shares for other transactions.
+        let signer_set_info = match state.registry_signer_set_info() {
             Some(info) => info,
-            None => db
-                .get_latest_verified_dkg_shares()
-                .await?
-                .map(SignerSetInfo::from)
-                .ok_or_else(|| Error::NoDkgShares)?,
+            None => match db.get_latest_verified_dkg_shares().await? {
+                Some(info) => info.into(),
+                None if matches!(request.contract_tx, StacksTx::SmartContract(_))
+                    && !state.sbtc_contracts_deployed() =>
+                {
+                    db.get_latest_encrypted_dkg_shares()
+                        .await?
+                        .map(SignerSetInfo::from)
+                        .ok_or(Error::NoDkgShares)?
+                }
+                _ => return Err(Error::NoVerifiedDkgShares),
+            },
         };
 
         if !signer_set_info.signer_set.contains(&public_key) {

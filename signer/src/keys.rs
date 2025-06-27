@@ -28,14 +28,18 @@
 //! [^3]: https://github.com/Trust-Machines/p256k1/blob/3ecb941c1af13741d52335ef911693b6d6fda94b/p256k1/src/scalar.rs#L245-L257
 //! [^4]: https://github.com/bitcoin-core/secp256k1/blob/3fdf146bad042a17f6b2f490ef8bd9d8e774cdbd/src/scalar.h#L31-L36
 
+use std::borrow::Borrow;
+use std::collections::BTreeSet;
 use std::ops::Deref;
 use std::str::FromStr;
 
 use bitcoin::ScriptBuf;
 use bitcoin::TapTweakHash;
+use bitcoin::hashes::Hash as _;
 use secp256k1::SECP256K1;
 use serde::Deserialize;
 use serde::Serialize;
+use sha2::Digest as _;
 
 use crate::error::Error;
 
@@ -476,11 +480,82 @@ impl SignerScriptPubKey for secp256k1::XOnlyPublicKey {
     }
 }
 
+/// Utility methods for determining the coordinator public key based on the
+/// underlying set of signers and the bitcoin chain tip.
+pub trait CoordinatorPublicKey {
+    /// Find the coordinator public key
+    fn determine_for<B, K>(
+        bitcoin_chain_tip: B,
+        signer_public_keys: &BTreeSet<K>,
+    ) -> Option<PublicKey>
+    where
+        B: Borrow<bitcoin::BlockHash>,
+        K: Copy + Into<PublicKey>,
+    {
+        let num_signers = signer_public_keys.len();
+        if num_signers == 0 {
+            // Handle empty set to avoid panic with % 0
+            return None;
+        }
+
+        // Create a hash of the bitcoin chain tip. SHA256 will always result in
+        // a 32 byte digest.
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(bitcoin_chain_tip.borrow().to_byte_array());
+        let digest: [u8; 32] = hasher.finalize().into();
+
+        // Use the first 4 bytes of the digest to create a u32 index. Since `digest`
+        // is 32 bytes and we explicitly take the first 4 bytes, this is safe.
+        #[allow(clippy::expect_used)]
+        let u32_bytes = digest[..4]
+            .try_into()
+            .expect("BUG: failed to take first 4 bytes of digest");
+
+        // Convert the first 4 bytes of the digest to a u32 index.
+        let index = u32::from_be_bytes(u32_bytes);
+
+        signer_public_keys
+            .iter()
+            .nth((index as usize) % num_signers)
+            .copied()
+            .map(Into::into)
+    }
+
+    /// Determine the coordinator public key for the given bitcoin chain tip.
+    fn determine_coordinator_public_key_for<B>(&self, bitcoin_chain_tip: B) -> Option<PublicKey>
+    where
+        B: Borrow<bitcoin::BlockHash>;
+
+    /// Determine if the given public key is the coordinator public key
+    /// for the given bitcoin chain tip.
+    fn is_public_key_coordinator_for<B, K>(&self, public_key: K, bitcoin_chain_tip: B) -> bool
+    where
+        B: Borrow<bitcoin::BlockHash>,
+        K: Into<PublicKey>,
+    {
+        let coordinator_public_key = self.determine_coordinator_public_key_for(bitcoin_chain_tip);
+        let public_key = public_key.into();
+        coordinator_public_key == Some(public_key)
+    }
+}
+
+/// Implementation of the `CoordinatorPublicKey` trait for `BTreeSet<PublicKey>`.
+impl CoordinatorPublicKey for BTreeSet<PublicKey> {
+    fn determine_coordinator_public_key_for<B>(&self, bitcoin_chain_tip: B) -> Option<PublicKey>
+    where
+        B: Borrow<bitcoin::BlockHash>,
+    {
+        Self::determine_for(bitcoin_chain_tip, self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    use rand::SeedableRng as _;
     use rand::rngs::OsRng;
+    use rand::rngs::StdRng;
     use secp256k1::Parity;
     use secp256k1::SecretKey;
     use stacks_common::util::secp256k1::Secp256k1PrivateKey;
@@ -688,5 +763,117 @@ mod tests {
         let tweaked_aggregate_key2_bytes =
             tweaked_aggregate_key2.0.x_only_public_key().0.serialize();
         assert_eq!(tweaked_aggregate_key1_bytes, tweaked_aggregate_key2_bytes);
+    }
+
+    // Helper to create a PrivateKey for testing using a seeded RNG
+    fn sk_from_seed(seed: u64) -> PrivateKey {
+        let mut rng = StdRng::seed_from_u64(seed);
+        PrivateKey::new(&mut rng)
+    }
+
+    // Helper to create a PublicKey for testing using a seeded RNG
+    fn pk_from_seed(seed: u64) -> PublicKey {
+        PublicKey::from_private_key(&sk_from_seed(seed))
+    }
+
+    // Helper to create a bitcoin::BlockHash for testing
+    // Ensures different seeds produce different (though simple) hashes.
+    fn bh_from_seed(seed: u8) -> bitcoin::BlockHash {
+        let mut bytes = [0u8; 32];
+        bytes[0] = seed; // Simple differentiation
+        bitcoin::BlockHash::from_byte_array(bytes)
+    }
+
+    #[test_case(vec![], bh_from_seed(1) => None; "btree_set empty set")]
+    #[test_case(vec![pk_from_seed(1)], bh_from_seed(1) => Some(pk_from_seed(1)); "btree_set single key")]
+    fn test_determine_coordinator_btree_set(
+        keys_vec: Vec<PublicKey>,
+        block_hash: bitcoin::BlockHash,
+    ) -> Option<PublicKey> {
+        let key_set: BTreeSet<PublicKey> = keys_vec.into_iter().collect();
+        key_set.determine_coordinator_public_key_for(block_hash)
+    }
+
+    #[test]
+    fn test_determine_coordinator_multiple_keys_and_determinism() {
+        let keys_data: Vec<PublicKey> = (1..=5).map(pk_from_seed).collect();
+        let key_set: BTreeSet<PublicKey> = keys_data.iter().copied().collect();
+
+        let bh1 = bh_from_seed(10);
+        let bh2 = bh_from_seed(20);
+
+        let coord1_set = key_set
+            .determine_coordinator_public_key_for(bh1)
+            .expect("Expected a coordinator for BTreeSet with bh1");
+        let coord2_set = key_set
+            .determine_coordinator_public_key_for(bh2)
+            .expect("Expected a coordinator for BTreeSet with bh2");
+        let coord1_set_again = key_set
+            .determine_coordinator_public_key_for(bh1)
+            .expect("Expected a coordinator for BTreeSet with bh1 again");
+
+        assert_eq!(
+            coord1_set, coord1_set_again,
+            "BTreeSet determination should be deterministic"
+        );
+
+        assert!(keys_data.contains(&coord1_set));
+        assert!(keys_data.contains(&coord2_set));
+    }
+
+    #[test]
+    fn test_is_public_key_coordinator() {
+        let keys_data: Vec<PublicKey> = (10..=12).map(pk_from_seed).collect(); // pk(10), pk(11), pk(12)
+        let key_set: BTreeSet<PublicKey> = keys_data.iter().copied().collect();
+        let block_hash = bh_from_seed(50);
+
+        if let Some(coordinator_set) = key_set.determine_coordinator_public_key_for(block_hash) {
+            assert!(key_set.is_public_key_coordinator_for(coordinator_set, block_hash));
+            // For every public key in the set except the identified coordinator, make sure that
+            // it is not considered a coordinator for the same block hash.
+            for key in keys_data.iter().filter(|&&k| k != coordinator_set) {
+                assert!(!key_set.is_public_key_coordinator_for(*key, block_hash));
+            }
+        } else {
+            panic!("Expected a coordinator for BTreeSet in is_public_key_coordinator test");
+        }
+
+        // Test with an empty set
+        let empty_set: BTreeSet<PublicKey> = BTreeSet::new();
+        assert!(!empty_set.is_public_key_coordinator_for(pk_from_seed(100), block_hash));
+
+        // Test with a key not in the set
+        let non_member_key = pk_from_seed(999);
+        assert!(!key_set.is_public_key_coordinator_for(non_member_key, block_hash));
+    }
+
+    #[test]
+    fn test_different_block_hashes_select_different_coordinators_sometimes() {
+        let keys_data: Vec<PublicKey> = (200..=205).map(pk_from_seed).collect();
+        let key_set: BTreeSet<PublicKey> = keys_data.iter().copied().collect();
+
+        // Using 10 block hashes with 6 keys should yield a risk of false failures of
+        // something like 1 in 10 million.
+        let num_block_hashes_to_test = 10;
+        let block_hashes: Vec<bitcoin::BlockHash> =
+            (1..=num_block_hashes_to_test).map(bh_from_seed).collect();
+
+        let selected_coordinators: Vec<PublicKey> = block_hashes
+            .into_iter()
+            .map(|bh| {
+                key_set
+                    .determine_coordinator_public_key_for(bh)
+                    .expect("Coordinator should be found for a non-empty key set")
+            })
+            .collect();
+
+        let unique_coordinators: BTreeSet<PublicKey> =
+            selected_coordinators.iter().copied().collect();
+
+        more_asserts::assert_gt!(
+            unique_coordinators.len(),
+            1,
+            "Expected different block hashes to select at least two different coordinators out of {num_block_hashes_to_test} attempts.",
+        );
     }
 }
