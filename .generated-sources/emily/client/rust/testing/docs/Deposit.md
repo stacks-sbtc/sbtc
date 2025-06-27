@@ -14,7 +14,8 @@ Name | Type | Description | Notes
 **parameters** | [**models::DepositParameters**](DepositParameters.md) |  | 
 **recipient** | **String** | Stacks address to received the deposited sBTC. | 
 **reclaim_script** | **String** | Raw reclaim script binary in hex. | 
-**status** | [**models::Status**](Status.md) |  | 
+**replaced_by_tx** | Option<**String**> | Transaction ID of the transaction that replaced this one via RBF. | [optional]
+**status** | [**models::DepositStatus**](DepositStatus.md) |  | 
 **status_message** | **String** | The status message of the deposit. | 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
