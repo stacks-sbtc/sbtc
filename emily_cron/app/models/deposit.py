@@ -13,7 +13,6 @@ class RequestStatus(Enum):
     ACCEPTED = "accepted"
     CONFIRMED = "confirmed"
     FAILED = "failed"
-    REPROCESSING = "reprocessing"
     RBF = "rbf"
 
 

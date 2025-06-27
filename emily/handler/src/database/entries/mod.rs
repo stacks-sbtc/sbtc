@@ -78,9 +78,6 @@ pub enum DepositStatusEntry {
     /// Transaction hasn't yet been addressed by the sBTC Signers.
     #[default]
     Pending,
-    /// Transaction was dealt with by the signers at one point but is now being
-    /// reprocessed. The Signers are aware of the operation request.
-    Reprocessing,
     /// Transaction has been seen and accepted by the sBTC Signers, but is not
     /// yet included in any on chain artifact. The transaction can still fail
     /// at this point if the Signers fail to include the transaction in an on
@@ -110,9 +107,6 @@ pub enum WithdrawalStatusEntry {
     /// Transaction hasn't yet been addressed by the sBTC Signers.
     #[default]
     Pending,
-    /// Transaction was dealt with by the signers at one point but is now being
-    /// reprocessed. The Signers are aware of the operation request.
-    Reprocessing,
     /// Transaction has been seen and accepted by the sBTC Signers, but is not
     /// yet included in any on chain artifact. The transaction can still fail
     /// at this point if the Signers fail to include the transaction in an on
@@ -136,7 +130,6 @@ impl From<&DepositStatusEntry> for DepositStatus {
     fn from(value: &DepositStatusEntry) -> Self {
         match value {
             DepositStatusEntry::Pending => DepositStatus::Pending,
-            DepositStatusEntry::Reprocessing => DepositStatus::Reprocessing,
             DepositStatusEntry::Accepted => DepositStatus::Accepted,
             DepositStatusEntry::Confirmed(_) => DepositStatus::Confirmed,
             DepositStatusEntry::Failed => DepositStatus::Failed,
@@ -149,7 +142,6 @@ impl From<&WithdrawalStatusEntry> for WithdrawalStatus {
     fn from(value: &WithdrawalStatusEntry) -> Self {
         match value {
             WithdrawalStatusEntry::Pending => WithdrawalStatus::Pending,
-            WithdrawalStatusEntry::Reprocessing => WithdrawalStatus::Reprocessing,
             WithdrawalStatusEntry::Accepted => WithdrawalStatus::Accepted,
             WithdrawalStatusEntry::Confirmed(_) => WithdrawalStatus::Confirmed,
             WithdrawalStatusEntry::Failed => WithdrawalStatus::Failed,

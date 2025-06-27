@@ -510,16 +510,13 @@ async fn update_withdrawals() {
 
 #[test_case(WithdrawalStatus::Pending, WithdrawalStatus::Pending, true; "pending_to_pending")]
 #[test_case(WithdrawalStatus::Pending, WithdrawalStatus::Accepted, false; "pending_to_accepted")]
-#[test_case(WithdrawalStatus::Pending, WithdrawalStatus::Reprocessing, true; "pending_to_reprocessing")]
 #[test_case(WithdrawalStatus::Pending, WithdrawalStatus::Confirmed, true; "pending_to_confirmed")]
 #[test_case(WithdrawalStatus::Pending, WithdrawalStatus::Failed, true; "pending_to_failed")]
 #[test_case(WithdrawalStatus::Accepted, WithdrawalStatus::Pending, true; "accepted_to_pending")]
 #[test_case(WithdrawalStatus::Failed, WithdrawalStatus::Pending, true; "failed_to_pending")]
-#[test_case(WithdrawalStatus::Reprocessing, WithdrawalStatus::Pending, true; "reprocessing_to_pending")]
 #[test_case(WithdrawalStatus::Confirmed, WithdrawalStatus::Pending, true; "confirmed_to_pending")]
 #[test_case(WithdrawalStatus::Accepted, WithdrawalStatus::Accepted, false; "accepted_to_accepted")]
 #[test_case(WithdrawalStatus::Failed, WithdrawalStatus::Accepted, true; "failed_to_accepted")]
-#[test_case(WithdrawalStatus::Reprocessing, WithdrawalStatus::Accepted, true; "reprocessing_to_accepted")]
 #[test_case(WithdrawalStatus::Confirmed, WithdrawalStatus::Accepted, true; "confirmed_to_accepted")]
 #[tokio::test]
 async fn update_withdrawals_is_forbidden_for_signer(
@@ -649,7 +646,6 @@ async fn update_withdrawals_is_forbidden_for_signer(
 
 #[test_case(WithdrawalStatus::Pending, WithdrawalStatus::Accepted; "pending_to_accepted")]
 #[test_case(WithdrawalStatus::Pending, WithdrawalStatus::Pending; "pending_to_pending")]
-#[test_case(WithdrawalStatus::Pending, WithdrawalStatus::Reprocessing; "pending_to_reprocessing")]
 #[test_case(WithdrawalStatus::Pending, WithdrawalStatus::Confirmed; "pending_to_confirmed")]
 #[test_case(WithdrawalStatus::Pending, WithdrawalStatus::Failed; "pending_to_failed")]
 #[test_case(WithdrawalStatus::Confirmed, WithdrawalStatus::Pending; "confirmed_to_pending")]

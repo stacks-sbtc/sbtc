@@ -87,7 +87,6 @@ impl WithdrawalUpdate {
             }
             WithdrawalStatus::Accepted => WithdrawalStatusEntry::Accepted,
             WithdrawalStatus::Pending => WithdrawalStatusEntry::Pending,
-            WithdrawalStatus::Reprocessing => WithdrawalStatusEntry::Reprocessing,
             WithdrawalStatus::Failed => WithdrawalStatusEntry::Failed,
         };
         // Make the new event.

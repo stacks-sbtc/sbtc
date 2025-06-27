@@ -171,7 +171,6 @@ impl DepositUpdate {
             }
             DepositStatus::Accepted => DepositStatusEntry::Accepted,
             DepositStatus::Pending => DepositStatusEntry::Pending,
-            DepositStatus::Reprocessing => DepositStatusEntry::Reprocessing,
             DepositStatus::Failed => DepositStatusEntry::Failed,
             DepositStatus::Rbf => DepositStatusEntry::Rbf(self.replaced_by_tx.ok_or(
                 ValidationError::DepositMissingReplacementTx(
