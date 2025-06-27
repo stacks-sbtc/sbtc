@@ -14,7 +14,7 @@ use blockstack_lib::{
     },
 };
 use clarity::types::chainstate::{StacksAddress, StacksBlockId};
-use emily_client::models::Status;
+use emily_client::models::DepositStatus;
 use tokio::sync::{Mutex, broadcast};
 use tokio::time::error::Elapsed;
 
@@ -560,7 +560,7 @@ impl EmilyInteract for WrappedMockEmilyInteract {
 
     async fn get_deposits_with_status(
         &self,
-        status: Status,
+        status: DepositStatus,
     ) -> Result<Vec<sbtc::deposits::CreateDepositRequest>, Error> {
         self.inner
             .lock()

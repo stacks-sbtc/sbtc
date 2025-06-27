@@ -48,7 +48,7 @@ pub struct Withdrawal {
     #[serde(rename = "stacksBlockHeight")]
     pub stacks_block_height: u64,
     #[serde(rename = "status")]
-    pub status: models::Status,
+    pub status: models::WithdrawalStatus,
     /// The status message of the withdrawal.
     #[serde(rename = "statusMessage")]
     pub status_message: String,
@@ -69,7 +69,7 @@ impl Withdrawal {
         sender: String,
         stacks_block_hash: String,
         stacks_block_height: u64,
-        status: models::Status,
+        status: models::WithdrawalStatus,
         status_message: String,
         txid: String,
     ) -> Withdrawal {

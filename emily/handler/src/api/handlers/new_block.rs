@@ -16,7 +16,7 @@ use crate::api::handlers::deposit::update_deposits_sidecar;
 use crate::api::handlers::withdrawal::{create_withdrawal, update_withdrawals_sidecar};
 use crate::api::models::chainstate::Chainstate;
 use crate::api::models::common::Fulfillment;
-use crate::api::models::common::Status;
+use crate::api::models::common::{DepositStatus, WithdrawalStatus};
 use crate::api::models::deposit::requests::{DepositUpdate, UpdateDepositsRequestBody};
 use crate::api::models::new_block::NewBlockEventRaw;
 use crate::api::models::withdrawal::WithdrawalParameters;
@@ -266,7 +266,7 @@ async fn handle_completed_deposit(
     Ok(DepositUpdate {
         bitcoin_tx_output_index: event.outpoint.vout,
         bitcoin_txid: event.outpoint.txid.to_string(),
-        status: Status::Confirmed,
+        status: DepositStatus::Confirmed,
         fulfillment: Some(Fulfillment {
             bitcoin_block_hash: event.sweep_block_hash.to_string(),
             bitcoin_block_height: event.sweep_block_height,
@@ -296,7 +296,7 @@ fn handle_withdrawal_accept(event: WithdrawalAcceptEvent) -> WithdrawalUpdate {
 
     WithdrawalUpdate {
         request_id: event.request_id,
-        status: Status::Confirmed,
+        status: WithdrawalStatus::Confirmed,
         fulfillment: Some(Fulfillment {
             bitcoin_block_hash: event.sweep_block_hash.to_string(),
             bitcoin_block_height: event.sweep_block_height,
@@ -356,7 +356,7 @@ fn handle_withdrawal_reject(event: WithdrawalRejectEvent) -> WithdrawalUpdate {
     WithdrawalUpdate {
         fulfillment: None,
         request_id: event.request_id,
-        status: Status::Failed,
+        status: WithdrawalStatus::Failed,
         status_message: "Rejected".to_string(),
     }
 }
@@ -418,7 +418,7 @@ mod test {
         // Expected struct to be added to the rejected_withdrawals vector
         let expectation = WithdrawalUpdate {
             request_id: event.request_id,
-            status: Status::Failed,
+            status: WithdrawalStatus::Failed,
             fulfillment: None,
             status_message: "Rejected".to_string(),
         };
@@ -445,7 +445,7 @@ mod test {
 
         let expectation = WithdrawalUpdate {
             request_id: event.request_id,
-            status: Status::Confirmed,
+            status: WithdrawalStatus::Confirmed,
             fulfillment: Some(Fulfillment {
                 bitcoin_block_hash: event.sweep_block_hash.to_string(),
                 bitcoin_block_height: event.sweep_block_height,

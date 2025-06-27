@@ -2,7 +2,7 @@
 use tracing::{debug, instrument};
 use warp::reply::{Reply, json, with_status};
 
-use crate::api::models::common::Status;
+use crate::api::models::common::WithdrawalStatus;
 use crate::api::models::common::requests::BasicPaginationQuery;
 use crate::api::models::withdrawal::responses::WithdrawalWithStatus;
 use crate::api::models::withdrawal::{Withdrawal, WithdrawalInfo};
@@ -13,7 +13,7 @@ use crate::api::models::withdrawal::{
 use crate::common::error::Error;
 use crate::context::EmilyContext;
 use crate::database::accessors;
-use crate::database::entries::StatusEntry;
+use crate::database::entries::WithdrawalStatusEntry;
 use crate::database::entries::chainstate::ApiStateEntry;
 use crate::database::entries::withdrawal::{
     ValidatedUpdateWithdrawalRequest, WithdrawalEntry, WithdrawalEntryKey, WithdrawalEvent,
@@ -65,7 +65,7 @@ pub async fn get_withdrawal(context: EmilyContext, request_id: u64) -> impl warp
     operation_id = "getWithdrawals",
     path = "/withdrawal",
     params(
-        ("status" = Status, Query, description = "the status to search by when getting all withdrawals."),
+        ("status" = WithdrawalStatus, Query, description = "the status to search by when getting all withdrawals."),
         ("nextToken" = Option<String>, Query, description = "the next token value from the previous return of this api call."),
         ("pageSize" = Option<u16>, Query, description = "the maximum number of items in the response list.")
     ),
@@ -261,7 +261,7 @@ pub async fn create_withdrawal(
             txid,
         } = body;
 
-        let status = Status::Pending;
+        let status = WithdrawalStatus::Pending;
 
         // Make table entry.
         let withdrawal_entry: WithdrawalEntry = WithdrawalEntry {
@@ -275,7 +275,7 @@ pub async fn create_withdrawal(
             amount,
             parameters: WithdrawalParametersEntry { max_fee: parameters.max_fee },
             history: vec![WithdrawalEvent {
-                status: StatusEntry::Pending,
+                status: WithdrawalStatusEntry::Pending,
                 message: "Just received withdrawal".to_string(),
                 stacks_block_hash: stacks_block_hash.clone(),
                 stacks_block_height,

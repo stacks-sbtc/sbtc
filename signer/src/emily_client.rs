@@ -17,12 +17,12 @@ use emily_client::apis::limits_api;
 use emily_client::apis::withdrawal_api;
 use emily_client::models::DepositInfo;
 use emily_client::models::DepositUpdate;
-use emily_client::models::Status;
 use emily_client::models::UpdateDepositsRequestBody;
 use emily_client::models::UpdateDepositsResponse;
 use emily_client::models::UpdateWithdrawalsRequestBody;
 use emily_client::models::UpdateWithdrawalsResponse;
 use emily_client::models::WithdrawalUpdate;
+use emily_client::models::{DepositStatus, WithdrawalStatus};
 use sbtc::deposits::CreateDepositRequest;
 use url::Url;
 
@@ -84,7 +84,7 @@ pub trait EmilyInteract: Sync + Send {
     /// Get pending deposits with a specific status from Emily.
     fn get_deposits_with_status(
         &self,
-        status: Status,
+        status: DepositStatus,
     ) -> impl std::future::Future<Output = Result<Vec<CreateDepositRequest>, Error>> + Send;
 
     /// Update accepted deposits after their sweep bitcoin transaction has been
@@ -231,8 +231,8 @@ impl EmilyInteract for EmilyClient {
     }
 
     async fn get_deposits(&self) -> Result<Vec<CreateDepositRequest>, Error> {
-        let pending_deposits = self.get_deposits_with_status(Status::Pending).await;
-        let accepted_deposits = self.get_deposits_with_status(Status::Accepted).await;
+        let pending_deposits = self.get_deposits_with_status(DepositStatus::Pending).await;
+        let accepted_deposits = self.get_deposits_with_status(DepositStatus::Accepted).await;
 
         match (pending_deposits, accepted_deposits) {
             (Err(pending_err), Err(_accepted_err)) => {
@@ -259,7 +259,7 @@ impl EmilyInteract for EmilyClient {
 
     async fn get_deposits_with_status(
         &self,
-        status: Status,
+        status: DepositStatus,
     ) -> Result<Vec<CreateDepositRequest>, Error> {
         let mut all_deposits = Vec::new();
         let mut next_token: Option<String> = None;
@@ -341,7 +341,7 @@ impl EmilyInteract for EmilyClient {
             .map(|withdrawal| WithdrawalUpdate {
                 request_id: withdrawal.request_id,
                 fulfillment: None,
-                status: Status::Accepted,
+                status: WithdrawalStatus::Accepted,
                 status_message: "".to_string(),
             })
             .collect();
@@ -362,7 +362,7 @@ impl EmilyInteract for EmilyClient {
             .map(|deposit| DepositUpdate {
                 bitcoin_tx_output_index: deposit.outpoint.vout,
                 bitcoin_txid: deposit.outpoint.txid.to_string(),
-                status: Status::Accepted,
+                status: DepositStatus::Accepted,
                 fulfillment: None,
                 status_message: "".to_string(),
                 replaced_by_tx: None,
@@ -434,7 +434,7 @@ impl EmilyInteract for ApiFallbackClient<EmilyClient> {
 
     async fn get_deposits_with_status(
         &self,
-        status: Status,
+        status: DepositStatus,
     ) -> Result<Vec<CreateDepositRequest>, Error> {
         self.exec(|client, _| client.get_deposits_with_status(status))
             .await
