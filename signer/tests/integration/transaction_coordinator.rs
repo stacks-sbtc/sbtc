@@ -1593,9 +1593,6 @@ async fn sign_bitcoin_transaction() {
     //   the signers should all participate in DKG.
     // =========================================================================
     let chain_tip = faucet.generate_block().into();
-
-    // We first need to wait for bitcoin-core to send us all the
-    // notifications so that we are up-to-date with the chain tip and DKG.
     wait_for_signers(&signers).await;
 
     // DKG and DKG verification should have finished successfully. We
@@ -1897,9 +1894,6 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
 
     // This should kick off DKG.
     let chain_tip = faucet.generate_block().into();
-
-    // We first need to wait for bitcoin-core to send us all the
-    // notifications so that we are up-to-date with the chain tip.
     wait_for_signers(&signers).await;
 
     // DKG and DKG verification should have finished successfully. We
@@ -2037,9 +2031,6 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     // After the next bitcoin block, each of the signers will think that
     // DKG needs to be run. So we need to wait for it.
     let chain_tip = faucet.generate_block().into();
-
-    // We first need to wait for bitcoin-core to send us all the
-    // notifications so that we are up-to-date with the chain tip.
     wait_for_signers(&signers).await;
 
     let ctx = signers.first().unwrap();
@@ -2392,9 +2383,6 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     //   the signers should all participate in DKG.
     // =========================================================================
     let chain_tip: BitcoinBlockHash = faucet.generate_block().into();
-
-    // We first need to wait for bitcoin-core to send us all the
-    // notifications so that we are up-to-date with the chain tip and DKG.
     wait_for_signers(&signers).await;
 
     // DKG and DKG verification should have finished successfully. We
@@ -2511,9 +2499,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
         handle.abort();
     }
 
-    let db_kp = signers
-        .drain(..)
-        .collect::<Vec<_>>();
+    let db_kp = signers.drain(..).collect::<Vec<_>>();
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
@@ -2553,8 +2539,6 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     //   the signers should all participate in DKG.
     // =========================================================================
     let chain_tip: BitcoinBlockHash = faucet.generate_block().into();
-    // We first need to wait for bitcoin-core to send us all the
-    // notifications so that we are up-to-date with the chain tip and DKG.
     wait_for_signers(&signers).await;
 
     // DKG and DKG verification should have finished successfully. We
@@ -2578,8 +2562,6 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     }
 
     faucet.generate_block();
-    // We first need to wait for bitcoin-core to send us all the
-    // notifications so that we are up-to-date with the chain tip and DKG.
     wait_for_signers(&signers).await;
 
     // The signers should have ran DKG twice now
@@ -2957,9 +2939,6 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     //   the signers should all participate in DKG.
     // =========================================================================
     let chain_tip: BitcoinBlockHash = faucet.generate_block().into();
-
-    // We first need to wait for bitcoin-core to send us all the
-    // notifications so that we are up-to-date with the chain tip and DKG.
     wait_for_signers(&signers).await;
 
     // DKG and DKG verification should have finished successfully. We
@@ -3135,8 +3114,6 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     //   the signers should all participate in DKG.
     // =========================================================================
     let chain_tip: BitcoinBlockHash = faucet.generate_block().into();
-    // We first need to wait for bitcoin-core to send us all the
-    // notifications so that we are up-to-date with the chain tip and DKG.
     wait_for_signers(&signers).await;
 
     // DKG and DKG verification should have finished successfully. We
@@ -3160,8 +3137,6 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     }
 
     faucet.generate_block();
-    // We first need to wait for bitcoin-core to send us all the
-    // notifications so that we are up-to-date with the chain tip and DKG.
     wait_for_signers(&signers).await;
 
     // The first three signers should have ran DKG twice now, while the 4th
@@ -3569,9 +3544,6 @@ async fn skip_signer_activites_after_key_rotation() {
 
     // This should kick off DKG.
     let chain_tip: BitcoinBlockHash = faucet.generate_block().into();
-
-    // We first need to wait for bitcoin-core to send us all the
-    // notifications so that we are up-to-date with the chain tip.
     wait_for_signers(&signers).await;
 
     // DKG and DKG verification should have finished successfully. We
@@ -4000,9 +3972,6 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
     //   the signers should all participate in DKG.
     // =========================================================================
     faucet.generate_block();
-
-    // We first need to wait for bitcoin-core to send us all the
-    // notifications so that we are up-to-date with the chain tip.
     wait_for_signers(&signers).await;
 
     // =========================================================================
@@ -4014,9 +3983,6 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
     //   the signers should all participate in DKG.
     // =========================================================================
     faucet.generate_block();
-
-    // We first need to wait for bitcoin-core to send us all the
-    // notifications so that we are up-to-date with the chain tip.
     wait_for_signers(&signers).await;
 
     // =========================================================================
@@ -4817,6 +4783,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
     //   we use a counter to notify us when that happens.
     // =========================================================================
     for ctx in signers.iter() {
+        ctx.state().set_sbtc_contracts_deployed();
         start_event_loops(ctx, &network).await;
     }
 
@@ -4829,9 +4796,6 @@ async fn sign_bitcoin_transaction_withdrawals() {
     //   the signers should all participate in DKG.
     // =========================================================================
     let chain_tip = faucet.generate_block().into();
-
-    // We first need to wait for bitcoin-core to send us all the
-    // notifications so that we are up-to-date with the chain tip.
     wait_for_signers(&signers).await;
 
     // DKG and DKG verification should have finished successfully. We
@@ -6237,6 +6201,7 @@ async fn reuse_nonce_attack() {
     //   we use a counter to notify us when that happens.
     // =========================================================================
     for ctx in signers.iter() {
+        ctx.state().set_sbtc_contracts_deployed();
         start_event_loops(ctx, &network).await;
     }
 
