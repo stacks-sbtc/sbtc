@@ -44,7 +44,7 @@ pub struct SignerInfo {
 /// Trait for selecting the coordinator's private key from a list of items which
 /// contain keypairs.
 pub trait SelectCoordinatorPrivateKey {
-    /// Select the coordinator's private key based on the given list of `SignerInfo`.
+    /// Select the coordinator's private key.
     #[track_caller]
     fn select_coordinator_private_key<B>(&self, bitcoin_chain_tip: B) -> PrivateKey
     where
