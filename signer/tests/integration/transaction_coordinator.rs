@@ -746,6 +746,10 @@ async fn deploy_smart_contracts_coordinator() {
             context_window: 10000,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             signer_private_key: kp.secret_key().into(),
+            last_presign_block: BitcoinBlockRef {
+                block_height: 0u64.into(),
+                block_hash: BitcoinBlockHash::from([0; 32]),
+            },
             rng: rand::rngs::OsRng,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
