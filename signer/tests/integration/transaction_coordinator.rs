@@ -715,6 +715,7 @@ where
         block_observer.run().await
     }));
 
+    // We wait to make sure that all spawned tasks have started.
     while start_count.load(Ordering::SeqCst) < 4 {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
@@ -4644,10 +4645,10 @@ async fn test_conservative_initial_sbtc_limits() {
     //   in getting deposits (so no signal is sent to request decider and tx
     //   coordinator)
     // =========================================================================
-    let signers_key = setup.signers.signer_keys().iter().cloned().collect();
     loop {
-        let chain_tip: BitcoinBlockHash = faucet.generate_blocks(1).pop().unwrap().into();
-        if given_key_is_coordinator(signers[0].2.public_key().into(), &chain_tip, &signers_key) {
+        let chain_tip: BitcoinBlockHash = faucet.generate_block().into();
+        let public_key = signers[0].2.public_key().into();
+        if given_key_is_coordinator(public_key, &chain_tip, &signer_set_public_keys) {
             break;
         }
     }
