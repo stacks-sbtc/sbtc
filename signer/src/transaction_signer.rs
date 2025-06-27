@@ -487,7 +487,6 @@ where
         self.send_message(BitcoinPreSignAck, &chain_tip.block_hash)
             .await?;
 
-        tracing::debug!(?chain_tip, "updating used_presign_blocks",);
         self.last_presign_block = *chain_tip;
 
         Ok(())
