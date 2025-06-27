@@ -2577,12 +2577,12 @@ struct TestThresholds {
 }
 
 /// Test that three signers can successfully re-run DKG after the signature
-/// threshold changes. 
-/// 
+/// threshold changes.
+///
 /// Have three signers run DKG, and sweep a deposit. Then have the three
 /// signers update the signature threshold, run DKG again, and sweep two
 /// deposits in two separate sweep transactions to the new scriptPubKey.
-/// 
+///
 /// The test setup is as follows:
 /// 1. There are three "signers" contexts. Each context points to its own
 ///    real postgres database, and they have their own private key. Each
@@ -3268,15 +3268,14 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     }
 }
 
-
 /// Test that three signers can successfully re-run DKG after the signature
-/// threshold changes and a new signer is added to the signer set. 
-/// 
+/// threshold changes and a new signer is added to the signer set.
+///
 /// Have three signers run DKG, and sweep a deposit. Then have the three
 /// signers update the signature threshold, add a new signer to their
 /// configs, run DKG again, and sweep two deposits in two separate sweep
 /// transactions to the new scriptPubKey.
-/// 
+///
 /// The test setup is as follows:
 /// 1. There are three "signers" contexts. Each context points to its own
 ///    real postgres database, and they have their own private key. Each
