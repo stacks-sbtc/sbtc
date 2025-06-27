@@ -2500,11 +2500,9 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
         handle.abort();
     }
 
-    let db_kp = signers.drain(..).collect::<Vec<_>>();
+    let previous_contexts = signers.drain(..).collect::<Vec<_>>();
 
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
-    for ctx_old in db_kp {
+    for ctx_old in previous_contexts {
         let db = ctx_old.inner_storage();
         let mut ctx = TestContext::builder()
             .with_storage(db.clone())
@@ -3064,7 +3062,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
 
     let new_db = testing::storage::new_test_database().await;
 
-    let db_kp = signers
+    let previous_contexts = signers
         .drain(..)
         .map(|ctx| (ctx.inner_storage(), ctx.config().signer.private_key))
         .chain([(new_db, new_signer_keypair.secret_key().into())])
@@ -3076,9 +3074,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
         handle.abort();
     }
 
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
-    for (db, private_key) in db_kp {
+    for (db, private_key) in previous_contexts {
         let mut ctx = TestContext::builder()
             .with_storage(db.clone())
             .with_first_bitcoin_core_client()

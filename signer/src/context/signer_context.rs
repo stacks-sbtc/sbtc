@@ -65,17 +65,6 @@ where
     }
 }
 
-#[cfg(any(test, feature = "testing"))]
-impl<Storage, Bitcoin, Stacks, Emily> SignerContext<Storage, Bitcoin, Stacks, Emily>
-where
-    Storage: Clone,
-{
-    /// Get a clone of the inner storage.
-    pub fn inner_storage(&self) -> Storage {
-        self.storage.clone()
-    }
-}
-
 impl<S, BC, ST, EM> SignerContext<S, BC, ST, EM>
 where
     S: DbRead + DbWrite + Clone + Sync + Send,
