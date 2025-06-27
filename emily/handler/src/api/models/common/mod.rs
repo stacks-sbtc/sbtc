@@ -1,6 +1,7 @@
 //! Request structures for deposit api calls.
 
 use serde::{Deserialize, Serialize};
+use strum::EnumIter;
 use utoipa::{ToResponse, ToSchema};
 
 /// Common request structures.
@@ -8,7 +9,7 @@ pub mod requests;
 
 // Common Types ----------------------------------------------------------------
 
-/// The status of the in-flight sBTC operation.
+/// The status of the in-flight sBTC deposit.
 #[derive(
     Clone,
     Default,
@@ -22,9 +23,10 @@ pub mod requests;
     Deserialize,
     ToSchema,
     ToResponse,
+    EnumIter,
 )]
 #[serde(rename_all = "lowercase")]
-pub enum Status {
+pub enum DepositStatus {
     /// Transaction hasn't yet been addressed by the sBTC Signers.
     #[default]
     Pending,
@@ -50,6 +52,49 @@ pub enum Status {
     Failed,
     /// Transaction was replaced by another transaction via RBF.
     Rbf,
+}
+
+/// The status of the in-flight sBTC withdrawal.
+#[derive(
+    Clone,
+    Default,
+    Debug,
+    Eq,
+    PartialEq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    ToResponse,
+    EnumIter,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum WithdrawalStatus {
+    /// Transaction hasn't yet been addressed by the sBTC Signers.
+    #[default]
+    Pending,
+    /// Transaction was dealt with by the signers at one point but is now being
+    /// reprocessed. The Signers are aware of the operation request.
+    Reprocessing,
+    /// Transaction has been seen and accepted by the sBTC Signers, but is not
+    /// yet included in any on chain artifact. The transaction can still fail
+    /// at this point if the Signers fail to include the transaction in an on
+    /// chain artifact.
+    ///
+    /// For example, a deposit or withdrawal that has specified too low of a
+    /// BTC fee may fail after being accepted.
+    Accepted,
+    /// The artifacts that fulfill the operation have been observed in a valid fork of
+    /// both the Stacks blockchain and the Bitcoin blockchain by at least one signer.
+    ///
+    /// Note that if the signers detect a conflicting chainstate in which the operation
+    /// is not confirmed this status will be reverted to either ACCEPTED or REEVALUATING
+    /// depending on whether the conflicting chainstate calls the acceptance into question.
+    Confirmed,
+    /// The operation was not fulfilled.
+    Failed,
 }
 
 /// Data about the fulfillment of an sBTC Operation.

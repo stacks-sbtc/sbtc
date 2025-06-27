@@ -19,7 +19,7 @@ use utoipa::ToSchema;
 use warp::{reject::Reject, reply::Reply};
 
 use crate::{
-    api::models::{chainstate::Chainstate, common::Status},
+    api::models::{chainstate::Chainstate, common::DepositStatus},
     database::entries::{
         chainstate::ChainstateEntry, deposit::DepositEntryKey, withdrawal::WithdrawalEntryKey,
     },
@@ -60,14 +60,7 @@ pub enum ValidationError {
     #[error(
         "deposit with replaced_by_tx is only valid if status is RBF, but got status {0:?} for txid: {1}, vout: {2}"
     )]
-    InvalidReplacedByTxStatus(Status, String, u32),
-
-    /// In current implementation, withdrawals can't have RBF status. However, since we have same Status enum
-    /// for both deposits and withdrawals, we need to handle this case.
-    #[error(
-        "withdrawal related transaction have RBF status, but this should never happen. request_id: {0}"
-    )]
-    WithdrawalRbf(u64),
+    InvalidReplacedByTxStatus(DepositStatus, String, u32),
 
     /// The deposit has status RBF but is missing the replaced_by_tx field.
     #[error("missing replaced_by_tx for RBF deposit with txid: {0}, vout: {1}")]

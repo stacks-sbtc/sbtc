@@ -80,7 +80,7 @@ use testing_emily_client::apis::chainstate_api;
 use testing_emily_client::apis::testing_api;
 use testing_emily_client::apis::withdrawal_api;
 use testing_emily_client::models::Chainstate;
-use testing_emily_client::models::Status as TestingEmilyStatus;
+use testing_emily_client::models::WithdrawalStatus as TestingEmilyWithdrawalStatus;
 
 use signer::WITHDRAWAL_BLOCKS_EXPIRY;
 use signer::WITHDRAWAL_MIN_CONFIRMATIONS;
@@ -4612,19 +4612,27 @@ async fn sign_bitcoin_transaction_withdrawals() {
     let response = withdrawal_api::create_withdrawal(&emily_config, request_body).await;
     assert!(response.is_ok());
     // Check that there is no Accepted requests on emily before we broadcast them
-    let withdrawals_on_emily =
-        withdrawal_api::get_withdrawals(&emily_config, TestingEmilyStatus::Accepted, None, None)
-            .await
-            .unwrap()
-            .withdrawals;
+    let withdrawals_on_emily = withdrawal_api::get_withdrawals(
+        &emily_config,
+        TestingEmilyWithdrawalStatus::Accepted,
+        None,
+        None,
+    )
+    .await
+    .unwrap()
+    .withdrawals;
     assert!(withdrawals_on_emily.is_empty());
 
     // Check that there is no Accepted requests on emily before we broadcast them
-    let withdrawals_on_emily =
-        withdrawal_api::get_withdrawals(&emily_config, TestingEmilyStatus::Pending, None, None)
-            .await
-            .unwrap()
-            .withdrawals;
+    let withdrawals_on_emily = withdrawal_api::get_withdrawals(
+        &emily_config,
+        TestingEmilyWithdrawalStatus::Pending,
+        None,
+        None,
+    )
+    .await
+    .unwrap()
+    .withdrawals;
     assert_eq!(withdrawals_on_emily.len(), 1);
 
     for (_, db, _, _) in signers.iter() {
@@ -4678,11 +4686,15 @@ async fn sign_bitcoin_transaction_withdrawals() {
     //   amount.
     // =========================================================================
 
-    let withdrawals_on_emily =
-        withdrawal_api::get_withdrawals(&emily_config, TestingEmilyStatus::Accepted, None, None)
-            .await
-            .unwrap()
-            .withdrawals;
+    let withdrawals_on_emily = withdrawal_api::get_withdrawals(
+        &emily_config,
+        TestingEmilyWithdrawalStatus::Accepted,
+        None,
+        None,
+    )
+    .await
+    .unwrap()
+    .withdrawals;
 
     assert_eq!(withdrawals_on_emily.len(), 1);
 

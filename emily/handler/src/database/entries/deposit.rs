@@ -3,13 +3,13 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    EntryTrait, KeyTrait, PrimaryIndex, PrimaryIndexTrait, SecondaryIndex, SecondaryIndexTrait,
-    StatusEntry, VersionedEntryTrait,
+    DepositStatusEntry, EntryTrait, KeyTrait, PrimaryIndex, PrimaryIndexTrait, SecondaryIndex,
+    SecondaryIndexTrait, VersionedEntryTrait,
 };
 use crate::{
     api::models::{
         chainstate::Chainstate,
-        common::{Fulfillment, Status},
+        common::{DepositStatus, Fulfillment},
         deposit::{Deposit, DepositInfo, DepositParameters},
     },
     common::error::{Error, Inconsistency, ValidationError},
@@ -51,7 +51,7 @@ pub struct DepositEntry {
     pub parameters: DepositParametersEntry,
     /// The status of the deposit.
     #[serde(rename = "OpStatus")]
-    pub status: Status,
+    pub status: DepositStatus,
     /// The raw reclaim script.
     pub reclaim_script: String,
     /// The raw deposit script.
@@ -182,7 +182,7 @@ impl DepositEntry {
         // latest update is the point at which the reorg happened.
         if self.history.is_empty() {
             self.history = vec![DepositEvent {
-                status: StatusEntry::Pending,
+                status: DepositStatusEntry::Pending,
                 message: "Reprocessing deposit status after reorg.".to_string(),
                 stacks_block_height: chainstate.stacks_block_height,
                 stacks_block_hash: chainstate.stacks_block_hash.clone(),
@@ -211,21 +211,21 @@ impl DepositEntry {
         // Get latest event.
         let latest_event: DepositEvent = self.latest_event()?.clone();
         // Calculate the new values.
-        let new_status: Status = (&latest_event.status).into();
+        let new_status: DepositStatus = (&latest_event.status).into();
         let new_last_update_height: u64 = latest_event.stacks_block_height;
 
         // Set variables.
-        if new_status == Status::Confirmed {
+        if new_status == DepositStatus::Confirmed {
             self.fulfillment = match &latest_event.status {
-                StatusEntry::Confirmed(fulfillment) => Some(fulfillment.clone()),
+                DepositStatusEntry::Confirmed(fulfillment) => Some(fulfillment.clone()),
                 _ => None,
             };
         } else {
             self.fulfillment = None;
         }
-        if new_status == Status::Rbf {
+        if new_status == DepositStatus::Rbf {
             self.replaced_by_tx = match &latest_event.status {
-                StatusEntry::Rbf(replaced_by_tx) => Some(replaced_by_tx.clone()),
+                DepositStatusEntry::Rbf(replaced_by_tx) => Some(replaced_by_tx.clone()),
                 _ => None,
             };
         } else {
@@ -249,13 +249,13 @@ impl TryFrom<DepositEntry> for Deposit {
         // Extract data from the latest event.
         let latest_event = deposit_entry.latest_event()?;
         let status_message = latest_event.message.clone();
-        let status: Status = (&latest_event.status).into();
+        let status: DepositStatus = (&latest_event.status).into();
         let fulfillment = match &latest_event.status {
-            StatusEntry::Confirmed(fulfillment) => Some(fulfillment.clone()),
+            DepositStatusEntry::Confirmed(fulfillment) => Some(fulfillment.clone()),
             _ => None,
         };
         let replaced_by_tx = match &latest_event.status {
-            StatusEntry::Rbf(replaced_by_tx) => Some(replaced_by_tx.clone()),
+            DepositStatusEntry::Rbf(replaced_by_tx) => Some(replaced_by_tx.clone()),
             _ => None,
         };
 
@@ -298,7 +298,7 @@ pub struct DepositParametersEntry {
 pub struct DepositEvent {
     /// Status code.
     #[serde(rename = "OpStatus")]
-    pub status: StatusEntry,
+    pub status: DepositStatusEntry,
     /// Status message.
     pub message: String,
     /// Stacks block height at the time of this update.
@@ -357,7 +357,7 @@ pub struct DepositInfoEntrySearchToken {
 pub struct DepositInfoEntryKey {
     /// The status of the deposit.
     #[serde(rename = "OpStatus")]
-    pub status: Status,
+    pub status: DepositStatus,
     /// The most recent Stacks block height the API was aware of when the deposit was last
     /// updated. If the most recent update is tied to an artifact on the Stacks blockchain
     /// then this height is the Stacks block height that contains that artifact.
@@ -391,7 +391,7 @@ pub struct DepositInfoEntry {
 /// Implements the key trait for the deposit entry key.
 impl KeyTrait for DepositInfoEntryKey {
     /// The type of the partition key.
-    type PartitionKey = Status;
+    type PartitionKey = DepositStatus;
     /// the type of the sort key.
     type SortKey = u64;
     /// The table field name of the partition key.
@@ -479,7 +479,7 @@ pub struct DepositInfoByRecipientEntry {
     pub primary_index_key: DepositEntryKey,
     /// The status of the entry.
     #[serde(rename = "OpStatus")]
-    pub status: Status,
+    pub status: DepositStatus,
     /// Amount of BTC being deposited in satoshis.
     pub amount: u64,
     /// The raw reclaim script.
@@ -582,7 +582,7 @@ pub struct DepositInfoByReclaimPubkeysEntry {
     pub primary_index_key: DepositEntryKey,
     /// The status of the entry.
     #[serde(rename = "OpStatus")]
-    pub status: Status,
+    pub status: DepositStatus,
     /// The recipient of the deposit encoded in hex.
     pub recipient: String,
     /// Amount of BTC being deposited in satoshis.
@@ -725,14 +725,14 @@ mod tests {
     #[test]
     fn deposit_update_should_be_unnecessary_when_event_is_present() {
         let pending = DepositEvent {
-            status: StatusEntry::Pending,
+            status: DepositStatusEntry::Pending,
             message: "".to_string(),
             stacks_block_height: 0,
             stacks_block_hash: "".to_string(),
         };
 
         let accepted = DepositEvent {
-            status: StatusEntry::Accepted,
+            status: DepositStatusEntry::Accepted,
             message: "".to_string(),
             stacks_block_height: 1,
             stacks_block_hash: "".to_string(),
@@ -744,7 +744,7 @@ mod tests {
             recipient: "".to_string(),
             amount: 0,
             parameters: Default::default(),
-            status: Status::Pending,
+            status: DepositStatus::Pending,
             reclaim_script: "".to_string(),
             deposit_script: "".to_string(),
             last_update_height: 0,
@@ -766,14 +766,14 @@ mod tests {
     #[test]
     fn deposit_update_should_be_necessary_when_event_is_not_present() {
         let pending = DepositEvent {
-            status: StatusEntry::Pending,
+            status: DepositStatusEntry::Pending,
             message: "".to_string(),
             stacks_block_height: 0,
             stacks_block_hash: "".to_string(),
         };
 
         let accepted = DepositEvent {
-            status: StatusEntry::Accepted,
+            status: DepositStatusEntry::Accepted,
             message: "".to_string(),
             stacks_block_height: 1,
             stacks_block_hash: "".to_string(),
@@ -785,7 +785,7 @@ mod tests {
             recipient: "".to_string(),
             amount: 0,
             parameters: Default::default(),
-            status: Status::Pending,
+            status: DepositStatus::Pending,
             reclaim_script: "".to_string(),
             deposit_script: "".to_string(),
             last_update_height: 0,
@@ -804,27 +804,27 @@ mod tests {
         assert!(!update.is_unnecessary(&deposit));
     }
 
-    #[test_case(0, "hash0", 0, "hash0", StatusEntry::Pending; "reorg around genesis sets status to pending at genesis")]
-    #[test_case(5, "hash5", 4, "hash4", StatusEntry::Accepted; "reorg goes to earliest canonical event 1")]
-    #[test_case(4, "hash4", 4, "hash4", StatusEntry::Accepted; "reorg setting a height consistent with an event keeps it")]
-    #[test_case(4, "hash4-1", 2, "hash2", StatusEntry::Pending; "reorg setting a height inconsistent with an event removes it")]
-    #[test_case(3, "hash3", 2, "hash2", StatusEntry::Pending; "reorg  goes to earliest canonical event 2")]
+    #[test_case(0, "hash0", 0, "hash0", DepositStatusEntry::Pending; "reorg around genesis sets status to pending at genesis")]
+    #[test_case(5, "hash5", 4, "hash4", DepositStatusEntry::Accepted; "reorg goes to earliest canonical event 1")]
+    #[test_case(4, "hash4", 4, "hash4", DepositStatusEntry::Accepted; "reorg setting a height consistent with an event keeps it")]
+    #[test_case(4, "hash4-1", 2, "hash2", DepositStatusEntry::Pending; "reorg setting a height inconsistent with an event removes it")]
+    #[test_case(3, "hash3", 2, "hash2", DepositStatusEntry::Pending; "reorg  goes to earliest canonical event 2")]
     fn reorganizing_around_a_new_chainstate_results_in_valid_deposit(
         reorg_height: u64,
         reorg_hash: &str,
         expected_height: u64,
         expected_hash: &str,
-        expected_status: StatusEntry,
+        expected_status: DepositStatusEntry,
     ) {
         let pending = DepositEvent {
-            status: StatusEntry::Pending,
+            status: DepositStatusEntry::Pending,
             message: "initial test pending".to_string(),
             stacks_block_height: 2,
             stacks_block_hash: "hash2".to_string(),
         };
 
         let accepted = DepositEvent {
-            status: StatusEntry::Accepted,
+            status: DepositStatusEntry::Accepted,
             message: "accepted".to_string(),
             stacks_block_height: 4,
             stacks_block_hash: "hash4".to_string(),
@@ -832,7 +832,7 @@ mod tests {
 
         let fulfillment: Fulfillment = Default::default();
         let confirmed = DepositEvent {
-            status: StatusEntry::Confirmed(fulfillment.clone()),
+            status: DepositStatusEntry::Confirmed(fulfillment.clone()),
             message: "confirmed".to_string(),
             stacks_block_height: 6,
             stacks_block_hash: "hash6".to_string(),

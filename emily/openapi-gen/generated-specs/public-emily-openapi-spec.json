@@ -206,7 +206,7 @@
             "description": "the status to search by when getting all deposits.",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/Status"
+              "$ref": "#/components/schemas/DepositStatus"
             }
           },
           {
@@ -1257,7 +1257,7 @@
             "description": "the status to search by when getting all withdrawals.",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/Status"
+              "$ref": "#/components/schemas/WithdrawalStatus"
             }
           },
           {
@@ -1999,7 +1999,7 @@
             "nullable": true
           },
           "status": {
-            "$ref": "#/components/schemas/Status"
+            "$ref": "#/components/schemas/DepositStatus"
           },
           "statusMessage": {
             "type": "string",
@@ -2061,7 +2061,7 @@
             "description": "Raw reclaim script binary in hex."
           },
           "status": {
-            "$ref": "#/components/schemas/Status"
+            "$ref": "#/components/schemas/DepositStatus"
           }
         }
       },
@@ -2086,6 +2086,18 @@
             "minimum": 0
           }
         }
+      },
+      "DepositStatus": {
+        "type": "string",
+        "description": "The status of the in-flight sBTC deposit.",
+        "enum": [
+          "pending",
+          "reprocessing",
+          "accepted",
+          "confirmed",
+          "failed",
+          "rbf"
+        ]
       },
       "DepositUpdate": {
         "type": "object",
@@ -2121,7 +2133,7 @@
             "nullable": true
           },
           "status": {
-            "$ref": "#/components/schemas/Status"
+            "$ref": "#/components/schemas/DepositStatus"
           },
           "statusMessage": {
             "type": "string",
@@ -2345,18 +2357,6 @@
           }
         }
       },
-      "Status": {
-        "type": "string",
-        "description": "The status of the in-flight sBTC operation.",
-        "enum": [
-          "pending",
-          "reprocessing",
-          "accepted",
-          "confirmed",
-          "failed",
-          "rbf"
-        ]
-      },
       "UpdateDepositsRequestBody": {
         "type": "object",
         "description": "Request structure for update deposit request.",
@@ -2491,7 +2491,7 @@
             "minimum": 0
           },
           "status": {
-            "$ref": "#/components/schemas/Status"
+            "$ref": "#/components/schemas/WithdrawalStatus"
           },
           "statusMessage": {
             "type": "string",
@@ -2560,7 +2560,7 @@
             "minimum": 0
           },
           "status": {
-            "$ref": "#/components/schemas/Status"
+            "$ref": "#/components/schemas/WithdrawalStatus"
           },
           "txid": {
             "type": "string",
@@ -2582,6 +2582,17 @@
             "minimum": 0
           }
         }
+      },
+      "WithdrawalStatus": {
+        "type": "string",
+        "description": "The status of the in-flight sBTC withdrawal.",
+        "enum": [
+          "pending",
+          "reprocessing",
+          "accepted",
+          "confirmed",
+          "failed"
+        ]
       },
       "WithdrawalUpdate": {
         "type": "object",
@@ -2607,7 +2618,7 @@
             "minimum": 0
           },
           "status": {
-            "$ref": "#/components/schemas/Status"
+            "$ref": "#/components/schemas/WithdrawalStatus"
           },
           "statusMessage": {
             "type": "string",
