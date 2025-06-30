@@ -351,6 +351,12 @@ where
                 }
             }
         } else {
+            // If we do not have signer set info in the registry, then we
+            // are in the bootstrap phase. Our latest DKG shares may be
+            // 'Unverified', but if we are here then they were not 'Failed'
+            // when we made to call to `should_coordinate_dkg`, since we
+            // will coordinate DKG if our last DKG shares are 'Failed'. But
+            // we could be loading 'Failed' shares here.
             registry_aggregate_key
                 .ok_or(Error::MissingAggregateKey(*bitcoin_chain_tip.block_hash))?
         };
