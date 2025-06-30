@@ -36,7 +36,7 @@ pub struct DepositUpdate {
     )]
     pub replaced_by_tx: Option<Option<String>>,
     #[serde(rename = "status")]
-    pub status: models::Status,
+    pub status: models::DepositStatus,
     /// The status message of the deposit.
     #[serde(rename = "statusMessage")]
     pub status_message: String,
@@ -47,7 +47,7 @@ impl DepositUpdate {
     pub fn new(
         bitcoin_tx_output_index: u32,
         bitcoin_txid: String,
-        status: models::Status,
+        status: models::DepositStatus,
         status_message: String,
     ) -> DepositUpdate {
         DepositUpdate {
