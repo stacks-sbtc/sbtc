@@ -82,7 +82,7 @@ Class | Method | HTTP request | Description
  - [DepositInfo](docs/DepositInfo.md)
  - [DepositParameters](docs/DepositParameters.md)
  - [DepositUpdate](docs/DepositUpdate.md)
- - [DepositWithStatusSchemed](docs/DepositWithStatusSchemed.md)
+ - [DepositWithStatus](docs/DepositWithStatus.md)
  - [ErrorResponse](docs/ErrorResponse.md)
  - [Fulfillment](docs/Fulfillment.md)
  - [GetDepositsForTransactionResponse](docs/GetDepositsForTransactionResponse.md)
@@ -99,7 +99,7 @@ Class | Method | HTTP request | Description
  - [WithdrawalInfo](docs/WithdrawalInfo.md)
  - [WithdrawalParameters](docs/WithdrawalParameters.md)
  - [WithdrawalUpdate](docs/WithdrawalUpdate.md)
- - [WithdrawalWithStatusSchemed](docs/WithdrawalWithStatusSchemed.md)
+ - [WithdrawalWithStatus](docs/WithdrawalWithStatus.md)
 
 
 To get access to the crate's generated documentation, use:

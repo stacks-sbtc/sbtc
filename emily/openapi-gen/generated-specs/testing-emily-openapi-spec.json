@@ -2963,9 +2963,9 @@
           }
         }
       },
-      "DepositWithStatusSchemed": {
+      "DepositWithStatus": {
         "type": "object",
-        "description": "Workaround to make utopia generate openapi. Used only as last step before sending\nUpdateDepositsResponce",
+        "description": "Wrapper for deposit with status code. Used for multi-status responses.\nTODO: utopia, which we use for generating OpenAPI spec does not support\n[`Result`] in structs, however, logically exactly one of `deposit` or `error` should be\nNone, and exactly one of them should be Some. It would be nice to find a way to use\n`Result` here.",
         "required": [
           "status"
         ],
@@ -2980,11 +2980,13 @@
           },
           "error": {
             "type": "string",
+            "description": "String explaining error occured during updating the deposit.",
             "nullable": true
           },
           "status": {
             "type": "integer",
             "format": "int32",
+            "description": "HTTP status code for the deposit processing result.",
             "minimum": 0
           }
         }
@@ -3228,7 +3230,7 @@
           "deposits": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/DepositWithStatusSchemed"
+              "$ref": "#/components/schemas/DepositWithStatus"
             },
             "description": "Deposit infos: deposits with a little less data."
           }
@@ -3260,7 +3262,7 @@
           "withdrawals": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/WithdrawalWithStatusSchemed"
+              "$ref": "#/components/schemas/WithdrawalWithStatus"
             },
             "description": "Updated withdrawals."
           }
@@ -3460,20 +3462,22 @@
           }
         }
       },
-      "WithdrawalWithStatusSchemed": {
+      "WithdrawalWithStatus": {
         "type": "object",
-        "description": "Workaround to make utopia generate openapi. Used only as last step before sending\nUpdateWithdrawalsResponse",
+        "description": "Wrapper for withdrawal with status code. Used for multi-status responses.\nTODO: utopia, which we use for generating OpenAPI spec does not support\n[`Result`] in structs, however, logically exactly one of `withdrawal` or `error` should be\nNone, and exactly one of them should be Some. It would be nice to find a way to use\n`Result` here.",
         "required": [
           "status"
         ],
         "properties": {
           "error": {
             "type": "string",
+            "description": "String explaining error occured during updating the withdrawal.",
             "nullable": true
           },
           "status": {
             "type": "integer",
             "format": "int32",
+            "description": "HTTP status code for the withdrawal processing result.",
             "minimum": 0
           },
           "withdrawal": {

@@ -510,11 +510,12 @@ async fn update_deposits(
     for (index, update) in validated_request.deposits {
         if update.is_err() {
             // We just checked that update is err, so this unwrap is fine.
-            let deposit = Err(update.unwrap_err().to_string());
+            let error = update.unwrap_err().to_string();
             updated_deposits.push((
                 index,
                 DepositWithStatus {
-                    deposit,
+                    deposit: None,
+                    error: Some(error),
                     status: StatusCode::BAD_REQUEST.as_u16(),
                 },
             ));
@@ -549,7 +550,8 @@ async fn update_deposits(
                 updated_deposits.push((
                     index,
                     DepositWithStatus {
-                        deposit: Err(Error::NotFound.to_string()),
+                        deposit: None,
+                        error: Some(Error::NotFound.to_string()),
                         status: StatusCode::NOT_FOUND.as_u16(),
                     },
                 ));
@@ -564,7 +566,8 @@ async fn update_deposits(
                 updated_deposits.push((
                     index,
                     DepositWithStatus {
-                        deposit: Err(Error::Forbidden.to_string()),
+                        deposit: None,
+                        error: Some(Error::Forbidden.to_string()),
                         status: StatusCode::FORBIDDEN.as_u16(),
                     },
                 ));
@@ -580,7 +583,8 @@ async fn update_deposits(
                 updated_deposits.push((
                     index,
                     DepositWithStatus {
-                        deposit: Err(error.to_string()),
+                        deposit: None,
+                        error: Some(error.to_string()),
                         status: StatusCode::INTERNAL_SERVER_ERROR.as_u16(),
                     },
                 ));
@@ -601,15 +605,19 @@ async fn update_deposits(
         updated_deposits.push((
             index,
             DepositWithStatus {
-                deposit: Ok(deposit),
+                error: None,
+                deposit: Some(deposit),
                 status: StatusCode::OK.as_u16(),
             },
         ));
     }
 
     updated_deposits.sort_by_key(|(index, _)| *index);
-    let deposits = updated_deposits.into_iter().map(|(_, deposit)| deposit);
-    let response = UpdateDepositsResponse::from(deposits);
+    let deposits: Vec<_> = updated_deposits
+        .into_iter()
+        .map(|(_, deposit)| deposit)
+        .collect();
+    let response = UpdateDepositsResponse { deposits };
     Ok(with_status(json(&response), StatusCode::OK))
 }
 

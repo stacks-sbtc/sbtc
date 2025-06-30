@@ -11,22 +11,36 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// WithdrawalWithStatus : Wrapper for withdrawal with status code. Used for multi-status responses.
+/// WithdrawalWithStatus : Wrapper for withdrawal with status code. Used for multi-status responses. TODO: utopia, which we use for generating OpenAPI spec does not support [`Result`] in structs, however, logically exactly one of `withdrawal` or `error` should be None, and exactly one of them should be Some. It would be nice to find a way to use `Result` here.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WithdrawalWithStatus {
-    /// HTTP status code, returned as part of multi-status responses.
+    /// String explaining error occured during updating the withdrawal.
+    #[serde(
+        rename = "error",
+        default,
+        with = "::serde_with::rust::double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub error: Option<Option<String>>,
+    /// HTTP status code for the withdrawal processing result.
     #[serde(rename = "status")]
     pub status: u32,
-    #[serde(rename = "withdrawal")]
-    pub withdrawal: Box<models::Withdrawal>,
+    #[serde(
+        rename = "withdrawal",
+        default,
+        with = "::serde_with::rust::double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub withdrawal: Option<Option<Box<models::Withdrawal>>>,
 }
 
 impl WithdrawalWithStatus {
-    /// Wrapper for withdrawal with status code. Used for multi-status responses.
-    pub fn new(status: u32, withdrawal: models::Withdrawal) -> WithdrawalWithStatus {
+    /// Wrapper for withdrawal with status code. Used for multi-status responses. TODO: utopia, which we use for generating OpenAPI spec does not support [`Result`] in structs, however, logically exactly one of `withdrawal` or `error` should be None, and exactly one of them should be Some. It would be nice to find a way to use `Result` here.
+    pub fn new(status: u32) -> WithdrawalWithStatus {
         WithdrawalWithStatus {
+            error: None,
             status,
-            withdrawal: Box::new(withdrawal),
+            withdrawal: None,
         }
     }
 }

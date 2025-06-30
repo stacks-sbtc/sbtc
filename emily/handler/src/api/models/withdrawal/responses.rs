@@ -20,46 +20,21 @@ pub struct GetWithdrawalsResponse {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateWithdrawalsResponse {
     /// Updated withdrawals.
-    pub withdrawals: Vec<WithdrawalWithStatusSchemed>,
-}
-
-impl<T> From<T> for UpdateWithdrawalsResponse
-where
-    T: IntoIterator<Item = WithdrawalWithStatus>,
-{
-    fn from(value: T) -> Self {
-        Self {
-            withdrawals: value.into_iter().map(Into::into).collect(),
-        }
-    }
+    pub withdrawals: Vec<WithdrawalWithStatus>,
 }
 
 /// Wrapper for withdrawal with status code. Used for multi-status responses.
-#[derive(Clone, Debug, PartialEq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WithdrawalWithStatus {
-    /// The fully extracted and validated withdrawal.
-    pub withdrawal: Result<Withdrawal, String>,
-    /// HTTP status code, returned as part of multi-status responses.
-    pub status: u16,
-}
-
-/// Workaround to make utopia generate openapi. Used only as last step before sending
-/// UpdateWithdrawalsResponse
+/// TODO: utopia, which we use for generating OpenAPI spec does not support
+/// [`Result`] in structs, however, logically exactly one of `withdrawal` or `error` should be
+/// None, and exactly one of them should be Some. It would be nice to find a way to use
+/// `Result` here.
 #[derive(Clone, Default, Debug, PartialEq, Hash, Serialize, Deserialize, ToSchema, ToResponse)]
 #[serde(rename_all = "camelCase")]
-pub struct WithdrawalWithStatusSchemed {
-    withdrawal: Option<Withdrawal>,
-    error: Option<String>,
-    status: u16,
-}
-
-impl From<WithdrawalWithStatus> for WithdrawalWithStatusSchemed {
-    fn from(value: WithdrawalWithStatus) -> Self {
-        Self {
-            withdrawal: value.withdrawal.clone().ok(),
-            error: value.withdrawal.err(),
-            status: value.status,
-        }
-    }
+pub struct WithdrawalWithStatus {
+    /// The fully extracted and validated withdrawal request.
+    pub withdrawal: Option<Withdrawal>,
+    /// String explaining error occured during updating the withdrawal.
+    pub error: Option<String>,
+    /// HTTP status code for the withdrawal processing result.
+    pub status: u16,
 }

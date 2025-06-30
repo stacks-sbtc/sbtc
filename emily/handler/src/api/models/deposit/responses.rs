@@ -30,47 +30,21 @@ pub struct GetDepositsResponse {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateDepositsResponse {
     /// Deposit infos: deposits with a little less data.
-    pub deposits: Vec<DepositWithStatusSchemed>,
-}
-
-impl<T> From<T> for UpdateDepositsResponse
-where
-    T: IntoIterator<Item = DepositWithStatus>,
-{
-    fn from(value: T) -> Self {
-        Self {
-            deposits: value.into_iter().map(Into::into).collect(),
-        }
-    }
+    pub deposits: Vec<DepositWithStatus>,
 }
 
 /// Wrapper for deposit with status code. Used for multi-status responses.
-#[derive(Clone, Debug, PartialEq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DepositWithStatus {
-    /// The fully extracted and validated deposit request, or
-    /// an error message.
-    pub deposit: Result<Deposit, String>,
-    /// HTTP status code, returned as part of multi-status responses.
-    pub status: u16,
-}
-
-/// Workaround to make utopia generate openapi. Used only as last step before sending
-/// UpdateDepositsResponce
+/// TODO: utopia, which we use for generating OpenAPI spec does not support
+/// [`Result`] in structs, however, logically exactly one of `deposit` or `error` should be
+/// None, and exactly one of them should be Some. It would be nice to find a way to use
+/// `Result` here.
 #[derive(Clone, Default, Debug, PartialEq, Hash, Serialize, Deserialize, ToSchema, ToResponse)]
 #[serde(rename_all = "camelCase")]
-pub struct DepositWithStatusSchemed {
-    deposit: Option<Deposit>,
-    error: Option<String>,
-    status: u16,
-}
-
-impl From<DepositWithStatus> for DepositWithStatusSchemed {
-    fn from(value: DepositWithStatus) -> Self {
-        Self {
-            deposit: value.deposit.clone().ok(),
-            error: value.deposit.err(),
-            status: value.status,
-        }
-    }
+pub struct DepositWithStatus {
+    /// The fully extracted and validated deposit request.
+    pub deposit: Option<Deposit>,
+    /// String explaining error occured during updating the deposit.
+    pub error: Option<String>,
+    /// HTTP status code for the deposit processing result.
+    pub status: u16,
 }

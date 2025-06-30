@@ -410,7 +410,8 @@ async fn update_withdrawals(
             updated_withdrawals.push((
                 index,
                 WithdrawalWithStatus {
-                    withdrawal: Err(error),
+                    withdrawal: None,
+                    error: Some(error),
                     status: StatusCode::BAD_REQUEST.as_u16(),
                 },
             ));
@@ -437,7 +438,8 @@ async fn update_withdrawals(
                 updated_withdrawals.push((
                     index,
                     WithdrawalWithStatus {
-                        withdrawal: Err(Error::NotFound.to_string()),
+                        withdrawal: None,
+                        error: Some(Error::NotFound.to_string()),
                         status: StatusCode::NOT_FOUND.as_u16(),
                     },
                 ));
@@ -451,7 +453,8 @@ async fn update_withdrawals(
                 updated_withdrawals.push((
                     index,
                     WithdrawalWithStatus {
-                        withdrawal: Err(Error::Forbidden.to_string()),
+                        withdrawal: None,
+                        error: Some(Error::Forbidden.to_string()),
                         status: StatusCode::FORBIDDEN.as_u16(),
                     },
                 ));
@@ -466,7 +469,8 @@ async fn update_withdrawals(
                 updated_withdrawals.push((
                     index,
                     WithdrawalWithStatus {
-                        withdrawal: Err(error.to_string()),
+                        withdrawal: None,
+                        error: Some(error.to_string()),
                         status: StatusCode::INTERNAL_SERVER_ERROR.as_u16(),
                     },
                 ));
@@ -486,16 +490,18 @@ async fn update_withdrawals(
         updated_withdrawals.push((
             index,
             WithdrawalWithStatus {
-                withdrawal: Ok(withdrawal),
+                error: None,
+                withdrawal: Some(withdrawal),
                 status: StatusCode::OK.as_u16(),
             },
         ));
     }
     updated_withdrawals.sort_by_key(|(index, _)| *index);
-    let withdrawals = updated_withdrawals
+    let withdrawals: Vec<_> = updated_withdrawals
         .into_iter()
-        .map(|(_, withdrawal)| withdrawal);
-    let response = UpdateWithdrawalsResponse::from(withdrawals);
+        .map(|(_, withdrawal)| withdrawal)
+        .collect();
+    let response = UpdateWithdrawalsResponse { withdrawals };
     Ok(with_status(json(&response), StatusCode::OK))
 }
 

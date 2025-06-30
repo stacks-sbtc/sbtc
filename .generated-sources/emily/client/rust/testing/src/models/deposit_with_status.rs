@@ -11,21 +11,35 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// DepositWithStatus : Wrapper for deposit with status code. Used for multi-status responses.
+/// DepositWithStatus : Wrapper for deposit with status code. Used for multi-status responses. TODO: utopia, which we use for generating OpenAPI spec does not support [`Result`] in structs, however, logically exactly one of `deposit` or `error` should be None, and exactly one of them should be Some. It would be nice to find a way to use `Result` here.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DepositWithStatus {
-    #[serde(rename = "deposit")]
-    pub deposit: Box<models::Deposit>,
-    /// HTTP status code, returned as part of multi-status responses.
+    #[serde(
+        rename = "deposit",
+        default,
+        with = "::serde_with::rust::double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub deposit: Option<Option<Box<models::Deposit>>>,
+    /// String explaining error occured during updating the deposit.
+    #[serde(
+        rename = "error",
+        default,
+        with = "::serde_with::rust::double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub error: Option<Option<String>>,
+    /// HTTP status code for the deposit processing result.
     #[serde(rename = "status")]
     pub status: u32,
 }
 
 impl DepositWithStatus {
-    /// Wrapper for deposit with status code. Used for multi-status responses.
-    pub fn new(deposit: models::Deposit, status: u32) -> DepositWithStatus {
+    /// Wrapper for deposit with status code. Used for multi-status responses. TODO: utopia, which we use for generating OpenAPI spec does not support [`Result`] in structs, however, logically exactly one of `deposit` or `error` should be None, and exactly one of them should be Some. It would be nice to find a way to use `Result` here.
+    pub fn new(status: u32) -> DepositWithStatus {
         DepositWithStatus {
-            deposit: Box::new(deposit),
+            deposit: None,
+            error: None,
             status,
         }
     }
