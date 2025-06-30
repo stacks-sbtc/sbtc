@@ -316,7 +316,11 @@ where
         );
         span.record("bitcoin_tip_height", *bitcoin_chain_tip.block_height);
 
-        let registry_signer_set_info = self.context.state().registry_signer_set_info();
+        let registry_aggregate_key = self
+            .context
+            .state()
+            .registry_signer_set_info()
+            .map(|info| info.aggregate_key);
 
         // If we are not the coordinator, then we have no business
         // coordinating DKG or constructing bitcoin and stacks
@@ -342,29 +346,13 @@ where
                 Ok(key) => key,
                 Err(error) => {
                     tracing::error!(%error, "failed to coordinate DKG; using existing aggregate key");
-                    registry_signer_set_info
-                        .as_ref()
-                        .map(|info| info.aggregate_key)
+                    registry_aggregate_key
                         .ok_or(Error::MissingAggregateKey(*bitcoin_chain_tip.block_hash))?
                 }
             }
         } else {
-            // If we do not have signer set info in the registry, then we
-            // are in the bootstrap phase. Our latest DKG shares may be
-            // 'Unverified', but if we are here then they were not 'Failed'
-            // when we made to call to `should_coordinate_dkg`, since we
-            // will coordinate DKG if our last DKG shares are 'Failed'. But
-            // we could be loading 'Failed' shares here.
-            match registry_signer_set_info.as_ref() {
-                Some(info) => info.aggregate_key,
-                None => self
-                    .context
-                    .get_storage()
-                    .get_latest_encrypted_dkg_shares()
-                    .await?
-                    .map(|shares| shares.aggregate_key)
-                    .ok_or(Error::NoDkgShares)?,
-            }
+            registry_aggregate_key
+                .ok_or(Error::MissingAggregateKey(*bitcoin_chain_tip.block_hash))?
         };
 
         let chain_tip_hash = &bitcoin_chain_tip.block_hash;
@@ -390,7 +378,10 @@ where
             return Ok(());
         }
 
-        let signer_public_keys = registry_signer_set_info
+        let signer_public_keys = self
+            .context
+            .state()
+            .registry_signer_set_info()
             .map(|info| info.signer_set)
             .ok_or_else(|| Error::NoKeyRotationEvent)?;
 
@@ -446,7 +437,7 @@ where
             .await?;
 
         let (needs_verification, needs_rotate_key) =
-            assert_rotate_key_action(&last_dkg, current_aggregate_key)?;
+            assert_rotate_key_action(&self.context, &last_dkg, current_aggregate_key).await?;
         if !needs_verification && !needs_rotate_key {
             tracing::debug!(
                 "stacks node is up to date with the current aggregate key and no DKG verification required"
@@ -2606,14 +2597,33 @@ pub async fn should_coordinate_dkg(
 
 /// Assert, given the last dkg and smart contract current aggregate key, if we
 /// need to verify the shares and/or issue a rotate key call.
-pub fn assert_rotate_key_action(
+pub async fn assert_rotate_key_action<C>(
+    context: &C,
     last_dkg: &model::EncryptedDkgShares,
     current_aggregate_key: Option<PublicKey>,
-) -> Result<(bool, bool), Error> {
+) -> Result<(bool, bool), Error>
+where
+    C: Context,
+{
     let needs_rotate_key = Some(last_dkg.aggregate_key) != current_aggregate_key;
 
+    // Check if past verification window, if we are, skip verification
+    let dkg_verification_window = context.config().signer.dkg_verification_window;
+    let max_verification_height = last_dkg
+        .started_at_bitcoin_block_height
+        .saturating_add(dkg_verification_window as u64);
+
+    // Get the current bitcoin chain tip to check against the verification window
+    let current_bitcoin_chain_tip = context
+        .get_storage()
+        .get_bitcoin_canonical_chain_tip_ref()
+        .await?
+        .ok_or(Error::NoChainTip)?;
+
+    let past_verification_window = current_bitcoin_chain_tip.block_height > max_verification_height;
+
     let needs_verification = match last_dkg.dkg_shares_status {
-        model::DkgSharesStatus::Unverified => true,
+        model::DkgSharesStatus::Unverified => !past_verification_window,
         model::DkgSharesStatus::Verified => needs_rotate_key,
         model::DkgSharesStatus::Failed => {
             return Err(Error::DkgVerificationFailed(last_dkg.aggregate_key.into()));
@@ -2856,7 +2866,7 @@ mod tests {
             current_aggregate_key_seed: None,
             needs_verification: true,
             needs_rotate_key: true,
-        }; "unverified, no key")]
+        }; "unverified, no key, within window")]
     #[test_case(
         RotateKeyActionTest {
             shares_status: model::DkgSharesStatus::Verified,
@@ -2872,7 +2882,7 @@ mod tests {
             current_aggregate_key_seed: Some(1),
             needs_verification: true,
             needs_rotate_key: false,
-        }; "unverified, key up to date")]
+        }; "unverified, key up to date, within window")]
     #[test_case(
         RotateKeyActionTest {
             shares_status: model::DkgSharesStatus::Verified,
@@ -2888,7 +2898,7 @@ mod tests {
             current_aggregate_key_seed: Some(1),
             needs_verification: true,
             needs_rotate_key: true,
-        }; "unverified, new key")]
+        }; "unverified, new key, within window")]
     #[test_case(
         RotateKeyActionTest {
             shares_status: model::DkgSharesStatus::Verified,
@@ -2897,39 +2907,151 @@ mod tests {
             needs_verification: true,
             needs_rotate_key: true,
         }; "verified, new key")]
-    fn test_assert_rotate_key_action(scenario: RotateKeyActionTest) {
-        let last_dkg = model::EncryptedDkgShares {
-            dkg_shares_status: scenario.shares_status,
-            aggregate_key: public_key_from_seed(scenario.shares_key_seed),
-            ..Faker.fake()
-        };
+    #[test_case(
+        RotateKeyActionTest {
+            shares_status: model::DkgSharesStatus::Unverified,
+            shares_key_seed: 1,
+            current_aggregate_key_seed: None,
+            needs_verification: false,
+            needs_rotate_key: true,
+        }; "unverified, no key, past window")]
+    #[test_case(
+        RotateKeyActionTest {
+            shares_status: model::DkgSharesStatus::Unverified,
+            shares_key_seed: 1,
+            current_aggregate_key_seed: Some(1),
+            needs_verification: false,
+            needs_rotate_key: false,
+        }; "unverified, key up to date, past window")]
+    #[test_case(
+        RotateKeyActionTest {
+            shares_status: model::DkgSharesStatus::Unverified,
+            shares_key_seed: 2,
+            current_aggregate_key_seed: Some(1),
+            needs_verification: false,
+            needs_rotate_key: true,
+        }; "unverified, new key, past window")]
+    #[tokio::test]
+    async fn test_assert_rotate_key_action(scenario: RotateKeyActionTest) -> Result<(), Error> {
+        let context = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .build();
+
+        let mut last_dkg: model::EncryptedDkgShares = Faker.fake();
+        last_dkg.dkg_shares_status = scenario.shares_status;
+        last_dkg.aggregate_key = public_key_from_seed(scenario.shares_key_seed);
+
+        // Set the DKG start height based on whether we expect verification or not
+        // If we expect verification (needs_verification = true), set within window
+        // If we don't expect verification (needs_verification = false), set past window
+        if scenario.needs_verification {
+            // Set within verification window (10 blocks before current height of 100)
+            last_dkg.started_at_bitcoin_block_height = 90u64.into();
+        } else {
+            // Set past verification window (21 blocks before current height of 101)
+            last_dkg.started_at_bitcoin_block_height = 80u64.into();
+        }
+
         let current_aggregate_key = scenario
             .current_aggregate_key_seed
             .map(public_key_from_seed);
 
+        // Write a bitcoin block at the appropriate height to simulate the current chain tip
+        let storage = context.get_storage_mut();
+        let chain_tip_height = if scenario.needs_verification {
+            100u64
+        } else {
+            101u64
+        };
+        storage
+            .write_bitcoin_block(&model::BitcoinBlock {
+                block_hash: Faker.fake(),
+                block_height: chain_tip_height.into(),
+                parent_hash: Faker.fake(),
+            })
+            .await
+            .unwrap();
+
         let (needs_verification, needs_rotate_key) =
-            assert_rotate_key_action(&last_dkg, current_aggregate_key).unwrap();
+            assert_rotate_key_action(&context, &last_dkg, current_aggregate_key).await?;
         assert_eq!(needs_verification, scenario.needs_verification);
         assert_eq!(needs_rotate_key, scenario.needs_rotate_key);
+        Ok(())
     }
 
     #[test_case(None; "no key")]
     #[test_case(Some(public_key_from_seed(1)); "key up to date")]
     #[test_case(Some(public_key_from_seed(2)); "new key")]
-    fn test_assert_rotate_key_action_failure(current_aggregate_key: Option<PublicKey>) {
-        let last_dkg = model::EncryptedDkgShares {
-            dkg_shares_status: model::DkgSharesStatus::Failed,
-            aggregate_key: public_key_from_seed(1),
-            ..Faker.fake()
-        };
+    #[tokio::test]
+    async fn test_assert_rotate_key_action_failure(current_aggregate_key: Option<PublicKey>) {
+        let context = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .build();
 
-        let result = assert_rotate_key_action(&last_dkg, current_aggregate_key);
+        let mut last_dkg: model::EncryptedDkgShares = Faker.fake();
+        last_dkg.dkg_shares_status = model::DkgSharesStatus::Failed;
+        last_dkg.aggregate_key = public_key_from_seed(1);
+        // Set the DKG start height to ensure verification window check passes
+        last_dkg.started_at_bitcoin_block_height = 90u64.into(); // 10 blocks before current height of 100
+
+        // Write a bitcoin block at height 100 to simulate the current chain tip
+        let storage = context.get_storage_mut();
+        storage
+            .write_bitcoin_block(&model::BitcoinBlock {
+                block_hash: Faker.fake(),
+                block_height: 100u64.into(),
+                parent_hash: Faker.fake(),
+            })
+            .await
+            .unwrap();
+
+        let result = assert_rotate_key_action(&context, &last_dkg, current_aggregate_key).await;
         match result {
             Err(Error::DkgVerificationFailed(key)) => {
                 assert_eq!(key, last_dkg.aggregate_key.into());
             }
             _ => {
                 panic!("unexpected result")
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_assert_rotate_key_action_verification_window_elapsed() {
+        let context = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .build();
+
+        let mut last_dkg: model::EncryptedDkgShares = Faker.fake();
+        last_dkg.dkg_shares_status = model::DkgSharesStatus::Unverified;
+        last_dkg.aggregate_key = public_key_from_seed(1);
+        // Set the DKG start height to be outside the verification window
+        last_dkg.started_at_bitcoin_block_height = 80u64.into(); // 21 blocks before current height of 101
+
+        // Write a bitcoin block at height 101 to simulate the current chain tip
+        let storage = context.get_storage_mut();
+        storage
+            .write_bitcoin_block(&model::BitcoinBlock {
+                block_hash: Faker.fake(),
+                block_height: 101u64.into(),
+                parent_hash: Faker.fake(),
+            })
+            .await
+            .unwrap();
+
+        let result = assert_rotate_key_action(&context, &last_dkg, None).await;
+
+        // Now we expect success: no verification needed (false), but rotation needed (true)
+        match result {
+            Ok((needs_verification, needs_rotate_key)) => {
+                assert_eq!(needs_verification, false);
+                assert_eq!(needs_rotate_key, true);
+            }
+            Err(e) => {
+                panic!("expected success but got error: {:?}", e)
             }
         }
     }
