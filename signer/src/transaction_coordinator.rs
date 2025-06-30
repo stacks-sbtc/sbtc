@@ -533,6 +533,12 @@ where
 
         // Create a signal stream with the defined filter
         let signal_stream = self.context.as_signal_stream(presign_ack_filter);
+        // This value may not be the "correct" threshold to use. The
+        // threshold should be the max of all thresholds for the inputs in
+        // the sweep transaction package. Since the signer set is currently
+        // stable, using this value won't cause any issues. However we can
+        // have a bug here if we open up the signer set and allow a large
+        // increase in the signatures required parameter.
         let signature_threshold = self.context.config().signer.bootstrap_signatures_required;
 
         // Send the presign request message
