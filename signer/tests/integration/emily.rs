@@ -132,12 +132,7 @@ async fn deposit_flow() {
     let network = network::in_memory::InMemoryNetwork::new();
     let signer_info = testing::wsts::generate_signer_info(&mut rng, num_signers);
 
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(1),
-        None,
-    )
-    .unwrap();
+    let emily_client = EmilyClient::new_text_client();
     let stacks_client = WrappedMock::default();
 
     // Wipe the Emily database to start fresh
@@ -545,12 +540,7 @@ async fn get_deposit_request_works() {
     let amount_sats = 49_900_000;
     let lock_time = 150;
 
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(1),
-        None,
-    )
-    .unwrap();
+    let emily_client = EmilyClient::new_text_client();
 
     wipe_databases(&emily_client.config().as_testing())
         .await
@@ -651,12 +641,7 @@ async fn test_get_deposits_returns_pending_and_accepted() {
     let num_deposits = 5;
     let num_accepted = 2;
 
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(10),
-        None,
-    )
-    .unwrap();
+    let emily_client = EmilyClient::new_text_client();
 
     wipe_databases(&emily_client.config().as_testing())
         .await
