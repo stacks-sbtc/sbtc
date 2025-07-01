@@ -1306,7 +1306,7 @@ fn extract_signer_set(value: Value) -> Result<BTreeSet<PublicKey>, Error> {
         // public key. If the record is not a buffer, then return an error.
         Value::Sequence(SequenceData::List(ListData { data, .. })) => data
             .into_iter()
-            .flat_map(|item| extract_public_key(item).transpose())
+            .map(|item| extract_public_key(item))
             .collect(),
         // We expected the top-level value to be a list of buffers,
         // but we got something else.
@@ -1318,12 +1318,25 @@ fn extract_signer_set(value: Value) -> Result<BTreeSet<PublicKey>, Error> {
 
 /// Extract a public key from a Clarity value.
 ///
+/// In the sbtc-registry smart contract, public keys are compressed and
+/// stored as 33 byte buffers.
+fn extract_public_key(value: Value) -> Result<PublicKey, Error> {
+    match value {
+        Value::Sequence(SequenceData::Buffer(BuffData { data })) => PublicKey::from_slice(&data),
+        _ => Err(Error::InvalidStacksResponse(
+            "expected a buffer but got something else",
+        )),
+    }
+}
+
+/// Extract a aggregate key from a Clarity value.
+///
 /// In the sbtc-registry smart contract, the aggregate key is stored in the
 /// `current-aggregate-pubkey` data var and is initialized to the 0x00
 /// byte, allowing use to distinguish between the initial value and an
 /// actual public key in that case. Ok(None) is returned if the value is
 /// the initial value.
-fn extract_public_key(value: Value) -> Result<Option<PublicKey>, Error> {
+fn extract_aggregate_key(value: Value) -> Result<Option<PublicKey>, Error> {
     match value {
         Value::Sequence(SequenceData::Buffer(BuffData { data })) => {
             // The initial value of the data var is all zeros
@@ -1377,7 +1390,7 @@ impl StacksInteract for StacksClient {
             Value::Tuple(TupleData { mut data_map, .. }) => {
                 let maybe_aggregate_key = data_map
                     .remove("current-aggregate-pubkey")
-                    .map(extract_public_key);
+                    .map(extract_aggregate_key);
                 let maybe_signer_set = data_map
                     .remove("current-signer-set")
                     .map(extract_signer_set);
@@ -1419,7 +1432,7 @@ impl StacksInteract for StacksClient {
             )
             .await?;
 
-        extract_public_key(value)
+        extract_aggregate_key(value)
     }
 
     async fn is_deposit_completed(
