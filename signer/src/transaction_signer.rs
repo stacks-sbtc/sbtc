@@ -430,10 +430,8 @@ where
     ) -> Result<(), Error> {
         let db = self.context.get_storage_mut();
 
-        if let Some(processed_block) = &self.last_presign_block {
-            if processed_block == &chain_tip.block_hash {
-                return Err(Error::InvalidPresignRequest(chain_tip.block_hash));
-            }
+        if self.last_presign_block == Some(chain_tip.block_hash) {
+            return Err(Error::InvalidPresignRequest(chain_tip.block_hash));
         }
 
         let aggregate_key = self
