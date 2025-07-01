@@ -398,7 +398,7 @@ pub enum Error {
     InvalidRecoverableSignature(#[source] secp256k1::Error, secp256k1::Message),
 
     /// This is thrown when we attempt to process a presign request for
-    /// a block for which we already processed presign request.
+    /// a block for which we have already processed a presign request.
     #[error("Recieved presign request for already processed block {0}")]
     InvalidPresignRequest(BitcoinBlockHash),
 
