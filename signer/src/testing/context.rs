@@ -422,7 +422,7 @@ impl BitcoinInteract for WrappedMockBitcoinInteract {
     }
 }
 
-impl StacksInteract for WrappedMock<MockStacksInteract> {
+impl StacksInteract for WrappedMockStacksInteract {
     async fn get_current_signer_set_info(
         &self,
         contract_principal: &StacksAddress,
