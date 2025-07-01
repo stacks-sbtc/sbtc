@@ -821,7 +821,6 @@ pub async fn presign_request_ignore_request_if_already_processed_this_block() {
 
     // Now we will try to process the same block again, but since we already
     // processed it, we should get an error.
-    set_verification_status(&db, aggregate_key, DkgSharesStatus::Verified).await;
     let result = tx_signer
         .handle_bitcoin_pre_sign_request(&sbtc_context, &chain_tip)
         .await;
