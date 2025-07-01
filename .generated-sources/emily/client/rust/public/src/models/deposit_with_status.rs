@@ -21,7 +21,7 @@ pub struct DepositWithStatus {
         skip_serializing_if = "Option::is_none"
     )]
     pub deposit: Option<Option<Box<models::Deposit>>>,
-    /// String explaining error occured during updating the deposit.
+    /// A string explaining the error that occurred during the deposit update.
     #[serde(
         rename = "error",
         default,
