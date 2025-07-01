@@ -508,14 +508,12 @@ async fn update_deposits(
 
     // Loop through all updates and execute.
     for (index, update) in validated_request.deposits {
-        if update.is_err() {
-            // We just checked that update is err, so this unwrap is fine.
-            let error = update.unwrap_err().to_string();
+        if let Err(error) = update {
             updated_deposits.push((
                 index,
                 DepositWithStatus {
                     deposit: None,
-                    error: Some(error),
+                    error: Some(error.to_string()),
                     status: StatusCode::BAD_REQUEST.as_u16(),
                 },
             ));
