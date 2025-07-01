@@ -486,9 +486,7 @@ pub async fn assert_should_be_able_to_handle_sbtc_requests() {
     // Build the test context with mocked clients
     let ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_mocked_bitcoin_client()
-        .with_mocked_emily_client()
-        .with_mocked_stacks_client()
+        .with_mocked_clients()
         .build();
     ctx.state().update_current_limits(SbtcLimits::unlimited());
 
@@ -628,9 +626,7 @@ pub async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is
     // Build the test context with mocked clients
     let ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_mocked_bitcoin_client()
-        .with_mocked_emily_client()
-        .with_mocked_stacks_client()
+        .with_mocked_clients()
         .build();
 
     let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
@@ -729,9 +725,7 @@ pub async fn presign_request_ignore_request_if_already_processed_this_block() {
     // Build the test context with mocked clients
     let ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_mocked_bitcoin_client()
-        .with_mocked_emily_client()
-        .with_mocked_stacks_client()
+        .with_mocked_clients()
         .build();
 
     let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
@@ -853,9 +847,7 @@ async fn new_state_machine_per_valid_sighash() {
     // Build the test context with mocked clients
     let ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_mocked_bitcoin_client()
-        .with_mocked_emily_client()
-        .with_mocked_stacks_client()
+        .with_mocked_clients()
         .build();
 
     let (_, faucet) = sbtc::testing::regtest::initialize_blockchain();
@@ -979,9 +971,7 @@ async fn max_one_state_machine_per_bitcoin_block_hash_for_dkg() {
     // Build the test context with mocked clients
     let ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_mocked_bitcoin_client()
-        .with_mocked_emily_client()
-        .with_mocked_stacks_client()
+        .with_mocked_clients()
         .build();
 
     // Let's make sure that the database has the chain tip.
