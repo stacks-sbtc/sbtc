@@ -854,7 +854,7 @@ pub async fn presign_request_ignore_request_if_already_processed_this_block() {
     let err = result.unwrap_err();
     match err {
         Error::InvalidPresignRequest(hash) => {
-            assert_eq!(hash, chain_tip.block_hash.to_string())
+            assert_eq!(hash, chain_tip.block_hash)
         }
         _ => panic!("Expected InvalidPresignRequest error, got: {err}"),
     }

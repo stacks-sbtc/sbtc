@@ -15,6 +15,7 @@ use crate::stacks::contracts::DepositValidationError;
 use crate::stacks::contracts::RotateKeysValidationError;
 use crate::stacks::contracts::WithdrawalAcceptValidationError;
 use crate::stacks::contracts::WithdrawalRejectValidationError;
+use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::SigHash;
 use crate::transaction_signer::StacksSignRequestId;
 use crate::wsts_state_machine::StateMachineId;
@@ -399,7 +400,7 @@ pub enum Error {
     /// This is thrown when we attempt to process a presign request for
     /// a block for which we already processed presign request.
     #[error("Recieved presign request for already processed block {0}")]
-    InvalidPresignRequest(String),
+    InvalidPresignRequest(BitcoinBlockHash),
 
     /// This is thrown when we attempt to create a wallet with:
     /// 1. No public keys.

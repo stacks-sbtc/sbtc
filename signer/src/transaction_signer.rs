@@ -435,9 +435,7 @@ where
         let db = self.context.get_storage_mut();
 
         if &self.last_presign_block == chain_tip {
-            return Err(Error::InvalidPresignRequest(
-                chain_tip.block_hash.to_string(),
-            ));
+            return Err(Error::InvalidPresignRequest(chain_tip.block_hash));
         }
 
         let aggregate_key = self
