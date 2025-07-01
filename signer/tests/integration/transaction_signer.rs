@@ -819,12 +819,8 @@ pub async fn presign_request_ignore_request_if_already_processed_this_block() {
     // Check that we store information that we processed this block
     assert_eq!(tx_signer.last_presign_block, Some(chain_tip.block_hash));
 
-    // Now we will try to process the same block again, but this time we will
-    // Put unverified shares in the database. Since shares are not verified
-    // it should return an error, but, since we already processed this
-    // block, it should return early with Ok(()).
-    // Seing Ok(()) here indicates that we ignored the request.
-
+    // Now we will try to process the same block again, but since we already
+    // processed it, we should get an error.
     set_verification_status(&db, aggregate_key, DkgSharesStatus::Verified).await;
     let result = tx_signer
         .handle_bitcoin_pre_sign_request(&sbtc_context, &chain_tip)
@@ -838,7 +834,7 @@ pub async fn presign_request_ignore_request_if_already_processed_this_block() {
         _ => panic!("Expected InvalidPresignRequest error, got: {err}"),
     }
 
-    // Sanity check: if we clear information about already processed blocks this returns an error
+    // Sanity check: if we clear information about already processed blocks this is ok again
 
     tx_signer.last_presign_block = None;
     let result = tx_signer
