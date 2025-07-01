@@ -1353,7 +1353,7 @@ fn extract_signatures_required(value: Value) -> Result<Option<u16>, Error> {
             threshold.try_into().map_err(|_| Error::TypeConversion)?,
         )),
         _ => Err(Error::InvalidStacksResponse(
-            "expected a buffer but got something else",
+            "expected a uint but got something else",
         )),
     }
 }
