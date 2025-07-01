@@ -120,10 +120,7 @@ async fn signing_set_validation_check_for_stacks_transactions() {
         wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
         signer_private_key: setup.aggregated_signer.keypair.secret_key().into(),
         threshold: 2,
-        last_presign_block: BitcoinBlockRef {
-            block_hash: BitcoinBlockHash::from([0; 32]),
-            block_height: 0u64.into(),
-        },
+        last_presign_block: None,
         rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
@@ -213,10 +210,7 @@ async fn signing_set_validation_ignores_aggregate_key_in_request() {
         wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
         signer_private_key: setup.aggregated_signer.keypair.secret_key().into(),
         threshold: 2,
-        last_presign_block: BitcoinBlockRef {
-            block_hash: BitcoinBlockHash::from([0; 32]),
-            block_height: 0u64.into(),
-        },
+        last_presign_block: None,
         rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
@@ -314,10 +308,7 @@ async fn signer_rejects_stacks_txns_with_too_high_a_fee(
         signer_private_key: setup.aggregated_signer.keypair.secret_key().into(),
         threshold: 2,
         rng: rand::rngs::StdRng::seed_from_u64(51),
-        last_presign_block: BitcoinBlockRef {
-            block_hash: BitcoinBlockHash::from([0; 32]),
-            block_height: 0u64.into(),
-        },
+        last_presign_block: None,
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
@@ -403,10 +394,7 @@ async fn signer_rejects_multiple_attempts_in_tenure() {
         wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
         signer_private_key: setup.aggregated_signer.keypair.secret_key().into(),
         threshold: 2,
-        last_presign_block: BitcoinBlockRef {
-            block_hash: BitcoinBlockHash::from([0; 32]),
-            block_height: 0u64.into(),
-        },
+        last_presign_block: None,
         rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
@@ -549,10 +537,7 @@ pub async fn assert_should_be_able_to_handle_sbtc_requests() {
         wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
         signer_private_key: setup.aggregated_signer.keypair.secret_key().into(),
         threshold: 2,
-        last_presign_block: BitcoinBlockRef {
-            block_hash: BitcoinBlockHash::from([0; 32]),
-            block_height: 0u64.into(),
-        },
+        last_presign_block: None,
         rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
@@ -706,10 +691,7 @@ pub async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is
         signer_private_key: setup.signers.private_key(),
         threshold: 2,
         rng: rand::rngs::StdRng::seed_from_u64(51),
-        last_presign_block: BitcoinBlockRef {
-            block_hash: BitcoinBlockHash::from([0; 32]),
-            block_height: 0u64.into(),
-        },
+        last_presign_block: None,
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
@@ -810,10 +792,7 @@ pub async fn presign_request_ignore_request_if_already_processed_this_block() {
         signer_private_key: setup.signers.private_key(),
         threshold: 2,
         rng: rand::rngs::StdRng::seed_from_u64(51),
-        last_presign_block: BitcoinBlockRef {
-            block_hash: BitcoinBlockHash::from([0; 32]),
-            block_height: 0u64.into(),
-        },
+        last_presign_block: None,
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
@@ -838,7 +817,7 @@ pub async fn presign_request_ignore_request_if_already_processed_this_block() {
     assert!(result.is_ok());
 
     // Check that we store information that we processed this block
-    assert_eq!(tx_signer.last_presign_block, chain_tip);
+    assert_eq!(tx_signer.last_presign_block, Some(chain_tip.block_hash));
 
     // Now we will try to process the same block again, but this time we will
     // Put unverified shares in the database. Since shares are not verified
@@ -861,10 +840,7 @@ pub async fn presign_request_ignore_request_if_already_processed_this_block() {
 
     // Sanity check: if we clear information about already processed blocks this returns an error
 
-    tx_signer.last_presign_block = BitcoinBlockRef {
-        block_hash: BitcoinBlockHash::from([0; 32]),
-        block_height: 0u64.into(),
-    };
+    tx_signer.last_presign_block = None;
     let result = tx_signer
         .handle_bitcoin_pre_sign_request(&sbtc_context, &chain_tip)
         .await;
@@ -910,10 +886,7 @@ async fn new_state_machine_per_valid_sighash() {
         // one of the public keys that we stored in the DKG shares table.
         signer_private_key: setup.signers.private_key(),
         threshold: 2,
-        last_presign_block: BitcoinBlockRef {
-            block_hash: BitcoinBlockHash::from([0; 32]),
-            block_height: 0u64.into(),
-        },
+        last_presign_block: None,
         rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
@@ -1040,10 +1013,7 @@ async fn max_one_state_machine_per_bitcoin_block_hash_for_dkg() {
         wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
         signer_private_key: ctx.config().signer.private_key,
         threshold: 2,
-        last_presign_block: BitcoinBlockRef {
-            block_hash: BitcoinBlockHash::from([0; 32]),
-            block_height: 0u64.into(),
-        },
+        last_presign_block: None,
         rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),

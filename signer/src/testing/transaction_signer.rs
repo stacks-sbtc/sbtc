@@ -18,8 +18,6 @@ use crate::storage;
 use crate::storage::DbRead;
 use crate::storage::DbWrite;
 use crate::storage::model;
-use crate::storage::model::BitcoinBlockHash;
-use crate::storage::model::BitcoinBlockRef;
 use crate::testing;
 use crate::testing::get_rng;
 use crate::testing::storage::model::TestData;
@@ -61,10 +59,7 @@ where
                 context_window,
                 wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
                 threshold,
-                last_presign_block: BitcoinBlockRef {
-                    block_hash: BitcoinBlockHash::from([0; 32]),
-                    block_height: 0u64.into(),
-                },
+                last_presign_block: None,
                 rng,
                 dkg_begin_pause: None,
                 dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),

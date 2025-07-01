@@ -64,7 +64,6 @@ use signer::network::MessageTransfer as _;
 use signer::stacks::api::StacksClient;
 use signer::stacks::api::StacksInteract;
 use signer::stacks::wallet::SignerWallet;
-use signer::storage::model::BitcoinBlockRef;
 use signer::storage::model::KeyRotationEvent;
 use signer::storage::model::WithdrawalTxOutput;
 use signer::testing::btc::get_canonical_chain_tip;
@@ -746,10 +745,7 @@ async fn deploy_smart_contracts_coordinator() {
             context_window: 10000,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             signer_private_key: kp.secret_key().into(),
-            last_presign_block: BitcoinBlockRef {
-                block_height: 0u64.into(),
-                block_hash: BitcoinBlockHash::from([0; 32]),
-            },
+            last_presign_block: None,
             rng: rand::rngs::OsRng,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
@@ -1375,10 +1371,7 @@ async fn run_subsequent_dkg() {
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             signer_private_key: kp.secret_key().into(),
             rng: rand::rngs::OsRng,
-            last_presign_block: BitcoinBlockRef {
-                block_hash: BitcoinBlockHash::from([0; 32]),
-                block_height: 0u64.into(),
-            },
+            last_presign_block: None,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
@@ -1708,10 +1701,7 @@ async fn sign_bitcoin_transaction() {
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             signer_private_key: kp.secret_key().into(),
             rng: rand::rngs::OsRng,
-            last_presign_block: BitcoinBlockRef {
-                block_hash: BitcoinBlockHash::from([0; 32]),
-                block_height: 0u64.into(),
-            },
+            last_presign_block: None,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
@@ -2166,10 +2156,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             signer_private_key: kp.secret_key().into(),
             rng: rand::rngs::OsRng,
-            last_presign_block: BitcoinBlockRef {
-                block_hash: BitcoinBlockHash::from([0; 32]),
-                block_height: 0u64.into(),
-            },
+            last_presign_block: None,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
@@ -2831,10 +2818,7 @@ async fn skip_signer_activites_after_key_rotation() {
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             signer_private_key: kp.secret_key().into(),
             rng: rand::rngs::OsRng,
-            last_presign_block: BitcoinBlockRef {
-                block_hash: BitcoinBlockHash::from([0; 32]),
-                block_height: 0u64.into(),
-            },
+            last_presign_block: None,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
@@ -3412,10 +3396,7 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             signer_private_key: kp.secret_key().into(),
             rng: rand::rngs::OsRng,
-            last_presign_block: BitcoinBlockRef {
-                block_hash: BitcoinBlockHash::from([0; 32]),
-                block_height: 0u64.into(),
-            },
+            last_presign_block: None,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
@@ -4179,10 +4160,7 @@ async fn test_conservative_initial_sbtc_limits() {
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             signer_private_key: kp.secret_key().into(),
             rng: rand::rngs::OsRng,
-            last_presign_block: BitcoinBlockRef {
-                block_hash: BitcoinBlockHash::from([0; 32]),
-                block_height: 0u64.into(),
-            },
+            last_presign_block: None,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
@@ -4491,10 +4469,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
             context_window: 10000,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             signer_private_key: kp.secret_key().into(),
-            last_presign_block: BitcoinBlockRef {
-                block_hash: BitcoinBlockHash::from([0; 32]),
-                block_height: 0u64.into(),
-            },
+            last_presign_block: None,
             rng: rand::rngs::OsRng,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
@@ -5993,10 +5968,7 @@ async fn reuse_nonce_attack() {
             context_window: 10000,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             signer_private_key: kp.secret_key().into(),
-            last_presign_block: BitcoinBlockRef {
-                block_hash: BitcoinBlockHash::from([0; 32]),
-                block_height: 0u64.into(),
-            },
+            last_presign_block: None,
             rng: rand::rngs::OsRng,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
