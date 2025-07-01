@@ -43,7 +43,7 @@ pub struct UpdateDepositsResponse {
 pub struct DepositWithStatus {
     /// The fully extracted and validated deposit request.
     pub deposit: Option<Deposit>,
-    /// String explaining error occured during updating the deposit.
+    /// A string explaining the error that occurred during the deposit update.
     pub error: Option<String>,
     /// HTTP status code for the deposit processing result.
     pub status: u16,

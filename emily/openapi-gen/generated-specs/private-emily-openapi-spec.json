@@ -2629,7 +2629,7 @@
           },
           "error": {
             "type": "string",
-            "description": "String explaining error occured during updating the deposit.",
+            "description": "A string explaining the error that occurred during the deposit update.",
             "nullable": true
           },
           "status": {
