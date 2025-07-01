@@ -1304,10 +1304,9 @@ fn extract_signer_set(value: Value) -> Result<BTreeSet<PublicKey>, Error> {
     match value {
         // Iterate through each record in the list and convert it to a
         // public key. If the record is not a buffer, then return an error.
-        Value::Sequence(SequenceData::List(ListData { data, .. })) => data
-            .into_iter()
-            .map(|item| extract_public_key(item))
-            .collect(),
+        Value::Sequence(SequenceData::List(ListData { data, .. })) => {
+            data.into_iter().map(extract_public_key).collect()
+        }
         // We expected the top-level value to be a list of buffers,
         // but we got something else.
         _ => Err(Error::InvalidStacksResponse(
@@ -1340,7 +1339,7 @@ fn extract_aggregate_key(value: Value) -> Result<Option<PublicKey>, Error> {
     match value {
         Value::Sequence(SequenceData::Buffer(BuffData { data })) => {
             // The initial value of the data var is all zeros
-            if &[0u8] == data.as_slice() {
+            if data.as_slice() == [0u8] {
                 Ok(None)
             } else {
                 PublicKey::from_slice(&data).map(Some)
