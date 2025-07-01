@@ -2207,12 +2207,16 @@ mod tests {
         C: StacksInteract,
         F: Fn(Url) -> C,
     {
-        let aggregate_key = generate_pubkeys(1).into_iter().next().unwrap();
+        let aggregate_key = generate_pubkeys(1)[0];
 
         let data;
         let expected;
         if return_none {
-            data = [0; 33].to_vec();
+            // 0x00 is the initial value of the signers' aggregate key in
+            // the sbtc-registry contract, and
+            // get_current_signers_aggregate_key should return None when we
+            // receive it.
+            data = vec![0]; 
             expected = None;
         } else {
             data = aggregate_key.serialize().to_vec();
