@@ -1327,7 +1327,7 @@ fn extract_public_key(value: Value) -> Result<Option<PublicKey>, Error> {
     match value {
         Value::Sequence(SequenceData::Buffer(BuffData { data })) => {
             // The initial value of the data var is all zeros
-            if data.iter().all(|v| *v == 0) {
+            if &[0u8] == data.as_slice() {
                 Ok(None)
             } else {
                 PublicKey::from_slice(&data).map(Some)
