@@ -2216,7 +2216,7 @@ mod tests {
             // the sbtc-registry contract, and
             // get_current_signers_aggregate_key should return None when we
             // receive it.
-            data = vec![0]; 
+            data = vec![0];
             expected = None;
         } else {
             data = aggregate_key.serialize().to_vec();
