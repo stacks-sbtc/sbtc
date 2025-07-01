@@ -316,11 +316,7 @@ where
         );
         span.record("bitcoin_tip_height", *bitcoin_chain_tip.block_height);
 
-        let registry_aggregate_key = self
-            .context
-            .state()
-            .registry_signer_set_info()
-            .map(|info| info.aggregate_key);
+        let registry_signer_set_info = self.context.state().registry_signer_set_info();
 
         // If we are not the coordinator, then we have no business
         // coordinating DKG or constructing bitcoin and stacks
@@ -346,13 +342,29 @@ where
                 Ok(key) => key,
                 Err(error) => {
                     tracing::error!(%error, "failed to coordinate DKG; using existing aggregate key");
-                    registry_aggregate_key
+                    registry_signer_set_info
+                        .as_ref()
+                        .map(|info| info.aggregate_key)
                         .ok_or(Error::MissingAggregateKey(*bitcoin_chain_tip.block_hash))?
                 }
             }
         } else {
-            registry_aggregate_key
-                .ok_or(Error::MissingAggregateKey(*bitcoin_chain_tip.block_hash))?
+            // If we do not have signer set info in the registry, then we
+            // are in the bootstrap phase. Our latest DKG shares may be
+            // 'Unverified', but if we are here then they were not 'Failed'
+            // when we made to call to `should_coordinate_dkg`, since we
+            // will coordinate DKG if our last DKG shares are 'Failed'. But
+            // we could be loading 'Failed' shares here.
+            match registry_signer_set_info.as_ref() {
+                Some(info) => info.aggregate_key,
+                None => self
+                    .context
+                    .get_storage()
+                    .get_latest_encrypted_dkg_shares()
+                    .await?
+                    .map(|shares| shares.aggregate_key)
+                    .ok_or(Error::NoDkgShares)?,
+            }
         };
 
         let chain_tip_hash = &bitcoin_chain_tip.block_hash;
@@ -378,10 +390,7 @@ where
             return Ok(());
         }
 
-        let signer_public_keys = self
-            .context
-            .state()
-            .registry_signer_set_info()
+        let signer_public_keys = registry_signer_set_info
             .map(|info| info.signer_set)
             .ok_or_else(|| Error::NoKeyRotationEvent)?;
 
