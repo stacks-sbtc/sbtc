@@ -807,7 +807,7 @@ pub async fn presign_request_ignore_request_if_already_processed_this_block() {
         .handle_bitcoin_pre_sign_request(&sbtc_context, &chain_tip)
         .await;
 
-    // We processing this block with verified shares and thus it should be ok.
+    // We are processing this block with verified shares and thus it should be ok.
     assert!(result.is_ok());
 
     // Check that we store information that we processed this block
