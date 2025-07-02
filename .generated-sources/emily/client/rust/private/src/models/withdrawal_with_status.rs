@@ -11,7 +11,7 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// WithdrawalWithStatus : Wrapper for withdrawal with status code. Used for multi-status responses. TODO: utopia, which we use for generating OpenAPI spec does not support [`Result`] in structs, however, logically exactly one of `withdrawal` or `error` should be None, and exactly one of them should be Some. It would be nice to find a way to use `Result` here.
+/// WithdrawalWithStatus : Wrapper for withdrawal with status code. Used for multi-status responses. Note: logically, exactly one field among `error` and `withdrawal` should be `None`, and exactly one should be `Some`, so, storing them as `Result` would be more correct. However, utopia, which we use for openAPI schema generation, does not allow `Result` usage in its structs, and we have to use two `Option`s
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WithdrawalWithStatus {
     /// String explaining error occured during updating the withdrawal.
@@ -35,7 +35,7 @@ pub struct WithdrawalWithStatus {
 }
 
 impl WithdrawalWithStatus {
-    /// Wrapper for withdrawal with status code. Used for multi-status responses. TODO: utopia, which we use for generating OpenAPI spec does not support [`Result`] in structs, however, logically exactly one of `withdrawal` or `error` should be None, and exactly one of them should be Some. It would be nice to find a way to use `Result` here.
+    /// Wrapper for withdrawal with status code. Used for multi-status responses. Note: logically, exactly one field among `error` and `withdrawal` should be `None`, and exactly one should be `Some`, so, storing them as `Result` would be more correct. However, utopia, which we use for openAPI schema generation, does not allow `Result` usage in its structs, and we have to use two `Option`s
     pub fn new(status: u32) -> WithdrawalWithStatus {
         WithdrawalWithStatus {
             error: None,
