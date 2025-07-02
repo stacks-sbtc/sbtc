@@ -77,7 +77,7 @@ const DUMMY_STX_TRANSFER_PAYLOAD: TransactionPayload = TransactionPayload::Token
 /// The names of all the read-only functions used in the signers for any of
 /// the sbtc smart contracts.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, strum::Display, strum::IntoStaticStr)]
-#[strum(serialize_all = "kebab_case")]
+#[strum(serialize_all = "kebab-case")]
 pub enum ReadOnlyFnName {
     /// This is the name of the read-only function in the sbtc-registry smart
     /// contract that returns the status of a deposit request.
@@ -96,7 +96,7 @@ pub enum ReadOnlyFnName {
 
 /// A wrapper around the contract name string.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, strum::Display, strum::IntoStaticStr)]
-#[strum(serialize_all = "kebab_case")]
+#[strum(serialize_all = "kebab-case")]
 pub enum ClarityMapName {
     /// The name of the map in the sbtc-registry smart contract that
     /// stores the status of a withdrawal request.
@@ -105,7 +105,7 @@ pub enum ClarityMapName {
 
 /// A wrapper around the contract name string.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, strum::Display, strum::IntoStaticStr)]
-#[strum(serialize_all = "kebab_case")]
+#[strum(serialize_all = "kebab-case")]
 pub enum DataVarName {
     /// The name of the data variable in the sbtc-registry smart contract
     /// that stores the current aggregate public key of the signers.
@@ -725,7 +725,7 @@ impl StacksClient {
             .await
             .map_err(Error::StacksNodeRequest)?;
 
-        Metrics::record_call_read_duration(instant.elapsed(), contract_name, fn_name, &response);
+        Metrics::record_call_read(instant.elapsed(), contract_name, fn_name, &response);
 
         response
             .error_for_status()
@@ -772,7 +772,7 @@ impl StacksClient {
             .await
             .map_err(Error::StacksNodeRequest)?;
 
-        Metrics::record_data_var_duration(instant.elapsed(), contract_name, var_name, &response);
+        Metrics::record_data_var(instant.elapsed(), contract_name, var_name, &response);
 
         response
             .error_for_status()
@@ -829,7 +829,7 @@ impl StacksClient {
             .await
             .map_err(Error::StacksNodeRequest)?;
 
-        Metrics::record_map_entry_duration(instant.elapsed(), contract_name, map_name, &response);
+        Metrics::record_map_entry(instant.elapsed(), contract_name, map_name, &response);
         // It looks like the stacks node returns a 404 if the data is not
         // available, see
         // https://github.com/stacks-network/stacks-core/blob/c1a1f50fddcbc11054fae537103423e21221665a/stackslib/src/net/api/getmapentry.rs#L223-L225C22

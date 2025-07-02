@@ -83,6 +83,30 @@ impl From<Metrics> for metrics::KeyName {
     }
 }
 
+impl From<SmartContract> for metrics::SharedString {
+    fn from(value: SmartContract) -> Self {
+        metrics::SharedString::const_str(value.contract_name())
+    }
+}
+
+impl From<ReadOnlyFnName> for metrics::SharedString {
+    fn from(value: ReadOnlyFnName) -> Self {
+        metrics::SharedString::const_str(value.into())
+    }
+}
+
+impl From<ClarityMapName> for metrics::SharedString {
+    fn from(value: ClarityMapName) -> Self {
+        metrics::SharedString::const_str(value.into())
+    }
+}
+
+impl From<DataVarName> for metrics::SharedString {
+    fn from(value: DataVarName) -> Self {
+        metrics::SharedString::const_str(value.into())
+    }
+}
+
 impl Metrics {
     /// Increment the deposit request counter for incoming deposit requests
     pub fn increment_deposit_total(deposit: &Result<Option<Deposit>, Error>) {
@@ -187,15 +211,12 @@ impl Metrics {
 
     /// Record the amount of time it took to complete a
     /// /v2/contracts/call-read request from the stacks node.
-    pub fn record_call_read_duration(
+    pub fn record_call_read(
         elapsed: Duration,
         contract_name: SmartContract,
         function_name: ReadOnlyFnName,
         response: &Response,
     ) {
-        let contract_name: &'static str = contract_name.contract_name();
-        let function_name: &'static str = function_name.into();
-
         metrics::histogram!(
             Metrics::CallReadOnlyDurationSeconds,
             "contract_name" => contract_name,
@@ -217,15 +238,12 @@ impl Metrics {
 
     /// Record the amount of time it took to complete a /v2/data_var
     /// request from the stacks node.
-    pub fn record_data_var_duration(
+    pub fn record_data_var(
         elapsed: Duration,
         contract_name: SmartContract,
         variable_name: DataVarName,
         response: &Response,
     ) {
-        let contract_name: &'static str = contract_name.contract_name();
-        let variable_name: &'static str = variable_name.into();
-
         metrics::histogram!(
             Metrics::ReadDataVarDurationSeconds,
             "contract_name" => contract_name,
@@ -247,15 +265,12 @@ impl Metrics {
 
     /// Record the amount of time it took to complete a /v2/map_entry
     /// request from the stacks node.
-    pub fn record_map_entry_duration(
+    pub fn record_map_entry(
         elapsed: Duration,
         contract_name: SmartContract,
         map_name: ClarityMapName,
         response: &Response,
     ) {
-        let contract_name: &'static str = contract_name.contract_name();
-        let map_name: &'static str = map_name.into();
-
         metrics::histogram!(
             Metrics::ReadMapEntryDurationSeconds,
             "contract_name" => contract_name,
