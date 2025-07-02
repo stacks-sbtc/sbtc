@@ -283,8 +283,8 @@ async fn get_sbtc_balance(
     let result = stacks_client
         .call_read(
             deployer,
-            &ContractName::from(SmartContract::SbtcToken.contract_name()),
-            &ClarityName::from("get-balance"),
+            ContractName::from(SmartContract::SbtcToken.contract_name()),
+            ClarityName::from("get-balance"),
             deployer,
             &[Value::Principal(address.clone())],
         )

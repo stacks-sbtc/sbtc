@@ -4,7 +4,10 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
+use clarity::vm::ClarityName;
+use clarity::vm::ContractName;
 use metrics_exporter_prometheus::PrometheusBuilder;
+use reqwest::Response;
 
 use crate::block_observer::Deposit;
 use crate::error::Error;
@@ -52,6 +55,9 @@ pub enum Metrics {
     ValidationDurationSeconds,
     /// The number of peers connected in the p2p network.
     PeersConnected,
+    /// The amount of time, in seconds, it took for a call-read request to
+    /// return from the stacks node.
+    CallReadOnlyDurationSeconds,
 }
 
 impl From<Metrics> for metrics::KeyName {
@@ -160,6 +166,27 @@ impl Metrics {
             "status" => validation_status,
         )
         .increment(1);
+    }
+
+    /// Record the amount of time it took to complete a /v2/call-read
+    /// request from the stacks node.
+    pub fn record_call_read_duration(
+        elapsed: Duration,
+        contract_name: ContractName,
+        function_name: ClarityName,
+        response: &Response,
+    ) {
+        let contract_name: String = contract_name.into();
+        let function_name: String = function_name.into();
+
+        metrics::histogram!(
+            Metrics::CallReadOnlyDurationSeconds,
+            "contract_name" => contract_name,
+            "function_name" => function_name,
+            "status_code" => response.status().as_u16().to_string(),
+            "blockchain" => STACKS_BLOCKCHAIN,
+        )
+        .record(elapsed);
     }
 }
 
