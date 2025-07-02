@@ -718,13 +718,10 @@ impl StacksClient {
     pub async fn get_data_var(
         &self,
         contract_principal: &StacksAddress,
-        contract_name: &ContractName,
-        var_name: &ClarityName,
+        contract_name: ContractName,
+        var_name: ClarityName,
     ) -> Result<Value, Error> {
-        let path = format!(
-            "/v2/data_var/{}/{}/{}?proof=0",
-            contract_principal, contract_name, var_name
-        );
+        let path = format!("/v2/data_var/{contract_principal}/{contract_name}/{var_name}?proof=0");
 
         let url = self
             .endpoint
@@ -738,6 +735,7 @@ impl StacksClient {
             "fetching contract data variable"
         );
 
+        let instant = Instant::now();
         let response = self
             .client
             .get(url)
@@ -745,6 +743,8 @@ impl StacksClient {
             .send()
             .await
             .map_err(Error::StacksNodeRequest)?;
+
+        Metrics::record_data_var_duration(instant.elapsed(), contract_name, var_name, &response);
 
         response
             .error_for_status()
@@ -1436,8 +1436,8 @@ impl StacksInteract for StacksClient {
         let value = self
             .get_data_var(
                 contract_principal,
-                &ContractName::from("sbtc-registry"),
-                &ClarityName::from("current-aggregate-pubkey"),
+                ContractName::from("sbtc-registry"),
+                ClarityName::from("current-aggregate-pubkey"),
             )
             .await?;
 
@@ -2313,8 +2313,8 @@ mod tests {
             .get_data_var(
                 &StacksAddress::from_string("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM")
                     .expect("failed to parse stacks address"),
-                &ContractName::from("sbtc-registry"),
-                &ClarityName::from("current-signer-set"),
+                ContractName::from("sbtc-registry"),
+                ClarityName::from("current-signer-set"),
             )
             .await
             .unwrap();

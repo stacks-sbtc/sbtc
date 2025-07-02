@@ -58,6 +58,9 @@ pub enum Metrics {
     /// The amount of time, in seconds, it took for a call-read request to
     /// return from the stacks node.
     CallReadOnlyDurationSeconds,
+    /// The amount of time, in seconds, it took for to read a data variable
+    /// in a smart contract by making a request to the stacks node.
+    ReadDataVarDurationSeconds,
 }
 
 impl From<Metrics> for metrics::KeyName {
@@ -183,6 +186,27 @@ impl Metrics {
             Metrics::CallReadOnlyDurationSeconds,
             "contract_name" => contract_name,
             "function_name" => function_name,
+            "status_code" => response.status().as_u16().to_string(),
+            "blockchain" => STACKS_BLOCKCHAIN,
+        )
+        .record(elapsed);
+    }
+
+    /// Record the amount of time it took to complete a /v2/data_var
+    /// request from the stacks node.
+    pub fn record_data_var_duration(
+        elapsed: Duration,
+        contract_name: ContractName,
+        variable_name: ClarityName,
+        response: &Response,
+    ) {
+        let contract_name: String = contract_name.into();
+        let variable_name: String = variable_name.into();
+
+        metrics::histogram!(
+            Metrics::ReadDataVarDurationSeconds,
+            "contract_name" => contract_name,
+            "variable_name" => variable_name,
             "status_code" => response.status().as_u16().to_string(),
             "blockchain" => STACKS_BLOCKCHAIN,
         )
