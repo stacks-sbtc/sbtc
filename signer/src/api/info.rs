@@ -194,7 +194,7 @@ impl InfoResponse {
                 }
             }
             None => {
-                tracing::debug!("no local bitcoin tip found in the state");
+                tracing::debug!("no local bitcoin tip found in the signer's state");
             }
         }
     }
