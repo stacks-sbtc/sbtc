@@ -72,7 +72,7 @@ pub const SMART_CONTRACTS: [SmartContract; 5] = [
     SmartContract::SbtcToken,
     SmartContract::SbtcDeposit,
     SmartContract::SbtcWithdrawal,
-    SmartContract::SbtcBootstrap,
+    SmartContract::SbtcBootstrapSigners,
 ];
 
 /// This struct is used as supplemental data to help validate a request to
@@ -1466,7 +1466,7 @@ impl RotateKeysErrorMsg {
 /// A wrapper type for smart contract deployment that implements
 /// AsTxPayload.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, strum::Display)]
-#[strum(serialize_all = "snake_case")]
+#[strum(serialize_all = "kebab_case")]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
 pub enum SmartContract {
     /// The sbtc-registry contract. This contract needs to be deployed
@@ -1483,7 +1483,7 @@ pub enum SmartContract {
     SbtcWithdrawal,
     /// The sbtc-bootstrap-signers contract. Can be deployed after the
     /// sbtc-token contract.
-    SbtcBootstrap,
+    SbtcBootstrapSigners,
 }
 
 impl AsTxPayload for SmartContract {
@@ -1520,7 +1520,7 @@ impl SmartContract {
             SmartContract::SbtcRegistry => "sbtc-registry",
             SmartContract::SbtcDeposit => "sbtc-deposit",
             SmartContract::SbtcWithdrawal => "sbtc-withdrawal",
-            SmartContract::SbtcBootstrap => "sbtc-bootstrap-signers",
+            SmartContract::SbtcBootstrapSigners => "sbtc-bootstrap-signers",
         }
     }
 
@@ -1539,7 +1539,7 @@ impl SmartContract {
             SmartContract::SbtcWithdrawal => {
                 include_str!("../../../contracts/contracts/sbtc-withdrawal.clar")
             }
-            SmartContract::SbtcBootstrap => {
+            SmartContract::SbtcBootstrapSigners => {
                 include_str!("../../../contracts/contracts/sbtc-bootstrap-signers.clar")
             }
         }
@@ -1675,7 +1675,7 @@ mod tests {
         let _ = call.as_contract_call();
     }
 
-    #[test_case::test_case(SmartContract::SbtcBootstrap; "sbtc-bootstrap")]
+    #[test_case::test_case(SmartContract::SbtcBootstrapSigners; "sbtc-bootstrap")]
     #[test_case::test_case(SmartContract::SbtcRegistry; "sbtc-registry")]
     #[test_case::test_case(SmartContract::SbtcDeposit; "sbtc-deposit")]
     #[test_case::test_case(SmartContract::SbtcWithdrawal; "sbtc-withdrawal")]

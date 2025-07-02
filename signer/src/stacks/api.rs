@@ -31,10 +31,10 @@ use blockstack_lib::net::api::postfeerate::RPCFeeEstimateResponse;
 use blockstack_lib::types::chainstate::StacksAddress;
 use blockstack_lib::types::chainstate::StacksBlockId;
 use clarity::types::StacksEpochId;
+use clarity::vm::Value;
 use clarity::vm::types::OptionalData;
 use clarity::vm::types::TupleData;
 use clarity::vm::types::{BuffData, ListData, SequenceData};
-use clarity::vm::{ClarityName, ContractName, Value};
 use reqwest::StatusCode;
 use reqwest::header::CONTENT_LENGTH;
 use reqwest::header::CONTENT_TYPE;
@@ -66,18 +66,6 @@ const TX_FEE_TX_SIZE_MULTIPLIER: u64 = 2 * MINIMUM_TX_FEE_RATE_PER_BYTE;
 /// case the stacks node returns wonky values. This is 10 STX.
 const MAX_TX_FEE: u64 = 10_000_000;
 
-/// This is the name of the MAP in the sbtc-registry smart contract that
-/// stores the status of a withdrawal request.
-const WITHDRAWAL_STATUS_MAP_NAME: &str = "withdrawal-status";
-
-/// This is the name of the read-only function in the sbtc-registry smart
-/// contract that returns the status of a deposit request.
-const GET_DEPOSIT_STATUS_FN_NAME: &str = "get-deposit-status";
-
-/// This is the name of the read-only function in the sbtc-registry smart
-/// contract that returns the current signer set data.
-const GET_SIGNER_SET_DATA_FN_NAME: &str = "get-current-signer-data";
-
 /// This is a dummy STX transfer payload used only for estimating STX
 /// transfer costs.
 const DUMMY_STX_TRANSFER_PAYLOAD: TransactionPayload = TransactionPayload::TokenTransfer(
@@ -85,6 +73,47 @@ const DUMMY_STX_TRANSFER_PAYLOAD: TransactionPayload = TransactionPayload::Token
     0,
     TokenTransferMemo([0; 34]),
 );
+
+/// The names of all the read-only functions used in the signers for any of
+/// the sbtc smart contracts.
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, strum::Display, strum::IntoStaticStr)]
+#[strum(serialize_all = "kebab_case")]
+pub enum ReadOnlyFnName {
+    /// This is the name of the read-only function in the sbtc-registry smart
+    /// contract that returns the status of a deposit request.
+    GetDepositStatus,
+    /// This is the name of the read-only function in the sbtc-registry smart
+    /// contract that returns the current signer set data.
+    GetCurrentSignerData,
+    /// This is the name of the read-only function in the sbtc-token smart
+    /// for getting the total supply.
+    GetTotalSupply,
+    /// This is the name of the read-only function in the sbtc-token smart
+    /// contract that returns the balance of a given principal.
+    #[cfg(any(test, feature = "testing"))]
+    GetBalance,
+}
+
+/// A wrapper around the contract name string.
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, strum::Display, strum::IntoStaticStr)]
+#[strum(serialize_all = "kebab_case")]
+pub enum ClarityMapName {
+    /// The name of the map in the sbtc-registry smart contract that
+    /// stores the status of a withdrawal request.
+    WithdrawalStatus,
+}
+
+/// A wrapper around the contract name string.
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, strum::Display, strum::IntoStaticStr)]
+#[strum(serialize_all = "kebab_case")]
+pub enum DataVarName {
+    /// The name of the data variable in the sbtc-registry smart contract
+    /// that stores the current aggregate public key of the signers.
+    CurrentAggregatePubkey,
+    /// The name of the data variable in the sbtc-registry smart contract
+    #[cfg(any(test, feature = "testing"))]
+    CurrentSignerSet,
+}
 
 trait ExtractFee {
     fn extract_fee(&self, priority: FeePriority) -> Option<RPCFeeEstimate>;
@@ -649,8 +678,8 @@ impl StacksClient {
     pub async fn call_read(
         &self,
         contract_principal: &StacksAddress,
-        contract_name: ContractName,
-        fn_name: ClarityName,
+        contract_name: SmartContract,
+        fn_name: ReadOnlyFnName,
         sender: &StacksAddress,
         arguments: &[Value],
     ) -> Result<Value, Error> {
@@ -717,8 +746,8 @@ impl StacksClient {
     pub async fn get_data_var(
         &self,
         contract_principal: &StacksAddress,
-        contract_name: ContractName,
-        var_name: ClarityName,
+        contract_name: SmartContract,
+        var_name: DataVarName,
     ) -> Result<Value, Error> {
         let path = format!("/v2/data_var/{contract_principal}/{contract_name}/{var_name}?proof=0");
 
@@ -767,8 +796,8 @@ impl StacksClient {
     pub async fn get_map_entry(
         &self,
         contract_principal: &StacksAddress,
-        contract_name: ContractName,
-        map_name: ClarityName,
+        contract_name: SmartContract,
+        map_name: ClarityMapName,
         map_entry: &Value,
     ) -> Result<Option<Value>, Error> {
         let path = format!("/v2/map_entry/{contract_principal}/{contract_name}/{map_name}?proof=0");
@@ -1389,8 +1418,8 @@ impl StacksInteract for StacksClient {
         let result = self
             .call_read(
                 contract_principal,
-                ContractName::from(SmartContract::SbtcRegistry.contract_name()),
-                ClarityName::from(GET_SIGNER_SET_DATA_FN_NAME),
+                SmartContract::SbtcRegistry,
+                ReadOnlyFnName::GetCurrentSignerData,
                 contract_principal,
                 &[],
             )
@@ -1437,8 +1466,8 @@ impl StacksInteract for StacksClient {
         let value = self
             .get_data_var(
                 contract_principal,
-                ContractName::from("sbtc-registry"),
-                ClarityName::from("current-aggregate-pubkey"),
+                SmartContract::SbtcRegistry,
+                DataVarName::CurrentAggregatePubkey,
             )
             .await?;
 
@@ -1450,11 +1479,8 @@ impl StacksInteract for StacksClient {
         deployer: &StacksAddress,
         outpoint: &OutPoint,
     ) -> Result<bool, Error> {
-        // Both ContractName::from and ClarityName::from can panic when
-        // given the "wrong" strings. These particular strings do not
-        // panic, and we test this fact in our unit tests.
-        let contract_name = ContractName::from(SmartContract::SbtcRegistry.contract_name());
-        let fn_name = ClarityName::from(GET_DEPOSIT_STATUS_FN_NAME);
+        let contract_name = SmartContract::SbtcRegistry;
+        let fn_name = ReadOnlyFnName::GetDepositStatus;
 
         // The transaction IDs are written in little endian format when
         // making the contract call that sets the deposit status, so we
@@ -1485,11 +1511,8 @@ impl StacksInteract for StacksClient {
         deployer: &StacksAddress,
         request_id: u64,
     ) -> Result<bool, Error> {
-        // Both ContractName::from and ClarityName::from can panic when
-        // given the "wrong" strings. These particular strings do not
-        // panic, and we test this fact in our unit tests.
-        let contract_name = ContractName::from(SmartContract::SbtcRegistry.contract_name());
-        let map_name = ClarityName::from(WITHDRAWAL_STATUS_MAP_NAME);
+        let contract_name = SmartContract::SbtcRegistry;
+        let map_name = ClarityMapName::WithdrawalStatus;
 
         let map_entry = Value::UInt(request_id as u128);
         let result = self
@@ -1652,8 +1675,8 @@ impl StacksInteract for StacksClient {
         let result = self
             .call_read(
                 deployer,
-                ContractName::from(SmartContract::SbtcToken.contract_name()),
-                ClarityName::from("get-total-supply"),
+                SmartContract::SbtcToken,
+                ReadOnlyFnName::GetTotalSupply,
                 deployer,
                 &[],
             )
@@ -1828,6 +1851,7 @@ mod tests {
     use crate::storage::memory::Store;
 
     use clarity::types::Address;
+    use clarity::vm::ClarityName;
     use clarity::vm::types::{
         BuffData, BufferLength, ListData, ListTypeData, SequenceData, SequenceSubtype,
         TypeSignature,
@@ -2314,8 +2338,8 @@ mod tests {
             .get_data_var(
                 &StacksAddress::from_string("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM")
                     .expect("failed to parse stacks address"),
-                ContractName::from("sbtc-registry"),
-                ClarityName::from("current-signer-set"),
+                SmartContract::SbtcRegistry,
+                DataVarName::CurrentSignerSet,
             )
             .await
             .unwrap();

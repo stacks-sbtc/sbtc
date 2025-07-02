@@ -4,14 +4,16 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
-use clarity::vm::ClarityName;
-use clarity::vm::ContractName;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use reqwest::Response;
 
 use crate::block_observer::Deposit;
 use crate::error::Error;
 use crate::message::StacksTransactionSignRequest;
+use crate::stacks::api::ClarityMapName;
+use crate::stacks::api::DataVarName;
+use crate::stacks::api::ReadOnlyFnName;
+use crate::stacks::contracts::SmartContract;
 use crate::transaction_signer::AcceptedSigHash;
 
 /// The buckets used for metric histograms
@@ -58,12 +60,21 @@ pub enum Metrics {
     /// The amount of time, in seconds, it took for a call-read request to
     /// return from the stacks node.
     CallReadOnlyDurationSeconds,
+    /// Records total number of times that a call-read request has been
+    /// made to the stacks node.
+    CallReadOnlyRequestsTotal,
     /// The amount of time, in seconds, it took for to read a data variable
     /// in a smart contract by making a request to the stacks node.
     ReadDataVarDurationSeconds,
+    /// Records the total number of times that request to read a data
+    /// variable has been made to the stacks node.
+    ReadDataVarRequestsTotal,
     /// The amount of time, in seconds, it took read a map entry in a smart
     /// contract by making a request to the stacks node.
     ReadMapEntryDurationSeconds,
+    /// The total number of times that a request to read a map entry in a
+    /// smart contract has been made to the stacks node.
+    ReadMapEntryRequestsTotal,
 }
 
 impl From<Metrics> for metrics::KeyName {
@@ -174,16 +185,16 @@ impl Metrics {
         .increment(1);
     }
 
-    /// Record the amount of time it took to complete a /v2/call-read
-    /// request from the stacks node.
+    /// Record the amount of time it took to complete a
+    /// /v2/contracts/call-read request from the stacks node.
     pub fn record_call_read_duration(
         elapsed: Duration,
-        contract_name: ContractName,
-        function_name: ClarityName,
+        contract_name: SmartContract,
+        function_name: ReadOnlyFnName,
         response: &Response,
     ) {
-        let contract_name: String = contract_name.into();
-        let function_name: String = function_name.into();
+        let contract_name: &'static str = contract_name.contract_name();
+        let function_name: &'static str = function_name.into();
 
         metrics::histogram!(
             Metrics::CallReadOnlyDurationSeconds,
@@ -193,18 +204,27 @@ impl Metrics {
             "blockchain" => STACKS_BLOCKCHAIN,
         )
         .record(elapsed);
+
+        metrics::counter!(
+            Metrics::CallReadOnlyRequestsTotal,
+            "contract_name" => contract_name,
+            "function_name" => function_name,
+            "status_code" => response.status().as_u16().to_string(),
+            "blockchain" => STACKS_BLOCKCHAIN,
+        )
+        .increment(1);
     }
 
     /// Record the amount of time it took to complete a /v2/data_var
     /// request from the stacks node.
     pub fn record_data_var_duration(
         elapsed: Duration,
-        contract_name: ContractName,
-        variable_name: ClarityName,
+        contract_name: SmartContract,
+        variable_name: DataVarName,
         response: &Response,
     ) {
-        let contract_name: String = contract_name.into();
-        let variable_name: String = variable_name.into();
+        let contract_name: &'static str = contract_name.contract_name();
+        let variable_name: &'static str = variable_name.into();
 
         metrics::histogram!(
             Metrics::ReadDataVarDurationSeconds,
@@ -214,18 +234,27 @@ impl Metrics {
             "blockchain" => STACKS_BLOCKCHAIN,
         )
         .record(elapsed);
+
+        metrics::counter!(
+            Metrics::ReadDataVarRequestsTotal,
+            "contract_name" => contract_name,
+            "variable_name" => variable_name,
+            "status_code" => response.status().as_u16().to_string(),
+            "blockchain" => STACKS_BLOCKCHAIN,
+        )
+        .increment(1);
     }
 
-    /// Record the amount of time it took to complete a /v2/data_map
+    /// Record the amount of time it took to complete a /v2/map_entry
     /// request from the stacks node.
     pub fn record_map_entry_duration(
         elapsed: Duration,
-        contract_name: ContractName,
-        map_name: ClarityName,
+        contract_name: SmartContract,
+        map_name: ClarityMapName,
         response: &Response,
     ) {
-        let contract_name: String = contract_name.into();
-        let map_name: String = map_name.into();
+        let contract_name: &'static str = contract_name.contract_name();
+        let map_name: &'static str = map_name.into();
 
         metrics::histogram!(
             Metrics::ReadMapEntryDurationSeconds,
@@ -235,6 +264,15 @@ impl Metrics {
             "blockchain" => STACKS_BLOCKCHAIN,
         )
         .record(elapsed);
+
+        metrics::counter!(
+            Metrics::ReadMapEntryRequestsTotal,
+            "contract_name" => contract_name,
+            "map_name" => map_name,
+            "status_code" => response.status().as_u16().to_string(),
+            "blockchain" => STACKS_BLOCKCHAIN,
+        )
+        .increment(1);
     }
 }
 
