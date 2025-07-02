@@ -11,7 +11,7 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// DepositWithStatus : Wrapper for deposit with status code. Used for multi-status responses. TODO: utopia, which we use for generating OpenAPI spec does not support [`Result`] in structs, however, logically exactly one of `deposit` or `error` should be None, and exactly one of them should be Some. It would be nice to find a way to use `Result` here.
+/// DepositWithStatus : Wrapper for deposit with status code. Used for multi-status responses. Note: logically, exactly one field among `error` and `deposit` should be `None`, and exactly one should be `Some`, so, storing them as `Result` would be more correct. However, utopia, which we use for openAPI schema generation, does not allow `Result` usage in its structs, and we have to use two `Option`s
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DepositWithStatus {
     #[serde(
@@ -35,7 +35,7 @@ pub struct DepositWithStatus {
 }
 
 impl DepositWithStatus {
-    /// Wrapper for deposit with status code. Used for multi-status responses. TODO: utopia, which we use for generating OpenAPI spec does not support [`Result`] in structs, however, logically exactly one of `deposit` or `error` should be None, and exactly one of them should be Some. It would be nice to find a way to use `Result` here.
+    /// Wrapper for deposit with status code. Used for multi-status responses. Note: logically, exactly one field among `error` and `deposit` should be `None`, and exactly one should be `Some`, so, storing them as `Result` would be more correct. However, utopia, which we use for openAPI schema generation, does not allow `Result` usage in its structs, and we have to use two `Option`s
     pub fn new(status: u32) -> DepositWithStatus {
         DepositWithStatus {
             deposit: None,
