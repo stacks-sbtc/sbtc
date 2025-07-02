@@ -74,12 +74,10 @@ impl SignerState {
 
     /// Set the current bitcoin chain tip.
     pub fn set_bitcoin_chain_tip(&self, chain_tip: BitcoinBlockRef) {
-        let mut block = self
-            .bitcoin_chain_tip
+        self.bitcoin_chain_tip
             .write()
-            .expect("BUG: Failed to acquire write lock");
-
-        *block = Some(chain_tip);
+            .expect("BUG: Failed to acquire write lock")
+            .replace(chain_tip);
     }
 
     /// Get the current sBTC limits.
