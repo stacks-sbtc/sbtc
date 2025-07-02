@@ -2563,7 +2563,6 @@
         "description": "The status of the in-flight sBTC deposit.",
         "enum": [
           "pending",
-          "reprocessing",
           "accepted",
           "confirmed",
           "failed",
@@ -3063,7 +3062,6 @@
         "description": "The status of the in-flight sBTC withdrawal.",
         "enum": [
           "pending",
-          "reprocessing",
           "accepted",
           "confirmed",
           "failed"

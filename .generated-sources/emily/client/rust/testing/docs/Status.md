@@ -5,7 +5,6 @@
 | Name | Value |
 |---- | -----|
 | Pending | pending |
-| Reprocessing | reprocessing |
 | Accepted | accepted |
 | Confirmed | confirmed |
 | Failed | failed |

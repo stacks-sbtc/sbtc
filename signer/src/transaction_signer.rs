@@ -12,7 +12,6 @@ use std::time::Duration;
 
 use crate::bitcoin::utxo::UnsignedMockTransaction;
 use crate::bitcoin::validation::BitcoinTxContext;
-use crate::block_observer::SignerSetInfo;
 use crate::context::Context;
 use crate::context::P2PEvent;
 use crate::context::SignerCommand;
@@ -33,6 +32,7 @@ use crate::message::StacksTransactionSignRequest;
 use crate::message::WstsMessageId;
 use crate::metrics::Metrics;
 use crate::network;
+use crate::stacks::api::SignerSetInfo;
 use crate::stacks::contracts::AsContractCall as _;
 use crate::stacks::contracts::ContractCall;
 use crate::stacks::contracts::ReqContext;

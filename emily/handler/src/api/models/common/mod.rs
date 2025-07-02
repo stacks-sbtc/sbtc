@@ -30,9 +30,6 @@ pub enum DepositStatus {
     /// Transaction hasn't yet been addressed by the sBTC Signers.
     #[default]
     Pending,
-    /// Transaction was dealt with by the signers at one point but is now being
-    /// reprocessed. The Signers are aware of the operation request.
-    Reprocessing,
     /// Transaction has been seen and accepted by the sBTC Signers, but is not
     /// yet included in any on chain artifact. The transaction can still fail
     /// at this point if the Signers fail to include the transaction in an on
@@ -75,9 +72,6 @@ pub enum WithdrawalStatus {
     /// Transaction hasn't yet been addressed by the sBTC Signers.
     #[default]
     Pending,
-    /// Transaction was dealt with by the signers at one point but is now being
-    /// reprocessed. The Signers are aware of the operation request.
-    Reprocessing,
     /// Transaction has been seen and accepted by the sBTC Signers, but is not
     /// yet included in any on chain artifact. The transaction can still fail
     /// at this point if the Signers fail to include the transaction in an on
