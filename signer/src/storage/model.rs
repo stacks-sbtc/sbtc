@@ -24,6 +24,7 @@ use crate::block_observer::Deposit;
 use crate::error::Error;
 use crate::keys::PublicKey;
 use crate::keys::PublicKeyXOnly;
+use crate::stacks::api::SignerSetInfo;
 
 /// A bitcoin transaction output (TXO) relevant for the sBTC signers.
 ///
@@ -529,6 +530,16 @@ impl EncryptedDkgShares {
     }
 }
 
+impl From<EncryptedDkgShares> for SignerSetInfo {
+    fn from(value: EncryptedDkgShares) -> Self {
+        SignerSetInfo {
+            aggregate_key: value.aggregate_key,
+            signer_set: value.signer_set_public_keys(),
+            signatures_required: value.signature_share_threshold,
+        }
+    }
+}
+
 /// Persisted public DKG shares from other signers
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
@@ -549,6 +560,16 @@ pub struct KeyRotationEvent {
     /// The number of signatures required for the multi-sig wallet.
     #[sqlx(try_from = "i32")]
     pub signatures_required: u16,
+}
+
+impl From<KeyRotationEvent> for SignerSetInfo {
+    fn from(value: KeyRotationEvent) -> Self {
+        SignerSetInfo {
+            aggregate_key: value.aggregate_key,
+            signer_set: value.signer_set.into_iter().collect(),
+            signatures_required: value.signatures_required,
+        }
+    }
 }
 
 /// A struct containing how a signer voted for a deposit or withdrawal

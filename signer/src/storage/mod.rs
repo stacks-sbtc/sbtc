@@ -310,6 +310,7 @@ pub trait DbRead {
     fn get_encrypted_dkg_shares_count(&self) -> impl Future<Output = Result<u32, Error>> + Send;
 
     /// Return the latest rotate-keys transaction confirmed by the given `chain-tip`.
+    #[cfg(any(test, feature = "testing"))]
     fn get_last_key_rotation(
         &self,
         chain_tip: &model::BitcoinBlockHash,
