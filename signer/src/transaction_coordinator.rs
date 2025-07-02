@@ -304,9 +304,8 @@ where
 
         let bitcoin_chain_tip = self
             .context
-            .get_storage()
-            .get_bitcoin_canonical_chain_tip_ref()
-            .await?
+            .state()
+            .bitcoin_chain_tip()
             .ok_or(Error::NoChainTip)?;
 
         let span = tracing::Span::current();

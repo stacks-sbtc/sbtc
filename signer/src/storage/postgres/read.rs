@@ -721,6 +721,7 @@ impl PgRead {
         .map_err(Error::SqlxQuery)
     }
 
+    #[cfg(any(test, feature = "testing"))]
     pub async fn get_bitcoin_canonical_chain_tip<'e, E>(
         executor: &'e mut E,
     ) -> Result<Option<model::BitcoinBlockHash>, Error>
@@ -742,6 +743,7 @@ impl PgRead {
         .map_err(Error::SqlxQuery)
     }
 
+    #[cfg(any(test, feature = "testing"))]
     async fn get_bitcoin_canonical_chain_tip_ref<'e, E>(
         executor: &'e mut E,
     ) -> Result<Option<model::BitcoinBlockRef>, Error>
@@ -2531,12 +2533,14 @@ impl DbRead for PgStore {
         PgRead::get_stacks_block(self.get_connection().await?.as_mut(), block_hash).await
     }
 
+    #[cfg(any(test, feature = "testing"))]
     async fn get_bitcoin_canonical_chain_tip(
         &self,
     ) -> Result<Option<model::BitcoinBlockHash>, Error> {
         PgRead::get_bitcoin_canonical_chain_tip(self.get_connection().await?.as_mut()).await
     }
 
+    #[cfg(any(test, feature = "testing"))]
     async fn get_bitcoin_canonical_chain_tip_ref(
         &self,
     ) -> Result<Option<model::BitcoinBlockRef>, Error> {
@@ -2955,6 +2959,7 @@ impl DbRead for PgTransaction<'_> {
         PgRead::get_stacks_block(self.tx.lock().await.as_mut(), block_hash).await
     }
 
+    #[cfg(any(test, feature = "testing"))]
     async fn get_bitcoin_canonical_chain_tip(
         &self,
     ) -> Result<Option<model::BitcoinBlockHash>, Error> {
@@ -2962,6 +2967,7 @@ impl DbRead for PgTransaction<'_> {
         PgRead::get_bitcoin_canonical_chain_tip(tx.as_mut()).await
     }
 
+    #[cfg(any(test, feature = "testing"))]
     async fn get_bitcoin_canonical_chain_tip_ref(
         &self,
     ) -> Result<Option<model::BitcoinBlockRef>, Error> {

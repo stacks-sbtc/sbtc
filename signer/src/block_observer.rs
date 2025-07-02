@@ -498,12 +498,13 @@ impl<C: Context, B> BlockObserver<C, B> {
     }
 
     /// Update the `SignerState` object with current bitcoin chain tip.
-    async fn update_bitcoin_chain_tip(&self) -> Result<(), Error> {
+    async fn update_bitcoin_chain_tip(&self, chain_tip: BlockHash) -> Result<(), Error> {
         let db = self.context.get_storage();
         let chain_tip = db
-            .get_bitcoin_canonical_chain_tip_ref()
+            .get_bitcoin_block(&chain_tip.into())
             .await?
-            .ok_or(Error::NoChainTip)?;
+            .map(model::BitcoinBlockRef::from)
+            .ok_or_else(|| Error::UnknownBitcoinBlock(chain_tip))?;
 
         self.context.state().set_bitcoin_chain_tip(chain_tip);
         Ok(())
@@ -527,7 +528,7 @@ impl<C: Context, B> BlockObserver<C, B> {
         self.set_signer_set_info().await?;
 
         tracing::info!("updating the signer state with the current bitcoin chain tip");
-        self.update_bitcoin_chain_tip().await
+        self.update_bitcoin_chain_tip(chain_tip).await
     }
 
     /// Checks if the latest dkg share is pending and is no longer valid

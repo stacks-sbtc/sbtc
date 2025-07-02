@@ -66,11 +66,13 @@ pub trait DbRead {
     ) -> impl Future<Output = Result<Option<model::StacksBlock>, Error>> + Send;
 
     /// Get the bitcoin canonical chain tip.
+    #[cfg(any(test, feature = "testing"))]
     fn get_bitcoin_canonical_chain_tip(
         &self,
     ) -> impl Future<Output = Result<Option<model::BitcoinBlockHash>, Error>> + Send;
 
     /// Get the bitcoin canonical chain tip.
+    #[cfg(any(test, feature = "testing"))]
     fn get_bitcoin_canonical_chain_tip_ref(
         &self,
     ) -> impl Future<Output = Result<Option<model::BitcoinBlockRef>, Error>> + Send;

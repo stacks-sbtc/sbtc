@@ -126,11 +126,12 @@ pub async fn info_handler<C: Context>(state: State<ApiState<C>>) -> InfoResponse
     let stacks_client = state.ctx.get_stacks_client();
     let storage = state.ctx.get_storage();
     let config = state.ctx.config();
+    let ctx = &state.ctx;
 
     let mut response = InfoResponse::default();
 
     response.populate_config_info(config);
-    response.populate_local_chain_info(&storage).await;
+    response.populate_local_chain_info(&storage, ctx).await;
     response.populate_bitcoin_node_info(&bitcoin_client).await;
     response.populate_stacks_node_info(&stacks_client).await;
     response
@@ -163,25 +164,11 @@ impl InfoResponse {
     }
 
     /// Populates the local Bitcoin and Stacks chain tip information.
-    async fn populate_local_chain_info(&mut self, storage: &impl DbRead) {
-        let bitcoin_tip = storage.get_bitcoin_canonical_chain_tip().await;
+    async fn populate_local_chain_info<C: Context, R: DbRead>(&mut self, storage: &R, ctx: &C) {
+        let bitcoin_tip = ctx.state().bitcoin_chain_tip();
 
         match bitcoin_tip {
-            Ok(Some(local_bitcoin_chain_tip)) => {
-                let bitcoin_block = storage
-                    .get_bitcoin_block(&local_bitcoin_chain_tip)
-                    .await
-                    .inspect_err(|error| {
-                        tracing::error!(%error, "error reading bitcoin block from the database")
-                    });
-
-                let Ok(Some(bitcoin_block)) = bitcoin_block else {
-                    tracing::error!(
-                        "canonical tip found but could not retrieve block from the database"
-                    );
-                    return;
-                };
-
+            Some(bitcoin_block) => {
                 self.bitcoin.signer_tip = Some(ChainTipInfo {
                     block_hash: bitcoin_block.block_hash,
                     block_height: bitcoin_block.block_height,
@@ -206,11 +193,8 @@ impl InfoResponse {
                     }
                 }
             }
-            Ok(None) => {
-                tracing::debug!("no local bitcoin tip found in the database.");
-            }
-            Err(error) => {
-                tracing::error!(%error, "error reading bitcoin tip from the database");
+            None => {
+                tracing::debug!("no local bitcoin tip found in the state");
             }
         }
     }
