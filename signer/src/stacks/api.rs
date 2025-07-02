@@ -768,8 +768,8 @@ impl StacksClient {
     pub async fn get_map_entry(
         &self,
         contract_principal: &StacksAddress,
-        contract_name: &ContractName,
-        map_name: &ClarityName,
+        contract_name: ContractName,
+        map_name: ClarityName,
         map_entry: &Value,
     ) -> Result<Option<Value>, Error> {
         let path = format!("/v2/map_entry/{contract_principal}/{contract_name}/{map_name}?proof=0");
@@ -791,6 +791,7 @@ impl StacksClient {
             .map_err(Box::new)
             .map_err(Error::ClarityValueSerialization)?;
 
+        let instant = Instant::now();
         let response = self
             .client
             .post(url)
@@ -800,6 +801,7 @@ impl StacksClient {
             .await
             .map_err(Error::StacksNodeRequest)?;
 
+        Metrics::record_map_entry_duration(instant.elapsed(), contract_name, map_name, &response);
         // It looks like the stacks node returns a 404 if the data is not
         // available, see
         // https://github.com/stacks-network/stacks-core/blob/c1a1f50fddcbc11054fae537103423e21221665a/stackslib/src/net/api/getmapentry.rs#L223-L225C22
@@ -1492,7 +1494,7 @@ impl StacksInteract for StacksClient {
 
         let map_entry = Value::UInt(request_id as u128);
         let result = self
-            .get_map_entry(deployer, &contract_name, &map_name, &map_entry)
+            .get_map_entry(deployer, contract_name, map_name, &map_entry)
             .await?;
 
         // This map `withdrawal-status` in the smart contract stores
