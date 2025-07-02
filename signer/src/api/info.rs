@@ -327,7 +327,7 @@ mod tests {
         error::Error,
         storage::{
             DbWrite,
-            model::{BitcoinBlock, StacksBlock},
+            model::{BitcoinBlock, BitcoinBlockRef, StacksBlock},
         },
         testing::context::*,
     };
@@ -446,6 +446,9 @@ mod tests {
 
         let bitcoin_block: BitcoinBlock = Faker.fake();
         storage.write_bitcoin_block(&bitcoin_block).await.unwrap();
+        context
+            .state()
+            .set_bitcoin_chain_tip(BitcoinBlockRef::from(&bitcoin_block));
 
         let stacks_block = StacksBlock {
             bitcoin_anchor: bitcoin_block.block_hash,
