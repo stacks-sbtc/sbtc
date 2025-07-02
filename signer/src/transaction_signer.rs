@@ -433,6 +433,7 @@ where
         if self.last_presign_block == Some(chain_tip.block_hash) {
             return Err(Error::InvalidPresignRequest(chain_tip.block_hash));
         }
+        self.last_presign_block = Some(chain_tip.block_hash);
 
         let aggregate_key = self
             .context
@@ -480,8 +481,6 @@ where
 
         self.send_message(BitcoinPreSignAck, &chain_tip.block_hash)
             .await?;
-
-        self.last_presign_block = Some(chain_tip.block_hash);
 
         Ok(())
     }
