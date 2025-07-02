@@ -687,7 +687,6 @@ impl StacksClient {
         );
 
         let instant = Instant::now();
-
         let response = self
             .client
             .post(url)
