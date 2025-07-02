@@ -761,10 +761,7 @@ pub async fn presign_request_ignore_request_if_already_processed_this_block() {
 
     set_verification_status(&db, aggregate_key, DkgSharesStatus::Verified).await;
 
-    let signer_set_info = get_signer_set_info(&ctx, chain_tip.block_hash)
-        .await
-        .unwrap()
-        .unwrap();
+    let signer_set_info = get_signer_set_info(&ctx).await.unwrap().unwrap();
 
     ctx.state().update_registry_signer_set_info(signer_set_info);
     ctx.state().update_current_limits(SbtcLimits::unlimited());
