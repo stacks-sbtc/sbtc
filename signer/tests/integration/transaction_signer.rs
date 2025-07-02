@@ -9,7 +9,6 @@ use lru::LruCache;
 use rand::SeedableRng as _;
 use rand::rngs::OsRng;
 use signer::bitcoin::MockBitcoinInteract;
-use signer::block_observer::get_signer_set_info;
 use signer::emily_client::MockEmilyInteract;
 use signer::network::in_memory2::SignerNetworkInstance;
 use signer::stacks::api::MockStacksInteract;
