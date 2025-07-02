@@ -65,6 +65,7 @@ impl SignerState {
     }
 
     /// Get the current bitcoin chain tip.
+    #[allow(clippy::unwrap_in_result)]
     pub fn bitcoin_chain_tip(&self) -> Option<BitcoinBlockRef> {
         self.bitcoin_chain_tip
             .read()
