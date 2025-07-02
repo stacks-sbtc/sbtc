@@ -24,10 +24,10 @@ pub struct UpdateWithdrawalsResponse {
 }
 
 /// Wrapper for withdrawal with status code. Used for multi-status responses.
-/// TODO: utopia, which we use for generating OpenAPI spec does not support
-/// [`Result`] in structs, however, logically exactly one of `withdrawal` or `error` should be
-/// None, and exactly one of them should be Some. It would be nice to find a way to use
-/// `Result` here.
+/// Note: logically, exactly one field among `error` and `withdrawal` should be `None`,
+/// and exactly one should be `Some`, so, storing them as `Result` would be more correct.
+/// However, utopia, which we use for openAPI schema generation, does not allow `Result`
+/// usage in its structs, and we have to use two `Option`s
 #[derive(Clone, Default, Debug, PartialEq, Hash, Serialize, Deserialize, ToSchema, ToResponse)]
 #[serde(rename_all = "camelCase")]
 pub struct WithdrawalWithStatus {

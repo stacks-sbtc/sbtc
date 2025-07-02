@@ -3112,7 +3112,7 @@
       },
       "WithdrawalWithStatus": {
         "type": "object",
-        "description": "Wrapper for withdrawal with status code. Used for multi-status responses.\nTODO: utopia, which we use for generating OpenAPI spec does not support\n[`Result`] in structs, however, logically exactly one of `withdrawal` or `error` should be\nNone, and exactly one of them should be Some. It would be nice to find a way to use\n`Result` here.",
+        "description": "Wrapper for withdrawal with status code. Used for multi-status responses.\nNote: logically, exactly one field among `error` and `withdrawal` should be `None`,\nand exactly one should be `Some`, so, storing them as `Result` would be more correct.\nHowever, utopia, which we use for openAPI schema generation, does not allow `Result`\nusage in its structs, and we have to use two `Option`s",
         "required": [
           "status"
         ],
