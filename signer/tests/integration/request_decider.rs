@@ -452,6 +452,13 @@ async fn blocklist_client_retry(num_failures: u8, failing_iters: u8) {
     let chain_tip: BitcoinBlockHash = setup.sweep_block_hash.into();
     backfill_bitcoin_blocks(&db, rpc, &chain_tip).await;
 
+    let chain_tip_ref = db
+        .get_bitcoin_canonical_chain_tip_ref()
+        .await
+        .unwrap()
+        .unwrap();
+    ctx.state().set_bitcoin_chain_tip(chain_tip_ref);
+
     // We need to store the deposit request because of the foreign key
     // constraint on the deposit_signers table.
     setup.store_deposit_request(&db).await;
@@ -572,6 +579,13 @@ async fn do_not_procceed_with_blocked_addresses(is_withdrawal: bool, is_blocked:
     // Let's get the blockchain data into the database.
     let chain_tip: BitcoinBlockHash = setup.sweep_block_hash.into();
     backfill_bitcoin_blocks(&db, rpc, &chain_tip).await;
+
+    let chain_tip_ref = db
+        .get_bitcoin_canonical_chain_tip_ref()
+        .await
+        .unwrap()
+        .unwrap();
+    ctx.state().set_bitcoin_chain_tip(chain_tip_ref);
 
     if is_withdrawal {
         // For withdrawals we can store only request and dkg shares
