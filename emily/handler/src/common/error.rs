@@ -38,6 +38,8 @@ pub enum Inconsistency {
 }
 
 /// Errors from the internal API logic.
+/// Note that this error may be returned to the client, so it must not contain
+/// any sensitive information.
 #[derive(thiserror::Error, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ValidationError {
     /// The withdrawal is confirmed but missing the fulfillment data.

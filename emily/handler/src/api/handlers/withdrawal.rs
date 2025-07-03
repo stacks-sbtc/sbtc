@@ -404,11 +404,14 @@ async fn update_withdrawals(
 
     // Loop through all updates and execute.
     for (index, update) in validated_request.withdrawals {
-        if update.is_err() {
+        if let Err(error) = update {
+            // This error is a ValidationError: it shouldn't contain any
+            // sensitive information.
             updated_withdrawals.push((
                 index,
                 WithdrawalWithStatus {
-                    withdrawal: Withdrawal::default(),
+                    withdrawal: None,
+                    error: Some(error.to_string()),
                     status: StatusCode::BAD_REQUEST.as_u16(),
                 },
             ));
@@ -435,7 +438,8 @@ async fn update_withdrawals(
                 updated_withdrawals.push((
                     index,
                     WithdrawalWithStatus {
-                        withdrawal: Withdrawal::default(),
+                        withdrawal: None,
+                        error: Some(Error::NotFound.to_string()),
                         status: StatusCode::NOT_FOUND.as_u16(),
                     },
                 ));
@@ -449,7 +453,8 @@ async fn update_withdrawals(
                 updated_withdrawals.push((
                     index,
                     WithdrawalWithStatus {
-                        withdrawal: Withdrawal::default(),
+                        withdrawal: None,
+                        error: Some(Error::Forbidden.to_string()),
                         status: StatusCode::FORBIDDEN.as_u16(),
                     },
                 ));
@@ -464,7 +469,8 @@ async fn update_withdrawals(
                 updated_withdrawals.push((
                     index,
                     WithdrawalWithStatus {
-                        withdrawal: Withdrawal::default(),
+                        withdrawal: None,
+                        error: Some(error.into_production_error().to_string()),
                         status: StatusCode::INTERNAL_SERVER_ERROR.as_u16(),
                     },
                 ));
@@ -484,13 +490,14 @@ async fn update_withdrawals(
         updated_withdrawals.push((
             index,
             WithdrawalWithStatus {
-                withdrawal,
+                error: None,
+                withdrawal: Some(withdrawal),
                 status: StatusCode::OK.as_u16(),
             },
         ));
     }
     updated_withdrawals.sort_by_key(|(index, _)| *index);
-    let withdrawals = updated_withdrawals
+    let withdrawals: Vec<_> = updated_withdrawals
         .into_iter()
         .map(|(_, withdrawal)| withdrawal)
         .collect();

@@ -11,22 +11,36 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// WithdrawalWithStatus : Wrapper for withdrawal with status code. Used for multi-status responses.
+/// WithdrawalWithStatus : Wrapper for withdrawal with status code. Used for multi-status responses. Note: logically, exactly one field among `error` and `withdrawal` should be `None`, and exactly one should be `Some`, so, storing them as `Result` would be more correct. However, utopia, which we use for openAPI schema generation, does not allow `Result` usage in its structs, and we have to use two `Option`s
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WithdrawalWithStatus {
-    /// HTTP status code, returned as part of multi-status responses.
+    /// String explaining error occured during updating the withdrawal.
+    #[serde(
+        rename = "error",
+        default,
+        with = "::serde_with::rust::double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub error: Option<Option<String>>,
+    /// HTTP status code for the withdrawal processing result.
     #[serde(rename = "status")]
     pub status: u32,
-    #[serde(rename = "withdrawal")]
-    pub withdrawal: Box<models::Withdrawal>,
+    #[serde(
+        rename = "withdrawal",
+        default,
+        with = "::serde_with::rust::double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub withdrawal: Option<Option<Box<models::Withdrawal>>>,
 }
 
 impl WithdrawalWithStatus {
-    /// Wrapper for withdrawal with status code. Used for multi-status responses.
-    pub fn new(status: u32, withdrawal: models::Withdrawal) -> WithdrawalWithStatus {
+    /// Wrapper for withdrawal with status code. Used for multi-status responses. Note: logically, exactly one field among `error` and `withdrawal` should be `None`, and exactly one should be `Some`, so, storing them as `Result` would be more correct. However, utopia, which we use for openAPI schema generation, does not allow `Result` usage in its structs, and we have to use two `Option`s
+    pub fn new(status: u32) -> WithdrawalWithStatus {
         WithdrawalWithStatus {
+            error: None,
             status,
-            withdrawal: Box::new(withdrawal),
+            withdrawal: None,
         }
     }
 }

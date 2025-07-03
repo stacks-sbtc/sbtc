@@ -508,11 +508,14 @@ async fn update_deposits(
 
     // Loop through all updates and execute.
     for (index, update) in validated_request.deposits {
-        if update.is_err() {
+        if let Err(error) = update {
+            // This error is a ValidationError: it shouldn't contain any
+            // sensitive information.
             updated_deposits.push((
                 index,
                 DepositWithStatus {
-                    deposit: Deposit::default(),
+                    deposit: None,
+                    error: Some(error.to_string()),
                     status: StatusCode::BAD_REQUEST.as_u16(),
                 },
             ));
@@ -547,7 +550,8 @@ async fn update_deposits(
                 updated_deposits.push((
                     index,
                     DepositWithStatus {
-                        deposit: Deposit::default(),
+                        deposit: None,
+                        error: Some(Error::NotFound.to_string()),
                         status: StatusCode::NOT_FOUND.as_u16(),
                     },
                 ));
@@ -562,7 +566,8 @@ async fn update_deposits(
                 updated_deposits.push((
                     index,
                     DepositWithStatus {
-                        deposit: Deposit::default(),
+                        deposit: None,
+                        error: Some(Error::Forbidden.to_string()),
                         status: StatusCode::FORBIDDEN.as_u16(),
                     },
                 ));
@@ -578,7 +583,8 @@ async fn update_deposits(
                 updated_deposits.push((
                     index,
                     DepositWithStatus {
-                        deposit: Deposit::default(),
+                        deposit: None,
+                        error: Some(error.into_production_error().to_string()),
                         status: StatusCode::INTERNAL_SERVER_ERROR.as_u16(),
                     },
                 ));
@@ -599,14 +605,15 @@ async fn update_deposits(
         updated_deposits.push((
             index,
             DepositWithStatus {
-                deposit,
+                error: None,
+                deposit: Some(deposit),
                 status: StatusCode::OK.as_u16(),
             },
         ));
     }
 
     updated_deposits.sort_by_key(|(index, _)| *index);
-    let deposits = updated_deposits
+    let deposits: Vec<_> = updated_deposits
         .into_iter()
         .map(|(_, deposit)| deposit)
         .collect();
