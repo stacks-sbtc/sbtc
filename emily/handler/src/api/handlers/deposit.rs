@@ -582,7 +582,7 @@ async fn update_deposits(
                     index,
                     DepositWithStatus {
                         deposit: None,
-                        error: Some(error.to_string()),
+                        error: Some(error.into_production_error().to_string()),
                         status: StatusCode::INTERNAL_SERVER_ERROR.as_u16(),
                     },
                 ));

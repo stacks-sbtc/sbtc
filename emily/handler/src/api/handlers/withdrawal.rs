@@ -404,14 +404,12 @@ async fn update_withdrawals(
 
     // Loop through all updates and execute.
     for (index, update) in validated_request.withdrawals {
-        if update.is_err() {
-            // We just checked that update is err so unwrap here is fine.
-            let error = update.unwrap_err().to_string();
+        if let Err(error) = update {
             updated_withdrawals.push((
                 index,
                 WithdrawalWithStatus {
                     withdrawal: None,
-                    error: Some(error),
+                    error: Some(error.to_string()),
                     status: StatusCode::BAD_REQUEST.as_u16(),
                 },
             ));
@@ -470,7 +468,7 @@ async fn update_withdrawals(
                     index,
                     WithdrawalWithStatus {
                         withdrawal: None,
-                        error: Some(error.to_string()),
+                        error: Some(error.into_production_error().to_string()),
                         status: StatusCode::INTERNAL_SERVER_ERROR.as_u16(),
                     },
                 ));

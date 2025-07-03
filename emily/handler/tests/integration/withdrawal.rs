@@ -1012,7 +1012,7 @@ async fn emily_process_withdrawal_updates_when_some_of_them_are_unknown() {
             },
         ],
     };
-    let update_responce = apis::withdrawal_api::update_withdrawals_signer(
+    let update_response = apis::withdrawal_api::update_withdrawals_signer(
         &testing_configuration,
         update_withdrawals_request_body,
     )
@@ -1020,13 +1020,14 @@ async fn emily_process_withdrawal_updates_when_some_of_them_are_unknown() {
     .expect("Received an error after making a valid update withdrawal request api call.");
 
     // Check that multistatus response is returned correctly.
-    update_responce
+    update_response
         .withdrawals
         .iter()
         .for_each(|withdrawal| match &withdrawal.withdrawal {
             Some(Some(inner)) => {
                 assert_eq!(inner.request_id, create_withdrawal_body1.request_id);
                 assert_eq!(withdrawal.status, 200);
+                assert!(withdrawal.error.clone().unwrap().is_none());
             }
             Some(None) => {
                 assert_eq!(withdrawal.status, 404);

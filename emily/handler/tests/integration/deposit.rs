@@ -1643,7 +1643,7 @@ async fn emily_process_deposit_updates_when_some_of_them_are_unknown() {
             },
         ],
     };
-    let update_responce = apis::deposit_api::update_deposits_signer(
+    let update_response = apis::deposit_api::update_deposits_signer(
         &testing_configuration,
         update_deposits_request_body,
     )
@@ -1651,13 +1651,14 @@ async fn emily_process_deposit_updates_when_some_of_them_are_unknown() {
     .expect("Received an error after making a valid update deposit request api call.");
 
     // Check that multistatus response is returned correctly.
-    update_responce
+    update_response
         .deposits
         .iter()
         .for_each(|deposit| match &deposit.deposit {
             Some(Some(inner)) => {
                 assert_eq!(inner.bitcoin_txid, create_deposit_body1.bitcoin_txid);
                 assert_eq!(deposit.status, 200);
+                assert!(deposit.error.clone().unwrap().is_none());
             }
             Some(None) => {
                 assert_eq!(deposit.status, 404);
