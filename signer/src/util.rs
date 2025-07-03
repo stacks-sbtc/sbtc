@@ -237,7 +237,7 @@ mod tests {
             } else {
                 // Just picked a random error here (which isn't
                 // a AllFailoverClientsFailed)
-                Err(Error::Encryption)
+                Err(Error::Dummy)
             }
         }
     }
@@ -431,6 +431,6 @@ mod tests {
 
         // Assert that the error is the error that the mock client returns
         // (which was just randomly chosen, it has no significance)
-        assert!(matches!(result.unwrap_err(), Error::Encryption));
+        assert!(matches!(result.unwrap_err(), Error::Dummy));
     }
 }
