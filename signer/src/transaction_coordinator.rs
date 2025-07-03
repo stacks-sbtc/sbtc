@@ -2636,7 +2636,7 @@ where
 
     let needs_verification = match last_dkg.dkg_shares_status {
         model::DkgSharesStatus::Unverified => !past_verification_window,
-        model::DkgSharesStatus::Verified => needs_rotate_key,
+        model::DkgSharesStatus::Verified => needs_rotate_key && !past_verification_window,
         model::DkgSharesStatus::Failed => {
             return Err(Error::DkgVerificationFailed(last_dkg.aggregate_key.into()));
         }
