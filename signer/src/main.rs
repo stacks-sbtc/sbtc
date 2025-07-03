@@ -366,7 +366,6 @@ async fn run_transaction_coordinator(ctx: impl Context) -> Result<(), Error> {
         private_key,
         signing_round_max_duration: config.signer.signer_round_max_duration,
         bitcoin_presign_request_max_duration: config.signer.bitcoin_presign_request_max_duration,
-        threshold: config.signer.bootstrap_signatures_required,
         dkg_max_duration: config.signer.dkg_max_duration,
         is_epoch3: false,
     };

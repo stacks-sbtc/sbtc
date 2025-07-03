@@ -91,6 +91,9 @@ async fn signing_set_validation_check_for_stacks_transactions() {
         .with_first_bitcoin_core_client()
         .with_mocked_emily_client()
         .with_mocked_stacks_client()
+        .modify_settings(|settings| {
+            settings.signer.bootstrap_signatures_required = 2;
+        })
         .build();
     let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
 
@@ -119,7 +122,6 @@ async fn signing_set_validation_check_for_stacks_transactions() {
         context_window: 10000,
         wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
         signer_private_key: setup.aggregated_signer.keypair.secret_key().into(),
-        threshold: 2,
         last_presign_block: None,
         rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
@@ -181,6 +183,9 @@ async fn signing_set_validation_ignores_aggregate_key_in_request() {
         .with_first_bitcoin_core_client()
         .with_mocked_emily_client()
         .with_mocked_stacks_client()
+        .modify_settings(|settings| {
+            settings.signer.bootstrap_signatures_required = 2;
+        })
         .build();
     let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
 
@@ -209,7 +214,6 @@ async fn signing_set_validation_ignores_aggregate_key_in_request() {
         context_window: 10000,
         wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
         signer_private_key: setup.aggregated_signer.keypair.secret_key().into(),
-        threshold: 2,
         last_presign_block: None,
         rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
@@ -273,6 +277,9 @@ async fn signer_rejects_stacks_txns_with_too_high_a_fee(
         .with_first_bitcoin_core_client()
         .with_mocked_emily_client()
         .with_mocked_stacks_client()
+        .modify_settings(|settings| {
+            settings.signer.bootstrap_signatures_required = 2;
+        })
         .build();
 
     // We need this or the contract call will fail validation with an
@@ -306,7 +313,6 @@ async fn signer_rejects_stacks_txns_with_too_high_a_fee(
         context_window: 10000,
         wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
         signer_private_key: setup.aggregated_signer.keypair.secret_key().into(),
-        threshold: 2,
         rng: rand::rngs::StdRng::seed_from_u64(51),
         last_presign_block: None,
         dkg_begin_pause: None,
@@ -360,6 +366,9 @@ async fn signer_rejects_multiple_attempts_in_tenure() {
         .with_first_bitcoin_core_client()
         .with_mocked_emily_client()
         .with_mocked_stacks_client()
+        .modify_settings(|settings| {
+            settings.signer.bootstrap_signatures_required = 2;
+        })
         .build();
 
     // We need this or the contract call will fail validation with an
@@ -393,7 +402,6 @@ async fn signer_rejects_multiple_attempts_in_tenure() {
         context_window: 10000,
         wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
         signer_private_key: setup.aggregated_signer.keypair.secret_key().into(),
-        threshold: 2,
         last_presign_block: None,
         rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
@@ -487,6 +495,9 @@ async fn assert_should_be_able_to_handle_sbtc_requests() {
     let ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.bootstrap_signatures_required = 2;
+        })
         .build();
     ctx.state().update_current_limits(SbtcLimits::unlimited());
 
@@ -532,7 +543,6 @@ async fn assert_should_be_able_to_handle_sbtc_requests() {
         context_window: 10000,
         wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
         signer_private_key: setup.aggregated_signer.keypair.secret_key().into(),
-        threshold: 2,
         last_presign_block: None,
         rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
@@ -625,6 +635,9 @@ async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is_ok:
     let ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.bootstrap_signatures_required = 2;
+        })
         .build();
 
     let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
@@ -681,7 +694,6 @@ async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is_ok:
         // We use this private key because it needs to be associated with
         // one of the public keys that we stored in the DKG shares table.
         signer_private_key: setup.signers.private_key(),
-        threshold: 2,
         rng: rand::rngs::StdRng::seed_from_u64(51),
         last_presign_block: None,
         dkg_begin_pause: None,
@@ -778,7 +790,6 @@ pub async fn presign_request_ignore_request_if_already_processed_this_block() {
         // We use this private key because it needs to be associated with
         // one of the public keys that we stored in the DKG shares table.
         signer_private_key: setup.signers.private_key(),
-        threshold: 2,
         rng: rand::rngs::StdRng::seed_from_u64(51),
         last_presign_block: None,
         dkg_begin_pause: None,
@@ -842,6 +853,9 @@ async fn new_state_machine_per_valid_sighash() {
     let ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.bootstrap_signatures_required = 2;
+        })
         .build();
 
     let (_, faucet) = sbtc::testing::regtest::initialize_blockchain();
@@ -866,7 +880,6 @@ async fn new_state_machine_per_valid_sighash() {
         // We use this private key because it needs to be associated with
         // one of the public keys that we stored in the DKG shares table.
         signer_private_key: setup.signers.private_key(),
-        threshold: 2,
         last_presign_block: None,
         rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
@@ -966,6 +979,9 @@ async fn max_one_state_machine_per_bitcoin_block_hash_for_dkg() {
     let ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.bootstrap_signatures_required = 2;
+        })
         .build();
 
     // Let's make sure that the database has the chain tip.
@@ -991,7 +1007,6 @@ async fn max_one_state_machine_per_bitcoin_block_hash_for_dkg() {
         context_window: 10000,
         wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
         signer_private_key: ctx.config().signer.private_key,
-        threshold: 2,
         last_presign_block: None,
         rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
