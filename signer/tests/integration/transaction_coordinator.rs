@@ -2548,8 +2548,8 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
 
     // Start off with some initial UTXOs to work with.
     faucet.send_to(50_000_000, &depositor.address);
-    faucet.generate_block();
 
+    faucet.generate_block();
     wait_for_signers(&signers).await;
 
     // =========================================================================
@@ -2724,6 +2724,10 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     // - After they have the same view of the canonical bitcoin blockchain,
     //   the signers should all participate in DKG.
     // =========================================================================
+    faucet.generate_block();
+    wait_for_signers(&signers).await;
+
+    // We need to generate another block just for good measure.
     faucet.generate_block();
     wait_for_signers(&signers).await;
 
@@ -3388,6 +3392,10 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     // - After they have the same view of the canonical bitcoin blockchain,
     //   the signers should all participate in DKG.
     // =========================================================================
+    faucet.generate_block();
+    wait_for_signers(&signers).await;
+
+    // We need to generate another block just for good measure.
     faucet.generate_block();
     wait_for_signers(&signers).await;
 
