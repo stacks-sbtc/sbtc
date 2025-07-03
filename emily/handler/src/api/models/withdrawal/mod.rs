@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use utoipa::{ToResponse, ToSchema};
 
-use crate::api::models::common::{Fulfillment, Status};
+use crate::api::models::common::{Fulfillment, WithdrawalStatus};
 
 /// Requests.
 pub mod requests;
@@ -48,7 +48,7 @@ pub struct Withdrawal {
     /// then this hash is the Stacks block hash that contains that artifact.
     pub last_update_block_hash: String,
     /// The status of the withdrawal.
-    pub status: Status,
+    pub status: WithdrawalStatus,
     /// The status message of the withdrawal.
     pub status_message: String,
     /// Withdrawal request parameters.
@@ -120,7 +120,7 @@ pub struct WithdrawalInfo {
     /// then this hash is the Stacks block hash that contains that artifact.
     pub last_update_block_hash: String,
     /// The status of the withdrawal.
-    pub status: Status,
+    pub status: WithdrawalStatus,
     /// The hex encoded txid of the stacks transaction that generated this event.
     pub txid: String,
 }

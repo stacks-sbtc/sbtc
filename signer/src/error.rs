@@ -15,6 +15,7 @@ use crate::stacks::contracts::DepositValidationError;
 use crate::stacks::contracts::RotateKeysValidationError;
 use crate::stacks::contracts::WithdrawalAcceptValidationError;
 use crate::stacks::contracts::WithdrawalRejectValidationError;
+use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::SigHash;
 use crate::transaction_signer::StacksSignRequestId;
 use crate::wsts_state_machine::StateMachineId;
@@ -395,6 +396,11 @@ pub enum Error {
     /// recoverable ECDSA signature.
     #[error("could not recover the public key from the signature: {0}, digest: {1}")]
     InvalidRecoverableSignature(#[source] secp256k1::Error, secp256k1::Message),
+
+    /// This is thrown when we attempt to process a presign request for
+    /// a block for which we have already processed a presign request.
+    #[error("Recieved presign request for already processed block {0}")]
+    InvalidPresignRequest(BitcoinBlockHash),
 
     /// This is thrown when we attempt to create a wallet with:
     /// 1. No public keys.

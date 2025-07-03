@@ -25,7 +25,7 @@ pub struct WithdrawalUpdate {
     #[serde(rename = "requestId")]
     pub request_id: u64,
     #[serde(rename = "status")]
-    pub status: models::Status,
+    pub status: models::WithdrawalStatus,
     /// The status message of the withdrawal.
     #[serde(rename = "statusMessage")]
     pub status_message: String,
@@ -35,7 +35,7 @@ impl WithdrawalUpdate {
     /// A singular Withdrawal update that contains only the fields pertinent to updating the status of a withdrawal. This includes the key related data in addition to status history related data.
     pub fn new(
         request_id: u64,
-        status: models::Status,
+        status: models::WithdrawalStatus,
         status_message: String,
     ) -> WithdrawalUpdate {
         WithdrawalUpdate {

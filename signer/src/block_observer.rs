@@ -17,7 +17,6 @@
 //! - Update signer set transactions
 //! - Set aggregate key transactions
 
-use std::collections::BTreeSet;
 use std::future::Future;
 use std::time::Duration;
 
@@ -35,6 +34,7 @@ use crate::keys::SignerScriptPubKey as _;
 use crate::metrics::BITCOIN_BLOCKCHAIN;
 use crate::metrics::Metrics;
 use crate::stacks::api::GetNakamotoStartHeight as _;
+use crate::stacks::api::SignerSetInfo;
 use crate::stacks::api::StacksInteract;
 use crate::stacks::api::TenureBlockHeaders;
 use crate::storage::DbRead;
@@ -43,7 +43,6 @@ use crate::storage::Transactable;
 use crate::storage::TransactionHandle;
 use crate::storage::model;
 use crate::storage::model::EncryptedDkgShares;
-use crate::storage::model::KeyRotationEvent;
 use bitcoin::Amount;
 use bitcoin::BlockHash;
 use bitcoin::ScriptBuf;
@@ -487,8 +486,8 @@ impl<C: Context, B> BlockObserver<C, B> {
     /// execute them. The cached information is the current signer set
     /// info. It gets this information from the last successful
     /// key-rotation contract call if it exists.
-    async fn set_signer_set_info(&self, chain_tip: BlockHash) -> Result<(), Error> {
-        let info = get_signer_set_info(&self.context, chain_tip).await?;
+    async fn set_signer_set_info(&self) -> Result<(), Error> {
+        let info = get_signer_set_info(&self.context).await?;
 
         let state = self.context.state();
         if let Some(info) = info {
@@ -525,7 +524,7 @@ impl<C: Context, B> BlockObserver<C, B> {
         self.update_sbtc_limits(chain_tip).await?;
 
         tracing::info!("updating the signer state with the current signer set");
-        self.set_signer_set_info(chain_tip).await?;
+        self.set_signer_set_info().await?;
 
         tracing::info!("updating the signer state with the current bitcoin chain tip");
         self.update_bitcoin_chain_tip().await
@@ -575,23 +574,6 @@ impl<C: Context, B> BlockObserver<C, B> {
 
         Ok(())
     }
-}
-
-/// Structure describing the info about signer set currently stored in the
-/// smart contract on Stacks.
-#[derive(Debug, Clone)]
-pub struct SignerSetInfo {
-    /// The aggregate key of the most recently confirmed key rotation
-    /// contract call on Stacks.
-    pub aggregate_key: PublicKey,
-    /// The set of sBTC signers public keys.
-    pub signer_set: BTreeSet<PublicKey>,
-    /// The number of signatures required to sign a transaction.
-    /// This is the number of signature shares necessary to successfully sign a
-    /// bitcoin transaction spending a UTXO locked with the above aggregate key,
-    /// or the number of signers necessary to sign a Stacks transaction under
-    /// the signers' principal.
-    pub signatures_required: u16,
 }
 
 /// Extract all BTC transactions from the block where one of the UTXOs
@@ -711,26 +693,6 @@ where
     extract_fut().await
 }
 
-impl From<KeyRotationEvent> for SignerSetInfo {
-    fn from(value: KeyRotationEvent) -> Self {
-        SignerSetInfo {
-            aggregate_key: value.aggregate_key,
-            signer_set: value.signer_set.into_iter().collect(),
-            signatures_required: value.signatures_required,
-        }
-    }
-}
-
-impl From<model::EncryptedDkgShares> for SignerSetInfo {
-    fn from(value: model::EncryptedDkgShares) -> Self {
-        SignerSetInfo {
-            aggregate_key: value.aggregate_key,
-            signer_set: value.signer_set_public_keys(),
-            signatures_required: value.signature_share_threshold,
-        }
-    }
-}
-
 /// Return the signing set that can make sBTC related contract calls along
 /// with the current aggregate key to use for locking UTXOs on bitcoin.
 ///
@@ -740,20 +702,21 @@ impl From<model::EncryptedDkgShares> for SignerSetInfo {
 /// rotate-keys transactions on the canonical stacks blockchain, then we
 /// return None.
 #[tracing::instrument(skip_all)]
-pub async fn get_signer_set_info<C, B>(
-    ctx: &C,
-    chain_tip: B,
-) -> Result<Option<SignerSetInfo>, Error>
+pub async fn get_signer_set_info<C>(ctx: &C) -> Result<Option<SignerSetInfo>, Error>
 where
     C: Context,
-    B: Into<model::BitcoinBlockHash>,
 {
-    let chain_tip = chain_tip.into();
+    let stacks = ctx.get_stacks_client();
+    let address = &ctx.config().signer.deployer;
+    // If the sBTC contracts have not been deployed, then we don't have any
+    // signer set info in the registry.
+    if !ctx.state().sbtc_contracts_deployed() {
+        return Ok(None);
+    }
 
-    ctx.get_storage()
-        .get_last_key_rotation(&chain_tip)
-        .await
-        .map(|event| event.map(SignerSetInfo::from))
+    // This returns Ok(None) if API call returns a response with values
+    // that are only set when we first deploy the sBTC contracts.
+    stacks.get_current_signer_set_info(address).await
 }
 
 #[cfg(test)]
