@@ -1651,24 +1651,28 @@ async fn emily_process_deposit_updates_when_some_of_them_are_unknown() {
     .expect("Received an error after making a valid update deposit request api call.");
 
     // Check that multistatus response is returned correctly.
-    update_response
-        .deposits
-        .iter()
-        .for_each(|deposit| match &deposit.deposit {
-            Some(Some(inner)) => {
-                assert_eq!(inner.bitcoin_txid, create_deposit_body1.bitcoin_txid);
-                assert_eq!(deposit.status, 200);
-                assert!(deposit.error.clone().unwrap().is_none());
-            }
-            Some(None) => {
-                assert_eq!(deposit.status, 404);
-                assert_eq!(
-                    deposit.error.clone().unwrap().unwrap(),
-                    "Resource not found"
-                );
-            }
-            None => unreachable!(),
-        });
+    let [wrong_update, correct_update] = &update_response.deposits[..] else {
+        panic!("Expected 2 items, got {:?}", update_response.deposits);
+    };
+
+    assert!(wrong_update.deposit.clone().unwrap().is_none());
+    assert_eq!(wrong_update.status, 404);
+    assert_eq!(
+        wrong_update.error.clone().unwrap().unwrap(),
+        "Resource not found"
+    );
+
+    assert_eq!(
+        correct_update
+            .deposit
+            .clone()
+            .unwrap()
+            .unwrap()
+            .bitcoin_txid,
+        create_deposit_body1.bitcoin_txid
+    );
+    assert_eq!(correct_update.status, 200);
+    assert!(correct_update.error.clone().unwrap().is_none());
 
     // Now we should have 1 accepted deposit.
     let deposits = apis::deposit_api::get_deposits(

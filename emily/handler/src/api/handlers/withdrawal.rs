@@ -405,6 +405,8 @@ async fn update_withdrawals(
     // Loop through all updates and execute.
     for (index, update) in validated_request.withdrawals {
         if let Err(error) = update {
+            // This error is a ValidationError: it shouldn't contain any
+            // sensitive information.
             updated_withdrawals.push((
                 index,
                 WithdrawalWithStatus {

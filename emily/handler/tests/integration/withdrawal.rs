@@ -1020,24 +1020,28 @@ async fn emily_process_withdrawal_updates_when_some_of_them_are_unknown() {
     .expect("Received an error after making a valid update withdrawal request api call.");
 
     // Check that multistatus response is returned correctly.
-    update_response
-        .withdrawals
-        .iter()
-        .for_each(|withdrawal| match &withdrawal.withdrawal {
-            Some(Some(inner)) => {
-                assert_eq!(inner.request_id, create_withdrawal_body1.request_id);
-                assert_eq!(withdrawal.status, 200);
-                assert!(withdrawal.error.clone().unwrap().is_none());
-            }
-            Some(None) => {
-                assert_eq!(withdrawal.status, 404);
-                assert_eq!(
-                    withdrawal.error.clone().unwrap().unwrap(),
-                    "Resource not found"
-                );
-            }
-            None => unreachable!(),
-        });
+    let [correct_update, wrong_update] = &update_response.withdrawals[..] else {
+        panic!("Expected 2 items, got {:?}", update_response.withdrawals);
+    };
+
+    assert_eq!(
+        correct_update
+            .withdrawal
+            .clone()
+            .unwrap()
+            .unwrap()
+            .request_id,
+        create_withdrawal_body1.request_id
+    );
+    assert_eq!(correct_update.status, 200);
+    assert!(correct_update.error.clone().unwrap().is_none());
+
+    assert!(wrong_update.withdrawal.clone().unwrap().is_none());
+    assert_eq!(wrong_update.status, 404);
+    assert_eq!(
+        wrong_update.error.clone().unwrap().unwrap(),
+        "Resource not found"
+    );
 
     // Now we should have 1 accepted withdrawal.
     let withdrawals = apis::withdrawal_api::get_withdrawals(

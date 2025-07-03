@@ -509,6 +509,8 @@ async fn update_deposits(
     // Loop through all updates and execute.
     for (index, update) in validated_request.deposits {
         if let Err(error) = update {
+            // This error is a ValidationError: it shouldn't contain any
+            // sensitive information.
             updated_deposits.push((
                 index,
                 DepositWithStatus {
