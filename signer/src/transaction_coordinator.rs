@@ -316,11 +316,7 @@ where
         );
         span.record("bitcoin_tip_height", *bitcoin_chain_tip.block_height);
 
-        let registry_aggregate_key = self
-            .context
-            .state()
-            .registry_signer_set_info()
-            .map(|info| info.aggregate_key);
+        let registry_signer_set_info = self.context.state().registry_signer_set_info();
 
         // If we are not the coordinator, then we have no business
         // coordinating DKG or constructing bitcoin and stacks
@@ -346,7 +342,9 @@ where
                 Ok(key) => key,
                 Err(error) => {
                     tracing::error!(%error, "failed to coordinate DKG; using existing aggregate key");
-                    registry_aggregate_key
+                    registry_signer_set_info
+                        .as_ref()
+                        .map(|info| info.aggregate_key)
                         .ok_or(Error::MissingAggregateKey(*bitcoin_chain_tip.block_hash))?
                 }
             }
@@ -357,8 +355,16 @@ where
             // when we made to call to `should_coordinate_dkg`, since we
             // will coordinate DKG if our last DKG shares are 'Failed'. But
             // we could be loading 'Failed' shares here.
-            registry_aggregate_key
-                .ok_or(Error::MissingAggregateKey(*bitcoin_chain_tip.block_hash))?
+            match registry_signer_set_info.as_ref() {
+                Some(info) => info.aggregate_key,
+                None => self
+                    .context
+                    .get_storage()
+                    .get_latest_encrypted_dkg_shares()
+                    .await?
+                    .map(|shares| shares.aggregate_key)
+                    .ok_or(Error::NoDkgShares)?,
+            }
         };
 
         let chain_tip_hash = &bitcoin_chain_tip.block_hash;
