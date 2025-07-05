@@ -10,9 +10,7 @@ use reqwest::Response;
 use crate::block_observer::Deposit;
 use crate::error::Error;
 use crate::message::StacksTransactionSignRequest;
-use crate::stacks::api::ClarityMapName;
-use crate::stacks::api::DataVarName;
-use crate::stacks::api::ReadOnlyFnName;
+use crate::stacks::api::ClarityName;
 use crate::stacks::contracts::SmartContract;
 use crate::transaction_signer::AcceptedSigHash;
 
@@ -89,20 +87,8 @@ impl From<SmartContract> for metrics::SharedString {
     }
 }
 
-impl From<ReadOnlyFnName> for metrics::SharedString {
-    fn from(value: ReadOnlyFnName) -> Self {
-        metrics::SharedString::const_str(value.0)
-    }
-}
-
-impl From<ClarityMapName> for metrics::SharedString {
-    fn from(value: ClarityMapName) -> Self {
-        metrics::SharedString::const_str(value.0)
-    }
-}
-
-impl From<DataVarName> for metrics::SharedString {
-    fn from(value: DataVarName) -> Self {
+impl From<ClarityName> for metrics::SharedString {
+    fn from(value: ClarityName) -> Self {
         metrics::SharedString::const_str(value.0)
     }
 }
@@ -214,7 +200,7 @@ impl Metrics {
     pub fn record_call_read(
         elapsed: Duration,
         contract_name: SmartContract,
-        function_name: ReadOnlyFnName,
+        function_name: ClarityName,
         response: &Response,
     ) {
         metrics::histogram!(
@@ -241,7 +227,7 @@ impl Metrics {
     pub fn record_data_var(
         elapsed: Duration,
         contract_name: SmartContract,
-        variable_name: DataVarName,
+        variable_name: ClarityName,
         response: &Response,
     ) {
         metrics::histogram!(
@@ -268,7 +254,7 @@ impl Metrics {
     pub fn record_map_entry(
         elapsed: Duration,
         contract_name: SmartContract,
-        map_name: ClarityMapName,
+        map_name: ClarityName,
         response: &Response,
     ) {
         metrics::histogram!(

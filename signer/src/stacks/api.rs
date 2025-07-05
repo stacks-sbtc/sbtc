@@ -97,29 +97,9 @@ const DUMMY_STX_TRANSFER_PAYLOAD: TransactionPayload = TransactionPayload::Token
 /// The names of all the read-only functions used in the signers for any of
 /// the sbtc smart contracts.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
-pub struct ReadOnlyFnName(pub &'static str);
+pub struct ClarityName(pub &'static str);
 
-impl std::fmt::Display for ReadOnlyFnName {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-/// A wrapper around the contract name string.
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
-pub struct ClarityMapName(pub &'static str);
-
-impl std::fmt::Display for ClarityMapName {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-/// A wrapper around the contract name string.
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
-pub struct DataVarName(pub &'static str);
-
-impl std::fmt::Display for DataVarName {
+impl std::fmt::Display for ClarityName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
@@ -689,7 +669,7 @@ impl StacksClient {
         &self,
         contract_principal: &StacksAddress,
         contract_name: SmartContract,
-        fn_name: ReadOnlyFnName,
+        fn_name: ClarityName,
         sender: &StacksAddress,
         arguments: &[Value],
     ) -> Result<Value, Error> {
@@ -757,7 +737,7 @@ impl StacksClient {
         &self,
         contract_principal: &StacksAddress,
         contract_name: SmartContract,
-        var_name: DataVarName,
+        var_name: ClarityName,
     ) -> Result<Value, Error> {
         let path = format!("/v2/data_var/{contract_principal}/{contract_name}/{var_name}?proof=0");
 
@@ -807,7 +787,7 @@ impl StacksClient {
         &self,
         contract_principal: &StacksAddress,
         contract_name: SmartContract,
-        map_name: ClarityMapName,
+        map_name: ClarityName,
         map_entry: &Value,
     ) -> Result<Option<Value>, Error> {
         let path = format!("/v2/map_entry/{contract_principal}/{contract_name}/{map_name}?proof=0");
@@ -1429,7 +1409,7 @@ impl StacksInteract for StacksClient {
             .call_read(
                 contract_principal,
                 SmartContract::SbtcRegistry,
-                ReadOnlyFnName(GET_SIGNER_SET_DATA_FN_NAME),
+                ClarityName(GET_SIGNER_SET_DATA_FN_NAME),
                 contract_principal,
                 &[],
             )
@@ -1477,7 +1457,7 @@ impl StacksInteract for StacksClient {
             .get_data_var(
                 contract_principal,
                 SmartContract::SbtcRegistry,
-                DataVarName(CURRENT_AGGREGATE_PUBKEY_DATA_VAR_NAME),
+                ClarityName(CURRENT_AGGREGATE_PUBKEY_DATA_VAR_NAME),
             )
             .await?;
 
@@ -1490,7 +1470,7 @@ impl StacksInteract for StacksClient {
         outpoint: &OutPoint,
     ) -> Result<bool, Error> {
         let contract_name = SmartContract::SbtcRegistry;
-        let fn_name = ReadOnlyFnName(GET_DEPOSIT_STATUS_FN_NAME);
+        let fn_name = ClarityName(GET_DEPOSIT_STATUS_FN_NAME);
 
         // The transaction IDs are written in little endian format when
         // making the contract call that sets the deposit status, so we
@@ -1522,7 +1502,7 @@ impl StacksInteract for StacksClient {
         request_id: u64,
     ) -> Result<bool, Error> {
         let contract_name = SmartContract::SbtcRegistry;
-        let map_name = ClarityMapName(WITHDRAWAL_STATUS_MAP_NAME);
+        let map_name = ClarityName(WITHDRAWAL_STATUS_MAP_NAME);
 
         let map_entry = Value::UInt(request_id as u128);
         let result = self
@@ -1686,7 +1666,7 @@ impl StacksInteract for StacksClient {
             .call_read(
                 deployer,
                 SmartContract::SbtcToken,
-                ReadOnlyFnName(GET_TOTAL_SUPPLY_FN_NAME),
+                ClarityName(GET_TOTAL_SUPPLY_FN_NAME),
                 deployer,
                 &[],
             )
@@ -2349,7 +2329,7 @@ mod tests {
                 &StacksAddress::from_string("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM")
                     .expect("failed to parse stacks address"),
                 SmartContract::SbtcRegistry,
-                DataVarName("current-signer-set"),
+                ClarityName("current-signer-set"),
             )
             .await
             .unwrap();

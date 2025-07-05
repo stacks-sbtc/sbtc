@@ -37,7 +37,7 @@ use serde::de::DeserializeOwned;
 use serde_json::to_value;
 use signer::bitcoin::utxo::DepositRequest;
 use signer::error::Error;
-use signer::stacks::api::ReadOnlyFnName;
+use signer::stacks::api::ClarityName;
 use signer::stacks::contracts::SmartContract;
 use signer::storage::model::TaprootScriptHash;
 use std::sync::Arc;
@@ -283,7 +283,7 @@ async fn get_sbtc_balance(
         .call_read(
             deployer,
             SmartContract::SbtcToken,
-            ReadOnlyFnName("get-balance"),
+            ClarityName("get-balance"),
             deployer,
             &[Value::Principal(address.clone())],
         )
