@@ -495,7 +495,7 @@ impl From<SmartContract> for proto::SmartContract {
             SmartContract::SbtcToken => proto::SmartContract::SbtcToken,
             SmartContract::SbtcDeposit => proto::SmartContract::SbtcDeposit,
             SmartContract::SbtcWithdrawal => proto::SmartContract::SbtcWithdrawal,
-            SmartContract::SbtcBootstrap => proto::SmartContract::SbtcBootstrap,
+            SmartContract::SbtcBootstrapSigners => proto::SmartContract::SbtcBootstrap,
         }
     }
 }
@@ -508,7 +508,7 @@ impl TryFrom<proto::SmartContract> for SmartContract {
             proto::SmartContract::SbtcToken => SmartContract::SbtcToken,
             proto::SmartContract::SbtcDeposit => SmartContract::SbtcDeposit,
             proto::SmartContract::SbtcWithdrawal => SmartContract::SbtcWithdrawal,
-            proto::SmartContract::SbtcBootstrap => SmartContract::SbtcBootstrap,
+            proto::SmartContract::SbtcBootstrap => SmartContract::SbtcBootstrapSigners,
             proto::SmartContract::Unspecified => return Err(Error::TypeConversion),
         })
     }
