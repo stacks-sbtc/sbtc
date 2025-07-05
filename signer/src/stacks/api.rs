@@ -94,8 +94,8 @@ const DUMMY_STX_TRANSFER_PAYLOAD: TransactionPayload = TransactionPayload::Token
     TokenTransferMemo([0; 34]),
 );
 
-/// The names of all the read-only functions used in the signers for any of
-/// the sbtc smart contracts.
+/// The names of all the read-only functions, data variables, and map names
+/// used in the signers for any of the sbtc smart contracts.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub struct ClarityName(pub &'static str);
 
