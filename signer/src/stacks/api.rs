@@ -66,6 +66,26 @@ const TX_FEE_TX_SIZE_MULTIPLIER: u64 = 2 * MINIMUM_TX_FEE_RATE_PER_BYTE;
 /// case the stacks node returns wonky values. This is 10 STX.
 const MAX_TX_FEE: u64 = 10_000_000;
 
+/// This is the name of the MAP in the sbtc-registry smart contract that
+/// stores the status of a withdrawal request.
+const WITHDRAWAL_STATUS_MAP_NAME: &str = "withdrawal-status";
+
+/// This is the name of the read-only function in the sbtc-registry smart
+/// contract that returns the status of a deposit request.
+const GET_DEPOSIT_STATUS_FN_NAME: &str = "get-deposit-status";
+
+/// This is the name of the read-only function in the sbtc-registry smart
+/// contract that returns the current signer set data.
+const GET_SIGNER_SET_DATA_FN_NAME: &str = "get-current-signer-data";
+
+/// This is the name of the read-only function in the sbtc-token smart
+/// contract that returns the total supply of sBTC.
+const GET_TOTAL_SUPPLY_FN_NAME: &str = "get-total-supply";
+
+/// This is the name of the data variable in the sbtc-registry smart contract
+/// that stores the current aggregate public key of the signers.
+const CURRENT_AGGREGATE_PUBKEY_DATA_VAR_NAME: &str = "current-aggregate-pubkey";
+
 /// This is a dummy STX transfer payload used only for estimating STX
 /// transfer costs.
 const DUMMY_STX_TRANSFER_PAYLOAD: TransactionPayload = TransactionPayload::TokenTransfer(
@@ -76,43 +96,33 @@ const DUMMY_STX_TRANSFER_PAYLOAD: TransactionPayload = TransactionPayload::Token
 
 /// The names of all the read-only functions used in the signers for any of
 /// the sbtc smart contracts.
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, strum::Display, strum::IntoStaticStr)]
-#[strum(serialize_all = "kebab-case")]
-pub enum ReadOnlyFnName {
-    /// This is the name of the read-only function in the sbtc-registry smart
-    /// contract that returns the status of a deposit request.
-    GetDepositStatus,
-    /// This is the name of the read-only function in the sbtc-registry smart
-    /// contract that returns the current signer set data.
-    GetCurrentSignerData,
-    /// This is the name of the read-only function in the sbtc-token smart
-    /// for getting the total supply.
-    GetTotalSupply,
-    /// This is the name of the read-only function in the sbtc-token smart
-    /// contract that returns the balance of a given principal.
-    #[cfg(any(test, feature = "testing"))]
-    GetBalance,
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub struct ReadOnlyFnName(pub &'static str);
+
+impl std::fmt::Display for ReadOnlyFnName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
 }
 
 /// A wrapper around the contract name string.
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, strum::Display, strum::IntoStaticStr)]
-#[strum(serialize_all = "kebab-case")]
-pub enum ClarityMapName {
-    /// The name of the map in the sbtc-registry smart contract that
-    /// stores the status of a withdrawal request.
-    WithdrawalStatus,
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub struct ClarityMapName(pub &'static str);
+
+impl std::fmt::Display for ClarityMapName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
 }
 
 /// A wrapper around the contract name string.
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, strum::Display, strum::IntoStaticStr)]
-#[strum(serialize_all = "kebab-case")]
-pub enum DataVarName {
-    /// The name of the data variable in the sbtc-registry smart contract
-    /// that stores the current aggregate public key of the signers.
-    CurrentAggregatePubkey,
-    /// The name of the data variable in the sbtc-registry smart contract
-    #[cfg(any(test, feature = "testing"))]
-    CurrentSignerSet,
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub struct DataVarName(pub &'static str);
+
+impl std::fmt::Display for DataVarName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
 }
 
 trait ExtractFee {
@@ -1419,7 +1429,7 @@ impl StacksInteract for StacksClient {
             .call_read(
                 contract_principal,
                 SmartContract::SbtcRegistry,
-                ReadOnlyFnName::GetCurrentSignerData,
+                ReadOnlyFnName(GET_SIGNER_SET_DATA_FN_NAME),
                 contract_principal,
                 &[],
             )
@@ -1467,7 +1477,7 @@ impl StacksInteract for StacksClient {
             .get_data_var(
                 contract_principal,
                 SmartContract::SbtcRegistry,
-                DataVarName::CurrentAggregatePubkey,
+                DataVarName(CURRENT_AGGREGATE_PUBKEY_DATA_VAR_NAME),
             )
             .await?;
 
@@ -1480,7 +1490,7 @@ impl StacksInteract for StacksClient {
         outpoint: &OutPoint,
     ) -> Result<bool, Error> {
         let contract_name = SmartContract::SbtcRegistry;
-        let fn_name = ReadOnlyFnName::GetDepositStatus;
+        let fn_name = ReadOnlyFnName(GET_DEPOSIT_STATUS_FN_NAME);
 
         // The transaction IDs are written in little endian format when
         // making the contract call that sets the deposit status, so we
@@ -1512,7 +1522,7 @@ impl StacksInteract for StacksClient {
         request_id: u64,
     ) -> Result<bool, Error> {
         let contract_name = SmartContract::SbtcRegistry;
-        let map_name = ClarityMapName::WithdrawalStatus;
+        let map_name = ClarityMapName(WITHDRAWAL_STATUS_MAP_NAME);
 
         let map_entry = Value::UInt(request_id as u128);
         let result = self
@@ -1676,7 +1686,7 @@ impl StacksInteract for StacksClient {
             .call_read(
                 deployer,
                 SmartContract::SbtcToken,
-                ReadOnlyFnName::GetTotalSupply,
+                ReadOnlyFnName(GET_TOTAL_SUPPLY_FN_NAME),
                 deployer,
                 &[],
             )
@@ -2339,7 +2349,7 @@ mod tests {
                 &StacksAddress::from_string("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM")
                     .expect("failed to parse stacks address"),
                 SmartContract::SbtcRegistry,
-                DataVarName::CurrentSignerSet,
+                DataVarName("current-signer-set"),
             )
             .await
             .unwrap();

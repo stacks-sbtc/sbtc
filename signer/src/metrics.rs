@@ -91,19 +91,19 @@ impl From<SmartContract> for metrics::SharedString {
 
 impl From<ReadOnlyFnName> for metrics::SharedString {
     fn from(value: ReadOnlyFnName) -> Self {
-        metrics::SharedString::const_str(value.into())
+        metrics::SharedString::const_str(value.0)
     }
 }
 
 impl From<ClarityMapName> for metrics::SharedString {
     fn from(value: ClarityMapName) -> Self {
-        metrics::SharedString::const_str(value.into())
+        metrics::SharedString::const_str(value.0)
     }
 }
 
 impl From<DataVarName> for metrics::SharedString {
     fn from(value: DataVarName) -> Self {
-        metrics::SharedString::const_str(value.into())
+        metrics::SharedString::const_str(value.0)
     }
 }
 

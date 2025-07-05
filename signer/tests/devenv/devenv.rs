@@ -283,7 +283,7 @@ async fn get_sbtc_balance(
         .call_read(
             deployer,
             SmartContract::SbtcToken,
-            ReadOnlyFnName::GetBalance,
+            ReadOnlyFnName("get-balance"),
             deployer,
             &[Value::Principal(address.clone())],
         )
