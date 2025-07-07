@@ -1465,8 +1465,7 @@ impl RotateKeysErrorMsg {
 
 /// A wrapper type for smart contract deployment that implements
 /// AsTxPayload.
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, strum::Display)]
-#[strum(serialize_all = "kebab_case")]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
 pub enum SmartContract {
     /// The sbtc-registry contract. This contract needs to be deployed
@@ -1484,6 +1483,12 @@ pub enum SmartContract {
     /// The sbtc-bootstrap-signers contract. Can be deployed after the
     /// sbtc-token contract.
     SbtcBootstrapSigners,
+}
+
+impl std::fmt::Display for SmartContract {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.contract_name())
+    }
 }
 
 impl AsTxPayload for SmartContract {
