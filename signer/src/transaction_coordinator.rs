@@ -2563,7 +2563,16 @@ pub async fn should_coordinate_dkg(
 
         // Trigger DKG if signer set changes
         if registry_signer_info.signer_set != config.signer.bootstrap_signing_set {
-            tracing::info!("signer set has changed; proceeding with DKG");
+            // Check if we have verified shares that match the current bootstrap set
+            if let Some(latest_shares) = storage.get_latest_encrypted_dkg_shares().await? {
+                if latest_shares.dkg_shares_status == model::DkgSharesStatus::Verified
+                    && latest_shares.signer_set_public_keys() == config.signer.bootstrap_signing_set
+                {
+                    // We have verified shares for the current bootstrap set, skip DKG
+                    return Ok(false);
+                }
+            }
+            // No verified shares for current set, proceed with DKG
             return Ok(true);
         }
     }
