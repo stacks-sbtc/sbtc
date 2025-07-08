@@ -2966,7 +2966,7 @@ mod tests {
             last_dkg.started_at_bitcoin_block_height = 90u64.into();
         } else {
             // Set past verification window (21 blocks before current height of 101)
-            last_dkg.started_at_bitcoin_block_height = 80u64.into();
+            last_dkg.started_at_bitcoin_block_height = 11u64.into();
         }
 
         let current_aggregate_key = scenario
@@ -2980,7 +2980,7 @@ mod tests {
         } else {
             101u64
         };
-        let bitcoin_chain_tip = model::BitcoinBlockHash::from(Faker.fake::<[u8; 32]>());
+        let bitcoin_chain_tip: model::BitcoinBlockHash = Faker.fake();
         storage
             .write_bitcoin_block(&model::BitcoinBlock {
                 block_hash: bitcoin_chain_tip,
