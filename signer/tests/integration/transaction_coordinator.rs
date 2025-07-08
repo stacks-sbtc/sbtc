@@ -1589,10 +1589,10 @@ async fn sign_bitcoin_transaction() {
     // - After they have the same view of the canonical bitcoin blockchain,
     //   the signers should all participate in DKG.
     // =========================================================================
-    
+
     faucet.generate_block();
     wait_for_signers(&signers).await;
-    
+
     let ctx = signers.first().unwrap();
     let db = ctx.inner_storage();
     let shares = db.get_latest_encrypted_dkg_shares().await.unwrap().unwrap();
@@ -2422,7 +2422,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
         handle.abort();
     }
 
-    let previous_contexts = signers.drain(..).collect::<Vec<_>>();
+    let previous_contexts = std::mem::take(&mut signers);
 
     for ctx_old in previous_contexts {
         let db = ctx_old.inner_storage();
