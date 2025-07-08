@@ -453,8 +453,13 @@ where
             .await?
             .ok_or(Error::NoChainTip)?;
 
-        let (needs_verification, needs_rotate_key) =
-            assert_rotate_key_action(&self.context, &last_dkg, current_aggregate_key, &bitcoin_chain_tip_ref).await?;
+        let (needs_verification, needs_rotate_key) = assert_rotate_key_action(
+            &self.context,
+            &last_dkg,
+            current_aggregate_key,
+            &bitcoin_chain_tip_ref,
+        )
+        .await?;
         if !needs_verification && !needs_rotate_key {
             tracing::debug!(
                 "stacks node is up to date with the current aggregate key and no DKG verification required"
@@ -2990,8 +2995,13 @@ mod tests {
             block_height: chain_tip_height.into(),
         };
 
-        let (needs_verification, needs_rotate_key) =
-            assert_rotate_key_action(&context, &last_dkg, current_aggregate_key, &bitcoin_chain_tip_ref).await?;
+        let (needs_verification, needs_rotate_key) = assert_rotate_key_action(
+            &context,
+            &last_dkg,
+            current_aggregate_key,
+            &bitcoin_chain_tip_ref,
+        )
+        .await?;
         assert_eq!(needs_verification, scenario.needs_verification);
         assert_eq!(needs_rotate_key, scenario.needs_rotate_key);
         Ok(())
@@ -3030,7 +3040,13 @@ mod tests {
             block_height: 100u64.into(),
         };
 
-        let result = assert_rotate_key_action(&context, &last_dkg, current_aggregate_key, &bitcoin_chain_tip_ref).await;
+        let result = assert_rotate_key_action(
+            &context,
+            &last_dkg,
+            current_aggregate_key,
+            &bitcoin_chain_tip_ref,
+        )
+        .await;
         match result {
             Err(Error::DkgVerificationFailed(key)) => {
                 assert_eq!(key, last_dkg.aggregate_key.into());
@@ -3071,7 +3087,8 @@ mod tests {
             block_height: 101u64.into(),
         };
 
-        let result = assert_rotate_key_action(&context, &last_dkg, None, &bitcoin_chain_tip_ref).await;
+        let result =
+            assert_rotate_key_action(&context, &last_dkg, None, &bitcoin_chain_tip_ref).await;
 
         // Now we expect success: no verification needed (false), but rotation needed (true)
         match result {
