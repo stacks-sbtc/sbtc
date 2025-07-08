@@ -441,9 +441,9 @@ where
 
         let current_aggregate_key = self
             .context
-            .get_stacks_client()
-            .get_current_signers_aggregate_key(&self.context.config().signer.deployer)
-            .await?;
+            .state()
+            .registry_signer_set_info()
+            .map(|info| info.aggregate_key);
 
         // Get the bitcoin chain tip ref from the database to pass to assert_rotate_key_action
         let bitcoin_chain_tip_ref = self
