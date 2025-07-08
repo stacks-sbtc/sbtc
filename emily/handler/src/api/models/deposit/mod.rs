@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use utoipa::{ToResponse, ToSchema};
 
-use crate::api::models::common::{Fulfillment, Status};
+use crate::api::models::common::{DepositStatus, Fulfillment};
 
 /// Requests.
 pub mod requests;
@@ -44,7 +44,7 @@ pub struct Deposit {
     /// then this hash is the Stacks block hash that contains that artifact.
     pub last_update_block_hash: String,
     /// The status of the deposit.
-    pub status: Status,
+    pub status: DepositStatus,
     /// The status message of the deposit.
     pub status_message: String,
     /// Deposit parameters
@@ -119,7 +119,7 @@ pub struct DepositInfo {
     /// then this hash is the Stacks block hash that contains that artifact.
     pub last_update_block_hash: String,
     /// The status of the deposit.
-    pub status: Status,
+    pub status: DepositStatus,
     /// Raw reclaim script binary in hex.
     pub reclaim_script: String,
     /// Raw deposit script binary in hex.

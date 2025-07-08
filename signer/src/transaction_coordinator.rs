@@ -439,9 +439,9 @@ where
 
         let current_aggregate_key = self
             .context
-            .get_stacks_client()
-            .get_current_signers_aggregate_key(&self.context.config().signer.deployer)
-            .await?;
+            .state()
+            .registry_signer_set_info()
+            .map(|info| info.aggregate_key);
 
         let (needs_verification, needs_rotate_key) =
             assert_rotate_key_action(&last_dkg, current_aggregate_key)?;
@@ -533,6 +533,12 @@ where
 
         // Create a signal stream with the defined filter
         let signal_stream = self.context.as_signal_stream(presign_ack_filter);
+        // This value may not be the "correct" threshold to use. The
+        // threshold should be the max of all thresholds for the inputs in
+        // the sweep transaction package. Since the signer set is currently
+        // stable, using this value won't cause any issues. However we can
+        // have a bug here if we open up the signer set and allow a large
+        // increase in the signatures required parameter.
         let signature_threshold = self.context.config().signer.bootstrap_signatures_required;
 
         // Send the presign request message

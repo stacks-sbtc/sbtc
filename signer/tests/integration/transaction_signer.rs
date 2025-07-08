@@ -12,6 +12,7 @@ use signer::bitcoin::MockBitcoinInteract;
 use signer::emily_client::MockEmilyInteract;
 use signer::network::in_memory2::SignerNetworkInstance;
 use signer::stacks::api::MockStacksInteract;
+use signer::stacks::api::SignerSetInfo;
 use signer::stacks::wallet::MultisigTx;
 use signer::stacks::wallet::SignerWallet;
 use signer::storage::DbRead;
@@ -25,7 +26,6 @@ use signer::bitcoin::utxo::RequestRef;
 use signer::bitcoin::utxo::Requests;
 use signer::bitcoin::utxo::UnsignedTransaction;
 use signer::bitcoin::validation::TxRequestIds;
-use signer::block_observer::get_signer_set_info;
 use signer::context::Context;
 use signer::context::SbtcLimits;
 use signer::error::Error;
@@ -122,6 +122,7 @@ async fn signing_set_validation_check_for_stacks_transactions() {
         context_window: 10000,
         wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
         signer_private_key: setup.aggregated_signer.keypair.secret_key().into(),
+        last_presign_block: None,
         rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
@@ -213,6 +214,7 @@ async fn signing_set_validation_ignores_aggregate_key_in_request() {
         context_window: 10000,
         wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
         signer_private_key: setup.aggregated_signer.keypair.secret_key().into(),
+        last_presign_block: None,
         rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
@@ -312,6 +314,7 @@ async fn signer_rejects_stacks_txns_with_too_high_a_fee(
         wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
         signer_private_key: setup.aggregated_signer.keypair.secret_key().into(),
         rng: rand::rngs::StdRng::seed_from_u64(51),
+        last_presign_block: None,
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
@@ -399,6 +402,7 @@ async fn signer_rejects_multiple_attempts_in_tenure() {
         context_window: 10000,
         wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
         signer_private_key: setup.aggregated_signer.keypair.secret_key().into(),
+        last_presign_block: None,
         rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
@@ -482,7 +486,7 @@ async fn signer_rejects_multiple_attempts_in_tenure() {
 }
 
 #[tokio::test]
-pub async fn assert_should_be_able_to_handle_sbtc_requests() {
+async fn assert_should_be_able_to_handle_sbtc_requests() {
     let db = testing::storage::new_test_database().await;
 
     let mut rng = get_rng();
@@ -490,9 +494,7 @@ pub async fn assert_should_be_able_to_handle_sbtc_requests() {
     // Build the test context with mocked clients
     let ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_mocked_bitcoin_client()
-        .with_mocked_emily_client()
-        .with_mocked_stacks_client()
+        .with_mocked_clients()
         .modify_settings(|settings| {
             settings.signer.bootstrap_signatures_required = 2;
         })
@@ -524,14 +526,12 @@ pub async fn assert_should_be_able_to_handle_sbtc_requests() {
     setup.store_deposit_request(&db).await;
     setup.store_deposit_decisions(&db).await;
 
-    let info = get_signer_set_info(&ctx, chain_tip.block_hash)
-        .await
-        .unwrap()
-        .unwrap();
+    let shares = db.get_latest_encrypted_dkg_shares().await.unwrap().unwrap();
+    let signer_set_info = SignerSetInfo::from(shares);
 
     let state = ctx.state();
-    state.update_current_signer_set(info.signer_set.clone());
-    state.update_registry_signer_set_info(info);
+    state.update_current_signer_set(signer_set_info.signer_set.clone());
+    state.update_registry_signer_set_info(signer_set_info);
 
     // Initialize the transaction signer event loop
     let network = WanNetwork::default();
@@ -543,6 +543,7 @@ pub async fn assert_should_be_able_to_handle_sbtc_requests() {
         context_window: 10000,
         wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
         signer_private_key: setup.aggregated_signer.keypair.secret_key().into(),
+        last_presign_block: None,
         rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
@@ -626,16 +627,14 @@ pub async fn assert_should_be_able_to_handle_sbtc_requests() {
 #[test_case(DkgSharesStatus::Unverified, false ; "unverified-shares-not-okay")]
 #[test_case(DkgSharesStatus::Failed, false ; "failed-shares-not-okay")]
 #[tokio::test]
-pub async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is_ok: bool) {
+async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is_ok: bool) {
     let db = testing::storage::new_test_database().await;
 
     let mut rng = get_rng();
     // Build the test context with mocked clients
     let ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_mocked_bitcoin_client()
-        .with_mocked_emily_client()
-        .with_mocked_stacks_client()
+        .with_mocked_clients()
         .modify_settings(|settings| {
             settings.signer.bootstrap_signatures_required = 2;
         })
@@ -644,9 +643,9 @@ pub async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is
     let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    // Create a test setup object so that we can simply create proper DKG
+    // Create a test setup object so that we can easily create proper DKG
     // shares in the database. Note that calling TestSweepSetup2::new_setup
-    // creates two bitcoin block.
+    // creates two bitcoin blocks.
     let amounts = SweepAmounts {
         amount: 100000,
         max_fee: 10000,
@@ -677,10 +676,8 @@ pub async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is
 
     set_verification_status(&db, aggregate_key, status).await;
 
-    let signer_set_info = get_signer_set_info(&ctx, chain_tip.block_hash)
-        .await
-        .unwrap()
-        .unwrap();
+    let shares = db.get_latest_encrypted_dkg_shares().await.unwrap().unwrap();
+    let signer_set_info = SignerSetInfo::from(shares);
 
     ctx.state().update_registry_signer_set_info(signer_set_info);
     ctx.state().update_current_limits(SbtcLimits::unlimited());
@@ -698,6 +695,7 @@ pub async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is
         // one of the public keys that we stored in the DKG shares table.
         signer_private_key: setup.signers.private_key(),
         rng: rand::rngs::StdRng::seed_from_u64(51),
+        last_presign_block: None,
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
@@ -727,6 +725,125 @@ pub async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is
     testing::storage::drop_db(db).await;
 }
 
+#[tokio::test]
+pub async fn presign_request_ignore_request_if_already_processed_this_block() {
+    let db = testing::storage::new_test_database().await;
+
+    let mut rng = get_rng();
+    // Build the test context with mocked clients
+    let ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_mocked_clients()
+        .build();
+
+    let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
+
+    let signers = TestSignerSet::new(&mut rng);
+    // Create a test setup object so that we can easily create proper DKG
+    // shares in the database. Note that calling TestSweepSetup2::new_setup
+    // creates two bitcoin blocks.
+    let amounts = SweepAmounts {
+        amount: 100000,
+        max_fee: 10000,
+        is_deposit: true,
+    };
+    let setup = TestSweepSetup2::new_setup(signers, faucet, &[amounts]);
+
+    let block_header = rpc
+        .get_block_header_info(&setup.deposit_block_hash)
+        .unwrap();
+    let chain_tip = BitcoinBlockRef {
+        block_hash: block_header.hash.into(),
+        block_height: block_header.height.into(),
+    };
+
+    // Store the necessary data for passing validation
+    let aggregate_key = setup.signers.aggregate_key();
+
+    backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
+
+    setup.store_stacks_genesis_block(&db).await;
+    setup.store_dkg_shares(&db).await;
+    setup.store_rotate_keys_event(&db).await;
+    setup.store_donation(&db).await;
+    setup.store_deposit_txs(&db).await;
+    setup.store_deposit_request(&db).await;
+    setup.store_deposit_decisions(&db).await;
+
+    set_verification_status(&db, aggregate_key, DkgSharesStatus::Verified).await;
+
+    let shares = db.get_latest_encrypted_dkg_shares().await.unwrap().unwrap();
+    let signer_set_info = SignerSetInfo::from(shares);
+
+    ctx.state().update_registry_signer_set_info(signer_set_info);
+    ctx.state().update_current_limits(SbtcLimits::unlimited());
+
+    // Initialize the transaction signer event loop
+    let network = WanNetwork::default();
+
+    let net = network.connect(&ctx);
+    let mut tx_signer = TxSignerEventLoop {
+        network: net.spawn(),
+        context: ctx.clone(),
+        context_window: 10000,
+        wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
+        // We use this private key because it needs to be associated with
+        // one of the public keys that we stored in the DKG shares table.
+        signer_private_key: setup.signers.private_key(),
+        rng: rand::rngs::StdRng::seed_from_u64(51),
+        last_presign_block: None,
+        dkg_begin_pause: None,
+        dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
+        stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+    };
+
+    let sbtc_requests: TxRequestIds = TxRequestIds {
+        deposits: setup.deposit_outpoints(),
+        withdrawals: vec![],
+    };
+
+    let sbtc_context = BitcoinPreSignRequest {
+        request_package: vec![sbtc_requests],
+        fee_rate: 2.0,
+        last_fees: None,
+    };
+
+    let result = tx_signer
+        .handle_bitcoin_pre_sign_request(&sbtc_context, &chain_tip)
+        .await;
+
+    // We are processing this block with verified shares and thus it should be ok.
+    assert!(result.is_ok());
+
+    // Check that we store information that we processed this block
+    assert_eq!(tx_signer.last_presign_block, Some(chain_tip.block_hash));
+
+    // Now we will try to process the same block again, but since we already
+    // processed it, we should get an error.
+    let result = tx_signer
+        .handle_bitcoin_pre_sign_request(&sbtc_context, &chain_tip)
+        .await;
+
+    let err = result.unwrap_err();
+    match err {
+        Error::InvalidPresignRequest(hash) => {
+            assert_eq!(hash, chain_tip.block_hash)
+        }
+        _ => panic!("Expected InvalidPresignRequest error, got: {err}"),
+    }
+
+    // Sanity check: if we clear information about already processed blocks this is ok again
+
+    tx_signer.last_presign_block = None;
+    let result = tx_signer
+        .handle_bitcoin_pre_sign_request(&sbtc_context, &chain_tip)
+        .await;
+
+    assert!(result.is_ok());
+
+    testing::storage::drop_db(db).await;
+}
+
 #[test_log::test(tokio::test)]
 async fn new_state_machine_per_valid_sighash() {
     let db = testing::storage::new_test_database().await;
@@ -735,9 +852,7 @@ async fn new_state_machine_per_valid_sighash() {
     // Build the test context with mocked clients
     let ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_mocked_bitcoin_client()
-        .with_mocked_emily_client()
-        .with_mocked_stacks_client()
+        .with_mocked_clients()
         .modify_settings(|settings| {
             settings.signer.bootstrap_signatures_required = 2;
         })
@@ -746,9 +861,9 @@ async fn new_state_machine_per_valid_sighash() {
     let (_, faucet) = sbtc::testing::regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    // Create a test setup object so that we can simply create proper DKG
+    // Create a test setup object so that we can easily create proper DKG
     // shares in the database. Note that calling TestSweepSetup2::new_setup
-    // creates two bitcoin block.
+    // creates two bitcoin blocks.
     let setup = TestSweepSetup2::new_setup(signers, faucet, &[]);
 
     setup.store_dkg_shares(&db).await;
@@ -765,6 +880,7 @@ async fn new_state_machine_per_valid_sighash() {
         // We use this private key because it needs to be associated with
         // one of the public keys that we stored in the DKG shares table.
         signer_private_key: setup.signers.private_key(),
+        last_presign_block: None,
         rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
@@ -862,9 +978,7 @@ async fn max_one_state_machine_per_bitcoin_block_hash_for_dkg() {
     // Build the test context with mocked clients
     let ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_mocked_bitcoin_client()
-        .with_mocked_emily_client()
-        .with_mocked_stacks_client()
+        .with_mocked_clients()
         .modify_settings(|settings| {
             settings.signer.bootstrap_signatures_required = 2;
         })
@@ -893,6 +1007,7 @@ async fn max_one_state_machine_per_bitcoin_block_hash_for_dkg() {
         context_window: 10000,
         wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
         signer_private_key: ctx.config().signer.private_key,
+        last_presign_block: None,
         rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),

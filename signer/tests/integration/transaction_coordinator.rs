@@ -59,10 +59,10 @@ use signer::bitcoin::utxo::Fees;
 use signer::bitcoin::utxo::TxDeconstructor as _;
 use signer::bitcoin::validation::WithdrawalValidationResult;
 use signer::block_observer;
-use signer::block_observer::SignerSetInfo;
 use signer::context::RequestDeciderEvent;
 use signer::message::Payload;
-use signer::network::MessageTransfer as _;
+use signer::network::MessageTransfer;
+use signer::stacks::api::SignerSetInfo;
 use signer::stacks::api::StacksClient;
 use signer::stacks::api::StacksInteract;
 use signer::stacks::wallet::SignerWallet;
@@ -83,7 +83,7 @@ use testing_emily_client::apis::chainstate_api;
 use testing_emily_client::apis::testing_api;
 use testing_emily_client::apis::withdrawal_api;
 use testing_emily_client::models::Chainstate;
-use testing_emily_client::models::Status as TestingEmilyStatus;
+use testing_emily_client::models::WithdrawalStatus as TestingEmilyWithdrawalStatus;
 
 use signer::WITHDRAWAL_BLOCKS_EXPIRY;
 use signer::WITHDRAWAL_MIN_CONFIRMATIONS;
@@ -404,7 +404,7 @@ async fn process_complete_deposit() {
         signer_set: signer_set_public_keys.clone(),
         signatures_required: signing_threshold as u16,
     };
-    state.update_registry_signer_set_info(signer_set_info);
+    state.update_registry_signer_set_info(signer_set_info.clone());
     state.update_current_signer_set(signer_set_public_keys);
     state.set_bitcoin_chain_tip(bitcoin_chain_tip);
 
@@ -444,10 +444,11 @@ async fn process_complete_deposit() {
                     Ok(SubmitTxResponse::Acceptance(txid))
                 })
             });
-
             client
-                .expect_get_current_signers_aggregate_key()
-                .returning(move |_| Box::pin(std::future::ready(Ok(Some(aggregate_key)))));
+                .expect_get_current_signer_set_info()
+                .returning(move |_| {
+                    Box::pin(std::future::ready(Ok(Some(signer_set_info.clone()))))
+                });
         })
         .await;
 
@@ -606,12 +607,12 @@ async fn mock_stacks_core<D, B, E>(
         // record of a rotate keys contract call being executed once we
         // have verified shares.
         client
-            .expect_get_current_signers_aggregate_key()
+            .expect_get_current_signer_set_info()
             .returning(move |_| {
                 let db = db.clone();
                 Box::pin(async move {
                     let shares = db.get_latest_verified_dkg_shares().await?;
-                    Ok(shares.map(|sh| sh.aggregate_key))
+                    Ok(shares.map(SignerSetInfo::from))
                 })
             });
 
@@ -681,6 +682,7 @@ where
         signer_private_key: private_key,
         rng: rand::rngs::OsRng,
         dkg_begin_pause: None,
+        last_presign_block: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
     };
@@ -937,11 +939,8 @@ async fn run_dkg_from_scratch() {
             });
 
             client
-                .expect_get_current_signers_aggregate_key()
-                .returning(move |_| {
-                    // We want to test the tx submission
-                    Box::pin(std::future::ready(Ok(None)))
-                });
+                .expect_get_current_signer_set_info()
+                .returning(move |_| Box::pin(std::future::ready(Ok(None))));
         })
         .await;
 
@@ -1342,11 +1341,8 @@ async fn run_subsequent_dkg() {
             });
 
             client
-                .expect_get_current_signers_aggregate_key()
-                .returning(move |_| {
-                    // We want to test the tx submission
-                    Box::pin(std::future::ready(Ok(None)))
-                });
+                .expect_get_current_signer_set_info()
+                .returning(move |_| Box::pin(std::future::ready(Ok(None))));
         })
         .await;
 
@@ -1380,6 +1376,7 @@ async fn run_subsequent_dkg() {
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             signer_private_key: kp.secret_key().into(),
             rng: rand::rngs::OsRng,
+            last_presign_block: None,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
@@ -1516,7 +1513,6 @@ async fn run_subsequent_dkg() {
 async fn sign_bitcoin_transaction() {
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let (rpc, faucet) = regtest::initialize_blockchain();
-    let mut rng = get_rng();
 
     // We need to populate our databases, so let's fetch the data.
     let emily_client = EmilyClient::new_text_client();
@@ -1593,29 +1589,10 @@ async fn sign_bitcoin_transaction() {
     // - After they have the same view of the canonical bitcoin blockchain,
     //   the signers should all participate in DKG.
     // =========================================================================
-    let chain_tip = faucet.generate_block().into();
+    
+    faucet.generate_block();
     wait_for_signers(&signers).await;
-
-    // DKG and DKG verification should have finished successfully. We
-    // assume, for now, that the key rotation contract call was submitted.
-    // This assumption gets validated later, but we make the assumption now
-    // and populate the database with a key rotation event.
-    for ctx in signers.iter() {
-        let db = ctx.inner_storage();
-        let shares = db.get_latest_verified_dkg_shares().await.unwrap().unwrap();
-
-        let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
-        let event = KeyRotationEvent {
-            txid: fake::Faker.fake_with_rng(&mut rng),
-            block_hash: stacks_chain_tip.block_hash,
-            aggregate_key: shares.aggregate_key,
-            signer_set: shares.signer_set_public_keys.clone(),
-            signatures_required: shares.signature_share_threshold,
-            address: PrincipalData::from(ctx.config().signer.deployer).into(),
-        };
-        db.write_rotate_keys_transaction(&event).await.unwrap();
-    }
-
+    
     let ctx = signers.first().unwrap();
     let db = ctx.inner_storage();
     let shares = db.get_latest_encrypted_dkg_shares().await.unwrap().unwrap();
@@ -1792,7 +1769,6 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
-    let mut rng = get_rng();
     // We need to populate our databases, so let's fetch the data.
     let emily_client = EmilyClient::new_text_client();
 
@@ -1893,32 +1869,12 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     //   the signers should all participate in DKG.
     // =========================================================================
 
-    // This should kick off DKG.
-    let chain_tip = faucet.generate_block().into();
+    faucet.generate_block();
     wait_for_signers(&signers).await;
-
-    // DKG and DKG verification should have finished successfully. We
-    // assume, for now, that the key rotation contract call was submitted.
-    // This assumption gets validated later, but we make the assumption now
-    // and populate the database with a key rotation event.
-    for ctx in signers.iter() {
-        let db = ctx.inner_storage();
-        let shares = db.get_latest_verified_dkg_shares().await.unwrap().unwrap();
-
-        let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
-        let event = KeyRotationEvent {
-            txid: fake::Faker.fake_with_rng(&mut rng),
-            block_hash: stacks_chain_tip.block_hash,
-            aggregate_key: shares.aggregate_key,
-            signer_set: shares.signer_set_public_keys.clone(),
-            signatures_required: shares.signature_share_threshold,
-            address: PrincipalData::from(ctx.config().signer.deployer).into(),
-        };
-        db.write_rotate_keys_transaction(&event).await.unwrap();
-    }
 
     let ctx = signers.first().unwrap();
     let db = ctx.inner_storage();
+
     let shares1 = db.get_latest_verified_dkg_shares().await.unwrap().unwrap();
 
     // =========================================================================
@@ -2031,7 +1987,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
 
     // After the next bitcoin block, each of the signers will think that
     // DKG needs to be run. So we need to wait for it.
-    let chain_tip = faucet.generate_block().into();
+    faucet.generate_block();
     wait_for_signers(&signers).await;
 
     let ctx = signers.first().unwrap();
@@ -2047,19 +2003,6 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
             .unwrap();
 
         assert_eq!(dkg_share_count, 2);
-
-        let shares = db.get_latest_verified_dkg_shares().await.unwrap().unwrap();
-
-        let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
-        let event = KeyRotationEvent {
-            txid: fake::Faker.fake_with_rng(&mut rng),
-            block_hash: stacks_chain_tip.block_hash,
-            aggregate_key: shares.aggregate_key,
-            signer_set: shares.signer_set_public_keys.clone(),
-            signatures_required: shares.signature_share_threshold,
-            address: PrincipalData::from(ctx.config().signer.deployer).into(),
-        };
-        db.write_rotate_keys_transaction(&event).await.unwrap();
     }
 
     // =========================================================================
@@ -2292,11 +2235,10 @@ struct TestThresholds {
     first: NonZeroU16::new(3).unwrap(),
     second: NonZeroU16::new(2).unwrap(),
 }; "lower the threshold")]
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) {
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let (rpc, faucet) = regtest::initialize_blockchain();
-    let mut rng = get_rng();
 
     // We need to populate our databases, so let's fetch the data.
     let emily_client = EmilyClient::new_text_client();
@@ -2383,28 +2325,8 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     // - After they have the same view of the canonical bitcoin blockchain,
     //   the signers should all participate in DKG.
     // =========================================================================
-    let chain_tip: BitcoinBlockHash = faucet.generate_block().into();
+    faucet.generate_block();
     wait_for_signers(&signers).await;
-
-    // DKG and DKG verification should have finished successfully. We
-    // assume, for now, that the key rotation contract call was submitted.
-    // This assumption gets validated later, but we make the assumption now
-    // and populate the database with a key rotation event.
-    for ctx in signers.iter() {
-        let db = ctx.inner_storage();
-        let shares = db.get_latest_verified_dkg_shares().await.unwrap().unwrap();
-
-        let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
-        let event = KeyRotationEvent {
-            txid: fake::Faker.fake_with_rng(&mut rng),
-            block_hash: stacks_chain_tip.block_hash,
-            aggregate_key: shares.aggregate_key,
-            signer_set: shares.signer_set_public_keys.clone(),
-            signatures_required: shares.signature_share_threshold,
-            address: PrincipalData::from(ctx.config().signer.deployer).into(),
-        };
-        db.write_rotate_keys_transaction(&event).await.unwrap();
-    }
 
     let first_dkg_shares = {
         let ctx = signers.first().unwrap();
@@ -2431,8 +2353,8 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
 
     // Start off with some initial UTXOs to work with.
     faucet.send_to(50_000_000, &depositor.address);
-    faucet.generate_block();
 
+    faucet.generate_block();
     wait_for_signers(&signers).await;
 
     // =========================================================================
@@ -2537,29 +2459,10 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     // - After they have the same view of the canonical bitcoin blockchain,
     //   the signers should all participate in DKG.
     // =========================================================================
-    let chain_tip: BitcoinBlockHash = faucet.generate_block().into();
+    faucet.generate_block();
     wait_for_signers(&signers).await;
 
-    // DKG and DKG verification should have finished successfully. We
-    // assume, for now, that the key rotation contract call was submitted.
-    // This assumption gets validated later, but we make the assumption now
-    // and populate the database with a key rotation event.
-    for ctx in signers.iter() {
-        let db = ctx.inner_storage();
-        let shares = db.get_latest_verified_dkg_shares().await.unwrap().unwrap();
-
-        let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
-        let event = KeyRotationEvent {
-            txid: fake::Faker.fake_with_rng(&mut rng),
-            block_hash: stacks_chain_tip.block_hash,
-            aggregate_key: shares.aggregate_key,
-            signer_set: shares.signer_set_public_keys.clone(),
-            signatures_required: shares.signature_share_threshold,
-            address: PrincipalData::from(ctx.config().signer.deployer).into(),
-        };
-        db.write_rotate_keys_transaction(&event).await.unwrap();
-    }
-
+    // We need to generate another block just for good measure.
     faucet.generate_block();
     wait_for_signers(&signers).await;
 
@@ -2846,7 +2749,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     first: NonZeroU16::new(3).unwrap(),
     second: NonZeroU16::new(2).unwrap(),
 }; "lower the threshold")]
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds: TestThresholds) {
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let (rpc, faucet) = regtest::initialize_blockchain();
@@ -2937,28 +2840,8 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     // - After they have the same view of the canonical bitcoin blockchain,
     //   the signers should all participate in DKG.
     // =========================================================================
-    let chain_tip: BitcoinBlockHash = faucet.generate_block().into();
+    faucet.generate_block();
     wait_for_signers(&signers).await;
-
-    // DKG and DKG verification should have finished successfully. We
-    // assume, for now, that the key rotation contract call was submitted.
-    // This assumption gets validated later, but we make the assumption now
-    // and populate the database with a key rotation event.
-    for ctx in signers.iter() {
-        let db = ctx.inner_storage();
-        let shares = db.get_latest_verified_dkg_shares().await.unwrap().unwrap();
-
-        let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
-        let event = KeyRotationEvent {
-            txid: fake::Faker.fake_with_rng(&mut rng),
-            block_hash: stacks_chain_tip.block_hash,
-            aggregate_key: shares.aggregate_key,
-            signer_set: shares.signer_set_public_keys.clone(),
-            signatures_required: shares.signature_share_threshold,
-            address: PrincipalData::from(ctx.config().signer.deployer).into(),
-        };
-        db.write_rotate_keys_transaction(&event).await.unwrap();
-    }
 
     let first_dkg_shares = {
         let ctx = signers.first().unwrap();
@@ -3110,29 +2993,10 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     // - After they have the same view of the canonical bitcoin blockchain,
     //   the signers should all participate in DKG.
     // =========================================================================
-    let chain_tip: BitcoinBlockHash = faucet.generate_block().into();
+    faucet.generate_block();
     wait_for_signers(&signers).await;
 
-    // DKG and DKG verification should have finished successfully. We
-    // assume, for now, that the key rotation contract call was submitted.
-    // This assumption gets validated later, but we make the assumption now
-    // and populate the database with a key rotation event.
-    for ctx in signers.iter() {
-        let db = ctx.inner_storage();
-        let shares = db.get_latest_verified_dkg_shares().await.unwrap().unwrap();
-
-        let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
-        let event = KeyRotationEvent {
-            txid: fake::Faker.fake_with_rng(&mut rng),
-            block_hash: stacks_chain_tip.block_hash,
-            aggregate_key: shares.aggregate_key,
-            signer_set: shares.signer_set_public_keys.clone(),
-            signatures_required: shares.signature_share_threshold,
-            address: PrincipalData::from(ctx.config().signer.deployer).into(),
-        };
-        db.write_rotate_keys_transaction(&event).await.unwrap();
-    }
-
+    // We need to generate another block just for good measure.
     faucet.generate_block();
     wait_for_signers(&signers).await;
 
@@ -3438,7 +3302,6 @@ async fn skip_signer_activites_after_key_rotation() {
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
-    let mut rng = get_rng();
     // We need to populate our databases, so let's fetch the data.
     let emily_client = EmilyClient::new_text_client();
 
@@ -3540,28 +3403,8 @@ async fn skip_signer_activites_after_key_rotation() {
     // =========================================================================
 
     // This should kick off DKG.
-    let chain_tip: BitcoinBlockHash = faucet.generate_block().into();
+    faucet.generate_block();
     wait_for_signers(&signers).await;
-
-    // DKG and DKG verification should have finished successfully. We
-    // assume, for now, that the key rotation contract call was submitted.
-    // This assumption gets validated later, but we make the assumption now
-    // and populate the database with a key rotation event.
-    for ctx in signers.iter() {
-        let db = ctx.inner_storage();
-        let shares = db.get_latest_verified_dkg_shares().await.unwrap().unwrap();
-
-        let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
-        let event = KeyRotationEvent {
-            txid: fake::Faker.fake_with_rng(&mut rng),
-            block_hash: stacks_chain_tip.block_hash,
-            aggregate_key: shares.aggregate_key,
-            signer_set: shares.signer_set_public_keys.clone(),
-            signatures_required: shares.signature_share_threshold,
-            address: PrincipalData::from(ctx.config().signer.deployer).into(),
-        };
-        db.write_rotate_keys_transaction(&event).await.unwrap();
-    }
 
     let ctx = signers.first().unwrap();
     let db = ctx.inner_storage();
@@ -3721,24 +3564,6 @@ async fn skip_signer_activites_after_key_rotation() {
             .unwrap();
 
         assert_eq!(dkg_share_count, 2);
-
-        // DKG and DKG verification should have finished successfully. We
-        // assume, for now, that the key rotation contract call was
-        // submitted. This assumption gets validated later, but we make the
-        // assumption now and populate the database with a key rotation
-        // event.
-        let shares = db.get_latest_verified_dkg_shares().await.unwrap().unwrap();
-
-        let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
-        let event = KeyRotationEvent {
-            txid: fake::Faker.fake_with_rng(&mut rng),
-            block_hash: stacks_chain_tip.block_hash,
-            aggregate_key: shares.aggregate_key,
-            signer_set: shares.signer_set_public_keys.clone(),
-            signatures_required: shares.signature_share_threshold,
-            address: PrincipalData::from(ctx.config().signer.deployer).into(),
-        };
-        db.write_rotate_keys_transaction(&event).await.unwrap();
     }
 
     // =========================================================================
@@ -3931,8 +3756,11 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
     // - Set up the mocks to that the block observer fetches at least one
     //   Stacks block. This is necessary because we need the stacks chain
     //   tip in the transaction coordinator.
-    // - Set up the current-aggregate-key response to be `Some(_)`. This means
-    //   that each coordinator will not broadcast a rotate keys transaction.
+    // - Set up the signer set info to be `Some(_)` where the details match
+    //   the bootstrap signer set info.
+    // - Write DKG shares to the database. This, with the above point,
+    //   means that each coordinator will not run DKG or broadcast a rotate
+    //   keys transaction.
     // =========================================================================
     let (broadcast_stacks_tx, _rx) = tokio::sync::broadcast::channel(10);
 
@@ -3959,17 +3787,6 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
         ctx.state().set_sbtc_contracts_deployed();
         start_event_loops(ctx, &network).await;
     }
-
-    // =========================================================================
-    // Step 4 - Wait for DKG
-    // -------------------------------------------------------------------------
-    // - Once they are all running, generate a bitcoin block to kick off
-    //   the database updating process.
-    // - After they have the same view of the canonical bitcoin blockchain,
-    //   the signers should all participate in DKG.
-    // =========================================================================
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
 
     // =========================================================================
     // Step 4 - Wait for DKG
@@ -4533,6 +4350,7 @@ async fn test_conservative_initial_sbtc_limits() {
     //   tip in the transaction coordinator.
     // =========================================================================
     for (ctx, _, _) in signers.iter_mut() {
+        let signer_set = signer_set_public_keys.clone();
         ctx.with_stacks_client(|client| {
             client
                 .expect_get_tenure_info()
@@ -4587,8 +4405,14 @@ async fn test_conservative_initial_sbtc_limits() {
             // executed, so the coordinator will construct and broadcast
             // one.
             client
-                .expect_get_current_signers_aggregate_key()
-                .returning(move |_| Box::pin(std::future::ready(Ok(Some(aggregate_key)))));
+                .expect_get_current_signer_set_info()
+                .returning(move |_| {
+                    Box::pin(std::future::ready(Ok(Some(SignerSetInfo {
+                        aggregate_key,
+                        signer_set: signer_set.clone(),
+                        signatures_required,
+                    }))))
+                });
 
             // The coordinator will get the total supply of sBTC to
             // determine the amount of mintable sBTC.
@@ -4891,19 +4715,27 @@ async fn sign_bitcoin_transaction_withdrawals() {
     let response = withdrawal_api::create_withdrawal(&emily_config, request_body).await;
     assert!(response.is_ok());
     // Check that there is no Accepted requests on emily before we broadcast them
-    let withdrawals_on_emily =
-        withdrawal_api::get_withdrawals(&emily_config, TestingEmilyStatus::Accepted, None, None)
-            .await
-            .unwrap()
-            .withdrawals;
+    let withdrawals_on_emily = withdrawal_api::get_withdrawals(
+        &emily_config,
+        TestingEmilyWithdrawalStatus::Accepted,
+        None,
+        None,
+    )
+    .await
+    .unwrap()
+    .withdrawals;
     assert!(withdrawals_on_emily.is_empty());
 
     // Check that there is no Accepted requests on emily before we broadcast them
-    let withdrawals_on_emily =
-        withdrawal_api::get_withdrawals(&emily_config, TestingEmilyStatus::Pending, None, None)
-            .await
-            .unwrap()
-            .withdrawals;
+    let withdrawals_on_emily = withdrawal_api::get_withdrawals(
+        &emily_config,
+        TestingEmilyWithdrawalStatus::Pending,
+        None,
+        None,
+    )
+    .await
+    .unwrap()
+    .withdrawals;
     assert_eq!(withdrawals_on_emily.len(), 1);
 
     for ctx in signers.iter() {
@@ -4958,11 +4790,15 @@ async fn sign_bitcoin_transaction_withdrawals() {
     //   amount.
     // =========================================================================
 
-    let withdrawals_on_emily =
-        withdrawal_api::get_withdrawals(&emily_config, TestingEmilyStatus::Accepted, None, None)
-            .await
-            .unwrap()
-            .withdrawals;
+    let withdrawals_on_emily = withdrawal_api::get_withdrawals(
+        &emily_config,
+        TestingEmilyWithdrawalStatus::Accepted,
+        None,
+        None,
+    )
+    .await
+    .unwrap()
+    .withdrawals;
 
     assert_eq!(withdrawals_on_emily.len(), 1);
 
@@ -5102,12 +4938,12 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
             // record of a rotate keys contract call being executed once we
             // have verified shares.
             client
-                .expect_get_current_signers_aggregate_key()
+                .expect_get_current_signer_set_info()
                 .returning(move |_| {
                     let db2 = db2.clone();
                     Box::pin(async move {
                         let shares = db2.get_latest_verified_dkg_shares().await?;
-                        Ok(shares.map(|sh| sh.aggregate_key))
+                        Ok(shares.map(SignerSetInfo::from))
                     })
                 });
 
@@ -5261,6 +5097,7 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
     let wait_for_transaction_task =
         tokio::spawn(async move { wait_for_transaction_rx.recv().await });
 
+    let signer_set: BTreeSet<_> = testing_signer_set.signer_keys().into_iter().collect();
     // Setup the stacks client mock to broadcast the transaction to our channel.
     context
         .with_stacks_client(|client| {
@@ -5280,8 +5117,14 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
                 });
 
             client
-                .expect_get_current_signers_aggregate_key()
-                .returning(move |_| Box::pin(std::future::ready(Ok(Some(aggregate_key)))));
+                .expect_get_current_signer_set_info()
+                .returning(move |_| {
+                    Box::pin(std::future::ready(Ok(Some(SignerSetInfo {
+                        aggregate_key,
+                        signer_set: signer_set.clone(),
+                        signatures_required: signing_threshold as u16,
+                    }))))
+                });
         })
         .await;
 
@@ -5417,6 +5260,7 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
 
     ctx.state().set_sbtc_contracts_deployed();
 
+    let signer_set: BTreeSet<_> = signers.signer_keys().iter().copied().collect();
     ctx.with_stacks_client(|client| {
         client
             .expect_estimate_fees()
@@ -5434,8 +5278,14 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
         });
 
         client
-            .expect_get_current_signers_aggregate_key()
-            .returning(move |_| Box::pin(std::future::ready(Ok(Some(aggregate_key)))));
+            .expect_get_current_signer_set_info()
+            .returning(move |_| {
+                Box::pin(std::future::ready(Ok(Some(SignerSetInfo {
+                    aggregate_key,
+                    signer_set: signer_set.clone(),
+                    signatures_required: 1,
+                }))))
+            });
     })
     .await;
 

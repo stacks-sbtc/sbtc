@@ -24,6 +24,7 @@ use crate::block_observer::Deposit;
 use crate::error::Error;
 use crate::keys::PublicKey;
 use crate::keys::PublicKeyXOnly;
+use crate::stacks::api::SignerSetInfo;
 
 /// A bitcoin transaction output (TXO) relevant for the sBTC signers.
 ///
@@ -159,7 +160,7 @@ impl From<bitcoin::Block> for BitcoinBlock {
 pub struct StacksBlock {
     /// Block hash.
     pub block_hash: StacksBlockHash,
-    /// Block height.    
+    /// Block height.
     pub block_height: StacksBlockHeight,
     /// Hash of the parent block.
     pub parent_hash: StacksBlockHash,
@@ -391,7 +392,7 @@ pub struct SweptDepositRequest {
     /// The block id of the bitcoin block that includes the sweep
     /// transaction.
     pub sweep_block_hash: BitcoinBlockHash,
-    /// The block height of the block referenced by the `sweep_block_hash`.   
+    /// The block height of the block referenced by the `sweep_block_hash`.
     pub sweep_block_height: BitcoinBlockHeight,
     /// Transaction ID of the deposit request transaction.
     pub txid: BitcoinTxId,
@@ -436,7 +437,7 @@ pub struct SweptWithdrawalRequest {
     /// The block id of the stacks block that includes this sweep
     /// transaction.
     pub sweep_block_hash: BitcoinBlockHash,
-    /// The block height of the block that includes the sweep transaction.    
+    /// The block height of the block that includes the sweep transaction.
     pub sweep_block_height: BitcoinBlockHeight,
     /// Request ID of the withdrawal request. These are supposed to be
     /// unique, but there can be duplicates if there is a reorg that
@@ -529,6 +530,16 @@ impl EncryptedDkgShares {
     }
 }
 
+impl From<EncryptedDkgShares> for SignerSetInfo {
+    fn from(value: EncryptedDkgShares) -> Self {
+        SignerSetInfo {
+            aggregate_key: value.aggregate_key,
+            signer_set: value.signer_set_public_keys(),
+            signatures_required: value.signature_share_threshold,
+        }
+    }
+}
+
 /// Persisted public DKG shares from other signers
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
@@ -549,6 +560,16 @@ pub struct KeyRotationEvent {
     /// The number of signatures required for the multi-sig wallet.
     #[sqlx(try_from = "i32")]
     pub signatures_required: u16,
+}
+
+impl From<KeyRotationEvent> for SignerSetInfo {
+    fn from(value: KeyRotationEvent) -> Self {
+        SignerSetInfo {
+            aggregate_key: value.aggregate_key,
+            signer_set: value.signer_set.into_iter().collect(),
+            signatures_required: value.signatures_required,
+        }
+    }
 }
 
 /// A struct containing how a signer voted for a deposit or withdrawal

@@ -14,14 +14,14 @@ use blockstack_lib::{
     },
 };
 use clarity::types::chainstate::{StacksAddress, StacksBlockId};
-use emily_client::models::Status;
+use emily_client::models::DepositStatus;
 use tokio::sync::{Mutex, broadcast};
 use tokio::time::error::Elapsed;
 
 use crate::bitcoin::GetTransactionFeeResult;
 use crate::bitcoin::rpc::{BitcoinBlockHeader, BitcoinBlockInfo};
-use crate::block_observer::SignerSetInfo;
 use crate::context::SbtcLimits;
+use crate::stacks::api::SignerSetInfo;
 use crate::stacks::api::TenureBlocks;
 use crate::stacks::wallet::SignerWallet;
 use crate::storage::Transactable;
@@ -423,14 +423,14 @@ impl BitcoinInteract for WrappedMockBitcoinInteract {
 }
 
 impl StacksInteract for WrappedMockStacksInteract {
-    async fn get_current_signer_set(
+    async fn get_current_signer_set_info(
         &self,
         contract_principal: &StacksAddress,
-    ) -> Result<Vec<PublicKey>, Error> {
+    ) -> Result<Option<SignerSetInfo>, Error> {
         self.inner
             .lock()
             .await
-            .get_current_signer_set(contract_principal)
+            .get_current_signer_set_info(contract_principal)
             .await
     }
 
@@ -560,7 +560,7 @@ impl EmilyInteract for WrappedMockEmilyInteract {
 
     async fn get_deposits_with_status(
         &self,
-        status: Status,
+        status: DepositStatus,
     ) -> Result<Vec<sbtc::deposits::CreateDepositRequest>, Error> {
         self.inner
             .lock()
