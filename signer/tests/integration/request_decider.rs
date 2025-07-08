@@ -312,7 +312,7 @@ async fn persist_received_deposit_decision_fetches_missing_deposit_requests() {
 
     let mut rng = get_rng();
 
-    let emily_client = EmilyClient::new_text_client();
+    let emily_client = EmilyClient::new_test_client();
 
     testing_api::wipe_databases(&emily_client.config().as_testing())
         .await
