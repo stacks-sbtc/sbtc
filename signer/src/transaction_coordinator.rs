@@ -390,10 +390,7 @@ where
             return Ok(());
         }
 
-        let signer_public_keys = self
-            .context
-            .state()
-            .registry_signer_set_info()
+        let signer_public_keys = registry_signer_set_info
             .map(|info| info.signer_set)
             .ok_or_else(|| Error::NoKeyRotationEvent)?;
 
@@ -448,8 +445,16 @@ where
             .get_current_signers_aggregate_key(&self.context.config().signer.deployer)
             .await?;
 
+        // Get the bitcoin chain tip ref from the database to pass to assert_rotate_key_action
+        let bitcoin_chain_tip_ref = self
+            .context
+            .get_storage()
+            .get_bitcoin_canonical_chain_tip_ref()
+            .await?
+            .ok_or(Error::NoChainTip)?;
+
         let (needs_verification, needs_rotate_key) =
-            assert_rotate_key_action(&self.context, &last_dkg, current_aggregate_key).await?;
+            assert_rotate_key_action(&self.context, &last_dkg, current_aggregate_key, &bitcoin_chain_tip_ref).await?;
         if !needs_verification && !needs_rotate_key {
             tracing::debug!(
                 "stacks node is up to date with the current aggregate key and no DKG verification required"
@@ -2613,6 +2618,7 @@ pub async fn assert_rotate_key_action<C>(
     context: &C,
     last_dkg: &model::EncryptedDkgShares,
     current_aggregate_key: Option<PublicKey>,
+    bitcoin_chain_tip: &model::BitcoinBlockRef,
 ) -> Result<(bool, bool), Error>
 where
     C: Context,
@@ -2625,14 +2631,7 @@ where
         .started_at_bitcoin_block_height
         .saturating_add(dkg_verification_window as u64);
 
-    // Get the current bitcoin chain tip to check against the verification window
-    let current_bitcoin_chain_tip = context
-        .get_storage()
-        .get_bitcoin_canonical_chain_tip_ref()
-        .await?
-        .ok_or(Error::NoChainTip)?;
-
-    let past_verification_window = current_bitcoin_chain_tip.block_height > max_verification_height;
+    let past_verification_window = bitcoin_chain_tip.block_height > max_verification_height;
 
     let needs_verification = match last_dkg.dkg_shares_status {
         model::DkgSharesStatus::Unverified => !past_verification_window,
@@ -2976,17 +2975,23 @@ mod tests {
         } else {
             101u64
         };
+        let bitcoin_chain_tip = model::BitcoinBlockHash::from(Faker.fake::<[u8; 32]>());
         storage
             .write_bitcoin_block(&model::BitcoinBlock {
-                block_hash: Faker.fake(),
+                block_hash: bitcoin_chain_tip,
                 block_height: chain_tip_height.into(),
                 parent_hash: Faker.fake(),
             })
             .await
             .unwrap();
 
+        let bitcoin_chain_tip_ref = model::BitcoinBlockRef {
+            block_hash: bitcoin_chain_tip,
+            block_height: chain_tip_height.into(),
+        };
+
         let (needs_verification, needs_rotate_key) =
-            assert_rotate_key_action(&context, &last_dkg, current_aggregate_key).await?;
+            assert_rotate_key_action(&context, &last_dkg, current_aggregate_key, &bitcoin_chain_tip_ref).await?;
         assert_eq!(needs_verification, scenario.needs_verification);
         assert_eq!(needs_rotate_key, scenario.needs_rotate_key);
         Ok(())
@@ -3010,16 +3015,22 @@ mod tests {
 
         // Write a bitcoin block at height 100 to simulate the current chain tip
         let storage = context.get_storage_mut();
+        let bitcoin_chain_tip = model::BitcoinBlockHash::from(Faker.fake::<[u8; 32]>());
         storage
             .write_bitcoin_block(&model::BitcoinBlock {
-                block_hash: Faker.fake(),
+                block_hash: bitcoin_chain_tip,
                 block_height: 100u64.into(),
                 parent_hash: Faker.fake(),
             })
             .await
             .unwrap();
 
-        let result = assert_rotate_key_action(&context, &last_dkg, current_aggregate_key).await;
+        let bitcoin_chain_tip_ref = model::BitcoinBlockRef {
+            block_hash: bitcoin_chain_tip,
+            block_height: 100u64.into(),
+        };
+
+        let result = assert_rotate_key_action(&context, &last_dkg, current_aggregate_key, &bitcoin_chain_tip_ref).await;
         match result {
             Err(Error::DkgVerificationFailed(key)) => {
                 assert_eq!(key, last_dkg.aggregate_key.into());
@@ -3045,16 +3056,22 @@ mod tests {
 
         // Write a bitcoin block at height 101 to simulate the current chain tip
         let storage = context.get_storage_mut();
+        let bitcoin_chain_tip = model::BitcoinBlockHash::from(Faker.fake::<[u8; 32]>());
         storage
             .write_bitcoin_block(&model::BitcoinBlock {
-                block_hash: Faker.fake(),
+                block_hash: bitcoin_chain_tip,
                 block_height: 101u64.into(),
                 parent_hash: Faker.fake(),
             })
             .await
             .unwrap();
 
-        let result = assert_rotate_key_action(&context, &last_dkg, None).await;
+        let bitcoin_chain_tip_ref = model::BitcoinBlockRef {
+            block_hash: bitcoin_chain_tip,
+            block_height: 101u64.into(),
+        };
+
+        let result = assert_rotate_key_action(&context, &last_dkg, None, &bitcoin_chain_tip_ref).await;
 
         // Now we expect success: no verification needed (false), but rotation needed (true)
         match result {
