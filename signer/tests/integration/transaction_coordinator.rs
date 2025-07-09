@@ -119,6 +119,7 @@ use stacks_common::types::chainstate::SortitionId;
 use test_case::test_case;
 use test_log::test;
 use tokio::task::JoinHandle;
+use tokio::time::error::Elapsed;
 use tokio_stream::wrappers::BroadcastStream;
 use url::Url;
 
@@ -289,6 +290,43 @@ where
     // It's not entirely clear why this sleep is helpful, but it appears to
     // be necessary in CI.
     Sleep::for_secs(2).await;
+}
+
+/// For the signer who is coordinator for the given bitcoin block hash to
+/// finish their tenure duties.
+pub async fn wait_for_coordinator<DB, B, S, E>(
+    signers: &[TestContext<DB, B, S, E>],
+    chain_tip: &BitcoinBlockHash,
+) -> Result<(), Elapsed>
+where
+    TestContext<DB, B, S, E>: Context,
+{
+    // Each signer uses their bootstrap signing set to determine who is in
+    // the signing set.
+    let signer_public_keys = signers[0].config().signer.bootstrap_signing_set.clone();
+
+    // We only care about the coordinator's context.
+    let coordinator_ctx = signers
+        .iter()
+        .filter(|ctx| {
+            let public_key = ctx.config().signer.public_key();
+            given_key_is_coordinator(public_key, &chain_tip, &signer_public_keys)
+        })
+        .next()
+        .unwrap();
+
+    let expected_signal = TxCoordinatorEvent::TenureCompleted.into();
+    let wait_duration = Duration::from_secs(10);
+
+    tracing::info!(
+        public_key = %coordinator_ctx.config().signer.public_key(),
+        %chain_tip,
+        "the coordinator is"
+    );
+
+    coordinator_ctx
+        .wait_for_signal(wait_duration, |signal| signal == &expected_signal)
+        .await
 }
 
 fn mock_deploy_all_contracts() -> Box<dyn FnOnce(&mut MockStacksInteract)> {
@@ -657,6 +695,7 @@ where
 
     let private_key = ctx.config().signer.private_key;
     let net = network.connect(ctx);
+    let signer_config = &ctx.config().signer;
 
     let ev = TxCoordinatorEventLoop {
         network: net.spawn(),
@@ -664,7 +703,7 @@ where
         context_window: 10000,
         private_key,
         signing_round_max_duration: Duration::from_secs(10),
-        bitcoin_presign_request_max_duration: Duration::from_secs(10),
+        bitcoin_presign_request_max_duration: signer_config.bitcoin_presign_request_max_duration,
         dkg_max_duration: Duration::from_secs(10),
         is_epoch3: true,
     };
@@ -4266,6 +4305,7 @@ async fn test_conservative_initial_sbtc_limits() {
                 settings.signer.private_key = kp.secret_key().into();
                 settings.signer.bootstrap_signing_set = signer_set_public_keys.clone();
                 settings.signer.bootstrap_signatures_required = signatures_required;
+                settings.signer.bitcoin_presign_request_max_duration = Duration::from_secs(2);
             })
             .build();
 
@@ -4274,7 +4314,7 @@ async fn test_conservative_initial_sbtc_limits() {
         let aggregate_key = Faker.fake_with_rng(&mut rng);
         prevent_dkg_on_changed_signer_set_info(&ctx, aggregate_key);
 
-        signers.push((ctx, db, kp));
+        signers.push(ctx);
     }
 
     // =========================================================================
@@ -4288,11 +4328,12 @@ async fn test_conservative_initial_sbtc_limits() {
         .run_dkg(chain_tip, dkg_txid, &mut rng, DkgSharesStatus::Verified)
         .await;
 
-    for ((_, db, _), dkg_shares) in signers.iter_mut().zip(encrypted_shares.iter_mut()) {
+    for (ctx, dkg_shares) in signers.iter_mut().zip(encrypted_shares.iter_mut()) {
+        let db = ctx.inner_storage();
         dkg_shares.dkg_shares_status = DkgSharesStatus::Verified;
         dkg_shares.signature_share_threshold = signatures_required;
         signer_set
-            .write_as_rotate_keys_tx(db, &chain_tip, dkg_shares, &mut rng)
+            .write_as_rotate_keys_tx(&db, &chain_tip, dkg_shares, &mut rng)
             .await;
 
         db.write_encrypted_dkg_shares(dkg_shares)
@@ -4304,7 +4345,10 @@ async fn test_conservative_initial_sbtc_limits() {
     // Setup the emily client mocks.
     // =========================================================================
     let enable_emily_limits = Arc::new(AtomicBool::new(false));
-    for (i, (ctx, _, _)) in signers.iter_mut().enumerate() {
+    for ctx in signers.iter_mut() {
+        let db = ctx.inner_storage();
+        let public_key = ctx.config().signer.public_key();
+        let signer_set_public_keys = signer_set_public_keys.clone();
         ctx.with_emily_client(|client| {
             // We already stored the deposit, we don't need it from Emily
             client
@@ -4325,18 +4369,32 @@ async fn test_conservative_initial_sbtc_limits() {
                 ))))
             });
 
+            // Here we set things up so that the coordinator has the right
+            // limits while everyone else could not reach out to Emily.
             let enable_emily_limits = enable_emily_limits.clone();
             client.expect_get_limits().times(1..).returning(move || {
-                // Since we don't signal the coordinator if we fail to fetch the limits
-                // we need the coordinator to be able to fetch them.
-                // But we want the other signers to fail fetching limits.
-                let limits = if i == 0 || enable_emily_limits.load(Ordering::SeqCst) {
-                    Ok(SbtcLimits::unlimited())
-                } else {
-                    // Just a random error, we don't care about it
-                    Err(Error::InvalidStacksResponse("dummy"))
-                };
-                Box::pin(std::future::ready(limits))
+                let db = db.clone();
+                let to_load_limits = enable_emily_limits.load(Ordering::SeqCst);
+                let signer_set_public_keys = signer_set_public_keys.clone();
+
+                Box::pin(async move {
+                    let chain_tip = db
+                        .get_bitcoin_canonical_chain_tip()
+                        .await
+                        .expect("failed to get chain tip")
+                        .expect("no chain tip");
+                    let is_coordinator =
+                        given_key_is_coordinator(public_key, &chain_tip, &signer_set_public_keys);
+                    // Since we don't signal the coordinator if we fail to fetch the limits
+                    // we need the coordinator to be able to fetch them.
+                    // But we want the other signers to fail fetching limits.
+                    if is_coordinator || to_load_limits {
+                        Ok(SbtcLimits::unlimited())
+                    } else {
+                        // Just a random error, we don't care about it
+                        Err(Error::InvalidStacksResponse("dummy"))
+                    }
+                })
             });
         })
         .await;
@@ -4349,7 +4407,7 @@ async fn test_conservative_initial_sbtc_limits() {
     //   Stacks block. This is necessary because we need the stacks chain
     //   tip in the transaction coordinator.
     // =========================================================================
-    for (ctx, _, _) in signers.iter_mut() {
+    for ctx in signers.iter_mut() {
         let signer_set = signer_set_public_keys.clone();
         ctx.with_stacks_client(|client| {
             client
@@ -4429,7 +4487,7 @@ async fn test_conservative_initial_sbtc_limits() {
     // - Write the deposit (and anything required for it to be swept)
     // =========================================================================
     let dkg_shares = encrypted_shares.first().cloned().unwrap();
-    let bitcoin_client = signers[0].0.clone().bitcoin_client;
+    let bitcoin_client = signers[0].bitcoin_client.clone();
     let setup = create_test_setup(
         &dkg_shares,
         signatures_required,
@@ -4437,7 +4495,8 @@ async fn test_conservative_initial_sbtc_limits() {
         rpc,
         &bitcoin_client,
     );
-    for (_, db, _) in signers.iter_mut() {
+    for ctx in signers.iter_mut() {
+        let db = &ctx.inner_storage();
         backfill_bitcoin_blocks(db, rpc, &setup.deposit_block_hash).await;
         setup.store_stacks_genesis_block(db).await;
         setup.store_donation(db).await;
@@ -4453,7 +4512,7 @@ async fn test_conservative_initial_sbtc_limits() {
     // - We only proceed with the test after all processes have started, and
     //   we use a counter to notify us when that happens.
     // =========================================================================
-    for (ctx, _, _) in signers.iter() {
+    for ctx in signers.iter() {
         ctx.state().set_sbtc_contracts_deployed();
         start_event_loops(ctx, &network).await;
     }
@@ -4465,20 +4524,17 @@ async fn test_conservative_initial_sbtc_limits() {
     //   in getting deposits (so no signal is sent to request decider and tx
     //   coordinator)
     // =========================================================================
-    loop {
-        let chain_tip: BitcoinBlockHash = faucet.generate_block().into();
-        let public_key = signers[0].2.public_key().into();
-        if given_key_is_coordinator(public_key, &chain_tip, &signer_set_public_keys) {
-            break;
-        }
-    }
-    // Giving enough time to process the transaction
-    Sleep::for_secs(3).await;
+
+    // Giving enough time to process the bitcoin block. We wait for the
+    // coordinator, who should be able to reach out to Emily, while the
+    // other signers cannot.
+    let chain_tip = faucet.generate_block().into();
+    wait_for_coordinator(&signers, &chain_tip).await.unwrap();
 
     // =========================================================================
     // Check we did NOT process the deposit
     // =========================================================================
-    let (ctx, _, _) = signers.first().unwrap();
+    let ctx = &signers[0];
     let txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
 
     assert!(txids.is_empty());
@@ -4488,12 +4544,15 @@ async fn test_conservative_initial_sbtc_limits() {
     // =========================================================================
     enable_emily_limits.store(true, Ordering::SeqCst);
 
-    faucet.generate_block();
-    Sleep::for_secs(3).await;
+    // For this bitcoin block, all signers should be able to reach Emily
+    // and fetch the limits. They'll now be able to complete a deposit
+    // request.
+    let chain_tip = faucet.generate_block().into();
+    wait_for_coordinator(&signers, &chain_tip).await.unwrap();
+
     // =========================================================================
     // Check we did process the deposit now
     // =========================================================================
-    let (ctx, _, _) = signers.first().unwrap();
     let txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
 
     assert_eq!(txids.len(), 1);
@@ -4504,8 +4563,8 @@ async fn test_conservative_initial_sbtc_limits() {
         setup.deposit_outpoints()[0]
     );
 
-    for (_, db, _) in signers {
-        testing::storage::drop_db(db).await;
+    for ctx in signers {
+        testing::storage::drop_db(ctx.inner_storage()).await;
     }
 }
 

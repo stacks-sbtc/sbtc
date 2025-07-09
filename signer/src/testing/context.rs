@@ -130,6 +130,16 @@ where
         self.emily_client.clone()
     }
 
+    /// Get a mutable reference to the inner config.
+    pub fn config_mut(&mut self) -> &mut Settings {
+        self.inner.config_mut()
+    }
+}
+
+impl<Storage, Bitcoin, Stacks, Emily> TestContext<Storage, Bitcoin, Stacks, Emily>
+where
+    TestContext<Storage, Bitcoin, Stacks, Emily>: Context,
+{
     /// Wait for a specific signal to be received.
     pub async fn wait_for_signal(
         &self,
@@ -146,11 +156,6 @@ where
             }
         })
         .await
-    }
-
-    /// Get a mutable reference to the inner config.
-    pub fn config_mut(&mut self) -> &mut Settings {
-        self.inner.config_mut()
     }
 }
 
