@@ -375,8 +375,12 @@ where
         self.deploy_smart_contracts(chain_tip_hash, &wallet, &aggregate_key)
             .await?;
 
-        let rotate_key_txid =
-            self.check_and_submit_rotate_key_transaction(chain_tip_hash, &wallet, &aggregate_key);
+        // Pass the full bitcoin_chain_tip ref
+        let rotate_key_txid = self.check_and_submit_rotate_key_transaction(
+            &bitcoin_chain_tip,
+            &wallet,
+            &aggregate_key,
+        );
 
         // If a rotate-keys contract call has been submitted, we stop our
         // tenure to make sure that all signers are up to date with the
@@ -420,7 +424,7 @@ where
     #[tracing::instrument(skip_all)]
     async fn check_and_submit_rotate_key_transaction(
         &mut self,
-        bitcoin_chain_tip: &model::BitcoinBlockHash,
+        bitcoin_chain_tip: &model::BitcoinBlockRef,
         wallet: &SignerWallet,
         aggregate_key: &PublicKey,
     ) -> Result<Option<StacksTxId>, Error> {
@@ -445,19 +449,12 @@ where
             .registry_signer_set_info()
             .map(|info| info.aggregate_key);
 
-        // Get the bitcoin chain tip ref from the database to pass to assert_rotate_key_action
-        let bitcoin_chain_tip_ref = self
-            .context
-            .get_storage()
-            .get_bitcoin_canonical_chain_tip_ref()
-            .await?
-            .ok_or(Error::NoChainTip)?;
-
+        // Use the passed-in bitcoin_chain_tip directly
         let (needs_verification, needs_rotate_key) = assert_rotate_key_action(
             &self.context,
             &last_dkg,
             current_aggregate_key,
-            &bitcoin_chain_tip_ref,
+            bitcoin_chain_tip,
         )
         .await?;
         if !needs_verification && !needs_rotate_key {
@@ -473,7 +470,7 @@ where
             tracing::info!(
                 "🔐 beginning DKG verification before submitting rotate-key transaction"
             );
-            self.perform_dkg_verification(bitcoin_chain_tip, &last_dkg.aggregate_key)
+            self.perform_dkg_verification(&bitcoin_chain_tip.block_hash, &last_dkg.aggregate_key)
                 .await?;
             tracing::info!("🔐 DKG verification successful");
         }
@@ -492,7 +489,7 @@ where
             tracing::info!("preparing to submit a rotate-key transaction");
             let txid = self
                 .construct_and_sign_rotate_key_transaction(
-                    bitcoin_chain_tip,
+                    &bitcoin_chain_tip.block_hash,
                     signing_key,
                     &last_dkg.aggregate_key,
                     wallet,
