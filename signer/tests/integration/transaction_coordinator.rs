@@ -301,7 +301,7 @@ where
 
     // It's not entirely clear why this sleep is helpful, but it appears to
     // be necessary in CI.
-    Sleep::for_secs(2).await;
+    Sleep::for_secs(1).await;
 }
 
 /// For the signer who is coordinator for the given bitcoin block hash to
@@ -2373,6 +2373,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
                 settings.signer.bootstrap_signing_set = bootstrap_signing_set.clone();
                 settings.signer.bootstrap_signatures_required = thresholds.first.get();
                 settings.signer.dkg_target_rounds = NonZeroU32::new(1).unwrap();
+                settings.signer.bitcoin_processing_delay = Duration::from_secs(1);
             })
             .build();
 
@@ -2493,7 +2494,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     // - The coordinator should submit a sweep transaction. We check the
     //   mempool for its existence.
     // =========================================================================
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
 
     faucet.generate_block();
     wait_for_signers(&signers).await;
@@ -2536,7 +2537,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
                 settings.signer.private_key = ctx_old.config().signer.private_key;
                 settings.signer.bootstrap_signatures_required = thresholds.second.get();
                 settings.signer.dkg_target_rounds = NonZeroU32::new(1).unwrap();
-                settings.signer.bitcoin_processing_delay = Duration::from_secs(2);
+                settings.signer.bitcoin_processing_delay = Duration::from_secs(1);
             })
             .build();
 
@@ -2561,10 +2562,6 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     // - After they have the same view of the canonical bitcoin blockchain,
     //   the signers should all participate in DKG.
     // =========================================================================
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
-
-    // We need to generate another block just for good measure.
     faucet.generate_block();
     wait_for_signers(&signers).await;
 
@@ -2857,8 +2854,6 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     let (rpc, faucet) = regtest::initialize_blockchain();
     let mut rng = get_rng();
 
-    signer::logging::setup_logging("info,signer=debug", false);
-
     // We need to populate our databases, so let's fetch the data.
     let emily_client = EmilyClient::new_test_client();
 
@@ -2894,6 +2889,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
                 settings.signer.bootstrap_signing_set = bootstrap_signing_set.clone();
                 settings.signer.bootstrap_signatures_required = thresholds.first.get();
                 settings.signer.dkg_target_rounds = NonZeroU32::new(1).unwrap();
+                settings.signer.bitcoin_processing_delay = Duration::from_secs(1);
             })
             .build();
 
@@ -3014,7 +3010,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     // - The coordinator should submit a sweep transaction. We check the
     //   mempool for its existence.
     // =========================================================================
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
 
     faucet.generate_block();
     wait_for_signers(&signers).await;
@@ -3101,10 +3097,6 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     // - After they have the same view of the canonical bitcoin blockchain,
     //   the signers should all participate in DKG.
     // =========================================================================
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
-
-    // We need to generate another block just for good measure.
     faucet.generate_block();
     wait_for_signers(&signers).await;
 
