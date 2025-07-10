@@ -854,9 +854,7 @@ async fn nonce_response_unique_nonces() {
     // Build the test context with mocked clients
     let ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_mocked_bitcoin_client()
-        .with_mocked_emily_client()
-        .with_mocked_stacks_client()
+        .with_mocked_clients()
         .build();
 
     let (_, faucet) = sbtc::testing::regtest::initialize_blockchain();
