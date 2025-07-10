@@ -634,7 +634,8 @@ impl SignerStateMachine {
         let public_shares = self.inner.dkg_public_shares.clone().encode_to_vec();
 
         // After DKG, each of the signers will have "new public keys". The
-        // can error if we are encrypting more than 68719476752 bytes.
+        // call to `wsts::util::encrypt` can error if we are encrypting
+        // more than 68719476752 bytes.
         let encrypted_private_shares = wsts::util::encrypt(
             &self.inner.network_private_key.to_bytes(),
             &encoded,
