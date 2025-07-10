@@ -15,7 +15,7 @@ If you have identified a vulnerability, please:
 
 | Name                       | Fingerprint                                         |
 | -------------------------- | --------------------------------------------------- |
-| security@bitcoinl2labs.com | `DFD9 33A6 C455 0ED4 C046 7133 F78A DC4F 9F65 58DD` |
+| <security@bitcoinl2labs.com> | `DFD9 33A6 C455 0ED4 C046 7133 F78A DC4F 9F65 58DD` |
 
 ```txt
 -----BEGIN PGP PUBLIC KEY BLOCK-----

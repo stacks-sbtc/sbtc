@@ -1669,6 +1669,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.8",
  "stacks-common",
+ "strum",
  "test-case",
  "testing-emily-client",
  "thiserror 2.0.11",

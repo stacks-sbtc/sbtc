@@ -12,7 +12,6 @@ use std::time::Duration;
 
 use crate::bitcoin::utxo::UnsignedMockTransaction;
 use crate::bitcoin::validation::BitcoinTxContext;
-use crate::block_observer::SignerSetInfo;
 use crate::context::Context;
 use crate::context::P2PEvent;
 use crate::context::SignerCommand;
@@ -33,6 +32,7 @@ use crate::message::StacksTransactionSignRequest;
 use crate::message::WstsMessageId;
 use crate::metrics::Metrics;
 use crate::network;
+use crate::stacks::api::SignerSetInfo;
 use crate::stacks::contracts::AsContractCall as _;
 use crate::stacks::contracts::ContractCall;
 use crate::stacks::contracts::ReqContext;
@@ -43,6 +43,7 @@ use crate::stacks::wallet::SignerWallet;
 use crate::storage::DbRead;
 use crate::storage::DbWrite as _;
 use crate::storage::model;
+use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::DkgSharesStatus;
 use crate::storage::model::SigHash;
 use crate::wsts_state_machine::FrostCoordinator;
@@ -139,6 +140,9 @@ pub struct TxSignerEventLoop<Context, Network, Rng> {
     pub wsts_state_machines: LruCache<StateMachineId, SignerStateMachine>,
     /// The threshold for the signer
     pub threshold: u32,
+    /// Last bitcoin block for which the signer has already processed
+    /// presign request.
+    pub last_presign_block: Option<BitcoinBlockHash>,
     /// How many bitcoin blocks back from the chain tip the signer will look for requests.
     pub context_window: u16,
     /// Random number generator used for encryption
@@ -268,6 +272,7 @@ where
             context_window,
             wsts_state_machines: LruCache::new(max_state_machines),
             threshold,
+            last_presign_block: None,
             rng,
             dkg_begin_pause,
             dkg_verification_state_machines: LruCache::new(
@@ -424,6 +429,11 @@ where
     ) -> Result<(), Error> {
         let db = self.context.get_storage_mut();
 
+        if self.last_presign_block == Some(chain_tip.block_hash) {
+            return Err(Error::InvalidPresignRequest(chain_tip.block_hash));
+        }
+        self.last_presign_block = Some(chain_tip.block_hash);
+
         let aggregate_key = self
             .context
             .state()
@@ -470,6 +480,7 @@ where
 
         self.send_message(BitcoinPreSignAck, &chain_tip.block_hash)
             .await?;
+
         Ok(())
     }
 
@@ -551,20 +562,29 @@ where
 
         let db = self.context.get_storage();
         let public_key = self.signer_public_key();
+        let state = self.context.state();
 
         // There is one check that applies to all Stacks transactions, and
         // that check is that the current signer is in the signing set
-        // associated authorized wallet in the sbtc registry. We do this
-        // check here. If we are in the bootstrap phase, there may not be
-        // any signer set info in the registry so we fallback on the
-        // information in latest verified DKG shares in that case.
-        let signer_set_info = match self.context.state().registry_signer_set_info() {
+        // associated authorized wallet in the sbtc registry.
+        //
+        // If the sbtc-registry has not been deployed yet, then we allow
+        // any DKG shares for smart contract deployments, but require
+        // verified DKG shares for other transactions.
+        let signer_set_info = match state.registry_signer_set_info() {
             Some(info) => info,
-            None => db
-                .get_latest_verified_dkg_shares()
-                .await?
-                .map(SignerSetInfo::from)
-                .ok_or_else(|| Error::NoDkgShares)?,
+            None => match db.get_latest_verified_dkg_shares().await? {
+                Some(info) => info.into(),
+                None if matches!(request.contract_tx, StacksTx::SmartContract(_))
+                    && !state.sbtc_contracts_deployed() =>
+                {
+                    db.get_latest_encrypted_dkg_shares()
+                        .await?
+                        .map(SignerSetInfo::from)
+                        .ok_or(Error::NoDkgShares)?
+                }
+                _ => return Err(Error::NoVerifiedDkgShares),
+            },
         };
 
         if !signer_set_info.signer_set.contains(&public_key) {
@@ -1854,6 +1874,7 @@ mod tests {
             context_window: 1,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             threshold: 1,
+            last_presign_block: None,
             rng: rand::rngs::OsRng,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
@@ -1921,6 +1942,7 @@ mod tests {
             signer_private_key: PrivateKey::new(&mut rand::rngs::OsRng),
             context_window: 1,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
+            last_presign_block: None,
             threshold: 1,
             rng: rand::rngs::OsRng,
             dkg_begin_pause: None,
@@ -2008,6 +2030,7 @@ mod tests {
             context_window: 1,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             threshold: 1,
+            last_presign_block: None,
             rng: rand::rngs::OsRng,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),

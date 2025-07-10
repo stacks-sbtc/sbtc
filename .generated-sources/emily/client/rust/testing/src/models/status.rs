@@ -17,24 +17,24 @@ use serde::{Deserialize, Serialize};
 pub enum Status {
     #[serde(rename = "pending")]
     Pending,
-    #[serde(rename = "reprocessing")]
-    Reprocessing,
     #[serde(rename = "accepted")]
     Accepted,
     #[serde(rename = "confirmed")]
     Confirmed,
     #[serde(rename = "failed")]
     Failed,
+    #[serde(rename = "rbf")]
+    Rbf,
 }
 
 impl std::fmt::Display for Status {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Self::Pending => write!(f, "pending"),
-            Self::Reprocessing => write!(f, "reprocessing"),
             Self::Accepted => write!(f, "accepted"),
             Self::Confirmed => write!(f, "confirmed"),
             Self::Failed => write!(f, "failed"),
+            Self::Rbf => write!(f, "rbf"),
         }
     }
 }

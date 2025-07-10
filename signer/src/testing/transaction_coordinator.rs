@@ -23,6 +23,7 @@ use crate::network;
 use crate::network::in_memory2::SignerNetwork;
 use crate::stacks::api::AccountInfo;
 use crate::stacks::api::MockStacksInteract;
+use crate::stacks::api::SignerSetInfo;
 use crate::stacks::api::SubmitTxResponse;
 use crate::stacks::contracts::AcceptWithdrawalV1;
 use crate::stacks::contracts::AsContractCall;
@@ -425,8 +426,13 @@ where
         self.context
             .with_stacks_client(|client| {
                 client
-                    .expect_get_current_signers_aggregate_key()
-                    .returning(move |_| Box::pin(std::future::ready(Ok(Some(aggregate_key)))));
+                    .expect_get_current_signer_set_info()
+                    .returning(move |_| {
+                        Box::pin(std::future::ready(Ok(Some(SignerSetInfo {
+                            aggregate_key,
+                            ..fake::Faker.fake_with_rng(&mut rng)
+                        }))))
+                    });
             })
             .await;
 
@@ -578,8 +584,13 @@ where
         self.context
             .with_stacks_client(|client| {
                 client
-                    .expect_get_current_signers_aggregate_key()
-                    .returning(move |_| Box::pin(std::future::ready(Ok(Some(aggregate_key)))));
+                    .expect_get_current_signer_set_info()
+                    .returning(move |_| {
+                        Box::pin(std::future::ready(Ok(Some(SignerSetInfo {
+                            aggregate_key,
+                            ..fake::Faker.fake_with_rng(&mut rng)
+                        }))))
+                    });
             })
             .await;
 
@@ -709,7 +720,7 @@ where
     }
 
     /// Assert we get a withdrawal accept tx
-    pub async fn assert_construct_withdrawal_accept_stacks_sign_request(mut self) {
+    pub async fn assert_construct_withdrawal_accept_stacks_sign_request(self) {
         let mut rng = get_rng();
         let signer_network = SignerNetwork::single(&self.context);
         let private_key = PrivateKey::new(&mut rng);
@@ -861,7 +872,7 @@ where
     }
 
     /// Assert we get a withdrawal reject tx
-    pub async fn assert_construct_withdrawal_reject_stacks_sign_request(mut self) {
+    pub async fn assert_construct_withdrawal_reject_stacks_sign_request(self) {
         let mut rng = get_rng();
         let signer_network = SignerNetwork::single(&self.context);
         let private_key = PrivateKey::new(&mut rng);

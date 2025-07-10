@@ -39,7 +39,7 @@ pub struct DepositInfo {
     #[serde(rename = "reclaimScript")]
     pub reclaim_script: String,
     #[serde(rename = "status")]
-    pub status: models::Status,
+    pub status: models::DepositStatus,
 }
 
 impl DepositInfo {
@@ -53,7 +53,7 @@ impl DepositInfo {
         last_update_height: u64,
         recipient: String,
         reclaim_script: String,
-        status: models::Status,
+        status: models::DepositStatus,
     ) -> DepositInfo {
         DepositInfo {
             amount,
