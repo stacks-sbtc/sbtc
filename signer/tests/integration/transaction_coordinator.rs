@@ -910,7 +910,7 @@ async fn deploy_smart_contracts_coordinator() {
     }
 
     let sleep_fut = tokio::time::sleep(Duration::from_secs(5));
-    let tx_broadcaster: Vec<StacksTransaction> = stacks_tx_stream
+    let broadcast_stacks_txs: Vec<StacksTransaction> = stacks_tx_stream
         .take_until(sleep_fut)
         .collect::<Vec<_>>()
         .await
@@ -918,10 +918,10 @@ async fn deploy_smart_contracts_coordinator() {
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
 
-    assert_eq!(tx_broadcaster.len(), SMART_CONTRACTS.len());
+    assert_eq!(broadcast_stacks_txs.len(), SMART_CONTRACTS.len());
 
     // Check that the contracts were deployed
-    for (deployed, broadcasted_tx) in SMART_CONTRACTS.iter().zip(tx_broadcaster) {
+    for (deployed, broadcasted_tx) in SMART_CONTRACTS.iter().zip(broadcast_stacks_txs) {
         // Await the `wait_for_tx_task` to receive the first transaction broadcasted.
         broadcasted_tx.verify().unwrap();
 
