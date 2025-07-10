@@ -999,6 +999,7 @@ async fn nonce_response_unique_nonces() {
         threshold: 2,
         rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
+        last_presign_block: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
     };
