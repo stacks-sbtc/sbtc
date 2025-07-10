@@ -1107,11 +1107,12 @@ async fn run_dkg_from_scratch() {
     });
 
     // Await the `stacks_tx_receiver_task` to receive the first transaction broadcasted.
-    let tx_broadcaster = tokio::time::timeout(Duration::from_secs(10), stacks_tx_receiver_task)
-        .await
-        .unwrap()
-        .expect("failed to receive message")
-        .expect("no message received");
+    let broadcast_stacks_txs =
+        tokio::time::timeout(Duration::from_secs(10), stacks_tx_receiver_task)
+            .await
+            .unwrap()
+            .expect("failed to receive message")
+            .expect("no message received");
 
     let mut aggregate_keys = BTreeSet::new();
 
@@ -1139,9 +1140,9 @@ async fn run_dkg_from_scratch() {
     assert_eq!(aggregate_keys.len(), 1);
 
     // 8. Check that the coordinator broadcast a rotate key tx
-    tx_broadcaster.verify().unwrap();
+    broadcast_stacks_txs.verify().unwrap();
 
-    let TransactionPayload::ContractCall(contract_call) = tx_broadcaster.payload else {
+    let TransactionPayload::ContractCall(contract_call) = broadcast_stacks_txs.payload else {
         panic!("unexpected tx payload")
     };
     assert_eq!(
@@ -1507,11 +1508,12 @@ async fn run_subsequent_dkg() {
     });
 
     // Await the `stacks_tx_receiver_task` to receive the first transaction broadcasted.
-    let tx_broadcaster = tokio::time::timeout(Duration::from_secs(10), stacks_tx_receiver_task)
-        .await
-        .unwrap()
-        .expect("failed to receive message")
-        .expect("no message received");
+    let broadcast_stacks_txs =
+        tokio::time::timeout(Duration::from_secs(10), stacks_tx_receiver_task)
+            .await
+            .unwrap()
+            .expect("failed to receive message")
+            .expect("no message received");
 
     // A BTreeSet to uniquely hold all the aggregate keys we find in the database.
     let mut all_aggregate_keys = BTreeSet::new();
@@ -1548,9 +1550,9 @@ async fn run_subsequent_dkg() {
     assert_ne!(aggregate_key_1, new_aggregate_key);
 
     // 8. Check that the coordinator broadcast a rotate key tx
-    tx_broadcaster.verify().unwrap();
+    broadcast_stacks_txs.verify().unwrap();
 
-    let TransactionPayload::ContractCall(contract_call) = tx_broadcaster.payload else {
+    let TransactionPayload::ContractCall(contract_call) = broadcast_stacks_txs.payload else {
         panic!("unexpected tx payload")
     };
     assert_eq!(
@@ -1770,7 +1772,7 @@ async fn sign_bitcoin_transaction() {
     // - Does the sweep transaction spend to the signers' scriptPubKey.
     // =========================================================================
     let sleep_fut = Sleep::for_secs(5);
-    let tx_broadcaster: Vec<StacksTransaction> = stacks_tx_stream
+    let broadcast_stacks_txs: Vec<StacksTransaction> = stacks_tx_stream
         .take_until(sleep_fut)
         .collect::<Vec<_>>()
         .await
@@ -1778,15 +1780,15 @@ async fn sign_bitcoin_transaction() {
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
 
-    more_asserts::assert_ge!(tx_broadcaster.len(), 2);
+    more_asserts::assert_ge!(broadcast_stacks_txs.len(), 2);
     // Check that the first N - 1 are all rotate keys contract calls.
-    let rotate_keys_count = tx_broadcaster.len() - 1;
-    for tx in tx_broadcaster.iter().take(rotate_keys_count) {
+    let rotate_keys_count = broadcast_stacks_txs.len() - 1;
+    for tx in broadcast_stacks_txs.iter().take(rotate_keys_count) {
         assert_stacks_transaction_kind::<RotateKeysV1>(tx);
     }
     // Check that the Nth transaction is the complete-deposit contract
     // call.
-    let tx = tx_broadcaster.last().unwrap();
+    let tx = broadcast_stacks_txs.last().unwrap();
     assert_stacks_transaction_kind::<CompleteDepositV1>(tx);
 
     // Now lets check the bitcoin transaction, first we get it.
@@ -2177,7 +2179,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     //   scriptPubKey.
     // =========================================================================
     let sleep_fut = Sleep::for_secs(5);
-    let tx_broadcaster: Vec<StacksTransaction> = stacks_tx_stream
+    let broadcast_stacks_txs: Vec<StacksTransaction> = stacks_tx_stream
         .take_until(sleep_fut)
         .collect::<Vec<_>>()
         .await
@@ -2185,7 +2187,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
 
-    let mut complete_deposit_txs: Vec<StacksTransaction> = tx_broadcaster
+    let mut complete_deposit_txs: Vec<StacksTransaction> = broadcast_stacks_txs
         .iter()
         .filter(|tx| match &tx.payload {
             TransactionPayload::ContractCall(cc) => {
@@ -2216,7 +2218,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     // We ran DKG twice, so we should observe two distinct rotate-keys
     // contract calls. Since we call rotate keys with each bitcoin block we
     // need to filter out the duplicates.
-    let mut rotate_keys_txs: Vec<StacksTransaction> = tx_broadcaster
+    let mut rotate_keys_txs: Vec<StacksTransaction> = broadcast_stacks_txs
         .iter()
         .filter(|tx| match &tx.payload {
             TransactionPayload::ContractCall(cc) => {
@@ -2677,7 +2679,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     //   scriptPubKey.
     // =========================================================================
     let sleep_fut = tokio::time::sleep(Duration::from_secs(5));
-    let tx_broadcaster: Vec<StacksTransaction> = stacks_tx_stream
+    let broadcast_stacks_txs: Vec<StacksTransaction> = stacks_tx_stream
         .take_until(sleep_fut)
         .collect::<Vec<_>>()
         .await
@@ -2685,9 +2687,9 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
 
-    more_asserts::assert_ge!(tx_broadcaster.len(), 3);
+    more_asserts::assert_ge!(broadcast_stacks_txs.len(), 3);
 
-    let mut complete_deposit_txs: Vec<StacksTransaction> = tx_broadcaster
+    let mut complete_deposit_txs: Vec<StacksTransaction> = broadcast_stacks_txs
         .iter()
         .filter(|tx| match &tx.payload {
             TransactionPayload::ContractCall(cc) => {
@@ -2718,7 +2720,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     // We ran DKG twice, so we should observe two distinct rotate-keys
     // contract calls. Since we call rotate keys with each bitcoin block we
     // need to filter out the duplicates.
-    let mut rotate_keys_txs: Vec<StacksTransaction> = tx_broadcaster
+    let mut rotate_keys_txs: Vec<StacksTransaction> = broadcast_stacks_txs
         .iter()
         .filter(|tx| match &tx.payload {
             TransactionPayload::ContractCall(cc) => {
@@ -3233,7 +3235,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     //   scriptPubKey.
     // =========================================================================
     let sleep_fut = tokio::time::sleep(Duration::from_secs(5));
-    let tx_broadcaster: Vec<StacksTransaction> = stacks_tx_stream
+    let broadcast_stacks_txs: Vec<StacksTransaction> = stacks_tx_stream
         .take_until(sleep_fut)
         .collect::<Vec<_>>()
         .await
@@ -3241,9 +3243,9 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
 
-    more_asserts::assert_ge!(tx_broadcaster.len(), 3);
+    more_asserts::assert_ge!(broadcast_stacks_txs.len(), 3);
 
-    let mut complete_deposit_txs: Vec<StacksTransaction> = tx_broadcaster
+    let mut complete_deposit_txs: Vec<StacksTransaction> = broadcast_stacks_txs
         .iter()
         .filter(|tx| match &tx.payload {
             TransactionPayload::ContractCall(cc) => {
@@ -3274,7 +3276,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     // We ran DKG twice, so we should observe two distinct rotate-keys
     // contract calls. Since we call rotate keys with each bitcoin block we
     // need to filter out the duplicates.
-    let mut rotate_keys_txs: Vec<StacksTransaction> = tx_broadcaster
+    let mut rotate_keys_txs: Vec<StacksTransaction> = broadcast_stacks_txs
         .iter()
         .filter(|tx| match &tx.payload {
             TransactionPayload::ContractCall(cc) => {
@@ -3704,7 +3706,7 @@ async fn skip_signer_activites_after_key_rotation() {
     //   scriptPubKey.
     // =========================================================================
     let sleep_fut = tokio::time::sleep(Duration::from_secs(5));
-    let tx_broadcaster: Vec<StacksTransaction> = stacks_tx_stream
+    let broadcast_stacks_txs: Vec<StacksTransaction> = stacks_tx_stream
         .take_until(sleep_fut)
         .collect::<Vec<_>>()
         .await
@@ -3712,7 +3714,7 @@ async fn skip_signer_activites_after_key_rotation() {
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
 
-    let mut complete_deposit_txs: Vec<StacksTransaction> = tx_broadcaster
+    let mut complete_deposit_txs: Vec<StacksTransaction> = broadcast_stacks_txs
         .iter()
         .filter(|tx| match &tx.payload {
             TransactionPayload::ContractCall(cc) => {
@@ -3740,7 +3742,7 @@ async fn skip_signer_activites_after_key_rotation() {
         _ => None,
     });
 
-    let rotate_keys_txs: Vec<StacksTransaction> = tx_broadcaster
+    let rotate_keys_txs: Vec<StacksTransaction> = broadcast_stacks_txs
         .iter()
         .filter(|tx| match &tx.payload {
             TransactionPayload::ContractCall(cc) => {
@@ -4954,7 +4956,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
     assert_eq!(withdrawal_on_emily.amount, withdrawal_request.amount);
 
     let sleep_fut = Sleep::for_secs(5);
-    let tx_broadcaster: Vec<StacksTransaction> = stacks_tx_stream
+    let broadcast_stacks_txs: Vec<StacksTransaction> = stacks_tx_stream
         .take_until(sleep_fut)
         .collect::<Vec<_>>()
         .await
@@ -4962,15 +4964,15 @@ async fn sign_bitcoin_transaction_withdrawals() {
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
 
-    more_asserts::assert_ge!(tx_broadcaster.len(), 2);
+    more_asserts::assert_ge!(broadcast_stacks_txs.len(), 2);
     // Check that the first N - 1 are all rotate keys contract calls.
-    let rotate_keys_count = tx_broadcaster.len() - 1;
-    for tx in tx_broadcaster.iter().take(rotate_keys_count) {
+    let rotate_keys_count = broadcast_stacks_txs.len() - 1;
+    for tx in broadcast_stacks_txs.iter().take(rotate_keys_count) {
         assert_stacks_transaction_kind::<RotateKeysV1>(tx);
     }
     // Check that the Nth transaction is the accept-withdrawal-request
     // contract call.
-    let tx = tx_broadcaster.last().unwrap();
+    let tx = broadcast_stacks_txs.last().unwrap();
     assert_stacks_transaction_kind::<AcceptWithdrawalV1>(tx);
 
     // Now lets check the bitcoin transaction, first we get it.
