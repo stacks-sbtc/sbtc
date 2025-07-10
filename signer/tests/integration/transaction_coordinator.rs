@@ -4,6 +4,7 @@ use std::num::NonZeroU32;
 use std::num::NonZeroUsize;
 use std::ops::Deref as _;
 use std::sync::Arc;
+use std::sync::RwLock;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering;
@@ -267,6 +268,17 @@ where
     assert_eq!(contract_call.function_name.as_str(), T::FUNCTION_NAME);
 }
 
+fn is_stacks_transaction_kind<T>(tx: &StacksTransaction) -> bool
+where
+    T: AsContractCall,
+{
+    if let TransactionPayload::ContractCall(contract_call) = &tx.payload {
+        return contract_call.contract_name.as_str() == T::CONTRACT_NAME
+            && contract_call.function_name.as_str() == T::FUNCTION_NAME;
+    };
+    false
+}
+
 /// Wait for all signers to finish their coordinator duties and do this
 /// concurrently so that we don't miss anything (not sure if we need to do
 /// it concurrently).
@@ -308,21 +320,14 @@ where
     // We only care about the coordinator's context.
     let coordinator_ctx = signers
         .iter()
-        .filter(|ctx| {
+        .find(|ctx| {
             let public_key = ctx.config().signer.public_key();
-            given_key_is_coordinator(public_key, &chain_tip, &signer_public_keys)
+            given_key_is_coordinator(public_key, chain_tip, &signer_public_keys)
         })
-        .next()
         .unwrap();
 
     let expected_signal = TxCoordinatorEvent::TenureCompleted.into();
     let wait_duration = Duration::from_secs(10);
-
-    tracing::info!(
-        public_key = %coordinator_ctx.config().signer.public_key(),
-        %chain_tip,
-        "the coordinator is"
-    );
 
     coordinator_ctx
         .wait_for_signal(wait_duration, |signal| signal == &expected_signal)
@@ -573,12 +578,57 @@ async fn process_complete_deposit() {
     testing::storage::drop_db(db).await;
 }
 
+/// This function is used to watch for rotate keys transactions and update
+/// the signer set info variable.
+///
+/// We assume that every contract call gets confirmed immediately. In
+/// particular, key-rotation contract calls are confirmed and the smart
+/// contract is immediately updated. To mock this, we create a shared
+/// variable that we update when we receive a rotate keys transaction. This
+/// same variable is read when we call `get_current_signer_set_info`. Below
+/// we set up a task to watch for the submission of a rotate keys
+/// transaction and update the signer set info variable if so.
+fn watch_for_rotate_keys_transaction(
+    tx_broadcaster: &Sender<StacksTransaction>,
+    signer_set_data: Arc<RwLock<Option<SignerSetInfo>>>,
+) {
+    let mut tx_receiver = tx_broadcaster.subscribe();
+
+    tokio::spawn(async move {
+        while let Ok(tx) = tx_receiver.recv().await {
+            if is_stacks_transaction_kind::<RotateKeysV1>(&tx) {
+                let TransactionPayload::ContractCall(payload) = &tx.payload else {
+                    panic!("expected a contract call payload");
+                };
+                let signer_set = payload.function_args[0]
+                    .clone()
+                    .expect_list()
+                    .unwrap()
+                    .iter()
+                    .map(|buff| {
+                        PublicKey::from_slice(&buff.clone().expect_buff(33).unwrap()).unwrap()
+                    })
+                    .collect::<BTreeSet<_>>();
+
+                let aggregate_key_bytes = payload.function_args[1].clone().expect_buff(33).unwrap();
+                let signatures_required = payload.function_args[2].clone().expect_u128().unwrap();
+                let signer_set_info = SignerSetInfo {
+                    aggregate_key: PublicKey::from_slice(&aggregate_key_bytes).unwrap(),
+                    signer_set,
+                    signatures_required: signatures_required as u16,
+                };
+                signer_set_data.write().unwrap().replace(signer_set_info);
+            }
+        }
+    });
+}
+
 /// Mock the stacks client to return dummy data for the given context.
 async fn mock_stacks_core<D, B, E>(
     ctx: &mut TestContext<D, B, WrappedMock<MockStacksInteract>, E>,
     chain_tip_info: GetChainTipsResultTip,
-    db: PgStore,
-    broadcast_stacks_tx: Sender<StacksTransaction>,
+    signer_set_data: Arc<RwLock<Option<SignerSetInfo>>>,
+    tx_broadcaster: Sender<StacksTransaction>,
 ) {
     ctx.with_stacks_client(|client| {
         client
@@ -644,14 +694,12 @@ async fn mock_stacks_core<D, B, E>(
         // key. The response of here means that the stacks node has a
         // record of a rotate keys contract call being executed once we
         // have verified shares.
+        let signer_set_info = signer_set_data.clone();
         client
             .expect_get_current_signer_set_info()
             .returning(move |_| {
-                let db = db.clone();
-                Box::pin(async move {
-                    let shares = db.get_latest_verified_dkg_shares().await?;
-                    Ok(shares.map(SignerSetInfo::from))
-                })
+                let signer_set_info = signer_set_info.read().unwrap().clone();
+                Box::pin(std::future::ready(Ok(signer_set_info)))
             });
 
         // Only the client that corresponds to the coordinator will
@@ -660,12 +708,13 @@ async fn mock_stacks_core<D, B, E>(
         client.expect_submit_tx().returning(move |tx| {
             let tx = tx.clone();
             let txid = tx.txid();
-            let broadcast_stacks_tx = broadcast_stacks_tx.clone();
+            let tx_broadcaster = tx_broadcaster.clone();
             Box::pin(async move {
-                broadcast_stacks_tx.send(tx).unwrap();
+                tx_broadcaster.send(tx).unwrap();
                 Ok(SubmitTxResponse::Acceptance(txid))
             })
         });
+
         // The coordinator will get the total supply of sBTC to
         // determine the amount of mintable sBTC.
         client
@@ -816,16 +865,20 @@ async fn deploy_smart_contracts_coordinator() {
     // - Set up the current-aggregate-key response to be `None`. This means
     //   that each coordinator will broadcast a rotate keys transaction.
     // =========================================================================
-    let (broadcast_stacks_tx, rx) = tokio::sync::broadcast::channel(10);
+    let (tx_broadcaster, rx) = tokio::sync::broadcast::channel(10);
     let stacks_tx_stream = BroadcastStream::new(rx);
+    let signer_set_data = Arc::new(RwLock::new(None));
+    watch_for_rotate_keys_transaction(&tx_broadcaster, signer_set_data.clone());
 
     for ctx in signers.iter_mut() {
-        let broadcast_stacks_tx = broadcast_stacks_tx.clone();
-        let db = ctx.inner_storage();
+        let tx_broadcaster = tx_broadcaster.clone();
+        let signer_set_data = signer_set_data.clone();
+        let chain_tip_info = chain_tip_info.clone();
 
         ctx.with_stacks_client(|client| mock_deploy_all_contracts()(client))
             .await;
-        mock_stacks_core(ctx, chain_tip_info.clone(), db, broadcast_stacks_tx).await;
+
+        mock_stacks_core(ctx, chain_tip_info, signer_set_data, tx_broadcaster).await;
     }
 
     // =========================================================================
@@ -857,7 +910,7 @@ async fn deploy_smart_contracts_coordinator() {
     }
 
     let sleep_fut = tokio::time::sleep(Duration::from_secs(5));
-    let broadcast_stacks_txs: Vec<StacksTransaction> = stacks_tx_stream
+    let tx_broadcaster: Vec<StacksTransaction> = stacks_tx_stream
         .take_until(sleep_fut)
         .collect::<Vec<_>>()
         .await
@@ -865,10 +918,10 @@ async fn deploy_smart_contracts_coordinator() {
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
 
-    assert_eq!(broadcast_stacks_txs.len(), SMART_CONTRACTS.len());
+    assert_eq!(tx_broadcaster.len(), SMART_CONTRACTS.len());
 
     // Check that the contracts were deployed
-    for (deployed, broadcasted_tx) in SMART_CONTRACTS.iter().zip(broadcast_stacks_txs) {
+    for (deployed, broadcasted_tx) in SMART_CONTRACTS.iter().zip(tx_broadcaster) {
         // Await the `wait_for_tx_task` to receive the first transaction broadcasted.
         broadcasted_tx.verify().unwrap();
 
@@ -924,9 +977,9 @@ async fn run_dkg_from_scratch() {
     };
     let test_data = TestData::generate(&mut rng, &[], &test_params);
 
-    let (broadcast_stacks_tx, _rx) = tokio::sync::broadcast::channel(1);
+    let (tx_broadcaster, _rx) = tokio::sync::broadcast::channel(1);
 
-    let mut stacks_tx_receiver = broadcast_stacks_tx.subscribe();
+    let mut stacks_tx_receiver = tx_broadcaster.subscribe();
     let stacks_tx_receiver_task = tokio::spawn(async move { stacks_tx_receiver.recv().await });
 
     let iter: Vec<(Keypair, TestData)> = signer_key_pairs
@@ -941,7 +994,7 @@ async fn run_dkg_from_scratch() {
     let mut signers: Vec<_> = Vec::new();
 
     for (kp, data) in iter {
-        let broadcast_stacks_tx = broadcast_stacks_tx.clone();
+        let tx_broadcaster = tx_broadcaster.clone();
         let db = testing::storage::new_test_database().await;
         let ctx = TestContext::builder()
             .with_storage(db.clone())
@@ -970,9 +1023,9 @@ async fn run_dkg_from_scratch() {
             client.expect_submit_tx().returning(move |tx| {
                 let tx = tx.clone();
                 let txid = tx.txid();
-                let broadcast_stacks_tx = broadcast_stacks_tx.clone();
+                let tx_broadcaster = tx_broadcaster.clone();
                 Box::pin(async move {
-                    broadcast_stacks_tx.send(tx).expect("Failed to send result");
+                    tx_broadcaster.send(tx).expect("Failed to send result");
                     Ok(SubmitTxResponse::Acceptance(txid))
                 })
             });
@@ -1054,12 +1107,11 @@ async fn run_dkg_from_scratch() {
     });
 
     // Await the `stacks_tx_receiver_task` to receive the first transaction broadcasted.
-    let broadcast_stacks_txs =
-        tokio::time::timeout(Duration::from_secs(10), stacks_tx_receiver_task)
-            .await
-            .unwrap()
-            .expect("failed to receive message")
-            .expect("no message received");
+    let tx_broadcaster = tokio::time::timeout(Duration::from_secs(10), stacks_tx_receiver_task)
+        .await
+        .unwrap()
+        .expect("failed to receive message")
+        .expect("no message received");
 
     let mut aggregate_keys = BTreeSet::new();
 
@@ -1087,9 +1139,9 @@ async fn run_dkg_from_scratch() {
     assert_eq!(aggregate_keys.len(), 1);
 
     // 8. Check that the coordinator broadcast a rotate key tx
-    broadcast_stacks_txs.verify().unwrap();
+    tx_broadcaster.verify().unwrap();
 
-    let TransactionPayload::ContractCall(contract_call) = broadcast_stacks_txs.payload else {
+    let TransactionPayload::ContractCall(contract_call) = tx_broadcaster.payload else {
         panic!("unexpected tx payload")
     };
     assert_eq!(
@@ -1302,9 +1354,9 @@ async fn run_subsequent_dkg() {
     };
     let test_data = TestData::generate(&mut rng, &[], &test_params);
 
-    let (broadcast_stacks_tx, _rx) = tokio::sync::broadcast::channel(1);
+    let (tx_broadcaster, _rx) = tokio::sync::broadcast::channel(1);
 
-    let mut stacks_tx_receiver = broadcast_stacks_tx.subscribe();
+    let mut stacks_tx_receiver = tx_broadcaster.subscribe();
     let stacks_tx_receiver_task = tokio::spawn(async move { stacks_tx_receiver.recv().await });
 
     let iter: Vec<(Keypair, TestData)> = signer_key_pairs
@@ -1326,7 +1378,7 @@ async fn run_subsequent_dkg() {
         .collect();
 
     for (kp, data) in iter {
-        let broadcast_stacks_tx = broadcast_stacks_tx.clone();
+        let tx_broadcaster = tx_broadcaster.clone();
         let db = testing::storage::new_test_database().await;
         let ctx = TestContext::builder()
             .with_storage(db.clone())
@@ -1372,9 +1424,9 @@ async fn run_subsequent_dkg() {
             client.expect_submit_tx().returning(move |tx| {
                 let tx = tx.clone();
                 let txid = tx.txid();
-                let broadcast_stacks_tx = broadcast_stacks_tx.clone();
+                let tx_broadcaster = tx_broadcaster.clone();
                 Box::pin(async move {
-                    broadcast_stacks_tx.send(tx).expect("Failed to send result");
+                    tx_broadcaster.send(tx).expect("Failed to send result");
                     Ok(SubmitTxResponse::Acceptance(txid))
                 })
             });
@@ -1455,12 +1507,11 @@ async fn run_subsequent_dkg() {
     });
 
     // Await the `stacks_tx_receiver_task` to receive the first transaction broadcasted.
-    let broadcast_stacks_txs =
-        tokio::time::timeout(Duration::from_secs(10), stacks_tx_receiver_task)
-            .await
-            .unwrap()
-            .expect("failed to receive message")
-            .expect("no message received");
+    let tx_broadcaster = tokio::time::timeout(Duration::from_secs(10), stacks_tx_receiver_task)
+        .await
+        .unwrap()
+        .expect("failed to receive message")
+        .expect("no message received");
 
     // A BTreeSet to uniquely hold all the aggregate keys we find in the database.
     let mut all_aggregate_keys = BTreeSet::new();
@@ -1497,9 +1548,9 @@ async fn run_subsequent_dkg() {
     assert_ne!(aggregate_key_1, new_aggregate_key);
 
     // 8. Check that the coordinator broadcast a rotate key tx
-    broadcast_stacks_txs.verify().unwrap();
+    tx_broadcaster.verify().unwrap();
 
-    let TransactionPayload::ContractCall(contract_call) = broadcast_stacks_txs.payload else {
+    let TransactionPayload::ContractCall(contract_call) = tx_broadcaster.payload else {
         panic!("unexpected tx payload")
     };
     assert_eq!(
@@ -1598,14 +1649,17 @@ async fn sign_bitcoin_transaction() {
     // - Set up the current-aggregate-key response to be `None`. This means
     //   that each coordinator will broadcast a rotate keys transaction.
     // =========================================================================
-    let (broadcast_stacks_tx, rx) = tokio::sync::broadcast::channel(10);
+    let (tx_broadcaster, rx) = tokio::sync::broadcast::channel(10);
     let stacks_tx_stream = BroadcastStream::new(rx);
+    let signer_set_data = Arc::new(RwLock::new(None));
+    watch_for_rotate_keys_transaction(&tx_broadcaster, signer_set_data.clone());
 
     for ctx in signers.iter_mut() {
-        let broadcast_stacks_tx = broadcast_stacks_tx.clone();
-        let db = ctx.inner_storage();
+        let tx_broadcaster = tx_broadcaster.clone();
+        let signer_set_data = signer_set_data.clone();
+        let chain_tip_info = chain_tip_info.clone();
 
-        mock_stacks_core(ctx, chain_tip_info.clone(), db, broadcast_stacks_tx).await;
+        mock_stacks_core(ctx, chain_tip_info, signer_set_data, tx_broadcaster).await;
     }
 
     // =========================================================================
@@ -1716,7 +1770,7 @@ async fn sign_bitcoin_transaction() {
     // - Does the sweep transaction spend to the signers' scriptPubKey.
     // =========================================================================
     let sleep_fut = Sleep::for_secs(5);
-    let broadcast_stacks_txs: Vec<StacksTransaction> = stacks_tx_stream
+    let tx_broadcaster: Vec<StacksTransaction> = stacks_tx_stream
         .take_until(sleep_fut)
         .collect::<Vec<_>>()
         .await
@@ -1724,15 +1778,15 @@ async fn sign_bitcoin_transaction() {
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
 
-    more_asserts::assert_ge!(broadcast_stacks_txs.len(), 2);
+    more_asserts::assert_ge!(tx_broadcaster.len(), 2);
     // Check that the first N - 1 are all rotate keys contract calls.
-    let rotate_keys_count = broadcast_stacks_txs.len() - 1;
-    for tx in broadcast_stacks_txs.iter().take(rotate_keys_count) {
+    let rotate_keys_count = tx_broadcaster.len() - 1;
+    for tx in tx_broadcaster.iter().take(rotate_keys_count) {
         assert_stacks_transaction_kind::<RotateKeysV1>(tx);
     }
     // Check that the Nth transaction is the complete-deposit contract
     // call.
-    let tx = broadcast_stacks_txs.last().unwrap();
+    let tx = tx_broadcaster.last().unwrap();
     assert_stacks_transaction_kind::<CompleteDepositV1>(tx);
 
     // Now lets check the bitcoin transaction, first we get it.
@@ -1864,14 +1918,17 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     // - Set up the current-aggregate-key response to be `None`. This means
     //   that each coordinator will broadcast a rotate keys transaction.
     // =========================================================================
-    let (broadcast_stacks_tx, rx) = tokio::sync::broadcast::channel(10);
+    let (tx_broadcaster, rx) = tokio::sync::broadcast::channel(10);
     let stacks_tx_stream = BroadcastStream::new(rx);
+    let signer_set_data = Arc::new(RwLock::new(None));
+    watch_for_rotate_keys_transaction(&tx_broadcaster, signer_set_data.clone());
 
     for ctx in signers.iter_mut() {
-        let broadcast_stacks_tx = broadcast_stacks_tx.clone();
-        let db = ctx.inner_storage();
+        let tx_broadcaster = tx_broadcaster.clone();
+        let signer_set_data = signer_set_data.clone();
+        let chain_tip_info = chain_tip_info.clone();
 
-        mock_stacks_core(ctx, chain_tip_info.clone(), db, broadcast_stacks_tx).await;
+        mock_stacks_core(ctx, chain_tip_info, signer_set_data, tx_broadcaster).await;
     }
 
     // =========================================================================
@@ -2120,7 +2177,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     //   scriptPubKey.
     // =========================================================================
     let sleep_fut = Sleep::for_secs(5);
-    let broadcast_stacks_txs: Vec<StacksTransaction> = stacks_tx_stream
+    let tx_broadcaster: Vec<StacksTransaction> = stacks_tx_stream
         .take_until(sleep_fut)
         .collect::<Vec<_>>()
         .await
@@ -2128,7 +2185,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
 
-    let mut complete_deposit_txs: Vec<StacksTransaction> = broadcast_stacks_txs
+    let mut complete_deposit_txs: Vec<StacksTransaction> = tx_broadcaster
         .iter()
         .filter(|tx| match &tx.payload {
             TransactionPayload::ContractCall(cc) => {
@@ -2159,7 +2216,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     // We ran DKG twice, so we should observe two distinct rotate-keys
     // contract calls. Since we call rotate keys with each bitcoin block we
     // need to filter out the duplicates.
-    let mut rotate_keys_txs: Vec<StacksTransaction> = broadcast_stacks_txs
+    let mut rotate_keys_txs: Vec<StacksTransaction> = tx_broadcaster
         .iter()
         .filter(|tx| match &tx.payload {
             TransactionPayload::ContractCall(cc) => {
@@ -2331,14 +2388,17 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     // - Set up the current-aggregate-key response to be `None`. This means
     //   that each coordinator will broadcast a rotate keys transaction.
     // =========================================================================
-    let (broadcast_stacks_tx, rx) = tokio::sync::broadcast::channel(10);
+    let (tx_broadcaster, rx) = tokio::sync::broadcast::channel(10);
     let stacks_tx_stream = BroadcastStream::new(rx);
+    let signer_set_data = Arc::new(RwLock::new(None));
+    watch_for_rotate_keys_transaction(&tx_broadcaster, signer_set_data.clone());
 
     for ctx in signers.iter_mut() {
-        let broadcast_stacks_tx = broadcast_stacks_tx.clone();
-        let db = ctx.inner_storage();
+        let tx_broadcaster = tx_broadcaster.clone();
+        let signer_set_data = signer_set_data.clone();
+        let chain_tip_info = chain_tip_info.clone();
 
-        mock_stacks_core(ctx, chain_tip_info.clone(), db, broadcast_stacks_tx).await;
+        mock_stacks_core(ctx, chain_tip_info, signer_set_data, tx_broadcaster).await;
     }
 
     // =========================================================================
@@ -2483,9 +2543,10 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
         ctx.state().set_sbtc_contracts_deployed();
         start_event_loops(&ctx, &network).await;
 
-        let broadcast_stacks_tx = broadcast_stacks_tx.clone();
+        let tx_broadcaster = tx_broadcaster.clone();
         let chain_tip_info = chain_tip_info.clone();
-        mock_stacks_core(&mut ctx, chain_tip_info, db.clone(), broadcast_stacks_tx).await;
+        let signer_set_data = signer_set_data.clone();
+        mock_stacks_core(&mut ctx, chain_tip_info, signer_set_data, tx_broadcaster).await;
 
         signers.push(ctx);
     }
@@ -2616,7 +2677,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     //   scriptPubKey.
     // =========================================================================
     let sleep_fut = tokio::time::sleep(Duration::from_secs(5));
-    let broadcast_stacks_txs: Vec<StacksTransaction> = stacks_tx_stream
+    let tx_broadcaster: Vec<StacksTransaction> = stacks_tx_stream
         .take_until(sleep_fut)
         .collect::<Vec<_>>()
         .await
@@ -2624,9 +2685,9 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
 
-    more_asserts::assert_ge!(broadcast_stacks_txs.len(), 3);
+    more_asserts::assert_ge!(tx_broadcaster.len(), 3);
 
-    let mut complete_deposit_txs: Vec<StacksTransaction> = broadcast_stacks_txs
+    let mut complete_deposit_txs: Vec<StacksTransaction> = tx_broadcaster
         .iter()
         .filter(|tx| match &tx.payload {
             TransactionPayload::ContractCall(cc) => {
@@ -2657,7 +2718,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     // We ran DKG twice, so we should observe two distinct rotate-keys
     // contract calls. Since we call rotate keys with each bitcoin block we
     // need to filter out the duplicates.
-    let mut rotate_keys_txs: Vec<StacksTransaction> = broadcast_stacks_txs
+    let mut rotate_keys_txs: Vec<StacksTransaction> = tx_broadcaster
         .iter()
         .filter(|tx| match &tx.payload {
             TransactionPayload::ContractCall(cc) => {
@@ -2794,6 +2855,8 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     let (rpc, faucet) = regtest::initialize_blockchain();
     let mut rng = get_rng();
 
+    signer::logging::setup_logging("info,signer=debug", false);
+
     // We need to populate our databases, so let's fetch the data.
     let emily_client = EmilyClient::new_test_client();
 
@@ -2846,14 +2909,17 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     // - Set up the current-aggregate-key response to be `None`. This means
     //   that each coordinator will broadcast a rotate keys transaction.
     // =========================================================================
-    let (broadcast_stacks_tx, rx) = tokio::sync::broadcast::channel(10);
+    let (tx_broadcaster, rx) = tokio::sync::broadcast::channel(10);
     let stacks_tx_stream = BroadcastStream::new(rx);
+    let signer_set_data = Arc::new(RwLock::new(None));
+    watch_for_rotate_keys_transaction(&tx_broadcaster, signer_set_data.clone());
 
     for ctx in signers.iter_mut() {
-        let broadcast_stacks_tx = broadcast_stacks_tx.clone();
-        let db = ctx.inner_storage();
+        let tx_broadcaster = tx_broadcaster.clone();
+        let signer_set_data = signer_set_data.clone();
+        let chain_tip_info = chain_tip_info.clone();
 
-        mock_stacks_core(ctx, chain_tip_info.clone(), db, broadcast_stacks_tx).await;
+        mock_stacks_core(ctx, chain_tip_info, signer_set_data, tx_broadcaster).await;
     }
 
     // =========================================================================
@@ -3017,9 +3083,10 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
         ctx.state().set_sbtc_contracts_deployed();
         start_event_loops(&ctx, &network).await;
 
-        let broadcast_stacks_tx = broadcast_stacks_tx.clone();
+        let tx_broadcaster = tx_broadcaster.clone();
         let chain_tip_info = chain_tip_info.clone();
-        mock_stacks_core(&mut ctx, chain_tip_info, db.clone(), broadcast_stacks_tx).await;
+        let signer_set_data = signer_set_data.clone();
+        mock_stacks_core(&mut ctx, chain_tip_info, signer_set_data, tx_broadcaster).await;
 
         signers.push(ctx);
     }
@@ -3166,7 +3233,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     //   scriptPubKey.
     // =========================================================================
     let sleep_fut = tokio::time::sleep(Duration::from_secs(5));
-    let broadcast_stacks_txs: Vec<StacksTransaction> = stacks_tx_stream
+    let tx_broadcaster: Vec<StacksTransaction> = stacks_tx_stream
         .take_until(sleep_fut)
         .collect::<Vec<_>>()
         .await
@@ -3174,9 +3241,9 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
 
-    more_asserts::assert_ge!(broadcast_stacks_txs.len(), 3);
+    more_asserts::assert_ge!(tx_broadcaster.len(), 3);
 
-    let mut complete_deposit_txs: Vec<StacksTransaction> = broadcast_stacks_txs
+    let mut complete_deposit_txs: Vec<StacksTransaction> = tx_broadcaster
         .iter()
         .filter(|tx| match &tx.payload {
             TransactionPayload::ContractCall(cc) => {
@@ -3207,7 +3274,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     // We ran DKG twice, so we should observe two distinct rotate-keys
     // contract calls. Since we call rotate keys with each bitcoin block we
     // need to filter out the duplicates.
-    let mut rotate_keys_txs: Vec<StacksTransaction> = broadcast_stacks_txs
+    let mut rotate_keys_txs: Vec<StacksTransaction> = tx_broadcaster
         .iter()
         .filter(|tx| match &tx.payload {
             TransactionPayload::ContractCall(cc) => {
@@ -3397,14 +3464,16 @@ async fn skip_signer_activites_after_key_rotation() {
     // - Set up the current-aggregate-key response to be `None`. This means
     //   that each coordinator will broadcast a rotate keys transaction.
     // =========================================================================
-    let (broadcast_stacks_tx, rx) = tokio::sync::broadcast::channel(10);
+    let (tx_broadcaster, rx) = tokio::sync::broadcast::channel(10);
     let stacks_tx_stream = BroadcastStream::new(rx);
+    let signer_set_data = Arc::new(RwLock::new(None));
+    watch_for_rotate_keys_transaction(&tx_broadcaster, signer_set_data.clone());
 
     for ctx in signers.iter_mut() {
-        let broadcast_stacks_tx = broadcast_stacks_tx.clone();
-        let db = ctx.inner_storage();
-
-        mock_stacks_core(ctx, chain_tip_info.clone(), db, broadcast_stacks_tx).await;
+        let tx_broadcaster = tx_broadcaster.clone();
+        let signer_set_data = signer_set_data.clone();
+        let chain_tip_info = chain_tip_info.clone();
+        mock_stacks_core(ctx, chain_tip_info, signer_set_data, tx_broadcaster).await;
     }
 
     // =========================================================================
@@ -3635,7 +3704,7 @@ async fn skip_signer_activites_after_key_rotation() {
     //   scriptPubKey.
     // =========================================================================
     let sleep_fut = tokio::time::sleep(Duration::from_secs(5));
-    let broadcast_stacks_txs: Vec<StacksTransaction> = stacks_tx_stream
+    let tx_broadcaster: Vec<StacksTransaction> = stacks_tx_stream
         .take_until(sleep_fut)
         .collect::<Vec<_>>()
         .await
@@ -3643,7 +3712,7 @@ async fn skip_signer_activites_after_key_rotation() {
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
 
-    let mut complete_deposit_txs: Vec<StacksTransaction> = broadcast_stacks_txs
+    let mut complete_deposit_txs: Vec<StacksTransaction> = tx_broadcaster
         .iter()
         .filter(|tx| match &tx.payload {
             TransactionPayload::ContractCall(cc) => {
@@ -3671,7 +3740,7 @@ async fn skip_signer_activites_after_key_rotation() {
         _ => None,
     });
 
-    let rotate_keys_txs: Vec<StacksTransaction> = broadcast_stacks_txs
+    let rotate_keys_txs: Vec<StacksTransaction> = tx_broadcaster
         .iter()
         .filter(|tx| match &tx.payload {
             TransactionPayload::ContractCall(cc) => {
@@ -3801,18 +3870,20 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
     //   means that each coordinator will not run DKG or broadcast a rotate
     //   keys transaction.
     // =========================================================================
-    let (broadcast_stacks_tx, _rx) = tokio::sync::broadcast::channel(10);
+    let (tx_broadcaster, _rx) = tokio::sync::broadcast::channel(10);
+    let signer_set_data = Arc::new(RwLock::new(None));
+    watch_for_rotate_keys_transaction(&tx_broadcaster, signer_set_data.clone());
 
     for ctx in signers.iter_mut() {
-        let db = ctx.inner_storage();
-
         ctx.with_stacks_client(|client| {
             // No transactions should be submitted.
             client.expect_submit_tx().never();
         })
         .await;
 
-        mock_stacks_core(ctx, chain_tip_info.clone(), db, broadcast_stacks_tx.clone()).await;
+        let chain_tip_info = chain_tip_info.clone();
+        let signer_set_data = signer_set_data.clone();
+        mock_stacks_core(ctx, chain_tip_info, signer_set_data, tx_broadcaster.clone()).await;
     }
 
     // =========================================================================
@@ -4645,14 +4716,16 @@ async fn sign_bitcoin_transaction_withdrawals() {
     // - Set up the current-aggregate-key response to be `None`. This means
     //   that each coordinator will broadcast a rotate keys transaction.
     // =========================================================================
-    let (broadcast_stacks_tx, rx) = tokio::sync::broadcast::channel(10);
+    let (tx_broadcaster, rx) = tokio::sync::broadcast::channel(10);
     let stacks_tx_stream = BroadcastStream::new(rx);
+    let signer_set_data = Arc::new(RwLock::new(None));
+    watch_for_rotate_keys_transaction(&tx_broadcaster, signer_set_data.clone());
 
     for ctx in signers.iter_mut() {
-        let broadcast_stacks_tx = broadcast_stacks_tx.clone();
-        let db = ctx.inner_storage();
-
-        mock_stacks_core(ctx, chain_tip_info.clone(), db, broadcast_stacks_tx).await;
+        let tx_broadcaster = tx_broadcaster.clone();
+        let signer_set_data = signer_set_data.clone();
+        let chain_tip_info = chain_tip_info.clone();
+        mock_stacks_core(ctx, chain_tip_info, signer_set_data, tx_broadcaster).await;
     }
 
     // =========================================================================
@@ -4881,7 +4954,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
     assert_eq!(withdrawal_on_emily.amount, withdrawal_request.amount);
 
     let sleep_fut = Sleep::for_secs(5);
-    let broadcast_stacks_txs: Vec<StacksTransaction> = stacks_tx_stream
+    let tx_broadcaster: Vec<StacksTransaction> = stacks_tx_stream
         .take_until(sleep_fut)
         .collect::<Vec<_>>()
         .await
@@ -4889,15 +4962,15 @@ async fn sign_bitcoin_transaction_withdrawals() {
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
 
-    more_asserts::assert_ge!(broadcast_stacks_txs.len(), 2);
+    more_asserts::assert_ge!(tx_broadcaster.len(), 2);
     // Check that the first N - 1 are all rotate keys contract calls.
-    let rotate_keys_count = broadcast_stacks_txs.len() - 1;
-    for tx in broadcast_stacks_txs.iter().take(rotate_keys_count) {
+    let rotate_keys_count = tx_broadcaster.len() - 1;
+    for tx in tx_broadcaster.iter().take(rotate_keys_count) {
         assert_stacks_transaction_kind::<RotateKeysV1>(tx);
     }
     // Check that the Nth transaction is the accept-withdrawal-request
     // contract call.
-    let tx = broadcast_stacks_txs.last().unwrap();
+    let tx = tx_broadcaster.last().unwrap();
     assert_stacks_transaction_kind::<AcceptWithdrawalV1>(tx);
 
     // Now lets check the bitcoin transaction, first we get it.
