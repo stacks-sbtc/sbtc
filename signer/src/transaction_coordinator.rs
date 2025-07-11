@@ -2978,14 +2978,6 @@ mod tests {
             101u64
         };
         let bitcoin_chain_tip: model::BitcoinBlockHash = Faker.fake();
-        storage
-            .write_bitcoin_block(&model::BitcoinBlock {
-                block_hash: bitcoin_chain_tip,
-                block_height: chain_tip_height.into(),
-                parent_hash: Faker.fake(),
-            })
-            .await
-            .unwrap();
 
         let bitcoin_chain_tip_ref = model::BitcoinBlockRef {
             block_hash: bitcoin_chain_tip,
@@ -3007,7 +2999,6 @@ mod tests {
     #[test_case(None; "no key")]
     #[test_case(Some(public_key_from_seed(1)); "key up to date")]
     #[test_case(Some(public_key_from_seed(2)); "new key")]
-    #[tokio::test]
     async fn test_assert_rotate_key_action_failure(current_aggregate_key: Option<PublicKey>) {
         let context = TestContext::builder()
             .with_in_memory_storage()
@@ -3022,15 +3013,7 @@ mod tests {
 
         // Write a bitcoin block at height 100 to simulate the current chain tip
         let storage = context.get_storage_mut();
-        let bitcoin_chain_tip = model::BitcoinBlockHash::from(Faker.fake::<[u8; 32]>());
-        storage
-            .write_bitcoin_block(&model::BitcoinBlock {
-                block_hash: bitcoin_chain_tip,
-                block_height: 100u64.into(),
-                parent_hash: Faker.fake(),
-            })
-            .await
-            .unwrap();
+        let bitcoin_chain_tip: model::BitcoinBlockHash = Faker.fake();
 
         let bitcoin_chain_tip_ref = model::BitcoinBlockRef {
             block_hash: bitcoin_chain_tip,
@@ -3069,15 +3052,7 @@ mod tests {
 
         // Write a bitcoin block at height 101 to simulate the current chain tip
         let storage = context.get_storage_mut();
-        let bitcoin_chain_tip = model::BitcoinBlockHash::from(Faker.fake::<[u8; 32]>());
-        storage
-            .write_bitcoin_block(&model::BitcoinBlock {
-                block_hash: bitcoin_chain_tip,
-                block_height: 101u64.into(),
-                parent_hash: Faker.fake(),
-            })
-            .await
-            .unwrap();
+        let bitcoin_chain_tip: model::BitcoinBlockHash = Faker.fake();
 
         let bitcoin_chain_tip_ref = model::BitcoinBlockRef {
             block_hash: bitcoin_chain_tip,
