@@ -2840,14 +2840,39 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
 /// ```
 ///
 /// then, once everything is up and running, run the test.
+///
+/// # Note
+/// 
+/// This test becomes flaky if the threshold gets set to 1. This is due to
+/// a bug in WSTS (https://github.com/stacks-sbtc/wsts/issues/191), the
+/// problematic scenario for this test goes like so:
+/// 1. The coordinator starts a signing round for an input, and some of the
+///    signers respond with a NonceResponse quickly.
+/// 2. The coordinator receives at least one NonceResponse and asks for
+///    signature shares. Some signers respond quickly again.
+/// 3. The coordinator finalizes the signing round and starts a signing
+///    round for another input.
+/// 4. One of the slower signers send a nonce response for the first input.
+/// 5. The coordinator receives the nonce response for the first input and
+///    assumes it is for the second signing round. It then replaces the
+///    message that it was trying to sign with the one in the
+///    NonceResponse. This is part of the WSTS bug.
+/// 6. The coordinator then asks for signature shares.
+/// 7. The signers receive the signature share request but most do not have
+///    the state machine for the coorsponding message, which appears to
+///    relate to the first input because of (5).
 #[test_case(TestThresholds {
-    first: NonZeroU16::new(1).unwrap(),
+    first: NonZeroU16::new(2).unwrap(),
     second: NonZeroU16::new(3).unwrap(),
 }; "increase the threshold")]
 #[test_case(TestThresholds {
     first: NonZeroU16::new(3).unwrap(),
     second: NonZeroU16::new(2).unwrap(),
 }; "lower the threshold")]
+#[test_case(TestThresholds {
+    first: NonZeroU16::new(3).unwrap(),
+    second: NonZeroU16::new(3).unwrap(),
+}; "same the threshold")]
 #[tokio::test]
 async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds: TestThresholds) {
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
