@@ -2842,7 +2842,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
 /// then, once everything is up and running, run the test.
 ///
 /// # Note
-/// 
+///
 /// This test becomes flaky if the threshold gets set to 1. This is due to
 /// a bug in WSTS (https://github.com/stacks-sbtc/wsts/issues/191), the
 /// problematic scenario for this test goes like so:
