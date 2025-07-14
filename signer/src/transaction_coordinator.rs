@@ -2971,7 +2971,6 @@ mod tests {
             .map(public_key_from_seed);
 
         // Write a bitcoin block at the appropriate height to simulate the current chain tip
-        let storage = context.get_storage_mut();
         let chain_tip_height = if scenario.needs_verification {
             100u64
         } else {
@@ -3012,7 +3011,6 @@ mod tests {
         last_dkg.started_at_bitcoin_block_height = 90u64.into(); // 10 blocks before current height of 100
 
         // Write a bitcoin block at height 100 to simulate the current chain tip
-        let storage = context.get_storage_mut();
         let bitcoin_chain_tip: model::BitcoinBlockHash = Faker.fake();
 
         let bitcoin_chain_tip_ref = model::BitcoinBlockRef {
@@ -3051,7 +3049,6 @@ mod tests {
         last_dkg.started_at_bitcoin_block_height = 80u64.into(); // 21 blocks before current height of 101
 
         // Write a bitcoin block at height 101 to simulate the current chain tip
-        let storage = context.get_storage_mut();
         let bitcoin_chain_tip: model::BitcoinBlockHash = Faker.fake();
 
         let bitcoin_chain_tip_ref = model::BitcoinBlockRef {
