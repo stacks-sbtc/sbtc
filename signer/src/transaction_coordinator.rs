@@ -2998,6 +2998,7 @@ mod tests {
     #[test_case(None; "no key")]
     #[test_case(Some(public_key_from_seed(1)); "key up to date")]
     #[test_case(Some(public_key_from_seed(2)); "new key")]
+    #[tokio::test]
     async fn test_assert_rotate_key_action_failure(current_aggregate_key: Option<PublicKey>) {
         let context = TestContext::builder()
             .with_in_memory_storage()
