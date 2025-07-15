@@ -94,12 +94,13 @@ fn construct_signing_round_id(message: &[u8], bitcoin_chain_tip: &BitcoinBlockHa
         .finalize()
         .into();
 
-    // Use the first 8 bytes of the digest to create a u64 index. Since `digest`
-    // is 64 bytes and we explicitly take the first 8 bytes, this is safe.
+    // Use the first 8 bytes of the digest to create a u64 index. Since
+    // `digest` is 32 bytes and we explicitly take the first 8 bytes, this
+    // is safe.
     #[allow(clippy::expect_used)]
     let u64_bytes: [u8; 8] = digest[..8]
         .try_into()
-        .expect("BUG: failed to take first 4 bytes of digest");
+        .expect("BUG: failed to take first 8 bytes of digest");
 
     u64::from_le_bytes(u64_bytes)
 }
