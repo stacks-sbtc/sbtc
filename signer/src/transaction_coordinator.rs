@@ -1599,7 +1599,7 @@ where
     where
         Coordinator: WstsCoordinator,
     {
-        let outbound = coordinator.start_signing_round(msg, signature_type)?;
+        let outbound = coordinator.start_signing_round(msg, bitcoin_chain_tip, signature_type)?;
 
         // We create a signal stream before sending a message so that there
         // is no race condition with the steam and the getting a response.

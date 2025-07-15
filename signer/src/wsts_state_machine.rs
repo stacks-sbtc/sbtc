@@ -13,12 +13,15 @@ use crate::keys::PublicKeyXOnly;
 use crate::keys::SignerScriptPubKey as _;
 use crate::storage;
 use crate::storage::model;
+use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::DkgSharesStatus;
 use crate::storage::model::SigHash;
 
 use hashbrown::HashMap;
 use hashbrown::HashSet;
 use rand::rngs::OsRng;
+use sha2::Digest as _;
+use sha2::Sha256;
 use wsts::common::PolyCommitment;
 use wsts::net::Message;
 use wsts::net::Packet;
@@ -77,6 +80,28 @@ impl From<SigHash> for StateMachineId {
     fn from(value: SigHash) -> Self {
         StateMachineId::BitcoinSign(value)
     }
+}
+
+/// Construct a signing round id from the given message and bitcoin chain tip.
+///
+/// The signing round id is a u64 that is used to identify the signing round.
+/// It is constructed by hashing the message and bitcoin chain tip together.
+/// The first 8 bytes of the hash are used as the u64.
+fn construct_signing_round_id(message: &[u8], bitcoin_chain_tip: &BitcoinBlockHash) -> u64 {
+    let digest: [u8; 32] = Sha256::new()
+        .chain_update(message)
+        .chain_update(bitcoin_chain_tip.into_bytes())
+        .finalize()
+        .into();
+
+    // Use the first 8 bytes of the digest to create a u64 index. Since `digest`
+    // is 64 bytes and we explicitly take the first 8 bytes, this is safe.
+    #[allow(clippy::expect_used)]
+    let u64_bytes: [u8; 8] = digest[..8]
+        .try_into()
+        .expect("BUG: failed to take first 4 bytes of digest");
+
+    u64::from_le_bytes(u64_bytes)
 }
 
 /// A trait for converting a message into another type.
@@ -192,6 +217,7 @@ where
     fn start_signing_round(
         &mut self,
         message: &[u8],
+        bitcoin_chain_tip: &BitcoinBlockHash,
         signature_type: SignatureType,
     ) -> Result<Packet, Error>;
 }
@@ -292,8 +318,10 @@ impl WstsCoordinator for FireCoordinator {
     fn start_signing_round(
         &mut self,
         message: &[u8],
+        bitcoin_chain_tip: &BitcoinBlockHash,
         signature_type: SignatureType,
     ) -> Result<Packet, Error> {
+        self.0.current_sign_id = construct_signing_round_id(message, bitcoin_chain_tip);
         self.0
             .start_signing_round(message, signature_type)
             .map_err(Error::wsts_coordinator)
@@ -396,8 +424,11 @@ impl WstsCoordinator for FrostCoordinator {
     fn start_signing_round(
         &mut self,
         message: &[u8],
+        _: &BitcoinBlockHash,
         signature_type: SignatureType,
     ) -> Result<Packet, Error> {
+        // The current sign ID is private in the FROST coordinator so we
+        // cannot set it.
         self.0
             .start_signing_round(message, signature_type)
             .map_err(Error::wsts_coordinator)
