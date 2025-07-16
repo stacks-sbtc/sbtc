@@ -455,8 +455,7 @@ where
             &last_dkg,
             current_aggregate_key,
             bitcoin_chain_tip,
-        )
-        .await?;
+        )?;
         if !needs_verification && !needs_rotate_key {
             tracing::debug!(
                 "stacks node is up to date with the current aggregate key and no DKG verification required"
@@ -2616,7 +2615,7 @@ pub async fn should_coordinate_dkg(
 
 /// Assert, given the last dkg and smart contract current aggregate key, if we
 /// need to verify the shares and/or issue a rotate key call.
-pub async fn assert_rotate_key_action<C>(
+pub fn assert_rotate_key_action<C>(
     context: &C,
     last_dkg: &model::EncryptedDkgShares,
     current_aggregate_key: Option<PublicKey>,
@@ -2962,8 +2961,8 @@ mod tests {
             // Set within verification window (10 blocks before current height of 100)
             last_dkg.started_at_bitcoin_block_height = 90u64.into();
         } else {
-            // Set past verification window (21 blocks before current height of 101)
-            last_dkg.started_at_bitcoin_block_height = 11u64.into();
+            // Set past verification window (11 blocks before current height of 100)
+            last_dkg.started_at_bitcoin_block_height = 89u64.into();
         }
 
         let current_aggregate_key = scenario
@@ -2971,11 +2970,7 @@ mod tests {
             .map(public_key_from_seed);
 
         // Write a bitcoin block at the appropriate height to simulate the current chain tip
-        let chain_tip_height = if scenario.needs_verification {
-            100u64
-        } else {
-            101u64
-        };
+        let chain_tip_height = 100u64;
         let bitcoin_chain_tip: model::BitcoinBlockHash = Faker.fake();
 
         let bitcoin_chain_tip_ref = model::BitcoinBlockRef {
@@ -2988,8 +2983,7 @@ mod tests {
             &last_dkg,
             current_aggregate_key,
             &bitcoin_chain_tip_ref,
-        )
-        .await?;
+        )?;
         assert_eq!(needs_verification, scenario.needs_verification);
         assert_eq!(needs_rotate_key, scenario.needs_rotate_key);
         Ok(())
@@ -3009,7 +3003,7 @@ mod tests {
         last_dkg.dkg_shares_status = model::DkgSharesStatus::Failed;
         last_dkg.aggregate_key = public_key_from_seed(1);
         // Set the DKG start height to ensure verification window check passes
-        last_dkg.started_at_bitcoin_block_height = 90u64.into(); // 10 blocks before current height of 100
+        last_dkg.started_at_bitcoin_block_height = 89u64.into(); // 11 blocks before current height of 100
 
         // Write a bitcoin block at height 100 to simulate the current chain tip
         let bitcoin_chain_tip: model::BitcoinBlockHash = Faker.fake();
@@ -3024,8 +3018,7 @@ mod tests {
             &last_dkg,
             current_aggregate_key,
             &bitcoin_chain_tip_ref,
-        )
-        .await;
+        );
         match result {
             Err(Error::DkgVerificationFailed(key)) => {
                 assert_eq!(key, last_dkg.aggregate_key.into());
@@ -3047,18 +3040,17 @@ mod tests {
         last_dkg.dkg_shares_status = model::DkgSharesStatus::Unverified;
         last_dkg.aggregate_key = public_key_from_seed(1);
         // Set the DKG start height to be outside the verification window
-        last_dkg.started_at_bitcoin_block_height = 80u64.into(); // 21 blocks before current height of 101
+        last_dkg.started_at_bitcoin_block_height = 79u64.into(); // 11 blocks before current height of 100
 
-        // Write a bitcoin block at height 101 to simulate the current chain tip
+        // Write a bitcoin block at height 100 to simulate the current chain tip
         let bitcoin_chain_tip: model::BitcoinBlockHash = Faker.fake();
 
         let bitcoin_chain_tip_ref = model::BitcoinBlockRef {
             block_hash: bitcoin_chain_tip,
-            block_height: 101u64.into(),
+            block_height: 100u64.into(),
         };
 
-        let result =
-            assert_rotate_key_action(&context, &last_dkg, None, &bitcoin_chain_tip_ref).await;
+        let result = assert_rotate_key_action(&context, &last_dkg, None, &bitcoin_chain_tip_ref);
 
         // Now we expect success: no verification needed (false), but rotation needed (true)
         match result {
