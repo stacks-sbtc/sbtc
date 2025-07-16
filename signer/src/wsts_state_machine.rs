@@ -14,6 +14,7 @@ use crate::keys::SignerScriptPubKey as _;
 use crate::storage;
 use crate::storage::model;
 use crate::storage::model::BitcoinBlockHash;
+use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::DkgSharesStatus;
 use crate::storage::model::SigHash;
 
@@ -170,7 +171,19 @@ where
     Self: Sized,
 {
     /// Creates a new coordinator state machine.
-    fn new<I>(signers: I, threshold: u16, message_private_key: PrivateKey) -> Self
+    ///
+    /// # Notes
+    ///
+    /// For signing rounds, the `block_height` is the block height of the
+    /// bitcoin chain tip when the DKG round associated with these shares
+    /// started. For new rounds of DKG, the `block_height` is the block
+    /// height of the bitcoin chain tip when the DKG round started.
+    fn new<I>(
+        signers: I,
+        threshold: u16,
+        message_private_key: PrivateKey,
+        block_height: BitcoinBlockHeight,
+    ) -> Self
     where
         I: IntoIterator<Item = PublicKey>;
 
@@ -224,7 +237,12 @@ where
 }
 
 impl WstsCoordinator for FireCoordinator {
-    fn new<I>(signers: I, threshold: u16, message_private_key: PrivateKey) -> Self
+    fn new<I>(
+        signers: I,
+        threshold: u16,
+        message_private_key: PrivateKey,
+        block_height: BitcoinBlockHeight,
+    ) -> Self
     where
         I: IntoIterator<Item = PublicKey>,
     {
@@ -258,7 +276,8 @@ impl WstsCoordinator for FireCoordinator {
             signer_public_keys,
         };
 
-        let wsts_coordinator = fire::Coordinator::new(config);
+        let mut wsts_coordinator = fire::Coordinator::new(config);
+        wsts_coordinator.current_dkg_id = *block_height;
         Self(wsts_coordinator)
     }
 
@@ -292,13 +311,18 @@ impl WstsCoordinator for FireCoordinator {
 
         let signer_public_keys = encrypted_shares.signer_set_public_keys();
         let threshold = encrypted_shares.signature_share_threshold;
-        let mut coordinator = Self::new(signer_public_keys, threshold, signer_private_key);
+        let block_height = encrypted_shares.started_at_bitcoin_block_height;
+        let mut coordinator = Self::new(
+            signer_public_keys,
+            threshold,
+            signer_private_key,
+            block_height,
+        );
 
         let aggregate_key = encrypted_shares.aggregate_key.into();
         coordinator
             .set_key_and_party_polynomials(aggregate_key, party_polynomials)
             .map_err(Error::wsts_coordinator)?;
-        coordinator.current_dkg_id = 1;
 
         coordinator
             .move_to(WstsState::Idle)
@@ -330,7 +354,12 @@ impl WstsCoordinator for FireCoordinator {
 }
 
 impl WstsCoordinator for FrostCoordinator {
-    fn new<I>(signers: I, threshold: u16, message_private_key: PrivateKey) -> Self
+    fn new<I>(
+        signers: I,
+        threshold: u16,
+        message_private_key: PrivateKey,
+        block_height: BitcoinBlockHeight,
+    ) -> Self
     where
         I: IntoIterator<Item = PublicKey>,
     {
@@ -364,7 +393,8 @@ impl WstsCoordinator for FrostCoordinator {
             signer_public_keys,
         };
 
-        let wsts_coordinator = frost::Coordinator::new(config);
+        let mut wsts_coordinator = frost::Coordinator::new(config);
+        wsts_coordinator.current_dkg_id = *block_height;
         Self(wsts_coordinator)
     }
 
@@ -398,13 +428,18 @@ impl WstsCoordinator for FrostCoordinator {
 
         let signer_public_keys = encrypted_shares.signer_set_public_keys();
         let threshold = encrypted_shares.signature_share_threshold;
-        let mut coordinator = Self::new(signer_public_keys, threshold, signer_private_key);
+        let block_height = encrypted_shares.started_at_bitcoin_block_height;
+        let mut coordinator = Self::new(
+            signer_public_keys,
+            threshold,
+            signer_private_key,
+            block_height,
+        );
 
         let aggregate_key = encrypted_shares.aggregate_key.into();
         coordinator
             .set_key_and_party_polynomials(aggregate_key, party_polynomials)
             .map_err(Error::wsts_coordinator)?;
-        coordinator.current_dkg_id = 1;
 
         coordinator
             .move_to(WstsState::Idle)

@@ -1474,12 +1474,10 @@ where
     ) -> Result<(), Error> {
         let db = self.context.get_storage();
         let sighashes = transaction.construct_digests()?;
-        let mut fire_coordinator = FireCoordinator::load(
-            &db,
-            sighashes.signers_aggregate_key.into(),
-            self.private_key,
-        )
-        .await?;
+        let locking_public_key = sighashes.signers_aggregate_key.into();
+        let mut fire_coordinator =
+            FireCoordinator::load(&db, locking_public_key, self.private_key).await?;
+
         let msg = sighashes.signers.to_raw_hash().to_byte_array();
 
         let txid = transaction.tx.compute_txid();
@@ -1639,11 +1637,12 @@ where
         // Get the current signer set for running DKG.
         let signer_set = self.context.config().signer.bootstrap_signing_set.clone();
 
-        let mut state_machine = FireCoordinator::new(signer_set, self.threshold, self.private_key);
+        let block_height = chain_tip.block_height;
+        let mut state_machine =
+            FireCoordinator::new(signer_set, self.threshold, self.private_key, block_height);
 
         // Okay let's move the coordinator state machine to the beginning
         // of the DKG phase.
-        state_machine.current_dkg_id = *chain_tip.block_height;
         state_machine
             .move_to(WstsCoordinatorState::DkgPublicDistribute)
             .map_err(Error::wsts_coordinator)?;
