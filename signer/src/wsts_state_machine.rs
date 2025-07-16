@@ -88,7 +88,7 @@ impl From<SigHash> for StateMachineId {
 /// The signing round id is a u64 that is used to identify the signing round.
 /// It is constructed by hashing the message and bitcoin chain tip together.
 /// The first 8 bytes of the hash are used as the u64.
-fn construct_signing_round_id(message: &[u8], bitcoin_chain_tip: &BitcoinBlockHash) -> u64 {
+pub fn construct_signing_round_id(message: &[u8], bitcoin_chain_tip: &BitcoinBlockHash) -> u64 {
     let digest: [u8; 32] = Sha256::new()
         .chain_update(message)
         .chain_update(bitcoin_chain_tip.into_bytes())
