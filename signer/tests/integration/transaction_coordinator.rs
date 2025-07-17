@@ -1805,6 +1805,8 @@ async fn wsts_ids_set_during_dkg_and_signing_rounds() {
         assert_eq!(dkg_id, header.height as u64);
         more_asserts::assert_lt!(dkg_id, chain_tip_header.height as u64);
 
+        // The signature share response does not contain the message that
+        // was signed, so we skip it in the match below.
         let (sign_id, message) = match &msg.inner {
             wsts::net::Message::NonceRequest(msg) => (msg.sign_id, msg.message.clone()),
             wsts::net::Message::NonceResponse(msg) => (msg.sign_id, msg.message.clone()),
