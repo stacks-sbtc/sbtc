@@ -256,19 +256,40 @@ impl PgRead {
     {
         sqlx::query_as::<_, model::BitcoinTxRef>(
             r#"
-            SELECT
-                bwo.bitcoin_txid AS txid
-              , bt.block_hash
-            FROM sbtc_signer.withdrawal_requests AS wr
-            JOIN sbtc_signer.bitcoin_withdrawals_outputs AS bwo
-              ON bwo.request_id = wr.request_id
-             AND bwo.stacks_block_hash = wr.block_hash
-            JOIN sbtc_signer.bitcoin_transactions AS bt
-              ON bt.txid = bwo.bitcoin_txid
-            JOIN sbtc_signer.bitcoin_blockchain_until($1, wr.bitcoin_block_height) AS bbu
-              ON bbu.block_hash = bt.block_hash
-            WHERE wr.request_id = $2
-              AND wr.block_hash = $3
+            WITH potential_transactions AS (
+                SELECT
+                    bwo.bitcoin_txid AS txid
+                  , bt.block_hash
+                  , wr.bitcoin_block_height
+                FROM sbtc_signer.withdrawal_requests AS wr
+                JOIN sbtc_signer.bitcoin_withdrawals_outputs AS bwo
+                  ON bwo.request_id = wr.request_id
+                  AND bwo.stacks_block_hash = wr.block_hash
+                JOIN sbtc_signer.bitcoin_transactions AS bt
+                  ON bt.txid = bwo.bitcoin_txid
+                WHERE wr.request_id = $1
+                  AND wr.block_hash = $2
+
+                UNION
+
+                SELECT
+                    bwto.txid
+                  , bt.block_hash
+                  , wr.bitcoin_block_height
+                FROM sbtc_signer.withdrawal_requests AS wr
+                JOIN sbtc_signer.bitcoin_withdrawal_tx_outputs AS bwto
+                  ON bwto.request_id = wr.request_id
+                JOIN sbtc_signer.bitcoin_transactions AS bt
+                  ON bt.txid = bwto.bitcoin_txid
+                WHERE wr.request_id = $1
+                  AND wr.block_hash = $2
+            )
+            SELECT 
+                txid
+              , block_hash
+            FROM potential_transactions AS pt
+            JOIN sbtc_signer.bitcoin_blockchain_until($1, pt.bitcoin_block_height) AS bbu
+              ON bbu.block_hash = pt.block_hash
             LIMIT 1
             "#,
         )
@@ -1341,8 +1362,13 @@ impl PgRead {
                 LEFT JOIN sbtc_signer.bitcoin_withdrawals_outputs bwo
                     ON bwo.request_id = wr.request_id
                     AND bwo.stacks_block_hash = wr.block_hash
+
+                LEFT JOIN sbtc_signer.bitcoin_withdrawal_tx_outputs bwto
+                    ON bwto.request_id = wr.request_id
+
                 LEFT JOIN sbtc_signer.bitcoin_transactions bt
                     ON bt.txid = bwo.bitcoin_txid
+                    OR bt.txid = bwto.txid
 
                 -- Join in any rejection events we know about.
                 LEFT JOIN sbtc_signer.withdrawal_reject_events AS wre
