@@ -346,6 +346,8 @@ impl WstsCoordinator for FireCoordinator {
         bitcoin_chain_tip: &BitcoinBlockHash,
         signature_type: SignatureType,
     ) -> Result<Packet, Error> {
+        // TODO: Revisit when https://github.com/stacks-sbtc/wsts/pull/198
+        // is merged and we updated the WSTS dependency with those changes.
         self.0.current_sign_id = construct_signing_round_id(message, bitcoin_chain_tip);
         self.0
             .start_signing_round(message, signature_type)
@@ -394,6 +396,8 @@ impl WstsCoordinator for FrostCoordinator {
         };
 
         let mut wsts_coordinator = frost::Coordinator::new(config);
+        // TODO: Revisit when https://github.com/stacks-sbtc/wsts/pull/198
+        // is merged and we updated the WSTS dependency with those changes.
         wsts_coordinator.current_dkg_id = *block_height;
         Self(wsts_coordinator)
     }
@@ -465,6 +469,8 @@ impl WstsCoordinator for FrostCoordinator {
     ) -> Result<Packet, Error> {
         // The current sign ID is private in the FROST coordinator so we
         // cannot set it.
+        // TODO: Revisit when https://github.com/stacks-sbtc/wsts/pull/198
+        // is merged and we updated the WSTS dependency with those changes.
         self.0
             .start_signing_round(message, signature_type)
             .map_err(Error::wsts_coordinator)
