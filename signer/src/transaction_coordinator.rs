@@ -375,7 +375,6 @@ where
         self.deploy_smart_contracts(chain_tip_hash, &wallet, &aggregate_key)
             .await?;
 
-        // Pass the full bitcoin_chain_tip ref
         let rotate_key_txid = self.check_and_submit_rotate_key_transaction(
             &bitcoin_chain_tip,
             &wallet,
@@ -449,7 +448,6 @@ where
             .registry_signer_set_info()
             .map(|info| info.aggregate_key);
 
-        // Use the passed-in bitcoin_chain_tip directly
         let (needs_verification, needs_rotate_key) = assert_rotate_key_action(
             &self.context,
             &last_dkg,
@@ -2624,7 +2622,7 @@ pub fn assert_rotate_key_action<C>(
 where
     C: Context,
 {
-    let needs_rotate_key = Some(last_dkg.aggregate_key) != current_aggregate_key;
+    let base_needs_rotate_key = Some(last_dkg.aggregate_key) != current_aggregate_key;
 
     // Check if past verification window, if we are, skip verification
     let dkg_verification_window = context.config().signer.dkg_verification_window;
@@ -2636,7 +2634,16 @@ where
 
     let needs_verification = match last_dkg.dkg_shares_status {
         model::DkgSharesStatus::Unverified => !past_verification_window,
-        model::DkgSharesStatus::Verified => needs_rotate_key && !past_verification_window,
+        model::DkgSharesStatus::Verified => base_needs_rotate_key && !past_verification_window,
+        model::DkgSharesStatus::Failed => {
+            return Err(Error::DkgVerificationFailed(last_dkg.aggregate_key.into()));
+        }
+    };
+
+    // Similar logic to needs_rotate_key: if shares are Unverified *&* past verification window, don't rotate
+    let needs_rotate_key = match last_dkg.dkg_shares_status {
+        model::DkgSharesStatus::Unverified => base_needs_rotate_key && !past_verification_window,
+        model::DkgSharesStatus::Verified => base_needs_rotate_key,
         model::DkgSharesStatus::Failed => {
             return Err(Error::DkgVerificationFailed(last_dkg.aggregate_key.into()));
         }
@@ -3040,7 +3047,7 @@ mod tests {
         last_dkg.dkg_shares_status = model::DkgSharesStatus::Unverified;
         last_dkg.aggregate_key = public_key_from_seed(1);
         // Set the DKG start height to be outside the verification window
-        last_dkg.started_at_bitcoin_block_height = 79u64.into(); // 11 blocks before current height of 100
+        last_dkg.started_at_bitcoin_block_height = 79u64.into(); // 21 blocks before current height of 100
 
         // Write a bitcoin block at height 100 to simulate the current chain tip
         let bitcoin_chain_tip: model::BitcoinBlockHash = Faker.fake();
