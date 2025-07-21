@@ -5533,8 +5533,11 @@ async fn pending_rejected_withdrawal_rejected_already_rejected() {
 
 /// Check that pending_rejected_withdrawal correctly skips expired requests
 /// that have a confirmed withdrawal output.
+#[test_case(SetupTables::PreSign; "bitcoin_withdrawal_outputs")]
+#[test_case(SetupTables::WithdrawalIds; "bitcoin_withdrawal_tx_outputs")]
+#[test_case(SetupTables::Both; "rows in both tables")]
 #[test_log::test(tokio::test)]
-async fn pending_rejected_withdrawal_already_accepted() {
+async fn pending_rejected_withdrawal_already_accepted(setup_tables: SetupTables) {
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
 
@@ -5605,17 +5608,39 @@ async fn pending_rejected_withdrawal_already_accepted() {
         ..fake::Faker.fake_with_rng(&mut rng)
     };
     db.write_bitcoin_block(&forked_block).await.unwrap();
+    let sweep_txid = fake::Faker.fake_with_rng(&mut rng);
 
-    let forked_withdrawal_output = BitcoinWithdrawalOutput {
-        request_id: request.request_id,
-        stacks_block_hash: request.block_hash,
-        ..fake::Faker.fake_with_rng(&mut rng)
-    };
-    db.write_bitcoin_withdrawals_outputs(&[forked_withdrawal_output.clone()])
-        .await
-        .unwrap();
+    if matches!(setup_tables, SetupTables::PreSign | SetupTables::Both) {
+        let forked_withdrawal_output = BitcoinWithdrawalOutput {
+            request_id: request.request_id,
+            stacks_block_hash: request.block_hash,
+            bitcoin_txid: sweep_txid,
+            ..fake::Faker.fake_with_rng(&mut rng)
+        };
+        db.write_bitcoin_withdrawals_outputs(&[forked_withdrawal_output.clone()])
+            .await
+            .unwrap();
+    }
+
+    if matches!(setup_tables, SetupTables::WithdrawalIds | SetupTables::Both) {
+        let swept_output = model::WithdrawalTxOutput {
+            request_id: request.request_id,
+            txid: sweep_txid,
+            output_index: 2,
+        };
+        let tx_output = model::TxOutput {
+            txid: sweep_txid,
+            output_index: 2,
+            script_pubkey: fake::Faker.fake_with_rng(&mut rng),
+            amount: request.amount,
+            output_type: model::TxOutputType::Withdrawal,
+        };
+        db.write_tx_output(&tx_output).await.unwrap();
+        db.write_withdrawal_tx_output(&swept_output).await.unwrap();
+    }
+
     db.write_bitcoin_transaction(&model::BitcoinTxRef {
-        txid: forked_withdrawal_output.bitcoin_txid,
+        txid: sweep_txid,
         block_hash: forked_block.block_hash,
     })
     .await
@@ -6254,8 +6279,8 @@ mod get_pending_accepted_withdrawal_requests {
         testing::storage::{self, DbReadTestExt as _, DbWriteTestExt as _},
     };
 
-    use test_case::test_case;
     use super::*;
+    use test_case::test_case;
 
     /// Creates [`WithdrawalSigner`]s for each vote in the provided slice and
     /// stores them in the database. The signer public key is randomized.
@@ -6968,8 +6993,7 @@ mod get_pending_accepted_withdrawal_requests {
 
         // Simulate a sweep transaction on the canonical chain which will
         // include the withdrawal request.
-        sweep_withdrawal_request(&db, &request_1, &bitcoin_block_1.block_hash, setup_tables)
-            .await;
+        sweep_withdrawal_request(&db, &request_1, &bitcoin_block_1.block_hash, setup_tables).await;
 
         // The request should be considered swept now, so we should get empty
         // results here.
