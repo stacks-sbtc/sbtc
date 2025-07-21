@@ -6254,6 +6254,7 @@ mod get_pending_accepted_withdrawal_requests {
         testing::storage::{self, DbReadTestExt as _, DbWriteTestExt as _},
     };
 
+    use test_case::test_case;
     use super::*;
 
     /// Creates [`WithdrawalSigner`]s for each vote in the provided slice and
@@ -6325,6 +6326,7 @@ mod get_pending_accepted_withdrawal_requests {
         db: &PgStore,
         request: &WithdrawalRequest,
         at_bitcoin_block: &BitcoinBlockHash,
+        setup_tables: SetupTables,
     ) -> BitcoinTxId {
         // Simulate a sweep transaction on the canonical chain which will
         // include the withdrawal request.
@@ -6336,19 +6338,40 @@ mod get_pending_accepted_withdrawal_requests {
             .await
             .expect("failed to write bitcoin transaction");
 
-        // Write a fully validated withdrawal output for the request.
-        db.write_bitcoin_withdrawals_outputs(&[model::BitcoinWithdrawalOutput {
-            bitcoin_txid: bitcoin_sweep_tx.txid,
-            bitcoin_chain_tip: *at_bitcoin_block,
-            is_valid_tx: true,
-            stacks_txid: request.txid,
-            stacks_block_hash: request.block_hash,
-            request_id: request.request_id,
-            validation_result: WithdrawalValidationResult::Ok,
-            output_index: 2,
-        }])
-        .await
-        .expect("failed to write bitcoin withdrawal output");
+        if matches!(setup_tables, SetupTables::PreSign | SetupTables::Both) {
+            // Write a fully validated withdrawal output for the request.
+            db.write_bitcoin_withdrawals_outputs(&[model::BitcoinWithdrawalOutput {
+                bitcoin_txid: bitcoin_sweep_tx.txid,
+                bitcoin_chain_tip: *at_bitcoin_block,
+                is_valid_tx: true,
+                stacks_txid: request.txid,
+                stacks_block_hash: request.block_hash,
+                request_id: request.request_id,
+                validation_result: WithdrawalValidationResult::Ok,
+                output_index: 2,
+            }])
+            .await
+            .expect("failed to write bitcoin withdrawal output");
+        }
+
+        if matches!(setup_tables, SetupTables::WithdrawalIds | SetupTables::Both) {
+            let swept_output = model::WithdrawalTxOutput {
+                request_id: request.request_id,
+                txid: bitcoin_sweep_tx.txid,
+                output_index: 2,
+            };
+
+            let tx_output = model::TxOutput {
+                txid: bitcoin_sweep_tx.txid,
+                output_index: 2,
+                script_pubkey: Faker.fake(),
+                amount: request.amount,
+                output_type: model::TxOutputType::Withdrawal,
+            };
+
+            db.write_tx_output(&tx_output).await.unwrap();
+            db.write_withdrawal_tx_output(&swept_output).await.unwrap();
+        }
 
         bitcoin_sweep_tx.txid
     }
@@ -6907,8 +6930,11 @@ mod get_pending_accepted_withdrawal_requests {
     /// Stacks:  │   S1 ✔ │
     ///          └────────┘
     /// ```
+    #[test_case(SetupTables::PreSign; "bitcoin_withdrawal_outputs")]
+    #[test_case(SetupTables::WithdrawalIds; "bitcoin_withdrawal_tx_outputs")]
+    #[test_case(SetupTables::Both; "rows in both tables")]
     #[tokio::test]
-    async fn requests_swept_on_canonical_chain_are_not_returned() {
+    async fn requests_swept_on_canonical_chain_are_not_returned(setup_tables: SetupTables) {
         let db = storage::new_test_database().await;
 
         let signature_threshold = 2;
@@ -6942,7 +6968,8 @@ mod get_pending_accepted_withdrawal_requests {
 
         // Simulate a sweep transaction on the canonical chain which will
         // include the withdrawal request.
-        sweep_withdrawal_request(&db, &request_1, &bitcoin_block_1.block_hash).await;
+        sweep_withdrawal_request(&db, &request_1, &bitcoin_block_1.block_hash, setup_tables)
+            .await;
 
         // The request should be considered swept now, so we should get empty
         // results here.
@@ -6980,8 +7007,11 @@ mod get_pending_accepted_withdrawal_requests {
     /// Stacks:  │   S1 ✔ │  The request is confirmed (✔) in S1.
     ///          └────────┘
     /// ```
+    #[test_case(SetupTables::PreSign; "bitcoin_withdrawal_outputs")]
+    #[test_case(SetupTables::WithdrawalIds; "bitcoin_withdrawal_tx_outputs")]
+    #[test_case(SetupTables::Both; "rows in both tables")]
     #[tokio::test]
-    async fn returns_request_swept_in_orphaned_bitcoin_block() {
+    async fn returns_request_swept_in_orphaned_bitcoin_block(setup_tables: SetupTables) {
         let db = storage::new_test_database().await;
 
         let signature_threshold = 2;
@@ -7025,7 +7055,7 @@ mod get_pending_accepted_withdrawal_requests {
         assert_eq!(requests.len(), 1);
 
         // Sweep the request on the orphaned chain (block 2b).
-        sweep_withdrawal_request(&db, &request, &bitcoin_2b.block_hash).await;
+        sweep_withdrawal_request(&db, &request, &bitcoin_2b.block_hash, setup_tables).await;
 
         // The request confirmed in the canonical chain and swept in an
         // orphaned bitcoin block, so we should get it back here.
@@ -7063,8 +7093,13 @@ mod get_pending_accepted_withdrawal_requests {
     ///               └──────►  S2b   │  We confirm (✔) the request in S1.
     ///                      └────────┘
     /// ```
+    #[test_case(SetupTables::PreSign; "bitcoin_withdrawal_outputs")]
+    #[test_case(SetupTables::WithdrawalIds; "bitcoin_withdrawal_tx_outputs")]
+    #[test_case(SetupTables::Both; "rows in both tables")]
     #[tokio::test]
-    async fn does_not_return_request_swept_in_both_canonical_and_orphaned_blocks() {
+    async fn does_not_return_request_swept_in_both_canonical_and_orphaned_blocks(
+        setup_tables: SetupTables,
+    ) {
         let db = storage::new_test_database().await;
 
         let signature_threshold = 2;
@@ -7098,9 +7133,9 @@ mod get_pending_accepted_withdrawal_requests {
         let request = store_withdrawal_request(&db, 1, &bitcoin_1, &stacks_1, &[true, true]).await;
 
         // Sweep the request on the canonical chain (B2a).
-        sweep_withdrawal_request(&db, &request, &bitcoin_2a.block_hash).await;
+        sweep_withdrawal_request(&db, &request, &bitcoin_2a.block_hash, setup_tables).await;
         // Sweep the request on the orphaned chain (B2b).
-        sweep_withdrawal_request(&db, &request, &bitcoin_2b.block_hash).await;
+        sweep_withdrawal_request(&db, &request, &bitcoin_2b.block_hash, setup_tables).await;
 
         // The request is both confirmed (B1) and swept (B2a) in the canonical
         // bitcoin chain. It is also swept in an orphaned block (B2b). The query
