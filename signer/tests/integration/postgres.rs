@@ -16,6 +16,7 @@ use futures::StreamExt as _;
 use futures::future::join_all;
 use more_asserts::assert_gt;
 use more_asserts::assert_le;
+use rand::Rng as _;
 use rand::seq::IteratorRandom as _;
 use rand::seq::SliceRandom as _;
 use signer::WITHDRAWAL_BLOCKS_EXPIRY;
@@ -2192,11 +2193,31 @@ async fn get_swept_deposit_requests_returns_swept_deposit_requests() {
     signer::testing::storage::drop_db(db).await;
 }
 
+/// The setup table to use for the test.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SetupTables {
+    /// Setup the test with a row in the bitcoin_withdrawal_outputs table
+    /// that is populated as part of processing a pre-sign request.
+    PreSign,
+    /// Setup the test with a row in the bitcoin_withdrawal_tx_outputs
+    /// table that is populated with withdrawal IDs as part of the block
+    /// observer's duties.
+    WithdrawalIds,
+    /// Setup the test with a row in both the bitcoin_withdrawal_outputs
+    /// and bitcoin_withdrawal_tx_outputs tables
+    Both,
+}
+
 /// This tests that withdrawal requests where there is an associated sweep
 /// transaction will show up in the query results from
 /// [`DbRead::get_swept_withdrawal_requests`].
+#[test_case(SetupTables::PreSign; "bitcoin_withdrawal_outputs")]
+#[test_case(SetupTables::WithdrawalIds; "bitcoin_withdrawal_tx_outputs")]
+#[test_case(SetupTables::Both; "rows in both tables")]
 #[tokio::test]
-async fn get_swept_withdrawal_requests_returns_swept_withdrawal_requests() {
+async fn get_swept_withdrawal_requests_returns_swept_withdrawal_requests(
+    setup_tables: SetupTables,
+) {
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
 
@@ -2250,15 +2271,11 @@ async fn get_swept_withdrawal_requests_returns_swept_withdrawal_requests() {
         sender_address: fake::Faker.fake_with_rng(&mut rng),
         bitcoin_block_height: bitcoin_block.block_height,
     };
-    let swept_output = BitcoinWithdrawalOutput {
-        request_id: withdrawal_request.request_id,
-        stacks_txid: withdrawal_request.txid,
-        stacks_block_hash: withdrawal_request.block_hash,
-        bitcoin_chain_tip: bitcoin_block.block_hash,
-        ..Faker.fake_with_rng(&mut rng)
-    };
+
+    let sweep_tx_id = fake::Faker.fake_with_rng(&mut rng);
+    let sweep_output_index = rng.gen_range(0..i32::MAX as u32);
     let sweep_tx_ref = model::BitcoinTxRef {
-        txid: swept_output.bitcoin_txid,
+        txid: sweep_tx_id,
         block_hash: bitcoin_block.block_hash,
     };
 
@@ -2277,9 +2294,41 @@ async fn get_swept_withdrawal_requests_returns_swept_withdrawal_requests() {
         .await
         .unwrap();
     db.write_bitcoin_transaction(&sweep_tx_ref).await.unwrap();
-    db.write_bitcoin_withdrawals_outputs(&[swept_output.clone()])
-        .await
-        .unwrap();
+
+    if matches!(setup_tables, SetupTables::PreSign | SetupTables::Both) {
+        let swept_output = BitcoinWithdrawalOutput {
+            request_id: withdrawal_request.request_id,
+            stacks_txid: withdrawal_request.txid,
+            stacks_block_hash: withdrawal_request.block_hash,
+            bitcoin_chain_tip: bitcoin_block.block_hash,
+            output_index: sweep_output_index,
+            bitcoin_txid: sweep_tx_id,
+            ..Faker.fake_with_rng(&mut rng)
+        };
+
+        db.write_bitcoin_withdrawals_outputs(&[swept_output])
+            .await
+            .unwrap();
+    }
+
+    if matches!(setup_tables, SetupTables::WithdrawalIds | SetupTables::Both) {
+        let swept_output = model::WithdrawalTxOutput {
+            request_id: withdrawal_request.request_id,
+            txid: sweep_tx_id,
+            output_index: sweep_output_index,
+        };
+
+        let tx_output = model::TxOutput {
+            txid: sweep_tx_id,
+            output_index: sweep_output_index,
+            script_pubkey: fake::Faker.fake_with_rng(&mut rng),
+            amount: withdrawal_request.amount,
+            output_type: model::TxOutputType::Withdrawal,
+        };
+
+        db.write_tx_output(&tx_output).await.unwrap();
+        db.write_withdrawal_tx_output(&swept_output).await.unwrap();
+    }
 
     // There should only be one request in the database and it has a sweep
     // trasnaction so the length should be 1.
@@ -2292,12 +2341,12 @@ async fn get_swept_withdrawal_requests_returns_swept_withdrawal_requests() {
     // Its details should match that of the withdrawals request.
     let req = requests.pop().unwrap();
     let expected = SweptWithdrawalRequest {
-        output_index: swept_output.output_index,
+        output_index: sweep_output_index,
         amount: withdrawal_request.amount,
         txid: withdrawal_request.txid,
         sweep_block_hash: bitcoin_block.block_hash,
         sweep_block_height: bitcoin_block.block_height,
-        sweep_txid: swept_output.bitcoin_txid,
+        sweep_txid: sweep_tx_id,
         request_id: withdrawal_request.request_id,
         block_hash: withdrawal_request.block_hash,
         sender_address: withdrawal_request.sender_address,
@@ -2589,8 +2638,13 @@ async fn get_swept_deposit_requests_does_not_return_deposit_requests_with_respon
 
 /// This tests that accepted withdrawal requests will not show up in the query results from
 /// [`DbRead::get_swept_withdrawal_requests`].
+#[test_case(SetupTables::PreSign; "bitcoin_withdrawal_outputs")]
+#[test_case(SetupTables::WithdrawalIds; "bitcoin_withdrawal_tx_outputs")]
+#[test_case(SetupTables::Both; "rows in both tables")]
 #[tokio::test]
-async fn get_swept_withdrawal_requests_does_not_return_withdrawal_requests_with_responses() {
+async fn get_swept_withdrawal_requests_does_not_return_withdrawal_requests_with_responses(
+    setup_tables: SetupTables,
+) {
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
 
@@ -2643,15 +2697,10 @@ async fn get_swept_withdrawal_requests_does_not_return_withdrawal_requests_with_
         sender_address: fake::Faker.fake_with_rng(&mut rng),
         bitcoin_block_height: bitcoin_block.block_height,
     };
-    let swept_output = BitcoinWithdrawalOutput {
-        request_id: withdrawal_request.request_id,
-        stacks_txid: withdrawal_request.txid,
-        stacks_block_hash: withdrawal_request.block_hash,
-        bitcoin_chain_tip: bitcoin_block.block_hash,
-        ..Faker.fake_with_rng(&mut rng)
-    };
+    let sweep_tx_id = fake::Faker.fake_with_rng(&mut rng);
+    let sweep_output_index = rng.gen_range(0..i32::MAX as u32);
     let sweep_tx_ref = model::BitcoinTxRef {
-        txid: swept_output.bitcoin_txid,
+        txid: sweep_tx_id,
         block_hash: bitcoin_block.block_hash,
     };
 
@@ -2670,9 +2719,41 @@ async fn get_swept_withdrawal_requests_does_not_return_withdrawal_requests_with_
         .await
         .unwrap();
     db.write_bitcoin_transaction(&sweep_tx_ref).await.unwrap();
-    db.write_bitcoin_withdrawals_outputs(&[swept_output.clone()])
-        .await
-        .unwrap();
+
+    if matches!(setup_tables, SetupTables::PreSign | SetupTables::Both) {
+        let swept_output = BitcoinWithdrawalOutput {
+            request_id: withdrawal_request.request_id,
+            stacks_txid: withdrawal_request.txid,
+            stacks_block_hash: withdrawal_request.block_hash,
+            bitcoin_chain_tip: bitcoin_block.block_hash,
+            output_index: sweep_output_index,
+            bitcoin_txid: sweep_tx_id,
+            ..Faker.fake_with_rng(&mut rng)
+        };
+
+        db.write_bitcoin_withdrawals_outputs(&[swept_output])
+            .await
+            .unwrap();
+    }
+
+    if matches!(setup_tables, SetupTables::WithdrawalIds | SetupTables::Both) {
+        let swept_output = model::WithdrawalTxOutput {
+            request_id: withdrawal_request.request_id,
+            txid: sweep_tx_id,
+            output_index: sweep_output_index,
+        };
+
+        let tx_output = model::TxOutput {
+            txid: sweep_tx_id,
+            output_index: sweep_output_index,
+            script_pubkey: fake::Faker.fake_with_rng(&mut rng),
+            amount: withdrawal_request.amount,
+            output_type: model::TxOutputType::Withdrawal,
+        };
+
+        db.write_tx_output(&tx_output).await.unwrap();
+        db.write_withdrawal_tx_output(&swept_output).await.unwrap();
+    }
 
     // Before we write corresponding withdrawal accept event query should return 1 request
     let context_window = 20;
@@ -2992,8 +3073,11 @@ async fn get_swept_deposit_requests_boundary() {
 /// function return requests where we have already confirmed a
 /// `complete-withdrawal` contract call transaction on the Stacks blockchain
 /// but that transaction has been reorged while the sweep transaction has not.
+#[test_case(SetupTables::PreSign; "bitcoin_withdrawal_outputs")]
+#[test_case(SetupTables::WithdrawalIds; "bitcoin_withdrawal_tx_outputs")]
+#[test_case(SetupTables::Both; "rows in both tables")]
 #[tokio::test]
-async fn get_swept_withdrawal_requests_response_tx_reorged() {
+async fn get_swept_withdrawal_requests_response_tx_reorged(setup_tables: SetupTables) {
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
 
@@ -3046,15 +3130,12 @@ async fn get_swept_withdrawal_requests_response_tx_reorged() {
         sender_address: fake::Faker.fake_with_rng(&mut rng),
         bitcoin_block_height: bitcoin_block.block_height,
     };
-    let swept_output = BitcoinWithdrawalOutput {
-        request_id: withdrawal_request.request_id,
-        stacks_txid: withdrawal_request.txid,
-        stacks_block_hash: withdrawal_request.block_hash,
-        bitcoin_chain_tip: bitcoin_block.block_hash,
-        ..Faker.fake_with_rng(&mut rng)
-    };
+
+    let sweep_tx_id = fake::Faker.fake_with_rng(&mut rng);
+    let sweep_output_index = rng.gen_range(0..i32::MAX as u32);
+
     let sweep_tx_ref = model::BitcoinTxRef {
-        txid: swept_output.bitcoin_txid,
+        txid: sweep_tx_id,
         block_hash: bitcoin_block.block_hash,
     };
 
@@ -3065,9 +3146,41 @@ async fn get_swept_withdrawal_requests_response_tx_reorged() {
         .await
         .unwrap();
     db.write_bitcoin_transaction(&sweep_tx_ref).await.unwrap();
-    db.write_bitcoin_withdrawals_outputs(&[swept_output.clone()])
-        .await
-        .unwrap();
+
+    if matches!(setup_tables, SetupTables::PreSign | SetupTables::Both) {
+        let swept_output = BitcoinWithdrawalOutput {
+            request_id: withdrawal_request.request_id,
+            stacks_txid: withdrawal_request.txid,
+            stacks_block_hash: withdrawal_request.block_hash,
+            bitcoin_chain_tip: bitcoin_block.block_hash,
+            output_index: sweep_output_index,
+            bitcoin_txid: sweep_tx_id,
+            ..Faker.fake_with_rng(&mut rng)
+        };
+
+        db.write_bitcoin_withdrawals_outputs(&[swept_output])
+            .await
+            .unwrap();
+    }
+
+    if matches!(setup_tables, SetupTables::WithdrawalIds | SetupTables::Both) {
+        let swept_output = model::WithdrawalTxOutput {
+            request_id: withdrawal_request.request_id,
+            txid: sweep_tx_id,
+            output_index: sweep_output_index,
+        };
+
+        let tx_output = model::TxOutput {
+            txid: sweep_tx_id,
+            output_index: sweep_output_index,
+            script_pubkey: fake::Faker.fake_with_rng(&mut rng),
+            amount: withdrawal_request.amount,
+            output_type: model::TxOutputType::Withdrawal,
+        };
+
+        db.write_tx_output(&tx_output).await.unwrap();
+        db.write_withdrawal_tx_output(&swept_output).await.unwrap();
+    }
 
     // Creating new bitcoin block, withdrawal accept event will happen
     // in stacks block ancored to this block
