@@ -2932,7 +2932,7 @@ mod tests {
             shares_key_seed: 1,
             current_aggregate_key_seed: None,
             needs_verification: false,
-            needs_rotate_key: true,
+            needs_rotate_key: false,
         }; "unverified, no key, past window")]
     #[test_case(
         RotateKeyActionTest {
@@ -2948,7 +2948,7 @@ mod tests {
             shares_key_seed: 2,
             current_aggregate_key_seed: Some(1),
             needs_verification: false,
-            needs_rotate_key: true,
+            needs_rotate_key: false,
         }; "unverified, new key, past window")]
     #[tokio::test]
     async fn test_assert_rotate_key_action(scenario: RotateKeyActionTest) -> Result<(), Error> {
@@ -3059,11 +3059,11 @@ mod tests {
 
         let result = assert_rotate_key_action(&context, &last_dkg, None, &bitcoin_chain_tip_ref);
 
-        // Now we expect success: no verification needed (false), but rotation needed (true)
+        // Now we expect success: no verification needed (false), and no rotation needed (false) since past verification window
         match result {
             Ok((needs_verification, needs_rotate_key)) => {
                 assert_eq!(needs_verification, false);
-                assert_eq!(needs_rotate_key, true);
+                assert_eq!(needs_rotate_key, false);
             }
             Err(e) => {
                 panic!("expected success but got error: {:?}", e)
