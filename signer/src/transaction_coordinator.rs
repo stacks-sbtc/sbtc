@@ -2640,7 +2640,9 @@ where
         }
     };
 
-    // Similar logic to needs_rotate_key: if shares are Unverified *&* past verification window, don't rotate
+    // Similar logic to needs_rotate_key: if shares are Unverified &
+    // past the verification window, don't attempt to submit a key
+    // rotation transaction.
     let needs_rotate_key = match last_dkg.dkg_shares_status {
         model::DkgSharesStatus::Unverified => base_needs_rotate_key && !past_verification_window,
         model::DkgSharesStatus::Verified => base_needs_rotate_key,
@@ -2878,6 +2880,11 @@ mod tests {
         needs_rotate_key: bool,
     }
 
+    // Test cases for assert_rotate_key_action with dkg_verification_window = 10
+    // Chain tip height = 100, so verification window is heights 90-100
+    // Tests with needs_verification = true use DKG start height 90 (within window)
+    // Tests with needs_verification = false use DKG start height 89 (past window)
+
     #[test_case(
         RotateKeyActionTest {
             shares_status: model::DkgSharesStatus::Unverified,
@@ -2952,6 +2959,10 @@ mod tests {
         }; "unverified, new key, past window")]
     #[tokio::test]
     async fn test_assert_rotate_key_action(scenario: RotateKeyActionTest) -> Result<(), Error> {
+        // dkg_verification_window = 10 (default value)
+        // Current chain tip height = 100
+        // For needs_verification = true: DKG started at height 90 (within 10-block window)
+        // For needs_verification = false: DKG started at height 89 (past 10-block window)
         let context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
@@ -3001,6 +3012,9 @@ mod tests {
     #[test_case(Some(public_key_from_seed(2)); "new key")]
     #[tokio::test]
     async fn test_assert_rotate_key_action_failure(current_aggregate_key: Option<PublicKey>) {
+        // dkg_verification_window = 10 (default value)
+        // Current chain tip height = 100
+        // DKG started at height 89 (past 10-block window, but this test fails regardless)
         let context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
@@ -3038,6 +3052,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_assert_rotate_key_action_verification_window_elapsed() {
+        // dkg_verification_window = 10 (default value)
+        // Current chain tip height = 100
+        // DKG started at height 79 (21 blocks past the 10-block verification window)
         let context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
@@ -3059,7 +3076,9 @@ mod tests {
 
         let result = assert_rotate_key_action(&context, &last_dkg, None, &bitcoin_chain_tip_ref);
 
-        // Now we expect success: no verification needed (false), and no rotation needed (false) since past verification window
+        // Now we expect success: neither verification nor key
+        // rotation are needed since we are past the verification
+        // window of 10 bitcoin blocks
         match result {
             Ok((needs_verification, needs_rotate_key)) => {
                 assert_eq!(needs_verification, false);
