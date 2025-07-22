@@ -592,7 +592,7 @@ async fn should_return_the_same_pending_accepted_deposit_requests_as_in_memory_s
     test_data.write_to(&pg_store).await;
 
     let chain_tip = in_memory_store
-        .get_bitcoin_canonical_chain_tip()
+        .get_bitcoin_canonical_chain_tip_ref()
         .await
         .expect("failed to get canonical chain tip")
         .expect("no chain tip");
@@ -603,7 +603,7 @@ async fn should_return_the_same_pending_accepted_deposit_requests_as_in_memory_s
             .await
             .expect("failed to get canonical chain tip")
             .expect("no chain tip"),
-        chain_tip
+        chain_tip.block_hash
     );
 
     let mut pending_accepted_deposit_requests = in_memory_store
@@ -643,7 +643,11 @@ async fn should_not_return_swept_deposits_as_pending_accepted() {
     let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
     let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
 
-    let chain_tip = setup.sweep_block_hash.into();
+    let chain_tip = model::BitcoinBlockRef {
+        block_hash: setup.sweep_block_hash.into(),
+        block_height: setup.sweep_block_height,
+    };
+
     let context_window = 20;
     let threshold = 4;
 
@@ -682,11 +686,17 @@ async fn should_not_return_swept_deposits_as_pending_accepted() {
 
     assert!(requests.is_empty());
 
+    let deposit_block_ref = db
+        .get_bitcoin_block(&setup.deposit_block_hash.into())
+        .await
+        .unwrap()
+        .unwrap()
+        .into();
     // Ensure that we only consider sweep tx in the canonical chain
     let requests = db
         .get_pending_accepted_deposit_requests(
             // this excludes the sweep tx block
-            &setup.deposit_block_hash.into(),
+            &deposit_block_ref,
             context_window,
             threshold,
         )
@@ -738,13 +748,13 @@ async fn should_return_only_accepted_pending_deposits_that_are_within_reclaim_bo
     test_data.write_to(&in_memory_store).await;
 
     let chain_tip = in_memory_store
-        .get_bitcoin_canonical_chain_tip()
+        .get_bitcoin_canonical_chain_tip_ref()
         .await
         .expect("failed to get canonical chain tip")
         .expect("no chain tip");
 
     assert_eq!(
-        chain_tip,
+        chain_tip.block_hash,
         pg_store
             .get_bitcoin_canonical_chain_tip()
             .await
@@ -778,7 +788,7 @@ async fn should_return_only_accepted_pending_deposits_that_are_within_reclaim_bo
     // Now get the height of the Bitcoin chain tip, we're going to use this to put some of the
     // accepted deposit requests outside of the reclaim bounds.
     let bitcoin_chain_tip_height = pg_store
-        .get_bitcoin_block(&chain_tip)
+        .get_bitcoin_block(&chain_tip.block_hash)
         .await
         .expect("failed to get bitcoin block")
         .expect("no chain tip block")

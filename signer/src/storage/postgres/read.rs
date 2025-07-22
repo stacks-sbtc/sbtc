@@ -872,7 +872,7 @@ impl PgRead {
 
     pub async fn get_pending_accepted_deposit_requests<'e, E>(
         executor: &'e mut E,
-        chain_tip: &model::BitcoinBlockHash,
+        chain_tip: &model::BitcoinBlockRef,
         context_window: u16,
         threshold: u16,
     ) -> Result<Vec<model::DepositRequest>, Error>
@@ -880,16 +880,13 @@ impl PgRead {
         E: 'static,
         for<'c> &'c mut E: sqlx::PgExecutor<'c>,
     {
-        // Add one to the acceptable unlock height because the chain tip is at height one less
-        // than the height of the next block, which is the block for which we are assessing
-        // the threshold.
-        let minimum_acceptable_unlock_height = {
-            let block_height = Self::get_bitcoin_block(&mut *executor, chain_tip)
-                .await?
-                .ok_or(Error::MissingBitcoinBlock(*chain_tip))?
-                .block_height;
-            *block_height as i32 + DEPOSIT_LOCKTIME_BLOCK_BUFFER as i32 + 1
-        };
+        // We only consider deposits where the confirmation height plus
+        // their locktime is greater than the value below. We add one to
+        // the acceptable unlock height because the chain tip is at height
+        // one less than the height of the next block, which is the block
+        // for which we are assessing the threshold.
+        let minimum_acceptable_unlock_height =
+            *chain_tip.block_height as i32 + DEPOSIT_LOCKTIME_BLOCK_BUFFER as i32 + 1;
 
         sqlx::query_as::<_, model::DepositRequest>(
             r#"
@@ -949,7 +946,7 @@ impl PgRead {
                 COUNT(transactions_in_window.txid) = 0
             "#,
         )
-        .bind(chain_tip)
+        .bind(chain_tip.block_hash)
         .bind(i32::from(context_window))
         .bind(i32::from(threshold))
         .bind(minimum_acceptable_unlock_height)
@@ -2567,7 +2564,7 @@ impl DbRead for PgStore {
 
     async fn get_pending_accepted_deposit_requests(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
+        chain_tip: &model::BitcoinBlockRef,
         context_window: u16,
         threshold: u16,
     ) -> Result<Vec<model::DepositRequest>, Error> {
@@ -2995,7 +2992,7 @@ impl DbRead for PgTransaction<'_> {
 
     async fn get_pending_accepted_deposit_requests(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
+        chain_tip: &model::BitcoinBlockRef,
         context_window: u16,
         signatures_required: u16,
     ) -> Result<Vec<model::DepositRequest>, Error> {

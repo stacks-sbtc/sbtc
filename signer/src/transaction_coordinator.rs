@@ -2099,7 +2099,7 @@ where
         // done by the storage layer.
         let pending_deposit_requests = storage
             .get_pending_accepted_deposit_requests(
-                params.bitcoin_chain_tip.as_ref(),
+                params.bitcoin_chain_tip,
                 context_window,
                 params.signature_threshold,
             )
