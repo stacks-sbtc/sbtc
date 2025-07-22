@@ -2758,7 +2758,6 @@ async fn wsts_ids_set_during_dkg_and_signing_rounds() {
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
-    signer::logging::setup_logging("info,signer=debug", false);
     // We need to populate our databases, so let's fetch the data.
     let emily_client = EmilyClient::try_new(
         &Url::parse("http://testApiKey@localhost:3031").unwrap(),
