@@ -92,12 +92,12 @@ impl DbRead for SharedStore {
 
     async fn get_pending_accepted_deposit_requests(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
+        chain_tip: &model::BitcoinBlockRef,
         context_window: u16,
         threshold: u16,
     ) -> Result<Vec<model::DepositRequest>, Error> {
         let store = self.lock().await;
-        let deposit_requests = store.get_deposit_requests(chain_tip, context_window);
+        let deposit_requests = store.get_deposit_requests(&chain_tip.block_hash, context_window);
 
         let threshold = threshold as usize;
 
@@ -105,19 +105,18 @@ impl DbRead for SharedStore {
         // than the height of the next block, which is the block for which we are assessing
         // the threshold.
         let minimum_acceptable_unlock_height =
-            store.bitcoin_blocks.get(chain_tip).unwrap().block_height
-                + DEPOSIT_LOCKTIME_BLOCK_BUFFER as u64
-                + 1;
+            chain_tip.block_height + DEPOSIT_LOCKTIME_BLOCK_BUFFER as u64 + 1;
 
         // Get all canonical blocks in the context window.
-        let canonical_bitcoin_blocks = std::iter::successors(Some(chain_tip), |block_hash| {
-            store
-                .bitcoin_blocks
-                .get(block_hash)
-                .map(|block| &block.parent_hash)
-        })
-        .take(context_window as usize)
-        .collect::<HashSet<_>>();
+        let canonical_bitcoin_blocks =
+            std::iter::successors(Some(&chain_tip.block_hash), |block_hash| {
+                store
+                    .bitcoin_blocks
+                    .get(block_hash)
+                    .map(|block| &block.parent_hash)
+            })
+            .take(context_window as usize)
+            .collect::<HashSet<_>>();
 
         Ok(deposit_requests
             .into_iter()
@@ -821,7 +820,7 @@ impl DbRead for InMemoryTransaction {
 
     async fn get_pending_accepted_deposit_requests(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
+        chain_tip: &model::BitcoinBlockRef,
         context_window: u16,
         signatures_required: u16,
     ) -> Result<Vec<model::DepositRequest>, Error> {

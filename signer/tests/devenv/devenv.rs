@@ -22,8 +22,6 @@ use bitcoin::XOnlyPublicKey;
 use bitcoin::absolute::LockTime;
 use bitcoin::transaction::Version;
 use bitvec::array::BitArray;
-use clarity::vm::ClarityName;
-use clarity::vm::ContractName;
 use clarity::vm::Value;
 use clarity::vm::types::PrincipalData;
 use fake::Fake as _;
@@ -39,6 +37,7 @@ use serde::de::DeserializeOwned;
 use serde_json::to_value;
 use signer::bitcoin::utxo::DepositRequest;
 use signer::error::Error;
+use signer::stacks::api::ClarityName;
 use signer::stacks::contracts::SmartContract;
 use signer::storage::model::TaprootScriptHash;
 use std::sync::Arc;
@@ -283,8 +282,8 @@ async fn get_sbtc_balance(
     let result = stacks_client
         .call_read(
             deployer,
-            &ContractName::from(SmartContract::SbtcToken.contract_name()),
-            &ClarityName::from("get-balance"),
+            SmartContract::SbtcToken,
+            ClarityName("get-balance"),
             deployer,
             &[Value::Principal(address.clone())],
         )
