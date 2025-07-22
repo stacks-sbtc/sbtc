@@ -14,6 +14,7 @@ use crate::keys::SignerScriptPubKey as _;
 use crate::storage;
 use crate::storage::model;
 use crate::storage::model::BitcoinBlockHash;
+use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::DkgSharesStatus;
 use crate::storage::model::SigHash;
@@ -24,6 +25,7 @@ use rand::SeedableRng as _;
 use rand::rngs::OsRng;
 use rand_chacha::ChaCha20Rng;
 use sha2::Digest as _;
+use sha2::Sha256;
 use wsts::common::PolyCommitment;
 use wsts::net::Message;
 use wsts::net::Packet;
@@ -82,6 +84,29 @@ impl From<SigHash> for StateMachineId {
     fn from(value: SigHash) -> Self {
         StateMachineId::BitcoinSign(value)
     }
+}
+
+/// Construct a signing round id from the given message and bitcoin chain tip.
+///
+/// The signing round id is a u64 that is used to identify the signing round.
+/// It is constructed by hashing the message and bitcoin chain tip together.
+/// The first 8 bytes of the hash are used as the u64.
+pub fn construct_signing_round_id(message: &[u8], bitcoin_chain_tip: &BitcoinBlockHash) -> u64 {
+    let digest: [u8; 32] = Sha256::new()
+        .chain_update(message)
+        .chain_update(bitcoin_chain_tip.into_bytes())
+        .finalize()
+        .into();
+
+    // Use the first 8 bytes of the digest to create a u64 index. Since
+    // `digest` is 32 bytes and we explicitly take the first 8 bytes, this
+    // is safe.
+    #[allow(clippy::expect_used)]
+    let u64_bytes: [u8; 8] = digest[..8]
+        .try_into()
+        .expect("BUG: failed to take first 8 bytes of digest");
+
+    u64::from_le_bytes(u64_bytes)
 }
 
 /// A trait for converting a message into another type.
@@ -149,7 +174,19 @@ where
     Self: Sized,
 {
     /// Creates a new coordinator state machine.
-    fn new<I>(signers: I, threshold: u16, message_private_key: PrivateKey) -> Self
+    ///
+    /// # Notes
+    ///
+    /// For signing rounds, the `block_height` is the block height of the
+    /// bitcoin chain tip when the DKG round associated with these shares
+    /// started. For new rounds of DKG, the `block_height` is the block
+    /// height of the bitcoin chain tip when the DKG round started.
+    fn new<I>(
+        signers: I,
+        threshold: u16,
+        message_private_key: PrivateKey,
+        block_height: BitcoinBlockHeight,
+    ) -> Self
     where
         I: IntoIterator<Item = PublicKey>;
 
@@ -197,12 +234,18 @@ where
     fn start_signing_round(
         &mut self,
         message: &[u8],
+        bitcoin_chain_tip: &BitcoinBlockHash,
         signature_type: SignatureType,
     ) -> Result<Packet, Error>;
 }
 
 impl WstsCoordinator for FireCoordinator {
-    fn new<I>(signers: I, threshold: u16, message_private_key: PrivateKey) -> Self
+    fn new<I>(
+        signers: I,
+        threshold: u16,
+        message_private_key: PrivateKey,
+        block_height: BitcoinBlockHeight,
+    ) -> Self
     where
         I: IntoIterator<Item = PublicKey>,
     {
@@ -236,7 +279,8 @@ impl WstsCoordinator for FireCoordinator {
             signer_public_keys,
         };
 
-        let wsts_coordinator = fire::Coordinator::new(config);
+        let mut wsts_coordinator = fire::Coordinator::new(config);
+        wsts_coordinator.current_dkg_id = *block_height;
         Self(wsts_coordinator)
     }
 
@@ -270,13 +314,18 @@ impl WstsCoordinator for FireCoordinator {
 
         let signer_public_keys = encrypted_shares.signer_set_public_keys();
         let threshold = encrypted_shares.signature_share_threshold;
-        let mut coordinator = Self::new(signer_public_keys, threshold, signer_private_key);
+        let block_height = encrypted_shares.started_at_bitcoin_block_height;
+        let mut coordinator = Self::new(
+            signer_public_keys,
+            threshold,
+            signer_private_key,
+            block_height,
+        );
 
         let aggregate_key = encrypted_shares.aggregate_key.into();
         coordinator
             .set_key_and_party_polynomials(aggregate_key, party_polynomials)
             .map_err(Error::wsts_coordinator)?;
-        coordinator.current_dkg_id = 1;
 
         coordinator
             .move_to(WstsState::Idle)
@@ -297,8 +346,12 @@ impl WstsCoordinator for FireCoordinator {
     fn start_signing_round(
         &mut self,
         message: &[u8],
+        bitcoin_chain_tip: &BitcoinBlockHash,
         signature_type: SignatureType,
     ) -> Result<Packet, Error> {
+        // TODO: Revisit when https://github.com/stacks-sbtc/wsts/pull/198
+        // is merged and we updated the WSTS dependency with those changes.
+        self.0.current_sign_id = construct_signing_round_id(message, bitcoin_chain_tip);
         self.0
             .start_signing_round(message, signature_type)
             .map_err(Error::wsts_coordinator)
@@ -306,7 +359,12 @@ impl WstsCoordinator for FireCoordinator {
 }
 
 impl WstsCoordinator for FrostCoordinator {
-    fn new<I>(signers: I, threshold: u16, message_private_key: PrivateKey) -> Self
+    fn new<I>(
+        signers: I,
+        threshold: u16,
+        message_private_key: PrivateKey,
+        block_height: BitcoinBlockHeight,
+    ) -> Self
     where
         I: IntoIterator<Item = PublicKey>,
     {
@@ -340,7 +398,10 @@ impl WstsCoordinator for FrostCoordinator {
             signer_public_keys,
         };
 
-        let wsts_coordinator = frost::Coordinator::new(config);
+        let mut wsts_coordinator = frost::Coordinator::new(config);
+        // TODO: Revisit when https://github.com/stacks-sbtc/wsts/pull/198
+        // is merged and we updated the WSTS dependency with those changes.
+        wsts_coordinator.current_dkg_id = *block_height;
         Self(wsts_coordinator)
     }
 
@@ -374,13 +435,18 @@ impl WstsCoordinator for FrostCoordinator {
 
         let signer_public_keys = encrypted_shares.signer_set_public_keys();
         let threshold = encrypted_shares.signature_share_threshold;
-        let mut coordinator = Self::new(signer_public_keys, threshold, signer_private_key);
+        let block_height = encrypted_shares.started_at_bitcoin_block_height;
+        let mut coordinator = Self::new(
+            signer_public_keys,
+            threshold,
+            signer_private_key,
+            block_height,
+        );
 
         let aggregate_key = encrypted_shares.aggregate_key.into();
         coordinator
             .set_key_and_party_polynomials(aggregate_key, party_polynomials)
             .map_err(Error::wsts_coordinator)?;
-        coordinator.current_dkg_id = 1;
 
         coordinator
             .move_to(WstsState::Idle)
@@ -401,8 +467,13 @@ impl WstsCoordinator for FrostCoordinator {
     fn start_signing_round(
         &mut self,
         message: &[u8],
+        _: &BitcoinBlockHash,
         signature_type: SignatureType,
     ) -> Result<Packet, Error> {
+        // The current sign ID is private in the FROST coordinator so we
+        // cannot set it.
+        // TODO: Revisit when https://github.com/stacks-sbtc/wsts/pull/198
+        // is merged and we updated the WSTS dependency with those changes.
         self.0
             .start_signing_round(message, signature_type)
             .map_err(Error::wsts_coordinator)

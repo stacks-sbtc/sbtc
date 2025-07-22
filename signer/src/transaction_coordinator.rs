@@ -338,7 +338,7 @@ where
         let should_coordinate_dkg =
             should_coordinate_dkg(&self.context, &bitcoin_chain_tip).await?;
         let aggregate_key = if should_coordinate_dkg {
-            match self.coordinate_dkg(bitcoin_chain_tip.as_ref()).await {
+            match self.coordinate_dkg(&bitcoin_chain_tip).await {
                 Ok(key) => key,
                 Err(error) => {
                     tracing::error!(%error, "failed to coordinate DKG; using existing aggregate key");
@@ -1481,12 +1481,10 @@ where
     ) -> Result<(), Error> {
         let db = self.context.get_storage();
         let sighashes = transaction.construct_digests()?;
-        let mut fire_coordinator = FireCoordinator::load(
-            &db,
-            sighashes.signers_aggregate_key.into(),
-            self.private_key,
-        )
-        .await?;
+        let locking_public_key = sighashes.signers_aggregate_key.into();
+        let mut fire_coordinator =
+            FireCoordinator::load(&db, locking_public_key, self.private_key).await?;
+
         let msg = sighashes.signers.to_raw_hash().to_byte_array();
 
         let txid = transaction.tx.compute_txid();
@@ -1606,7 +1604,7 @@ where
     where
         Coordinator: WstsCoordinator,
     {
-        let outbound = coordinator.start_signing_round(msg, signature_type)?;
+        let outbound = coordinator.start_signing_round(msg, bitcoin_chain_tip, signature_type)?;
 
         // We create a signal stream before sending a message so that there
         // is no race condition with the steam and the getting a response.
@@ -1639,13 +1637,16 @@ where
     #[tracing::instrument(skip_all)]
     async fn coordinate_dkg(
         &mut self,
-        chain_tip: &model::BitcoinBlockHash,
+        chain_tip: &model::BitcoinBlockRef,
     ) -> Result<PublicKey, Error> {
         tracing::info!("Coordinating DKG");
+        let block_hash = chain_tip.block_hash;
         // Get the current signer set for running DKG.
         let signer_set = self.context.config().signer.bootstrap_signing_set.clone();
 
-        let mut state_machine = FireCoordinator::new(signer_set, self.threshold, self.private_key);
+        let block_height = chain_tip.block_height;
+        let mut state_machine =
+            FireCoordinator::new(signer_set, self.threshold, self.private_key, block_height);
 
         // Okay let's move the coordinator state machine to the beginning
         // of the DKG phase.
@@ -1657,10 +1658,7 @@ where
             .start_public_shares()
             .map_err(Error::wsts_coordinator)?;
 
-        // We identify the DKG round by a 32-byte hash based on the coordinator
-        // identity and current bitcoin chain tip.
-        let identifier = self.coordinator_id(chain_tip);
-        let id = WstsMessageId::Dkg(identifier);
+        let id = WstsMessageId::Dkg(chain_tip.block_hash.into_bytes());
         let msg = message::WstsMessage { id, inner: outbound.msg };
 
         // We create a signal stream before sending a message so that there
@@ -1674,12 +1672,12 @@ where
         // running on the signers will pick up this message and act on it,
         // including our own. When they do they create a signing state
         // machine and begin DKG.
-        self.send_message(msg, chain_tip).await?;
+        self.send_message(msg, &block_hash).await?;
 
         // Now that DKG has "begun" we need to drive it to completion.
         let max_duration = self.dkg_max_duration;
         let dkg_fut =
-            self.drive_wsts_state_machine(signal_stream, chain_tip, &mut state_machine, id);
+            self.drive_wsts_state_machine(signal_stream, &block_hash, &mut state_machine, id);
 
         let operation_result = tokio::time::timeout(max_duration, dkg_fut)
             .await
@@ -2198,16 +2196,6 @@ where
             sbtc_limits,
             max_deposits_per_bitcoin_tx,
         }))
-    }
-
-    /// This function provides a deterministic 32-byte identifier for the
-    /// signer.
-    fn coordinator_id(&self, chain_tip: &model::BitcoinBlockHash) -> [u8; 32] {
-        sha2::Sha256::new_with_prefix("SIGNER_COORDINATOR_ID")
-            .chain_update(self.signer_public_key().serialize())
-            .chain_update(chain_tip.into_bytes())
-            .finalize()
-            .into()
     }
 
     /// Takes a [`Payload`], converts it to a [`Message`], signs it with the
