@@ -271,7 +271,6 @@ async fn run_dkg_and_store_results_for_signers<'s: 'r, 'r, S, Rng>(
         .run_dkg(
             bitcoin_chain_tip,
             dkg_txid.into(),
-            rng,
             model::DkgSharesStatus::Verified,
         )
         .await;
