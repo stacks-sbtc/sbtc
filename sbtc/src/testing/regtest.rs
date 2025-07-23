@@ -269,6 +269,26 @@ impl Faucet {
         let desc = descriptor_base(&public_key, kind);
         let descriptor_info = self.rpc.get_descriptor_info(&desc).unwrap();
 
+        // This isn't part of the bitcoincore_rpc API, unfortunately.
+        let list_descriptors_request = self
+            .rpc
+            .get_jsonrpc_client()
+            .build_request("listdescriptors", None);
+        let list_descriptors_response = self
+            .rpc
+            .get_jsonrpc_client()
+            .send_request(list_descriptors_request)
+            .expect("failed to list descriptors");
+
+        if list_descriptors_response
+            .result
+            .is_some_and(|f| f.get().contains(&descriptor_info.descriptor))
+        {
+            // The descriptor is already tracked, no need to import it again.
+            // This avoids a scan of the entire blockchain.
+            return;
+        }
+
         let req = ImportDescriptors {
             descriptor: descriptor_info.descriptor,
             label: label.map(ToString::to_string),
@@ -278,6 +298,7 @@ impl Faucet {
             next_index: None,
             range: None,
         };
+
         let response = self.rpc.import_descriptors(req).unwrap();
         response.into_iter().for_each(|item| assert!(item.success));
     }
