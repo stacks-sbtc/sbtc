@@ -2976,19 +2976,28 @@
       },
       "DepositWithStatus": {
         "type": "object",
-        "description": "Wrapper for deposit with status code. Used for multi-status responses.",
+        "description": "Wrapper for deposit with status code. Used for multi-status responses.\nNote: logically, exactly one field among `error` and `deposit` should be `None`,\nand exactly one should be `Some`, so, storing them as `Result` would be more correct.\nHowever, utopia, which we use for openAPI schema generation, does not allow `Result`\nusage in its structs, and we have to use two `Option`s",
         "required": [
-          "deposit",
           "status"
         ],
         "properties": {
           "deposit": {
-            "$ref": "#/components/schemas/Deposit"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Deposit"
+              }
+            ],
+            "nullable": true
+          },
+          "error": {
+            "type": "string",
+            "description": "A string explaining the error that occurred during the deposit update.",
+            "nullable": true
           },
           "status": {
             "type": "integer",
             "format": "int32",
-            "description": "HTTP status code, returned as part of multi-status responses.",
+            "description": "HTTP status code for the deposit processing result.",
             "minimum": 0
           }
         }
@@ -3464,20 +3473,29 @@
       },
       "WithdrawalWithStatus": {
         "type": "object",
-        "description": "Wrapper for withdrawal with status code. Used for multi-status responses.",
+        "description": "Wrapper for withdrawal with status code. Used for multi-status responses.\nNote: logically, exactly one field among `error` and `withdrawal` should be `None`,\nand exactly one should be `Some`, so, storing them as `Result` would be more correct.\nHowever, utopia, which we use for openAPI schema generation, does not allow `Result`\nusage in its structs, and we have to use two `Option`s",
         "required": [
-          "withdrawal",
           "status"
         ],
         "properties": {
+          "error": {
+            "type": "string",
+            "description": "String explaining error occured during updating the withdrawal.",
+            "nullable": true
+          },
           "status": {
             "type": "integer",
             "format": "int32",
-            "description": "HTTP status code, returned as part of multi-status responses.",
+            "description": "HTTP status code for the withdrawal processing result.",
             "minimum": 0
           },
           "withdrawal": {
-            "$ref": "#/components/schemas/Withdrawal"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Withdrawal"
+              }
+            ],
+            "nullable": true
           }
         }
       }

@@ -7,10 +7,10 @@ use std::time::Duration;
 use clarity::util::secp256k1::Secp256k1PublicKey;
 use clarity::vm::types::PrincipalData;
 use fake::Fake;
-use rand::rngs::OsRng;
 use stacks_common::address::AddressHashMode;
 use stacks_common::address::C32_ADDRESS_VERSION_TESTNET_MULTISIG;
 use stacks_common::types::chainstate::StacksAddress;
+use wsts::net::Message as WstsNetMessage;
 use wsts::net::SignatureType;
 use wsts::state_machine::StateMachine as _;
 use wsts::state_machine::coordinator;
@@ -26,6 +26,7 @@ use crate::network;
 use crate::network::MessageTransfer as _;
 use crate::storage;
 use crate::storage::model;
+use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::EncryptedDkgShares;
 use crate::storage::model::StacksPrincipal;
 use crate::wsts_state_machine;
@@ -149,7 +150,7 @@ impl Coordinator {
             .start_public_shares()
             .expect("failed to start public shares");
 
-        self.send_packet(bitcoin_chain_tip, id, outbound).await;
+        self.send_packet(bitcoin_chain_tip, id, outbound.msg).await;
 
         match self.loop_until_result(bitcoin_chain_tip, id).await {
             wsts::state_machine::OperationResult::Dkg(aggregate_key) => {
@@ -172,7 +173,7 @@ impl Coordinator {
             .start_signing_round(msg, signature_type)
             .expect("failed to start signing round");
 
-        self.send_packet(bitcoin_chain_tip, id, outbound).await;
+        self.send_packet(bitcoin_chain_tip, id, outbound.msg).await;
 
         match self.loop_until_result(bitcoin_chain_tip, id).await {
             wsts::state_machine::OperationResult::SignTaproot(signature)
@@ -206,7 +207,7 @@ impl Coordinator {
 
                 if let Some(packet) = outbound_packet {
                     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                    self.send_packet(bitcoin_chain_tip, id, packet).await;
+                    self.send_packet(bitcoin_chain_tip, id, packet.msg).await;
                 }
 
                 if let Some(result) = operation_result {
@@ -234,9 +235,11 @@ impl Signer {
         signer_info: SignerInfo,
         threshold: u32,
     ) -> Self {
+        let created_at: BitcoinBlockRef = fake::Faker.fake();
         let wsts_signer = wsts_state_machine::SignerStateMachine::new(
             signer_info.signer_public_keys,
             threshold,
+            created_at,
             signer_info.signer_private_key,
         )
         .expect("failed to construct state machine");
@@ -251,7 +254,6 @@ impl Signer {
     /// Participate in a DKG round and return the result
     pub async fn run_until_dkg_end(mut self) -> Self {
         let future = async move {
-            let mut rng = OsRng;
             loop {
                 let msg = self.network.receive().await.expect("network error");
                 let bitcoin_chain_tip = msg.bitcoin_chain_tip;
@@ -260,25 +262,22 @@ impl Signer {
                     continue;
                 };
 
-                let packet = wsts::net::Packet {
-                    msg: wsts_msg.inner,
-                    sig: Vec::new(),
-                };
-
-                let outbound_packets = self
+                let outbound_messages = self
                     .wsts_signer
-                    .process_inbound_messages(&[packet], &mut rng)
+                    .process(&wsts_msg.inner)
                     .expect("message processing failed");
 
-                for packet in outbound_packets {
+                for message in outbound_messages {
                     self.wsts_signer
-                        .process_inbound_messages(&[packet.clone()], &mut rng)
+                        .process(&message)
                         .expect("message processing failed");
 
-                    self.send_packet(bitcoin_chain_tip, wsts_msg.id, packet.clone())
+                    let dkg_has_ended = matches!(message, WstsNetMessage::DkgEnd(_));
+
+                    self.send_packet(bitcoin_chain_tip, wsts_msg.id, message)
                         .await;
 
-                    if let wsts::net::Message::DkgEnd(_) = packet.msg {
+                    if dkg_has_ended {
                         return self;
                     }
                 }
@@ -292,7 +291,6 @@ impl Signer {
     /// Participate in a signing round and return the result
     pub async fn run_until_signature_share_response(mut self) -> Self {
         let future = async move {
-            let mut rng = OsRng;
             loop {
                 let msg = self.network.receive().await.expect("network error");
                 let bitcoin_chain_tip = msg.bitcoin_chain_tip;
@@ -301,25 +299,23 @@ impl Signer {
                     continue;
                 };
 
-                let packet = wsts::net::Packet {
-                    msg: wsts_msg.inner,
-                    sig: Vec::new(),
-                };
-
-                let outbound_packets = self
+                let outbound_messages = self
                     .wsts_signer
-                    .process_inbound_messages(&[packet], &mut rng)
+                    .process(&wsts_msg.inner)
                     .expect("message processing failed");
 
-                for packet in outbound_packets {
+                for message in outbound_messages {
                     self.wsts_signer
-                        .process_inbound_messages(&[packet.clone()], &mut rng)
+                        .process(&message)
                         .expect("message processing failed");
 
-                    self.send_packet(bitcoin_chain_tip, wsts_msg.id, packet.clone())
+                    let signing_round_ended =
+                        matches!(message, WstsNetMessage::SignatureShareResponse(_));
+
+                    self.send_packet(bitcoin_chain_tip, wsts_msg.id, message)
                         .await;
 
-                    if let wsts::net::Message::SignatureShareResponse(_) = packet.msg {
+                    if signing_round_ended {
                         return self;
                     }
                 }
@@ -344,9 +340,9 @@ trait WstsEntity {
         &mut self,
         bitcoin_chain_tip: model::BitcoinBlockHash,
         id: WstsMessageId,
-        packet: wsts::net::Packet,
+        wsts_message: WstsNetMessage,
     ) {
-        let payload: message::Payload = message::WstsMessage { id, inner: packet.msg }.into();
+        let payload: message::Payload = message::WstsMessage { id, inner: wsts_message }.into();
 
         let msg = payload
             .to_message(bitcoin_chain_tip)
@@ -404,11 +400,10 @@ impl SignerSet {
 
     /// Run DKG and return the private and public shares
     /// for all signers
-    pub async fn run_dkg<Rng: rand::RngCore + rand::CryptoRng>(
+    pub async fn run_dkg(
         &mut self,
         bitcoin_chain_tip: model::BitcoinBlockHash,
         id: WstsMessageId,
-        rng: &mut Rng,
         dkg_shares_status: model::DkgSharesStatus,
     ) -> (PublicKey, Vec<model::EncryptedDkgShares>) {
         let mut signer_handles = Vec::new();
@@ -424,11 +419,6 @@ impl SignerSet {
             self.signers.push(signer)
         }
 
-        let started_at = model::BitcoinBlockRef {
-            block_hash: bitcoin_chain_tip,
-            block_height: 0u64.into(),
-        };
-
         (
             aggregate_key,
             self.signers
@@ -436,7 +426,7 @@ impl SignerSet {
                 .map(|signer| {
                     let mut shares = signer
                         .wsts_signer
-                        .get_encrypted_dkg_shares(rng, &started_at)
+                        .get_encrypted_dkg_shares()
                         .expect("failed to get encrypted shares");
                     shares.dkg_shares_status = dkg_shares_status;
                     shares
@@ -548,7 +538,6 @@ mod tests {
             .run_dkg(
                 bitcoin_chain_tip,
                 txid.into(),
-                &mut rng,
                 model::DkgSharesStatus::Unverified,
             )
             .await;
