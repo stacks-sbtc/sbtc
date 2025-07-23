@@ -304,9 +304,8 @@ where
 
         let bitcoin_chain_tip = self
             .context
-            .get_storage()
-            .get_bitcoin_canonical_chain_tip_ref()
-            .await?
+            .state()
+            .bitcoin_chain_tip()
             .ok_or(Error::NoChainTip)?;
 
         let span = tracing::Span::current();
@@ -793,7 +792,7 @@ where
         );
 
         for req in swept_deposits {
-            if &self.context.state().bitcoin_chain_tip() != chain_tip {
+            if self.context.state().bitcoin_chain_tip().as_ref() != Some(chain_tip) {
                 tracing::info!("new bitcoin chain tip, stopping coordinator activities");
                 return Ok(());
             }
@@ -893,7 +892,7 @@ where
         );
 
         for swept_request in swept_withdrawals {
-            if &self.context.state().bitcoin_chain_tip() != chain_tip {
+            if self.context.state().bitcoin_chain_tip().as_ref() != Some(chain_tip) {
                 tracing::info!("new bitcoin chain tip, stopping coordinator activities");
                 return Ok(());
             }
@@ -916,7 +915,7 @@ where
         }
 
         for withdrawal in rejected_withdrawals {
-            if &self.context.state().bitcoin_chain_tip() != chain_tip {
+            if self.context.state().bitcoin_chain_tip().as_ref() != Some(chain_tip) {
                 tracing::info!("new bitcoin chain tip, stopping coordinator activities");
                 return Ok(());
             }

@@ -941,6 +941,13 @@ async fn run_dkg_from_scratch() {
 
         let network = network.connect(&ctx);
 
+        let chain_tip_ref = db
+            .get_bitcoin_canonical_chain_tip_ref()
+            .await
+            .unwrap()
+            .unwrap();
+        ctx.state().set_bitcoin_chain_tip(chain_tip_ref);
+
         signers.push((ctx, db, kp, network));
     }
 
@@ -1338,6 +1345,13 @@ async fn run_subsequent_dkg() {
         .await;
 
         let network = network.connect(&ctx);
+
+        let chain_tip_ref = db
+            .get_bitcoin_canonical_chain_tip_ref()
+            .await
+            .unwrap()
+            .unwrap();
+        ctx.state().set_bitcoin_chain_tip(chain_tip_ref);
 
         signers.push((ctx, db, kp, network));
     }
@@ -5891,6 +5905,7 @@ async fn should_handle_dkg_coordination_failure() {
     context
         .state()
         .update_current_signer_set(signer_keys.clone());
+    context.state().set_bitcoin_chain_tip(chain_tip);
 
     // Mock the stacks client to handle contract source checks
     context
