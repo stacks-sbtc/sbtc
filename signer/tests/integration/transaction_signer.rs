@@ -1009,7 +1009,6 @@ async fn nonce_response_unique_nonces() {
         // We use this private key because it needs to be associated with
         // one of the public keys that we stored in the DKG shares table.
         signer_private_key: setup.signers.private_key(),
-        threshold: 2,
         rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
         last_presign_block: None,
