@@ -266,8 +266,11 @@ impl Poller {
     }
 }
 
-/// A stream provider that connects to a Bitcoin Core ZMQ endpoint,
-/// polls for block hash messages, and broadcasts them to multiple subscribers.
+/// The `BitcoinCoreMessageDispatcher` is responsible for managing the ZMQ polling task
+/// and providing a stream of block hashes received from the Bitcoin Core ZMQ interface.
+/// It connects to the specified ZMQ endpoint, listens for block hash messages, and
+/// broadcasts them to subscribers. This implementation ensures reliable message delivery
+/// and handles reconnection logic in case of connection issues.
 #[derive(Clone)]
 pub struct BitcoinCoreMessageDispatcher {
     // The broadcast channel now sends Result<BlockHash, BitcoinZmqError>
@@ -321,7 +324,6 @@ fn calculate_backoff_duration(attempt: u32) -> Duration {
     }
 }
 
-/// Encapsulates the state and logic for the ZMQ polling task.
 impl BitcoinCoreMessageDispatcher {
     /// Creates a new `BitcoinCoreMessageStream` instance that connects to the
     /// specified ZMQ endpoint and starts polling for block hash messages.
