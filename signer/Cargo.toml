@@ -69,8 +69,10 @@ tonic-build.workspace = true
 
 [dev-dependencies]
 bitcoincore-rpc.workspace = true
+madhouse.workspace = true
 mockito.workspace = true
 more-asserts.workspace = true
+proptest.workspace = true
 ripemd.workspace = true
 sbtc = { workspace = true, features = ["testing"] }
 # We need this so that we have access to "testing" feature code in our

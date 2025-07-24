@@ -1250,7 +1250,7 @@ async fn max_one_state_machine_per_bitcoin_block_hash_for_dkg() {
 /// [`MockedTxSigner::validate_dkg_verification_message`] function. See
 /// [`MockedTxSigner`] for information on the validations that these tests
 /// are asserting.
-mod validate_dkg_verification_message {
+pub mod validate_dkg_verification_message {
     use secp256k1::Keypair;
 
     use signer::{
@@ -1262,7 +1262,8 @@ mod validate_dkg_verification_message {
 
     /// Helper struct for testing
     /// [`MockedTxSigner::validate_dkg_verification_message`].
-    struct TestParams {
+    #[derive(Debug)]
+    pub struct TestParams {
         pub new_aggregate_key: PublicKeyXOnly,
         pub dkg_verification_window: u16,
         pub bitcoin_chain_tip: BitcoinBlockRef,
@@ -1285,7 +1286,7 @@ mod validate_dkg_verification_message {
     }
 
     impl TestParams {
-        fn new(new_aggregate_key: PublicKeyXOnly) -> Self {
+        pub fn new(new_aggregate_key: PublicKeyXOnly) -> Self {
             Self {
                 new_aggregate_key,
                 ..Self::default()
@@ -1293,7 +1294,7 @@ mod validate_dkg_verification_message {
         }
         /// Executes [`MockedTxSigner::validate_dkg_verification_message`] with
         /// the values in this [`TestParams`] instance.
-        async fn execute(&self, db: &PgStore) -> Result<(), Error> {
+        pub async fn execute(&self, db: &PgStore) -> Result<(), Error> {
             MockedTxSigner::validate_dkg_verification_message::<PgStore>(
                 db,
                 &self.new_aggregate_key,
@@ -1383,6 +1384,26 @@ mod validate_dkg_verification_message {
         ));
 
         testing::storage::drop_db(db).await;
+    }
+
+    use std::sync::Arc;
+
+    use crate::commands::{
+        CreateFailedDkgShares, Ctx, VerifyDkgVerificationFailed, WriteDkgShares,
+    };
+    use madhouse::prelude::*;
+    use proptest::prelude::*;
+
+    #[test]
+    fn latest_key_in_failed_state_scenario() {
+        let test_context = Arc::new(Ctx::new());
+
+        scenario![
+            test_context,
+            CreateFailedDkgShares,
+            WriteDkgShares,
+            VerifyDkgVerificationFailed,
+        ]
     }
 
     #[tokio::test]

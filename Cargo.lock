@@ -3624,6 +3624,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "madhouse"
+version = "0.2.0"
+source = "git+https://github.com/stacks-network/madhouse-rs.git?tag=0.2.1#5d4d51bedf2d56c8ef0643d891fb085df1615c91"
+dependencies = [
+ "proptest",
+]
+
+[[package]]
 name = "match_cfg"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5798,6 +5806,7 @@ dependencies = [
  "include_dir",
  "libp2p",
  "lru",
+ "madhouse",
  "metrics",
  "metrics-exporter-prometheus",
  "mockall",
@@ -5805,6 +5814,7 @@ dependencies = [
  "more-asserts",
  "p256k1",
  "polynomial",
+ "proptest",
  "prost",
  "rand",
  "rand_chacha",
