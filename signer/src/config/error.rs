@@ -92,8 +92,4 @@ pub enum SignerConfigError {
     /// See https://github.com/stacks-sbtc/sbtc/issues/1694
     #[error("Bootstrap signer set must be at most 16 signers, but it contains {0} signers")]
     TooManySigners(usize),
-
-    /// URL list was empty during deserialization for a list defined as non-empty.
-    #[error("URL list may not be empty; specify at least one URL")]
-    EmptyUrlList,
 }

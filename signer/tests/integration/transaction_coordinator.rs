@@ -56,6 +56,7 @@ use signer::bitcoin::utxo::DepositRequest;
 use signer::bitcoin::utxo::Fees;
 use signer::bitcoin::utxo::TxDeconstructor as _;
 use signer::bitcoin::validation::WithdrawalValidationResult;
+use signer::bitcoin::zmq::BitcoinCoreMessageDispatcher;
 use signer::block_observer;
 use signer::context::P2PEvent;
 use signer::context::RequestDeciderEvent;
@@ -72,13 +73,13 @@ use signer::storage::model::WithdrawalTxOutput;
 use signer::testing::btc::get_canonical_chain_tip;
 use signer::testing::get_rng;
 
-use signer::testing::FutureExt as _;
 use signer::testing::FuturesIterExt as _;
-use signer::testing::Sleep;
 use signer::transaction_coordinator::given_key_is_coordinator;
 use signer::transaction_coordinator::should_coordinate_dkg;
 use signer::transaction_signer::STACKS_SIGN_REQUEST_LRU_SIZE;
 use signer::transaction_signer::assert_allow_dkg_begin;
+use signer::util::FutureExt;
+use signer::util::Sleep;
 use signer::wsts_state_machine::construct_signing_round_id;
 use testing_emily_client::apis::chainstate_api;
 use testing_emily_client::apis::testing_api;
@@ -163,7 +164,6 @@ use crate::setup::set_deposit_completed;
 use crate::setup::set_deposit_incomplete;
 use crate::utxo_construction::generate_withdrawal;
 use crate::utxo_construction::make_deposit_request;
-use crate::zmq::BITCOIN_CORE_ZMQ_ENDPOINT;
 
 type IntegrationTestContext<Stacks> = TestContext<PgStore, BitcoinCoreClient, Stacks, EmilyClient>;
 
@@ -776,10 +776,10 @@ async fn deploy_smart_contracts_coordinator() {
             ev.run().await
         });
 
+        let bitcoin_block_provider = BitcoinCoreMessageDispatcher::new_for_regtest().await;
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT)
-                .await,
+            bitcoin_block_provider,
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -1649,10 +1649,10 @@ async fn pseudo_random_dkg() {
             ev.run().await
         });
 
+        let bitcoin_block_provider = BitcoinCoreMessageDispatcher::new_for_regtest().await;
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT)
-                .await,
+            bitcoin_block_provider,
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -2041,10 +2041,10 @@ async fn sign_bitcoin_transaction() {
             ev.run().await
         });
 
+        let bitcoin_block_provider = BitcoinCoreMessageDispatcher::new_for_regtest().await;
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT)
-                .await,
+            bitcoin_block_provider,
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -2380,10 +2380,10 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
             ev.run().await
         });
 
+        let bitcoin_block_provider = BitcoinCoreMessageDispatcher::new_for_regtest().await;
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT)
-                .await,
+            bitcoin_block_provider,
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -2892,10 +2892,10 @@ async fn wsts_ids_set_during_dkg_and_signing_rounds() {
             ev.run().await
         });
 
+        let bitcoin_block_provider = BitcoinCoreMessageDispatcher::new_for_regtest().await;
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT)
-                .await,
+            bitcoin_block_provider,
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -3259,10 +3259,10 @@ async fn skip_signer_activites_after_key_rotation() {
             ev.run().await
         });
 
+        let bitcoin_block_provider = BitcoinCoreMessageDispatcher::new_for_regtest().await;
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT)
-                .await,
+            bitcoin_block_provider,
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -3810,10 +3810,10 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
             ev.run().await
         });
 
+        let bitcoin_block_provider = BitcoinCoreMessageDispatcher::new_for_regtest().await;
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT)
-                .await,
+            bitcoin_block_provider,
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -4547,10 +4547,10 @@ async fn test_conservative_initial_sbtc_limits() {
             ev.run().await
         });
 
+        let bitcoin_block_provider = BitcoinCoreMessageDispatcher::new_for_regtest().await;
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT)
-                .await,
+            bitcoin_block_provider,
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -4767,10 +4767,10 @@ async fn sign_bitcoin_transaction_withdrawals() {
             ev.run().await
         });
 
+        let bitcoin_block_provider = BitcoinCoreMessageDispatcher::new_for_regtest().await;
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT)
-                .await,
+            bitcoin_block_provider,
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -6281,10 +6281,10 @@ async fn reuse_nonce_attack() {
             ev.run().await
         });
 
+        let bitcoin_block_provider = BitcoinCoreMessageDispatcher::new_for_regtest().await;
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT)
-                .await,
+            bitcoin_block_provider,
         };
         let counter = start_count.clone();
         tokio::spawn(async move {

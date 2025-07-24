@@ -12,7 +12,7 @@ use clap::ValueEnum;
 use signer::api;
 use signer::api::ApiState;
 use signer::bitcoin::rpc::BitcoinCoreClient;
-use signer::bitcoin::zmq::BitcoinCoreMessageStream;
+use signer::bitcoin::zmq::BitcoinCoreMessageDispatcher;
 use signer::block_observer;
 use signer::blocklist_client::BlocklistClient;
 use signer::config::Settings;
@@ -330,15 +330,19 @@ async fn run_block_observer(ctx: impl Context) -> Result<(), Error> {
 
     // TODO: Need to handle multiple endpoints, so some sort of
     // failover-stream-wrapper.
-    let endpoint = config.bitcoin.block_hash_stream_endpoints[0].as_str();
-    let stream = BitcoinCoreMessageStream::new_from_endpoint(endpoint)
-        .await
-        .unwrap();
+    let endpoint = config
+        .bitcoin
+        .block_hash_stream_endpoints
+        .first()
+        .ok_or_else(|| Error::NoBitcoinCoreZmqEndpoints)?
+        .as_str();
+
+    let bitcoin_block_provider = BitcoinCoreMessageDispatcher::new_from_endpoint(endpoint).await?;
 
     // TODO: We should have a new() method that builds from the context
     let block_observer = block_observer::BlockObserver {
         context: ctx,
-        bitcoin_blocks: stream.to_block_hash_stream(),
+        bitcoin_block_provider,
     };
 
     block_observer.run().await

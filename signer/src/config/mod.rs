@@ -21,7 +21,6 @@ use crate::config::serialization::duration_seconds_deserializer;
 use crate::config::serialization::p2p_multiaddr_deserializer_vec;
 use crate::config::serialization::parse_stacks_address;
 use crate::config::serialization::private_key_deserializer;
-use crate::config::serialization::url_deserializer_non_empty_vec;
 use crate::config::serialization::url_deserializer_single;
 use crate::config::serialization::url_deserializer_vec;
 use crate::keys::PrivateKey;
@@ -132,7 +131,7 @@ pub struct BitcoinConfig {
     pub rpc_endpoints: Vec<Url>,
 
     /// Bitcoin ZeroMQ block-hash stream endpoint.
-    #[serde(deserialize_with = "url_deserializer_non_empty_vec")]
+    #[serde(deserialize_with = "url_deserializer_vec")]
     pub block_hash_stream_endpoints: Vec<Url>,
 }
 

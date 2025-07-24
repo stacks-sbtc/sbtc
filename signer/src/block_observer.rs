@@ -766,11 +766,10 @@ mod tests {
         // There must be at least one signal receiver alive when the block observer
         // later tries to send a signal, hence this line.
         let _signal_rx = ctx.get_signal_receiver();
-        let block_hash_stream = test_harness.spawn_block_hash_stream();
 
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_block_provider: block_hash_stream,
+            bitcoin_block_provider: test_harness.clone(),
         };
 
         let handle = tokio::spawn(block_observer.run());

@@ -11,7 +11,9 @@ use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc_json::Utxo;
 use fake::Fake as _;
 use futures::future::join_all;
+use signer::testing::btc::ManualBlockHashStreamProvider;
 use signer::testing::storage::model::TestBitcoinTxInfo;
+use signer::util::Sleep;
 use test_case::test_case;
 use test_log::test;
 use url::Url;
@@ -368,13 +370,10 @@ async fn deposit_flow() {
         })
         .await;
 
-    let (block_observer_stream_tx, block_observer_stream_rx) = tokio::sync::mpsc::channel(1);
-    let block_stream: tokio_stream::wrappers::ReceiverStream<Result<bitcoin::BlockHash, Error>> =
-        block_observer_stream_rx.into();
-
+    let bitcoin_block_provider = ManualBlockHashStreamProvider::default();
     let block_observer = block_observer::BlockObserver {
         context: context.clone(),
-        bitcoin_blocks: block_stream,
+        bitcoin_block_provider: bitcoin_block_provider.clone(),
     };
 
     let block_observer_handle = tokio::spawn(async move { block_observer.run().await });
@@ -415,12 +414,9 @@ async fn deposit_flow() {
         .expect("cannot create emily deposit");
 
     // Wake up block observer to process the new block
-    block_observer_stream_tx
-        .send(Ok(deposit_block_hash))
-        .await
-        .unwrap();
+    bitcoin_block_provider.send(Ok(deposit_block_hash));
 
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    Sleep::for_millis(500).await;
 
     // Ensure we picked up the new tip
     assert_eq!(

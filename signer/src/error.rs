@@ -98,6 +98,10 @@ pub enum Error {
     #[error("error from bitcoin-core ZMQ: {0}")]
     BitcoinCoreZmq(#[from] BitcoinZmqError),
 
+    /// No ZMQ endpoints are configured.
+    #[error("no bitcoin core ZMQ endpoints are configured, cannot start")]
+    NoBitcoinCoreZmqEndpoints,
+
     /// Indicates an error when decoding a protobuf
     #[error("could not decode protobuf {0}")]
     DecodeProtobuf(#[source] prost::DecodeError),
