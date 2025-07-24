@@ -22,6 +22,18 @@ where
     Ok(v)
 }
 
+pub fn url_deserializer_non_empty_vec<'de, D>(deserializer: D) -> Result<Vec<url::Url>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let v = url_deserializer_vec(deserializer)?;
+    if v.is_empty() {
+        Err(serde::de::Error::custom(SignerConfigError::EmptyUrlList))
+    } else {
+        Ok(v)
+    }
+}
+
 /// A deserializer for the url::Url type. Does not support deserializing a list,
 /// only a single URL.
 pub fn url_deserializer_single<'de, D>(deserializer: D) -> Result<url::Url, D::Error>

@@ -35,6 +35,8 @@ use crate::bitcoin::rpc::BitcoinBlockInfo;
 use crate::bitcoin::rpc::BitcoinTxInfo;
 use crate::bitcoin::rpc::GetTxResponse;
 use crate::bitcoin::utxo;
+use crate::bitcoin::zmq::BitcoinZmqError;
+use crate::bitcoin::zmq::BlockHashStreamProvider;
 use crate::context::SbtcLimits;
 use crate::emily_client::EmilyInteract;
 use crate::error::Error;
@@ -178,7 +180,7 @@ impl TestHarness {
     /// Spawn a Bitcoin block hash stream for testing.
     pub fn spawn_block_hash_stream(
         &self,
-    ) -> tokio_stream::wrappers::ReceiverStream<Result<bitcoin::BlockHash, Error>> {
+    ) -> tokio_stream::wrappers::ReceiverStream<Result<bitcoin::BlockHash, BitcoinZmqError>> {
         let headers: Vec<_> = self
             .bitcoin_blocks
             .iter()
@@ -194,6 +196,15 @@ impl TestHarness {
         });
 
         rx.into()
+    }
+}
+
+impl BlockHashStreamProvider for TestHarness {
+    fn get_block_hash_stream(
+        &self,
+    ) -> impl futures::Stream<Item = Result<BlockHash, BitcoinZmqError>> + Send + Sync + Unpin + 'static
+    {
+        self.spawn_block_hash_stream()
     }
 }
 
