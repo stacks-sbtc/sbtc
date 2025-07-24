@@ -165,7 +165,10 @@ impl Poller {
                 );
                 // If we fail to connect, we must signal the constructor if it's still waiting.
                 if let Some(tx) = self.initial_conn_signal_tx.take() {
-                    let err_msg = format!("initial ZMQ connection attempt failed: {error}");
+                    let err_msg = format!(
+                        "initial ZMQ connection attempt failed for endpoint {}: {error}",
+                        self.endpoint
+                    );
                     let _ = tx.send(Err(BitcoinZmqError::Internal(err_msg)));
                 }
                 return ControlFlow::Reconnect;
