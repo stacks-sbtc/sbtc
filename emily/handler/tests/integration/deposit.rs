@@ -105,15 +105,13 @@ impl DepositTxnData {
         amounts: &[u64],
         recipient: u8,
     ) -> Self {
-        let tx_setup = testing::deposits::tx_setup_with_recipient(
-            lock_time,
-            max_fee,
-            amounts,
-            StacksAddress {
-                version: 0,
-                bytes: stacks_common::util::hash::Hash160([recipient; 20]),
-            },
-        );
+        let stacks_addr =
+            StacksAddress::new(0, stacks_common::util::hash::Hash160([recipient; 20]))
+                .expect("failed to create new stacks addr with recipient");
+
+        let tx_setup =
+            testing::deposits::tx_setup_with_recipient(lock_time, max_fee, amounts, stacks_addr);
+
         Self::from_tx_setup(tx_setup)
     }
 
