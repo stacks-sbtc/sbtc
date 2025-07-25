@@ -1879,7 +1879,6 @@ async fn only_completed_deposit_can_have_fullfillment_sidecar(status: DepositSta
         assert_eq!(deposits.len(), 1);
         let deposit = deposits.first().unwrap();
         assert_eq!(deposit.status, 400);
-        println!("Deposit: {:?}", deposit);
         assert!(deposit.deposit.clone().unwrap().is_none());
         let status_str: String = status
             .to_string()
