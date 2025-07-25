@@ -501,7 +501,7 @@ async fn update_withdrawals() {
     let mut updated_withdrawals = update_withdrawals_response
         .withdrawals
         .iter()
-        .map(|withdrawal| *withdrawal.withdrawal.clone())
+        .map(|withdrawal| *withdrawal.withdrawal.clone().unwrap().unwrap())
         .collect::<Vec<_>>();
     updated_withdrawals.sort_by(arbitrary_withdrawal_partial_cmp);
     expected_withdrawals.sort_by(arbitrary_withdrawal_partial_cmp);
@@ -623,6 +623,8 @@ async fn update_withdrawals_is_forbidden_for_signer(
         assert_eq!(withdrawals.len(), 1);
         let withdrawal = withdrawals.first().unwrap();
         assert_eq!(withdrawal.status, 403);
+        assert!(withdrawal.withdrawal.clone().unwrap().is_none());
+        assert_eq!(withdrawal.error.clone().unwrap().unwrap(), "Forbidden");
 
         // Check withdrawal wasn't updated
         let response = apis::withdrawal_api::get_withdrawal(&user_configuration, request_id)
@@ -638,7 +640,9 @@ async fn update_withdrawals_is_forbidden_for_signer(
             .first()
             .expect("No withdrawal in response")
             .withdrawal
-            .clone();
+            .clone()
+            .unwrap()
+            .unwrap();
         assert_eq!(withdrawal.request_id, request_id);
         assert_eq!(withdrawal.status, new_status);
     }
@@ -753,7 +757,9 @@ async fn update_withdrawals_is_not_forbidden_for_sidecar(
         .first()
         .expect("No withdrawal in response")
         .withdrawal
-        .clone();
+        .clone()
+        .unwrap()
+        .unwrap();
     assert_eq!(withdrawal.request_id, request_id);
     assert_eq!(withdrawal.status, new_status);
 }
@@ -1002,7 +1008,7 @@ async fn emily_process_withdrawal_updates_when_some_of_them_are_unknown() {
             },
         ],
     };
-    let update_responce = apis::withdrawal_api::update_withdrawals_signer(
+    let update_response = apis::withdrawal_api::update_withdrawals_signer(
         &testing_configuration,
         update_withdrawals_request_body,
     )
@@ -1010,13 +1016,28 @@ async fn emily_process_withdrawal_updates_when_some_of_them_are_unknown() {
     .expect("Received an error after making a valid update withdrawal request api call.");
 
     // Check that multistatus response is returned correctly.
-    assert!(update_responce.withdrawals.iter().all(|withdrawal| {
-        if withdrawal.withdrawal.request_id == create_withdrawal_body1.request_id {
-            withdrawal.status == 200
-        } else {
-            withdrawal.status == 404
-        }
-    }));
+    let [correct_update, wrong_update] = &update_response.withdrawals[..] else {
+        panic!("Expected 2 items, got {:?}", update_response.withdrawals);
+    };
+
+    assert_eq!(
+        correct_update
+            .withdrawal
+            .clone()
+            .unwrap()
+            .unwrap()
+            .request_id,
+        create_withdrawal_body1.request_id
+    );
+    assert_eq!(correct_update.status, 200);
+    assert!(correct_update.error.clone().unwrap().is_none());
+
+    assert!(wrong_update.withdrawal.clone().unwrap().is_none());
+    assert_eq!(wrong_update.status, 404);
+    assert_eq!(
+        wrong_update.error.clone().unwrap().unwrap(),
+        "Resource not found"
+    );
 
     // Now we should have 1 accepted withdrawal.
     let withdrawals = apis::withdrawal_api::get_withdrawals(

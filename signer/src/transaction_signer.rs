@@ -55,7 +55,6 @@ use bitcoin::TapSighash;
 use bitcoin::hashes::Hash as _;
 use futures::StreamExt;
 use lru::LruCache;
-use rand::rngs::OsRng;
 use wsts::net::DkgEnd;
 use wsts::net::DkgStatus;
 use wsts::net::Message as WstsNetMessage;
@@ -381,9 +380,10 @@ where
     ) -> Result<MsgChainTipReport, Error> {
         let storage = self.context.get_storage();
 
-        let chain_tip = storage
-            .get_bitcoin_canonical_chain_tip_ref()
-            .await?
+        let chain_tip = self
+            .context
+            .state()
+            .bitcoin_chain_tip()
             .ok_or(Error::NoChainTip)?;
 
         let is_known = storage
@@ -679,6 +679,7 @@ where
                 let state_machine = SignerStateMachine::new(
                     signer_public_keys,
                     threshold,
+                    *chain_tip,
                     self.signer_private_key,
                 )?;
                 let state_machine_id = StateMachineId::Dkg(*chain_tip);
@@ -1171,15 +1172,13 @@ where
         signer_id: u32,
         sender_public_key: &PublicKey,
     ) -> Result<(), Error> {
-        let public_keys = match self.wsts_state_machines.get(state_machine_id) {
-            Some(state_machine) => &state_machine.public_keys,
+        let state_machine = match self.wsts_state_machines.get(state_machine_id) {
+            Some(state_machine) => state_machine,
             None => return Err(Error::MissingStateMachine(*state_machine_id)),
         };
 
-        let wsts_public_key = public_keys
-            .signers
-            .get(&signer_id)
-            .map(PublicKey::from)
+        let wsts_public_key = state_machine
+            .get_signer_public_key(signer_id)
             .ok_or(Error::MissingPublicKey)?;
 
         if &wsts_public_key != sender_public_key {
@@ -1217,12 +1216,11 @@ where
             .get(state_machine_id)
             .ok_or_else(|| Error::MissingStateMachine(*state_machine_id))?;
 
-        let StateMachineId::Dkg(started_at) = state_machine_id else {
+        let StateMachineId::Dkg(_) = state_machine_id else {
             return Err(Error::UnexpectedStateMachineId(*state_machine_id));
         };
 
-        let encrypted_dkg_shares =
-            state_machine.get_encrypted_dkg_shares(&mut self.rng, started_at)?;
+        let encrypted_dkg_shares = state_machine.get_encrypted_dkg_shares()?;
 
         tracing::debug!("🔐 storing DKG shares");
         self.context
@@ -1477,8 +1475,6 @@ where
         msg: &WstsNetMessage,
         bitcoin_chain_tip: &model::BitcoinBlockHash,
     ) -> Result<(), Error> {
-        let mut rng = OsRng;
-
         // Validate that the sender is a valid member of the signing set and
         // has the correct id according to the signer state machine.
         if let Some(signer_id) = signer_id {
@@ -1487,7 +1483,7 @@ where
 
         // Process the message in the WSTS signer state machine.
         let outbound_messages = match self.wsts_state_machines.get_mut(state_machine_id) {
-            Some(state_machine) => state_machine.process(msg, &mut rng).map_err(Error::Wsts)?,
+            Some(state_machine) => state_machine.process(msg)?,
             None => {
                 tracing::warn!("missing signing round");
                 return Err(Error::MissingStateMachine(*state_machine_id));
@@ -1518,8 +1514,7 @@ where
             self.wsts_state_machines
                 .get_mut(state_machine_id)
                 .ok_or_else(|| Error::MissingStateMachine(*state_machine_id))?
-                .process(outbound_message, &mut rng)
-                .map_err(Error::Wsts)?;
+                .process(outbound_message)?;
 
             // If this is a DKG verification then we need to process the message
             // in the FROST state machine as well for it to properly follow

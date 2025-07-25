@@ -806,7 +806,7 @@ async fn update_deposits() {
     let mut updated_deposits = update_deposits_response
         .deposits
         .iter()
-        .map(|deposit| *deposit.deposit.clone())
+        .map(|deposit| *deposit.deposit.clone().unwrap().unwrap())
         .collect::<Vec<_>>();
     updated_deposits.sort_by(arbitrary_deposit_partial_cmp);
     expected_deposits.sort_by(arbitrary_deposit_partial_cmp);
@@ -1056,6 +1056,8 @@ async fn update_deposits_is_forbidden_for_signer(
         assert_eq!(deposits.len(), 1);
         let deposit = deposits.first().unwrap();
         assert_eq!(deposit.status, 403);
+        assert!(deposit.deposit.clone().unwrap().is_none());
+        assert_eq!(deposit.error.clone().unwrap().unwrap(), "Forbidden");
 
         // Check that deposit wasn't updated
         let response = apis::deposit_api::get_deposit(
@@ -1070,12 +1072,14 @@ async fn update_deposits_is_forbidden_for_signer(
     } else {
         assert!(response.is_ok());
         let response = response.unwrap();
-        let deposit = *response
+        let deposit = response
             .deposits
             .first()
             .expect("No deposit in response")
             .deposit
-            .clone();
+            .clone()
+            .unwrap()
+            .unwrap();
         assert_eq!(deposit.bitcoin_txid, bitcoin_txid);
         assert_eq!(deposit.status, new_status);
     }
@@ -1205,12 +1209,14 @@ async fn update_deposits_is_not_forbidden_for_sidecar(
 
     assert!(response.is_ok());
     let response = response.unwrap();
-    let deposit = *response
+    let deposit = response
         .deposits
         .first()
         .expect("No deposit in response")
         .deposit
-        .clone();
+        .clone()
+        .unwrap()
+        .unwrap();
     assert_eq!(deposit.bitcoin_txid, bitcoin_txid);
     assert_eq!(deposit.status, new_status);
 }
@@ -1272,8 +1278,14 @@ async fn rbf_status_saved_successfully() {
     assert!(response.is_ok());
     let response = response.unwrap();
     let deposit = response.deposits.first().expect("No deposit in response");
-    assert_eq!(deposit.deposit.bitcoin_txid, bitcoin_txid);
-    assert_eq!(deposit.deposit.status, DepositStatus::Rbf);
+    assert_eq!(
+        deposit.deposit.clone().unwrap().unwrap().bitcoin_txid,
+        bitcoin_txid
+    );
+    assert_eq!(
+        deposit.deposit.clone().unwrap().unwrap().status,
+        DepositStatus::Rbf
+    );
 
     // Check that the deposit can be retrieved with the correct status.
     let response = apis::deposit_api::get_deposit(&user_configuration, &txid, &index)
@@ -1355,6 +1367,17 @@ async fn replaced_by_tx_for_not_rbf_transactions_is_bad_request(status: DepositS
     assert!(
         deposit.status == 400,
         "Expected a 400 Bad Request status code"
+    );
+    assert!(deposit.deposit.clone().unwrap().is_none());
+    let status_str = status.to_string();
+    let mut chars = status_str.chars();
+    let first = chars.next().unwrap().to_ascii_uppercase();
+    let status_str = first.to_string() + chars.as_str();
+    assert_eq!(
+        deposit.error.clone().unwrap().unwrap(),
+        format!(
+            "deposit with replaced_by_tx is only valid if status is RBF, but got status {status_str} for txid: {bitcoin_txid}, vout: {bitcoin_tx_output_index}"
+        )
     );
 
     // Check that the deposit status wasn't updated.
@@ -1610,7 +1633,7 @@ async fn emily_process_deposit_updates_when_some_of_them_are_unknown() {
             },
         ],
     };
-    let update_responce = apis::deposit_api::update_deposits_signer(
+    let update_response = apis::deposit_api::update_deposits_signer(
         &testing_configuration,
         update_deposits_request_body,
     )
@@ -1618,13 +1641,28 @@ async fn emily_process_deposit_updates_when_some_of_them_are_unknown() {
     .expect("Received an error after making a valid update deposit request api call.");
 
     // Check that multistatus response is returned correctly.
-    assert!(update_responce.deposits.iter().all(|deposit| {
-        if deposit.deposit.bitcoin_txid == create_deposit_body1.bitcoin_txid {
-            deposit.status == 200
-        } else {
-            deposit.status == 404
-        }
-    }));
+    let [wrong_update, correct_update] = &update_response.deposits[..] else {
+        panic!("Expected 2 items, got {:?}", update_response.deposits);
+    };
+
+    assert!(wrong_update.deposit.clone().unwrap().is_none());
+    assert_eq!(wrong_update.status, 404);
+    assert_eq!(
+        wrong_update.error.clone().unwrap().unwrap(),
+        "Resource not found"
+    );
+
+    assert_eq!(
+        correct_update
+            .deposit
+            .clone()
+            .unwrap()
+            .unwrap()
+            .bitcoin_txid,
+        create_deposit_body1.bitcoin_txid
+    );
+    assert_eq!(correct_update.status, 200);
+    assert!(correct_update.error.clone().unwrap().is_none());
 
     // Now we should have 1 accepted deposit.
     let deposits = apis::deposit_api::get_deposits(

@@ -4,6 +4,7 @@ use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::future::Future;
 use std::time::Duration;
+use std::time::Instant;
 
 use bitcoin::Amount;
 use bitcoin::OutPoint;
@@ -30,10 +31,10 @@ use blockstack_lib::net::api::postfeerate::RPCFeeEstimateResponse;
 use blockstack_lib::types::chainstate::StacksAddress;
 use blockstack_lib::types::chainstate::StacksBlockId;
 use clarity::types::StacksEpochId;
+use clarity::vm::Value;
 use clarity::vm::types::OptionalData;
 use clarity::vm::types::TupleData;
 use clarity::vm::types::{BuffData, ListData, SequenceData};
-use clarity::vm::{ClarityName, ContractName, Value};
 use reqwest::StatusCode;
 use reqwest::header::CONTENT_LENGTH;
 use reqwest::header::CONTENT_TYPE;
@@ -43,6 +44,7 @@ use url::Url;
 use crate::config::Settings;
 use crate::error::Error;
 use crate::keys::PublicKey;
+use crate::metrics::Metrics;
 use crate::storage::DbRead;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinBlockHeight;
@@ -70,7 +72,19 @@ const WITHDRAWAL_STATUS_MAP_NAME: &str = "withdrawal-status";
 
 /// This is the name of the read-only function in the sbtc-registry smart
 /// contract that returns the status of a deposit request.
-const DEPOSIT_STATUS_READ_ONLY_FUNCTION_NAME: &str = "get-deposit-status";
+const GET_DEPOSIT_STATUS_FN_NAME: &str = "get-deposit-status";
+
+/// This is the name of the read-only function in the sbtc-registry smart
+/// contract that returns the current signer set data.
+const GET_SIGNER_SET_DATA_FN_NAME: &str = "get-current-signer-data";
+
+/// This is the name of the read-only function in the sbtc-token smart
+/// contract that returns the total supply of sBTC.
+const GET_TOTAL_SUPPLY_FN_NAME: &str = "get-total-supply";
+
+/// This is the name of the data variable in the sbtc-registry smart contract
+/// that stores the current aggregate public key of the signers.
+const CURRENT_AGGREGATE_PUBKEY_DATA_VAR_NAME: &str = "current-aggregate-pubkey";
 
 /// This is a dummy STX transfer payload used only for estimating STX
 /// transfer costs.
@@ -79,6 +93,17 @@ const DUMMY_STX_TRANSFER_PAYLOAD: TransactionPayload = TransactionPayload::Token
     0,
     TokenTransferMemo([0; 34]),
 );
+
+/// The names of all the read-only functions, data variables, and map names
+/// used in the signers for any of the sbtc smart contracts.
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub struct ClarityName(pub &'static str);
+
+impl std::fmt::Display for ClarityName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 trait ExtractFee {
     fn extract_fee(&self, priority: FeePriority) -> Option<RPCFeeEstimate>;
@@ -643,8 +668,8 @@ impl StacksClient {
     pub async fn call_read(
         &self,
         contract_principal: &StacksAddress,
-        contract_name: &ContractName,
-        fn_name: &ClarityName,
+        contract_name: SmartContract,
+        fn_name: ClarityName,
         sender: &StacksAddress,
         arguments: &[Value],
     ) -> Result<Value, Error> {
@@ -680,6 +705,7 @@ impl StacksClient {
             "Fetching contract data variable"
         );
 
+        let instant = Instant::now();
         let response = self
             .client
             .post(url)
@@ -688,6 +714,8 @@ impl StacksClient {
             .send()
             .await
             .map_err(Error::StacksNodeRequest)?;
+
+        Metrics::record_call_read(instant.elapsed(), contract_name, fn_name, &response);
 
         response
             .error_for_status()
@@ -708,13 +736,10 @@ impl StacksClient {
     pub async fn get_data_var(
         &self,
         contract_principal: &StacksAddress,
-        contract_name: &ContractName,
-        var_name: &ClarityName,
+        contract_name: SmartContract,
+        var_name: ClarityName,
     ) -> Result<Value, Error> {
-        let path = format!(
-            "/v2/data_var/{}/{}/{}?proof=0",
-            contract_principal, contract_name, var_name
-        );
+        let path = format!("/v2/data_var/{contract_principal}/{contract_name}/{var_name}?proof=0");
 
         let url = self
             .endpoint
@@ -728,6 +753,7 @@ impl StacksClient {
             "fetching contract data variable"
         );
 
+        let instant = Instant::now();
         let response = self
             .client
             .get(url)
@@ -735,6 +761,8 @@ impl StacksClient {
             .send()
             .await
             .map_err(Error::StacksNodeRequest)?;
+
+        Metrics::record_data_var(instant.elapsed(), contract_name, var_name, &response);
 
         response
             .error_for_status()
@@ -758,8 +786,8 @@ impl StacksClient {
     pub async fn get_map_entry(
         &self,
         contract_principal: &StacksAddress,
-        contract_name: &ContractName,
-        map_name: &ClarityName,
+        contract_name: SmartContract,
+        map_name: ClarityName,
         map_entry: &Value,
     ) -> Result<Option<Value>, Error> {
         let path = format!("/v2/map_entry/{contract_principal}/{contract_name}/{map_name}?proof=0");
@@ -781,6 +809,7 @@ impl StacksClient {
             .map_err(Box::new)
             .map_err(Error::ClarityValueSerialization)?;
 
+        let instant = Instant::now();
         let response = self
             .client
             .post(url)
@@ -790,6 +819,7 @@ impl StacksClient {
             .await
             .map_err(Error::StacksNodeRequest)?;
 
+        Metrics::record_map_entry(instant.elapsed(), contract_name, map_name, &response);
         // It looks like the stacks node returns a 404 if the data is not
         // available, see
         // https://github.com/stacks-network/stacks-core/blob/c1a1f50fddcbc11054fae537103423e21221665a/stackslib/src/net/api/getmapentry.rs#L223-L225C22
@@ -1378,8 +1408,8 @@ impl StacksInteract for StacksClient {
         let result = self
             .call_read(
                 contract_principal,
-                &ContractName::from(SmartContract::SbtcRegistry.contract_name()),
-                &ClarityName::from("get-current-signer-data"),
+                SmartContract::SbtcRegistry,
+                ClarityName(GET_SIGNER_SET_DATA_FN_NAME),
                 contract_principal,
                 &[],
             )
@@ -1426,8 +1456,8 @@ impl StacksInteract for StacksClient {
         let value = self
             .get_data_var(
                 contract_principal,
-                &ContractName::from("sbtc-registry"),
-                &ClarityName::from("current-aggregate-pubkey"),
+                SmartContract::SbtcRegistry,
+                ClarityName(CURRENT_AGGREGATE_PUBKEY_DATA_VAR_NAME),
             )
             .await?;
 
@@ -1439,11 +1469,8 @@ impl StacksInteract for StacksClient {
         deployer: &StacksAddress,
         outpoint: &OutPoint,
     ) -> Result<bool, Error> {
-        // Both ContractName::from and ClarityName::from can panic when
-        // given the "wrong" strings. These particular strings do not
-        // panic, and we test this fact in our unit tests.
-        let contract_name = ContractName::from(SmartContract::SbtcRegistry.contract_name());
-        let fn_name = ClarityName::from(DEPOSIT_STATUS_READ_ONLY_FUNCTION_NAME);
+        let contract_name = SmartContract::SbtcRegistry;
+        let fn_name = ClarityName(GET_DEPOSIT_STATUS_FN_NAME);
 
         // The transaction IDs are written in little endian format when
         // making the contract call that sets the deposit status, so we
@@ -1455,7 +1482,7 @@ impl StacksInteract for StacksClient {
             Value::UInt(outpoint.vout as u128),
         ];
         let result = self
-            .call_read(deployer, &contract_name, &fn_name, deployer, &arguments)
+            .call_read(deployer, contract_name, fn_name, deployer, &arguments)
             .await?;
 
         // The `get-deposit-status` read-only function retrieves values
@@ -1474,15 +1501,12 @@ impl StacksInteract for StacksClient {
         deployer: &StacksAddress,
         request_id: u64,
     ) -> Result<bool, Error> {
-        // Both ContractName::from and ClarityName::from can panic when
-        // given the "wrong" strings. These particular strings do not
-        // panic, and we test this fact in our unit tests.
-        let contract_name = ContractName::from(SmartContract::SbtcRegistry.contract_name());
-        let map_name = ClarityName::from(WITHDRAWAL_STATUS_MAP_NAME);
+        let contract_name = SmartContract::SbtcRegistry;
+        let map_name = ClarityName(WITHDRAWAL_STATUS_MAP_NAME);
 
         let map_entry = Value::UInt(request_id as u128);
         let result = self
-            .get_map_entry(deployer, &contract_name, &map_name, &map_entry)
+            .get_map_entry(deployer, contract_name, map_name, &map_entry)
             .await?;
 
         // This map `withdrawal-status` in the smart contract stores
@@ -1641,8 +1665,8 @@ impl StacksInteract for StacksClient {
         let result = self
             .call_read(
                 deployer,
-                &ContractName::from(SmartContract::SbtcToken.contract_name()),
-                &ClarityName::from("get-total-supply"),
+                SmartContract::SbtcToken,
+                ClarityName(GET_TOTAL_SUPPLY_FN_NAME),
                 deployer,
                 &[],
             )
@@ -1817,6 +1841,7 @@ mod tests {
     use crate::storage::memory::Store;
 
     use clarity::types::Address;
+    use clarity::vm::ClarityName;
     use clarity::vm::types::{
         BuffData, BufferLength, ListData, ListTypeData, SequenceData, SequenceSubtype,
         TypeSignature,
@@ -2303,8 +2328,8 @@ mod tests {
             .get_data_var(
                 &StacksAddress::from_string("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM")
                     .expect("failed to parse stacks address"),
-                &ContractName::from("sbtc-registry"),
-                &ClarityName::from("current-signer-set"),
+                SmartContract::SbtcRegistry,
+                ClarityName("current-signer-set"),
             )
             .await
             .unwrap();

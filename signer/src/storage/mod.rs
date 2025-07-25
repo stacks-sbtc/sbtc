@@ -66,11 +66,13 @@ pub trait DbRead {
     ) -> impl Future<Output = Result<Option<model::StacksBlock>, Error>> + Send;
 
     /// Get the bitcoin canonical chain tip.
+    #[cfg(any(test, feature = "testing"))]
     fn get_bitcoin_canonical_chain_tip(
         &self,
     ) -> impl Future<Output = Result<Option<model::BitcoinBlockHash>, Error>> + Send;
 
     /// Get the bitcoin canonical chain tip.
+    #[cfg(any(test, feature = "testing"))]
     fn get_bitcoin_canonical_chain_tip_ref(
         &self,
     ) -> impl Future<Output = Result<Option<model::BitcoinBlockRef>, Error>> + Send;
@@ -102,7 +104,7 @@ pub trait DbRead {
     /// that generated the aggregate key locking the deposit.
     fn get_pending_accepted_deposit_requests(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
+        chain_tip: &model::BitcoinBlockRef,
         context_window: u16,
         signatures_required: u16,
     ) -> impl Future<Output = Result<Vec<model::DepositRequest>, Error>> + Send;
