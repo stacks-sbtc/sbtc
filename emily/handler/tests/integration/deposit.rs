@@ -1682,7 +1682,7 @@ async fn emily_process_deposit_updates_when_some_of_them_are_unknown() {
 // only after check if such request is allowed for signer.
 #[test_case(DepositStatus::Accepted; "accepted")]
 #[tokio::test]
-async fn only_completed_deposit_can_have_fullfillment_signer(status: DepositStatus) {
+async fn only_completed_deposit_can_have_fulfillment_signer(status: DepositStatus) {
     // the testing configuration has privileged access to all endpoints.
     let testing_configuration = clean_setup().await;
 
