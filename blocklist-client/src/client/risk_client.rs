@@ -219,10 +219,7 @@ mod tests {
     async fn test_get_risk_assessment_high_risk() {
         let mut server = Server::new_async().await;
         let mock = server
-            .mock(
-                "GET",
-                format!("{API_BASE_PATH}/{TEST_ADDRESS}").as_str(),
-            )
+            .mock("GET", format!("{API_BASE_PATH}/{TEST_ADDRESS}").as_str())
             .with_status(200)
             .expect(1)
             .with_body(r#"{"risk": "Severe"}"#)
@@ -245,10 +242,7 @@ mod tests {
     async fn test_get_risk_assessment_invalid_response() {
         let mut server = Server::new_async().await;
         let mock = server
-            .mock(
-                "GET",
-                format!("{API_BASE_PATH}/{TEST_ADDRESS}").as_str(),
-            )
+            .mock("GET", format!("{API_BASE_PATH}/{TEST_ADDRESS}").as_str())
             .with_status(200)
             .expect(1)
             .with_body(r#"{"risky": "Severe"}"#)
@@ -278,10 +272,7 @@ mod tests {
             .with_body(ADDRESS_REGISTRATION_BODY)
             .create();
         let risk_mock = server
-            .mock(
-                "GET",
-                format!("{API_BASE_PATH}/{TEST_ADDRESS}").as_str(),
-            )
+            .mock("GET", format!("{API_BASE_PATH}/{TEST_ADDRESS}").as_str())
             .with_status(200)
             .expect(1)
             .with_body(r#"{"risk": "Severe", "riskReason": "fraud"}"#)
@@ -312,10 +303,7 @@ mod tests {
             .with_body(ADDRESS_REGISTRATION_BODY)
             .create();
         let risk_mock = server
-            .mock(
-                "GET",
-                format!("{API_BASE_PATH}/{TEST_ADDRESS}").as_str(),
-            )
+            .mock("GET", format!("{API_BASE_PATH}/{TEST_ADDRESS}").as_str())
             .with_status(200)
             .expect(1)
             .with_body(r#"{"risk": "Low"}"#)
@@ -368,10 +356,7 @@ mod tests {
             .with_body(ADDRESS_REGISTRATION_BODY)
             .create();
         let risk_mock = server
-            .mock(
-                "GET",
-                format!("{API_BASE_PATH}/{TEST_ADDRESS}").as_str(),
-            )
+            .mock("GET", format!("{API_BASE_PATH}/{TEST_ADDRESS}").as_str())
             .with_status(500)
             .expect(1)
             .with_body(r#"{}"#)

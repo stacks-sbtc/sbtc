@@ -67,10 +67,9 @@ pub fn parse_deep_object(prefix: &str, value: &serde_json::Value) -> Vec<(String
 
         for (key, value) in object {
             match value {
-                serde_json::Value::Object(_) => params.append(&mut parse_deep_object(
-                    &format!("{prefix}[{key}]"),
-                    value,
-                )),
+                serde_json::Value::Object(_) => {
+                    params.append(&mut parse_deep_object(&format!("{prefix}[{key}]"), value))
+                }
                 serde_json::Value::Array(array) => {
                     for (i, value) in array.iter().enumerate() {
                         params.append(&mut parse_deep_object(

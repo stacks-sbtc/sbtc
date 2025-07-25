@@ -114,9 +114,7 @@ fn verbose_not_found_route()
         .and(warp::path::peek())
         .map(|full_path, peek_path| {
             warp::reply::with_status(
-                format!(
-                    "Endpoint not found. Full: {full_path:?} | Peek: {peek_path:?}"
-                ),
+                format!("Endpoint not found. Full: {full_path:?} | Peek: {peek_path:?}"),
                 warp::http::StatusCode::NOT_FOUND,
             )
         })
