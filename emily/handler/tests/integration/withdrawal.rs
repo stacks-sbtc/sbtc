@@ -1165,7 +1165,7 @@ async fn only_confirmed_withdrawals_can_have_fulfillment_sidecar(status: Withdra
 // Signer allowed only to update Pending -> Accepted.
 #[test_case(WithdrawalStatus::Accepted; "accepted")]
 #[tokio::test]
-async fn only_confirmed_withdrawals_can_have_fullfillment_signer(status: WithdrawalStatus) {
+async fn only_confirmed_withdrawals_can_have_fulfillment_signer(status: WithdrawalStatus) {
     // the testing configuration has privileged access to all endpoints.
     let testing_configuration = clean_setup().await;
 
