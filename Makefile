@@ -100,7 +100,8 @@ integration-env-up: emily-cdk-synth
 
 integration-test:
 	cargo $(CARGO_FLAGS) nextest run --features "testing" $(CARGO_EXCLUDES) --test integration --no-fail-fast --test-threads 1
-	uv run --directory emily_sidecar python -m unittest test/test_integration.py
+#	Disabled for 1.0.3 hotfix release as it requires pulling in more, and unrelated changes
+#	uv run --directory emily_sidecar python -m unittest test/test_integration.py
 
 integration-test-build:
 	cargo $(CARGO_FLAGS) test build --features "testing" $(CARGO_EXCLUDES) --test integration --no-run --locked
