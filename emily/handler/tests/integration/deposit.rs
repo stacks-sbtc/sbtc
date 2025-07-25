@@ -1806,7 +1806,7 @@ async fn only_completed_deposit_can_have_fulfillment_signer(status: DepositStatu
 #[test_case(DepositStatus::Failed; "failed")]
 #[test_case(DepositStatus::Confirmed; "confirmed")]
 #[tokio::test]
-async fn only_completed_deposit_can_have_fullfillment_sidecar(status: DepositStatus) {
+async fn only_completed_deposit_can_have_fulfillment_sidecar(status: DepositStatus) {
     // the testing configuration has privileged access to all endpoints.
     let testing_configuration = clean_setup().await;
 
