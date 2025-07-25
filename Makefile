@@ -16,23 +16,46 @@ CARGO_FLAGS := --locked
 # MAIN TARGETS
 # ##############################################################################
 
-install:
+install-py:
+	uv --directory emily_cron venv && uv --directory emily_cron pip sync pyproject.toml
+	uv --directory emily_sidecar venv && uv --directory emily_sidecar pip sync pyproject.toml
+
+install-pnpm:
 	pnpm --recursive install
+
+install: install-py install-pnpm
 
 build: blocklist-client-codegen emily-client-codegen contracts
 	cargo $(CARGO_FLAGS) build --all-targets $(CARGO_EXCLUDES) ${CARGO_BUILD_ARGS}
 
+test-py:
+	uv run --directory emily_cron python -m unittest discover
+	uv run --directory emily_sidecar python -m unittest test/test_main.py
+
 test:
 	cargo $(CARGO_FLAGS) nextest run --features "testing" --lib $(CARGO_EXCLUDES) --no-fail-fast ${CARGO_BUILD_ARGS}
+	make test-py
 	pnpm --recursive test
 
 test-build:
 	cargo $(CARGO_FLAGS) test build --features "testing"  $(CARGO_EXCLUDES) --no-run --locked ${CARGO_BUILD_ARGS}
 
+CARGO_FMT = cargo $(CARGO_FLAGS) fmt --all
+CARGO_CLIPPY_BASE = cargo $(CARGO_FLAGS) clippy --workspace --all-targets --all-features --no-deps
+CLIPPY_FLAGS = -D warnings
+
 lint:
-	cargo $(CARGO_FLAGS) fmt --all -- --check
-	cargo $(CARGO_FLAGS) clippy -- -D warnings
+	$(CARGO_FMT) -- --check
+	$(CARGO_CLIPPY_BASE) -- $(CLIPPY_FLAGS)
 	pnpm --recursive run lint
+
+fix:
+	$(CARGO_FMT)
+	$(CARGO_CLIPPY_BASE) --fix -- $(CLIPPY_FLAGS)
+
+fix-uncommitted:
+	$(CARGO_FMT)
+	$(CARGO_CLIPPY_BASE) --fix --allow-dirty -- $(CLIPPY_FLAGS)
 
 format:
 	cargo $(CARGO_FLAGS) fmt
@@ -44,7 +67,7 @@ clean:
 	cargo $(CARGO_FLAGS) clean
 	pnpm --recursive clean
 
-.PHONY: install build test test-build lint format contracts clean
+.PHONY: install-py install-pnpm install build test-py test test-build lint format contracts clean
 
 # ##############################################################################
 # NEXTEST
@@ -77,6 +100,7 @@ integration-env-up: emily-cdk-synth
 
 integration-test:
 	cargo $(CARGO_FLAGS) nextest run --features "testing" $(CARGO_EXCLUDES) --test integration --no-fail-fast --test-threads 1
+	uv run --directory emily_sidecar python -m unittest test/test_integration.py
 
 integration-test-build:
 	cargo $(CARGO_FLAGS) test build --features "testing" $(CARGO_EXCLUDES) --test integration --no-run --locked
@@ -95,16 +119,14 @@ integration-env-up-ci: emily-cdk-synth
 		INPUT_CDK_TEMPLATE=./emily/cdk/cdk.out/EmilyStack.template.json \
 		OUTPUT_CDK_TEMPLATE=./emily/cdk/cdk.out/EmilyStack.devenv.template.json \
 		LOCAL_LAMBDA_PATH=empty.zip \
-		TRUSTED_REORG_API_KEY=testApiKey \
 		DEPLOYER_ADDRESS=SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS \
 		python3 docker/sbtc/emily-aws-setup/initialize.py
-	cargo $(CARGO_FLAGS) build --bin emily-server
+	cargo $(CARGO_FLAGS) build --bin emily-server --features "testing"
 	AWS_ACCESS_KEY_ID=xxxxxxxxxxxx \
 		AWS_SECRET_ACCESS_KEY=xxxxxxxxxxxx \
 		AWS_REGION=us-west-2 \
-		TRUSTED_REORG_API_KEY=testApiKey \
 		DEPLOYER_ADDRESS=SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS \
-		cargo $(CARGO_FLAGS) run --bin emily-server -- \
+		cargo $(CARGO_FLAGS) run --bin emily-server --features "testing" -- \
 			--host 127.0.0.1 --port 3031 --dynamodb-endpoint http://localhost:8000 > ./target/emily-server.log 2>&1 &
 
 integration-env-down-ci:
@@ -159,7 +181,6 @@ EMILY_CDK_SOURCE_FILES := $(shell find emily/cdk/lib -type f)
 $(EMILY_CDK_TEMPLATE): $(EMILY_CDK_SOURCE_FILES)
 	AWS_STAGE=local \
 	TABLES_ONLY=true \
-	TRUSTED_REORG_API_KEY=testApiKey \
 	DEPLOYER_ADDRESS=SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS \
 	pnpm --filter $(EMILY_CDK_PROJECT_NAME) run synth
 
