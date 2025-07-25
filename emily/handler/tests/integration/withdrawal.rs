@@ -1246,7 +1246,6 @@ async fn only_confirmed_withdrawals_can_have_fullfillment_signer(status: Withdra
         assert_eq!(withdrawals.len(), 1);
         let withdrawal = withdrawals.first().unwrap();
         assert_eq!(withdrawal.status, 400);
-        println!("withdrawal: {:?}", withdrawal);
         assert!(withdrawal.withdrawal.clone().unwrap().is_none());
         let status_str: String = status
             .to_string()
