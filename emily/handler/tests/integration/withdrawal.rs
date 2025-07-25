@@ -1056,7 +1056,7 @@ async fn emily_process_withdrawal_updates_when_some_of_them_are_unknown() {
 #[test_case(WithdrawalStatus::Confirmed; "confirmed")]
 #[test_case(WithdrawalStatus::Failed; "failed")]
 #[tokio::test]
-async fn only_confirmed_withdrawals_can_have_fullfillment_sidecar(status: WithdrawalStatus) {
+async fn only_confirmed_withdrawals_can_have_fulfillment_sidecar(status: WithdrawalStatus) {
     // the testing configuration has privileged access to all endpoints.
     let testing_configuration = clean_setup().await;
 
