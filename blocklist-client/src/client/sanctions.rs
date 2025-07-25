@@ -39,7 +39,7 @@ pub struct SanctionsResponse {
 }
 
 fn risk_assessment_path(base_url: &str, address: &str) -> String {
-    format!("{}{}/{}", base_url, API_BASE_PATH, address)
+    format!("{base_url}{API_BASE_PATH}/{address}")
 }
 
 /// Check risk status associated with a registered address
@@ -174,7 +174,7 @@ mod tests {
         let mock = server
             .mock(
                 "GET",
-                format!("{}/{}", API_BASE_PATH, TEST_ADDRESS).as_str(),
+                format!("{API_BASE_PATH}/{TEST_ADDRESS}").as_str(),
             )
             .with_status(200)
             .with_body(response_json)
@@ -198,7 +198,7 @@ mod tests {
         let mock = server
             .mock(
                 "GET",
-                format!("{}/{}", API_BASE_PATH, TEST_ADDRESS).as_str(),
+                format!("{API_BASE_PATH}/{TEST_ADDRESS}").as_str(),
             )
             .with_status(200)
             .with_body(r#"{"risky": "Severe"}"#)
@@ -229,7 +229,7 @@ mod tests {
         let risk_mock = server
             .mock(
                 "GET",
-                format!("{}/{}", API_BASE_PATH, TEST_ADDRESS).as_str(),
+                format!("{API_BASE_PATH}/{TEST_ADDRESS}").as_str(),
             )
             .with_status(200)
             .with_body(response_json)
@@ -255,7 +255,7 @@ mod tests {
         let risk_mock = server
             .mock(
                 "GET",
-                format!("{}/{}", API_BASE_PATH, TEST_ADDRESS).as_str(),
+                format!("{API_BASE_PATH}/{TEST_ADDRESS}").as_str(),
             )
             .with_status(200)
             .with_body(r#"{"identifications": []}"#)
@@ -300,7 +300,7 @@ mod tests {
         let risk_mock = server
             .mock(
                 "GET",
-                format!("{}/{}", API_BASE_PATH, TEST_ADDRESS).as_str(),
+                format!("{API_BASE_PATH}/{TEST_ADDRESS}").as_str(),
             )
             .with_status(500)
             .with_body("{}")
