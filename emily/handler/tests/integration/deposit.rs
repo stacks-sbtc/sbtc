@@ -1716,7 +1716,7 @@ async fn only_completed_deposit_can_have_fulfillment_signer(status: DepositStatu
         .await
         .expect("Received an error after making a valid create deposit request api call.");
 
-    // Creating not None fullfillment for all cases
+    // Creating not None fulfillment for all cases
     let fulfillment = Some(Some(Box::new(Fulfillment {
         bitcoin_block_hash: "bitcoin_block_hash".to_string(),
         bitcoin_block_height: 23,
