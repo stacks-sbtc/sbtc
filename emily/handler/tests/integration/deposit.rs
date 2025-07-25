@@ -1678,7 +1678,7 @@ async fn emily_process_deposit_updates_when_some_of_them_are_unknown() {
 }
 
 // All other deposit status updates are forbidden to signer and I don't think we
-// want strictly pin behaviour where Emily first validate request about fullfillment and
+// want strictly pin behaviour where Emily first validate request about fulfillment and
 // only after check if such request is allowed for signer.
 #[test_case(DepositStatus::Accepted; "accepted")]
 #[tokio::test]
