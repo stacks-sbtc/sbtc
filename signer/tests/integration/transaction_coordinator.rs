@@ -2820,6 +2820,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
                 settings.signer.bootstrap_signing_set = bootstrap_signing_set.clone();
                 settings.signer.bootstrap_signatures_required = thresholds.first.get();
                 settings.signer.dkg_target_rounds = NonZeroU32::new(1).unwrap();
+                settings.signer.bitcoin_processing_delay = Duration::from_secs(1);
             })
             .build();
 
@@ -3050,7 +3051,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
                 settings.signer.private_key = keypair.secret_key().into();
                 settings.signer.bootstrap_signatures_required = thresholds.second.get();
                 settings.signer.dkg_target_rounds = NonZeroU32::new(1).unwrap();
-                settings.signer.bitcoin_processing_delay = Duration::from_secs(2);
+                settings.signer.bitcoin_processing_delay = Duration::from_secs(1);
             })
             .build();
 
@@ -3418,7 +3419,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
 ///
 /// then, once everything is up and running, run the test.
 #[test_case(TestThresholds {
-    first: NonZeroU16::new(1).unwrap(),
+    first: NonZeroU16::new(2).unwrap(),
     second: NonZeroU16::new(3).unwrap(),
 }; "increase the threshold")]
 #[test_case(TestThresholds {
@@ -3471,6 +3472,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
                 settings.signer.bootstrap_signing_set = bootstrap_signing_set.clone();
                 settings.signer.bootstrap_signatures_required = thresholds.first.get();
                 settings.signer.dkg_target_rounds = NonZeroU32::new(1).unwrap();
+                settings.signer.bitcoin_processing_delay = Duration::from_secs(1);
             })
             .build();
 
@@ -3718,7 +3720,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
                 settings.signer.bootstrap_signatures_required = thresholds.second.get();
                 settings.signer.bootstrap_aggregate_key = Some(first_dkg_shares.aggregate_key);
                 settings.signer.dkg_target_rounds = NonZeroU32::new(1).unwrap();
-                settings.signer.bitcoin_processing_delay = Duration::from_secs(2);
+                settings.signer.bitcoin_processing_delay = Duration::from_secs(1);
             })
             .build();
 
