@@ -4,7 +4,7 @@ FROM python:3.13-slim AS emily-cron
 COPY --from=ghcr.io/astral-sh/uv@sha256:562193a4a9d398f8aedddcb223e583da394ee735de36b5815f8f1d22cb49be15 /uv /uvx /bin/
 
 # Install cron
-RUN apt-get update && apt-get install -y cron && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends cron build-essential libgmp3-dev && rm -rf /var/lib/apt/lists/*
 
 # Copy the application into the container
 COPY ../../emily_cron /app
@@ -20,11 +20,12 @@ RUN chmod +x /app/main.py
 RUN touch /var/log/cron.log
 
 # Environment variables
-ENV API_KEY=testApiKey
+ENV EMILY_API_KEY=testApiKey
 ENV EMILY_ENDPOINT=http://emily-server:3031
 ENV PRIVATE_EMILY_ENDPOINT=http://emily-server:3031
-ENV MEMPOOL_API_URL=https://mempool.space/api
-ENV HIRO_API_URL=https://api.hiro.so/extended
+ENV MEMPOOL_API_URL=http://mempool-api:8999/api
+ENV ELECTRS_API_URL=http://electrs:3002
+ENV HIRO_API_URL=https://api.hiro.so
 ENV MIN_BLOCK_CONFIRMATIONS=6
 ENV MAX_UNCONFIRMED_TIME=86400
 ENV DEPLOYER_ADDRESS=SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS

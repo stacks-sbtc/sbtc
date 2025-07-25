@@ -3574,7 +3574,8 @@ mod tests {
         let contract_call = TransactionContractCall {
             // This is the address of the poser that deployed their own
             // versions of the sBTC smart contracts.
-            address: StacksAddress::new(2, Hash160([1; 20])),
+            address: StacksAddress::new(2, Hash160([1; 20]))
+                .expect("failed to create stacks address"),
             contract_name: ContractName::from(contract_name),
             function_name: ClarityName::from(function_name),
             function_args: Vec::new(),
