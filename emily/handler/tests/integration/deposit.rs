@@ -1056,6 +1056,7 @@ async fn update_deposits_is_forbidden_for_signer(
         assert_eq!(deposits.len(), 1);
         let deposit = deposits.first().unwrap();
         assert_eq!(deposit.status, 403);
+        println!("Deposit: {:?}", deposit);
         assert!(deposit.deposit.clone().unwrap().is_none());
         assert_eq!(deposit.error.clone().unwrap().unwrap(), "Forbidden");
 
@@ -1674,4 +1675,251 @@ async fn emily_process_deposit_updates_when_some_of_them_are_unknown() {
     .await
     .expect("Received an error after making a valid get deposits api call.");
     assert_eq!(deposits.deposits.len(), 1);
+}
+
+// All other deposit status updates are forbidden to signer and I don't think we
+// want strictly pin behaviour where Emily first validate request about fullfillment and
+// only after check if such request is allowed for signer.
+#[test_case(DepositStatus::Accepted; "accepted")]
+#[tokio::test]
+async fn only_completed_deposit_can_have_fullfillment_signer(status: DepositStatus) {
+    // the testing configuration has privileged access to all endpoints.
+    let testing_configuration = clean_setup().await;
+
+    // the user configuration access depends on the api_key.
+    let user_configuration = testing_configuration.clone();
+    // Arrange.
+    // --------
+    let bitcoin_tx_output_index = 0;
+
+    // Setup test deposit transaction.
+    let DepositTxnData {
+        reclaim_scripts,
+        deposit_scripts,
+        bitcoin_txid,
+        transaction_hex,
+        ..
+    } = DepositTxnData::new(DEPOSIT_LOCK_TIME, DEPOSIT_MAX_FEE, &[DEPOSIT_AMOUNT_SATS]);
+    let reclaim_script = reclaim_scripts.first().unwrap().clone();
+    let deposit_script = deposit_scripts.first().unwrap().clone();
+
+    let create_deposit_body = CreateDepositRequestBody {
+        bitcoin_tx_output_index,
+        bitcoin_txid: bitcoin_txid.clone(),
+        deposit_script: deposit_script.clone(),
+        reclaim_script: reclaim_script.clone(),
+        transaction_hex: transaction_hex.clone(),
+    };
+
+    // Update the deposit status with the privileged configuration.
+    apis::deposit_api::create_deposit(&testing_configuration, create_deposit_body.clone())
+        .await
+        .expect("Received an error after making a valid create deposit request api call.");
+
+    // Creating not None fullfillment for all cases
+    let fulfillment = Some(Some(Box::new(Fulfillment {
+        bitcoin_block_hash: "bitcoin_block_hash".to_string(),
+        bitcoin_block_height: 23,
+        bitcoin_tx_index: 45,
+        bitcoin_txid: "test_fulfillment_bitcoin_txid".to_string(),
+        btc_fee: 2314,
+        stacks_txid: "test_fulfillment_stacks_txid".to_string(),
+    })));
+
+    // Creating replacing by tx only if necessary
+    let replaced_by_tx = if status == DepositStatus::Rbf {
+        Some(Some("replaced_by_txid2".to_string()))
+    } else {
+        None
+    };
+
+    let response = apis::deposit_api::update_deposits_signer(
+        &user_configuration,
+        UpdateDepositsRequestBody {
+            deposits: vec![DepositUpdate {
+                bitcoin_tx_output_index,
+                bitcoin_txid: bitcoin_txid.clone(),
+                fulfillment: fulfillment.clone(),
+                status,
+                status_message: "foo".into(),
+                replaced_by_tx,
+            }],
+        },
+    )
+    .await;
+
+    if status != DepositStatus::Confirmed {
+        // Check response correctness
+        let response = response.expect("Batch update should return 200 OK");
+        let deposits = response.deposits;
+        assert_eq!(deposits.len(), 1);
+        let deposit = deposits.first().unwrap();
+        assert_eq!(deposit.status, 400);
+        println!("Deposit: {:?}", deposit);
+        assert!(deposit.deposit.clone().unwrap().is_none());
+        let status_str: String = status
+            .to_string()
+            .chars()
+            .enumerate()
+            .map(|(i, c)| {
+                if i == 0 {
+                    c.to_uppercase().next().unwrap()
+                } else {
+                    c
+                }
+            })
+            .collect();
+        let expected_error = format!(
+            "deposit with fulfillment data must be confirmed, but got status {status_str} for txid: {bitcoin_txid}, vout: {bitcoin_tx_output_index}"
+        );
+        assert_eq!(deposit.error.clone().unwrap().unwrap(), expected_error);
+
+        // Check that deposit wasn't updated
+        let response = apis::deposit_api::get_deposit(
+            &user_configuration,
+            &bitcoin_txid,
+            &bitcoin_tx_output_index.to_string(),
+        )
+        .await
+        .expect("Received an error after making a valid get deposit api call.");
+        assert_eq!(response.bitcoin_txid, bitcoin_txid);
+    } else {
+        assert!(response.is_ok());
+        let response = response.unwrap();
+        let deposit = response
+            .deposits
+            .first()
+            .expect("No deposit in response")
+            .deposit
+            .clone()
+            .unwrap()
+            .unwrap();
+        assert_eq!(deposit.bitcoin_txid, bitcoin_txid);
+        assert_eq!(deposit.status, status);
+        assert_eq!(deposit.fulfillment, fulfillment);
+    }
+}
+
+#[test_case(DepositStatus::Rbf; "rbf")]
+#[test_case(DepositStatus::Pending; "pending")]
+#[test_case(DepositStatus::Accepted; "accepted")]
+#[test_case(DepositStatus::Failed; "failed")]
+#[test_case(DepositStatus::Confirmed; "confirmed")]
+#[tokio::test]
+async fn only_completed_deposit_can_have_fullfillment_sidecar(status: DepositStatus) {
+    // the testing configuration has privileged access to all endpoints.
+    let testing_configuration = clean_setup().await;
+
+    // the user configuration access depends on the api_key.
+    let user_configuration = testing_configuration.clone();
+    // Arrange.
+    // --------
+    let bitcoin_tx_output_index = 0;
+
+    // Setup test deposit transaction.
+    let DepositTxnData {
+        reclaim_scripts,
+        deposit_scripts,
+        bitcoin_txid,
+        transaction_hex,
+        ..
+    } = DepositTxnData::new(DEPOSIT_LOCK_TIME, DEPOSIT_MAX_FEE, &[DEPOSIT_AMOUNT_SATS]);
+    let reclaim_script = reclaim_scripts.first().unwrap().clone();
+    let deposit_script = deposit_scripts.first().unwrap().clone();
+
+    let create_deposit_body = CreateDepositRequestBody {
+        bitcoin_tx_output_index,
+        bitcoin_txid: bitcoin_txid.clone(),
+        deposit_script: deposit_script.clone(),
+        reclaim_script: reclaim_script.clone(),
+        transaction_hex: transaction_hex.clone(),
+    };
+
+    // Update the deposit status with the privileged configuration.
+    apis::deposit_api::create_deposit(&testing_configuration, create_deposit_body.clone())
+        .await
+        .expect("Received an error after making a valid create deposit request api call.");
+
+    // Creating not None fullfillment for all cases
+    let fulfillment = Some(Some(Box::new(Fulfillment {
+        bitcoin_block_hash: "bitcoin_block_hash".to_string(),
+        bitcoin_block_height: 23,
+        bitcoin_tx_index: 45,
+        bitcoin_txid: "test_fulfillment_bitcoin_txid".to_string(),
+        btc_fee: 2314,
+        stacks_txid: "test_fulfillment_stacks_txid".to_string(),
+    })));
+
+    // Creating replacing by tx only if necessary
+    let replaced_by_tx = if status == DepositStatus::Rbf {
+        Some(Some("replaced_by_txid2".to_string()))
+    } else {
+        None
+    };
+
+    let response = apis::deposit_api::update_deposits_sidecar(
+        &user_configuration,
+        UpdateDepositsRequestBody {
+            deposits: vec![DepositUpdate {
+                bitcoin_tx_output_index,
+                bitcoin_txid: bitcoin_txid.clone(),
+                fulfillment: fulfillment.clone(),
+                status,
+                status_message: "foo".into(),
+                replaced_by_tx,
+            }],
+        },
+    )
+    .await;
+
+    if status != DepositStatus::Confirmed {
+        // Check response correctness
+        let response = response.expect("Batch update should return 200 OK");
+        let deposits = response.deposits;
+        assert_eq!(deposits.len(), 1);
+        let deposit = deposits.first().unwrap();
+        assert_eq!(deposit.status, 400);
+        println!("Deposit: {:?}", deposit);
+        assert!(deposit.deposit.clone().unwrap().is_none());
+        let status_str: String = status
+            .to_string()
+            .chars()
+            .enumerate()
+            .map(|(i, c)| {
+                if i == 0 {
+                    c.to_uppercase().next().unwrap()
+                } else {
+                    c
+                }
+            })
+            .collect();
+        let expected_error = format!(
+            "deposit with fulfillment data must be confirmed, but got status {status_str} for txid: {bitcoin_txid}, vout: {bitcoin_tx_output_index}"
+        );
+        assert_eq!(deposit.error.clone().unwrap().unwrap(), expected_error);
+
+        // Check that deposit wasn't updated
+        let response = apis::deposit_api::get_deposit(
+            &user_configuration,
+            &bitcoin_txid,
+            &bitcoin_tx_output_index.to_string(),
+        )
+        .await
+        .expect("Received an error after making a valid get deposit api call.");
+        assert_eq!(response.bitcoin_txid, bitcoin_txid);
+    } else {
+        assert!(response.is_ok());
+        let response = response.unwrap();
+        let deposit = response
+            .deposits
+            .first()
+            .expect("No deposit in response")
+            .deposit
+            .clone()
+            .unwrap()
+            .unwrap();
+        assert_eq!(deposit.bitcoin_txid, bitcoin_txid);
+        assert_eq!(deposit.status, status);
+        assert_eq!(deposit.fulfillment, fulfillment);
+    }
 }
