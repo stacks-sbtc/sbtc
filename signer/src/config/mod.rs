@@ -140,10 +140,6 @@ pub struct BitcoinConfig {
     /// hashes (`getbestblockhash`).
     #[serde(deserialize_with = "duration_seconds_deserializer")]
     pub chain_tip_polling_interval: std::time::Duration,
-
-    /// Bitcoin ZeroMQ block-hash stream endpoint.
-    #[serde(deserialize_with = "url_deserializer_vec")]
-    pub block_hash_stream_endpoints: Vec<Url>,
 }
 
 impl Validatable for BitcoinConfig {
@@ -797,17 +793,9 @@ mod tests {
                 .rpc_endpoints
                 .contains(&url("http://foo:bar@localhost:5678"))
         );
-        assert!(
-            settings
-                .bitcoin
-                .block_hash_stream_endpoints
-                .contains(&url("tcp://localhost:1234"))
-        );
-        assert!(
-            settings
-                .bitcoin
-                .block_hash_stream_endpoints
-                .contains(&url("tcp://localhost:5678"))
+        assert_eq!(
+            settings.bitcoin.chain_tip_polling_interval,
+            Duration::from_secs(5)
         );
     }
 
