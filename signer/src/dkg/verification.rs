@@ -246,11 +246,7 @@ impl StateMachine {
             .public_keys
             .signers
             .values()
-            .any(|key| {
-                PublicKey::try_from(key)
-                    .map(|pub_key| pub_key == sender)
-                    .unwrap_or(false)
-            });
+            .any(|key| *key == sender.into());
 
         if !is_known {
             return Err(Error::UnknownSender(sender));
