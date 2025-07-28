@@ -6,6 +6,12 @@ use tracing_subscriber::fmt::time::UtcTime;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
+use crate::api::build_info;
+use crate::context::Context;
+use crate::error::Error;
+
+use std::time::Duration;
+
 /// Sets up logging based on the provided format preference
 ///
 /// # Arguments
@@ -42,4 +48,44 @@ fn setup_logging_pretty(directives: &str) {
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(directives)))
         .with(main_layer)
         .init()
+}
+
+/// Logs to standard logging stream information about Bitcoin and Stacks
+/// node versions, chaintips, dkg rounds, etc.
+async fn log_blockchain_nodes_info<C: Context>(ctx: &C) {
+    let info = build_info(ctx).await;
+    tracing::debug!(?info, "logging blockchain info",);
+}
+
+/// Simple struct for time to time writing logs
+/// about Stacks and Bitcoin nodes state.
+pub struct BlockchainInfoLogger<Context> {
+    /// Signer context.
+    context: Context,
+    /// Logging period.
+    timeout: Duration,
+}
+
+impl<C> BlockchainInfoLogger<C>
+where
+    C: Context,
+{
+    /// Creates new BlockchainInfoLogger with given context and timeout.
+    pub fn new(context: C, timeout: Duration) -> Self {
+        Self { context, timeout }
+    }
+    /// Runs BlockchainInfoLogger which will log info about blockchain nodes
+    /// each timeout.
+    pub async fn run(self) -> Result<(), Error> {
+        let term = self.context.get_termination_handle();
+        loop {
+            if term.shutdown_signalled() {
+                break;
+            }
+            tokio::time::sleep(self.timeout).await;
+            log_blockchain_nodes_info(&self.context).await;
+        }
+        tracing::info!("blockchain info logger has stopped");
+        Ok(())
+    }
 }

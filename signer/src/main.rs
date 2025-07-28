@@ -20,6 +20,7 @@ use signer::context::Context;
 use signer::context::SignerContext;
 use signer::emily_client::EmilyClient;
 use signer::error::Error;
+use signer::logging::BlockchainInfoLogger;
 use signer::network::P2PNetwork;
 use signer::network::libp2p::SignerSwarmBuilder;
 use signer::request_decider::RequestDeciderEventLoop;
@@ -146,6 +147,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         run_checked(run_request_decider, &context),
         run_checked(run_transaction_coordinator, &context),
         run_checked(run_transaction_signer, &context),
+        run_checked(run_blockchain_info_logger, &context),
     );
 
     Ok(())
@@ -342,6 +344,14 @@ async fn run_block_observer(ctx: impl Context) -> Result<(), Error> {
     };
 
     block_observer.run().await
+}
+
+/// Run the blockchain info logger event loop.
+async fn run_blockchain_info_logger(ctx: impl Context) -> Result<(), Error> {
+    // TODO: make timout a config parameter.
+    let logger = BlockchainInfoLogger::new(ctx, Duration::from_secs(60));
+
+    logger.run().await
 }
 
 /// Run the transaction signer event-loop.
