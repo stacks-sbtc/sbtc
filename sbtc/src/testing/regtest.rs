@@ -169,6 +169,18 @@ pub struct Recipient {
     pub script_pubkey: ScriptBuf,
 }
 
+/// Models the result of "listdescriptors"
+#[derive(Clone, PartialEq, Eq, Debug, serde::Deserialize)]
+struct ListDescriptorsResult {
+    pub wallet_name: String,
+    pub descriptors: Vec<ListDescriptorsInner>,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, serde::Deserialize)]
+struct ListDescriptorsInner {
+    pub desc: String,
+}
+
 fn descriptor_base(public_key: &PublicKey, kind: AddressType) -> String {
     match kind {
         AddressType::P2wpkh => format!("wpkh({public_key})"),
@@ -270,19 +282,15 @@ impl Faucet {
         let descriptor_info = self.rpc.get_descriptor_info(&desc).unwrap();
 
         // This isn't part of the bitcoincore_rpc API, unfortunately.
-        let list_descriptors_request = self
+        let wallet: ListDescriptorsResult = self
             .rpc
-            .get_jsonrpc_client()
-            .build_request("listdescriptors", None);
-        let list_descriptors_response = self
-            .rpc
-            .get_jsonrpc_client()
-            .send_request(list_descriptors_request)
+            .call("listdescriptors", &[])
             .expect("failed to list descriptors");
 
-        if list_descriptors_response
-            .result
-            .is_some_and(|f| f.get().contains(&descriptor_info.descriptor))
+        if wallet
+            .descriptors
+            .iter()
+            .any(|d| d.desc == descriptor_info.descriptor)
         {
             // The descriptor is already tracked, no need to import it again.
             // This avoids a scan of the entire blockchain.
