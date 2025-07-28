@@ -223,8 +223,7 @@ impl StateMachine {
             .signers
             .get(&signer_id)
             .ok_or(Error::UnknownSender(sender))?
-            .try_into()
-            .map_err(|_| Error::InvalidPublicKeys)?;
+            .into();
 
         if wsts != sender {
             return Err(Error::SignerPublicKeyMismatch {
