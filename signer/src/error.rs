@@ -5,7 +5,6 @@ use bitcoin::script::PushBytesError;
 use blockstack_lib::types::chainstate::StacksBlockId;
 
 use crate::bitcoin::validation::WithdrawalCapContext;
-use crate::bitcoin::zmq::BitcoinZmqError;
 use crate::blocklist_client::BlocklistClientError;
 use crate::codec;
 use crate::dkg;
@@ -94,9 +93,19 @@ pub enum Error {
     #[error("the signer set aggregate key could not be determined for bitcoin block {0}")]
     MissingAggregateKey(bitcoin::BlockHash),
 
-    /// An error was received from the Bitcoin Core ZMQ subscriber.
-    #[error("error from bitcoin-core ZMQ: {0}")]
-    BitcoinCoreZmq(#[from] BitcoinZmqError),
+    /// Bitcoin chain tip poller failed to initialize within the timeout. The only
+    /// failure mode at the moment is that it failed to successfully fetch the
+    /// initial block hash from the Bitcoin Core RPC (`getbestblockhash`).
+    #[error(
+        "failed to initialize bitcoin chain tip poller within the allowed timeout ({timeout:?}): {last_error}"
+    )]
+    BitcoinChainTipPollerInitialization {
+        /// The last error received from the Bitcoin Core RPC.
+        #[source]
+        last_error: Box<Self>,
+        /// The timeout duration for the initialization.
+        timeout: std::time::Duration,
+    },
 
     /// No ZMQ endpoints are configured.
     #[error("no bitcoin core ZMQ endpoints are configured, cannot start")]

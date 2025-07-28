@@ -35,8 +35,8 @@ use sbtc::testing::regtest::AsUtxo;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::to_value;
+use signer::bitcoin::poller::BitcoinChainTipPoller;
 use signer::bitcoin::utxo::DepositRequest;
-use signer::bitcoin::zmq::BitcoinCoreMessageDispatcher;
 use signer::error::Error;
 use signer::stacks::api::ClarityName;
 use signer::stacks::contracts::SmartContract;
@@ -112,11 +112,11 @@ async fn process_blocks_simple_fork() {
     })
     .await;
 
-    let bitcoin_block_provider = BitcoinCoreMessageDispatcher::new_for_regtest().await;
+    let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
 
     let block_observer = BlockObserver {
         context: ctx.clone(),
-        bitcoin_block_provider,
+        bitcoin_block_source,
     };
 
     // We need to wait for the block observer to be up

@@ -38,6 +38,12 @@ pub const MAX_BITCOIN_PROCESSING_DELAY_SECONDS: u64 = 300;
 /// Maximum configurable delay (in seconds) before processing new SBTC requests.
 pub const MAX_REQUESTS_PROCESSING_DELAY_SECONDS: u64 = 300;
 
+/// Maximum configurable interval (in seconds) for polling Bitcoin chain tips.
+/// This cannot be too large otherwise signers risk becoming out-of-sync with
+/// other signers, and in the role of signer potentially falling outside of the
+/// coordinator's timeouts.
+pub const MAX_BITCOIN_CHAIN_TIP_POLLING_INTERVAL_SECONDS: u64 = 10;
+
 /// Maximum amount of signers supported by our smart contracts
 /// See https://github.com/stacks-sbtc/sbtc/issues/1694
 pub const MAX_SIGNERS: usize = 16;
@@ -130,9 +136,52 @@ pub struct BitcoinConfig {
     #[serde(deserialize_with = "url_deserializer_vec")]
     pub rpc_endpoints: Vec<Url>,
 
+    /// The number of seconds to wait between polling for new canonical block
+    /// hashes (`getbestblockhash`).
+    #[serde(deserialize_with = "duration_seconds_deserializer")]
+    pub chain_tip_polling_interval: std::time::Duration,
+
     /// Bitcoin ZeroMQ block-hash stream endpoint.
     #[serde(deserialize_with = "url_deserializer_vec")]
     pub block_hash_stream_endpoints: Vec<Url>,
+}
+
+impl Validatable for BitcoinConfig {
+    fn validate(&self, _: &Settings) -> Result<(), ConfigError> {
+        // At least one endpoint must be provided.
+        if self.rpc_endpoints.is_empty() {
+            return Err(ConfigError::Message(
+                "[bitcoin.rpc_endpoints] At least one Bitcoin RPC endpoint must be provided"
+                    .to_string(),
+            ));
+        }
+
+        // Validate each endpoint configuration.
+        for endpoint in &self.rpc_endpoints {
+            if !["http", "https"].contains(&endpoint.scheme()) {
+                return Err(ConfigError::Message(
+                    "[bitcoin.rpc_endpoints] Invalid URL scheme: must be HTTP or HTTPS".to_string(),
+                ));
+            }
+
+            if endpoint.host_str().is_none() {
+                return Err(ConfigError::Message(
+                    "[bitcoin.rpc_endpoints] Invalid URL: host is required".to_string(),
+                ));
+            }
+        }
+
+        if self.chain_tip_polling_interval.as_secs()
+            > MAX_BITCOIN_CHAIN_TIP_POLLING_INTERVAL_SECONDS
+        {
+            return Err(ConfigError::Message(
+                "[bitcoin.chain_tip_polling_interval] Maximum polling interval exceeded"
+                    .to_string(),
+            ));
+        }
+
+        Ok(())
+    }
 }
 
 /// Signer network configuration
@@ -520,6 +569,7 @@ impl Settings {
         cfg_builder = cfg_builder.set_default("emily.pagination_timeout", 10)?;
         cfg_builder = cfg_builder.set_default("signer.dkg_verification_window", 10)?;
         cfg_builder = cfg_builder.set_default("signer.stacks_fees_max_ustx", 1_500_000)?;
+        cfg_builder = cfg_builder.set_default("bitcoin.chain_tip_polling_interval", 5)?;
 
         if let Some(path) = config_path {
             cfg_builder = cfg_builder.add_source(File::from(path.as_ref()));

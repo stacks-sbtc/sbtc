@@ -27,6 +27,7 @@ use emily_client::models::DepositStatus;
 use rand::seq::IteratorRandom;
 use sbtc::deposits::CreateDepositRequest;
 
+use crate::bitcoin::BitcoinBlockHashStreamProvider;
 use crate::bitcoin::BitcoinInteract;
 use crate::bitcoin::GetTransactionFeeResult;
 use crate::bitcoin::TransactionLookupHint;
@@ -35,8 +36,6 @@ use crate::bitcoin::rpc::BitcoinBlockInfo;
 use crate::bitcoin::rpc::BitcoinTxInfo;
 use crate::bitcoin::rpc::GetTxResponse;
 use crate::bitcoin::utxo;
-use crate::bitcoin::zmq::BitcoinZmqError;
-use crate::bitcoin::zmq::BlockHashStreamProvider;
 use crate::context::SbtcLimits;
 use crate::emily_client::EmilyInteract;
 use crate::error::Error;
@@ -180,7 +179,7 @@ impl TestHarness {
     /// Spawn a Bitcoin block hash stream for testing.
     pub fn spawn_block_hash_stream(
         &self,
-    ) -> tokio_stream::wrappers::ReceiverStream<Result<bitcoin::BlockHash, BitcoinZmqError>> {
+    ) -> tokio_stream::wrappers::ReceiverStream<Result<bitcoin::BlockHash, Error>> {
         let headers: Vec<_> = self
             .bitcoin_blocks
             .iter()
@@ -199,10 +198,11 @@ impl TestHarness {
     }
 }
 
-impl BlockHashStreamProvider for TestHarness {
+impl BitcoinBlockHashStreamProvider for TestHarness {
+    type Error = Error;
     fn get_block_hash_stream(
         &self,
-    ) -> impl futures::Stream<Item = Result<BlockHash, BitcoinZmqError>> + Send + Sync + Unpin + 'static
+    ) -> impl futures::Stream<Item = Result<BlockHash, Self::Error>> + Send + Sync + Unpin + 'static
     {
         self.spawn_block_hash_stream()
     }
@@ -304,6 +304,10 @@ impl BitcoinInteract for TestHarness {
     }
 
     async fn get_network_info(&self) -> Result<bitcoincore_rpc_json::GetNetworkInfoResult, Error> {
+        unimplemented!()
+    }
+
+    async fn get_best_block_hash(&self) -> Result<BlockHash, Error> {
         unimplemented!()
     }
 }

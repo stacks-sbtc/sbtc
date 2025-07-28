@@ -11,8 +11,8 @@ use clap::Parser;
 use clap::ValueEnum;
 use signer::api;
 use signer::api::ApiState;
+use signer::bitcoin::poller::BitcoinChainTipPoller;
 use signer::bitcoin::rpc::BitcoinCoreClient;
-use signer::bitcoin::zmq::BitcoinCoreMessageDispatcher;
 use signer::block_observer;
 use signer::blocklist_client::BlocklistClient;
 use signer::config::Settings;
@@ -33,11 +33,17 @@ use tower_http::trace::TraceLayer;
 use tracing::Instrument;
 use tracing::Span;
 
-// This is how many seconds the P2P swarm will wait before attempting to
-// bootstrap (i.e. connect to other peers). Three seconds is a sane default
-// value, giving the swarm a few seconds to start up and bind listener(s)
-// before proceeding.
+/// This is how many seconds the P2P swarm will wait before attempting to
+/// bootstrap (i.e. connect to other peers). Three seconds is a sane default
+/// value, giving the swarm a few seconds to start up and bind listener(s)
+/// before proceeding.
 const INITIAL_BOOTSTRAP_DELAY_SECS: u64 = 3;
+
+/// The timeout for the Bitcoin chain tip poller to initialize. This is the
+/// maximum time the poller will wait for the initial block hash to be
+/// received from the Bitcoin Core RPC. If this timeout is reached, the
+/// poller will return an error and shut down.
+const BITCOIN_POLLER_INITIALIZATION_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum LogOutputFormat {
@@ -326,35 +332,27 @@ async fn run_api(ctx: impl Context + 'static) -> Result<(), Error> {
 
 /// Run the block observer event-loop.
 async fn run_block_observer(ctx: impl Context) -> Result<(), Error> {
-    let config = ctx.config().clone();
+    let bitcoin_client = ctx.get_bitcoin_client();
+    let chain_tip_polling_interval = ctx.config().bitcoin.chain_tip_polling_interval;
 
-    // TODO: Need to handle multiple endpoints, so some sort of
-    // failover-stream-wrapper.
-    let endpoint = config
-        .bitcoin
-        .block_hash_stream_endpoints
-        .first()
-        .ok_or_else(|| Error::NoBitcoinCoreZmqEndpoints)?
-        .as_str();
+    let bitcoin_block_source = BitcoinChainTipPoller::builder(bitcoin_client)
+        .with_polling_interval(chain_tip_polling_interval)
+        .with_init_timeout(BITCOIN_POLLER_INITIALIZATION_TIMEOUT)
+        .start()
+        .await?;
 
-    let bitcoin_block_provider = BitcoinCoreMessageDispatcher::new_from_endpoint(endpoint).await?;
-
-    // TODO: We should have a new() method that builds from the context
-    let block_observer = block_observer::BlockObserver {
-        context: ctx,
-        bitcoin_block_provider,
-    };
-
-    block_observer.run().await
+    block_observer::BlockObserver::new(ctx, bitcoin_block_source)
+        .run()
+        .await
 }
 
 /// Run the transaction signer event-loop.
 async fn run_transaction_signer(ctx: impl Context) -> Result<(), Error> {
     let network = P2PNetwork::new(&ctx);
 
-    let signer = transaction_signer::TxSignerEventLoop::new(ctx, network, rand::thread_rng())?;
-
-    signer.run().await
+    transaction_signer::TxSignerEventLoop::new(ctx, network, rand::thread_rng())?
+        .run()
+        .await
 }
 
 /// Run the transaction coordinator event-loop.

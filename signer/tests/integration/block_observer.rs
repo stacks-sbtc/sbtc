@@ -27,11 +27,11 @@ use sbtc::deposits::ReclaimScriptInputs;
 use sbtc::testing::regtest;
 use sbtc::testing::regtest::Faucet;
 use sbtc::testing::regtest::Recipient;
+use signer::bitcoin::poller::BitcoinChainTipPoller;
 use signer::bitcoin::utxo::DepositRequest;
 use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
 use signer::bitcoin::utxo::SignerUtxo;
-use signer::bitcoin::zmq::BitcoinCoreMessageDispatcher;
 use signer::block_observer::get_signer_set_info;
 use signer::context::SbtcLimits;
 use signer::emily_client::EmilyClient;
@@ -164,10 +164,10 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
-    let bitcoin_block_provider = BitcoinCoreMessageDispatcher::new_for_regtest().await;
+    let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
     let block_observer = BlockObserver {
         context: ctx.clone(),
-        bitcoin_block_provider,
+        bitcoin_block_source,
     };
 
     // We need at least one receiver
@@ -270,10 +270,10 @@ async fn link_blocks() {
     })
     .await;
 
-    let bitcoin_block_provider = BitcoinCoreMessageDispatcher::new_for_regtest().await;
+    let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
     let block_observer = BlockObserver {
         context: ctx.clone(),
-        bitcoin_block_provider,
+        bitcoin_block_source,
     };
 
     let mut signal_rx = ctx.get_signal_receiver();
@@ -428,10 +428,10 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
-    let bitcoin_block_provider = BitcoinCoreMessageDispatcher::new_for_regtest().await;
+    let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
     let block_observer = BlockObserver {
         context: ctx.clone(),
-        bitcoin_block_provider,
+        bitcoin_block_source,
     };
 
     tokio::spawn(async move {
@@ -948,10 +948,10 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
-    let bitcoin_block_provider = BitcoinCoreMessageDispatcher::new_for_regtest().await;
+    let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
     let block_observer = BlockObserver {
         context: ctx.clone(),
-        bitcoin_block_provider,
+        bitcoin_block_source,
     };
 
     let mut signal_receiver = ctx.get_signal_receiver();
@@ -1018,7 +1018,7 @@ async fn next_headers_to_process_gets_all_headers() {
 
     let block_observer = BlockObserver {
         context: ctx.clone(),
-        bitcoin_block_provider: (),
+        bitcoin_block_source: (),
     };
 
     let headers = block_observer
@@ -1070,7 +1070,7 @@ async fn next_headers_to_process_ignores_known_headers() {
 
     let block_observer = BlockObserver {
         context,
-        bitcoin_block_provider: (),
+        bitcoin_block_source: (),
     };
 
     let chain_tip_block_hash = rpc.get_best_block_hash().unwrap();
@@ -1230,10 +1230,10 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
-    let bitcoin_block_provider = BitcoinCoreMessageDispatcher::new_for_regtest().await;
+    let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
     let block_observer = BlockObserver {
         context: ctx.clone(),
-        bitcoin_block_provider,
+        bitcoin_block_source,
     };
 
     // In this test the signer set public keys start empty. When running
@@ -1394,10 +1394,10 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
-    let bitcoin_block_provider = BitcoinCoreMessageDispatcher::new_for_regtest().await;
+    let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
     let block_observer = BlockObserver {
         context: ctx.clone(),
-        bitcoin_block_provider,
+        bitcoin_block_source,
     };
 
     // In this test the signer set public keys start empty. When running
@@ -1613,10 +1613,10 @@ async fn block_observer_ignores_coinbase() {
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
-    let bitcoin_block_provider = BitcoinCoreMessageDispatcher::new_for_regtest().await;
+    let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
     let block_observer = BlockObserver {
         context: ctx.clone(),
-        bitcoin_block_provider,
+        bitcoin_block_source,
     };
 
     tokio::spawn(async move {

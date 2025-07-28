@@ -11,7 +11,7 @@ use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc_json::Utxo;
 use fake::Fake as _;
 use futures::future::join_all;
-use signer::testing::btc::ManualBlockHashStreamProvider;
+use signer::testing::btc::ManualBitcoinBlockHashStreamProvider;
 use signer::testing::storage::model::TestBitcoinTxInfo;
 use signer::util::Sleep;
 use test_case::test_case;
@@ -370,10 +370,10 @@ async fn deposit_flow() {
         })
         .await;
 
-    let bitcoin_block_provider = ManualBlockHashStreamProvider::default();
+    let bitcoin_block_source = ManualBitcoinBlockHashStreamProvider::default();
     let block_observer = block_observer::BlockObserver {
         context: context.clone(),
-        bitcoin_block_provider: bitcoin_block_provider.clone(),
+        bitcoin_block_source: bitcoin_block_source.clone(),
     };
 
     let block_observer_handle = tokio::spawn(async move { block_observer.run().await });
@@ -414,7 +414,7 @@ async fn deposit_flow() {
         .expect("cannot create emily deposit");
 
     // Wake up block observer to process the new block
-    bitcoin_block_provider.send(Ok(deposit_block_hash));
+    bitcoin_block_source.send(Ok(deposit_block_hash));
 
     Sleep::for_millis(500).await;
 

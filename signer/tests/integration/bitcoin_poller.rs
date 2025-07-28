@@ -1,10 +1,9 @@
 use bitcoin::BlockHash;
 use futures::StreamExt;
 use sbtc::testing::regtest;
-use signer::bitcoin::zmq::{BitcoinCoreMessageDispatcher, BlockHashStreamProvider};
+use signer::bitcoin::BitcoinBlockHashStreamProvider as _;
+use signer::bitcoin::poller::BitcoinChainTipPoller;
 use test_log::test;
-
-pub const BITCOIN_CORE_ZMQ_ENDPOINT: &str = "tcp://localhost:28332";
 
 /// This tests that out bitcoin block hash stream receives new block hashes
 /// from bitcoin-core as it receives blocks. We create the stream, generate
@@ -15,11 +14,9 @@ pub const BITCOIN_CORE_ZMQ_ENDPOINT: &str = "tcp://localhost:28332";
 async fn block_hash_stream_streams_block_hashes() {
     let (_, faucet) = regtest::initialize_blockchain();
 
-    let stream = BitcoinCoreMessageDispatcher::new_from_endpoint(BITCOIN_CORE_ZMQ_ENDPOINT)
+    let mut block_hash_stream = BitcoinChainTipPoller::start_for_regtest()
         .await
-        .unwrap();
-
-    let mut block_hash_stream = stream.get_block_hash_stream();
+        .get_block_hash_stream();
 
     // We want to have our stream always waiting for block hashes so that
     // we get them as they arise. The issue is that await points

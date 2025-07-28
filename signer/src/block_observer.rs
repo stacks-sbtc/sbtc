@@ -20,11 +20,11 @@
 use std::future::Future;
 use std::time::Duration;
 
+use crate::bitcoin::BitcoinBlockHashStreamProvider;
 use crate::bitcoin::BitcoinInteract;
 use crate::bitcoin::rpc::BitcoinBlockHeader;
 use crate::bitcoin::rpc::BitcoinTxInfo;
 use crate::bitcoin::utxo::TxDeconstructor as _;
-use crate::bitcoin::zmq::BlockHashStreamProvider;
 use crate::context::Context;
 use crate::context::SbtcLimits;
 use crate::context::SignerEvent;
@@ -55,11 +55,11 @@ use std::collections::HashSet;
 
 /// Block observer
 #[derive(Debug)]
-pub struct BlockObserver<Context, BHSP> {
+pub struct BlockObserver<Context, BlockSource> {
     /// Signer context
     pub context: Context,
     /// Provider of Bitcoin block hashes.
-    pub bitcoin_block_provider: BHSP,
+    pub bitcoin_block_source: BlockSource,
 }
 
 /// A full "deposit", containing the bitcoin transaction and a fully
@@ -132,16 +132,22 @@ pub trait DepositRequestValidator {
         C: BitcoinInteract;
 }
 
-impl<C, BHSP> BlockObserver<C, BHSP>
+impl<C, BlockSource> BlockObserver<C, BlockSource>
 where
     C: Context,
-    BHSP: BlockHashStreamProvider,
+    BlockSource: BitcoinBlockHashStreamProvider,
 {
+    /// Create a new `BlockObserver` with the given context and Bitcoin block
+    /// provider.
+    pub fn new(context: C, bitcoin_block_source: BlockSource) -> Self {
+        Self { context, bitcoin_block_source }
+    }
+
     /// Run the block observer
     #[tracing::instrument(skip_all, name = "block-observer")]
     pub async fn run(self) -> Result<(), Error> {
         let term = self.context.get_termination_handle();
-        let mut bitcoin_blocks = self.bitcoin_block_provider.get_block_hash_stream();
+        let mut bitcoin_blocks = self.bitcoin_block_source.get_block_hash_stream();
 
         loop {
             if term.shutdown_signalled() {
@@ -769,7 +775,7 @@ mod tests {
 
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_block_provider: test_harness.clone(),
+            bitcoin_block_source: test_harness.clone(),
         };
 
         let handle = tokio::spawn(block_observer.run());
@@ -902,7 +908,7 @@ mod tests {
 
         let block_observer = BlockObserver {
             context: ctx,
-            bitcoin_block_provider: (),
+            bitcoin_block_source: (),
         };
 
         {
@@ -987,7 +993,7 @@ mod tests {
 
         let block_observer = BlockObserver {
             context: ctx,
-            bitcoin_block_provider: (),
+            bitcoin_block_source: (),
         };
 
         block_observer.load_latest_deposit_requests().await.unwrap();

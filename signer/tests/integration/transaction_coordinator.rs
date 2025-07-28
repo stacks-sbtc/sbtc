@@ -50,13 +50,13 @@ use sbtc::testing::regtest::p2wpkh_sign_transaction;
 use secp256k1::Keypair;
 use secp256k1::SECP256K1;
 use signer::bitcoin::BitcoinInteract as _;
+use signer::bitcoin::poller::BitcoinChainTipPoller;
 use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::bitcoin::utxo::BitcoinInputsOutputs;
 use signer::bitcoin::utxo::DepositRequest;
 use signer::bitcoin::utxo::Fees;
 use signer::bitcoin::utxo::TxDeconstructor as _;
 use signer::bitcoin::validation::WithdrawalValidationResult;
-use signer::bitcoin::zmq::BitcoinCoreMessageDispatcher;
 use signer::block_observer;
 use signer::context::P2PEvent;
 use signer::context::RequestDeciderEvent;
@@ -776,10 +776,10 @@ async fn deploy_smart_contracts_coordinator() {
             ev.run().await
         });
 
-        let bitcoin_block_provider = BitcoinCoreMessageDispatcher::new_for_regtest().await;
+        let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_block_provider,
+            bitcoin_block_source,
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -1649,10 +1649,10 @@ async fn pseudo_random_dkg() {
             ev.run().await
         });
 
-        let bitcoin_block_provider = BitcoinCoreMessageDispatcher::new_for_regtest().await;
+        let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_block_provider,
+            bitcoin_block_source,
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -2041,10 +2041,10 @@ async fn sign_bitcoin_transaction() {
             ev.run().await
         });
 
-        let bitcoin_block_provider = BitcoinCoreMessageDispatcher::new_for_regtest().await;
+        let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_block_provider,
+            bitcoin_block_source,
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -2380,10 +2380,10 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
             ev.run().await
         });
 
-        let bitcoin_block_provider = BitcoinCoreMessageDispatcher::new_for_regtest().await;
+        let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_block_provider,
+            bitcoin_block_source,
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -2892,10 +2892,10 @@ async fn wsts_ids_set_during_dkg_and_signing_rounds() {
             ev.run().await
         });
 
-        let bitcoin_block_provider = BitcoinCoreMessageDispatcher::new_for_regtest().await;
+        let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_block_provider,
+            bitcoin_block_source,
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -3259,10 +3259,10 @@ async fn skip_signer_activites_after_key_rotation() {
             ev.run().await
         });
 
-        let bitcoin_block_provider = BitcoinCoreMessageDispatcher::new_for_regtest().await;
+        let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_block_provider,
+            bitcoin_block_source,
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -3810,10 +3810,10 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
             ev.run().await
         });
 
-        let bitcoin_block_provider = BitcoinCoreMessageDispatcher::new_for_regtest().await;
+        let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_block_provider,
+            bitcoin_block_source,
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -4547,10 +4547,10 @@ async fn test_conservative_initial_sbtc_limits() {
             ev.run().await
         });
 
-        let bitcoin_block_provider = BitcoinCoreMessageDispatcher::new_for_regtest().await;
+        let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_block_provider,
+            bitcoin_block_source,
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -4767,10 +4767,10 @@ async fn sign_bitcoin_transaction_withdrawals() {
             ev.run().await
         });
 
-        let bitcoin_block_provider = BitcoinCoreMessageDispatcher::new_for_regtest().await;
+        let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_block_provider,
+            bitcoin_block_source,
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -6281,10 +6281,10 @@ async fn reuse_nonce_attack() {
             ev.run().await
         });
 
-        let bitcoin_block_provider = BitcoinCoreMessageDispatcher::new_for_regtest().await;
+        let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_block_provider,
+            bitcoin_block_source,
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
