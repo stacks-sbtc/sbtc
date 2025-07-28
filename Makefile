@@ -48,6 +48,7 @@ CARGO_CLIPPY_BASE = cargo $(CARGO_FLAGS) clippy --workspace --all-targets --all-
     --exclude testing-emily-client
 CLIPPY_FLAGS = -D warnings
 
+
 lint:
 	$(CARGO_FMT) -- --check
 	$(CARGO_CLIPPY_BASE) -- $(CLIPPY_FLAGS)
