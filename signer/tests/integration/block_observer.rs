@@ -369,12 +369,7 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     // We need to populate our databases, so let's fetch the data.
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(1),
-        None,
-    )
-    .unwrap();
+    let emily_client = EmilyClient::new_test_client();
 
     testing_api::wipe_databases(&emily_client.config().as_testing())
         .await
@@ -1544,12 +1539,7 @@ async fn block_observer_ignores_coinbase() {
     let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(1),
-        None,
-    )
-    .unwrap();
+    let emily_client = EmilyClient::new_test_client();
 
     testing_api::wipe_databases(&emily_client.config().as_testing())
         .await

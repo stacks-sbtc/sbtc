@@ -382,7 +382,7 @@ where
         // tenure to make sure that all signers are up to date with the
         // same information when signing any transactions. In particular,
         // signers use the sbtc-registry contract for figuring out the new
-        // signers' scriptPubKey and for bitcoin transactions, and need to
+        // signers' scriptPubKey for bitcoin transactions, and they need to
         // have the same view of the signers wallet for confirming stacks
         // transactions.
         if let Some(txid) = rotate_key_txid.await? {
