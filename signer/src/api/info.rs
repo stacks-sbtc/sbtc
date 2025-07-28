@@ -131,7 +131,6 @@ pub async fn build_info<C: Context>(ctx: &C) -> InfoResponse {
     let stacks_client = ctx.get_stacks_client();
     let storage = ctx.get_storage();
     let config = ctx.config();
-    let ctx = ctx;
 
     let mut response = InfoResponse::default();
 
