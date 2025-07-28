@@ -498,7 +498,7 @@ async fn process_complete_deposit() {
 
     // Wake coordinator up
     context
-        .signal(RequestDeciderEvent::NewRequestsHandled.into())
+        .signal(RequestDeciderEvent::NewRequestsHandled(bitcoin_chain_tip).into())
         .expect("failed to signal");
 
     // Await the `wait_for_tx_task` to receive the first transaction broadcasted.
@@ -1006,9 +1006,15 @@ async fn run_dkg_from_scratch() {
     // 5. Once they are all running, signal that DKG should be run. We
     //    signal them all because we do not know which one is the
     //    coordinator.
+    let first_db = &signers.first().unwrap().1;
+    let chain_tip = first_db
+        .get_bitcoin_canonical_chain_tip_ref()
+        .await
+        .unwrap()
+        .unwrap();
     signers.iter().for_each(|(ctx, _, _, _)| {
         ctx.get_signal_sender()
-            .send(RequestDeciderEvent::NewRequestsHandled.into())
+            .send(RequestDeciderEvent::NewRequestsHandled(chain_tip).into())
             .unwrap();
     });
 
@@ -1416,9 +1422,15 @@ async fn run_subsequent_dkg() {
     // 5. Once they are all running, signal that DKG should be run. We
     //    signal them all because we do not know which one is the
     //    coordinator.
+    let first_db = &signers.first().unwrap().1;
+    let chain_tip = first_db
+        .get_bitcoin_canonical_chain_tip_ref()
+        .await
+        .unwrap()
+        .unwrap();
     signers.iter().for_each(|(ctx, _, _, _)| {
         ctx.get_signal_sender()
-            .send(RequestDeciderEvent::NewRequestsHandled.into())
+            .send(RequestDeciderEvent::NewRequestsHandled(chain_tip).into())
             .unwrap();
     });
 
@@ -1673,13 +1685,19 @@ async fn pseudo_random_dkg() {
     // - After they have the same view of the canonical bitcoin blockchain,
     //   the signers should all participate in DKG.
     // =========================================================================
-    faucet.generate_block();
+    let chain_tip = faucet.generate_block().into();
 
     // Now we wait for DKG to successfully complete by waiting for all
     // coordinator event loops to finish.
     wait_for_signers(&signers).await;
     let (_, db, _, _) = signers.first().unwrap();
     let original_shares = db.get_latest_encrypted_dkg_shares().await.unwrap().unwrap();
+    let chain_tip_ref = db
+        .get_bitcoin_canonical_chain_tip_ref()
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(chain_tip_ref.block_hash, chain_tip);
 
     // =========================================================================
     // Step 5 - Prepare to re-run DKG with the same bitcoin block
@@ -1746,9 +1764,10 @@ async fn pseudo_random_dkg() {
     // assuming the same bitcoin block hash and height are used as part of
     // the process. To kick this off, we just trigger each of the
     // cooridnators.
+    let event = RequestDeciderEvent::NewRequestsHandled(chain_tip_ref);
     signers
         .iter()
-        .try_for_each(|(ctx, _, _, _)| ctx.signal(RequestDeciderEvent::NewRequestsHandled.into()))
+        .try_for_each(|(ctx, _, _, _)| ctx.signal(event.clone().into()))
         .unwrap();
 
     wait_for_signers(&signers).await;
@@ -5350,7 +5369,7 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
 
     // Wake coordinator up
     context
-        .signal(RequestDeciderEvent::NewRequestsHandled.into())
+        .signal(RequestDeciderEvent::NewRequestsHandled(bitcoin_chain_tip).into())
         .expect("failed to signal");
 
     // Await for tenure completion
@@ -5538,7 +5557,7 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
     }
 
     // Wake up the coordinator
-    ctx.signal(RequestDeciderEvent::NewRequestsHandled.into())
+    ctx.signal(RequestDeciderEvent::NewRequestsHandled(bitcoin_chain_tip).into())
         .expect("failed to signal");
 
     let network_msg = tokio::time::timeout(signing_round_max_duration, fake_signer.receive()).await;
@@ -5950,7 +5969,7 @@ async fn should_handle_dkg_coordination_failure() {
     // that 'should_coordinate_dkg' will trigger and we set the
     // 'dkg_max_duration' to 10 milliseconds we expect that
     // DKG will run & fail
-    let result = coordinator.process_new_blocks().await;
+    let result = coordinator.process_new_blocks(chain_tip).await;
     assert!(
         result.is_ok(),
         "process_new_blocks should complete successfully even with DKG failure"
@@ -5968,7 +5987,7 @@ async fn should_handle_dkg_coordination_failure() {
     // Verify that we can still process blocks after DKG failure,
     // this final assert specifically checks that blocks are still
     // being processed since there was an aggregate key to fallback on
-    let result = coordinator.process_new_blocks().await;
+    let result = coordinator.process_new_blocks(chain_tip).await;
     assert!(
         result.is_ok(),
         "Should be able to continue processing blocks after DKG failure"

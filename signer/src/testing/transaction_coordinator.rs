@@ -496,7 +496,7 @@ where
         // Signal `RequestDeciderEvent::NewRequestsHandled` to trigger the coordinator.
         handle
             .context
-            .signal(RequestDeciderEvent::NewRequestsHandled.into())
+            .signal(RequestDeciderEvent::NewRequestsHandled(bitcoin_chain_tip).into())
             .expect("failed to signal");
 
         // Await the `wait_for_tx_task` to receive the first transaction broadcasted.
@@ -694,7 +694,7 @@ where
         // Signal `TxSignerEvent::NewRequestsHandled` to trigger the coordinator.
         handle
             .context
-            .signal(RequestDeciderEvent::NewRequestsHandled.into())
+            .signal(RequestDeciderEvent::NewRequestsHandled(bitcoin_chain_tip).into())
             .expect("failed to signal");
 
         // Await the `wait_for_tx_task` to receive the first transaction broadcasted.
