@@ -530,6 +530,10 @@ async fn blocklist_client_retry(num_failures: u8, failing_iters: u8) {
         .unwrap();
     assert!(votes.is_empty());
 
+    // The request decider checks the given chain tip against the chain tip
+    // stored in the signer state, and bails if they are different.
+    ctx.state().set_bitcoin_chain_tip(chain_tip_ref);
+
     // Iterations with failing blocklist client
     for _ in 0..failing_iters {
         request_decider

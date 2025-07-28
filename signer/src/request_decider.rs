@@ -134,8 +134,8 @@ where
         }
 
         let state_chain_tip = self.context.state().bitcoin_chain_tip();
-        if Some(chain_tip) == state_chain_tip.map(|btc| btc.block_hash) {
-            tracing::debug!("chain tip has not changed, skipping request processing");
+        if Some(chain_tip) != state_chain_tip.map(|btc| btc.block_hash) {
+            tracing::debug!("chain tip has changed, skipping request processing");
             return Ok(());
         }
 
