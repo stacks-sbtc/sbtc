@@ -242,7 +242,7 @@ async fn libp2p_limits_max_established_connections() -> Result<(), Box<dyn std::
         })
         .await
         .unwrap_or_else(|_| {
-            panic!("timeout waiting for peer {}'s swarm to start", i);
+            panic!("timeout waiting for peer {i}'s swarm to start");
         });
 
         // Create a dedicated reconnect loop to keep connection alive

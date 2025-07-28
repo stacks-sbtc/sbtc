@@ -3068,11 +3068,11 @@ mod tests {
         // window of 10 bitcoin blocks
         match result {
             Ok((needs_verification, needs_rotate_key)) => {
-                assert_eq!(needs_verification, false);
-                assert_eq!(needs_rotate_key, false);
+                assert!(!needs_verification);
+                assert!(!needs_rotate_key);
             }
             Err(e) => {
-                panic!("expected success but got error: {:?}", e)
+                panic!("expected success but got error: {e:?}")
             }
         }
     }

@@ -1350,7 +1350,7 @@ mod validate_dkg_verification_message {
             assert_eq!(expected, new_aggregate_key);
             assert_ne!(actual, expected);
         } else {
-            panic!("Expected an AggregateKeyMismatch error, got: {:?}", result);
+            panic!("Expected an AggregateKeyMismatch error, got: {result:?}");
         }
 
         testing::storage::drop_db(db).await;

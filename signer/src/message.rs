@@ -263,9 +263,9 @@ impl From<crate::storage::model::BitcoinTxId> for WstsMessageId {
 impl std::fmt::Display for WstsMessageId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            WstsMessageId::Sweep(txid) => write!(f, "sweep({})", txid),
+            WstsMessageId::Sweep(txid) => write!(f, "sweep({txid})"),
             WstsMessageId::DkgVerification(aggregate_key) => {
-                write!(f, "dkg-verification({})", aggregate_key)
+                write!(f, "dkg-verification({aggregate_key})")
             }
             WstsMessageId::Dkg(id) => {
                 write!(f, "dkg({})", hex::encode(id))
