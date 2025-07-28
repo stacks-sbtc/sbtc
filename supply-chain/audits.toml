@@ -48,3 +48,9 @@ who = "djordon <dan.jordon@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "14.0.0 -> 14.0.0@git:11e2316aa0edf996f8e8f9ccbbbfd4bd2975ed1d"
 importable = false
+
+[[audits.wsts]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "14.0.0@git:11e2316aa0edf996f8e8f9ccbbbfd4bd2975ed1d -> 15.0.0@git:f354dedeb0f7bede14575553be6d35454309cf02"
+importable = false
