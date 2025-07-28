@@ -65,7 +65,7 @@ fn run_loop_message_filter(signal: &SignerSignal) -> bool {
         signal,
         SignerSignal::Command(SignerCommand::Shutdown)
             | SignerSignal::Event(SignerEvent::P2P(P2PEvent::MessageReceived(_)))
-            | SignerSignal::Event(SignerEvent::BitcoinBlockObserved)
+            | SignerSignal::Event(SignerEvent::BitcoinBlockObserved(_))
     )
 }
 
@@ -100,12 +100,12 @@ where
                             tracing::error!(%error, "error handling signer message");
                         }
                     }
-                    SignerEvent::BitcoinBlockObserved => {
-                        if let Err(error) = self.handle_new_requests().await {
+                    SignerEvent::BitcoinBlockObserved(chain_tip) => {
+                        if let Err(error) = self.handle_new_requests(chain_tip.block_hash).await {
                             tracing::warn!(%error, "error handling new requests; skipping this round");
                         }
 
-                        let message = RequestDeciderEvent::NewRequestsHandled.into();
+                        let message = RequestDeciderEvent::NewRequestsHandled(chain_tip).into();
                         // If there is an error here then the application
                         // is on its way down since
                         // [`SignerContext::signal`] sends a shutdown
@@ -125,27 +125,22 @@ where
     }
 
     /// Vote on pending deposit requests
-    #[tracing::instrument(skip_all, fields(chain_tip = tracing::field::Empty))]
-    pub async fn handle_new_requests(&mut self) -> Result<(), Error> {
+    #[tracing::instrument(skip_all, fields(chain_tip = %chain_tip))]
+    pub async fn handle_new_requests(&mut self, chain_tip: BitcoinBlockHash) -> Result<(), Error> {
         let requests_processing_delay = self.context.config().signer.requests_processing_delay;
         if requests_processing_delay > Duration::ZERO {
             tracing::debug!("sleeping before processing new requests");
             tokio::time::sleep(requests_processing_delay).await;
         }
 
-        let db = self.context.get_storage();
-        let chain_tip = self
-            .context
-            .state()
-            .bitcoin_chain_tip()
-            .ok_or(Error::NoChainTip)?
-            .block_hash;
+        let state_chain_tip = self.context.state().bitcoin_chain_tip();
+        if Some(chain_tip) == state_chain_tip.map(|btc| btc.block_hash) {
+            tracing::debug!("chain tip has not changed, skipping request processing");
+            return Ok(());
+        }
 
         let signer_public_key = self.signer_public_key();
-
-        let span = tracing::Span::current();
-        span.record("chain_tip", tracing::field::display(chain_tip));
-
+        let db = self.context.get_storage();
         // We retry the deposit decisions because some signers' bitcoin nodes might have
         // been running behind and ignored the previous messages.
         let deposit_decisions_to_retry = db

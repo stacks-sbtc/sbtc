@@ -68,6 +68,7 @@ use crate::stacks::wallet::MultisigTx;
 use crate::stacks::wallet::SignerWallet;
 use crate::storage::DbRead;
 use crate::storage::model;
+use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::StacksTxId;
 use crate::wsts_state_machine::FireCoordinator;
 use crate::wsts_state_machine::FrostCoordinator;
@@ -201,7 +202,7 @@ fn run_loop_message_filter(signal: &SignerSignal) -> bool {
     matches!(
         signal,
         SignerSignal::Event(SignerEvent::RequestDecider(
-            RequestDeciderEvent::NewRequestsHandled,
+            RequestDeciderEvent::NewRequestsHandled(_),
         )) | SignerSignal::Command(SignerCommand::Shutdown)
     )
 }
@@ -231,22 +232,18 @@ where
             match message {
                 SignerSignal::Command(SignerCommand::Shutdown) => break,
                 SignerSignal::Command(SignerCommand::P2PPublish(_)) => {}
-                SignerSignal::Event(event) => {
-                    if let SignerEvent::RequestDecider(RequestDeciderEvent::NewRequestsHandled) =
-                        event
-                    {
-                        tracing::debug!("received signal; processing requests");
-                        if let Err(error) = self.process_new_blocks().await {
-                            tracing::error!(
-                                %error,
-                                "error processing requests; skipping this round"
-                            );
-                        }
-                        tracing::trace!("sending tenure completed signal");
-                        self.context
-                            .signal(TxCoordinatorEvent::TenureCompleted.into())?;
+                SignerSignal::Event(SignerEvent::RequestDecider(
+                    RequestDeciderEvent::NewRequestsHandled(chain_tip),
+                )) => {
+                    tracing::debug!("received signal; processing requests");
+                    if let Err(error) = self.process_new_blocks(chain_tip).await {
+                        tracing::error!(%error, "error processing requests; skipping this round");
                     }
+                    tracing::trace!("sending tenure completed signal");
+                    self.context
+                        .signal(TxCoordinatorEvent::TenureCompleted.into())?;
                 }
+                SignerSignal::Event(_) => {}
             }
         }
 
@@ -288,10 +285,13 @@ where
     /// A function for processing new blocks
     #[tracing::instrument(skip_all, fields(
         public_key = %self.signer_public_key(),
-        bitcoin_tip_hash = tracing::field::Empty,
-        bitcoin_tip_height = tracing::field::Empty,
+        bitcoin_tip_hash = %bitcoin_chain_tip.block_hash,
+        bitcoin_tip_height = %bitcoin_chain_tip.block_height,
     ))]
-    pub async fn process_new_blocks(&mut self) -> Result<(), Error> {
+    pub async fn process_new_blocks(
+        &mut self,
+        bitcoin_chain_tip: BitcoinBlockRef,
+    ) -> Result<(), Error> {
         if !self.is_epoch3().await? {
             return Ok(());
         }
@@ -302,20 +302,12 @@ where
             tokio::time::sleep(bitcoin_processing_delay).await;
         }
 
-        let bitcoin_chain_tip = self
-            .context
-            .state()
-            .bitcoin_chain_tip()
-            .ok_or(Error::NoChainTip)?;
+        if Some(bitcoin_chain_tip) != self.context.state().bitcoin_chain_tip() {
+            tracing::debug!("bitcoin chain tip has changed, skipping processing");
+            return Ok(());
+        }
 
-        let span = tracing::Span::current();
-        span.record(
-            "bitcoin_tip_hash",
-            tracing::field::display(bitcoin_chain_tip.block_hash),
-        );
-        span.record("bitcoin_tip_height", *bitcoin_chain_tip.block_height);
-
-        let registry_signer_set_info = self.context.state().registry_signer_set_info();
+        let maybe_registry_signer_set_info = self.context.state().registry_signer_set_info();
 
         // If we are not the coordinator, then we have no business
         // coordinating DKG or constructing bitcoin and stacks
@@ -341,7 +333,7 @@ where
                 Ok(key) => key,
                 Err(error) => {
                     tracing::error!(%error, "failed to coordinate DKG; using existing aggregate key");
-                    registry_signer_set_info
+                    maybe_registry_signer_set_info
                         .as_ref()
                         .map(|info| info.aggregate_key)
                         .ok_or(Error::MissingAggregateKey(*bitcoin_chain_tip.block_hash))?
@@ -354,7 +346,7 @@ where
             // when we made to call to `should_coordinate_dkg`, since we
             // will coordinate DKG if our last DKG shares are 'Failed'. But
             // we could be loading 'Failed' shares here.
-            match registry_signer_set_info.as_ref() {
+            match maybe_registry_signer_set_info.as_ref() {
                 Some(info) => info.aggregate_key,
                 None => self
                     .context
@@ -392,7 +384,7 @@ where
             return Ok(());
         }
 
-        let signer_public_keys = registry_signer_set_info
+        let signer_public_keys = maybe_registry_signer_set_info
             .map(|info| info.signer_set)
             .ok_or_else(|| Error::NoKeyRotationEvent)?;
 
