@@ -219,7 +219,8 @@ impl StateMachine {
     pub fn validate_sender(&self, signer_id: u32, sender: PublicKey) -> Result<(), Error> {
         let config = self.coordinator.get_config();
         let wsts: PublicKey = config
-            .signer_public_keys
+            .public_keys
+            .signers
             .get(&signer_id)
             .ok_or(Error::UnknownSender(sender))?
             .try_into()
@@ -243,7 +244,8 @@ impl StateMachine {
         let is_known = self
             .coordinator
             .get_config()
-            .signer_public_keys
+            .public_keys
+            .signers
             .values()
             .any(|key| {
                 PublicKey::try_from(key)

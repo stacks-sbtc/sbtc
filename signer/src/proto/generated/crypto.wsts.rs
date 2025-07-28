@@ -99,6 +99,9 @@ pub struct SignerDkgPublicShares {
     /// List of (signer_id, commitment)
     #[prost(message, repeated, tag = "3")]
     pub commitments: ::prost::alloc::vec::Vec<PartyCommitment>,
+    /// kex exchange public key
+    #[prost(message, optional, tag = "4")]
+    pub kex_public_key: ::core::option::Option<super::Point>,
 }
 /// The public polynomial committed to by one of the party members who are
 /// participating in distributed key generation.

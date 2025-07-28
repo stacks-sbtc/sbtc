@@ -1725,7 +1725,16 @@ where
             let sender_is_coordinator =
                 given_key_is_coordinator(msg_public_key, bitcoin_chain_tip, &signer_set);
 
-            let public_keys = &coordinator.get_config().signer_public_keys;
+            let public_keys = &coordinator
+                .get_config()
+                .public_keys
+                .signers
+                .iter()
+                .map(|(id, key)| {
+                    let public_key = PublicKey::from(key);
+                    (*id, p256k1::point::Point::from(public_key))
+                })
+                .collect();
             let public_key_point = p256k1::point::Point::from(msg_public_key);
 
             let msg = wsts_msg.inner;

@@ -249,21 +249,35 @@ impl WstsCoordinator for FireCoordinator {
     where
         I: IntoIterator<Item = PublicKey>,
     {
-        let signer_public_keys: hashbrown::HashMap<u32, _> = signers
+        let signers: hashbrown::HashMap<u32, _> = signers
             .into_iter()
             .enumerate()
-            .map(|(idx, key)| (idx as u32, key.into()))
+            .map(|(id, key)| (id as u32, p256k1::keys::PublicKey::from(&key)))
             .collect();
-
         // The number of possible signers is capped at a number well below
         // u32::MAX, so this conversion should always work.
-        let num_signers: u32 = signer_public_keys
+        let num_signers: u32 = signers
             .len()
             .try_into()
             .expect("the number of signers is greater than u32::MAX?");
-        let signer_key_ids = (0..num_signers)
-            .map(|signer_id| (signer_id, std::iter::once(signer_id + 1).collect()))
+        let key_ids = signers
+            .clone()
+            .into_iter()
+            .map(|(id, key)| (id + 1, key))
             .collect();
+        let signer_key_ids: HashMap<u32, HashSet<u32>> = signers
+            .iter()
+            .map(|(&signer_id, _)| {
+                let mut keys = HashSet::new();
+                keys.insert(signer_id + 1);
+                (signer_id, keys)
+            })
+            .collect();
+        let public_keys = wsts::state_machine::PublicKeys {
+            signers,
+            key_ids,
+            signer_key_ids,
+        };
         let config = wsts::state_machine::coordinator::Config {
             num_signers,
             num_keys: num_signers,
@@ -275,8 +289,8 @@ impl WstsCoordinator for FireCoordinator {
             dkg_end_timeout: None,
             nonce_timeout: None,
             sign_timeout: None,
-            signer_key_ids,
-            signer_public_keys,
+            public_keys,
+            verify_packet_sigs: false,
         };
 
         let mut wsts_coordinator = fire::Coordinator::new(config);
@@ -349,11 +363,9 @@ impl WstsCoordinator for FireCoordinator {
         bitcoin_chain_tip: &BitcoinBlockHash,
         signature_type: SignatureType,
     ) -> Result<Packet, Error> {
-        // TODO: Revisit when https://github.com/stacks-sbtc/wsts/pull/198
-        // is merged and we updated the WSTS dependency with those changes.
-        self.0.current_sign_id = construct_signing_round_id(message, bitcoin_chain_tip);
+        let sign_id = construct_signing_round_id(message, bitcoin_chain_tip);
         self.0
-            .start_signing_round(message, signature_type)
+            .start_signing_round(message, signature_type, Some(sign_id))
             .map_err(Error::wsts_coordinator)
     }
 }
@@ -368,21 +380,35 @@ impl WstsCoordinator for FrostCoordinator {
     where
         I: IntoIterator<Item = PublicKey>,
     {
-        let signer_public_keys: hashbrown::HashMap<u32, _> = signers
+        let signers: hashbrown::HashMap<u32, _> = signers
             .into_iter()
             .enumerate()
-            .map(|(idx, key)| (idx as u32, key.into()))
+            .map(|(id, key)| (id as u32, p256k1::keys::PublicKey::from(&key)))
             .collect();
-
         // The number of possible signers is capped at a number well below
         // u32::MAX, so this conversion should always work.
-        let num_signers: u32 = signer_public_keys
+        let num_signers: u32 = signers
             .len()
             .try_into()
             .expect("the number of signers is greater than u32::MAX?");
-        let signer_key_ids = (0..num_signers)
-            .map(|signer_id| (signer_id, std::iter::once(signer_id + 1).collect()))
+        let key_ids = signers
+            .clone()
+            .into_iter()
+            .map(|(id, key)| (id + 1, key))
             .collect();
+        let signer_key_ids: HashMap<u32, HashSet<u32>> = signers
+            .iter()
+            .map(|(&signer_id, _)| {
+                let mut keys = HashSet::new();
+                keys.insert(signer_id + 1);
+                (signer_id, keys)
+            })
+            .collect();
+        let public_keys = wsts::state_machine::PublicKeys {
+            signers,
+            key_ids,
+            signer_key_ids,
+        };
         let config = wsts::state_machine::coordinator::Config {
             num_signers,
             num_keys: num_signers,
@@ -394,8 +420,8 @@ impl WstsCoordinator for FrostCoordinator {
             dkg_end_timeout: None,
             nonce_timeout: None,
             sign_timeout: None,
-            signer_key_ids,
-            signer_public_keys,
+            public_keys,
+            verify_packet_sigs: false,
         };
 
         let mut wsts_coordinator = frost::Coordinator::new(config);
@@ -467,15 +493,12 @@ impl WstsCoordinator for FrostCoordinator {
     fn start_signing_round(
         &mut self,
         message: &[u8],
-        _: &BitcoinBlockHash,
+        bitcoin_chain_tip: &BitcoinBlockHash,
         signature_type: SignatureType,
     ) -> Result<Packet, Error> {
-        // The current sign ID is private in the FROST coordinator so we
-        // cannot set it.
-        // TODO: Revisit when https://github.com/stacks-sbtc/wsts/pull/198
-        // is merged and we updated the WSTS dependency with those changes.
+        let sign_id = construct_signing_round_id(message, bitcoin_chain_tip);
         self.0
-            .start_signing_round(message, signature_type)
+            .start_signing_round(message, signature_type, Some(sign_id))
             .map_err(Error::wsts_coordinator)
     }
 }
@@ -605,12 +628,13 @@ impl SignerStateMachine {
     /// All other messages are processed with the OS random number
     /// generated.
     pub fn process(&mut self, message: &Message) -> Result<Vec<Message>, Error> {
+        let packet = Packet::from_message(message);
         let response = match message {
             Message::DkgBegin(_) => {
                 let mut rng = Self::create_rng(&self.started_at.block_hash, self.private_key);
-                self.inner.process(message, &mut rng)
+                self.inner.process(&packet, &mut rng)
             }
-            _ => self.inner.process(message, &mut OsRng),
+            _ => self.inner.process(&packet, &mut OsRng),
         };
 
         response.map_err(Error::Wsts)

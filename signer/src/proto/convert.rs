@@ -1593,6 +1593,7 @@ impl From<DkgPublicShares> for proto::SignerDkgPublicShares {
             dkg_id: value.dkg_id,
             signer_id: value.signer_id,
             commitments: value.comms.into_iter().map(|v| v.into()).collect(),
+            kex_public_key: Some(proto::Point::from(value.kex_public_key)),
         }
     }
 }
@@ -1600,7 +1601,12 @@ impl From<DkgPublicShares> for proto::SignerDkgPublicShares {
 impl TryFrom<proto::SignerDkgPublicShares> for DkgPublicShares {
     type Error = Error;
     fn try_from(value: proto::SignerDkgPublicShares) -> Result<Self, Self::Error> {
+        let kex_public_key = match value.kex_public_key {
+            Some(key) => Point::try_from(key)?,
+            None => Point::new(),
+        };
         Ok(DkgPublicShares {
+            kex_public_key,
             dkg_id: value.dkg_id,
             signer_id: value.signer_id,
             comms: value

@@ -24,6 +24,8 @@ message SignerDkgPublicShares {
   uint32 signer_id = 2;
   // List of (signer_id, commitment)
   repeated PartyCommitment commitments = 3;
+  // kex exchange public key
+  crypto.Point kex_public_key = 4;
 }
 
 // The public polynomial committed to by one of the party members who are
