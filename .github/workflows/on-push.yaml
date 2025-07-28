@@ -83,7 +83,7 @@ jobs:
         run: make install-pnpm
 
       - name: Lint (Rust & Pnpm)
-        id: lint_rust
+        id: lint_rust_and_pnpm
         run: make lint
 
       - name: Lint (Protobuf)
