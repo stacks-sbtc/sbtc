@@ -413,9 +413,10 @@ impl StateMachine {
 
 #[cfg(test)]
 mod tests {
-    use wsts::net::Message;
+    use wsts::net::{Message, Packet};
 
     use crate::testing::get_rng;
+    use crate::wsts_state_machine::FromMessage;
     use crate::{dkg::testing::*, testing::IterTestExt};
 
     use super::{
@@ -530,8 +531,15 @@ mod tests {
         let mut rng = get_rng();
 
         let nonce_request = nonce_request(1, 1, 1);
-        let nonce_response1 = signer1.process(&nonce_request, &mut rng).unwrap().single();
-        let nonce_response2 = signer2.process(&nonce_request, &mut rng).unwrap().single();
+        let nonce_request_packet = Packet::from_message(&nonce_request);
+        let nonce_response1 = signer1
+            .process(&nonce_request_packet, &mut rng)
+            .unwrap()
+            .single();
+        let nonce_response2 = signer2
+            .process(&nonce_request_packet, &mut rng)
+            .unwrap()
+            .single();
 
         assert_state!(state_machine, State::Idle);
 
@@ -585,16 +593,17 @@ mod tests {
         assert_eq!(state_machine.signer_count(), 2);
 
         let nonce_request = nonce_request(1, 1, 1);
+        let nonce_request_packet = Packet::from_message(&nonce_request);
 
         // Process the nonce request with signer 1 and 2 to get their nonce
         // responses.
         let nonce_response1 = signer1
-            .process(&nonce_request, &mut rng)
+            .process(&nonce_request_packet, &mut rng)
             .expect("signer1 should be able to process message")
             .single();
         assert!(matches!(nonce_response1, Message::NonceResponse(_)));
         let nonce_response2 = signer2
-            .process(&nonce_request, &mut rng)
+            .process(&nonce_request_packet, &mut rng)
             .expect("signer2 should be able to process message")
             .single();
         assert!(matches!(nonce_response2, Message::NonceResponse(_)));
@@ -638,10 +647,17 @@ mod tests {
         let mut rng = get_rng();
 
         let nonce_request = nonce_request(1, 1, 1);
+        let nonce_request_packet = Packet::from_message(&nonce_request);
 
         // Process the nonce request with signer 1 and 2 to get their responses.
-        let nonce_response1 = signer1.process(&nonce_request, &mut rng).unwrap().single();
-        let nonce_response2 = signer2.process(&nonce_request, &mut rng).unwrap().single();
+        let nonce_response1 = signer1
+            .process(&nonce_request_packet, &mut rng)
+            .unwrap()
+            .single();
+        let nonce_response2 = signer2
+            .process(&nonce_request_packet, &mut rng)
+            .unwrap()
+            .single();
 
         // Process the nonce request in the state machine and assert.
         state_machine
@@ -682,14 +698,15 @@ mod tests {
             1,
             vec![nonce_response1.clone(), nonce_response2.clone()],
         );
+        let sig_share_request_packet = Packet::from_message(&sig_share_request);
 
         // Process the signature share request
         let sig_share_response1 = signer1
-            .process(&sig_share_request, &mut rng)
+            .process(&sig_share_request_packet, &mut rng)
             .expect("should be able to process message")
             .single();
         let sig_share_response2 = signer2
-            .process(&sig_share_request, &mut rng)
+            .process(&sig_share_request_packet, &mut rng)
             .expect("should be able to process message")
             .single();
 

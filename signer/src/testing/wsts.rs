@@ -7,6 +7,7 @@ use std::time::Duration;
 use clarity::util::secp256k1::Secp256k1PublicKey;
 use clarity::vm::types::PrincipalData;
 use fake::Fake;
+use hashbrown::{HashMap, HashSet};
 use stacks_common::address::AddressHashMode;
 use stacks_common::address::C32_ADDRESS_VERSION_TESTNET_MULTISIG;
 use stacks_common::types::chainstate::StacksAddress;
@@ -100,17 +101,32 @@ impl Coordinator {
     ) -> Self {
         let num_signers = signer_info.signer_public_keys.len().try_into().unwrap();
         let message_private_key = signer_info.signer_private_key;
-        let signer_public_keys: hashbrown::HashMap<u32, _> = signer_info
+        let signers: hashbrown::HashMap<u32, _> = signer_info
             .signer_public_keys
             .into_iter()
             .enumerate()
-            .map(|(idx, key)| (idx.try_into().unwrap(), p256k1::point::Point::from(&key)))
+            .map(|(id, key)| (id as u32, p256k1::keys::PublicKey::from(&key)))
             .collect();
         let num_keys = num_signers;
         let dkg_threshold = num_keys;
-        let signer_key_ids = (0..num_signers)
-            .map(|signer_id| (signer_id, std::iter::once(signer_id + 1).collect()))
+        let key_ids = signers
+            .clone()
+            .into_iter()
+            .map(|(id, key)| (id + 1, key))
             .collect();
+        let signer_key_ids: HashMap<u32, HashSet<u32>> = signers
+            .iter()
+            .map(|(&signer_id, _)| {
+                let mut keys = HashSet::new();
+                keys.insert(signer_id + 1);
+                (signer_id, keys)
+            })
+            .collect();
+        let public_keys = wsts::state_machine::PublicKeys {
+            signers,
+            key_ids,
+            signer_key_ids,
+        };
         let config = wsts::state_machine::coordinator::Config {
             num_signers,
             num_keys,
@@ -122,8 +138,8 @@ impl Coordinator {
             dkg_end_timeout: None,
             nonce_timeout: None,
             sign_timeout: None,
-            signer_key_ids,
-            signer_public_keys,
+            public_keys,
+            verify_packet_sigs: false,
         };
 
         let wsts_coordinator = fire::Coordinator::new(config);
@@ -168,9 +184,10 @@ impl Coordinator {
         msg: &[u8],
         signature_type: SignatureType,
     ) -> wsts::taproot::SchnorrProof {
+        let sign_id = wsts_state_machine::construct_signing_round_id(msg, &bitcoin_chain_tip);
         let outbound = self
             .wsts_coordinator
-            .start_signing_round(msg, signature_type)
+            .start_signing_round(msg, signature_type, Some(sign_id))
             .expect("failed to start signing round");
 
         self.send_packet(bitcoin_chain_tip, id, outbound.msg).await;
