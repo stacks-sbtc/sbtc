@@ -125,7 +125,7 @@ where
     }
 
     /// Vote on pending deposit requests
-    #[tracing::instrument(skip_all, fields(chain_tip = %chain_tip))]
+    #[tracing::instrument(skip_all, fields(bitcoin_tip_hash = %chain_tip))]
     pub async fn handle_new_requests(&mut self, chain_tip: BitcoinBlockHash) -> Result<(), Error> {
         let requests_processing_delay = self.context.config().signer.requests_processing_delay;
         if requests_processing_delay > Duration::ZERO {
@@ -133,6 +133,9 @@ where
             tokio::time::sleep(requests_processing_delay).await;
         }
 
+        // If the bitcoin chain tip has changed since the we observed
+        // the bitcoin block given as an input here, then we can safely
+        // bail, as we will be processing the new block shortly.
         let state_chain_tip = self.context.state().bitcoin_chain_tip();
         if Some(chain_tip) != state_chain_tip.map(|btc| btc.block_hash) {
             tracing::debug!("chain tip has changed, skipping request processing");
