@@ -1,30 +1,17 @@
-//! This module provides functionality for receiving new blocks from
-//! bitcoin-core's ZeroMQ interface[1]. From the bitcoin-core docs:
+//! This module provides a poller for detecting new blocks on the Bitcoin
+//! blockchain.
 //!
-//! > The ZeroMQ facility implements a notification interface through a set of
-//! > specific notifiers. Currently, there are notifiers that publish blocks and
-//! > transactions. This read-only facility requires only the connection of a
-//! > corresponding ZeroMQ subscriber port in receiving software; it is not
-//! > authenticated nor is there any two-way protocol involvement. Therefore,
-//! > subscribers should validate the received data since it may be out of date,
-//! > incomplete or even invalid.
+//! The `BitcoinChainTipPoller` is the primary component, responsible for
+//! periodically calling the `getbestblockhash` RPC method on a Bitcoin Core
+//! node. When it detects a new block hash, it broadcasts it to all subscribers.
 //!
-//! > ZeroMQ sockets are self-connecting and self-healing; that is, connections
-//! > made between two endpoints will be automatically restored after an outage,
-//! > and either end may be freely started or stopped in any order.
+//! This approach provides a resilient, event-driven stream of new block hashes
+//! that other components, like the `BlockObserver`, can consume. The poller is
+//! designed to be robust, handling transient RPC errors by logging and retrying,
+//! ensuring continuous operation as long as the Bitcoin node is reachable.
 //!
-//! > Because ZeroMQ is message oriented, subscribers receive transactions and
-//! > blocks all-at-once and do not need to implement any sort of buffering or
-//! > reassembly.
-//!
-//! [^1]: https://github.com/bitcoin/bitcoin/blob/870447fd585e5926b4ce4e83db31c59b1be45a50/doc/zmq.md
-//!
-//! ### Testing Notes
-//!
-//! - When testing this module within the signer (i.e. in `devenv`), it is
-//!   important that bitcoind's state be preserved between stops/starts. For
-//!   docker compose, this means that you should use the `stop` command and not
-//!   the `down` command.
+//! The poller is created using the `BitcoinChainTipPollerBuilder`, which
+//! provides a fluent interface for configuration.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -42,12 +29,14 @@ use crate::bitcoin::BitcoinInteract;
 use crate::error::Error;
 use crate::util::SleepAsyncExt as _;
 
+/// The default interval at which the poller will check for a new chain tip.
 const DEFAULT_POLLING_INTERVAL: Duration = Duration::from_secs(5);
+/// The default capacity of the broadcast channel for sending new block hashes.
 const DEFAULT_BROADCAST_CAPACITY: usize = 1000;
-const INITIALIZATION_TIMEOUT: Duration = Duration::from_secs(60);
+/// The default timeout for the poller's initial connection to the RPC endpoint.
+const DEFAULT_INITIALIZATION_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// Error type for the Bitcoin ZMQ module, encapsulating errors related to
-/// the ZMQ data source or subscriber issues.
+/// Error type for subscribers of the `BitcoinChainTipPoller`.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum BitcoinChainTipPollerError {
     /// A subscriber to the ZMQ block hash broadcast lagged too far behind
@@ -57,6 +46,8 @@ pub enum BitcoinChainTipPollerError {
 }
 
 /// A builder for creating and configuring a `BitcoinChainTipPoller`.
+///
+/// This provides a fluent interface for setting up a poller instance.
 pub struct BitcoinChainTipPollerBuilder<Bitcoin>
 where
     Bitcoin: BitcoinInteract + 'static,
@@ -78,7 +69,7 @@ where
         Self {
             rpc,
             polling_interval: DEFAULT_POLLING_INTERVAL,
-            init_timeout: INITIALIZATION_TIMEOUT,
+            init_timeout: DEFAULT_INITIALIZATION_TIMEOUT,
         }
     }
 
@@ -96,29 +87,28 @@ where
 
     /// Builds and starts the `BitcoinChainTipPoller`.
     ///
-    /// This function will not return until it has successfully fetched the
-    /// initial best block hash from the RPC, or until the `init_timeout`
-    /// is reached.
+    /// This function consumes the builder and spawns the background polling task.
+    /// It will not return until it has successfully fetched the initial best
+    /// block hash from the RPC, or until the `init_timeout` is reached.
     pub async fn start(self) -> Result<BitcoinChainTipPoller, Error> {
         BitcoinChainTipPoller::start(self.rpc, self.polling_interval, self.init_timeout).await
     }
 }
 
-/// The `BitcoinChainTipPoller` is responsible for managing the ZMQ polling task
-/// and providing a stream of block hashes received from the Bitcoin Core ZMQ interface.
-/// It connects to the specified ZMQ endpoint, listens for block hash messages, and
-/// broadcasts them to subscribers. This implementation ensures reliable message delivery
-/// and handles reconnection logic in case of connection issues.
+/// A poller that periodically checks for and broadcasts new Bitcoin chain tips.
+///
+/// This struct manages a background task that polls a Bitcoin Core node's RPC
+/// to get the latest block hash. It provides a stream of these hashes that other
+/// parts of the application can subscribe to.
 #[derive(Clone)]
 pub struct BitcoinChainTipPoller {
-    // The broadcast channel now sends Result<BlockHash, BitcoinChainTipPollerError>
+    /// The sender for the broadcast channel that distributes new block hashes.
     broadcast_tx: broadcast::Sender<BlockHash>,
-    // Keep the task handle to ensure the poller task isn't dropped prematurely
-    // and potentially for graceful shutdown in the future.
+    /// A handle to the background polling task, used for graceful shutdown.
     poller_task_handle: Arc<JoinHandle<()>>,
 }
 
-/// Runs the RPC polling loop.
+/// Runs the RPC polling loop in a background task.
 ///
 /// This function polls the `getbestblockhash` RPC method at a regular interval,
 /// detects new block hashes, and broadcasts them on the provided channel.
@@ -155,8 +145,9 @@ async fn run_rpc_poller<Bitcoin>(
 }
 
 impl BitcoinChainTipPoller {
-    /// Creates a new `BitcoinChainTipPoller` using the provided Bitcoin client
-    /// and polling interval.
+    /// Creates a new builder for a `BitcoinChainTipPoller`.
+    ///
+    /// This is the main entry point for creating a new poller instance.
     pub fn builder<Bitcoin>(rpc: Bitcoin) -> BitcoinChainTipPollerBuilder<Bitcoin>
     where
         Bitcoin: BitcoinInteract + 'static,
@@ -164,9 +155,11 @@ impl BitcoinChainTipPoller {
         BitcoinChainTipPollerBuilder::new(rpc)
     }
 
-    /// Creates a new `BitcoinChainTipPoller` using the provided Bitcoin client
-    /// and polling interval, starts the task and returns itself. This is called
-    /// by the builder.
+    /// Creates and starts a new `BitcoinChainTipPoller` task.
+    ///
+    /// This private method is called by the builder. It attempts to fetch the
+    /// initial block hash within a timeout and then spawns the long-running
+    /// poller task.
     async fn start<Bitcoin>(
         rpc: Bitcoin,
         polling_interval: Duration,
@@ -227,6 +220,7 @@ impl BitcoinChainTipPoller {
 impl BitcoinBlockHashStreamProvider for BitcoinChainTipPoller {
     type Error = BitcoinChainTipPollerError;
 
+    /// Subscribes to the poller, returning a new stream of block hashes.
     fn get_block_hash_stream(
         &self,
     ) -> impl Stream<Item = Result<BlockHash, BitcoinChainTipPollerError>> + Send + Sync + 'static
