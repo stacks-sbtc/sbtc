@@ -579,7 +579,7 @@ impl SignerStateMachine {
             return Err(error::Error::InvalidConfiguration);
         };
 
-        let inner = WstsSigner::new(
+        let mut inner = WstsSigner::new(
             threshold,
             dkg_threshold,
             num_parties,
@@ -591,6 +591,8 @@ impl SignerStateMachine {
             &mut OsRng,
         )
         .map_err(Error::Wsts)?;
+
+        inner.verify_packet_sigs = false;
 
         Ok(Self { inner, started_at, private_key })
     }
