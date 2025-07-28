@@ -2141,7 +2141,7 @@ mod tests {
                 assert_eq!(a1, a2);
                 assert_eq!(m1, m2);
             }
-            (result, expected) => panic!("Expected {:?} but got {:?}", expected, result),
+            (result, expected) => panic!("Expected {expected:?} but got {result:?}"),
         };
     }
 

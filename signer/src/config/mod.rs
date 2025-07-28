@@ -843,7 +843,7 @@ mod tests {
                 );
             }
             _ => {
-                panic!("Expected ConfigError::Message, got: {:#?}", error);
+                panic!("Expected ConfigError::Message, got: {error:#?}");
             }
         }
     }

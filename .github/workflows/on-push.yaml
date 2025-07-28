@@ -82,17 +82,9 @@ jobs:
         id: install_dependencies
         run: make install-pnpm
 
-      - name: Lint (Rustfmt)
-        id: lint_rustfmt
-        run: cargo fmt --all -- --check
-
-      - name: Lint (Clippy)
-        id: lint_clippy
-        run: cargo clippy -- -D warnings
-
-      - name: Lint (pnpm)
-        id: lint_pnpm
-        run: pnpm --recursive run lint
+      - name: Lint (Rust & Pnpm)
+        id: lint_rust_and_pnpm
+        run: make lint
 
       - name: Lint (Protobuf)
         id: lint_protobuf

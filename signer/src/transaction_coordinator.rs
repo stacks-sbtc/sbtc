@@ -3072,7 +3072,7 @@ mod tests {
                 assert!(!needs_rotate_key);
             }
             Err(e) => {
-                panic!("expected success but got error: {:?}", e)
+                panic!("expected success but got error: {e:?}")
             }
         }
     }

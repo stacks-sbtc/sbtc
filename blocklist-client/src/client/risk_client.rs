@@ -141,11 +141,11 @@ async fn check_api_response(response: Response) -> Result<Response, Error> {
 }
 
 fn register_address_path(base_url: &str) -> String {
-    format!("{}{}", base_url, API_BASE_PATH)
+    format!("{base_url}{API_BASE_PATH}")
 }
 
 fn risk_assessment_path(base_url: &str, address: &str) -> String {
-    format!("{}{}/{}", base_url, API_BASE_PATH, address)
+    format!("{base_url}{API_BASE_PATH}/{address}")
 }
 
 #[cfg(test)]
@@ -184,7 +184,7 @@ mod tests {
         assert!(result.is_ok());
         match result {
             Ok(response) => assert_eq!(response.address, TEST_ADDRESS),
-            Err(e) => panic!("Expected success, got error: {:?}", e),
+            Err(e) => panic!("Expected success, got error: {e:?}"),
         }
 
         mock.assert();
@@ -209,7 +209,7 @@ mod tests {
                 assert_eq!(code, StatusCode::BAD_REQUEST);
                 assert!(message.contains("Bad request - Invalid parameters or data"));
             }
-            _ => panic!("Expected HttpRequest, got {:?}", result),
+            _ => panic!("Expected HttpRequest, got {result:?}"),
         }
 
         mock.assert();
@@ -219,10 +219,7 @@ mod tests {
     async fn test_get_risk_assessment_high_risk() {
         let mut server = Server::new_async().await;
         let mock = server
-            .mock(
-                "GET",
-                format!("{}/{}", API_BASE_PATH, TEST_ADDRESS).as_str(),
-            )
+            .mock("GET", format!("{API_BASE_PATH}/{TEST_ADDRESS}").as_str())
             .with_status(200)
             .expect(1)
             .with_body(r#"{"risk": "Severe"}"#)
@@ -234,7 +231,7 @@ mod tests {
         match result {
             Ok(risk) => assert_eq!(risk.severity, Severe),
             Err(e) => {
-                panic!("Expected RiskSeverity::Severe, got error: {:?}", e)
+                panic!("Expected RiskSeverity::Severe, got error: {e:?}")
             }
         }
 
@@ -245,10 +242,7 @@ mod tests {
     async fn test_get_risk_assessment_invalid_response() {
         let mut server = Server::new_async().await;
         let mock = server
-            .mock(
-                "GET",
-                format!("{}/{}", API_BASE_PATH, TEST_ADDRESS).as_str(),
-            )
+            .mock("GET", format!("{API_BASE_PATH}/{TEST_ADDRESS}").as_str())
             .with_status(200)
             .expect(1)
             .with_body(r#"{"risky": "Severe"}"#)
@@ -278,10 +272,7 @@ mod tests {
             .with_body(ADDRESS_REGISTRATION_BODY)
             .create();
         let risk_mock = server
-            .mock(
-                "GET",
-                format!("{}/{}", API_BASE_PATH, TEST_ADDRESS).as_str(),
-            )
+            .mock("GET", format!("{API_BASE_PATH}/{TEST_ADDRESS}").as_str())
             .with_status(200)
             .expect(1)
             .with_body(r#"{"risk": "Severe", "riskReason": "fraud"}"#)
@@ -312,10 +303,7 @@ mod tests {
             .with_body(ADDRESS_REGISTRATION_BODY)
             .create();
         let risk_mock = server
-            .mock(
-                "GET",
-                format!("{}/{}", API_BASE_PATH, TEST_ADDRESS).as_str(),
-            )
+            .mock("GET", format!("{API_BASE_PATH}/{TEST_ADDRESS}").as_str())
             .with_status(200)
             .expect(1)
             .with_body(r#"{"risk": "Low"}"#)
@@ -368,10 +356,7 @@ mod tests {
             .with_body(ADDRESS_REGISTRATION_BODY)
             .create();
         let risk_mock = server
-            .mock(
-                "GET",
-                format!("{}/{}", API_BASE_PATH, TEST_ADDRESS).as_str(),
-            )
+            .mock("GET", format!("{API_BASE_PATH}/{TEST_ADDRESS}").as_str())
             .with_status(500)
             .expect(1)
             .with_body(r#"{}"#)

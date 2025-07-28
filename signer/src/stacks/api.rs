@@ -674,8 +674,7 @@ impl StacksClient {
         arguments: &[Value],
     ) -> Result<Value, Error> {
         let path = format!(
-            "/v2/contracts/call-read/{}/{}/{}?tip=latest",
-            contract_principal, contract_name, fn_name
+            "/v2/contracts/call-read/{contract_principal}/{contract_name}/{fn_name}?tip=latest"
         );
 
         let url = self
@@ -843,7 +842,7 @@ impl StacksClient {
     /// be included in the response.
     #[tracing::instrument(skip_all)]
     pub async fn get_account(&self, address: &StacksAddress) -> Result<AccountInfo, Error> {
-        let path = format!("/v2/accounts/{}?proof=0", address);
+        let path = format!("/v2/accounts/{address}?proof=0");
         let url = self
             .endpoint
             .join(&path)
@@ -883,7 +882,7 @@ impl StacksClient {
         address: &StacksAddress,
         contract_name: &str,
     ) -> Result<ContractSrcResponse, Error> {
-        let path = format!("/v2/contracts/source/{}/{}?proof=0", address, contract_name);
+        let path = format!("/v2/contracts/source/{address}/{contract_name}?proof=0");
         let url = self
             .endpoint
             .join(&path)
@@ -1181,7 +1180,7 @@ impl StacksClient {
         &self,
         consensus_hash: &ConsensusHash,
     ) -> Result<SortitionInfo, Error> {
-        let path = format!("/v3/sortitions/consensus/{}", consensus_hash);
+        let path = format!("/v3/sortitions/consensus/{consensus_hash}");
         let url = self
             .endpoint
             .join(&path)
