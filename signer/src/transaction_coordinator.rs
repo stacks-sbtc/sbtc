@@ -2659,6 +2659,7 @@ mod tests {
     use crate::emily_client::MockEmilyInteract;
     use crate::error::Error;
     use crate::keys::{PrivateKey, PublicKey};
+    use crate::network::in_memory2::WanNetwork;
     use crate::stacks::api::MockStacksInteract;
     use crate::storage::memory::SharedStore;
     use crate::storage::model::BitcoinBlockHeight;
@@ -2673,6 +2674,7 @@ mod tests {
 
     use super::assert_rotate_key_action;
     use super::should_coordinate_dkg;
+    use super::*;
 
     #[allow(clippy::type_complexity)]
     fn test_environment() -> TestEnvironment<
@@ -2749,6 +2751,42 @@ mod tests {
             .assert_should_be_able_to_coordinate_signing_rounds(delay)
             .await;
         more_asserts::assert_gt!(start.elapsed(), delay + baseline_elapsed);
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn should_skip_processing_bitcoin_blocks_if_chain_tip_has_changed() {
+        let mut rng = testing::get_rng();
+        let ctx = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .build();
+
+        let network = WanNetwork::default();
+        let net = network.connect(&ctx);
+
+        let mut ev = TxCoordinatorEventLoop {
+            network: net.spawn(),
+            context: ctx.clone(),
+            context_window: 10000,
+            private_key: PrivateKey::new(&mut rng),
+            signing_round_max_duration: Duration::from_secs(10),
+            bitcoin_presign_request_max_duration: Duration::from_secs(10),
+            threshold: ctx.config().signer.bootstrap_signatures_required,
+            dkg_max_duration: Duration::from_secs(10),
+            is_epoch3: true,
+        };
+
+        let chain_tip1 = fake::Faker.fake_with_rng(&mut rng);
+        let chain_tip2 = fake::Faker.fake_with_rng(&mut rng);
+
+        ctx.state().set_bitcoin_chain_tip(chain_tip1);
+
+        // We should bail early here and just return Ok(())
+        ev.process_new_blocks(chain_tip2).await.unwrap();
+
+        // This one won't bail early enough and will reach out the the
+        // stacks node for something and then panic.
+        ev.process_new_blocks(chain_tip1).await.unwrap_err();
     }
 
     #[tokio::test]
