@@ -384,9 +384,10 @@ where
     ) -> Result<MsgChainTipReport, Error> {
         let storage = self.context.get_storage();
 
-        let chain_tip = storage
-            .get_bitcoin_canonical_chain_tip_ref()
-            .await?
+        let chain_tip = self
+            .context
+            .state()
+            .bitcoin_chain_tip()
             .ok_or(Error::NoChainTip)?;
 
         let is_known = storage

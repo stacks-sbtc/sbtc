@@ -346,7 +346,7 @@ async fn exec_deposit(ctx: &Context, args: DepositArgs) -> Result<(), Error> {
     .await
     .map_err(Box::new)?;
 
-    println!("Deposit request created: {:?}", emily_deposit);
+    println!("Deposit request created: {emily_deposit:?}");
 
     Ok(())
 }

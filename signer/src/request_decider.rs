@@ -134,10 +134,12 @@ where
         }
 
         let db = self.context.get_storage();
-        let chain_tip = db
-            .get_bitcoin_canonical_chain_tip()
-            .await?
-            .ok_or(Error::NoChainTip)?;
+        let chain_tip = self
+            .context
+            .state()
+            .bitcoin_chain_tip()
+            .ok_or(Error::NoChainTip)?
+            .block_hash;
 
         let signer_public_key = self.signer_public_key();
 

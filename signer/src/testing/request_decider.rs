@@ -177,6 +177,15 @@ where
         let test_data = self.generate_test_data(&mut rng, signer_set);
         Self::write_test_data(&handle.context.get_storage_mut(), &test_data).await;
 
+        let chain_tip_ref = handle
+            .context
+            .get_storage()
+            .get_bitcoin_canonical_chain_tip_ref()
+            .await
+            .unwrap()
+            .unwrap();
+        handle.context.state().set_bitcoin_chain_tip(chain_tip_ref);
+
         let group_key = PublicKey::combine_keys(signer_set).unwrap();
         store_dummy_dkg_shares(
             &mut rng,
@@ -262,6 +271,15 @@ where
         let signer_set = &coordinator_signer_info.signer_public_keys;
         let test_data = self.generate_test_data(&mut rng, signer_set);
         Self::write_test_data(&handle.context.get_storage_mut(), &test_data).await;
+
+        let chain_tip_ref = handle
+            .context
+            .get_storage()
+            .get_bitcoin_canonical_chain_tip_ref()
+            .await
+            .unwrap()
+            .unwrap();
+        handle.context.state().set_bitcoin_chain_tip(chain_tip_ref);
 
         handle
             .context
@@ -350,6 +368,15 @@ where
         let test_data = self.generate_test_data(&mut rng, signer_set);
         for handle in event_loop_handles.iter_mut() {
             test_data.write_to(&handle.context.get_storage_mut()).await;
+
+            let chain_tip_ref = handle
+                .context
+                .get_storage()
+                .get_bitcoin_canonical_chain_tip_ref()
+                .await
+                .unwrap()
+                .unwrap();
+            handle.context.state().set_bitcoin_chain_tip(chain_tip_ref);
 
             let group_key = PublicKey::combine_keys(signer_set).unwrap();
             store_dummy_dkg_shares(

@@ -64,7 +64,7 @@ impl std::fmt::Display for StateMachineId {
                 "dkg(block_hash={}, block_height={})",
                 block.block_hash, block.block_height
             ),
-            StateMachineId::BitcoinSign(sighash) => write!(f, "bitcoin-sign({})", sighash),
+            StateMachineId::BitcoinSign(sighash) => write!(f, "bitcoin-sign({sighash})"),
             StateMachineId::DkgVerification(pubkey, block) => write!(
                 f,
                 "dkg-verification(key={pubkey}, block_hash={}, block_height={})",
