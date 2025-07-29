@@ -1603,10 +1603,10 @@ impl TryFrom<proto::SignerDkgPublicShares> for DkgPublicShares {
     fn try_from(value: proto::SignerDkgPublicShares) -> Result<Self, Self::Error> {
         let kex_public_key = match value.kex_public_key {
             Some(key) => Point::try_from(key)?,
-            // If the protobuf doesn't have a kex_public_key, that means it is an artifact
-            // from an old DKG run before we had ephemeral DKG encryption keys.  Using the
+            // If the protobuf doesn't have a kex_public_key, that means it's an artifact
+            // from an old DKG round before we had ephemeral DKG encryption keys.  Using the
             // point at infinity allows us to distinguish this case in code if desired, and
-            // also prevents us from accidentally using these shares in a future DKG found,
+            // also prevents us from accidentally using these shares in a future DKG round,
             // since the point at infinity will not deserialize if sent over the wire.
             None => Point::identity(),
         };
