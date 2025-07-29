@@ -1834,19 +1834,12 @@ where
         }
     }
 
-    // Determine if the current coordinator is the coordinator.
-    //
-    // The coordinator is decided using the hash of the bitcoin
-    // chain tip. We don't use the chain tip directly because
-    // it typically starts with a lot of leading zeros.
-    //
-    // Note that this function is technically not fallible,
-    // but for now we have chosen to return phantom errors
-    // instead of adding expects/unwraps in the code.
-    // Ideally the code should be formulated in a way to guarantee
-    // it being infallible without relying on sequentially coupling
-    // expressions. However, that is left for future work.
-    fn is_coordinator(&self, bitcoin_chain_tip: &model::BitcoinBlockHash) -> bool {
+    /// Determine if this signer is the signer set's coordinator.
+    ///
+    /// The coordinator is decided using the hash of the bitcoin chain tip.
+    /// We don't use the chain tip directly because it typically starts
+    /// with a lot of leading zeros.
+    pub fn is_coordinator(&self, bitcoin_chain_tip: &model::BitcoinBlockHash) -> bool {
         given_key_is_coordinator(
             self.signer_public_key(),
             bitcoin_chain_tip,
@@ -2767,12 +2760,60 @@ mod tests {
 
     /// Check that we skip processing bitcoin blocks if the chain tip in
     /// the state doesn't match the block hash passed in.
+    #[tokio::test]
+    async fn should_skip_processing_bitcoin_blocks_if_chain_tip_has_changed() {
+        let mut rng = testing::get_rng();
+        let ctx = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .modify_settings(|settings| {
+                settings.signer.bootstrap_signatures_required = 1;
+                settings.signer.bootstrap_signing_set =
+                    std::iter::once(settings.signer.public_key()).collect();
+            })
+            .build();
+
+        let network = WanNetwork::default();
+        let net = network.connect(&ctx);
+
+        let mut ev = TxCoordinatorEventLoop {
+            network: net.spawn(),
+            context: ctx.clone(),
+            context_window: 10000,
+            private_key: ctx.config().signer.private_key,
+            signing_round_max_duration: Duration::from_secs(10),
+            bitcoin_presign_request_max_duration: Duration::from_secs(10),
+            threshold: ctx.config().signer.bootstrap_signatures_required,
+            dkg_max_duration: Duration::from_secs(10),
+            is_epoch3: true,
+        };
+
+        let chain_tip1: BitcoinBlockRef = fake::Faker.fake_with_rng(&mut rng);
+        let chain_tip2: BitcoinBlockRef = fake::Faker.fake_with_rng(&mut rng);
+
+        // There is only one signer in the signer set, us, so we should
+        // always be coordinator.
+        assert!(ev.is_coordinator(&chain_tip1.block_hash));
+        assert!(ev.is_coordinator(&chain_tip2.block_hash));
+
+        // We should bail if the chain tip is not set.
+        let error = ev.process_new_blocks(chain_tip2).await.unwrap_err();
+        assert_matches::assert_matches!(error, Error::NoChainTip);
+
+        // Now the chain tip in the state is set but it does not match the
+        // chain tip passed in, so we should bail early and return Ok(())
+        ctx.state().set_bitcoin_chain_tip(chain_tip1);
+        ev.process_new_blocks(chain_tip2).await.unwrap();
+    }
+
+    /// Check that we skip processing bitcoin blocks if the chain tip in
+    /// the state doesn't match the block hash passed in.
     ///
     /// Note: this test is a little sensitive to the current logic that
     /// checks for smart contract deployment after checking whether the
     /// chain tip is up to date.
-    #[test_log::test(tokio::test)]
-    async fn should_skip_processing_bitcoin_blocks_if_chain_tip_has_changed() {
+    #[tokio::test]
+    async fn should_skip_processing_bitcoin_blocks_if_not_coordinator() {
         let mut rng = testing::get_rng();
         let ctx = TestContext::builder()
             .with_in_memory_storage()
@@ -2800,21 +2841,19 @@ mod tests {
             is_epoch3: true,
         };
 
-        let chain_tip1 = fake::Faker.fake_with_rng(&mut rng);
-        let chain_tip2 = fake::Faker.fake_with_rng(&mut rng);
+        let chain_tip1: BitcoinBlockRef = fake::Faker.fake_with_rng(&mut rng);
+        // The given private key is randomly generated so it is unlikely to
+        // be part of the bootstrap signing set, and so unlikely to be
+        // coordinator.
+        assert!(!ev.is_coordinator(&chain_tip1.block_hash));
 
-        // The chain tip in the state does not match the chain tip passed
-        // in, so it should bail early and just return Ok(()
         ctx.state().set_bitcoin_chain_tip(chain_tip1);
-        ev.process_new_blocks(chain_tip2).await.unwrap();
 
-        // This one won't bail early enough and will reach out the the
-        // stacks node to figure out if the contracts have been deployed.
-        // They haven't and we've mocked stacks to return a Dummy error.
-        let error = ev
-            .process_new_blocks(chain_tip1)
-            .await
-            .expect_err("the event loop should end early with an error");
+        // This one will bail early since we are not the coordinator.
+        // However, when we do so, we check to see if the contracts have
+        // been deployed. They haven't and we've mocked stacks to return a
+        // Dummy error when we run the check.
+        let error = ev.process_new_blocks(chain_tip1).await.unwrap_err();
 
         assert_matches::assert_matches!(error, Error::Dummy);
     }
