@@ -256,6 +256,7 @@ impl PgRead {
     {
         sqlx::query_as::<_, model::BitcoinTxRef>(
             r#"
+            -- get_withdrawal_sweep_info
             WITH potential_transactions AS (
                 SELECT
                     bwo.bitcoin_txid AS txid
