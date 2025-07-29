@@ -281,13 +281,13 @@ impl PgRead {
                 JOIN sbtc_signer.bitcoin_withdrawal_tx_outputs AS bwto
                   ON bwto.request_id = wr.request_id
                 JOIN sbtc_signer.bitcoin_transactions AS bt
-                  ON bt.txid = bwto.bitcoin_txid
+                  ON bt.txid = bwto.txid
                 WHERE wr.request_id = $2
                   AND wr.block_hash = $3
             )
             SELECT 
-                txid
-              , block_hash
+                pt.txid
+              , pt.block_hash
             FROM potential_transactions AS pt
             JOIN sbtc_signer.bitcoin_blockchain_until($1, pt.bitcoin_block_height) AS bbu
               ON bbu.block_hash = pt.block_hash
