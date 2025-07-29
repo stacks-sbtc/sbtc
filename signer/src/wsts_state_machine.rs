@@ -378,7 +378,7 @@ impl WstsCoordinator for FrostCoordinator {
         let signers: hashbrown::HashMap<u32, _> = signers
             .into_iter()
             .enumerate()
-            .map(|(id, key)| (id as u32, p256k1::keys::PublicKey::from(&key)))
+            .map(|(idx, key)| (idx as u32, key.into()))
             .collect();
         // The number of possible signers is capped at a number well below
         // u32::MAX, so this conversion should always work.
@@ -391,13 +391,8 @@ impl WstsCoordinator for FrostCoordinator {
             .into_iter()
             .map(|(id, key)| (id + 1, key))
             .collect();
-        let signer_key_ids: HashMap<u32, HashSet<u32>> = signers
-            .iter()
-            .map(|(&signer_id, _)| {
-                let mut keys = HashSet::new();
-                keys.insert(signer_id + 1);
-                (signer_id, keys)
-            })
+        let signer_key_ids = (0..num_signers)
+            .map(|signer_id| (signer_id, std::iter::once(signer_id + 1).collect()))
             .collect();
         let public_keys = wsts::state_machine::PublicKeys {
             signers,
