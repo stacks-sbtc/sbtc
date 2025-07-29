@@ -1,24 +1,19 @@
 //! Entries into the withdrawal table.
 
-use std::collections::HashSet;
-
 use serde::{Deserialize, Serialize};
 
 use crate::{
     api::models::{
         chainstate::Chainstate,
-        common::Status,
-        withdrawal::{
-            requests::{UpdateWithdrawalsRequestBody, WithdrawalUpdate},
-            Withdrawal, WithdrawalInfo, WithdrawalParameters,
-        },
+        common::WithdrawalStatus,
+        withdrawal::{Withdrawal, WithdrawalInfo, WithdrawalParameters},
     },
-    common::error::{Error, Inconsistency},
+    common::error::{Error, Inconsistency, ValidationError},
 };
 
 use super::{
     EntryTrait, KeyTrait, PrimaryIndex, PrimaryIndexTrait, SecondaryIndex, SecondaryIndexTrait,
-    StatusEntry, VersionedEntryTrait,
+    VersionedEntryTrait, WithdrawalStatusEntry,
 };
 
 // Withdrawal entry ---------------------------------------------------------------
@@ -33,6 +28,12 @@ pub struct WithdrawalEntryKey {
     pub stacks_block_hash: String,
 }
 
+impl std::fmt::Display for WithdrawalEntryKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.request_id, self.stacks_block_hash)
+    }
+}
+
 /// Withdrawal table entry.
 #[derive(Clone, Default, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -44,8 +45,10 @@ pub struct WithdrawalEntry {
     pub stacks_block_height: u64,
     /// Table entry version. Updated on each alteration.
     pub version: u64,
-    /// Stacks address to received the withdrawn sBTC.
+    /// The recipient's Bitcoin hex-encoded scriptPubKey.
     pub recipient: String,
+    /// The sender's Stacks principal.
+    pub sender: String,
     /// Amount of BTC being withdrawn in satoshis.
     pub amount: u64,
     /// Withdrawal parameters.
@@ -53,7 +56,7 @@ pub struct WithdrawalEntry {
     pub parameters: WithdrawalParametersEntry,
     /// The status of the withdrawal.
     #[serde(rename = "OpStatus")]
-    pub status: Status,
+    pub status: WithdrawalStatus,
     /// The most recent Stacks block height the API was aware of when the withdrawal was last
     /// updated. If the most recent update is tied to an artifact on the Stacks blockchain
     /// then this height is the Stacks block height that contains that artifact.
@@ -62,6 +65,8 @@ pub struct WithdrawalEntry {
     /// updated. If the most recent update is tied to an artifact on the Stacks blockchain
     /// then this hash is the Stacks block hash that contains that artifact.
     pub last_update_block_hash: String,
+    /// The hex encoded txid of the stacks transaction that generated this event.
+    pub txid: String,
     /// History of this withdrawal transaction.
     pub history: Vec<WithdrawalEvent>,
 }
@@ -84,27 +89,26 @@ impl VersionedEntryTrait for WithdrawalEntry {
 impl WithdrawalEntry {
     /// Implement validate.
     pub fn validate(&self) -> Result<(), Error> {
-        let stringy_self = serde_json::to_string(self)?;
-
         // Get latest event.
-        let latest_event: &WithdrawalEvent = self.history.last().ok_or(Error::Debug(format!(
-            "Failed getting the last history element for withdrawal. {stringy_self:?}"
-        )))?;
+        let latest_event: &WithdrawalEvent = self.latest_event()?;
 
         // Verify that the latest event is the current one shown in the entry.
         if self.last_update_block_hash != latest_event.stacks_block_hash {
-            return Err(Error::Debug(
-                format!("last update block hash is inconsistent between history and top level data. {stringy_self:?}")
+            return Err(Error::InvalidWithdrawalEntry(
+                "last update block hash is inconsistent between history and top level data",
+                self.key.clone(),
             ));
         }
         if self.last_update_height != latest_event.stacks_block_height {
-            return Err(Error::Debug(
-                format!("last update block height is inconsistent between history and top level data. {stringy_self:?}")
+            return Err(Error::InvalidWithdrawalEntry(
+                "last update block height is inconsistent between history and top level data",
+                self.key.clone(),
             ));
         }
         if self.status != (&latest_event.status).into() {
-            return Err(Error::Debug(
-                format!("most recent status is inconsistent between history and top level data. {stringy_self:?}")
+            return Err(Error::InvalidWithdrawalEntry(
+                "most recent status is inconsistent between history and top level data",
+                self.key.clone(),
             ));
         }
         Ok(())
@@ -112,10 +116,10 @@ impl WithdrawalEntry {
 
     /// Gets the latest event.
     pub fn latest_event(&self) -> Result<&WithdrawalEvent, Error> {
-        self.history.last().ok_or(Error::Debug(format!(
-            "Withdrawal entry must always have at least one event, but entry with id {:?} did not.",
-            self.key(),
-        )))
+        self.history.last().ok_or(Error::InvalidWithdrawalEntry(
+            "Withdrawal entry must always have at least one event, but did not",
+            self.key.clone(),
+        ))
     }
 
     /// Reorgs around a given chainstate.
@@ -133,7 +137,7 @@ impl WithdrawalEntry {
         // latest update is the point at which the reorg happened.
         if self.history.is_empty() {
             self.history = vec![WithdrawalEvent {
-                status: StatusEntry::Pending,
+                status: WithdrawalStatusEntry::Pending,
                 message: "Reprocessing withdrawal status after reorg.".to_string(),
                 stacks_block_height: chainstate.stacks_block_height,
                 stacks_block_hash: chainstate.stacks_block_hash.clone(),
@@ -162,7 +166,7 @@ impl WithdrawalEntry {
         // Get latest event.
         let latest_event = self.latest_event()?.clone();
         // Calculate the new values.
-        let new_status: Status = (&latest_event.status).into();
+        let new_status: WithdrawalStatus = (&latest_event.status).into();
         let new_last_update_height: u64 = latest_event.stacks_block_height;
         // Set variables.
         self.status = new_status;
@@ -182,9 +186,9 @@ impl TryFrom<WithdrawalEntry> for Withdrawal {
         // Extract data from the latest event.
         let latest_event = withdrawal_entry.latest_event()?;
         let status_message = latest_event.message.clone();
-        let status: Status = (&latest_event.status).into();
+        let status: WithdrawalStatus = (&latest_event.status).into();
         let fulfillment = match &latest_event.status {
-            StatusEntry::Confirmed(fulfillment) => Some(fulfillment.clone()),
+            WithdrawalStatusEntry::Confirmed(fulfillment) => Some(fulfillment.clone()),
             _ => None,
         };
 
@@ -194,6 +198,7 @@ impl TryFrom<WithdrawalEntry> for Withdrawal {
             stacks_block_hash: withdrawal_entry.key.stacks_block_hash,
             stacks_block_height: withdrawal_entry.stacks_block_height,
             recipient: withdrawal_entry.recipient,
+            sender: withdrawal_entry.sender,
             amount: withdrawal_entry.amount,
             last_update_height: withdrawal_entry.last_update_height,
             last_update_block_hash: withdrawal_entry.last_update_block_hash,
@@ -202,6 +207,7 @@ impl TryFrom<WithdrawalEntry> for Withdrawal {
             parameters: WithdrawalParameters {
                 max_fee: withdrawal_entry.parameters.max_fee,
             },
+            txid: withdrawal_entry.txid,
             fulfillment,
         })
     }
@@ -222,10 +228,10 @@ pub struct WithdrawalParametersEntry {
 pub struct WithdrawalEvent {
     /// Status code.
     #[serde(rename = "OpStatus")]
-    pub status: StatusEntry,
+    pub status: WithdrawalStatusEntry,
     /// Status message.
     pub message: String,
-    /// Stacks block heigh at the time of this update.
+    /// Stacks block height at the time of this update.
     pub stacks_block_height: u64,
     /// Stacks block hash associated with the height of this update.
     pub stacks_block_hash: String,
@@ -240,17 +246,24 @@ impl WithdrawalEvent {
     ) -> Result<(), Error> {
         // Determine if event is valid.
         if self.stacks_block_height > next_event.stacks_block_height {
-            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(
-                "Attempting to update a withdrawal with a block height earlier than it should be."
-                    .into(),
-            )));
+            let message =
+                "Attempting to update a withdrawal with a block height earlier than it should be";
+            tracing::warn!(
+                new_event = ?next_event,
+                last_existing_event = ?self,
+                message
+            );
+            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(message)));
         } else if self.stacks_block_height == next_event.stacks_block_height
             && self.stacks_block_hash != next_event.stacks_block_hash
         {
-            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(
-                "Attempting to update a withdrawal with a block height and hash that conflicts with the current history."
-                    .into(),
-            )));
+            let message = "Attempting to update a withdrawal with a block height and hash that conflicts with the current history";
+            tracing::warn!(
+                new_event = ?next_event,
+                last_existing_event = ?self,
+                message
+            );
+            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(message)));
         }
 
         Ok(())
@@ -282,7 +295,7 @@ impl EntryTrait for WithdrawalEntry {
     }
 }
 
-/// Primary index struct.
+/// Secondary index struct.
 pub struct WithdrawalTablePrimaryIndexInner;
 /// Withdrawal table primary index type.
 pub type WithdrawalTablePrimaryIndex = PrimaryIndex<WithdrawalTablePrimaryIndexInner>;
@@ -314,7 +327,7 @@ pub struct WithdrawalInfoEntrySearchToken {
 pub struct WithdrawalInfoEntryKey {
     /// The status of the withdrawal.
     #[serde(rename = "OpStatus")]
-    pub status: Status,
+    pub status: WithdrawalStatus,
     /// The most recent Stacks block height the API was aware of when the withdrawal was last
     /// updated. If the most recent update is tied to an artifact on the Stacks blockchain
     /// then this height is the Stacks block height that contains that artifact.
@@ -333,20 +346,24 @@ pub struct WithdrawalInfoEntry {
     pub primary_index_key: WithdrawalEntryKey,
     /// The height of the Stacks block in which this request id was initiated.
     pub stacks_block_height: u64,
-    /// Stacks address to received the withdrawn sBTC.
+    /// The recipient's Bitcoin hex-encoded scriptPubKey.
     pub recipient: String,
+    /// The sender's Stacks principal.
+    pub sender: String,
     /// Amount of BTC being withdrawn in satoshis.
     pub amount: u64,
     /// The most recent Stacks block hash the API was aware of when the withdrawal was last
     /// updated. If the most recent update is tied to an artifact on the Stacks blockchain
     /// then this hash is the Stacks block hash that contains that artifact.
     pub last_update_block_hash: String,
+    /// The hex encoded txid of the stacks transaction that generated this event.
+    pub txid: String,
 }
 
 /// Implements the key trait for the withdrawal info entry key.
 impl KeyTrait for WithdrawalInfoEntryKey {
     /// The type of the partition key.
-    type PartitionKey = Status;
+    type PartitionKey = WithdrawalStatus;
     /// the type of the sort key.
     type SortKey = u64;
     /// The table field name of the partition key.
@@ -368,11 +385,11 @@ impl EntryTrait for WithdrawalInfoEntry {
     }
 }
 
-/// Primary index struct.
+/// Secondary index struct.
 pub struct WithdrawalTableSecondaryIndexInner;
-/// Withdrawal table primary index type.
+/// Withdrawal table secondary index type.
 pub type WithdrawalTableSecondaryIndex = SecondaryIndex<WithdrawalTableSecondaryIndexInner>;
-/// Definition of Primary index trait.
+/// Definition of secondary index trait.
 impl SecondaryIndexTrait for WithdrawalTableSecondaryIndexInner {
     type PrimaryIndex = WithdrawalTablePrimaryIndex;
     type Entry = WithdrawalInfoEntry;
@@ -387,13 +404,228 @@ impl From<WithdrawalInfoEntry> for WithdrawalInfo {
             stacks_block_hash: withdrawal_info_entry.primary_index_key.stacks_block_hash,
             stacks_block_height: withdrawal_info_entry.stacks_block_height,
             recipient: withdrawal_info_entry.recipient,
+            sender: withdrawal_info_entry.sender,
             amount: withdrawal_info_entry.amount,
             last_update_height: withdrawal_info_entry.key.last_update_height,
             last_update_block_hash: withdrawal_info_entry.last_update_block_hash,
             status: withdrawal_info_entry.key.status,
+            txid: withdrawal_info_entry.txid,
         }
     }
 }
+
+/// Search token for WithdrawalRecipient GSI.
+#[derive(Clone, Default, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct WithdrawalInfoByRecipientEntrySearchToken {
+    /// Primary index key.
+    #[serde(flatten)]
+    pub primary_index_key: WithdrawalEntryKey,
+    /// Global secondary index key.
+    #[serde(flatten)]
+    pub secondary_index_key: WithdrawalInfoByRecipientEntryKey,
+}
+
+/// Key for withdrawal info entry that's indexed by recipient.
+#[derive(Clone, Default, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct WithdrawalInfoByRecipientEntryKey {
+    /// The recipient's Bitcoin hex-encoded scriptPubKey.
+    pub recipient: String,
+    /// The most recent Stacks block height the API was aware of when the withdrawal was last
+    /// updated. If the most recent update is tied to an artifact on the Stacks blockchain
+    /// then this height is the Stacks block height that contains that artifact.
+    pub last_update_height: u64,
+}
+
+/// Reduced version of the withdrawal data.
+#[derive(Clone, Default, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct WithdrawalInfoByRecipientEntry {
+    /// Secondary index key. This is what's used to search for this particular item.
+    #[serde(flatten)]
+    pub key: WithdrawalInfoByRecipientEntryKey,
+    /// Primary index key. This is what's used to search the main table.
+    #[serde(flatten)]
+    pub primary_index_key: WithdrawalEntryKey,
+    /// The height of the Stacks block in which this request id was initiated.
+    pub stacks_block_height: u64,
+    /// The status of the entry.
+    #[serde(rename = "OpStatus")]
+    pub status: WithdrawalStatus,
+    /// The sender's Stacks principal.
+    pub sender: String,
+    /// Amount of BTC being withdrawn in satoshis.
+    pub amount: u64,
+    /// The most recent Stacks block hash the API was aware of when the withdrawal was last
+    /// updated. If the most recent update is tied to an artifact on the Stacks blockchain
+    /// then this hash is the Stacks block hash that contains that artifact.
+    pub last_update_block_hash: String,
+    /// The hex encoded txid of the stacks transaction that generated this event.
+    pub txid: String,
+}
+
+/// Implements the key trait for the withdrawal info entry key.
+impl KeyTrait for WithdrawalInfoByRecipientEntryKey {
+    /// The type of the partition key.
+    type PartitionKey = String;
+    /// the type of the sort key.
+    type SortKey = u64;
+    /// The table field name of the partition key.
+    const PARTITION_KEY_NAME: &'static str = "Recipient";
+    /// The table field name of the sort key.
+    const SORT_KEY_NAME: &'static str = "LastUpdateHeight";
+}
+
+/// Implements the entry trait for the withdrawal info entry.
+impl EntryTrait for WithdrawalInfoByRecipientEntry {
+    /// The type of the key for this entry type.
+    type Key = WithdrawalInfoByRecipientEntryKey;
+    /// Extract the key from the withdrawal info entry.
+    fn key(&self) -> Self::Key {
+        WithdrawalInfoByRecipientEntryKey {
+            recipient: self.key.recipient.clone(),
+            last_update_height: self.key.last_update_height,
+        }
+    }
+}
+
+/// Secondary index struct.
+pub struct WithdrawalTableByRecipientSecondaryIndexInner;
+/// Withdrawal table secondary index type.
+pub type WithdrawalTableByRecipientSecondaryIndex =
+    SecondaryIndex<WithdrawalTableByRecipientSecondaryIndexInner>;
+/// Definition of secondary index trait.
+impl SecondaryIndexTrait for WithdrawalTableByRecipientSecondaryIndexInner {
+    type PrimaryIndex = WithdrawalTablePrimaryIndex;
+    type Entry = WithdrawalInfoByRecipientEntry;
+    const INDEX_NAME: &'static str = "WithdrawalRecipient";
+}
+
+impl From<WithdrawalInfoByRecipientEntry> for WithdrawalInfo {
+    fn from(withdrawal_info_entry: WithdrawalInfoByRecipientEntry) -> Self {
+        // Create withdrawal info resource from withdrawal info table entry.
+        WithdrawalInfo {
+            request_id: withdrawal_info_entry.primary_index_key.request_id,
+            stacks_block_hash: withdrawal_info_entry.primary_index_key.stacks_block_hash,
+            stacks_block_height: withdrawal_info_entry.stacks_block_height,
+            recipient: withdrawal_info_entry.key.recipient,
+            sender: withdrawal_info_entry.sender,
+            amount: withdrawal_info_entry.amount,
+            last_update_height: withdrawal_info_entry.key.last_update_height,
+            last_update_block_hash: withdrawal_info_entry.last_update_block_hash,
+            status: withdrawal_info_entry.status,
+            txid: withdrawal_info_entry.txid,
+        }
+    }
+}
+
+/// Search token for WithdrawalSender GSI.
+#[derive(Clone, Default, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct WithdrawalInfoBySenderEntrySearchToken {
+    /// Primary index key.
+    #[serde(flatten)]
+    pub primary_index_key: WithdrawalEntryKey,
+    /// Global secondary index key.
+    #[serde(flatten)]
+    pub secondary_index_key: WithdrawalInfoBySenderEntryKey,
+}
+
+/// Key for withdrawal info entry that's indexed by sender.
+#[derive(Clone, Default, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct WithdrawalInfoBySenderEntryKey {
+    /// Sender's Stacks principal.
+    pub sender: String,
+    /// The most recent Stacks block height the API was aware of when the withdrawal was last
+    /// updated. If the most recent update is tied to an artifact on the Stacks blockchain
+    /// then this height is the Stacks block height that contains that artifact.
+    pub last_update_height: u64,
+}
+
+/// Reduced version of the withdrawal data.
+#[derive(Clone, Default, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct WithdrawalInfoBySenderEntry {
+    /// Secondary index key. This is what's used to search for this particular item.
+    #[serde(flatten)]
+    pub key: WithdrawalInfoBySenderEntryKey,
+    /// Primary index key. This is what's used to search the main table.
+    #[serde(flatten)]
+    pub primary_index_key: WithdrawalEntryKey,
+    /// The height of the Stacks block in which this request id was initiated.
+    pub stacks_block_height: u64,
+    /// The status of the entry.
+    #[serde(rename = "OpStatus")]
+    pub status: WithdrawalStatus,
+    /// Recipient's Bitcoin hex-encoded scriptPubKey.
+    pub recipient: String,
+    /// Amount of BTC being withdrawn in satoshis.
+    pub amount: u64,
+    /// The most recent Stacks block hash the API was aware of when the withdrawal was last
+    /// updated. If the most recent update is tied to an artifact on the Stacks blockchain
+    /// then this hash is the Stacks block hash that contains that artifact.
+    pub last_update_block_hash: String,
+    /// The hex encoded txid of the stacks transaction that generated this event.
+    pub txid: String,
+}
+
+/// Implements the key trait for the withdrawal info entry key.
+impl KeyTrait for WithdrawalInfoBySenderEntryKey {
+    /// The type of the partition key.
+    type PartitionKey = String;
+    /// the type of the sort key.
+    type SortKey = u64;
+    /// The table field name of the partition key.
+    const PARTITION_KEY_NAME: &'static str = "Sender";
+    /// The table field name of the sort key.
+    const SORT_KEY_NAME: &'static str = "LastUpdateHeight";
+}
+
+/// Implements the entry trait for the withdrawal info entry.
+impl EntryTrait for WithdrawalInfoBySenderEntry {
+    /// The type of the key for this entry type.
+    type Key = WithdrawalInfoBySenderEntryKey;
+    /// Extract the key from the withdrawal info entry.
+    fn key(&self) -> Self::Key {
+        WithdrawalInfoBySenderEntryKey {
+            sender: self.key.sender.clone(),
+            last_update_height: self.key.last_update_height,
+        }
+    }
+}
+
+/// Secondary index struct.
+pub struct WithdrawalTableBySenderSecondaryIndexInner;
+/// Withdrawal table secondary index type.
+pub type WithdrawalTableBySenderSecondaryIndex =
+    SecondaryIndex<WithdrawalTableBySenderSecondaryIndexInner>;
+/// Definition of secondary index trait.
+impl SecondaryIndexTrait for WithdrawalTableBySenderSecondaryIndexInner {
+    type PrimaryIndex = WithdrawalTablePrimaryIndex;
+    type Entry = WithdrawalInfoBySenderEntry;
+    const INDEX_NAME: &'static str = "WithdrawalSender";
+}
+
+impl From<WithdrawalInfoBySenderEntry> for WithdrawalInfo {
+    fn from(withdrawal_info_entry: WithdrawalInfoBySenderEntry) -> Self {
+        // Create withdrawal info resource from withdrawal info table entry.
+        WithdrawalInfo {
+            request_id: withdrawal_info_entry.primary_index_key.request_id,
+            stacks_block_hash: withdrawal_info_entry.primary_index_key.stacks_block_hash,
+            stacks_block_height: withdrawal_info_entry.stacks_block_height,
+            recipient: withdrawal_info_entry.recipient,
+            sender: withdrawal_info_entry.key.sender,
+            amount: withdrawal_info_entry.amount,
+            last_update_height: withdrawal_info_entry.key.last_update_height,
+            last_update_block_hash: withdrawal_info_entry.last_update_block_hash,
+            status: withdrawal_info_entry.status,
+            txid: withdrawal_info_entry.txid,
+        }
+    }
+}
+// End for WithdrawalSender GSI.
 
 /// Validated version of the update withdrawal request.
 #[derive(Clone, Default, Debug, Eq, PartialEq, Hash)]
@@ -404,57 +636,7 @@ pub struct ValidatedUpdateWithdrawalRequest {
     ///
     /// This allows the updates to be executed in chronological order but returned in the order
     /// that the client sent them.
-    pub withdrawals: Vec<(usize, ValidatedWithdrawalUpdate)>,
-}
-
-/// Implement try from for the validated withdrawal requests.
-impl TryFrom<UpdateWithdrawalsRequestBody> for ValidatedUpdateWithdrawalRequest {
-    type Error = Error;
-    fn try_from(update_request: UpdateWithdrawalsRequestBody) -> Result<Self, Self::Error> {
-        // Validate all the withdrawal updates.
-        let mut withdrawals: Vec<(usize, ValidatedWithdrawalUpdate)> = update_request
-            .withdrawals
-            .into_iter()
-            .enumerate()
-            .map(|(index, update)| {
-                update
-                    .try_into()
-                    .map(|validated_update| (index, validated_update))
-            })
-            .collect::<Result<_, Error>>()?;
-
-        // Order the updates by order of when they occur so that it's as though we got them in
-        // chronological order.
-        withdrawals.sort_by_key(|(_, update)| update.event.stacks_block_height);
-
-        Ok(ValidatedUpdateWithdrawalRequest { withdrawals })
-    }
-}
-
-impl ValidatedUpdateWithdrawalRequest {
-    /// Infers all chainstates that need to be present in the API for the
-    /// withdrawal updates to be valid.
-    pub fn inferred_chainstates(&self) -> Result<Vec<Chainstate>, Error> {
-        // TODO(TBD): Error if the inferred chainstates have conflicting block hashes
-        // for a the same block height.
-        let mut inferred_chainstates = self
-            .withdrawals
-            .clone()
-            .into_iter()
-            .map(|(_, update)| Chainstate {
-                stacks_block_hash: update.event.stacks_block_hash,
-                stacks_block_height: update.event.stacks_block_height,
-            })
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
-
-        // Sort the chainstates in the order that they should come in.
-        inferred_chainstates.sort_by_key(|chainstate| chainstate.stacks_block_height);
-
-        // Return.
-        Ok(inferred_chainstates)
-    }
+    pub withdrawals: Vec<(usize, Result<ValidatedWithdrawalUpdate, ValidationError>)>,
 }
 
 /// Validated withdrawal update.
@@ -464,35 +646,6 @@ pub struct ValidatedWithdrawalUpdate {
     pub request_id: u64,
     /// Withdrawal event.
     pub event: WithdrawalEvent,
-}
-
-impl TryFrom<WithdrawalUpdate> for ValidatedWithdrawalUpdate {
-    type Error = Error;
-    fn try_from(update: WithdrawalUpdate) -> Result<Self, Self::Error> {
-        // Make status entry.
-        let status_entry: StatusEntry = match update.status {
-            Status::Confirmed => {
-                let fulfillment = update.fulfillment.ok_or(Error::InternalServer)?;
-                StatusEntry::Confirmed(fulfillment)
-            }
-            Status::Accepted => StatusEntry::Accepted,
-            Status::Pending => StatusEntry::Pending,
-            Status::Reprocessing => StatusEntry::Reprocessing,
-            Status::Failed => StatusEntry::Failed,
-        };
-        // Make the new event.
-        let event = WithdrawalEvent {
-            status: status_entry,
-            message: update.status_message,
-            stacks_block_height: update.last_update_height,
-            stacks_block_hash: update.last_update_block_hash,
-        };
-        // Return the validated update.
-        Ok(ValidatedWithdrawalUpdate {
-            request_id: update.request_id,
-            event,
-        })
-    }
 }
 
 impl ValidatedWithdrawalUpdate {
@@ -525,10 +678,9 @@ impl WithdrawalUpdatePackage {
         update: ValidatedWithdrawalUpdate,
     ) -> Result<Self, Error> {
         // Ensure the keys are equal.
+        let key = entry.key.clone();
         if update.request_id != entry.key.request_id {
-            return Err(Error::Debug(
-                "Attempted to update withdrawal request_id combo.".into(),
-            ));
+            return Err(Error::WithdrawalRequestIdMismatch(key, update.request_id));
         }
         // Ensure that this event is valid if it follows the current latest event.
         entry
@@ -536,7 +688,7 @@ impl WithdrawalUpdatePackage {
             .ensure_following_event_is_valid(&update.event)?;
         // Create the withdrawal update package.
         Ok(WithdrawalUpdatePackage {
-            key: entry.key.clone(),
+            key,
             version: entry.version,
             event: update.event,
         })
@@ -547,9 +699,9 @@ impl WithdrawalUpdatePackage {
 mod tests {
     use crate::api::models::chainstate::Chainstate;
     use crate::api::models::common::Fulfillment;
-    use crate::database::entries::StatusEntry;
+    use crate::database::entries::WithdrawalStatusEntry;
     use crate::{
-        api::models::common::Status,
+        api::models::common::WithdrawalStatus,
         database::entries::withdrawal::{
             ValidatedWithdrawalUpdate, WithdrawalEntry, WithdrawalEntryKey, WithdrawalEvent,
             WithdrawalParametersEntry,
@@ -561,14 +713,14 @@ mod tests {
     fn withdrawal_update_should_be_unnecessary_when_event_is_present() {
         // Arrange
         let pending = WithdrawalEvent {
-            status: StatusEntry::Pending,
+            status: WithdrawalStatusEntry::Pending,
             message: "message".to_string(),
             stacks_block_height: 1,
             stacks_block_hash: "hash".to_string(),
         };
 
         let failed = WithdrawalEvent {
-            status: StatusEntry::Failed,
+            status: WithdrawalStatusEntry::Failed,
             message: "message".to_string(),
             stacks_block_height: 2,
             stacks_block_hash: "hash".to_string(),
@@ -582,12 +734,14 @@ mod tests {
             stacks_block_height: 1,
             version: 1,
             recipient: "recipient".to_string(),
+            sender: "sender".to_string(),
             amount: 1,
             parameters: WithdrawalParametersEntry { max_fee: 1 },
-            status: Status::Pending,
+            status: WithdrawalStatus::Pending,
             last_update_height: 1,
             last_update_block_hash: "hash".to_string(),
             history: vec![pending, failed.clone()],
+            txid: "txid".to_string(),
         };
 
         let withdrawal_update = ValidatedWithdrawalUpdate { request_id: 1, event: failed };
@@ -603,14 +757,14 @@ mod tests {
     fn withdrawal_update_should_be_necessary_when_event_is_not_present() {
         // Arrange
         let pending = WithdrawalEvent {
-            status: StatusEntry::Pending,
+            status: WithdrawalStatusEntry::Pending,
             message: "message".to_string(),
             stacks_block_height: 1,
             stacks_block_hash: "hash".to_string(),
         };
 
         let failed = WithdrawalEvent {
-            status: StatusEntry::Failed,
+            status: WithdrawalStatusEntry::Failed,
             message: "message".to_string(),
             stacks_block_height: 2,
             stacks_block_hash: "hash".to_string(),
@@ -624,12 +778,14 @@ mod tests {
             stacks_block_height: 1,
             version: 1,
             recipient: "recipient".to_string(),
+            sender: "sender".to_string(),
             amount: 1,
             parameters: WithdrawalParametersEntry { max_fee: 1 },
-            status: Status::Pending,
+            status: WithdrawalStatus::Pending,
             last_update_height: 1,
             last_update_block_hash: "hash".to_string(),
             history: vec![pending.clone()],
+            txid: "txid".to_string(),
         };
 
         let withdrawal_update = ValidatedWithdrawalUpdate { request_id: 1, event: failed };
@@ -641,27 +797,27 @@ mod tests {
         assert!(!is_unnecessary);
     }
 
-    #[test_case(0, "hash0", 0, "hash0", StatusEntry::Pending; "reorg around genesis sets status to pending at genesis")]
-    #[test_case(5, "hash5", 4, "hash4", StatusEntry::Accepted; "reorg goes to earliest canonical event 1")]
-    #[test_case(4, "hash4", 4, "hash4", StatusEntry::Accepted; "reorg setting a height consistent with an event keeps it")]
-    #[test_case(4, "hash4-1", 2, "hash2", StatusEntry::Pending; "reorg setting a height inconsistent with an event removes it")]
-    #[test_case(3, "hash3", 2, "hash2", StatusEntry::Pending; "reorg  goes to earliest canonical event 2")]
+    #[test_case(0, "hash0", 0, "hash0", WithdrawalStatusEntry::Pending; "reorg around genesis sets status to pending at genesis")]
+    #[test_case(5, "hash5", 4, "hash4", WithdrawalStatusEntry::Accepted; "reorg goes to earliest canonical event 1")]
+    #[test_case(4, "hash4", 4, "hash4", WithdrawalStatusEntry::Accepted; "reorg setting a height consistent with an event keeps it")]
+    #[test_case(4, "hash4-1", 2, "hash2", WithdrawalStatusEntry::Pending; "reorg setting a height inconsistent with an event removes it")]
+    #[test_case(3, "hash3", 2, "hash2", WithdrawalStatusEntry::Pending; "reorg  goes to earliest canonical event 2")]
     fn reorganizing_around_a_new_chainstate_results_in_valid_withdrawal(
         reorg_height: u64,
         reorg_hash: &str,
         expected_height: u64,
         expected_hash: &str,
-        expected_status: StatusEntry,
+        expected_status: WithdrawalStatusEntry,
     ) {
         let pending = WithdrawalEvent {
-            status: StatusEntry::Pending,
+            status: WithdrawalStatusEntry::Pending,
             message: "initial test pending".to_string(),
             stacks_block_height: 2,
             stacks_block_hash: "hash2".to_string(),
         };
 
         let accepted = WithdrawalEvent {
-            status: StatusEntry::Accepted,
+            status: WithdrawalStatusEntry::Accepted,
             message: "accepted".to_string(),
             stacks_block_height: 4,
             stacks_block_hash: "hash4".to_string(),
@@ -669,7 +825,7 @@ mod tests {
 
         let fulfillment: Fulfillment = Default::default();
         let confirmed = WithdrawalEvent {
-            status: StatusEntry::Confirmed(fulfillment.clone()),
+            status: WithdrawalStatusEntry::Confirmed(fulfillment.clone()),
             message: "confirmed".to_string(),
             stacks_block_height: 6,
             stacks_block_hash: "hash6".to_string(),
@@ -683,12 +839,14 @@ mod tests {
             stacks_block_height: 1,
             version: 1,
             recipient: "test-recipient".to_string(),
+            sender: "test-sender".to_string(),
             amount: 1,
             parameters: WithdrawalParametersEntry { max_fee: 1 },
-            status: Status::Confirmed,
+            status: WithdrawalStatus::Confirmed,
             last_update_height: 6,
             last_update_block_hash: "hash6".to_string(),
             history: vec![pending.clone(), accepted.clone(), confirmed.clone()],
+            txid: "txid".to_string(),
         };
 
         // Ensure the withdrawal is valid.
@@ -701,6 +859,7 @@ mod tests {
         let chainstate = Chainstate {
             stacks_block_height: reorg_height,
             stacks_block_hash: reorg_hash.to_string(),
+            bitcoin_block_height: Some(0),
         };
         withdrawal_entry.reorganize_around(&chainstate).unwrap();
 

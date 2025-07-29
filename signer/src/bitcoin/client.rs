@@ -21,12 +21,13 @@ use url::Url;
 
 use crate::{error::Error, util::ApiFallbackClient};
 
+use super::BitcoinInteract;
+use super::TransactionLookupHint;
 use super::rpc::BitcoinBlockHeader;
+use super::rpc::BitcoinBlockInfo;
 use super::rpc::BitcoinCoreClient;
 use super::rpc::BitcoinTxInfo;
 use super::rpc::GetTxResponse;
-use super::BitcoinInteract;
-use super::TransactionLookupHint;
 
 /// Implement the [`TryFrom`] trait for a slice of [`Url`]s to allow for a
 /// [`ApiFallbackClient`] to be implicitly created from a list of URLs.
@@ -46,8 +47,8 @@ impl BitcoinInteract for ApiFallbackClient<BitcoinCoreClient> {
     async fn get_block(
         &self,
         block_hash: &bitcoin::BlockHash,
-    ) -> Result<Option<bitcoin::Block>, Error> {
-        self.exec(|client, _| async { client.get_block(block_hash) })
+    ) -> Result<Option<BitcoinBlockInfo>, Error> {
+        self.exec(|client, _| BitcoinInteract::get_block(client, block_hash))
             .await
     }
 

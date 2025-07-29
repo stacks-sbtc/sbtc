@@ -49,7 +49,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// 3. The signer bitmap in the clarity contract can take only 128 signers.
 /// 4. The rotate-keys-wrapper public function in one of the clarity
 ///    contracts takes a maximum of 128 keys.
-const MAX_KEYS: u16 = 128;
+pub const MAX_KEYS: u16 = 128;
 
 /// Each deposit has a reclaim script spend path that can be executed after
 /// some "time". Right now this "time", the locktime, can only be
@@ -73,7 +73,7 @@ pub const SIGNER_CHANNEL_CAPACITY: usize = 1024;
 /// The maximum number of blocks that can be affected by a reorg on the
 /// bitcoin blockchain. This is used when adding a buffer when searching
 /// for the signers UTXO.
-pub const MAX_REORG_BLOCK_COUNT: i64 = 10;
+pub const MAX_REORG_BLOCK_COUNT: u64 = 10;
 
 /// The maximum number of sweep transactions that the signers can confirm
 /// per block.
@@ -105,7 +105,7 @@ pub const DEPOSIT_DUST_LIMIT: u64 = 546;
 /// that we respect bitcoin's default dust limits even if the smart
 /// contracts are updated and the check is removed.
 ///
-/// See the following for more on the dustrelatfee:
+/// See the following for more on the dustrelayfee:
 /// https://github.com/bitcoin/bitcoin/blob/c242fa5be358150d83c2446896b6f4c45c6365e9/src/policy/policy.cpp#L26-L41
 pub const WITHDRAWAL_DUST_LIMIT: u64 = 546;
 
@@ -124,6 +124,14 @@ pub const WITHDRAWAL_MIN_CONFIRMATIONS: u64 = 6;
 /// This is the value suggested in
 /// https://github.com/stacks-network/sbtc/issues/620.
 pub const WITHDRAWAL_BLOCKS_EXPIRY: u64 = 24;
+
+/// This is the number of bitcoin blocks prior to [`WITHDRAWAL_BLOCKS_EXPIRY`]
+/// in which the coordinator will cease to include a withdrawal request in sweep
+/// proposals.
+///
+/// This is the value in https://github.com/stacks-network/sbtc/issues/1363's
+/// proposed "buffer for expiring requests" section.
+pub const WITHDRAWAL_EXPIRY_BUFFER: u64 = 6;
 
 /// This is the default maximum virtual size of a bitcoin transaction
 /// package. This value is the default limit set in bitcoin core, and

@@ -1,11 +1,6 @@
 //! Integration testing helper functions
 //!
 
-use bitcoin::absolute::LockTime;
-use bitcoin::key::TapTweak;
-use bitcoin::sighash::Prevouts;
-use bitcoin::sighash::SighashCache;
-use bitcoin::transaction::Version;
 use bitcoin::Address;
 use bitcoin::AddressType;
 use bitcoin::Amount;
@@ -23,6 +18,15 @@ use bitcoin::TxIn;
 use bitcoin::TxOut;
 use bitcoin::Txid;
 use bitcoin::Witness;
+use bitcoin::absolute::LockTime;
+use bitcoin::key::TapTweak;
+use bitcoin::sighash::Prevouts;
+use bitcoin::sighash::SighashCache;
+use bitcoin::transaction::Version;
+use bitcoincore_rpc::Auth;
+use bitcoincore_rpc::Client;
+use bitcoincore_rpc::Error as BtcRpcError;
+use bitcoincore_rpc::RpcApi;
 use bitcoincore_rpc::json::ImportDescriptors;
 use bitcoincore_rpc::json::ListUnspentQueryOptions;
 use bitcoincore_rpc::json::ListUnspentResultEntry;
@@ -32,10 +36,6 @@ use bitcoincore_rpc::json::Timestamp;
 use bitcoincore_rpc::json::Utxo;
 use bitcoincore_rpc::jsonrpc::error::Error as JsonRpcError;
 use bitcoincore_rpc::jsonrpc::error::RpcError;
-use bitcoincore_rpc::Auth;
-use bitcoincore_rpc::Client;
-use bitcoincore_rpc::Error as BtcRpcError;
-use bitcoincore_rpc::RpcApi;
 use secp256k1::SECP256K1;
 use std::sync::OnceLock;
 
@@ -99,6 +99,38 @@ pub fn initialize_blockchain() -> (&'static Client, &'static Faucet) {
     (rpc, faucet)
 }
 
+/// Similar to `initialize_blockchain`, but for devenv.
+/// Note that this will not generate a spendable coinbase since advancing the
+/// bitcoin chain too quickly may break devenv Stacks.
+pub fn initialize_blockchain_devenv() -> (&'static Client, &'static Faucet) {
+    static BTC_CLIENT: OnceLock<Client> = OnceLock::new();
+    static FAUCET: OnceLock<Faucet> = OnceLock::new();
+    let rpc = BTC_CLIENT.get_or_init(|| {
+        let username = BITCOIN_CORE_RPC_USERNAME.to_string();
+        let password = BITCOIN_CORE_RPC_PASSWORD.to_string();
+        let auth = Auth::UserPass(username, password);
+        Client::new(
+            &format!("http://127.0.0.1:18443/wallet/{BITCOIN_CORE_WALLET_NAME}"),
+            auth,
+        )
+        .unwrap()
+    });
+
+    let faucet = FAUCET.get_or_init(|| {
+        get_or_create_wallet(rpc, BITCOIN_CORE_WALLET_NAME);
+        let faucet = Faucet::new(FAUCET_SECRET_KEY, AddressType::P2wpkh, rpc);
+        faucet.track_address(FAUCET_LABEL);
+
+        // We cannot create 100 blocks here, as it may break the Stacks signers.
+        // So we just assume someone already funded the faucet a bit to survive
+        // until the coinbase rewards are spendable.
+
+        faucet
+    });
+
+    (rpc, faucet)
+}
+
 fn get_or_create_wallet(rpc: &Client, wallet: &str) {
     match rpc.load_wallet(wallet) {
         // Success
@@ -137,6 +169,18 @@ pub struct Recipient {
     pub script_pubkey: ScriptBuf,
 }
 
+/// Models the result of "listdescriptors"
+#[derive(Clone, PartialEq, Eq, Debug, serde::Deserialize)]
+struct ListDescriptorsResult {
+    pub wallet_name: String,
+    pub descriptors: Vec<ListDescriptorsInner>,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, serde::Deserialize)]
+struct ListDescriptorsInner {
+    pub desc: String,
+}
+
 fn descriptor_base(public_key: &PublicKey, kind: AddressType) -> String {
     match kind {
         AddressType::P2wpkh => format!("wpkh({public_key})"),
@@ -152,7 +196,13 @@ impl Recipient {
     /// Generate a new public-private key pair and address of the given
     /// kind.
     pub fn new(kind: AddressType) -> Self {
-        let keypair = secp256k1::Keypair::new_global(&mut rand::rngs::OsRng);
+        Self::new_with_rng(kind, &mut rand::rngs::OsRng)
+    }
+
+    /// Generate a new public-private key pair and address of the given
+    /// kind using the given random number generator.
+    pub fn new_with_rng<R: rand::Rng>(kind: AddressType, rng: &mut R) -> Self {
+        let keypair = secp256k1::Keypair::new_global(rng);
         let pk = keypair.public_key();
         let script_pubkey = match kind {
             AddressType::P2wpkh => ScriptBuf::new_p2wpkh(&CompressedPublicKey(pk).wpubkey_hash()),
@@ -231,6 +281,22 @@ impl Faucet {
         let desc = descriptor_base(&public_key, kind);
         let descriptor_info = self.rpc.get_descriptor_info(&desc).unwrap();
 
+        // This isn't part of the bitcoincore_rpc API, unfortunately.
+        let wallet: ListDescriptorsResult = self
+            .rpc
+            .call("listdescriptors", &[])
+            .expect("failed to list descriptors");
+
+        if wallet
+            .descriptors
+            .iter()
+            .any(|d| d.desc == descriptor_info.descriptor)
+        {
+            // The descriptor is already tracked, no need to import it again.
+            // This avoids a scan of the entire blockchain.
+            return;
+        }
+
         let req = ImportDescriptors {
             descriptor: descriptor_info.descriptor,
             label: label.map(ToString::to_string),
@@ -240,6 +306,7 @@ impl Faucet {
             next_index: None,
             range: None,
         };
+
         let response = self.rpc.import_descriptors(req).unwrap();
         response.into_iter().for_each(|item| assert!(item.success));
     }
@@ -252,10 +319,17 @@ impl Faucet {
             .unwrap()
     }
 
+    /// Generates one block with coinbase rewards being sent to this recipient.
+    pub fn generate_block(&self) -> BlockHash {
+        self.generate_blocks(1)
+            .pop()
+            .expect("failed to generate bitcoin block")
+    }
+
     /// Return all UTXOs for this recipient where the amount is greater
     /// than or equal to the given amount. The address must be tracked by
     /// the bitcoin-core wallet.
-    fn get_utxos(&self, amount: Option<u64>) -> Vec<ListUnspentResultEntry> {
+    pub fn get_utxos(&self, amount: Option<u64>) -> Vec<ListUnspentResultEntry> {
         let query_options = amount.map(|sats| ListUnspentQueryOptions {
             minimum_amount: Some(Amount::from_sat(sats)),
             ..Default::default()

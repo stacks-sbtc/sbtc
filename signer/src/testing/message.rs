@@ -1,12 +1,9 @@
 //! Test utilities for signer message
 
-use bitvec::array::BitArray;
 use fake::Fake;
 use rand::seq::SliceRandom;
 use stacks_common::types::chainstate::StacksAddress;
 
-use crate::keys::PrivateKey;
-use crate::keys::PublicKey;
 use crate::message;
 use crate::stacks::contracts::ContractCall;
 use crate::stacks::contracts::RejectWithdrawalV1;
@@ -79,17 +76,16 @@ impl fake::Dummy<fake::Faker> for message::SignerDepositDecision {
 
 impl fake::Dummy<fake::Faker> for message::StacksTransactionSignRequest {
     fn dummy_with_rng<R: rand::RngCore + ?Sized>(config: &fake::Faker, rng: &mut R) -> Self {
-        let private_key = PrivateKey::new(rng);
+        let reject_withdrawal_v1 = RejectWithdrawalV1 {
+            id: config.fake_with_rng(rng),
+            signer_bitmap: 0,
+            deployer: StacksAddress::burn_address(false),
+        };
         Self {
-            contract_tx: ContractCall::RejectWithdrawalV1(RejectWithdrawalV1 {
-                id: config.fake_with_rng(rng),
-                signer_bitmap: BitArray::ZERO,
-                deployer: StacksAddress::burn_address(false),
-            })
-            .into(),
+            contract_tx: ContractCall::RejectWithdrawalV1(Box::new(reject_withdrawal_v1)).into(),
             tx_fee: 123,
             nonce: 1,
-            aggregate_key: PublicKey::from_private_key(&private_key),
+            aggregate_key: None,
             txid: config.fake_with_rng::<StacksTxId, _>(rng).into(),
         }
     }

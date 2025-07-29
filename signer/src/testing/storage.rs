@@ -1,10 +1,16 @@
 //! Test utilities for the `storage` module
 
+use std::future::Future;
 use std::time::Duration;
 
-use crate::storage::model::BitcoinBlockHash;
+use crate::keys::PublicKey;
+use crate::storage::model::{
+    BitcoinBlock, BitcoinBlockHash, BitcoinBlockRef, DkgSharesStatus, EncryptedDkgShares,
+    KeyRotationEvent, StacksBlock, StacksBlockHash,
+};
 use crate::storage::postgres::PgStore;
-use crate::storage::DbRead;
+use crate::storage::{DbRead, DbWrite};
+use crate::testing::{FutureExt, SleepAsyncExt, TestUtilityError};
 
 pub mod model;
 pub mod postgres;
@@ -42,7 +48,7 @@ pub async fn new_test_database() -> PgStore {
     // We create a new connection to the default database each time this
     // function is called, because we depend on all connections to this
     // database being closed before it begins.
-    let postgres_url = format!("{}/postgres", DATABASE_URL_BASE);
+    let postgres_url = format!("{DATABASE_URL_BASE}/postgres");
     let pool = get_connection_pool(&postgres_url);
 
     sqlx::query("CREATE SEQUENCE IF NOT EXISTS db_num_seq;")
@@ -55,7 +61,7 @@ pub async fn new_test_database() -> PgStore {
         .await
         .unwrap();
 
-    let db_name = format!("signer_test_{}", db_num);
+    let db_name = format!("signer_test_{db_num}");
 
     let create_db = format!("CREATE DATABASE \"{db_name}\" WITH OWNER = 'postgres';");
 
@@ -64,7 +70,7 @@ pub async fn new_test_database() -> PgStore {
         .await
         .expect("failed to create test database");
 
-    let test_db_url = format!("{}/{}", DATABASE_URL_BASE, db_name);
+    let test_db_url = format!("{DATABASE_URL_BASE}/{db_name}");
     // In order to create a new database from another database, there
     // cannot exist any other connections to that database. So we
     // explicitly close this connection. See the notes section in the docs
@@ -89,7 +95,7 @@ pub async fn drop_db(store: PgStore) {
             return;
         }
 
-        let postgres_url = format!("{}/postgres", DATABASE_URL_BASE);
+        let postgres_url = format!("{DATABASE_URL_BASE}/postgres");
         let pool = get_connection_pool(&postgres_url);
 
         // FORCE closes all connections to the database if there are any
@@ -110,38 +116,247 @@ pub async fn drop_db(store: PgStore) {
 /// with the chain tip. This occurs because the first message that we
 /// process from the ZeroMQ socket need not be the last one sent by
 /// bitcoin-core.
-pub async fn wait_for_chain_tip<D>(db: &D, chain_tip: BitcoinBlockHash)
-where
-    D: DbRead + Clone,
-{
+pub async fn wait_for_chain_tip(db: &impl DbRead, chain_tip: BitcoinBlockHash) {
+    let timeout_duration = Duration::from_secs(10);
+    let poll_interval = Duration::from_millis(100);
+
     let mut current_chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap();
 
-    let waiting_fut = async {
-        let db = db.clone();
+    let polling_fut = async {
         while current_chain_tip != Some(chain_tip) {
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            poll_interval.sleep().await;
             current_chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap();
         }
     };
 
     // Wrap in a timeout just in case the block observer crashes and
     // can no longer update the database.
-    tokio::time::timeout(Duration::from_secs(10), waiting_fut)
-        .await
-        .unwrap();
+    polling_fut.with_timeout(timeout_duration).await.unwrap();
 }
 
 /// This is a helper function for waiting for the database to have a row in
 /// the dkg_shares, signaling that DKG has finished successfully.
-pub async fn wait_for_dkg(db: &PgStore, count: u32) {
-    let waiting_fut = async {
-        let db = db.clone();
+pub async fn wait_for_dkg(db: &impl DbRead, count: u32) {
+    let timeout_duration = Duration::from_secs(10);
+    let poll_interval = Duration::from_millis(100);
+
+    let polling_fut = async {
         while db.get_encrypted_dkg_shares_count().await.unwrap() < count {
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            poll_interval.sleep().await;
         }
     };
 
-    tokio::time::timeout(Duration::from_secs(10), waiting_fut)
+    polling_fut
+        .with_timeout(timeout_duration)
         .await
-        .unwrap();
+        .unwrap_or_else(|_| {
+            panic!("timed out waiting for {count} DKG shares entries to be written to the database")
+        });
+}
+
+/// Helper function for waiting for the latest DKG shares in the provided `DbRead`
+/// to become verified (as per [`DbRead::get_latest_encrypted_dkg_shares]).
+#[must_use = "The result of this function must be unwrapped to assert that no errors or timeouts occurred."]
+pub async fn wait_for_latest_dkg_to_become_verified(
+    db: &impl DbRead,
+) -> Result<EncryptedDkgShares, TestUtilityError> {
+    let timeout_duration = Duration::from_secs(10);
+    let poll_interval = Duration::from_millis(100);
+
+    let polling_fut = async {
+        loop {
+            if let Some(shares) = db.get_latest_encrypted_dkg_shares().await? {
+                if shares.dkg_shares_status == DkgSharesStatus::Verified {
+                    return Ok(shares); // Successfully found verified shares
+                }
+            }
+            poll_interval.sleep().await;
+        }
+    };
+
+    polling_fut
+        .with_timeout(timeout_duration)
+        .await
+        .map_err(|_| "timed out waiting for latest DKG shares to become verified")?
+        .map_err(|e: crate::error::Error| {
+            format!("failed to wait for latest DKG shares to become verified: {e}").into()
+        })
+}
+
+/// Wait for a key rotation event to be recorded in the database. Returns the
+/// event if it is found, or an error if the timeout is reached.
+#[must_use = "The result of this function must be unwrapped to assert that no errors or timeouts occurred."]
+pub async fn wait_for_key_rotation_event(
+    db: &impl DbRead,
+    chain_tip: &BitcoinBlockHash,
+    aggregate_key: &PublicKey,
+) -> Result<KeyRotationEvent, TestUtilityError> {
+    let timeout_duration = Duration::from_secs(15);
+    let poll_interval = Duration::from_millis(100);
+
+    let polling_fut = async {
+        loop {
+            if let Some(event) = db.get_last_key_rotation(chain_tip).await? {
+                if event.aggregate_key == *aggregate_key {
+                    return Ok(event); // Successfully found the key rotation event
+                }
+            }
+            poll_interval.sleep().await;
+        }
+    };
+
+    polling_fut
+        .with_timeout(timeout_duration)
+        .await
+        .map_err(|_| {
+            format!("timed out waiting for key rotation event for aggregate key {aggregate_key}")
+        })?
+        .map_err(|e: crate::error::Error| {
+            format!("failed to wait for key rotation event: {e}").into()
+        })
+}
+
+/// Extension trait for [`DbWrite`] that provides additional methods for
+/// testing purposes.
+pub trait DbWriteTestExt {
+    /// Helper function to write multiple bitcoin blocks to the database and
+    /// panics if any errors are encountered.
+    ///
+    /// ## Examples:
+    /// ```
+    /// # use crate::testing::storage::DbWriteExt;
+    /// # use crate::storage::model::BitcoinBlock;
+    /// # use crate::storage::model::StacksBlock;
+    ///
+    /// db.write_bitcoin_blocks(
+    ///     [&bitcoin_1, &bitcoin_2a, &bitcoin_2b, &bitcoin_3a],
+    /// )
+    /// .await;
+    /// ```
+    fn write_bitcoin_blocks<'a, I>(&self, blocks: I) -> impl Future<Output = ()> + Send
+    where
+        I: IntoIterator<Item = &'a BitcoinBlock> + Send + Sync + 'a,
+        I::IntoIter: Send + Sync;
+
+    /// Helper function to write multiple stacks blocks to the database and
+    /// panics if any errors are encountered.
+    ///
+    /// ## Examples:
+    /// ```
+    /// # use crate::testing::storage::DbWriteExt;
+    /// # use crate::storage::model::BitcoinBlock;
+    /// # use crate::storage::model::StacksBlock;
+    ///
+    /// db.write_stacks_blocks(
+    ///     [&stacks_1, &stacks_2a, &stacks_2b, &stacks_3a],
+    /// )
+    /// .await;
+    /// ```
+    fn write_stacks_blocks<'a, I>(&self, blocks: I) -> impl Future<Output = ()> + Send
+    where
+        I: IntoIterator<Item = &'a StacksBlock> + Send + Sync + 'a,
+        I::IntoIter: Send + Sync;
+
+    /// Helper function to write multiple bitcoin and stacks blocks to the
+    /// database and panics if any errors are encountered.
+    ///
+    /// ## Examples:
+    /// ```
+    /// # use crate::testing::storage::DbWriteExt;
+    /// # use crate::storage::model::BitcoinBlock;
+    /// # use crate::storage::model::StacksBlock;
+    ///
+    /// db.write_blocks(
+    ///     [&bitcoin_1, &bitcoin_2a, &bitcoin_2b, &bitcoin_3a],
+    ///     [&stacks_1, &stacks_2a, &stacks_2b, &stacks_3a],
+    /// )
+    /// .await;
+    /// ```
+    fn write_blocks<'a, IB, IS>(
+        &self,
+        bitcoin_blocks: IB,
+        stacks_blocks: IS,
+    ) -> impl Future<Output = ()> + Send
+    where
+        IB: IntoIterator<Item = &'a BitcoinBlock> + Send + Sync + 'a,
+        IB::IntoIter: Send + Sync,
+        IS: IntoIterator<Item = &'a StacksBlock> + Send + Sync + 'a,
+        IS::IntoIter: Send + Sync;
+}
+
+/// Extension trait for [`DbRead`] that provides additional methods for
+/// testing purposes.
+pub trait DbReadTestExt {
+    /// Helper function to get both bitcoin and stacks chain tips from the
+    /// database and panics on error.
+    ///
+    /// ## Examples:
+    /// ```
+    /// # use crate::testing::storage::DbReadExt;
+    ///
+    /// let (bitcoin_tip, stacks_tip) = db.get_chain_tips().await;
+    /// ```
+    fn get_chain_tips(&self) -> impl Future<Output = (BitcoinBlockRef, StacksBlockHash)> + Send;
+}
+
+/// Implement the [`DbWriteExt`] trait for all types that implement [`DbWrite`].
+impl<T> DbWriteTestExt for T
+where
+    T: DbWrite + DbRead + Send + Sync + 'static,
+{
+    async fn write_bitcoin_blocks<'a, I>(&self, blocks: I)
+    where
+        I: IntoIterator<Item = &'a BitcoinBlock>,
+    {
+        for block in blocks {
+            self.write_bitcoin_block(block)
+                .await
+                .expect("failed to write bitcoin block");
+        }
+    }
+
+    async fn write_stacks_blocks<'a, I>(&self, blocks: I)
+    where
+        I: IntoIterator<Item = &'a StacksBlock>,
+    {
+        for block in blocks {
+            self.write_stacks_block(block)
+                .await
+                .expect("failed to write stacks block");
+        }
+    }
+
+    async fn write_blocks<'a, IB, IS>(&self, bitcoin_blocks: IB, stacks_blocks: IS)
+    where
+        IB: IntoIterator<Item = &'a BitcoinBlock> + Send + Sync + 'a,
+        IB::IntoIter: Send + Sync,
+        IS: IntoIterator<Item = &'a StacksBlock> + Send + Sync + 'a,
+        IS::IntoIter: Send + Sync,
+    {
+        self.write_bitcoin_blocks(bitcoin_blocks).await;
+        self.write_stacks_blocks(stacks_blocks).await;
+    }
+}
+
+/// Implement the [`DbReadExt`] trait for all types that implement [`DbRead`].
+impl<T> DbReadTestExt for T
+where
+    T: DbRead + Send + Sync + 'static,
+{
+    async fn get_chain_tips(&self) -> (BitcoinBlockRef, StacksBlockHash) {
+        let bitcoin_tip = self
+            .get_bitcoin_canonical_chain_tip_ref()
+            .await
+            .expect("db error: error when retrieving bitcoin chain tip")
+            .expect("no bitcoin chain tip found");
+
+        let stacks_tip = self
+            .get_stacks_chain_tip(&bitcoin_tip.block_hash)
+            .await
+            .expect("db error: error when retrieving stacks chain tip")
+            .expect("no stacks chain tip found")
+            .block_hash;
+
+        (bitcoin_tip, stacks_tip)
+    }
 }

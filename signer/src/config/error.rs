@@ -4,7 +4,9 @@ use libp2p::Multiaddr;
 #[derive(Debug, thiserror::Error)]
 pub enum SignerConfigError {
     /// Invalid Stacks private key length
-    #[error("The Stacks private key provided is invalid, it must be either 64 or 66 hex characters long, got {0}")]
+    #[error(
+        "The Stacks private key provided is invalid, it must be either 64 or 66 hex characters long, got {0}"
+    )]
     InvalidStacksPrivateKeyLength(usize),
 
     /// Invalid Stacks private key compression byte marker
@@ -57,7 +59,9 @@ pub enum SignerConfigError {
 
     /// A public endpoint uses a protocol which is not enabled in the listen_on
     /// addresses.
-    #[error("P2P public endpoint protocol mismatch: '{0}'. The listen_on addresses must include the protocol.")]
+    #[error(
+        "P2P public endpoint protocol mismatch: '{0}'. The listen_on addresses must include the protocol."
+    )]
     P2PPublicEndpointProtocolMismatch(Multiaddr),
 
     /// Unsupported database driver
@@ -77,4 +81,15 @@ pub enum SignerConfigError {
     /// An error returned for duration parameters that must be positive.
     #[error("Duration for {0} must be nonzero")]
     ZeroDurationForbidden(&'static str),
+
+    /// An error returned if bootstrap_signer_set does not contain pubkey of
+    /// this signer
+    #[error("Bootstrap signer set must contain pubkey of this signer")]
+    MissingPubkeyInBootstrapSignerSet,
+
+    /// An error returned if bootstrap_signer_set contains more than 16 signers.
+    /// Currently our stacks contracts don't allow more than 16 signers.
+    /// See https://github.com/stacks-sbtc/sbtc/issues/1694
+    #[error("Bootstrap signer set must be at most 16 signers, but it contains {0} signers")]
+    TooManySigners(usize),
 }

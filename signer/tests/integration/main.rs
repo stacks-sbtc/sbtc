@@ -1,6 +1,7 @@
 use std::sync::atomic::AtomicU16;
 
 mod bitcoin_client;
+mod bitcoin_forks;
 mod bitcoin_rpc;
 mod bitcoin_validation;
 mod block_observer;
@@ -8,13 +9,11 @@ mod communication;
 mod complete_deposit;
 mod contracts;
 mod emily;
-mod fees;
 mod postgres;
 mod rbf;
 mod request_decider;
 mod rotate_keys;
 mod setup;
-mod stacks_events_observer;
 mod tls_checking;
 mod transaction_coordinator;
 mod transaction_signer;

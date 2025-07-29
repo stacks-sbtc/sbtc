@@ -6,7 +6,7 @@ use std::{
 };
 
 use secp256k1::XOnlyPublicKey;
-use wsts::state_machine::{coordinator::Coordinator, OperationResult, SignError};
+use wsts::state_machine::{OperationResult, SignError, coordinator::Coordinator};
 
 use crate::{
     keys::PublicKey,
@@ -413,6 +413,7 @@ impl StateMachine {
 mod tests {
     use wsts::net::Message;
 
+    use crate::testing::get_rng;
     use crate::{dkg::testing::*, testing::IterTestExt};
 
     use super::{
@@ -524,10 +525,11 @@ mod tests {
         let sender1 = signer1.as_public_key();
         let sender2 = signer2.as_public_key();
         let mut state_machine = setup.state_machine;
+        let mut rng = get_rng();
 
         let nonce_request = nonce_request(1, 1, 1);
-        let nonce_response1 = signer1.process(&nonce_request).unwrap().single();
-        let nonce_response2 = signer2.process(&nonce_request).unwrap().single();
+        let nonce_response1 = signer1.process(&nonce_request, &mut rng).unwrap().single();
+        let nonce_response2 = signer2.process(&nonce_request, &mut rng).unwrap().single();
 
         assert_state!(state_machine, State::Idle);
 
@@ -576,6 +578,7 @@ mod tests {
         let sender1 = signer1.as_public_key();
         let sender2 = signer2.as_public_key();
         let mut state_machine = setup.state_machine;
+        let mut rng = get_rng();
 
         assert_eq!(state_machine.signer_count(), 2);
 
@@ -584,12 +587,12 @@ mod tests {
         // Process the nonce request with signer 1 and 2 to get their nonce
         // responses.
         let nonce_response1 = signer1
-            .process(&nonce_request)
+            .process(&nonce_request, &mut rng)
             .expect("signer1 should be able to process message")
             .single();
         assert!(matches!(nonce_response1, Message::NonceResponse(_)));
         let nonce_response2 = signer2
-            .process(&nonce_request)
+            .process(&nonce_request, &mut rng)
             .expect("signer2 should be able to process message")
             .single();
         assert!(matches!(nonce_response2, Message::NonceResponse(_)));
@@ -630,12 +633,13 @@ mod tests {
         let sender1 = signer1.as_public_key();
         let sender2 = signer2.as_public_key();
         let mut state_machine = setup.state_machine;
+        let mut rng = get_rng();
 
         let nonce_request = nonce_request(1, 1, 1);
 
         // Process the nonce request with signer 1 and 2 to get their responses.
-        let nonce_response1 = signer1.process(&nonce_request).unwrap().single();
-        let nonce_response2 = signer2.process(&nonce_request).unwrap().single();
+        let nonce_response1 = signer1.process(&nonce_request, &mut rng).unwrap().single();
+        let nonce_response2 = signer2.process(&nonce_request, &mut rng).unwrap().single();
 
         // Process the nonce request in the state machine and assert.
         state_machine
@@ -662,10 +666,10 @@ mod tests {
 
         // Unwrap our nonce responses.
         let Message::NonceResponse(nonce_response1) = nonce_response1 else {
-            panic!("expected nonce response, got {:?}", nonce_response1);
+            panic!("expected nonce response, got {nonce_response1:?}");
         };
         let Message::NonceResponse(nonce_response2) = nonce_response2 else {
-            panic!("expected nonce response, got {:?}", nonce_response2);
+            panic!("expected nonce response, got {nonce_response2:?}");
         };
 
         // Create signature share requests, populated with the nonce responses
@@ -679,11 +683,11 @@ mod tests {
 
         // Process the signature share request
         let sig_share_response1 = signer1
-            .process(&sig_share_request)
+            .process(&sig_share_request, &mut rng)
             .expect("should be able to process message")
             .single();
         let sig_share_response2 = signer2
-            .process(&sig_share_request)
+            .process(&sig_share_request, &mut rng)
             .expect("should be able to process message")
             .single();
 

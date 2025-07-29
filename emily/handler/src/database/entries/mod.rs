@@ -49,12 +49,12 @@ use std::{collections::HashMap, fmt::Debug};
 use aws_sdk_dynamodb::types::AttributeValue;
 #[cfg(feature = "testing")]
 use aws_sdk_dynamodb::types::{DeleteRequest, WriteRequest};
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
 use serde_dynamo::Item;
 
 use crate::{
-    api::models::common::{Fulfillment, Status},
+    api::models::common::{DepositStatus, Fulfillment, WithdrawalStatus},
     common::error::Error,
     context::Settings,
 };
@@ -71,16 +71,42 @@ pub mod withdrawal;
 // Event structure
 // -----------------------------------------------------------------------------
 
-/// Status entry.
+/// Deposit Status entry.
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
 #[serde(rename_all = "PascalCase")]
-pub enum StatusEntry {
+pub enum DepositStatusEntry {
     /// Transaction hasn't yet been addressed by the sBTC Signers.
     #[default]
     Pending,
-    /// Transaction was dealt with by the signers at one point but is now being
-    /// reprocessed. The Signers are aware of the operation request.
-    Reprocessing,
+    /// Transaction has been seen and accepted by the sBTC Signers, but is not
+    /// yet included in any on chain artifact. The transaction can still fail
+    /// at this point if the Signers fail to include the transaction in an on
+    /// chain artifact.
+    ///
+    /// For example, a deposit or withdrawal that has specified too low of a
+    /// BTC fee may fail after being accepted.
+    Accepted,
+    /// The artifacts that fulfill the operation have been observed in a valid fork of
+    /// both the Stacks blockchain and the Bitcoin blockchain by at least one signer.
+    ///
+    /// Note that if the signers detect a conflicting chainstate in which the operation
+    /// is not confirmed this status will be reverted to either ACCEPTED or REEVALUATING
+    /// depending on whether the conflicting chainstate calls the acceptance into question.
+    Confirmed(Fulfillment),
+    /// The operation was not fulfilled.
+    Failed,
+    /// Transaction was replaced by another transaction via RBF.
+    /// Inner string is transaction ID of replacement transaction.
+    Rbf(String),
+}
+
+/// Deposit Status entry.
+#[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
+#[serde(rename_all = "PascalCase")]
+pub enum WithdrawalStatusEntry {
+    /// Transaction hasn't yet been addressed by the sBTC Signers.
+    #[default]
+    Pending,
     /// Transaction has been seen and accepted by the sBTC Signers, but is not
     /// yet included in any on chain artifact. The transaction can still fail
     /// at this point if the Signers fail to include the transaction in an on
@@ -100,14 +126,25 @@ pub enum StatusEntry {
     Failed,
 }
 
-impl From<&StatusEntry> for Status {
-    fn from(value: &StatusEntry) -> Self {
+impl From<&DepositStatusEntry> for DepositStatus {
+    fn from(value: &DepositStatusEntry) -> Self {
         match value {
-            StatusEntry::Pending => Status::Pending,
-            StatusEntry::Reprocessing => Status::Reprocessing,
-            StatusEntry::Accepted => Status::Accepted,
-            StatusEntry::Confirmed(_) => Status::Confirmed,
-            StatusEntry::Failed => Status::Failed,
+            DepositStatusEntry::Pending => DepositStatus::Pending,
+            DepositStatusEntry::Accepted => DepositStatus::Accepted,
+            DepositStatusEntry::Confirmed(_) => DepositStatus::Confirmed,
+            DepositStatusEntry::Failed => DepositStatus::Failed,
+            DepositStatusEntry::Rbf(_) => DepositStatus::Rbf,
+        }
+    }
+}
+
+impl From<&WithdrawalStatusEntry> for WithdrawalStatus {
+    fn from(value: &WithdrawalStatusEntry) -> Self {
+        match value {
+            WithdrawalStatusEntry::Pending => WithdrawalStatus::Pending,
+            WithdrawalStatusEntry::Accepted => WithdrawalStatus::Accepted,
+            WithdrawalStatusEntry::Confirmed(_) => WithdrawalStatus::Confirmed,
+            WithdrawalStatusEntry::Failed => WithdrawalStatus::Failed,
         }
     }
 }
@@ -226,7 +263,8 @@ pub(crate) trait TableIndexTrait {
             .table_name(Self::table_name(settings))
             .set_key(Some(key_item.into()))
             .send()
-            .await?;
+            .await
+            .map_err(Box::new)?;
         // Get DynamoDB item.
         let item = get_item_output.item.ok_or(Error::NotFound)?;
         // Convert item into entry.
@@ -261,7 +299,8 @@ pub(crate) trait TableIndexTrait {
             .expression_attribute_values(":v", serde_dynamo::to_attribute_value(partition_key)?)
             .scan_index_forward(false)
             .send()
-            .await?;
+            .await
+            .map_err(Box::new)?;
         // Convert data into output format.
         let entries: Vec<Self::Entry> =
             serde_dynamo::from_items(query_output.items.unwrap_or_default())?;
@@ -306,7 +345,8 @@ pub(crate) trait TableIndexTrait {
             .expression_attribute_values(":sk", serde_dynamo::to_attribute_value(sort_key)?)
             .scan_index_forward(false)
             .send()
-            .await?;
+            .await
+            .map_err(Box::new)?;
         // Convert data into output format.
         let entries: Vec<Self::Entry> =
             serde_dynamo::from_items(query_output.items.unwrap_or_default())?;
@@ -339,7 +379,6 @@ pub(crate) trait TableIndexTrait {
     }
 
     /// Get all entries from a dynamodb table.
-    #[cfg(feature = "testing")]
     async fn get_all_entries(
         dynamodb_client: &aws_sdk_dynamodb::Client,
         settings: &Settings,
@@ -349,7 +388,12 @@ pub(crate) trait TableIndexTrait {
         // Create vector to aggregate items in.
         let mut all_entries: Vec<Self::Entry> = Vec::new();
         // Scan the table for as many entries as possible.
-        let mut scan_output = dynamodb_client.scan().table_name(table_name).send().await?;
+        let mut scan_output = dynamodb_client
+            .scan()
+            .table_name(table_name)
+            .send()
+            .await
+            .map_err(Box::new)?;
         // Put items into aggregate list.
         all_entries.extend(serde_dynamo::from_items(
             scan_output.items.unwrap_or_default(),
@@ -361,7 +405,8 @@ pub(crate) trait TableIndexTrait {
                 .table_name(table_name)
                 .set_exclusive_start_key(Some(exclusive_start_key))
                 .send()
-                .await?;
+                .await
+                .map_err(Box::new)?;
             all_entries.extend(serde_dynamo::from_items(
                 scan_output.items.unwrap_or_default(),
             )?);
@@ -371,7 +416,6 @@ pub(crate) trait TableIndexTrait {
     }
 
     /// Generic delete table entry.
-    #[cfg(feature = "testing")]
     async fn delete_entry(
         dynamodb_client: &aws_sdk_dynamodb::Client,
         settings: &Settings,
@@ -417,7 +461,8 @@ pub(crate) trait TableIndexTrait {
                 .batch_write_item()
                 .request_items(table_name, chunk.to_vec())
                 .send()
-                .await?;
+                .await
+                .map_err(Box::new)?;
         }
         // Return.
         Ok(())
@@ -588,7 +633,7 @@ fn detokenize<T>(token: String) -> Result<T, Error>
 where
     T: for<'de> Deserialize<'de>,
 {
-    let decoded = URL_SAFE_NO_PAD.decode(token)?;
+    let decoded = URL_SAFE_NO_PAD.decode(token).map_err(Error::Base64Decode)?;
     let deserialized = serde_json::from_slice::<T>(&decoded)?;
     Ok(deserialized)
 }

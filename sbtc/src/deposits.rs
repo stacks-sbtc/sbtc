@@ -1,12 +1,6 @@
 //! This is the transaction analysis module
 //!
 
-use bitcoin::locktime::relative::LockTime;
-use bitcoin::opcodes::all as opcodes;
-use bitcoin::script::PushBytesBuf;
-use bitcoin::taproot::LeafVersion;
-use bitcoin::taproot::NodeInfo;
-use bitcoin::taproot::TaprootSpendInfo;
 use bitcoin::Address;
 use bitcoin::Network;
 use bitcoin::OutPoint;
@@ -14,6 +8,12 @@ use bitcoin::Script;
 use bitcoin::ScriptBuf;
 use bitcoin::Transaction;
 use bitcoin::XOnlyPublicKey;
+use bitcoin::locktime::relative::LockTime;
+use bitcoin::opcodes::all as opcodes;
+use bitcoin::script::PushBytesBuf;
+use bitcoin::taproot::LeafVersion;
+use bitcoin::taproot::NodeInfo;
+use bitcoin::taproot::TaprootSpendInfo;
 use clarity::codec::StacksMessageCodec;
 use clarity::types::chainstate::StacksAddress;
 use clarity::vm::types::PrincipalData;
@@ -342,7 +342,7 @@ impl DepositScriptInputs {
                 data
             }
             [OP_PUSHDATA1, n, data @ ..] if data.len() == *n as usize && *n < 76 => {
-                return Err(Error::NonMinimalPushDepositScript)
+                return Err(Error::NonMinimalPushDepositScript);
             }
             // This branch can be a standard (non-contract) Stacks
             // addresses when n == 30 (8 byte max fee + 22 byte address)
@@ -568,9 +568,9 @@ fn scriptint_parse(v: &[u8]) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use bitcoin::hashes::Hash as _;
     use bitcoin::AddressType;
     use bitcoin::Txid;
+    use bitcoin::hashes::Hash as _;
     use rand::rngs::OsRng;
     use secp256k1::SecretKey;
     use stacks_common::codec::StacksMessageCodec;
@@ -679,7 +679,7 @@ mod tests {
 
     #[test]
     fn deposit_script_128_byte_contract_name() {
-        let contract_name = std::iter::repeat('a').take(128).collect::<String>();
+        let contract_name = "a".repeat(128);
         let principal_str = format!("{}.{contract_name}", StacksAddress::burn_address(false));
         let secret_key = SecretKey::new(&mut OsRng);
 
@@ -793,7 +793,7 @@ mod tests {
         .push_opcode(opcodes::OP_CSV)
         .into_script() ; "start with 0")]
     #[test_case(ScriptBuf::builder()
-        .push_int(1 << 31 + 15)
+        .push_int(1 << (31 + 15))
         .push_opcode(opcodes::OP_CSV)
         .into_script() ; "is a lock-disabling number")]
     #[test_case(ScriptBuf::builder()

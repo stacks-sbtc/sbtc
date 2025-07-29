@@ -6,7 +6,8 @@
 //! The canonical implementation of these traits is the [`postgres::PgStore`]
 //! allowing the signer to use a Postgres database to store data.
 
-pub mod in_memory;
+#[cfg(any(test, feature = "testing"))]
+pub mod memory;
 pub mod model;
 pub mod postgres;
 pub mod sqlx;
@@ -23,9 +24,32 @@ use crate::bitcoin::validation::WithdrawalRequestReport;
 use crate::error::Error;
 use crate::keys::PublicKey;
 use crate::keys::PublicKeyXOnly;
+use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::CompletedDepositEvent;
 use crate::storage::model::WithdrawalAcceptEvent;
 use crate::storage::model::WithdrawalRejectEvent;
+
+/// Represents a handle to an ongoing database transaction.
+pub trait TransactionHandle: DbRead + DbWrite + Send {
+    /// Commits the transaction.
+    fn commit(self) -> impl Future<Output = Result<(), Error>> + Send;
+    /// Rolls back the transaction.
+    fn rollback(self) -> impl Future<Output = Result<(), Error>> + Send;
+}
+
+/// Trait for storage backends that support initiating transactions.
+/// The returned transaction object itself implements `DbRead` and `DbWrite`.
+pub trait Transactable {
+    /// The type of the transaction object. It must implement `DbRead`, `DbWrite`,
+    /// and `TransactionHandle`. The lifetime `'a` ties the transaction to the
+    /// lifetime of the `Transactable` implementor (e.g., the `PgStore`).
+    type Tx<'a>: DbRead + DbWrite + TransactionHandle + Sync + Send + 'a
+    where
+        Self: 'a;
+
+    /// Begins a new database transaction.
+    fn begin_transaction(&self) -> impl Future<Output = Result<Self::Tx<'_>, Error>> + Send;
+}
 
 /// Represents the ability to read data from the signer storage.
 pub trait DbRead {
@@ -42,11 +66,13 @@ pub trait DbRead {
     ) -> impl Future<Output = Result<Option<model::StacksBlock>, Error>> + Send;
 
     /// Get the bitcoin canonical chain tip.
+    #[cfg(any(test, feature = "testing"))]
     fn get_bitcoin_canonical_chain_tip(
         &self,
     ) -> impl Future<Output = Result<Option<model::BitcoinBlockHash>, Error>> + Send;
 
     /// Get the bitcoin canonical chain tip.
+    #[cfg(any(test, feature = "testing"))]
     fn get_bitcoin_canonical_chain_tip_ref(
         &self,
     ) -> impl Future<Output = Result<Option<model::BitcoinBlockRef>, Error>> + Send;
@@ -78,7 +104,7 @@ pub trait DbRead {
     /// that generated the aggregate key locking the deposit.
     fn get_pending_accepted_deposit_requests(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
+        chain_tip: &model::BitcoinBlockRef,
         context_window: u16,
         signatures_required: u16,
     ) -> impl Future<Output = Result<Vec<model::DepositRequest>, Error>> + Send;
@@ -131,6 +157,15 @@ pub trait DbRead {
         signer_public_key: &PublicKey,
     ) -> impl Future<Output = Result<Vec<model::DepositSigner>, Error>> + Send;
 
+    /// Get all the withdrawal decisions for the given signer in the given window
+    /// of blocks.
+    fn get_withdrawal_signer_decisions(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+        signer_public_key: &PublicKey,
+    ) -> impl Future<Output = Result<Vec<model::WithdrawalSigner>, Error>> + Send;
+
     /// Returns whether the given `signer_public_key` can provide signature
     /// shares for the deposit transaction.
     ///
@@ -166,13 +201,38 @@ pub trait DbRead {
         signer_public_key: &PublicKey,
     ) -> impl Future<Output = Result<Vec<model::WithdrawalRequest>, Error>> + Send;
 
-    /// Get pending withdrawal requests that have been accepted by at least
-    /// `threshold` signers and has no responses
+    /// This function returns withdrawal requests filtered by a portion of the
+    /// consensus critera defined in #741.
+    ///
+    /// ## Filter Criteria
+    ///
+    /// 1. The withdrawal request transaction (`create-withdrawal-request`
+    ///    contract call) is confirmed in a block on the canonical stacks
+    ///    blockchain.
+    /// 2. The withdrawal request has not been included in a sweep transaction
+    ///    that has been confirmed in a block on the canonical bitcoin
+    ///    blockchain.
+    /// 3. The withdrawal request has been approved by at least
+    ///    `signature_threshold` signers.
+    /// 4. The withdrawal request bitcoin block height is not older than the
+    ///    given `min_bitcoin_height` (_inclusive_).
+    /// 5. There is no canonically confirmed withdrawal request rejection event
+    ///    (`reject-withdrawal-request` contract call) for the request.
+    ///
+    /// ## Notes
+    ///
+    /// -  This does does not filter `signature_threshold` on that the approving
+    ///    signers are part of the current signer set and this parameter is only
+    ///    used as a pre-filter as the votes themselves are generally also
+    ///    needed separately. Use
+    ///    [`DbRead::get_withdrawal_request_signer_votes`] to fetch the votes
+    ///    and perform this verification separately.
     fn get_pending_accepted_withdrawal_requests(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
-        context_window: u16,
-        threshold: u16,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+        stacks_chain_tip: &model::StacksBlockHash,
+        min_bitcoin_height: BitcoinBlockHeight,
+        signature_threshold: u16,
     ) -> impl Future<Output = Result<Vec<model::WithdrawalRequest>, Error>> + Send;
 
     /// Get pending rejected withdrawal requests that have failed but are not
@@ -205,6 +265,15 @@ pub trait DbRead {
         id: &model::QualifiedRequestId,
         signer_public_key: &PublicKey,
     ) -> impl Future<Output = Result<Option<WithdrawalRequestReport>, Error>> + Send;
+
+    /// This function returns the total amount of BTC (in sats) that has
+    /// been swept out and confirmed on the bitcoin blockchain identified
+    /// by the given chain tip and context window.
+    fn compute_withdrawn_total(
+        &self,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+    ) -> impl Future<Output = Result<u64, Error>> + Send;
 
     /// Get bitcoin blocks that include a particular transaction
     fn get_bitcoin_blocks_with_transaction(
@@ -243,10 +312,11 @@ pub trait DbRead {
     fn get_encrypted_dkg_shares_count(&self) -> impl Future<Output = Result<u32, Error>> + Send;
 
     /// Return the latest rotate-keys transaction confirmed by the given `chain-tip`.
+    #[cfg(any(test, feature = "testing"))]
     fn get_last_key_rotation(
         &self,
         chain_tip: &model::BitcoinBlockHash,
-    ) -> impl Future<Output = Result<Option<model::RotateKeysTransaction>, Error>> + Send;
+    ) -> impl Future<Output = Result<Option<model::KeyRotationEvent>, Error>> + Send;
 
     /// Checks if a key rotation exists on the canonical chain
     fn key_rotation_exists(
@@ -319,13 +389,33 @@ pub trait DbRead {
         script: &model::ScriptPubKey,
     ) -> impl Future<Output = Result<bool, Error>> + Send;
 
-    /// Fetch the bitcoin transaction that is included in the block
-    /// identified by the block hash.
-    fn get_bitcoin_tx(
+    /// Returns whether the identified withdrawal may be included in a
+    /// sweep transaction that is in the bitcoin mempool.
+    ///
+    /// # Notes
+    ///
+    /// At this time, we cannot use the bitcoin mempool for this
+    /// information since we cannot match withdrawals with transaction
+    /// outputs without a lot of computational effort. Instead, we use our
+    /// database, where the query is straightforward. The tables that are
+    /// be able to answer whether a withdrawal is potentially in the
+    /// mempool are populated during validation of pre-sign requests.
+    fn is_withdrawal_inflight(
         &self,
-        txid: &model::BitcoinTxId,
-        block_hash: &model::BitcoinBlockHash,
-    ) -> impl Future<Output = Result<Option<model::BitcoinTx>, Error>> + Send;
+        id: &model::QualifiedRequestId,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+    ) -> impl Future<Output = Result<bool, Error>> + Send;
+
+    /// Returns whether we should consider the withdrawal active. A
+    /// withdrawal request is considered active if there is a reasonable
+    /// risk of the withdrawal being confirmed from a fork of blocks less
+    /// than `min_confirmations`.
+    fn is_withdrawal_active(
+        &self,
+        id: &model::QualifiedRequestId,
+        bitcoin_chain_tip: &model::BitcoinBlockRef,
+        min_confirmations: u64,
+    ) -> impl Future<Output = Result<bool, Error>> + Send;
 
     /// Fetch bitcoin transactions that have fulfilled a deposit request
     /// but where we have not confirmed a stacks transaction finalizing the
@@ -409,12 +499,6 @@ pub trait DbWrite {
         decision: &model::WithdrawalSigner,
     ) -> impl Future<Output = Result<(), Error>> + Send;
 
-    /// Write a raw transaction.
-    fn write_transaction(
-        &self,
-        transaction: &model::Transaction,
-    ) -> impl Future<Output = Result<(), Error>> + Send;
-
     /// Write a connection between a bitcoin block and a transaction
     fn write_bitcoin_transaction(
         &self,
@@ -424,19 +508,7 @@ pub trait DbWrite {
     /// Write the bitcoin transactions to the data store.
     fn write_bitcoin_transactions(
         &self,
-        txs: Vec<model::Transaction>,
-    ) -> impl Future<Output = Result<(), Error>> + Send;
-
-    /// Write a connection between a stacks block and a transaction
-    fn write_stacks_transaction(
-        &self,
-        stacks_transaction: &model::StacksTransaction,
-    ) -> impl Future<Output = Result<(), Error>> + Send;
-
-    /// Write the stacks transactions to the data store.
-    fn write_stacks_transactions(
-        &self,
-        txs: Vec<model::Transaction>,
+        txs: Vec<model::BitcoinTxRef>,
     ) -> impl Future<Output = Result<(), Error>> + Send;
 
     /// Write the stacks block ids and their parent block ids.
@@ -454,7 +526,7 @@ pub trait DbWrite {
     /// Write rotate-keys transaction
     fn write_rotate_keys_transaction(
         &self,
-        key_rotation: &model::RotateKeysTransaction,
+        key_rotation: &model::KeyRotationEvent,
     ) -> impl Future<Output = Result<(), Error>> + Send;
 
     /// Write the withdrawal-reject event to the database.
@@ -479,6 +551,12 @@ pub trait DbWrite {
     fn write_tx_output(
         &self,
         output: &model::TxOutput,
+    ) -> impl Future<Output = Result<(), Error>> + Send;
+
+    /// Write the withdrawal bitcoin transaction output to the database.
+    fn write_withdrawal_tx_output(
+        &self,
+        output: &model::WithdrawalTxOutput,
     ) -> impl Future<Output = Result<(), Error>> + Send;
 
     /// Write the bitcoin transaction input to the database.

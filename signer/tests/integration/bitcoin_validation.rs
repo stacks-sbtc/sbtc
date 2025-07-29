@@ -4,10 +4,10 @@ use std::ops::Deref;
 use bitcoin::hashes::Hash as _;
 use rand::rngs::OsRng;
 use rand::seq::SliceRandom;
-use rand::SeedableRng as _;
 use test_case::test_case;
 
 use sbtc::testing::regtest;
+use signer::WITHDRAWAL_MIN_CONFIRMATIONS;
 use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
 use signer::bitcoin::validation::BitcoinTxContext;
@@ -18,17 +18,17 @@ use signer::bitcoin::validation::WithdrawalValidationResult;
 use signer::context::Context;
 use signer::context::SbtcLimits;
 use signer::message::BitcoinPreSignRequest;
-use signer::storage::model::TxPrevoutType;
 use signer::storage::DbRead as _;
+use signer::storage::model::TxPrevoutType;
 use signer::testing;
 use signer::testing::context::TestContext;
 use signer::testing::context::*;
-use signer::WITHDRAWAL_MIN_CONFIRMATIONS;
+use signer::testing::get_rng;
 
-use crate::setup::backfill_bitcoin_blocks;
 use crate::setup::SweepAmounts;
 use crate::setup::TestSignerSet;
 use crate::setup::TestSweepSetup2;
+use crate::setup::backfill_bitcoin_blocks;
 
 const TEST_FEE_RATE: f64 = 10.0;
 
@@ -87,14 +87,14 @@ pub trait AssertConstantInvariants {
 
 impl AssertConstantInvariants for Vec<BitcoinTxValidationData> {
     fn packages(&self) -> &[BitcoinTxValidationData] {
-        &self
+        self
     }
 }
 
 #[tokio::test]
 async fn one_tx_per_request_set() {
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let ctx = TestContext::builder()
@@ -112,7 +112,7 @@ async fn one_tx_per_request_set() {
         is_deposit: true,
     }];
 
-    let mut setup = TestSweepSetup2::new_setup(signers, &faucet, &amounts);
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
     setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
     backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
 
@@ -190,7 +190,7 @@ async fn one_invalid_deposit_invalidates_tx() {
     let low_fee = 10;
 
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let ctx = TestContext::builder()
@@ -217,7 +217,7 @@ async fn one_invalid_deposit_invalidates_tx() {
 
     // When making assertions below, we need to make sure that we're
     // comparing the right deposits transaction outputs, so we sort.
-    let mut setup = TestSweepSetup2::new_setup(signers, &faucet, &amounts);
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
     setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
     backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
 
@@ -353,7 +353,7 @@ async fn one_invalid_deposit_invalidates_tx() {
 #[tokio::test]
 async fn withdrawals_and_deposits_can_pass_validation(amounts: Vec<SweepAmounts>) {
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let ctx = TestContext::builder()
@@ -369,7 +369,7 @@ async fn withdrawals_and_deposits_can_pass_validation(amounts: Vec<SweepAmounts>
 
     // When making assertions below, we need to make sure that we're
     // comparing the right deposits transaction outputs, so we sort.
-    let mut setup = TestSweepSetup2::new_setup(signers, &faucet, &amounts);
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
     setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
     backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
 
@@ -380,7 +380,7 @@ async fn withdrawals_and_deposits_can_pass_validation(amounts: Vec<SweepAmounts>
     setup.store_deposit_request(&db).await;
     setup.store_deposit_decisions(&db).await;
     // For the withdrawal
-    setup.store_withdrawal_request(&db).await;
+    setup.store_withdrawal_requests(&db).await;
     setup.store_withdrawal_decisions(&db).await;
 
     let chain_tip = faucet
@@ -448,7 +448,7 @@ async fn withdrawals_and_deposits_can_pass_validation(amounts: Vec<SweepAmounts>
 #[tokio::test]
 async fn swept_withdrawals_fail_validation() {
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(2);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let ctx = TestContext::builder()
@@ -469,7 +469,7 @@ async fn swept_withdrawals_fail_validation() {
 
     // When making assertions below, we need to make sure that we're
     // comparing the right deposits transaction outputs, so we sort.
-    let mut setup = TestSweepSetup2::new_setup(signers, &faucet, &amounts);
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
     setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
     backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
 
@@ -480,7 +480,7 @@ async fn swept_withdrawals_fail_validation() {
     setup.store_deposit_request(&db).await;
     setup.store_deposit_decisions(&db).await;
     // For the withdrawal
-    setup.store_withdrawal_request(&db).await;
+    setup.store_withdrawal_requests(&db).await;
     setup.store_withdrawal_decisions(&db).await;
 
     // Let's confirm a sweep transaction
@@ -557,7 +557,7 @@ async fn swept_withdrawals_fail_validation() {
 #[tokio::test]
 async fn cannot_sign_deposit_is_ok() {
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
@@ -585,7 +585,7 @@ async fn cannot_sign_deposit_is_ok() {
 
     // When making assertions below, we need to make sure that we're
     // comparing the right deposits transaction outputs, so we sort.
-    let mut setup = TestSweepSetup2::new_setup(signers, &faucet, &amounts);
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
     setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
     // Let's suppose that signer 0 cannot sign for the deposit, but that
     // they still accept the deposit. That means the bitmap at signer 0
@@ -724,7 +724,7 @@ async fn cannot_sign_deposit_is_ok() {
 #[tokio::test]
 async fn sighashes_match_from_sbtc_requests_object() {
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let ctx = TestContext::builder()
@@ -749,7 +749,7 @@ async fn sighashes_match_from_sbtc_requests_object() {
         },
     ];
 
-    let mut setup = TestSweepSetup2::new_setup(signers, &faucet, &amounts);
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
     setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
     backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
 
@@ -893,7 +893,7 @@ async fn outcome_is_independent_of_input_order() {
         },
     ];
 
-    let mut setup = TestSweepSetup2::new_setup(signers, &faucet, &amounts);
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
     setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
     backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
 

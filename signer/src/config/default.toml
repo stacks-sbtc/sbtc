@@ -35,13 +35,13 @@
 # Environment: SIGNER_EMILY__ENDPOINTS
 # Environment Example: '"https://1234567890abcdef@api.emilyexample.com",..'
 endpoints = [
-    "http://testApiKey@localhost:3031",
+    "http://testApiKey@127.0.0.1:3031",
 ]
 
 # The pagination timeout, in seconds, used to fetch deposits requests from Emily.
 # Required: false
 # Environment: SIGNER_EMILY__PAGINATION_TIMEOUT
-# pagination_timeout = 15
+# pagination_timeout = 10
 
 # !! ==============================================================================
 # !! Bitcoin Core Configuration
@@ -58,7 +58,7 @@ endpoints = [
 # Environment: SIGNER_BITCOIN__RPC_ENDPOINTS
 # Environment Example: http://user:pass@seed-1:4122,http://foo:bar@seed-2:4122
 rpc_endpoints = [
-    "http://devnet:devnet@localhost:18443",
+    "http://devnet:devnet@127.0.0.1:18443",
 ]
 
 # The URI(s) of the Bitcoin Core ZMQ block hash stream(s) to connect to.
@@ -73,7 +73,7 @@ rpc_endpoints = [
 # Environment: SIGNER_BITCOIN__BLOCK_HASH_STREAM_ENDPOINTS
 # Environment Example: tcp://10.0.0.1:28332,tcp://10.0.0.2:28332
 block_hash_stream_endpoints = [
-    "tcp://localhost:28332"
+    "tcp://127.0.0.1:28332"
 ]
 
 # !! ==============================================================================
@@ -83,7 +83,7 @@ block_hash_stream_endpoints = [
 # The RPC URL(s) of the Stacks node(s) to connect to. At least one must be
 # provided. If multiple nodes are provided they will be tried in order when
 # making requests.
-endpoints = ["http://localhost:20443"]
+endpoints = ["http://127.0.0.1:20443"]
 
 # !! ==============================================================================
 # !! Signer Configuration
@@ -100,11 +100,10 @@ endpoints = ["http://localhost:20443"]
 # Format: "<hex-encoded-private-key>" (64 or 66 hex-characters)
 # Required: true
 # Environment: SIGNER_SIGNER__PRIVATE_KEY
-# TODO(715): Remove default value.
 private_key = "41634762d89dfa09133a4a8e9c1378d0161d29cd0a9433b51f1e3d32947a73dc"
 
 # Specifies which network to use when constructing and sending transactions
-# on stacks and bitcoin. This cooresponds to the `chain` flag in the
+# on stacks and bitcoin. This corresponds to the `chain` flag in the
 # bitcoin.conf file of the connected bitcoin-core node, and the
 # `burnchain.mode` flag int he config.toml of the connected stacks-core
 # node.
@@ -112,26 +111,26 @@ private_key = "41634762d89dfa09133a4a8e9c1378d0161d29cd0a9433b51f1e3d32947a73dc"
 # Required: true
 # Possible values: mainnet, testnet, regtest
 # Environment: SIGNER_SIGNER__NETWORK
-# TODO(715): Change to mainnet.
 network = "regtest"
 
 # The address that deployed the sbtc smart contracts.
 #
 # Required: true
-# TODO(715): Change after SCs have been deployed.
 deployer = "SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS"
 
 # The signer database endpoint (pgsql connection string)
 #
 # Required: true
 # Environment: SIGNER_SIGNER__DB_ENDPOINT
-db_endpoint = "postgresql://postgres:postgres@localhost:5432/signer"
+db_endpoint = "postgresql://postgres:postgres@127.0.0.1:5432/signer"
 
 # A complete list of (compressed) public keys for known bootstrap signer
 # peers who are approved to be in the sBTC signer set.
+# Bootstrap signer set can be at most 16 signers, see
+# https://github.com/stacks-sbtc/sbtc/issues/1694 for more info.
+# Bootstrap signer set must contain the public key of the signer itself.
 #
 # Required: true Environment: SIGNER_SIGNER__BOOTSTRAP_SIGNING_SET
-# TODO(715): Change after initial signing set has been determined.
 bootstrap_signing_set = [
     "035249137286c077ccee65ecc43e724b9b9e5a588e3d7f51e3b62f9624c2a49e46",
     "031a4d9f4903da97498945a4e01a5023a1d53bc96ad670bfe03adf8a06c52e6380",
@@ -143,7 +142,6 @@ bootstrap_signing_set = [
 # `bootstrap_signing_set`. Must be strictly positive.
 #
 # Required: true Environment: SIGNER_SIGNER__BOOTSTRAP_SIGNATURES_REQUIRED
-# TODO(715): Change as specified by sBTC SIP.
 bootstrap_signatures_required = 2
 
 # Seconds to wait before processing a new Bitcoin block.
@@ -154,6 +152,18 @@ bitcoin_processing_delay = 0
 # Seconds to wait before processing new SBTC requests.
 # Required: true Environment: SIGNER_SIGNER__REQUESTS_PROCESSING_DELAY
 requests_processing_delay = 0
+
+# How many bitcoin blocks back from the chain tip the signer will
+# look for deposit decisions to retry to propagate.
+# Required: false
+# Environment: SIGNER_SIGNER__DEPOSIT_DECISIONS_RETRY_WINDOW
+deposit_decisions_retry_window = 3
+
+# How many bitcoin blocks back from the chain tip the signer will
+# look for withdrawal decisions to retry to propagate.
+# Required: false
+# Environment: SIGNER_SIGNER__WITHDRAWAL_DECISIONS_RETRY_WINDOW
+withdrawal_decisions_retry_window = 3
 
 # How many bitcoin blocks back from the chain tip the signer will look for
 # requests. Must be strictly positive.
@@ -243,6 +253,23 @@ sbtc_bitcoin_start_height = 101
 # Required: false
 # Environment: SIGNER_SIGNER__DKG_VERIFICATION_WINDOW
 # dkg_verification_window = 10
+
+# The maximum fee in microSTX that a signer will accept for a Stacks
+# transaction. If the coordinator suggests a fee higher than this value for
+# a transaction the signer will reject it. This value must be greater than
+# zero.
+#
+# Required: false
+# Environment: SIGNER_SIGNER__STACKS_FEES_MAX_USTX
+# stacks_fees_max_ustx = 1500000
+
+# The hex encoded bytes of the compressed public key that locked the first
+# UTXO created by the signers. It is also aggregate key constructed during
+# the signers' first DKG.
+#
+# Required: false
+# Environment: SIGNER_SIGNER__BOOTSTRAP_AGGREGATE_KEY
+# bootstrap_aggregate_key = "03a9b4e455fabecf0e8cf423dd519a6ea5968cf365f4e65c4feab5589da1f84895"
 
 # !! ==============================================================================
 # !! Stacks Event Observer Configuration

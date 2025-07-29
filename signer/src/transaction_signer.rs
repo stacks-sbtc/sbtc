@@ -6,6 +6,7 @@
 //! For more details, see the [`TxSignerEventLoop`] documentation.
 
 use std::collections::BTreeSet;
+use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::time::Duration;
 
@@ -30,32 +31,37 @@ use crate::message::Payload;
 use crate::message::StacksTransactionSignRequest;
 use crate::message::WstsMessageId;
 use crate::metrics::Metrics;
-use crate::metrics::BITCOIN_BLOCKCHAIN;
-use crate::metrics::STACKS_BLOCKCHAIN;
 use crate::network;
+use crate::stacks::api::SignerSetInfo;
 use crate::stacks::contracts::AsContractCall as _;
 use crate::stacks::contracts::ContractCall;
 use crate::stacks::contracts::ReqContext;
+use crate::stacks::contracts::SmartContract;
 use crate::stacks::contracts::StacksTx;
 use crate::stacks::wallet::MultisigTx;
 use crate::stacks::wallet::SignerWallet;
-use crate::storage::model;
-use crate::storage::model::DkgSharesStatus;
-use crate::storage::model::SigHash;
 use crate::storage::DbRead;
 use crate::storage::DbWrite as _;
+use crate::storage::model;
+use crate::storage::model::BitcoinBlockHash;
+use crate::storage::model::DkgSharesStatus;
+use crate::storage::model::SigHash;
 use crate::wsts_state_machine::FrostCoordinator;
 use crate::wsts_state_machine::SignerStateMachine;
 use crate::wsts_state_machine::StateMachineId;
 use crate::wsts_state_machine::WstsCoordinator;
 
-use bitcoin::hashes::Hash as _;
 use bitcoin::TapSighash;
+use bitcoin::hashes::Hash as _;
 use futures::StreamExt;
 use lru::LruCache;
 use wsts::net::DkgEnd;
 use wsts::net::DkgStatus;
 use wsts::net::Message as WstsNetMessage;
+
+/// LRU cache max size for the stacks signature requests. This is the number of
+/// bitcoin tenures for which we keep track of the signed stacks transactions.
+pub const STACKS_SIGN_REQUEST_LRU_SIZE: NonZeroUsize = NonZeroUsize::new(2).expect("2 is non zero");
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// # Transaction signer event loop
@@ -134,6 +140,9 @@ pub struct TxSignerEventLoop<Context, Network, Rng> {
     pub wsts_state_machines: LruCache<StateMachineId, SignerStateMachine>,
     /// The threshold for the signer
     pub threshold: u32,
+    /// Last bitcoin block for which the signer has already processed
+    /// presign request.
+    pub last_presign_block: Option<BitcoinBlockHash>,
     /// How many bitcoin blocks back from the chain tip the signer will look for requests.
     pub context_window: u16,
     /// Random number generator used for encryption
@@ -145,6 +154,9 @@ pub struct TxSignerEventLoop<Context, Network, Rng> {
     /// during DKG using the FROST algorithm. This is then used during the
     /// verification of the Stacks rotate-keys transaction.
     pub dkg_verification_state_machines: LruCache<StateMachineId, dkg::verification::StateMachine>,
+    /// Stacks transactions signed during a bitcoin tenure. We don't allow
+    /// signing for the same request multiple times in a tenure.
+    pub stacks_sign_request: LruCache<model::BitcoinBlockHash, HashSet<StacksSignRequestId>>,
 }
 
 /// This struct represents a signature hash and the public key that locks
@@ -152,11 +164,63 @@ pub struct TxSignerEventLoop<Context, Network, Rng> {
 ///
 /// The struct is only created when the signer has validated the bitcoin
 /// transaction and has agreed to sign the sighash.
-struct AcceptedSigHash {
+pub struct AcceptedSigHash {
     /// The signature hash to be signed.
     sighash: SigHash,
     /// The public key that is used to lock the above signature hash.
     public_key: PublicKeyXOnly,
+}
+
+/// An enum identifying requests for which we can sign for on stacks only once
+/// per tenure.
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub enum StacksSignRequestId {
+    /// A complete deposit transaction
+    CompleteDeposit(bitcoin::OutPoint),
+    /// An accept or reject withdrawal for a request id. Since we can only sign
+    /// for one of them at any time, we don't differentiate.
+    CompleteWithdrawal(u64),
+    /// A rotate keys transaction for an aggregate key
+    RotateKeys(PublicKey),
+    /// A new contract deployment
+    SmartContract(SmartContract),
+}
+
+impl StacksSignRequestId {
+    fn from_sign_request(request: &StacksTransactionSignRequest) -> Self {
+        match &request.contract_tx {
+            StacksTx::ContractCall(ContractCall::CompleteDepositV1(contract)) => {
+                StacksSignRequestId::CompleteDeposit(contract.outpoint)
+            }
+            StacksTx::ContractCall(ContractCall::AcceptWithdrawalV1(contract)) => {
+                StacksSignRequestId::CompleteWithdrawal(contract.id.request_id)
+            }
+            StacksTx::ContractCall(ContractCall::RejectWithdrawalV1(contract)) => {
+                StacksSignRequestId::CompleteWithdrawal(contract.id.request_id)
+            }
+            StacksTx::ContractCall(ContractCall::RotateKeysV1(contract)) => {
+                StacksSignRequestId::RotateKeys(contract.aggregate_key)
+            }
+            StacksTx::SmartContract(contract) => StacksSignRequestId::SmartContract(*contract),
+        }
+    }
+}
+
+impl std::fmt::Display for StacksSignRequestId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StacksSignRequestId::CompleteDeposit(outpoint) => {
+                write!(f, "CompleteDeposit({outpoint}")
+            }
+            StacksSignRequestId::CompleteWithdrawal(request_id) => {
+                write!(f, "CompleteWithdrawal({request_id}")
+            }
+            StacksSignRequestId::RotateKeys(public_key) => write!(f, "RotateKeys({public_key}"),
+            StacksSignRequestId::SmartContract(smart_contract) => {
+                write!(f, "SmartContract({smart_contract}")
+            }
+        }
+    }
 }
 
 /// This function defines which messages this event loop is interested
@@ -208,11 +272,13 @@ where
             context_window,
             wsts_state_machines: LruCache::new(max_state_machines),
             threshold,
+            last_presign_block: None,
             rng,
             dkg_begin_pause,
             dkg_verification_state_machines: LruCache::new(
                 NonZeroUsize::new(5).ok_or(Error::TypeConversion)?,
             ),
+            stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
         })
     }
 
@@ -288,31 +354,12 @@ where
 
             (Payload::BitcoinPreSignRequest(requests), true, ChainTipStatus::Canonical) => {
                 let instant = std::time::Instant::now();
-                let pre_validation_status = self
+                let presign_result = self
                     .handle_bitcoin_pre_sign_request(requests, &chain_tip)
                     .await;
 
-                let status = if pre_validation_status.is_ok() {
-                    "success"
-                } else {
-                    "failure"
-                };
-                metrics::histogram!(
-                    Metrics::ValidationDurationSeconds,
-                    "blockchain" => BITCOIN_BLOCKCHAIN,
-                    "kind" => "sweep-presign",
-                    "status" => status,
-                )
-                .record(instant.elapsed());
-
-                metrics::counter!(
-                    Metrics::SignRequestsTotal,
-                    "blockchain" => BITCOIN_BLOCKCHAIN,
-                    "kind" => "sweep-presign",
-                    "status" => status,
-                )
-                .increment(1);
-                pre_validation_status?;
+                Metrics::increment_presign_validation(instant.elapsed(), &presign_result);
+                presign_result?;
             }
             // Message types ignored by the transaction signer
             (Payload::StacksTransactionSignature(_), _, _)
@@ -337,9 +384,10 @@ where
     ) -> Result<MsgChainTipReport, Error> {
         let storage = self.context.get_storage();
 
-        let chain_tip = storage
-            .get_bitcoin_canonical_chain_tip_ref()
-            .await?
+        let chain_tip = self
+            .context
+            .state()
+            .bitcoin_chain_tip()
             .ok_or(Error::NoChainTip)?;
 
         let is_known = storage
@@ -348,11 +396,11 @@ where
             .is_some();
         let is_canonical = msg_bitcoin_chain_tip == &chain_tip.block_hash;
 
-        let signer_set = self.context.state().current_signer_public_keys();
+        let signer_set = &self.context.config().signer.bootstrap_signing_set;
         let sender_is_coordinator = crate::transaction_coordinator::given_key_is_coordinator(
             msg_sender,
             &chain_tip.block_hash,
-            &signer_set,
+            signer_set,
         );
 
         let chain_tip_status = match (is_known, is_canonical) {
@@ -382,10 +430,16 @@ where
     ) -> Result<(), Error> {
         let db = self.context.get_storage_mut();
 
+        if self.last_presign_block == Some(chain_tip.block_hash) {
+            return Err(Error::InvalidPresignRequest(chain_tip.block_hash));
+        }
+        self.last_presign_block = Some(chain_tip.block_hash);
+
         let aggregate_key = self
             .context
             .state()
-            .current_aggregate_key()
+            .registry_signer_set_info()
+            .map(|info| info.aggregate_key)
             .ok_or(Error::NoDkgShares)?;
 
         let dkg_shares = db.get_encrypted_dkg_shares(aggregate_key).await?;
@@ -427,39 +481,30 @@ where
 
         self.send_message(BitcoinPreSignAck, &chain_tip.block_hash)
             .await?;
+
         Ok(())
     }
 
+    /// Processes the [`StacksTransactionSignRequest`] message.
+    /// Validate the request and if valid then sign and broadcast the signed tx.
     #[tracing::instrument(skip_all)]
-    async fn handle_stacks_transaction_sign_request(
+    pub async fn handle_stacks_transaction_sign_request(
         &mut self,
         request: &StacksTransactionSignRequest,
         chain_tip: &model::BitcoinBlockRef,
         origin_public_key: &PublicKey,
     ) -> Result<(), Error> {
         let instant = std::time::Instant::now();
-        let validation_status = self
+        let validation_result = self
             .assert_valid_stacks_tx_sign_request(request, chain_tip, origin_public_key)
             .await;
 
-        metrics::histogram!(
-            Metrics::ValidationDurationSeconds,
-            "blockchain" => STACKS_BLOCKCHAIN,
-            "kind" => request.tx_kind(),
-        )
-        .record(instant.elapsed());
-        metrics::counter!(
-            Metrics::SignRequestsTotal,
-            "blockchain" => STACKS_BLOCKCHAIN,
-            "kind" => request.tx_kind(),
-            "status" => if validation_status.is_ok() { "success" } else { "failed" },
-        )
-        .increment(1);
-        validation_status?;
+        Metrics::increment_stacks_validation(instant.elapsed(), request, &validation_result);
+        validation_result?;
 
         // We need to set the nonce in order to get the exact transaction
         // that we need to sign.
-        let wallet = SignerWallet::load(&self.context, &chain_tip.block_hash).await?;
+        let wallet = SignerWallet::load(&self.context).await?;
         wallet.set_nonce(request.nonce);
 
         let multi_sig = MultisigTx::new_tx(&request.contract_tx, &wallet, request.tx_fee);
@@ -475,6 +520,12 @@ where
 
         self.send_message(msg, &chain_tip.block_hash).await?;
 
+        // Mark the sign request as signed for this tenure
+        let request_id = StacksSignRequestId::from_sign_request(request);
+        self.stacks_sign_request
+            .get_or_insert_mut(chain_tip.block_hash, Default::default)
+            .insert(request_id);
+
         Ok(())
     }
 
@@ -482,30 +533,77 @@ where
     /// are run depend on the transaction being signed.
     #[tracing::instrument(skip_all, fields(sender = %origin_public_key, txid = %request.txid), err)]
     pub async fn assert_valid_stacks_tx_sign_request(
-        &self,
+        &mut self,
         request: &StacksTransactionSignRequest,
         chain_tip: &model::BitcoinBlockRef,
         origin_public_key: &PublicKey,
     ) -> Result<(), Error> {
+        // Ensure we didn't already sign for this request
+        let request_id = StacksSignRequestId::from_sign_request(request);
+        let already_signed = self
+            .stacks_sign_request
+            .get(&chain_tip.block_hash)
+            .map(|set| set.contains(&request_id))
+            .unwrap_or(false);
+        if already_signed {
+            return Err(Error::StacksRequestAlreadySigned(
+                request_id,
+                *chain_tip.block_hash,
+            ));
+        }
+
+        // Ensure that the Stacks fee is within the acceptable range.
+        let highest_acceptable_fee = self.context.config().signer.stacks_fees_max_ustx.get();
+        if request.tx_fee > highest_acceptable_fee {
+            return Err(Error::StacksFeeLimitExceeded(
+                request.tx_fee,
+                highest_acceptable_fee,
+            ));
+        }
+
         let db = self.context.get_storage();
         let public_key = self.signer_public_key();
+        let state = self.context.state();
 
-        let Some(shares) = db.get_encrypted_dkg_shares(&request.aggregate_key).await? else {
-            return Err(Error::MissingDkgShares(request.aggregate_key.into()));
-        };
         // There is one check that applies to all Stacks transactions, and
         // that check is that the current signer is in the signing set
-        // associated with the given aggregate key. We do this check here.
-        if !shares.signer_set_public_keys.contains(&public_key) {
-            return Err(Error::ValidationSignerSet(request.aggregate_key));
+        // associated authorized wallet in the sbtc registry.
+        //
+        // If the sbtc-registry has not been deployed yet, then we allow
+        // any DKG shares for smart contract deployments, but require
+        // verified DKG shares for other transactions.
+        let signer_set_info = match state.registry_signer_set_info() {
+            Some(info) => info,
+            None => match db.get_latest_verified_dkg_shares().await? {
+                Some(info) => info.into(),
+                None if matches!(request.contract_tx, StacksTx::SmartContract(_))
+                    && !state.sbtc_contracts_deployed() =>
+                {
+                    db.get_latest_encrypted_dkg_shares()
+                        .await?
+                        .map(SignerSetInfo::from)
+                        .ok_or(Error::NoDkgShares)?
+                }
+                _ => return Err(Error::NoVerifiedDkgShares),
+            },
+        };
+
+        if !signer_set_info.signer_set.contains(&public_key) {
+            return Err(Error::ValidationSignerSet(signer_set_info.aggregate_key));
         }
+
+        let stacks_chain_tip = db
+            .get_stacks_chain_tip(&chain_tip.block_hash)
+            .await?
+            .ok_or(Error::NoStacksChainTip)?;
 
         let req_ctx = ReqContext {
             chain_tip: *chain_tip,
+            stacks_chain_tip: stacks_chain_tip.block_hash,
             context_window: self.context_window,
             origin: *origin_public_key,
-            aggregate_key: request.aggregate_key,
-            signatures_required: shares.signature_share_threshold,
+            aggregate_key: signer_set_info.aggregate_key,
+            signatures_required: signer_set_info.signatures_required,
             deployer: self.context.config().signer.deployer,
         };
         let ctx = &self.context;
@@ -577,11 +675,15 @@ where
                 assert_allow_dkg_begin(&self.context, chain_tip).await?;
 
                 tracing::debug!("processing message");
-                let signer_public_keys = self.context.state().current_signer_public_keys();
+                let signer_public_keys = self.context.config().signer.bootstrap_signing_set.clone();
+                // The as _ cast is okay because we are going from a u16 to
+                // a u32, which is always okay.
+                let threshold = self.context.config().signer.bootstrap_signatures_required as u32;
 
                 let state_machine = SignerStateMachine::new(
                     signer_public_keys,
-                    self.threshold,
+                    threshold,
+                    *chain_tip,
                     self.signer_private_key,
                 )?;
                 let state_machine_id = StateMachineId::Dkg(*chain_tip);
@@ -749,21 +851,7 @@ where
                         let accepted_sighash =
                             Self::validate_bitcoin_sign_request(&db, &request.message).await;
 
-                        let validation_status = match &accepted_sighash {
-                            Ok(_) => "success",
-                            Err(Error::SigHashConversion(_)) => "improper-sighash",
-                            Err(Error::UnknownSigHash(_)) => "unknown-sighash",
-                            Err(Error::InvalidSigHash(_)) => "invalid-sighash",
-                            Err(_) => "unexpected-failure",
-                        };
-
-                        metrics::counter!(
-                            Metrics::SignRequestsTotal,
-                            "blockchain" => BITCOIN_BLOCKCHAIN,
-                            "kind" => "sweep",
-                            "status" => validation_status,
-                        )
-                        .increment(1);
+                        Metrics::increment_bitcoin_validation(&accepted_sighash);
 
                         let accepted_sighash = accepted_sighash?;
                         let id = StateMachineId::BitcoinSign(accepted_sighash.sighash);
@@ -797,13 +885,8 @@ where
                 };
 
                 // Create a new `SignerStateMachine`.
-                let state_machine = SignerStateMachine::load(
-                    &db,
-                    aggregate_key,
-                    self.threshold,
-                    self.signer_private_key,
-                )
-                .await?;
+                let state_machine =
+                    SignerStateMachine::load(&db, aggregate_key, self.signer_private_key).await?;
 
                 // Put the state machine into the cache.
                 self.wsts_state_machines
@@ -1093,15 +1176,13 @@ where
         signer_id: u32,
         sender_public_key: &PublicKey,
     ) -> Result<(), Error> {
-        let public_keys = match self.wsts_state_machines.get(state_machine_id) {
-            Some(state_machine) => &state_machine.public_keys,
+        let state_machine = match self.wsts_state_machines.get(state_machine_id) {
+            Some(state_machine) => state_machine,
             None => return Err(Error::MissingStateMachine(*state_machine_id)),
         };
 
-        let wsts_public_key = public_keys
-            .signers
-            .get(&signer_id)
-            .map(PublicKey::from)
+        let wsts_public_key = state_machine
+            .get_signer_public_key(signer_id)
             .ok_or(Error::MissingPublicKey)?;
 
         if &wsts_public_key != sender_public_key {
@@ -1139,12 +1220,11 @@ where
             .get(state_machine_id)
             .ok_or_else(|| Error::MissingStateMachine(*state_machine_id))?;
 
-        let StateMachineId::Dkg(started_at) = state_machine_id else {
+        let StateMachineId::Dkg(_) = state_machine_id else {
             return Err(Error::UnexpectedStateMachineId(*state_machine_id));
         };
 
-        let encrypted_dkg_shares =
-            state_machine.get_encrypted_dkg_shares(&mut self.rng, started_at)?;
+        let encrypted_dkg_shares = state_machine.get_encrypted_dkg_shares()?;
 
         tracing::debug!("🔐 storing DKG shares");
         self.context
@@ -1189,14 +1269,8 @@ where
         );
 
         // Create the WSTS FROST coordinator.
-        let coordinator = FrostCoordinator::load(
-            storage,
-            aggregate_key,
-            signing_set,
-            dkg_shares.signature_share_threshold,
-            signer_private_key,
-        )
-        .await?;
+        let coordinator =
+            FrostCoordinator::load(storage, aggregate_key, signer_private_key).await?;
 
         // Create the DKG verification state machine using the above coordinator.
         let state_machine = dkg::verification::StateMachine::new(coordinator, aggregate_key, None)
@@ -1267,15 +1341,21 @@ where
         // Determine if the state machine is in an end-state.
         let is_end_state = match state_machine.state() {
             dkg::verification::State::Success(_) => {
-                tracing::warn!("🔐 the DKG verification signing round already completed for this aggregate key");
+                tracing::warn!(
+                    "🔐 the DKG verification signing round already completed for this aggregate key"
+                );
                 true
             }
             dkg::verification::State::Error => {
-                tracing::warn!("🔐 the DKG verification state machine for this aggregate key is in a failed state and may not be used");
+                tracing::warn!(
+                    "🔐 the DKG verification state machine for this aggregate key is in a failed state and may not be used"
+                );
                 true
             }
             dkg::verification::State::Expired => {
-                tracing::warn!("🔐 the DKG verification state machine for this aggregate key is expired and the state machine may not be used");
+                tracing::warn!(
+                    "🔐 the DKG verification state machine for this aggregate key is expired and the state machine may not be used"
+                );
                 true
             }
             dkg::verification::State::Idle | dkg::verification::State::Signing => false,
@@ -1352,7 +1432,9 @@ where
                 self.dkg_verification_state_machines.pop(&state_machine_id);
 
                 // Perform verification of the signature.
-                tracing::info!("🔐 verifying that the signature can be used to spend a UTXO locked by the new aggregate key");
+                tracing::info!(
+                    "🔐 verifying that the signature can be used to spend a UTXO locked by the new aggregate key"
+                );
                 let mock_tx = UnsignedMockTransaction::new(aggregate_key.into());
 
                 match mock_tx.verify_signature(&signature) {
@@ -1405,7 +1487,7 @@ where
 
         // Process the message in the WSTS signer state machine.
         let outbound_messages = match self.wsts_state_machines.get_mut(state_machine_id) {
-            Some(state_machine) => state_machine.process(msg).map_err(Error::Wsts)?,
+            Some(state_machine) => state_machine.process(msg)?,
             None => {
                 tracing::warn!("missing signing round");
                 return Err(Error::MissingStateMachine(*state_machine_id));
@@ -1436,8 +1518,7 @@ where
             self.wsts_state_machines
                 .get_mut(state_machine_id)
                 .ok_or_else(|| Error::MissingStateMachine(*state_machine_id))?
-                .process(outbound_message)
-                .map_err(Error::Wsts)?;
+                .process(outbound_message)?;
 
             // If this is a DKG verification then we need to process the message
             // in the FROST state machine as well for it to properly follow
@@ -1488,7 +1569,7 @@ where
 
         self.network.broadcast(msg.clone()).await?;
         self.context
-            .signal(TxSignerEvent::MessageGenerated(msg).into())?;
+            .signal(TxSignerEvent::MessageGenerated(Box::new(msg)).into())?;
 
         Ok(())
     }
@@ -1506,6 +1587,31 @@ pub async fn assert_allow_dkg_begin(
 ) -> Result<(), Error> {
     let storage = context.get_storage();
     let config = context.config();
+
+    // If the latest shares are unverified, we want to prioritize verifying them
+    // instead of doing new DKG rounds. If we fail to do so they will eventually
+    // be marked as failed, and we will resume DKG-ing.
+    let latest_dkg_shares = storage.get_latest_encrypted_dkg_shares().await?;
+    if latest_dkg_shares.map(|s| s.dkg_shares_status) == Some(model::DkgSharesStatus::Unverified) {
+        tracing::warn!("latest shares are unverified; aborting");
+        return Err(Error::DkgHasAlreadyRun);
+    }
+
+    // If we do not have a key rotation event in the database, we will
+    // allow DKG below if we have not run DKG yet.
+    if let Some(registry_signer_info) = context.state().registry_signer_set_info() {
+        // Trigger DKG if signatures_required has changed
+        if registry_signer_info.signatures_required != config.signer.bootstrap_signatures_required {
+            tracing::info!("signatures required has changed; proceeding with DKG");
+            return Ok(());
+        }
+
+        // Trigger DKG if signer set changes
+        if registry_signer_info.signer_set != config.signer.bootstrap_signing_set {
+            tracing::info!("signer set has changed; proceeding with DKG");
+            return Ok(());
+        }
+    }
 
     // Get the number of DKG shares that have been stored
     let dkg_shares_entry_count = storage.get_encrypted_dkg_shares_count().await?;
@@ -1537,7 +1643,7 @@ pub async fn assert_allow_dkg_begin(
                 );
                 return Err(Error::DkgHasAlreadyRun);
             }
-            if bitcoin_chain_tip.block_height < dkg_min_height.get() {
+            if bitcoin_chain_tip.block_height < dkg_min_height {
                 tracing::warn!(
                     ?dkg_min_bitcoin_block_height,
                     %dkg_target_rounds,
@@ -1601,7 +1707,7 @@ pub enum ChainTipStatus {
 
 #[cfg(test)]
 mod tests {
-    use std::num::{NonZeroU32, NonZeroU64, NonZeroUsize};
+    use std::num::{NonZeroU32, NonZeroUsize};
 
     use bitcoin::Txid;
     use fake::{Fake, Faker};
@@ -1612,13 +1718,14 @@ mod tests {
     use crate::context::Context;
     use crate::emily_client::MockEmilyInteract;
     use crate::stacks::api::MockStacksInteract;
-    use crate::storage::in_memory::SharedStore;
-    use crate::storage::{model, DbWrite};
+    use crate::storage::memory::SharedStore;
+    use crate::storage::{DbWrite, model};
     use crate::testing;
     use crate::testing::context::*;
 
     use super::*;
 
+    #[allow(clippy::type_complexity)]
     fn test_environment() -> testing::transaction_signer::TestEnvironment<
         TestContext<
             SharedStore,
@@ -1673,12 +1780,13 @@ mod tests {
         chain_tip_height: u64,
         should_allow: bool,
     ) {
+        let chain_tip_height = chain_tip_height.into();
+        let dkg_min_bitcoin_block_height = dkg_min_bitcoin_block_height.map(Into::into);
         let context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
             .modify_settings(|s| {
-                s.signer.dkg_min_bitcoin_block_height =
-                    dkg_min_bitcoin_block_height.map(NonZeroU64::new).flatten();
+                s.signer.dkg_min_bitcoin_block_height = dkg_min_bitcoin_block_height;
                 s.signer.dkg_target_rounds = NonZeroU32::new(dkg_target_rounds).unwrap();
             })
             .build();
@@ -1710,6 +1818,9 @@ mod tests {
             .await
             .unwrap();
 
+        let aggregate_key = Faker.fake();
+        prevent_dkg_on_changed_signer_set_info(&context, aggregate_key);
+
         // Test the case
         let result = assert_allow_dkg_begin(&context, &bitcoin_chain_tip).await;
 
@@ -1740,18 +1851,21 @@ mod tests {
         // Dummy chain tip hash which will be used to fetch the block height.
         let bitcoin_chain_tip = model::BitcoinBlockRef {
             block_hash: Faker.fake(),
-            block_height: 100,
+            block_height: 100u64.into(),
         };
 
         // Write a bitcoin block at the given height, simulating the chain tip.
         storage
             .write_bitcoin_block(&model::BitcoinBlock {
-                block_height: 100,
+                block_height: 100u64.into(),
                 parent_hash: Faker.fake(),
                 block_hash: bitcoin_chain_tip.block_hash,
             })
             .await
             .unwrap();
+
+        let aggregate_key = Faker.fake();
+        prevent_dkg_on_changed_signer_set_info(&context, aggregate_key);
 
         // Create our signer instance.
         let mut signer = TxSignerEventLoop {
@@ -1761,9 +1875,11 @@ mod tests {
             context_window: 1,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             threshold: 1,
+            last_presign_block: None,
             rng: rand::rngs::OsRng,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
+            stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
         };
 
         // Create a DkgBegin message to be handled by the signer.
@@ -1813,7 +1929,7 @@ mod tests {
         // Write a bitcoin block at the given height, simulating the chain tip.
         storage
             .write_bitcoin_block(&model::BitcoinBlock {
-                block_height: 100,
+                block_height: 100u64.into(),
                 parent_hash: Faker.fake(),
                 block_hash: bitcoin_chain_tip,
             })
@@ -1827,10 +1943,12 @@ mod tests {
             signer_private_key: PrivateKey::new(&mut rand::rngs::OsRng),
             context_window: 1,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
+            last_presign_block: None,
             threshold: 1,
             rng: rand::rngs::OsRng,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
+            stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
         };
 
         // Create a DkgBegin message to be handled by the signer.
@@ -1898,7 +2016,7 @@ mod tests {
         // Write a bitcoin block at the given height, simulating the chain tip.
         storage
             .write_bitcoin_block(&model::BitcoinBlock {
-                block_height: 100,
+                block_height: 100u64.into(),
                 parent_hash: Faker.fake(),
                 block_hash: bitcoin_chain_tip,
             })
@@ -1913,9 +2031,11 @@ mod tests {
             context_window: 1,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             threshold: 1,
+            last_presign_block: None,
             rng: rand::rngs::OsRng,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
+            stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
         };
 
         let msg = message::WstsMessage {

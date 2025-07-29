@@ -9,6 +9,7 @@ use crate::stacks::contracts::ContractCall;
 use crate::stacks::contracts::StacksTx;
 use crate::storage::model;
 use crate::storage::model::BitcoinBlockHash;
+use crate::storage::model::StacksBlockHash;
 use crate::storage::model::StacksTxId;
 
 /// Messages exchanged between signers
@@ -166,12 +167,24 @@ pub struct SignerWithdrawalDecision {
     pub accepted: bool,
 }
 
+impl From<model::WithdrawalSigner> for SignerWithdrawalDecision {
+    fn from(signer: model::WithdrawalSigner) -> Self {
+        Self {
+            request_id: signer.request_id,
+            block_hash: signer.block_hash,
+            txid: signer.txid,
+            accepted: signer.is_accepted,
+        }
+    }
+}
+
 /// Represents a request to sign a Stacks transaction.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StacksTransactionSignRequest {
-    /// This is the bitcoin aggregate key that was output from DKG. It is used
-    /// to identify the signing set for the transaction.
-    pub aggregate_key: PublicKey,
+    /// **Deprecated**. This is the aggregate key that was output from DKG.
+    /// It was used to identify the signing set for the transaction, but is
+    /// unnecessary now.
+    pub aggregate_key: Option<PublicKey>,
     /// The contract call transaction to sign.
     pub contract_tx: StacksTx,
     /// The nonce to use for the transaction.
@@ -250,9 +263,9 @@ impl From<crate::storage::model::BitcoinTxId> for WstsMessageId {
 impl std::fmt::Display for WstsMessageId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            WstsMessageId::Sweep(txid) => write!(f, "sweep({})", txid),
+            WstsMessageId::Sweep(txid) => write!(f, "sweep({txid})"),
             WstsMessageId::DkgVerification(aggregate_key) => {
-                write!(f, "dkg-verification({})", aggregate_key)
+                write!(f, "dkg-verification({aggregate_key})")
             }
             WstsMessageId::Dkg(id) => {
                 write!(f, "dkg({})", hex::encode(id))
@@ -287,9 +300,6 @@ impl WstsMessage {
         }
     }
 }
-
-/// Convenient type aliases
-type StacksBlockHash = [u8; 32];
 
 #[cfg(test)]
 mod tests {

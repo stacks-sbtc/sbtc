@@ -1,28 +1,68 @@
 //! This module contains implementations of structs that make reading from
 //! and writing from postgres easy.
-//!
-//!
 
 use std::ops::Deref;
 use std::str::FromStr as _;
 
-use bitcoin::consensus::Decodable as _;
-use bitcoin::consensus::Encodable as _;
 use bitcoin::hashes::Hash as _;
 use sqlx::encode::IsNull;
 use sqlx::error::BoxDynError;
 use sqlx::postgres::PgArgumentBuffer;
+use sqlx::postgres::PgTypeInfo;
+use sqlx::postgres::types::Oid;
+use time::OffsetDateTime;
+use time::macros::datetime;
 
 use crate::keys::PublicKey;
 use crate::keys::PublicKeyXOnly;
 use crate::storage::model::BitcoinBlockHash;
-use crate::storage::model::BitcoinTx;
+use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::BitcoinTxId;
 use crate::storage::model::ScriptPubKey;
 use crate::storage::model::SigHash;
 use crate::storage::model::StacksBlockHash;
+use crate::storage::model::StacksBlockHeight;
 use crate::storage::model::StacksPrincipal;
 use crate::storage::model::StacksTxId;
+use crate::storage::model::TaprootScriptHash;
+
+use super::model::Timestamp;
+
+/// The PostgreSQL epoch is 2000-01-01 00:00:00 UTC
+/// (https://en.wikipedia.org/wiki/Epoch_(computing)).
+const POSTGRES_EPOCH_DATETIME: OffsetDateTime = datetime!(2000-01-01 00:00:00 UTC);
+
+/// OID for PostgreSQL's TIMESTAMPTZ type.
+/// https://github.com/postgres/postgres/blob/5d6eac80cdce7aa7c5f4ec74208ddc1feea9eef3/src/include/catalog/pg_type.dat#L306
+const TIMESTAMPTZ_OID: Oid = Oid(1184);
+
+// For the [`TaprootScriptHash`]
+
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for TaprootScriptHash {
+    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, BoxDynError> {
+        let bytes = <[u8; 32] as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        Ok(TaprootScriptHash::from(bytes))
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for TaprootScriptHash {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <[u8; 32] as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl<'r> sqlx::Encode<'r, sqlx::Postgres> for TaprootScriptHash {
+    fn encode_by_ref(&self, buf: &mut PgArgumentBuffer) -> Result<IsNull, BoxDynError> {
+        let bytes = self.to_byte_array();
+        <[u8; 32] as sqlx::Encode<'r, sqlx::Postgres>>::encode_by_ref(&bytes, buf)
+    }
+}
+
+impl sqlx::postgres::PgHasArrayType for TaprootScriptHash {
+    fn array_type_info() -> sqlx::postgres::PgTypeInfo {
+        <[u8; 32] as sqlx::postgres::PgHasArrayType>::array_type_info()
+    }
+}
 
 // For the [`ScriptPubKey`]
 
@@ -77,37 +117,6 @@ impl<'r> sqlx::Encode<'r, sqlx::Postgres> for BitcoinBlockHash {
 impl sqlx::postgres::PgHasArrayType for BitcoinBlockHash {
     fn array_type_info() -> sqlx::postgres::PgTypeInfo {
         <[u8; 32] as sqlx::postgres::PgHasArrayType>::array_type_info()
-    }
-}
-
-// For the [`BitcoinTx`]
-
-impl<'r> sqlx::Decode<'r, sqlx::Postgres> for BitcoinTx {
-    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, BoxDynError> {
-        let bytes = <Vec<u8> as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
-        let mut reader = bytes.as_slice();
-        let tx = bitcoin::Transaction::consensus_decode(&mut reader)?;
-        Ok(BitcoinTx::from(tx))
-    }
-}
-
-impl sqlx::Type<sqlx::Postgres> for BitcoinTx {
-    fn type_info() -> sqlx::postgres::PgTypeInfo {
-        <Vec<u8> as sqlx::Type<sqlx::Postgres>>::type_info()
-    }
-}
-
-impl<'r> sqlx::Encode<'r, sqlx::Postgres> for BitcoinTx {
-    fn encode_by_ref(&self, buf: &mut PgArgumentBuffer) -> Result<IsNull, BoxDynError> {
-        let mut writer: Vec<u8> = Vec::<u8>::new();
-        self.consensus_encode(&mut writer)?;
-        <Vec<u8> as sqlx::Encode<'r, sqlx::Postgres>>::encode_by_ref(&writer, buf)
-    }
-}
-
-impl sqlx::postgres::PgHasArrayType for BitcoinTx {
-    fn array_type_info() -> sqlx::postgres::PgTypeInfo {
-        <Vec<u8> as sqlx::postgres::PgHasArrayType>::array_type_info()
     }
 }
 
@@ -196,6 +205,62 @@ impl<'r> sqlx::Encode<'r, sqlx::Postgres> for PublicKeyXOnly {
 impl sqlx::postgres::PgHasArrayType for PublicKeyXOnly {
     fn array_type_info() -> sqlx::postgres::PgTypeInfo {
         <[u8; 32] as sqlx::postgres::PgHasArrayType>::array_type_info()
+    }
+}
+
+// For the [`StacksBlockHeight`]
+
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for StacksBlockHeight {
+    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, BoxDynError> {
+        let height = <i64 as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        StacksBlockHeight::try_from(height).map_err(BoxDynError::from)
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for StacksBlockHeight {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <i64 as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl<'r> sqlx::Encode<'r, sqlx::Postgres> for StacksBlockHeight {
+    fn encode_by_ref(&self, buf: &mut PgArgumentBuffer) -> Result<IsNull, BoxDynError> {
+        let as_i64 = i64::try_from(*self)?;
+        <i64 as sqlx::Encode<'r, sqlx::Postgres>>::encode_by_ref(&as_i64, buf)
+    }
+}
+
+impl sqlx::postgres::PgHasArrayType for StacksBlockHeight {
+    fn array_type_info() -> sqlx::postgres::PgTypeInfo {
+        <i64 as sqlx::postgres::PgHasArrayType>::array_type_info()
+    }
+}
+
+// For the [`BitcoinBlockHeight`]
+
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for BitcoinBlockHeight {
+    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, BoxDynError> {
+        let height = <i64 as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        BitcoinBlockHeight::try_from(height).map_err(BoxDynError::from)
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for BitcoinBlockHeight {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <i64 as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl<'r> sqlx::Encode<'r, sqlx::Postgres> for BitcoinBlockHeight {
+    fn encode_by_ref(&self, buf: &mut PgArgumentBuffer) -> Result<IsNull, BoxDynError> {
+        let as_i64 = i64::try_from(*self)?;
+        <i64 as sqlx::Encode<'r, sqlx::Postgres>>::encode_by_ref(&as_i64, buf)
+    }
+}
+
+impl sqlx::postgres::PgHasArrayType for BitcoinBlockHeight {
+    fn array_type_info() -> sqlx::postgres::PgTypeInfo {
+        <i64 as sqlx::postgres::PgHasArrayType>::array_type_info()
     }
 }
 
@@ -304,5 +369,56 @@ impl<'r> sqlx::Encode<'r, sqlx::Postgres> for SigHash {
 impl sqlx::postgres::PgHasArrayType for SigHash {
     fn array_type_info() -> sqlx::postgres::PgTypeInfo {
         <[u8; 32] as sqlx::postgres::PgHasArrayType>::array_type_info()
+    }
+}
+
+// --- sqlx Type implementation for Timestamp --
+
+impl sqlx::Type<sqlx::Postgres> for Timestamp {
+    fn type_info() -> PgTypeInfo {
+        PgTypeInfo::with_oid(TIMESTAMPTZ_OID)
+    }
+
+    fn compatible(ty: &PgTypeInfo) -> bool {
+        // Ensure compatibility with PostgreSQL's TIMESTAMPTZ type.
+        ty.oid() == Some(TIMESTAMPTZ_OID)
+    }
+}
+
+impl<'q> sqlx::Encode<'q, sqlx::Postgres> for Timestamp {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<IsNull, BoxDynError> {
+        let duration_since_pg_epoch = **self - POSTGRES_EPOCH_DATETIME;
+        let pg_epoch_micros: i64 = duration_since_pg_epoch
+            .whole_microseconds()
+            .try_into()
+            .map_err(|_| "timestamp could not be encoded as a PostgreSQL TIMESTAMPTZ")?;
+
+        pg_epoch_micros.encode_by_ref(buf)
+    }
+
+    fn size_hint(&self) -> usize {
+        std::mem::size_of::<i64>()
+    }
+}
+
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for Timestamp {
+    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, BoxDynError> {
+        // Decode the i64 representing microseconds since PostgreSQL epoch.
+        let pg_epoch_micros_i64 = <i64 as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+
+        // Create a Duration from these microseconds.
+        let duration_from_pg_epoch = time::Duration::microseconds(pg_epoch_micros_i64);
+
+        // Add this duration to the PostgreSQL epoch datetime.
+        // checked_add handles potential overflow/underflow if the resulting datetime
+        // is outside the representable range of OffsetDateTime.
+        let datetime = POSTGRES_EPOCH_DATETIME
+            .checked_add(duration_from_pg_epoch)
+            .ok_or("failed to construct OffsetDateTime from decoded TIMESTAMPTZ value")?;
+
+        Ok(datetime.into()) // Convert OffsetDateTime to Timestamp
     }
 }

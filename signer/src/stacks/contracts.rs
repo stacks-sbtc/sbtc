@@ -24,41 +24,42 @@ use std::sync::OnceLock;
 use bitcoin::Amount;
 use bitcoin::OutPoint;
 use bitcoin::TxOut;
-use bitvec::array::BitArray;
-use bitvec::field::BitField as _;
 use blockstack_lib::chainstate::stacks::TransactionContractCall;
 use blockstack_lib::chainstate::stacks::TransactionPayload;
 use blockstack_lib::chainstate::stacks::TransactionPostCondition;
 use blockstack_lib::chainstate::stacks::TransactionPostConditionMode;
 use blockstack_lib::chainstate::stacks::TransactionSmartContract;
+use blockstack_lib::clarity::vm::ClarityName;
+use blockstack_lib::clarity::vm::ContractName;
+use blockstack_lib::clarity::vm::Value as ClarityValue;
+use blockstack_lib::clarity::vm::types::BUFF_33;
 use blockstack_lib::clarity::vm::types::BuffData;
 use blockstack_lib::clarity::vm::types::ListData;
 use blockstack_lib::clarity::vm::types::ListTypeData;
 use blockstack_lib::clarity::vm::types::PrincipalData;
 use blockstack_lib::clarity::vm::types::SequenceData;
-use blockstack_lib::clarity::vm::types::BUFF_33;
-use blockstack_lib::clarity::vm::ClarityName;
-use blockstack_lib::clarity::vm::ContractName;
-use blockstack_lib::clarity::vm::Value as ClarityValue;
 use blockstack_lib::types::chainstate::StacksAddress;
 use blockstack_lib::util_lib::strings::StacksString;
 use clarity::vm::ClarityVersion;
 
-use crate::bitcoin::validation::WithdrawalRequestStatus;
+use crate::DEPOSIT_DUST_LIMIT;
+use crate::WITHDRAWAL_BLOCKS_EXPIRY;
+use crate::WITHDRAWAL_MIN_CONFIRMATIONS;
 use crate::bitcoin::BitcoinInteract;
+use crate::bitcoin::validation::WithdrawalRequestStatus;
 use crate::context::Context;
 use crate::error::Error;
 use crate::keys::PublicKey;
 use crate::stacks::wallet::SignerWallet;
+use crate::storage::DbRead;
 use crate::storage::model::BitcoinBlockHash;
+use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::BitcoinTxId;
 use crate::storage::model::DkgSharesStatus;
 use crate::storage::model::QualifiedRequestId;
+use crate::storage::model::StacksBlockHash;
 use crate::storage::model::ToLittleEndianOrder as _;
-use crate::storage::DbRead;
-use crate::DEPOSIT_DUST_LIMIT;
-use crate::WITHDRAWAL_BLOCKS_EXPIRY;
 
 use super::api::StacksInteract;
 
@@ -71,7 +72,7 @@ pub const SMART_CONTRACTS: [SmartContract; 5] = [
     SmartContract::SbtcToken,
     SmartContract::SbtcDeposit,
     SmartContract::SbtcWithdrawal,
-    SmartContract::SbtcBootstrap,
+    SmartContract::SbtcBootstrapSigners,
 ];
 
 /// This struct is used as supplemental data to help validate a request to
@@ -86,6 +87,9 @@ pub struct ReqContext {
     /// the bitcoin blockchain with the greatest height. On ties, we sort
     /// by the block hash descending and take the first one.
     pub chain_tip: BitcoinBlockRef,
+    /// This signer's current view of the chain tip of the canonical
+    /// stacks blockchain.
+    pub stacks_chain_tip: StacksBlockHash,
     /// How many bitcoin blocks back from the chain tip the signer will
     /// look for requests.
     pub context_window: u16,
@@ -239,16 +243,16 @@ impl From<SmartContract> for StacksTx {
 pub enum ContractCall {
     /// Call the `complete-deposit-wrapper` function in the `sbtc-deposit`
     /// smart contract
-    CompleteDepositV1(CompleteDepositV1),
+    CompleteDepositV1(Box<CompleteDepositV1>),
     /// Call the `accept-withdrawal-request` function in the
     /// `sbtc-withdrawal` smart contract.
-    AcceptWithdrawalV1(AcceptWithdrawalV1),
+    AcceptWithdrawalV1(Box<AcceptWithdrawalV1>),
     /// Call the `reject-withdrawal-request` function in the
     /// `sbtc-withdrawal` smart contract.
-    RejectWithdrawalV1(RejectWithdrawalV1),
+    RejectWithdrawalV1(Box<RejectWithdrawalV1>),
     /// Call the `rotate-keys-wrapper` function in the
     /// `sbtc-bootstrap-signers` smart contract.
-    RotateKeysV1(RotateKeysV1),
+    RotateKeysV1(Box<RotateKeysV1>),
 }
 
 impl AsTxPayload for ContractCall {
@@ -262,10 +266,18 @@ impl AsTxPayload for ContractCall {
     }
     fn post_conditions(&self) -> StacksTxPostConditions {
         match self {
-            ContractCall::AcceptWithdrawalV1(contract) => AsContractCall::post_conditions(contract),
-            ContractCall::CompleteDepositV1(contract) => AsContractCall::post_conditions(contract),
-            ContractCall::RejectWithdrawalV1(contract) => AsContractCall::post_conditions(contract),
-            ContractCall::RotateKeysV1(contract) => AsContractCall::post_conditions(contract),
+            ContractCall::AcceptWithdrawalV1(contract) => {
+                AsContractCall::post_conditions(contract.deref())
+            }
+            ContractCall::CompleteDepositV1(contract) => {
+                AsContractCall::post_conditions(contract.deref())
+            }
+            ContractCall::RejectWithdrawalV1(contract) => {
+                AsContractCall::post_conditions(contract.deref())
+            }
+            ContractCall::RotateKeysV1(contract) => {
+                AsContractCall::post_conditions(contract.deref())
+            }
         }
     }
 }
@@ -300,7 +312,7 @@ pub struct CompleteDepositV1 {
     /// that is included in this block.
     pub sweep_block_hash: BitcoinBlockHash,
     /// The block height associated with the above bitcoin block hash.
-    pub sweep_block_height: u64,
+    pub sweep_block_height: BitcoinBlockHeight,
 }
 
 impl AsTxPayload for CompleteDepositV1 {
@@ -335,29 +347,31 @@ impl AsContractCall for CompleteDepositV1 {
             ClarityValue::UInt(self.amount as u128),
             ClarityValue::Principal(self.recipient.clone()),
             ClarityValue::Sequence(SequenceData::Buffer(burn_hash_buff)),
-            ClarityValue::UInt(self.sweep_block_height as u128),
+            ClarityValue::UInt(self.sweep_block_height.into()),
             ClarityValue::Sequence(SequenceData::Buffer(sweep_txid)),
         ]
     }
     /// Validates that the Complete deposit request satisfies the following
     /// criteria:
     ///
-    /// 1. That the smart contract deployer matches the deployer in our
-    ///    context.
-    /// 2. That the signer has a record of the deposit request in its list
-    ///    of pending and accepted deposit requests.
-    /// 3. That the signer sweep transaction is on the canonical bitcoin
-    ///    blockchain.
-    /// 4. That the sweep transaction uses the indicated deposit outpoint
-    ///    as an input.
-    /// 5. That the recipients in the transaction matches that of the
-    ///    deposit request.
-    /// 6. That the amount to mint is above the dust amount.
-    /// 7. That the fee matches the expected assessed fee for the outpoint.
-    /// 8. That the fee is less than the specified max-fee.
-    /// 9. That the first input into the sweep transaction is the signers'
-    ///    UTXO. This checks that the sweep transaction was generated by
-    ///    the signers.
+    ///  1. That the smart contract deployer matches the deployer in our
+    ///     context.
+    ///  2. That the signer has a record of the deposit request in its list
+    ///     of deposit requests.
+    ///  3. That the signer sweep transaction is on the canonical bitcoin
+    ///     blockchain.
+    ///  4. That the sweep transaction uses the indicated deposit outpoint
+    ///     as an input.
+    ///  5. That the recipients in the transaction matches that of the
+    ///     deposit request.
+    ///  6. That the amount to mint is above the dust amount.
+    ///  7. That the fee matches the expected assessed fee for the
+    ///     outpoint.
+    ///  8. That the fee is less than the specified max-fee.
+    ///  9. That the first input into the sweep transaction is the signers'
+    ///     UTXO. This checks that the sweep transaction was generated by
+    ///     the signers.
+    /// 10. That sBTC has not been minted for the deposit already.
     ///
     /// # Notes
     ///
@@ -372,6 +386,16 @@ impl AsContractCall for CompleteDepositV1 {
     where
         C: Context + Send + Sync,
     {
+        // 10. Check that sBTC has not been minted for the deposit already.
+        let stacks = ctx.get_stacks_client();
+        let is_deposit_completed = stacks
+            .is_deposit_completed(&req_ctx.deployer, &self.outpoint)
+            .await?;
+
+        if is_deposit_completed {
+            return Err(DepositErrorMsg::DepositCompleted.into_error(req_ctx, self));
+        }
+
         // Covers points 3-4 & 9
         let fee = self.validate_sweep_tx(ctx, req_ctx).await?;
         let db = ctx.get_storage();
@@ -389,7 +413,7 @@ impl CompleteDepositV1 {
     /// 1. That the smart contract deployer matches the deployer in our
     ///    context.
     /// 2. That the signer has a record of the deposit request in its list
-    ///    of swept deposit requests.
+    ///    of deposit requests.
     /// 5. That the recipients in the transaction matches that of the
     ///    deposit request.
     /// 6. That the amount to mint is above the dust amount.
@@ -408,15 +432,12 @@ impl CompleteDepositV1 {
             return Err(DepositErrorMsg::DeployerMismatch.into_error(req_ctx, self));
         }
         // 2. Check that the signer has a record of the deposit request
-        //    from our list of swept deposit requests.
-        let deposit_requests = db
-            .get_swept_deposit_requests(&req_ctx.chain_tip.block_hash, req_ctx.context_window)
-            .await?;
-
-        let deposit_request = deposit_requests
-            .into_iter()
-            .find(|req| req.deposit_outpoint() == self.outpoint)
-            .ok_or_else(|| DepositErrorMsg::RequestMissing.into_error(req_ctx, self))?;
+        //    from our list of deposit requests.
+        let txid = self.outpoint.txid.into();
+        let output_index = self.outpoint.vout;
+        let Some(deposit_request) = db.get_deposit_request(&txid, output_index).await? else {
+            return Err(DepositErrorMsg::RequestMissing.into_error(req_ctx, self));
+        };
 
         // 5. Check that the recipients in the transaction matches that of
         //    the deposit request.
@@ -500,7 +521,7 @@ impl CompleteDepositV1 {
         let script_pub_key = sweep_tx
             .vin
             .first()
-            .map(|x| x.prevout.script_pub_key.script.clone().into())
+            .and_then(|x| Some(x.prevout.as_ref()?.script_pubkey.script.clone().into()))
             .ok_or_else(|| DepositErrorMsg::InvalidSweep.into_error(req_ctx, self))?;
 
         // The real check that this transaction was actually generated by
@@ -560,6 +581,9 @@ pub enum DepositErrorMsg {
     /// The smart contract deployer is fixed, so this should always match.
     #[error("the deployer in the transaction does not match the expected deployer")]
     DeployerMismatch,
+    /// We have already minted sBTC for the given deposit request
+    #[error("sBTC has already been minted for the deposit request")]
+    DepositCompleted,
     /// The fee paid to the bitcoin miners exceeded the max fee.
     #[error("fee paid to the bitcoin miners exceeded the max fee")]
     FeeTooHigh,
@@ -608,9 +632,11 @@ impl DepositErrorMsg {
 #[derive(Clone, Debug, Hash, PartialEq)]
 pub struct AcceptWithdrawalV1 {
     /// The ID of the withdrawal request generated by the
-    /// initiate-withdrawal-request function in the sbtc-withdrawal smart
-    /// contract.
-    pub request_id: u64,
+    /// `initiate-withdrawal-request` function in the sbtc-withdrawal smart
+    /// contract along with the transaction ID of the transaction that
+    /// generated the request and block hash of the Stacks block that
+    /// confirmed the transaction.
+    pub id: QualifiedRequestId,
     /// The outpoint of the bitcoin UTXO that was spent to fulfill the
     /// withdrawal request.
     pub outpoint: OutPoint,
@@ -621,7 +647,10 @@ pub struct AcceptWithdrawalV1 {
     /// A bitmap of how the signers voted. This structure supports up to
     /// 128 distinct signers. Here, we assume that a 1 (or true) implies
     /// that the signer voted *against* the transaction.
-    pub signer_bitmap: BitArray<[u8; 16]>,
+    ///
+    /// This field is currently unused, and is assumed to be zero. See
+    /// https://github.com/stacks-network/sbtc/issues/1505.
+    pub signer_bitmap: u128,
     /// The address that deployed the contract.
     pub deployer: StacksAddress,
     /// The block hash of the bitcoin block that contains a sweep
@@ -632,7 +661,7 @@ pub struct AcceptWithdrawalV1 {
     /// is included in this block.
     pub sweep_block_hash: BitcoinBlockHash,
     /// The block height associated with the above bitcoin block hash.
-    pub sweep_block_height: u64,
+    pub sweep_block_height: BitcoinBlockHeight,
 }
 
 impl AsTxPayload for AcceptWithdrawalV1 {
@@ -658,13 +687,17 @@ impl AsContractCall for AcceptWithdrawalV1 {
         let burn_hash_buff = BuffData { data: burn_hash_data };
 
         vec![
-            ClarityValue::UInt(self.request_id as u128),
-            ClarityValue::Sequence(SequenceData::Buffer(txid)),
-            ClarityValue::UInt(self.signer_bitmap.load_le()),
+            ClarityValue::UInt(self.id.request_id as u128),
+            ClarityValue::Sequence(SequenceData::Buffer(txid.clone())),
+            // This is the signer bitmap field. See the following for more
+            // on why this is fixed at zero.
+            // https://github.com/stacks-network/sbtc/issues/1505
+            ClarityValue::UInt(0),
             ClarityValue::UInt(self.outpoint.vout as u128),
             ClarityValue::UInt(self.tx_fee as u128),
             ClarityValue::Sequence(SequenceData::Buffer(burn_hash_buff)),
-            ClarityValue::UInt(self.sweep_block_height as u128),
+            ClarityValue::UInt(self.sweep_block_height.into()),
+            ClarityValue::Sequence(SequenceData::Buffer(txid)),
         ]
     }
     /// Validates that the accept-withdrawal-request satisfies the
@@ -686,15 +719,25 @@ impl AsContractCall for AcceptWithdrawalV1 {
     ///  8. That the fee matches the expected assessed fee for the output.
     ///  9. That the first input into the sweep transaction is the signers'
     ///     UTXO.
-    /// 10. That the signer bitmap matches the bitmap from our records.
-    async fn validate<C>(&self, db: &C, req_ctx: &ReqContext) -> Result<(), Error>
+    /// 10. That the withdrawal request is not already completed.
+    async fn validate<C>(&self, ctx: &C, req_ctx: &ReqContext) -> Result<(), Error>
     where
         C: Context + Send + Sync,
     {
+        // 10. Check whether the withdrawal request is already completed.
+        let withdrawal_completed = ctx
+            .get_stacks_client()
+            .is_withdrawal_completed(&req_ctx.deployer, self.id.request_id)
+            .await?;
+
+        if withdrawal_completed {
+            return Err(WithdrawalErrorMsg::RequestCompleted.into_error(req_ctx, self));
+        }
+
         // Covers points 3-4 & 8-9
-        let tx_out = self.validate_sweep(db, req_ctx).await?;
+        let tx_out = self.validate_sweep(ctx, req_ctx).await?;
         // Covers points 1-2 & 5-7, & 10
-        self.validate_utxo(db, req_ctx, tx_out).await
+        self.validate_utxo(ctx, req_ctx, tx_out).await
     }
 }
 
@@ -714,7 +757,6 @@ impl AcceptWithdrawalV1 {
     ///  6. The `amount` of the UTXO matches the one in the withdrawal
     ///     request.
     ///  7. That the fee is less than the desired max-fee.
-    /// 10. That the signer bitmap matches the bitmap from our records.
     async fn validate_utxo<C>(
         &self,
         ctx: &C,
@@ -730,48 +772,51 @@ impl AcceptWithdrawalV1 {
         if self.deployer != req_ctx.deployer {
             return Err(WithdrawalErrorMsg::DeployerMismatch.into_error(req_ctx, self));
         }
-        // 2. That the signer has a record of the withdrawal request in its
-        //    list of pending and accepted withdrawal requests.
-        //
-        // Check that this is actually a pending and accepted withdrawal
-        // request.
-        let withdrawal_requests = db
-            .get_pending_accepted_withdrawal_requests(
-                &req_ctx.chain_tip.block_hash,
-                req_ctx.context_window,
-                req_ctx.signatures_required,
-            )
-            .await?;
 
-        let request = withdrawal_requests
-            .into_iter()
-            .find(|req| req.request_id == self.request_id)
-            .ok_or_else(|| WithdrawalErrorMsg::RequestMissing.into_error(req_ctx, self))?;
+        let signer_public_key = ctx.config().signer.public_key();
+        let withdrawal_request = db.get_withdrawal_request_report(
+            &req_ctx.chain_tip.block_hash,
+            &req_ctx.stacks_chain_tip,
+            &self.id,
+            &signer_public_key,
+        );
+
+        let Some(report) = withdrawal_request.await? else {
+            return Err(WithdrawalErrorMsg::RequestMissing.into_error(req_ctx, self));
+        };
+
+        // 2. The signer thinks that the withdrawal request has been
+        //    fulfilled on the canonical bitcoin blockchain.
+        let txid_ref = match report.status {
+            WithdrawalRequestStatus::Fulfilled(txid) => txid,
+            WithdrawalRequestStatus::Confirmed => {
+                return Err(WithdrawalErrorMsg::SweepTransactionMissing.into_error(req_ctx, self));
+            }
+            WithdrawalRequestStatus::Unconfirmed => {
+                return Err(WithdrawalErrorMsg::SweepTransactionMissing.into_error(req_ctx, self));
+            }
+        };
+
+        if txid_ref.txid.deref() != &self.outpoint.txid {
+            return Err(WithdrawalErrorMsg::IncorrectSweepTx.into_error(req_ctx, self));
+        }
 
         // 5. The `scriptPubKey` of the UTXO matches the one in the withdrawal
         //    request.
-        if &tx_out.script_pubkey != request.recipient.deref() {
+        if &tx_out.script_pubkey != report.recipient.deref() {
             return Err(WithdrawalErrorMsg::RecipientMismatch.into_error(req_ctx, self));
         }
         // 6. The `amount` of the UTXO matches the one in the withdrawal
         //    request.
-        if tx_out.value.to_sat() != request.amount {
+        if tx_out.value.to_sat() != report.amount {
             return Err(WithdrawalErrorMsg::InvalidAmount.into_error(req_ctx, self));
         }
         // 7. Check that the fee is less than the desired max-fee.
         //
         // The smart contract cannot check if we exceed the max fee, so we
         // do a check ourselves.
-        if self.tx_fee > request.max_fee {
+        if self.tx_fee > report.max_fee {
             return Err(WithdrawalErrorMsg::FeeTooHigh.into_error(req_ctx, self));
-        }
-        // 10. That the signer bitmap matches the bitmap formed from our
-        //     records.
-        let votes = db
-            .get_withdrawal_request_signer_votes(&request.qualified_id(), &req_ctx.aggregate_key)
-            .await?;
-        if self.signer_bitmap != BitArray::from(votes) {
-            return Err(WithdrawalErrorMsg::BitmapMismatch.into_error(req_ctx, self));
         }
 
         Ok(())
@@ -842,7 +887,7 @@ impl AcceptWithdrawalV1 {
         let script_pub_key = sweep_tx
             .vin
             .first()
-            .map(|x| x.prevout.script_pub_key.script.clone().into())
+            .and_then(|x| Some(x.prevout.as_ref()?.script_pubkey.script.clone().into()))
             .ok_or_else(|| WithdrawalErrorMsg::InvalidSweep.into_error(req_ctx, self))?;
 
         // The real check that this transaction was actually generated by
@@ -918,10 +963,6 @@ impl std::error::Error for WithdrawalRejectValidationError {
 /// contract call transaction.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum WithdrawalErrorMsg {
-    /// The bitmap set in the transaction object should match the one in
-    /// our database.
-    #[error("bitmap does not match expected bitmap from")]
-    BitmapMismatch,
     /// The smart contract deployer is fixed, so this should always match.
     #[error("the deployer in the transaction does not match the expected deployer")]
     DeployerMismatch,
@@ -931,6 +972,10 @@ pub enum WithdrawalErrorMsg {
     /// The supplied fee does not match what is expected.
     #[error("the supplied fee does not match what is expected")]
     IncorrectFee,
+    /// The transaction that swept in the funds must match the one in our
+    /// records.
+    #[error("the transaction that swept the funds was not one that matched our records")]
+    IncorrectSweepTx,
     /// The amount to withdraw must equal the amount in the withdrawal
     /// request.
     #[error("amount to withdrawn exceeded the amount in the withdrawal request")]
@@ -943,6 +988,11 @@ pub enum WithdrawalErrorMsg {
     /// records.
     #[error("recipient did not match the recipient in our withdrawal request")]
     RecipientMismatch,
+    /// We have checked the smart contract for the status of the
+    /// withdrawal's request ID and it has indicated that the request has
+    /// been either accepted or rejected already.
+    #[error("the smart contract has been updated to indicate that the request has been completed")]
+    RequestCompleted,
     /// We do not have a record of the withdrawal request in our list of
     /// pending and accepted withdrawal requests.
     #[error("no record of withdrawal request in pending and accepted withdrawal requests")]
@@ -975,26 +1025,34 @@ impl WithdrawalErrorMsg {
 /// contract call transaction.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum WithdrawalRejectErrorMsg {
-    /// The bitmap set in the transaction object should match the one in
-    /// our database.
-    #[error("bitmap does not match expected bitmap from")]
-    BitmapMismatch,
     /// The smart contract deployer is fixed, so this should always match.
     #[error("the deployer in the transaction does not match the expected deployer")]
     DeployerMismatch,
+    /// The withdrawal request is likely being fulfilled right now.
+    #[error("the withdrawal request may be fulfilled by a transaction in the mempool")]
+    RequestBeingFulfilled,
+    /// We have checked the smart contract for the status of the
+    /// withdrawal's request ID and it has indicated that the request has
+    /// been either accepted or rejected already.
+    #[error("the smart contract has been updated to indicate that the request has been completed")]
+    RequestCompleted,
+    /// A withdrawal request is still active if it's reasonably possible
+    /// for the request to be fulfilled by a sweep transaction on bitcoin.
+    #[error("the withdrawal request is still active, we cannot reject it yet")]
+    RequestStillActive,
+    /// Withdrawal request fulfilled
+    #[error("Withdrawal request fulfilled")]
+    RequestFulfilled,
     /// We do not have a record of the withdrawal request in our list of
     /// pending and accepted withdrawal requests.
     #[error("no record of withdrawal request in pending and accepted withdrawal requests")]
     RequestMissing,
-    /// Withdrawal request fulfilled
-    #[error("Withdrawal request fulfilled")]
-    RequestFulfilled,
-    /// Withdrawal request unconfirmed
-    #[error("Withdrawal request unconfirmed")]
-    RequestUnconfirmed,
     /// Withdrawal request is not final
     #[error("Withdrawal request is not final")]
     RequestNotFinal,
+    /// Withdrawal request unconfirmed
+    #[error("Withdrawal request unconfirmed")]
+    RequestUnconfirmed,
 }
 
 impl WithdrawalRejectErrorMsg {
@@ -1002,7 +1060,7 @@ impl WithdrawalRejectErrorMsg {
         Error::WithdrawalRejectValidation(Box::new(WithdrawalRejectValidationError {
             error: self,
             context: *ctx,
-            tx: *tx,
+            tx: tx.clone(),
         }))
     }
 }
@@ -1010,16 +1068,21 @@ impl WithdrawalRejectErrorMsg {
 /// This struct is used to generate a properly formatted Stacks transaction
 /// for calling the reject-withdrawal-request function in the
 /// sbtc-withdrawal smart contract.
-#[derive(Copy, Clone, Debug, Hash, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq)]
 pub struct RejectWithdrawalV1 {
     /// The ID of the withdrawal request generated by the
-    /// initiate-withdrawal-request function in the sbtc-withdrawal smart
-    /// contract.
+    /// `initiate-withdrawal-request` function in the sbtc-withdrawal smart
+    /// contract along with the transaction ID of the transaction that
+    /// generated the request and block hash of the Stacks block that
+    /// confirmed the transaction.
     pub id: QualifiedRequestId,
     /// A bitmap of how the signers voted. This structure supports up to
     /// 128 distinct signers. Here, we assume that a 1 (or true) implies
     /// that the signer voted *against* the transaction.
-    pub signer_bitmap: BitArray<[u8; 16]>,
+    ///
+    /// This field is currently unused, and is assumed to be zero. See
+    /// https://github.com/stacks-network/sbtc/issues/1505.
+    pub signer_bitmap: u128,
     /// The address that deployed the contract.
     pub deployer: StacksAddress,
 }
@@ -1043,44 +1106,56 @@ impl AsContractCall for RejectWithdrawalV1 {
     fn as_contract_args(&self) -> Vec<ClarityValue> {
         vec![
             ClarityValue::UInt(self.id.request_id as u128),
-            ClarityValue::UInt(self.signer_bitmap.load_le()),
+            // This is the signer bitmap field. See the following for more
+            // on why this is fixed at zero.
+            // https://github.com/stacks-network/sbtc/issues/1505
+            ClarityValue::UInt(0),
         ]
     }
     /// Validates that the reject-withdrawal-request satisfies the
     /// following criteria:
     ///
-    /// 1. That the transaction with the associated request_id is stored as
-    ///    an event on the canonical Stacks blockchain.
-    /// 2. That the signer bitmap matches the signer decisions stored in
-    ///    this signer's database.
+    /// 1. That the withdrawal request is not already completed.
+    /// 2. Whether the smart contract deployer matches the deployer in our
+    ///    context.
+    /// 3. Whether the associated withdrawal request transaction is
+    ///    confirmed on the canonical stacks blockchain. Fail if it is not
+    ///    on the canonical stacks blockchain.
+    /// 4. Whether the request has been fulfilled. Fail if it has.
+    /// 5. Whether the withdrawal request has expired. Fail if it hasn't.
+    /// 6. Whether the withdrawal request is being serviced by a sweep
+    ///    transaction that is in the mempool.
+    /// 7. Whether we need to worry about forks causing the withdrawal to
+    ///    be confirmed by a sweep that was broadcast changing the status
+    ///    of the request from rejected to accepted.
     async fn validate<C>(&self, ctx: &C, req_ctx: &ReqContext) -> Result<(), Error>
     where
         C: Context + Send + Sync,
     {
+        let db = ctx.get_storage();
+        // 1. Check whether the withdrawal request is already completed.
+        let withdrawal_completed = ctx
+            .get_stacks_client()
+            .is_withdrawal_completed(&req_ctx.deployer, self.id.request_id)
+            .await?;
+
+        if withdrawal_completed {
+            return Err(WithdrawalRejectErrorMsg::RequestCompleted.into_error(req_ctx, self));
+        }
+
+        // 2. Whether the smart contract deployer matches the deployer in
+        //    our context.
         if self.deployer != req_ctx.deployer {
             return Err(WithdrawalRejectErrorMsg::DeployerMismatch.into_error(req_ctx, self));
         }
 
-        // 1. The request exists. Check whether the associated withdrawal request transaction
-        //    is confirmed on the canonical stacks blockchain. Fail the withdrawal request if
-        //    it is not on the canonical stacks blockchain.
-        //
-        // 2. The double spend check. Check whether the qualified request ID is in the
-        //    bitcoin_withdrawals_outputs table, and that any of the associated txids are
-        //    confirmed on the canonical bitcoin blockchain. Fail the withdrawal request if
-        //    such a transaction was found.
-
-        let stacks_chain_tip = ctx
-            .get_storage()
-            .get_stacks_chain_tip(&req_ctx.chain_tip.block_hash)
-            .await
-            .unwrap()
-            .unwrap();
-        let maybe_report = ctx
-            .get_storage()
+        // 3. Whether the associated withdrawal request transaction is
+        //    confirmed on the canonical stacks blockchain.
+        // 4. Whether the request has been fulfilled.
+        let maybe_report = db
             .get_withdrawal_request_report(
                 &req_ctx.chain_tip.block_hash,
-                &stacks_chain_tip.block_hash,
+                &req_ctx.stacks_chain_tip,
                 &self.id,
                 &ctx.config().signer.public_key(),
             )
@@ -1093,31 +1168,40 @@ impl AsContractCall for RejectWithdrawalV1 {
         match report.status {
             WithdrawalRequestStatus::Confirmed => (),
             WithdrawalRequestStatus::Fulfilled(_txid) => {
-                // fails #2
                 return Err(WithdrawalRejectErrorMsg::RequestFulfilled.into_error(req_ctx, self));
             }
             WithdrawalRequestStatus::Unconfirmed => {
-                // fails #1
                 return Err(WithdrawalRejectErrorMsg::RequestUnconfirmed.into_error(req_ctx, self));
             }
         }
 
-        let signer_votes = ctx
-            .get_storage()
-            .get_withdrawal_request_signer_votes(&self.id, &req_ctx.aggregate_key)
-            .await?;
-        let signer_bitmap = BitArray::<[u8; 16]>::from(signer_votes);
+        // 5. Check whether the withdrawal request has expired.
+        let blocks_observed = req_ctx
+            .chain_tip
+            .block_height
+            .saturating_sub(report.bitcoin_block_height);
 
-        if signer_bitmap != self.signer_bitmap {
-            return Err(WithdrawalRejectErrorMsg::BitmapMismatch.into_error(req_ctx, self));
+        if blocks_observed <= WITHDRAWAL_BLOCKS_EXPIRY.into() {
+            return Err(WithdrawalRejectErrorMsg::RequestNotFinal.into_error(req_ctx, self));
         }
 
-        let request_block_height = report.bitcoin_block_height;
-        let blocks_observed = req_ctx.chain_tip.block_height - request_block_height;
+        // 6. Check whether the withdrawal request may be serviced by a
+        //    sweep transaction that may be in the mempool.
+        let withdrawal_is_inflight = db
+            .is_withdrawal_inflight(&self.id, &req_ctx.chain_tip.block_hash)
+            .await?;
+        if withdrawal_is_inflight {
+            return Err(WithdrawalRejectErrorMsg::RequestBeingFulfilled.into_error(req_ctx, self));
+        }
 
-        // 4. The request is expired.
-        if blocks_observed < WITHDRAWAL_BLOCKS_EXPIRY {
-            return Err(WithdrawalRejectErrorMsg::RequestNotFinal.into_error(req_ctx, self));
+        // 7. Check whether the withdrawal request is still active, as in
+        //    it could still be fulfilled.
+        let withdrawal_is_active = db
+            .is_withdrawal_active(&self.id, &req_ctx.chain_tip, WITHDRAWAL_MIN_CONFIRMATIONS)
+            .await?;
+
+        if withdrawal_is_active {
+            return Err(WithdrawalRejectErrorMsg::RequestStillActive.into_error(req_ctx, self));
         }
 
         Ok(())
@@ -1153,6 +1237,26 @@ impl RotateKeysV1 {
             new_keys: wallet.public_keys().clone(),
             deployer,
             signatures_required: wallet.signatures_required(),
+        }
+    }
+
+    /// Create a rotate-key instance that will be associated with the given
+    /// aggregate key using the associated DKG shares in the database. If
+    /// no such shares exist then return an error.
+    pub async fn load<C>(ctx: &C, aggregate_key: &PublicKey) -> Result<Self, Error>
+    where
+        C: Context,
+    {
+        let db = ctx.get_storage();
+
+        match db.get_encrypted_dkg_shares(aggregate_key).await? {
+            Some(shares) => Ok(Self {
+                aggregate_key: shares.aggregate_key,
+                new_keys: shares.signer_set_public_keys(),
+                deployer: ctx.config().signer.deployer,
+                signatures_required: shares.signature_share_threshold,
+            }),
+            None => Err(Error::MissingDkgShares(aggregate_key.into())),
         }
     }
 
@@ -1361,7 +1465,7 @@ impl RotateKeysErrorMsg {
 
 /// A wrapper type for smart contract deployment that implements
 /// AsTxPayload.
-#[derive(Clone, Copy, Debug, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
 pub enum SmartContract {
     /// The sbtc-registry contract. This contract needs to be deployed
@@ -1378,7 +1482,13 @@ pub enum SmartContract {
     SbtcWithdrawal,
     /// The sbtc-bootstrap-signers contract. Can be deployed after the
     /// sbtc-token contract.
-    SbtcBootstrap,
+    SbtcBootstrapSigners,
+}
+
+impl std::fmt::Display for SmartContract {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.contract_name())
+    }
 }
 
 impl AsTxPayload for SmartContract {
@@ -1415,7 +1525,7 @@ impl SmartContract {
             SmartContract::SbtcRegistry => "sbtc-registry",
             SmartContract::SbtcDeposit => "sbtc-deposit",
             SmartContract::SbtcWithdrawal => "sbtc-withdrawal",
-            SmartContract::SbtcBootstrap => "sbtc-bootstrap-signers",
+            SmartContract::SbtcBootstrapSigners => "sbtc-bootstrap-signers",
         }
     }
 
@@ -1434,7 +1544,7 @@ impl SmartContract {
             SmartContract::SbtcWithdrawal => {
                 include_str!("../../../contracts/contracts/sbtc-withdrawal.clar")
             }
-            SmartContract::SbtcBootstrap => {
+            SmartContract::SbtcBootstrapSigners => {
                 include_str!("../../../contracts/contracts/sbtc-bootstrap-signers.clar")
             }
         }
@@ -1480,14 +1590,13 @@ impl SmartContract {
 #[cfg(test)]
 mod tests {
     use fake::Fake as _;
-    use rand::rngs::StdRng;
-    use rand::SeedableRng as _;
-    use secp256k1::SecretKey;
     use secp256k1::SECP256K1;
+    use secp256k1::SecretKey;
 
     use crate::config::NetworkKind;
     use crate::storage::model::StacksBlockHash;
     use crate::storage::model::StacksTxId;
+    use crate::testing::get_rng;
 
     use super::*;
 
@@ -1502,7 +1611,7 @@ mod tests {
             deployer: StacksAddress::burn_address(false),
             sweep_txid: BitcoinTxId::from([0; 32]),
             sweep_block_hash: BitcoinBlockHash::from([0; 32]),
-            sweep_block_height: 7,
+            sweep_block_height: 7u64.into(),
         };
 
         let _ = call.as_contract_call();
@@ -1513,13 +1622,17 @@ mod tests {
         // This is to check that this function doesn't implicitly panic. If
         // it doesn't panic now, it can never panic at runtime.
         let call = AcceptWithdrawalV1 {
-            request_id: 42,
+            id: QualifiedRequestId {
+                request_id: 43,
+                txid: StacksTxId::from([0; 32]),
+                block_hash: StacksBlockHash::from([0; 32]),
+            },
             outpoint: OutPoint::null(),
             tx_fee: 125,
-            signer_bitmap: BitArray::ZERO,
+            signer_bitmap: 0,
             deployer: StacksAddress::burn_address(false),
             sweep_block_hash: BitcoinBlockHash::from([0; 32]),
-            sweep_block_height: 7,
+            sweep_block_height: 7u64.into(),
         };
 
         let _ = call.as_contract_call();
@@ -1535,7 +1648,7 @@ mod tests {
                 txid: StacksTxId::from([0; 32]),
                 block_hash: StacksBlockHash::from([0; 32]),
             },
-            signer_bitmap: BitArray::new([1; 16]),
+            signer_bitmap: 0,
             deployer: StacksAddress::burn_address(false),
         };
 
@@ -1549,7 +1662,7 @@ mod tests {
         // runtime.
         let _ = RotateKeysV1::list_data_type();
 
-        let mut rng = StdRng::seed_from_u64(112);
+        let mut rng = get_rng();
         let secret_keys = [
             SecretKey::new(&mut rng),
             SecretKey::new(&mut rng),
@@ -1567,7 +1680,7 @@ mod tests {
         let _ = call.as_contract_call();
     }
 
-    #[test_case::test_case(SmartContract::SbtcBootstrap; "sbtc-bootstrap")]
+    #[test_case::test_case(SmartContract::SbtcBootstrapSigners; "sbtc-bootstrap")]
     #[test_case::test_case(SmartContract::SbtcRegistry; "sbtc-registry")]
     #[test_case::test_case(SmartContract::SbtcDeposit; "sbtc-deposit")]
     #[test_case::test_case(SmartContract::SbtcWithdrawal; "sbtc-withdrawal")]

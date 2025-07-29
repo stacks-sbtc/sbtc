@@ -28,12 +28,12 @@ pub struct ExecuteReorgRequest {
 ///
 /// Return meanings:
 /// - Err(e):
-///     Something went wrong.
+///   Something went wrong.
 /// - Ok(None):
-///     The API status is already what we wanted it to be, so there's
-///     no action required.
+///   The API status is already what we wanted it to be, so there's
+///   no action required.
 /// - Ok(Some(ApiStateEntry)):
-///     We have successfully converted the api to the state returned.
+///   We have successfully converted the api to the state returned.
 async fn set_api_state_status(
     context: &EmilyContext,
     new_status: &ApiStatus,
@@ -56,28 +56,38 @@ async fn set_api_state_status(
             }
             // Handle trying to set the api status to reorganizing.
             (ApiStatus::Reorg(new_reorg_tip), ApiStatus::Reorg(current_reorg_tip)) => {
-                if new_reorg_tip == current_reorg_tip {
+                // Compare only `.key` (stacks height and hash) since old chainstate entries lack
+                // `bitcoin_block_height`. A Stacks block always has the same Bitcoin height, so
+                // ignoring it prevents false mismatches for old data.
+                if new_reorg_tip.key == current_reorg_tip.key {
                     return Ok(None);
                 } else {
-                    let err_msg: String = format!("Trying to reorg with new chaintip {new_reorg_tip:?} while the api is reorganizing around the chaintip {current_reorg_tip:?}");
-                    warn!(err_msg);
-                    return Err(Error::InconsistentState(Inconsistency::ItemUpdate(err_msg)));
+                    let message =
+                        "Trying to reorg with new chaintip while the API is already reorganizing";
+                    warn!(?new_reorg_tip, ?current_reorg_tip, message);
+                    return Err(Error::InconsistentState(Inconsistency::ItemUpdate(message)));
                 }
             }
         };
 
-        debug!("Changing Api state from [{original_api_state:?}] to [{api_state:?}]. Attempt {attempt_number} of maximum {MAX_SET_API_STATE_ATTEMPTS_DURING_REORG}.");
+        debug!(
+            ?api_state,
+            ?original_api_state,
+            attempt = %attempt_number,
+            max_attempts = %MAX_SET_API_STATE_ATTEMPTS_DURING_REORG,
+            "Changing the API state"
+        );
 
         // Attempt to set the API state.
         match accessors::set_api_state(context, &api_state).await {
             // We successfully set the API state.
             Ok(()) => {
-                info!("Successfully set api state: {:?}.", api_state);
+                info!(?api_state, "Successfully set api state.");
                 return Ok(Some(api_state));
             }
             // Retry if there was a version conflict.
-            Err(Error::VersionConflict) => {
-                debug!("Failed to update API state - retrying: {api_state:?}")
+            Err(Error::VersionConflict(error)) => {
+                warn!(%error, ?api_state, "Failed to update API state, retrying")
             }
             // If some other error occurred then return from here; this shouldn't
             // happen and something has actually gone wrong.
@@ -97,7 +107,12 @@ pub async fn execute_reorg_handler(
     context: &EmilyContext,
     request: ExecuteReorgRequest,
 ) -> Result<impl warp::reply::Reply, Error> {
-    info!("Executing a reorg with request {request:?}.");
+    info!(
+        stacks_canonical_chain_tip = ?request.canonical_tip,
+        conflicting_blocks_start = ?request.conflicting_chainstates.first(),
+        conflicting_blocks_end = ?request.conflicting_chainstates.last(),
+        "Executing a reorg request"
+    );
     let empty_reply = warp::reply::with_status(warp::reply(), StatusCode::NO_CONTENT);
 
     let new_status = ApiStatus::Reorg(request.canonical_tip.clone().into());
@@ -132,10 +147,13 @@ pub async fn execute_reorg_handler(
             entry.reorganize_around(&request.canonical_tip)?;
             match accessors::set_deposit_entry(context, &mut entry).await {
                 Ok(_) => break,
-                Err(Error::VersionConflict) => {
-                    debug!(
-                        "Encountered race condition in updating entry {:?}. Attempt {}/{}",
-                        entry, attempt, ENTRY_UPDATE_RETRIES
+                Err(Error::VersionConflict(error)) => {
+                    warn!(
+                        %error,
+                        ?entry,
+                        %attempt,
+                        max_attempts = %ENTRY_UPDATE_RETRIES,
+                        "Encountered race condition in updating entry",
                     );
                 }
                 e @ Err(_) => e?,
@@ -147,8 +165,8 @@ pub async fn execute_reorg_handler(
 
     // Show updated deposits when in debug mode.
     debug!(
-        "Reorganized deposits: {}",
-        serde_json::to_string_pretty(&debug_modified_deposit_entries)?
+        deposits = serde_json::to_string_pretty(&debug_modified_deposit_entries)?,
+        "Reorganized deposits"
     );
 
     // Get all withdrawals that would be impacted by this reorg.
@@ -171,10 +189,13 @@ pub async fn execute_reorg_handler(
             entry.reorganize_around(&request.canonical_tip)?;
             match accessors::set_withdrawal_entry(context, &mut entry).await {
                 Ok(_) => break,
-                Err(Error::VersionConflict) => {
-                    debug!(
-                        "Encountered race condition in updating entry {:?}. Attempt {}/{}",
-                        entry, attempt, ENTRY_UPDATE_RETRIES
+                Err(Error::VersionConflict(error)) => {
+                    warn!(
+                        %error,
+                        ?entry,
+                        %attempt,
+                        max_attempts = %ENTRY_UPDATE_RETRIES,
+                        "Encountered race condition in updating entry",
                     );
                 }
                 e @ Err(_) => e?,
@@ -186,8 +207,8 @@ pub async fn execute_reorg_handler(
 
     // Show updated withdrawals when in debug mode.
     debug!(
-        "Reorganized withdrawals: {}",
-        serde_json::to_string_pretty(&debug_modified_withdrawal_entries)?
+        withdrawals = serde_json::to_string_pretty(&debug_modified_withdrawal_entries)?,
+        "Reorganized withdrawals",
     );
 
     // Cleanup API state.

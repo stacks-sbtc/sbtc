@@ -4,7 +4,7 @@ use crate::common::error::ErrorResponse;
 
 use std::convert::Infallible;
 use tracing::error;
-use warp::{http::StatusCode, Rejection, Reply};
+use warp::{Rejection, Reply, http::StatusCode};
 
 /// Chainstate handlers.
 pub mod chainstate;
@@ -16,6 +16,8 @@ pub mod health;
 pub mod internal;
 /// Limit handlers.
 pub mod limits;
+/// New block handlers.
+pub mod new_block;
 /// Testing handlers.
 #[cfg(feature = "testing")]
 pub mod testing;
@@ -23,7 +25,6 @@ pub mod testing;
 pub mod withdrawal;
 
 /// Central error handler for Warp rejections, converting them to appropriate HTTP responses.
-/// TODO(131): Alter handler for Emily API.
 pub async fn handle_rejection(err: Rejection) -> Result<impl Reply, Infallible> {
     if err.is_not_found() {
         let json = warp::reply::json(&ErrorResponse {
@@ -34,7 +35,7 @@ pub async fn handle_rejection(err: Rejection) -> Result<impl Reply, Infallible> 
 
     if let Some(e) = err.find::<warp::filters::body::BodyDeserializeError>() {
         let json = warp::reply::json(&ErrorResponse {
-            message: format!("Invalid Body: {}", e),
+            message: format!("Invalid Body: {e}"),
         });
         return Ok(warp::reply::with_status(json, StatusCode::BAD_REQUEST));
     }

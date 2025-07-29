@@ -13,7 +13,7 @@ export interface EmilyStackProps extends cdk.StackProps {
   readonly env: cdk.Environment;
 
   /**
-   * The trusted reorg API key.
+   * The address of the deployer of the sBTC smart contracts.
    */
-  readonly trustedReorgApiKey: string;
+  readonly deployerAddress: string;
 }

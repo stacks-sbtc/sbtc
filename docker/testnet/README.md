@@ -26,7 +26,7 @@ to tweak the config file a little.
 
 | Network         | Archive                                                                                              | Example Config                           |
 | --------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| Bitcoin regtest | [archive](https://drive.google.com/drive/u/3/folders/1KvpmIxvX8Rh7H8Th91qbc_HsbhQLi13V)              | [example config](./bitcoin/bitcoin.conf) |
+| Bitcoin regtest | [archive](https://drive.google.com/drive/folders/1FtZP6RJIfooOsqF0qhhUGaPt1EsKSFxQ)              | [example config](./bitcoin/bitcoin.conf) |
 | Stacks testnet  | [archive](https://archive.hiro.so/testnet/stacks-blockchain/testnet-stacks-blockchain-latest.tar.gz) | [example config](./stacks/Config.toml)   |
 
 ## Configuration
@@ -66,7 +66,7 @@ work for the folks running the signer. If your signer is saying that it
 cannot find the signer database either:
 
 1. The database is not in the location `.postgres/data`
-2. It has incompatable permissions with the docker container runner.
+2. It has incompatible permissions with the docker container runner.
 
 ### Add an event-listener to your Stacks node
 

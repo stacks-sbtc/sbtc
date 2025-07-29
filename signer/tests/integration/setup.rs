@@ -1,8 +1,7 @@
 use std::collections::BTreeMap;
 use std::collections::HashSet;
+use std::ops::Deref;
 
-use bitcoin::consensus::Encodable as _;
-use bitcoin::hashes::Hash as _;
 use bitcoin::AddressType;
 use bitcoin::Amount;
 use bitcoin::OutPoint;
@@ -12,6 +11,7 @@ use blockstack_lib::types::chainstate::StacksAddress;
 use clarity::types::chainstate::StacksBlockId;
 use clarity::vm::types::PrincipalData;
 
+use emily_client::apis::configuration::Configuration as EmilyApiConfiguration;
 use fake::Fake;
 use fake::Faker;
 use rand::rngs::OsRng;
@@ -20,37 +20,49 @@ use sbtc::deposits::DepositInfo;
 use sbtc::testing::regtest;
 use sbtc::testing::regtest::Faucet;
 use sbtc::testing::regtest::Recipient;
+use signer::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
+use signer::bitcoin::BitcoinInteract;
 use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::bitcoin::rpc::BitcoinTxInfo;
-use signer::bitcoin::rpc::GetTxResponse;
 use signer::bitcoin::utxo;
+use signer::bitcoin::utxo::Fees;
 use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
 use signer::bitcoin::utxo::SignerUtxo;
 use signer::bitcoin::utxo::TxDeconstructor as _;
 use signer::bitcoin::validation::WithdrawalValidationResult;
-use signer::block_observer::BlockObserver;
+use signer::block_observer;
 use signer::block_observer::Deposit;
 use signer::codec::Encode as _;
+use signer::config::NetworkKind;
 use signer::config::Settings;
+use signer::context::Context;
 use signer::context::SbtcLimits;
+use signer::keys::PrivateKey;
 use signer::keys::PublicKey;
 use signer::keys::SignerScriptPubKey;
+use signer::stacks::api::MockStacksInteract;
+use signer::stacks::wallet::SignerWallet;
+use signer::storage::DbRead;
+use signer::storage::DbWrite as _;
 use signer::storage::model;
 use signer::storage::model::BitcoinBlock;
 use signer::storage::model::BitcoinBlockHash;
+use signer::storage::model::BitcoinBlockHeight;
 use signer::storage::model::BitcoinBlockRef;
 use signer::storage::model::BitcoinTxRef;
+use signer::storage::model::BitcoinTxSigHash;
 use signer::storage::model::BitcoinWithdrawalOutput;
 use signer::storage::model::DkgSharesStatus;
 use signer::storage::model::EncryptedDkgShares;
+use signer::storage::model::KeyRotationEvent;
 use signer::storage::model::QualifiedRequestId;
 use signer::storage::postgres::PgStore;
-use signer::storage::DbWrite as _;
 use signer::testing::context::TestContext;
 use signer::testing::context::*;
 use signer::testing::dummy::Unit;
-use signer::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
+use testing_emily_client::apis::configuration::ApiKey as TestingEmilyApiKey;
+use testing_emily_client::apis::configuration::Configuration as TestingEmilyApiConfiguration;
 
 use crate::utxo_construction::generate_withdrawal;
 use crate::utxo_construction::make_deposit_request;
@@ -64,7 +76,28 @@ impl AsBlockRef for bitcoincore_rpc_json::GetBlockHeaderResult {
     fn as_block_ref(&self) -> BitcoinBlockRef {
         BitcoinBlockRef {
             block_hash: self.hash.into(),
-            block_height: self.height as u64,
+            block_height: (self.height as u64).into(),
+        }
+    }
+}
+
+pub trait IntoEmilyTestingConfig {
+    fn as_testing(&self) -> TestingEmilyApiConfiguration;
+}
+
+impl IntoEmilyTestingConfig for EmilyApiConfiguration {
+    fn as_testing(&self) -> TestingEmilyApiConfiguration {
+        TestingEmilyApiConfiguration {
+            base_path: self.base_path.clone(),
+            user_agent: self.user_agent.clone(),
+            client: self.client.clone(),
+            basic_auth: self.basic_auth.clone(),
+            oauth_access_token: self.oauth_access_token.clone(),
+            bearer_access_token: self.bearer_access_token.clone(),
+            api_key: self.api_key.clone().map(|key| TestingEmilyApiKey {
+                prefix: key.prefix.clone(),
+                key: key.key.clone(),
+            }),
         }
     }
 }
@@ -95,7 +128,7 @@ pub struct TestSweepSetup {
     pub sweep_block_hash: bitcoin::BlockHash,
     /// The height of the bitcoin block that confirmed the sweep
     /// transaction.
-    pub sweep_block_height: u64,
+    pub sweep_block_height: BitcoinBlockHeight,
     /// The transaction that swept in the deposit transaction.
     pub sweep_tx_info: BitcoinTxInfo,
     /// The withdrawal request, and a bitmap for how the signers voted on
@@ -109,6 +142,8 @@ pub struct TestSweepSetup {
     /// threshold is the bitcoin signature threshold, which for v1 matches
     /// the signatures required on stacks.
     pub signatures_required: u16,
+    /// The hash of the first stacks block.
+    pub stacks_genesis_block: model::StacksBlockHash,
 }
 
 impl TestSweepSetup {
@@ -218,13 +253,14 @@ impl TestSweepSetup {
             deposit_request: requests.deposits.pop().unwrap(),
             deposit_tx_info,
             sweep_tx_info,
-            sweep_block_height,
+            sweep_block_height: sweep_block_height.into(),
             sweep_block_hash,
             signer_keys: signer::testing::wallet::create_signers_keys(rng, &signer, 7),
             aggregated_signer: signer,
             withdrawal_request: requests.withdrawals.pop().unwrap(),
             withdrawal_sender: PrincipalData::from(StacksAddress::burn_address(false)),
             signatures_required: 2,
+            stacks_genesis_block: Faker.fake_with_rng(rng),
         }
     }
 
@@ -242,8 +278,8 @@ impl TestSweepSetup {
     /// blockchain identified by the sweep chain tip.
     pub async fn store_stacks_genesis_block(&self, db: &PgStore) {
         let block = model::StacksBlock {
-            block_hash: Faker.fake_with_rng(&mut OsRng),
-            block_height: 0,
+            block_hash: self.stacks_genesis_block,
+            block_height: 0u64.into(),
             parent_hash: StacksBlockId::first_mined().into(),
             bitcoin_anchor: self.sweep_block_hash.into(),
         };
@@ -252,37 +288,21 @@ impl TestSweepSetup {
 
     /// Store the deposit transaction into the database
     pub async fn store_deposit_tx(&self, db: &PgStore) {
-        let deposit_tx = model::Transaction {
-            tx: bitcoin::consensus::serialize(&self.deposit_tx_info.tx),
-            txid: self.deposit_tx_info.txid.to_byte_array(),
-            tx_type: model::TransactionType::SbtcTransaction,
-            block_hash: self.deposit_block_hash.to_byte_array(),
-        };
-
         let bitcoin_tx_ref = BitcoinTxRef {
-            txid: deposit_tx.txid.into(),
+            txid: self.deposit_tx_info.compute_txid().into(),
             block_hash: self.deposit_block_hash.into(),
         };
 
-        db.write_transaction(&deposit_tx).await.unwrap();
         db.write_bitcoin_transaction(&bitcoin_tx_ref).await.unwrap();
     }
     /// Store the transaction that swept the deposit into the signers' UTXO
     /// into the database
     pub async fn store_sweep_tx(&self, db: &PgStore) {
-        let sweep_tx = model::Transaction {
-            tx: bitcoin::consensus::serialize(&self.sweep_tx_info.tx),
-            txid: self.sweep_tx_info.txid.to_byte_array(),
-            tx_type: model::TransactionType::SbtcTransaction,
-            block_hash: self.sweep_block_hash.to_byte_array(),
-        };
-
         let bitcoin_tx_ref = BitcoinTxRef {
-            txid: sweep_tx.txid.into(),
-            block_hash: sweep_tx.block_hash.into(),
+            txid: self.sweep_tx_info.compute_txid().into(),
+            block_hash: self.sweep_block_hash.into(),
         };
 
-        db.write_transaction(&sweep_tx).await.unwrap();
         db.write_bitcoin_transaction(&bitcoin_tx_ref).await.unwrap();
 
         let mut signer_script_pubkeys = HashSet::new();
@@ -298,7 +318,7 @@ impl TestSweepSetup {
             db.write_tx_prevout(&prevout).await.unwrap();
         }
 
-        for output in self.sweep_tx_info.to_outputs(&signer_script_pubkeys) {
+        for output in self.sweep_tx_info.to_tx_outputs(&signer_script_pubkeys) {
             db.write_tx_output(&output).await.unwrap();
         }
     }
@@ -308,6 +328,7 @@ impl TestSweepSetup {
         let deposit = Deposit {
             tx_info: self.deposit_tx_info.clone(),
             info: self.deposit_info.clone(),
+            block_hash: self.deposit_block_hash,
         };
         let deposit_request = model::DepositRequest::from(deposit);
         db.write_deposit_request(&deposit_request).await.unwrap();
@@ -340,35 +361,10 @@ impl TestSweepSetup {
         }
     }
 
-    /// Use the bitmap in the `self.withdrawal_request.signer_bitmap` field to
-    /// generate the corresponding deposit signer votes and store these
-    /// decisions in the database.
-    pub async fn store_withdrawal_decisions(&self, db: &PgStore) {
-        let withdrawal_signers: Vec<model::WithdrawalSigner> = self
-            .signer_keys
-            .iter()
-            .copied()
-            .zip(self.withdrawal_request.signer_bitmap)
-            .map(|(signer_pub_key, is_rejected)| model::WithdrawalSigner {
-                request_id: self.withdrawal_request.request_id,
-                block_hash: self.withdrawal_request.block_hash,
-                txid: self.withdrawal_request.txid,
-                signer_pub_key,
-                is_accepted: !is_rejected,
-            })
-            .collect();
-
-        for decision in withdrawal_signers {
-            db.write_withdrawal_signer_decision(&decision)
-                .await
-                .unwrap();
-        }
-    }
-
     pub async fn store_withdrawal_request(&self, db: &PgStore) {
         let block = model::StacksBlock {
             block_hash: self.withdrawal_request.block_hash,
-            block_height: self.sweep_block_height,
+            block_height: 1u64.into(), // Sweep setup creates two stacks blocks, and withdrawal request is in the second one.
             parent_hash: Faker.fake_with_rng(&mut OsRng),
             bitcoin_anchor: self.sweep_block_hash.into(),
         };
@@ -382,7 +378,7 @@ impl TestSweepSetup {
             amount: self.withdrawal_request.amount,
             max_fee: self.withdrawal_request.max_fee,
             sender_address: self.withdrawal_sender.clone().into(),
-            bitcoin_block_height: block.block_height, // This should be set to the bitcoin block height.
+            bitcoin_block_height: self.sweep_block_height,
         };
         db.write_withdrawal_request(&withdrawal_request)
             .await
@@ -403,39 +399,76 @@ impl TestSweepSetup {
             signature_share_threshold: self.signatures_required,
             dkg_shares_status: model::DkgSharesStatus::Verified,
             started_at_bitcoin_block_hash: self.deposit_block_hash.into(),
-            started_at_bitcoin_block_height: 0,
+            started_at_bitcoin_block_height: 0u64.into(),
         };
         db.write_encrypted_dkg_shares(&shares).await.unwrap();
+    }
+
+    /// Store a rotate keys transaction in the database. The details will
+    /// match the row inserted by the store_dkg_shares function.
+    pub async fn store_rotate_keys_event(&self, db: &PgStore) {
+        let signer_set = self.signer_keys.clone();
+        let wallet = SignerWallet::new(
+            &signer_set,
+            self.signatures_required,
+            NetworkKind::Regtest,
+            0,
+        )
+        .unwrap();
+
+        let address = *wallet.address();
+
+        let event = KeyRotationEvent {
+            txid: fake::Faker.fake(),
+            block_hash: self.stacks_genesis_block,
+            aggregate_key: self.aggregated_signer.keypair.public_key().into(),
+            signer_set,
+            signatures_required: self.signatures_required,
+            address: PrincipalData::from(address).into(),
+        };
+        db.write_rotate_keys_transaction(&event).await.unwrap();
     }
 
     // This is all normal happy path things that need to happen in order to
     // pass validation of a Stacks transaction.
     pub async fn store_happy_path_data(&mut self, db: &PgStore) {
-        self.store_deposit_tx(&db).await;
-        self.store_sweep_tx(&db).await;
-        self.store_dkg_shares(&db).await;
-        self.store_deposit_request(&db).await;
-        self.store_deposit_decisions(&db).await;
-        self.store_withdrawal_request(&db).await;
+        self.store_deposit_tx(db).await;
+        self.store_sweep_tx(db).await;
+        self.store_dkg_shares(db).await;
+        self.store_deposit_request(db).await;
+        self.store_deposit_decisions(db).await;
+        self.store_withdrawal_request(db).await;
     }
 }
 
 /// Fetch all block headers from bitcoin-core and store it in the database.
 pub async fn backfill_bitcoin_blocks(db: &PgStore, rpc: &Client, chain_tip: &bitcoin::BlockHash) {
-    let mut block_header = rpc.get_block_header_info(&chain_tip).unwrap();
+    let mut block_header = rpc.get_block_header_info(chain_tip).unwrap();
 
     // There are no non-coinbase transactions below this height.
     while block_header.height as u64 >= regtest::MIN_BLOCKCHAIN_HEIGHT {
         let parent_header_hash = block_header.previous_block_hash.unwrap();
         let bitcoin_block = BitcoinBlock {
             block_hash: block_header.hash.into(),
-            block_height: block_header.height as u64,
+            block_height: (block_header.height as u64).into(),
             parent_hash: parent_header_hash.into(),
         };
 
         db.write_bitcoin_block(&bitcoin_block).await.unwrap();
         block_header = rpc.get_block_header_info(&parent_header_hash).unwrap();
     }
+
+    let block_hash = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
+    assert_eq!(block_hash.deref(), chain_tip);
+}
+
+/// Fetch all block headers from bitcoin-core and store it in the database.
+pub async fn fetch_canonical_bitcoin_blockchain(db: &PgStore, rpc: &Client) -> BitcoinBlockHash {
+    let chain_tip_info = rpc.get_blockchain_info().unwrap();
+
+    backfill_bitcoin_blocks(db, rpc, &chain_tip_info.best_block_hash).await;
+
+    chain_tip_info.best_block_hash.into()
 }
 
 pub async fn fill_signers_utxo<R: rand::RngCore + ?Sized>(
@@ -455,10 +488,6 @@ pub async fn fill_signers_utxo<R: rand::RngCore + ?Sized>(
         },
     );
     let signer_utxo_txid = signer_utxo_tx.compute_txid();
-    let mut signer_utxo_encoded = Vec::new();
-    signer_utxo_tx
-        .consensus_encode(&mut signer_utxo_encoded)
-        .unwrap();
 
     let utxo_input = model::TxPrevout {
         txid: signer_utxo_txid.into(),
@@ -475,16 +504,8 @@ pub async fn fill_signers_utxo<R: rand::RngCore + ?Sized>(
 
     // Write the Bitcoin block and transaction to the database.
     db.write_bitcoin_block(&bitcoin_block).await.unwrap();
-    db.write_transaction(&model::Transaction {
-        txid: *signer_utxo_txid.as_byte_array(),
-        tx: signer_utxo_encoded,
-        tx_type: model::TransactionType::SbtcTransaction,
-        block_hash: bitcoin_block.block_hash.into_bytes(),
-    })
-    .await
-    .unwrap();
     db.write_bitcoin_transaction(&model::BitcoinTxRef {
-        block_hash: bitcoin_block.block_hash.into(),
+        block_hash: bitcoin_block.block_hash,
         txid: signer_utxo_txid.into(),
     })
     .await
@@ -502,10 +523,6 @@ pub async fn fill_signers_utxo<R: rand::RngCore + ?Sized>(
         },
     );
     let signer_utxo_txid = signer_utxo_tx.compute_txid();
-    let mut signer_utxo_encoded = Vec::new();
-    signer_utxo_tx
-        .consensus_encode(&mut signer_utxo_encoded)
-        .unwrap();
 
     let utxo_input = model::TxPrevout {
         txid: signer_utxo_txid.into(),
@@ -522,22 +539,50 @@ pub async fn fill_signers_utxo<R: rand::RngCore + ?Sized>(
 
     // Write the Bitcoin block and transaction to the database.
     db.write_bitcoin_block(&bitcoin_block).await.unwrap();
-    db.write_transaction(&model::Transaction {
-        txid: *signer_utxo_txid.as_byte_array(),
-        tx: signer_utxo_encoded,
-        tx_type: model::TransactionType::SbtcTransaction,
-        block_hash: bitcoin_block.block_hash.into_bytes(),
-    })
-    .await
-    .unwrap();
     db.write_bitcoin_transaction(&model::BitcoinTxRef {
-        block_hash: bitcoin_block.block_hash.into(),
+        block_hash: bitcoin_block.block_hash,
         txid: signer_utxo_txid.into(),
     })
     .await
     .unwrap();
     db.write_tx_prevout(&utxo_input).await.unwrap();
     db.write_tx_output(&utxo_output).await.unwrap();
+}
+
+type MockedStacksContext<S, B, E> = TestContext<S, B, WrappedMock<MockStacksInteract>, E>;
+
+pub async fn set_deposit_incomplete<S, B, E>(ctx: &mut MockedStacksContext<S, B, E>) {
+    set_deposit_status(ctx, false).await;
+}
+
+pub async fn set_deposit_completed<S, B, E>(ctx: &mut MockedStacksContext<S, B, E>) {
+    set_deposit_status(ctx, true).await;
+}
+
+pub async fn set_deposit_status<S, B, E>(ctx: &mut MockedStacksContext<S, B, E>, status: bool) {
+    ctx.with_stacks_client(|client| {
+        client
+            .expect_is_deposit_completed()
+            .returning(move |_, _| Box::pin(std::future::ready(Ok(status))));
+    })
+    .await;
+}
+
+pub async fn set_withdrawal_incomplete<S, B, E>(ctx: &mut MockedStacksContext<S, B, E>) {
+    set_withdrawal_status(ctx, false).await;
+}
+
+pub async fn set_withdrawal_completed<S, B, E>(ctx: &mut MockedStacksContext<S, B, E>) {
+    set_withdrawal_status(ctx, true).await;
+}
+
+pub async fn set_withdrawal_status<S, B, E>(ctx: &mut MockedStacksContext<S, B, E>, status: bool) {
+    ctx.with_stacks_client(|client| {
+        client
+            .expect_is_withdrawal_completed()
+            .returning(move |_, _| Box::pin(std::future::ready(Ok(status))));
+    })
+    .await;
 }
 
 /// The information about a sweep transaction that has been confirmed.
@@ -568,6 +613,16 @@ impl TestSignerSet {
 
     pub fn aggregate_key(&self) -> PublicKey {
         self.signer.keypair.public_key().into()
+    }
+
+    pub fn private_key(&self) -> PrivateKey {
+        self.signer.keypair.secret_key().into()
+    }
+
+    pub fn address(&self, signatures_required: u16) -> StacksAddress {
+        let wallet =
+            SignerWallet::new(&self.keys, signatures_required, NetworkKind::Regtest, 0).unwrap();
+        *wallet.address()
     }
 }
 
@@ -600,11 +655,20 @@ pub struct SweepTxInfo {
     pub block_hash: BitcoinBlockHash,
     /// The height of the bitcoin block that confirmed the sweep
     /// transaction.
-    pub block_height: u64,
+    pub block_height: BitcoinBlockHeight,
     /// The parent block hash of the `block_hash`.
     pub parent_hash: BitcoinBlockHash,
     /// The transaction that swept in the deposit transaction.
     pub tx_info: BitcoinTxInfo,
+}
+
+#[derive(Debug, Clone)]
+pub struct BroadcastSweepTxInfo {
+    /// The block hash of the bitcoin chain tip when the sweep transaction
+    /// was broadcast
+    pub block_hash: bitcoin::BlockHash,
+    /// The transaction that swept in the deposit transaction.
+    pub txid: bitcoin::Txid,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -639,8 +703,12 @@ pub struct TestSweepSetup2 {
     pub deposits: Vec<(DepositInfo, utxo::DepositRequest, BitcoinTxInfo)>,
     /// And initial donation to make to the signers.
     pub donation: OutPoint,
+    /// And initial donation to make to the signers.
+    pub donation_block_hash: bitcoin::BlockHash,
     /// The transaction that swept in the deposit transaction.
     pub sweep_tx_info: Option<SweepTxInfo>,
+    /// Information about the sweep transaction when it was broadcast.
+    pub broadcast_info: Option<BroadcastSweepTxInfo>,
     /// The stacks blocks confirming the withdrawal requests, along with a
     /// genesis block.
     pub stacks_blocks: Vec<model::StacksBlock>,
@@ -696,7 +764,7 @@ impl TestSweepSetup2 {
         // Start off with some initial UTXOs to work with.
 
         let donation = faucet.send_to(Amount::ONE_BTC.to_sat(), &signer.address);
-        faucet.generate_blocks(1);
+        let donation_block_hash = faucet.generate_blocks(1)[0];
 
         let mut deposits = Vec::new();
 
@@ -729,7 +797,7 @@ impl TestSweepSetup2 {
 
         let genesis_block = model::StacksBlock {
             block_hash: Faker.fake_with_rng(&mut OsRng),
-            block_height: 0,
+            block_height: 0u64.into(),
             parent_hash: StacksBlockId::first_mined().into(),
             bitcoin_anchor: deposit_block_hash.into(),
         };
@@ -769,7 +837,9 @@ impl TestSweepSetup2 {
             deposit_block_hash,
             deposits,
             sweep_tx_info: None,
+            broadcast_info: None,
             donation,
+            donation_block_hash,
             signers,
             stacks_blocks,
             withdrawals,
@@ -816,29 +886,53 @@ impl TestSweepSetup2 {
             .with_mocked_emily_client()
             .build();
 
+        let bitcoin_client = context.get_bitcoin_client();
+
         // We fetch the entire block, to feed to the block observer. It's
         // easier this way.
-        let GetTxResponse { tx, block_hash, .. } = context
-            .bitcoin_client
-            .get_tx(&self.donation.txid)
+        let tx_info = bitcoin_client
+            .get_tx_info(&self.donation.txid, &self.donation_block_hash)
+            .await
             .unwrap()
             .unwrap();
-        let block_observer = BlockObserver { context, bitcoin_blocks: () };
 
-        block_observer
-            .extract_sbtc_transactions(block_hash.unwrap(), &[tx])
-            .await
-            .unwrap();
+        let bootstrap_script_pubkey = context.config().signer.bootstrap_aggregate_key;
+        block_observer::extract_sbtc_transactions(
+            db,
+            bootstrap_script_pubkey,
+            self.donation_block_hash,
+            &[tx_info],
+        )
+        .await
+        .unwrap();
     }
 
     /// This function generates a sweep transaction that sweeps in the
     /// deposited funds and sweeps out the withdrawal funds in a proper
-    /// sweep transaction, that is also confirmed on bitcoin.
-    pub fn submit_sweep_tx(&mut self, rpc: &Client, faucet: &Faucet) {
+    /// sweep transaction, it broadcasts this transaction to the bitcoin
+    /// network.
+    pub fn broadcast_sweep_tx(&mut self, rpc: &Client) {
         // Okay now we try to peg-in the deposit by making a transaction.
         // Let's start by getting the signer's sole UTXO.
         let aggregated_signer = &self.signers.signer;
         let signer_utxo = aggregated_signer.get_utxos(rpc, None).pop().unwrap();
+
+        // Well we want a BitcoinCoreClient, so we create one using the
+        // settings. Not, the best thing to do, sorry. TODO: pass in a
+        // bitcoin core client object.
+        let settings = Settings::new_from_default_config().unwrap();
+        let btc = BitcoinCoreClient::try_from(&settings.bitcoin.rpc_endpoints[0]).unwrap();
+        let outpoint = OutPoint::new(signer_utxo.txid, signer_utxo.vout);
+        let txids = btc.get_tx_spending_prevout(&outpoint).unwrap();
+
+        let last_fees = txids
+            .iter()
+            .filter_map(|txid| btc.get_mempool_entry(txid).unwrap())
+            .map(|entry| Fees {
+                total: entry.fees.base.to_sat(),
+                rate: entry.fees.base.to_sat() as f64 / entry.vsize as f64,
+            })
+            .max_by_key(|fees| fees.total);
 
         let withdrawals = self
             .withdrawals
@@ -861,7 +955,7 @@ impl TestSweepSetup2 {
                 },
                 fee_rate: 10.0,
                 public_key: aggregated_signer.keypair.x_only_public_key().0,
-                last_fees: None,
+                last_fees,
                 magic_bytes: [b'T', b'3'],
             },
             accept_threshold: 4,
@@ -884,7 +978,24 @@ impl TestSweepSetup2 {
             unsigned.tx.compute_txid()
         };
 
-        // Let's sweep in the transaction
+        let block_header = rpc.get_blockchain_info().unwrap();
+
+        self.broadcast_info = Some(BroadcastSweepTxInfo {
+            block_hash: block_header.best_block_hash,
+            txid,
+        });
+    }
+
+    /// This function generates a sweep transaction that sweeps in the
+    /// deposited funds and sweeps out the withdrawal funds in a proper
+    /// sweep transaction, that is also confirmed on bitcoin.
+    pub fn submit_sweep_tx(&mut self, rpc: &Client, faucet: &Faucet) {
+        if self.broadcast_info.is_none() {
+            self.broadcast_sweep_tx(rpc);
+        }
+        let txid = self.broadcast_info.as_ref().unwrap().txid;
+
+        // Let's confirm the sweep transaction
         let block_hash = faucet.generate_blocks(1).pop().unwrap();
         let block_header = rpc.get_block_header_info(&block_hash).unwrap();
 
@@ -894,7 +1005,7 @@ impl TestSweepSetup2 {
 
         self.sweep_tx_info = Some(SweepTxInfo {
             block_hash: block_hash.into(),
-            block_height: block_header.height as u64,
+            block_height: (block_header.height as u64).into(),
             parent_hash: block_header.previous_block_hash.unwrap().into(),
             tx_info,
         });
@@ -903,20 +1014,51 @@ impl TestSweepSetup2 {
     /// Store the deposit transaction into the database
     pub async fn store_deposit_txs(&self, db: &PgStore) {
         for (_, _, tx_info) in self.deposits.iter() {
-            let deposit_tx = model::Transaction {
-                tx: bitcoin::consensus::serialize(&tx_info.tx),
-                txid: tx_info.txid.to_byte_array(),
-                tx_type: model::TransactionType::SbtcTransaction,
-                block_hash: self.deposit_block_hash.to_byte_array(),
-            };
-
             let bitcoin_tx_ref = BitcoinTxRef {
-                txid: deposit_tx.txid.into(),
+                txid: tx_info.compute_txid().into(),
                 block_hash: self.deposit_block_hash.into(),
             };
 
-            db.write_transaction(&deposit_tx).await.unwrap();
             db.write_bitcoin_transaction(&bitcoin_tx_ref).await.unwrap();
+        }
+    }
+
+    /// Store the rows in the `bitcoin_tx_sighashes` for the sweep.
+    ///
+    /// This simulates the sweep transaction successfully going through
+    /// validation, where we write to the `bitcoin_tx_sighashes` table at
+    /// the end.
+    pub async fn store_bitcoin_tx_sighashes(&self, db: &PgStore) {
+        let sweep = self.broadcast_info.as_ref().expect("no sweep tx info set");
+
+        let sighash = BitcoinTxSigHash {
+            txid: sweep.txid.into(),
+            chain_tip: sweep.block_hash.into(),
+            prevout_txid: self.donation.txid.into(),
+            prevout_output_index: self.donation.vout,
+            aggregate_key: self.signers.aggregate_key().into(),
+            will_sign: true,
+            is_valid_tx: true,
+            validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
+            prevout_type: model::TxPrevoutType::SignersInput,
+            sighash: Faker.fake_with_rng(&mut OsRng),
+        };
+        db.write_bitcoin_txs_sighashes(&[sighash]).await.unwrap();
+
+        for (_, request, _) in self.deposits.iter() {
+            let sighash = BitcoinTxSigHash {
+                txid: sweep.txid.into(),
+                chain_tip: sweep.block_hash.into(),
+                prevout_txid: request.outpoint.txid.into(),
+                prevout_output_index: request.outpoint.vout,
+                aggregate_key: request.signers_public_key.into(),
+                will_sign: true,
+                is_valid_tx: true,
+                validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
+                prevout_type: model::TxPrevoutType::SignersInput,
+                sighash: Faker.fake_with_rng(&mut OsRng),
+            };
+            db.write_bitcoin_txs_sighashes(&[sighash]).await.unwrap();
         }
     }
 
@@ -927,18 +1069,18 @@ impl TestSweepSetup2 {
     /// validation, where we write to the `bitcoin_withdrawals_outputs`
     /// table at the end.
     pub async fn store_bitcoin_withdrawals_outputs(&self, db: &PgStore) {
-        let sweep = self.sweep_tx_info.as_ref().expect("no sweep tx info set");
+        let sweep = self.broadcast_info.as_ref().expect("no sweep tx info set");
 
         for (index, withdrawal) in self.withdrawals.iter().enumerate() {
             let swept_output = BitcoinWithdrawalOutput {
                 request_id: withdrawal.request.request_id,
                 stacks_txid: withdrawal.request.txid,
                 stacks_block_hash: withdrawal.request.block_hash,
-                bitcoin_chain_tip: sweep.block_hash,
+                bitcoin_chain_tip: sweep.block_hash.into(),
                 is_valid_tx: true,
                 validation_result: WithdrawalValidationResult::Ok,
                 output_index: index as u32 + 2,
-                bitcoin_txid: sweep.tx_info.txid.into(),
+                bitcoin_txid: sweep.txid.into(),
             };
             db.write_bitcoin_withdrawals_outputs(&[swept_output])
                 .await
@@ -951,16 +1093,9 @@ impl TestSweepSetup2 {
     pub async fn store_sweep_tx(&self, db: &PgStore) {
         let sweep = self.sweep_tx_info.as_ref().expect("no sweep tx info set");
 
-        let sweep_tx = model::Transaction {
-            tx: bitcoin::consensus::serialize(&sweep.tx_info.tx),
-            txid: sweep.tx_info.txid.to_byte_array(),
-            tx_type: model::TransactionType::SbtcTransaction,
-            block_hash: sweep.block_hash.to_byte_array(),
-        };
-
         let bitcoin_tx_ref = BitcoinTxRef {
-            txid: sweep_tx.txid.into(),
-            block_hash: sweep_tx.block_hash.into(),
+            txid: sweep.tx_info.compute_txid().into(),
+            block_hash: sweep.block_hash,
         };
 
         let block = BitcoinBlock {
@@ -969,7 +1104,6 @@ impl TestSweepSetup2 {
             parent_hash: sweep.parent_hash,
         };
         db.write_bitcoin_block(&block).await.unwrap();
-        db.write_transaction(&sweep_tx).await.unwrap();
         db.write_bitcoin_transaction(&bitcoin_tx_ref).await.unwrap();
 
         let mut signer_script_pubkeys = HashSet::new();
@@ -980,7 +1114,7 @@ impl TestSweepSetup2 {
             db.write_tx_prevout(&prevout).await.unwrap();
         }
 
-        for output in sweep.tx_info.to_outputs(&signer_script_pubkeys) {
+        for output in sweep.tx_info.to_tx_outputs(&signer_script_pubkeys) {
             db.write_tx_output(&output).await.unwrap();
         }
     }
@@ -991,6 +1125,7 @@ impl TestSweepSetup2 {
             let deposit = Deposit {
                 tx_info: tx_info.clone(),
                 info: info.clone(),
+                block_hash: self.deposit_block_hash,
             };
             let deposit_request = model::DepositRequest::from(deposit);
             db.write_deposit_request(&deposit_request).await.unwrap();
@@ -1055,15 +1190,7 @@ impl TestSweepSetup2 {
         }
     }
 
-    pub fn reject_withdrawal_request(&mut self) {
-        for withdrawal in self.withdrawals.iter_mut() {
-            for i in 0..self.signers.keys.len() {
-                withdrawal.request.signer_bitmap.replace(i, true);
-            }
-        }
-    }
-
-    pub async fn store_withdrawal_request(&self, db: &PgStore) {
+    pub async fn store_withdrawal_requests(&self, db: &PgStore) {
         for stacks_block in self.stacks_blocks.iter() {
             db.write_stacks_block(stacks_block).await.unwrap();
         }
@@ -1105,7 +1232,7 @@ impl TestSweepSetup2 {
             parties: vec![Unit.fake_with_rng(&mut OsRng)],
         };
         let encoded = private_shares.encode_to_vec();
-        let signer_private_key = self.signers.signer.keypair.secret_bytes();
+        let signer_private_key = self.signers.private_key().to_bytes();
 
         let encrypted_private_shares =
             wsts::util::encrypt(&signer_private_key, &encoded, &mut OsRng)
@@ -1122,8 +1249,24 @@ impl TestSweepSetup2 {
             signature_share_threshold: self.signatures_required,
             dkg_shares_status: DkgSharesStatus::Verified,
             started_at_bitcoin_block_hash: self.deposit_block_hash.into(),
-            started_at_bitcoin_block_height: 0,
+            started_at_bitcoin_block_height: 0u64.into(),
         };
         db.write_encrypted_dkg_shares(&shares).await.unwrap();
+    }
+
+    /// Store a rotate keys transaction in the database. The details will
+    /// match the row inserted by the store_dkg_shares function.
+    pub async fn store_rotate_keys_event(&self, db: &PgStore) {
+        let address = self.signers.address(self.signatures_required);
+
+        let event = KeyRotationEvent {
+            txid: fake::Faker.fake(),
+            block_hash: self.stacks_blocks.first().unwrap().block_hash,
+            aggregate_key: self.signers.signer.keypair.public_key().into(),
+            signer_set: self.signers.keys.clone(),
+            signatures_required: self.signatures_required,
+            address: PrincipalData::from(address).into(),
+        };
+        db.write_rotate_keys_transaction(&event).await.unwrap();
     }
 }

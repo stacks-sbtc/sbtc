@@ -59,8 +59,8 @@
 //! // Verify the signed message.
 //! assert!(signed_msg.verify());
 
-use prost::bytes::Buf as _;
 use prost::Message as _;
+use prost::bytes::Buf as _;
 use sha2::Digest as _;
 
 use crate::codec::ProtoSerializable;
@@ -264,7 +264,6 @@ mod tests {
 
     use fake::Fake as _;
     use rand::rngs::OsRng;
-    use rand::SeedableRng as _;
 
     use crate::codec::Encode as _;
     use crate::ecdsa::SignEcdsa;
@@ -272,6 +271,7 @@ mod tests {
     use crate::message;
     use crate::proto;
     use crate::storage::model::{BitcoinBlockHash, StacksBlockHash, StacksTxId};
+    use crate::testing::get_rng;
 
     use super::*;
     use fake::Faker;
@@ -612,7 +612,7 @@ mod tests {
 
     #[test]
     fn enforce_tag_ordering_signed_message() {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(1234);
+        let mut rng = get_rng();
 
         let keypair = secp256k1::Keypair::new_global(&mut rng);
         let private_key: PrivateKey = keypair.secret_key().into();

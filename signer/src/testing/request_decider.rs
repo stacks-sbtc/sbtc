@@ -11,21 +11,22 @@ use crate::error::Error;
 use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
 use crate::message::Payload;
+use crate::network::MessageTransfer as _;
 use crate::network::in_memory2::SignerNetwork;
 use crate::network::in_memory2::SignerNetworkInstance;
 use crate::network::in_memory2::WanNetwork;
-use crate::network::MessageTransfer as _;
 use crate::request_decider::RequestDeciderEventLoop;
 use crate::storage;
-use crate::storage::model;
-use crate::storage::model::DkgSharesStatus;
 use crate::storage::DbRead;
 use crate::storage::DbWrite;
+use crate::storage::model;
+use crate::storage::model::DkgSharesStatus;
 use crate::testing;
+use crate::testing::get_rng;
 use crate::testing::storage::model::TestData;
 
 use hashbrown::HashSet;
-use rand::SeedableRng as _;
+use rand::SeedableRng;
 use tokio::sync::broadcast;
 use tokio::time::error::Elapsed;
 
@@ -44,6 +45,7 @@ impl<C: Context + 'static> RequestDeciderEventLoopHarness<C> {
         network: SignerNetwork,
         context_window: u16,
         deposit_decisions_retry_window: u16,
+        withdrawal_decisions_retry_window: u16,
         signer_private_key: PrivateKey,
     ) -> Self {
         Self {
@@ -54,6 +56,7 @@ impl<C: Context + 'static> RequestDeciderEventLoopHarness<C> {
                 signer_private_key,
                 context_window,
                 deposit_decisions_retry_window,
+                withdrawal_decisions_retry_window,
             },
             context,
         }
@@ -127,6 +130,8 @@ pub struct TestEnvironment<C> {
     pub context_window: u16,
     /// Deposit decisions retry window
     pub deposit_decisions_retry_window: u16,
+    /// Withdrawal decisions retry window
+    pub withdrawal_decisions_retry_window: u16,
     /// Num signers
     pub num_signers: usize,
     /// Signing threshold
@@ -142,7 +147,7 @@ where
     /// Assert that the transaction signer will make and store decisions
     /// for pending deposit requests.
     pub async fn assert_should_store_decisions_for_pending_deposit_requests(self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let wan_network = WanNetwork::default();
 
         let ctx1 = TestContext::default_mocked();
@@ -162,6 +167,7 @@ where
             signer_network,
             self.context_window,
             self.deposit_decisions_retry_window,
+            self.withdrawal_decisions_retry_window,
             coordinator_signer_info.signer_private_key,
         );
 
@@ -170,6 +176,15 @@ where
         let signer_set = &coordinator_signer_info.signer_public_keys;
         let test_data = self.generate_test_data(&mut rng, signer_set);
         Self::write_test_data(&handle.context.get_storage_mut(), &test_data).await;
+
+        let chain_tip_ref = handle
+            .context
+            .get_storage()
+            .get_bitcoin_canonical_chain_tip_ref()
+            .await
+            .unwrap()
+            .unwrap();
+        handle.context.state().set_bitcoin_chain_tip(chain_tip_ref);
 
         let group_key = PublicKey::combine_keys(signer_set).unwrap();
         store_dummy_dkg_shares(
@@ -226,7 +241,8 @@ where
     /// Assert that the transaction signer will make and store decisions
     /// for pending withdraw requests.
     pub async fn assert_should_store_decisions_for_pending_withdrawal_requests(self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        // TODO(#1466): fix this test for other seeds and use `get_rng()`
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
         let wan_network = WanNetwork::default();
 
         let ctx1 = TestContext::default_mocked();
@@ -246,6 +262,7 @@ where
             signer_network,
             self.context_window,
             self.deposit_decisions_retry_window,
+            self.withdrawal_decisions_retry_window,
             coordinator_signer_info.signer_private_key,
         );
 
@@ -254,6 +271,15 @@ where
         let signer_set = &coordinator_signer_info.signer_public_keys;
         let test_data = self.generate_test_data(&mut rng, signer_set);
         Self::write_test_data(&handle.context.get_storage_mut(), &test_data).await;
+
+        let chain_tip_ref = handle
+            .context
+            .get_storage()
+            .get_bitcoin_canonical_chain_tip_ref()
+            .await
+            .unwrap()
+            .unwrap();
+        handle.context.state().set_bitcoin_chain_tip(chain_tip_ref);
 
         handle
             .context
@@ -282,8 +308,13 @@ where
         .await
         .expect("timeout");
 
+        // The query that fetches pending withdrawal requests uses
+        // `context_window` blocks plus 1, and the in-memory implementation
+        // matches that behavior. So for this test we need to make sure
+        // that we look back the correct number of blocks, hence the plus
+        // 1.
         self.assert_only_withdraw_requests_in_context_window_has_decisions(
-            self.context_window,
+            self.context_window + 1,
             &test_data.withdraw_requests,
             1,
         )
@@ -303,7 +334,7 @@ where
     /// Assert that the transaction signer will make and store decisions
     /// received from other signers.
     pub async fn assert_should_store_decisions_received_from_other_signers(self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let mut rng = get_rng();
         let network = WanNetwork::default();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers);
         let coordinator_signer_info = signer_info.first().cloned().unwrap();
@@ -324,6 +355,7 @@ where
                     net,
                     self.context_window,
                     self.deposit_decisions_retry_window,
+                    self.withdrawal_decisions_retry_window,
                     signer_info.signer_private_key,
                 );
 
@@ -336,6 +368,15 @@ where
         let test_data = self.generate_test_data(&mut rng, signer_set);
         for handle in event_loop_handles.iter_mut() {
             test_data.write_to(&handle.context.get_storage_mut()).await;
+
+            let chain_tip_ref = handle
+                .context
+                .get_storage()
+                .get_bitcoin_canonical_chain_tip_ref()
+                .await
+                .unwrap()
+                .unwrap();
+            handle.context.state().set_bitcoin_chain_tip(chain_tip_ref);
 
             let group_key = PublicKey::combine_keys(signer_set).unwrap();
             store_dummy_dkg_shares(

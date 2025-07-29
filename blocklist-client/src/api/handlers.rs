@@ -6,7 +6,7 @@ use crate::config::{AssessmentMethod, Settings};
 use reqwest::Client;
 use std::convert::Infallible;
 use tracing::error;
-use warp::{http::StatusCode, Rejection, Reply};
+use warp::{Rejection, Reply, http::StatusCode};
 
 /// Handles requests to check the blocklist status of a given address.
 /// Converts successful blocklist status results to JSON and returns them,
@@ -63,7 +63,7 @@ pub async fn handle_rejection(err: Rejection) -> Result<impl Reply, Infallible> 
 
     if let Some(e) = err.find::<warp::filters::body::BodyDeserializeError>() {
         let json = warp::reply::json(&ErrorResponse {
-            message: format!("Invalid Body: {}", e),
+            message: format!("Invalid Body: {e}"),
         });
         return Ok(warp::reply::with_status(json, StatusCode::BAD_REQUEST));
     }
