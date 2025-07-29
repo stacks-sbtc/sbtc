@@ -1173,14 +1173,13 @@ async fn run_dkg_if_signer_set_changes(scenario: RunDkgSignerSetScenario, expect
 
     if scenario.latest_shares_matches {
         // Latest shares must match the config
-        let mut signer_set: Vec<PublicKey> = ctx
+        let signer_set: Vec<PublicKey> = ctx
             .config()
             .signer
             .bootstrap_signing_set
             .iter()
             .copied()
             .collect();
-        signer_set.sort();
 
         let dkg_shares = model::EncryptedDkgShares {
             dkg_shares_status: model::DkgSharesStatus::Verified,
