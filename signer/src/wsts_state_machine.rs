@@ -592,6 +592,7 @@ impl SignerStateMachine {
         )
         .map_err(Error::Wsts)?;
 
+        // sBTC has its own network packet layer with signatures and verification
         inner.verify_packet_sigs = false;
 
         Ok(Self { inner, started_at, private_key })
