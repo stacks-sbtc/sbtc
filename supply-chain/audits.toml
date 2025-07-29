@@ -2,7 +2,7 @@
 # cargo-vet audits file
 
 [[audits.base16ct]]
-who = "Joey Yandle <xoloki@gmail.com>"
+who = "xoloki <xoloki@gmail.com>"
 criteria = "safe-to-deploy"
 version = "0.2.0"
 
@@ -18,22 +18,22 @@ This library is provided by the rust-bitcoin GH organization which also maintain
 """
 
 [[audits.crypto-bigint]]
-who = "Joey Yandle <xoloki@gmail.com>"
+who = "xoloki <xoloki@gmail.com>"
 criteria = "safe-to-deploy"
 version = "0.5.5"
 
 [[audits.elliptic-curve]]
-who = "Joey Yandle <xoloki@gmail.com>"
+who = "xoloki <xoloki@gmail.com>"
 criteria = "safe-to-deploy"
 version = "0.13.8"
 
 [[audits.ff]]
-who = "Joey Yandle <xoloki@gmail.com>"
+who = "xoloki <xoloki@gmail.com>"
 criteria = "safe-to-deploy"
 version = "0.13.1"
 
 [[audits.group]]
-who = "Joey Yandle <xoloki@gmail.com>"
+who = "xoloki <xoloki@gmail.com>"
 criteria = "safe-to-deploy"
 version = "0.13.0"
 
