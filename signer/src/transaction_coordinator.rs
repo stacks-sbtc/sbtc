@@ -296,6 +296,19 @@ where
             return Ok(());
         }
 
+        // If we are not the coordinator, then we have no business
+        // coordinating DKG or constructing bitcoin and stacks
+        // transactions, might as well return early.
+        if !self.is_coordinator(bitcoin_chain_tip.as_ref()) {
+            // Before returning, we also check if all the smart contracts are
+            // deployed: we do this as some other coordinator could have deployed
+            // them, in which case we need to updated our state.
+            self.all_smart_contracts_deployed().await?;
+
+            tracing::debug!("we are not the coordinator, so nothing to do");
+            return Ok(());
+        }
+
         let bitcoin_processing_delay = self.context.config().signer.bitcoin_processing_delay;
         if bitcoin_processing_delay > Duration::ZERO {
             tracing::debug!("sleeping before processing new bitcoin block");
@@ -312,19 +325,6 @@ where
         }
 
         let maybe_registry_signer_set_info = self.context.state().registry_signer_set_info();
-
-        // If we are not the coordinator, then we have no business
-        // coordinating DKG or constructing bitcoin and stacks
-        // transactions, might as well return early.
-        if !self.is_coordinator(bitcoin_chain_tip.as_ref()) {
-            // Before returning, we also check if all the smart contracts are
-            // deployed: we do this as some other coordinator could have deployed
-            // them, in which case we need to updated our state.
-            self.all_smart_contracts_deployed().await?;
-
-            tracing::debug!("we are not the coordinator, so nothing to do");
-            return Ok(());
-        }
 
         tracing::debug!("we are the coordinator");
         metrics::counter!(Metrics::CoordinatorTenuresTotal).increment(1);
