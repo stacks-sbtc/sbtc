@@ -7,7 +7,6 @@ use std::time::Duration;
 use clarity::util::secp256k1::Secp256k1PublicKey;
 use clarity::vm::types::PrincipalData;
 use fake::Fake;
-use hashbrown::{HashMap, HashSet};
 use stacks_common::address::AddressHashMode;
 use stacks_common::address::C32_ADDRESS_VERSION_TESTNET_MULTISIG;
 use stacks_common::types::chainstate::StacksAddress;
@@ -105,22 +104,17 @@ impl Coordinator {
             .signer_public_keys
             .into_iter()
             .enumerate()
-            .map(|(id, key)| (id as u32, p256k1::keys::PublicKey::from(&key)))
+            .map(|(idx, key)| (idx.try_into().unwrap(), p256k1::keys::PublicKey::from(&key)))
             .collect();
         let num_keys = num_signers;
         let dkg_threshold = num_keys;
+        let signer_key_ids = (0..num_signers)
+            .map(|signer_id| (signer_id, std::iter::once(signer_id + 1).collect()))
+            .collect();
         let key_ids = signers
             .clone()
             .into_iter()
             .map(|(id, key)| (id + 1, key))
-            .collect();
-        let signer_key_ids: HashMap<u32, HashSet<u32>> = signers
-            .iter()
-            .map(|(&signer_id, _)| {
-                let mut keys = HashSet::new();
-                keys.insert(signer_id + 1);
-                (signer_id, keys)
-            })
             .collect();
         let public_keys = wsts::state_machine::PublicKeys {
             signers,
