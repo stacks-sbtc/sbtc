@@ -29,7 +29,7 @@ while true; do
             echo "Detected Stacks mining mempool tx, mining btc block..."
         fi
         bitcoin-cli -rpcwallet=main -rpcconnect=bitcoin generatetoaddress 1 "${BTC_ADDR}"
-        # This now correctly updates the timeout for the next loop iteration.
+        # Update the default timeout to 30 seconds from now for the next iteration.
         DEFAULT_TIMEOUT=$(($(date +%s) + 30))
     else
         echo "No Stacks mining tx detected"
