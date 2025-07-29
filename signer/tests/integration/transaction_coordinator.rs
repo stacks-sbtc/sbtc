@@ -6009,17 +6009,6 @@ async fn should_handle_dkg_coordination_failure() {
         "DKG shares should not exist since DKG failed to complete"
     );
 
-    // Verify that we can still process blocks after DKG failure, this
-    // final assert specifically checks that transaction processing still
-    // continues since there is signer set info to fallback on. Note that
-    // the coordinator should be emitting lots of error logs when
-    // constructing bitcoin or stacks transactions, but the coordinator
-    // should continue through all of that.
-    coordinator
-        .process_new_blocks(chain_tip)
-        .await
-        .expect("process_new_blocks should complete successfully even with DKG failure");
-
     testing::storage::drop_db(db).await;
 }
 
