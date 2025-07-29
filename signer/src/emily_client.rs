@@ -197,6 +197,19 @@ impl EmilyClient {
     }
 }
 
+#[cfg(any(test, feature = "testing"))]
+impl EmilyClient {
+    /// Create a new Emily Client for use in our integration tests.
+    pub fn new_test_client() -> Self {
+        EmilyClient::try_new(
+            &Url::parse("http://testApiKey@localhost:3031").unwrap(),
+            Duration::from_secs(1),
+            None,
+        )
+        .unwrap()
+    }
+}
+
 impl EmilyInteract for EmilyClient {
     async fn get_deposit(
         &self,

@@ -87,7 +87,10 @@ pub async fn new_zmq_block_hash_stream(endpoint: &str) -> ReceiverStream<Result<
     tokio::spawn(async move {
         let mut stream = zmq_stream.to_block_hash_stream();
         while let Some(block) = stream.next().await {
-            sender.send(block).await.unwrap();
+            if let Err(error) = sender.send(block).await {
+                tracing::warn!(%error, "could not send bitcoin block hash from zmq stream; exiting");
+                break;
+            }
         }
     });
 
