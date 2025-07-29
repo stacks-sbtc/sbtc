@@ -29,19 +29,19 @@ while true; do
             echo "Detected Stacks mining mempool tx, mining btc block..."
         fi
         bitcoin-cli -rpcwallet=main -rpcconnect=bitcoin generatetoaddress 1 "${BTC_ADDR}"
-        # This now correctly updates the timeout for the next loop iteration.
+        # Update the default timeout to 30 seconds from now for the next iteration.
         DEFAULT_TIMEOUT=$(($(date +%s) + 30))
     else
         echo "No Stacks mining tx detected"
     fi
 
     # Attempt to get the block height, defaulting to 0 on failure.
-    BLOCK_HEIGHT=$(bitcoin-cli -rpcwallet=main -rpcconnect=bitcoin getblockcount 2>/dev/null || echo 0)
+    BLOCK_HEIGHT=$(bitcoin-cli -rpcwallet=main -rpcconnect=bitcoin getblockcount 2>/dev/null || echo "-999")
 
-    if [ "${BLOCK_HEIGHT}" -eq 0 ]; then
+    if [ "${BLOCK_HEIGHT}" -eq "-999" ]; then
         # If getting block height failed, wait before retrying.
-        echo "Failed to get block height, likely due to bitcoind connection issue. Retrying in 5s..."
-        sleep 5 &
+        echo "Failed to get block height, likely due to bitcoind connection issue. Retrying in ${RETRY_SLEEP_DURATION}s..."
+        sleep "${RETRY_SLEEP_DURATION}" &
         wait || exit 0
     else
         # Otherwise, determine the correct sleep duration based on the epoch.
