@@ -238,10 +238,10 @@ mod tests {
             task_started_clone.notify_one();
             let signal = cloned_receiver.recv().await.unwrap();
 
-            assert!(matches!(
+            assert_matches::assert_matches!(
                 signal,
                 SignerSignal::Event(SignerEvent::BitcoinBlockObserved(_))
-            ));
+            );
 
             recv_count_clone.fetch_add(1, Ordering::Relaxed);
             task_completed_clone.notify_one();

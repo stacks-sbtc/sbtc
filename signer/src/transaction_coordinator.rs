@@ -2804,7 +2804,7 @@ mod tests {
             .await
             .expect_err("the event loop should end early with an error");
 
-        assert!(matches!(error, Error::Dummy));
+        assert_matches::assert_matches!(error, Error::Dummy);
     }
 
     #[tokio::test]
