@@ -46,8 +46,6 @@ pub const BITCOIN_CORE_RPC_USERNAME: &str = "devnet";
 pub const BITCOIN_CORE_RPC_PASSWORD: &str = "devnet";
 /// Default RPC endpoint for regtest bitcoin-core
 pub const BITCOIN_CORE_RPC_ENDPOINT: &str = "http://localhost:18443";
-/// Default ZMQ endpoint for regtest bitcoin-core
-pub const BITCOIN_CORE_ZMQ_ENDPOINT: &str = "tcp://localhost:28332";
 
 /// The fallback fee in bitcoin core
 pub const BITCOIN_CORE_FALLBACK_FEE: Amount = Amount::from_sat(1000);
