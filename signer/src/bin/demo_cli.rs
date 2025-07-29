@@ -461,7 +461,7 @@ async fn create_stacks_tx(
     let conditions = payload.post_conditions();
 
     let auth = SinglesigSpendingCondition {
-        signer: sender_addr.bytes,
+        signer: *sender_addr.bytes(),
         nonce,
         tx_fee: 1000,
         hash_mode: SinglesigHashMode::P2PKH,

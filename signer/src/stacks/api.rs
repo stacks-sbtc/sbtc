@@ -3,6 +3,7 @@
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::future::Future;
+use std::sync::LazyLock;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -88,11 +89,13 @@ const CURRENT_AGGREGATE_PUBKEY_DATA_VAR_NAME: &str = "current-aggregate-pubkey";
 
 /// This is a dummy STX transfer payload used only for estimating STX
 /// transfer costs.
-const DUMMY_STX_TRANSFER_PAYLOAD: TransactionPayload = TransactionPayload::TokenTransfer(
-    PrincipalData::Standard(StandardPrincipalData(0, [0; 20])),
-    0,
-    TokenTransferMemo([0; 34]),
-);
+static DUMMY_STX_TRANSFER_PAYLOAD: LazyLock<TransactionPayload> = LazyLock::new(|| {
+    TransactionPayload::TokenTransfer(
+        PrincipalData::Standard(StandardPrincipalData::null_principal()),
+        0,
+        TokenTransferMemo([0; 34]),
+    )
+});
 
 /// The names of all the read-only functions, data variables, and map names
 /// used in the signers for any of the sbtc smart contracts.
@@ -1605,7 +1608,7 @@ impl StacksInteract for StacksClient {
         // doesn't depend on the recipient, amount, or memo. So a
         // dummy transfer payload will do.
         let stx_transfer_estimate_response = self
-            .get_fee_estimate(&DUMMY_STX_TRANSFER_PAYLOAD, None)
+            .get_fee_estimate(&*DUMMY_STX_TRANSFER_PAYLOAD, None)
             .await;
 
         // If we get a valid response, then we use the fee estimate we received,
@@ -2438,11 +2441,11 @@ mod tests {
         let client =
             StacksClient::new(url::Url::parse(stacks_node_server.url().as_str()).unwrap()).unwrap();
 
-        let expected_fee = get_full_tx_size(&DUMMY_STX_TRANSFER_PAYLOAD, &wallet).unwrap()
+        let expected_fee = get_full_tx_size(&*DUMMY_STX_TRANSFER_PAYLOAD, &wallet).unwrap()
             * TX_FEE_TX_SIZE_MULTIPLIER;
 
         let resp = client
-            .estimate_fees(&wallet, &DUMMY_STX_TRANSFER_PAYLOAD, FeePriority::High)
+            .estimate_fees(&wallet, &*DUMMY_STX_TRANSFER_PAYLOAD, FeePriority::High)
             .await
             .unwrap();
 
@@ -2488,7 +2491,7 @@ mod tests {
         let client =
             StacksClient::new(url::Url::parse(stacks_node_server.url().as_str()).unwrap()).unwrap();
         let resp = client
-            .get_fee_estimate(&DUMMY_STX_TRANSFER_PAYLOAD, None)
+            .get_fee_estimate(&*DUMMY_STX_TRANSFER_PAYLOAD, None)
             .await
             .unwrap();
         let expected: RPCFeeEstimateResponse = serde_json::from_str(raw_json_response).unwrap();
@@ -2498,19 +2501,19 @@ mod tests {
         // Now lets check that the interface function returns the requested
         // priority fees.
         let fee = client
-            .estimate_fees(&wallet, &DUMMY_STX_TRANSFER_PAYLOAD, FeePriority::Low)
+            .estimate_fees(&wallet, &*DUMMY_STX_TRANSFER_PAYLOAD, FeePriority::Low)
             .await
             .unwrap();
         assert_eq!(fee, 7679);
 
         let fee = client
-            .estimate_fees(&wallet, &DUMMY_STX_TRANSFER_PAYLOAD, FeePriority::Medium)
+            .estimate_fees(&wallet, &*DUMMY_STX_TRANSFER_PAYLOAD, FeePriority::Medium)
             .await
             .unwrap();
         assert_eq!(fee, 7680);
 
         let fee = client
-            .estimate_fees(&wallet, &DUMMY_STX_TRANSFER_PAYLOAD, FeePriority::High)
+            .estimate_fees(&wallet, &*DUMMY_STX_TRANSFER_PAYLOAD, FeePriority::High)
             .await
             .unwrap();
         assert_eq!(fee, 25505);

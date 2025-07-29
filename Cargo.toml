@@ -23,9 +23,9 @@ blocklist-api = { path = "./.generated-sources/blocklist-api" }
 blocklist-client = { path = "./blocklist-client" }
 
 # Stacks-Core Dependencies
-clarity = { git = "https://github.com/stacks-network/stacks-core", rev = "49777d3fd73a6dbb610be80c376b7d9389c9871a", default-features = false, features = ["canonical"] }
-stackslib = { git = "https://github.com/stacks-network/stacks-core", rev = "49777d3fd73a6dbb610be80c376b7d9389c9871a", default-features = false }
-stacks-common = { git = "https://github.com/stacks-network/stacks-core", rev = "49777d3fd73a6dbb610be80c376b7d9389c9871a", default-features = false, features = ["canonical"] }
+clarity = { git = "https://github.com/stacks-network/stacks-core", rev = "6c769636d5d598d1872960ca2744ad1b64fa6385", default-features = false }
+stackslib = { git = "https://github.com/stacks-network/stacks-core", rev = "6c769636d5d598d1872960ca2744ad1b64fa6385", default-features = false }
+stacks-common = { git = "https://github.com/stacks-network/stacks-core", rev = "6c769636d5d598d1872960ca2744ad1b64fa6385", default-features = false }
 
 # Trust Machines Dependencies
 wsts = { git = "https://github.com/Trust-Machines/wsts", rev = "11e2316aa0edf996f8e8f9ccbbbfd4bd2975ed1d" }
@@ -45,6 +45,7 @@ bitcoincore-rpc = { version = "0.19.0", default-features = false }
 bitcoincore-rpc-json = { version = "0.19.0", default-features = false }
 bitcoincore-zmq = { version = "1.5.2", default-features = false, features = ["async"] }
 bitvec = { version = "1.0.1", default-features = false, features = ["serde"] }
+chrono = { version = "0.4.41", default-features = false, features = ["serde"] }
 clap = { version = "4.5.27", default-features = false, features = ["derive", "env", "std", "help"] }
 config = { version = "0.14.1", default-features = false, features = ["toml"] }
 futures = { version = "0.3.31", default-features = false }
