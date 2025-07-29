@@ -36,10 +36,10 @@ const DEFAULT_BROADCAST_CAPACITY: usize = 1000;
 /// The default timeout for the poller's initial connection to the RPC endpoint.
 const DEFAULT_INITIALIZATION_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// Error type for subscribers of the `BitcoinChainTipPoller`.
+/// Error type for subscribers of the [`BitcoinChainTipPoller`].
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum BitcoinChainTipPollerError {
-    /// A subscriber to the ZMQ block hash broadcast lagged too far behind
+    /// A subscriber to the block hash broadcast lagged too far behind
     /// and missed messages. The inner u64 is the number of messages missed.
     #[error("subscriber lagged behind broadcast channel: {0} messages missed")]
     SubscriberLagged(u64),

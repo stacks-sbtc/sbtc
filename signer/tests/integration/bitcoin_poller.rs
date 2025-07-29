@@ -50,9 +50,7 @@ async fn chain_tip_poller_streams_chain_tips() {
 
     // Now let's make sure we're actually receiving _chain tip_ block hashes by
     // generating a few more blocks. The chain tip should be the last block
-    // hash we receive. `generate_blocks` seems to generate blocks either very
-    // quickly or atomically, as the poller regtest interval is 100ms by default
-    // and this test hasn't failed yet.
+    // hash we receive.
     let block_hashes = faucet.generate_blocks(5);
     let final_tip_hash = block_hashes.last().unwrap();
 
