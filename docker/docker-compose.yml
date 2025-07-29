@@ -21,6 +21,7 @@ x-common-vars:
   - &STACKS_25_HEIGHT ${STACKS_25_HEIGHT:-209}
   - &STACKS_30_HEIGHT ${STACKS_30_HEIGHT:-232}
   - &STACKS_31_HEIGHT ${STACKS_31_HEIGHT:-233}
+  - &STACKS_32_HEIGHT ${STACKS_32_HEIGHT:-234}
   - &STACKING_CYCLES ${STACKING_CYCLES:-1} # number of cycles to stack-stx or stack-extend for
   - &POX_PREPARE_LENGTH ${POX_PREPARE_LENGTH:-5}
   - &POX_REWARD_LENGTH ${POX_REWARD_LENGTH:-20}
@@ -30,7 +31,7 @@ x-common-vars:
 # Templates.
 # ------------------------------------------------------------------------------
 x-stacks-blockchain: &stacks-blockchain
-  image: blockstack/stacks-core:3.1.0.0.5
+  image: blockstack/stacks-core:3.2.0.0.0
   profiles:
     - default
 
@@ -396,6 +397,7 @@ services:
       STACKS_25_HEIGHT: *STACKS_25_HEIGHT
       STACKS_30_HEIGHT: *STACKS_30_HEIGHT
       STACKS_31_HEIGHT: *STACKS_31_HEIGHT
+      STACKS_32_HEIGHT: *STACKS_32_HEIGHT
       POX_PREPARE_LENGTH: *POX_PREPARE_LENGTH
       POX_REWARD_LENGTH: *POX_REWARD_LENGTH
       REWARD_RECIPIENT: *REWARD_RECIPIENT
