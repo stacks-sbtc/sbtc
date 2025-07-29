@@ -11,7 +11,7 @@ use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc_json::Utxo;
 use fake::Fake as _;
 use futures::future::join_all;
-use signer::testing::btc::ManualBitcoinBlockHashStreamProvider;
+use signer::testing::btc::MockBitcoinBlockHashStreamProvider;
 use signer::testing::storage::model::TestBitcoinTxInfo;
 use signer::util::Sleep;
 use test_case::test_case;
@@ -370,7 +370,7 @@ async fn deposit_flow() {
         })
         .await;
 
-    let bitcoin_block_source = ManualBitcoinBlockHashStreamProvider::default();
+    let bitcoin_block_source = MockBitcoinBlockHashStreamProvider::default();
     let block_observer = block_observer::BlockObserver {
         context: context.clone(),
         bitcoin_block_source: bitcoin_block_source.clone(),

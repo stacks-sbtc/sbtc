@@ -121,12 +121,12 @@ const DEFAULT_MANUAL_PROVIDER_CAPACITY: usize = 128;
 /// without a bitcoin node. It uses a broadcast channel internally, so multiple
 /// streams can subscribe to the same sequence of manually sent items.
 #[derive(Clone, Debug)]
-pub struct ManualBitcoinBlockHashStreamProvider {
+pub struct MockBitcoinBlockHashStreamProvider {
     sender: broadcast::Sender<Result<BlockHash, BroadcastStreamRecvError>>,
 }
 
-impl ManualBitcoinBlockHashStreamProvider {
-    /// Creates a new `ManualBitcoinBlockHashStreamProvider` with the specified buffer capacity
+impl MockBitcoinBlockHashStreamProvider {
+    /// Creates a new `MockBitcoinBlockHashStreamProvider` with the specified buffer capacity
     /// for its internal broadcast channel.
     pub fn with_capacity(capacity: usize) -> Self {
         let (sender, _receiver) = broadcast::channel(capacity);
@@ -146,13 +146,13 @@ impl ManualBitcoinBlockHashStreamProvider {
     }
 }
 
-impl Default for ManualBitcoinBlockHashStreamProvider {
+impl Default for MockBitcoinBlockHashStreamProvider {
     fn default() -> Self {
         Self::with_capacity(DEFAULT_MANUAL_PROVIDER_CAPACITY)
     }
 }
 
-impl BitcoinBlockHashStreamProvider for ManualBitcoinBlockHashStreamProvider {
+impl BitcoinBlockHashStreamProvider for MockBitcoinBlockHashStreamProvider {
     type Error = BroadcastStreamRecvError;
 
     fn get_block_hash_stream(
