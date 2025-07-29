@@ -24,7 +24,7 @@ message SignerDkgPublicShares {
   uint32 signer_id = 2;
   // List of (signer_id, commitment)
   repeated PartyCommitment commitments = 3;
-  // kex exchange public key
+  // The public key used for exchanging secret shares during DKG
   crypto.Point kex_public_key = 4;
 }
 
