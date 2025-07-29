@@ -1,6 +1,11 @@
 
 # cargo-vet audits file
 
+[[audits.base16ct]]
+who = "Joey Yandle <xoloki@gmail.com>"
+criteria = "safe-to-deploy"
+version = "0.2.0"
+
 [[audits.bitcoinconsensus]]
 who = "cylewitruk <cyle.witruk@outlook.com>"
 criteria = "safe-to-deploy"
@@ -11,6 +16,26 @@ The bitcoin-core sources are indeed from bitcoin-core v26.
 Note that this library does use C bindings and thus FFI and unsafe. There are panic-able code paths if used incorrectly.
 This library is provided by the rust-bitcoin GH organization which also maintains the bitcoin and secp256k1 crates which we use extensively.
 """
+
+[[audits.crypto-bigint]]
+who = "Joey Yandle <xoloki@gmail.com>"
+criteria = "safe-to-deploy"
+version = "0.5.5"
+
+[[audits.elliptic-curve]]
+who = "Joey Yandle <xoloki@gmail.com>"
+criteria = "safe-to-deploy"
+version = "0.13.8"
+
+[[audits.ff]]
+who = "Joey Yandle <xoloki@gmail.com>"
+criteria = "safe-to-deploy"
+version = "0.13.1"
+
+[[audits.group]]
+who = "Joey Yandle <xoloki@gmail.com>"
+criteria = "safe-to-deploy"
+version = "0.13.0"
 
 [[audits.p256k1]]
 who = "cylewitruk <cyle.witruk@outlook.com>"
