@@ -5894,10 +5894,19 @@ mod get_eligible_pending_withdrawal_requests {
 // aggregate key to fallback on.
 #[test_log::test(tokio::test)]
 async fn should_handle_dkg_coordination_failure() {
+    let db = testing::storage::new_test_database().await;
+
     let mut rng = get_rng();
     let context = TestContext::builder()
-        .with_in_memory_storage()
+        .with_storage(db.clone())
         .with_mocked_clients()
+        .modify_settings(|settings| {
+            // We make the bootstrap signing set only contain the current
+            // signer so that the current signer is always the coordinator.
+            settings.signer.bootstrap_signing_set =
+                std::iter::once(settings.signer.public_key()).collect();
+            settings.signer.bootstrap_signatures_required = 1;
+        })
         .build();
 
     let storage = context.get_storage_mut();
@@ -5913,17 +5922,7 @@ async fn should_handle_dkg_coordination_failure() {
         .unwrap()
         .unwrap();
 
-    // Create a set of signer public keys and update the context state
-    let mut signer_keys = BTreeSet::new();
-    for _ in 0..3 {
-        // Create 3 signers
-        let private_key = PrivateKey::new(&mut rng);
-        let public_key = PublicKey::from_private_key(&private_key);
-        signer_keys.insert(public_key);
-    }
-    context
-        .state()
-        .update_current_signer_set(signer_keys.clone());
+    // Update the context state with the chain tip
     context.state().set_bitcoin_chain_tip(chain_tip);
 
     // Mock the stacks client to handle contract source checks
@@ -5938,6 +5937,17 @@ async fn should_handle_dkg_coordination_failure() {
                     })
                 })
             });
+
+            client.expect_get_account().returning(|_| {
+                let response = Ok(AccountInfo {
+                    balance: 0,
+                    locked: 0,
+                    unlock_height: 0u64.into(),
+                    // this is the only part used to create the Stacks transaction.
+                    nonce: 12,
+                });
+                Box::pin(std::future::ready(response))
+            });
         })
         .await;
 
@@ -5949,13 +5959,25 @@ async fn should_handle_dkg_coordination_failure() {
         "DKG should be triggered since no shares exist yet"
     );
 
+    // We need to set the registry signer set info to something since we
+    // use it on DKG failure
+    let signer_set_info = SignerSetInfo {
+        aggregate_key: context.config().signer.public_key(),
+        signer_set: std::iter::once(context.config().signer.public_key()).collect(),
+        signatures_required: 1,
+    };
+
+    context
+        .state()
+        .update_registry_signer_set_info(signer_set_info);
+
     // Create coordinator with test parameters using SignerNetwork::single
     let network = SignerNetwork::single(&context);
     let mut coordinator = TxCoordinatorEventLoop {
         context: context.clone(),
         network: network.spawn(),
-        private_key: PrivateKey::new(&mut rng),
-        threshold: 3,
+        private_key: context.config().signer.private_key,
+        threshold: 1,
         context_window: 5,
         signing_round_max_duration: std::time::Duration::from_secs(5),
         bitcoin_presign_request_max_duration: std::time::Duration::from_secs(5),
@@ -5964,16 +5986,19 @@ async fn should_handle_dkg_coordination_failure() {
         is_epoch3: true,
     };
 
-    // We're verifying that the coordinator is currently
-    // processing requests correctly. Since we previously checked
-    // that 'should_coordinate_dkg' will trigger and we set the
-    // 'dkg_max_duration' to 10 milliseconds we expect that
-    // DKG will run & fail
-    let result = coordinator.process_new_blocks(chain_tip).await;
-    assert!(
-        result.is_ok(),
-        "process_new_blocks should complete successfully even with DKG failure"
-    );
+    // Coordinator should be the current signer, since the bootstrap
+    // signing set has only the current signer in it.
+    assert!(coordinator.is_coordinator(&chain_tip.block_hash));
+
+    // We're verifying that the coordinator is currently processing
+    // requests correctly. Since we previously checked that
+    // 'should_coordinate_dkg' will trigger and we set the
+    // 'dkg_max_duration' to 10 milliseconds we expect that DKG will run
+    // and fail.
+    coordinator
+        .process_new_blocks(chain_tip)
+        .await
+        .expect("process_new_blocks should complete successfully even with DKG failure");
 
     // Here we check that DKG ran & correctly failed by fetching
     // the latest DKG shares from storage. We test it failed
@@ -5981,17 +6006,21 @@ async fn should_handle_dkg_coordination_failure() {
     let dkg_shares = storage.get_latest_encrypted_dkg_shares().await.unwrap();
     assert!(
         dkg_shares.is_none(),
-        "DKG shares should not exist since DKG failed to complete due to timeout"
+        "DKG shares should not exist since DKG failed to complete"
     );
 
-    // Verify that we can still process blocks after DKG failure,
-    // this final assert specifically checks that blocks are still
-    // being processed since there was an aggregate key to fallback on
-    let result = coordinator.process_new_blocks(chain_tip).await;
-    assert!(
-        result.is_ok(),
-        "Should be able to continue processing blocks after DKG failure"
-    );
+    // Verify that we can still process blocks after DKG failure, this
+    // final assert specifically checks that transaction processing still
+    // continues since there is signer set info to fallback on. Note that
+    // the coordinator should be emitting lots of error logs when
+    // constructing bitcoin or stacks transactions, but the coordinator
+    // should continue through all of that.
+    coordinator
+        .process_new_blocks(chain_tip)
+        .await
+        .expect("process_new_blocks should complete successfully even with DKG failure");
+
+    testing::storage::drop_db(db).await;
 }
 
 /// Similar to `create_signers_keys` in `wallet.rs`, but returning also the keypairs
