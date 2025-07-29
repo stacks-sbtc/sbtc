@@ -537,7 +537,7 @@ async fn blocklist_client_retry(num_failures: u8, failing_iters: u8) {
     // Iterations with failing blocklist client
     for _ in 0..failing_iters {
         request_decider
-            .handle_new_requests(chain_tip_ref.block_hash)
+            .handle_new_requests(chain_tip_ref)
             .await
             .unwrap();
 
@@ -551,7 +551,7 @@ async fn blocklist_client_retry(num_failures: u8, failing_iters: u8) {
 
     // Final iteration with (at least one) blocklist success
     request_decider
-        .handle_new_requests(chain_tip_ref.block_hash)
+        .handle_new_requests(chain_tip_ref)
         .await
         .unwrap();
 
@@ -709,7 +709,7 @@ async fn do_not_procceed_with_blocked_addresses(is_withdrawal: bool, is_blocked:
 
     // Handle requests
     request_decider
-        .handle_new_requests(chain_tip_ref.block_hash)
+        .handle_new_requests(chain_tip_ref)
         .await
         .unwrap();
 

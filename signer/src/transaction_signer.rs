@@ -315,7 +315,10 @@ where
         Ok(())
     }
 
-    #[tracing::instrument(skip_all, fields(chain_tip = tracing::field::Empty))]
+    #[tracing::instrument(skip_all, fields(
+        bitcoin_tip_hash = tracing::field::Empty,
+        bitcoin_tip_height = tracing::field::Empty,
+    ))]
     async fn handle_signer_message(&mut self, msg: &network::Msg) -> Result<(), Error> {
         let chain_tip_report = self
             .inspect_msg_chain_tip(msg.signer_public_key, &msg.bitcoin_chain_tip)
@@ -327,7 +330,10 @@ where
         } = chain_tip_report;
 
         let span = tracing::Span::current();
-        span.record("chain_tip", tracing::field::display(chain_tip.block_hash));
+        let tracing_chain_tip = tracing::field::display(chain_tip.block_hash);
+        span.record("bitcoin_tip_hash", tracing_chain_tip);
+        span.record("bitcoin_tip_height", *chain_tip.block_height);
+
         tracing::trace!(
             %sender_is_coordinator,
             %chain_tip_status,

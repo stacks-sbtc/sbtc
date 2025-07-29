@@ -30,6 +30,7 @@ use crate::storage::DbRead as _;
 use crate::storage::DbWrite as _;
 use crate::storage::model;
 use crate::storage::model::BitcoinBlockHash;
+use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::DepositSigner;
 use crate::storage::model::WithdrawalSigner;
 
@@ -101,7 +102,7 @@ where
                         }
                     }
                     SignerEvent::BitcoinBlockObserved(chain_tip) => {
-                        if let Err(error) = self.handle_new_requests(chain_tip.block_hash).await {
+                        if let Err(error) = self.handle_new_requests(chain_tip).await {
                             tracing::warn!(%error, "error handling new requests; skipping this round");
                         }
 
@@ -125,8 +126,11 @@ where
     }
 
     /// Vote on pending deposit requests
-    #[tracing::instrument(skip_all, fields(bitcoin_tip_hash = %chain_tip))]
-    pub async fn handle_new_requests(&mut self, chain_tip: BitcoinBlockHash) -> Result<(), Error> {
+    #[tracing::instrument(skip_all, fields(
+        bitcoin_tip_hash = %block_ref.block_hash,
+        bitcoin_tip_height = %block_ref.block_height,
+    ))]
+    pub async fn handle_new_requests(&mut self, block_ref: BitcoinBlockRef) -> Result<(), Error> {
         let requests_processing_delay = self.context.config().signer.requests_processing_delay;
         if requests_processing_delay > Duration::ZERO {
             tracing::debug!("sleeping before processing new requests");
@@ -137,11 +141,12 @@ where
         // the bitcoin block given as an input here, then we can safely
         // bail, as we will be processing the new block shortly.
         let state_chain_tip = self.context.state().bitcoin_chain_tip();
-        if Some(chain_tip) != state_chain_tip.map(|btc| btc.block_hash) {
+        if Some(block_ref) != state_chain_tip {
             tracing::debug!("chain tip has changed, skipping request processing");
             return Ok(());
         }
 
+        let chain_tip = block_ref.block_hash;
         let signer_public_key = self.signer_public_key();
         let db = self.context.get_storage();
         // We retry the deposit decisions because some signers' bitcoin nodes might have
