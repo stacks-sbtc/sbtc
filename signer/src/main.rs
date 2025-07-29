@@ -344,9 +344,14 @@ async fn run_block_observer(ctx: impl Context) -> Result<(), Error> {
         .start()
         .await?;
 
-    block_observer::BlockObserver::new(ctx, bitcoin_block_source)
+    let result = block_observer::BlockObserver::new(ctx, bitcoin_block_source.clone())
         .run()
-        .await
+        .await;
+
+    // Once the block observer has finished running, we need to stop the
+    // Bitcoin chain tip poller before returning the result from the observer.
+    bitcoin_block_source.stop();
+    result
 }
 
 /// Run the transaction signer event-loop.
