@@ -137,15 +137,6 @@ where
             tokio::time::sleep(requests_processing_delay).await;
         }
 
-        // If the bitcoin chain tip has changed since the we observed
-        // the bitcoin block given as an input here, then we can safely
-        // bail, as we will be processing the new block shortly.
-        let state_chain_tip = self.context.state().bitcoin_chain_tip();
-        if Some(block_ref) != state_chain_tip {
-            tracing::debug!("chain tip has changed, skipping request processing");
-            return Ok(());
-        }
-
         let chain_tip = block_ref.block_hash;
         let signer_public_key = self.signer_public_key();
         let db = self.context.get_storage();
