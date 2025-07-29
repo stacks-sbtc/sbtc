@@ -2804,6 +2804,12 @@ mod tests {
         // chain tip passed in, so we should bail early and return Ok(())
         ctx.state().set_bitcoin_chain_tip(chain_tip1);
         ev.process_new_blocks(chain_tip2).await.unwrap();
+
+        // Now the chain tip in the state matches the chain tip passed in,
+        // so we should process the blocks. However, we do not have any
+        // signer set info in the state, so we'll bail with an error.
+        let error = ev.process_new_blocks(chain_tip1).await.unwrap_err();
+        assert_matches::assert_matches!(error, Error::MissingAggregateKey(_));
     }
 
     /// Check that we skip processing bitcoin blocks if the chain tip in
