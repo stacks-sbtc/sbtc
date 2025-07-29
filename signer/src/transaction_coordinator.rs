@@ -2753,6 +2753,12 @@ mod tests {
         more_asserts::assert_gt!(start.elapsed(), delay + baseline_elapsed);
     }
 
+    /// Check that we skip processing bitcoin blocks if the chain tip in
+    /// the state doesn't match the block hash passed in.
+    ///
+    /// Note: this test is a little sensitive to the current logic that
+    /// checks for smart contract deployment after checking whether the
+    /// chain tip is up to date.
     #[test_log::test(tokio::test)]
     async fn should_skip_processing_bitcoin_blocks_if_chain_tip_has_changed() {
         let mut rng = testing::get_rng();
@@ -2760,6 +2766,12 @@ mod tests {
             .with_in_memory_storage()
             .with_mocked_clients()
             .build();
+
+        ctx.with_stacks_client(|mock| {
+            mock.expect_get_contract_source()
+                .returning(|_, _| Box::pin(std::future::ready(Err(Error::Dummy))));
+        })
+        .await;
 
         let network = WanNetwork::default();
         let net = network.connect(&ctx);
@@ -2779,14 +2791,20 @@ mod tests {
         let chain_tip1 = fake::Faker.fake_with_rng(&mut rng);
         let chain_tip2 = fake::Faker.fake_with_rng(&mut rng);
 
+        // The chain tip in the state does not match the chain tip passed
+        // in, so it should bail early and just return Ok(()
         ctx.state().set_bitcoin_chain_tip(chain_tip1);
-
-        // We should bail early here and just return Ok(())
         ev.process_new_blocks(chain_tip2).await.unwrap();
 
         // This one won't bail early enough and will reach out the the
-        // stacks node for something and then panic.
-        ev.process_new_blocks(chain_tip1).await.unwrap_err();
+        // stacks node to figure out if the contracts have been deployed.
+        // They haven't and we've mocked stacks to return a Dummy error.
+        let error = ev
+            .process_new_blocks(chain_tip1)
+            .await
+            .expect_err("the event loop should end early with an error");
+
+        assert!(matches!(error, Error::Dummy));
     }
 
     #[tokio::test]
