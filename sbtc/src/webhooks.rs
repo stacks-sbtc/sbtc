@@ -22,7 +22,6 @@
 
 use blockstack_lib::burnchains::Txid;
 use blockstack_lib::chainstate::stacks::StacksTransaction;
-use blockstack_lib::net::api::HexDeser;
 use clarity::vm::types::QualifiedContractIdentifier;
 use clarity::vm::types::Value as ClarityValue;
 use serde::Deserialize;
@@ -30,6 +29,7 @@ use stacks_common::codec::StacksMessageCodec;
 use stacks_common::types::chainstate::BlockHeaderHash;
 use stacks_common::types::chainstate::BurnchainHeaderHash;
 use stacks_common::types::chainstate::StacksBlockId;
+use stacks_common::util::HexDeser;
 
 use crate::error::Error;
 
@@ -195,7 +195,7 @@ where
 {
     let hex_str = <String>::deserialize(deserializer)?;
     let hex_str = hex_str.trim_start_matches("0x");
-    <T as HexDeser>::try_from(hex_str).map_err(serde::de::Error::custom)
+    <T as HexDeser>::try_from_hex(hex_str).map_err(serde::de::Error::custom)
 }
 
 /// This is for deserializing fields in webhooks that were effectively

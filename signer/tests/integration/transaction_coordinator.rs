@@ -597,6 +597,7 @@ async fn mock_stacks_core<D, B, E>(
                 stacks_parent_ch: None,
                 last_sortition_ch: None,
                 committed_block_hash: None,
+                vrf_seed: None,
             });
             Box::pin(std::future::ready(response))
         });
@@ -3727,6 +3728,7 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
                     stacks_parent_ch: None,
                     last_sortition_ch: None,
                     committed_block_hash: None,
+                    vrf_seed: None,
                 });
                 Box::pin(std::future::ready(response))
             });
