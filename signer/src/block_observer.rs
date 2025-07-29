@@ -137,7 +137,7 @@ where
     C: Context,
     BlockSource: BitcoinBlockHashStreamProvider,
 {
-    /// Create a new `BlockObserver` with the given context and Bitcoin block
+    /// Create a new [`BlockObserver`] with the given context and Bitcoin block
     /// provider.
     pub fn new(context: C, bitcoin_block_source: BlockSource) -> Self {
         Self { context, bitcoin_block_source }

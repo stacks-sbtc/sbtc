@@ -48,10 +48,7 @@ pub enum BitcoinChainTipPollerError {
 /// A builder for creating and configuring a `BitcoinChainTipPoller`.
 ///
 /// This provides a fluent interface for setting up a poller instance.
-pub struct BitcoinChainTipPollerBuilder<Bitcoin>
-where
-    Bitcoin: BitcoinInteract + 'static,
-{
+pub struct BitcoinChainTipPollerBuilder<Bitcoin> {
     rpc: Bitcoin,
     polling_interval: Duration,
     init_timeout: Duration,
@@ -128,7 +125,7 @@ async fn run_rpc_poller<Bitcoin>(
         match rpc.get_best_block_hash().await {
             Ok(current_hash) => {
                 if current_hash != last_seen_hash {
-                    tracing::info!(new_hash = %current_hash, "detected new best block hash");
+                    tracing::trace!(new_hash = %current_hash, "detected new best block hash");
                     last_seen_hash = current_hash;
                     if broadcast_tx.send(current_hash).is_err() {
                         tracing::warn!("broadcasting new block hash failed; no subscribers?");

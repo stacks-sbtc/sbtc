@@ -723,6 +723,7 @@ async fn deploy_smart_contracts_coordinator() {
     //   we use a counter to notify us when that happens.
     // =========================================================================
     let start_count = Arc::new(AtomicU8::new(0));
+    let bitcoin_chain_tip_poller = BitcoinChainTipPoller::start_for_regtest().await;
 
     for (ctx, _, kp, network) in signers.iter() {
         let ev = TxCoordinatorEventLoop {
@@ -776,10 +777,9 @@ async fn deploy_smart_contracts_coordinator() {
             ev.run().await
         });
 
-        let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_block_source,
+            bitcoin_block_source: bitcoin_chain_tip_poller.clone(),
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -1595,6 +1595,7 @@ async fn pseudo_random_dkg() {
     //   and we use a counter to notify us when that happens.
     // =========================================================================
     let start_count = Arc::new(AtomicU8::new(0));
+    let bitcoin_chain_tip_poller = BitcoinChainTipPoller::start_for_regtest().await;
 
     for (ctx, _, kp, network) in signers.iter() {
         ctx.state().set_sbtc_contracts_deployed();
@@ -1649,10 +1650,9 @@ async fn pseudo_random_dkg() {
             ev.run().await
         });
 
-        let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_block_source,
+            bitcoin_block_source: bitcoin_chain_tip_poller.clone(),
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -1987,6 +1987,7 @@ async fn sign_bitcoin_transaction() {
     //   we use a counter to notify us when that happens.
     // =========================================================================
     let start_count = Arc::new(AtomicU8::new(0));
+    let bitcoin_chain_tip_poller = BitcoinChainTipPoller::start_for_regtest().await;
 
     for (ctx, _, kp, network) in signers.iter() {
         ctx.state().set_sbtc_contracts_deployed();
@@ -2041,10 +2042,9 @@ async fn sign_bitcoin_transaction() {
             ev.run().await
         });
 
-        let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_block_source,
+            bitcoin_block_source: bitcoin_chain_tip_poller.clone(),
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -2326,6 +2326,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     //   we use a counter to notify us when that happens.
     // =========================================================================
     let start_count = Arc::new(AtomicU8::new(0));
+    let bitcoin_chain_tip_poller = BitcoinChainTipPoller::start_for_regtest().await;
 
     for (ctx, _, kp, network) in signers.iter() {
         ctx.state().set_sbtc_contracts_deployed();
@@ -2380,10 +2381,9 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
             ev.run().await
         });
 
-        let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_block_source,
+            bitcoin_block_source: bitcoin_chain_tip_poller.clone(),
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -2838,6 +2838,7 @@ async fn wsts_ids_set_during_dkg_and_signing_rounds() {
     //   we use a counter to notify us when that happens.
     // =========================================================================
     let start_count = Arc::new(AtomicU8::new(0));
+    let bitcoin_chain_tip_poller = BitcoinChainTipPoller::start_for_regtest().await;
 
     for (ctx, _, kp, network) in signers.iter() {
         ctx.state().set_sbtc_contracts_deployed();
@@ -2892,10 +2893,9 @@ async fn wsts_ids_set_during_dkg_and_signing_rounds() {
             ev.run().await
         });
 
-        let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_block_source,
+            bitcoin_block_source: bitcoin_chain_tip_poller.clone(),
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -3205,6 +3205,7 @@ async fn skip_signer_activites_after_key_rotation() {
     //   we use a counter to notify us when that happens.
     // =========================================================================
     let start_count = Arc::new(AtomicU8::new(0));
+    let bitcoin_chain_tip_poller = BitcoinChainTipPoller::start_for_regtest().await;
 
     for (ctx, _, kp, network) in signers.iter() {
         ctx.state().set_sbtc_contracts_deployed();
@@ -3259,10 +3260,9 @@ async fn skip_signer_activites_after_key_rotation() {
             ev.run().await
         });
 
-        let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_block_source,
+            bitcoin_block_source: bitcoin_chain_tip_poller.clone(),
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -3756,6 +3756,7 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
     //   we use a counter to notify us when that happens.
     // =========================================================================
     let start_count = Arc::new(AtomicU8::new(0));
+    let bitcoin_chain_tip_poller = BitcoinChainTipPoller::start_for_regtest().await;
 
     for (ctx, _, kp, network) in signers.iter() {
         ctx.state().set_sbtc_contracts_deployed();
@@ -3810,10 +3811,9 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
             ev.run().await
         });
 
-        let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_block_source,
+            bitcoin_block_source: bitcoin_chain_tip_poller.clone(),
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -4493,6 +4493,7 @@ async fn test_conservative_initial_sbtc_limits() {
     //   we use a counter to notify us when that happens.
     // =========================================================================
     let start_count = Arc::new(AtomicU8::new(0));
+    let bitcoin_chain_tip_poller = BitcoinChainTipPoller::start_for_regtest().await;
 
     for (ctx, _, kp, network) in signers.iter() {
         ctx.state().set_sbtc_contracts_deployed();
@@ -4547,10 +4548,9 @@ async fn test_conservative_initial_sbtc_limits() {
             ev.run().await
         });
 
-        let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_block_source,
+            bitcoin_block_source: bitcoin_chain_tip_poller.clone(),
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -4713,6 +4713,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
     //   we use a counter to notify us when that happens.
     // =========================================================================
     let start_count = Arc::new(AtomicU8::new(0));
+    let bitcoin_chain_tip_poller = BitcoinChainTipPoller::start_for_regtest().await;
 
     for (ctx, _, kp, network) in signers.iter() {
         ctx.state().set_sbtc_contracts_deployed();
@@ -4767,10 +4768,9 @@ async fn sign_bitcoin_transaction_withdrawals() {
             ev.run().await
         });
 
-        let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_block_source,
+            bitcoin_block_source: bitcoin_chain_tip_poller.clone(),
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -6228,6 +6228,7 @@ async fn reuse_nonce_attack() {
     //   we use a counter to notify us when that happens.
     // =========================================================================
     let start_count = Arc::new(AtomicU8::new(0));
+    let bitcoin_chain_tip_poller = BitcoinChainTipPoller::start_for_regtest().await;
 
     for (ctx, _, kp, network) in signers.iter() {
         let ev = TxCoordinatorEventLoop {
@@ -6281,10 +6282,9 @@ async fn reuse_nonce_attack() {
             ev.run().await
         });
 
-        let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_block_source,
+            bitcoin_block_source: bitcoin_chain_tip_poller.clone(),
         };
         let counter = start_count.clone();
         tokio::spawn(async move {

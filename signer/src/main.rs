@@ -335,6 +335,9 @@ async fn run_block_observer(ctx: impl Context) -> Result<(), Error> {
     let bitcoin_client = ctx.get_bitcoin_client();
     let chain_tip_polling_interval = ctx.config().bitcoin.chain_tip_polling_interval;
 
+    // Build and start the Bitcoin chain tip poller. This will block until it
+    // can successfully fetch the initial block hash. If ths timeout is exceeded
+    // while waiting for the initial block hash, an error will be returned.
     let bitcoin_block_source = BitcoinChainTipPoller::builder(bitcoin_client)
         .with_polling_interval(chain_tip_polling_interval)
         .with_init_timeout(BITCOIN_POLLER_INITIALIZATION_TIMEOUT)
