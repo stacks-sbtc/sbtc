@@ -1619,7 +1619,7 @@ pub async fn assert_allow_dkg_begin(
                 return Ok(());
             } else {
                 tracing::debug!(
-                    "signer set config differs from registry, but we alreay have verified shares for it; checking other conditions"
+                    "signer set config differs from registry, but we already have verified shares for it; checking other conditions"
                 );
             }
         }

@@ -2568,7 +2568,7 @@ pub async fn should_coordinate_dkg(
                 return Ok(true);
             } else {
                 tracing::debug!(
-                    "signer set config differs from registry, but we alreay have verified shares for it; checking other conditions"
+                    "signer set config differs from registry, but we already have verified shares for it; checking other conditions"
                 );
             }
         }
