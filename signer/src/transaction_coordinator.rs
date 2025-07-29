@@ -315,12 +315,24 @@ where
             tokio::time::sleep(bitcoin_processing_delay).await;
         }
 
+        // If we need to bail here then there is some bug in the code,
+        // since `process_new_blocks` should only be called after the state
+        // has been updated with the bitcoin chain tip.
+        let Some(state_chain_tip) = self.context.state().bitcoin_chain_tip() else {
+            tracing::error!("no bitcoin chain tip in state, skipping processing");
+            return Err(Error::NoChainTip);
+        };
+
         // The bitcoin chain tip could have changed since the we observed
         // the bitcoin block given as an input here. If so, we can safely
         // skip processing this block since other signers are likely to
         // ignore us if we are the coordinator.
-        if Some(bitcoin_chain_tip) != self.context.state().bitcoin_chain_tip() {
-            tracing::debug!("bitcoin chain tip has changed, skipping processing");
+        if bitcoin_chain_tip != state_chain_tip {
+            tracing::info!(
+                state_bitcoin_tip_hash = %state_chain_tip.block_hash,
+                state_bitcoin_tip_height = %state_chain_tip.block_height,
+                "bitcoin chain tip has changed, skipping processing"
+            );
             return Ok(());
         }
 
