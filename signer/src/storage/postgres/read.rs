@@ -268,8 +268,8 @@ impl PgRead {
                   AND bwo.stacks_block_hash = wr.block_hash
                 JOIN sbtc_signer.bitcoin_transactions AS bt
                   ON bt.txid = bwo.bitcoin_txid
-                WHERE wr.request_id = $1
-                  AND wr.block_hash = $2
+                WHERE wr.request_id = $2
+                  AND wr.block_hash = $3
 
                 UNION
 
@@ -282,8 +282,8 @@ impl PgRead {
                   ON bwto.request_id = wr.request_id
                 JOIN sbtc_signer.bitcoin_transactions AS bt
                   ON bt.txid = bwto.bitcoin_txid
-                WHERE wr.request_id = $1
-                  AND wr.block_hash = $2
+                WHERE wr.request_id = $2
+                  AND wr.block_hash = $3
             )
             SELECT 
                 txid
