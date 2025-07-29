@@ -265,13 +265,8 @@ impl WstsCoordinator for FireCoordinator {
             .into_iter()
             .map(|(id, key)| (id + 1, key))
             .collect();
-        let signer_key_ids: HashMap<u32, HashSet<u32>> = signers
-            .iter()
-            .map(|(&signer_id, _)| {
-                let mut keys = HashSet::new();
-                keys.insert(signer_id + 1);
-                (signer_id, keys)
-            })
+        let signer_key_ids = (0..num_signers)
+            .map(|signer_id| (signer_id, std::iter::once(signer_id + 1).collect()))
             .collect();
         let public_keys = wsts::state_machine::PublicKeys {
             signers,
