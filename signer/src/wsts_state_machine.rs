@@ -252,7 +252,7 @@ impl WstsCoordinator for FireCoordinator {
         let signers: hashbrown::HashMap<u32, _> = signers
             .into_iter()
             .enumerate()
-            .map(|(id, key)| (id as u32, p256k1::keys::PublicKey::from(&key)))
+            .map(|(idx, key)| (idx as u32, key.into()))
             .collect();
         // The number of possible signers is capped at a number well below
         // u32::MAX, so this conversion should always work.
