@@ -323,10 +323,10 @@ where
             return Err(Error::NoChainTip);
         };
 
-        // The bitcoin chain tip could have changed since the we observed
-        // the bitcoin block given as an input here. If so, we can safely
-        // skip processing this block since other signers are likely to
-        // ignore us if we are the coordinator.
+        // The bitcoin chain tip could have changed since we observed the
+        // bitcoin block given as an input here. If so, we can safely skip
+        // processing this block since other signers are likely to ignore
+        // us if we are the coordinator.
         if bitcoin_chain_tip != state_chain_tip {
             tracing::info!(
                 state_bitcoin_tip_hash = %state_chain_tip.block_hash,
@@ -1834,7 +1834,8 @@ where
         }
     }
 
-    /// Determine if this signer is the signer set's coordinator.
+    /// Determine if this signer is the signer set's coordinator for the
+    /// specified bitcoin block hash.
     ///
     /// The coordinator is decided using the hash of the bitcoin chain tip.
     /// We don't use the chain tip directly because it typically starts
