@@ -617,6 +617,7 @@ mod tests {
     use std::str::FromStr;
     use std::time::Duration;
 
+    use assert_matches::assert_matches;
     use tempfile;
     use toml_edit::DocumentMut;
 
@@ -821,34 +822,21 @@ mod tests {
         let interval_secs = (MAX_BITCOIN_CHAIN_TIP_POLLING_INTERVAL_SECONDS + 1).to_string();
         set_var("SIGNER_BITCOIN__CHAIN_TIP_POLLING_INTERVAL", interval_secs);
 
-        let error = Settings::new_from_default_config().unwrap_err();
-
-        match error {
-            ConfigError::Message(msg) => {
-                assert!(msg.contains("polling interval exceeded"));
-            }
-            _ => {
-                panic!("Expected ConfigError::Message, got: {error:#?}");
-            }
-        }
+        assert_matches!(
+            Settings::new_from_default_config(),
+            Err(ConfigError::Message(msg)) if msg.contains("polling interval exceeded")
+        );
     }
 
     #[test]
     fn config_errors_if_no_bitcoin_rpc_endpoints() {
         clear_env();
-
         set_var("SIGNER_BITCOIN__RPC_ENDPOINTS", "");
 
-        let error = Settings::new_from_default_config().unwrap_err();
-
-        match error {
-            ConfigError::Message(msg) => {
-                assert!(msg.contains("RPC endpoint must be provided"));
-            }
-            _ => {
-                panic!("Expected ConfigError::Message, got: {error:#?}");
-            }
-        }
+        assert_matches!(
+            Settings::new_from_default_config(),
+            Err(ConfigError::Message(msg)) if msg.contains("At least one Bitcoin RPC endpoint must be provided")
+        );
     }
 
     #[test]
