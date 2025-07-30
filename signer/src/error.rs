@@ -93,20 +93,6 @@ pub enum Error {
     #[error("the signer set aggregate key could not be determined for bitcoin block {0}")]
     MissingAggregateKey(bitcoin::BlockHash),
 
-    /// Bitcoin chain tip poller failed to initialize within the timeout. The only
-    /// failure mode at the moment is that it failed to successfully fetch the
-    /// initial block hash from the Bitcoin Core RPC (`getbestblockhash`).
-    #[error(
-        "failed to initialize bitcoin chain tip poller within the allowed timeout ({timeout:?}): {last_error}"
-    )]
-    BitcoinChainTipPollerInitialization {
-        /// The last error received from the Bitcoin Core RPC.
-        #[source]
-        last_error: Box<Self>,
-        /// The timeout duration for the initialization.
-        timeout: std::time::Duration,
-    },
-
     /// Indicates an error when decoding a protobuf
     #[error("could not decode protobuf {0}")]
     DecodeProtobuf(#[source] prost::DecodeError),

@@ -39,12 +39,6 @@ use tracing::Span;
 /// before proceeding.
 const INITIAL_BOOTSTRAP_DELAY_SECS: u64 = 3;
 
-/// The timeout for the Bitcoin chain tip poller to initialize. This is the
-/// maximum time the poller will wait for the initial block hash to be
-/// received from the Bitcoin Core RPC. If this timeout is reached, the
-/// poller will return an error and shut down.
-const BITCOIN_POLLER_INITIALIZATION_TIMEOUT: Duration = Duration::from_secs(120);
-
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum LogOutputFormat {
     Json,
@@ -338,11 +332,8 @@ async fn run_block_observer(ctx: impl Context) -> Result<(), Error> {
     // Build and start the Bitcoin chain tip poller. This will block until it
     // can successfully fetch the initial block hash. If ths timeout is exceeded
     // while waiting for the initial block hash, an error will be returned.
-    let bitcoin_block_source = BitcoinChainTipPoller::builder(bitcoin_client)
-        .with_polling_interval(chain_tip_polling_interval)
-        .with_init_timeout(BITCOIN_POLLER_INITIALIZATION_TIMEOUT)
-        .start()
-        .await?;
+    let bitcoin_block_source =
+        BitcoinChainTipPoller::start_new(bitcoin_client, chain_tip_polling_interval).await;
 
     let result = block_observer::BlockObserver::new(ctx, bitcoin_block_source.clone())
         .run()

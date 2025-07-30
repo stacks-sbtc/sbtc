@@ -26,15 +26,10 @@ use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
 use crate::bitcoin::BitcoinBlockHashStreamProvider;
 use crate::bitcoin::BitcoinInteract;
-use crate::error::Error;
 use crate::util::SleepAsyncExt as _;
 
-/// The default interval at which the poller will check for a new chain tip.
-const DEFAULT_POLLING_INTERVAL: Duration = Duration::from_secs(5);
 /// The default capacity of the broadcast channel for sending new block hashes.
 const DEFAULT_BROADCAST_CAPACITY: usize = 1000;
-/// The default timeout for the poller's initial connection to the RPC endpoint.
-const DEFAULT_INITIALIZATION_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Error type for subscribers of the [`BitcoinChainTipPoller`].
 #[derive(Debug, Clone, thiserror::Error)]
@@ -43,53 +38,6 @@ pub enum BitcoinChainTipPollerError {
     /// and missed messages. The inner u64 is the number of messages missed.
     #[error("subscriber lagged behind broadcast channel: {0} messages missed")]
     SubscriberLagged(u64),
-}
-
-/// A builder for creating and configuring a `BitcoinChainTipPoller`.
-///
-/// This provides a fluent interface for setting up a poller instance.
-pub struct BitcoinChainTipPollerBuilder<Bitcoin> {
-    rpc: Bitcoin,
-    polling_interval: Duration,
-    init_timeout: Duration,
-}
-
-impl<Bitcoin> BitcoinChainTipPollerBuilder<Bitcoin>
-where
-    Bitcoin: BitcoinInteract + 'static,
-{
-    /// Creates a new builder for a `BitcoinChainTipPoller`.
-    ///
-    /// The `rpc` client is required. Polling interval and initialization
-    /// timeout will use default values unless otherwise configured.
-    pub fn new(rpc: Bitcoin) -> Self {
-        Self {
-            rpc,
-            polling_interval: DEFAULT_POLLING_INTERVAL,
-            init_timeout: DEFAULT_INITIALIZATION_TIMEOUT,
-        }
-    }
-
-    /// Sets a custom polling interval for the poller.
-    pub fn with_polling_interval(mut self, polling_interval: Duration) -> Self {
-        self.polling_interval = polling_interval;
-        self
-    }
-
-    /// Sets a custom timeout for the initial connection to the RPC.
-    pub fn with_init_timeout(mut self, init_timeout: Duration) -> Self {
-        self.init_timeout = init_timeout;
-        self
-    }
-
-    /// Builds and starts the `BitcoinChainTipPoller`.
-    ///
-    /// This function consumes the builder and spawns the background polling task.
-    /// It will not return until it has successfully fetched the initial best
-    /// block hash from the RPC, or until the `init_timeout` is reached.
-    pub async fn start(self) -> Result<BitcoinChainTipPoller, Error> {
-        BitcoinChainTipPoller::start(self.rpc, self.polling_interval, self.init_timeout).await
-    }
 }
 
 /// A poller that periodically checks for and broadcasts new Bitcoin chain tips.
@@ -113,21 +61,18 @@ async fn run_rpc_poller<Bitcoin>(
     rpc: Bitcoin,
     broadcast_tx: broadcast::Sender<BlockHash>,
     polling_interval: Duration,
-    initial_hash: BlockHash,
 ) where
     Bitcoin: BitcoinInteract,
 {
-    let mut last_seen_hash = initial_hash;
+    let mut last_seen_hash = None;
 
     loop {
-        polling_interval.sleep().await;
-
         match rpc.get_best_block_hash().await {
             Ok(current_hash) => {
-                if current_hash != last_seen_hash {
+                if Some(current_hash) != last_seen_hash {
                     tracing::trace!(new_hash = %current_hash, "detected new best block hash");
                     match broadcast_tx.send(current_hash) {
-                        Ok(_) => last_seen_hash = current_hash,
+                        Ok(_) => last_seen_hash = Some(current_hash),
                         Err(broadcast::error::SendError(_)) => {
                             tracing::warn!("no active subscribers for block hash broadcast");
                         }
@@ -140,67 +85,29 @@ async fn run_rpc_poller<Bitcoin>(
                 tracing::warn!(%error, "failed to get best block hash during polling; will retry.");
             }
         }
+
+        polling_interval.sleep().await;
     }
 }
 
 impl BitcoinChainTipPoller {
-    /// Creates a new builder for a `BitcoinChainTipPoller`.
-    ///
-    /// This is the main entry point for creating a new poller instance.
-    pub fn builder<Bitcoin>(rpc: Bitcoin) -> BitcoinChainTipPollerBuilder<Bitcoin>
-    where
-        Bitcoin: BitcoinInteract + 'static,
-    {
-        BitcoinChainTipPollerBuilder::new(rpc)
-    }
-
     /// Creates and starts a new `BitcoinChainTipPoller` task.
     ///
-    /// This private method is called by the builder. It attempts to fetch the
-    /// initial block hash within a timeout and then spawns the long-running
-    /// poller task.
-    async fn start<Bitcoin>(
-        rpc: Bitcoin,
-        polling_interval: Duration,
-        init_timeout: Duration,
-    ) -> Result<Self, Error>
+    /// This private method is called by the builder. It polls the bitcoin node.
+    pub async fn start_new<Bitcoin>(rpc: Bitcoin, polling_interval: Duration) -> Self
     where
         Bitcoin: BitcoinInteract + 'static,
     {
-        let start_time = tokio::time::Instant::now();
-
-        // Try to fetch the initial hash, retrying until the timeout is reached.
-        let initial_hash = loop {
-            match rpc.get_best_block_hash().await {
-                Ok(hash) => break hash,
-                Err(error) => {
-                    if start_time.elapsed() >= init_timeout {
-                        tracing::error!(%error, "timed out getting initial block hash");
-                        return Err(Error::BitcoinChainTipPollerInitialization {
-                            last_error: Box::new(error),
-                            timeout: init_timeout,
-                        });
-                    }
-                    tracing::warn!(%error, "failed to get initial block hash, retrying...");
-                    tokio::time::sleep(Duration::from_secs(1)).await;
-                }
-            }
-        };
-
         let (broadcast_tx, _rx) = broadcast::channel::<BlockHash>(DEFAULT_BROADCAST_CAPACITY);
 
         // Spawn the RPC polling task.
-        let poller_task_handle = tokio::spawn(run_rpc_poller(
-            rpc,
-            broadcast_tx.clone(),
-            polling_interval,
-            initial_hash,
-        ));
+        let poller_task_handle =
+            tokio::spawn(run_rpc_poller(rpc, broadcast_tx.clone(), polling_interval));
 
-        Ok(Self {
+        Self {
             broadcast_tx,
             poller_task_handle: Arc::new(poller_task_handle),
-        })
+        }
     }
 
     /// Stops the background polling task.

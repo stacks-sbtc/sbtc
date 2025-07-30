@@ -103,12 +103,11 @@ impl BitcoinChainTipPoller {
     /// Creates a new `BitcoinChainTipPoller` for the regtest network with a
     /// short polling interval and initialization timeout suitable for tests.
     pub async fn start_for_regtest() -> Self {
-        BitcoinChainTipPoller::builder(BitcoinCoreClient::new_regtest())
-            .with_polling_interval(Duration::from_millis(100))
-            .with_init_timeout(Duration::from_secs(2))
-            .start()
-            .await
-            .expect("Failed to create BitcoinChainTipPoller for regtest")
+        BitcoinChainTipPoller::start_new(
+            BitcoinCoreClient::new_regtest(),
+            Duration::from_millis(100),
+        )
+        .await
     }
 }
 
