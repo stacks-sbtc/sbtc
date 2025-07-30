@@ -465,7 +465,7 @@ impl<'r> sqlx::Decode<'r, sqlx::Postgres> for DbPeerId {
         // Parse the string back into a PeerId
         PeerId::from_str(&peer_id_str)
             .map(DbPeerId::from)
-            .map_err(|e| format!("Failed to parse PeerId from database string: {}", e).into())
+            .map_err(|e| format!("Failed to parse PeerId from database string: {e}").into())
     }
 }
 
@@ -504,6 +504,6 @@ impl<'r> sqlx::Decode<'r, sqlx::Postgres> for DbMultiaddr {
         // Parse the string back into a Multiaddr
         Multiaddr::from_str(&multiaddr_str)
             .map(DbMultiaddr::from)
-            .map_err(|e| format!("Failed to parse Multiaddr from database string: {}", e).into())
+            .map_err(|e| format!("Failed to parse Multiaddr from database string: {e}").into())
     }
 }

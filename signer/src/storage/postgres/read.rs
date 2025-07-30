@@ -21,21 +21,7 @@ use crate::{
     },
 };
 
-<<<<<<< HEAD:signer/src/storage/postgres.rs
-use crate::DEPOSIT_LOCKTIME_BLOCK_BUFFER;
-use crate::MAX_MEMPOOL_PACKAGE_TX_COUNT;
-use crate::MAX_REORG_BLOCK_COUNT;
-use crate::WITHDRAWAL_BLOCKS_EXPIRY;
-
-use super::model::DbMultiaddr;
-use super::model::DbPeerId;
-
-/// All migration scripts from the `signer/migrations` directory.
-static PGSQL_MIGRATIONS: include_dir::Dir =
-    include_dir::include_dir!("$CARGO_MANIFEST_DIR/migrations");
-=======
 use super::{PgStore, PgTransaction};
->>>>>>> main:signer/src/storage/postgres/read.rs
 
 /// A convenience struct for retrieving a deposit request report
 #[derive(sqlx::FromRow)]
@@ -2528,19 +2514,22 @@ impl PgRead {
         .map_err(Error::SqlxQuery)
     }
 
-    async fn get_p2p_peers(&self) -> Result<Vec<model::P2PPeer>, Error> {
+    async fn get_p2p_peers<'e, E>(executor: &'e mut E) -> Result<Vec<model::P2PPeer>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query_as::<_, model::P2PPeer>(
             r#"
             SELECT 
-                peer_id, 
-                public_key, 
-                address,
-                last_dialed_at
+                peer_id
+              , public_key
+              , address
+              , last_dialed_at
             FROM 
                 sbtc_signer.p2p_peers
             "#,
         )
-        .fetch_all(&self.0)
+        .fetch_all(executor)
         .await
         .map_err(Error::SqlxQuery)
     }
@@ -2969,6 +2958,10 @@ impl DbRead for PgStore {
         )
         .await
     }
+
+    async fn get_p2p_peers(&self) -> Result<Vec<model::P2PPeer>, Error> {
+        PgRead::get_p2p_peers(self.get_connection().await?.as_mut()).await
+    }
 }
 
 impl DbRead for PgTransaction<'_> {
@@ -3393,32 +3386,8 @@ impl DbRead for PgTransaction<'_> {
         PgRead::will_sign_bitcoin_tx_sighash(tx.as_mut(), sighash).await
     }
 
-    async fn update_peer_connection(
-        &self,
-        pub_key: &PublicKey,
-        peer_id: &libp2p::PeerId,
-        address: libp2p::Multiaddr,
-    ) -> Result<(), Error> {
-        sqlx::query(
-            r#"
-            INSERT INTO sbtc_signer.p2p_peers (
-                peer_id
-              , public_key
-              , address
-            )
-            VALUES ($1, $2, $3)
-            ON CONFLICT (peer_id, public_key) DO UPDATE SET
-                address = EXCLUDED.address
-              , last_dialed_at = NOW()
-            "#,
-        )
-        .bind(DbPeerId::from(*peer_id))
-        .bind(pub_key)
-        .bind(DbMultiaddr::from(address))
-        .execute(&self.0)
-        .await
-        .map_err(Error::SqlxQuery)?;
-
-        Ok(())
+    async fn get_p2p_peers(&self) -> Result<Vec<model::P2PPeer>, Error> {
+        let mut tx = self.tx.lock().await;
+        PgRead::get_p2p_peers(tx.as_mut()).await
     }
 }
