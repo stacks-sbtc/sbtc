@@ -275,7 +275,7 @@ async fn run_libp2p_swarm(ctx: impl Context) -> Result<(), Error> {
         // Fetch known peers from the database.
         let mut db_peers = ctx.get_storage().get_p2p_peers().await.unwrap_or_default();
 
-        // Sort the peers by last successful dialed time, duration-ascending.
+        // Sort the peers by last successful dialed time, duration-descending.
         db_peers.sort_unstable_by(|a, b| b.last_dialed_at.cmp(&a.last_dialed_at));
 
         // Create a list of known peers, filtering out those that have not been
