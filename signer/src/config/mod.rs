@@ -843,7 +843,6 @@ mod tests {
 
         match error {
             ConfigError::Message(msg) => {
-                dbg!(&msg);
                 assert!(msg.contains("RPC endpoint must be provided"));
             }
             _ => {
