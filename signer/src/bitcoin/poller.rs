@@ -132,10 +132,10 @@ async fn run_rpc_poller<Bitcoin>(
                     }
                 }
             }
-            Err(e) => {
+            Err(error) => {
                 // On a transient error, log it and continue polling. Do not send the
                 // error to consumers, as they cannot act on it.
-                tracing::warn!(error = %e, "failed to get best block hash during polling; will retry.");
+                tracing::warn!(%error, "failed to get best block hash during polling; will retry.");
             }
         }
     }
@@ -166,22 +166,20 @@ impl BitcoinChainTipPoller {
         Bitcoin: BitcoinInteract + 'static,
     {
         let start_time = tokio::time::Instant::now();
-        let mut last_error;
 
         // Try to fetch the initial hash, retrying until the timeout is reached.
         let initial_hash = loop {
             match rpc.get_best_block_hash().await {
                 Ok(hash) => break hash,
-                Err(e) => {
-                    last_error = e;
+                Err(error) => {
                     if start_time.elapsed() >= init_timeout {
-                        tracing::error!(error = %last_error, "timed out getting initial block hash");
+                        tracing::error!(%error, "timed out getting initial block hash");
                         return Err(Error::BitcoinChainTipPollerInitialization {
-                            last_error: Box::new(last_error),
+                            last_error: Box::new(error),
                             timeout: init_timeout,
                         });
                     }
-                    tracing::warn!(error = %last_error, "failed to get initial block hash, retrying...");
+                    tracing::warn!(%error, "failed to get initial block hash, retrying...");
                     tokio::time::sleep(Duration::from_secs(1)).await;
                 }
             }
