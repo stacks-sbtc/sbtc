@@ -104,8 +104,8 @@ impl SignerBehavior {
 
         let bootstrap_config = bootstrap::Config::new(local_peer_id)
             .with_initial_delay(config.initial_bootstrap_delay)
-            .add_seed_addresses(&config.seed_addresses)
-            .with_known_peers(&config.known_peers);
+            .add_seed_addresses(config.seed_addresses)
+            .add_known_peers(config.known_peers);
         let bootstrap = bootstrap::Behavior::new(bootstrap_config);
 
         Ok(Self {
@@ -117,16 +117,16 @@ impl SignerBehavior {
             autonat_client,
             autonat_server,
             bootstrap,
-            connection_limits: Self::connection_limits(&config),
+            connection_limits: Self::connection_limits(config.num_signers),
         })
     }
 
-    fn connection_limits(config: &SignerSwarmConfig) -> connection_limits::Behaviour {
+    fn connection_limits(num_signers_in: u16) -> connection_limits::Behaviour {
         // The number of signers is the number of signers in the set, minus one
         // for the local signer. This is used to calculate the connection limits.
         // Note: We use `max(2)` here to ensure that we always have limits
         // that support at least two signers.
-        let num_signers = config.num_signers.saturating_sub(1).max(2) as u32;
+        let num_signers = num_signers_in.saturating_sub(1).max(2) as u32;
 
         // Allow `num_signers` * 3 connections to be established at once. This
         // allows room for one incoming/outgoing connection to each signer, plus

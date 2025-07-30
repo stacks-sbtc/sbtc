@@ -42,25 +42,20 @@ impl Config {
     }
 
     /// Adds seed addresses to the configuration.
-    pub fn add_seed_addresses<'a, T>(mut self, seed_addresses: T) -> Self
+    pub fn add_seed_addresses<T>(mut self, seed_addresses: T) -> Self
     where
-        T: IntoIterator<Item = &'a Multiaddr>,
+        T: IntoIterator<Item = Multiaddr>,
     {
-        self.seed_addresses
-            .extend(seed_addresses.into_iter().cloned());
+        self.seed_addresses.extend(seed_addresses);
         self
     }
 
     /// Adds known peers to the configuration.
-    pub fn with_known_peers<'a, T>(mut self, known_peers: T) -> Self
+    pub fn add_known_peers<T>(mut self, known_peers: T) -> Self
     where
-        T: IntoIterator<Item = &'a (PeerId, Multiaddr)>,
+        T: IntoIterator<Item = (PeerId, Multiaddr)>,
     {
-        self.known_peers.extend(
-            known_peers
-                .into_iter()
-                .map(|(peer_id, addr)| (*peer_id, addr.clone())),
-        );
+        self.known_peers.extend(known_peers);
         self
     }
 
