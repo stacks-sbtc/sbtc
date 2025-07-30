@@ -541,7 +541,6 @@ impl Settings {
             .with_list_parse_key("signer.p2p.listen_on")
             .with_list_parse_key("signer.p2p.public_endpoints")
             .with_list_parse_key("bitcoin.rpc_endpoints")
-            .with_list_parse_key("bitcoin.block_hash_stream_endpoints")
             .with_list_parse_key("stacks.endpoints")
             .with_list_parse_key("emily.endpoints")
             .prefix_separator("_");
@@ -771,11 +770,6 @@ mod tests {
         set_var(
             "SIGNER_BITCOIN__RPC_ENDPOINTS",
             "http://user:pass@localhost:1234,http://foo:bar@localhost:5678",
-        );
-
-        set_var(
-            "SIGNER_BITCOIN__BLOCK_HASH_STREAM_ENDPOINTS",
-            "tcp://localhost:1234,tcp://localhost:5678",
         );
 
         let settings = Settings::new_from_default_config().unwrap();

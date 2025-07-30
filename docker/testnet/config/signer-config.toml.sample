@@ -13,11 +13,6 @@ rpc_endpoints = [
     "http://USER:PASS@TODO:18443",
 ]
 
-# TODO: Change this to local bitcoin container
-block_hash_stream_endpoints = [
-    "tcp://TODO:28332"
-]
-
 [stacks]
 # TODO: Change this to local stacks container
 endpoints = [
