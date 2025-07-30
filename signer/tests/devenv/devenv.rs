@@ -138,9 +138,11 @@ async fn process_blocks_simple_fork() {
 
     // Let's wait for the block observer signal
     let signal = signal_rx.recv();
-    let Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved)) = signal.await else {
-        panic!("Not the right signal")
-    };
+    match signal.await {
+        Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref)))
+            if *block_ref.block_hash == block_1a => {}
+        _ => panic!("Not the right signal"),
+    }
 
     let (bitcoin_tip_original, _) = db.get_chain_tips().await;
     assert_eq!(block_1a, bitcoin_tip_original.block_hash.into());
@@ -156,9 +158,11 @@ async fn process_blocks_simple_fork() {
 
     // Let's wait for the block observer signal
     let signal = signal_rx.recv();
-    let Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved)) = signal.await else {
-        panic!("Not the right signal")
-    };
+    match signal.await {
+        Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref)))
+            if *block_ref.block_hash == block_2b => {}
+        _ => panic!("Not the right signal"),
+    }
 
     let (bitcoin_tip_fork, _) = db.get_chain_tips().await;
     assert_eq!(block_2b, bitcoin_tip_fork.block_hash.into());
