@@ -86,7 +86,7 @@ use crate::storage::model::StacksTxId;
 use crate::storage::model::TaprootScriptHash;
 use crate::storage::model::WithdrawalAcceptEvent;
 use crate::storage::model::WithdrawalRejectEvent;
-use crate::wsts_state_machine::DkgPublicSharesDb;
+use crate::wsts_state_machine::DkgSignerCommitments;
 
 /// Dummy block
 pub fn block<R: rand::RngCore + ?Sized>(
@@ -1152,9 +1152,9 @@ impl Dummy<Unit> for DkgPublicShares {
     }
 }
 
-impl Dummy<Unit> for DkgPublicSharesDb {
+impl Dummy<Unit> for DkgSignerCommitments {
     fn dummy_with_rng<R: rand::Rng + ?Sized>(config: &Unit, rng: &mut R) -> Self {
-        DkgPublicSharesDb {
+        DkgSignerCommitments {
             comms: fake::vec![(); 0..20]
                 .into_iter()
                 .map(|_| config.fake_with_rng(rng))

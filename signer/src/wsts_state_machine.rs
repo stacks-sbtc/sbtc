@@ -47,12 +47,12 @@ use wsts::v2::Aggregator;
 ///
 /// This is used to store the DKG public shares in the database.
 #[derive(Clone, Debug, PartialEq, Default)]
-pub struct DkgPublicSharesDb {
+pub struct DkgSignerCommitments {
     /// List of (party_id, commitment)
     pub comms: Vec<(u32, PolyCommitment)>,
 }
 
-impl crate::codec::Decode for BTreeMap<u32, DkgPublicSharesDb> {
+impl crate::codec::Decode for BTreeMap<u32, DkgSignerCommitments> {
     fn decode<R: std::io::Read>(mut reader: R) -> Result<Self, Error> {
         let mut buf = Vec::new();
         reader
@@ -64,7 +64,7 @@ impl crate::codec::Decode for BTreeMap<u32, DkgPublicSharesDb> {
             .commitments
             .into_iter()
             .map(|(id, comms)| Ok((id, comms.try_into()?)))
-            .collect::<Result<BTreeMap<u32, DkgPublicSharesDb>, Error>>()
+            .collect::<Result<BTreeMap<u32, DkgSignerCommitments>, Error>>()
     }
 }
 
@@ -342,7 +342,7 @@ impl WstsCoordinator for FireCoordinator {
             .await?
             .ok_or(Error::MissingDkgShares(aggregate_key))?;
 
-        let public_dkg_shares: BTreeMap<u32, DkgPublicSharesDb> =
+        let public_dkg_shares: BTreeMap<u32, DkgSignerCommitments> =
             BTreeMap::decode(encrypted_shares.public_shares.as_slice())?;
         let party_polynomials = public_dkg_shares
             .iter()
@@ -470,7 +470,7 @@ impl WstsCoordinator for FrostCoordinator {
             .await?
             .ok_or(Error::MissingDkgShares(aggregate_key))?;
 
-        let public_dkg_shares: BTreeMap<u32, DkgPublicSharesDb> =
+        let public_dkg_shares: BTreeMap<u32, DkgSignerCommitments> =
             BTreeMap::decode(encrypted_shares.public_shares.as_slice())?;
         let party_polynomials = public_dkg_shares
             .iter()
@@ -807,7 +807,7 @@ mod tests {
         let mut rng = get_rng();
         let shares: BTreeMap<u32, DkgPublicShares> = Unit.fake_with_rng(&mut rng);
         let encoded = shares.clone().encode_to_vec();
-        let decoded_shares = BTreeMap::<u32, DkgPublicSharesDb>::decode(&*encoded).unwrap();
+        let decoded_shares = BTreeMap::<u32, DkgSignerCommitments>::decode(&*encoded).unwrap();
 
         for (original, decoded) in shares.iter().zip(decoded_shares.iter()) {
             assert_eq!(original.0, decoded.0);
