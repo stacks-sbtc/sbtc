@@ -802,7 +802,7 @@ impl fake::Dummy<fake::Faker> for model::Timestamp {
 impl fake::Dummy<fake::Faker> for model::P2PPeer {
     fn dummy_with_rng<R: rand::RngCore + ?Sized>(config: &fake::Faker, rng: &mut R) -> Self {
         let public_key: PublicKey = config.fake_with_rng(rng);
-        let multiaddr = Multiaddr::random_memory();
+        let multiaddr = Multiaddr::random_memory(rng);
         let peer_id: PeerId = public_key.into();
 
         model::P2PPeer {

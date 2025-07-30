@@ -6147,11 +6147,11 @@ mod p2p_peers {
     #[tokio::test]
     async fn write_read_p2p_peer() {
         let db = testing::storage::new_test_database().await;
-        let mut rng = get_rng();
+        let rng = &mut get_rng();
 
-        let pub_key: PublicKey = Faker.fake_with_rng(&mut rng);
+        let pub_key: PublicKey = Faker.fake_with_rng(rng);
         let peer_id: PeerId = pub_key.into();
-        let multiaddr = Multiaddr::random_memory();
+        let multiaddr = Multiaddr::random_memory(rng);
         let utc_now = time::OffsetDateTime::now_utc();
 
         db.update_peer_connection(&pub_key, &peer_id, multiaddr.clone())
@@ -6166,9 +6166,6 @@ mod p2p_peers {
         // Ensure that the last_dialed_at timestamp is within a reasonable
         // timespan from utc_now.
         assert!(*peers[0].last_dialed_at - utc_now < time::Duration::seconds(5));
-
-        dbg!(&peers);
-        dbg!(&peers[0].last_dialed_at);
 
         testing::storage::drop_db(db).await;
     }

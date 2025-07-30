@@ -564,11 +564,12 @@ mod tests {
 
     #[tokio::test]
     async fn swarm_with_memory_transport() {
+        let rng = &mut get_rng();
         let private_key = PrivateKey::new(&mut rand::thread_rng());
         let builder = SignerSwarmBuilder::new(&private_key);
         let mut swarm = builder
             .enable_memory_transport(true)
-            .add_listen_endpoint(Multiaddr::random_memory())
+            .add_listen_endpoint(Multiaddr::random_memory(rng))
             .build()
             .unwrap();
 
@@ -588,11 +589,12 @@ mod tests {
 
     #[tokio::test]
     async fn swarm_with_memory_transport_disabled() {
+        let rng = &mut get_rng();
         let private_key = PrivateKey::new(&mut rand::thread_rng());
         let builder = SignerSwarmBuilder::new(&private_key);
         let mut swarm = builder
             .enable_memory_transport(false)
-            .add_listen_endpoint(Multiaddr::random_memory())
+            .add_listen_endpoint(Multiaddr::random_memory(rng))
             .build()
             .unwrap();
 
