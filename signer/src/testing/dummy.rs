@@ -86,6 +86,7 @@ use crate::storage::model::StacksTxId;
 use crate::storage::model::TaprootScriptHash;
 use crate::storage::model::WithdrawalAcceptEvent;
 use crate::storage::model::WithdrawalRejectEvent;
+use crate::wsts_state_machine::DkgPublicSharesDb;
 
 /// Dummy block
 pub fn block<R: rand::RngCore + ?Sized>(
@@ -1143,6 +1144,17 @@ impl Dummy<Unit> for DkgPublicShares {
             kex_public_key: config.fake_with_rng(rng),
             dkg_id: Faker.fake_with_rng(rng),
             signer_id: Faker.fake_with_rng(rng),
+            comms: fake::vec![(); 0..20]
+                .into_iter()
+                .map(|_| config.fake_with_rng(rng))
+                .collect(),
+        }
+    }
+}
+
+impl Dummy<Unit> for DkgPublicSharesDb {
+    fn dummy_with_rng<R: rand::Rng + ?Sized>(config: &Unit, rng: &mut R) -> Self {
+        DkgPublicSharesDb {
             comms: fake::vec![(); 0..20]
                 .into_iter()
                 .map(|_| config.fake_with_rng(rng))

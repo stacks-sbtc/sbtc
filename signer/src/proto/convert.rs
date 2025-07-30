@@ -68,6 +68,7 @@ use crate::storage::model::QualifiedRequestId;
 use crate::storage::model::StacksBlockHash;
 use crate::storage::model::StacksPrincipal;
 use crate::storage::model::StacksTxId;
+use crate::wsts_state_machine::DkgPublicSharesDb;
 
 use super::wsts_message;
 
@@ -1584,6 +1585,19 @@ impl TryFrom<proto::PartyCommitment> for (u32, PolyCommitment) {
     type Error = Error;
     fn try_from(value: proto::PartyCommitment) -> Result<Self, Self::Error> {
         Ok((value.signer_id, value.commitment.required()?.try_into()?))
+    }
+}
+
+impl TryFrom<proto::DkgSignerCommitment> for DkgPublicSharesDb {
+    type Error = Error;
+    fn try_from(value: proto::DkgSignerCommitment) -> Result<Self, Self::Error> {
+        let commitments = value
+            .commitment
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<Vec<_>, Error>>()?;
+
+        Ok(DkgPublicSharesDb { comms: commitments })
     }
 }
 
