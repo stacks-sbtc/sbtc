@@ -651,7 +651,7 @@ impl BitcoinCoreClient {
             .map_err(Error::BitcoinCoreRpc)
     }
 
-    /// Gets the best block height from the Bitcoin node.
+    /// Gets the best block hash from the Bitcoin node.
     pub fn get_best_block_hash(&self) -> Result<BlockHash, Error> {
         self.inner
             .get_best_block_hash()

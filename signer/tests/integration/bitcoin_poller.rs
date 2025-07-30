@@ -6,7 +6,7 @@ use signer::bitcoin::poller::BitcoinChainTipPoller;
 use test_log::test;
 use tokio::sync::mpsc::error::TryRecvError;
 
-/// This tests that out bitcoin block hash stream receives new block hashes
+/// This tests that our bitcoin block hash stream receives new block hashes
 /// from bitcoin-core as it receives blocks. We create the stream, generate
 /// bitcoin blocks, and wait for the block hashes to be received from the
 /// stream. This also checks that we parse block hashes correctly, since
