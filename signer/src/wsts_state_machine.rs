@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 use std::future::Future;
 
+use crate::codec::CodecError;
 use crate::codec::Decode as _;
 use crate::codec::Encode as _;
 use crate::error;
@@ -11,6 +12,7 @@ use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
 use crate::keys::PublicKeyXOnly;
 use crate::keys::SignerScriptPubKey as _;
+use crate::proto;
 use crate::storage;
 use crate::storage::model;
 use crate::storage::model::BitcoinBlockHash;
@@ -21,6 +23,7 @@ use crate::storage::model::SigHash;
 
 use hashbrown::HashMap;
 use hashbrown::HashSet;
+use prost::Message as _;
 use rand::SeedableRng as _;
 use rand::rngs::OsRng;
 use rand_chacha::ChaCha20Rng;
@@ -39,6 +42,31 @@ use wsts::state_machine::coordinator::fire;
 use wsts::state_machine::coordinator::frost;
 use wsts::traits::Signer as _;
 use wsts::v2::Aggregator;
+
+/// A database model for storing DKG public shares.
+///
+/// This is used to store the DKG public shares in the database.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct DkgSignerCommitments {
+    /// List of (party_id, commitment)
+    pub comms: Vec<(u32, PolyCommitment)>,
+}
+
+impl crate::codec::Decode for BTreeMap<u32, DkgSignerCommitments> {
+    fn decode<R: std::io::Read>(mut reader: R) -> Result<Self, Error> {
+        let mut buf = Vec::new();
+        reader
+            .read_to_end(&mut buf)
+            .map_err(CodecError::DecodeIOError)?;
+
+        proto::DkgPolynomialCommitments::decode(&*buf)
+            .map_err(CodecError::DecodeError)?
+            .commitments
+            .into_iter()
+            .map(|(id, comms)| Ok((id, comms.try_into()?)))
+            .collect::<Result<BTreeMap<u32, DkgSignerCommitments>, Error>>()
+    }
+}
 
 /// An identifier for signer state machines.
 ///
@@ -314,7 +342,7 @@ impl WstsCoordinator for FireCoordinator {
             .await?
             .ok_or(Error::MissingDkgShares(aggregate_key))?;
 
-        let public_dkg_shares: BTreeMap<u32, wsts::net::DkgPublicShares> =
+        let public_dkg_shares: BTreeMap<u32, DkgSignerCommitments> =
             BTreeMap::decode(encrypted_shares.public_shares.as_slice())?;
         let party_polynomials = public_dkg_shares
             .iter()
@@ -442,7 +470,7 @@ impl WstsCoordinator for FrostCoordinator {
             .await?
             .ok_or(Error::MissingDkgShares(aggregate_key))?;
 
-        let public_dkg_shares: BTreeMap<u32, wsts::net::DkgPublicShares> =
+        let public_dkg_shares: BTreeMap<u32, DkgSignerCommitments> =
             BTreeMap::decode(encrypted_shares.public_shares.as_slice())?;
         let party_polynomials = public_dkg_shares
             .iter()
@@ -749,5 +777,41 @@ impl SignerStateMachine {
             started_at_bitcoin_block_hash: self.started_at.block_hash,
             started_at_bitcoin_block_height: self.started_at.block_height,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use fake::Fake as _;
+    use wsts::net::DkgPublicShares;
+
+    use crate::testing::dummy::Unit;
+    use crate::testing::get_rng;
+
+    use super::*;
+
+    /// Test that we can decode DKG public shares
+    ///
+    /// During normal operation the signers encode the full DKG public
+    /// shares object as a protobuf. Public shares start out as a
+    /// `BTreeMap<u32, DkgPublicShares>` and is serialized as a
+    /// `proto::DkgPublicShares`. When decoding, we only decode the one
+    /// field that we care about, the `comms` field in each
+    /// `DkgPublicShares`. We do this to allow the WSTS types to evolve
+    /// independently of what the signers store in their database. So long
+    /// as the protobuf type that we stored, the `proto::DkgPublicShares`,
+    /// is compatible with the `BTreeMap<u32, DkgPublicSharesDb>` type,
+    /// then we are fine.
+    #[test]
+    fn test_dkg_public_shares_db_decoding() {
+        let mut rng = get_rng();
+        let shares: BTreeMap<u32, DkgPublicShares> = Unit.fake_with_rng(&mut rng);
+        let encoded = shares.clone().encode_to_vec();
+        let decoded_shares = BTreeMap::<u32, DkgSignerCommitments>::decode(&*encoded).unwrap();
+
+        for (original, decoded) in shares.iter().zip(decoded_shares.iter()) {
+            assert_eq!(original.0, decoded.0);
+            assert_eq!(original.1.comms, decoded.1.comms);
+        }
     }
 }
