@@ -134,10 +134,6 @@ impl MockBitcoinBlockHashStreamProvider {
     }
 
     /// Sends a block hash result to all subscribers of this provider.
-    ///
-    /// ## Returns
-    /// * `Ok(usize)`: The number of active receivers the message was sent to.
-    /// * `Err(broadcast::error::SendError<...>)`: If there are no active receivers.
     #[track_caller]
     pub fn send(&self, item: Result<BlockHash, BroadcastStreamRecvError>) {
         self.sender
