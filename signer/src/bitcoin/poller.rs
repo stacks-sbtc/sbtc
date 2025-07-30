@@ -189,11 +189,6 @@ impl BitcoinChainTipPoller {
 
         let (broadcast_tx, _rx) = broadcast::channel::<BlockHash>(DEFAULT_BROADCAST_CAPACITY);
 
-        // Broadcast the initial hash.
-        if broadcast_tx.send(initial_hash).is_err() {
-            tracing::warn!("no subscribers at initial broadcast, continuing anyway");
-        }
-
         // Spawn the RPC polling task.
         let poller_task_handle = tokio::spawn(run_rpc_poller(
             rpc,
