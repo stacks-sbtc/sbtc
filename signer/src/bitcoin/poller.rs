@@ -135,7 +135,7 @@ async fn run_rpc_poller<Bitcoin>(
             Err(e) => {
                 // On a transient error, log it and continue polling. Do not send the
                 // error to consumers, as they cannot act on it.
-                tracing::error!(error = %e, "failed to get best block hash during polling; will retry.");
+                tracing::warn!(error = %e, "failed to get best block hash during polling; will retry.");
             }
         }
     }
