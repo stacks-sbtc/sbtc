@@ -22,6 +22,7 @@ services:
     environment:
       BITCOIN_RPC_USERNAME: *BITCOIN_RPC_USERNAME
       BITCOIN_RPC_PASSWORD: *BITCOIN_RPC_PASSWORD
+      BITCOIN_RPC_PORT: *BITCOIN_RPC_PORT
       BITCOIN_DATA: /bitcoin/data
     entrypoint:
       - /bin/bash
