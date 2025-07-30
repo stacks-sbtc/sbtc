@@ -111,7 +111,7 @@ impl BitcoinChainTipPoller {
     }
 
     /// Stops the background polling task.
-    pub fn stop(&self) {
+    pub fn stop(self) {
         self.poller_task_handle.abort();
     }
 }
