@@ -326,7 +326,7 @@ where
         // The bitcoin chain tip could have changed since we observed the
         // bitcoin block given as an input here. If so, we can safely skip
         // processing this block since other signers are likely to ignore
-        // us if we are the coordinator.
+        // us.
         if bitcoin_chain_tip != state_chain_tip {
             tracing::info!(
                 state_bitcoin_tip_hash = %state_chain_tip.block_hash,
