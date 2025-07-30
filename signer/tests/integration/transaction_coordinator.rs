@@ -37,6 +37,7 @@ use fake::Fake;
 use fake::Faker;
 use futures::StreamExt as _;
 use lru::LruCache;
+use more_asserts::assert_gt;
 use more_asserts::assert_lt;
 use rand::rngs::OsRng;
 
@@ -1072,11 +1073,54 @@ async fn run_dkg_from_scratch() {
     }
 }
 
+struct RunDkgSignerSetScenario {
+    pub signer_set_changed: bool,
+    pub threshold_changed: bool,
+    pub latest_shares_matches: bool,
+}
 /// Tests that dkg will be triggered if signer set changes
-#[test_case(true; "signatures_required_changed")]
-#[test_case(false; "signatures_required_unchanged")]
+#[test_case(RunDkgSignerSetScenario {
+    signer_set_changed: false,
+    threshold_changed: false,
+    latest_shares_matches: false,
+}, false; "no changes, latest don't match")]
+#[test_case(RunDkgSignerSetScenario {
+    signer_set_changed: false,
+    threshold_changed: false,
+    latest_shares_matches: true,
+}, false; "no changes, latest match")]
+#[test_case(RunDkgSignerSetScenario {
+    signer_set_changed: true,
+    threshold_changed: false,
+    latest_shares_matches: false,
+}, true; "set changed, latest don't match")]
+#[test_case(RunDkgSignerSetScenario {
+    signer_set_changed: true,
+    threshold_changed: false,
+    latest_shares_matches: true,
+}, false; "set changed, latest match")]
+#[test_case(RunDkgSignerSetScenario {
+    signer_set_changed: false,
+    threshold_changed: true,
+    latest_shares_matches: false,
+}, true; "threshold changed, latest don't match")]
+#[test_case(RunDkgSignerSetScenario {
+    signer_set_changed: false,
+    threshold_changed: true,
+    latest_shares_matches: true,
+}, false; "threshold changed, latest match")]
+#[test_case(RunDkgSignerSetScenario {
+    signer_set_changed: true,
+    threshold_changed: true,
+    latest_shares_matches: false,
+}, true; "both changed, latest don't match")]
+#[test_case(RunDkgSignerSetScenario {
+    signer_set_changed: true,
+    threshold_changed: true,
+    latest_shares_matches: true,
+}, false; "both changed, latest match")]
 #[tokio::test]
-async fn run_dkg_if_signer_set_changes(signer_set_changed: bool) {
+async fn run_dkg_if_signer_set_changes(scenario: RunDkgSignerSetScenario, expect_dkg: bool) {
     let mut rng = get_rng();
     let db = testing::storage::new_test_database().await;
     let ctx = TestContext::builder()
@@ -1087,16 +1131,22 @@ async fn run_dkg_if_signer_set_changes(signer_set_changed: bool) {
         })
         .build();
 
-    let mut config_signer_set = ctx.config().signer.bootstrap_signing_set.clone();
+    let chaintip: model::BitcoinBlockRef = Faker.fake_with_rng(&mut rng);
+
     // Sanity check
-    assert!(!config_signer_set.is_empty());
+    assert!(!ctx.config().signer.bootstrap_signing_set.is_empty());
+    assert_gt!(ctx.config().signer.bootstrap_signatures_required, 1);
 
-    // Make sure that in very beginning of the test config and context signer sets are same.
-    ctx.inner
-        .state()
-        .update_current_signer_set(config_signer_set.iter().cloned().collect());
+    // Initially the config and registry matches
+    let mut signer_set_info = SignerSetInfo {
+        aggregate_key: Faker.fake_with_rng(&mut rng),
+        signatures_required: ctx.config().signer.bootstrap_signatures_required,
+        signer_set: ctx.config().signer.bootstrap_signing_set.clone(),
+    };
+    ctx.state()
+        .update_registry_signer_set_info(signer_set_info.clone());
 
-    // Write dkg shares so it won't be a reason to trigger dkg.
+    // Write some verified DKG shares so it won't be a reason to trigger DKG
     let dkg_shares = model::EncryptedDkgShares {
         dkg_shares_status: model::DkgSharesStatus::Verified,
         ..Faker.fake_with_rng(&mut rng)
@@ -1105,90 +1155,44 @@ async fn run_dkg_if_signer_set_changes(signer_set_changed: bool) {
         .await
         .expect("failed to write dkg shares");
 
-    // Remove one signer
-    if signer_set_changed {
-        let _removed_signer = config_signer_set
+    // Before any change DKG shouldn't be triggered
+    assert!(!should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+    assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_err());
+
+    // Alter the registry based on the test
+    if scenario.signer_set_changed {
+        signer_set_info
+            .signer_set
             .pop_first()
             .expect("This signer set should not be empty");
     }
-    // Create chaintip
-    let chaintip: model::BitcoinBlockRef = Faker.fake_with_rng(&mut rng);
-
-    prevent_dkg_on_changed_signer_set_info(&ctx, dkg_shares.aggregate_key);
-
-    // Before we actually change the signer set, the DKG won't be triggered
-    assert!(!should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
-    assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_err());
-
-    // Now we change context signer set.
-    let signer_set_info = SignerSetInfo {
-        aggregate_key: dkg_shares.aggregate_key,
-        signatures_required: ctx.config().signer.bootstrap_signatures_required,
-        signer_set: config_signer_set,
-    };
-
-    ctx.state().update_registry_signer_set_info(signer_set_info);
-
-    if signer_set_changed {
-        assert!(should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
-        assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_ok());
-    } else {
-        assert!(!should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
-        assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_err());
+    if scenario.threshold_changed {
+        signer_set_info.signatures_required -= 1;
     }
-    testing::storage::drop_db(db).await;
-}
-
-/// Tests that dkg will be triggered if signatures required parameter changes
-#[test_case(true; "signatures_required_changed")]
-#[test_case(false; "signatures_required_unchanged")]
-#[tokio::test]
-async fn run_dkg_if_signatures_required_changes(change_signatures_required: bool) {
-    let mut rng = get_rng();
-    let db = testing::storage::new_test_database().await;
-    let mut ctx = TestContext::builder()
-        .with_storage(db.clone())
-        .with_mocked_clients()
-        .modify_settings(|settings| {
-            settings.signer.dkg_target_rounds = std::num::NonZero::<u32>::new(1).unwrap();
-            settings.signer.bootstrap_signatures_required = 1;
-        })
-        .build();
-    let config_signer_set = ctx.config().signer.bootstrap_signing_set.clone();
-
-    // Sanity check, since we want change bootstrap_signatures_required during this test
-    // we need at least two valid values.
-    assert!(config_signer_set.len() > 1);
-
-    // Write dkg shares so it won't be a reason to trigger dkg.
-    let dkg_shares = model::EncryptedDkgShares {
-        dkg_shares_status: model::DkgSharesStatus::Verified,
-        ..Faker.fake_with_rng(&mut rng)
-    };
-    db.write_encrypted_dkg_shares(&dkg_shares)
-        .await
-        .expect("failed to write dkg shares");
-
-    let signer_set_info = SignerSetInfo {
-        aggregate_key: dkg_shares.aggregate_key,
-        // This matches the value we set for the bootstrap_signatures_required
-        signatures_required: ctx.config().signer.bootstrap_signatures_required,
-        signer_set: config_signer_set,
-    };
-
     ctx.state().update_registry_signer_set_info(signer_set_info);
 
-    // Create chaintip
-    let chaintip: model::BitcoinBlockRef = Faker.fake_with_rng(&mut rng);
+    if scenario.latest_shares_matches {
+        // Latest shares must match the config
+        let signer_set: Vec<PublicKey> = ctx
+            .config()
+            .signer
+            .bootstrap_signing_set
+            .iter()
+            .copied()
+            .collect();
 
-    // Before we actually change the signatures_required, the DKG won't be triggered
-    assert!(!should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
-    assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_err());
+        let dkg_shares = model::EncryptedDkgShares {
+            dkg_shares_status: model::DkgSharesStatus::Verified,
+            signer_set_public_keys: signer_set,
+            signature_share_threshold: ctx.config().signer.bootstrap_signatures_required,
+            ..Faker.fake_with_rng(&mut rng)
+        };
+        db.write_encrypted_dkg_shares(&dkg_shares)
+            .await
+            .expect("failed to write dkg shares");
+    }
 
-    // Change bootstrap_signatures_required to trigger dkg
-    if change_signatures_required {
-        ctx.config_mut().signer.bootstrap_signatures_required = 2;
-
+    if expect_dkg {
         assert!(should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
         assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_ok());
     } else {
