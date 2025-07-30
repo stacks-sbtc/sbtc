@@ -3,6 +3,7 @@ use futures::StreamExt;
 use sbtc::testing::regtest;
 use signer::bitcoin::BitcoinBlockHashStreamProvider as _;
 use signer::bitcoin::poller::BitcoinChainTipPoller;
+use signer::util::Sleep;
 use test_log::test;
 use tokio::sync::mpsc::error::TryRecvError;
 
@@ -72,4 +73,8 @@ async fn chain_tip_poller_streams_chain_tips() {
 
     // The last hash we received must be the final chain tip.
     assert_eq!(Some(*final_tip_hash), last_received_hash);
+
+    Sleep::for_millis(250).await;
+    // Ensure that no more hashes are received after the final tip.
+    assert_eq!(Err(TryRecvError::Empty), rx.try_recv());
 }
