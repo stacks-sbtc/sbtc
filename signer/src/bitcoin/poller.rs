@@ -126,9 +126,11 @@ async fn run_rpc_poller<Bitcoin>(
             Ok(current_hash) => {
                 if current_hash != last_seen_hash {
                     tracing::trace!(new_hash = %current_hash, "detected new best block hash");
-                    last_seen_hash = current_hash;
-                    if broadcast_tx.send(current_hash).is_err() {
-                        tracing::warn!("broadcasting new block hash failed; no subscribers?");
+                    match broadcast_tx.send(current_hash) {
+                        Ok(_) => last_seen_hash = current_hash,
+                        Err(broadcast::error::SendError(_)) => {
+                            tracing::warn!("no active subscribers for block hash broadcast");
+                        }
                     }
                 }
             }
