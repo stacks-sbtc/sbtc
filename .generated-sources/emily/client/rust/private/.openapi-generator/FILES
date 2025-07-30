@@ -12,7 +12,9 @@ docs/Deposit.md
 docs/DepositApi.md
 docs/DepositInfo.md
 docs/DepositParameters.md
+docs/DepositStatus.md
 docs/DepositUpdate.md
+docs/DepositWithStatus.md
 docs/ErrorResponse.md
 docs/Fulfillment.md
 docs/GetDepositsForTransactionResponse.md
@@ -23,7 +25,6 @@ docs/HealthData.md
 docs/Limits.md
 docs/LimitsApi.md
 docs/NewBlockApi.md
-docs/Status.md
 docs/UpdateDepositsRequestBody.md
 docs/UpdateDepositsResponse.md
 docs/UpdateWithdrawalsRequestBody.md
@@ -32,7 +33,9 @@ docs/Withdrawal.md
 docs/WithdrawalApi.md
 docs/WithdrawalInfo.md
 docs/WithdrawalParameters.md
+docs/WithdrawalStatus.md
 docs/WithdrawalUpdate.md
+docs/WithdrawalWithStatus.md
 git_push.sh
 src/apis/chainstate_api.rs
 src/apis/configuration.rs
@@ -51,7 +54,9 @@ src/models/create_withdrawal_request_body.rs
 src/models/deposit.rs
 src/models/deposit_info.rs
 src/models/deposit_parameters.rs
+src/models/deposit_status.rs
 src/models/deposit_update.rs
+src/models/deposit_with_status.rs
 src/models/error_response.rs
 src/models/fulfillment.rs
 src/models/get_deposits_for_transaction_response.rs
@@ -60,7 +65,6 @@ src/models/get_withdrawals_response.rs
 src/models/health_data.rs
 src/models/limits.rs
 src/models/mod.rs
-src/models/status.rs
 src/models/update_deposits_request_body.rs
 src/models/update_deposits_response.rs
 src/models/update_withdrawals_request_body.rs
@@ -68,4 +72,6 @@ src/models/update_withdrawals_response.rs
 src/models/withdrawal.rs
 src/models/withdrawal_info.rs
 src/models/withdrawal_parameters.rs
+src/models/withdrawal_status.rs
 src/models/withdrawal_update.rs
+src/models/withdrawal_with_status.rs

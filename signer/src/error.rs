@@ -15,7 +15,9 @@ use crate::stacks::contracts::DepositValidationError;
 use crate::stacks::contracts::RotateKeysValidationError;
 use crate::stacks::contracts::WithdrawalAcceptValidationError;
 use crate::stacks::contracts::WithdrawalRejectValidationError;
+use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::SigHash;
+use crate::transaction_signer::StacksSignRequestId;
 use crate::wsts_state_machine::StateMachineId;
 
 /// Top-level signer error
@@ -395,6 +397,11 @@ pub enum Error {
     #[error("could not recover the public key from the signature: {0}, digest: {1}")]
     InvalidRecoverableSignature(#[source] secp256k1::Error, secp256k1::Message),
 
+    /// This is thrown when we attempt to process a presign request for
+    /// a block for which we have already processed a presign request.
+    #[error("Recieved presign request for already processed block {0}")]
+    InvalidPresignRequest(BitcoinBlockHash),
+
     /// This is thrown when we attempt to create a wallet with:
     /// 1. No public keys.
     /// 2. No required signatures.
@@ -460,6 +467,11 @@ pub enum Error {
     #[error("encountered an error while rolling back an sqlx transaction: {0}")]
     SqlxRollbackTransaction(#[source] sqlx::Error),
 
+    /// An error occurred while attempting to acquire a connection to the
+    /// database.
+    #[error("encountered an error while attempting to acquire a connection to the database: {0}")]
+    SqlxAcquireConnection(#[source] sqlx::Error),
+
     /// An error when attempting to read a migration script.
     #[error("failed to read migration script: {0}")]
     ReadSqlMigration(Cow<'static, str>),
@@ -506,6 +518,10 @@ pub enum Error {
     /// The response from the Stacks node was invalid or malformed.
     #[error("invalid stacks response: {0}")]
     InvalidStacksResponse(&'static str),
+
+    /// The stacks request was already signed in this tenure
+    #[error("stacks request for {0} was already signed in tenure {1}")]
+    StacksRequestAlreadySigned(StacksSignRequestId, bitcoin::BlockHash),
 
     /// Taproot error
     #[error("an error occurred when constructing the taproot signing digest: {0}")]
@@ -564,6 +580,13 @@ pub enum Error {
     #[error("DKG has not been run")]
     NoDkgShares,
 
+    /// This should only happen during the bootstrap phase of signer set or
+    /// during the addition of a new signer. It arises when a signer is the
+    /// coordinator but doesn't have a key rotation event in their
+    /// database.
+    #[error("no key rotation event in database")]
+    NoKeyRotationEvent,
+
     /// This arises when a signer gets a message that requires DKG to have
     /// been run with output shares that have passed verification, but no
     /// such shares exist.
@@ -595,9 +618,14 @@ pub enum Error {
     #[error("type conversion error")]
     TypeConversion,
 
-    /// Encryption error
-    #[error("encryption error")]
-    Encryption,
+    /// An error thrown by `wsts::util::encrypt`, which encryptes the WSTS
+    /// signer state machine's state before storing it in the database.
+    #[error("could not encrypt the signer state for storage {0}; aggregate key {1}")]
+    WstsEncrypt(#[source] wsts::errors::EncryptionError, PublicKey),
+
+    /// Got an error when decrypting DKG shares from the database
+    #[error("could not decrypt the signer state from storage {0}; aggregate key {1}")]
+    WstsDecrypt(#[source] wsts::errors::EncryptionError, PublicKeyXOnly),
 
     /// Invalid configuration
     #[error("invalid configuration")]
@@ -605,7 +633,7 @@ pub enum Error {
 
     /// We throw this when signer produced txid and coordinator produced txid differ.
     #[error(
-        "signer and coordinator txid mismatch. Signer produced txid {0}, but coordinator send txid {1}"
+        "signer and coordinator txid mismatch. Signer produced txid {0}, but coordinator sent txid {1}"
     )]
     SignerCoordinatorTxidMismatch(
         blockstack_lib::burnchains::Txid,
@@ -656,6 +684,11 @@ pub enum Error {
     /// No chain tip found.
     #[error("no bitcoin chain tip")]
     NoChainTip,
+
+    /// The given block hash could not be found in the database when doing
+    /// a DbRead::get_bitcoin_block call.
+    #[error("the given block hash could not be found in the database: {0}")]
+    UnknownBitcoinBlock(bitcoin::BlockHash),
 
     /// No stacks chain tip found.
     #[error("no stacks chain tip")]
@@ -752,12 +785,22 @@ pub enum Error {
             amounts = .0.amounts, cap = .0.cap, cap_blocks = .0.cap_blocks, withdrawn_total = .0.withdrawn_total)]
     ExceedsWithdrawalCap(WithdrawalCapContext),
 
+    /// An error was raised by the in-memory database.
+    #[cfg(any(test, feature = "testing"))]
+    #[error("In-memory database error: {0}")]
+    InMemoryDatabase(crate::storage::memory::MemoryStoreError),
+
     /// An error which can be used in test code instead of `unimplemented!()` or
     /// other alternatives, so that an an actual error is returned instead of
     /// panicking.
     #[cfg(test)]
     #[error("Dummy (for testing purposes)")]
     Dummy,
+
+    /// An error raised by test utility functions.
+    #[cfg(any(test, feature = "testing"))]
+    #[error("Test utility error: {0}")]
+    TestUtility(crate::testing::TestUtilityError),
 }
 
 impl From<std::convert::Infallible> for Error {

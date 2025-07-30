@@ -85,6 +85,7 @@ use crate::storage::model::StacksBlockHash;
 use crate::storage::model::StacksBlockHeight;
 use crate::storage::model::StacksPrincipal;
 use crate::storage::model::StacksTxId;
+use crate::storage::model::TaprootScriptHash;
 use crate::storage::model::WithdrawalAcceptEvent;
 use crate::storage::model::WithdrawalRejectEvent;
 
@@ -607,6 +608,13 @@ impl fake::Dummy<fake::Faker> for ScriptPubKey {
     }
 }
 
+impl fake::Dummy<fake::Faker> for TaprootScriptHash {
+    fn dummy_with_rng<R: Rng + ?Sized>(config: &fake::Faker, rng: &mut R) -> Self {
+        let bytes: [u8; 32] = config.fake_with_rng(rng);
+        TaprootScriptHash::from(bytes)
+    }
+}
+
 impl fake::Dummy<fake::Faker> for SigHash {
     fn dummy_with_rng<R: Rng + ?Sized>(config: &fake::Faker, rng: &mut R) -> Self {
         TapSighash::from_byte_array(config.fake_with_rng(rng)).into()
@@ -776,21 +784,6 @@ impl fake::Dummy<fake::Faker> for BitcoinPreSignAck {
     }
 }
 
-impl fake::Dummy<fake::Faker> for model::P2PPeer {
-    fn dummy_with_rng<R: rand::RngCore + ?Sized>(config: &fake::Faker, rng: &mut R) -> Self {
-        let public_key: PublicKey = config.fake_with_rng(rng);
-        let multiaddr = Multiaddr::random_memory();
-        let peer_id: PeerId = public_key.into();
-
-        model::P2PPeer {
-            peer_id: peer_id.into(),
-            public_key,
-            address: multiaddr.into(),
-            last_dialed_at: Faker.fake_with_rng(rng),
-        }
-    }
-}
-
 impl fake::Dummy<fake::Faker> for model::Timestamp {
     fn dummy_with_rng<R: rand::RngCore + ?Sized>(_: &fake::Faker, rng: &mut R) -> Self {
         // The PostgreSQL epoch is 2000-01-01 00:00:00 UTC
@@ -806,8 +799,30 @@ impl fake::Dummy<fake::Faker> for model::Timestamp {
     }
 }
 
+
+impl fake::Dummy<fake::Faker> for model::P2PPeer {
+    fn dummy_with_rng<R: rand::RngCore + ?Sized>(config: &fake::Faker, rng: &mut R) -> Self {
+        let public_key: PublicKey = config.fake_with_rng(rng);
+        let multiaddr = Multiaddr::random_memory();
+        let peer_id: PeerId = public_key.into();
+
+        model::P2PPeer {
+            peer_id: peer_id.into(),
+            public_key,
+            address: multiaddr.into(),
+            last_dialed_at: Faker.fake_with_rng(rng),
+        }
+    }
+}
+
 /// A struct to help with creating dummy values for testing
 pub struct Unit;
+
+impl Dummy<Unit> for secp256k1::Keypair {
+    fn dummy_with_rng<R: rand::Rng + ?Sized>(_: &Unit, rng: &mut R) -> Self {
+        secp256k1::Keypair::new(secp256k1::SECP256K1, rng)
+    }
+}
 
 impl Dummy<Unit> for bitcoin::OutPoint {
     fn dummy_with_rng<R: rand::Rng + ?Sized>(_: &Unit, rng: &mut R) -> Self {

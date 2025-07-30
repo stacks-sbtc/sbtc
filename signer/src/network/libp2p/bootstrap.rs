@@ -1,6 +1,5 @@
 //! LibP2P behavior for bootstrapping the node against the network using
 //! the known seed addresses.
-
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     task::Poll,
@@ -19,6 +18,7 @@ use libp2p::{
 };
 
 use super::MultiaddrExt;
+use crate::metrics::Metrics;
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -220,6 +220,9 @@ impl Behavior {
         // Determine if this is one of our seed addresses.
         let is_seed_addr = self.config.seed_addresses.iter().any(|seed| seed == &addr);
 
+        // Check if this is a new peer (not already in connected_peers)
+        let is_new_peer = !self.connected_peers.contains_key(&peer_id);
+
         // Get or create the peer info record for the connected peer.
         let peer_info = self
             .connected_peers
@@ -237,6 +240,10 @@ impl Behavior {
         // Update the peer info record with the connection and address.
         peer_info.connections.insert(connection_id, addr);
 
+        // Only increment the gauge if this is a new peer
+        if is_new_peer {
+            Metrics::increment_peers_connected_total();
+        }
         Some(peer_info)
     }
 
@@ -262,6 +269,8 @@ impl Behavior {
         // If the peer has no remaining connections, we remove the peer from the
         // connected peers map and return the peer info record.
         if remove_peer {
+            // Decrement the gauge for connected peers
+            Metrics::decrement_peers_connected_total();
             return self.connected_peers.remove(&peer_id);
         }
 

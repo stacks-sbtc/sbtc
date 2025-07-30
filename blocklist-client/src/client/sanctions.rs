@@ -39,7 +39,7 @@ pub struct SanctionsResponse {
 }
 
 fn risk_assessment_path(base_url: &str, address: &str) -> String {
-    format!("{}{}/{}", base_url, API_BASE_PATH, address)
+    format!("{base_url}{API_BASE_PATH}/{address}")
 }
 
 /// Check risk status associated with a registered address
@@ -172,10 +172,7 @@ mod tests {
 
         let mut server = Server::new_async().await;
         let mock = server
-            .mock(
-                "GET",
-                format!("{}/{}", API_BASE_PATH, TEST_ADDRESS).as_str(),
-            )
+            .mock("GET", format!("{API_BASE_PATH}/{TEST_ADDRESS}").as_str())
             .with_status(200)
             .with_body(response_json)
             .create();
@@ -196,10 +193,7 @@ mod tests {
     async fn test_get_risk_assessment_invalid_response() {
         let mut server = Server::new_async().await;
         let mock = server
-            .mock(
-                "GET",
-                format!("{}/{}", API_BASE_PATH, TEST_ADDRESS).as_str(),
-            )
+            .mock("GET", format!("{API_BASE_PATH}/{TEST_ADDRESS}").as_str())
             .with_status(200)
             .with_body(r#"{"risky": "Severe"}"#)
             .create();
@@ -227,10 +221,7 @@ mod tests {
 }"#;
         let mut server = Server::new_async().await;
         let risk_mock = server
-            .mock(
-                "GET",
-                format!("{}/{}", API_BASE_PATH, TEST_ADDRESS).as_str(),
-            )
+            .mock("GET", format!("{API_BASE_PATH}/{TEST_ADDRESS}").as_str())
             .with_status(200)
             .with_body(response_json)
             .create();
@@ -253,10 +244,7 @@ mod tests {
     async fn test_check_address_not_blocklisted_for_low_risk() {
         let mut server = Server::new_async().await;
         let risk_mock = server
-            .mock(
-                "GET",
-                format!("{}/{}", API_BASE_PATH, TEST_ADDRESS).as_str(),
-            )
+            .mock("GET", format!("{API_BASE_PATH}/{TEST_ADDRESS}").as_str())
             .with_status(200)
             .with_body(r#"{"identifications": []}"#)
             .create();
@@ -298,10 +286,7 @@ mod tests {
     async fn test_check_address_risk_assessment_fails() {
         let mut server = Server::new_async().await;
         let risk_mock = server
-            .mock(
-                "GET",
-                format!("{}/{}", API_BASE_PATH, TEST_ADDRESS).as_str(),
-            )
+            .mock("GET", format!("{API_BASE_PATH}/{TEST_ADDRESS}").as_str())
             .with_status(500)
             .with_body("{}")
             .create();

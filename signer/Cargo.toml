@@ -37,6 +37,7 @@ p256k1.workspace = true
 polynomial.workspace = true
 prost.workspace = true
 rand.workspace = true
+rand_chacha.workspace = true
 reqwest.workspace = true
 sbtc = { workspace = true, features = ["webhooks"] }
 secp256k1.workspace = true
@@ -82,6 +83,7 @@ test-log.workspace = true
 testing-emily-client.workspace = true
 toml_edit.workspace = true
 tower.workspace = true
+assert_matches.workspace = true
 
 [[bin]]
 name = "demo-cli"

@@ -48,6 +48,7 @@ use super::CorsSupport;
         api::models::chainstate::Chainstate,
         // Deposit models.
         api::models::deposit::Deposit,
+        api::models::deposit::responses::DepositWithStatus,
         api::models::deposit::DepositParameters,
         api::models::deposit::DepositInfo,
         api::models::deposit::requests::CreateDepositRequestBody,
@@ -58,6 +59,7 @@ use super::CorsSupport;
         api::models::deposit::responses::UpdateDepositsResponse,
         // Withdrawal Models.
         api::models::withdrawal::Withdrawal,
+        api::models::withdrawal::responses::WithdrawalWithStatus,
         api::models::withdrawal::WithdrawalInfo,
         api::models::withdrawal::WithdrawalParameters,
         api::models::withdrawal::requests::CreateWithdrawalRequestBody,
@@ -68,7 +70,8 @@ use super::CorsSupport;
         // Health check datatypes.
         api::models::health::responses::HealthData,
         // Common models.
-        api::models::common::Status,
+        api::models::common::DepositStatus,
+        api::models::common::WithdrawalStatus,
         api::models::common::Fulfillment,
         // Limits models
         api::models::limits::Limits,

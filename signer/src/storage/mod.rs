@@ -7,7 +7,7 @@
 //! allowing the signer to use a Postgres database to store data.
 
 #[cfg(any(test, feature = "testing"))]
-pub mod in_memory;
+pub mod memory;
 pub mod model;
 pub mod postgres;
 pub mod sqlx;
@@ -31,6 +31,28 @@ use crate::storage::model::CompletedDepositEvent;
 use crate::storage::model::WithdrawalAcceptEvent;
 use crate::storage::model::WithdrawalRejectEvent;
 
+/// Represents a handle to an ongoing database transaction.
+pub trait TransactionHandle: DbRead + DbWrite + Send {
+    /// Commits the transaction.
+    fn commit(self) -> impl Future<Output = Result<(), Error>> + Send;
+    /// Rolls back the transaction.
+    fn rollback(self) -> impl Future<Output = Result<(), Error>> + Send;
+}
+
+/// Trait for storage backends that support initiating transactions.
+/// The returned transaction object itself implements `DbRead` and `DbWrite`.
+pub trait Transactable {
+    /// The type of the transaction object. It must implement `DbRead`, `DbWrite`,
+    /// and `TransactionHandle`. The lifetime `'a` ties the transaction to the
+    /// lifetime of the `Transactable` implementor (e.g., the `PgStore`).
+    type Tx<'a>: DbRead + DbWrite + TransactionHandle + Sync + Send + 'a
+    where
+        Self: 'a;
+
+    /// Begins a new database transaction.
+    fn begin_transaction(&self) -> impl Future<Output = Result<Self::Tx<'_>, Error>> + Send;
+}
+
 /// Represents the ability to read data from the signer storage.
 pub trait DbRead {
     /// Get the bitcoin block with the given block hash.
@@ -46,11 +68,13 @@ pub trait DbRead {
     ) -> impl Future<Output = Result<Option<model::StacksBlock>, Error>> + Send;
 
     /// Get the bitcoin canonical chain tip.
+    #[cfg(any(test, feature = "testing"))]
     fn get_bitcoin_canonical_chain_tip(
         &self,
     ) -> impl Future<Output = Result<Option<model::BitcoinBlockHash>, Error>> + Send;
 
     /// Get the bitcoin canonical chain tip.
+    #[cfg(any(test, feature = "testing"))]
     fn get_bitcoin_canonical_chain_tip_ref(
         &self,
     ) -> impl Future<Output = Result<Option<model::BitcoinBlockRef>, Error>> + Send;
@@ -82,7 +106,7 @@ pub trait DbRead {
     /// that generated the aggregate key locking the deposit.
     fn get_pending_accepted_deposit_requests(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
+        chain_tip: &model::BitcoinBlockRef,
         context_window: u16,
         signatures_required: u16,
     ) -> impl Future<Output = Result<Vec<model::DepositRequest>, Error>> + Send;
@@ -290,6 +314,7 @@ pub trait DbRead {
     fn get_encrypted_dkg_shares_count(&self) -> impl Future<Output = Result<u32, Error>> + Send;
 
     /// Return the latest rotate-keys transaction confirmed by the given `chain-tip`.
+    #[cfg(any(test, feature = "testing"))]
     fn get_last_key_rotation(
         &self,
         chain_tip: &model::BitcoinBlockHash,

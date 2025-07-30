@@ -666,10 +666,10 @@ mod tests {
 
         // Unwrap our nonce responses.
         let Message::NonceResponse(nonce_response1) = nonce_response1 else {
-            panic!("expected nonce response, got {:?}", nonce_response1);
+            panic!("expected nonce response, got {nonce_response1:?}");
         };
         let Message::NonceResponse(nonce_response2) = nonce_response2 else {
-            panic!("expected nonce response, got {:?}", nonce_response2);
+            panic!("expected nonce response, got {nonce_response2:?}");
         };
 
         // Create signature share requests, populated with the nonce responses

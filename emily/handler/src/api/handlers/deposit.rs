@@ -8,10 +8,10 @@ use tracing::instrument;
 use warp::http::StatusCode;
 use warp::reply::{Reply, json, with_status};
 
-use crate::api::models::common::Status;
+use crate::api::models::common::DepositStatus;
 use crate::api::models::common::requests::BasicPaginationQuery;
 use crate::api::models::deposit::responses::{
-    GetDepositsForTransactionResponse, UpdateDepositsResponse,
+    DepositWithStatus, GetDepositsForTransactionResponse, UpdateDepositsResponse,
 };
 use crate::api::models::deposit::{Deposit, DepositInfo};
 use crate::api::models::{
@@ -24,7 +24,7 @@ use crate::api::models::{
 use crate::common::error::Error;
 use crate::context::EmilyContext;
 use crate::database::accessors;
-use crate::database::entries::StatusEntry;
+use crate::database::entries::DepositStatusEntry;
 use crate::database::entries::chainstate::ApiStateEntry;
 use crate::database::entries::deposit::{
     DepositEntry, DepositEntryKey, DepositEvent, DepositParametersEntry,
@@ -145,7 +145,7 @@ pub async fn get_deposits_for_transaction(
     operation_id = "getDeposits",
     path = "/deposit",
     params(
-        ("status" = Status, Query, description = "the status to search by when getting all deposits."),
+        ("status" = DepositStatus, Query, description = "the status to search by when getting all deposits."),
         ("nextToken" = Option<String>, Query, description = "the next token value from the previous return of this api call."),
         ("pageSize" = Option<u16>, Query, description = "the maximum number of items in the response list.")
     ),
@@ -376,12 +376,12 @@ pub async fn create_deposit(
                 lock_time: deposit_info.lock_time.to_consensus_u32(),
             },
             history: vec![DepositEvent {
-                status: StatusEntry::Pending,
+                status: DepositStatusEntry::Pending,
                 message: "Just received deposit".to_string(),
                 stacks_block_hash: stacks_block_hash.clone(),
                 stacks_block_height,
             }],
-            status: Status::Pending,
+            status: DepositStatus::Pending,
             last_update_block_hash: stacks_block_hash,
             last_update_height: stacks_block_height,
             amount: deposit_info.amount,
@@ -412,7 +412,7 @@ pub async fn create_deposit(
     tag = "deposit",
     request_body = UpdateDepositsRequestBody,
     responses(
-        (status = 201, description = "Deposits updated successfully", body = UpdateDepositsResponse),
+        (status = 200, description = "Deposits updated successfully", body = UpdateDepositsResponse),
         (status = 400, description = "Invalid request body", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
         (status = 404, description = "Address not found", body = ErrorResponse),
@@ -440,16 +440,6 @@ pub async fn update_deposits_signer(
         let api_state = accessors::get_api_state(&context).await?;
         api_state.error_if_reorganizing()?;
 
-        // Signers are only allowed to update deposits to the accepted state.
-        let is_allowed = !body
-            .deposits
-            .iter()
-            .any(|deposit| deposit.status != Status::Accepted);
-
-        if !is_allowed {
-            return Err(Error::Forbidden);
-        }
-
         update_deposits(api_state, context, body, false).await
     }
     // Handle and respond.
@@ -466,7 +456,7 @@ pub async fn update_deposits_signer(
     tag = "deposit",
     request_body = UpdateDepositsRequestBody,
     responses(
-        (status = 201, description = "Deposits updated successfully", body = UpdateDepositsResponse),
+        (status = 200, description = "Deposits updated successfully", body = UpdateDepositsResponse),
         (status = 400, description = "Invalid request body", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
         (status = 404, description = "Address not found", body = ErrorResponse),
@@ -510,14 +500,29 @@ async fn update_deposits(
 ) -> Result<impl warp::reply::Reply, Error> {
     // Validate request.
     let validated_request: ValidatedUpdateDepositsRequest =
-        body.try_into_validated_update_request(api_state.chaintip().into())?;
+        body.into_validated_update_request(api_state.chaintip().into());
 
     // Create aggregator.
-    let mut updated_deposits: Vec<(usize, Deposit)> =
+    let mut updated_deposits: Vec<(usize, DepositWithStatus)> =
         Vec::with_capacity(validated_request.deposits.len());
 
     // Loop through all updates and execute.
     for (index, update) in validated_request.deposits {
+        if let Err(error) = update {
+            // This error is a ValidationError: it shouldn't contain any
+            // sensitive information.
+            updated_deposits.push((
+                index,
+                DepositWithStatus {
+                    deposit: None,
+                    error: Some(error.to_string()),
+                    status: StatusCode::BAD_REQUEST.as_u16(),
+                },
+            ));
+            continue;
+        }
+        let update = update.unwrap();
+
         let bitcoin_txid = update.key.bitcoin_txid.clone();
         let bitcoin_tx_output_index = update.key.bitcoin_tx_output_index;
 
@@ -527,21 +532,66 @@ async fn update_deposits(
             "updating deposit"
         );
 
-        let updated_deposit = accessors::pull_and_update_deposit_with_retry(
+        let updated_deposit = match accessors::pull_and_update_deposit_with_retry(
             &context,
             update,
             15,
             is_from_trusted_source,
         )
         .await
-        .inspect_err(|error| {
-            tracing::error!(
-                %bitcoin_txid,
-                bitcoin_tx_output_index,
-                %error,
-                "failed to update deposit"
-            );
-        })?;
+        {
+            Ok(updated_deposit) => updated_deposit,
+            Err(Error::NotFound) => {
+                tracing::warn!(
+                    %bitcoin_txid,
+                    bitcoin_tx_output_index,
+                    "failed to update deposit. Deposit not found in the database"
+                );
+                updated_deposits.push((
+                    index,
+                    DepositWithStatus {
+                        deposit: None,
+                        error: Some(Error::NotFound.to_string()),
+                        status: StatusCode::NOT_FOUND.as_u16(),
+                    },
+                ));
+                continue;
+            }
+            Err(Error::Forbidden) => {
+                tracing::warn!(
+                    %bitcoin_txid,
+                    bitcoin_tx_output_index,
+                    "failed to update deposit. Such type of update is not allowed for the caller"
+                );
+                updated_deposits.push((
+                    index,
+                    DepositWithStatus {
+                        deposit: None,
+                        error: Some(Error::Forbidden.to_string()),
+                        status: StatusCode::FORBIDDEN.as_u16(),
+                    },
+                ));
+                continue;
+            }
+            Err(error) => {
+                tracing::error!(
+                    %bitcoin_txid,
+                    bitcoin_tx_output_index,
+                    %error,
+                    "failed to update deposit"
+                );
+                updated_deposits.push((
+                    index,
+                    DepositWithStatus {
+                        deposit: None,
+                        error: Some(error.into_production_error().to_string()),
+                        status: StatusCode::INTERNAL_SERVER_ERROR.as_u16(),
+                    },
+                ));
+                continue;
+            }
+        };
+
         let deposit: Deposit = updated_deposit.try_into().inspect_err(|error| {
             // This should never happen, because the deposit was
             // validated before being updated.
@@ -552,16 +602,23 @@ async fn update_deposits(
                 "failed to convert deposit"
             );
         })?;
-        updated_deposits.push((index, deposit));
+        updated_deposits.push((
+            index,
+            DepositWithStatus {
+                error: None,
+                deposit: Some(deposit),
+                status: StatusCode::OK.as_u16(),
+            },
+        ));
     }
 
     updated_deposits.sort_by_key(|(index, _)| *index);
-    let deposits = updated_deposits
+    let deposits: Vec<_> = updated_deposits
         .into_iter()
         .map(|(_, deposit)| deposit)
         .collect();
     let response = UpdateDepositsResponse { deposits };
-    Ok(with_status(json(&response), StatusCode::CREATED))
+    Ok(with_status(json(&response), StatusCode::OK))
 }
 
 const OP_DROP: u8 = opcodes::OP_DROP.to_u8();

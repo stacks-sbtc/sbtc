@@ -4,10 +4,10 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::api::models::chainstate::Chainstate;
-use crate::api::models::common::{Fulfillment, Status};
+use crate::api::models::common::{Fulfillment, WithdrawalStatus};
 use crate::api::models::withdrawal::WithdrawalParameters;
 use crate::common::error::{self, ValidationError};
-use crate::database::entries::StatusEntry;
+use crate::database::entries::WithdrawalStatusEntry;
 use crate::database::entries::withdrawal::{
     ValidatedUpdateWithdrawalRequest, ValidatedWithdrawalUpdate, WithdrawalEvent,
 };
@@ -17,7 +17,7 @@ use crate::database::entries::withdrawal::{
 #[serde(rename_all = "camelCase")]
 pub struct GetWithdrawalsQuery {
     /// Operation status.
-    pub status: Status,
+    pub status: WithdrawalStatus,
     /// Next token for the search.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_token: Option<String>,
@@ -57,7 +57,7 @@ pub struct WithdrawalUpdate {
     /// The id of the Stacks withdrawal request that initiated the sBTC operation.
     pub request_id: u64,
     /// The status of the withdrawal.
-    pub status: Status,
+    pub status: WithdrawalStatus,
     /// The status message of the withdrawal.
     pub status_message: String,
     /// Details about the on chain artifacts that fulfilled the withdrawal.
@@ -74,21 +74,20 @@ impl WithdrawalUpdate {
     pub fn try_into_validated_withdrawal_update(
         self,
         chainstate: Chainstate,
-    ) -> Result<ValidatedWithdrawalUpdate, error::Error> {
+    ) -> Result<ValidatedWithdrawalUpdate, error::ValidationError> {
         // Make status entry.
-        let status_entry: StatusEntry = match self.status {
-            Status::Confirmed => {
+        let status_entry: WithdrawalStatusEntry = match self.status {
+            WithdrawalStatus::Confirmed => {
                 let fulfillment =
                     self.fulfillment
                         .ok_or(ValidationError::WithdrawalMissingFulfillment(
                             self.request_id,
                         ))?;
-                StatusEntry::Confirmed(fulfillment)
+                WithdrawalStatusEntry::Confirmed(fulfillment)
             }
-            Status::Accepted => StatusEntry::Accepted,
-            Status::Pending => StatusEntry::Pending,
-            Status::Reprocessing => StatusEntry::Reprocessing,
-            Status::Failed => StatusEntry::Failed,
+            WithdrawalStatus::Accepted => WithdrawalStatusEntry::Accepted,
+            WithdrawalStatus::Pending => WithdrawalStatusEntry::Pending,
+            WithdrawalStatus::Failed => WithdrawalStatusEntry::Failed,
         };
         // Make the new event.
         let event = WithdrawalEvent {
@@ -119,32 +118,44 @@ impl UpdateWithdrawalsRequestBody {
     /// # Errors
     ///
     /// - `ValidationError::WithdrawalsMissingFulfillment`: If any of the withdrawal updates are missing a fulfillment.
-    pub fn try_into_validated_update_request(
+    pub fn into_validated_update_request(
         self,
         chainstate: Chainstate,
-    ) -> Result<ValidatedUpdateWithdrawalRequest, error::Error> {
+    ) -> ValidatedUpdateWithdrawalRequest {
         // Validate all the withdrawal updates.
-        let mut withdrawals: Vec<(usize, ValidatedWithdrawalUpdate)> = vec![];
-        let mut failed_ids: Vec<u64> = vec![];
+        let mut withdrawals: Vec<(usize, Result<ValidatedWithdrawalUpdate, ValidationError>)> =
+            vec![];
 
         for (index, update) in self.withdrawals.into_iter().enumerate() {
             match update
                 .clone()
                 .try_into_validated_withdrawal_update(chainstate.clone())
             {
-                Ok(validated_update) => withdrawals.push((index, validated_update)),
-                Err(_) => failed_ids.push(update.request_id),
+                Ok(validated_update) => withdrawals.push((index, Ok(validated_update))),
+                Err(ref error @ ValidationError::WithdrawalMissingFulfillment(request_id)) => {
+                    tracing::warn!(
+                        request_id,
+                        "failed to update withdrawal: request missing fulfillment for completed request."
+                    );
+                    withdrawals.push((index, Err(error.clone())));
+                }
+                Err(error) => {
+                    tracing::error!(
+                        request_id = update.request_id,
+                        %error,
+                        "unexpected error while validating withdrawal update: this error should never happen during a withdrawal update validation.",
+                    );
+                    withdrawals.push((index, Err(error)));
+                }
             }
         }
 
-        // If there are failed conversions, return an error.
-        if !failed_ids.is_empty() {
-            return Err(ValidationError::WithdrawalsMissingFulfillment(failed_ids).into());
-        }
-
         // Sort updates by stacks_block_height to process them in chronological order.
-        withdrawals.sort_by_key(|(_, update)| update.event.stacks_block_height);
+        withdrawals.sort_by_key(|(_, update)| match update {
+            Ok(validated_update) => validated_update.event.stacks_block_height,
+            Err(_) => u64::MAX, // Place errors at the end
+        });
 
-        Ok(ValidatedUpdateWithdrawalRequest { withdrawals })
+        ValidatedUpdateWithdrawalRequest { withdrawals }
     }
 }

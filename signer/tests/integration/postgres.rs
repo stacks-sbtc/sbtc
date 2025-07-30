@@ -319,7 +319,7 @@ async fn checking_stacks_blocks_exists_works() {
 #[tokio::test]
 async fn should_return_the_same_pending_deposit_requests_as_in_memory_store() {
     let pg_store = testing::storage::new_test_database().await;
-    let in_memory_store = storage::in_memory::Store::new_shared();
+    let in_memory_store = storage::memory::Store::new_shared();
 
     let mut rng = get_rng();
 
@@ -492,7 +492,7 @@ async fn get_pending_withdrawal_requests_only_pending() {
 #[tokio::test]
 async fn should_return_the_same_pending_withdraw_requests_as_in_memory_store() {
     let pg_store = testing::storage::new_test_database().await;
-    let in_memory_store = storage::in_memory::Store::new_shared();
+    let in_memory_store = storage::memory::Store::new_shared();
 
     let mut rng = get_rng();
 
@@ -569,7 +569,7 @@ async fn should_return_the_same_pending_withdraw_requests_as_in_memory_store() {
 #[tokio::test]
 async fn should_return_the_same_pending_accepted_deposit_requests_as_in_memory_store() {
     let pg_store = testing::storage::new_test_database().await;
-    let in_memory_store = storage::in_memory::Store::new_shared();
+    let in_memory_store = storage::memory::Store::new_shared();
 
     let mut rng = get_rng();
 
@@ -592,7 +592,7 @@ async fn should_return_the_same_pending_accepted_deposit_requests_as_in_memory_s
     test_data.write_to(&pg_store).await;
 
     let chain_tip = in_memory_store
-        .get_bitcoin_canonical_chain_tip()
+        .get_bitcoin_canonical_chain_tip_ref()
         .await
         .expect("failed to get canonical chain tip")
         .expect("no chain tip");
@@ -603,7 +603,7 @@ async fn should_return_the_same_pending_accepted_deposit_requests_as_in_memory_s
             .await
             .expect("failed to get canonical chain tip")
             .expect("no chain tip"),
-        chain_tip
+        chain_tip.block_hash
     );
 
     let mut pending_accepted_deposit_requests = in_memory_store
@@ -643,7 +643,11 @@ async fn should_not_return_swept_deposits_as_pending_accepted() {
     let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
     let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
 
-    let chain_tip = setup.sweep_block_hash.into();
+    let chain_tip = model::BitcoinBlockRef {
+        block_hash: setup.sweep_block_hash.into(),
+        block_height: setup.sweep_block_height,
+    };
+
     let context_window = 20;
     let threshold = 4;
 
@@ -682,11 +686,17 @@ async fn should_not_return_swept_deposits_as_pending_accepted() {
 
     assert!(requests.is_empty());
 
+    let deposit_block_ref = db
+        .get_bitcoin_block(&setup.deposit_block_hash.into())
+        .await
+        .unwrap()
+        .unwrap()
+        .into();
     // Ensure that we only consider sweep tx in the canonical chain
     let requests = db
         .get_pending_accepted_deposit_requests(
             // this excludes the sweep tx block
-            &setup.deposit_block_hash.into(),
+            &deposit_block_ref,
             context_window,
             threshold,
         )
@@ -708,7 +718,7 @@ async fn should_not_return_swept_deposits_as_pending_accepted() {
 #[tokio::test]
 async fn should_return_only_accepted_pending_deposits_that_are_within_reclaim_bounds() {
     let mut pg_store = testing::storage::new_test_database().await;
-    let mut in_memory_store = storage::in_memory::Store::new_shared();
+    let mut in_memory_store = storage::memory::Store::new_shared();
 
     let mut rng = get_rng();
 
@@ -738,13 +748,13 @@ async fn should_return_only_accepted_pending_deposits_that_are_within_reclaim_bo
     test_data.write_to(&in_memory_store).await;
 
     let chain_tip = in_memory_store
-        .get_bitcoin_canonical_chain_tip()
+        .get_bitcoin_canonical_chain_tip_ref()
         .await
         .expect("failed to get canonical chain tip")
         .expect("no chain tip");
 
     assert_eq!(
-        chain_tip,
+        chain_tip.block_hash,
         pg_store
             .get_bitcoin_canonical_chain_tip()
             .await
@@ -778,7 +788,7 @@ async fn should_return_only_accepted_pending_deposits_that_are_within_reclaim_bo
     // Now get the height of the Bitcoin chain tip, we're going to use this to put some of the
     // accepted deposit requests outside of the reclaim bounds.
     let bitcoin_chain_tip_height = pg_store
-        .get_bitcoin_block(&chain_tip)
+        .get_bitcoin_block(&chain_tip.block_hash)
         .await
         .expect("failed to get bitcoin block")
         .expect("no chain tip block")
@@ -856,7 +866,7 @@ async fn should_return_only_accepted_pending_deposits_that_are_within_reclaim_bo
     // We should only get the ones that are within the reclaim bounds.
     signer::testing::storage::drop_db(pg_store).await;
     pg_store = testing::storage::new_test_database().await;
-    in_memory_store = storage::in_memory::Store::new_shared();
+    in_memory_store = storage::memory::Store::new_shared();
 
     // Initialize the data.
     test_data.write_to(&pg_store).await;
@@ -895,7 +905,7 @@ async fn should_return_only_accepted_pending_deposits_that_are_within_reclaim_bo
 #[tokio::test]
 async fn should_return_the_same_last_key_rotation_as_in_memory_store() {
     let pg_store = testing::storage::new_test_database().await;
-    let in_memory_store = storage::in_memory::Store::new_shared();
+    let in_memory_store = storage::memory::Store::new_shared();
 
     let mut rng = get_rng();
 
@@ -928,12 +938,7 @@ async fn should_return_the_same_last_key_rotation_as_in_memory_store() {
         testing::wsts::SignerSet::new(&signer_info, threshold, || dummy_wsts_network.connect());
     let dkg_txid = testing::dummy::txid(&fake::Faker, &mut rng);
     let (_, all_shares) = testing_signer_set
-        .run_dkg(
-            chain_tip,
-            dkg_txid.into(),
-            &mut rng,
-            model::DkgSharesStatus::Verified,
-        )
+        .run_dkg(chain_tip, dkg_txid.into(), model::DkgSharesStatus::Verified)
         .await;
 
     let shares = all_shares.first().unwrap();
@@ -1743,7 +1748,7 @@ async fn block_in_canonical_bitcoin_blockchain_in_other_block_chain() {
 #[tokio::test]
 async fn is_signer_script_pub_key_checks_dkg_shares_for_script_pubkeys() {
     let db = testing::storage::new_test_database().await;
-    let mem = storage::in_memory::Store::new_shared();
+    let mem = storage::memory::Store::new_shared();
 
     let mut rng = get_rng();
 
@@ -1778,6 +1783,50 @@ async fn is_signer_script_pub_key_checks_dkg_shares_for_script_pubkeys() {
 
     assert!(!db.is_signer_script_pub_key(&script_pubkey).await.unwrap());
     assert!(!mem.is_signer_script_pub_key(&script_pubkey).await.unwrap());
+
+    signer::testing::storage::drop_db(db).await;
+}
+
+/// Check that `is_signer_script_pub_key` correctly returns whether a
+/// scriptPubKey value exists in the dkg_shares table.
+#[tokio::test]
+async fn is_signer_script_pub_key_checks_bitcoin_tx_outputs_for_script_pubkeys() {
+    let db = testing::storage::new_test_database().await;
+    let mem = storage::memory::Store::new_shared();
+
+    let mut rng = get_rng();
+
+    // We test that only the signers_output type will be used to identify
+    // that a scriptPubKKey is controlled by the signers.
+    for output_type in model::TxOutputType::iter() {
+        let aggregate_key: PublicKey = fake::Faker.fake_with_rng(&mut rng);
+        let script_pubkey: ScriptPubKey = aggregate_key.signers_script_pubkey().into();
+        let tx_output = model::TxOutput {
+            script_pubkey: script_pubkey.clone(),
+            output_type,
+            ..fake::Faker.fake_with_rng(&mut rng)
+        };
+        db.write_tx_output(&tx_output).await.unwrap();
+        mem.write_tx_output(&tx_output).await.unwrap();
+
+        // Now we have a row in the right "tables" with our scriptPubKey,
+        // let's make sure that the query accurately reports whether the
+        // scriptPubKey is associated with the signers.
+        let is_signer_output = output_type == model::TxOutputType::SignersOutput;
+        let db_result = db.is_signer_script_pub_key(&script_pubkey).await.unwrap();
+        let mem_result = mem.is_signer_script_pub_key(&script_pubkey).await.unwrap();
+
+        assert_eq!(db_result, is_signer_output);
+        assert_eq!(mem_result, is_signer_output);
+
+        // Now we try the case where the scriptPubKey is missing from
+        // the database by generating a new one.
+        let aggregate_key: PublicKey = fake::Faker.fake_with_rng(&mut rng);
+        let script_pubkey: ScriptPubKey = aggregate_key.signers_script_pubkey().into();
+
+        assert!(!db.is_signer_script_pub_key(&script_pubkey).await.unwrap());
+        assert!(!mem.is_signer_script_pub_key(&script_pubkey).await.unwrap());
+    }
 
     signer::testing::storage::drop_db(db).await;
 }
@@ -4703,7 +4752,7 @@ async fn compare_in_memory_bitcoin_chain_tip() {
     let mut rng = get_rng();
 
     let pg_store = testing::storage::new_test_database().await;
-    let in_memory_store = storage::in_memory::Store::new_shared();
+    let in_memory_store = storage::memory::Store::new_shared();
 
     let root: BitcoinBlock = fake::Faker.fake_with_rng(&mut rng);
     let mut blocks = vec![root.clone()];
@@ -4744,7 +4793,7 @@ async fn compare_in_memory_stacks_chain_tip() {
     let mut rng = get_rng();
 
     let pg_store = testing::storage::new_test_database().await;
-    let in_memory_store = storage::in_memory::Store::new_shared();
+    let in_memory_store = storage::memory::Store::new_shared();
 
     let root_anchor: BitcoinBlock = fake::Faker.fake_with_rng(&mut rng);
 
@@ -7302,5 +7351,120 @@ mod get_pending_accepted_withdrawal_requests {
         assert_eq!(requests.len(), 0);
 
         storage::drop_db(db).await;
+    }
+}
+
+mod sqlx_transactions {
+    use super::*;
+
+    use signer::{
+        storage::{Transactable, TransactionHandle},
+        testing::{
+            blocks::{BitcoinChain, StacksChain},
+            storage,
+        },
+    };
+    use test_log::test;
+
+    #[tokio::test]
+    async fn test_pgsql_transaction_commit() -> Result<(), Box<Error>> {
+        let db = storage::new_test_database().await;
+
+        let bitcoin_chain = BitcoinChain::default();
+        let stacks_chain = StacksChain::new_anchored(&bitcoin_chain);
+        let btc_1 = bitcoin_chain.first_block();
+        let stx_a = stacks_chain.first_block();
+        let stx_b = stx_a.new_child().anchored_to(btc_1);
+        let btc_2 = btc_1.new_child();
+        let stx_c = stx_b.new_child().anchored_to(&btc_2);
+
+        // Start transaction
+        let tx = db.begin_transaction().await?;
+
+        // Write data within transaction
+        tx.write_bitcoin_block(btc_1).await?;
+        tx.write_stacks_block(stx_a).await?;
+        tx.write_stacks_block(&stx_b).await?;
+
+        tx.write_bitcoin_block(&btc_2).await?;
+        tx.write_stacks_block(&stx_c).await?;
+
+        // Commit transaction
+        tx.commit().await?;
+
+        // Verify data in original store
+        assert_eq!(
+            db.get_bitcoin_block(&btc_1.block_hash).await?,
+            Some(btc_1.clone())
+        );
+        assert_eq!(
+            db.get_stacks_block(&stx_a.block_hash).await?,
+            Some(stx_a.clone())
+        );
+        assert_eq!(
+            db.get_stacks_block(&stx_b.block_hash).await?,
+            Some(stx_b.clone())
+        );
+
+        assert_eq!(
+            db.get_bitcoin_block(&btc_2.block_hash).await?,
+            Some(btc_2.clone())
+        );
+        assert_eq!(
+            db.get_stacks_block(&stx_c.block_hash).await?,
+            Some(stx_c.clone())
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_pgsql_transaction_rollback() -> Result<(), Box<Error>> {
+        let db = storage::new_test_database().await;
+
+        let bitcoin_chain = BitcoinChain::default();
+        let stacks_chain = StacksChain::new_anchored(&bitcoin_chain);
+        let btc_1 = bitcoin_chain.first_block();
+        let stx_a = stacks_chain.first_block();
+
+        // Start transaction
+        let tx = db.begin_transaction().await?;
+
+        // Write data within transaction
+        tx.write_bitcoin_block(btc_1).await?;
+        tx.write_stacks_block(stx_a).await?;
+
+        // Rollback transaction
+        tx.rollback().await?;
+
+        // Verify data is NOT in original store
+        assert!(db.get_bitcoin_block(&btc_1.block_hash).await?.is_none());
+        assert!(db.get_stacks_block(&stx_a.block_hash).await?.is_none());
+
+        Ok(())
+    }
+
+    #[test(tokio::test)]
+    async fn test_pgsql_transaction_implicit_rollback_on_drop() -> Result<(), Box<Error>> {
+        let db = storage::new_test_database().await;
+
+        let bitcoin_chain = BitcoinChain::default();
+        let stacks_chain = StacksChain::new_anchored(&bitcoin_chain);
+        let btc_1 = bitcoin_chain.first_block();
+        let stx_a = stacks_chain.first_block();
+
+        // Scope for the transaction. The transaction is dropped at the end of
+        // the scope and should be implicitly rolled-back.
+        {
+            let tx = db.begin_transaction().await?;
+            tx.write_bitcoin_block(btc_1).await?;
+            tx.write_stacks_block(stx_a).await?;
+        }
+
+        // Verify data is NOT in original store
+        assert!(db.get_bitcoin_block(&btc_1.block_hash).await?.is_none());
+        assert!(db.get_stacks_block(&stx_a.block_hash).await?.is_none());
+
+        Ok(())
     }
 }
