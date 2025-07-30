@@ -17,6 +17,9 @@ where
 {
     let mut v = Vec::new();
     for s in Vec::<String>::deserialize(deserializer)? {
+        if s.is_empty() {
+            continue;
+        }
         v.push(s.parse().map_err(serde::de::Error::custom)?);
     }
     Ok(v)

@@ -582,6 +582,7 @@ impl Settings {
 
     /// Perform validation on the configuration.
     fn validate(&self) -> Result<(), ConfigError> {
+        self.bitcoin.validate(self)?;
         self.signer.validate(self)?;
         self.stacks.validate(self)?;
         self.emily.validate(self)?;
@@ -679,6 +680,10 @@ mod tests {
         assert_eq!(settings.bitcoin.rpc_endpoints[0].username(), "devnet");
         assert_eq!(settings.bitcoin.rpc_endpoints[0].password(), Some("devnet"));
         assert_eq!(
+            settings.bitcoin.chain_tip_polling_interval,
+            Duration::from_secs(5)
+        );
+        assert_eq!(
             settings.signer.event_observer.bind,
             "0.0.0.0:8801".parse::<SocketAddr>().unwrap()
         );
@@ -771,6 +776,7 @@ mod tests {
             "SIGNER_BITCOIN__RPC_ENDPOINTS",
             "http://user:pass@localhost:1234,http://foo:bar@localhost:5678",
         );
+        set_var("SIGNER_BITCOIN__CHAIN_TIP_POLLING_INTERVAL", "10");
 
         let settings = Settings::new_from_default_config().unwrap();
 
@@ -789,7 +795,7 @@ mod tests {
         );
         assert_eq!(
             settings.bitcoin.chain_tip_polling_interval,
-            Duration::from_secs(5)
+            Duration::from_secs(10)
         );
     }
 
@@ -806,6 +812,44 @@ mod tests {
             settings.signer.private_key,
             PrivateKey::from_str(&new[..64]).unwrap()
         );
+    }
+
+    #[test]
+    fn config_errors_if_bitcoin_polling_interval_exceeds_max() {
+        clear_env();
+
+        let interval_secs = (MAX_BITCOIN_CHAIN_TIP_POLLING_INTERVAL_SECONDS + 1).to_string();
+        set_var("SIGNER_BITCOIN__CHAIN_TIP_POLLING_INTERVAL", interval_secs);
+
+        let error = Settings::new_from_default_config().unwrap_err();
+
+        match error {
+            ConfigError::Message(msg) => {
+                assert!(msg.contains("polling interval exceeded"));
+            }
+            _ => {
+                panic!("Expected ConfigError::Message, got: {error:#?}");
+            }
+        }
+    }
+
+    #[test]
+    fn config_errors_if_no_bitcoin_rpc_endpoints() {
+        clear_env();
+
+        set_var("SIGNER_BITCOIN__RPC_ENDPOINTS", "");
+
+        let error = Settings::new_from_default_config().unwrap_err();
+
+        match error {
+            ConfigError::Message(msg) => {
+                dbg!(&msg);
+                assert!(msg.contains("RPC endpoint must be provided"));
+            }
+            _ => {
+                panic!("Expected ConfigError::Message, got: {error:#?}");
+            }
+        }
     }
 
     #[test]
