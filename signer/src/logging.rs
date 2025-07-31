@@ -59,9 +59,9 @@ async fn log_blockchain_nodes_info<C: Context>(ctx: &C) {
 /// Simple struct for time to time writing logs
 /// about Stacks and Bitcoin nodes state, info about DKG,
 /// signer config, etc.
-pub struct SignerInfoLogger<Context> {
+pub struct SignerInfoLogger<C> {
     /// Signer context.
-    context: Context,
+    context: C,
     /// Logging interval.
     interval: Duration,
 }
