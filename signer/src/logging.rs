@@ -79,6 +79,7 @@ where
     /// last dkg, signer config, etc, each [`interval`].
     pub async fn run(self) {
         let mut term = self.context.get_termination_handle();
+        log_blockchain_nodes_info(&self.context).await;
         loop {
             tokio::select! {
                 _ = term.wait_for_shutdown() => {
