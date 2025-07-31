@@ -84,6 +84,7 @@ testing-emily-client.workspace = true
 toml_edit.workspace = true
 tower.workspace = true
 assert_matches.workspace = true
+wsts = { workspace = true, features = ["testing"] }
 
 [[bin]]
 name = "demo-cli"

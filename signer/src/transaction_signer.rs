@@ -315,7 +315,10 @@ where
         Ok(())
     }
 
-    #[tracing::instrument(skip_all, fields(chain_tip = tracing::field::Empty))]
+    #[tracing::instrument(skip_all, fields(
+        bitcoin_tip_hash = tracing::field::Empty,
+        bitcoin_tip_height = tracing::field::Empty,
+    ))]
     async fn handle_signer_message(&mut self, msg: &network::Msg) -> Result<(), Error> {
         let chain_tip_report = self
             .inspect_msg_chain_tip(msg.signer_public_key, &msg.bitcoin_chain_tip)
@@ -327,7 +330,10 @@ where
         } = chain_tip_report;
 
         let span = tracing::Span::current();
-        span.record("chain_tip", tracing::field::display(chain_tip.block_hash));
+        let tracing_chain_tip = tracing::field::display(chain_tip.block_hash);
+        span.record("bitcoin_tip_hash", tracing_chain_tip);
+        span.record("bitcoin_tip_height", *chain_tip.block_height);
+
         tracing::trace!(
             %sender_is_coordinator,
             %chain_tip_status,
@@ -460,7 +466,7 @@ where
             aggregate_key,
         };
 
-        tracing::debug!("validating bitcoin transaction pre-sign");
+        tracing::debug!(%request, "validating bitcoin transaction pre-sign");
         let sighashes = request
             .construct_package_sighashes(&self.context, &btc_ctx)
             .await?;
@@ -1588,32 +1594,46 @@ pub async fn assert_allow_dkg_begin(
     let storage = context.get_storage();
     let config = context.config();
 
+    let latest_dkg_shares = storage.get_latest_non_failed_dkg_shares().await?;
+    let Some(latest_dkg_shares) = latest_dkg_shares else {
+        tracing::info!("no non-failed DKG shares exist; proceeding with DKG");
+        return Ok(());
+    };
+
     // If the latest shares are unverified, we want to prioritize verifying them
     // instead of doing new DKG rounds. If we fail to do so they will eventually
     // be marked as failed, and we will resume DKG-ing.
-    let latest_dkg_shares = storage.get_latest_encrypted_dkg_shares().await?;
-    if latest_dkg_shares.map(|s| s.dkg_shares_status) == Some(model::DkgSharesStatus::Unverified) {
+    if latest_dkg_shares.dkg_shares_status == model::DkgSharesStatus::Unverified {
         tracing::warn!("latest shares are unverified; aborting");
         return Err(Error::DkgHasAlreadyRun);
     }
 
-    // If we do not have a key rotation event in the database, we will
-    // allow DKG below if we have not run DKG yet.
+    // If the registry has signer set info, we may need to run DKG based on it
     if let Some(registry_signer_info) = context.state().registry_signer_set_info() {
-        // Trigger DKG if signatures_required has changed
-        if registry_signer_info.signatures_required != config.signer.bootstrap_signatures_required {
-            tracing::info!("signatures required has changed; proceeding with DKG");
-            return Ok(());
-        }
-
-        // Trigger DKG if signer set changes
-        if registry_signer_info.signer_set != config.signer.bootstrap_signing_set {
-            tracing::info!("signer set has changed; proceeding with DKG");
-            return Ok(());
+        // If the registry differs from the config we may need to run DKG
+        if registry_signer_info.signatures_required != config.signer.bootstrap_signatures_required
+            || registry_signer_info.signer_set != config.signer.bootstrap_signing_set
+        {
+            // If we don't have new shares for the config already, we need DKG
+            if latest_dkg_shares.signature_share_threshold
+                != config.signer.bootstrap_signatures_required
+                || latest_dkg_shares.signer_set_public_keys() != config.signer.bootstrap_signing_set
+            {
+                tracing::info!(
+                    "signer set config differs from registry and latest DKG shares; proceeding with DKG"
+                );
+                return Ok(());
+            } else {
+                tracing::debug!(
+                    "signer set config differs from registry, but we already have verified shares for it; checking other conditions"
+                );
+            }
         }
     }
 
-    // Get the number of DKG shares that have been stored
+    // Finally, we may need to run DKG because of config target rounds.
+
+    // Get the number of non-failed DKG shares that have been stored
     let dkg_shares_entry_count = storage.get_encrypted_dkg_shares_count().await?;
 
     // Get DKG configuration parameters
@@ -1626,13 +1646,6 @@ pub async fn assert_allow_dkg_begin(
         dkg_target_rounds,
         dkg_min_bitcoin_block_height,
     ) {
-        (0, _, _) => {
-            tracing::info!(
-                ?dkg_min_bitcoin_block_height,
-                %dkg_target_rounds,
-                "no DKG shares exist; proceeding with DKG"
-            );
-        }
         (current, target, Some(dkg_min_height)) => {
             if current >= target.get() {
                 tracing::warn!(
@@ -1659,7 +1672,8 @@ pub async fn assert_allow_dkg_begin(
                 "DKG rerun height has been met and we are below the target number of rounds; proceeding with DKG"
             );
         }
-        // Note that we account for all (0, _, _) cases above (i.e. first DKG round)
+        // Note that we account for all (0, _, _) cases in the early return when
+        // we fetch the latest non failed DKG shares
         (_, _, None) => {
             tracing::warn!(
                 ?dkg_min_bitcoin_block_height,

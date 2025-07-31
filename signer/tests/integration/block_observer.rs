@@ -280,7 +280,10 @@ async fn link_blocks() {
     // Wait for new block; when running in devenv, it should take <30s
     loop {
         let signal = signal_rx.recv().await.expect("failed to get signal");
-        if let SignerSignal::Event(SignerEvent::BitcoinBlockObserved) = signal {
+        if matches!(
+            signal,
+            SignerSignal::Event(SignerEvent::BitcoinBlockObserved(_))
+        ) {
             break;
         }
     }
@@ -488,7 +491,7 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     // Let's wait for the block observer to signal that it has finished
     // processing everything.
     let signal = signal_receiver.recv();
-    let Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved)) = signal.await else {
+    let Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(_))) = signal.await else {
         panic!("Not the right signal")
     };
 
@@ -531,12 +534,14 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     // Start off with some initial UTXOs to work with.
     faucet.send_to(50_000_000, &depositor.address);
 
-    let chain_tip = faucet.generate_blocks(1).pop().unwrap().into();
+    let chain_tip: BitcoinBlockHash = faucet.generate_block().into();
 
     let signal = signal_receiver.recv();
-    let Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved)) = signal.await else {
-        panic!("Not the right signal")
-    };
+    match signal.await {
+        Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref)))
+            if block_ref.block_hash == chain_tip => {}
+        _ => panic!("Not the right signal"),
+    }
 
     // Now lets make a deposit transaction and submit it. First we get some
     // sats.
@@ -598,14 +603,16 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     // ** Step 6 **
     //
     // Check that the block observer populates the tables correctly
-    faucet.generate_block();
+    let chain_tip: BitcoinBlockHash = faucet.generate_block().into();
 
     // Okay now there is a deposit, and it has been confirmed. We should
     // pick it up automatically.
     let signal = signal_receiver.recv();
-    let Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved)) = signal.await else {
-        panic!("Not the right signal")
-    };
+    match signal.await {
+        Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref)))
+            if block_ref.block_hash == chain_tip => {}
+        _ => panic!("Not the right signal"),
+    }
 
     // Okay now we should see the signers output with the expected values.
     let TxOutput { txid, output_index, amount, .. } =
@@ -964,13 +971,15 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
 
     // Let's generate a new block and wait for our block observer to send a
     // BitcoinBlockObserved signal.
-    let expected_tip = faucet.generate_blocks(1).pop().unwrap();
+    let expected_tip = faucet.generate_block().into();
 
     let waiting_fut = async {
         let signal = signal_receiver.recv();
-        let Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved)) = signal.await else {
-            panic!("Not the right signal")
-        };
+        match signal.await {
+            Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref)))
+                if block_ref.block_hash == expected_tip => {}
+            _ => panic!("Not the right signal"),
+        }
     };
 
     tokio::time::timeout(Duration::from_secs(3), waiting_fut)
@@ -983,7 +992,7 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
         .get_bitcoin_canonical_chain_tip()
         .await
         .expect("cannot get chain tip");
-    assert_eq!(db_chain_tip, Some(expected_tip.into()));
+    assert_eq!(db_chain_tip, Some(expected_tip));
 
     testing::storage::drop_db(db).await;
 }
@@ -1248,12 +1257,13 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
 
     // Let's generate a new block and wait for our block observer to send a
     // BitcoinBlockObserved signal.
-    let chain_tip = faucet.generate_blocks(1).pop().unwrap().into();
+    let chain_tip = faucet.generate_block().into();
 
     ctx.wait_for_signal(Duration::from_secs(3), |signal| {
         matches!(
             signal,
-            SignerSignal::Event(SignerEvent::BitcoinBlockObserved)
+            SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
+                if block_ref.block_hash == chain_tip
         )
     })
     .await
@@ -1292,7 +1302,8 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
     ctx.wait_for_signal(Duration::from_secs(3), |signal| {
         matches!(
             signal,
-            SignerSignal::Event(SignerEvent::BitcoinBlockObserved)
+            SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
+                if block_ref.block_hash == chain_tip
         )
     })
     .await
@@ -1417,12 +1428,13 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
 
     // Let's generate a new block and wait for our block observer to send a
     // BitcoinBlockObserved signal.
-    let chain_tip = faucet.generate_blocks(1).pop().unwrap().into();
+    let chain_tip = faucet.generate_block().into();
 
     ctx.wait_for_signal(Duration::from_secs(3), |signal| {
         matches!(
             signal,
-            SignerSignal::Event(SignerEvent::BitcoinBlockObserved)
+            SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
+                if block_ref.block_hash == chain_tip
         )
     })
     .await
@@ -1470,12 +1482,13 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
 
     // While in the verification window, we expect the share to stay in pending
     for _ in 0..verification_window {
-        let chain_tip = faucet.generate_blocks(1).pop().unwrap().into();
+        let chain_tip = faucet.generate_block().into();
 
         ctx.wait_for_signal(Duration::from_secs(3), |signal| {
             matches!(
                 signal,
-                SignerSignal::Event(SignerEvent::BitcoinBlockObserved)
+                SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
+                    if block_ref.block_hash == chain_tip
             )
         })
         .await
@@ -1503,12 +1516,13 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
     }
 
     // With this block we exit the verification window
-    let chain_tip = faucet.generate_blocks(1).pop().unwrap().into();
+    let chain_tip = faucet.generate_block().into();
 
     ctx.wait_for_signal(Duration::from_secs(3), |signal| {
         matches!(
             signal,
-            SignerSignal::Event(SignerEvent::BitcoinBlockObserved)
+            SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
+                if block_ref.block_hash == chain_tip
         )
     })
     .await
@@ -1645,14 +1659,16 @@ async fn block_observer_ignores_coinbase() {
     let donation_amount = 123_456;
     let donation_outpoint = faucet.send_to(donation_amount, &address);
 
-    rpc.generate_to_address(1, &address).unwrap();
+    let chain_tip = rpc.generate_to_address(1, &address).unwrap().pop().unwrap();
 
     // Let's wait for the block observer to signal that it has finished
     // processing everything.
     let signal = signal_receiver.recv();
-    let Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved)) = signal.await else {
-        panic!("Not the right signal")
-    };
+    match signal.await {
+        Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref)))
+            if *block_ref.block_hash == chain_tip => {}
+        _ => panic!("Not the right signal"),
+    }
 
     // Okay now we check we ignored the coinbase donation but processed the
     // block as expected and have the second donation.
@@ -1678,12 +1694,15 @@ async fn block_observer_ignores_coinbase() {
     let (deposit_tx, deposit_request) =
         make_coinbase_deposit_request(rpc, max_fee, signers_public_key);
 
+    let chain_tip = get_canonical_chain_tip(rpc).hash;
     // `make_coinbase_deposit_request` will generate a block, ensure we process
     // it just fine.
     let signal = signal_receiver.recv();
-    let Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved)) = signal.await else {
-        panic!("Not the right signal")
-    };
+    match signal.await {
+        Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref)))
+            if *block_ref.block_hash == chain_tip => {}
+        _ => panic!("Not the right signal"),
+    }
 
     // ** Step 5 **
     //
@@ -1702,14 +1721,16 @@ async fn block_observer_ignores_coinbase() {
     // ** Step 6 **
     //
     // Check that the block observer populates the tables correctly
-    faucet.generate_blocks(1);
+    let chain_tip = faucet.generate_block().into();
 
     // Okay now there is a deposit, and it has been confirmed. We should
     // pick it up automatically.
     let signal = signal_receiver.recv();
-    let Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved)) = signal.await else {
-        panic!("Not the right signal")
-    };
+    match signal.await {
+        Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref)))
+            if block_ref.block_hash == chain_tip => {}
+        _ => panic!("Not the right signal"),
+    }
 
     // We should have two donations if we processed both blocks correctly
     let donations = fetch_output(&db, TxOutputType::Donation).await;

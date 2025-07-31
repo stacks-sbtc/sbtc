@@ -150,7 +150,7 @@ impl StateMachine {
         } else {
             eprintln!("!! message count assertions failed:");
             for result in results {
-                eprintln!(" - {}", result);
+                eprintln!(" - {result}");
             }
             false
         }

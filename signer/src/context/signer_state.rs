@@ -528,6 +528,19 @@ impl SignerSet {
             .expect("BUG: Failed to acquire read lock")
             .len()
     }
+
+    /// Gets the signer public key for the given peer ID, returning `None` if
+    /// the peer ID is not in the signer set or otherwise unknown.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn get_pubkey_for_peer(&self, peer_id: &PeerId) -> Option<PublicKey> {
+        #[allow(clippy::expect_used)]
+        self.signers
+            .read()
+            .expect("BUG: Failed to acquire read lock")
+            .iter()
+            .find(|signer| signer.peer_id() == peer_id)
+            .map(|signer| *signer.public_key())
+    }
 }
 
 #[cfg(test)]

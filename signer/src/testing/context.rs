@@ -21,6 +21,7 @@ use tokio::time::error::Elapsed;
 use crate::bitcoin::GetTransactionFeeResult;
 use crate::bitcoin::rpc::{BitcoinBlockHeader, BitcoinBlockInfo};
 use crate::context::SbtcLimits;
+use crate::keys::PrivateKey;
 use crate::stacks::api::SignerSetInfo;
 use crate::stacks::api::TenureBlocks;
 use crate::stacks::wallet::SignerWallet;
@@ -689,6 +690,17 @@ where
         f(&mut config.settings);
         ContextBuilder { config }
     }
+
+    /// Helper for configuring the context's settings with the specified signer
+    /// private key.
+    fn with_private_key(
+        self,
+        private_key: PrivateKey,
+    ) -> ContextBuilder<Storage, Bitcoin, Stacks, Emily> {
+        self.modify_settings(|settings| {
+            settings.signer.private_key = private_key;
+        })
+    }
 }
 
 impl<Storage, Bitcoin, Stacks, Emily> ConfigureSettings<Storage, Bitcoin, Stacks, Emily>
@@ -955,6 +967,7 @@ mod tests {
 
     use tokio::sync::Notify;
 
+    use crate::storage::model;
     use crate::{
         context::{Context as _, SignerEvent, SignerSignal},
         testing::context::*,
@@ -983,9 +996,9 @@ mod tests {
 
         let recv1 = tokio::spawn(async move {
             let signal = recv.recv().await.unwrap();
-            assert_eq!(
+            assert_matches::assert_matches!(
                 signal,
-                SignerSignal::Event(SignerEvent::BitcoinBlockObserved)
+                SignerSignal::Event(SignerEvent::BitcoinBlockObserved(_))
             );
             signal
         });
@@ -1001,9 +1014,9 @@ mod tests {
             let mut cloned_receiver = context_clone.get_signal_receiver();
             recv_task_started_clone.store(true, Ordering::Relaxed);
             let signal = cloned_receiver.recv().await.unwrap();
-            assert_eq!(
+            assert_matches::assert_matches!(
                 signal,
-                SignerSignal::Event(SignerEvent::BitcoinBlockObserved)
+                SignerSignal::Event(SignerEvent::BitcoinBlockObserved(_))
             );
             recv_count_clone.fetch_add(1, Ordering::Relaxed);
             recv_signal_received_clone.store(true, Ordering::Relaxed);
@@ -1014,8 +1027,9 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
 
+        let chain_tip_ref = model::BitcoinBlockRef::genesis();
         context
-            .signal(SignerEvent::BitcoinBlockObserved.into())
+            .signal(SignerEvent::BitcoinBlockObserved(chain_tip_ref).into())
             .unwrap();
 
         while !recv_signal_received.load(Ordering::Relaxed) {

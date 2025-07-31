@@ -339,7 +339,7 @@ mod tests {
         // Attempt to read the last "garbage byte" (should error)
         match cursor.read_leb128() {
             Err(Error::IncompleteSequence) => {} // Expected
-            other => panic!("expected IncompleteSequence error, got {:?}", other),
+            other => panic!("expected IncompleteSequence error, got {other:?}"),
         }
         assert_eq!(cursor.position(), 5);
         cursor.set_position(cursor.position() + 1); // Skip past the invalid byte
@@ -347,7 +347,7 @@ mod tests {
         // Attempt read at end (should error)
         match cursor.read_leb128() {
             Err(Error::IndexOutOfBounds) => {} // Expected
-            other => panic!("expected IndexOutOfBounds error, got {:?}", other),
+            other => panic!("expected IndexOutOfBounds error, got {other:?}"),
         }
 
         // Position should remain unchanged after error
@@ -369,7 +369,7 @@ mod tests {
         cursor.set_position(large_but_valid_pos);
         match cursor.read_leb128() {
             Err(Error::IndexOutOfBounds) => {} // Expected
-            other => panic!("Expected IndexOutOfBounds error, got {:?}", other),
+            other => panic!("Expected IndexOutOfBounds error, got {other:?}"),
         }
     }
 

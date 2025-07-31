@@ -15,6 +15,8 @@ use clarity::util::secp256k1::Secp256k1PublicKey;
 use fake::Dummy;
 use fake::Fake;
 use fake::Faker;
+use libp2p::Multiaddr;
+use libp2p::PeerId;
 use p256k1::point::Point;
 use p256k1::scalar::Scalar;
 use polynomial::Polynomial;
@@ -86,6 +88,9 @@ use crate::storage::model::StacksTxId;
 use crate::storage::model::TaprootScriptHash;
 use crate::storage::model::WithdrawalAcceptEvent;
 use crate::storage::model::WithdrawalRejectEvent;
+use crate::wsts_state_machine::DkgSignerCommitments;
+
+use super::network::MultiaddrExt as _;
 
 /// Dummy block
 pub fn block<R: rand::RngCore + ?Sized>(
@@ -344,10 +349,11 @@ pub fn encrypted_dkg_shares<R: rand::RngCore + rand::CryptoRng>(
     group_key: PublicKey,
     status: DkgSharesStatus,
 ) -> model::EncryptedDkgShares {
+    let private_key_scalar = Scalar::from(*signer_private_key);
     let party_state = wsts::traits::PartyState {
         polynomial: None,
         private_keys: vec![],
-        nonce: wsts::common::Nonce::random(rng),
+        nonce: wsts::common::Nonce::random(&private_key_scalar, rng),
     };
 
     let signer_state = wsts::traits::SignerState {
@@ -795,6 +801,21 @@ impl fake::Dummy<fake::Faker> for model::Timestamp {
     }
 }
 
+impl fake::Dummy<fake::Faker> for model::P2PPeer {
+    fn dummy_with_rng<R: rand::RngCore + ?Sized>(config: &fake::Faker, rng: &mut R) -> Self {
+        let public_key: PublicKey = config.fake_with_rng(rng);
+        let multiaddr = Multiaddr::random_memory(rng);
+        let peer_id: PeerId = public_key.into();
+
+        model::P2PPeer {
+            peer_id: peer_id.into(),
+            public_key,
+            address: multiaddr.into(),
+            last_dialed_at: Faker.fake_with_rng(rng),
+        }
+    }
+}
+
 /// A struct to help with creating dummy values for testing
 pub struct Unit;
 
@@ -1139,8 +1160,20 @@ impl Dummy<Unit> for (u32, PolyCommitment) {
 impl Dummy<Unit> for DkgPublicShares {
     fn dummy_with_rng<R: rand::Rng + ?Sized>(config: &Unit, rng: &mut R) -> Self {
         DkgPublicShares {
+            kex_public_key: config.fake_with_rng(rng),
             dkg_id: Faker.fake_with_rng(rng),
             signer_id: Faker.fake_with_rng(rng),
+            comms: fake::vec![(); 0..20]
+                .into_iter()
+                .map(|_| config.fake_with_rng(rng))
+                .collect(),
+        }
+    }
+}
+
+impl Dummy<Unit> for DkgSignerCommitments {
+    fn dummy_with_rng<R: rand::Rng + ?Sized>(config: &Unit, rng: &mut R) -> Self {
+        DkgSignerCommitments {
             comms: fake::vec![(); 0..20]
                 .into_iter()
                 .map(|_| config.fake_with_rng(rng))
