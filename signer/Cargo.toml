@@ -93,6 +93,7 @@ test-log.workspace = true
 testing-emily-client.workspace = true
 toml_edit.workspace = true
 tower.workspace = true
+wsts = { workspace = true, features = ["testing"] }
 
 # Inherit lints from the workspace
 [lints]
