@@ -55,6 +55,7 @@ const KNOWN_PEER_WINDOW: Duration = Duration::from_secs(60 * 60 * 24 * 30); // 3
 /// addition to the seed peers.
 const MAX_KNOWN_PEERS: usize = 6;
 
+
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum LogOutputFormat {
     Json,
