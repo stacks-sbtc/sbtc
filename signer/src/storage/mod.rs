@@ -17,6 +17,8 @@ use std::collections::BTreeSet;
 use std::future::Future;
 
 use blockstack_lib::types::chainstate::StacksBlockId;
+use libp2p::Multiaddr;
+use libp2p::PeerId;
 
 use crate::bitcoin::utxo::SignerUtxo;
 use crate::bitcoin::validation::DepositRequestReport;
@@ -459,6 +461,9 @@ pub trait DbRead {
         &self,
         sighash: &model::SigHash,
     ) -> impl Future<Output = Result<Option<(bool, PublicKeyXOnly)>, Error>> + Send;
+
+    /// Returns the list of stored peers.
+    fn get_p2p_peers(&self) -> impl Future<Output = Result<Vec<model::P2PPeer>, Error>> + Send;
 }
 
 /// Represents the ability to write data to the signer storage.
@@ -604,4 +609,13 @@ pub trait DbWrite {
     ) -> impl Future<Output = Result<bool, Error>> + Send
     where
         X: Into<PublicKeyXOnly> + Send;
+
+    /// Upserts a P2P peer, updating the last seen time and address if the peer
+    /// already exists.
+    fn update_peer_connection(
+        &self,
+        pub_key: &PublicKey,
+        peer_id: &PeerId,
+        address: Multiaddr,
+    ) -> impl Future<Output = Result<(), Error>> + Send;
 }

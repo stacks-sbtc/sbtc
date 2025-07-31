@@ -784,6 +784,12 @@ impl DbRead for SharedStore {
 
         Ok(result)
     }
+
+    async fn get_p2p_peers(&self) -> Result<Vec<model::P2PPeer>, Error> {
+        let store = self.lock().await;
+        let peers = store.p2p_peers.values().cloned().collect();
+        Ok(peers)
+    }
 }
 
 impl DbRead for InMemoryTransaction {
@@ -1147,5 +1153,9 @@ impl DbRead for InMemoryTransaction {
         sighash: &model::SigHash,
     ) -> Result<Option<(bool, PublicKeyXOnly)>, Error> {
         self.store.will_sign_bitcoin_tx_sighash(sighash).await
+    }
+
+    async fn get_p2p_peers(&self) -> Result<Vec<model::P2PPeer>, Error> {
+        self.store.get_p2p_peers().await
     }
 }

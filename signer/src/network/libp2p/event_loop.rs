@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
+use libp2p::core::ConnectedPoint;
 use libp2p::kad::RoutingUpdate;
 use libp2p::swarm::SwarmEvent;
 use libp2p::{Swarm, gossipsub, identify, kad, mdns};
@@ -11,6 +12,8 @@ use crate::codec::Encode;
 use crate::context::{Context, P2PEvent, SignerCommand, SignerSignal};
 use crate::error::Error;
 use crate::network::Msg;
+use crate::network::libp2p::MultiaddrExt;
+use crate::storage::DbWrite;
 
 use super::TOPIC;
 use super::swarm::{SignerBehavior, SignerBehaviorEvent};
@@ -110,16 +113,46 @@ pub async fn run(ctx: &impl Context, swarm: Arc<Mutex<Swarm<SignerBehavior>>>) {
                             let _ = swarm.disconnect_peer_id(peer_id);
                         } else {
                             tracing::debug!(%peer_id, ?endpoint, "connected to peer");
-                            if endpoint.is_dialer() && swarm.behaviour().kademlia.is_enabled() {
-                                let kad_addr = endpoint.get_remote_address();
-                                tracing::debug!(%peer_id, %kad_addr, "adding address to kademlia");
-                                swarm
-                                    .behaviour_mut()
-                                    .kademlia
-                                    .as_mut() // Returns `None` if disabled.
-                                    .map(|kademlia| {
-                                        kademlia.add_address(&peer_id, kad_addr.clone())
-                                    });
+
+                            // Perform operations that are only needed/possible when we are the
+                            // dialer and have peer's confirmed dialable address.
+                            if let ConnectedPoint::Dialer { address, .. } = endpoint {
+                                // If we are the dialer, we know that the address is reachable
+                                // from the outside, so we add it to the Kademlia routing table
+                                // if Kademlia is enabled.
+                                if swarm.behaviour().kademlia.is_enabled() {
+                                    tracing::debug!(%peer_id, %address, "adding address to kademlia");
+                                    swarm
+                                        .behaviour_mut()
+                                        .kademlia
+                                        .as_mut() // Returns `None` if disabled.
+                                        .map(|kademlia| {
+                                            kademlia.add_address(&peer_id, address.clone())
+                                        });
+                                }
+
+                                // Attempt to map the peer ID to its public key.
+                                let peer_pubkey = ctx
+                                    .state()
+                                    .current_signer_set()
+                                    .get_pubkey_for_peer(&peer_id);
+
+                                // If the peer ID could be mapped to a public key, proceed to update
+                                // our peer storage with the latest address information. This *should*
+                                // always work.
+                                if let Some(pubkey) = peer_pubkey {
+                                    let address = address.without_p2p_protocol();
+                                    tracing::debug!(%peer_id, %pubkey, %address, "updating peer connection entry in storage");
+                                    // Update the peer's connection entry.
+                                    let _ = ctx.get_storage_mut()
+                                        .update_peer_connection(&pubkey, &peer_id, address)
+                                        .await
+                                        .inspect_err(|error| {
+                                            tracing::warn!(%error, "failed to update peer connection entry");
+                                        });
+                                } else {
+                                    tracing::warn!(%peer_id, "BUG: peer was allowed, but we couldn't map it to a public key");
+                                }
                             }
                         }
                     }

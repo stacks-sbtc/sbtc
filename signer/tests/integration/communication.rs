@@ -12,6 +12,7 @@ use signer::keys::PrivateKey;
 use signer::keys::PublicKey;
 use signer::network::P2PNetwork;
 use signer::network::libp2p::SignerSwarmBuilder;
+use signer::testing::IterTestExt;
 use signer::testing::context::TestContext;
 use signer::testing::context::*;
 use test_case::test_case;
@@ -101,8 +102,8 @@ async fn libp2p_clients_can_exchange_messages_given_real_network(addr1: &str, ad
     // Wait for the swarms to start.
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-    let swarm1_addr = swarm1.listen_addrs().await.pop().unwrap();
-    let swarm2_addr = swarm2.listen_addrs().await.pop().unwrap();
+    let swarm1_addr = swarm1.listen_addrs().await.single();
+    let swarm2_addr = swarm2.listen_addrs().await.single();
 
     swarm1.dial(swarm2_addr).await.unwrap();
     swarm2.dial(swarm1_addr).await.unwrap();

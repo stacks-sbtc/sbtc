@@ -6206,6 +6206,51 @@ async fn writing_key_rotation_transactions() {
     testing::storage::drop_db(db).await;
 }
 
+mod p2p_peers {
+    use libp2p::{Multiaddr, PeerId};
+    use signer::testing::network::MultiaddrExt as _;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn write_read_update_p2p_peer() {
+        let db = testing::storage::new_test_database().await;
+        let rng = &mut get_rng();
+
+        let pub_key: PublicKey = Faker.fake_with_rng(rng);
+        let peer_id: PeerId = pub_key.into();
+        let multiaddr = Multiaddr::random_memory(rng);
+        let utc_now = time::OffsetDateTime::now_utc();
+
+        db.update_peer_connection(&pub_key, &peer_id, multiaddr.clone())
+            .await
+            .expect("Failed to insert peer connection");
+
+        let peers = db.get_p2p_peers().await.unwrap();
+        assert_eq!(peers.len(), 1);
+        assert_eq!(*peers[0].peer_id, peer_id);
+        assert_eq!(peers[0].public_key, pub_key);
+        assert_eq!(*peers[0].address, multiaddr);
+        // Ensure that the last_dialed_at timestamp is within a reasonable
+        // timespan from utc_now.
+        assert!(*peers[0].last_dialed_at - utc_now < time::Duration::seconds(5));
+
+        // Now let's update the peer connection with a new address.
+        let multiaddr = Multiaddr::random_memory(rng);
+        db.update_peer_connection(&pub_key, &peer_id, multiaddr.clone())
+            .await
+            .expect("Failed to update peer connection");
+        let peers = db.get_p2p_peers().await.unwrap();
+
+        assert_eq!(peers.len(), 1);
+        assert_eq!(*peers[0].peer_id, peer_id);
+        assert_eq!(peers[0].public_key, pub_key);
+        assert_eq!(*peers[0].address, multiaddr);
+
+        testing::storage::drop_db(db).await;
+    }
+}
+
 /// Module containing a test suite and helpers specific to
 /// `DbRead::get_pending_accepted_withdrawal_requests`.
 mod get_pending_accepted_withdrawal_requests {

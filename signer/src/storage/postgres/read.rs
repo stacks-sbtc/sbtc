@@ -2543,6 +2543,26 @@ impl PgRead {
         .await
         .map_err(Error::SqlxQuery)
     }
+
+    async fn get_p2p_peers<'e, E>(executor: &'e mut E) -> Result<Vec<model::P2PPeer>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
+        sqlx::query_as::<_, model::P2PPeer>(
+            r#"
+            SELECT 
+                peer_id
+              , public_key
+              , address
+              , last_dialed_at
+            FROM 
+                sbtc_signer.p2p_peers
+            "#,
+        )
+        .fetch_all(executor)
+        .await
+        .map_err(Error::SqlxQuery)
+    }
 }
 
 impl DbRead for PgStore {
@@ -2974,6 +2994,10 @@ impl DbRead for PgStore {
         )
         .await
     }
+
+    async fn get_p2p_peers(&self) -> Result<Vec<model::P2PPeer>, Error> {
+        PgRead::get_p2p_peers(self.get_connection().await?.as_mut()).await
+    }
 }
 
 impl DbRead for PgTransaction<'_> {
@@ -3403,5 +3427,10 @@ impl DbRead for PgTransaction<'_> {
     ) -> Result<Option<(bool, crate::keys::PublicKeyXOnly)>, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::will_sign_bitcoin_tx_sighash(tx.as_mut(), sighash).await
+    }
+
+    async fn get_p2p_peers(&self) -> Result<Vec<model::P2PPeer>, Error> {
+        let mut tx = self.tx.lock().await;
+        PgRead::get_p2p_peers(tx.as_mut()).await
     }
 }

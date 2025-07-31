@@ -1,10 +1,13 @@
 use super::{PgStore, PgTransaction};
 use crate::{
     error::Error,
-    keys::PublicKeyXOnly,
+    keys::{PublicKey, PublicKeyXOnly},
     storage::{
         DbWrite,
-        model::{self, CompletedDepositEvent, WithdrawalAcceptEvent, WithdrawalRejectEvent},
+        model::{
+            self, CompletedDepositEvent, DbMultiaddr, DbPeerId, WithdrawalAcceptEvent,
+            WithdrawalRejectEvent,
+        },
     },
 };
 use bitcoin::hashes::Hash as _;
@@ -966,6 +969,39 @@ impl PgWrite {
         .map(|res| res.rows_affected() > 0)
         .map_err(Error::SqlxQuery)
     }
+
+    async fn update_peer_connection<'e, E>(
+        executor: &'e mut E,
+        pub_key: &PublicKey,
+        peer_id: &libp2p::PeerId,
+        address: libp2p::Multiaddr,
+    ) -> Result<(), Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
+        sqlx::query(
+            r#"
+            INSERT INTO sbtc_signer.p2p_peers (
+                public_key
+              , peer_id
+              , address
+            )
+            VALUES ($1, $2, $3)
+            ON CONFLICT (public_key) DO UPDATE SET
+                address = EXCLUDED.address
+              , last_dialed_at = NOW()
+            WHERE p2p_peers.peer_id = EXCLUDED.peer_id
+            "#,
+        )
+        .bind(pub_key)
+        .bind(DbPeerId::from(*peer_id))
+        .bind(DbMultiaddr::from(address))
+        .execute(executor)
+        .await
+        .map_err(Error::SqlxQuery)?;
+
+        Ok(())
+    }
 }
 
 impl DbWrite for PgStore {
@@ -1112,6 +1148,21 @@ impl DbWrite for PgStore {
         X: Into<PublicKeyXOnly>,
     {
         PgWrite::verify_dkg_shares(self.get_connection().await?.as_mut(), aggregate_key).await
+    }
+
+    async fn update_peer_connection(
+        &self,
+        pub_key: &PublicKey,
+        peer_id: &libp2p::PeerId,
+        address: libp2p::Multiaddr,
+    ) -> Result<(), Error> {
+        PgWrite::update_peer_connection(
+            self.get_connection().await?.as_mut(),
+            pub_key,
+            peer_id,
+            address,
+        )
+        .await
     }
 }
 
@@ -1275,5 +1326,15 @@ impl DbWrite for PgTransaction<'_> {
     {
         let mut tx = self.tx.lock().await;
         PgWrite::verify_dkg_shares(tx.as_mut(), aggregate_key).await
+    }
+
+    async fn update_peer_connection(
+        &self,
+        pub_key: &PublicKey,
+        peer_id: &libp2p::PeerId,
+        address: libp2p::Multiaddr,
+    ) -> Result<(), Error> {
+        let mut tx = self.tx.lock().await;
+        PgWrite::update_peer_connection(tx.as_mut(), pub_key, peer_id, address).await
     }
 }
