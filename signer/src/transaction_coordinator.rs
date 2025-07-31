@@ -551,6 +551,7 @@ where
         let signal_stream = self.context.as_signal_stream(presign_ack_filter);
 
         // Send the presign request message
+        tracing::debug!(request = %sbtc_requests, "sending pre-sign request");
         self.send_message(sbtc_requests, bitcoin_chain_tip).await?;
 
         tokio::pin!(signal_stream);

@@ -466,7 +466,7 @@ where
             aggregate_key,
         };
 
-        tracing::debug!("validating bitcoin transaction pre-sign");
+        tracing::debug!(%request, "validating bitcoin transaction pre-sign");
         let sighashes = request
             .construct_package_sighashes(&self.context, &btc_ctx)
             .await?;
