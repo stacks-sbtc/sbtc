@@ -982,19 +982,19 @@ impl PgWrite {
         sqlx::query(
             r#"
             INSERT INTO sbtc_signer.p2p_peers (
-                peer_id
-              , public_key
+                public_key
+              , peer_id
               , address
             )
             VALUES ($1, $2, $3)
             ON CONFLICT (public_key) DO UPDATE SET
-                peer_id = EXCLUDED.peer_id
-              , address = EXCLUDED.address
+                address = EXCLUDED.address
               , last_dialed_at = NOW()
+            WHERE p2p_peers.peer_id = EXCLUDED.peer_id
             "#,
         )
-        .bind(DbPeerId::from(*peer_id))
         .bind(pub_key)
+        .bind(DbPeerId::from(*peer_id))
         .bind(DbMultiaddr::from(address))
         .execute(executor)
         .await
