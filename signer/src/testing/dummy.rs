@@ -86,6 +86,7 @@ use crate::storage::model::StacksTxId;
 use crate::storage::model::TaprootScriptHash;
 use crate::storage::model::WithdrawalAcceptEvent;
 use crate::storage::model::WithdrawalRejectEvent;
+use crate::wsts_state_machine::DkgSignerCommitments;
 
 /// Dummy block
 pub fn block<R: rand::RngCore + ?Sized>(
@@ -344,10 +345,11 @@ pub fn encrypted_dkg_shares<R: rand::RngCore + rand::CryptoRng>(
     group_key: PublicKey,
     status: DkgSharesStatus,
 ) -> model::EncryptedDkgShares {
+    let private_key_scalar = Scalar::from(*signer_private_key);
     let party_state = wsts::traits::PartyState {
         polynomial: None,
         private_keys: vec![],
-        nonce: wsts::common::Nonce::random(rng),
+        nonce: wsts::common::Nonce::random(&private_key_scalar, rng),
     };
 
     let signer_state = wsts::traits::SignerState {
@@ -1139,8 +1141,20 @@ impl Dummy<Unit> for (u32, PolyCommitment) {
 impl Dummy<Unit> for DkgPublicShares {
     fn dummy_with_rng<R: rand::Rng + ?Sized>(config: &Unit, rng: &mut R) -> Self {
         DkgPublicShares {
+            kex_public_key: config.fake_with_rng(rng),
             dkg_id: Faker.fake_with_rng(rng),
             signer_id: Faker.fake_with_rng(rng),
+            comms: fake::vec![(); 0..20]
+                .into_iter()
+                .map(|_| config.fake_with_rng(rng))
+                .collect(),
+        }
+    }
+}
+
+impl Dummy<Unit> for DkgSignerCommitments {
+    fn dummy_with_rng<R: rand::Rng + ?Sized>(config: &Unit, rng: &mut R) -> Self {
+        DkgSignerCommitments {
             comms: fake::vec![(); 0..20]
                 .into_iter()
                 .map(|_| config.fake_with_rng(rng))

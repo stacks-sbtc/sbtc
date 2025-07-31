@@ -1734,8 +1734,8 @@ where
             let sender_is_coordinator =
                 given_key_is_coordinator(msg_public_key, bitcoin_chain_tip, &signer_set);
 
-            let public_keys = &coordinator.get_config().signer_public_keys;
-            let public_key_point = p256k1::point::Point::from(msg_public_key);
+            let public_keys = &coordinator.get_config().public_keys.signers;
+            let msg_public_key = p256k1::keys::PublicKey::from(msg_public_key);
 
             let msg = wsts_msg.inner;
 
@@ -1743,7 +1743,7 @@ where
             let is_authenticated = Self::authenticate_message(
                 &msg,
                 public_keys,
-                public_key_point,
+                msg_public_key,
                 sender_is_coordinator,
             );
 
@@ -1777,12 +1777,12 @@ where
 
     fn authenticate_message(
         msg: &wsts::net::Message,
-        public_keys: &hashbrown::HashMap<u32, p256k1::point::Point>,
-        public_key_point: p256k1::point::Point,
+        public_keys: &hashbrown::HashMap<u32, p256k1::keys::PublicKey>,
+        msg_public_key: p256k1::keys::PublicKey,
         sender_is_coordinator: bool,
     ) -> bool {
         let check_signer_public_key = |signer_id| match public_keys.get(&signer_id) {
-            Some(signer_public_key) if public_key_point != *signer_public_key => {
+            Some(signer_public_key) if msg_public_key != *signer_public_key => {
                 tracing::warn!(
                     ?msg,
                     reason = "message was signed by the wrong signer",
