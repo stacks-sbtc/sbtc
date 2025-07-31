@@ -342,6 +342,19 @@ impl DbRead for SharedStore {
             .map(|(_, shares)| shares.clone()))
     }
 
+    async fn get_latest_non_failed_dkg_shares(
+        &self,
+    ) -> Result<Option<model::EncryptedDkgShares>, Error> {
+        Ok(self
+            .lock()
+            .await
+            .encrypted_dkg_shares
+            .values()
+            .filter(|(_, shares)| shares.dkg_shares_status != DkgSharesStatus::Failed)
+            .max_by_key(|(time, _)| time)
+            .map(|(_, shares)| shares.clone()))
+    }
+
     async fn get_encrypted_dkg_shares_count(&self) -> Result<u32, Error> {
         Ok(self
             .lock()
@@ -996,6 +1009,12 @@ impl DbRead for InMemoryTransaction {
         &self,
     ) -> Result<Option<model::EncryptedDkgShares>, Error> {
         self.store.get_latest_verified_dkg_shares().await
+    }
+
+    async fn get_latest_non_failed_dkg_shares(
+        &self,
+    ) -> Result<Option<model::EncryptedDkgShares>, Error> {
+        self.store.get_latest_non_failed_dkg_shares().await
     }
 
     async fn get_encrypted_dkg_shares_count(&self) -> Result<u32, Error> {

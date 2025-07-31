@@ -530,9 +530,16 @@ async fn blocklist_client_retry(num_failures: u8, failing_iters: u8) {
         .unwrap();
     assert!(votes.is_empty());
 
+    // The request decider checks the given chain tip against the chain tip
+    // stored in the signer state, and bails if they are different.
+    ctx.state().set_bitcoin_chain_tip(chain_tip_ref);
+
     // Iterations with failing blocklist client
     for _ in 0..failing_iters {
-        request_decider.handle_new_requests().await.unwrap();
+        request_decider
+            .handle_new_requests(chain_tip_ref)
+            .await
+            .unwrap();
 
         // We shouldn't have any decision yet
         let votes = db
@@ -543,7 +550,10 @@ async fn blocklist_client_retry(num_failures: u8, failing_iters: u8) {
     }
 
     // Final iteration with (at least one) blocklist success
-    request_decider.handle_new_requests().await.unwrap();
+    request_decider
+        .handle_new_requests(chain_tip_ref)
+        .await
+        .unwrap();
 
     // A decision should get stored and there should only be one
     let votes = db
@@ -698,7 +708,10 @@ async fn do_not_procceed_with_blocked_addresses(is_withdrawal: bool, is_blocked:
     }
 
     // Handle requests
-    request_decider.handle_new_requests().await.unwrap();
+    request_decider
+        .handle_new_requests(chain_tip_ref)
+        .await
+        .unwrap();
 
     // Check that after requests handled we have votes and decisions, and that they are
     // following blocklist

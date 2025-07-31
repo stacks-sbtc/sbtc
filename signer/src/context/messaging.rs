@@ -1,6 +1,8 @@
 //! This module contains types related to the application's internal
 //! messaging via the [`Context`].
 
+use crate::storage::model::BitcoinBlockRef;
+
 /// Signals that can be sent within the signer binary.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SignerSignal {
@@ -36,7 +38,7 @@ pub enum SignerEvent {
     /// Signals that a P2P event has occurred.
     P2P(P2PEvent),
     /// Signals that a block observer event has occurred.
-    BitcoinBlockObserved,
+    BitcoinBlockObserved(BitcoinBlockRef),
     /// A Request decider event has occurred.
     RequestDecider(RequestDeciderEvent),
     /// Transaction signer events
@@ -74,7 +76,7 @@ pub enum RequestDeciderEvent {
     PendingDepositRequestRegistered,
     /// New pending requests have been handled. This is primarily used as a
     /// trigger for the transaction coordinator to process the new blocks.
-    NewRequestsHandled,
+    NewRequestsHandled(BitcoinBlockRef),
     /// Event which occurs when the transaction signer has started its event
     /// loop.
     EventLoopStarted,
