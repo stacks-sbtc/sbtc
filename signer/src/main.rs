@@ -20,6 +20,7 @@ use signer::context::Context;
 use signer::context::SignerContext;
 use signer::emily_client::EmilyClient;
 use signer::error::Error;
+use signer::logging::SignerInfoLogger;
 use signer::network::P2PNetwork;
 use signer::network::libp2p::SignerSwarmBuilder;
 use signer::request_decider::RequestDeciderEventLoop;
@@ -40,6 +41,11 @@ use tracing::Span;
 /// value, giving the swarm a few seconds to start up and bind listener(s)
 /// before proceeding.
 const INITIAL_BOOTSTRAP_DELAY_SECS: u64 = 3;
+
+// Timeout after which signer info logger will print new log.
+// Currently chosen to be 1 hour.
+// TODO: make this interval a config parameter.
+const SIGNER_INFO_LOGGER_INTERVAL: Duration = Duration::from_secs(3600);
 
 /// The window of time in which we consider a peer to be known and valid for
 /// inclusion in bootstrapping.
@@ -156,6 +162,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         run_checked(run_request_decider, &context),
         run_checked(run_transaction_coordinator, &context),
         run_checked(run_transaction_signer, &context),
+        // Signer info logger intentionally runned in unchecked mode,
+        // since it is not necessary for signer to be operational.
+        run_signer_info_logger(context.clone()),
     );
 
     Ok(())
@@ -405,6 +414,13 @@ async fn run_block_observer(ctx: impl Context) -> Result<(), Error> {
     // Bitcoin chain tip poller before returning the result from the observer.
     bitcoin_block_source.stop();
     result
+}
+
+/// Run the signer info logger event loop.
+async fn run_signer_info_logger(ctx: impl Context) {
+    SignerInfoLogger::new(ctx, SIGNER_INFO_LOGGER_INTERVAL)
+        .run()
+        .await
 }
 
 /// Run the transaction signer event-loop.
