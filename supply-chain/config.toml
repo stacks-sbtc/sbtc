@@ -101,10 +101,6 @@ criteria = "safe-to-deploy"
 version = "0.1.80"
 criteria = "safe-to-deploy"
 
-[[exemptions.async_zmq]]
-version = "0.4.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.asynchronous-codec]]
 version = "0.7.0"
 criteria = "safe-to-deploy"
@@ -253,10 +249,6 @@ criteria = "safe-to-deploy"
 version = "0.19.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.bitcoincore-zmq]]
-version = "1.5.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.bitvec]]
 version = "1.0.1"
 criteria = "safe-to-deploy"
@@ -357,16 +349,8 @@ criteria = "safe-to-deploy"
 version = "2.4.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.crossbeam]]
-version = "0.8.4"
-criteria = "safe-to-deploy"
-
 [[exemptions.crossbeam-channel]]
 version = "0.5.13"
-criteria = "safe-to-deploy"
-
-[[exemptions.crossbeam-deque]]
-version = "0.8.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.crossbeam-epoch]]
@@ -435,10 +419,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.digest]]
 version = "0.9.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.dircpy]]
-version = "0.3.19"
 criteria = "safe-to-deploy"
 
 [[exemptions.dirs-sys-next]]
@@ -761,20 +741,12 @@ criteria = "safe-to-deploy"
 version = "0.10.5"
 criteria = "safe-to-deploy"
 
-[[exemptions.jobserver]]
-version = "0.1.32"
-criteria = "safe-to-deploy"
-
 [[exemptions.js-sys]]
 version = "0.3.69"
 criteria = "safe-to-deploy"
 
 [[exemptions.jsonrpc]]
 version = "0.18.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.jwalk]]
-version = "0.8.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.keccak]]
@@ -1637,16 +1609,8 @@ criteria = "safe-to-deploy"
 version = "0.6.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.system-deps]]
-version = "6.2.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.tagptr]]
 version = "0.2.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.target-lexicon]]
-version = "0.12.16"
 criteria = "safe-to-deploy"
 
 [[exemptions.tempfile]]
@@ -1847,10 +1811,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.uuid]]
 version = "1.8.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.version-compare]]
-version = "0.2.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.vsimd]]
@@ -2115,16 +2075,4 @@ criteria = "safe-to-deploy"
 
 [[exemptions.zerocopy-derive]]
 version = "0.7.34"
-criteria = "safe-to-deploy"
-
-[[exemptions.zeromq-src]]
-version = "0.2.6+4.3.4"
-criteria = "safe-to-deploy"
-
-[[exemptions.zmq]]
-version = "0.10.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.zmq-sys]]
-version = "0.12.0"
 criteria = "safe-to-deploy"

@@ -10,7 +10,8 @@ use crate::storage::model::{
 };
 use crate::storage::postgres::PgStore;
 use crate::storage::{DbRead, DbWrite};
-use crate::testing::{FutureExt, SleepAsyncExt, TestUtilityError};
+use crate::testing::TestUtilityError;
+use crate::util::{FutureExt, SleepAsyncExt};
 
 pub mod model;
 pub mod postgres;

@@ -35,6 +35,7 @@ use sbtc::testing::regtest::AsUtxo;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::to_value;
+use signer::bitcoin::poller::BitcoinChainTipPoller;
 use signer::bitcoin::utxo::DepositRequest;
 use signer::error::Error;
 use signer::stacks::api::ClarityName;
@@ -77,7 +78,6 @@ use signer::testing::context::*;
 use signer::testing::storage::DbReadTestExt;
 use url::Url;
 
-const BITCOIN_CORE_ZMQ_ENDPOINT: &str = "tcp://localhost:28332";
 const DEVENV_DEPLOYER: &str = "SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS";
 const DEVENV_STACKS_API: &str = "http://127.0.0.1:3999";
 
@@ -112,9 +112,11 @@ async fn process_blocks_simple_fork() {
     })
     .await;
 
+    let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
+
     let block_observer = BlockObserver {
         context: ctx.clone(),
-        bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT).await,
+        bitcoin_block_source,
     };
 
     // We need to wait for the block observer to be up

@@ -651,6 +651,13 @@ impl BitcoinCoreClient {
             .map_err(Error::BitcoinCoreRpc)
     }
 
+    /// Gets the best block hash from the Bitcoin node.
+    pub fn get_best_block_hash(&self) -> Result<BlockHash, Error> {
+        self.inner
+            .get_best_block_hash()
+            .map_err(Error::BitcoinCoreRpc)
+    }
+
     /// Gets the network info from the Bitcoin node.
     pub fn get_network_info(&self) -> Result<GetNetworkInfoResult, Error> {
         self.inner.get_network_info().map_err(Error::BitcoinCoreRpc)
@@ -803,6 +810,10 @@ impl BitcoinInteract for BitcoinCoreClient {
 
     async fn get_network_info(&self) -> Result<bitcoincore_rpc_json::GetNetworkInfoResult, Error> {
         self.get_network_info()
+    }
+
+    async fn get_best_block_hash(&self) -> Result<BlockHash, Error> {
+        self.get_best_block_hash()
     }
 }
 

@@ -44,6 +44,8 @@ use std::sync::OnceLock;
 pub const BITCOIN_CORE_RPC_USERNAME: &str = "devnet";
 /// The password for RPC calls in bitcoin-core
 pub const BITCOIN_CORE_RPC_PASSWORD: &str = "devnet";
+/// Default RPC endpoint for regtest bitcoin-core
+pub const BITCOIN_CORE_RPC_ENDPOINT: &str = "http://localhost:18443";
 
 /// The fallback fee in bitcoin core
 pub const BITCOIN_CORE_FALLBACK_FEE: Amount = Amount::from_sat(1000);

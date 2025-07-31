@@ -27,6 +27,7 @@ use emily_client::models::DepositStatus;
 use rand::seq::IteratorRandom;
 use sbtc::deposits::CreateDepositRequest;
 
+use crate::bitcoin::BitcoinBlockHashStreamProvider;
 use crate::bitcoin::BitcoinInteract;
 use crate::bitcoin::GetTransactionFeeResult;
 use crate::bitcoin::TransactionLookupHint;
@@ -197,6 +198,16 @@ impl TestHarness {
     }
 }
 
+impl BitcoinBlockHashStreamProvider for TestHarness {
+    type Error = Error;
+    fn get_block_hash_stream(
+        &self,
+    ) -> impl futures::Stream<Item = Result<BlockHash, Self::Error>> + Send + Sync + Unpin + 'static
+    {
+        self.spawn_block_hash_stream()
+    }
+}
+
 impl TryFrom<TestHarness> for ApiFallbackClient<TestHarness> {
     type Error = Error;
     fn try_from(value: TestHarness) -> Result<Self, Error> {
@@ -293,6 +304,10 @@ impl BitcoinInteract for TestHarness {
     }
 
     async fn get_network_info(&self) -> Result<bitcoincore_rpc_json::GetNetworkInfoResult, Error> {
+        unimplemented!()
+    }
+
+    async fn get_best_block_hash(&self) -> Result<BlockHash, Error> {
         unimplemented!()
     }
 }

@@ -421,6 +421,10 @@ impl BitcoinInteract for WrappedMockBitcoinInteract {
     async fn get_network_info(&self) -> Result<bitcoincore_rpc_json::GetNetworkInfoResult, Error> {
         self.inner.lock().await.get_network_info().await
     }
+
+    async fn get_best_block_hash(&self) -> Result<bitcoin::BlockHash, Error> {
+        self.inner.lock().await.get_best_block_hash().await
+    }
 }
 
 impl StacksInteract for WrappedMockStacksInteract {

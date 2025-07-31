@@ -20,6 +20,7 @@
 use std::future::Future;
 use std::time::Duration;
 
+use crate::bitcoin::BitcoinBlockHashStreamProvider;
 use crate::bitcoin::BitcoinInteract;
 use crate::bitcoin::rpc::BitcoinBlockHeader;
 use crate::bitcoin::rpc::BitcoinTxInfo;
@@ -44,10 +45,10 @@ use crate::storage::TransactionHandle;
 use crate::storage::model;
 use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::EncryptedDkgShares;
+use crate::util::FutureExt;
 use bitcoin::Amount;
 use bitcoin::BlockHash;
 use bitcoin::ScriptBuf;
-use futures::stream::Stream;
 use futures::stream::StreamExt;
 use sbtc::deposits::CreateDepositRequest;
 use sbtc::deposits::DepositInfo;
@@ -55,11 +56,11 @@ use std::collections::HashSet;
 
 /// Block observer
 #[derive(Debug)]
-pub struct BlockObserver<Context, BlockHashStream> {
+pub struct BlockObserver<Context, BlockSource> {
     /// Signer context
     pub context: Context,
-    /// Stream of blocks from the block notifier
-    pub bitcoin_blocks: BlockHashStream,
+    /// Provider of Bitcoin block hashes.
+    pub bitcoin_block_source: BlockSource,
 }
 
 /// A full "deposit", containing the bitcoin transaction and a fully
@@ -132,28 +133,38 @@ pub trait DepositRequestValidator {
         C: BitcoinInteract;
 }
 
-impl<C, S> BlockObserver<C, S>
+impl<C, BlockSource> BlockObserver<C, BlockSource>
 where
     C: Context,
-    S: Stream<Item = Result<bitcoin::BlockHash, Error>> + Unpin,
+    BlockSource: BitcoinBlockHashStreamProvider,
 {
+    /// Create a new [`BlockObserver`] with the given context and Bitcoin block
+    /// provider.
+    pub fn new(context: C, bitcoin_block_source: BlockSource) -> Self {
+        Self { context, bitcoin_block_source }
+    }
+
     /// Run the block observer
     #[tracing::instrument(skip_all, name = "block-observer")]
-    pub async fn run(mut self) -> Result<(), Error> {
+    pub async fn run(self) -> Result<(), Error> {
         let term = self.context.get_termination_handle();
+        let mut bitcoin_blocks = self.bitcoin_block_source.get_block_hash_stream();
 
         loop {
             if term.shutdown_signalled() {
+                tracing::debug!("block observer has received a shutdown signal");
                 break;
             }
 
             // Bitcoin blocks will generally arrive in ~10 minute intervals, so
             // we don't need to be so aggressive in our timeout here.
-            let poll = tokio::time::timeout(Duration::from_millis(100), self.bitcoin_blocks.next());
+            let poll = bitcoin_blocks
+                .next()
+                .with_timeout(Duration::from_millis(100));
 
             match poll.await {
                 Ok(Some(Ok(block_hash))) => {
-                    tracing::info!("observed new bitcoin block from stream");
+                    tracing::info!(%block_hash, "observed new bitcoin block from stream");
                     metrics::counter!(
                         Metrics::BlocksObservedTotal,
                         "blockchain" => BITCOIN_BLOCKCHAIN,
@@ -765,11 +776,10 @@ mod tests {
         // There must be at least one signal receiver alive when the block observer
         // later tries to send a signal, hence this line.
         let _signal_rx = ctx.get_signal_receiver();
-        let block_hash_stream = test_harness.spawn_block_hash_stream();
 
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_blocks: block_hash_stream,
+            bitcoin_block_source: test_harness.clone(),
         };
 
         let handle = tokio::spawn(block_observer.run());
@@ -902,7 +912,7 @@ mod tests {
 
         let block_observer = BlockObserver {
             context: ctx,
-            bitcoin_blocks: (),
+            bitcoin_block_source: (),
         };
 
         {
@@ -987,7 +997,7 @@ mod tests {
 
         let block_observer = BlockObserver {
             context: ctx,
-            bitcoin_blocks: (),
+            bitcoin_block_source: (),
         };
 
         block_observer.load_latest_deposit_requests().await.unwrap();
