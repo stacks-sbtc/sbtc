@@ -273,7 +273,13 @@ async fn run_libp2p_swarm(ctx: impl Context) -> Result<(), Error> {
     // security.
     let known_peers = {
         // Fetch known peers from the database.
-        let mut db_peers = ctx.get_storage().get_p2p_peers().await.unwrap_or_default();
+        let mut db_peers = ctx.get_storage()
+            .get_p2p_peers()
+            .await
+            .inspect_err(|error| {
+                tracing::warn!(%error, "failed to fetch known peers from the database; skipping known peers");
+            })
+            .unwrap_or_default();
 
         // Sort the peers by last successful dialed time, duration-descending.
         db_peers.sort_unstable_by(|a, b| b.last_dialed_at.cmp(&a.last_dialed_at));
