@@ -987,8 +987,9 @@ impl PgWrite {
               , address
             )
             VALUES ($1, $2, $3)
-            ON CONFLICT (peer_id, public_key) DO UPDATE SET
-                address = EXCLUDED.address
+            ON CONFLICT (public_key) DO UPDATE SET
+                peer_id = EXCLUDED.peer_id
+              , address = EXCLUDED.address
               , last_dialed_at = NOW()
             "#,
         )

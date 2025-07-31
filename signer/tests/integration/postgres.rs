@@ -6145,7 +6145,7 @@ mod p2p_peers {
     use super::*;
 
     #[tokio::test]
-    async fn write_read_p2p_peer() {
+    async fn write_read_update_p2p_peer() {
         let db = testing::storage::new_test_database().await;
         let rng = &mut get_rng();
 
@@ -6166,6 +6166,18 @@ mod p2p_peers {
         // Ensure that the last_dialed_at timestamp is within a reasonable
         // timespan from utc_now.
         assert!(*peers[0].last_dialed_at - utc_now < time::Duration::seconds(5));
+
+        // Now let's update the peer connection with a new address.
+        let multiaddr = Multiaddr::random_memory(rng);
+        db.update_peer_connection(&pub_key, &peer_id, multiaddr.clone())
+            .await
+            .expect("Failed to update peer connection");
+        let peers = db.get_p2p_peers().await.unwrap();
+
+        assert_eq!(peers.len(), 1);
+        assert_eq!(*peers[0].peer_id, peer_id);
+        assert_eq!(peers[0].public_key, pub_key);
+        assert_eq!(*peers[0].address, multiaddr);
 
         testing::storage::drop_db(db).await;
     }
