@@ -878,12 +878,16 @@ mod tests {
         let p2p_peers_1a = context1.get_storage().get_p2p_peers().await.unwrap();
 
         // Verify that context 1 has the peer from signer 2. We only only validate
-        // context 1's storage because signer 1 is the dialer (incoming connections
+        // context 1's stored signers because signer 1 is the dialer (incoming connections
         // do not update stored known peers due to the risk of ephemeral ports/NAT).
         assert_eq!(p2p_peers_1a.len(), 1);
         assert_eq!(*p2p_peers_1a[0].peer_id, key2_pub.into());
         assert_eq!(p2p_peers_1a[0].public_key, key2_pub);
         assert_eq!(*p2p_peers_1a[0].address, swarm2_addr);
         assert!(*p2p_peers_1a[0].last_dialed_at - utc_now < time::Duration::seconds(5));
+
+        // Verify that context 2 has no peers stored, as it was not the dialer
+        let p2p_peers_2a = context2.get_storage().get_p2p_peers().await.unwrap();
+        assert!(p2p_peers_2a.is_empty());
     }
 }
