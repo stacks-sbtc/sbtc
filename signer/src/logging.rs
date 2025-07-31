@@ -78,12 +78,23 @@ where
     /// each timeout.
     pub async fn run(self) {
         let term = self.context.get_termination_handle();
+
+        // Without this counter and each_nth_iteration_print_log,
+        // if self.timeout is big, tokio::time::sleep will sleep for
+        // full timeout, and it will not check if termination was activated
+        // for a long time.
+        let each_nth_iteration_print_log = self.timeout.as_secs();
+        let mut counter = 0;
         loop {
             if term.shutdown_signalled() {
                 break;
             }
-            tokio::time::sleep(self.timeout).await;
-            log_blockchain_nodes_info(&self.context).await;
+            if counter >= each_nth_iteration_print_log {
+                log_blockchain_nodes_info(&self.context).await;
+                counter = 0;
+            }
+            counter += 1;
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
         tracing::info!("blockchain info logger has stopped");
     }
