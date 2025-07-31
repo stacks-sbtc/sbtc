@@ -1607,7 +1607,7 @@ impl From<DkgPublicShares> for proto::SignerDkgPublicShares {
             dkg_id: value.dkg_id,
             signer_id: value.signer_id,
             commitments: value.comms.into_iter().map(|v| v.into()).collect(),
-            kex_public_key: Some(proto::Point::from(value.kex_public_key)),
+            kex_public_key: Some(value.kex_public_key.into()),
         }
     }
 }
