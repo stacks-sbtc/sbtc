@@ -76,7 +76,7 @@ where
     }
     /// Runs BlockchainInfoLogger which will log info about blockchain nodes
     /// each timeout.
-    pub async fn run(self) -> Result<(), Error> {
+    pub async fn run(self) {
         let term = self.context.get_termination_handle();
         loop {
             if term.shutdown_signalled() {
@@ -86,6 +86,5 @@ where
             log_blockchain_nodes_info(&self.context).await;
         }
         tracing::info!("blockchain info logger has stopped");
-        Ok(())
     }
 }
