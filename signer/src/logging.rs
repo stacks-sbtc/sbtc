@@ -62,20 +62,20 @@ async fn log_blockchain_nodes_info<C: Context>(ctx: &C) {
 pub struct SignerInfoLogger<Context> {
     /// Signer context.
     context: Context,
-    /// Logging period.
-    timeout: Duration,
+    /// Logging interval.
+    interval: Duration,
 }
 
 impl<C> SignerInfoLogger<C>
 where
     C: Context,
 {
-    /// Creates new SignerInfoLogger with given context and timeout.
-    pub fn new(context: C, timeout: Duration) -> Self {
-        Self { context, timeout }
+    /// Creates new SignerInfoLogger with given context and interval.
+    pub fn new(context: C, interval: Duration) -> Self {
+        Self { context, interval }
     }
-    /// Runs SignerInfoLogger which will log info about blockchain nodes
-    /// each timeout.
+    /// Runs SignerInfoLogger which will log info about stacks & bitcoin nodes,
+    /// last dkg, signer config, etc, each [`interval`].
     pub async fn run(self) {
         let term = self.context.get_termination_handle();
 
@@ -83,7 +83,7 @@ where
         // if self.timeout is big, tokio::time::sleep will sleep for
         // full timeout, and it will not check if termination was activated
         // for a long time.
-        let each_nth_iteration_print_log = self.timeout.as_secs();
+        let each_nth_iteration_print_log = self.interval.as_secs();
         let mut counter = 0;
         loop {
             if term.shutdown_signalled() {
