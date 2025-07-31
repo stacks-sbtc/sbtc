@@ -498,11 +498,11 @@ impl SignerSwarm {
 
 #[cfg(test)]
 mod tests {
-    use rand::RngCore;
+    use rand::RngCore as _;
 
     use crate::{
         keys::PublicKey,
-        storage::DbRead,
+        storage::DbRead as _,
         testing::{context::*, get_rng, network::MultiaddrExt as _},
     };
 
@@ -795,9 +795,9 @@ mod tests {
 
     #[test_log::test(tokio::test)]
     async fn libp2p_swarm_bootstraps_with_known_peers() {
-        let mut rng = get_rng();
-        let swarm1_addr = Multiaddr::memory(rng.next_u64());
-        let swarm2_addr = Multiaddr::memory(rng.next_u64());
+        let rng = &mut get_rng();
+        let swarm1_addr = Multiaddr::random_memory(rng);
+        let swarm2_addr = Multiaddr::random_memory(rng);
 
         // PeerId = 16Uiu2HAm46BSFWYYWzMjhTRDRwXHpDWpQ32iu93nzDwd1F4Tt256
         let key1 = PrivateKey::from_slice(
