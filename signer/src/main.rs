@@ -42,7 +42,7 @@ const INITIAL_BOOTSTRAP_DELAY_SECS: u64 = 3;
 
 // Timeout after which blockchain info logger will print new log.
 // Currently chosen to be 1 hour.
-// TODO: make timout a config parameter.
+// TODO: make timeout a config parameter.
 const BLOCKCHAIN_INFO_LOGGER_TIMEOUT: Duration = Duration::from_secs(3600);
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
