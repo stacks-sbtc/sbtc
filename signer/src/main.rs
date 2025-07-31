@@ -20,7 +20,7 @@ use signer::context::Context;
 use signer::context::SignerContext;
 use signer::emily_client::EmilyClient;
 use signer::error::Error;
-use signer::logging::BlockchainInfoLogger;
+use signer::logging::SignerInfoLogger;
 use signer::network::P2PNetwork;
 use signer::network::libp2p::SignerSwarmBuilder;
 use signer::request_decider::RequestDeciderEventLoop;
@@ -40,10 +40,10 @@ use tracing::Span;
 // before proceeding.
 const INITIAL_BOOTSTRAP_DELAY_SECS: u64 = 3;
 
-// Timeout after which blockchain info logger will print new log.
+// Timeout after which signer info logger will print new log.
 // Currently chosen to be 1 hour.
-// TODO: make timeout a config parameter.
-const BLOCKCHAIN_INFO_LOGGER_TIMEOUT: Duration = Duration::from_secs(3600);
+// TODO: make this interval a config parameter.
+const SIGNER_INFO_LOGGER_INTERVAL: Duration = Duration::from_secs(3600);
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum LogOutputFormat {
@@ -152,7 +152,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         run_checked(run_request_decider, &context),
         run_checked(run_transaction_coordinator, &context),
         run_checked(run_transaction_signer, &context),
-        run_blockchain_info_logger(context.clone()),
+        // Signer info logger intentionally runned in unchecked mode,
+        // since it is not necessary for signer to be operational.
+        run_signer_info_logger(context.clone()),
     );
 
     Ok(())
@@ -351,9 +353,9 @@ async fn run_block_observer(ctx: impl Context) -> Result<(), Error> {
     block_observer.run().await
 }
 
-/// Run the blockchain info logger event loop.
-async fn run_blockchain_info_logger(ctx: impl Context) {
-    BlockchainInfoLogger::new(ctx, BLOCKCHAIN_INFO_LOGGER_TIMEOUT)
+/// Run the signer info logger event loop.
+async fn run_signer_info_logger(ctx: impl Context) {
+    SignerInfoLogger::new(ctx, SIGNER_INFO_LOGGER_INTERVAL)
         .run()
         .await
 }

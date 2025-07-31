@@ -57,23 +57,24 @@ async fn log_blockchain_nodes_info<C: Context>(ctx: &C) {
 }
 
 /// Simple struct for time to time writing logs
-/// about Stacks and Bitcoin nodes state.
-pub struct BlockchainInfoLogger<Context> {
+/// about Stacks and Bitcoin nodes state, info about DKG,
+/// signer config, etc.
+pub struct SignerInfoLogger<Context> {
     /// Signer context.
     context: Context,
     /// Logging period.
     timeout: Duration,
 }
 
-impl<C> BlockchainInfoLogger<C>
+impl<C> SignerInfoLogger<C>
 where
     C: Context,
 {
-    /// Creates new BlockchainInfoLogger with given context and timeout.
+    /// Creates new SignerInfoLogger with given context and timeout.
     pub fn new(context: C, timeout: Duration) -> Self {
         Self { context, timeout }
     }
-    /// Runs BlockchainInfoLogger which will log info about blockchain nodes
+    /// Runs SignerInfoLogger which will log info about blockchain nodes
     /// each timeout.
     pub async fn run(self) {
         let term = self.context.get_termination_handle();
