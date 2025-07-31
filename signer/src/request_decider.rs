@@ -30,6 +30,7 @@ use crate::storage::DbRead as _;
 use crate::storage::DbWrite as _;
 use crate::storage::model;
 use crate::storage::model::BitcoinBlockHash;
+use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::DepositSigner;
 use crate::storage::model::WithdrawalSigner;
 
@@ -65,7 +66,7 @@ fn run_loop_message_filter(signal: &SignerSignal) -> bool {
         signal,
         SignerSignal::Command(SignerCommand::Shutdown)
             | SignerSignal::Event(SignerEvent::P2P(P2PEvent::MessageReceived(_)))
-            | SignerSignal::Event(SignerEvent::BitcoinBlockObserved)
+            | SignerSignal::Event(SignerEvent::BitcoinBlockObserved(_))
     )
 }
 
@@ -100,12 +101,12 @@ where
                             tracing::error!(%error, "error handling signer message");
                         }
                     }
-                    SignerEvent::BitcoinBlockObserved => {
-                        if let Err(error) = self.handle_new_requests().await {
+                    SignerEvent::BitcoinBlockObserved(chain_tip) => {
+                        if let Err(error) = self.handle_new_requests(chain_tip).await {
                             tracing::warn!(%error, "error handling new requests; skipping this round");
                         }
 
-                        let message = RequestDeciderEvent::NewRequestsHandled.into();
+                        let message = RequestDeciderEvent::NewRequestsHandled(chain_tip).into();
                         // If there is an error here then the application
                         // is on its way down since
                         // [`SignerContext::signal`] sends a shutdown
@@ -125,27 +126,20 @@ where
     }
 
     /// Vote on pending deposit requests
-    #[tracing::instrument(skip_all, fields(chain_tip = tracing::field::Empty))]
-    pub async fn handle_new_requests(&mut self) -> Result<(), Error> {
+    #[tracing::instrument(skip_all, fields(
+        bitcoin_tip_hash = %block_ref.block_hash,
+        bitcoin_tip_height = %block_ref.block_height,
+    ))]
+    pub async fn handle_new_requests(&mut self, block_ref: BitcoinBlockRef) -> Result<(), Error> {
         let requests_processing_delay = self.context.config().signer.requests_processing_delay;
         if requests_processing_delay > Duration::ZERO {
             tracing::debug!("sleeping before processing new requests");
             tokio::time::sleep(requests_processing_delay).await;
         }
 
-        let db = self.context.get_storage();
-        let chain_tip = self
-            .context
-            .state()
-            .bitcoin_chain_tip()
-            .ok_or(Error::NoChainTip)?
-            .block_hash;
-
+        let chain_tip = block_ref.block_hash;
         let signer_public_key = self.signer_public_key();
-
-        let span = tracing::Span::current();
-        span.record("chain_tip", tracing::field::display(chain_tip));
-
+        let db = self.context.get_storage();
         // We retry the deposit decisions because some signers' bitcoin nodes might have
         // been running behind and ignored the previous messages.
         let deposit_decisions_to_retry = db

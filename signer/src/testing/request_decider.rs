@@ -199,7 +199,9 @@ where
 
         handle
             .context
-            .signal(SignerSignal::Event(SignerEvent::BitcoinBlockObserved))
+            .signal(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(
+                chain_tip_ref,
+            )))
             .expect("failed to send signal");
 
         tokio::time::timeout(Duration::from_secs(10), async move {
@@ -283,7 +285,9 @@ where
 
         handle
             .context
-            .signal(SignerSignal::Event(SignerEvent::BitcoinBlockObserved))
+            .signal(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(
+                chain_tip_ref,
+            )))
             .expect("failed to send signal");
 
         // let msg = TxSignerEvent::PendingWithdrawalRequestRegistered;
@@ -391,7 +395,12 @@ where
         }
 
         let db = event_loop_handles.first().unwrap().context.get_storage();
-        let chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
+        let chain_tip_ref = db
+            .get_bitcoin_canonical_chain_tip_ref()
+            .await
+            .unwrap()
+            .unwrap();
+        let chain_tip = chain_tip_ref.block_hash;
         let signer_public_key = signer_set.first().unwrap();
         let pending_deposits_count = db
             .get_pending_deposit_requests(&chain_tip, self.context_window, signer_public_key)
@@ -403,7 +412,9 @@ where
         for handle in event_loop_handles.iter() {
             handle
                 .context
-                .signal(SignerSignal::Event(SignerEvent::BitcoinBlockObserved))
+                .signal(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(
+                    chain_tip_ref,
+                )))
                 .expect("failed to send signal");
         }
 

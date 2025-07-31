@@ -199,6 +199,7 @@ mod tests {
 
     use tokio::sync::Notify;
 
+    use crate::storage::model::BitcoinBlockRef;
     use crate::{
         context::{Context as _, SignerEvent, SignerSignal},
         testing::context::*,
@@ -237,9 +238,9 @@ mod tests {
             task_started_clone.notify_one();
             let signal = cloned_receiver.recv().await.unwrap();
 
-            assert_eq!(
+            assert_matches::assert_matches!(
                 signal,
-                SignerSignal::Event(SignerEvent::BitcoinBlockObserved)
+                SignerSignal::Event(SignerEvent::BitcoinBlockObserved(_))
             );
 
             recv_count_clone.fetch_add(1, Ordering::Relaxed);
@@ -254,7 +255,7 @@ mod tests {
 
         // Signal the original context.
         context
-            .signal(SignerEvent::BitcoinBlockObserved.into())
+            .signal(SignerEvent::BitcoinBlockObserved(BitcoinBlockRef::genesis()).into())
             .unwrap();
 
         // This wait is needed to ensure that the below `abort()` doesn't

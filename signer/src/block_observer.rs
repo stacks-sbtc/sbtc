@@ -42,6 +42,7 @@ use crate::storage::DbWrite;
 use crate::storage::Transactable;
 use crate::storage::TransactionHandle;
 use crate::storage::model;
+use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::EncryptedDkgShares;
 use bitcoin::Amount;
 use bitcoin::BlockHash;
@@ -173,10 +174,13 @@ where
                     }
 
                     tracing::debug!("updating the signer state");
-                    if let Err(error) = self.update_signer_state(block_hash).await {
-                        tracing::warn!(%error, "could not update the signer state");
-                        continue;
-                    }
+                    let chain_tip = match self.update_signer_state(block_hash).await {
+                        Ok(chain_tip) => chain_tip,
+                        Err(error) => {
+                            tracing::warn!(%error, "could not update the signer state");
+                            continue;
+                        }
+                    };
 
                     tracing::info!("loading latest deposit requests from Emily");
                     if let Err(error) = self.load_latest_deposit_requests().await {
@@ -184,7 +188,7 @@ where
                     }
 
                     self.context
-                        .signal(SignerEvent::BitcoinBlockObserved.into())?;
+                        .signal(SignerEvent::BitcoinBlockObserved(chain_tip).into())?;
                 }
                 Ok(Some(Err(error))) => {
                     tracing::warn!(%error, "error decoding new bitcoin block hash from stream");
@@ -497,8 +501,8 @@ impl<C: Context, B> BlockObserver<C, B> {
         Ok(())
     }
 
-    /// Update the `SignerState` object with current bitcoin chain tip.
-    async fn update_bitcoin_chain_tip(&self, chain_tip: BlockHash) -> Result<(), Error> {
+    /// Set the `SignerState` object with current bitcoin chain tip.
+    async fn set_bitcoin_chain_tip(&self, chain_tip: BlockHash) -> Result<BitcoinBlockRef, Error> {
         let db = self.context.get_storage();
         let chain_tip = db
             .get_bitcoin_block(&chain_tip.into())
@@ -507,7 +511,7 @@ impl<C: Context, B> BlockObserver<C, B> {
             .ok_or_else(|| Error::UnknownBitcoinBlock(chain_tip))?;
 
         self.context.state().set_bitcoin_chain_tip(chain_tip);
-        Ok(())
+        Ok(chain_tip)
     }
 
     /// Update the `SignerState` object with data that is unlikely to
@@ -520,7 +524,7 @@ impl<C: Context, B> BlockObserver<C, B> {
     /// * The current signer set.
     /// * The current aggregate key.
     /// * The current bitcoin chain tip.
-    async fn update_signer_state(&self, chain_tip: BlockHash) -> Result<(), Error> {
+    async fn update_signer_state(&self, chain_tip: BlockHash) -> Result<BitcoinBlockRef, Error> {
         tracing::info!("loading sbtc limits from Emily");
         self.update_sbtc_limits(chain_tip).await?;
 
@@ -528,7 +532,7 @@ impl<C: Context, B> BlockObserver<C, B> {
         self.set_signer_set_info().await?;
 
         tracing::info!("updating the signer state with the current bitcoin chain tip");
-        self.update_bitcoin_chain_tip(chain_tip).await
+        self.set_bitcoin_chain_tip(chain_tip).await
     }
 
     /// Checks if the latest dkg share is pending and is no longer valid
@@ -772,7 +776,7 @@ mod tests {
         ctx.wait_for_signal(Duration::from_secs(3), |signal| {
             matches!(
                 signal,
-                SignerSignal::Event(SignerEvent::BitcoinBlockObserved)
+                SignerSignal::Event(SignerEvent::BitcoinBlockObserved(_))
             )
         })
         .await
