@@ -76,6 +76,26 @@ pub struct TxRequestIds {
     pub withdrawals: Vec<QualifiedRequestId>,
 }
 
+impl std::fmt::Display for TxRequestIds {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "TxRequestIds(deposits=[")?;
+        for (i, value) in self.deposits.iter().enumerate() {
+            if i > 0 {
+                write!(f, ",")?;
+            }
+            write!(f, "{value}")?;
+        }
+        write!(f, "], withdrawals=[")?;
+        for (i, value) in self.withdrawals.iter().enumerate() {
+            if i > 0 {
+                write!(f, ",")?;
+            }
+            write!(f, "{value}")?;
+        }
+        write!(f, "])")
+    }
+}
+
 impl From<&Requests<'_>> for TxRequestIds {
     fn from(requests: &Requests) -> Self {
         let mut deposits = Vec::new();
