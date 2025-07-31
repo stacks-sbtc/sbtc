@@ -77,24 +77,16 @@ where
     /// Runs SignerInfoLogger which will log info about stacks & bitcoin nodes,
     /// last dkg, signer config, etc, each [`interval`].
     pub async fn run(self) {
-        let term = self.context.get_termination_handle();
-
-        // Without this counter and each_nth_iteration_print_log,
-        // if self.timeout is big, tokio::time::sleep will sleep for
-        // full timeout, and it will not check if termination was activated
-        // for a long time.
-        let each_nth_iteration_print_log = self.interval.as_secs();
-        let mut counter = 0;
+        let mut term = self.context.get_termination_handle();
         loop {
-            if term.shutdown_signalled() {
-                break;
+            tokio::select! {
+                _ = term.wait_for_shutdown() => {
+                    break;
+                }
+                _ = tokio::time::sleep(self.interval) => {
+                    log_blockchain_nodes_info(&self.context).await;
+                }
             }
-            if counter >= each_nth_iteration_print_log {
-                log_blockchain_nodes_info(&self.context).await;
-                counter = 0;
-            }
-            counter += 1;
-            tokio::time::sleep(Duration::from_secs(1)).await;
         }
         tracing::info!("blockchain info logger has stopped");
     }
