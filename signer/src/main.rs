@@ -40,6 +40,11 @@ use tracing::Span;
 // before proceeding.
 const INITIAL_BOOTSTRAP_DELAY_SECS: u64 = 3;
 
+// Timeout after which blockchain info logger will print new log.
+// Currently chosen to be 1 hour.
+// TODO: make timout a config parameter.
+const BLOCKCHAIN_INFO_LOGGER_TIMEOUT: Duration = Duration::from_secs(3600);
+
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum LogOutputFormat {
     Json,
@@ -147,7 +152,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         run_checked(run_request_decider, &context),
         run_checked(run_transaction_coordinator, &context),
         run_checked(run_transaction_signer, &context),
-        run_checked(run_blockchain_info_logger, &context),
+        run_blockchain_info_logger(context.clone()),
     );
 
     Ok(())
@@ -348,10 +353,7 @@ async fn run_block_observer(ctx: impl Context) -> Result<(), Error> {
 
 /// Run the blockchain info logger event loop.
 async fn run_blockchain_info_logger(ctx: impl Context) {
-    // TODO: make timout a config parameter.
-    let logger = BlockchainInfoLogger::new(ctx, Duration::from_secs(60));
-
-    logger.run().await
+    BlockchainInfoLogger::new(ctx, BLOCKCHAIN_INFO_LOGGER_TIMEOUT).run().await
 }
 
 /// Run the transaction signer event-loop.
