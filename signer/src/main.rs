@@ -353,7 +353,9 @@ async fn run_block_observer(ctx: impl Context) -> Result<(), Error> {
 
 /// Run the blockchain info logger event loop.
 async fn run_blockchain_info_logger(ctx: impl Context) {
-    BlockchainInfoLogger::new(ctx, BLOCKCHAIN_INFO_LOGGER_TIMEOUT).run().await
+    BlockchainInfoLogger::new(ctx, BLOCKCHAIN_INFO_LOGGER_TIMEOUT)
+        .run()
+        .await
 }
 
 /// Run the transaction signer event-loop.

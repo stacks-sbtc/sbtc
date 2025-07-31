@@ -8,7 +8,6 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::api::build_info;
 use crate::context::Context;
-use crate::error::Error;
 
 use std::time::Duration;
 
