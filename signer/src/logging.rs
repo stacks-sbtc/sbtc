@@ -53,7 +53,7 @@ fn setup_logging_pretty(directives: &str) {
 /// node versions, chaintips, dkg rounds, etc.
 async fn log_blockchain_nodes_info<C: Context>(ctx: &C) {
     let info = build_info(ctx).await;
-    let json = serde_json::to_string(&info).unwrap_or_else(|_| "{}".to_string());
+    let json = serde_json::to_string(&info).unwrap_or_else(|_| format!("{info:?}"));
     tracing::debug!(%json, "signer info");
 }
 
