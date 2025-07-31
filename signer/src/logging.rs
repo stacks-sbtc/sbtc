@@ -53,7 +53,8 @@ fn setup_logging_pretty(directives: &str) {
 /// node versions, chaintips, dkg rounds, etc.
 async fn log_blockchain_nodes_info<C: Context>(ctx: &C) {
     let info = build_info(ctx).await;
-    tracing::debug!(?info, "signer info");
+    let json = serde_json::to_string(&info).unwrap_or_else(|_| "{}".to_string());
+    tracing::debug!(%json, "signer info");
 }
 
 /// Simple struct for time to time writing logs
