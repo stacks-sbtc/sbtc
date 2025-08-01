@@ -14,7 +14,6 @@ permissions:
 
 ## Define which docker arch to build for
 env:
-  docker_platforms: "linux/amd64"
   latest_release: $(curl -s https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r .tag_name)
 
 concurrency:
@@ -38,6 +37,9 @@ jobs:
         docker_target:
           - signer
           - blocklist-client
+        docker_platforms:
+          - linux/amd64
+          - linux/arm64
     outputs:
       signer: ${{ steps.save_digest.outputs.signer }}
       blocklist-client: ${{ steps.save_digest.outputs.blocklist-client }}
@@ -72,25 +74,25 @@ jobs:
       ## Set docker metatdata
       ## - depending on the matrix.dist, different tags will be enabled
       ## ex. debian will have this tag: `type=ref,event=tag,enable=${{ matrix.dist == 'debian' }}`
-      - name: Docker Metadata ( ${{ matrix.dist }} )
+      - name: Docker Metadata ( ${{ matrix.dist }} ${{ matrix.docker_platforms }} )
         id: docker_metadata
         uses: stacks-sbtc/actions/docker/metadata-action@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           images: |
             ${{ env.ghcr_org }}/sbtc
           tags: |
-            type=raw,value=${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }}-${{ matrix.dist }}
-            type=raw,value=${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }},enable=${{ matrix.dist == 'debian' }}
-            type=raw,value=${{ matrix.docker_target }}-latest,enable=${{ env.latest_release == github.event.client_payload.tag_name && matrix.dist == 'debian' }}
-            type=raw,value=${{ matrix.docker_target }}-latest-${{ matrix.dist }},enable=${{ env.latest_release == github.event.client_payload.tag_name }}
+            type=raw,value=${{ matrix.docker_platforms }}.${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }}-${{ matrix.dist }}
+            type=raw,value=${{ matrix.docker_platforms }}.${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }},enable=${{ matrix.dist == 'debian' }}
+            type=raw,value=${{ matrix.docker_platforms }}.${{ matrix.docker_target }}-latest,enable=${{ env.latest_release == github.event.client_payload.tag_name && matrix.dist == 'debian' }}
+            type=raw,value=${{ matrix.docker_platforms }}.${{ matrix.docker_target }}-latest-${{ matrix.dist }},enable=${{ env.latest_release == github.event.client_payload.tag_name }}
 
       ## Build docker image for release
-      - name: Build and Push ( ${{ matrix.dist }} ${{ matrix.docker_target }} )
+      - name: Build and Push ( ${{ matrix.dist }} ${{ matrix.docker_target }} ${{ matrix.docker_platforms }} )
         id: docker_build
         uses: stacks-sbtc/actions/docker/build-push-action@942832cc7f86ead03c05b7035cd4b9573dd6c617
         with:
           file: ./.github/actions/dockerfiles/Dockerfile.${{ matrix.docker_target }}.${{ matrix.dist }}
-          platforms: ${{ env.docker_platforms }}
+          platforms: ${{ matrix.docker_platforms }}
           tags: ${{ steps.docker_metadata.outputs.tags }}
           labels: ${{ steps.docker_metadata.outputs.labels }}
           target: ${{ matrix.docker_target }}
@@ -100,7 +102,7 @@ jobs:
 
       - name: Save digest as output
         id: save_digest
-        run: echo "${{ matrix.docker_target }}=${{ steps.docker_build.outputs.digest }}" >> "$GITHUB_OUTPUT"
+        run: echo "${{ matrix.docker_target }}.${{ matrix.docker_platforms }}=${{ steps.docker_build.outputs.digest }}" >> "$GITHUB_OUTPUT"
 
       - name: Generate artifact attestation
         id: generate_attestation
@@ -114,7 +116,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh attestation download oci://${{ env.ghcr_org }}/sbtc:${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }}-${{ matrix.dist }} -R ${{ github.repository_owner }}/sbtc
+          gh attestation download oci://${{ env.ghcr_org }}/sbtc:${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }}-${{ matrix.dist }}-${{ matrix.docker_platforms }} -R ${{ github.repository_owner }}/sbtc
           
           # Rename the attestation bundle (replace ":" with "_")
           ATTESTATION_FILE="$(echo "${{ steps.docker_build.outputs.digest }}.jsonl" | tr ':' '_')"
