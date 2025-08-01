@@ -3102,7 +3102,10 @@ async fn wsts_ids_set_during_dkg_and_signing_rounds() {
         };
 
         let expected_sign_id = construct_signing_round_id(&message, &block_hash);
-        assert_eq!(sign_id, expected_sign_id);
+        // When the WSTS coordinator state machine starts a new signing
+        // round, it automatically increments the sign ID by 1. So we
+        // adjust our expectations here.
+        assert_eq!(sign_id - 1, expected_sign_id);
     }
 
     for (_, db, _, _) in signers {

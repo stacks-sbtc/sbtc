@@ -99,27 +99,6 @@ pub struct SignerDkgPublicShares {
     /// List of (signer_id, commitment)
     #[prost(message, repeated, tag = "3")]
     pub commitments: ::prost::alloc::vec::Vec<PartyCommitment>,
-    /// The public key used for exchanging secret shares during DKG
-    #[prost(message, optional, tag = "4")]
-    pub kex_public_key: ::core::option::Option<super::Point>,
-}
-/// DKG public shares message from a signer to all signers and coordinator.
-/// This type is used by the signers for reading polynomial commitments from
-/// the database. For sBTC, this vector should always have a length of 1.
-/// This maps to this type:
-/// <<https://github.com/Trust-Machines/wsts/blob/2d6cb87218bb8dd9ed0519356afe57a0b9a697cb/src/net.rs#L137-L146>>
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct DkgSignerCommitment {
-    /// List of (signer_id, commitment)
-    #[prost(message, repeated, tag = "3")]
-    pub commitment: ::prost::alloc::vec::Vec<PartyCommitment>,
-}
-/// All of the polynomial commitments received by a signer during a DKG
-/// round.
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct DkgPolynomialCommitments {
-    #[prost(btree_map = "uint32, message", tag = "1")]
-    pub commitments: ::prost::alloc::collections::BTreeMap<u32, DkgSignerCommitment>,
 }
 /// The public polynomial committed to by one of the party members who are
 /// participating in distributed key generation.
