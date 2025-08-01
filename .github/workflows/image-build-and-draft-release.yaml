@@ -14,7 +14,6 @@ permissions:
 
 ## Define which docker arch to build for
 env:
-  docker_platforms: "linux/amd64"
   latest_release: $(curl -s https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r .tag_name)
 
 concurrency:
@@ -38,6 +37,9 @@ jobs:
         docker_target:
           - signer
           - blocklist-client
+        docker_platforms:
+          - linux/amd64
+          - linux/arm64
     outputs:
       signer: ${{ steps.save_digest.outputs.signer }}
       blocklist-client: ${{ steps.save_digest.outputs.blocklist-client }}
@@ -90,7 +92,7 @@ jobs:
         uses: stacks-sbtc/actions/docker/build-push-action@942832cc7f86ead03c05b7035cd4b9573dd6c617
         with:
           file: ./.github/actions/dockerfiles/Dockerfile.${{ matrix.docker_target }}.${{ matrix.dist }}
-          platforms: ${{ env.docker_platforms }}
+          platforms: ${{ matrix.docker_platforms }}
           tags: ${{ steps.docker_metadata.outputs.tags }}
           labels: ${{ steps.docker_metadata.outputs.labels }}
           target: ${{ matrix.docker_target }}
