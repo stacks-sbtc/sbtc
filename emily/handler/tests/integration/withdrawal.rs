@@ -10,8 +10,11 @@ use testing_emily_client::models::{
     Chainstate, CreateWithdrawalRequestBody, Fulfillment, UpdateWithdrawalsRequestBody, Withdrawal,
     WithdrawalInfo, WithdrawalParameters, WithdrawalStatus, WithdrawalUpdate,
 };
+use testing_emily_client::apis::chainstate_api::get_chain_tip;
 
 use crate::common::clean_setup;
+use crate::common::new_test_chainstate;
+use crate::common::batch_set_chainstates;
 
 const RECIPIENT: &str = "TEST_RECIPIENT";
 const SENDER: &str = "TEST_SENDER";
@@ -1049,4 +1052,98 @@ async fn emily_process_withdrawal_updates_when_some_of_them_are_unknown() {
     .await
     .expect("Received an error after making a valid get withdrawals api call.");
     assert_eq!(withdrawals.withdrawals.len(), 1);
+}
+
+#[tokio::test]
+async fn emily_handles_withdrawal_requests_on_forks() {
+    let configuration = clean_setup().await;
+
+    // During this test request ID should be similar for all withdrawals.
+    let request_id = 1;
+
+    // Set initial chainstate.
+    let pre_reorg_chain: Vec<Chainstate> = (1000..1015)
+        .map(|height| new_test_chainstate(height, height, 0))
+        .collect();
+
+    batch_set_chainstates(&configuration, pre_reorg_chain).await;
+
+    // Create a withdrawal request ancored to initial chainstate.
+
+    let chaintip = get_chain_tip(&configuration).await.expect("Failed to get chain tip");
+
+    // Saving this chaintip for further checks.
+    let old_chaintip = chaintip.clone();
+
+    let withdrawal_request = CreateWithdrawalRequestBody {
+        amount: 10000,
+        parameters: Box::new(WithdrawalParameters { max_fee: 100 }),
+        recipient: RECIPIENT.into(),
+        sender: SENDER.into(),
+        request_id,
+        stacks_block_hash: chaintip.stacks_block_hash.clone(),
+        stacks_block_height: chaintip.stacks_block_height,
+        txid: "test_txid_pre_reorg".to_string(),
+    };
+    apis::withdrawal_api::create_withdrawal(&configuration, withdrawal_request)
+        .await
+        .expect("Received an error after making a valid create withdrawal request api call.");
+
+    // Check that the withdrawal request is created.
+    let withdrawal = apis::withdrawal_api::get_withdrawal(&configuration, request_id)
+        .await
+        .expect("Received an error after making a valid get withdrawal api call.");
+
+    assert_eq!(withdrawal.txid, "test_txid_pre_reorg".to_string());
+    assert_eq!(withdrawal.stacks_block_hash, chaintip.stacks_block_hash.clone());
+
+    // Now we will create a reorg chain, and update Emily about it.
+
+    let post_reorg_chain: Vec<Chainstate> = (1010..1020)
+        .map(|height| new_test_chainstate(height, height, 1))
+        .collect();
+    batch_set_chainstates(&configuration, post_reorg_chain).await;
+
+    // Create a withdrawal request with same request ID, but anchored to the new chainstate.
+
+    let chaintip = get_chain_tip(&configuration).await.expect("Failed to get chain tip");
+
+    // Sanity check
+    assert_ne!(
+        chaintip.stacks_block_hash, old_chaintip.stacks_block_hash,
+        "Chaintip should be different after reorg"
+    );
+
+    let withdrawal_request = CreateWithdrawalRequestBody {
+        amount: 10000,
+        parameters: Box::new(WithdrawalParameters { max_fee: 100 }),
+        recipient: RECIPIENT.into(),
+        sender: SENDER.into(),
+        request_id,
+        stacks_block_hash: chaintip.stacks_block_hash.clone(),
+        stacks_block_height: chaintip.stacks_block_height,
+        txid: "test_txid_post_reorg".to_string(),
+    };
+
+    apis::withdrawal_api::create_withdrawal(&configuration, withdrawal_request)
+        .await
+        .expect("Received an error after making a valid create withdrawal request api call.");
+
+    // Now, Emily have two withdrawals with the same request ID, but anchored to different chainstates.
+    // Emily should return withdrawal ancored to canonical chainstate.
+
+    let withdrawal = apis::withdrawal_api::get_withdrawal(&configuration, request_id)
+        .await
+        .expect("Received an error after making a valid get withdrawal api call.");
+
+    assert_eq!(
+        withdrawal.txid, "test_txid_post_reorg".to_string(),
+        "Withdrawal should be anchored to the canonical chainstate"
+    );
+    assert_eq!(
+        withdrawal.stacks_block_hash, chaintip.stacks_block_hash,
+        "Withdrawal should be anchored to the canonical chainstate"
+    );
+
+
 }
