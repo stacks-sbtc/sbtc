@@ -2800,7 +2800,6 @@ mod tests {
             private_key: ctx.config().signer.private_key,
             signing_round_max_duration: Duration::from_secs(10),
             bitcoin_presign_request_max_duration: Duration::from_secs(10),
-            threshold: ctx.config().signer.bootstrap_signatures_required,
             dkg_max_duration: Duration::from_secs(10),
             is_epoch3: true,
         };
@@ -2859,7 +2858,6 @@ mod tests {
             private_key: PrivateKey::new(&mut rng),
             signing_round_max_duration: Duration::from_secs(10),
             bitcoin_presign_request_max_duration: Duration::from_secs(10),
-            threshold: ctx.config().signer.bootstrap_signatures_required,
             dkg_max_duration: Duration::from_secs(10),
             is_epoch3: true,
         };
