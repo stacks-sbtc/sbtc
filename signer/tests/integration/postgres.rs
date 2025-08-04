@@ -3143,7 +3143,7 @@ async fn get_swept_withdrawal_requests_response_tx_reorged() {
         .unwrap();
 
     // Creating new bitcoin block, withdrawal accept event will happen
-    // in stacks block ancored to this block
+    // in stacks block anchored to this block
     let new_block = model::BitcoinBlock {
         block_hash: fake::Faker.fake_with_rng(&mut rng),
         block_height: bitcoin_block.block_height + 1,

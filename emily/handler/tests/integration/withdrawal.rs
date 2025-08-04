@@ -1068,7 +1068,7 @@ async fn emily_handles_withdrawal_requests_on_forks() {
 
     batch_set_chainstates(&configuration, pre_reorg_chain).await;
 
-    // Create a withdrawal request ancored to initial chainstate.
+    // Create a withdrawal request anchored to initial chainstate.
 
     let chaintip = get_chain_tip(&configuration)
         .await
@@ -1102,7 +1102,7 @@ async fn emily_handles_withdrawal_requests_on_forks() {
         chaintip.stacks_block_hash.clone()
     );
 
-    // Now we will create a reorg chain, and update Emily about it.
+    // Now we will create a reorg chain, and update Emily with it.
 
     let post_reorg_chain: Vec<Chainstate> = (1010..1020)
         .map(|height| new_test_chainstate(height, height, 1))
@@ -1137,7 +1137,7 @@ async fn emily_handles_withdrawal_requests_on_forks() {
         .expect("Received an error after making a valid create withdrawal request api call.");
 
     // Now, Emily have two withdrawals with the same request ID, but anchored to different chainstates.
-    // Emily should return withdrawal ancored to canonical chainstate.
+    // Emily should return withdrawal anchored to canonical chainstate.
 
     let withdrawal = apis::withdrawal_api::get_withdrawal(&configuration, request_id)
         .await
