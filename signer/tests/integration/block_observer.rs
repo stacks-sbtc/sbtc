@@ -1127,7 +1127,7 @@ async fn next_headers_to_process_ignores_known_headers() {
 /// smart contracts have been deployed and returning None if they have not
 /// or if the smart contract contains only null data.
 #[tokio::test]
-async fn get_signer_set_info_falls_back() {
+async fn get_signer_set_info_checks_for_contract_deployment() {
     let db = testing::storage::new_test_database().await;
 
     let mut rng = get_rng();
