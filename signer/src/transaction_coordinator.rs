@@ -159,8 +159,6 @@ pub struct TxCoordinatorEventLoop<Context, Network> {
     pub network: Network,
     /// Private key of the coordinator for network communication.
     pub private_key: PrivateKey,
-    /// the number of signatures required.
-    pub threshold: u16,
     /// How many bitcoin blocks back from the chain tip the signer will
     /// look for requests.
     pub context_window: u16,
@@ -392,7 +390,7 @@ where
         // tenure to make sure that all signers are up to date with the
         // same information when signing any transactions. In particular,
         // signers use the sbtc-registry contract for figuring out the new
-        // signers' scriptPubKey and for bitcoin transactions, and need to
+        // signers' scriptPubKey for bitcoin transactions, and they need to
         // have the same view of the signers wallet for confirming stacks
         // transactions.
         if let Some(txid) = rotate_key_txid.await? {
@@ -549,6 +547,13 @@ where
 
         // Create a signal stream with the defined filter
         let signal_stream = self.context.as_signal_stream(presign_ack_filter);
+        // This value may not be the "correct" threshold to use. The
+        // threshold should be the max of all thresholds for the inputs in
+        // the sweep transaction package. Since the signer set is currently
+        // stable, using this value won't cause any issues. However we can
+        // have a bug here if we open up the signer set and allow a large
+        // increase in the signatures required parameter.
+        let signature_threshold = self.context.config().signer.bootstrap_signatures_required;
 
         // Send the presign request message
         tracing::debug!(request = %sbtc_requests, "sending pre-sign request");
@@ -559,7 +564,7 @@ where
             let target_tip = *bitcoin_chain_tip;
             let mut acknowledged_signers = HashSet::new();
 
-            while acknowledged_signers.len() < self.threshold as usize {
+            while acknowledged_signers.len() < signature_threshold as usize {
                 match signal_stream.next().await {
                     None => {
                         tracing::warn!("signer signal stream closed unexpectedly, shutting down");
@@ -1651,10 +1656,11 @@ where
         let block_hash = chain_tip.block_hash;
         // Get the current signer set for running DKG.
         let signer_set = self.context.config().signer.bootstrap_signing_set.clone();
+        let threshold = self.context.config().signer.bootstrap_signatures_required;
 
         let block_height = chain_tip.block_height;
         let mut state_machine =
-            FireCoordinator::new(signer_set, self.threshold, self.private_key, block_height);
+            FireCoordinator::new(signer_set, threshold, self.private_key, block_height);
 
         // Okay let's move the coordinator state machine to the beginning
         // of the DKG phase.
@@ -2144,13 +2150,14 @@ where
 
         // Get the current sBTC limits (caps).
         let sbtc_limits = self.context.state().get_current_limits();
+        let signature_threshold = config.signer.bootstrap_signatures_required;
 
         // Setup the parameters for fetching pending requests.
         let params = GetPendingRequestsParams {
             bitcoin_chain_tip,
             stacks_chain_tip,
             aggregate_key,
-            signature_threshold: self.threshold,
+            signature_threshold,
             sbtc_limits: &sbtc_limits,
         };
 
@@ -2193,7 +2200,7 @@ where
             deposits,
             withdrawals,
             signer_state,
-            accept_threshold: self.threshold,
+            accept_threshold: signature_threshold,
             num_signers,
             sbtc_limits,
             max_deposits_per_bitcoin_tx,
@@ -2710,6 +2717,9 @@ mod tests {
         let context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
+            .modify_settings(|settings| {
+                settings.signer.bootstrap_signatures_required = 3;
+            })
             .build();
 
         // TODO: fix tech debt #893 then raise threshold to 5
@@ -2717,7 +2727,6 @@ mod tests {
             context,
             context_window: 5,
             num_signers: 7,
-            signing_threshold: 3,
             test_model_parameters,
         }
     }
@@ -2791,7 +2800,6 @@ mod tests {
             private_key: ctx.config().signer.private_key,
             signing_round_max_duration: Duration::from_secs(10),
             bitcoin_presign_request_max_duration: Duration::from_secs(10),
-            threshold: ctx.config().signer.bootstrap_signatures_required,
             dkg_max_duration: Duration::from_secs(10),
             is_epoch3: true,
         };
@@ -2850,7 +2858,6 @@ mod tests {
             private_key: PrivateKey::new(&mut rng),
             signing_round_max_duration: Duration::from_secs(10),
             bitcoin_presign_request_max_duration: Duration::from_secs(10),
-            threshold: ctx.config().signer.bootstrap_signatures_required,
             dkg_max_duration: Duration::from_secs(10),
             is_epoch3: true,
         };

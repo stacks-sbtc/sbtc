@@ -3214,6 +3214,9 @@ async fn transaction_coordinator_test_environment(
     let context = TestContext::builder()
         .with_storage(store)
         .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.bootstrap_signatures_required = 5;
+        })
         .build();
 
     context
@@ -3224,7 +3227,6 @@ async fn transaction_coordinator_test_environment(
         context,
         context_window: 5,
         num_signers: 7,
-        signing_threshold: 5,
         test_model_parameters,
     }
 }
