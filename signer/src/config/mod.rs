@@ -167,12 +167,9 @@ impl Validatable for BitcoinConfig {
             }
         }
 
-        if self.chain_tip_polling_interval.as_secs()
-            > MAX_BITCOIN_CHAIN_TIP_POLLING_INTERVAL_SECONDS
-        {
+        if self.chain_tip_polling_interval == std::time::Duration::ZERO {
             return Err(ConfigError::Message(
-                "[bitcoin.chain_tip_polling_interval] Maximum polling interval exceeded"
-                    .to_string(),
+                "[bitcoin.chain_tip_polling_interval] Zero is not allowed".to_string(),
             ));
         }
 
@@ -819,12 +816,11 @@ mod tests {
     fn config_errors_if_bitcoin_polling_interval_exceeds_max() {
         clear_env();
 
-        let interval_secs = (MAX_BITCOIN_CHAIN_TIP_POLLING_INTERVAL_SECONDS + 1).to_string();
-        set_var("SIGNER_BITCOIN__CHAIN_TIP_POLLING_INTERVAL", interval_secs);
+        set_var("SIGNER_BITCOIN__CHAIN_TIP_POLLING_INTERVAL", "0");
 
         assert_matches!(
             Settings::new_from_default_config(),
-            Err(ConfigError::Message(msg)) if msg.contains("polling interval exceeded")
+            Err(ConfigError::Message(msg)) if msg.contains("Zero is not allowed")
         );
     }
 
