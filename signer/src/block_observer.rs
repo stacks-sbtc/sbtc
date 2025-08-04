@@ -736,7 +736,7 @@ where
     stacks.get_current_signer_set_info(address).await
 }
 
-/// Check if all the sBTC contracts are deployed.
+/// Check if all the sBTC smart contracts have been deployed.
 async fn are_sbtc_contracts_deployed<C>(ctx: &C) -> Result<bool, Error>
 where
     C: Context,
@@ -757,6 +757,9 @@ where
         }
     }
 
+    // If we get here, then all the smart contracts have been deployed.
+    // Let's store that fact so that we don't need to query our Stacks node
+    // again.
     ctx.state().set_sbtc_contracts_deployed();
     Ok(true)
 }

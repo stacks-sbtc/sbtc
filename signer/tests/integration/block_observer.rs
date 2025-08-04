@@ -1597,7 +1597,7 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
     testing::storage::drop_db(db).await;
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn block_observer_ignores_coinbase() {
     let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
@@ -1628,7 +1628,6 @@ async fn block_observer_ignores_coinbase() {
         .with_mocked_stacks_client()
         .build();
 
-    ctx.state().set_sbtc_contracts_deployed();
     let mut signal_receiver = ctx.get_signal_receiver();
 
     // The block observer reaches out to the stacks node to get the most
@@ -1652,9 +1651,13 @@ async fn block_observer_ignores_coinbase() {
             Box::pin(std::future::ready(response))
         });
 
-        client
-            .expect_get_current_signer_set_info()
-            .returning(|_| Box::pin(std::future::ready(Ok(None))));
+        client.expect_get_contract_source().returning(|_, _| {
+            Box::pin(async {
+                Err(Error::StacksNodeResponse(
+                    mock_reqwests_status_code_error(404).await,
+                ))
+            })
+        });
     })
     .await;
 
