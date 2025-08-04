@@ -2799,23 +2799,17 @@ mod tests {
 
     /// Check that we skip processing bitcoin blocks if the chain tip in
     /// the state doesn't match the block hash passed in.
-    ///
-    /// Note: this test is a little sensitive to the current logic that
-    /// checks for smart contract deployment after checking whether the
-    /// chain tip is up to date.
     #[tokio::test]
     async fn should_skip_processing_bitcoin_blocks_if_not_coordinator() {
         let mut rng = testing::get_rng();
         let ctx = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
+            .modify_settings(|settings| {
+                // If we are the coordinator then we will wait for 10 seconds.
+                settings.signer.bitcoin_processing_delay = Duration::from_secs(10);
+            })
             .build();
-
-        ctx.with_stacks_client(|mock| {
-            mock.expect_get_contract_source()
-                .returning(|_, _| Box::pin(std::future::ready(Err(Error::Dummy))));
-        })
-        .await;
 
         let network = WanNetwork::default();
         let net = network.connect(&ctx);
@@ -2840,13 +2834,13 @@ mod tests {
 
         ctx.state().set_bitcoin_chain_tip(chain_tip1);
 
-        // This one will bail early since we are not the coordinator.
-        // However, when we do so, we check to see if the contracts have
-        // been deployed. They haven't and we've mocked stacks to return a
-        // Dummy error when we run the check.
-        let error = ev.process_new_blocks(chain_tip1).await.unwrap_err();
-
-        assert_matches::assert_matches!(error, Error::Dummy);
+        // `process_new_blocks` will exit early since we are not the
+        // coordinator. If we were the cooridnator then we would try to
+        // wait for 10 seconds, resulting in a timeout error.
+        tokio::time::timeout(Duration::from_secs(1), ev.process_new_blocks(chain_tip1))
+            .await
+            .unwrap()
+            .unwrap();
     }
 
     #[tokio::test]

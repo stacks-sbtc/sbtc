@@ -317,7 +317,7 @@ impl StacksInteract for TestHarness {
         &self,
         _contract_principal: &StacksAddress,
     ) -> Result<Option<SignerSetInfo>, Error> {
-        todo!()
+        Ok(None)
     }
     async fn get_current_signers_aggregate_key(
         &self,
