@@ -20,6 +20,7 @@
 use std::future::Future;
 use std::time::Duration;
 
+use crate::bitcoin::BitcoinBlockHashStreamProvider;
 use crate::bitcoin::BitcoinInteract;
 use crate::bitcoin::rpc::BitcoinBlockHeader;
 use crate::bitcoin::rpc::BitcoinTxInfo;
@@ -42,11 +43,12 @@ use crate::storage::DbWrite;
 use crate::storage::Transactable;
 use crate::storage::TransactionHandle;
 use crate::storage::model;
+use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::EncryptedDkgShares;
+use crate::util::FutureExt;
 use bitcoin::Amount;
 use bitcoin::BlockHash;
 use bitcoin::ScriptBuf;
-use futures::stream::Stream;
 use futures::stream::StreamExt;
 use sbtc::deposits::CreateDepositRequest;
 use sbtc::deposits::DepositInfo;
@@ -54,11 +56,11 @@ use std::collections::HashSet;
 
 /// Block observer
 #[derive(Debug)]
-pub struct BlockObserver<Context, BlockHashStream> {
+pub struct BlockObserver<Context, BlockSource> {
     /// Signer context
     pub context: Context,
-    /// Stream of blocks from the block notifier
-    pub bitcoin_blocks: BlockHashStream,
+    /// Provider of Bitcoin block hashes.
+    pub bitcoin_block_source: BlockSource,
 }
 
 /// A full "deposit", containing the bitcoin transaction and a fully
@@ -131,28 +133,38 @@ pub trait DepositRequestValidator {
         C: BitcoinInteract;
 }
 
-impl<C, S> BlockObserver<C, S>
+impl<C, BlockSource> BlockObserver<C, BlockSource>
 where
     C: Context,
-    S: Stream<Item = Result<bitcoin::BlockHash, Error>> + Unpin,
+    BlockSource: BitcoinBlockHashStreamProvider,
 {
+    /// Create a new [`BlockObserver`] with the given context and Bitcoin block
+    /// provider.
+    pub fn new(context: C, bitcoin_block_source: BlockSource) -> Self {
+        Self { context, bitcoin_block_source }
+    }
+
     /// Run the block observer
     #[tracing::instrument(skip_all, name = "block-observer")]
-    pub async fn run(mut self) -> Result<(), Error> {
+    pub async fn run(self) -> Result<(), Error> {
         let term = self.context.get_termination_handle();
+        let mut bitcoin_blocks = self.bitcoin_block_source.get_block_hash_stream();
 
         loop {
             if term.shutdown_signalled() {
+                tracing::debug!("block observer has received a shutdown signal");
                 break;
             }
 
             // Bitcoin blocks will generally arrive in ~10 minute intervals, so
             // we don't need to be so aggressive in our timeout here.
-            let poll = tokio::time::timeout(Duration::from_millis(100), self.bitcoin_blocks.next());
+            let poll = bitcoin_blocks
+                .next()
+                .with_timeout(Duration::from_millis(100));
 
             match poll.await {
                 Ok(Some(Ok(block_hash))) => {
-                    tracing::info!("observed new bitcoin block from stream");
+                    tracing::info!(%block_hash, "observed new bitcoin block from stream");
                     metrics::counter!(
                         Metrics::BlocksObservedTotal,
                         "blockchain" => BITCOIN_BLOCKCHAIN,
@@ -173,10 +185,13 @@ where
                     }
 
                     tracing::debug!("updating the signer state");
-                    if let Err(error) = self.update_signer_state(block_hash).await {
-                        tracing::warn!(%error, "could not update the signer state");
-                        continue;
-                    }
+                    let chain_tip = match self.update_signer_state(block_hash).await {
+                        Ok(chain_tip) => chain_tip,
+                        Err(error) => {
+                            tracing::warn!(%error, "could not update the signer state");
+                            continue;
+                        }
+                    };
 
                     tracing::info!("loading latest deposit requests from Emily");
                     if let Err(error) = self.load_latest_deposit_requests().await {
@@ -184,7 +199,7 @@ where
                     }
 
                     self.context
-                        .signal(SignerEvent::BitcoinBlockObserved.into())?;
+                        .signal(SignerEvent::BitcoinBlockObserved(chain_tip).into())?;
                 }
                 Ok(Some(Err(error))) => {
                     tracing::warn!(%error, "error decoding new bitcoin block hash from stream");
@@ -497,8 +512,8 @@ impl<C: Context, B> BlockObserver<C, B> {
         Ok(())
     }
 
-    /// Update the `SignerState` object with current bitcoin chain tip.
-    async fn update_bitcoin_chain_tip(&self, chain_tip: BlockHash) -> Result<(), Error> {
+    /// Set the `SignerState` object with current bitcoin chain tip.
+    async fn set_bitcoin_chain_tip(&self, chain_tip: BlockHash) -> Result<BitcoinBlockRef, Error> {
         let db = self.context.get_storage();
         let chain_tip = db
             .get_bitcoin_block(&chain_tip.into())
@@ -507,7 +522,7 @@ impl<C: Context, B> BlockObserver<C, B> {
             .ok_or_else(|| Error::UnknownBitcoinBlock(chain_tip))?;
 
         self.context.state().set_bitcoin_chain_tip(chain_tip);
-        Ok(())
+        Ok(chain_tip)
     }
 
     /// Update the `SignerState` object with data that is unlikely to
@@ -520,7 +535,7 @@ impl<C: Context, B> BlockObserver<C, B> {
     /// * The current signer set.
     /// * The current aggregate key.
     /// * The current bitcoin chain tip.
-    async fn update_signer_state(&self, chain_tip: BlockHash) -> Result<(), Error> {
+    async fn update_signer_state(&self, chain_tip: BlockHash) -> Result<BitcoinBlockRef, Error> {
         tracing::info!("loading sbtc limits from Emily");
         self.update_sbtc_limits(chain_tip).await?;
 
@@ -528,7 +543,7 @@ impl<C: Context, B> BlockObserver<C, B> {
         self.set_signer_set_info().await?;
 
         tracing::info!("updating the signer state with the current bitcoin chain tip");
-        self.update_bitcoin_chain_tip(chain_tip).await
+        self.set_bitcoin_chain_tip(chain_tip).await
     }
 
     /// Checks if the latest dkg share is pending and is no longer valid
@@ -761,18 +776,17 @@ mod tests {
         // There must be at least one signal receiver alive when the block observer
         // later tries to send a signal, hence this line.
         let _signal_rx = ctx.get_signal_receiver();
-        let block_hash_stream = test_harness.spawn_block_hash_stream();
 
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_blocks: block_hash_stream,
+            bitcoin_block_source: test_harness.clone(),
         };
 
         let handle = tokio::spawn(block_observer.run());
         ctx.wait_for_signal(Duration::from_secs(3), |signal| {
             matches!(
                 signal,
-                SignerSignal::Event(SignerEvent::BitcoinBlockObserved)
+                SignerSignal::Event(SignerEvent::BitcoinBlockObserved(_))
             )
         })
         .await
@@ -898,7 +912,7 @@ mod tests {
 
         let block_observer = BlockObserver {
             context: ctx,
-            bitcoin_blocks: (),
+            bitcoin_block_source: (),
         };
 
         {
@@ -983,7 +997,7 @@ mod tests {
 
         let block_observer = BlockObserver {
             context: ctx,
-            bitcoin_blocks: (),
+            bitcoin_block_source: (),
         };
 
         block_observer.load_latest_deposit_requests().await.unwrap();

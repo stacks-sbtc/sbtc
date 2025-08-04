@@ -493,7 +493,7 @@ mod tests {
     impl Key<p256k1::keys::PublicKey> {
         fn new() -> Self {
             // Under the hood this uses a rand::thread_rng() for randomness.
-            let private_key = Secp256k1PrivateKey::new();
+            let private_key = Secp256k1PrivateKey::random();
             let pub_key = Secp256k1PublicKey::from_private(&private_key);
             let bytes = pub_key.to_bytes_compressed();
             Key(p256k1::keys::PublicKey::try_from(bytes.as_slice()).unwrap())
@@ -503,7 +503,7 @@ mod tests {
     impl Key<Secp256k1PublicKey> {
         fn new() -> Self {
             // Under the hood this uses a rand::thread_rng() for randomness.
-            let private_key = Secp256k1PrivateKey::new();
+            let private_key = Secp256k1PrivateKey::random();
             Key(Secp256k1PublicKey::from_private(&private_key))
         }
     }

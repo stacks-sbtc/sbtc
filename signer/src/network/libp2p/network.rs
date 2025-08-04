@@ -118,11 +118,12 @@ mod tests {
     use crate::{
         keys::{PrivateKey, PublicKey},
         network::libp2p::SignerSwarmBuilder,
-        testing::{self, clear_env, context::*, get_rng, network::RandomMemoryMultiaddr},
+        testing::{self, clear_env, context::*, get_rng, network::MultiaddrExt as _},
     };
 
     #[test(tokio::test)]
     async fn two_clients_should_be_able_to_exchange_messages_given_a_libp2p_network() {
+        let rng = &mut get_rng();
         clear_env();
 
         // PeerId = 16Uiu2HAm46BSFWYYWzMjhTRDRwXHpDWpQ32iu93nzDwd1F4Tt256
@@ -167,8 +168,8 @@ mod tests {
         let term1 = context1.get_termination_handle();
         let term2 = context2.get_termination_handle();
 
-        let swarm1_addr = Multiaddr::random_memory();
-        let swarm2_addr = Multiaddr::random_memory();
+        let swarm1_addr = Multiaddr::random_memory(rng);
+        let swarm2_addr = Multiaddr::random_memory(rng);
 
         let mut swarm1 = SignerSwarmBuilder::new(&key1)
             .enable_memory_transport(true)
@@ -224,10 +225,10 @@ mod tests {
     async fn connected_peers_gossip_to_one_another() {
         clear_env();
 
-        let mut rng = get_rng();
-        let key1 = PrivateKey::new(&mut rng);
-        let key2 = PrivateKey::new(&mut rng);
-        let key3 = PrivateKey::new(&mut rng);
+        let rng = &mut get_rng();
+        let key1 = PrivateKey::new(rng);
+        let key2 = PrivateKey::new(rng);
+        let key3 = PrivateKey::new(rng);
 
         let context1 = TestContext::builder()
             .with_in_memory_storage()
@@ -265,9 +266,9 @@ mod tests {
             current_signer_set3.add_signer(PublicKey::from_private_key(&key));
         }
 
-        let swarm1_addr = Multiaddr::random_memory();
-        let swarm2_addr = Multiaddr::random_memory();
-        let swarm3_addr = Multiaddr::random_memory();
+        let swarm1_addr = Multiaddr::random_memory(rng);
+        let swarm2_addr = Multiaddr::random_memory(rng);
+        let swarm3_addr = Multiaddr::random_memory(rng);
 
         // Configure the swarms to listen on hard-coded ports
         let mut swarm1 = SignerSwarmBuilder::new(&key1)
@@ -314,7 +315,7 @@ mod tests {
         // Let's generate some messages for signer 3 to try to send to signer 1.
         let number_of_messages = 10;
         let mut signed_messages: Vec<Msg> =
-            std::iter::repeat_with(|| Msg::random_with_private_key(&mut rng, &key3))
+            std::iter::repeat_with(|| Msg::random_with_private_key(rng, &key3))
                 .take(number_of_messages)
                 .collect();
         signed_messages.sort_by_cached_key(|x| x.inner.bitcoin_chain_tip);
@@ -378,10 +379,10 @@ mod tests {
     async fn signers_check_source_peer_ids() {
         clear_env();
 
-        let mut rng = get_rng();
-        let key1 = PrivateKey::new(&mut rng);
-        let key2 = PrivateKey::new(&mut rng);
-        let key3 = PrivateKey::new(&mut rng);
+        let rng = &mut get_rng();
+        let key1 = PrivateKey::new(rng);
+        let key2 = PrivateKey::new(rng);
+        let key3 = PrivateKey::new(rng);
 
         let context1 = TestContext::builder()
             .with_in_memory_storage()
@@ -421,9 +422,9 @@ mod tests {
             current_signer_set3.add_signer(PublicKey::from_private_key(&key));
         }
 
-        let swarm1_addr = Multiaddr::random_memory();
-        let swarm2_addr = Multiaddr::random_memory();
-        let swarm3_addr = Multiaddr::random_memory();
+        let swarm1_addr = Multiaddr::random_memory(rng);
+        let swarm2_addr = Multiaddr::random_memory(rng);
+        let swarm3_addr = Multiaddr::random_memory(rng);
 
         let mut swarm1 = SignerSwarmBuilder::new(&key1)
             .enable_memory_transport(true)
@@ -469,7 +470,7 @@ mod tests {
         // Let's generate some messages for signer 3 to try to send to signer 1.
         let number_of_messages = 10;
         let mut signed_messages: Vec<Msg> =
-            std::iter::repeat_with(|| Msg::random_with_private_key(&mut rng, &key3))
+            std::iter::repeat_with(|| Msg::random_with_private_key(rng, &key3))
                 .take(number_of_messages)
                 .collect();
         signed_messages.sort_by_cached_key(|x| x.inner.bitcoin_chain_tip);
@@ -538,6 +539,8 @@ mod tests {
 
     #[tokio::test]
     async fn swarm_rejects_connections_from_unknown_peers() {
+        let rng = &mut get_rng();
+
         // In this test we create three swarms (simulating three signers). We
         // simulate that signers 1 & 2 are trusted peers, and that signer 3 is
         // an untrusted peer. We start the swarms and ensure that signers 1 & 2
@@ -611,9 +614,9 @@ mod tests {
             .current_signer_set()
             .add_signer(PublicKey::from_private_key(&key2));
 
-        let swarm1_addr = Multiaddr::random_memory();
-        let swarm2_addr = Multiaddr::random_memory();
-        let swarm3_addr = Multiaddr::random_memory();
+        let swarm1_addr = Multiaddr::random_memory(rng);
+        let swarm2_addr = Multiaddr::random_memory(rng);
+        let swarm3_addr = Multiaddr::random_memory(rng);
 
         // Create the two trusted swarms.
         let mut swarm1 = SignerSwarmBuilder::new(&key1)

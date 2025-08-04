@@ -93,14 +93,6 @@ pub enum Error {
     #[error("the signer set aggregate key could not be determined for bitcoin block {0}")]
     MissingAggregateKey(bitcoin::BlockHash),
 
-    /// An error occurred while attempting to connect to the Bitcoin Core ZMQ socket.
-    #[error("timed-out trying to connect to bitcoin-core ZMQ endpoint: {0}")]
-    BitcoinCoreZmqConnectTimeout(String),
-
-    /// An error was received from the Bitcoin Core ZMQ subscriber.
-    #[error("error from bitcoin-core ZMQ: {0}")]
-    BitcoinCoreZmq(#[source] bitcoincore_zmq::Error),
-
     /// Indicates an error when decoding a protobuf
     #[error("could not decode protobuf {0}")]
     DecodeProtobuf(#[source] prost::DecodeError),

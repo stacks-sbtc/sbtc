@@ -15,6 +15,8 @@ use clarity::util::secp256k1::Secp256k1PublicKey;
 use fake::Dummy;
 use fake::Fake;
 use fake::Faker;
+use libp2p::Multiaddr;
+use libp2p::PeerId;
 use p256k1::point::Point;
 use p256k1::scalar::Scalar;
 use polynomial::Polynomial;
@@ -86,6 +88,8 @@ use crate::storage::model::StacksTxId;
 use crate::storage::model::TaprootScriptHash;
 use crate::storage::model::WithdrawalAcceptEvent;
 use crate::storage::model::WithdrawalRejectEvent;
+
+use super::network::MultiaddrExt as _;
 
 /// Dummy block
 pub fn block<R: rand::RngCore + ?Sized>(
@@ -792,6 +796,21 @@ impl fake::Dummy<fake::Faker> for model::Timestamp {
         time::OffsetDateTime::from_unix_timestamp(unix_timestamp)
             .expect("failed to create OffsetDateTime")
             .into()
+    }
+}
+
+impl fake::Dummy<fake::Faker> for model::P2PPeer {
+    fn dummy_with_rng<R: rand::RngCore + ?Sized>(config: &fake::Faker, rng: &mut R) -> Self {
+        let public_key: PublicKey = config.fake_with_rng(rng);
+        let multiaddr = Multiaddr::random_memory(rng);
+        let peer_id: PeerId = public_key.into();
+
+        model::P2PPeer {
+            peer_id: peer_id.into(),
+            public_key,
+            address: multiaddr.into(),
+            last_dialed_at: Faker.fake_with_rng(rng),
+        }
     }
 }
 

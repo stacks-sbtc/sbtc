@@ -122,11 +122,15 @@ impl IntoResponse for InfoResponse {
 /// Handler for the `/info` endpoint. This method is infallible and returns
 /// `null` for any missing information.
 pub async fn info_handler<C: Context>(state: State<ApiState<C>>) -> InfoResponse {
-    let bitcoin_client = state.ctx.get_bitcoin_client();
-    let stacks_client = state.ctx.get_stacks_client();
-    let storage = state.ctx.get_storage();
-    let config = state.ctx.config();
-    let ctx = &state.ctx;
+    build_info(&state.ctx).await
+}
+
+/// Helper function to populate [`InfoResponse`] from given [`Context`]
+pub async fn build_info<C: Context>(ctx: &C) -> InfoResponse {
+    let bitcoin_client = ctx.get_bitcoin_client();
+    let stacks_client = ctx.get_stacks_client();
+    let storage = ctx.get_storage();
+    let config = ctx.config();
 
     let mut response = InfoResponse::default();
 

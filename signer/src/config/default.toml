@@ -61,20 +61,13 @@ rpc_endpoints = [
     "http://devnet:devnet@127.0.0.1:18443",
 ]
 
-# The URI(s) of the Bitcoin Core ZMQ block hash stream(s) to connect to.
+# The interval, in seconds, at which the signer will poll the Bitcoin Core RPC
+# for the latest block hash. This is used to determine the current chain tip.
 #
-# You may optionally specify multiple endpoints if you have them. They will be
-# tried in order until one succeeds, and it will attempt failover to the next
-# endpoint if the connection is lost.
-#
-# Format: ["tcp://<host>:<port>", ..]
-# Default: <none>
-# Required: true
-# Environment: SIGNER_BITCOIN__BLOCK_HASH_STREAM_ENDPOINTS
-# Environment Example: tcp://10.0.0.1:28332,tcp://10.0.0.2:28332
-block_hash_stream_endpoints = [
-    "tcp://127.0.0.1:28332"
-]
+# Default: 5
+# Required: false
+# Environment: SIGNER_BITCOIN__CHAIN_TIP_POLLING_INTERVAL
+# chain_tip_polling_interval = 5
 
 # !! ==============================================================================
 # !! Stacks Node Configuration

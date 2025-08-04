@@ -47,21 +47,6 @@ rpc_endpoints = [
     "http://$BITCOIN_RPC_USERNAME:$BITCOIN_RPC_PASSWORD@$BITCOIN_RPC_HOST:$BITCOIN_RPC_PORT",
 ]
 
-# The URI(s) of the Bitcoin Core ZMQ block hash stream(s) to connect to.
-#
-# You may optionally specify multiple endpoints if you have them. They will be
-# tried in order until one succeeds, and it will attempt failover to the next
-# endpoint if the connection is lost.
-#
-# Format: ["tcp://<host>:<port>", ..]
-# Default: <none>
-# Required: true
-# Environment: SIGNER_BITCOIN__BLOCK_HASH_STREAM_ENDPOINTS
-# Environment Example: tcp://10.0.0.1:28332,tcp://10.0.0.2:28332
-block_hash_stream_endpoints = [
-    "tcp://$BITCOIN_ZMQ_HOST:$BITCOIN_ZMQ_PORT"
-]
-
 # !! ==============================================================================
 # !! Stacks Node Configuration
 # !! ==============================================================================

@@ -41,7 +41,11 @@ test-build:
 	cargo $(CARGO_FLAGS) test build --features "testing"  $(CARGO_EXCLUDES) --no-run --locked ${CARGO_BUILD_ARGS}
 
 CARGO_FMT = cargo $(CARGO_FLAGS) fmt --all
-CARGO_CLIPPY_BASE = cargo $(CARGO_FLAGS) clippy --workspace --all-targets --all-features --no-deps
+CARGO_CLIPPY_BASE = cargo $(CARGO_FLAGS) clippy --workspace --all-targets --all-features --no-deps \
+    --exclude blocklist-api \
+    --exclude private-emily-client \
+    --exclude emily-client \
+    --exclude testing-emily-client
 CLIPPY_FLAGS = -D warnings
 
 lint:

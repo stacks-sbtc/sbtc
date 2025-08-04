@@ -10,7 +10,8 @@ use crate::storage::model::{
 };
 use crate::storage::postgres::PgStore;
 use crate::storage::{DbRead, DbWrite};
-use crate::testing::{FutureExt, SleepAsyncExt, TestUtilityError};
+use crate::testing::TestUtilityError;
+use crate::util::{FutureExt, SleepAsyncExt};
 
 pub mod model;
 pub mod postgres;
@@ -48,7 +49,7 @@ pub async fn new_test_database() -> PgStore {
     // We create a new connection to the default database each time this
     // function is called, because we depend on all connections to this
     // database being closed before it begins.
-    let postgres_url = format!("{}/postgres", DATABASE_URL_BASE);
+    let postgres_url = format!("{DATABASE_URL_BASE}/postgres");
     let pool = get_connection_pool(&postgres_url);
 
     sqlx::query("CREATE SEQUENCE IF NOT EXISTS db_num_seq;")
@@ -61,7 +62,7 @@ pub async fn new_test_database() -> PgStore {
         .await
         .unwrap();
 
-    let db_name = format!("signer_test_{}", db_num);
+    let db_name = format!("signer_test_{db_num}");
 
     let create_db = format!("CREATE DATABASE \"{db_name}\" WITH OWNER = 'postgres';");
 
@@ -70,7 +71,7 @@ pub async fn new_test_database() -> PgStore {
         .await
         .expect("failed to create test database");
 
-    let test_db_url = format!("{}/{}", DATABASE_URL_BASE, db_name);
+    let test_db_url = format!("{DATABASE_URL_BASE}/{db_name}");
     // In order to create a new database from another database, there
     // cannot exist any other connections to that database. So we
     // explicitly close this connection. See the notes section in the docs
@@ -95,7 +96,7 @@ pub async fn drop_db(store: PgStore) {
             return;
         }
 
-        let postgres_url = format!("{}/postgres", DATABASE_URL_BASE);
+        let postgres_url = format!("{DATABASE_URL_BASE}/postgres");
         let pool = get_connection_pool(&postgres_url);
 
         // FORCE closes all connections to the database if there are any

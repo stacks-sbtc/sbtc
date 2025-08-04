@@ -1769,6 +1769,36 @@ impl PgRead {
         .map_err(Error::SqlxQuery)
     }
 
+    async fn get_latest_non_failed_dkg_shares<'e, E>(
+        executor: &'e mut E,
+    ) -> Result<Option<model::EncryptedDkgShares>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
+        sqlx::query_as::<_, model::EncryptedDkgShares>(
+            r#"
+            SELECT
+                aggregate_key
+              , tweaked_aggregate_key
+              , script_pubkey
+              , encrypted_private_shares
+              , public_shares
+              , signer_set_public_keys
+              , signature_share_threshold
+              , dkg_shares_status
+              , started_at_bitcoin_block_hash
+              , started_at_bitcoin_block_height
+            FROM sbtc_signer.dkg_shares
+            WHERE dkg_shares_status != 'failed'
+            ORDER BY created_at DESC
+            LIMIT 1;
+            "#,
+        )
+        .fetch_optional(executor)
+        .await
+        .map_err(Error::SqlxQuery)
+    }
+
     /// Returns the number of non-failed rows in the `dkg_shares` table.
     async fn get_encrypted_dkg_shares_count<'e, E>(executor: &'e mut E) -> Result<u32, Error>
     where
@@ -2513,6 +2543,26 @@ impl PgRead {
         .await
         .map_err(Error::SqlxQuery)
     }
+
+    async fn get_p2p_peers<'e, E>(executor: &'e mut E) -> Result<Vec<model::P2PPeer>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
+        sqlx::query_as::<_, model::P2PPeer>(
+            r#"
+            SELECT 
+                peer_id
+              , public_key
+              , address
+              , last_dialed_at
+            FROM 
+                sbtc_signer.p2p_peers
+            "#,
+        )
+        .fetch_all(executor)
+        .await
+        .map_err(Error::SqlxQuery)
+    }
 }
 
 impl DbRead for PgStore {
@@ -2780,6 +2830,12 @@ impl DbRead for PgStore {
         PgRead::get_latest_verified_dkg_shares(self.get_connection().await?.as_mut()).await
     }
 
+    async fn get_latest_non_failed_dkg_shares(
+        &self,
+    ) -> Result<Option<model::EncryptedDkgShares>, Error> {
+        PgRead::get_latest_non_failed_dkg_shares(self.get_connection().await?.as_mut()).await
+    }
+
     async fn get_encrypted_dkg_shares_count(&self) -> Result<u32, Error> {
         PgRead::get_encrypted_dkg_shares_count(self.get_connection().await?.as_mut()).await
     }
@@ -2937,6 +2993,10 @@ impl DbRead for PgStore {
             signer_public_key,
         )
         .await
+    }
+
+    async fn get_p2p_peers(&self) -> Result<Vec<model::P2PPeer>, Error> {
+        PgRead::get_p2p_peers(self.get_connection().await?.as_mut()).await
     }
 }
 
@@ -3207,6 +3267,13 @@ impl DbRead for PgTransaction<'_> {
         PgRead::get_latest_verified_dkg_shares(tx.as_mut()).await
     }
 
+    async fn get_latest_non_failed_dkg_shares(
+        &self,
+    ) -> Result<Option<model::EncryptedDkgShares>, Error> {
+        let mut tx = self.tx.lock().await;
+        PgRead::get_latest_non_failed_dkg_shares(tx.as_mut()).await
+    }
+
     async fn get_encrypted_dkg_shares_count(&self) -> Result<u32, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::get_encrypted_dkg_shares_count(tx.as_mut()).await
@@ -3360,5 +3427,10 @@ impl DbRead for PgTransaction<'_> {
     ) -> Result<Option<(bool, crate::keys::PublicKeyXOnly)>, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::will_sign_bitcoin_tx_sighash(tx.as_mut(), sighash).await
+    }
+
+    async fn get_p2p_peers(&self) -> Result<Vec<model::P2PPeer>, Error> {
+        let mut tx = self.tx.lock().await;
+        PgRead::get_p2p_peers(tx.as_mut()).await
     }
 }

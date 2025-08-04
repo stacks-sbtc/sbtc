@@ -17,7 +17,6 @@ bitcoin.workspace = true
 bitcoinconsensus.workspace = true
 bitcoincore-rpc.workspace = true
 bitcoincore-rpc-json.workspace = true
-bitcoincore-zmq.workspace = true
 bitvec.workspace = true
 blocklist-api.workspace = true
 cfg-if.workspace = true
