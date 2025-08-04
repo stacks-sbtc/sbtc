@@ -308,8 +308,14 @@ async fn is_in_canonical_chain(
     context: &EmilyContext,
     withdrawal: &WithdrawalEntry,
 ) -> Result<bool, Error> {
-    let canonical_block_at_height =
-        get_chainstate_entry_at_height(context, &withdrawal.stacks_block_height).await?;
+    let canonical_block_at_height = get_chainstate_entry_at_height(
+        context,
+        &withdrawal.stacks_block_height,
+    )
+    .await
+    .inspect_err(
+        |error| tracing::warn!(%error, "Failed to get canonical block at height for withdrawal"),
+    )?;
     Ok(canonical_block_at_height.key.hash == withdrawal.key.stacks_block_hash)
 }
 
