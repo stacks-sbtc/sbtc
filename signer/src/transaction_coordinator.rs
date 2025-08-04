@@ -300,11 +300,6 @@ where
         // coordinating DKG or constructing bitcoin and stacks
         // transactions, might as well return early.
         if !self.is_coordinator(bitcoin_chain_tip.as_ref()) {
-            // Before returning, we also check if all the smart contracts are
-            // deployed: we do this as some other coordinator could have deployed
-            // them, in which case we need to updated our state.
-            self.all_smart_contracts_deployed().await?;
-
             tracing::debug!("we are not the coordinator, so nothing to do");
             return Ok(());
         }
@@ -434,7 +429,7 @@ where
         wallet: &SignerWallet,
         aggregate_key: &PublicKey,
     ) -> Result<Option<StacksTxId>, Error> {
-        if !self.all_smart_contracts_deployed().await? {
+        if !self.context.state().sbtc_contracts_deployed() {
             return Ok(None);
         }
 
@@ -2312,7 +2307,7 @@ where
         wallet: &SignerWallet,
         bitcoin_aggregate_key: &PublicKey,
     ) -> Result<(), Error> {
-        if self.all_smart_contracts_deployed().await? {
+        if self.context.state().sbtc_contracts_deployed() {
             return Ok(());
         }
 
@@ -2322,24 +2317,6 @@ where
         }
 
         Ok(())
-    }
-
-    async fn all_smart_contracts_deployed(&mut self) -> Result<bool, Error> {
-        if self.context.state().sbtc_contracts_deployed() {
-            return Ok(true);
-        }
-
-        let stacks = self.context.get_stacks_client();
-        let deployer = self.context.config().signer.deployer;
-
-        for contract in SMART_CONTRACTS {
-            if !contract.is_deployed(&stacks, &deployer).await? {
-                return Ok(false);
-            }
-        }
-
-        self.context.state().set_sbtc_contracts_deployed();
-        Ok(true)
     }
 
     async fn get_signer_wallet(&self) -> Result<SignerWallet, Error> {
