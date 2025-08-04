@@ -1546,6 +1546,7 @@ dependencies = [
  "clap",
  "clarity",
  "config",
+ "futures",
  "hex",
  "reqwest 0.11.27",
  "sbtc",

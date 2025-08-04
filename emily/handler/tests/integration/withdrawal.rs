@@ -4,17 +4,17 @@ use std::collections::HashMap;
 use test_case::test_case;
 
 use testing_emily_client::apis;
+use testing_emily_client::apis::chainstate_api::get_chain_tip;
 use testing_emily_client::apis::chainstate_api::set_chainstate;
 use testing_emily_client::apis::configuration::Configuration;
 use testing_emily_client::models::{
     Chainstate, CreateWithdrawalRequestBody, Fulfillment, UpdateWithdrawalsRequestBody, Withdrawal,
     WithdrawalInfo, WithdrawalParameters, WithdrawalStatus, WithdrawalUpdate,
 };
-use testing_emily_client::apis::chainstate_api::get_chain_tip;
 
+use crate::common::batch_set_chainstates;
 use crate::common::clean_setup;
 use crate::common::new_test_chainstate;
-use crate::common::batch_set_chainstates;
 
 const RECIPIENT: &str = "TEST_RECIPIENT";
 const SENDER: &str = "TEST_SENDER";
@@ -1070,7 +1070,9 @@ async fn emily_handles_withdrawal_requests_on_forks() {
 
     // Create a withdrawal request ancored to initial chainstate.
 
-    let chaintip = get_chain_tip(&configuration).await.expect("Failed to get chain tip");
+    let chaintip = get_chain_tip(&configuration)
+        .await
+        .expect("Failed to get chain tip");
 
     // Saving this chaintip for further checks.
     let old_chaintip = chaintip.clone();
@@ -1095,7 +1097,10 @@ async fn emily_handles_withdrawal_requests_on_forks() {
         .expect("Received an error after making a valid get withdrawal api call.");
 
     assert_eq!(withdrawal.txid, "test_txid_pre_reorg".to_string());
-    assert_eq!(withdrawal.stacks_block_hash, chaintip.stacks_block_hash.clone());
+    assert_eq!(
+        withdrawal.stacks_block_hash,
+        chaintip.stacks_block_hash.clone()
+    );
 
     // Now we will create a reorg chain, and update Emily about it.
 
@@ -1106,7 +1111,9 @@ async fn emily_handles_withdrawal_requests_on_forks() {
 
     // Create a withdrawal request with same request ID, but anchored to the new chainstate.
 
-    let chaintip = get_chain_tip(&configuration).await.expect("Failed to get chain tip");
+    let chaintip = get_chain_tip(&configuration)
+        .await
+        .expect("Failed to get chain tip");
 
     // Sanity check
     assert_ne!(
@@ -1137,13 +1144,12 @@ async fn emily_handles_withdrawal_requests_on_forks() {
         .expect("Received an error after making a valid get withdrawal api call.");
 
     assert_eq!(
-        withdrawal.txid, "test_txid_post_reorg".to_string(),
+        withdrawal.txid,
+        "test_txid_post_reorg".to_string(),
         "Withdrawal should be anchored to the canonical chainstate"
     );
     assert_eq!(
         withdrawal.stacks_block_hash, chaintip.stacks_block_hash,
         "Withdrawal should be anchored to the canonical chainstate"
     );
-
-
 }
