@@ -1315,51 +1315,19 @@ where
         match stacks.get_tenure(header.parent_block_id).await {
             Ok(parent_tenure_blocks) => {
                 let parent_tenure: TenureBlockHeaders = parent_tenure_blocks.into();
-                // Log if there's a large gap in bitcoin anchor heights, 
-                // expected during testnet
-                let anchor_gap = (*tenure.anchor_block_height).saturating_sub(*parent_tenure.anchor_block_height);
-                if anchor_gap > 10 {
-                    tracing::info!(
-                        current_anchor_height = %tenure.anchor_block_height,
-                        parent_anchor_height = %parent_tenure.anchor_block_height,
-                        gap = %anchor_gap,
-                        "detected large gap in bitcoin anchor heights during backfill"
-                    );
-                    // TODO: this is where we'll manually massage / insert blocks if in testnet
-                    // Increment a metric for monitoring
-                    metrics::counter!(
-                        "stacks_backfill_anchor_gaps_total",
-                        "gap_size" => if anchor_gap > 100 { "large" } else { "medium" }
-                    ).increment(1);
-                }
                 headers.push(parent_tenure);
             }
-            Err(error) => {
-                // Check if it's a pre-Nakamoto block error
-                if is_pre_nakamoto_block_error(&error) {
-                    tracing::warn!(
-                        parent_block_id = %header.parent_block_id,
-                        current_anchor_height = %tenure.anchor_block_height,
-                        error = %error,
-                        "parent block appears to be pre-Nakamoto, stop backfill"
-                    );
+            Err(error) if is_pre_nakamoto_block_error(&error) => {
+                tracing::warn!(
+                    parent_block_id = %header.parent_block_id,
+                    current_anchor_height = %tenure.anchor_block_height,
+                    error = %error,
+                    "parent block appears to be pre-Nakamoto, stop backfill"
+                );
 
-                    // Increment metric for monitoring pre-Nakamoto stops
-                    metrics::counter!(
-                        "stacks_backfill_pre_nakamoto_stops_total"
-                    ).increment(1);
-
-                    break;
-                } else {
-                    // Propogate other errors
-                    tracing::error!(
-                        parent_block_id = %header.parent_block_id,
-                        error = %error,
-                        "failed to fetch parent tenure during backfill"
-                    );
-                    return Err(error);
-                }
+                break;
             }
+            Err(error) => return Err(error),
         }
     }
 
@@ -1374,13 +1342,6 @@ fn is_pre_nakamoto_block_error(error: &Error) -> bool {
         // If we get a 404, it's likely because the block ID refers to a pre-Nakamoto block
         Error::StacksNodeResponse(req_error) => {
             req_error.status() == Some(reqwest::StatusCode::NOT_FOUND)
-        }
-        // Deserialization errors can indicate pre-Nakamoto blocks, but they could
-        // also indicate corruption or network issues, so we're being conservative here
-        Error::DecodeNakamotoBlock(_, _) | Error::DecodeNakamotoTenure(_, _) => {
-            // Note: These could also indicate corrupted data, not just pre-Nakamoto blocks
-            // The caller logs this as a warning to help with debugging
-            true
         }
         // For other errors, we're not sure so we don't assume it's pre-Nakamoto
         _ => false,
