@@ -2803,7 +2803,11 @@ mod tests {
             .with_in_memory_storage()
             .with_mocked_clients()
             .modify_settings(|settings| {
-                // If we are the coordinator then we will wait for 10 seconds.
+                // If we are the coordinator then we will wait for 10
+                // seconds. However, in this test we shouldn't be the
+                // coordinator, so we should exit early. If there is a bug
+                // and we are the coordinator then we'll end up waiting 1
+                // second due to the timeout below.
                 settings.signer.bitcoin_processing_delay = Duration::from_secs(10);
             })
             .build();
