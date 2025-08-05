@@ -42,7 +42,7 @@ use reqwest::header::CONTENT_TYPE;
 use serde::{Deserialize, Deserializer};
 use url::Url;
 
-use crate::config::Settings;
+use crate::config::{NetworkKind, Settings};
 use crate::error::Error;
 use crate::keys::PublicKey;
 use crate::metrics::Metrics;
@@ -1317,17 +1317,25 @@ where
                 let parent_tenure: TenureBlockHeaders = parent_tenure_blocks.into();
                 headers.push(parent_tenure);
             }
-            Err(error) if is_pre_nakamoto_block_error(&error) => {
-                tracing::warn!(
-                    parent_block_id = %header.parent_block_id,
-                    current_anchor_height = %tenure.anchor_block_height,
-                    error = %error,
-                    "parent block appears to be pre-Nakamoto, stop backfill"
-                );
+            Err(error) => {
+                // Get network configuration to determine if we should treat 404 as pre-Nakamoto
+                let network = Settings::new_from_default_config()
+                    .map(|settings| settings.signer.network)
+                    .unwrap_or(NetworkKind::Regtest); // Default to Regtest if config fails
+                
+                if is_pre_nakamoto_block_error(&error, tenure.anchor_block_height, nakamoto_start_height, network) {
+                    tracing::warn!(
+                        parent_block_id = %header.parent_block_id,
+                        current_anchor_height = %tenure.anchor_block_height,
+                        error = %error,
+                        "parent block appears to be pre-Nakamoto, stop backfill"
+                    );
 
-                break;
+                    break;
+                } else {
+                    return Err(error);
+                }
             }
-            Err(error) => return Err(error),
         }
     }
 
@@ -1337,11 +1345,20 @@ where
 
 // Helper function for backfill testnet logic, checks if an 
 // error indicates we're trying to fetch a pre-Nakamoto block
-fn is_pre_nakamoto_block_error(error: &Error) -> bool {
+fn is_pre_nakamoto_block_error(
+    error: &Error, 
+    current_anchor_height: BitcoinBlockHeight,
+    nakamoto_start_height: BitcoinBlockHeight,
+    network: NetworkKind,
+) -> bool {
     match error {
         // If we get a 404, it's likely because the block ID refers to a pre-Nakamoto block
+        // But only if we're already close to or at the Nakamoto start height
+        // AND we're not in mainnet (since this is what we're addressing)
         Error::StacksNodeResponse(req_error) => {
-            req_error.status() == Some(reqwest::StatusCode::NOT_FOUND)
+            req_error.status() == Some(reqwest::StatusCode::NOT_FOUND) 
+                && current_anchor_height <= nakamoto_start_height + 1
+                && !network.is_mainnet()
         }
         // For other errors, we're not sure so we don't assume it's pre-Nakamoto
         _ => false,
@@ -1908,7 +1925,7 @@ mod tests {
         let client: ApiFallbackClient<StacksClient> = TryFrom::try_from(&settings).unwrap();
 
         let info = client.get_tenure_info().await.unwrap();
-        let tenures = fetch_unknown_ancestors(&client, &db, info.tip_block_id).await;
+        let tenures = fetch_unknown_ancestors(&client, &db, info.tip_block_id, NetworkKind::Regtest).await;
 
         let blocks = tenures.unwrap();
         let headers = blocks
