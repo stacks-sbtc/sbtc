@@ -374,8 +374,12 @@ where
         tracing::debug!("loading the signer stacks wallet");
         let wallet = self.get_signer_wallet().await?;
 
-        self.deploy_smart_contracts(chain_tip_hash, &wallet, &aggregate_key)
-            .await?;
+        if !self.context.state().sbtc_contracts_deployed() {
+            self.deploy_smart_contracts(chain_tip_hash, &wallet, &aggregate_key)
+                .await?;
+
+            return Ok(());
+        }
 
         let rotate_key_txid = self.check_and_submit_rotate_key_transaction(
             &bitcoin_chain_tip,
@@ -429,10 +433,6 @@ where
         wallet: &SignerWallet,
         aggregate_key: &PublicKey,
     ) -> Result<Option<StacksTxId>, Error> {
-        if !self.context.state().sbtc_contracts_deployed() {
-            return Ok(None);
-        }
-
         let last_dkg = self
             .context
             .get_storage()
@@ -2219,6 +2219,7 @@ where
     }
 
     /// Deploy an sBTC smart contract to the stacks node.
+    #[tracing::instrument(skip_all, fields(smart_contract = %contract_deploy))]
     async fn deploy_smart_contract(
         &mut self,
         contract_deploy: SmartContract,
@@ -2307,10 +2308,6 @@ where
         wallet: &SignerWallet,
         bitcoin_aggregate_key: &PublicKey,
     ) -> Result<(), Error> {
-        if self.context.state().sbtc_contracts_deployed() {
-            return Ok(());
-        }
-
         for contract in SMART_CONTRACTS {
             self.deploy_smart_contract(contract, chain_tip, bitcoin_aggregate_key, wallet)
                 .await?;
