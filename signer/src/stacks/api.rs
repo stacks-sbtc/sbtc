@@ -1322,8 +1322,13 @@ where
                 let network = Settings::new_from_default_config()
                     .map(|settings| settings.signer.network)
                     .unwrap_or(NetworkKind::Regtest); // Default to Regtest if config fails
-                
-                if is_pre_nakamoto_block_error(&error, tenure.anchor_block_height, nakamoto_start_height, network) {
+
+                if is_pre_nakamoto_block_error(
+                    &error,
+                    tenure.anchor_block_height,
+                    nakamoto_start_height,
+                    network,
+                ) {
                     tracing::warn!(
                         parent_block_id = %header.parent_block_id,
                         current_anchor_height = %tenure.anchor_block_height,
@@ -1343,10 +1348,10 @@ where
     Ok(headers)
 }
 
-// Helper function for backfill testnet logic, checks if an 
+// Helper function for backfill testnet logic, checks if an
 // error indicates we're trying to fetch a pre-Nakamoto block
 fn is_pre_nakamoto_block_error(
-    error: &Error, 
+    error: &Error,
     current_anchor_height: BitcoinBlockHeight,
     nakamoto_start_height: BitcoinBlockHeight,
     network: NetworkKind,
@@ -1356,7 +1361,7 @@ fn is_pre_nakamoto_block_error(
         // But only if we're already close to or at the Nakamoto start height
         // AND we're not in mainnet (since this is what we're addressing)
         Error::StacksNodeResponse(req_error) => {
-            req_error.status() == Some(reqwest::StatusCode::NOT_FOUND) 
+            req_error.status() == Some(reqwest::StatusCode::NOT_FOUND)
                 && current_anchor_height <= nakamoto_start_height + 1
                 && !network.is_mainnet()
         }
@@ -1925,7 +1930,7 @@ mod tests {
         let client: ApiFallbackClient<StacksClient> = TryFrom::try_from(&settings).unwrap();
 
         let info = client.get_tenure_info().await.unwrap();
-        let tenures = fetch_unknown_ancestors(&client, &db, info.tip_block_id, NetworkKind::Regtest).await;
+        let tenures = fetch_unknown_ancestors(&client, &db, info.tip_block_id).await;
 
         let blocks = tenures.unwrap();
         let headers = blocks
