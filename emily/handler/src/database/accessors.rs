@@ -4,6 +4,8 @@ use std::collections::HashMap;
 
 use aws_sdk_dynamodb::types::AttributeValue;
 use aws_sdk_dynamodb::types::error::ConditionalCheckFailedException;
+use futures;
+use futures::StreamExt as _;
 use serde_dynamo::Item;
 use strum::IntoEnumIterator;
 
@@ -302,6 +304,21 @@ pub async fn set_withdrawal_entry(
     put_entry_with_version::<WithdrawalTablePrimaryIndex>(context, entry).await
 }
 
+async fn is_in_canonical_chain(
+    context: &EmilyContext,
+    withdrawal: &WithdrawalEntry,
+) -> Result<bool, Error> {
+    let canonical_block_at_height = get_chainstate_entry_at_height(
+        context,
+        &withdrawal.stacks_block_height,
+    )
+    .await
+    .inspect_err(
+        |error| tracing::warn!(%error, "Failed to get canonical block at height for withdrawal"),
+    )?;
+    Ok(canonical_block_at_height.key.hash == withdrawal.key.stacks_block_hash)
+}
+
 /// Get withdrawal entry.
 pub async fn get_withdrawal_entry(
     context: &EmilyContext,
@@ -320,10 +337,28 @@ pub async fn get_withdrawal_entry(
     match entries.as_slice() {
         [] => Err(Error::NotFound),
         [withdrawal] => Ok(withdrawal.clone()),
-        _ => {
+        withdrawals => {
+            let in_canonical_chain = futures::stream::iter(withdrawals)
+                .filter_map(|withdrawal| async move {
+                    // TODO: I'm not sure yet if I want to silence errors here.
+                    if is_in_canonical_chain(context, withdrawal).await.ok()? {
+                        Some(withdrawal.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+                .await;
+
+            if in_canonical_chain.len() == 1 {
+                return Ok(in_canonical_chain[0].clone());
+            }
+            if in_canonical_chain.is_empty() {
+                return Err(Error::NotFound);
+            }
             warn!(
                 request_id = %key,
-                entries = %serde_json::to_string_pretty(&entries)?,
+                canonical_withdrawals = %serde_json::to_string_pretty(&in_canonical_chain)?,
                 "Found too many withdrawals",
             );
             Err(Error::TooManyWithdrawalEntries(*key))
@@ -735,7 +770,7 @@ async fn get_oldest_stacks_block_for_bitcoin_block(
     .ok_or(Error::NotFound)
 }
 
-// Returns oldest stacks block height, ancored to some block in range
+// Returns oldest stacks block height, anchored to some block in range
 // [range_start_bitcoin_height; range_end_bitcoin_height] (both sides inclusive)
 // If no stacks block is found, returns Error::NotFound.
 #[tracing::instrument(skip(context))]
