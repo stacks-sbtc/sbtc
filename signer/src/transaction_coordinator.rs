@@ -300,11 +300,6 @@ where
         // coordinating DKG or constructing bitcoin and stacks
         // transactions, might as well return early.
         if !self.is_coordinator(bitcoin_chain_tip.as_ref()) {
-            // Before returning, we also check if all the smart contracts are
-            // deployed: we do this as some other coordinator could have deployed
-            // them, in which case we need to updated our state.
-            self.all_smart_contracts_deployed().await?;
-
             tracing::debug!("we are not the coordinator, so nothing to do");
             return Ok(());
         }
@@ -379,8 +374,12 @@ where
         tracing::debug!("loading the signer stacks wallet");
         let wallet = self.get_signer_wallet().await?;
 
-        self.deploy_smart_contracts(chain_tip_hash, &wallet, &aggregate_key)
-            .await?;
+        if !self.context.state().sbtc_contracts_deployed() {
+            self.deploy_smart_contracts(chain_tip_hash, &wallet, &aggregate_key)
+                .await?;
+
+            return Ok(());
+        }
 
         let rotate_key_txid = self.check_and_submit_rotate_key_transaction(
             &bitcoin_chain_tip,
@@ -434,10 +433,6 @@ where
         wallet: &SignerWallet,
         aggregate_key: &PublicKey,
     ) -> Result<Option<StacksTxId>, Error> {
-        if !self.all_smart_contracts_deployed().await? {
-            return Ok(None);
-        }
-
         let last_dkg = self
             .context
             .get_storage()
@@ -2224,6 +2219,7 @@ where
     }
 
     /// Deploy an sBTC smart contract to the stacks node.
+    #[tracing::instrument(skip_all, fields(smart_contract = %contract_deploy))]
     async fn deploy_smart_contract(
         &mut self,
         contract_deploy: SmartContract,
@@ -2312,34 +2308,12 @@ where
         wallet: &SignerWallet,
         bitcoin_aggregate_key: &PublicKey,
     ) -> Result<(), Error> {
-        if self.all_smart_contracts_deployed().await? {
-            return Ok(());
-        }
-
         for contract in SMART_CONTRACTS {
             self.deploy_smart_contract(contract, chain_tip, bitcoin_aggregate_key, wallet)
                 .await?;
         }
 
         Ok(())
-    }
-
-    async fn all_smart_contracts_deployed(&mut self) -> Result<bool, Error> {
-        if self.context.state().sbtc_contracts_deployed() {
-            return Ok(true);
-        }
-
-        let stacks = self.context.get_stacks_client();
-        let deployer = self.context.config().signer.deployer;
-
-        for contract in SMART_CONTRACTS {
-            if !contract.is_deployed(&stacks, &deployer).await? {
-                return Ok(false);
-            }
-        }
-
-        self.context.state().set_sbtc_contracts_deployed();
-        Ok(true)
     }
 
     async fn get_signer_wallet(&self) -> Result<SignerWallet, Error> {
@@ -2822,23 +2796,21 @@ mod tests {
 
     /// Check that we skip processing bitcoin blocks if the chain tip in
     /// the state doesn't match the block hash passed in.
-    ///
-    /// Note: this test is a little sensitive to the current logic that
-    /// checks for smart contract deployment after checking whether the
-    /// chain tip is up to date.
     #[tokio::test]
     async fn should_skip_processing_bitcoin_blocks_if_not_coordinator() {
         let mut rng = testing::get_rng();
         let ctx = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
+            .modify_settings(|settings| {
+                // If we are the coordinator then we will wait for 10
+                // seconds. However, in this test we shouldn't be the
+                // coordinator, so we should exit early. If there is a bug
+                // and we are the coordinator then we'll end up waiting for
+                // one second due to the timeout below.
+                settings.signer.bitcoin_processing_delay = Duration::from_secs(10);
+            })
             .build();
-
-        ctx.with_stacks_client(|mock| {
-            mock.expect_get_contract_source()
-                .returning(|_, _| Box::pin(std::future::ready(Err(Error::Dummy))));
-        })
-        .await;
 
         let network = WanNetwork::default();
         let net = network.connect(&ctx);
@@ -2863,13 +2835,13 @@ mod tests {
 
         ctx.state().set_bitcoin_chain_tip(chain_tip1);
 
-        // This one will bail early since we are not the coordinator.
-        // However, when we do so, we check to see if the contracts have
-        // been deployed. They haven't and we've mocked stacks to return a
-        // Dummy error when we run the check.
-        let error = ev.process_new_blocks(chain_tip1).await.unwrap_err();
-
-        assert_matches::assert_matches!(error, Error::Dummy);
+        // `process_new_blocks` will exit early since we are not the
+        // coordinator. If we were the cooridnator then we would try to
+        // wait for 10 seconds, resulting in a timeout error.
+        tokio::time::timeout(Duration::from_secs(1), ev.process_new_blocks(chain_tip1))
+            .await
+            .unwrap()
+            .unwrap();
     }
 
     #[tokio::test]

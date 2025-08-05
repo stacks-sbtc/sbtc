@@ -38,6 +38,7 @@ use crate::stacks::api::GetNakamotoStartHeight as _;
 use crate::stacks::api::SignerSetInfo;
 use crate::stacks::api::StacksInteract;
 use crate::stacks::api::TenureBlockHeaders;
+use crate::stacks::contracts::SMART_CONTRACTS;
 use crate::storage::DbRead;
 use crate::storage::DbWrite;
 use crate::storage::Transactable;
@@ -726,13 +727,41 @@ where
     let address = &ctx.config().signer.deployer;
     // If the sBTC contracts have not been deployed, then we don't have any
     // signer set info in the registry.
-    if !ctx.state().sbtc_contracts_deployed() {
+    if !are_sbtc_contracts_deployed(ctx).await? {
         return Ok(None);
     }
 
     // This returns Ok(None) if API call returns a response with values
     // that are only set when we first deploy the sBTC contracts.
     stacks.get_current_signer_set_info(address).await
+}
+
+/// Check if all the sBTC smart contracts have been deployed.
+async fn are_sbtc_contracts_deployed<C>(ctx: &C) -> Result<bool, Error>
+where
+    C: Context,
+{
+    // First check if we already know if the contracts have been deployed.
+    // If we get false, then it could be that we are just starting the
+    // application, so we'll need to check our node.
+    if ctx.state().sbtc_contracts_deployed() {
+        return Ok(true);
+    }
+
+    let stacks = ctx.get_stacks_client();
+    let deployer = ctx.config().signer.deployer;
+
+    for contract in SMART_CONTRACTS {
+        if !contract.is_deployed(&stacks, &deployer).await? {
+            return Ok(false);
+        }
+    }
+
+    // If we get here, then all the smart contracts have been deployed.
+    // Let's store that fact so that we don't need to query our Stacks node
+    // again.
+    ctx.state().set_sbtc_contracts_deployed();
+    Ok(true)
 }
 
 #[cfg(test)]

@@ -154,6 +154,14 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
         client
             .expect_get_sortition_info()
             .returning(move |_| Box::pin(std::future::ready(Ok(DUMMY_SORTITION_INFO.clone()))));
+
+        client.expect_get_contract_source().returning(|_, _| {
+            Box::pin(async {
+                Err(Error::StacksNodeResponse(
+                    mock_reqwests_status_code_error(404).await,
+                ))
+            })
+        });
     })
     .await;
 
@@ -397,6 +405,7 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
         .with_mocked_stacks_client()
         .build();
 
+    ctx.state().set_sbtc_contracts_deployed();
     let mut signal_receiver = ctx.get_signal_receiver();
 
     // The block observer reaches out to the stacks node to get the most
@@ -419,6 +428,11 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
                 .map_err(Error::JsonSerialize);
             Box::pin(std::future::ready(response))
         });
+
+        // The signer set info is not necessary for this test.
+        client
+            .expect_get_current_signer_set_info()
+            .returning(|_| Box::pin(std::future::ready(Ok(None))));
     })
     .await;
 
@@ -1108,12 +1122,12 @@ async fn next_headers_to_process_ignores_known_headers() {
     testing::storage::drop_db(db).await;
 }
 
-/// The [`get_signer_set_and_aggregate_key`] function is supposed to fetch
-/// the signing set that is in the sbtc-registry by querying the stacks
-/// node if the smart contracts have been deployed and returning None if
-/// they have not.
+/// The [`get_signer_set_info`] function is supposed to fetch the signing
+/// set that is in the sbtc-registry by querying the stacks node if the
+/// smart contracts have been deployed and returning None if they have not
+/// or if the smart contract contains only null data.
 #[tokio::test]
-async fn get_signer_set_info_falls_back() {
+async fn get_signer_set_info_checks_for_contract_deployment() {
     let db = testing::storage::new_test_database().await;
 
     let mut rng = get_rng();
@@ -1141,18 +1155,23 @@ async fn get_signer_set_info_falls_back() {
         client
             .expect_get_current_signer_set_info()
             .returning(move |_| Box::pin(std::future::ready(Ok(Some(signer_set_info2.clone())))));
+
+        client.expect_get_contract_source().returning(|_, _| {
+            Box::pin(async {
+                Err(Error::StacksNodeResponse(
+                    mock_reqwests_status_code_error(404).await,
+                ))
+            })
+        });
     })
     .await;
 
-    // We have no rows in the DKG shares table and no rotate-keys
-    // transactions, so there should be no aggregate key, since that only
-    // happens after DKG, but we should always know the current signer set.
-    // Signatures required should fall back to config value.
     let info = get_signer_set_info(&ctx).await.unwrap();
     assert!(info.is_none());
 
-    // Alright, now that we have a rotate-keys transaction, we can check if
-    // it is preferred over the DKG shares table.
+    // Alright, now we set that the contracts have been deployed, so we no
+    // longer ask the stacks node about whether the they have been deployed
+    // or not and just query the smart contract.
     ctx.state().set_sbtc_contracts_deployed();
     let info = get_signer_set_info(&ctx).await.unwrap().unwrap();
 
@@ -1220,6 +1239,14 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
                     Ok(info.map(Into::into))
                 })
             });
+
+        client.expect_get_contract_source().returning(|_, _| {
+            Box::pin(async {
+                Err(Error::StacksNodeResponse(
+                    mock_reqwests_status_code_error(404).await,
+                ))
+            })
+        });
     })
     .await;
 
@@ -1386,6 +1413,14 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
         client
             .expect_get_sortition_info()
             .returning(|_| Box::pin(std::future::ready(Ok(DUMMY_SORTITION_INFO.clone()))));
+
+        client.expect_get_contract_source().returning(|_, _| {
+            Box::pin(async {
+                Err(Error::StacksNodeResponse(
+                    mock_reqwests_status_code_error(404).await,
+                ))
+            })
+        });
     })
     .await;
 
@@ -1614,6 +1649,14 @@ async fn block_observer_ignores_coinbase() {
             let response = serde_json::from_str::<RPCPoxInfoData>(GET_POX_INFO_JSON)
                 .map_err(Error::JsonSerialize);
             Box::pin(std::future::ready(response))
+        });
+
+        client.expect_get_contract_source().returning(|_, _| {
+            Box::pin(async {
+                Err(Error::StacksNodeResponse(
+                    mock_reqwests_status_code_error(404).await,
+                ))
+            })
         });
     })
     .await;
