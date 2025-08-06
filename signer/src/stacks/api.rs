@@ -1323,12 +1323,7 @@ where
                     .map(|settings| settings.signer.network)
                     .unwrap_or(NetworkKind::Regtest); // Default to Regtest if config fails
 
-                if is_pre_nakamoto_block_error(
-                    &error,
-                    tenure.anchor_block_height,
-                    nakamoto_start_height,
-                    network,
-                ) {
+                if is_pre_nakamoto_block_error(&error, network) {
                     tracing::warn!(
                         parent_block_id = %header.parent_block_id,
                         current_anchor_height = %tenure.anchor_block_height,
@@ -1352,17 +1347,13 @@ where
 // error indicates we're trying to fetch a pre-Nakamoto block
 fn is_pre_nakamoto_block_error(
     error: &Error,
-    current_anchor_height: BitcoinBlockHeight,
-    nakamoto_start_height: BitcoinBlockHeight,
     network: NetworkKind,
 ) -> bool {
     match error {
         // If we get a 404, it's likely because the block ID refers to a pre-Nakamoto block
-        // But only if we're already close to or at the Nakamoto start height
-        // AND we're not in mainnet (since this is what we're addressing)
+        // But only if we're not on mainnet (since this is a testnet-specific issue)
         Error::StacksNodeResponse(req_error) => {
             req_error.status() == Some(reqwest::StatusCode::NOT_FOUND)
-                && current_anchor_height <= nakamoto_start_height + 1
                 && !network.is_mainnet()
         }
         // For other errors, we're not sure so we don't assume it's pre-Nakamoto
