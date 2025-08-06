@@ -42,7 +42,7 @@ use reqwest::header::CONTENT_TYPE;
 use serde::{Deserialize, Deserializer};
 use url::Url;
 
-use crate::config::Settings;
+use crate::config::{NetworkKind, Settings};
 use crate::error::Error;
 use crate::keys::PublicKey;
 use crate::metrics::Metrics;
@@ -1309,13 +1309,52 @@ where
             tracing::debug!("parent block known in the database");
             break;
         }
-        // There are more blocks to fetch, so let's get them.
-        let tenure_blocks = stacks.get_tenure(header.parent_block_id).await?;
-        headers.push(tenure_blocks.into());
+
+        // Try to fetch parent tenure. If this fails because the parent
+        // is a pre-Nakamoto block we should stop rather than error out.
+        match stacks.get_tenure(header.parent_block_id).await {
+            Ok(parent_tenure_blocks) => {
+                let parent_tenure: TenureBlockHeaders = parent_tenure_blocks.into();
+                headers.push(parent_tenure);
+            }
+            Err(error) => {
+                // Get network configuration to determine if we should treat 404 as pre-Nakamoto
+                let network = Settings::new_from_default_config()
+                    .map(|settings| settings.signer.network)
+                    .unwrap_or(NetworkKind::Regtest); // Default to Regtest if config fails
+
+                if is_pre_nakamoto_block_error(&error, network) {
+                    tracing::warn!(
+                        parent_block_id = %header.parent_block_id,
+                        current_anchor_height = %tenure.anchor_block_height,
+                        error = %error,
+                        "parent block appears to be pre-Nakamoto, stop backfill"
+                    );
+
+                    break;
+                } else {
+                    return Err(error);
+                }
+            }
+        }
     }
 
     headers.reverse();
     Ok(headers)
+}
+
+// Helper function for backfill testnet logic, checks if an
+// error indicates we're trying to fetch a pre-Nakamoto block
+fn is_pre_nakamoto_block_error(error: &Error, network: NetworkKind) -> bool {
+    match error {
+        // If we get a 404, it's likely because the block ID refers to a pre-Nakamoto block
+        // But only if we're not on mainnet (since this is a testnet-specific issue)
+        Error::StacksNodeResponse(req_error) => {
+            req_error.status() == Some(reqwest::StatusCode::NOT_FOUND) && !network.is_mainnet()
+        }
+        // For other errors, we're not sure so we don't assume it's pre-Nakamoto
+        _ => false,
+    }
 }
 
 /// A deserializer for Clarity's [`Value`] type that deserializes a hex-encoded
