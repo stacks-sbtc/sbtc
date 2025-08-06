@@ -1345,16 +1345,12 @@ where
 
 // Helper function for backfill testnet logic, checks if an
 // error indicates we're trying to fetch a pre-Nakamoto block
-fn is_pre_nakamoto_block_error(
-    error: &Error,
-    network: NetworkKind,
-) -> bool {
+fn is_pre_nakamoto_block_error(error: &Error, network: NetworkKind) -> bool {
     match error {
         // If we get a 404, it's likely because the block ID refers to a pre-Nakamoto block
         // But only if we're not on mainnet (since this is a testnet-specific issue)
         Error::StacksNodeResponse(req_error) => {
-            req_error.status() == Some(reqwest::StatusCode::NOT_FOUND)
-                && !network.is_mainnet()
+            req_error.status() == Some(reqwest::StatusCode::NOT_FOUND) && !network.is_mainnet()
         }
         // For other errors, we're not sure so we don't assume it's pre-Nakamoto
         _ => false,
