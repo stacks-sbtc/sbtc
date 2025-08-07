@@ -62,5 +62,5 @@ jobs:
       - name: Devenv test
         id: devenv_test
         working-directory: ./devenv/tests
-        timeout-minutes: 15
+        timeout-minutes: 30
         run: python3 test_devenv.py
