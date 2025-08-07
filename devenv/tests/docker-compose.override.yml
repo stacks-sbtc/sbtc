@@ -2,6 +2,9 @@ x-stacks-blockchain: &stacks-blockchain
   image: blockstack/stacks-core:latest
 
 services:
+  bitcoin:
+    image: bitcoin/bitcoin:latest
+
   stacks-node:
     <<: *stacks-blockchain
   stacks-signer-1:
