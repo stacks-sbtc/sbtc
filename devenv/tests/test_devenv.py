@@ -60,8 +60,8 @@ def get_sbtc_balance(address):
 
 
 cmd("make devenv-down")
-cmd("docker compose -f docker/docker-compose.yml -f devenv/tests/docker-compose.override.yml --profile default --profile bitcoin-mempool --profile observability --profile sbtc-signer up -d")
-time.sleep(5)
+cmd("docker compose --verbose -f docker/docker-compose.yml -f devenv/tests/docker-compose.override.yml --profile default --profile bitcoin-mempool --profile sbtc-signer up --detach --quiet-pull")
+print("devenv started")
 
 # Wait for nakamoto
 while True:
