@@ -1,0 +1,12 @@
+x-stacks-blockchain: &stacks-blockchain
+  image: blockstack/stacks-core:latest
+
+services:
+  stacks-node:
+    <<: *stacks-blockchain
+  stacks-signer-1:
+    <<: *stacks-blockchain
+  stacks-signer-2:
+    <<: *stacks-blockchain
+  stacks-signer-3:
+    <<: *stacks-blockchain

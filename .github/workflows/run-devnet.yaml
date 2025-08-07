@@ -1,0 +1,60 @@
+name: Run devenv test
+
+on:
+  push: # TODO: remove before merging
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * *'
+
+concurrency:
+  group: devenv-${{ github.head_ref || github.ref_name || github.run_id}}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: 22.1.0
+  PYTHON_VERSION: 3.13
+
+jobs:
+  test-devenv:
+    name: Run devenv test
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Repository
+        id: checkout_Repository
+        uses: stacks-sbtc/actions/checkout@181f8c67da2707c66b5e31f24e7418c47adefdd1
+
+      - name: Setup Rust
+        id: setup_rust
+        uses: stacks-sbtc/actions/setup-rust-toolchain@181f8c67da2707c66b5e31f24e7418c47adefdd1
+        with:
+          cache-key: "rust-tests"
+
+      - name: Setup Pnpm
+        id: setup_pnpm
+        uses: stacks-sbtc/actions/setup-pnpm@181f8c67da2707c66b5e31f24e7418c47adefdd1
+
+      - name: Setup Node
+        id: setup_node
+        uses: stacks-sbtc/actions/setup-node@181f8c67da2707c66b5e31f24e7418c47adefdd1
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "pnpm"
+
+      - name: Setup Python
+        id: setup_python
+        uses: stacks-sbtc/actions/setup-python@181f8c67da2707c66b5e31f24e7418c47adefdd1
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Setup Python dependencies
+        run: pip3 install requests
+
+      - name: Install node packages and python dependencies
+        id: install_dependencies
+        run: make install
+
+      - name: Devenv test
+        id: devenv_test
+        working-directory: ./devenv/test
+        timeout-minutes: 15
+        run: python3 test_devenv.py
