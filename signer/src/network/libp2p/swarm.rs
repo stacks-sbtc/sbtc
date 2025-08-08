@@ -504,7 +504,7 @@ mod tests {
         keys::PublicKey,
         storage::DbRead as _,
         testing::{context::*, get_rng, network::MultiaddrExt as _},
-     as _};
+    };
 
     use super::*;
 
