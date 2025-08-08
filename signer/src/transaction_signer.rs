@@ -46,6 +46,7 @@ use crate::storage::model;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::DkgSharesStatus;
 use crate::storage::model::SigHash;
+use crate::transaction_coordinator::should_coordinate_dkg;
 use crate::wsts_state_machine::FrostCoordinator;
 use crate::wsts_state_machine::SignerStateMachine;
 use crate::wsts_state_machine::StateMachineId;
@@ -1591,101 +1592,17 @@ pub async fn assert_allow_dkg_begin(
     context: &impl Context,
     bitcoin_chain_tip: &model::BitcoinBlockRef,
 ) -> Result<(), Error> {
-    let storage = context.get_storage();
-    let config = context.config();
-
-    let latest_dkg_shares = storage.get_latest_non_failed_dkg_shares().await?;
-    let Some(latest_dkg_shares) = latest_dkg_shares else {
-        tracing::info!("no non-failed DKG shares exist; proceeding with DKG");
-        return Ok(());
-    };
-
-    // If the latest shares are unverified, we want to prioritize verifying them
-    // instead of doing new DKG rounds. If we fail to do so they will eventually
-    // be marked as failed, and we will resume DKG-ing.
-    if latest_dkg_shares.dkg_shares_status == model::DkgSharesStatus::Unverified {
-        tracing::warn!("latest shares are unverified; aborting");
-        return Err(Error::DkgHasAlreadyRun);
-    }
-
-    // If the registry has signer set info, we may need to run DKG based on it
-    if let Some(registry_signer_info) = context.state().registry_signer_set_info() {
-        // If the registry differs from the config we may need to run DKG
-        if registry_signer_info.signatures_required != config.signer.bootstrap_signatures_required
-            || registry_signer_info.signer_set != config.signer.bootstrap_signing_set
-        {
-            // If we don't have new shares for the config already, we need DKG
-            if latest_dkg_shares.signature_share_threshold
-                != config.signer.bootstrap_signatures_required
-                || latest_dkg_shares.signer_set_public_keys() != config.signer.bootstrap_signing_set
-            {
-                tracing::info!(
-                    "signer set config differs from registry and latest DKG shares; proceeding with DKG"
-                );
-                return Ok(());
-            } else {
-                tracing::debug!(
-                    "signer set config differs from registry, but we already have verified shares for it; checking other conditions"
-                );
-            }
-        }
-    }
-
-    // Finally, we may need to run DKG because of config target rounds.
-
-    // Get the number of non-failed DKG shares that have been stored
-    let dkg_shares_entry_count = storage.get_encrypted_dkg_shares_count().await?;
-
-    // Get DKG configuration parameters
-    let dkg_min_bitcoin_block_height = config.signer.dkg_min_bitcoin_block_height;
-    let dkg_target_rounds = config.signer.dkg_target_rounds;
-
-    // Determine the action based on the DKG shares count and the rerun height (if configured)
-    match (
-        dkg_shares_entry_count,
-        dkg_target_rounds,
-        dkg_min_bitcoin_block_height,
-    ) {
-        (current, target, Some(dkg_min_height)) => {
-            if current >= target.get() {
-                tracing::warn!(
-                    ?dkg_min_bitcoin_block_height,
-                    %dkg_target_rounds,
-                    dkg_current_rounds = %dkg_shares_entry_count,
-                    "The target number of DKG shares has been reached; aborting"
-                );
-                return Err(Error::DkgHasAlreadyRun);
-            }
-            if bitcoin_chain_tip.block_height < dkg_min_height {
-                tracing::warn!(
-                    ?dkg_min_bitcoin_block_height,
-                    %dkg_target_rounds,
-                    dkg_current_rounds = %dkg_shares_entry_count,
-                    "bitcoin chain tip is below the minimum height for DKG rerun; aborting"
-                );
-                return Err(Error::DkgHasAlreadyRun);
-            }
-            tracing::info!(
-                ?dkg_min_bitcoin_block_height,
-                %dkg_target_rounds,
-                dkg_current_rounds = %dkg_shares_entry_count,
-                "DKG rerun height has been met and we are below the target number of rounds; proceeding with DKG"
-            );
-        }
-        // Note that we account for all (0, _, _) cases in the early return when
-        // we fetch the latest non failed DKG shares
-        (_, _, None) => {
-            tracing::warn!(
-                ?dkg_min_bitcoin_block_height,
-                %dkg_target_rounds,
-                dkg_current_rounds = %dkg_shares_entry_count,
-                "attempt to run multiple DKGs without a configured re-run height; aborting"
-            );
-            return Err(Error::DkgHasAlreadyRun);
-        }
-    }
-
-    Ok(())
+     // Use the unified DKG decision logic, but with more aggressive logging for signers
+     let should_allow = should_coordinate_dkg(context, bitcoin_chain_tip).await?;
+    
+     if !should_allow {
+         tracing::warn!(
+             "signer rejecting DKG begin message based on current state and configuration"
+         );
+         return Err(Error::DkgHasAlreadyRun);
+     }
+     
+     Ok(())
 }
 
 /// Relevant information for validating incoming messages
