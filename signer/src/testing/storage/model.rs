@@ -62,7 +62,7 @@ impl BitcoinInputsOutputs for TestBitcoinTxInfo {
 }
 
 impl TxDeconstructor for TestBitcoinTxInfo {
-    fn prevout(&self, index: usize) -> Option<PrevoutRef> {
+    fn prevout(&self, index: usize) -> Option<PrevoutRef<'_>> {
         let input = self.tx.input.get(index)?;
         let prevout = self.prevouts.get(index)?;
         Some(PrevoutRef {
