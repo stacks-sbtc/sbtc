@@ -335,11 +335,11 @@ impl DbWrite for SharedStore {
         let mut store = self.lock().await;
         store.version += 1;
 
-        if let Some((_, shares)) = store.encrypted_dkg_shares.get_mut(&aggregate_key.into()) {
-            if shares.dkg_shares_status == DkgSharesStatus::Unverified {
-                shares.dkg_shares_status = DkgSharesStatus::Failed;
-                return Ok(true);
-            }
+        if let Some((_, shares)) = store.encrypted_dkg_shares.get_mut(&aggregate_key.into())
+            && shares.dkg_shares_status == DkgSharesStatus::Unverified
+        {
+            shares.dkg_shares_status = DkgSharesStatus::Failed;
+            return Ok(true);
         }
         Ok(false)
     }
@@ -351,11 +351,11 @@ impl DbWrite for SharedStore {
         let mut store = self.lock().await;
         store.version += 1;
 
-        if let Some((_, shares)) = store.encrypted_dkg_shares.get_mut(&aggregate_key.into()) {
-            if shares.dkg_shares_status == DkgSharesStatus::Unverified {
-                shares.dkg_shares_status = DkgSharesStatus::Verified;
-                return Ok(true);
-            }
+        if let Some((_, shares)) = store.encrypted_dkg_shares.get_mut(&aggregate_key.into())
+            && shares.dkg_shares_status == DkgSharesStatus::Unverified
+        {
+            shares.dkg_shares_status = DkgSharesStatus::Verified;
+            return Ok(true);
         }
         Ok(false)
     }

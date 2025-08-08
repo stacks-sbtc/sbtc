@@ -13,7 +13,7 @@ pub trait MultiaddrExt {
     fn is_memory(&self) -> bool;
     /// Returns the transport protocol used by the multiaddress, or `None` if no
     /// supported transport protocol was found.
-    fn get_transport_protocol(&self) -> Option<Protocol>;
+    fn get_transport_protocol(&self) -> Option<Protocol<'_>>;
     /// If the P2P protocol is present, return a new [`Multiaddr`] with the P2P
     /// protocol stripped. Otherwise, return a clone of the original
     /// [`Multiaddr`] (which is shallow as it uses a [`std::sync::Arc<Vec<u8>>`]
@@ -60,7 +60,7 @@ impl MultiaddrExt for Multiaddr {
         matches!(parts.next(), Some(Protocol::Memory(_)))
     }
 
-    fn get_transport_protocol(&self) -> Option<Protocol> {
+    fn get_transport_protocol(&self) -> Option<Protocol<'_>> {
         let mut parts = self.iter();
         parts.find(|part| {
             matches!(

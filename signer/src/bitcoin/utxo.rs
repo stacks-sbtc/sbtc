@@ -313,7 +313,7 @@ impl SbtcRequests {
     ///
     /// This function can fail if the output amounts are greater than the
     /// input amounts.
-    pub fn construct_transactions(&self) -> Result<Vec<UnsignedTransaction>, Error> {
+    pub fn construct_transactions(&self) -> Result<Vec<UnsignedTransaction<'_>>, Error> {
         if self.deposits.is_empty() && self.withdrawals.is_empty() {
             tracing::info!("No deposits or withdrawals so no BTC transaction");
             return Ok(Vec::new());
@@ -1034,7 +1034,7 @@ impl<'a> UnsignedTransaction<'a> {
     ///
     /// Other noteworthy assumptions is that the signers' UTXO is always a
     /// key-spend path only taproot UTXO.
-    pub fn construct_digests(&self) -> Result<SignatureHashes, Error> {
+    pub fn construct_digests(&self) -> Result<SignatureHashes<'_>, Error> {
         let deposit_requests = self.requests.iter().filter_map(RequestRef::as_deposit);
         let deposit_utxos = deposit_requests.clone().map(DepositRequest::as_tx_out);
         // All the transaction's inputs are used to construct the sighash
@@ -1405,7 +1405,7 @@ pub trait TxDeconstructor: BitcoinInputsOutputs {
     /// This function must return `Some(_)` for each `index` where
     /// `self.inputs().get(index)` returns `Some(_)`, and must be `None`
     /// otherwise.
-    fn prevout(&self, index: usize) -> Option<PrevoutRef>;
+    fn prevout(&self, index: usize) -> Option<PrevoutRef<'_>>;
 
     /// Return all inputs in this transaction if it is an sBTC transaction.
     ///
@@ -1611,7 +1611,7 @@ pub trait TxDeconstructor: BitcoinInputsOutputs {
 }
 
 impl TxDeconstructor for BitcoinTxInfo {
-    fn prevout(&self, index: usize) -> Option<PrevoutRef> {
+    fn prevout(&self, index: usize) -> Option<PrevoutRef<'_>> {
         let vin = self.vin.get(index)?;
         let prevout = vin.prevout.as_ref()?;
         Some(PrevoutRef {

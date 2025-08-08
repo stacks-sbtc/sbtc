@@ -86,7 +86,7 @@ pub struct NewBlockEvent {
 /// This matches the json value that is defined in stacks-core[^1]. It
 /// contains the raw transaction and the result of the transaction.
 ///
-/// <https://github.com/stacks-network/stacks-core/blob/09c4b066e25104be8b066e8f7530ff0c6df4ccd5/testnet/stacks-node/src/event_dispatcher.rs#L499-L511>
+/// [^1]: <!-- https://github.com/stacks-network/stacks-core/blob/09c4b066e25104be8b066e8f7530ff0c6df4ccd5/testnet/stacks-node/src/event_dispatcher.rs#L499-L511 -->
 #[derive(Debug, Deserialize)]
 pub struct TransactionReceipt {
     /// The id of this transaction .

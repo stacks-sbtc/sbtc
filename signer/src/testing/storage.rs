@@ -166,10 +166,10 @@ pub async fn wait_for_latest_dkg_to_become_verified(
 
     let polling_fut = async {
         loop {
-            if let Some(shares) = db.get_latest_encrypted_dkg_shares().await? {
-                if shares.dkg_shares_status == DkgSharesStatus::Verified {
-                    return Ok(shares); // Successfully found verified shares
-                }
+            if let Some(shares) = db.get_latest_encrypted_dkg_shares().await?
+                && shares.dkg_shares_status == DkgSharesStatus::Verified
+            {
+                return Ok(shares); // Successfully found verified shares
             }
             poll_interval.sleep().await;
         }
@@ -197,10 +197,10 @@ pub async fn wait_for_key_rotation_event(
 
     let polling_fut = async {
         loop {
-            if let Some(event) = db.get_last_key_rotation(chain_tip).await? {
-                if event.aggregate_key == *aggregate_key {
-                    return Ok(event); // Successfully found the key rotation event
-                }
+            if let Some(event) = db.get_last_key_rotation(chain_tip).await?
+                && event.aggregate_key == *aggregate_key
+            {
+                return Ok(event); // Successfully found the key rotation event
             }
             poll_interval.sleep().await;
         }

@@ -415,10 +415,10 @@ impl NetworkBehaviour for Behavior {
         }
 
         // If we've attempted to bootstrap recently, we wait until the interval has passed.
-        if let Some(last_bootstrap) = self.last_attempted_at {
-            if last_bootstrap.elapsed() < self.config.bootstrap_interval {
-                return self.next_pending_event();
-            }
+        if let Some(last_bootstrap) = self.last_attempted_at
+            && last_bootstrap.elapsed() < self.config.bootstrap_interval
+        {
+            return self.next_pending_event();
         }
 
         // If this is the first attempt, we wait for the initial delay.

@@ -1,5 +1,7 @@
 //! Integration tests for bitcoin-forking behaviours
 
+use std::slice;
+
 use bitcoin::Sequence;
 use bitcoin::Transaction;
 use bitcoin::TxIn;
@@ -73,7 +75,7 @@ async fn getrawtransaction_simple_fork() {
             regtest::p2wpkh_sign_transaction(&mut tx, input_index, utxo, keypair)
         }
         AddressType::P2tr => {
-            regtest::p2tr_sign_transaction(&mut tx, input_index, &[utxo.clone()], keypair)
+            regtest::p2tr_sign_transaction(&mut tx, input_index, slice::from_ref(utxo), keypair)
         }
         _ => unimplemented!(),
     };
@@ -142,7 +144,7 @@ async fn getrawtransaction_simple_fork() {
             regtest::p2wpkh_sign_transaction(&mut tx, input_index, utxo, keypair)
         }
         AddressType::P2tr => {
-            regtest::p2tr_sign_transaction(&mut tx, input_index, &[utxo.clone()], keypair)
+            regtest::p2tr_sign_transaction(&mut tx, input_index, slice::from_ref(utxo), keypair)
         }
         _ => unimplemented!(),
     };
