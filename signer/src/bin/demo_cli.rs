@@ -1,7 +1,9 @@
-use std::str::FromStr;
+//! CLI tool providing demo functionality for the sBTC signers.
+
+use std::str::FromStr as _;
 
 use bitcoin::consensus::encode::serialize_hex;
-use bitcoin::hex::DisplayHex;
+use bitcoin::hex::DisplayHex as _;
 use bitcoin::{Address, XOnlyPublicKey};
 use bitcoin::{
     Amount, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, absolute, transaction::Version,
@@ -34,9 +36,9 @@ use emily_client::{
 use sbtc::deposits::{DepositScriptInputs, ReclaimScriptInputs};
 use signer::config::Settings;
 use signer::context::Context as SignerCtx;
-use signer::keys::{PrivateKey, PublicKey, SignerScriptPubKey};
+use signer::keys::{PrivateKey, PublicKey, SignerScriptPubKey as _};
 use signer::signature::{RecoverableEcdsaSignature as _, sign_stacks_tx};
-use signer::stacks::api::{StacksClient, StacksInteract};
+use signer::stacks::api::{StacksClient, StacksInteract as _};
 use signer::stacks::contracts::{AsContractCall, AsTxPayload as _, ReqContext};
 use stacks_common::address::{
     AddressHashMode, C32_ADDRESS_VERSION_MAINNET_SINGLESIG, C32_ADDRESS_VERSION_TESTNET_SINGLESIG,

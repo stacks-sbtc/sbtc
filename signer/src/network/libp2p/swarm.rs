@@ -1,4 +1,4 @@
-use std::hash::{DefaultHasher, Hash, Hasher};
+use std::hash::{DefaultHasher, Hash as _, Hasher as _};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,7 +13,7 @@ use libp2p::swarm::NetworkBehaviour;
 use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::swarm::dial_opts::DialOpts;
 use libp2p::{
-    Multiaddr, PeerId, Swarm, Transport, autonat, connection_limits, gossipsub, identify, kad,
+    Multiaddr, PeerId, Swarm, Transport as _, autonat, connection_limits, gossipsub, identify, kad,
     mdns, noise, ping, quic, tcp, yamux,
 };
 use rand::SeedableRng as _;

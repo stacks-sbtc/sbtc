@@ -323,11 +323,11 @@ mod tests {
     use std::marker::PhantomData;
 
     use super::*;
-    use crate::codec::{Decode, Encode};
-    use crate::ecdsa::{SignEcdsa, Signed};
+    use crate::codec::{Decode as _, Encode as _};
+    use crate::ecdsa::{SignEcdsa as _, Signed};
     use crate::keys::PrivateKey;
 
-    use rand::SeedableRng;
+    use rand::SeedableRng as _;
     use test_case::test_case;
 
     #[test_case(PhantomData::<SignerDepositDecision> ; "SignerDepositDecision")]

@@ -14,7 +14,7 @@ use bitcoin::script::PushBytesBuf;
 use bitcoin::taproot::LeafVersion;
 use bitcoin::taproot::NodeInfo;
 use bitcoin::taproot::TaprootSpendInfo;
-use clarity::codec::StacksMessageCodec;
+use clarity::codec::StacksMessageCodec as _;
 use clarity::types::chainstate::StacksAddress;
 use clarity::vm::types::PrincipalData;
 use clarity::vm::types::QualifiedContractIdentifier;
@@ -573,7 +573,7 @@ mod tests {
     use bitcoin::hashes::Hash as _;
     use rand::rngs::OsRng;
     use secp256k1::SecretKey;
-    use stacks_common::codec::StacksMessageCodec;
+    use stacks_common::codec::StacksMessageCodec as _;
     use stacks_common::types::chainstate::StacksAddress;
 
     use super::*;

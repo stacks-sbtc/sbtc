@@ -381,8 +381,8 @@ mod test {
     use super::*;
     use bitcoin::{
         BlockHash, OutPoint, ScriptBuf, Txid,
-        hashes::Hash,
-        hex::DisplayHex,
+        hashes::Hash as _,
+        hex::DisplayHex as _,
         key::rand::{random, rngs::OsRng},
         secp256k1,
     };

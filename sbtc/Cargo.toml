@@ -28,9 +28,13 @@ hex = { workspace = true, optional = true }
 stackslib = { workspace = true, optional = true }
 
 [dev-dependencies]
+assert_matches.workspace = true
 bitcoincore-rpc.workspace = true
 bitcoincore-rpc-json.workspace = true
-test-case.workspace = true
-proptest.workspace = true
-assert_matches.workspace = true
 more-asserts.workspace = true
+proptest.workspace = true
+test-case.workspace = true
+
+# Inherit lints from the workspace
+[lints]
+workspace = true

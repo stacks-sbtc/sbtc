@@ -434,9 +434,9 @@ where
 mod tests {
     use blockstack_lib::chainstate::stacks::TransactionPayload;
     use blockstack_lib::clarity::vm::Value as ClarityValue;
-    use fake::Fake;
+    use fake::Fake as _;
     use rand::rngs::OsRng;
-    use rand::seq::SliceRandom;
+    use rand::seq::SliceRandom as _;
     use secp256k1::Keypair;
     use secp256k1::SECP256K1;
 
@@ -449,11 +449,11 @@ mod tests {
     use crate::stacks::contracts::ReqContext;
     use crate::storage::model::KeyRotationEvent;
     use crate::storage::model::StacksPrincipal;
-    use crate::testing::context::ConfigureMockedClients;
+    use crate::testing::context::ConfigureMockedClients as _;
     use crate::testing::context::TestContext;
     use crate::testing::context::*;
     use crate::testing::get_rng;
-    use crate::testing::storage::DbReadTestExt;
+    use crate::testing::storage::DbReadTestExt as _;
     use crate::testing::storage::model::TestData;
 
     use super::*;

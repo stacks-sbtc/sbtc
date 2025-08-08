@@ -2,14 +2,14 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::io::Read as _;
-use std::ops::Deref;
+use std::ops::Deref as _;
 use std::time::Duration;
 
 use bitcoin::hashes::Hash as _;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
 use blockstack_lib::clarity::vm::Value as ClarityValue;
 use blockstack_lib::clarity::vm::types::PrincipalData;
-use blockstack_lib::codec::StacksMessageCodec;
+use blockstack_lib::codec::StacksMessageCodec as _;
 use blockstack_lib::types::chainstate::StacksAddress;
 use fake::Faker;
 use futures::StreamExt as _;
@@ -28,8 +28,8 @@ use signer::storage::model::KeyRotationEvent;
 use signer::storage::model::SweptWithdrawalRequest;
 use signer::storage::model::WithdrawalRequest;
 use signer::testing::IterTestExt as _;
-use signer::testing::storage::DbReadTestExt;
-use strum::IntoEnumIterator;
+use signer::testing::storage::DbReadTestExt as _;
+use strum::IntoEnumIterator as _;
 use time::OffsetDateTime;
 
 use signer::bitcoin::MockBitcoinInteract;
@@ -49,8 +49,8 @@ use signer::stacks::contracts::RejectWithdrawalV1;
 use signer::stacks::contracts::ReqContext;
 use signer::stacks::contracts::RotateKeysV1;
 use signer::storage;
-use signer::storage::DbRead;
-use signer::storage::DbWrite;
+use signer::storage::DbRead as _;
+use signer::storage::DbWrite as _;
 use signer::storage::model;
 use signer::storage::model::BitcoinBlock;
 use signer::storage::model::BitcoinBlockHash;
@@ -73,7 +73,7 @@ use signer::testing::dummy::SignerSetConfig;
 use signer::testing::storage::model::TestData;
 use signer::testing::wallet::ContractCallWrapper;
 
-use fake::Fake;
+use fake::Fake as _;
 use signer::DEPOSIT_LOCKTIME_BLOCK_BUFFER;
 use signer::testing::context::*;
 use signer::testing::get_rng;
@@ -7435,7 +7435,7 @@ mod sqlx_transactions {
     use super::*;
 
     use signer::{
-        storage::{Transactable, TransactionHandle},
+        storage::{Transactable as _, TransactionHandle as _},
         testing::{
             blocks::{BitcoinChain, StacksChain},
             storage,

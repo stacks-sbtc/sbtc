@@ -1,3 +1,5 @@
+//! The main entrypoint for the sBTC signer binary.
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -25,7 +27,7 @@ use signer::network::P2PNetwork;
 use signer::network::libp2p::SignerSwarmBuilder;
 use signer::request_decider::RequestDeciderEventLoop;
 use signer::stacks::api::StacksClient;
-use signer::storage::DbRead;
+use signer::storage::DbRead as _;
 use signer::storage::postgres::PgStore;
 use signer::transaction_coordinator;
 use signer::transaction_signer;
@@ -33,7 +35,7 @@ use signer::util::ApiFallbackClient;
 use time::OffsetDateTime;
 use tokio::signal;
 use tower_http::trace::TraceLayer;
-use tracing::Instrument;
+use tracing::Instrument as _;
 use tracing::Span;
 
 /// This is how many seconds the P2P swarm will wait before attempting to

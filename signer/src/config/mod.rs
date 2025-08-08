@@ -614,7 +614,7 @@ impl Validatable for StacksConfig {
 #[cfg(test)]
 mod tests {
     use std::net::SocketAddr;
-    use std::str::FromStr;
+    use std::str::FromStr as _;
     use std::time::Duration;
 
     use assert_matches::assert_matches;
@@ -627,7 +627,7 @@ mod tests {
     use crate::testing::get_rng;
     use crate::testing::set_var;
 
-    use fake::Fake;
+    use fake::Fake as _;
     use fake::Faker;
 
     use super::*;

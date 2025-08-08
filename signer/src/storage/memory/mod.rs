@@ -1,5 +1,7 @@
 //! In-memory storage module for testing.
 
+#![allow(clippy::unwrap_in_result, clippy::unwrap_used, clippy::expect_used)]
+
 mod read;
 mod store;
 mod write;

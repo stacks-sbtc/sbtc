@@ -1,5 +1,5 @@
 use bitcoin::BlockHash;
-use futures::StreamExt;
+use futures::StreamExt as _;
 use sbtc::testing::regtest;
 use signer::bitcoin::BitcoinBlockHashStreamProvider as _;
 use signer::bitcoin::poller::BitcoinChainTipPoller;

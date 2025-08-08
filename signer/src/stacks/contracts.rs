@@ -18,7 +18,7 @@
 
 use std::collections::BTreeSet;
 use std::future::Future;
-use std::ops::Deref;
+use std::ops::Deref as _;
 use std::sync::OnceLock;
 
 use bitcoin::Amount;
@@ -45,7 +45,7 @@ use clarity::vm::ClarityVersion;
 use crate::DEPOSIT_DUST_LIMIT;
 use crate::WITHDRAWAL_BLOCKS_EXPIRY;
 use crate::WITHDRAWAL_MIN_CONFIRMATIONS;
-use crate::bitcoin::BitcoinInteract;
+use crate::bitcoin::BitcoinInteract as _;
 use crate::bitcoin::validation::WithdrawalRequestStatus;
 use crate::context::Context;
 use crate::error::Error;

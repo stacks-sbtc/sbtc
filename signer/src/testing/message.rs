@@ -1,7 +1,7 @@
 //! Test utilities for signer message
 
-use fake::Fake;
-use rand::seq::SliceRandom;
+use fake::Fake as _;
+use rand::seq::SliceRandom as _;
 use stacks_common::types::chainstate::StacksAddress;
 
 use crate::message;

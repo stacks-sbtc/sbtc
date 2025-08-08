@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use clarity::util::secp256k1::Secp256k1PublicKey;
 use clarity::vm::types::PrincipalData;
-use fake::Fake;
+use fake::Fake as _;
 use stacks_common::address::AddressHashMode;
 use stacks_common::address::C32_ADDRESS_VERSION_TESTNET_MULTISIG;
 use stacks_common::types::chainstate::StacksAddress;

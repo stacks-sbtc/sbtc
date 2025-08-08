@@ -5,12 +5,12 @@ use sbtc::testing::regtest;
 use signer::error::Error;
 use signer::keys::PublicKey;
 use signer::keys::SignerScriptPubKey as _;
-use signer::stacks::contracts::AsContractCall;
+use signer::stacks::contracts::AsContractCall as _;
 use signer::stacks::contracts::ReqContext;
 use signer::stacks::contracts::RotateKeysErrorMsg;
 use signer::stacks::contracts::RotateKeysV1;
 use signer::stacks::wallet::SignerWallet;
-use signer::storage::DbRead;
+use signer::storage::DbRead as _;
 use signer::storage::DbWrite as _;
 use signer::storage::model::BitcoinBlock;
 use signer::storage::model::DkgSharesStatus;
@@ -24,7 +24,7 @@ use signer::testing;
 use signer::testing::context::*;
 use signer::testing::get_rng;
 
-use fake::Fake;
+use fake::Fake as _;
 use signer::testing::storage::model::TestData;
 
 use crate::setup::set_verification_status;

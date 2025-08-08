@@ -12,11 +12,11 @@ use signer::keys::PrivateKey;
 use signer::keys::PublicKey;
 use signer::network::P2PNetwork;
 use signer::network::libp2p::SignerSwarmBuilder;
-use signer::testing::IterTestExt;
+use signer::testing::IterTestExt as _;
 use signer::testing::context::TestContext;
 use signer::testing::context::*;
 use test_case::test_case;
-use tokio_stream::StreamExt;
+use tokio_stream::StreamExt as _;
 
 #[test_case("/ip4/127.0.0.1/tcp/0", "/ip4/127.0.0.1/tcp/0"; "tcp")]
 #[test_case("/ip4/127.0.0.1/udp/0/quic-v1", "/ip4/127.0.0.1/udp/0/quic-v1"; "quic-v1")]

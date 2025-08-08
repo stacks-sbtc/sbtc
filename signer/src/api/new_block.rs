@@ -15,7 +15,7 @@ use crate::context::Context;
 use crate::error::Error;
 use crate::metrics::Metrics;
 use crate::metrics::STACKS_BLOCKCHAIN;
-use crate::storage::DbWrite;
+use crate::storage::DbWrite as _;
 use crate::storage::model::CompletedDepositEvent;
 use crate::storage::model::KeyRotationEvent;
 use crate::storage::model::StacksBlock;
@@ -303,13 +303,13 @@ mod tests {
     use bitcoin::OutPoint;
     use bitvec::array::BitArray;
     use clarity::vm::types::PrincipalData;
-    use fake::Fake;
+    use fake::Fake as _;
     use rand::rngs::OsRng;
     use sbtc::events::KeyRotationEvent;
     use secp256k1::SECP256K1;
     use stacks_common::types::chainstate::StacksBlockId;
     use test_case::test_case;
-    use tower::ServiceExt;
+    use tower::ServiceExt as _;
 
     use crate::api::get_router;
     use crate::storage::memory::Store;

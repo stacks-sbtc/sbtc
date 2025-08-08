@@ -4,7 +4,7 @@ use clap::Args;
 use clap::Parser;
 use emily_handler::context::EmilyContext;
 use tracing::info;
-use warp::Filter;
+use warp::Filter as _;
 
 use emily_handler::api;
 use emily_handler::logging;

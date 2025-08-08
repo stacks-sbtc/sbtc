@@ -4,8 +4,8 @@
 
 use crate::idpack::{
     Segments,
-    codec::{Decodable, Encodable},
-    segmenters::{BitmapSegmenter, Segmenter},
+    codec::{Decodable as _, Encodable as _},
+    segmenters::{BitmapSegmenter, Segmenter as _},
 };
 use proptest::prelude::*;
 use std::collections::BTreeSet;

@@ -1,7 +1,7 @@
 use crate::error::Error;
 use crate::storage::memory::MemoryStoreError;
 use crate::storage::memory::store::Store;
-use crate::storage::{DbRead, DbWrite, Transactable, TransactionHandle};
+use crate::storage::{DbRead as _, DbWrite as _, Transactable as _, TransactionHandle as _};
 use crate::testing::blocks::{BitcoinChain, StacksChain};
 
 use assert_matches::assert_matches;

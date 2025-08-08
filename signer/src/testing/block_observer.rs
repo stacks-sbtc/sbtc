@@ -1,12 +1,12 @@
 //! Test utilities for the block observer
 
 use std::collections::HashMap;
-use std::ops::Deref;
+use std::ops::Deref as _;
 
 use bitcoin::Amount;
 use bitcoin::BlockHash;
 use bitcoin::Txid;
-use bitcoin::hashes::Hash;
+use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc_json::GetTxOutResult;
 use blockstack_lib::chainstate::burn::ConsensusHash;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
@@ -24,7 +24,7 @@ use clarity::types::chainstate::BurnchainHeaderHash;
 use clarity::types::chainstate::SortitionId;
 use clarity::vm::costs::ExecutionCost;
 use emily_client::models::DepositStatus;
-use rand::seq::IteratorRandom;
+use rand::seq::IteratorRandom as _;
 use sbtc::deposits::CreateDepositRequest;
 
 use crate::bitcoin::BitcoinBlockHashStreamProvider;

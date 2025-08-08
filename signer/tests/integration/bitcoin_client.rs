@@ -5,7 +5,7 @@ use bitcoin::{AddressType, Amount, BlockHash, ScriptBuf, Sequence, Witness};
 use bitcoincore_rpc::RpcApi as _;
 use sbtc::testing::regtest::{self, AsUtxo as _, Recipient, p2wpkh_sign_transaction};
 use signer::bitcoin::rpc::BitcoinCoreClient;
-use signer::bitcoin::{BitcoinInteract, TransactionLookupHint};
+use signer::bitcoin::{BitcoinInteract as _, TransactionLookupHint};
 use signer::util::ApiFallbackClient;
 use url::Url;
 

@@ -1,3 +1,5 @@
+//! Integration tests for the Emily handler.
+
 /// Chainstate test module.
 pub mod chainstate;
 /// Common test utilities.

@@ -15,7 +15,7 @@ use crate::keys::PublicKey;
 use crate::network;
 use crate::network::MessageTransfer;
 use crate::storage;
-use crate::storage::DbRead;
+use crate::storage::DbRead as _;
 use crate::storage::DbWrite;
 use crate::storage::model;
 use crate::testing;

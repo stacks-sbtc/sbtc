@@ -26,10 +26,10 @@
 //! 2. Bitmap length (LEB128-encoded)
 //! 3. Bitmap bytes (1 bit per value)
 
-use std::io::{Cursor, Read};
+use std::io::{Cursor, Read as _};
 
 use crate::idpack::{Segment, Segments};
-use crate::leb128::ReadLeb128;
+use crate::leb128::ReadLeb128 as _;
 
 use super::{Decodable, DecodeError};
 
@@ -199,7 +199,7 @@ mod tests {
     use assert_matches::assert_matches;
     use test_case::test_case;
 
-    use crate::idpack::{Decodable, DecodeError, Segments};
+    use crate::idpack::{Decodable as _, DecodeError, Segments};
 
     /// Test specific error cases with crafted invalid inputs
     #[test_case(&[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]; "overflow in LEB128")]

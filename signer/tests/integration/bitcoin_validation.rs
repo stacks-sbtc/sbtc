@@ -1,9 +1,9 @@
 use std::collections::HashSet;
-use std::ops::Deref;
+use std::ops::Deref as _;
 
 use bitcoin::hashes::Hash as _;
 use rand::rngs::OsRng;
-use rand::seq::SliceRandom;
+use rand::seq::SliceRandom as _;
 use test_case::test_case;
 
 use sbtc::testing::regtest;

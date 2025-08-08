@@ -3,8 +3,8 @@
 
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::time::UtcTime;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::layer::SubscriberExt as _;
+use tracing_subscriber::util::SubscriberInitExt as _;
 
 /// Sets up logging based on the provided format preference
 ///

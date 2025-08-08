@@ -3,7 +3,7 @@
 use std::sync::atomic::AtomicU8;
 use std::time::Duration;
 
-use futures::StreamExt;
+use futures::StreamExt as _;
 use tokio::sync::broadcast::Sender;
 use tokio_stream::wrappers::BroadcastStream;
 

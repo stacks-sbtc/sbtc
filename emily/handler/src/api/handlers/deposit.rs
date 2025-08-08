@@ -2,7 +2,7 @@
 use bitcoin::ScriptBuf;
 use bitcoin::opcodes::all::{self as opcodes};
 use sbtc::deposits::ReclaimScriptInputs;
-use sha2::{Digest, Sha256};
+use sha2::{Digest as _, Sha256};
 use stacks_common::codec::StacksMessageCodec as _;
 use tracing::instrument;
 use warp::http::StatusCode;
