@@ -592,7 +592,7 @@ async fn should_return_the_same_pending_accepted_deposit_requests_as_in_memory_s
     test_data.write_to(&pg_store).await;
 
     let chain_tip = in_memory_store
-        .get_bitcoin_canonical_chain_tip()
+        .get_bitcoin_canonical_chain_tip_ref()
         .await
         .expect("failed to get canonical chain tip")
         .expect("no chain tip");
@@ -603,7 +603,7 @@ async fn should_return_the_same_pending_accepted_deposit_requests_as_in_memory_s
             .await
             .expect("failed to get canonical chain tip")
             .expect("no chain tip"),
-        chain_tip
+        chain_tip.block_hash
     );
 
     let mut pending_accepted_deposit_requests = in_memory_store
@@ -643,7 +643,11 @@ async fn should_not_return_swept_deposits_as_pending_accepted() {
     let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
     let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
 
-    let chain_tip = setup.sweep_block_hash.into();
+    let chain_tip = model::BitcoinBlockRef {
+        block_hash: setup.sweep_block_hash.into(),
+        block_height: setup.sweep_block_height,
+    };
+
     let context_window = 20;
     let threshold = 4;
 
@@ -682,11 +686,17 @@ async fn should_not_return_swept_deposits_as_pending_accepted() {
 
     assert!(requests.is_empty());
 
+    let deposit_block_ref = db
+        .get_bitcoin_block(&setup.deposit_block_hash.into())
+        .await
+        .unwrap()
+        .unwrap()
+        .into();
     // Ensure that we only consider sweep tx in the canonical chain
     let requests = db
         .get_pending_accepted_deposit_requests(
             // this excludes the sweep tx block
-            &setup.deposit_block_hash.into(),
+            &deposit_block_ref,
             context_window,
             threshold,
         )
@@ -738,13 +748,13 @@ async fn should_return_only_accepted_pending_deposits_that_are_within_reclaim_bo
     test_data.write_to(&in_memory_store).await;
 
     let chain_tip = in_memory_store
-        .get_bitcoin_canonical_chain_tip()
+        .get_bitcoin_canonical_chain_tip_ref()
         .await
         .expect("failed to get canonical chain tip")
         .expect("no chain tip");
 
     assert_eq!(
-        chain_tip,
+        chain_tip.block_hash,
         pg_store
             .get_bitcoin_canonical_chain_tip()
             .await
@@ -778,7 +788,7 @@ async fn should_return_only_accepted_pending_deposits_that_are_within_reclaim_bo
     // Now get the height of the Bitcoin chain tip, we're going to use this to put some of the
     // accepted deposit requests outside of the reclaim bounds.
     let bitcoin_chain_tip_height = pg_store
-        .get_bitcoin_block(&chain_tip)
+        .get_bitcoin_block(&chain_tip.block_hash)
         .await
         .expect("failed to get bitcoin block")
         .expect("no chain tip block")
@@ -928,12 +938,7 @@ async fn should_return_the_same_last_key_rotation_as_in_memory_store() {
         testing::wsts::SignerSet::new(&signer_info, threshold, || dummy_wsts_network.connect());
     let dkg_txid = testing::dummy::txid(&fake::Faker, &mut rng);
     let (_, all_shares) = testing_signer_set
-        .run_dkg(
-            chain_tip,
-            dkg_txid.into(),
-            &mut rng,
-            model::DkgSharesStatus::Verified,
-        )
+        .run_dkg(chain_tip, dkg_txid.into(), model::DkgSharesStatus::Verified)
         .await;
 
     let shares = all_shares.first().unwrap();
@@ -2055,6 +2060,74 @@ async fn get_last_verified_dkg_shares_does_whats_advertised() {
     // get the most recent ones.
     let some_shares = db.get_latest_verified_dkg_shares().await.unwrap();
     assert_eq!(some_shares.as_ref(), Some(&shares2));
+
+    signer::testing::storage::drop_db(db).await;
+}
+
+/// The [`DbRead::get_latest_non_failed_dkg_shares`] function is supposed to
+/// fetch the last encrypted DKG shares with status not 'failed' from the
+/// database.
+#[tokio::test]
+async fn get_latest_non_failed_dkg_shares_does_whats_advertised() {
+    let db = testing::storage::new_test_database().await;
+
+    let mut rng = get_rng();
+
+    // We have an empty database, so we don't have any DKG shares there.
+    let no_shares = db.get_latest_encrypted_dkg_shares().await.unwrap();
+    assert!(no_shares.is_none());
+
+    let no_shares = db.get_latest_non_failed_dkg_shares().await.unwrap();
+    assert!(no_shares.is_none());
+
+    // Add some failed shares
+    let mut shares: model::EncryptedDkgShares = fake::Faker.fake_with_rng(&mut rng);
+    shares.dkg_shares_status = model::DkgSharesStatus::Failed;
+    db.write_encrypted_dkg_shares(&shares).await.unwrap();
+
+    let stored_shares = db.get_latest_encrypted_dkg_shares().await.unwrap();
+    assert_eq!(stored_shares.as_ref(), Some(&shares));
+
+    let no_shares = db.get_latest_non_failed_dkg_shares().await.unwrap();
+    assert!(no_shares.is_none());
+
+    // Now some unverified shares
+    let mut shares: model::EncryptedDkgShares = fake::Faker.fake_with_rng(&mut rng);
+    shares.dkg_shares_status = model::DkgSharesStatus::Unverified;
+    db.write_encrypted_dkg_shares(&shares).await.unwrap();
+
+    let stored_shares = db.get_latest_encrypted_dkg_shares().await.unwrap();
+    assert_eq!(stored_shares.as_ref(), Some(&shares));
+
+    let unverified_shares = db.get_latest_non_failed_dkg_shares().await.unwrap();
+    assert_eq!(unverified_shares.as_ref(), Some(&shares));
+
+    // And now some verified shares
+    let mut shares: model::EncryptedDkgShares = fake::Faker.fake_with_rng(&mut rng);
+    shares.dkg_shares_status = model::DkgSharesStatus::Verified;
+    db.write_encrypted_dkg_shares(&shares).await.unwrap();
+
+    let stored_shares = db.get_latest_encrypted_dkg_shares().await.unwrap();
+    assert_eq!(stored_shares.as_ref(), Some(&shares));
+
+    let verified_shares = db.get_latest_non_failed_dkg_shares().await.unwrap();
+    assert_eq!(verified_shares.as_ref(), Some(&shares));
+
+    // Now we add some failed again, we should still get the previous one
+    let mut shares_tmp: model::EncryptedDkgShares = fake::Faker.fake_with_rng(&mut rng);
+    shares_tmp.dkg_shares_status = model::DkgSharesStatus::Failed;
+    db.write_encrypted_dkg_shares(&shares_tmp).await.unwrap();
+
+    let some_shares = db.get_latest_non_failed_dkg_shares().await.unwrap();
+    assert_eq!(some_shares.as_ref(), Some(&shares));
+
+    // And finally some unverified again
+    let mut shares: model::EncryptedDkgShares = fake::Faker.fake_with_rng(&mut rng);
+    shares.dkg_shares_status = model::DkgSharesStatus::Unverified;
+    db.write_encrypted_dkg_shares(&shares).await.unwrap();
+
+    let some_shares = db.get_latest_non_failed_dkg_shares().await.unwrap();
+    assert_eq!(some_shares.as_ref(), Some(&shares));
 
     signer::testing::storage::drop_db(db).await;
 }
@@ -6131,6 +6204,51 @@ async fn writing_key_rotation_transactions() {
     assert_ne!(stored_event, key_rotation3);
 
     testing::storage::drop_db(db).await;
+}
+
+mod p2p_peers {
+    use libp2p::{Multiaddr, PeerId};
+    use signer::testing::network::MultiaddrExt as _;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn write_read_update_p2p_peer() {
+        let db = testing::storage::new_test_database().await;
+        let rng = &mut get_rng();
+
+        let pub_key: PublicKey = Faker.fake_with_rng(rng);
+        let peer_id: PeerId = pub_key.into();
+        let multiaddr = Multiaddr::random_memory(rng);
+        let utc_now = time::OffsetDateTime::now_utc();
+
+        db.update_peer_connection(&pub_key, &peer_id, multiaddr.clone())
+            .await
+            .expect("Failed to insert peer connection");
+
+        let peers = db.get_p2p_peers().await.unwrap();
+        assert_eq!(peers.len(), 1);
+        assert_eq!(*peers[0].peer_id, peer_id);
+        assert_eq!(peers[0].public_key, pub_key);
+        assert_eq!(*peers[0].address, multiaddr);
+        // Ensure that the last_dialed_at timestamp is within a reasonable
+        // timespan from utc_now.
+        assert!(*peers[0].last_dialed_at - utc_now < time::Duration::seconds(5));
+
+        // Now let's update the peer connection with a new address.
+        let multiaddr = Multiaddr::random_memory(rng);
+        db.update_peer_connection(&pub_key, &peer_id, multiaddr.clone())
+            .await
+            .expect("Failed to update peer connection");
+        let peers = db.get_p2p_peers().await.unwrap();
+
+        assert_eq!(peers.len(), 1);
+        assert_eq!(*peers[0].peer_id, peer_id);
+        assert_eq!(peers[0].public_key, pub_key);
+        assert_eq!(*peers[0].address, multiaddr);
+
+        testing::storage::drop_db(db).await;
+    }
 }
 
 /// Module containing a test suite and helpers specific to

@@ -44,6 +44,8 @@ use std::sync::OnceLock;
 pub const BITCOIN_CORE_RPC_USERNAME: &str = "devnet";
 /// The password for RPC calls in bitcoin-core
 pub const BITCOIN_CORE_RPC_PASSWORD: &str = "devnet";
+/// Default RPC endpoint for regtest bitcoin-core
+pub const BITCOIN_CORE_RPC_ENDPOINT: &str = "http://localhost:18443";
 
 /// The fallback fee in bitcoin core
 pub const BITCOIN_CORE_FALLBACK_FEE: Amount = Amount::from_sat(1000);
@@ -169,6 +171,18 @@ pub struct Recipient {
     pub script_pubkey: ScriptBuf,
 }
 
+/// Models the result of "listdescriptors"
+#[derive(Clone, PartialEq, Eq, Debug, serde::Deserialize)]
+struct ListDescriptorsResult {
+    pub wallet_name: String,
+    pub descriptors: Vec<ListDescriptorsInner>,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, serde::Deserialize)]
+struct ListDescriptorsInner {
+    pub desc: String,
+}
+
 fn descriptor_base(public_key: &PublicKey, kind: AddressType) -> String {
     match kind {
         AddressType::P2wpkh => format!("wpkh({public_key})"),
@@ -269,6 +283,22 @@ impl Faucet {
         let desc = descriptor_base(&public_key, kind);
         let descriptor_info = self.rpc.get_descriptor_info(&desc).unwrap();
 
+        // This isn't part of the bitcoincore_rpc API, unfortunately.
+        let wallet: ListDescriptorsResult = self
+            .rpc
+            .call("listdescriptors", &[])
+            .expect("failed to list descriptors");
+
+        if wallet
+            .descriptors
+            .iter()
+            .any(|d| d.desc == descriptor_info.descriptor)
+        {
+            // The descriptor is already tracked, no need to import it again.
+            // This avoids a scan of the entire blockchain.
+            return;
+        }
+
         let req = ImportDescriptors {
             descriptor: descriptor_info.descriptor,
             label: label.map(ToString::to_string),
@@ -278,6 +308,7 @@ impl Faucet {
             next_index: None,
             range: None,
         };
+
         let response = self.rpc.import_descriptors(req).unwrap();
         response.into_iter().for_each(|item| assert!(item.success));
     }

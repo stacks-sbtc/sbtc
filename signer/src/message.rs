@@ -233,6 +233,23 @@ pub struct BitcoinPreSignRequest {
     pub last_fees: Option<Fees>,
 }
 
+impl std::fmt::Display for BitcoinPreSignRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "BitcoinPreSignRequest(request_package=[")?;
+        for (i, value) in self.request_package.iter().enumerate() {
+            if i > 0 {
+                write!(f, ",")?;
+            }
+            write!(f, "{value}")?;
+        }
+        write!(
+            f,
+            "], fee_rate={}, last_fees={:?})",
+            self.fee_rate, self.last_fees
+        )
+    }
+}
+
 /// An acknowledgment of a [`BitcoinPreSignRequest`].
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BitcoinPreSignAck;
@@ -263,9 +280,9 @@ impl From<crate::storage::model::BitcoinTxId> for WstsMessageId {
 impl std::fmt::Display for WstsMessageId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            WstsMessageId::Sweep(txid) => write!(f, "sweep({})", txid),
+            WstsMessageId::Sweep(txid) => write!(f, "sweep({txid})"),
             WstsMessageId::DkgVerification(aggregate_key) => {
-                write!(f, "dkg-verification({})", aggregate_key)
+                write!(f, "dkg-verification({aggregate_key})")
             }
             WstsMessageId::Dkg(id) => {
                 write!(f, "dkg({})", hex::encode(id))

@@ -1178,9 +1178,7 @@ mod tests {
                 let size = segmenter.estimate_size(&withdrawal_ids).unwrap();
                 assert!(
                     size <= OP_RETURN_AVAILABLE_SIZE,
-                    "withdrawal IDs exceed OP_RETURN size: {} > {}",
-                    size,
-                    OP_RETURN_AVAILABLE_SIZE
+                    "withdrawal IDs exceed OP_RETURN size: {size} > {OP_RETURN_AVAILABLE_SIZE}"
                 );
             }
         }

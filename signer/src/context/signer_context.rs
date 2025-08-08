@@ -1,5 +1,4 @@
 use std::sync::Arc;
-
 use tokio::sync::broadcast::Sender;
 use url::Url;
 
@@ -174,6 +173,21 @@ impl<Storage, Bitcoin, Stacks, Emily> SignerContext<Storage, Bitcoin, Stacks, Em
     pub fn config_mut(&mut self) -> &mut Settings {
         &mut self.config
     }
+
+    /// Resets the termination signal for this context.
+    ///
+    /// This sets the underlying termination state to `false`, allowing
+    /// new `TerminationHandle` instances or existing ones (that haven't
+    /// been dropped) to reflect a non-terminated state. This is primarily
+    /// useful in testing scenarios where a context is reused after a
+    /// simulated shutdown.
+    pub fn reset_termination_signal(&self) {
+        // Send `false` to the watch channel, indicating not terminated.
+        // The result of `send` is ignored here. If all receivers were dropped,
+        // there's no one to signal, but the internal state of the sender
+        // will be updated to `false`.
+        let _ = self.term_tx.send(false);
+    }
 }
 
 #[cfg(test)]
@@ -185,6 +199,7 @@ mod tests {
 
     use tokio::sync::Notify;
 
+    use crate::storage::model::BitcoinBlockRef;
     use crate::{
         context::{Context as _, SignerEvent, SignerSignal},
         testing::context::*,
@@ -223,9 +238,9 @@ mod tests {
             task_started_clone.notify_one();
             let signal = cloned_receiver.recv().await.unwrap();
 
-            assert_eq!(
+            assert_matches::assert_matches!(
                 signal,
-                SignerSignal::Event(SignerEvent::BitcoinBlockObserved)
+                SignerSignal::Event(SignerEvent::BitcoinBlockObserved(_))
             );
 
             recv_count_clone.fetch_add(1, Ordering::Relaxed);
@@ -240,7 +255,7 @@ mod tests {
 
         // Signal the original context.
         context
-            .signal(SignerEvent::BitcoinBlockObserved.into())
+            .signal(SignerEvent::BitcoinBlockObserved(BitcoinBlockRef::genesis()).into())
             .unwrap();
 
         // This wait is needed to ensure that the below `abort()` doesn't

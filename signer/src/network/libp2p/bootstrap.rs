@@ -11,7 +11,9 @@ use libp2p::{
     core::{Endpoint, transport::PortUse},
     swarm::{
         ConnectionDenied, ConnectionId, FromSwarm, NetworkBehaviour, THandler, THandlerInEvent,
-        ToSwarm, dial_opts::DialOpts, dummy,
+        ToSwarm,
+        dial_opts::{DialOpts, PeerCondition},
+        dummy,
     },
 };
 
@@ -22,6 +24,7 @@ use crate::metrics::Metrics;
 pub struct Config {
     local_peer_id: PeerId,
     seed_addresses: Vec<Multiaddr>,
+    known_peers: Vec<(PeerId, Multiaddr)>,
     bootstrap_interval: Duration,
     initial_delay: Duration,
 }
@@ -32,18 +35,27 @@ impl Config {
         Self {
             local_peer_id,
             seed_addresses: Default::default(),
+            known_peers: Default::default(),
             bootstrap_interval: Duration::from_secs(60),
             initial_delay: Duration::ZERO,
         }
     }
 
     /// Adds seed addresses to the configuration.
-    pub fn add_seed_addresses<'a, T>(mut self, seed_addresses: T) -> Self
+    pub fn add_seed_addresses<T>(mut self, seed_addresses: T) -> Self
     where
-        T: IntoIterator<Item = &'a Multiaddr>,
+        T: IntoIterator<Item = Multiaddr>,
     {
-        self.seed_addresses
-            .extend(seed_addresses.into_iter().cloned());
+        self.seed_addresses.extend(seed_addresses);
+        self
+    }
+
+    /// Adds known peers to the configuration.
+    pub fn add_known_peers<T>(mut self, known_peers: T) -> Self
+    where
+        T: IntoIterator<Item = (PeerId, Multiaddr)>,
+    {
+        self.known_peers.extend(known_peers);
         self
     }
 
@@ -79,7 +91,10 @@ pub enum BootstrapEvent {
     /// [`BootstrapEvent::Bootstrapped`] to a state where no peers are connected.
     NoConnectedPeers,
     /// An event which is raised when the bootstrapping process has started.
-    Started { seed_addresses: Vec<Multiaddr> },
+    Started {
+        seed_addresses: Vec<Multiaddr>,
+        known_peers: Vec<(PeerId, Multiaddr)>,
+    },
     /// An event which is raised when the behavior is dialing a seed peer.
     DialingSeed {
         connection_id: ConnectionId,
@@ -87,7 +102,7 @@ pub enum BootstrapEvent {
         addresses: Vec<Multiaddr>,
     },
     /// An event which is raised when the behavior has connected to a seed peer.
-    SeedConnected {
+    Connected {
         connection_id: ConnectionId,
         peer_id: PeerId,
         address: Multiaddr,
@@ -286,9 +301,9 @@ impl NetworkBehaviour for Behavior {
         self.peer_connected(peer_id, connection_id, address);
 
         if self.pending_connections.remove(&connection_id) {
-            tracing::debug!(%connection_id, %peer_id, %address, "successfully dialed seed peer");
+            tracing::debug!(%connection_id, %peer_id, %address, "successfully dialed bootstrap peer");
             self.pending_events
-                .push_back(ToSwarm::GenerateEvent(BootstrapEvent::SeedConnected {
+                .push_back(ToSwarm::GenerateEvent(BootstrapEvent::Connected {
                     connection_id,
                     peer_id,
                     address: address.clone(),
@@ -311,7 +326,7 @@ impl NetworkBehaviour for Behavior {
         // that this is a seed peer dial that we've initiated, so we publish
         // the `DialingSeed` event.
         if self.pending_connections.contains(&connection_id) {
-            tracing::debug!(%connection_id, ?addresses, peer_id = ?maybe_peer, "attempting to dial seed peer");
+            tracing::debug!(%connection_id, ?addresses, peer_id = ?maybe_peer, "attempting to dial bootstrap peer");
             self.pending_events
                 .push_back(ToSwarm::GenerateEvent(BootstrapEvent::DialingSeed {
                     connection_id,
@@ -338,7 +353,7 @@ impl NetworkBehaviour for Behavior {
                         %connection_id,
                         ?peer_id,
                         %error,
-                        "failed to dial seed peer"
+                        "failed to dial bootstrap peer"
                     );
                 }
             }
@@ -425,10 +440,15 @@ impl NetworkBehaviour for Behavior {
         }
 
         // Queue the bootstrap started event.
-        tracing::info!(addresses = ?self.config.seed_addresses, "initiating network bootstrapping from seed addresses");
+        tracing::info!(
+            seed_addresses = ?self.config.seed_addresses,
+            known_peers = ?self.config.known_peers,
+            "initiating network bootstrapping from seed addresses and known peers"
+        );
         self.pending_events
             .push_back(ToSwarm::GenerateEvent(BootstrapEvent::Started {
                 seed_addresses: self.config.seed_addresses.clone(),
+                known_peers: self.config.known_peers.clone(),
             }));
 
         // Iterate over the seed addresses and queue dial events for each. Note
@@ -440,6 +460,27 @@ impl NetworkBehaviour for Behavior {
             // Construct the dialing options and `Dial` event which will be
             // sent to the swarm.
             let dial_opts = DialOpts::unknown_peer_id().address(addr.clone()).build();
+            self.pending_connections.insert(dial_opts.connection_id());
+            let event = ToSwarm::Dial { opts: dial_opts };
+
+            // Queue the dial event.
+            self.pending_events.push_back(event);
+        });
+
+        // Iterate over the known peers and queue dial events for each. Note
+        // that we queue a dial event for each known peer, regardless of our
+        // current connection count (which will then be propagated in
+        // subsequent polls). The overall swarm connection/concurrent dialing
+        // limits will ensure we don't dial too many peers at once and limit the
+        // total number of connections.
+        self.config.known_peers.iter().for_each(|(peer_id, addr)| {
+            // Construct the dialing options and `Dial` event which will be
+            // sent to the swarm.
+            let dial_opts = DialOpts::peer_id(*peer_id)
+                .condition(PeerCondition::DisconnectedAndNotDialing)
+                .addresses(vec![addr.clone()])
+                .build();
+
             self.pending_connections.insert(dial_opts.connection_id());
             let event = ToSwarm::Dial { opts: dial_opts };
 

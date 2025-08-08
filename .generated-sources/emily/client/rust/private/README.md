@@ -75,6 +75,7 @@ Class | Method | HTTP request | Description
  - [Deposit](docs/Deposit.md)
  - [DepositInfo](docs/DepositInfo.md)
  - [DepositParameters](docs/DepositParameters.md)
+ - [DepositStatus](docs/DepositStatus.md)
  - [DepositUpdate](docs/DepositUpdate.md)
  - [DepositWithStatus](docs/DepositWithStatus.md)
  - [ErrorResponse](docs/ErrorResponse.md)
@@ -84,7 +85,6 @@ Class | Method | HTTP request | Description
  - [GetWithdrawalsResponse](docs/GetWithdrawalsResponse.md)
  - [HealthData](docs/HealthData.md)
  - [Limits](docs/Limits.md)
- - [Status](docs/Status.md)
  - [UpdateDepositsRequestBody](docs/UpdateDepositsRequestBody.md)
  - [UpdateDepositsResponse](docs/UpdateDepositsResponse.md)
  - [UpdateWithdrawalsRequestBody](docs/UpdateWithdrawalsRequestBody.md)
@@ -92,6 +92,7 @@ Class | Method | HTTP request | Description
  - [Withdrawal](docs/Withdrawal.md)
  - [WithdrawalInfo](docs/WithdrawalInfo.md)
  - [WithdrawalParameters](docs/WithdrawalParameters.md)
+ - [WithdrawalStatus](docs/WithdrawalStatus.md)
  - [WithdrawalUpdate](docs/WithdrawalUpdate.md)
  - [WithdrawalWithStatus](docs/WithdrawalWithStatus.md)
 

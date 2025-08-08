@@ -13,7 +13,7 @@ class RequestStatus(Enum):
     ACCEPTED = "accepted"
     CONFIRMED = "confirmed"
     FAILED = "failed"
-    REPROCESSING = "reprocessing"
+    RBF = "rbf"
 
 
 @dataclass
@@ -154,3 +154,4 @@ class DepositUpdate:
     status: str
     status_message: str
     fulfillment: Optional[Fulfillment] = None
+    replaced_by_txid: Optional[str] = None

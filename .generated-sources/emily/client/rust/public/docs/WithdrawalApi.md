@@ -50,7 +50,7 @@ Get withdrawals handler.
 
 Name | Type | Description  | Required | Notes
 ------------- | ------------- | ------------- | ------------- | -------------
-**status** | [**Status**](.md) | the status to search by when getting all withdrawals. | [required] |
+**status** | [**WithdrawalStatus**](.md) | the status to search by when getting all withdrawals. | [required] |
 **next_token** | Option<**String**> | the next token value from the previous return of this api call. |  |
 **page_size** | Option<**u32**> | the maximum number of items in the response list. |  |
 

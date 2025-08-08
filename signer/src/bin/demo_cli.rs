@@ -348,7 +348,7 @@ async fn exec_deposit(ctx: &Context, args: DepositArgs) -> Result<(), Error> {
     .await
     .map_err(Box::new)?;
 
-    println!("Deposit request created: {:?}", emily_deposit);
+    println!("Deposit request created: {emily_deposit:?}");
 
     Ok(())
 }
@@ -463,7 +463,7 @@ async fn create_stacks_tx(
     let conditions = payload.post_conditions();
 
     let auth = SinglesigSpendingCondition {
-        signer: sender_addr.bytes,
+        signer: *sender_addr.bytes(),
         nonce,
         tx_fee: 1000,
         hash_mode: SinglesigHashMode::P2PKH,

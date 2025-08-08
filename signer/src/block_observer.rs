@@ -17,10 +17,10 @@
 //! - Update signer set transactions
 //! - Set aggregate key transactions
 
-use std::collections::BTreeSet;
 use std::future::Future;
 use std::time::Duration;
 
+use crate::bitcoin::BitcoinBlockHashStreamProvider;
 use crate::bitcoin::BitcoinInteract;
 use crate::bitcoin::rpc::BitcoinBlockHeader;
 use crate::bitcoin::rpc::BitcoinTxInfo;
@@ -35,19 +35,21 @@ use crate::keys::SignerScriptPubKey as _;
 use crate::metrics::BITCOIN_BLOCKCHAIN;
 use crate::metrics::Metrics;
 use crate::stacks::api::GetNakamotoStartHeight as _;
+use crate::stacks::api::SignerSetInfo;
 use crate::stacks::api::StacksInteract as _;
 use crate::stacks::api::TenureBlockHeaders;
+use crate::stacks::contracts::SMART_CONTRACTS;
 use crate::storage::DbRead;
 use crate::storage::DbWrite;
 use crate::storage::Transactable as _;
 use crate::storage::TransactionHandle as _;
 use crate::storage::model;
+use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::EncryptedDkgShares;
-use crate::storage::model::KeyRotationEvent;
+use crate::util::FutureExt;
 use bitcoin::Amount;
 use bitcoin::BlockHash;
 use bitcoin::ScriptBuf;
-use futures::stream::Stream;
 use futures::stream::StreamExt as _;
 use sbtc::deposits::CreateDepositRequest;
 use sbtc::deposits::DepositInfo;
@@ -55,11 +57,11 @@ use std::collections::HashSet;
 
 /// Block observer
 #[derive(Debug)]
-pub struct BlockObserver<Context, BlockHashStream> {
+pub struct BlockObserver<Context, BlockSource> {
     /// Signer context
     pub context: Context,
-    /// Stream of blocks from the block notifier
-    pub bitcoin_blocks: BlockHashStream,
+    /// Provider of Bitcoin block hashes.
+    pub bitcoin_block_source: BlockSource,
 }
 
 /// A full "deposit", containing the bitcoin transaction and a fully
@@ -132,28 +134,38 @@ pub trait DepositRequestValidator {
         C: BitcoinInteract;
 }
 
-impl<C, S> BlockObserver<C, S>
+impl<C, BlockSource> BlockObserver<C, BlockSource>
 where
     C: Context,
-    S: Stream<Item = Result<bitcoin::BlockHash, Error>> + Unpin,
+    BlockSource: BitcoinBlockHashStreamProvider,
 {
+    /// Create a new [`BlockObserver`] with the given context and Bitcoin block
+    /// provider.
+    pub fn new(context: C, bitcoin_block_source: BlockSource) -> Self {
+        Self { context, bitcoin_block_source }
+    }
+
     /// Run the block observer
     #[tracing::instrument(skip_all, name = "block-observer")]
-    pub async fn run(mut self) -> Result<(), Error> {
+    pub async fn run(self) -> Result<(), Error> {
         let term = self.context.get_termination_handle();
+        let mut bitcoin_blocks = self.bitcoin_block_source.get_block_hash_stream();
 
         loop {
             if term.shutdown_signalled() {
+                tracing::debug!("block observer has received a shutdown signal");
                 break;
             }
 
             // Bitcoin blocks will generally arrive in ~10 minute intervals, so
             // we don't need to be so aggressive in our timeout here.
-            let poll = tokio::time::timeout(Duration::from_millis(100), self.bitcoin_blocks.next());
+            let poll = bitcoin_blocks
+                .next()
+                .with_timeout(Duration::from_millis(100));
 
             match poll.await {
                 Ok(Some(Ok(block_hash))) => {
-                    tracing::info!("observed new bitcoin block from stream");
+                    tracing::info!(%block_hash, "observed new bitcoin block from stream");
                     metrics::counter!(
                         Metrics::BlocksObservedTotal,
                         "blockchain" => BITCOIN_BLOCKCHAIN,
@@ -174,10 +186,13 @@ where
                     }
 
                     tracing::debug!("updating the signer state");
-                    if let Err(error) = self.update_signer_state(block_hash).await {
-                        tracing::warn!(%error, "could not update the signer state");
-                        continue;
-                    }
+                    let chain_tip = match self.update_signer_state(block_hash).await {
+                        Ok(chain_tip) => chain_tip,
+                        Err(error) => {
+                            tracing::warn!(%error, "could not update the signer state");
+                            continue;
+                        }
+                    };
 
                     tracing::info!("loading latest deposit requests from Emily");
                     if let Err(error) = self.load_latest_deposit_requests().await {
@@ -185,7 +200,7 @@ where
                     }
 
                     self.context
-                        .signal(SignerEvent::BitcoinBlockObserved.into())?;
+                        .signal(SignerEvent::BitcoinBlockObserved(chain_tip).into())?;
                 }
                 Ok(Some(Err(error))) => {
                     tracing::warn!(%error, "error decoding new bitcoin block hash from stream");
@@ -487,8 +502,8 @@ impl<C: Context, B> BlockObserver<C, B> {
     /// execute them. The cached information is the current signer set
     /// info. It gets this information from the last successful
     /// key-rotation contract call if it exists.
-    async fn set_signer_set_info(&self, chain_tip: BlockHash) -> Result<(), Error> {
-        let info = get_signer_set_info(&self.context, chain_tip).await?;
+    async fn set_signer_set_info(&self) -> Result<(), Error> {
+        let info = get_signer_set_info(&self.context).await?;
 
         let state = self.context.state();
         if let Some(info) = info {
@@ -498,16 +513,17 @@ impl<C: Context, B> BlockObserver<C, B> {
         Ok(())
     }
 
-    /// Update the `SignerState` object with current bitcoin chain tip.
-    async fn update_bitcoin_chain_tip(&self) -> Result<(), Error> {
+    /// Set the `SignerState` object with current bitcoin chain tip.
+    async fn set_bitcoin_chain_tip(&self, chain_tip: BlockHash) -> Result<BitcoinBlockRef, Error> {
         let db = self.context.get_storage();
         let chain_tip = db
-            .get_bitcoin_canonical_chain_tip_ref()
+            .get_bitcoin_block(&chain_tip.into())
             .await?
-            .ok_or(Error::NoChainTip)?;
+            .map(model::BitcoinBlockRef::from)
+            .ok_or_else(|| Error::UnknownBitcoinBlock(chain_tip))?;
 
         self.context.state().set_bitcoin_chain_tip(chain_tip);
-        Ok(())
+        Ok(chain_tip)
     }
 
     /// Update the `SignerState` object with data that is unlikely to
@@ -520,15 +536,15 @@ impl<C: Context, B> BlockObserver<C, B> {
     /// * The current signer set.
     /// * The current aggregate key.
     /// * The current bitcoin chain tip.
-    async fn update_signer_state(&self, chain_tip: BlockHash) -> Result<(), Error> {
+    async fn update_signer_state(&self, chain_tip: BlockHash) -> Result<BitcoinBlockRef, Error> {
         tracing::info!("loading sbtc limits from Emily");
         self.update_sbtc_limits(chain_tip).await?;
 
         tracing::info!("updating the signer state with the current signer set");
-        self.set_signer_set_info(chain_tip).await?;
+        self.set_signer_set_info().await?;
 
         tracing::info!("updating the signer state with the current bitcoin chain tip");
-        self.update_bitcoin_chain_tip().await
+        self.set_bitcoin_chain_tip(chain_tip).await
     }
 
     /// Checks if the latest dkg share is pending and is no longer valid
@@ -575,23 +591,6 @@ impl<C: Context, B> BlockObserver<C, B> {
 
         Ok(())
     }
-}
-
-/// Structure describing the info about signer set currently stored in the
-/// smart contract on Stacks.
-#[derive(Debug, Clone)]
-pub struct SignerSetInfo {
-    /// The aggregate key of the most recently confirmed key rotation
-    /// contract call on Stacks.
-    pub aggregate_key: PublicKey,
-    /// The set of sBTC signers public keys.
-    pub signer_set: BTreeSet<PublicKey>,
-    /// The number of signatures required to sign a transaction.
-    /// This is the number of signature shares necessary to successfully sign a
-    /// bitcoin transaction spending a UTXO locked with the above aggregate key,
-    /// or the number of signers necessary to sign a Stacks transaction under
-    /// the signers' principal.
-    pub signatures_required: u16,
 }
 
 /// Extract all BTC transactions from the block where one of the UTXOs
@@ -711,26 +710,6 @@ where
     extract_fut().await
 }
 
-impl From<KeyRotationEvent> for SignerSetInfo {
-    fn from(value: KeyRotationEvent) -> Self {
-        SignerSetInfo {
-            aggregate_key: value.aggregate_key,
-            signer_set: value.signer_set.into_iter().collect(),
-            signatures_required: value.signatures_required,
-        }
-    }
-}
-
-impl From<model::EncryptedDkgShares> for SignerSetInfo {
-    fn from(value: model::EncryptedDkgShares) -> Self {
-        SignerSetInfo {
-            aggregate_key: value.aggregate_key,
-            signer_set: value.signer_set_public_keys(),
-            signatures_required: value.signature_share_threshold,
-        }
-    }
-}
-
 /// Return the signing set that can make sBTC related contract calls along
 /// with the current aggregate key to use for locking UTXOs on bitcoin.
 ///
@@ -740,20 +719,49 @@ impl From<model::EncryptedDkgShares> for SignerSetInfo {
 /// rotate-keys transactions on the canonical stacks blockchain, then we
 /// return None.
 #[tracing::instrument(skip_all)]
-pub async fn get_signer_set_info<C, B>(
-    ctx: &C,
-    chain_tip: B,
-) -> Result<Option<SignerSetInfo>, Error>
+pub async fn get_signer_set_info<C>(ctx: &C) -> Result<Option<SignerSetInfo>, Error>
 where
     C: Context,
-    B: Into<model::BitcoinBlockHash>,
 {
-    let chain_tip = chain_tip.into();
+    let stacks = ctx.get_stacks_client();
+    let address = &ctx.config().signer.deployer;
+    // If the sBTC contracts have not been deployed, then we don't have any
+    // signer set info in the registry.
+    if !are_sbtc_contracts_deployed(ctx).await? {
+        return Ok(None);
+    }
 
-    ctx.get_storage()
-        .get_last_key_rotation(&chain_tip)
-        .await
-        .map(|event| event.map(SignerSetInfo::from))
+    // This returns Ok(None) if API call returns a response with values
+    // that are only set when we first deploy the sBTC contracts.
+    stacks.get_current_signer_set_info(address).await
+}
+
+/// Check if all the sBTC smart contracts have been deployed.
+async fn are_sbtc_contracts_deployed<C>(ctx: &C) -> Result<bool, Error>
+where
+    C: Context,
+{
+    // First check if we already know if the contracts have been deployed.
+    // If we get false, then it could be that we are just starting the
+    // application, so we'll need to check our node.
+    if ctx.state().sbtc_contracts_deployed() {
+        return Ok(true);
+    }
+
+    let stacks = ctx.get_stacks_client();
+    let deployer = ctx.config().signer.deployer;
+
+    for contract in SMART_CONTRACTS {
+        if !contract.is_deployed(&stacks, &deployer).await? {
+            return Ok(false);
+        }
+    }
+
+    // If we get here, then all the smart contracts have been deployed.
+    // Let's store that fact so that we don't need to query our Stacks node
+    // again.
+    ctx.state().set_sbtc_contracts_deployed();
+    Ok(true)
 }
 
 #[cfg(test)]
@@ -797,18 +805,17 @@ mod tests {
         // There must be at least one signal receiver alive when the block observer
         // later tries to send a signal, hence this line.
         let _signal_rx = ctx.get_signal_receiver();
-        let block_hash_stream = test_harness.spawn_block_hash_stream();
 
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_blocks: block_hash_stream,
+            bitcoin_block_source: test_harness.clone(),
         };
 
         let handle = tokio::spawn(block_observer.run());
         ctx.wait_for_signal(Duration::from_secs(3), |signal| {
             matches!(
                 signal,
-                SignerSignal::Event(SignerEvent::BitcoinBlockObserved)
+                SignerSignal::Event(SignerEvent::BitcoinBlockObserved(_))
             )
         })
         .await
@@ -934,7 +941,7 @@ mod tests {
 
         let block_observer = BlockObserver {
             context: ctx,
-            bitcoin_blocks: (),
+            bitcoin_block_source: (),
         };
 
         {
@@ -1019,7 +1026,7 @@ mod tests {
 
         let block_observer = BlockObserver {
             context: ctx,
-            bitcoin_blocks: (),
+            bitcoin_block_source: (),
         };
 
         block_observer.load_latest_deposit_requests().await.unwrap();

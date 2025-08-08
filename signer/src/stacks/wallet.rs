@@ -257,7 +257,7 @@ impl SignerWallet {
     ///   signatures.
     pub fn as_unsigned_tx_auth(&self, tx_fee: u64) -> OrderIndependentMultisigSpendingCondition {
         OrderIndependentMultisigSpendingCondition {
-            signer: self.address.bytes,
+            signer: *self.address.bytes(),
             nonce: self.nonce.fetch_add(1, Ordering::Relaxed),
             tx_fee,
             hash_mode: SignerWallet::hash_mode(),

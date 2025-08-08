@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::ops::Deref as _;
 use std::sync::Arc;
@@ -28,6 +27,7 @@ use sbtc::deposits::ReclaimScriptInputs;
 use sbtc::testing::regtest;
 use sbtc::testing::regtest::Faucet;
 use sbtc::testing::regtest::Recipient;
+use signer::bitcoin::poller::BitcoinChainTipPoller;
 use signer::bitcoin::utxo::DepositRequest;
 use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
@@ -38,14 +38,13 @@ use signer::emily_client::EmilyClient;
 use signer::error::Error;
 use signer::keys::PublicKey;
 use signer::keys::SignerScriptPubKey as _;
+use signer::stacks::api::SignerSetInfo;
 use signer::stacks::api::TenureBlocks;
 use signer::storage::DbWrite as _;
 use signer::storage::model;
 use signer::storage::model::BitcoinBlockHash;
 use signer::storage::model::DkgSharesStatus;
 use signer::storage::model::EncryptedDkgShares;
-use signer::storage::model::KeyRotationEvent;
-use signer::storage::model::StacksBlock;
 use signer::storage::model::TaprootScriptHash;
 use signer::storage::model::TxOutput;
 use signer::storage::model::TxOutputType;
@@ -77,7 +76,6 @@ use crate::setup::TestSweepSetup;
 use crate::setup::fetch_canonical_bitcoin_blockchain;
 use crate::transaction_coordinator::mock_reqwests_status_code_error;
 use crate::utxo_construction::make_deposit_request;
-use crate::zmq::BITCOIN_CORE_ZMQ_ENDPOINT;
 
 pub const GET_POX_INFO_JSON: &str =
     include_str!("../../tests/fixtures/stacksapi-get-pox-info-test-data.json");
@@ -95,7 +93,7 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
     let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
     let db = testing::storage::new_test_database().await;
-    let mut ctx = TestContext::builder()
+    let ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
         .with_mocked_emily_client()
@@ -156,6 +154,14 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
         client
             .expect_get_sortition_info()
             .returning(move |_| Box::pin(std::future::ready(Ok(DUMMY_SORTITION_INFO.clone()))));
+
+        client.expect_get_contract_source().returning(|_, _| {
+            Box::pin(async {
+                Err(Error::StacksNodeResponse(
+                    mock_reqwests_status_code_error(404).await,
+                ))
+            })
+        });
     })
     .await;
 
@@ -166,9 +172,10 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
+    let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
     let block_observer = BlockObserver {
         context: ctx.clone(),
-        bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT).await,
+        bitcoin_block_source,
     };
 
     // We need at least one receiver
@@ -256,7 +263,7 @@ async fn link_blocks() {
 
     let stacks_client = StacksClient::new(Url::parse("http://localhost:20443").unwrap()).unwrap();
 
-    let mut ctx = TestContext::builder()
+    let ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
         .with_stacks_client(stacks_client.clone())
@@ -271,9 +278,10 @@ async fn link_blocks() {
     })
     .await;
 
+    let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
     let block_observer = BlockObserver {
         context: ctx.clone(),
-        bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT).await,
+        bitcoin_block_source,
     };
 
     let mut signal_rx = ctx.get_signal_receiver();
@@ -282,7 +290,10 @@ async fn link_blocks() {
     // Wait for new block; when running in devenv, it should take <30s
     loop {
         let signal = signal_rx.recv().await.expect("failed to get signal");
-        if let SignerSignal::Event(SignerEvent::BitcoinBlockObserved) = signal {
+        if matches!(
+            signal,
+            SignerSignal::Event(SignerEvent::BitcoinBlockObserved(_))
+        ) {
             break;
         }
     }
@@ -387,13 +398,14 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     // 1. Create a database, an associated context for the block observer.
 
     let db = testing::storage::new_test_database().await;
-    let mut ctx = TestContext::builder()
+    let ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
         .with_emily_client(emily_client.clone())
         .with_mocked_stacks_client()
         .build();
 
+    ctx.state().set_sbtc_contracts_deployed();
     let mut signal_receiver = ctx.get_signal_receiver();
 
     // The block observer reaches out to the stacks node to get the most
@@ -416,6 +428,11 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
                 .map_err(Error::JsonSerialize);
             Box::pin(std::future::ready(response))
         });
+
+        // The signer set info is not necessary for this test.
+        client
+            .expect_get_current_signer_set_info()
+            .returning(|_| Box::pin(std::future::ready(Ok(None))));
     })
     .await;
 
@@ -428,9 +445,10 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
+    let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
     let block_observer = BlockObserver {
         context: ctx.clone(),
-        bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT).await,
+        bitcoin_block_source,
     };
 
     tokio::spawn(async move {
@@ -490,7 +508,7 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     // Let's wait for the block observer to signal that it has finished
     // processing everything.
     let signal = signal_receiver.recv();
-    let Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved)) = signal.await else {
+    let Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(_))) = signal.await else {
         panic!("Not the right signal")
     };
 
@@ -533,12 +551,14 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     // Start off with some initial UTXOs to work with.
     faucet.send_to(50_000_000, &depositor.address);
 
-    let chain_tip = faucet.generate_blocks(1).pop().unwrap().into();
+    let chain_tip: BitcoinBlockHash = faucet.generate_block().into();
 
     let signal = signal_receiver.recv();
-    let Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved)) = signal.await else {
-        panic!("Not the right signal")
-    };
+    match signal.await {
+        Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref)))
+            if block_ref.block_hash == chain_tip => {}
+        _ => panic!("Not the right signal"),
+    }
 
     // Now lets make a deposit transaction and submit it. First we get some
     // sats.
@@ -600,14 +620,16 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     // ** Step 6 **
     //
     // Check that the block observer populates the tables correctly
-    faucet.generate_blocks(1);
+    let chain_tip: BitcoinBlockHash = faucet.generate_block().into();
 
     // Okay now there is a deposit, and it has been confirmed. We should
     // pick it up automatically.
     let signal = signal_receiver.recv();
-    let Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved)) = signal.await else {
-        panic!("Not the right signal")
-    };
+    match signal.await {
+        Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref)))
+            if block_ref.block_hash == chain_tip => {}
+        _ => panic!("Not the right signal"),
+    }
 
     // Okay now we should see the signers output with the expected values.
     let TxOutput { txid, output_index, amount, .. } =
@@ -848,7 +870,7 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
     // database.
     let (_, faucet) = regtest::initialize_blockchain();
     let db = testing::storage::new_test_database().await;
-    let mut ctx = TestContext::builder()
+    let ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
         .with_mocked_emily_client()
@@ -858,6 +880,7 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
     // We need to set up the stacks client as well. We use it to fetch
     // information about the Stacks blockchain, so we need to prep it, even
     // though it isn't necessary for our test.
+    let db2 = db.clone();
     ctx.with_stacks_client(|client| {
         client
             .expect_get_tenure_info()
@@ -880,6 +903,21 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
         client
             .expect_get_sortition_info()
             .returning(move |_| Box::pin(std::future::ready(Ok(DUMMY_SORTITION_INFO.clone()))));
+
+        // The coordinator broadcasts a rotate keys transaction if it is
+        // not up-to-date with their view of the current aggregate key. The
+        // response of here means that the stacks node has a record of a
+        // rotate keys contract call being executed once we have verified
+        // shares.
+        client
+            .expect_get_current_signer_set_info()
+            .returning(move |_| {
+                let db = db2.clone();
+                Box::pin(async move {
+                    let shares = db.get_latest_verified_dkg_shares().await?;
+                    Ok(shares.map(SignerSetInfo::from))
+                })
+            });
     })
     .await;
 
@@ -931,9 +969,10 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
+    let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
     let block_observer = BlockObserver {
         context: ctx.clone(),
-        bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT).await,
+        bitcoin_block_source,
     };
 
     let mut signal_receiver = ctx.get_signal_receiver();
@@ -950,13 +989,15 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
 
     // Let's generate a new block and wait for our block observer to send a
     // BitcoinBlockObserved signal.
-    let expected_tip = faucet.generate_blocks(1).pop().unwrap();
+    let expected_tip = faucet.generate_block().into();
 
     let waiting_fut = async {
         let signal = signal_receiver.recv();
-        let Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved)) = signal.await else {
-            panic!("Not the right signal")
-        };
+        match signal.await {
+            Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref)))
+                if block_ref.block_hash == expected_tip => {}
+            _ => panic!("Not the right signal"),
+        }
     };
 
     tokio::time::timeout(Duration::from_secs(3), waiting_fut)
@@ -969,7 +1010,7 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
         .get_bitcoin_canonical_chain_tip()
         .await
         .expect("cannot get chain tip");
-    assert_eq!(db_chain_tip, Some(expected_tip.into()));
+    assert_eq!(db_chain_tip, Some(expected_tip));
 
     testing::storage::drop_db(db).await;
 }
@@ -1000,7 +1041,7 @@ async fn next_headers_to_process_gets_all_headers() {
 
     let block_observer = BlockObserver {
         context: ctx.clone(),
-        bitcoin_blocks: (),
+        bitcoin_block_source: (),
     };
 
     let headers = block_observer
@@ -1050,7 +1091,10 @@ async fn next_headers_to_process_ignores_known_headers() {
         .with_mocked_stacks_client()
         .build();
 
-    let block_observer = BlockObserver { context, bitcoin_blocks: () };
+    let block_observer = BlockObserver {
+        context,
+        bitcoin_block_source: (),
+    };
 
     let chain_tip_block_hash = rpc.get_best_block_hash().unwrap();
     let headers = block_observer
@@ -1078,12 +1122,12 @@ async fn next_headers_to_process_ignores_known_headers() {
     testing::storage::drop_db(db).await;
 }
 
-/// The [`get_signer_set_and_aggregate_key`] function is supposed to fetch
-/// the signing set that is in the sbtc-registry by looking for the last
-/// rotate-keys transaction confirmed on the canonical Stacks blockchain.
-/// None if no such contract call exists.
+/// The [`get_signer_set_info`] function is supposed to fetch the signing
+/// set that is in the sbtc-registry by querying the stacks node if the
+/// smart contracts have been deployed and returning None if they have not
+/// or if the smart contract contains only null data.
 #[tokio::test]
-async fn get_signer_set_info_falls_back() {
+async fn get_signer_set_info_checks_for_contract_deployment() {
     let db = testing::storage::new_test_database().await;
 
     let mut rng = get_rng();
@@ -1105,35 +1149,33 @@ async fn get_signer_set_info_falls_back() {
     let test_data = TestData::generate(&mut rng, &[], &test_params);
     test_data.write_to(&db).await;
 
-    // We always need the chain tip.
-    let chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
+    let signer_set_info: SignerSetInfo = Faker.fake_with_rng(&mut rng);
+    let signer_set_info2 = signer_set_info.clone();
+    ctx.with_stacks_client(|client| {
+        client
+            .expect_get_current_signer_set_info()
+            .returning(move |_| Box::pin(std::future::ready(Ok(Some(signer_set_info2.clone())))));
 
-    // We have no rows in the DKG shares table and no rotate-keys
-    // transactions, so there should be no aggregate key, since that only
-    // happens after DKG, but we should always know the current signer set.
-    // Signatures required should fall back to config value.
-    let info = get_signer_set_info(&ctx, chain_tip).await.unwrap();
+        client.expect_get_contract_source().returning(|_, _| {
+            Box::pin(async {
+                Err(Error::StacksNodeResponse(
+                    mock_reqwests_status_code_error(404).await,
+                ))
+            })
+        });
+    })
+    .await;
+
+    let info = get_signer_set_info(&ctx).await.unwrap();
     assert!(info.is_none());
 
-    let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
+    // Alright, now we set that the contracts have been deployed, so we no
+    // longer ask the stacks node about whether the they have been deployed
+    // or not and just query the smart contract.
+    ctx.state().set_sbtc_contracts_deployed();
+    let info = get_signer_set_info(&ctx).await.unwrap().unwrap();
 
-    let mut rotate_keys: KeyRotationEvent = Faker.fake_with_rng(&mut rng);
-    rotate_keys.block_hash = stacks_chain_tip.block_hash;
-
-    db.write_rotate_keys_transaction(&rotate_keys)
-        .await
-        .unwrap();
-
-    // Alright, now that we have a rotate-keys transaction, we can check if
-    // it is preferred over the DKG shares table.
-    let info = get_signer_set_info(&ctx, chain_tip).await.unwrap().unwrap();
-
-    let rotate_keys_signer_set: BTreeSet<PublicKey> =
-        rotate_keys.signer_set.iter().copied().collect();
-
-    assert_eq!(rotate_keys.aggregate_key, info.aggregate_key);
-    assert_eq!(rotate_keys_signer_set, info.signer_set);
-    assert_eq!(rotate_keys.signatures_required, info.signatures_required);
+    assert_eq!(signer_set_info, info);
 
     testing::storage::drop_db(db).await;
 }
@@ -1149,7 +1191,7 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
     // database.
     let (_, faucet) = regtest::initialize_blockchain();
     let db = testing::storage::new_test_database().await;
-    let mut ctx = TestContext::builder()
+    let ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
         .with_mocked_emily_client()
@@ -1159,6 +1201,7 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
     // We need to set up the stacks client as well. We use it to fetch
     // information about the Stacks blockchain, so we need to prep it, even
     // though it isn't necessary for our test.
+    let db2 = db.clone();
     ctx.with_stacks_client(|client| {
         client
             .expect_get_tenure_info()
@@ -1181,6 +1224,29 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
         client
             .expect_get_sortition_info()
             .returning(|_| Box::pin(std::future::ready(Ok(DUMMY_SORTITION_INFO.clone()))));
+
+        client
+            .expect_get_sbtc_total_supply()
+            .returning(move |_| Box::pin(async move { Ok(Amount::ZERO) }));
+
+        client
+            .expect_get_current_signer_set_info()
+            .returning(move |_| {
+                let db2 = db2.clone();
+
+                Box::pin(async move {
+                    let info = db2.get_latest_verified_dkg_shares().await?;
+                    Ok(info.map(Into::into))
+                })
+            });
+
+        client.expect_get_contract_source().returning(|_, _| {
+            Box::pin(async {
+                Err(Error::StacksNodeResponse(
+                    mock_reqwests_status_code_error(404).await,
+                ))
+            })
+        });
     })
     .await;
 
@@ -1200,9 +1266,10 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
+    let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
     let block_observer = BlockObserver {
         context: ctx.clone(),
-        bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT).await,
+        bitcoin_block_source,
     };
 
     // In this test the signer set public keys start empty. When running
@@ -1225,12 +1292,13 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
 
     // Let's generate a new block and wait for our block observer to send a
     // BitcoinBlockObserved signal.
-    let chain_tip = faucet.generate_blocks(1).pop().unwrap().into();
+    let chain_tip = faucet.generate_block().into();
 
     ctx.wait_for_signal(Duration::from_secs(3), |signal| {
         matches!(
             signal,
-            SignerSignal::Event(SignerEvent::BitcoinBlockObserved)
+            SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
+                if block_ref.block_hash == chain_tip
         )
     })
     .await
@@ -1250,32 +1318,27 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
     assert_eq!(state.get_current_limits(), SbtcLimits::unlimited());
     assert!(state.registry_signer_set_info().is_none());
 
-    // Okay now we're going to show what happens if we have received a key
-    // rotation event. Such events take priority over DKG shares, even if
-    // the DKG shares are newer. So let's add such an event to the
-    // database. First we need a stacks block for the join.
-    let stacks_block = StacksBlock {
-        bitcoin_anchor: chain_tip,
-        ..Faker.fake_with_rng(&mut rng)
-    };
+    // Okay now we're going to show what happens if we the stacks node has
+    // received a key-rotation contract call. However, we are mocking
+    // stacks and using entries in the DKG shares table as a proxy for the
+    // key rotation contract call.
+    let mut dkg_shares: EncryptedDkgShares = Faker.fake_with_rng(&mut rng);
+    dkg_shares.dkg_shares_status = model::DkgSharesStatus::Verified;
 
-    db.write_stacks_block(&stacks_block).await.unwrap();
-
-    let mut rotate_keys: KeyRotationEvent = Faker.fake_with_rng(&mut rng);
-    rotate_keys.block_hash = stacks_block.block_hash;
-
-    db.write_rotate_keys_transaction(&rotate_keys)
-        .await
-        .unwrap();
+    db.write_encrypted_dkg_shares(&dkg_shares).await.unwrap();
+    // We need to set this to true so that the block observer updates the
+    // signer state with the correct signer set info.
+    ctx.state().set_sbtc_contracts_deployed();
 
     // Let's generate a new block and wait for our block observer to send a
     // BitcoinBlockObserved signal.
-    let chain_tip = faucet.generate_blocks(1).pop().unwrap().into();
+    let chain_tip = faucet.generate_block().into();
 
     ctx.wait_for_signal(Duration::from_secs(3), |signal| {
         matches!(
             signal,
-            SignerSignal::Event(SignerEvent::BitcoinBlockObserved)
+            SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
+                if block_ref.block_hash == chain_tip
         )
     })
     .await
@@ -1289,13 +1352,13 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
 
     // We expect the signer state to be the same as what is in the rotate
     // keys event in the database.
-    let signer_set = rotate_keys.signer_set.iter().copied().collect();
+    let signer_set = dkg_shares.signer_set_public_keys();
     let signer_set_info = state.registry_signer_set_info().unwrap();
     assert_eq!(state.get_current_limits(), SbtcLimits::unlimited());
-    assert_eq!(signer_set_info.aggregate_key, rotate_keys.aggregate_key);
+    assert_eq!(signer_set_info.aggregate_key, dkg_shares.aggregate_key);
     assert_eq!(
         signer_set_info.signatures_required,
-        rotate_keys.signatures_required
+        dkg_shares.signature_share_threshold
     );
     assert_eq!(signer_set_info.signer_set, signer_set);
 
@@ -1313,7 +1376,7 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
     let (rpc, faucet) = regtest::initialize_blockchain();
     let db = testing::storage::new_test_database().await;
     let verification_window = 5;
-    let mut ctx = TestContext::builder()
+    let ctx = TestContext::builder()
         .modify_settings(|config| config.signer.dkg_verification_window = verification_window)
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
@@ -1350,6 +1413,14 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
         client
             .expect_get_sortition_info()
             .returning(|_| Box::pin(std::future::ready(Ok(DUMMY_SORTITION_INFO.clone()))));
+
+        client.expect_get_contract_source().returning(|_, _| {
+            Box::pin(async {
+                Err(Error::StacksNodeResponse(
+                    mock_reqwests_status_code_error(404).await,
+                ))
+            })
+        });
     })
     .await;
 
@@ -1369,9 +1440,10 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
+    let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
     let block_observer = BlockObserver {
         context: ctx.clone(),
-        bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT).await,
+        bitcoin_block_source,
     };
 
     // In this test the signer set public keys start empty. When running
@@ -1400,12 +1472,13 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
 
     // Let's generate a new block and wait for our block observer to send a
     // BitcoinBlockObserved signal.
-    let chain_tip = faucet.generate_blocks(1).pop().unwrap().into();
+    let chain_tip = faucet.generate_block().into();
 
     ctx.wait_for_signal(Duration::from_secs(3), |signal| {
         matches!(
             signal,
-            SignerSignal::Event(SignerEvent::BitcoinBlockObserved)
+            SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
+                if block_ref.block_hash == chain_tip
         )
     })
     .await
@@ -1453,12 +1526,13 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
 
     // While in the verification window, we expect the share to stay in pending
     for _ in 0..verification_window {
-        let chain_tip = faucet.generate_blocks(1).pop().unwrap().into();
+        let chain_tip = faucet.generate_block().into();
 
         ctx.wait_for_signal(Duration::from_secs(3), |signal| {
             matches!(
                 signal,
-                SignerSignal::Event(SignerEvent::BitcoinBlockObserved)
+                SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
+                    if block_ref.block_hash == chain_tip
             )
         })
         .await
@@ -1486,12 +1560,13 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
     }
 
     // With this block we exit the verification window
-    let chain_tip = faucet.generate_blocks(1).pop().unwrap().into();
+    let chain_tip = faucet.generate_block().into();
 
     ctx.wait_for_signal(Duration::from_secs(3), |signal| {
         matches!(
             signal,
-            SignerSignal::Event(SignerEvent::BitcoinBlockObserved)
+            SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
+                if block_ref.block_hash == chain_tip
         )
     })
     .await
@@ -1546,7 +1621,7 @@ async fn block_observer_ignores_coinbase() {
     // 1. Create a database, an associated context for the block observer.
 
     let db = testing::storage::new_test_database().await;
-    let mut ctx = TestContext::builder()
+    let ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
         .with_emily_client(emily_client.clone())
@@ -1575,6 +1650,14 @@ async fn block_observer_ignores_coinbase() {
                 .map_err(Error::JsonSerialize);
             Box::pin(std::future::ready(response))
         });
+
+        client.expect_get_contract_source().returning(|_, _| {
+            Box::pin(async {
+                Err(Error::StacksNodeResponse(
+                    mock_reqwests_status_code_error(404).await,
+                ))
+            })
+        });
     })
     .await;
 
@@ -1587,9 +1670,10 @@ async fn block_observer_ignores_coinbase() {
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
+    let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
     let block_observer = BlockObserver {
         context: ctx.clone(),
-        bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT).await,
+        bitcoin_block_source,
     };
 
     tokio::spawn(async move {
@@ -1628,14 +1712,16 @@ async fn block_observer_ignores_coinbase() {
     let donation_amount = 123_456;
     let donation_outpoint = faucet.send_to(donation_amount, &address);
 
-    rpc.generate_to_address(1, &address).unwrap();
+    let chain_tip = rpc.generate_to_address(1, &address).unwrap().pop().unwrap();
 
     // Let's wait for the block observer to signal that it has finished
     // processing everything.
     let signal = signal_receiver.recv();
-    let Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved)) = signal.await else {
-        panic!("Not the right signal")
-    };
+    match signal.await {
+        Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref)))
+            if *block_ref.block_hash == chain_tip => {}
+        _ => panic!("Not the right signal"),
+    }
 
     // Okay now we check we ignored the coinbase donation but processed the
     // block as expected and have the second donation.
@@ -1661,12 +1747,15 @@ async fn block_observer_ignores_coinbase() {
     let (deposit_tx, deposit_request) =
         make_coinbase_deposit_request(rpc, max_fee, signers_public_key);
 
+    let chain_tip = get_canonical_chain_tip(rpc).hash;
     // `make_coinbase_deposit_request` will generate a block, ensure we process
     // it just fine.
     let signal = signal_receiver.recv();
-    let Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved)) = signal.await else {
-        panic!("Not the right signal")
-    };
+    match signal.await {
+        Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref)))
+            if *block_ref.block_hash == chain_tip => {}
+        _ => panic!("Not the right signal"),
+    }
 
     // ** Step 5 **
     //
@@ -1685,14 +1774,16 @@ async fn block_observer_ignores_coinbase() {
     // ** Step 6 **
     //
     // Check that the block observer populates the tables correctly
-    faucet.generate_blocks(1);
+    let chain_tip = faucet.generate_block().into();
 
     // Okay now there is a deposit, and it has been confirmed. We should
     // pick it up automatically.
     let signal = signal_receiver.recv();
-    let Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved)) = signal.await else {
-        panic!("Not the right signal")
-    };
+    match signal.await {
+        Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref)))
+            if block_ref.block_hash == chain_tip => {}
+        _ => panic!("Not the right signal"),
+    }
 
     // We should have two donations if we processed both blocks correctly
     let donations = fetch_output(&db, TxOutputType::Donation).await;

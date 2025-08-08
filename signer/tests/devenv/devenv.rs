@@ -22,8 +22,6 @@ use bitcoin::XOnlyPublicKey;
 use bitcoin::absolute::LockTime;
 use bitcoin::transaction::Version;
 use bitvec::array::BitArray;
-use clarity::vm::ClarityName;
-use clarity::vm::ContractName;
 use clarity::vm::Value;
 use clarity::vm::types::PrincipalData;
 use fake::Fake as _;
@@ -37,8 +35,10 @@ use sbtc::testing::regtest::AsUtxo;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::to_value;
+use signer::bitcoin::poller::BitcoinChainTipPoller;
 use signer::bitcoin::utxo::DepositRequest;
 use signer::error::Error;
+use signer::stacks::api::ClarityName;
 use signer::stacks::contracts::SmartContract;
 use signer::storage::model::TaprootScriptHash;
 use std::sync::Arc;
@@ -78,7 +78,6 @@ use signer::testing::context::*;
 use signer::testing::storage::DbReadTestExt as _;
 use url::Url;
 
-const BITCOIN_CORE_ZMQ_ENDPOINT: &str = "tcp://localhost:28332";
 const DEVENV_DEPLOYER: &str = "SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS";
 const DEVENV_STACKS_API: &str = "http://127.0.0.1:3999";
 
@@ -91,7 +90,7 @@ async fn process_blocks_simple_fork() {
 
     let stacks_client = StacksClient::new(Url::parse("http://127.0.0.1:20443").unwrap()).unwrap();
 
-    let mut ctx = TestContext::builder()
+    let ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
         .with_stacks_client(stacks_client.clone())
@@ -113,9 +112,11 @@ async fn process_blocks_simple_fork() {
     })
     .await;
 
+    let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
+
     let block_observer = BlockObserver {
         context: ctx.clone(),
-        bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT).await,
+        bitcoin_block_source,
     };
 
     // We need to wait for the block observer to be up
@@ -139,9 +140,11 @@ async fn process_blocks_simple_fork() {
 
     // Let's wait for the block observer signal
     let signal = signal_rx.recv();
-    let Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved)) = signal.await else {
-        panic!("Not the right signal")
-    };
+    match signal.await {
+        Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref)))
+            if *block_ref.block_hash == block_1a => {}
+        _ => panic!("Not the right signal"),
+    }
 
     let (bitcoin_tip_original, _) = db.get_chain_tips().await;
     assert_eq!(block_1a, bitcoin_tip_original.block_hash.into());
@@ -157,9 +160,11 @@ async fn process_blocks_simple_fork() {
 
     // Let's wait for the block observer signal
     let signal = signal_rx.recv();
-    let Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved)) = signal.await else {
-        panic!("Not the right signal")
-    };
+    match signal.await {
+        Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref)))
+            if *block_ref.block_hash == block_2b => {}
+        _ => panic!("Not the right signal"),
+    }
 
     let (bitcoin_tip_fork, _) = db.get_chain_tips().await;
     assert_eq!(block_2b, bitcoin_tip_fork.block_hash.into());
@@ -283,8 +288,8 @@ async fn get_sbtc_balance(
     let result = stacks_client
         .call_read(
             deployer,
-            &ContractName::from(SmartContract::SbtcToken.contract_name()),
-            &ClarityName::from("get-balance"),
+            SmartContract::SbtcToken,
+            ClarityName("get-balance"),
             deployer,
             &[Value::Principal(address.clone())],
         )

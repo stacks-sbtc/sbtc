@@ -17,7 +17,6 @@ bitcoin.workspace = true
 bitcoinconsensus.workspace = true
 bitcoincore-rpc.workspace = true
 bitcoincore-rpc-json.workspace = true
-bitcoincore-zmq.workspace = true
 bitvec.workspace = true
 blocklist-api.workspace = true
 cfg-if.workspace = true
@@ -37,6 +36,7 @@ p256k1.workspace = true
 polynomial.workspace = true
 prost.workspace = true
 rand.workspace = true
+rand_chacha.workspace = true
 reqwest.workspace = true
 sbtc = { workspace = true, features = ["webhooks"] }
 secp256k1.workspace = true

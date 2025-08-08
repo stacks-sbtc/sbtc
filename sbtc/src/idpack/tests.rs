@@ -132,8 +132,7 @@ fn roundtrip_test(values: &[u64]) -> Result<(), String> {
     for (idx, (original, decoded)) in values.iter().zip(decoded_values.iter()).enumerate() {
         if original != decoded {
             return Err(format!(
-                "mismatch at index {}: original={}, decoded={}",
-                idx, original, decoded
+                "mismatch at index {idx}: original={original}, decoded={decoded}"
             ));
         }
     }

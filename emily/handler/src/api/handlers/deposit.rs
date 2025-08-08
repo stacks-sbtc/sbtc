@@ -8,7 +8,7 @@ use tracing::instrument;
 use warp::http::StatusCode;
 use warp::reply::{Reply, json, with_status};
 
-use crate::api::models::common::Status;
+use crate::api::models::common::DepositStatus;
 use crate::api::models::common::requests::BasicPaginationQuery;
 use crate::api::models::deposit::responses::{
     DepositWithStatus, GetDepositsForTransactionResponse, UpdateDepositsResponse,
@@ -24,7 +24,7 @@ use crate::api::models::{
 use crate::common::error::Error;
 use crate::context::EmilyContext;
 use crate::database::accessors;
-use crate::database::entries::StatusEntry;
+use crate::database::entries::DepositStatusEntry;
 use crate::database::entries::chainstate::ApiStateEntry;
 use crate::database::entries::deposit::{
     DepositEntry, DepositEntryKey, DepositEvent, DepositParametersEntry,
@@ -145,7 +145,7 @@ pub async fn get_deposits_for_transaction(
     operation_id = "getDeposits",
     path = "/deposit",
     params(
-        ("status" = Status, Query, description = "the status to search by when getting all deposits."),
+        ("status" = DepositStatus, Query, description = "the status to search by when getting all deposits."),
         ("nextToken" = Option<String>, Query, description = "the next token value from the previous return of this api call."),
         ("pageSize" = Option<u16>, Query, description = "the maximum number of items in the response list.")
     ),
@@ -376,12 +376,12 @@ pub async fn create_deposit(
                 lock_time: deposit_info.lock_time.to_consensus_u32(),
             },
             history: vec![DepositEvent {
-                status: StatusEntry::Pending,
+                status: DepositStatusEntry::Pending,
                 message: "Just received deposit".to_string(),
                 stacks_block_hash: stacks_block_hash.clone(),
                 stacks_block_height,
             }],
-            status: Status::Pending,
+            status: DepositStatus::Pending,
             last_update_block_hash: stacks_block_hash,
             last_update_height: stacks_block_height,
             amount: deposit_info.amount,
@@ -500,7 +500,7 @@ async fn update_deposits(
 ) -> Result<impl warp::reply::Reply, Error> {
     // Validate request.
     let validated_request: ValidatedUpdateDepositsRequest =
-        body.try_into_validated_update_request(api_state.chaintip().into())?;
+        body.into_validated_update_request(api_state.chaintip().into());
 
     // Create aggregator.
     let mut updated_deposits: Vec<(usize, DepositWithStatus)> =
@@ -508,11 +508,14 @@ async fn update_deposits(
 
     // Loop through all updates and execute.
     for (index, update) in validated_request.deposits {
-        if update.is_err() {
+        if let Err(error) = update {
+            // This error is a ValidationError: it shouldn't contain any
+            // sensitive information.
             updated_deposits.push((
                 index,
                 DepositWithStatus {
-                    deposit: Deposit::default(),
+                    deposit: None,
+                    error: Some(error.to_string()),
                     status: StatusCode::BAD_REQUEST.as_u16(),
                 },
             ));
@@ -547,7 +550,8 @@ async fn update_deposits(
                 updated_deposits.push((
                     index,
                     DepositWithStatus {
-                        deposit: Deposit::default(),
+                        deposit: None,
+                        error: Some(Error::NotFound.to_string()),
                         status: StatusCode::NOT_FOUND.as_u16(),
                     },
                 ));
@@ -562,7 +566,8 @@ async fn update_deposits(
                 updated_deposits.push((
                     index,
                     DepositWithStatus {
-                        deposit: Deposit::default(),
+                        deposit: None,
+                        error: Some(Error::Forbidden.to_string()),
                         status: StatusCode::FORBIDDEN.as_u16(),
                     },
                 ));
@@ -578,7 +583,8 @@ async fn update_deposits(
                 updated_deposits.push((
                     index,
                     DepositWithStatus {
-                        deposit: Deposit::default(),
+                        deposit: None,
+                        error: Some(error.into_production_error().to_string()),
                         status: StatusCode::INTERNAL_SERVER_ERROR.as_u16(),
                     },
                 ));
@@ -599,14 +605,15 @@ async fn update_deposits(
         updated_deposits.push((
             index,
             DepositWithStatus {
-                deposit,
+                error: None,
+                deposit: Some(deposit),
                 status: StatusCode::OK.as_u16(),
             },
         ));
     }
 
     updated_deposits.sort_by_key(|(index, _)| *index);
-    let deposits = updated_deposits
+    let deposits: Vec<_> = updated_deposits
         .into_iter()
         .map(|(_, deposit)| deposit)
         .collect();

@@ -16,10 +16,10 @@ use crate::error::Error;
 
 pub mod client;
 pub mod packaging;
+pub mod poller;
 pub mod rpc;
 pub mod utxo;
 pub mod validation;
-pub mod zmq;
 
 /// Result of a call to `get_transaction_fee`.
 #[derive(Debug, Clone)]
@@ -147,4 +147,30 @@ pub trait BitcoinInteract: Sync + Send {
     fn get_network_info(
         &self,
     ) -> impl Future<Output = Result<bitcoincore_rpc_json::GetNetworkInfoResult, Error>> + Send;
+
+    /// Gets the best (canonical, chain tip from chain with most work) block hash from the Bitcoin node.
+    fn get_best_block_hash(&self) -> impl Future<Output = Result<BlockHash, Error>> + Send;
+}
+
+/// A trait for providing a stream of block hashes to be used by the block observer.
+///
+/// Implementors of this trait are responsible for sourcing block hash notifications,
+/// such as new chain tips from a Bitcoin Core node, and making them available as an
+/// asynchronous stream. This abstraction allows different components, such as
+/// block observers or test utilities, to consume block hash events without being
+/// coupled to the specific mechanism of how those events are obtained.
+pub trait BitcoinBlockHashStreamProvider: Send + Sync {
+    /// The error type that this provider can return.
+    type Error: std::error::Error;
+
+    /// Subscribes to the block hash stream, returning a new stream that emits
+    /// block hashes as they are received.
+    ///
+    /// The returned stream will yield `Result<BlockHash, Self::Error>`.
+    ///
+    /// Consumers of this stream are responsible for mapping the error
+    /// to a broader application error type (like `crate::error::Error`) if needed.
+    fn get_block_hash_stream(
+        &self,
+    ) -> impl futures::Stream<Item = Result<BlockHash, Self::Error>> + Send + Sync + Unpin + 'static;
 }

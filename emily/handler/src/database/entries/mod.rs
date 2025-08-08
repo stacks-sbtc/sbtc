@@ -54,7 +54,7 @@ use serde::{Deserialize, Serialize};
 use serde_dynamo::Item;
 
 use crate::{
-    api::models::common::{Fulfillment, Status},
+    api::models::common::{DepositStatus, Fulfillment, WithdrawalStatus},
     common::error::Error,
     context::Settings,
 };
@@ -71,16 +71,42 @@ pub mod withdrawal;
 // Event structure
 // -----------------------------------------------------------------------------
 
-/// Status entry.
+/// Deposit Status entry.
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
 #[serde(rename_all = "PascalCase")]
-pub enum StatusEntry {
+pub enum DepositStatusEntry {
     /// Transaction hasn't yet been addressed by the sBTC Signers.
     #[default]
     Pending,
-    /// Transaction was dealt with by the signers at one point but is now being
-    /// reprocessed. The Signers are aware of the operation request.
-    Reprocessing,
+    /// Transaction has been seen and accepted by the sBTC Signers, but is not
+    /// yet included in any on chain artifact. The transaction can still fail
+    /// at this point if the Signers fail to include the transaction in an on
+    /// chain artifact.
+    ///
+    /// For example, a deposit or withdrawal that has specified too low of a
+    /// BTC fee may fail after being accepted.
+    Accepted,
+    /// The artifacts that fulfill the operation have been observed in a valid fork of
+    /// both the Stacks blockchain and the Bitcoin blockchain by at least one signer.
+    ///
+    /// Note that if the signers detect a conflicting chainstate in which the operation
+    /// is not confirmed this status will be reverted to either ACCEPTED or REEVALUATING
+    /// depending on whether the conflicting chainstate calls the acceptance into question.
+    Confirmed(Fulfillment),
+    /// The operation was not fulfilled.
+    Failed,
+    /// Transaction was replaced by another transaction via RBF.
+    /// Inner string is transaction ID of replacement transaction.
+    Rbf(String),
+}
+
+/// Deposit Status entry.
+#[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
+#[serde(rename_all = "PascalCase")]
+pub enum WithdrawalStatusEntry {
+    /// Transaction hasn't yet been addressed by the sBTC Signers.
+    #[default]
+    Pending,
     /// Transaction has been seen and accepted by the sBTC Signers, but is not
     /// yet included in any on chain artifact. The transaction can still fail
     /// at this point if the Signers fail to include the transaction in an on
@@ -100,14 +126,25 @@ pub enum StatusEntry {
     Failed,
 }
 
-impl From<&StatusEntry> for Status {
-    fn from(value: &StatusEntry) -> Self {
+impl From<&DepositStatusEntry> for DepositStatus {
+    fn from(value: &DepositStatusEntry) -> Self {
         match value {
-            StatusEntry::Pending => Status::Pending,
-            StatusEntry::Reprocessing => Status::Reprocessing,
-            StatusEntry::Accepted => Status::Accepted,
-            StatusEntry::Confirmed(_) => Status::Confirmed,
-            StatusEntry::Failed => Status::Failed,
+            DepositStatusEntry::Pending => DepositStatus::Pending,
+            DepositStatusEntry::Accepted => DepositStatus::Accepted,
+            DepositStatusEntry::Confirmed(_) => DepositStatus::Confirmed,
+            DepositStatusEntry::Failed => DepositStatus::Failed,
+            DepositStatusEntry::Rbf(_) => DepositStatus::Rbf,
+        }
+    }
+}
+
+impl From<&WithdrawalStatusEntry> for WithdrawalStatus {
+    fn from(value: &WithdrawalStatusEntry) -> Self {
+        match value {
+            WithdrawalStatusEntry::Pending => WithdrawalStatus::Pending,
+            WithdrawalStatusEntry::Accepted => WithdrawalStatus::Accepted,
+            WithdrawalStatusEntry::Confirmed(_) => WithdrawalStatus::Confirmed,
+            WithdrawalStatusEntry::Failed => WithdrawalStatus::Failed,
         }
     }
 }

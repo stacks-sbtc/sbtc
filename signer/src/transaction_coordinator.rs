@@ -68,6 +68,7 @@ use crate::stacks::wallet::MultisigTx;
 use crate::stacks::wallet::SignerWallet;
 use crate::storage::DbRead;
 use crate::storage::model;
+use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::StacksTxId;
 use crate::wsts_state_machine::FireCoordinator;
 use crate::wsts_state_machine::FrostCoordinator;
@@ -201,7 +202,7 @@ fn run_loop_message_filter(signal: &SignerSignal) -> bool {
     matches!(
         signal,
         SignerSignal::Event(SignerEvent::RequestDecider(
-            RequestDeciderEvent::NewRequestsHandled,
+            RequestDeciderEvent::NewRequestsHandled(_),
         )) | SignerSignal::Command(SignerCommand::Shutdown)
     )
 }
@@ -231,22 +232,18 @@ where
             match message {
                 SignerSignal::Command(SignerCommand::Shutdown) => break,
                 SignerSignal::Command(SignerCommand::P2PPublish(_)) => {}
-                SignerSignal::Event(event) => {
-                    if let SignerEvent::RequestDecider(RequestDeciderEvent::NewRequestsHandled) =
-                        event
-                    {
-                        tracing::debug!("received signal; processing requests");
-                        if let Err(error) = self.process_new_blocks().await {
-                            tracing::error!(
-                                %error,
-                                "error processing requests; skipping this round"
-                            );
-                        }
-                        tracing::trace!("sending tenure completed signal");
-                        self.context
-                            .signal(TxCoordinatorEvent::TenureCompleted.into())?;
+                SignerSignal::Event(SignerEvent::RequestDecider(
+                    RequestDeciderEvent::NewRequestsHandled(chain_tip),
+                )) => {
+                    tracing::debug!("received signal; processing requests");
+                    if let Err(error) = self.process_new_blocks(chain_tip).await {
+                        tracing::error!(%error, "error processing requests; skipping this round");
                     }
+                    tracing::trace!("sending tenure completed signal");
+                    self.context
+                        .signal(TxCoordinatorEvent::TenureCompleted.into())?;
                 }
+                SignerSignal::Event(_) => {}
             }
         }
 
@@ -288,11 +285,22 @@ where
     /// A function for processing new blocks
     #[tracing::instrument(skip_all, fields(
         public_key = %self.signer_public_key(),
-        bitcoin_tip_hash = tracing::field::Empty,
-        bitcoin_tip_height = tracing::field::Empty,
+        bitcoin_tip_hash = %bitcoin_chain_tip.block_hash,
+        bitcoin_tip_height = %bitcoin_chain_tip.block_height,
     ))]
-    pub async fn process_new_blocks(&mut self) -> Result<(), Error> {
+    pub async fn process_new_blocks(
+        &mut self,
+        bitcoin_chain_tip: BitcoinBlockRef,
+    ) -> Result<(), Error> {
         if !self.is_epoch3().await? {
+            return Ok(());
+        }
+
+        // If we are not the coordinator, then we have no business
+        // coordinating DKG or constructing bitcoin and stacks
+        // transactions, might as well return early.
+        if !self.is_coordinator(bitcoin_chain_tip.as_ref()) {
+            tracing::debug!("we are not the coordinator, so nothing to do");
             return Ok(());
         }
 
@@ -302,38 +310,28 @@ where
             tokio::time::sleep(bitcoin_processing_delay).await;
         }
 
-        let bitcoin_chain_tip = self
-            .context
-            .get_storage()
-            .get_bitcoin_canonical_chain_tip_ref()
-            .await?
-            .ok_or(Error::NoChainTip)?;
+        // If we need to bail here then there is some bug in the code,
+        // since `process_new_blocks` should only be called after the state
+        // has been updated with the bitcoin chain tip.
+        let Some(state_chain_tip) = self.context.state().bitcoin_chain_tip() else {
+            tracing::error!("no bitcoin chain tip in state, skipping processing");
+            return Err(Error::NoChainTip);
+        };
 
-        let span = tracing::Span::current();
-        span.record(
-            "bitcoin_tip_hash",
-            tracing::field::display(bitcoin_chain_tip.block_hash),
-        );
-        span.record("bitcoin_tip_height", *bitcoin_chain_tip.block_height);
-
-        let registry_aggregate_key = self
-            .context
-            .state()
-            .registry_signer_set_info()
-            .map(|info| info.aggregate_key);
-
-        // If we are not the coordinator, then we have no business
-        // coordinating DKG or constructing bitcoin and stacks
-        // transactions, might as well return early.
-        if !self.is_coordinator(bitcoin_chain_tip.as_ref()) {
-            // Before returning, we also check if all the smart contracts are
-            // deployed: we do this as some other coordinator could have deployed
-            // them, in which case we need to updated our state.
-            self.all_smart_contracts_deployed().await?;
-
-            tracing::debug!("we are not the coordinator, so nothing to do");
+        // The bitcoin chain tip could have changed since we observed the
+        // bitcoin block given as an input here. If so, we can safely skip
+        // processing this block since other signers are likely to ignore
+        // us.
+        if bitcoin_chain_tip != state_chain_tip {
+            tracing::info!(
+                state_bitcoin_tip_hash = %state_chain_tip.block_hash,
+                state_bitcoin_tip_height = %state_chain_tip.block_height,
+                "bitcoin chain tip has changed, skipping processing"
+            );
             return Ok(());
         }
+
+        let maybe_registry_signer_set_info = self.context.state().registry_signer_set_info();
 
         tracing::debug!("we are the coordinator");
         metrics::counter!(Metrics::CoordinatorTenuresTotal).increment(1);
@@ -342,17 +340,33 @@ where
         let should_coordinate_dkg =
             should_coordinate_dkg(&self.context, &bitcoin_chain_tip).await?;
         let aggregate_key = if should_coordinate_dkg {
-            match self.coordinate_dkg(bitcoin_chain_tip.as_ref()).await {
+            match self.coordinate_dkg(&bitcoin_chain_tip).await {
                 Ok(key) => key,
                 Err(error) => {
                     tracing::error!(%error, "failed to coordinate DKG; using existing aggregate key");
-                    registry_aggregate_key
+                    maybe_registry_signer_set_info
+                        .as_ref()
+                        .map(|info| info.aggregate_key)
                         .ok_or(Error::MissingAggregateKey(*bitcoin_chain_tip.block_hash))?
                 }
             }
         } else {
-            registry_aggregate_key
-                .ok_or(Error::MissingAggregateKey(*bitcoin_chain_tip.block_hash))?
+            // If we do not have signer set info in the registry, then we
+            // are in the bootstrap phase. Our latest DKG shares may be
+            // 'Unverified', but if we are here then they were not 'Failed'
+            // when we made to call to `should_coordinate_dkg`, since we
+            // will coordinate DKG if our last DKG shares are 'Failed'. But
+            // we could be loading 'Failed' shares here.
+            match maybe_registry_signer_set_info.as_ref() {
+                Some(info) => info.aggregate_key,
+                None => self
+                    .context
+                    .get_storage()
+                    .get_latest_encrypted_dkg_shares()
+                    .await?
+                    .map(|shares| shares.aggregate_key)
+                    .ok_or(Error::NoDkgShares)?,
+            }
         };
 
         let chain_tip_hash = &bitcoin_chain_tip.block_hash;
@@ -360,11 +374,18 @@ where
         tracing::debug!("loading the signer stacks wallet");
         let wallet = self.get_signer_wallet().await?;
 
-        self.deploy_smart_contracts(chain_tip_hash, &wallet, &aggregate_key)
-            .await?;
+        if !self.context.state().sbtc_contracts_deployed() {
+            self.deploy_smart_contracts(chain_tip_hash, &wallet, &aggregate_key)
+                .await?;
 
-        let rotate_key_txid =
-            self.check_and_submit_rotate_key_transaction(chain_tip_hash, &wallet, &aggregate_key);
+            return Ok(());
+        }
+
+        let rotate_key_txid = self.check_and_submit_rotate_key_transaction(
+            &bitcoin_chain_tip,
+            &wallet,
+            &aggregate_key,
+        );
 
         // If a rotate-keys contract call has been submitted, we stop our
         // tenure to make sure that all signers are up to date with the
@@ -378,10 +399,7 @@ where
             return Ok(());
         }
 
-        let signer_public_keys = self
-            .context
-            .state()
-            .registry_signer_set_info()
+        let signer_public_keys = maybe_registry_signer_set_info
             .map(|info| info.signer_set)
             .ok_or_else(|| Error::NoKeyRotationEvent)?;
 
@@ -411,14 +429,10 @@ where
     #[tracing::instrument(skip_all)]
     async fn check_and_submit_rotate_key_transaction(
         &mut self,
-        bitcoin_chain_tip: &model::BitcoinBlockHash,
+        bitcoin_chain_tip: &model::BitcoinBlockRef,
         wallet: &SignerWallet,
         aggregate_key: &PublicKey,
     ) -> Result<Option<StacksTxId>, Error> {
-        if !self.all_smart_contracts_deployed().await? {
-            return Ok(None);
-        }
-
         let last_dkg = self
             .context
             .get_storage()
@@ -432,12 +446,16 @@ where
 
         let current_aggregate_key = self
             .context
-            .get_stacks_client()
-            .get_current_signers_aggregate_key(&self.context.config().signer.deployer)
-            .await?;
+            .state()
+            .registry_signer_set_info()
+            .map(|info| info.aggregate_key);
 
-        let (needs_verification, needs_rotate_key) =
-            assert_rotate_key_action(&last_dkg, current_aggregate_key)?;
+        let (needs_verification, needs_rotate_key) = assert_rotate_key_action(
+            &self.context,
+            &last_dkg,
+            current_aggregate_key,
+            bitcoin_chain_tip,
+        )?;
         if !needs_verification && !needs_rotate_key {
             tracing::debug!(
                 "stacks node is up to date with the current aggregate key and no DKG verification required"
@@ -451,7 +469,7 @@ where
             tracing::info!(
                 "🔐 beginning DKG verification before submitting rotate-key transaction"
             );
-            self.perform_dkg_verification(bitcoin_chain_tip, &last_dkg.aggregate_key)
+            self.perform_dkg_verification(&bitcoin_chain_tip.block_hash, &last_dkg.aggregate_key)
                 .await?;
             tracing::info!("🔐 DKG verification successful");
         }
@@ -470,7 +488,7 @@ where
             tracing::info!("preparing to submit a rotate-key transaction");
             let txid = self
                 .construct_and_sign_rotate_key_transaction(
-                    bitcoin_chain_tip,
+                    &bitcoin_chain_tip.block_hash,
                     signing_key,
                     &last_dkg.aggregate_key,
                     wallet,
@@ -528,6 +546,7 @@ where
         let signal_stream = self.context.as_signal_stream(presign_ack_filter);
 
         // Send the presign request message
+        tracing::debug!(request = %sbtc_requests, "sending pre-sign request");
         self.send_message(sbtc_requests, bitcoin_chain_tip).await?;
 
         tokio::pin!(signal_stream);
@@ -777,7 +796,7 @@ where
         );
 
         for req in swept_deposits {
-            if &self.context.state().bitcoin_chain_tip() != chain_tip {
+            if self.context.state().bitcoin_chain_tip().as_ref() != Some(chain_tip) {
                 tracing::info!("new bitcoin chain tip, stopping coordinator activities");
                 return Ok(());
             }
@@ -877,7 +896,7 @@ where
         );
 
         for swept_request in swept_withdrawals {
-            if &self.context.state().bitcoin_chain_tip() != chain_tip {
+            if self.context.state().bitcoin_chain_tip().as_ref() != Some(chain_tip) {
                 tracing::info!("new bitcoin chain tip, stopping coordinator activities");
                 return Ok(());
             }
@@ -900,7 +919,7 @@ where
         }
 
         for withdrawal in rejected_withdrawals {
-            if &self.context.state().bitcoin_chain_tip() != chain_tip {
+            if self.context.state().bitcoin_chain_tip().as_ref() != Some(chain_tip) {
                 tracing::info!("new bitcoin chain tip, stopping coordinator activities");
                 return Ok(());
             }
@@ -1465,12 +1484,10 @@ where
     ) -> Result<(), Error> {
         let db = self.context.get_storage();
         let sighashes = transaction.construct_digests()?;
-        let mut fire_coordinator = FireCoordinator::load(
-            &db,
-            sighashes.signers_aggregate_key.into(),
-            self.private_key,
-        )
-        .await?;
+        let locking_public_key = sighashes.signers_aggregate_key.into();
+        let mut fire_coordinator =
+            FireCoordinator::load(&db, locking_public_key, self.private_key).await?;
+
         let msg = sighashes.signers.to_raw_hash().to_byte_array();
 
         let txid = transaction.tx.compute_txid();
@@ -1590,7 +1607,7 @@ where
     where
         Coordinator: WstsCoordinator,
     {
-        let outbound = coordinator.start_signing_round(msg, signature_type)?;
+        let outbound = coordinator.start_signing_round(msg, bitcoin_chain_tip, signature_type)?;
 
         // We create a signal stream before sending a message so that there
         // is no race condition with the steam and the getting a response.
@@ -1623,13 +1640,16 @@ where
     #[tracing::instrument(skip_all)]
     async fn coordinate_dkg(
         &mut self,
-        chain_tip: &model::BitcoinBlockHash,
+        chain_tip: &model::BitcoinBlockRef,
     ) -> Result<PublicKey, Error> {
         tracing::info!("Coordinating DKG");
+        let block_hash = chain_tip.block_hash;
         // Get the current signer set for running DKG.
         let signer_set = self.context.config().signer.bootstrap_signing_set.clone();
 
-        let mut state_machine = FireCoordinator::new(signer_set, self.threshold, self.private_key);
+        let block_height = chain_tip.block_height;
+        let mut state_machine =
+            FireCoordinator::new(signer_set, self.threshold, self.private_key, block_height);
 
         // Okay let's move the coordinator state machine to the beginning
         // of the DKG phase.
@@ -1641,10 +1661,7 @@ where
             .start_public_shares()
             .map_err(Error::wsts_coordinator)?;
 
-        // We identify the DKG round by a 32-byte hash based on the coordinator
-        // identity and current bitcoin chain tip.
-        let identifier = self.coordinator_id(chain_tip);
-        let id = WstsMessageId::Dkg(identifier);
+        let id = WstsMessageId::Dkg(chain_tip.block_hash.into_bytes());
         let msg = message::WstsMessage { id, inner: outbound.msg };
 
         // We create a signal stream before sending a message so that there
@@ -1658,12 +1675,12 @@ where
         // running on the signers will pick up this message and act on it,
         // including our own. When they do they create a signing state
         // machine and begin DKG.
-        self.send_message(msg, chain_tip).await?;
+        self.send_message(msg, &block_hash).await?;
 
         // Now that DKG has "begun" we need to drive it to completion.
         let max_duration = self.dkg_max_duration;
         let dkg_fut =
-            self.drive_wsts_state_machine(signal_stream, chain_tip, &mut state_machine, id);
+            self.drive_wsts_state_machine(signal_stream, &block_hash, &mut state_machine, id);
 
         let operation_result = tokio::time::timeout(max_duration, dkg_fut)
             .await
@@ -1813,19 +1830,13 @@ where
         }
     }
 
-    // Determine if the current coordinator is the coordinator.
-    //
-    // The coordinator is decided using the hash of the bitcoin
-    // chain tip. We don't use the chain tip directly because
-    // it typically starts with a lot of leading zeros.
-    //
-    // Note that this function is technically not fallible,
-    // but for now we have chosen to return phantom errors
-    // instead of adding expects/unwraps in the code.
-    // Ideally the code should be formulated in a way to guarantee
-    // it being infallible without relying on sequentially coupling
-    // expressions. However, that is left for future work.
-    fn is_coordinator(&self, bitcoin_chain_tip: &model::BitcoinBlockHash) -> bool {
+    /// Determine if this signer is the signer set's coordinator for the
+    /// specified bitcoin block hash.
+    ///
+    /// The coordinator is decided using the hash of the bitcoin chain tip.
+    /// We don't use the chain tip directly because it typically starts
+    /// with a lot of leading zeros.
+    pub fn is_coordinator(&self, bitcoin_chain_tip: &model::BitcoinBlockHash) -> bool {
         given_key_is_coordinator(
             self.signer_public_key(),
             bitcoin_chain_tip,
@@ -2083,7 +2094,7 @@ where
         // done by the storage layer.
         let pending_deposit_requests = storage
             .get_pending_accepted_deposit_requests(
-                params.bitcoin_chain_tip.as_ref(),
+                params.bitcoin_chain_tip,
                 context_window,
                 params.signature_threshold,
             )
@@ -2184,16 +2195,6 @@ where
         }))
     }
 
-    /// This function provides a deterministic 32-byte identifier for the
-    /// signer.
-    fn coordinator_id(&self, chain_tip: &model::BitcoinBlockHash) -> [u8; 32] {
-        sha2::Sha256::new_with_prefix("SIGNER_COORDINATOR_ID")
-            .chain_update(self.signer_public_key().serialize())
-            .chain_update(chain_tip.into_bytes())
-            .finalize()
-            .into()
-    }
-
     /// Takes a [`Payload`], converts it to a [`Message`], signs it with the
     /// signer's private key, and broadcasts it to the network.
     ///
@@ -2218,6 +2219,7 @@ where
     }
 
     /// Deploy an sBTC smart contract to the stacks node.
+    #[tracing::instrument(skip_all, fields(smart_contract = %contract_deploy))]
     async fn deploy_smart_contract(
         &mut self,
         contract_deploy: SmartContract,
@@ -2306,34 +2308,12 @@ where
         wallet: &SignerWallet,
         bitcoin_aggregate_key: &PublicKey,
     ) -> Result<(), Error> {
-        if self.all_smart_contracts_deployed().await? {
-            return Ok(());
-        }
-
         for contract in SMART_CONTRACTS {
             self.deploy_smart_contract(contract, chain_tip, bitcoin_aggregate_key, wallet)
                 .await?;
         }
 
         Ok(())
-    }
-
-    async fn all_smart_contracts_deployed(&mut self) -> Result<bool, Error> {
-        if self.context.state().sbtc_contracts_deployed() {
-            return Ok(true);
-        }
-
-        let stacks = self.context.get_stacks_client();
-        let deployer = self.context.config().signer.deployer;
-
-        for contract in SMART_CONTRACTS {
-            if !contract.is_deployed(&stacks, &deployer).await? {
-                return Ok(false);
-            }
-        }
-
-        self.context.state().set_sbtc_contracts_deployed();
-        Ok(true)
     }
 
     async fn get_signer_wallet(&self) -> Result<SignerWallet, Error> {
@@ -2534,32 +2514,46 @@ pub async fn should_coordinate_dkg(
     let storage = context.get_storage();
     let config = context.config();
 
+    let latest_dkg_shares = storage.get_latest_non_failed_dkg_shares().await?;
+    let Some(latest_dkg_shares) = latest_dkg_shares else {
+        tracing::info!("no non-failed DKG shares exist; proceeding with DKG");
+        return Ok(true);
+    };
+
     // If the latest shares are unverified, we want to prioritize verifying them
     // instead of doing new DKG rounds. If we fail to do so they will eventually
     // be marked as failed, and we will resume DKG-ing.
-    let latest_dkg_shares = storage.get_latest_encrypted_dkg_shares().await?;
-    if latest_dkg_shares.map(|s| s.dkg_shares_status) == Some(model::DkgSharesStatus::Unverified) {
+    if latest_dkg_shares.dkg_shares_status == model::DkgSharesStatus::Unverified {
         tracing::debug!("latest shares are unverified; skipping DKG");
         return Ok(false);
     }
 
-    // If we do not have a key rotation event in the database, we will
-    // allow DKG below if we have not run DKG yet.
+    // If the registry has signer set info, we may need to run DKG based on it
     if let Some(registry_signer_info) = context.state().registry_signer_set_info() {
-        // Trigger DKG if signatures_required has changed
-        if registry_signer_info.signatures_required != config.signer.bootstrap_signatures_required {
-            tracing::info!("signatures required has changed; proceeding with DKG");
-            return Ok(true);
-        }
-
-        // Trigger DKG if signer set changes
-        if registry_signer_info.signer_set != config.signer.bootstrap_signing_set {
-            tracing::info!("signer set has changed; proceeding with DKG");
-            return Ok(true);
+        // If the registry differs from the config we may need to run DKG
+        if registry_signer_info.signatures_required != config.signer.bootstrap_signatures_required
+            || registry_signer_info.signer_set != config.signer.bootstrap_signing_set
+        {
+            // If we don't have new shares for the config already, we need DKG
+            if latest_dkg_shares.signature_share_threshold
+                != config.signer.bootstrap_signatures_required
+                || latest_dkg_shares.signer_set_public_keys() != config.signer.bootstrap_signing_set
+            {
+                tracing::info!(
+                    "signer set config differs from registry and latest DKG shares; proceeding with DKG"
+                );
+                return Ok(true);
+            } else {
+                tracing::debug!(
+                    "signer set config differs from registry, but we already have verified shares for it; checking other conditions"
+                );
+            }
         }
     }
 
-    // Get the number of DKG shares that have been stored
+    // Finally, we may need to run DKG because of config target rounds.
+
+    // Get the number of non-failed DKG shares that have been stored
     let dkg_shares_entry_count = storage.get_encrypted_dkg_shares_count().await?;
 
     // Get DKG configuration parameters
@@ -2572,14 +2566,6 @@ pub async fn should_coordinate_dkg(
         dkg_target_rounds,
         dkg_min_bitcoin_block_height,
     ) {
-        (0, _, _) => {
-            tracing::info!(
-                ?dkg_min_bitcoin_block_height,
-                %dkg_target_rounds,
-                "no DKG shares exist; proceeding with DKG"
-            );
-            Ok(true)
-        }
         (current, target, Some(dkg_min_height))
             if current < target.get() && bitcoin_chain_tip.block_height >= dkg_min_height =>
         {
@@ -2597,15 +2583,39 @@ pub async fn should_coordinate_dkg(
 
 /// Assert, given the last dkg and smart contract current aggregate key, if we
 /// need to verify the shares and/or issue a rotate key call.
-pub fn assert_rotate_key_action(
+pub fn assert_rotate_key_action<C>(
+    context: &C,
     last_dkg: &model::EncryptedDkgShares,
     current_aggregate_key: Option<PublicKey>,
-) -> Result<(bool, bool), Error> {
-    let needs_rotate_key = Some(last_dkg.aggregate_key) != current_aggregate_key;
+    bitcoin_chain_tip: &model::BitcoinBlockRef,
+) -> Result<(bool, bool), Error>
+where
+    C: Context,
+{
+    let base_needs_rotate_key = Some(last_dkg.aggregate_key) != current_aggregate_key;
+
+    // Check if past verification window, if we are, skip verification
+    let dkg_verification_window = context.config().signer.dkg_verification_window;
+    let max_verification_height = last_dkg
+        .started_at_bitcoin_block_height
+        .saturating_add(dkg_verification_window as u64);
+
+    let past_verification_window = bitcoin_chain_tip.block_height > max_verification_height;
 
     let needs_verification = match last_dkg.dkg_shares_status {
-        model::DkgSharesStatus::Unverified => true,
-        model::DkgSharesStatus::Verified => needs_rotate_key,
+        model::DkgSharesStatus::Unverified => !past_verification_window,
+        model::DkgSharesStatus::Verified => base_needs_rotate_key && !past_verification_window,
+        model::DkgSharesStatus::Failed => {
+            return Err(Error::DkgVerificationFailed(last_dkg.aggregate_key.into()));
+        }
+    };
+
+    // Similar logic to needs_rotate_key: if shares are Unverified &
+    // past the verification window, don't attempt to submit a key
+    // rotation transaction.
+    let needs_rotate_key = match last_dkg.dkg_shares_status {
+        model::DkgSharesStatus::Unverified => base_needs_rotate_key && !past_verification_window,
+        model::DkgSharesStatus::Verified => base_needs_rotate_key,
         model::DkgSharesStatus::Failed => {
             return Err(Error::DkgVerificationFailed(last_dkg.aggregate_key.into()));
         }
@@ -2636,6 +2646,7 @@ mod tests {
     use crate::emily_client::MockEmilyInteract;
     use crate::error::Error;
     use crate::keys::{PrivateKey, PublicKey};
+    use crate::network::in_memory2::WanNetwork;
     use crate::stacks::api::MockStacksInteract;
     use crate::storage::memory::SharedStore;
     use crate::storage::model::BitcoinBlockHeight;
@@ -2650,6 +2661,7 @@ mod tests {
 
     use super::assert_rotate_key_action;
     use super::should_coordinate_dkg;
+    use super::*;
 
     #[allow(clippy::type_complexity)]
     fn test_environment() -> TestEnvironment<
@@ -2726,6 +2738,110 @@ mod tests {
             .assert_should_be_able_to_coordinate_signing_rounds(delay)
             .await;
         more_asserts::assert_gt!(start.elapsed(), delay + baseline_elapsed);
+    }
+
+    /// Check that we skip processing bitcoin blocks if the chain tip in
+    /// the state doesn't match the block hash passed in.
+    #[tokio::test]
+    async fn should_skip_processing_bitcoin_blocks_if_chain_tip_has_changed() {
+        let mut rng = testing::get_rng();
+        let ctx = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .modify_settings(|settings| {
+                settings.signer.bootstrap_signatures_required = 1;
+                settings.signer.bootstrap_signing_set =
+                    std::iter::once(settings.signer.public_key()).collect();
+            })
+            .build();
+
+        let network = WanNetwork::default();
+        let net = network.connect(&ctx);
+
+        let mut ev = TxCoordinatorEventLoop {
+            network: net.spawn(),
+            context: ctx.clone(),
+            context_window: 10000,
+            private_key: ctx.config().signer.private_key,
+            signing_round_max_duration: Duration::from_secs(10),
+            bitcoin_presign_request_max_duration: Duration::from_secs(10),
+            threshold: ctx.config().signer.bootstrap_signatures_required,
+            dkg_max_duration: Duration::from_secs(10),
+            is_epoch3: true,
+        };
+
+        let chain_tip1: BitcoinBlockRef = fake::Faker.fake_with_rng(&mut rng);
+        let chain_tip2: BitcoinBlockRef = fake::Faker.fake_with_rng(&mut rng);
+
+        // There is only one signer in the signer set, us, so we should
+        // always be coordinator.
+        assert!(ev.is_coordinator(&chain_tip1.block_hash));
+        assert!(ev.is_coordinator(&chain_tip2.block_hash));
+
+        // We should bail if the chain tip is not set.
+        let error = ev.process_new_blocks(chain_tip2).await.unwrap_err();
+        assert_matches::assert_matches!(error, Error::NoChainTip);
+
+        // Now the chain tip in the state is set but it does not match the
+        // chain tip passed in, so we should bail early and return Ok(())
+        ctx.state().set_bitcoin_chain_tip(chain_tip1);
+        ev.process_new_blocks(chain_tip2).await.unwrap();
+
+        // Now the chain tip in the state matches the chain tip passed in,
+        // so we should process the blocks. However, we do not have any
+        // signer set info in the state, so we'll bail with an error.
+        let error = ev.process_new_blocks(chain_tip1).await.unwrap_err();
+        assert_matches::assert_matches!(error, Error::MissingAggregateKey(_));
+    }
+
+    /// Check that we skip processing bitcoin blocks if the chain tip in
+    /// the state doesn't match the block hash passed in.
+    #[tokio::test]
+    async fn should_skip_processing_bitcoin_blocks_if_not_coordinator() {
+        let mut rng = testing::get_rng();
+        let ctx = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .modify_settings(|settings| {
+                // If we are the coordinator then we will wait for 10
+                // seconds. However, in this test we shouldn't be the
+                // coordinator, so we should exit early. If there is a bug
+                // and we are the coordinator then we'll end up waiting for
+                // one second due to the timeout below.
+                settings.signer.bitcoin_processing_delay = Duration::from_secs(10);
+            })
+            .build();
+
+        let network = WanNetwork::default();
+        let net = network.connect(&ctx);
+
+        let mut ev = TxCoordinatorEventLoop {
+            network: net.spawn(),
+            context: ctx.clone(),
+            context_window: 10000,
+            private_key: PrivateKey::new(&mut rng),
+            signing_round_max_duration: Duration::from_secs(10),
+            bitcoin_presign_request_max_duration: Duration::from_secs(10),
+            threshold: ctx.config().signer.bootstrap_signatures_required,
+            dkg_max_duration: Duration::from_secs(10),
+            is_epoch3: true,
+        };
+
+        let chain_tip1: BitcoinBlockRef = fake::Faker.fake_with_rng(&mut rng);
+        // The given private key is randomly generated so it is unlikely to
+        // be part of the bootstrap signing set, and so unlikely to be
+        // coordinator.
+        assert!(!ev.is_coordinator(&chain_tip1.block_hash));
+
+        ctx.state().set_bitcoin_chain_tip(chain_tip1);
+
+        // `process_new_blocks` will exit early since we are not the
+        // coordinator. If we were the cooridnator then we would try to
+        // wait for 10 seconds, resulting in a timeout error.
+        tokio::time::timeout(Duration::from_secs(1), ev.process_new_blocks(chain_tip1))
+            .await
+            .unwrap()
+            .unwrap();
     }
 
     #[tokio::test]
@@ -2840,6 +2956,11 @@ mod tests {
         needs_rotate_key: bool,
     }
 
+    // Test cases for assert_rotate_key_action with dkg_verification_window = 10
+    // Chain tip height = 100, so verification window is heights 90-100
+    // Tests with needs_verification = true use DKG start height 90 (within window)
+    // Tests with needs_verification = false use DKG start height 89 (past window)
+
     #[test_case(
         RotateKeyActionTest {
             shares_status: model::DkgSharesStatus::Unverified,
@@ -2847,7 +2968,7 @@ mod tests {
             current_aggregate_key_seed: None,
             needs_verification: true,
             needs_rotate_key: true,
-        }; "unverified, no key")]
+        }; "unverified, no key, within window")]
     #[test_case(
         RotateKeyActionTest {
             shares_status: model::DkgSharesStatus::Verified,
@@ -2863,7 +2984,7 @@ mod tests {
             current_aggregate_key_seed: Some(1),
             needs_verification: true,
             needs_rotate_key: false,
-        }; "unverified, key up to date")]
+        }; "unverified, key up to date, within window")]
     #[test_case(
         RotateKeyActionTest {
             shares_status: model::DkgSharesStatus::Verified,
@@ -2879,7 +3000,7 @@ mod tests {
             current_aggregate_key_seed: Some(1),
             needs_verification: true,
             needs_rotate_key: true,
-        }; "unverified, new key")]
+        }; "unverified, new key, within window")]
     #[test_case(
         RotateKeyActionTest {
             shares_status: model::DkgSharesStatus::Verified,
@@ -2888,39 +3009,159 @@ mod tests {
             needs_verification: true,
             needs_rotate_key: true,
         }; "verified, new key")]
-    fn test_assert_rotate_key_action(scenario: RotateKeyActionTest) {
-        let last_dkg = model::EncryptedDkgShares {
-            dkg_shares_status: scenario.shares_status,
-            aggregate_key: public_key_from_seed(scenario.shares_key_seed),
-            ..Faker.fake()
-        };
+    #[test_case(
+        RotateKeyActionTest {
+            shares_status: model::DkgSharesStatus::Unverified,
+            shares_key_seed: 1,
+            current_aggregate_key_seed: None,
+            needs_verification: false,
+            needs_rotate_key: false,
+        }; "unverified, no key, past window")]
+    #[test_case(
+        RotateKeyActionTest {
+            shares_status: model::DkgSharesStatus::Unverified,
+            shares_key_seed: 1,
+            current_aggregate_key_seed: Some(1),
+            needs_verification: false,
+            needs_rotate_key: false,
+        }; "unverified, key up to date, past window")]
+    #[test_case(
+        RotateKeyActionTest {
+            shares_status: model::DkgSharesStatus::Unverified,
+            shares_key_seed: 2,
+            current_aggregate_key_seed: Some(1),
+            needs_verification: false,
+            needs_rotate_key: false,
+        }; "unverified, new key, past window")]
+    #[tokio::test]
+    async fn test_assert_rotate_key_action(scenario: RotateKeyActionTest) -> Result<(), Error> {
+        // dkg_verification_window = 10 (default value)
+        // Current chain tip height = 100
+        // For needs_verification = true: DKG started at height 90 (within 10-block window)
+        // For needs_verification = false: DKG started at height 89 (past 10-block window)
+        let context = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .build();
+
+        let mut last_dkg: model::EncryptedDkgShares = Faker.fake();
+        last_dkg.dkg_shares_status = scenario.shares_status;
+        last_dkg.aggregate_key = public_key_from_seed(scenario.shares_key_seed);
+
+        // Set the DKG start height based on whether we expect verification or not
+        // If we expect verification (needs_verification = true), set within window
+        // If we don't expect verification (needs_verification = false), set past window
+        if scenario.needs_verification {
+            // Set within verification window (10 blocks before current height of 100)
+            last_dkg.started_at_bitcoin_block_height = 90u64.into();
+        } else {
+            // Set past verification window (11 blocks before current height of 100)
+            last_dkg.started_at_bitcoin_block_height = 89u64.into();
+        }
+
         let current_aggregate_key = scenario
             .current_aggregate_key_seed
             .map(public_key_from_seed);
 
-        let (needs_verification, needs_rotate_key) =
-            assert_rotate_key_action(&last_dkg, current_aggregate_key).unwrap();
+        // Write a bitcoin block at the appropriate height to simulate the current chain tip
+        let chain_tip_height = 100u64;
+        let bitcoin_chain_tip: model::BitcoinBlockHash = Faker.fake();
+
+        let bitcoin_chain_tip_ref = model::BitcoinBlockRef {
+            block_hash: bitcoin_chain_tip,
+            block_height: chain_tip_height.into(),
+        };
+
+        let (needs_verification, needs_rotate_key) = assert_rotate_key_action(
+            &context,
+            &last_dkg,
+            current_aggregate_key,
+            &bitcoin_chain_tip_ref,
+        )?;
         assert_eq!(needs_verification, scenario.needs_verification);
         assert_eq!(needs_rotate_key, scenario.needs_rotate_key);
+        Ok(())
     }
 
     #[test_case(None; "no key")]
     #[test_case(Some(public_key_from_seed(1)); "key up to date")]
     #[test_case(Some(public_key_from_seed(2)); "new key")]
-    fn test_assert_rotate_key_action_failure(current_aggregate_key: Option<PublicKey>) {
-        let last_dkg = model::EncryptedDkgShares {
-            dkg_shares_status: model::DkgSharesStatus::Failed,
-            aggregate_key: public_key_from_seed(1),
-            ..Faker.fake()
+    #[tokio::test]
+    async fn test_assert_rotate_key_action_failure(current_aggregate_key: Option<PublicKey>) {
+        // dkg_verification_window = 10 (default value)
+        // Current chain tip height = 100
+        // DKG started at height 89 (past 10-block window, but this test fails regardless)
+        let context = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .build();
+
+        let mut last_dkg: model::EncryptedDkgShares = Faker.fake();
+        last_dkg.dkg_shares_status = model::DkgSharesStatus::Failed;
+        last_dkg.aggregate_key = public_key_from_seed(1);
+        // Set the DKG start height to ensure verification window check passes
+        last_dkg.started_at_bitcoin_block_height = 89u64.into(); // 11 blocks before current height of 100
+
+        // Write a bitcoin block at height 100 to simulate the current chain tip
+        let bitcoin_chain_tip: model::BitcoinBlockHash = Faker.fake();
+
+        let bitcoin_chain_tip_ref = model::BitcoinBlockRef {
+            block_hash: bitcoin_chain_tip,
+            block_height: 100u64.into(),
         };
 
-        let result = assert_rotate_key_action(&last_dkg, current_aggregate_key);
+        let result = assert_rotate_key_action(
+            &context,
+            &last_dkg,
+            current_aggregate_key,
+            &bitcoin_chain_tip_ref,
+        );
         match result {
             Err(Error::DkgVerificationFailed(key)) => {
                 assert_eq!(key, last_dkg.aggregate_key.into());
             }
             _ => {
                 panic!("unexpected result")
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_assert_rotate_key_action_verification_window_elapsed() {
+        // dkg_verification_window = 10 (default value)
+        // Current chain tip height = 100
+        // DKG started at height 79 (21 blocks past the 10-block verification window)
+        let context = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .build();
+
+        let mut last_dkg: model::EncryptedDkgShares = Faker.fake();
+        last_dkg.dkg_shares_status = model::DkgSharesStatus::Unverified;
+        last_dkg.aggregate_key = public_key_from_seed(1);
+        // Set the DKG start height to be outside the verification window
+        last_dkg.started_at_bitcoin_block_height = 79u64.into(); // 21 blocks before current height of 100
+
+        // Write a bitcoin block at height 100 to simulate the current chain tip
+        let bitcoin_chain_tip: model::BitcoinBlockHash = Faker.fake();
+
+        let bitcoin_chain_tip_ref = model::BitcoinBlockRef {
+            block_hash: bitcoin_chain_tip,
+            block_height: 100u64.into(),
+        };
+
+        let result = assert_rotate_key_action(&context, &last_dkg, None, &bitcoin_chain_tip_ref);
+
+        // Now we expect success: neither verification nor key
+        // rotation are needed since we are past the verification
+        // window of 10 bitcoin blocks
+        match result {
+            Ok((needs_verification, needs_rotate_key)) => {
+                assert!(!needs_verification);
+                assert!(!needs_rotate_key);
+            }
+            Err(e) => {
+                panic!("expected success but got error: {e:?}")
             }
         }
     }

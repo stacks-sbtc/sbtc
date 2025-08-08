@@ -12,6 +12,7 @@ use bitcoin::{OutPoint, ScriptBuf};
 use bitvec::array::BitArray;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
 use clarity::vm::types::PrincipalData;
+use libp2p::{Multiaddr, PeerId};
 use serde::{Deserialize, Serialize};
 use stacks_common::types::chainstate::BurnchainHeaderHash;
 use stacks_common::types::chainstate::StacksBlockId;
@@ -24,6 +25,20 @@ use crate::block_observer::Deposit;
 use crate::error::Error;
 use crate::keys::PublicKey;
 use crate::keys::PublicKeyXOnly;
+use crate::stacks::api::SignerSetInfo;
+
+/// A P2P peer which the signer has successfully connected to.
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
+pub struct P2PPeer {
+    /// The peer ID of the connected peer.
+    pub peer_id: DbPeerId,
+    /// The public key of the connected peer.
+    pub public_key: PublicKey,
+    /// The address of the connected peer.
+    pub address: DbMultiaddr,
+    /// The timestamp of the last successful dial to the peer.
+    pub last_dialed_at: Timestamp,
+}
 
 /// A bitcoin transaction output (TXO) relevant for the sBTC signers.
 ///
@@ -159,7 +174,7 @@ impl From<bitcoin::Block> for BitcoinBlock {
 pub struct StacksBlock {
     /// Block hash.
     pub block_hash: StacksBlockHash,
-    /// Block height.    
+    /// Block height.
     pub block_height: StacksBlockHeight,
     /// Hash of the parent block.
     pub parent_hash: StacksBlockHash,
@@ -391,7 +406,7 @@ pub struct SweptDepositRequest {
     /// The block id of the bitcoin block that includes the sweep
     /// transaction.
     pub sweep_block_hash: BitcoinBlockHash,
-    /// The block height of the block referenced by the `sweep_block_hash`.   
+    /// The block height of the block referenced by the `sweep_block_hash`.
     pub sweep_block_height: BitcoinBlockHeight,
     /// Transaction ID of the deposit request transaction.
     pub txid: BitcoinTxId,
@@ -436,7 +451,7 @@ pub struct SweptWithdrawalRequest {
     /// The block id of the stacks block that includes this sweep
     /// transaction.
     pub sweep_block_hash: BitcoinBlockHash,
-    /// The block height of the block that includes the sweep transaction.    
+    /// The block height of the block that includes the sweep transaction.
     pub sweep_block_height: BitcoinBlockHeight,
     /// Request ID of the withdrawal request. These are supposed to be
     /// unique, but there can be duplicates if there is a reorg that
@@ -529,6 +544,16 @@ impl EncryptedDkgShares {
     }
 }
 
+impl From<EncryptedDkgShares> for SignerSetInfo {
+    fn from(value: EncryptedDkgShares) -> Self {
+        SignerSetInfo {
+            aggregate_key: value.aggregate_key,
+            signer_set: value.signer_set_public_keys(),
+            signatures_required: value.signature_share_threshold,
+        }
+    }
+}
+
 /// Persisted public DKG shares from other signers
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
@@ -549,6 +574,16 @@ pub struct KeyRotationEvent {
     /// The number of signatures required for the multi-sig wallet.
     #[sqlx(try_from = "i32")]
     pub signatures_required: u16,
+}
+
+impl From<KeyRotationEvent> for SignerSetInfo {
+    fn from(value: KeyRotationEvent) -> Self {
+        SignerSetInfo {
+            aggregate_key: value.aggregate_key,
+            signer_set: value.signer_set.into_iter().collect(),
+            signatures_required: value.signatures_required,
+        }
+    }
 }
 
 /// A struct containing how a signer voted for a deposit or withdrawal
@@ -1580,6 +1615,40 @@ impl Deref for Timestamp {
 impl From<time::OffsetDateTime> for Timestamp {
     fn from(value: time::OffsetDateTime) -> Self {
         Self(value)
+    }
+}
+
+/// A newtype over [`PeerId`] which implements encode/decode for sqlx.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct DbPeerId(PeerId);
+
+impl From<PeerId> for DbPeerId {
+    fn from(value: PeerId) -> Self {
+        Self(value)
+    }
+}
+
+impl Deref for DbPeerId {
+    type Target = PeerId;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A newtype over [`Multiaddr`] which implements encode/decode for sqlx.
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct DbMultiaddr(Multiaddr);
+
+impl From<Multiaddr> for DbMultiaddr {
+    fn from(value: Multiaddr) -> Self {
+        Self(value)
+    }
+}
+
+impl Deref for DbMultiaddr {
+    type Target = Multiaddr;
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 

@@ -17,6 +17,8 @@ use std::collections::BTreeSet;
 use std::future::Future;
 
 use blockstack_lib::types::chainstate::StacksBlockId;
+use libp2p::Multiaddr;
+use libp2p::PeerId;
 
 use crate::bitcoin::utxo::SignerUtxo;
 use crate::bitcoin::validation::DepositRequestReport;
@@ -66,11 +68,13 @@ pub trait DbRead {
     ) -> impl Future<Output = Result<Option<model::StacksBlock>, Error>> + Send;
 
     /// Get the bitcoin canonical chain tip.
+    #[cfg(any(test, feature = "testing"))]
     fn get_bitcoin_canonical_chain_tip(
         &self,
     ) -> impl Future<Output = Result<Option<model::BitcoinBlockHash>, Error>> + Send;
 
     /// Get the bitcoin canonical chain tip.
+    #[cfg(any(test, feature = "testing"))]
     fn get_bitcoin_canonical_chain_tip_ref(
         &self,
     ) -> impl Future<Output = Result<Option<model::BitcoinBlockRef>, Error>> + Send;
@@ -102,7 +106,7 @@ pub trait DbRead {
     /// that generated the aggregate key locking the deposit.
     fn get_pending_accepted_deposit_requests(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
+        chain_tip: &model::BitcoinBlockRef,
         context_window: u16,
         signatures_required: u16,
     ) -> impl Future<Output = Result<Vec<model::DepositRequest>, Error>> + Send;
@@ -306,10 +310,17 @@ pub trait DbRead {
         &self,
     ) -> impl Future<Output = Result<Option<model::EncryptedDkgShares>, Error>> + Send;
 
+    /// Return the most recent DKG shares with a non failed status, or None if
+    /// no such shares exist.
+    fn get_latest_non_failed_dkg_shares(
+        &self,
+    ) -> impl Future<Output = Result<Option<model::EncryptedDkgShares>, Error>> + Send;
+
     /// Returns the number of non-failed DKG shares entries in the database.
     fn get_encrypted_dkg_shares_count(&self) -> impl Future<Output = Result<u32, Error>> + Send;
 
     /// Return the latest rotate-keys transaction confirmed by the given `chain-tip`.
+    #[cfg(any(test, feature = "testing"))]
     fn get_last_key_rotation(
         &self,
         chain_tip: &model::BitcoinBlockHash,
@@ -450,6 +461,9 @@ pub trait DbRead {
         &self,
         sighash: &model::SigHash,
     ) -> impl Future<Output = Result<Option<(bool, PublicKeyXOnly)>, Error>> + Send;
+
+    /// Returns the list of stored peers.
+    fn get_p2p_peers(&self) -> impl Future<Output = Result<Vec<model::P2PPeer>, Error>> + Send;
 }
 
 /// Represents the ability to write data to the signer storage.
@@ -595,4 +609,13 @@ pub trait DbWrite {
     ) -> impl Future<Output = Result<bool, Error>> + Send
     where
         X: Into<PublicKeyXOnly> + Send;
+
+    /// Upserts a P2P peer, updating the last seen time and address if the peer
+    /// already exists.
+    fn update_peer_connection(
+        &self,
+        pub_key: &PublicKey,
+        peer_id: &PeerId,
+        address: Multiaddr,
+    ) -> impl Future<Output = Result<(), Error>> + Send;
 }

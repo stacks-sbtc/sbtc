@@ -538,6 +538,14 @@ impl BitcoinBlockRef {
             block_height: 1337u64.into(), // Arbitrary number
         }
     }
+
+    /// Returns the bitcoin genesis block
+    pub fn genesis() -> Self {
+        Self {
+            block_hash: BitcoinBlockHash::from([0; 32]),
+            block_height: 0u64.into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -567,7 +575,7 @@ fn vec_diff<T: std::cmp::Eq + std::hash::Hash>(subtrahend: &mut Vec<T>, minuend:
     subtrahend.retain(|v| !minuend_set.contains(v));
 }
 
-impl From<&bitcoin::Block> for crate::storage::model::BitcoinBlockRef {
+impl From<&bitcoin::Block> for model::BitcoinBlockRef {
     fn from(value: &bitcoin::Block) -> Self {
         Self {
             block_hash: value.block_hash().into(),

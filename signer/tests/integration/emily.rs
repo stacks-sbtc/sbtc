@@ -11,7 +11,9 @@ use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc_json::Utxo;
 use fake::Fake as _;
 use futures::future::join_all;
+use signer::testing::btc::MockBitcoinBlockHashStreamProvider;
 use signer::testing::storage::model::TestBitcoinTxInfo;
+use signer::util::Sleep;
 use test_case::test_case;
 use test_log::test;
 use url::Url;
@@ -21,8 +23,8 @@ use blockstack_lib::net::api::getsortition::SortitionInfo;
 use clarity::types::chainstate::BurnchainHeaderHash;
 use emily_client::apis::deposit_api;
 use emily_client::models::CreateDepositRequestBody;
+use emily_client::models::DepositStatus;
 use emily_client::models::DepositUpdate;
-use emily_client::models::Status;
 use emily_client::models::UpdateDepositsRequestBody;
 use sbtc::testing::regtest::Recipient;
 use signer::bitcoin::rpc::BitcoinBlockInfo;
@@ -104,7 +106,6 @@ where
         .run_dkg(
             bitcoin_chain_tip,
             dkg_txid.into(),
-            rng,
             model::DkgSharesStatus::Verified,
         )
         .await;
@@ -151,7 +152,7 @@ async fn deposit_flow() {
         .await
         .expect("Wiping Emily database in test setup failed.");
 
-    let mut context = TestContext::builder()
+    let context = TestContext::builder()
         .with_storage(db.clone())
         .with_mocked_bitcoin_client()
         .with_stacks_client(stacks_client.clone())
@@ -369,13 +370,10 @@ async fn deposit_flow() {
         })
         .await;
 
-    let (block_observer_stream_tx, block_observer_stream_rx) = tokio::sync::mpsc::channel(1);
-    let block_stream: tokio_stream::wrappers::ReceiverStream<Result<bitcoin::BlockHash, Error>> =
-        block_observer_stream_rx.into();
-
+    let bitcoin_block_source = MockBitcoinBlockHashStreamProvider::default();
     let block_observer = block_observer::BlockObserver {
         context: context.clone(),
-        bitcoin_blocks: block_stream,
+        bitcoin_block_source: bitcoin_block_source.clone(),
     };
 
     let block_observer_handle = tokio::spawn(async move { block_observer.run().await });
@@ -416,12 +414,9 @@ async fn deposit_flow() {
         .expect("cannot create emily deposit");
 
     // Wake up block observer to process the new block
-    block_observer_stream_tx
-        .send(Ok(deposit_block_hash))
-        .await
-        .unwrap();
+    bitcoin_block_source.send(Ok(deposit_block_hash));
 
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    Sleep::for_millis(500).await;
 
     // Ensure we picked up the new tip
     assert_eq!(
@@ -490,12 +485,12 @@ async fn deposit_flow() {
 
     assert_eq!(
         fetched_deposit.status,
-        emily_client::models::Status::Pending
+        emily_client::models::DepositStatus::Pending
     );
 
     // Wake coordinator up (again)
     context
-        .signal(RequestDeciderEvent::NewRequestsHandled.into())
+        .signal(RequestDeciderEvent::NewRequestsHandled(bitcoin_chain_tip).into())
         .expect("failed to signal");
 
     // Await the `wait_for_tx_task` to receive the first transaction broadcasted.
@@ -532,7 +527,7 @@ async fn deposit_flow() {
 
     assert_eq!(
         fetched_deposit.status,
-        emily_client::models::Status::Accepted
+        emily_client::models::DepositStatus::Accepted
     );
     assert_eq!(
         fetched_deposit.last_update_block_hash,
@@ -641,7 +636,7 @@ async fn test_get_deposits_with_status_request_paging(
     }
 
     let deposits = emily_client
-        .get_deposits_with_status(Status::Pending)
+        .get_deposits_with_status(DepositStatus::Pending)
         .await
         .unwrap();
     assert_eq!(deposits.len(), expected_result);
@@ -703,8 +698,9 @@ async fn test_get_deposits_returns_pending_and_accepted() {
             bitcoin_tx_output_index: 0,
             bitcoin_txid: setup.tx.compute_txid().to_string(),
             fulfillment: None,
-            status: Status::Accepted,
+            status: DepositStatus::Accepted,
             status_message: "accepted".to_string(),
+            replaced_by_tx: None,
         })
         .collect();
 
@@ -718,11 +714,11 @@ async fn test_get_deposits_returns_pending_and_accepted() {
     // Check that we get all deposits
     let deposits = emily_client.get_deposits().await.unwrap();
     let accepted_deposits = emily_client
-        .get_deposits_with_status(Status::Accepted)
+        .get_deposits_with_status(DepositStatus::Accepted)
         .await
         .unwrap();
     let pending_deposits = emily_client
-        .get_deposits_with_status(Status::Pending)
+        .get_deposits_with_status(DepositStatus::Pending)
         .await
         .unwrap();
 

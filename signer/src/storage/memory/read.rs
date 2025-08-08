@@ -92,12 +92,12 @@ impl DbRead for SharedStore {
 
     async fn get_pending_accepted_deposit_requests(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
+        chain_tip: &model::BitcoinBlockRef,
         context_window: u16,
         threshold: u16,
     ) -> Result<Vec<model::DepositRequest>, Error> {
         let store = self.lock().await;
-        let deposit_requests = store.get_deposit_requests(chain_tip, context_window);
+        let deposit_requests = store.get_deposit_requests(&chain_tip.block_hash, context_window);
 
         let threshold = threshold as usize;
 
@@ -105,19 +105,18 @@ impl DbRead for SharedStore {
         // than the height of the next block, which is the block for which we are assessing
         // the threshold.
         let minimum_acceptable_unlock_height =
-            store.bitcoin_blocks.get(chain_tip).unwrap().block_height
-                + DEPOSIT_LOCKTIME_BLOCK_BUFFER as u64
-                + 1;
+            chain_tip.block_height + DEPOSIT_LOCKTIME_BLOCK_BUFFER as u64 + 1;
 
         // Get all canonical blocks in the context window.
-        let canonical_bitcoin_blocks = std::iter::successors(Some(chain_tip), |block_hash| {
-            store
-                .bitcoin_blocks
-                .get(block_hash)
-                .map(|block| &block.parent_hash)
-        })
-        .take(context_window as usize)
-        .collect::<HashSet<_>>();
+        let canonical_bitcoin_blocks =
+            std::iter::successors(Some(&chain_tip.block_hash), |block_hash| {
+                store
+                    .bitcoin_blocks
+                    .get(block_hash)
+                    .map(|block| &block.parent_hash)
+            })
+            .take(context_window as usize)
+            .collect::<HashSet<_>>();
 
         Ok(deposit_requests
             .into_iter()
@@ -339,6 +338,19 @@ impl DbRead for SharedStore {
             .encrypted_dkg_shares
             .values()
             .filter(|(_, shares)| shares.dkg_shares_status == DkgSharesStatus::Verified)
+            .max_by_key(|(time, _)| time)
+            .map(|(_, shares)| shares.clone()))
+    }
+
+    async fn get_latest_non_failed_dkg_shares(
+        &self,
+    ) -> Result<Option<model::EncryptedDkgShares>, Error> {
+        Ok(self
+            .lock()
+            .await
+            .encrypted_dkg_shares
+            .values()
+            .filter(|(_, shares)| shares.dkg_shares_status != DkgSharesStatus::Failed)
             .max_by_key(|(time, _)| time)
             .map(|(_, shares)| shares.clone()))
     }
@@ -772,6 +784,12 @@ impl DbRead for SharedStore {
 
         Ok(result)
     }
+
+    async fn get_p2p_peers(&self) -> Result<Vec<model::P2PPeer>, Error> {
+        let store = self.lock().await;
+        let peers = store.p2p_peers.values().cloned().collect();
+        Ok(peers)
+    }
 }
 
 impl DbRead for InMemoryTransaction {
@@ -821,7 +839,7 @@ impl DbRead for InMemoryTransaction {
 
     async fn get_pending_accepted_deposit_requests(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
+        chain_tip: &model::BitcoinBlockRef,
         context_window: u16,
         signatures_required: u16,
     ) -> Result<Vec<model::DepositRequest>, Error> {
@@ -999,6 +1017,12 @@ impl DbRead for InMemoryTransaction {
         self.store.get_latest_verified_dkg_shares().await
     }
 
+    async fn get_latest_non_failed_dkg_shares(
+        &self,
+    ) -> Result<Option<model::EncryptedDkgShares>, Error> {
+        self.store.get_latest_non_failed_dkg_shares().await
+    }
+
     async fn get_encrypted_dkg_shares_count(&self) -> Result<u32, Error> {
         self.store.get_encrypted_dkg_shares_count().await
     }
@@ -1129,5 +1153,9 @@ impl DbRead for InMemoryTransaction {
         sighash: &model::SigHash,
     ) -> Result<Option<(bool, PublicKeyXOnly)>, Error> {
         self.store.will_sign_bitcoin_tx_sighash(sighash).await
+    }
+
+    async fn get_p2p_peers(&self) -> Result<Vec<model::P2PPeer>, Error> {
+        self.store.get_p2p_peers().await
     }
 }

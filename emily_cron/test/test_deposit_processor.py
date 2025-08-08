@@ -488,6 +488,8 @@ class TestDepositProcessorWithRbf(TestDepositProcessorBase):
                     self.assertTrue("Locktime expired" in update.status_message)
                 elif update.bitcoin_txid == "rbf_original_tx":
                     self.assertTrue("Replaced by confirmed tx" in update.status_message)
+                    self.assertEqual(update.status, RequestStatus.RBF.value)
+                    self.assertEqual(update.replaced_by_txid, "rbf_replacement_tx")
                 elif update.bitcoin_txid == "long_pending_tx":
                     self.assertTrue(
                         f"Pending for too long ({settings.MAX_UNCONFIRMED_TIME} seconds)"
