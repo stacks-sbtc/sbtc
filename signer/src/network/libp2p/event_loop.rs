@@ -12,8 +12,8 @@ use crate::codec::Encode as _;
 use crate::context::{Context, P2PEvent, SignerCommand, SignerSignal};
 use crate::error::Error;
 use crate::network::Msg;
-use crate::network::libp2p::MultiaddrExt;
-use crate::storage::DbWrite;
+use crate::network::libp2p::MultiaddrExt as _;
+use crate::storage::DbWrite as _;
 
 use super::TOPIC;
 use super::swarm::{SignerBehavior, SignerBehaviorEvent};

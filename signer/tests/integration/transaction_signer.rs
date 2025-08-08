@@ -20,7 +20,7 @@ use signer::stacks::wallet::SignerWallet;
 use signer::storage::DbRead as _;
 use signer::storage::DbWrite as _;
 use signer::storage::postgres::PgStore;
-use signer::testing::IterTestExt;
+use signer::testing::IterTestExt as _;
 use signer::testing::btc::get_canonical_chain_tip;
 use signer::transaction_signer::STACKS_SIGN_REQUEST_LRU_SIZE;
 use test_case::test_case;

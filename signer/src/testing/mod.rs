@@ -351,7 +351,7 @@ impl<T, E: Display, I: IntoIterator<Item = Result<T, E>>> ResultIterExt<T, E> fo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures::future::FutureExt;
+    use futures::future::FutureExt as _;
     use std::boxed::Box;
     use std::pin::Pin;
 

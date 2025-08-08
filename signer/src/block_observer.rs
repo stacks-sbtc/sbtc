@@ -46,7 +46,7 @@ use crate::storage::TransactionHandle as _;
 use crate::storage::model;
 use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::EncryptedDkgShares;
-use crate::util::FutureExt;
+use crate::util::FutureExt as _;
 use bitcoin::Amount;
 use bitcoin::BlockHash;
 use bitcoin::ScriptBuf;
