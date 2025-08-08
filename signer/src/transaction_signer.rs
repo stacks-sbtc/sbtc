@@ -1592,17 +1592,17 @@ pub async fn assert_allow_dkg_begin(
     context: &impl Context,
     bitcoin_chain_tip: &model::BitcoinBlockRef,
 ) -> Result<(), Error> {
-     // Use the unified DKG decision logic, but with more aggressive logging for signers
-     let should_allow = should_coordinate_dkg(context, bitcoin_chain_tip).await?;
-    
-     if !should_allow {
-         tracing::warn!(
-             "signer rejecting DKG begin message based on current state and configuration"
-         );
-         return Err(Error::DkgHasAlreadyRun);
-     }
-     
-     Ok(())
+    // Use the unified DKG decision logic, but with more aggressive logging for signers
+    let should_allow = should_coordinate_dkg(context, bitcoin_chain_tip).await?;
+
+    if !should_allow {
+        tracing::warn!(
+            "signer rejecting DKG begin message based on current state and configuration"
+        );
+        return Err(Error::DkgHasAlreadyRun);
+    }
+
+    Ok(())
 }
 
 /// Relevant information for validating incoming messages

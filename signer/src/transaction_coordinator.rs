@@ -2553,7 +2553,7 @@ pub async fn should_coordinate_dkg(
 
     // Check if we need to run DKG based on min-height
     let dkg_min_bitcoin_block_height = config.signer.dkg_min_bitcoin_block_height;
-    
+
     match dkg_min_bitcoin_block_height {
         Some(dkg_min_height) => {
             // Check if we've passed the minimum height and no DKG has been started since then
