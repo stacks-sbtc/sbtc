@@ -63,7 +63,7 @@ enum LogOutputFormat {
     Pretty,
 }
 
-// /// Command line arguments for the signer.
+/// Command line arguments for the signer.
 #[derive(Debug, Parser)]
 #[clap(name = "sBTC Signer")]
 struct SignerArgs {
