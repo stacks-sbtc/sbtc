@@ -2565,14 +2565,14 @@ pub async fn should_run_dkg(
                         current_height = %bitcoin_chain_tip.block_height,
                         "DKG rerun height has been met and no DKG has been started since then; proceeding with DKG"
                     );
-                    return Ok(true);
+                    Ok(true)
                 } else {
                     tracing::debug!(
                         ?dkg_min_bitcoin_block_height,
                         latest_dkg_started_at = %latest_dkg_shares.started_at_bitcoin_block_height,
                         "DKG has already been started after the minimum height; skipping DKG"
                     );
-                    return Ok(false);
+                    Ok(false)
                 }
             } else {
                 tracing::debug!(
@@ -2580,7 +2580,7 @@ pub async fn should_run_dkg(
                     current_height = %bitcoin_chain_tip.block_height,
                     "bitcoin chain tip is below the minimum height for DKG rerun; skipping DKG"
                 );
-                return Ok(false);
+                Ok(false)
             }
         }
         None => {
@@ -2589,7 +2589,7 @@ pub async fn should_run_dkg(
                 ?dkg_min_bitcoin_block_height,
                 "attempt to run multiple DKGs without a configured re-run height; skipping DKG"
             );
-            return Ok(false);
+            Ok(false)
         }
     }
 }
