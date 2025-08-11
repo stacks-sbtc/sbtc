@@ -1058,10 +1058,10 @@ async fn emily_process_withdrawal_updates_when_some_of_them_are_unknown() {
 async fn emily_handles_withdrawal_requests_on_forks() {
     // The only thing we care about this heights is that the block
     // associated with first withdrawal will be orphaned after the reorg.
-    const PRE_REORG_BEGIN: usize = 1000;
-    const PRE_REORG_END: usize = 1015;
-    const POST_REORG_BEGIN: usize = 1010;
-    const POST_REORG_END: usize = 1020;
+    const PRE_REORG_BEGIN: u64 = 1000;
+    const PRE_REORG_END: u64 = 1015;
+    const POST_REORG_BEGIN: u64 = 1010;
+    const POST_REORG_END: u64 = 1020;
 
     let configuration = clean_setup().await;
 

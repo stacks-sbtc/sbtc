@@ -4,10 +4,9 @@ use std::collections::HashMap;
 
 use aws_sdk_dynamodb::types::AttributeValue;
 use aws_sdk_dynamodb::types::error::ConditionalCheckFailedException;
-use futures;
 use serde_dynamo::Item;
 use strum::IntoEnumIterator;
-
+use tracing::{debug, warn};
 
 use crate::api::models::limits::{AccountLimits, Limits};
 use crate::common::error::{Error, Inconsistency};
