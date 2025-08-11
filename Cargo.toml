@@ -107,7 +107,7 @@ missing_docs = "deny"
 unused_imports = "deny"
 
 [workspace.lints.clippy]
-unused_trait_names = "warn"
+unused_trait_names = "deny"
 unwrap_in_result = "deny"
 #unwrap_used = "warn"
 #expect_used = "warn"
