@@ -76,6 +76,9 @@ tonic-build.workspace = true
 [dev-dependencies]
 # Local crates
 sbtc = { workspace = true, features = ["testing"] }
+# Add ourself as a dev-dependency with the "testing" feature enabled to
+# automatically include testing functionality for debug builds (i.e. dev/test).
+# This also ensures that your IDE will recognize feature-gated code as active.
 signer = { path = ".", features = ["testing"] }
 
 # External crates
