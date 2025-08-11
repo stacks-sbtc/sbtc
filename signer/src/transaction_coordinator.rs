@@ -337,9 +337,8 @@ where
         metrics::counter!(Metrics::CoordinatorTenuresTotal).increment(1);
 
         tracing::debug!("determining if we need to coordinate DKG");
-        let should_coordinate_dkg =
-            should_coordinate_dkg(&self.context, &bitcoin_chain_tip).await?;
-        let aggregate_key = if should_coordinate_dkg {
+        let should_run_dkg = should_run_dkg(&self.context, &bitcoin_chain_tip).await?;
+        let aggregate_key = if should_run_dkg {
             match self.coordinate_dkg(&bitcoin_chain_tip).await {
                 Ok(key) => key,
                 Err(error) => {
@@ -354,7 +353,7 @@ where
             // If we do not have signer set info in the registry, then we
             // are in the bootstrap phase. Our latest DKG shares may be
             // 'Unverified', but if we are here then they were not 'Failed'
-            // when we made to call to `should_coordinate_dkg`, since we
+            // when we made to call to `should_run_dkg`, since we
             // will coordinate DKG if our last DKG shares are 'Failed'. But
             // we could be loading 'Failed' shares here.
             match maybe_registry_signer_set_info.as_ref() {
@@ -2505,9 +2504,9 @@ pub fn coordinator_public_key(
         .copied()
 }
 
-/// Unified DKG decision logic that can be used by both coordinator & signer.
+/// Contains the logic used to decide if we should run DKG.
 /// Returns true if DKG should be allowed to proceed.
-pub async fn should_coordinate_dkg(
+pub async fn should_run_dkg(
     context: &impl Context,
     bitcoin_chain_tip: &model::BitcoinBlockRef,
 ) -> Result<bool, Error> {
@@ -2674,7 +2673,7 @@ mod tests {
     use test_case::test_case;
 
     use super::assert_rotate_key_action;
-    use super::should_coordinate_dkg;
+    use super::should_run_dkg;
     use super::*;
 
     #[allow(clippy::type_complexity)]
@@ -2899,7 +2898,7 @@ mod tests {
     #[test_case(1, Some(100), 1, 100, false; "subsequent DKG not allowed when target rounds reached")]
     #[test_case(1, Some(100), 2, 100, true; "subsequent DKG allowed when target rounds not reached and min height met")]
     #[test_log::test(tokio::test)]
-    async fn test_should_coordinate_dkg(
+    async fn test_should_run_dkg(
         dkg_rounds_current: u32,
         dkg_min_bitcoin_block_height: Option<u64>,
         dkg_target_rounds: u32,
@@ -2949,7 +2948,7 @@ mod tests {
         prevent_dkg_on_changed_signer_set_info(&context, aggregate_key);
 
         // Test the case
-        let result = should_coordinate_dkg(&context, &bitcoin_chain_tip)
+        let result = should_run_dkg(&context, &bitcoin_chain_tip)
             .await
             .expect("failed to check if DKG should be coordinated");
 

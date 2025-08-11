@@ -76,7 +76,7 @@ use signer::testing::get_rng;
 
 use signer::testing::FuturesIterExt as _;
 use signer::transaction_coordinator::given_key_is_coordinator;
-use signer::transaction_coordinator::should_coordinate_dkg;
+use signer::transaction_coordinator::should_run_dkg;
 use signer::transaction_signer::STACKS_SIGN_REQUEST_LRU_SIZE;
 use signer::transaction_signer::assert_allow_dkg_begin;
 use signer::util::FutureExt;
@@ -1162,7 +1162,7 @@ async fn run_dkg_if_signer_set_changes(scenario: RunDkgSignerSetScenario, expect
         .expect("failed to write dkg shares");
 
     // Before any change DKG shouldn't be triggered
-    assert!(!should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+    assert!(!should_run_dkg(&ctx, &chaintip).await.unwrap());
     assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_err());
 
     // Alter the registry based on the test
@@ -1199,10 +1199,10 @@ async fn run_dkg_if_signer_set_changes(scenario: RunDkgSignerSetScenario, expect
     }
 
     if expect_dkg {
-        assert!(should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+        assert!(should_run_dkg(&ctx, &chaintip).await.unwrap());
         assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_ok());
     } else {
-        assert!(!should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+        assert!(!should_run_dkg(&ctx, &chaintip).await.unwrap());
         assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_err());
     }
     testing::storage::drop_db(db).await;
@@ -1215,7 +1215,7 @@ async fn run_dkg_if_signer_set_changes(scenario: RunDkgSignerSetScenario, expect
 #[tokio::test]
 async fn skip_dkg_if_latest_shares_unverified(
     latest_shares_status: DkgSharesStatus,
-    should_run_dkg: bool,
+    run_dkg: bool,
 ) {
     let mut rng = get_rng();
     let db = testing::storage::new_test_database().await;
@@ -1240,11 +1240,11 @@ async fn skip_dkg_if_latest_shares_unverified(
 
     let chaintip: model::BitcoinBlockRef = Faker.fake_with_rng(&mut rng);
 
-    if should_run_dkg {
-        assert!(should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+    if run_dkg {
+        assert!(should_run_dkg(&ctx, &chaintip).await.unwrap());
         assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_ok());
     } else {
-        assert!(!should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+        assert!(!should_run_dkg(&ctx, &chaintip).await.unwrap());
         assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_err());
     }
 
@@ -5971,7 +5971,7 @@ async fn should_handle_dkg_coordination_failure() {
 
     // Verify DKG should run
     assert!(
-        transaction_coordinator::should_coordinate_dkg(&context, &chain_tip)
+        transaction_coordinator::should_run_dkg(&context, &chain_tip)
             .await
             .unwrap(),
         "DKG should be triggered since no shares exist yet"
@@ -6010,7 +6010,7 @@ async fn should_handle_dkg_coordination_failure() {
 
     // We're verifying that the coordinator is currently processing
     // requests correctly. Since we previously checked that
-    // 'should_coordinate_dkg' will trigger and we set the
+    // 'should_run_dkg' will trigger and we set the
     // 'dkg_max_duration' to 10 milliseconds we expect that DKG will run
     // and fail.
     coordinator

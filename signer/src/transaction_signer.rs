@@ -46,7 +46,7 @@ use crate::storage::model;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::DkgSharesStatus;
 use crate::storage::model::SigHash;
-use crate::transaction_coordinator::should_coordinate_dkg;
+use crate::transaction_coordinator::should_run_dkg;
 use crate::wsts_state_machine::FrostCoordinator;
 use crate::wsts_state_machine::SignerStateMachine;
 use crate::wsts_state_machine::StateMachineId;
@@ -1593,7 +1593,7 @@ pub async fn assert_allow_dkg_begin(
     bitcoin_chain_tip: &model::BitcoinBlockRef,
 ) -> Result<(), Error> {
     // Use the unified DKG decision logic, but with more aggressive logging for signers
-    let should_allow = should_coordinate_dkg(context, bitcoin_chain_tip).await?;
+    let should_allow = should_run_dkg(context, bitcoin_chain_tip).await?;
 
     if !should_allow {
         tracing::warn!(

@@ -67,7 +67,7 @@ use signer::testing::context::TestContext;
 use signer::testing::context::*;
 use signer::testing::get_rng;
 use signer::testing::storage::model::TestData;
-use signer::transaction_coordinator::should_coordinate_dkg;
+use signer::transaction_coordinator::should_run_dkg;
 use signer::transaction_signer::assert_allow_dkg_begin;
 use url::Url;
 
@@ -1504,7 +1504,7 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
     assert_eq!(storage.get_encrypted_dkg_shares_count().await.unwrap(), 0);
 
     // Signers and coordinator should allow DKG
-    assert!(should_coordinate_dkg(&ctx, &db_chain_tip).await.unwrap());
+    assert!(should_run_dkg(&ctx, &db_chain_tip).await.unwrap());
     assert!(assert_allow_dkg_begin(&ctx, &db_chain_tip).await.is_ok());
 
     // Okay now let's add in some DKG shares into the database.
@@ -1521,7 +1521,7 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
     prevent_dkg_on_changed_signer_set_info(&ctx, dkg_shares.aggregate_key);
 
     // Signers and coordinator should NOT allow DKG
-    assert!(!should_coordinate_dkg(&ctx, &db_chain_tip).await.unwrap());
+    assert!(!should_run_dkg(&ctx, &db_chain_tip).await.unwrap());
     assert!(assert_allow_dkg_begin(&ctx, &db_chain_tip).await.is_err());
 
     // While in the verification window, we expect the share to stay in pending
@@ -1555,7 +1555,7 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
         assert_eq!(storage.get_encrypted_dkg_shares_count().await.unwrap(), 1);
 
         // Signers and coordinator should NOT allow DKG
-        assert!(!should_coordinate_dkg(&ctx, &db_chain_tip).await.unwrap());
+        assert!(!should_run_dkg(&ctx, &db_chain_tip).await.unwrap());
         assert!(assert_allow_dkg_begin(&ctx, &db_chain_tip).await.is_err());
     }
 
@@ -1591,7 +1591,7 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
     assert_eq!(storage.get_encrypted_dkg_shares_count().await.unwrap(), 0);
 
     // Signers and coordinator should allow again DKG
-    assert!(should_coordinate_dkg(&ctx, &db_chain_tip).await.unwrap());
+    assert!(should_run_dkg(&ctx, &db_chain_tip).await.unwrap());
     assert!(assert_allow_dkg_begin(&ctx, &db_chain_tip).await.is_ok());
 
     testing::storage::drop_db(db).await;
