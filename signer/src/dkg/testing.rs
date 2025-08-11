@@ -141,8 +141,8 @@ impl StateMachine {
             && pending_count != expected_pending
         {
             results.push(format!(
-                    "expected {expected_pending} pending messages of type {message_type:?}, got {pending_count}"
-                ));
+                "expected {expected_pending} pending messages of type {message_type:?}, got {pending_count}"
+            ));
         }
 
         if results.is_empty() {
