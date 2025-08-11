@@ -109,9 +109,10 @@ unused_imports = "deny"
 [workspace.lints.clippy]
 unused_trait_names = "deny"
 unwrap_in_result = "deny"
+empty_loop = "deny"
+# We hope to be able to enable these lints in the future
 #unwrap_used = "warn"
 #expect_used = "warn"
-empty_loop = "deny"
 
 [profile.dev]
 # Disabling debug info speeds up builds a bunch,
