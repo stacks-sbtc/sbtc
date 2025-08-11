@@ -9,6 +9,7 @@ use futures::StreamExt as _;
 use serde_dynamo::Item;
 use strum::IntoEnumIterator;
 
+use testing_emily_client::models::withdrawal;
 use tracing::{debug, warn};
 
 use crate::api::models::limits::{AccountLimits, Limits};
@@ -338,17 +339,17 @@ pub async fn get_withdrawal_entry(
         [] => Err(Error::NotFound),
         [withdrawal] => Ok(withdrawal.clone()),
         withdrawals => {
-            let in_canonical_chain = futures::stream::iter(withdrawals)
-                .filter_map(|withdrawal| async move {
-                    // TODO: I'm not sure yet if I want to silence errors here.
-                    if is_in_canonical_chain(context, withdrawal).await.ok()? {
-                        Some(withdrawal.clone())
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>()
-                .await;
+            let mut in_canonical_chain = Vec::new();
+            for withdrawal in withdrawals {
+                let is_canonical = is_in_canonical_chain(context, withdrawal)
+                    .await
+                    // According to program logic, is_in_canonical_chain should never fail,
+                    // so we log the error and return an internal server error.
+                    .map_err(|_| Error::InternalServer)?;
+                if is_canonical {
+                    in_canonical_chain.push(withdrawal.clone());
+                }
+            }
 
             if in_canonical_chain.len() == 1 {
                 // SAFETY: The collection is guaranteed to have one item per the length check immediately above.`
