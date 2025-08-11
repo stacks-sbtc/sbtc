@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use bitcoin::ScriptBuf;
 use fake::Dummy as _;
-use fake::Fake;
+use fake::Fake as _;
 
 use crate::bitcoin::utxo::BitcoinInputsOutputs;
 use crate::bitcoin::utxo::PrevoutRef;
@@ -17,7 +17,7 @@ use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::StacksBlockHeight;
 
-use rand::seq::SliceRandom;
+use rand::seq::SliceRandom as _;
 
 /// A slimmed down [`BitcoinTxInfo`] type that can be used to implement the
 /// [`TxDeconstructor`] trait.

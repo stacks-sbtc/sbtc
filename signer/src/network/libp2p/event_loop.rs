@@ -1,19 +1,19 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::StreamExt;
+use futures::StreamExt as _;
 use libp2p::core::ConnectedPoint;
 use libp2p::kad::RoutingUpdate;
 use libp2p::swarm::SwarmEvent;
 use libp2p::{Swarm, gossipsub, identify, kad, mdns};
 use tokio::sync::Mutex;
 
-use crate::codec::Encode;
+use crate::codec::Encode as _;
 use crate::context::{Context, P2PEvent, SignerCommand, SignerSignal};
 use crate::error::Error;
 use crate::network::Msg;
-use crate::network::libp2p::MultiaddrExt;
-use crate::storage::DbWrite;
+use crate::network::libp2p::MultiaddrExt as _;
+use crate::storage::DbWrite as _;
 
 use super::TOPIC;
 use super::swarm::{SignerBehavior, SignerBehaviorEvent};

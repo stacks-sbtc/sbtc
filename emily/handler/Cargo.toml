@@ -6,12 +6,22 @@ edition = "2024"
 [package.metadata.cargo-machete]
 ignored = []
 
+[[bin]]
+name = "emily-lambda"
+
+[[bin]]
+name = "emily-server"
+
 [features]
 default = []
 testing = []
 populate = ["testing"]
 
 [dependencies]
+# Local crates
+sbtc = { workspace = true, features = ["webhooks"] }
+
+# External crates
 aws-config.workspace = true
 aws-sdk-dynamodb.workspace = true
 base64.workspace = true
@@ -22,12 +32,12 @@ clarity.workspace = true
 config.workspace = true
 hex.workspace = true
 reqwest.workspace = true
-sbtc = { workspace = true, features = ["webhooks"] }
 serde.workspace = true
 serde_dynamo.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 stacks-common.workspace = true
+strum.workspace = true
 thiserror.workspace = true
 time.workspace = true
 tokio.workspace = true
@@ -36,15 +46,15 @@ tracing-subscriber.workspace = true
 utoipa.workspace = true
 warp.workspace = true
 warp_lambda.workspace = true
-strum.workspace = true
 
 [dev-dependencies]
+# Local crates
 sbtc = { workspace = true, features = ["testing"] }
+
+# External crates
 test-case.workspace = true
 testing-emily-client.workspace = true
 
-[[bin]]
-name = "emily-lambda"
-
-[[bin]]
-name = "emily-server"
+# Inherit lints from the workspace
+[lints]
+workspace = true

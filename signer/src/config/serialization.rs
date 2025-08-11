@@ -1,8 +1,8 @@
-use std::{net::IpAddr, str::FromStr};
+use std::{net::IpAddr, str::FromStr as _};
 
 use clarity::{types::chainstate::StacksAddress, vm::types::PrincipalData};
 use libp2p::Multiaddr;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize as _, Deserializer};
 use url::Url;
 
 use crate::keys::PrivateKey;

@@ -8,7 +8,7 @@ use blockstack_lib::chainstate::stacks::StacksTransaction;
 use blockstack_lib::chainstate::stacks::TransactionAuthFlags;
 use blockstack_lib::chainstate::stacks::TransactionSpendingCondition;
 use secp256k1::ecdsa::RecoverableSignature;
-use serde::Deserialize;
+use serde::Deserialize as _;
 
 use crate::error::Error;
 use crate::keys::PrivateKey;
@@ -183,7 +183,7 @@ pub mod serde_utils {
 
 #[cfg(test)]
 mod tests {
-    use fake::Fake;
+    use fake::Fake as _;
     use rand::rngs::OsRng;
 
     use super::*;
