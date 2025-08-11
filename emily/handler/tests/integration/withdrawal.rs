@@ -1056,13 +1056,21 @@ async fn emily_process_withdrawal_updates_when_some_of_them_are_unknown() {
 
 #[tokio::test]
 async fn emily_handles_withdrawal_requests_on_forks() {
+    // The only thing we care about this heights is that the block
+    // associated with first withdrawal will be orphaned after the reorg.
+    const PRE_REORG_BEGIN: usize = 1000;
+    const PRE_REORG_END: usize = 1015;
+    const POST_REORG_BEGIN: usize = 1010;
+    const POST_REORG_END: usize = 1020;
+
+
     let configuration = clean_setup().await;
 
     // During this test request ID should be similar for all withdrawals.
     let request_id = 1;
 
     // Set initial chainstate.
-    let pre_reorg_chain: Vec<Chainstate> = (1000..1015)
+    let pre_reorg_chain: Vec<Chainstate> = (PRE_REORG_BEGIN..PRE_REORG_END)
         .map(|height| new_test_chainstate(height, height, 0))
         .collect();
 
@@ -1104,7 +1112,7 @@ async fn emily_handles_withdrawal_requests_on_forks() {
 
     // Now we will create a reorg chain, and update Emily with it.
 
-    let post_reorg_chain: Vec<Chainstate> = (1010..1020)
+    let post_reorg_chain: Vec<Chainstate> = (POST_REORG_BEGIN..POST_REORG_END)
         .map(|height| new_test_chainstate(height, height, 1))
         .collect();
     batch_set_chainstates(&configuration, post_reorg_chain).await;
