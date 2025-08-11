@@ -1063,7 +1063,6 @@ async fn emily_handles_withdrawal_requests_on_forks() {
     const POST_REORG_BEGIN: usize = 1010;
     const POST_REORG_END: usize = 1020;
 
-
     let configuration = clean_setup().await;
 
     // During this test request ID should be similar for all withdrawals.
