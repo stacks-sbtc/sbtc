@@ -5,12 +5,9 @@ use std::collections::HashMap;
 use aws_sdk_dynamodb::types::AttributeValue;
 use aws_sdk_dynamodb::types::error::ConditionalCheckFailedException;
 use futures;
-use futures::StreamExt as _;
 use serde_dynamo::Item;
 use strum::IntoEnumIterator;
 
-use testing_emily_client::models::withdrawal;
-use tracing::{debug, warn};
 
 use crate::api::models::limits::{AccountLimits, Limits};
 use crate::common::error::{Error, Inconsistency};
