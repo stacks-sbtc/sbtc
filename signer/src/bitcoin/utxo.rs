@@ -29,11 +29,11 @@ use bitcoin::taproot::Signature;
 use bitcoin::taproot::TaprootSpendInfo;
 use bitcoin::transaction::Version;
 use bitvec::array::BitArray;
-use bitvec::field::BitField;
+use bitvec::field::BitField as _;
 use sbtc::idpack::BitmapSegmenter;
 use sbtc::idpack::Decodable as _;
 use sbtc::idpack::Encodable as _;
-use sbtc::idpack::Segmenter;
+use sbtc::idpack::Segmenter as _;
 use sbtc::idpack::Segments;
 use secp256k1::SECP256K1;
 use secp256k1::XOnlyPublicKey;
@@ -1626,21 +1626,21 @@ impl TxDeconstructor for BitcoinTxInfo {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
-    use std::str::FromStr;
+    use std::str::FromStr as _;
     use std::sync::atomic::AtomicU64;
 
     use super::*;
     use bitcoin::CompressedPublicKey;
     use bitcoin::Txid;
     use bitcoin::hashes::Hash as _;
-    use bitcoin::key::TapTweak;
+    use bitcoin::key::TapTweak as _;
     use bitcoin::opcodes::all::OP_RETURN;
     use bitcoin::script::Instruction;
     use clarity::vm::types::PrincipalData;
     use fake::Fake as _;
     use model::SignerVote;
     use more_asserts::assert_ge;
-    use rand::distributions::Distribution;
+    use rand::distributions::Distribution as _;
     use rand::distributions::Uniform;
     use rand::rngs::OsRng;
     use sbtc::deposits::DepositScriptInputs;

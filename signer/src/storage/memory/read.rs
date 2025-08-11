@@ -9,7 +9,7 @@ use crate::{
         validation::{DepositRequestReport, WithdrawalRequestReport},
     },
     error::Error,
-    keys::{PublicKey, PublicKeyXOnly, SignerScriptPubKey},
+    keys::{PublicKey, PublicKeyXOnly, SignerScriptPubKey as _},
     storage::{
         DbRead,
         model::{self, BitcoinBlockHeight, DkgSharesStatus},

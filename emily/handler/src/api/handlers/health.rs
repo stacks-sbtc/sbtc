@@ -1,6 +1,6 @@
 //! Handlers for Health endpoint endpoints.
 
-use warp::reply::Reply;
+use warp::reply::Reply as _;
 
 use crate::{api::models::health::responses::HealthData, context::EmilyContext};
 

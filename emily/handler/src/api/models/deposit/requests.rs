@@ -1,6 +1,6 @@
 //! Request structures for deposit api calls.
 
-use std::str::FromStr;
+use std::str::FromStr as _;
 
 use bitcoin::blockdata::transaction::Transaction;
 use bitcoin::consensus::encode;

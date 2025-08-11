@@ -1,3 +1,7 @@
+//! Integration tests for the sBTC signer.
+
+#![allow(clippy::unwrap_in_result, clippy::unwrap_used, clippy::expect_used)]
+
 use std::sync::atomic::AtomicU16;
 
 mod bitcoin_client;

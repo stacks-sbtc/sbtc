@@ -67,7 +67,7 @@ use signer::context::Context as _;
 use signer::context::SignerEvent;
 use signer::context::SignerSignal;
 use signer::emily_client::EmilyClient;
-use signer::keys::SignerScriptPubKey;
+use signer::keys::SignerScriptPubKey as _;
 use signer::stacks::api::StacksClient;
 use signer::stacks::api::StacksInteract as _;
 use signer::storage::DbRead as _;
@@ -75,7 +75,7 @@ use signer::storage::model::StacksPrincipal;
 use signer::testing;
 use signer::testing::context::TestContext;
 use signer::testing::context::*;
-use signer::testing::storage::DbReadTestExt;
+use signer::testing::storage::DbReadTestExt as _;
 use url::Url;
 
 const DEVENV_DEPLOYER: &str = "SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS";
