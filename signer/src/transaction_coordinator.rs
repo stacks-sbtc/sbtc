@@ -2554,34 +2554,32 @@ pub async fn should_run_dkg(
     let dkg_min_bitcoin_block_height = config.signer.dkg_min_bitcoin_block_height;
 
     match dkg_min_bitcoin_block_height {
-        Some(dkg_min_height) => {
-            // Check if we've passed the minimum height and no DKG has been started since then
-            if bitcoin_chain_tip.block_height >= dkg_min_height {
-                // Check if the latest DKG shares were started before the minimum height
-                if latest_dkg_shares.started_at_bitcoin_block_height < dkg_min_height {
-                    tracing::info!(
-                        ?dkg_min_bitcoin_block_height,
-                        latest_dkg_started_at = %latest_dkg_shares.started_at_bitcoin_block_height,
-                        current_height = %bitcoin_chain_tip.block_height,
-                        "DKG rerun height has been met and no DKG has been started since then; proceeding with DKG"
-                    );
-                    Ok(true)
-                } else {
-                    tracing::debug!(
-                        ?dkg_min_bitcoin_block_height,
-                        latest_dkg_started_at = %latest_dkg_shares.started_at_bitcoin_block_height,
-                        "DKG has already been started after the minimum height; skipping DKG"
-                    );
-                    Ok(false)
-                }
+        Some(dkg_min_height) if bitcoin_chain_tip.block_height >= dkg_min_height => {
+            // Check if the latest DKG shares were started before the minimum height
+            if latest_dkg_shares.started_at_bitcoin_block_height < dkg_min_height {
+                tracing::info!(
+                    ?dkg_min_bitcoin_block_height,
+                    latest_dkg_started_at = %latest_dkg_shares.started_at_bitcoin_block_height,
+                    current_height = %bitcoin_chain_tip.block_height,
+                    "DKG rerun height has been met and no DKG has been started since then; proceeding with DKG"
+                );
+                Ok(true)
             } else {
                 tracing::debug!(
                     ?dkg_min_bitcoin_block_height,
-                    current_height = %bitcoin_chain_tip.block_height,
-                    "bitcoin chain tip is below the minimum height for DKG rerun; skipping DKG"
+                    latest_dkg_started_at = %latest_dkg_shares.started_at_bitcoin_block_height,
+                    "DKG has already been started after the minimum height; skipping DKG"
                 );
                 Ok(false)
             }
+        }
+        Some(_dkg_min_height) => {
+            tracing::debug!(
+                ?dkg_min_bitcoin_block_height,
+                current_height = %bitcoin_chain_tip.block_height,
+                "bitcoin chain tip is below the minimum height for DKG rerun; skipping DKG"
+            );
+            Ok(false)
         }
         None => {
             // If no minimum height is configured, we don't allow multiple DKG rounds
