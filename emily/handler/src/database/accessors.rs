@@ -351,6 +351,7 @@ pub async fn get_withdrawal_entry(
                 .await;
 
             if in_canonical_chain.len() == 1 {
+                // SAFETY: The collection is guaranteed to have one item per the length check immediately above.`
                 return Ok(in_canonical_chain[0].clone());
             }
             if in_canonical_chain.is_empty() {
