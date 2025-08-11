@@ -558,12 +558,12 @@ pub async fn add_chainstate_entry(
     // Get the current api state and give up if reorging.
     let mut api_state = get_api_state(context).await?;
     debug!("Adding chainstate entry, current api state: {api_state:?}");
-    if let ApiStatus::Reorg(reorg_chaintip) = &api_state.api_status {
-        if reorg_chaintip.key != entry.key {
-            let message = "Attempting to update chainstate during a reorg";
-            warn!(?entry, ?reorg_chaintip, message);
-            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(message)));
-        }
+    if let ApiStatus::Reorg(reorg_chaintip) = &api_state.api_status
+        && reorg_chaintip.key != entry.key
+    {
+        let message = "Attempting to update chainstate during a reorg";
+        warn!(?entry, ?reorg_chaintip, message);
+        return Err(Error::InconsistentState(Inconsistency::ItemUpdate(message)));
     }
 
     // Get the existing chainstate entry for height. If there's a conflict
@@ -839,10 +839,10 @@ pub async fn get_limits(context: &EmilyContext) -> Result<Limits, Error> {
         } else if limit_by_account.contains_key(account) {
             // If the account is already in the map then update the entry if the current
             // entry is newer.
-            if let Some(existing_entry) = limit_by_account.get_mut(account) {
-                if existing_entry.key.timestamp < entry.key.timestamp {
-                    *existing_entry = entry.clone();
-                }
+            if let Some(existing_entry) = limit_by_account.get_mut(account)
+                && existing_entry.key.timestamp < entry.key.timestamp
+            {
+                *existing_entry = entry.clone();
             }
         } else {
             // If the account isn't in the map then insert it.

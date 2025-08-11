@@ -3,6 +3,7 @@ use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::io::Read as _;
 use std::ops::Deref as _;
+use std::slice;
 use std::time::Duration;
 
 use bitcoin::hashes::Hash as _;
@@ -2350,7 +2351,7 @@ async fn get_swept_withdrawal_requests_returns_swept_withdrawal_requests() {
         .await
         .unwrap();
     db.write_bitcoin_transaction(&sweep_tx_ref).await.unwrap();
-    db.write_bitcoin_withdrawals_outputs(&[swept_output.clone()])
+    db.write_bitcoin_withdrawals_outputs(slice::from_ref(&swept_output))
         .await
         .unwrap();
 
@@ -2743,7 +2744,7 @@ async fn get_swept_withdrawal_requests_does_not_return_withdrawal_requests_with_
         .await
         .unwrap();
     db.write_bitcoin_transaction(&sweep_tx_ref).await.unwrap();
-    db.write_bitcoin_withdrawals_outputs(&[swept_output.clone()])
+    db.write_bitcoin_withdrawals_outputs(slice::from_ref(&swept_output))
         .await
         .unwrap();
 
@@ -3138,7 +3139,7 @@ async fn get_swept_withdrawal_requests_response_tx_reorged() {
         .await
         .unwrap();
     db.write_bitcoin_transaction(&sweep_tx_ref).await.unwrap();
-    db.write_bitcoin_withdrawals_outputs(&[swept_output.clone()])
+    db.write_bitcoin_withdrawals_outputs(slice::from_ref(&swept_output))
         .await
         .unwrap();
 
@@ -5571,7 +5572,7 @@ async fn pending_rejected_withdrawal_already_accepted() {
         stacks_block_hash: request.block_hash,
         ..fake::Faker.fake_with_rng(&mut rng)
     };
-    db.write_bitcoin_withdrawals_outputs(&[forked_withdrawal_output.clone()])
+    db.write_bitcoin_withdrawals_outputs(slice::from_ref(&forked_withdrawal_output))
         .await
         .unwrap();
     db.write_bitcoin_transaction(&model::BitcoinTxRef {
@@ -5610,7 +5611,7 @@ async fn pending_rejected_withdrawal_already_accepted() {
         stacks_block_hash: request.block_hash,
         ..fake::Faker.fake_with_rng(&mut rng)
     };
-    db.write_bitcoin_withdrawals_outputs(&[canonical_withdrawal_output.clone()])
+    db.write_bitcoin_withdrawals_outputs(slice::from_ref(&canonical_withdrawal_output))
         .await
         .unwrap();
 
