@@ -17,7 +17,7 @@ use libp2p::{
     },
 };
 
-use super::MultiaddrExt;
+use super::MultiaddrExt as _;
 use crate::metrics::Metrics;
 
 #[derive(Clone, Debug)]

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use aws_sdk_dynamodb::types::AttributeValue;
 use aws_sdk_dynamodb::types::error::ConditionalCheckFailedException;
 use serde_dynamo::Item;
-use strum::IntoEnumIterator;
+use strum::IntoEnumIterator as _;
 
 use tracing::{debug, warn};
 

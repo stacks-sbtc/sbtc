@@ -49,11 +49,11 @@ use crate::storage::model::SigHash;
 use crate::wsts_state_machine::FrostCoordinator;
 use crate::wsts_state_machine::SignerStateMachine;
 use crate::wsts_state_machine::StateMachineId;
-use crate::wsts_state_machine::WstsCoordinator;
+use crate::wsts_state_machine::WstsCoordinator as _;
 
 use bitcoin::TapSighash;
 use bitcoin::hashes::Hash as _;
-use futures::StreamExt;
+use futures::StreamExt as _;
 use lru::LruCache;
 use wsts::net::DkgEnd;
 use wsts::net::DkgStatus;
@@ -1724,16 +1724,16 @@ mod tests {
     use std::num::{NonZeroU32, NonZeroUsize};
 
     use bitcoin::Txid;
-    use fake::{Fake, Faker};
+    use fake::{Fake as _, Faker};
     use network::InMemoryNetwork;
     use test_case::test_case;
 
     use crate::bitcoin::MockBitcoinInteract;
-    use crate::context::Context;
+    use crate::context::Context as _;
     use crate::emily_client::MockEmilyInteract;
     use crate::stacks::api::MockStacksInteract;
     use crate::storage::memory::SharedStore;
-    use crate::storage::{DbWrite, model};
+    use crate::storage::{DbWrite as _, model};
     use crate::testing;
     use crate::testing::context::*;
 

@@ -13,13 +13,13 @@ use blockstack_lib::chainstate::stacks::StacksTransaction;
 use futures::Stream;
 use futures::StreamExt as _;
 use futures::future::try_join_all;
-use sha2::Digest;
+use sha2::Digest as _;
 
 use crate::WITHDRAWAL_BLOCKS_EXPIRY;
 use crate::WITHDRAWAL_DUST_LIMIT;
 use crate::WITHDRAWAL_EXPIRY_BUFFER;
 use crate::WITHDRAWAL_MIN_CONFIRMATIONS;
-use crate::bitcoin::BitcoinInteract;
+use crate::bitcoin::BitcoinInteract as _;
 use crate::bitcoin::TransactionLookupHint;
 use crate::bitcoin::utxo;
 use crate::bitcoin::utxo::Fees;
@@ -35,7 +35,7 @@ use crate::context::TxCoordinatorEvent;
 use crate::context::TxSignerEvent;
 use crate::ecdsa::SignEcdsa as _;
 use crate::ecdsa::Signed;
-use crate::emily_client::EmilyInteract;
+use crate::emily_client::EmilyInteract as _;
 use crate::error::Error;
 use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
@@ -51,9 +51,9 @@ use crate::metrics::STACKS_BLOCKCHAIN;
 use crate::network;
 use crate::signature::TaprootSignature;
 use crate::stacks::api::FeePriority;
-use crate::stacks::api::GetNakamotoStartHeight;
+use crate::stacks::api::GetNakamotoStartHeight as _;
 use crate::stacks::api::RejectionReason;
-use crate::stacks::api::StacksInteract;
+use crate::stacks::api::StacksInteract as _;
 use crate::stacks::api::SubmitTxResponse;
 use crate::stacks::api::TxRejection;
 use crate::stacks::contracts::AcceptWithdrawalV1;
@@ -2642,7 +2642,7 @@ mod tests {
     use std::num::NonZeroU32;
 
     use crate::bitcoin::MockBitcoinInteract;
-    use crate::context::Context;
+    use crate::context::Context as _;
     use crate::emily_client::MockEmilyInteract;
     use crate::error::Error;
     use crate::keys::{PrivateKey, PublicKey};
@@ -2650,12 +2650,12 @@ mod tests {
     use crate::stacks::api::MockStacksInteract;
     use crate::storage::memory::SharedStore;
     use crate::storage::model::BitcoinBlockHeight;
-    use crate::storage::{DbWrite, model};
+    use crate::storage::{DbWrite as _, model};
     use crate::testing;
     use crate::testing::context::*;
     use crate::testing::transaction_coordinator::TestEnvironment;
 
-    use fake::{Fake, Faker};
+    use fake::{Fake as _, Faker};
     use rand::SeedableRng as _;
     use test_case::test_case;
 

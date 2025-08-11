@@ -6,11 +6,19 @@ edition = "2024"
 [package.metadata.cargo-machete]
 ignored = ["tonic", "tonic-build", "stackslib"]
 
+[[bin]]
+name = "demo-cli"
+path = "src/bin/demo_cli.rs"
+
 [features]
 default = []
 testing = ["dep:fake", "dep:mockall", "sbtc/testing"]
 
 [dependencies]
+# Local crates
+sbtc = { workspace = true, features = ["webhooks"] }
+
+# External crates
 aquamarine.workspace = true
 axum.workspace = true
 bitcoin.workspace = true
@@ -38,7 +46,6 @@ prost.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
 reqwest.workspace = true
-sbtc = { workspace = true, features = ["webhooks"] }
 secp256k1.workspace = true
 serde.workspace = true
 serde_bytes.workspace = true
@@ -67,23 +74,26 @@ mockall = { workspace = true, optional = true }
 tonic-build.workspace = true
 
 [dev-dependencies]
+# Local crates
+sbtc = { workspace = true, features = ["testing"] }
+# Add ourself as a dev-dependency with the "testing" feature enabled to
+# automatically include testing functionality for debug builds (i.e. dev/test).
+# This also ensures that your IDE will recognize feature-gated code as active.
+signer = { path = ".", features = ["testing"] }
+
+# External crates
+assert_matches.workspace = true
 bitcoincore-rpc.workspace = true
 mockito.workspace = true
 more-asserts.workspace = true
 ripemd.workspace = true
-sbtc = { workspace = true, features = ["testing"] }
-# We need this so that we have access to "testing" feature code in our
-# tests. Taken from:
-# https://github.com/rust-lang/cargo/issues/2911#issuecomment-749580481
-signer = { path = ".", features = ["testing"] }
 tempfile.workspace = true
 test-case.workspace = true
 test-log.workspace = true
 testing-emily-client.workspace = true
 toml_edit.workspace = true
 tower.workspace = true
-assert_matches.workspace = true
 
-[[bin]]
-name = "demo-cli"
-path = "src/bin/demo_cli.rs"
+# Inherit lints from the workspace
+[lints]
+workspace = true
