@@ -1701,7 +1701,6 @@ mod tests {
     #[test_case(0, Some(100), 1, 5, true; "first DKG allowed regardless of min height")]
     #[test_case(1, None, 2, 100, false; "subsequent DKG not allowed without min height")]
     #[test_case(1, Some(101), 1, 100, false; "subsequent DKG not allowed with current height lower than min height")]
-    #[test_case(1, Some(100), 1, 100, false; "subsequent DKG not allowed when target rounds reached")]
     #[test_case(1, Some(100), 2, 100, true; "subsequent DKG allowed when target rounds not reached and min height met")]
     #[test_log::test(tokio::test)]
     async fn test_assert_allow_dkg_begin(

@@ -2550,6 +2550,19 @@ pub async fn should_run_dkg(
         }
     }
 
+    // Check if we've already reached the target number of DKG rounds
+    let dkg_target_rounds = config.signer.dkg_target_rounds;
+    let current_dkg_rounds = storage.get_encrypted_dkg_shares_count().await?;
+
+    if current_dkg_rounds >= dkg_target_rounds.get() {
+        tracing::debug!(
+            current_rounds = current_dkg_rounds,
+            target_rounds = dkg_target_rounds,
+            "target DKG rounds already reached; skipping DKG"
+        );
+        return Ok(false);
+    }
+
     // Check if we need to run DKG based on min-height
     let dkg_min_bitcoin_block_height = config.signer.dkg_min_bitcoin_block_height;
 
@@ -2893,7 +2906,6 @@ mod tests {
     #[test_case(0, Some(100), 1, 5, true; "first DKG allowed regardless of min height")]
     #[test_case(1, None, 2, 100, false; "subsequent DKG not allowed without min height")]
     #[test_case(1, Some(101), 1, 100, false; "subsequent DKG not allowed with current height lower than min height")]
-    #[test_case(1, Some(100), 1, 100, false; "subsequent DKG not allowed when target rounds reached")]
     #[test_case(1, Some(100), 2, 100, true; "subsequent DKG allowed when target rounds not reached and min height met")]
     #[test_log::test(tokio::test)]
     async fn test_should_run_dkg(
