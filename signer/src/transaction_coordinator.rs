@@ -2919,9 +2919,11 @@ mod tests {
 
         // Write `dkg_shares` entries for the `current` number of rounds, simulating
         // the signer having participated in that many successful DKG rounds.
-        for _ in 0..dkg_rounds_current {
+        for i in 0..dkg_rounds_current {
             let mut shares: model::EncryptedDkgShares = Faker.fake();
             shares.dkg_shares_status = model::DkgSharesStatus::Verified;
+            // Set a reasonable block height for each DKG round
+            shares.started_at_bitcoin_block_height = (50 + i as u64).into();
 
             storage.write_encrypted_dkg_shares(&shares).await.unwrap();
         }
