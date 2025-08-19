@@ -79,3 +79,9 @@ who = "xoloki <xoloki@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "14.0.0@git:11e2316aa0edf996f8e8f9ccbbbfd4bd2975ed1d -> 15.0.0@git:f354dedeb0f7bede14575553be6d35454309cf02"
 importable = false
+
+[[audits.wsts]]
+who = "xoloki <xoloki@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "15.0.0@git:f354dedeb0f7bede14575553be6d35454309cf02 -> 16.0.0@git:257c89fe1842b1122b1e3d28de3a7218f064e42e"
+importable = false
