@@ -10,6 +10,7 @@ use fake::Fake as _;
 use stacks_common::address::AddressHashMode;
 use stacks_common::address::C32_ADDRESS_VERSION_TESTNET_MULTISIG;
 use stacks_common::types::chainstate::StacksAddress;
+use wsts::compute::ExpansionType;
 use wsts::net::Message as WstsNetMessage;
 use wsts::net::SignatureType;
 use wsts::state_machine::StateMachine as _;
@@ -134,6 +135,7 @@ impl Coordinator {
             sign_timeout: None,
             public_keys,
             verify_packet_sigs: false,
+            expansion_type: ExpansionType::Default,
         };
 
         let wsts_coordinator = fire::Coordinator::new(config);

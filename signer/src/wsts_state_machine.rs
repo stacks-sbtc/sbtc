@@ -30,6 +30,7 @@ use rand_chacha::ChaCha20Rng;
 use sha2::Digest as _;
 use sha2::Sha256;
 use wsts::common::PolyCommitment;
+use wsts::compute::ExpansionType;
 use wsts::net::Message;
 use wsts::net::Packet;
 use wsts::net::SignatureType;
@@ -314,6 +315,7 @@ impl WstsCoordinator for FireCoordinator {
             sign_timeout: None,
             public_keys,
             verify_packet_sigs: false,
+            expansion_type: ExpansionType::Default,
         };
 
         let mut wsts_coordinator = fire::Coordinator::new(config);
@@ -440,6 +442,7 @@ impl WstsCoordinator for FrostCoordinator {
             sign_timeout: None,
             public_keys,
             verify_packet_sigs: false,
+            expansion_type: ExpansionType::Default,
         };
 
         let mut wsts_coordinator = frost::Coordinator::new(config);
@@ -607,6 +610,7 @@ impl SignerStateMachine {
             private_key.into(),
             public_keys,
             &mut OsRng,
+            ExpansionType::Default,
         )
         .map_err(Error::Wsts)?;
 

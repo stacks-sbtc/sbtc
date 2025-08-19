@@ -5,6 +5,7 @@ use std::collections::VecDeque;
 use rand::rngs::OsRng;
 use secp256k1::XOnlyPublicKey;
 use wsts::{
+    compute::ExpansionType,
     net::{Message, NonceRequest, NonceResponse, SignatureShareRequest, SignatureType},
     state_machine::{
         coordinator::{frost, test as wsts_test},
@@ -45,8 +46,10 @@ impl TestSetup {
             panic!("must have at least 1 parties");
         }
 
-        let (coordinators, signers) =
-            wsts_test::run_dkg::<frost::Coordinator<v2::Aggregator>, v2::Party>(num_parties, 5);
+        let (coordinators, signers) = wsts_test::run_dkg::<
+            frost::Coordinator<v2::Aggregator>,
+            v2::Party,
+        >(num_parties, 5, ExpansionType::Default);
 
         let signers = signers.into();
         let aggregate_key = pubkey_xonly();
