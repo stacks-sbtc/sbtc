@@ -411,7 +411,7 @@ mod tests {
     use wsts::net::{Message, Packet};
 
     use crate::testing::get_rng;
-    use crate::wsts_state_machine::FromMessage;
+    use crate::wsts_state_machine::FromMessage as _;
     use crate::{dkg::testing::*, testing::IterTestExt as _};
 
     use super::{
