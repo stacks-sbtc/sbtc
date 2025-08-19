@@ -24,11 +24,11 @@ use std::ops::Deref;
 
 use bitcoin::TapSighashType;
 use bitcoin::Witness;
-use bitcoin::key::TapTweak;
+use bitcoin::key::TapTweak as _;
 use secp256k1::SECP256K1;
 
-use rand::RngCore;
-use rand::SeedableRng;
+use rand::RngCore as _;
+use rand::SeedableRng as _;
 use rand::rngs::{OsRng, StdRng};
 
 use crate::bitcoin::utxo::UnsignedTransaction;
@@ -351,7 +351,7 @@ impl<T, E: Display, I: IntoIterator<Item = Result<T, E>>> ResultIterExt<T, E> fo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures::future::FutureExt;
+    use futures::future::FutureExt as _;
     use std::boxed::Box;
     use std::pin::Pin;
 

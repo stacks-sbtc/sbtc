@@ -1654,9 +1654,9 @@ impl Deref for DbMultiaddr {
 
 #[cfg(test)]
 mod tests {
-    use fake::Fake;
+    use fake::Fake as _;
 
-    use sbtc::events::FromLittleEndianOrder;
+    use sbtc::events::FromLittleEndianOrder as _;
 
     use crate::testing::get_rng;
 

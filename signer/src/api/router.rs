@@ -39,7 +39,7 @@ mod tests {
         body::Body,
         http::{Method, Request, StatusCode},
     };
-    use tower::ServiceExt;
+    use tower::ServiceExt as _;
 
     use crate::{
         api::{ApiState, router::get_router},

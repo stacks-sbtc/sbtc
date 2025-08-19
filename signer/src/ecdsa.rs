@@ -63,7 +63,7 @@ use prost::Message as _;
 use prost::bytes::Buf as _;
 use sha2::Digest as _;
 
-use crate::codec::ProtoSerializable;
+use crate::codec::ProtoSerializable as _;
 use crate::error::Error;
 use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
@@ -266,7 +266,7 @@ mod tests {
     use rand::rngs::OsRng;
 
     use crate::codec::Encode as _;
-    use crate::ecdsa::SignEcdsa;
+    use crate::ecdsa::SignEcdsa as _;
     use crate::keys::PrivateKey;
     use crate::message;
     use crate::proto;

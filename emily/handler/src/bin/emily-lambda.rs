@@ -5,7 +5,7 @@ use tracing::info;
 
 use emily_handler::api;
 use emily_handler::logging;
-use warp::Filter;
+use warp::Filter as _;
 
 #[tokio::main]
 async fn main() {

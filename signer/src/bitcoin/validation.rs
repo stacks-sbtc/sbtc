@@ -157,7 +157,7 @@ impl BitcoinPreSignRequest {
         &self,
         db: &D,
         btc_ctx: &BitcoinTxContext,
-    ) -> Result<ValidationCache, Error>
+    ) -> Result<ValidationCache<'_>, Error>
     where
         D: DbRead,
     {
@@ -564,7 +564,7 @@ pub struct SbtcReports {
 
 impl SbtcReports {
     /// Create the transaction with witness data using the requests.
-    pub fn create_transaction(&self) -> Result<UnsignedTransaction, Error> {
+    pub fn create_transaction(&self) -> Result<UnsignedTransaction<'_>, Error> {
         let deposits = self
             .deposits
             .iter()

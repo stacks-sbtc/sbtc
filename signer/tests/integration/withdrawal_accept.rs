@@ -12,7 +12,7 @@ use signer::storage::model::BitcoinTxId;
 use signer::testing;
 use signer::testing::get_rng;
 
-use fake::Fake;
+use fake::Fake as _;
 use signer::testing::context::*;
 
 use crate::setup::SweepAmounts;
