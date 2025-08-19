@@ -106,6 +106,13 @@ private_key = "41634762d89dfa09133a4a8e9c1378d0161d29cd0a9433b51f1e3d32947a73dc"
 # Environment: SIGNER_SIGNER__NETWORK
 network = "regtest"
 
+# Specifies which expansion type to use when computing the binding value
+#
+# Required: true
+# Possible values: default, xmd
+# Environment: SIGNER_SIGNER__EXPANSION_TYPE
+expansion_type = "default"
+
 # The address that deployed the sbtc smart contracts.
 #
 # Required: true

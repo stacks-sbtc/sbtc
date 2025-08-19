@@ -114,6 +114,35 @@ impl NetworkKind {
     }
 }
 
+#[derive(serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "testing"), derive(serde::Serialize))]
+#[serde(rename_all = "lowercase")]
+/// The WSTS ExpansionType to use
+pub enum ExpansionType {
+    /// The default expansion type
+    Default,
+    /// The xmd expansion type
+    Xmd,
+}
+
+impl From<ExpansionType> for wsts::compute::ExpansionType {
+    fn from(value: ExpansionType) -> Self {
+        match value {
+            ExpansionType::Default => wsts::compute::ExpansionType::Default,
+            ExpansionType::Xmd => wsts::compute::ExpansionType::Xmd,
+        }
+    }
+}
+
+impl std::fmt::Display for ExpansionType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExpansionType::Default => write!(f, "default"),
+            ExpansionType::Xmd => write!(f, "xmd"),
+        }
+    }
+}
+
 /// Top-level configuration for the signer
 #[derive(Deserialize, Clone, Debug)]
 pub struct Settings {
@@ -327,6 +356,8 @@ pub struct SignerConfig {
     pub p2p: P2PNetworkConfig,
     /// P2P network configuration
     pub network: NetworkKind,
+    /// WSTS expansion type
+    pub expansion_type: ExpansionType,
     /// Event observer server configuration
     pub event_observer: EventObserverConfig,
     /// The address of the deployer of the sBTC smart contracts.
@@ -972,6 +1003,24 @@ mod tests {
 
         let settings = Settings::new_from_default_config().unwrap();
         assert_eq!(settings.signer.network, NetworkKind::Regtest);
+    }
+
+    #[test]
+    fn default_config_toml_loads_signer_expansion_type_with_environment() {
+        clear_env();
+
+        let new = "default";
+        set_var("SIGNER_SIGNER__EXPANSION_TYPE", new);
+
+        let settings = Settings::new_from_default_config().unwrap();
+        assert_eq!(settings.signer.expansion_type, ExpansionType::Default);
+
+        // We unset the p2p seeds here as they're not required for regtest.
+        let new = "xmd";
+        set_var("SIGNER_SIGNER__EXPANSION_TYPE", new);
+
+        let settings = Settings::new_from_default_config().unwrap();
+        assert_eq!(settings.signer.expansion_type, ExpansionType::Xmd);
     }
 
     #[test]
