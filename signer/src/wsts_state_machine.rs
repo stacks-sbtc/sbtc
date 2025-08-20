@@ -215,6 +215,7 @@ where
         threshold: u16,
         message_private_key: PrivateKey,
         block_height: BitcoinBlockHeight,
+        xmd_block_height: Option<BitcoinBlockHeight>,
     ) -> Self
     where
         I: IntoIterator<Item = PublicKey>;
@@ -240,6 +241,7 @@ where
         storage: &S,
         aggregate_key: PublicKeyXOnly,
         signer_private_key: PrivateKey,
+        xmd_block_height: Option<BitcoinBlockHeight>,
     ) -> impl Future<Output = Result<Self, error::Error>> + Send
     where
         S: storage::DbRead + Send + Sync;
@@ -274,6 +276,7 @@ impl WstsCoordinator for FireCoordinator {
         threshold: u16,
         message_private_key: PrivateKey,
         block_height: BitcoinBlockHeight,
+        xmd_block_height: Option<BitcoinBlockHeight>,
     ) -> Self
     where
         I: IntoIterator<Item = PublicKey>,
@@ -302,6 +305,15 @@ impl WstsCoordinator for FireCoordinator {
             key_ids,
             signer_key_ids,
         };
+        let expansion_type = if let Some(xmd_block_height) = xmd_block_height {
+            if xmd_block_height <= block_height {
+                ExpansionType::Xmd
+            } else {
+                ExpansionType::Default
+            }
+        } else {
+            ExpansionType::Default
+        };
         let config = wsts::state_machine::coordinator::Config {
             num_signers,
             num_keys: num_signers,
@@ -315,7 +327,7 @@ impl WstsCoordinator for FireCoordinator {
             sign_timeout: None,
             public_keys,
             verify_packet_sigs: false,
-            expansion_type: ExpansionType::Default,
+            expansion_type,
         };
 
         let mut wsts_coordinator = fire::Coordinator::new(config);
@@ -335,6 +347,7 @@ impl WstsCoordinator for FireCoordinator {
         storage: &S,
         aggregate_key: PublicKeyXOnly,
         signer_private_key: PrivateKey,
+        xmd_block_height: Option<BitcoinBlockHeight>,
     ) -> Result<Self, error::Error>
     where
         S: storage::DbRead + Send + Sync,
@@ -359,6 +372,7 @@ impl WstsCoordinator for FireCoordinator {
             threshold,
             signer_private_key,
             block_height,
+            xmd_block_height,
         );
 
         let aggregate_key = encrypted_shares.aggregate_key.into();
@@ -401,6 +415,7 @@ impl WstsCoordinator for FrostCoordinator {
         threshold: u16,
         message_private_key: PrivateKey,
         block_height: BitcoinBlockHeight,
+        xmd_block_height: Option<BitcoinBlockHeight>,
     ) -> Self
     where
         I: IntoIterator<Item = PublicKey>,
@@ -429,6 +444,15 @@ impl WstsCoordinator for FrostCoordinator {
             key_ids,
             signer_key_ids,
         };
+        let expansion_type = if let Some(xmd_block_height) = xmd_block_height {
+            if xmd_block_height <= block_height {
+                ExpansionType::Xmd
+            } else {
+                ExpansionType::Default
+            }
+        } else {
+            ExpansionType::Default
+        };
         let config = wsts::state_machine::coordinator::Config {
             num_signers,
             num_keys: num_signers,
@@ -442,7 +466,7 @@ impl WstsCoordinator for FrostCoordinator {
             sign_timeout: None,
             public_keys,
             verify_packet_sigs: false,
-            expansion_type: ExpansionType::Default,
+            expansion_type,
         };
 
         let mut wsts_coordinator = frost::Coordinator::new(config);
@@ -464,6 +488,7 @@ impl WstsCoordinator for FrostCoordinator {
         storage: &S,
         aggregate_key: PublicKeyXOnly,
         signer_private_key: PrivateKey,
+        xmd_block_height: Option<BitcoinBlockHeight>,
     ) -> Result<Self, error::Error>
     where
         S: storage::DbRead + Send + Sync,
@@ -488,6 +513,7 @@ impl WstsCoordinator for FrostCoordinator {
             threshold,
             signer_private_key,
             block_height,
+            xmd_block_height,
         );
 
         let aggregate_key = encrypted_shares.aggregate_key.into();
@@ -551,6 +577,7 @@ impl SignerStateMachine {
         signers: impl IntoIterator<Item = PublicKey>,
         threshold: u32,
         started_at: BitcoinBlockRef,
+        xmd_block_height: Option<BitcoinBlockHeight>,
         private_key: PrivateKey,
     ) -> Result<Self, Error> {
         let signer_pub_key = PublicKey::from_private_key(&private_key);
@@ -599,6 +626,15 @@ impl SignerStateMachine {
         if threshold > num_keys {
             return Err(error::Error::InvalidConfiguration);
         };
+        let expansion_type = if let Some(xmd_block_height) = xmd_block_height {
+            if xmd_block_height <= started_at.block_height {
+                ExpansionType::Xmd
+            } else {
+                ExpansionType::Default
+            }
+        } else {
+            ExpansionType::Default
+        };
 
         let mut inner = WstsSigner::new(
             threshold,
@@ -610,7 +646,7 @@ impl SignerStateMachine {
             private_key.into(),
             public_keys,
             &mut OsRng,
-            ExpansionType::Default,
+            expansion_type,
         )
         .map_err(Error::Wsts)?;
 
@@ -693,6 +729,7 @@ impl SignerStateMachine {
         storage: &S,
         aggregate_key: PublicKeyXOnly,
         signer_private_key: PrivateKey,
+        xmd_block_height: Option<BitcoinBlockHeight>,
     ) -> Result<Self, Error>
     where
         S: storage::DbRead,
@@ -723,7 +760,13 @@ impl SignerStateMachine {
             block_height: encrypted_shares.started_at_bitcoin_block_height,
         };
 
-        let mut state_machine = Self::new(signers, threshold, created_at, signer_private_key)?;
+        let mut state_machine = Self::new(
+            signers,
+            threshold,
+            created_at,
+            xmd_block_height,
+            signer_private_key,
+        )?;
 
         state_machine.inner.signer = signer;
 

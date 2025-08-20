@@ -44,6 +44,7 @@ use crate::storage::DbRead;
 use crate::storage::DbWrite as _;
 use crate::storage::model;
 use crate::storage::model::BitcoinBlockHash;
+use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::DkgSharesStatus;
 use crate::storage::model::SigHash;
 use crate::wsts_state_machine::FrostCoordinator;
@@ -690,6 +691,7 @@ where
                     signer_public_keys,
                     threshold,
                     *chain_tip,
+                    self.context.config().signer.xmd_min_bitcoin_block_height,
                     self.signer_private_key,
                 )?;
                 let state_machine_id = StateMachineId::Dkg(*chain_tip);
@@ -891,8 +893,13 @@ where
                 };
 
                 // Create a new `SignerStateMachine`.
-                let state_machine =
-                    SignerStateMachine::load(&db, aggregate_key, self.signer_private_key).await?;
+                let state_machine = SignerStateMachine::load(
+                    &db,
+                    aggregate_key,
+                    self.signer_private_key,
+                    self.context.config().signer.xmd_min_bitcoin_block_height,
+                )
+                .await?;
 
                 // Put the state machine into the cache.
                 self.wsts_state_machines
@@ -1247,6 +1254,7 @@ where
         storage: &S,
         aggregate_key: PublicKeyXOnly,
         signer_private_key: PrivateKey,
+        xmd_block_height: Option<BitcoinBlockHeight>,
     ) -> Result<dkg::verification::StateMachine, Error>
     where
         S: DbRead + Send + Sync,
@@ -1276,7 +1284,8 @@ where
 
         // Create the WSTS FROST coordinator.
         let coordinator =
-            FrostCoordinator::load(storage, aggregate_key, signer_private_key).await?;
+            FrostCoordinator::load(storage, aggregate_key, signer_private_key, xmd_block_height)
+                .await?;
 
         // Create the DKG verification state machine using the above coordinator.
         let state_machine = dkg::verification::StateMachine::new(coordinator, aggregate_key, None)
@@ -1311,6 +1320,7 @@ where
                 &storage,
                 aggregate_key,
                 self.signer_private_key,
+                self.context.config().signer.xmd_min_bitcoin_block_height,
             )
             .await?;
             self.dkg_verification_state_machines

@@ -253,6 +253,7 @@ impl Signer {
             signer_info.signer_public_keys,
             threshold,
             created_at,
+            None,
             signer_info.signer_private_key,
         )
         .expect("failed to construct state machine");

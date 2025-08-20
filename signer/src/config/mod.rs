@@ -114,35 +114,6 @@ impl NetworkKind {
     }
 }
 
-#[derive(serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(any(test, feature = "testing"), derive(serde::Serialize))]
-#[serde(rename_all = "lowercase")]
-/// The WSTS ExpansionType to use
-pub enum ExpansionType {
-    /// The default expansion type
-    Default,
-    /// The xmd expansion type
-    Xmd,
-}
-
-impl From<ExpansionType> for wsts::compute::ExpansionType {
-    fn from(value: ExpansionType) -> Self {
-        match value {
-            ExpansionType::Default => wsts::compute::ExpansionType::Default,
-            ExpansionType::Xmd => wsts::compute::ExpansionType::Xmd,
-        }
-    }
-}
-
-impl std::fmt::Display for ExpansionType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ExpansionType::Default => write!(f, "default"),
-            ExpansionType::Xmd => write!(f, "xmd"),
-        }
-    }
-}
-
 /// Top-level configuration for the signer
 #[derive(Deserialize, Clone, Debug)]
 pub struct Settings {
@@ -356,8 +327,6 @@ pub struct SignerConfig {
     pub p2p: P2PNetworkConfig,
     /// P2P network configuration
     pub network: NetworkKind,
-    /// WSTS expansion type
-    pub expansion_type: ExpansionType,
     /// Event observer server configuration
     pub event_observer: EventObserverConfig,
     /// The address of the deployer of the sBTC smart contracts.
@@ -419,6 +388,9 @@ pub struct SignerConfig {
     /// arrives. The default here is controlled by the
     /// [`MAX_DEPOSITS_PER_BITCOIN_TX`] constant
     pub max_deposits_per_bitcoin_tx: NonZeroU16,
+    /// Configures the signer to use WSTS XMD expansion after the specified
+    /// Bitcoin block height
+    pub xmd_min_bitcoin_block_height: Option<BitcoinBlockHeight>,
     /// Configures a DKG re-run Bitcoin block height. If this is set and DKG has
     /// already been run, the coordinator will attempt to re-run DKG after this
     /// block height is met if `dkg_target_rounds` has not been reached. If DKG
@@ -747,6 +719,7 @@ mod tests {
             settings.signer.dkg_target_rounds,
             NonZeroU32::new(1).unwrap()
         );
+        assert_eq!(settings.signer.xmd_min_bitcoin_block_height, None);
         assert_eq!(settings.signer.dkg_verification_window, 10);
         assert_eq!(settings.signer.dkg_min_bitcoin_block_height, None);
         assert_eq!(settings.emily.pagination_timeout, Duration::from_secs(10));
@@ -920,6 +893,21 @@ mod tests {
     }
 
     #[test]
+    fn default_config_toml_loads_xmd_min_bitcoin_block_height() {
+        clear_env();
+
+        let settings = Settings::new_from_default_config().unwrap();
+        assert_eq!(settings.signer.xmd_min_bitcoin_block_height, None);
+
+        set_var("SIGNER_SIGNER__XMD_MIN_BITCOIN_BLOCK_HEIGHT", "42");
+        let settings = Settings::new_from_default_config().unwrap();
+        assert_eq!(
+            settings.signer.xmd_min_bitcoin_block_height,
+            Some(42u64.into())
+        );
+    }
+
+    #[test]
     fn default_config_toml_loads_dkg_min_bitcoin_block_height() {
         clear_env();
 
@@ -1003,24 +991,6 @@ mod tests {
 
         let settings = Settings::new_from_default_config().unwrap();
         assert_eq!(settings.signer.network, NetworkKind::Regtest);
-    }
-
-    #[test]
-    fn default_config_toml_loads_signer_expansion_type_with_environment() {
-        clear_env();
-
-        let new = "default";
-        set_var("SIGNER_SIGNER__EXPANSION_TYPE", new);
-
-        let settings = Settings::new_from_default_config().unwrap();
-        assert_eq!(settings.signer.expansion_type, ExpansionType::Default);
-
-        // We unset the p2p seeds here as they're not required for regtest.
-        let new = "xmd";
-        set_var("SIGNER_SIGNER__EXPANSION_TYPE", new);
-
-        let settings = Settings::new_from_default_config().unwrap();
-        assert_eq!(settings.signer.expansion_type, ExpansionType::Xmd);
     }
 
     #[test]

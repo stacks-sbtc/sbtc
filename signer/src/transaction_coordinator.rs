@@ -1120,6 +1120,7 @@ where
             &self.context.get_storage(),
             aggregate_key.into(),
             self.private_key,
+            self.context.config().signer.xmd_min_bitcoin_block_height,
         )
         .await?;
 
@@ -1485,8 +1486,13 @@ where
         let db = self.context.get_storage();
         let sighashes = transaction.construct_digests()?;
         let locking_public_key = sighashes.signers_aggregate_key.into();
-        let mut fire_coordinator =
-            FireCoordinator::load(&db, locking_public_key, self.private_key).await?;
+        let mut fire_coordinator = FireCoordinator::load(
+            &db,
+            locking_public_key,
+            self.private_key,
+            self.context.config().signer.xmd_min_bitcoin_block_height,
+        )
+        .await?;
 
         let msg = sighashes.signers.to_raw_hash().to_byte_array();
 
@@ -1525,8 +1531,13 @@ where
             let msg = sighash.to_raw_hash().to_byte_array();
 
             let locking_public_key = deposit.signers_public_key.into();
-            let mut fire_coordinator =
-                FireCoordinator::load(&db, locking_public_key, self.private_key).await?;
+            let mut fire_coordinator = FireCoordinator::load(
+                &db,
+                locking_public_key,
+                self.private_key,
+                self.context.config().signer.xmd_min_bitcoin_block_height,
+            )
+            .await?;
 
             let instant = std::time::Instant::now();
             let signature = self
@@ -1648,8 +1659,13 @@ where
         let signer_set = self.context.config().signer.bootstrap_signing_set.clone();
 
         let block_height = chain_tip.block_height;
-        let mut state_machine =
-            FireCoordinator::new(signer_set, self.threshold, self.private_key, block_height);
+        let mut state_machine = FireCoordinator::new(
+            signer_set,
+            self.threshold,
+            self.private_key,
+            block_height,
+            self.context.config().signer.xmd_min_bitcoin_block_height,
+        );
 
         // Okay let's move the coordinator state machine to the beginning
         // of the DKG phase.

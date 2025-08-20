@@ -106,13 +106,6 @@ private_key = "41634762d89dfa09133a4a8e9c1378d0161d29cd0a9433b51f1e3d32947a73dc"
 # Environment: SIGNER_SIGNER__NETWORK
 network = "regtest"
 
-# Specifies which expansion type to use when computing the binding value
-#
-# Required: true
-# Possible values: default, xmd
-# Environment: SIGNER_SIGNER__EXPANSION_TYPE
-expansion_type = "default"
-
 # The address that deployed the sbtc smart contracts.
 #
 # Required: true
@@ -229,6 +222,14 @@ sbtc_bitcoin_start_height = 101
 # Required: false
 # Environment: SIGNER_SIGNER__PROMETHEUS_EXPORTER_ENDPOINT
 # prometheus_exporter_endpoint = "[::]:9184"
+
+# When defined, the signer will switch to using xmd expansion with WSTS after
+# the specified Bitcoin block height. Please only use this parameter when
+# instructed to by the sBTC team.
+#
+# Required: false
+# Environment: SIGNER_SIGNER__XMD_MIN_BITCOIN_BLOCK_HEIGHT
+# xmd_min_bitcoin_block_height = 12345
 
 # When defined, the signer will attempt to re-run DKG after the specified
 # Bitcoin block height. Please only use this parameter when instructed to by
