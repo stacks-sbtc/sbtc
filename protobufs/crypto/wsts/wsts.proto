@@ -24,6 +24,24 @@ message SignerDkgPublicShares {
   uint32 signer_id = 2;
   // List of (signer_id, commitment)
   repeated PartyCommitment commitments = 3;
+  // The public key used for exchanging secret shares during DKG
+  crypto.Point kex_public_key = 4;
+}
+
+// DKG public shares message from a signer to all signers and coordinator.
+// This type is used by the signers for reading polynomial commitments from
+// the database. For sBTC, this vector should always have a length of 1.
+// This maps to this type:
+// <https://github.com/Trust-Machines/wsts/blob/2d6cb87218bb8dd9ed0519356afe57a0b9a697cb/src/net.rs#L137-L146>
+message DkgSignerCommitment {
+  // List of (signer_id, commitment)
+  repeated PartyCommitment commitment = 3;
+}
+
+// All of the polynomial commitments received by a signer during a DKG
+// round.
+message DkgPolynomialCommitments {
+  map<uint32, DkgSignerCommitment> commitments = 1;
 }
 
 // The public polynomial committed to by one of the party members who are

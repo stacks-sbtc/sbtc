@@ -28,6 +28,8 @@ use lru::LruCache;
 use tokio::sync::broadcast;
 use tokio::time::error::Elapsed;
 
+use wsts::compute::ExpansionType;
+
 use super::context::*;
 
 /// A test harness for the signer event loop.
@@ -146,7 +148,7 @@ where
 {
     /// Assert that a group of transaction signers together can
     /// participate successfully in a DKG round
-    pub async fn assert_should_be_able_to_participate_in_dkg(self) {
+    pub async fn assert_should_be_able_to_participate_in_dkg(self, expansion_type: ExpansionType) {
         let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers);
@@ -216,6 +218,7 @@ where
             network.connect(),
             coordinator_signer_info,
             self.signing_threshold,
+            expansion_type,
         );
         let aggregate_key = coordinator
             .run_dkg(bitcoin_chain_tip, dummy_txid.into())
@@ -264,7 +267,9 @@ async fn run_dkg_and_store_results_for_signers<'s: 'r, 'r, S, Rng>(
 {
     let network = network::InMemoryNetwork::new();
     let mut testing_signer_set =
-        testing::wsts::SignerSet::new(signer_info, threshold, || network.connect());
+        testing::wsts::SignerSet::new(signer_info, threshold, ExpansionType::Default, || {
+            network.connect()
+        });
     let dkg_txid = testing::dummy::txid(&fake::Faker, rng);
     let bitcoin_chain_tip = *chain_tip;
     let (_, all_dkg_shares) = testing_signer_set

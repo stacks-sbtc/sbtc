@@ -57,6 +57,7 @@ use clarity::vm::types::SequenceData;
 use fake::Fake as _;
 use fake::Faker;
 use rand::seq::IteratorRandom as _;
+use wsts::compute::ExpansionType;
 
 use super::context::TestContext;
 use super::context::WrappedMock;
@@ -190,10 +191,12 @@ where
         let context = self.context.clone();
         let storage = context.get_storage();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
-        let mut testing_signer_set =
-            testing::wsts::SignerSet::new(&signer_info, self.signing_threshold as u32, || {
-                network.connect()
-            });
+        let mut testing_signer_set = testing::wsts::SignerSet::new(
+            &signer_info,
+            self.signing_threshold as u32,
+            ExpansionType::Default,
+            || network.connect(),
+        );
         let (aggregate_key, bitcoin_chain_tip, mut test_data) = self
             .prepare_database_and_run_dkg(&mut rng, &mut testing_signer_set)
             .await;
@@ -372,10 +375,12 @@ where
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
-        let mut testing_signer_set =
-            testing::wsts::SignerSet::new(&signer_info, self.signing_threshold as u32, || {
-                network.connect()
-            });
+        let mut testing_signer_set = testing::wsts::SignerSet::new(
+            &signer_info,
+            self.signing_threshold as u32,
+            ExpansionType::Default,
+            || network.connect(),
+        );
 
         let (aggregate_key, bitcoin_chain_tip, mut test_data) = self
             .prepare_database_and_run_dkg(&mut rng, &mut testing_signer_set)
@@ -530,10 +535,12 @@ where
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
-        let mut testing_signer_set =
-            testing::wsts::SignerSet::new(&signer_info, self.signing_threshold as u32, || {
-                network.connect()
-            });
+        let mut testing_signer_set = testing::wsts::SignerSet::new(
+            &signer_info,
+            self.signing_threshold as u32,
+            ExpansionType::Default,
+            || network.connect(),
+        );
 
         let (aggregate_key, bitcoin_chain_tip, mut test_data) = self
             .prepare_database_and_run_dkg(&mut rng, &mut testing_signer_set)
@@ -970,10 +977,12 @@ where
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
-        let mut signer_set =
-            testing::wsts::SignerSet::new(&signer_info, self.signing_threshold as u32, || {
-                network.connect()
-            });
+        let mut signer_set = testing::wsts::SignerSet::new(
+            &signer_info,
+            self.signing_threshold as u32,
+            ExpansionType::Default,
+            || network.connect(),
+        );
 
         let (aggregate_key, bitcoin_chain_tip, mut test_data) = self
             .prepare_database_and_run_dkg(&mut rng, &mut signer_set)
@@ -1041,10 +1050,12 @@ where
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
-        let mut signer_set =
-            testing::wsts::SignerSet::new(&signer_info, self.signing_threshold as u32, || {
-                network.connect()
-            });
+        let mut signer_set = testing::wsts::SignerSet::new(
+            &signer_info,
+            self.signing_threshold as u32,
+            ExpansionType::Default,
+            || network.connect(),
+        );
 
         let (aggregate_key, bitcoin_chain_tip, test_data) = self
             .prepare_database_and_run_dkg(&mut rng, &mut signer_set)
@@ -1162,10 +1173,12 @@ where
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
-        let mut signer_set =
-            testing::wsts::SignerSet::new(&signer_info, self.signing_threshold as u32, || {
-                network.connect()
-            });
+        let mut signer_set = testing::wsts::SignerSet::new(
+            &signer_info,
+            self.signing_threshold as u32,
+            ExpansionType::Default,
+            || network.connect(),
+        );
 
         let (aggregate_key, bitcoin_chain_tip, mut test_data) = self
             .prepare_database_and_run_dkg(&mut rng, &mut signer_set)
@@ -1290,10 +1303,12 @@ where
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers as usize);
 
-        let mut signer_set =
-            testing::wsts::SignerSet::new(&signer_info, self.signing_threshold as u32, || {
-                network.connect()
-            });
+        let mut signer_set = testing::wsts::SignerSet::new(
+            &signer_info,
+            self.signing_threshold as u32,
+            ExpansionType::Default,
+            || network.connect(),
+        );
 
         let (aggregate_key, bitcoin_chain_tip, mut test_data) = self
             .prepare_database_and_run_dkg(&mut rng, &mut signer_set)

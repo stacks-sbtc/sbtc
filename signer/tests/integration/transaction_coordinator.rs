@@ -123,6 +123,7 @@ use test_case::test_case;
 use test_log::test;
 use tokio_stream::wrappers::BroadcastStream;
 use url::Url;
+use wsts::compute::ExpansionType;
 
 use signer::block_observer::BlockObserver;
 use signer::context::Context;
@@ -386,8 +387,12 @@ async fn process_complete_deposit() {
     let network = network::in_memory::InMemoryNetwork::new();
     let signer_info = testing::wsts::generate_signer_info(&mut rng, num_signers);
 
-    let mut testing_signer_set =
-        testing::wsts::SignerSet::new(&signer_info, signing_threshold, || network.connect());
+    let mut testing_signer_set = testing::wsts::SignerSet::new(
+        &signer_info,
+        signing_threshold,
+        ExpansionType::Default,
+        || network.connect(),
+    );
 
     let (aggregate_key, bitcoin_chain_tip) =
         run_dkg(&context, &mut rng, &mut testing_signer_set).await;
@@ -3108,10 +3113,7 @@ async fn wsts_ids_set_during_dkg_and_signing_rounds() {
         };
 
         let expected_sign_id = construct_signing_round_id(&message, &block_hash);
-        // When the WSTS coordinator state machine starts a new signing
-        // round, it automatically increments the sign ID by 1. So we
-        // adjust our expectations here.
-        assert_eq!(sign_id - 1, expected_sign_id);
+        assert_eq!(sign_id, expected_sign_id);
     }
 
     for (_, db, _, _) in signers {
@@ -4209,7 +4211,9 @@ fn create_signer_set(signers: &[Keypair], threshold: u32) -> (SignerSet, InMemor
         })
         .collect();
     (
-        SignerSet::new(&signer_info, threshold, || network.connect()),
+        SignerSet::new(&signer_info, threshold, ExpansionType::Default, || {
+            network.connect()
+        }),
         network,
     )
 }
@@ -5176,8 +5180,12 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
     let network = network::in_memory::InMemoryNetwork::new();
     let signer_info = testing::wsts::generate_signer_info(&mut rng, num_signers);
 
-    let mut testing_signer_set =
-        testing::wsts::SignerSet::new(&signer_info, signing_threshold, || network.connect());
+    let mut testing_signer_set = testing::wsts::SignerSet::new(
+        &signer_info,
+        signing_threshold,
+        ExpansionType::Default,
+        || network.connect(),
+    );
 
     let bitcoin_chain_tip = rpc.get_blockchain_info().unwrap().best_block_hash;
     backfill_bitcoin_blocks(&db, rpc, &bitcoin_chain_tip).await;

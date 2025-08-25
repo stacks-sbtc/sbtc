@@ -80,6 +80,7 @@ use signer::testing::context::*;
 use signer::testing::get_rng;
 use test_case::test_case;
 use test_log::test;
+use wsts::compute::ExpansionType;
 
 use crate::setup::SweepAmounts;
 use crate::setup::TestSignerSet;
@@ -936,7 +937,9 @@ async fn should_return_the_same_last_key_rotation_as_in_memory_store() {
 
     let dummy_wsts_network = network::InMemoryNetwork::new();
     let mut testing_signer_set =
-        testing::wsts::SignerSet::new(&signer_info, threshold, || dummy_wsts_network.connect());
+        testing::wsts::SignerSet::new(&signer_info, threshold, ExpansionType::Default, || {
+            dummy_wsts_network.connect()
+        });
     let dkg_txid = testing::dummy::txid(&fake::Faker, &mut rng);
     let (_, all_shares) = testing_signer_set
         .run_dkg(chain_tip, dkg_txid.into(), model::DkgSharesStatus::Verified)

@@ -388,6 +388,9 @@ pub struct SignerConfig {
     /// arrives. The default here is controlled by the
     /// [`MAX_DEPOSITS_PER_BITCOIN_TX`] constant
     pub max_deposits_per_bitcoin_tx: NonZeroU16,
+    /// Configures the signer to use WSTS XMD expansion after the specified
+    /// Bitcoin block height, once DKG has run
+    pub xmd_min_bitcoin_block_height: Option<BitcoinBlockHeight>,
     /// Configures a DKG re-run Bitcoin block height. If this is set and DKG has
     /// already been run, the coordinator will attempt to re-run DKG after this
     /// block height is met if `dkg_target_rounds` has not been reached. If DKG
@@ -716,6 +719,7 @@ mod tests {
             settings.signer.dkg_target_rounds,
             NonZeroU32::new(1).unwrap()
         );
+        assert_eq!(settings.signer.xmd_min_bitcoin_block_height, None);
         assert_eq!(settings.signer.dkg_verification_window, 10);
         assert_eq!(settings.signer.dkg_min_bitcoin_block_height, None);
         assert_eq!(settings.emily.pagination_timeout, Duration::from_secs(10));
@@ -886,6 +890,21 @@ mod tests {
 
         set_var("SIGNER_SIGNER__MAX_DEPOSITS_PER_BITCOIN_TX", "0");
         assert!(Settings::new_from_default_config().is_err());
+    }
+
+    #[test]
+    fn default_config_toml_loads_xmd_min_bitcoin_block_height() {
+        clear_env();
+
+        let settings = Settings::new_from_default_config().unwrap();
+        assert_eq!(settings.signer.xmd_min_bitcoin_block_height, None);
+
+        set_var("SIGNER_SIGNER__XMD_MIN_BITCOIN_BLOCK_HEIGHT", "42");
+        let settings = Settings::new_from_default_config().unwrap();
+        assert_eq!(
+            settings.signer.xmd_min_bitcoin_block_height,
+            Some(42u64.into())
+        );
     }
 
     #[test]
