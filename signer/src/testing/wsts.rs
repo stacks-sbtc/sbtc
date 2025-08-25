@@ -98,6 +98,7 @@ impl Coordinator {
         network: network::in_memory::MpmcBroadcaster,
         signer_info: SignerInfo,
         threshold: u32,
+        expansion_type: ExpansionType,
     ) -> Self {
         let num_signers = signer_info.signer_public_keys.len().try_into().unwrap();
         let message_private_key = signer_info.signer_private_key;
@@ -135,7 +136,7 @@ impl Coordinator {
             sign_timeout: None,
             public_keys,
             verify_packet_sigs: false,
-            expansion_type: ExpansionType::Default,
+            expansion_type,
         };
 
         let wsts_coordinator = fire::Coordinator::new(config);
@@ -397,12 +398,17 @@ pub struct SignerSet {
 
 impl SignerSet {
     /// Construct a new signer set
-    pub fn new<F>(signer_info: &[SignerInfo], threshold: u32, connect: F) -> Self
+    pub fn new<F>(
+        signer_info: &[SignerInfo],
+        threshold: u32,
+        expansion_type: ExpansionType,
+        connect: F,
+    ) -> Self
     where
         F: Fn() -> network::in_memory::MpmcBroadcaster,
     {
         let coordinator_info = signer_info.first().unwrap().clone();
-        let coordinator = Coordinator::new(connect(), coordinator_info, threshold);
+        let coordinator = Coordinator::new(connect(), coordinator_info, threshold, expansion_type);
         let signers = signer_info
             .iter()
             .cloned()
@@ -546,7 +552,10 @@ mod tests {
         let txid = dummy::txid(&fake::Faker, &mut rng);
 
         let signer_info = generate_signer_info(&mut rng, num_signers);
-        let mut signer_set = SignerSet::new(&signer_info, threshold, || network.connect());
+        let mut signer_set =
+            SignerSet::new(&signer_info, threshold, ExpansionType::Default, || {
+                network.connect()
+            });
 
         let (_, dkg_shares) = signer_set
             .run_dkg(

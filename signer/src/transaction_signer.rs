@@ -1737,6 +1737,7 @@ mod tests {
     use fake::{Fake as _, Faker};
     use network::InMemoryNetwork;
     use test_case::test_case;
+    use wsts::compute::ExpansionType;
 
     use crate::bitcoin::MockBitcoinInteract;
     use crate::context::Context as _;
@@ -1786,7 +1787,10 @@ mod tests {
     #[tokio::test]
     async fn should_be_able_to_participate_in_dkg() {
         test_environment()
-            .assert_should_be_able_to_participate_in_dkg()
+            .assert_should_be_able_to_participate_in_dkg(ExpansionType::Xmd)
+            .await;
+        test_environment()
+            .assert_should_be_able_to_participate_in_dkg(ExpansionType::Default)
             .await;
     }
 
