@@ -305,12 +305,10 @@ impl WstsCoordinator for FireCoordinator {
             key_ids,
             signer_key_ids,
         };
-        let expansion_type = if let Some(xmd_block_height) = xmd_block_height {
-            if xmd_block_height <= block_height {
-                ExpansionType::Xmd
-            } else {
-                ExpansionType::Default
-            }
+        let expansion_type = if let Some(xmd_block_height) = xmd_block_height
+            && xmd_block_height <= block_height
+        {
+            ExpansionType::Xmd
         } else {
             ExpansionType::Default
         };
