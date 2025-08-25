@@ -389,7 +389,7 @@ pub struct SignerConfig {
     /// [`MAX_DEPOSITS_PER_BITCOIN_TX`] constant
     pub max_deposits_per_bitcoin_tx: NonZeroU16,
     /// Configures the signer to use WSTS XMD expansion after the specified
-    /// Bitcoin block height
+    /// Bitcoin block height, once DKG has run
     pub xmd_min_bitcoin_block_height: Option<BitcoinBlockHeight>,
     /// Configures a DKG re-run Bitcoin block height. If this is set and DKG has
     /// already been run, the coordinator will attempt to re-run DKG after this
