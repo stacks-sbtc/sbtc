@@ -41,7 +41,7 @@ pub struct TestSetup {
 }
 
 impl TestSetup {
-    pub fn setup(num_parties: u32) -> Self {
+    pub fn setup(num_parties: u32, expansion_type: ExpansionType) -> Self {
         if num_parties == 0 {
             panic!("must have at least 1 parties");
         }
@@ -49,7 +49,7 @@ impl TestSetup {
         let (coordinators, signers) = wsts_test::run_dkg::<
             frost::Coordinator<v2::Aggregator>,
             v2::Party,
-        >(num_parties, 5, ExpansionType::Default);
+        >(num_parties, 5, expansion_type);
 
         let signers = signers.into();
         let aggregate_key = pubkey_xonly();
