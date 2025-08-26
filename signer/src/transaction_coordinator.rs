@@ -2504,8 +2504,13 @@ pub fn coordinator_public_key(
         .copied()
 }
 
-/// Contains the logic used to decide if we should run DKG.
-/// Returns true if DKG should be allowed to proceed.
+/// Determine, according to the current state of the signer and configuration,
+/// whether or not a new DKG round should be coordinated. The following checks are made:
+/// 1. Do non-failed DKG shares exist? (if not, run DKG)
+/// 2. Do non-verified DKG shares exist? (if yes, skip DKG & attempt to verify)
+/// 3. Does the config threshold or signer set differ from the config? (if yes, run DKG)
+/// 4. Have we reached the target # of DKG rounds? (if yes, skip DKG)
+/// 5. Is chain tip higher than DKG min height & were latest shares started before DKG min height? (if yes, run DKG)
 pub async fn should_run_dkg(
     context: &impl Context,
     bitcoin_chain_tip: &model::BitcoinBlockRef,

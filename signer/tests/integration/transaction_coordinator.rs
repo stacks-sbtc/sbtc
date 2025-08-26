@@ -1210,7 +1210,7 @@ async fn run_dkg_if_signer_set_changes(scenario: RunDkgSignerSetScenario, expect
 
 /// Tests that DKG will not run if latest shares are unverified
 #[test_case(DkgSharesStatus::Unverified, false; "unverified")]
-#[test_case(DkgSharesStatus::Verified, true; "verified")]
+#[test_case(DkgSharesStatus::Verified, false; "verified")]
 #[test_case(DkgSharesStatus::Failed, true; "failed")]
 #[tokio::test]
 async fn skip_dkg_if_latest_shares_unverified(
