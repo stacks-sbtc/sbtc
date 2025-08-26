@@ -1314,14 +1314,18 @@ async fn run_subsequent_dkg() {
 
         // Write one DKG shares entry to the signer's database simulating that
         // DKG has been successfully run once.
-        db.write_encrypted_dkg_shares(&EncryptedDkgShares {
+        let shares = EncryptedDkgShares {
             aggregate_key: aggregate_key_1,
             signer_set_public_keys: signer_set_public_keys.iter().copied().collect(),
             dkg_shares_status: DkgSharesStatus::Verified,
-            ..Faker.fake()
-        })
-        .await
-        .expect("failed to write dkg shares");
+            signature_share_threshold: 3,
+            ..Faker.fake_with_rng(&mut rng)
+        };
+        ctx.state()
+            .update_registry_signer_set_info(shares.clone().into());
+        db.write_encrypted_dkg_shares(&shares)
+            .await
+            .expect("failed to write dkg shares");
 
         ctx.with_stacks_client(|client| {
             client
