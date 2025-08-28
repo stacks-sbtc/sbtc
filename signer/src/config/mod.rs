@@ -567,14 +567,13 @@ impl Settings {
             DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX,
         )?;
         cfg_builder = cfg_builder.set_default("signer.dkg_target_rounds", 1)?;
-        cfg_builder = cfg_builder.set_default("signer.dkg_target_rounds", 1)?;
         cfg_builder = cfg_builder.set_default("emily.pagination_timeout", 10)?;
         cfg_builder = cfg_builder.set_default("signer.dkg_verification_window", 10)?;
         cfg_builder = cfg_builder.set_default("signer.stacks_fees_max_ustx", 1_500_000)?;
         cfg_builder = cfg_builder.set_default("bitcoin.chain_tip_polling_interval", 5)?;
         cfg_builder = cfg_builder.set_default(
             "signer.xmd_min_bitcoin_block_height",
-            *BitcoinBlockHeight::from(DEFAULT_SIGNER_XMD_MIN_BITCOIN_BLOCK_HEIGHT),
+            DEFAULT_SIGNER_XMD_MIN_BITCOIN_BLOCK_HEIGHT,
         )?;
 
         if let Some(path) = config_path {
