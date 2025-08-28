@@ -1577,7 +1577,8 @@ async fn pseudo_random_dkg() {
             .with_mocked_stacks_client()
             .modify_settings(|settings| {
                 settings.signer.dkg_target_rounds = NonZeroU32::new(20).unwrap();
-                settings.signer.dkg_min_bitcoin_block_height = Some(0u64.into());
+                // Set this to 1 so DKG can run when chain tip height is >= 1
+                settings.signer.dkg_min_bitcoin_block_height = Some(1u64.into());
             })
             .build();
 
@@ -1708,6 +1709,47 @@ async fn pseudo_random_dkg() {
         .unwrap();
     assert_eq!(chain_tip_ref.block_hash, chain_tip);
 
+    // Now we need to modify the database to set started_at_block_height to 0
+    // so that DKG can run again (the logic checks if latest_dkg_shares.started_at_bitcoin_block_height < dkg_min_height)
+    // Since dkg_min_height is 1 and we set started_at_height to 0, the condition 0 < 1 is true
+    for (_, db, _, _) in signers.iter() {
+        // Set started_at_block_height to 0 so it's less than dkg_min_height (1)
+
+        // Also modify the database to set the started_at_bitcoin_block_height to a very low value
+        // so that DKG can run again (the logic checks if latest_dkg_shares.started_at_bitcoin_block_height < dkg_min_height)
+        let pg_result = sqlx::query(
+            r#"
+            UPDATE sbtc_signer.dkg_shares
+            SET started_at_bitcoin_block_height = $1
+            WHERE aggregate_key = $2
+            "#,
+        )
+        .bind(0i64) // Set to 0, which is less than dkg_min_height (1)
+        .bind(original_shares.aggregate_key)
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+        assert_eq!(pg_result.rows_affected(), 1);
+
+        // Also update the started_at_bitcoin_block_hash to match the current block hash
+        // so that the test logic works correctly
+        let pg_result = sqlx::query(
+            r#"
+            UPDATE sbtc_signer.dkg_shares
+            SET started_at_bitcoin_block_hash = $1
+            WHERE aggregate_key = $2
+            "#,
+        )
+        .bind(chain_tip_ref.block_hash)
+        .bind(original_shares.aggregate_key)
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+        assert_eq!(pg_result.rows_affected(), 1);
+    }
+
     // =========================================================================
     // Step 5 - Prepare to re-run DKG with the same bitcoin block
     // -------------------------------------------------------------------------
@@ -1717,6 +1759,9 @@ async fn pseudo_random_dkg() {
     //   unchanged, since the aggregate key is the primary key. So we
     //   modify the aggregate key for the current row so that we get a
     //   second row when DKG is re-run.
+    //
+    //   We also need to generate another block to increment the height so that
+    //   DKG can run again (the logic requires the current height to be >= dkg_min_height).
     // =========================================================================
 
     // We create a tweak public key which is the generator of the secp256k1
@@ -1741,6 +1786,7 @@ async fn pseudo_random_dkg() {
         let count = db.get_encrypted_dkg_shares_count().await.unwrap();
         assert_eq!(count, 1);
 
+        // First, update the aggregate key
         let pg_result = sqlx::query(
             r#"
             UPDATE sbtc_signer.dkg_shares
@@ -1780,6 +1826,25 @@ async fn pseudo_random_dkg() {
         .unwrap();
 
     wait_for_signers(&signers).await;
+
+    // Now we need to fix the started_at_height of the first shares so that the test logic works
+    // We set it back to the current chain tip height so it matches the new shares
+    for (_, db, _, _) in signers.iter() {
+        let pg_result = sqlx::query(
+            r#"
+            UPDATE sbtc_signer.dkg_shares
+            SET started_at_bitcoin_block_height = $1
+            WHERE aggregate_key = $2
+            "#,
+        )
+        .bind(*chain_tip_ref.block_height as i64) // Set back to current chain tip height
+        .bind(adjusted_aggregate_key)
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+        assert_eq!(pg_result.rows_affected(), 1);
+    }
 
     // Okay, DKG should have run for a second time. The generated keys
     // should be identical to the keys generated the first time.
@@ -1847,7 +1912,26 @@ async fn pseudo_random_dkg() {
 
     // Let's run DKG a third time, where this time we expect new secret
     // shares to be generated.
-    faucet.generate_block();
+    let new_chain_tip: BitcoinBlockHash = faucet.generate_block().into();
+
+    // Update the started_at_height of the second DKG shares to allow the third DKG run
+    for (_, db, _, _) in signers.iter() {
+        let latest_shares = db.get_latest_encrypted_dkg_shares().await.unwrap().unwrap();
+        let pg_result = sqlx::query(
+            r#"
+            UPDATE sbtc_signer.dkg_shares
+            SET started_at_bitcoin_block_height = $1
+            WHERE aggregate_key = $2
+            "#,
+        )
+        .bind(0i64) // Set to 0, which is less than dkg_min_height (1)
+        .bind(latest_shares.aggregate_key)
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+        assert_eq!(pg_result.rows_affected(), 1);
+    }
     // Now we wait for all signers to say that their tenure has completed,
     // which means that no more actions are going to take place for any of
     // the signers.
