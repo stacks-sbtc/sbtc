@@ -1254,7 +1254,7 @@ where
         storage: &S,
         aggregate_key: PublicKeyXOnly,
         signer_private_key: PrivateKey,
-        xmd_block_height: Option<BitcoinBlockHeight>,
+        xmd_block_height: BitcoinBlockHeight,
     ) -> Result<dkg::verification::StateMachine, Error>
     where
         S: DbRead + Send + Sync,

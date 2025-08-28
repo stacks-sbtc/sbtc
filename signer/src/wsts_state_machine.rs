@@ -215,7 +215,7 @@ where
         threshold: u16,
         message_private_key: PrivateKey,
         block_height: BitcoinBlockHeight,
-        xmd_block_height: Option<BitcoinBlockHeight>,
+        xmd_block_height: BitcoinBlockHeight,
     ) -> Self
     where
         I: IntoIterator<Item = PublicKey>;
@@ -241,7 +241,7 @@ where
         storage: &S,
         aggregate_key: PublicKeyXOnly,
         signer_private_key: PrivateKey,
-        xmd_block_height: Option<BitcoinBlockHeight>,
+        xmd_block_height: BitcoinBlockHeight,
     ) -> impl Future<Output = Result<Self, error::Error>> + Send
     where
         S: storage::DbRead + Send + Sync;
@@ -276,7 +276,7 @@ impl WstsCoordinator for FireCoordinator {
         threshold: u16,
         message_private_key: PrivateKey,
         block_height: BitcoinBlockHeight,
-        xmd_block_height: Option<BitcoinBlockHeight>,
+        xmd_block_height: BitcoinBlockHeight,
     ) -> Self
     where
         I: IntoIterator<Item = PublicKey>,
@@ -305,9 +305,7 @@ impl WstsCoordinator for FireCoordinator {
             key_ids,
             signer_key_ids,
         };
-        let expansion_type = if let Some(xmd_block_height) = xmd_block_height
-            && xmd_block_height <= block_height
-        {
+        let expansion_type = if xmd_block_height <= block_height {
             ExpansionType::Xmd
         } else {
             ExpansionType::Default
@@ -345,7 +343,7 @@ impl WstsCoordinator for FireCoordinator {
         storage: &S,
         aggregate_key: PublicKeyXOnly,
         signer_private_key: PrivateKey,
-        xmd_block_height: Option<BitcoinBlockHeight>,
+        xmd_block_height: BitcoinBlockHeight,
     ) -> Result<Self, error::Error>
     where
         S: storage::DbRead + Send + Sync,
@@ -413,7 +411,7 @@ impl WstsCoordinator for FrostCoordinator {
         threshold: u16,
         message_private_key: PrivateKey,
         block_height: BitcoinBlockHeight,
-        xmd_block_height: Option<BitcoinBlockHeight>,
+        xmd_block_height: BitcoinBlockHeight,
     ) -> Self
     where
         I: IntoIterator<Item = PublicKey>,
@@ -442,12 +440,8 @@ impl WstsCoordinator for FrostCoordinator {
             key_ids,
             signer_key_ids,
         };
-        let expansion_type = if let Some(xmd_block_height) = xmd_block_height {
-            if xmd_block_height <= block_height {
-                ExpansionType::Xmd
-            } else {
-                ExpansionType::Default
-            }
+        let expansion_type = if xmd_block_height <= block_height {
+            ExpansionType::Xmd
         } else {
             ExpansionType::Default
         };
@@ -486,7 +480,7 @@ impl WstsCoordinator for FrostCoordinator {
         storage: &S,
         aggregate_key: PublicKeyXOnly,
         signer_private_key: PrivateKey,
-        xmd_block_height: Option<BitcoinBlockHeight>,
+        xmd_block_height: BitcoinBlockHeight,
     ) -> Result<Self, error::Error>
     where
         S: storage::DbRead + Send + Sync,
@@ -575,7 +569,7 @@ impl SignerStateMachine {
         signers: impl IntoIterator<Item = PublicKey>,
         threshold: u32,
         started_at: BitcoinBlockRef,
-        xmd_block_height: Option<BitcoinBlockHeight>,
+        xmd_block_height: BitcoinBlockHeight,
         private_key: PrivateKey,
     ) -> Result<Self, Error> {
         let signer_pub_key = PublicKey::from_private_key(&private_key);
@@ -624,12 +618,8 @@ impl SignerStateMachine {
         if threshold > num_keys {
             return Err(error::Error::InvalidConfiguration);
         };
-        let expansion_type = if let Some(xmd_block_height) = xmd_block_height {
-            if xmd_block_height <= started_at.block_height {
-                ExpansionType::Xmd
-            } else {
-                ExpansionType::Default
-            }
+        let expansion_type = if xmd_block_height <= started_at.block_height {
+            ExpansionType::Xmd
         } else {
             ExpansionType::Default
         };
@@ -727,7 +717,7 @@ impl SignerStateMachine {
         storage: &S,
         aggregate_key: PublicKeyXOnly,
         signer_private_key: PrivateKey,
-        xmd_block_height: Option<BitcoinBlockHeight>,
+        xmd_block_height: BitcoinBlockHeight,
     ) -> Result<Self, Error>
     where
         S: storage::DbRead,

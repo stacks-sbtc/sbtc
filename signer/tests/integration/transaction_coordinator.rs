@@ -2335,7 +2335,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys(switch_expansion_type: b
                 settings.signer.dkg_min_bitcoin_block_height = Some(dkg_run_two_height.into());
                 settings.signer.bitcoin_processing_delay = Duration::from_millis(200);
                 if switch_expansion_type {
-                    settings.signer.xmd_min_bitcoin_block_height = Some(dkg_run_two_height.into());
+                    settings.signer.xmd_min_bitcoin_block_height = dkg_run_two_height.into();
                 }
             })
             .build();

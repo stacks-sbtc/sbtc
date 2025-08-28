@@ -48,6 +48,9 @@ pub const MAX_BITCOIN_CHAIN_TIP_POLLING_INTERVAL_SECONDS: u64 = 10;
 /// See https://github.com/stacks-sbtc/sbtc/issues/1694
 pub const MAX_SIGNERS: usize = 16;
 
+/// Default signer.xmd_min_bitcoin_block_height
+pub const DEFAULT_SIGNER_XMD_MIN_BITCOIN_BLOCK_HEIGHT: u64 = 910753;
+
 /// Trait for validating configuration values.
 trait Validatable {
     /// Validate the configuration values.
@@ -390,7 +393,7 @@ pub struct SignerConfig {
     pub max_deposits_per_bitcoin_tx: NonZeroU16,
     /// Configures the signer to use WSTS XMD expansion after the specified
     /// Bitcoin block height, once DKG has run
-    pub xmd_min_bitcoin_block_height: Option<BitcoinBlockHeight>,
+    pub xmd_min_bitcoin_block_height: BitcoinBlockHeight,
     /// Configures a DKG re-run Bitcoin block height. If this is set and DKG has
     /// already been run, the coordinator will attempt to re-run DKG after this
     /// block height is met if `dkg_target_rounds` has not been reached. If DKG
@@ -564,10 +567,15 @@ impl Settings {
             DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX,
         )?;
         cfg_builder = cfg_builder.set_default("signer.dkg_target_rounds", 1)?;
+        cfg_builder = cfg_builder.set_default("signer.dkg_target_rounds", 1)?;
         cfg_builder = cfg_builder.set_default("emily.pagination_timeout", 10)?;
         cfg_builder = cfg_builder.set_default("signer.dkg_verification_window", 10)?;
         cfg_builder = cfg_builder.set_default("signer.stacks_fees_max_ustx", 1_500_000)?;
         cfg_builder = cfg_builder.set_default("bitcoin.chain_tip_polling_interval", 5)?;
+        cfg_builder = cfg_builder.set_default(
+            "signer.xmd_min_bitcoin_block_height",
+            *BitcoinBlockHeight::from(DEFAULT_SIGNER_XMD_MIN_BITCOIN_BLOCK_HEIGHT),
+        )?;
 
         if let Some(path) = config_path {
             cfg_builder = cfg_builder.add_source(File::from(path.as_ref()));
@@ -719,7 +727,10 @@ mod tests {
             settings.signer.dkg_target_rounds,
             NonZeroU32::new(1).unwrap()
         );
-        assert_eq!(settings.signer.xmd_min_bitcoin_block_height, None);
+        assert_eq!(
+            settings.signer.xmd_min_bitcoin_block_height,
+            DEFAULT_SIGNER_XMD_MIN_BITCOIN_BLOCK_HEIGHT.into()
+        );
         assert_eq!(settings.signer.dkg_verification_window, 10);
         assert_eq!(settings.signer.dkg_min_bitcoin_block_height, None);
         assert_eq!(settings.emily.pagination_timeout, Duration::from_secs(10));
@@ -897,14 +908,14 @@ mod tests {
         clear_env();
 
         let settings = Settings::new_from_default_config().unwrap();
-        assert_eq!(settings.signer.xmd_min_bitcoin_block_height, None);
+        assert_eq!(
+            settings.signer.xmd_min_bitcoin_block_height,
+            DEFAULT_SIGNER_XMD_MIN_BITCOIN_BLOCK_HEIGHT.into()
+        );
 
         set_var("SIGNER_SIGNER__XMD_MIN_BITCOIN_BLOCK_HEIGHT", "42");
         let settings = Settings::new_from_default_config().unwrap();
-        assert_eq!(
-            settings.signer.xmd_min_bitcoin_block_height,
-            Some(42u64.into())
-        );
+        assert_eq!(settings.signer.xmd_min_bitcoin_block_height, 42u64.into());
     }
 
     #[test]

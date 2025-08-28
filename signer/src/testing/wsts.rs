@@ -254,7 +254,7 @@ impl Signer {
             signer_info.signer_public_keys,
             threshold,
             created_at,
-            None,
+            storage::model::BitcoinBlockHeight::from(u64::MAX),
             signer_info.signer_private_key,
         )
         .expect("failed to construct state machine");
