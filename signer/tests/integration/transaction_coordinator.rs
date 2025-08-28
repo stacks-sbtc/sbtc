@@ -1910,10 +1910,6 @@ async fn pseudo_random_dkg() {
     //   aggregate key and new secret shares.
     // =========================================================================
 
-    // Let's run DKG a third time, where this time we expect new secret
-    // shares to be generated.
-    let new_chain_tip: BitcoinBlockHash = faucet.generate_block().into();
-
     // Update the started_at_height of the second DKG shares to allow the third DKG run
     for (_, db, _, _) in signers.iter() {
         let latest_shares = db.get_latest_encrypted_dkg_shares().await.unwrap().unwrap();
