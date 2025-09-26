@@ -1120,6 +1120,7 @@ where
             &self.context.get_storage(),
             aggregate_key.into(),
             self.private_key,
+            self.context.config().signer.xmd_min_bitcoin_block_height,
         )
         .await?;
 
@@ -1485,8 +1486,13 @@ where
         let db = self.context.get_storage();
         let sighashes = transaction.construct_digests()?;
         let locking_public_key = sighashes.signers_aggregate_key.into();
-        let mut fire_coordinator =
-            FireCoordinator::load(&db, locking_public_key, self.private_key).await?;
+        let mut fire_coordinator = FireCoordinator::load(
+            &db,
+            locking_public_key,
+            self.private_key,
+            self.context.config().signer.xmd_min_bitcoin_block_height,
+        )
+        .await?;
 
         let msg = sighashes.signers.to_raw_hash().to_byte_array();
 
@@ -1525,8 +1531,13 @@ where
             let msg = sighash.to_raw_hash().to_byte_array();
 
             let locking_public_key = deposit.signers_public_key.into();
-            let mut fire_coordinator =
-                FireCoordinator::load(&db, locking_public_key, self.private_key).await?;
+            let mut fire_coordinator = FireCoordinator::load(
+                &db,
+                locking_public_key,
+                self.private_key,
+                self.context.config().signer.xmd_min_bitcoin_block_height,
+            )
+            .await?;
 
             let instant = std::time::Instant::now();
             let signature = self
@@ -1648,8 +1659,13 @@ where
         let signer_set = self.context.config().signer.bootstrap_signing_set.clone();
 
         let block_height = chain_tip.block_height;
-        let mut state_machine =
-            FireCoordinator::new(signer_set, self.threshold, self.private_key, block_height);
+        let mut state_machine = FireCoordinator::new(
+            signer_set,
+            self.threshold,
+            self.private_key,
+            block_height,
+            self.context.config().signer.xmd_min_bitcoin_block_height,
+        );
 
         // Okay let's move the coordinator state machine to the beginning
         // of the DKG phase.
@@ -1729,8 +1745,8 @@ where
             let sender_is_coordinator =
                 given_key_is_coordinator(msg_public_key, bitcoin_chain_tip, &signer_set);
 
-            let public_keys = &coordinator.get_config().signer_public_keys;
-            let public_key_point = p256k1::point::Point::from(msg_public_key);
+            let public_keys = &coordinator.get_config().public_keys.signers;
+            let msg_public_key = p256k1::keys::PublicKey::from(msg_public_key);
 
             let msg = wsts_msg.inner;
 
@@ -1738,7 +1754,7 @@ where
             let is_authenticated = Self::authenticate_message(
                 &msg,
                 public_keys,
-                public_key_point,
+                msg_public_key,
                 sender_is_coordinator,
             );
 
@@ -1772,12 +1788,12 @@ where
 
     fn authenticate_message(
         msg: &wsts::net::Message,
-        public_keys: &hashbrown::HashMap<u32, p256k1::point::Point>,
-        public_key_point: p256k1::point::Point,
+        public_keys: &hashbrown::HashMap<u32, p256k1::keys::PublicKey>,
+        msg_public_key: p256k1::keys::PublicKey,
         sender_is_coordinator: bool,
     ) -> bool {
         let check_signer_public_key = |signer_id| match public_keys.get(&signer_id) {
-            Some(signer_public_key) if public_key_point != *signer_public_key => {
+            Some(signer_public_key) if msg_public_key != *signer_public_key => {
                 tracing::warn!(
                     ?msg,
                     reason = "message was signed by the wrong signer",

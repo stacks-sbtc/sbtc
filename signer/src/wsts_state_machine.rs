@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 use std::future::Future;
 
+use crate::codec::CodecError;
 use crate::codec::Decode as _;
 use crate::codec::Encode as _;
 use crate::error;
@@ -11,6 +12,7 @@ use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
 use crate::keys::PublicKeyXOnly;
 use crate::keys::SignerScriptPubKey as _;
+use crate::proto;
 use crate::storage;
 use crate::storage::model;
 use crate::storage::model::BitcoinBlockHash;
@@ -21,12 +23,14 @@ use crate::storage::model::SigHash;
 
 use hashbrown::HashMap;
 use hashbrown::HashSet;
+use prost::Message as _;
 use rand::SeedableRng as _;
 use rand::rngs::OsRng;
 use rand_chacha::ChaCha20Rng;
 use sha2::Digest as _;
 use sha2::Sha256;
 use wsts::common::PolyCommitment;
+use wsts::compute::ExpansionType;
 use wsts::net::Message;
 use wsts::net::Packet;
 use wsts::net::SignatureType;
@@ -39,6 +43,31 @@ use wsts::state_machine::coordinator::fire;
 use wsts::state_machine::coordinator::frost;
 use wsts::traits::Signer as _;
 use wsts::v2::Aggregator;
+
+/// A database model for storing DKG public shares.
+///
+/// This is used to store the DKG public shares in the database.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct DkgSignerCommitments {
+    /// List of (party_id, commitment)
+    pub comms: Vec<(u32, PolyCommitment)>,
+}
+
+impl crate::codec::Decode for BTreeMap<u32, DkgSignerCommitments> {
+    fn decode<R: std::io::Read>(mut reader: R) -> Result<Self, Error> {
+        let mut buf = Vec::new();
+        reader
+            .read_to_end(&mut buf)
+            .map_err(CodecError::DecodeIOError)?;
+
+        proto::DkgPolynomialCommitments::decode(&*buf)
+            .map_err(CodecError::DecodeError)?
+            .commitments
+            .into_iter()
+            .map(|(id, comms)| Ok((id, comms.try_into()?)))
+            .collect::<Result<BTreeMap<u32, DkgSignerCommitments>, Error>>()
+    }
+}
 
 /// An identifier for signer state machines.
 ///
@@ -186,6 +215,7 @@ where
         threshold: u16,
         message_private_key: PrivateKey,
         block_height: BitcoinBlockHeight,
+        xmd_block_height: BitcoinBlockHeight,
     ) -> Self
     where
         I: IntoIterator<Item = PublicKey>;
@@ -211,6 +241,7 @@ where
         storage: &S,
         aggregate_key: PublicKeyXOnly,
         signer_private_key: PrivateKey,
+        xmd_block_height: BitcoinBlockHeight,
     ) -> impl Future<Output = Result<Self, error::Error>> + Send
     where
         S: storage::DbRead + Send + Sync;
@@ -245,25 +276,40 @@ impl WstsCoordinator for FireCoordinator {
         threshold: u16,
         message_private_key: PrivateKey,
         block_height: BitcoinBlockHeight,
+        xmd_block_height: BitcoinBlockHeight,
     ) -> Self
     where
         I: IntoIterator<Item = PublicKey>,
     {
-        let signer_public_keys: hashbrown::HashMap<u32, _> = signers
+        let signers: hashbrown::HashMap<u32, _> = signers
             .into_iter()
             .enumerate()
             .map(|(idx, key)| (idx as u32, key.into()))
             .collect();
-
         // The number of possible signers is capped at a number well below
         // u32::MAX, so this conversion should always work.
-        let num_signers: u32 = signer_public_keys
+        let num_signers: u32 = signers
             .len()
             .try_into()
             .expect("the number of signers is greater than u32::MAX?");
+        let key_ids = signers
+            .clone()
+            .into_iter()
+            .map(|(id, key)| (id + 1, key))
+            .collect();
         let signer_key_ids = (0..num_signers)
             .map(|signer_id| (signer_id, std::iter::once(signer_id + 1).collect()))
             .collect();
+        let public_keys = wsts::state_machine::PublicKeys {
+            signers,
+            key_ids,
+            signer_key_ids,
+        };
+        let expansion_type = if xmd_block_height <= block_height {
+            ExpansionType::Xmd
+        } else {
+            ExpansionType::Default
+        };
         let config = wsts::state_machine::coordinator::Config {
             num_signers,
             num_keys: num_signers,
@@ -275,8 +321,9 @@ impl WstsCoordinator for FireCoordinator {
             dkg_end_timeout: None,
             nonce_timeout: None,
             sign_timeout: None,
-            signer_key_ids,
-            signer_public_keys,
+            public_keys,
+            verify_packet_sigs: false,
+            expansion_type,
         };
 
         let mut wsts_coordinator = fire::Coordinator::new(config);
@@ -296,6 +343,7 @@ impl WstsCoordinator for FireCoordinator {
         storage: &S,
         aggregate_key: PublicKeyXOnly,
         signer_private_key: PrivateKey,
+        xmd_block_height: BitcoinBlockHeight,
     ) -> Result<Self, error::Error>
     where
         S: storage::DbRead + Send + Sync,
@@ -305,7 +353,7 @@ impl WstsCoordinator for FireCoordinator {
             .await?
             .ok_or(Error::MissingDkgShares(aggregate_key))?;
 
-        let public_dkg_shares: BTreeMap<u32, wsts::net::DkgPublicShares> =
+        let public_dkg_shares: BTreeMap<u32, DkgSignerCommitments> =
             BTreeMap::decode(encrypted_shares.public_shares.as_slice())?;
         let party_polynomials = public_dkg_shares
             .iter()
@@ -320,6 +368,7 @@ impl WstsCoordinator for FireCoordinator {
             threshold,
             signer_private_key,
             block_height,
+            xmd_block_height,
         );
 
         let aggregate_key = encrypted_shares.aggregate_key.into();
@@ -349,11 +398,9 @@ impl WstsCoordinator for FireCoordinator {
         bitcoin_chain_tip: &BitcoinBlockHash,
         signature_type: SignatureType,
     ) -> Result<Packet, Error> {
-        // TODO: Revisit when https://github.com/stacks-sbtc/wsts/pull/198
-        // is merged and we updated the WSTS dependency with those changes.
-        self.0.current_sign_id = construct_signing_round_id(message, bitcoin_chain_tip);
+        let sign_id = construct_signing_round_id(message, bitcoin_chain_tip);
         self.0
-            .start_signing_round(message, signature_type)
+            .start_signing_round(message, signature_type, Some(sign_id))
             .map_err(Error::wsts_coordinator)
     }
 }
@@ -364,25 +411,40 @@ impl WstsCoordinator for FrostCoordinator {
         threshold: u16,
         message_private_key: PrivateKey,
         block_height: BitcoinBlockHeight,
+        xmd_block_height: BitcoinBlockHeight,
     ) -> Self
     where
         I: IntoIterator<Item = PublicKey>,
     {
-        let signer_public_keys: hashbrown::HashMap<u32, _> = signers
+        let signers: hashbrown::HashMap<u32, _> = signers
             .into_iter()
             .enumerate()
             .map(|(idx, key)| (idx as u32, key.into()))
             .collect();
-
         // The number of possible signers is capped at a number well below
         // u32::MAX, so this conversion should always work.
-        let num_signers: u32 = signer_public_keys
+        let num_signers: u32 = signers
             .len()
             .try_into()
             .expect("the number of signers is greater than u32::MAX?");
+        let key_ids = signers
+            .clone()
+            .into_iter()
+            .map(|(id, key)| (id + 1, key))
+            .collect();
         let signer_key_ids = (0..num_signers)
             .map(|signer_id| (signer_id, std::iter::once(signer_id + 1).collect()))
             .collect();
+        let public_keys = wsts::state_machine::PublicKeys {
+            signers,
+            key_ids,
+            signer_key_ids,
+        };
+        let expansion_type = if xmd_block_height <= block_height {
+            ExpansionType::Xmd
+        } else {
+            ExpansionType::Default
+        };
         let config = wsts::state_machine::coordinator::Config {
             num_signers,
             num_keys: num_signers,
@@ -394,8 +456,9 @@ impl WstsCoordinator for FrostCoordinator {
             dkg_end_timeout: None,
             nonce_timeout: None,
             sign_timeout: None,
-            signer_key_ids,
-            signer_public_keys,
+            public_keys,
+            verify_packet_sigs: false,
+            expansion_type,
         };
 
         let mut wsts_coordinator = frost::Coordinator::new(config);
@@ -417,6 +480,7 @@ impl WstsCoordinator for FrostCoordinator {
         storage: &S,
         aggregate_key: PublicKeyXOnly,
         signer_private_key: PrivateKey,
+        xmd_block_height: BitcoinBlockHeight,
     ) -> Result<Self, error::Error>
     where
         S: storage::DbRead + Send + Sync,
@@ -426,7 +490,7 @@ impl WstsCoordinator for FrostCoordinator {
             .await?
             .ok_or(Error::MissingDkgShares(aggregate_key))?;
 
-        let public_dkg_shares: BTreeMap<u32, wsts::net::DkgPublicShares> =
+        let public_dkg_shares: BTreeMap<u32, DkgSignerCommitments> =
             BTreeMap::decode(encrypted_shares.public_shares.as_slice())?;
         let party_polynomials = public_dkg_shares
             .iter()
@@ -441,6 +505,7 @@ impl WstsCoordinator for FrostCoordinator {
             threshold,
             signer_private_key,
             block_height,
+            xmd_block_height,
         );
 
         let aggregate_key = encrypted_shares.aggregate_key.into();
@@ -467,15 +532,12 @@ impl WstsCoordinator for FrostCoordinator {
     fn start_signing_round(
         &mut self,
         message: &[u8],
-        _: &BitcoinBlockHash,
+        bitcoin_chain_tip: &BitcoinBlockHash,
         signature_type: SignatureType,
     ) -> Result<Packet, Error> {
-        // The current sign ID is private in the FROST coordinator so we
-        // cannot set it.
-        // TODO: Revisit when https://github.com/stacks-sbtc/wsts/pull/198
-        // is merged and we updated the WSTS dependency with those changes.
+        let sign_id = construct_signing_round_id(message, bitcoin_chain_tip);
         self.0
-            .start_signing_round(message, signature_type)
+            .start_signing_round(message, signature_type, Some(sign_id))
             .map_err(Error::wsts_coordinator)
     }
 }
@@ -507,6 +569,7 @@ impl SignerStateMachine {
         signers: impl IntoIterator<Item = PublicKey>,
         threshold: u32,
         started_at: BitcoinBlockRef,
+        xmd_block_height: BitcoinBlockHeight,
         private_key: PrivateKey,
     ) -> Result<Self, Error> {
         let signer_pub_key = PublicKey::from_private_key(&private_key);
@@ -555,8 +618,13 @@ impl SignerStateMachine {
         if threshold > num_keys {
             return Err(error::Error::InvalidConfiguration);
         };
+        let expansion_type = if xmd_block_height <= started_at.block_height {
+            ExpansionType::Xmd
+        } else {
+            ExpansionType::Default
+        };
 
-        let inner = WstsSigner::new(
+        let mut inner = WstsSigner::new(
             threshold,
             dkg_threshold,
             num_parties,
@@ -566,8 +634,12 @@ impl SignerStateMachine {
             private_key.into(),
             public_keys,
             &mut OsRng,
+            expansion_type,
         )
         .map_err(Error::Wsts)?;
+
+        // sBTC has its own network packet layer with signatures and verification
+        inner.verify_packet_sigs = false;
 
         Ok(Self { inner, started_at, private_key })
     }
@@ -605,12 +677,13 @@ impl SignerStateMachine {
     /// All other messages are processed with the OS random number
     /// generated.
     pub fn process(&mut self, message: &Message) -> Result<Vec<Message>, Error> {
+        let packet = Packet::from_message(message);
         let response = match message {
             Message::DkgBegin(_) => {
                 let mut rng = Self::create_rng(&self.started_at.block_hash, self.private_key);
-                self.inner.process(message, &mut rng)
+                self.inner.process(&packet, &mut rng)
             }
-            _ => self.inner.process(message, &mut OsRng),
+            _ => self.inner.process(&packet, &mut OsRng),
         };
 
         response.map_err(Error::Wsts)
@@ -644,6 +717,7 @@ impl SignerStateMachine {
         storage: &S,
         aggregate_key: PublicKeyXOnly,
         signer_private_key: PrivateKey,
+        xmd_block_height: BitcoinBlockHeight,
     ) -> Result<Self, Error>
     where
         S: storage::DbRead,
@@ -674,7 +748,13 @@ impl SignerStateMachine {
             block_height: encrypted_shares.started_at_bitcoin_block_height,
         };
 
-        let mut state_machine = Self::new(signers, threshold, created_at, signer_private_key)?;
+        let mut state_machine = Self::new(
+            signers,
+            threshold,
+            created_at,
+            xmd_block_height,
+            signer_private_key,
+        )?;
 
         state_machine.inner.signer = signer;
 
@@ -732,5 +812,41 @@ impl SignerStateMachine {
             started_at_bitcoin_block_hash: self.started_at.block_hash,
             started_at_bitcoin_block_height: self.started_at.block_height,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use fake::Fake as _;
+    use wsts::net::DkgPublicShares;
+
+    use crate::testing::dummy::Unit;
+    use crate::testing::get_rng;
+
+    use super::*;
+
+    /// Test that we can decode DKG public shares
+    ///
+    /// During normal operation the signers encode the full DKG public
+    /// shares object as a protobuf. Public shares start out as a
+    /// `BTreeMap<u32, DkgPublicShares>` and is serialized as a
+    /// `proto::DkgPublicShares`. When decoding, we only decode the one
+    /// field that we care about, the `comms` field in each
+    /// `DkgPublicShares`. We do this to allow the WSTS types to evolve
+    /// independently of what the signers store in their database. So long
+    /// as the protobuf type that we stored, the `proto::DkgPublicShares`,
+    /// is compatible with the `BTreeMap<u32, DkgPublicSharesDb>` type,
+    /// then we are fine.
+    #[test]
+    fn test_dkg_public_shares_db_decoding() {
+        let mut rng = get_rng();
+        let shares: BTreeMap<u32, DkgPublicShares> = Unit.fake_with_rng(&mut rng);
+        let encoded = shares.clone().encode_to_vec();
+        let decoded_shares = BTreeMap::<u32, DkgSignerCommitments>::decode(&*encoded).unwrap();
+
+        for (original, decoded) in shares.iter().zip(decoded_shares.iter()) {
+            assert_eq!(original.0, decoded.0);
+            assert_eq!(original.1.comms, decoded.1.comms);
+        }
     }
 }

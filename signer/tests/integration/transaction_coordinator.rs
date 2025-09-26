@@ -123,6 +123,7 @@ use test_case::test_case;
 use test_log::test;
 use tokio_stream::wrappers::BroadcastStream;
 use url::Url;
+use wsts::compute::ExpansionType;
 
 use signer::block_observer::BlockObserver;
 use signer::context::Context;
@@ -386,8 +387,12 @@ async fn process_complete_deposit() {
     let network = network::in_memory::InMemoryNetwork::new();
     let signer_info = testing::wsts::generate_signer_info(&mut rng, num_signers);
 
-    let mut testing_signer_set =
-        testing::wsts::SignerSet::new(&signer_info, signing_threshold, || network.connect());
+    let mut testing_signer_set = testing::wsts::SignerSet::new(
+        &signer_info,
+        signing_threshold,
+        ExpansionType::Default,
+        || network.connect(),
+    );
 
     let (aggregate_key, bitcoin_chain_tip) =
         run_dkg(&context, &mut rng, &mut testing_signer_set).await;
@@ -2234,8 +2239,22 @@ async fn sign_bitcoin_transaction() {
     }
 }
 
+#[test(tokio::test)]
+async fn sign_bitcoin_transaction_multiple_locking_keys_default_expansion() {
+    sign_bitcoin_transaction_multiple_locking_keys(false).await;
+}
+
+#[test(tokio::test)]
+async fn sign_bitcoin_transaction_multiple_locking_keys_xmd_expansion() {
+    sign_bitcoin_transaction_multiple_locking_keys(true).await;
+}
+
 /// Test that three signers can successfully sign and broadcast a bitcoin
 /// transaction where the inputs are locked by different aggregate keys.
+///
+/// The test takes a boolean parameter that controls whether we switch to Xmd
+/// expasion after the second DKG.  If false, we stay with Default expansion
+/// throughout.
 ///
 /// The test setup is as follows:
 /// 1. There are three "signers" contexts. Each context points to its own
@@ -2268,8 +2287,7 @@ async fn sign_bitcoin_transaction() {
 /// ```
 ///
 /// then, once everything is up and running, run the test.
-#[test(tokio::test)]
-async fn sign_bitcoin_transaction_multiple_locking_keys() {
+async fn sign_bitcoin_transaction_multiple_locking_keys(switch_expansion_type: bool) {
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
@@ -2316,6 +2334,9 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
                 settings.signer.dkg_target_rounds = NonZeroU32::new(2).unwrap();
                 settings.signer.dkg_min_bitcoin_block_height = Some(dkg_run_two_height.into());
                 settings.signer.bitcoin_processing_delay = Duration::from_millis(200);
+                if switch_expansion_type {
+                    settings.signer.xmd_min_bitcoin_block_height = dkg_run_two_height.into();
+                }
             })
             .build();
 
@@ -3108,10 +3129,7 @@ async fn wsts_ids_set_during_dkg_and_signing_rounds() {
         };
 
         let expected_sign_id = construct_signing_round_id(&message, &block_hash);
-        // When the WSTS coordinator state machine starts a new signing
-        // round, it automatically increments the sign ID by 1. So we
-        // adjust our expectations here.
-        assert_eq!(sign_id - 1, expected_sign_id);
+        assert_eq!(sign_id, expected_sign_id);
     }
 
     for (_, db, _, _) in signers {
@@ -4209,7 +4227,9 @@ fn create_signer_set(signers: &[Keypair], threshold: u32) -> (SignerSet, InMemor
         })
         .collect();
     (
-        SignerSet::new(&signer_info, threshold, || network.connect()),
+        SignerSet::new(&signer_info, threshold, ExpansionType::Default, || {
+            network.connect()
+        }),
         network,
     )
 }
@@ -5176,8 +5196,12 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
     let network = network::in_memory::InMemoryNetwork::new();
     let signer_info = testing::wsts::generate_signer_info(&mut rng, num_signers);
 
-    let mut testing_signer_set =
-        testing::wsts::SignerSet::new(&signer_info, signing_threshold, || network.connect());
+    let mut testing_signer_set = testing::wsts::SignerSet::new(
+        &signer_info,
+        signing_threshold,
+        ExpansionType::Default,
+        || network.connect(),
+    );
 
     let bitcoin_chain_tip = rpc.get_blockchain_info().unwrap().best_block_hash;
     backfill_bitcoin_blocks(&db, rpc, &bitcoin_chain_tip).await;

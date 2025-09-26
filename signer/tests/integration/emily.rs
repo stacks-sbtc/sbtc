@@ -61,6 +61,7 @@ use signer::testing::transaction_coordinator::select_coordinator;
 use signer::testing::wsts::SignerSet;
 use signer::transaction_coordinator;
 use testing_emily_client::apis::testing_api::wipe_databases;
+use wsts::compute::ExpansionType;
 
 use crate::setup::IntoEmilyTestingConfig as _;
 use crate::utxo_construction::make_deposit_request;
@@ -159,8 +160,12 @@ async fn deposit_flow() {
         .with_emily_client(emily_client.clone())
         .build();
 
-    let mut testing_signer_set =
-        testing::wsts::SignerSet::new(&signer_info, signing_threshold, || network.connect());
+    let mut testing_signer_set = testing::wsts::SignerSet::new(
+        &signer_info,
+        signing_threshold,
+        ExpansionType::Default,
+        || network.connect(),
+    );
 
     let (aggregate_key, bitcoin_chain_tip, mut test_data) =
         run_dkg(&context, &mut rng, &mut testing_signer_set).await;
