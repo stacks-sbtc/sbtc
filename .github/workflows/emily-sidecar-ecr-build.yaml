@@ -1,4 +1,4 @@
-name: Build Docker Image for Environment Branch - Emily Sidecar
+name: Build Docker Image for Emily Sidecar
 
 on:
   push:

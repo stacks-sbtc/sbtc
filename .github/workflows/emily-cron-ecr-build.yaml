@@ -1,4 +1,4 @@
-name: Build Docker Image for Environment Branch - Emily Cron
+name: Build Docker Image for Emily Cron
 
 on:
   push:
