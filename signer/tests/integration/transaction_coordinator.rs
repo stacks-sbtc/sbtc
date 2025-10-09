@@ -125,7 +125,7 @@ use stacks_common::types::chainstate::ConsensusHash;
 use stacks_common::types::chainstate::SortitionId;
 use test_case::test_case;
 use test_log::test;
-use tokio::task::JoinHandle;
+use tokio::task::AbortHandle;
 use tokio::time::error::Elapsed;
 use tokio_stream::wrappers::BroadcastStream;
 use url::Url;
@@ -740,12 +740,12 @@ async fn mock_stacks_core<D, B, E>(
 }
 
 /// Start the signers event loops and return the join handles.
-async fn start_event_loops<C>(ctx: &C, network: &WanNetwork) -> Vec<JoinHandle<Result<(), Error>>>
+async fn start_event_loops<C>(ctx: &C, network: &WanNetwork) -> Vec<AbortHandle>
 where
     C: Context + 'static,
 {
     let start_count = Arc::new(AtomicU8::new(0));
-    let mut handles: Vec<JoinHandle<Result<(), Error>>> = Vec::new();
+    let mut handles: Vec<AbortHandle> = Vec::new();
 
     let private_key = ctx.config().signer.private_key;
     let net = network.connect(ctx);
@@ -762,10 +762,13 @@ where
         is_epoch3: true,
     };
     let counter = start_count.clone();
-    handles.push(tokio::spawn(async move {
-        counter.fetch_add(1, Ordering::Relaxed);
-        ev.run().await
-    }));
+    handles.push(
+        tokio::spawn(async move {
+            counter.fetch_add(1, Ordering::Relaxed);
+            ev.run().await
+        })
+        .abort_handle(),
+    );
 
     let ev = TxSignerEventLoop {
         network: net.spawn(),
@@ -780,10 +783,13 @@ where
         stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
     };
     let counter = start_count.clone();
-    handles.push(tokio::spawn(async move {
-        counter.fetch_add(1, Ordering::Relaxed);
-        ev.run().await
-    }));
+    handles.push(
+        tokio::spawn(async move {
+            counter.fetch_add(1, Ordering::Relaxed);
+            ev.run().await
+        })
+        .abort_handle(),
+    );
 
     let ev = RequestDeciderEventLoop {
         network: net.spawn(),
@@ -795,20 +801,27 @@ where
         signer_private_key: private_key,
     };
     let counter = start_count.clone();
-    handles.push(tokio::spawn(async move {
-        counter.fetch_add(1, Ordering::Relaxed);
-        ev.run().await
-    }));
+    handles.push(
+        tokio::spawn(async move {
+            counter.fetch_add(1, Ordering::Relaxed);
+            ev.run().await
+        })
+        .abort_handle(),
+    );
 
     let block_observer = BlockObserver {
         context: ctx.clone(),
         bitcoin_block_source: BitcoinChainTipPoller::start_for_regtest().await,
     };
     let counter = start_count.clone();
-    handles.push(tokio::spawn(async move {
-        counter.fetch_add(1, Ordering::Relaxed);
-        block_observer.run().await
-    }));
+    handles.push(block_observer.bitcoin_block_source.abort_handle());
+    handles.push(
+        tokio::spawn(async move {
+            counter.fetch_add(1, Ordering::Relaxed);
+            block_observer.run().await
+        })
+        .abort_handle(),
+    );
 
     // We wait to make sure that all spawned tasks have started.
     while start_count.load(Ordering::SeqCst) < 4 {
@@ -2753,7 +2766,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
                 settings.signer.bootstrap_signing_set = bootstrap_signing_set.clone();
                 settings.signer.bootstrap_signatures_required = thresholds.first.get();
                 settings.signer.dkg_target_rounds = NonZeroU32::new(1).unwrap();
-                settings.signer.bitcoin_processing_delay = Duration::from_secs(1);
+                settings.signer.bitcoin_processing_delay = Duration::from_millis(200);
             })
             .build();
 
@@ -2917,7 +2930,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
                 settings.signer.private_key = ctx_old.config().signer.private_key;
                 settings.signer.bootstrap_signatures_required = thresholds.second.get();
                 settings.signer.dkg_target_rounds = NonZeroU32::new(1).unwrap();
-                settings.signer.bitcoin_processing_delay = Duration::from_secs(1);
+                settings.signer.bitcoin_processing_delay = Duration::from_millis(200);
             })
             .build();
 
@@ -2933,6 +2946,15 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
 
         signers.push(ctx);
     }
+
+    // When we start the above event loops, the block observer will
+    // immediately observe a bitcoin block that is already known. This will
+    // trigger the usual flow of processing through the request decider and
+    // coordinator event loops. The actual coordinator will then sleep and
+    // see that there is nothing to do before exiting. We want this all to
+    // happen before we observe the next bitcoin block, so that things
+    // proceed naturally.
+    tokio::time::sleep(Duration::from_secs(2)).await;
 
     // =========================================================================
     // Step 9 - Wait for DKG again
@@ -3493,6 +3515,15 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
 
         signers.push(ctx);
     }
+
+    // When we start the above event loops, the block observer will
+    // immediately observe a bitcoin block that is already known. This will
+    // trigger the usual flow of processing through the request decider and
+    // coordinator event loops. The actual coordinator will then sleep and
+    // see that there is nothing to do before exiting. We want this all to
+    // happen before we observe the next bitcoin block, so that things
+    // proceed naturally.
+    tokio::time::sleep(Duration::from_secs(2)).await;
 
     // =========================================================================
     // Step 9 - Wait for DKG again
