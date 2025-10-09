@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::collections::HashSet;
-use std::ops::Deref as _;
 
 use bitcoin::AddressType;
 use bitcoin::Amount;
