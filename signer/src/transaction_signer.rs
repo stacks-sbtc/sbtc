@@ -138,8 +138,6 @@ pub struct TxSignerEventLoop<Context, Network, Rng> {
     pub signer_private_key: PrivateKey,
     /// WSTS state machines for active signing and DKG rounds.
     pub wsts_state_machines: LruCache<StateMachineId, SignerStateMachine>,
-    /// The threshold for the signer
-    pub threshold: u32,
     /// Last bitcoin block for which the signer has already processed
     /// presign request.
     pub last_presign_block: Option<BitcoinBlockHash>,
@@ -262,7 +260,6 @@ where
         let config = context.config();
         let signer_private_key = config.signer.private_key;
         let context_window = config.signer.context_window;
-        let threshold = config.signer.bootstrap_signatures_required.into();
         let dkg_begin_pause = config.signer.dkg_begin_pause.map(Duration::from_secs);
 
         Ok(Self {
@@ -271,7 +268,6 @@ where
             signer_private_key,
             context_window,
             wsts_state_machines: LruCache::new(max_state_machines),
-            threshold,
             last_presign_block: None,
             rng,
             dkg_begin_pause,
@@ -1760,6 +1756,9 @@ mod tests {
         let context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
+            .modify_settings(|settings| {
+                settings.signer.bootstrap_signatures_required = 3;
+            })
             .build();
 
         // TODO: fix tech debt #893 then raise threshold to 5
@@ -1767,7 +1766,6 @@ mod tests {
             context,
             context_window: 6,
             num_signers: 7,
-            signing_threshold: 3,
             test_model_parameters,
         }
     }
@@ -1850,6 +1848,9 @@ mod tests {
         let context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
+            .modify_settings(|settings| {
+                settings.signer.bootstrap_signatures_required = 1;
+            })
             .build();
 
         let storage = context.get_storage_mut();
@@ -1888,7 +1889,6 @@ mod tests {
             signer_private_key: PrivateKey::new(&mut rand::rngs::OsRng),
             context_window: 1,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
-            threshold: 1,
             last_presign_block: None,
             rng: rand::rngs::OsRng,
             dkg_begin_pause: None,
@@ -1925,6 +1925,9 @@ mod tests {
         let context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
+            .modify_settings(|settings| {
+                settings.signer.bootstrap_signatures_required = 1;
+            })
             .build();
 
         let storage = context.get_storage_mut();
@@ -1958,7 +1961,6 @@ mod tests {
             context_window: 1,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             last_presign_block: None,
-            threshold: 1,
             rng: rand::rngs::OsRng,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
@@ -2020,6 +2022,9 @@ mod tests {
         let context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
+            .modify_settings(|settings| {
+                settings.signer.bootstrap_signatures_required = 1;
+            })
             .build();
 
         let storage = context.get_storage_mut();
@@ -2044,7 +2049,6 @@ mod tests {
             signer_private_key: PrivateKey::new(&mut rand::rngs::OsRng),
             context_window: 1,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
-            threshold: 1,
             last_presign_block: None,
             rng: rand::rngs::OsRng,
             dkg_begin_pause: None,
