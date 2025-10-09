@@ -1,10 +1,4 @@
 #![doc = include_str!("../README.md")]
-#![deny(missing_docs)]
-#![deny(
-    clippy::unwrap_in_result,
-    // clippy::unwrap_used, // TODO: There's one unwrap left
-    // clippy::expect_used, // TODO: There's 14 expects left
-)]
 
 pub mod api;
 pub mod bitcoin;

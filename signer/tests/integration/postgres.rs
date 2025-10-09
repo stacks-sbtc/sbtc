@@ -2,14 +2,15 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::io::Read as _;
-use std::ops::Deref;
+use std::ops::Deref as _;
+use std::slice;
 use std::time::Duration;
 
 use bitcoin::hashes::Hash as _;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
 use blockstack_lib::clarity::vm::Value as ClarityValue;
 use blockstack_lib::clarity::vm::types::PrincipalData;
-use blockstack_lib::codec::StacksMessageCodec;
+use blockstack_lib::codec::StacksMessageCodec as _;
 use blockstack_lib::types::chainstate::StacksAddress;
 use fake::Faker;
 use futures::StreamExt as _;
@@ -28,8 +29,8 @@ use signer::storage::model::KeyRotationEvent;
 use signer::storage::model::SweptWithdrawalRequest;
 use signer::storage::model::WithdrawalRequest;
 use signer::testing::IterTestExt as _;
-use signer::testing::storage::DbReadTestExt;
-use strum::IntoEnumIterator;
+use signer::testing::storage::DbReadTestExt as _;
+use strum::IntoEnumIterator as _;
 use time::OffsetDateTime;
 
 use signer::bitcoin::MockBitcoinInteract;
@@ -49,8 +50,8 @@ use signer::stacks::contracts::RejectWithdrawalV1;
 use signer::stacks::contracts::ReqContext;
 use signer::stacks::contracts::RotateKeysV1;
 use signer::storage;
-use signer::storage::DbRead;
-use signer::storage::DbWrite;
+use signer::storage::DbRead as _;
+use signer::storage::DbWrite as _;
 use signer::storage::model;
 use signer::storage::model::BitcoinBlock;
 use signer::storage::model::BitcoinBlockHash;
@@ -73,7 +74,7 @@ use signer::testing::dummy::SignerSetConfig;
 use signer::testing::storage::model::TestData;
 use signer::testing::wallet::ContractCallWrapper;
 
-use fake::Fake;
+use fake::Fake as _;
 use signer::DEPOSIT_LOCKTIME_BLOCK_BUFFER;
 use signer::testing::context::*;
 use signer::testing::get_rng;
@@ -2350,7 +2351,7 @@ async fn get_swept_withdrawal_requests_returns_swept_withdrawal_requests() {
         .await
         .unwrap();
     db.write_bitcoin_transaction(&sweep_tx_ref).await.unwrap();
-    db.write_bitcoin_withdrawals_outputs(&[swept_output.clone()])
+    db.write_bitcoin_withdrawals_outputs(slice::from_ref(&swept_output))
         .await
         .unwrap();
 
@@ -2743,7 +2744,7 @@ async fn get_swept_withdrawal_requests_does_not_return_withdrawal_requests_with_
         .await
         .unwrap();
     db.write_bitcoin_transaction(&sweep_tx_ref).await.unwrap();
-    db.write_bitcoin_withdrawals_outputs(&[swept_output.clone()])
+    db.write_bitcoin_withdrawals_outputs(slice::from_ref(&swept_output))
         .await
         .unwrap();
 
@@ -3138,7 +3139,7 @@ async fn get_swept_withdrawal_requests_response_tx_reorged() {
         .await
         .unwrap();
     db.write_bitcoin_transaction(&sweep_tx_ref).await.unwrap();
-    db.write_bitcoin_withdrawals_outputs(&[swept_output.clone()])
+    db.write_bitcoin_withdrawals_outputs(slice::from_ref(&swept_output))
         .await
         .unwrap();
 
@@ -5573,7 +5574,7 @@ async fn pending_rejected_withdrawal_already_accepted() {
         stacks_block_hash: request.block_hash,
         ..fake::Faker.fake_with_rng(&mut rng)
     };
-    db.write_bitcoin_withdrawals_outputs(&[forked_withdrawal_output.clone()])
+    db.write_bitcoin_withdrawals_outputs(slice::from_ref(&forked_withdrawal_output))
         .await
         .unwrap();
     db.write_bitcoin_transaction(&model::BitcoinTxRef {
@@ -5612,7 +5613,7 @@ async fn pending_rejected_withdrawal_already_accepted() {
         stacks_block_hash: request.block_hash,
         ..fake::Faker.fake_with_rng(&mut rng)
     };
-    db.write_bitcoin_withdrawals_outputs(&[canonical_withdrawal_output.clone()])
+    db.write_bitcoin_withdrawals_outputs(slice::from_ref(&canonical_withdrawal_output))
         .await
         .unwrap();
 
@@ -7437,7 +7438,7 @@ mod sqlx_transactions {
     use super::*;
 
     use signer::{
-        storage::{Transactable, TransactionHandle},
+        storage::{Transactable as _, TransactionHandle as _},
         testing::{
             blocks::{BitcoinChain, StacksChain},
             storage,

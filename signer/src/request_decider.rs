@@ -17,7 +17,7 @@ use crate::context::SignerEvent;
 use crate::context::SignerSignal;
 use crate::ecdsa::SignEcdsa as _;
 use crate::ecdsa::Signed;
-use crate::emily_client::EmilyInteract;
+use crate::emily_client::EmilyInteract as _;
 use crate::error::Error;
 use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
@@ -34,8 +34,8 @@ use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::DepositSigner;
 use crate::storage::model::WithdrawalSigner;
 
-use futures::StreamExt;
-use futures::TryStreamExt;
+use futures::StreamExt as _;
+use futures::TryStreamExt as _;
 
 /// This struct is responsible for deciding whether to accept or reject
 /// requests and persisting requests from other signers.

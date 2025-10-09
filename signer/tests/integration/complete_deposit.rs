@@ -14,7 +14,7 @@ use signer::testing;
 use signer::testing::context::*;
 use signer::testing::get_rng;
 
-use fake::Fake;
+use fake::Fake as _;
 use signer::DEPOSIT_DUST_LIMIT;
 
 use crate::setup::SweepAmounts;

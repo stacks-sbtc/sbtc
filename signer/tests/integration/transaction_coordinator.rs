@@ -33,7 +33,7 @@ use clarity::types::chainstate::StacksBlockId;
 use clarity::vm::Value as ClarityValue;
 use clarity::vm::types::PrincipalData;
 use clarity::vm::types::SequenceData;
-use clarity::vm::types::StacksAddressExtensions;
+use clarity::vm::types::StacksAddressExtensions as _;
 use clarity::vm::types::StandardPrincipalData;
 use emily_client::apis::deposit_api;
 use fake::Fake as _;
@@ -56,7 +56,7 @@ use secp256k1::SECP256K1;
 use signer::bitcoin::BitcoinInteract as _;
 use signer::bitcoin::poller::BitcoinChainTipPoller;
 use signer::bitcoin::rpc::BitcoinCoreClient;
-use signer::bitcoin::utxo::BitcoinInputsOutputs;
+use signer::bitcoin::utxo::BitcoinInputsOutputs as _;
 use signer::bitcoin::utxo::DepositRequest;
 use signer::bitcoin::utxo::Fees;
 use signer::bitcoin::utxo::TxDeconstructor as _;
@@ -67,7 +67,7 @@ use signer::context::RequestDeciderEvent;
 use signer::context::SignerEvent;
 use signer::context::SignerSignal;
 use signer::message::Payload;
-use signer::network::MessageTransfer;
+use signer::network::MessageTransfer as _;
 use signer::stacks::api::SignerSetInfo;
 use signer::stacks::api::StacksClient;
 use signer::stacks::api::StacksInteract;
@@ -83,7 +83,7 @@ use signer::transaction_coordinator::given_key_is_coordinator;
 use signer::transaction_coordinator::should_coordinate_dkg;
 use signer::transaction_signer::STACKS_SIGN_REQUEST_LRU_SIZE;
 use signer::transaction_signer::assert_allow_dkg_begin;
-use signer::util::FutureExt;
+use signer::util::FutureExt as _;
 use signer::util::Sleep;
 use signer::wsts_state_machine::construct_signing_round_id;
 use testing_emily_client::apis::chainstate_api;
@@ -2013,6 +2013,7 @@ async fn sign_bitcoin_transaction() {
             .with_mocked_stacks_client()
             .modify_settings(|settings| {
                 settings.signer.private_key = kp.secret_key().into();
+                settings.signer.bitcoin_processing_delay = Duration::from_millis(200);
             })
             .build();
 
@@ -3829,7 +3830,7 @@ async fn wsts_ids_set_during_dkg_and_signing_rounds() {
             .modify_settings(|settings| {
                 settings.signer.private_key = kp.secret_key().into();
                 settings.signer.dkg_target_rounds = NonZeroU32::new(1).unwrap();
-                settings.signer.bitcoin_processing_delay = Duration::from_secs(1);
+                settings.signer.bitcoin_processing_delay = Duration::from_millis(200);
             })
             .build();
 
@@ -4532,6 +4533,7 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
             .with_mocked_stacks_client()
             .modify_settings(|settings| {
                 settings.signer.private_key = kp.secret_key().into();
+                settings.signer.bitcoin_processing_delay = Duration::from_millis(200);
             })
             .build();
 
@@ -5381,6 +5383,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
             .with_mocked_stacks_client()
             .modify_settings(|settings| {
                 settings.signer.private_key = kp.secret_key().into();
+                settings.signer.bitcoin_processing_delay = Duration::from_millis(200);
             })
             .build();
 

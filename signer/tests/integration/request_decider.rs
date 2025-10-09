@@ -3,7 +3,7 @@ use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering;
 
 use bitcoin::consensus::encode::serialize_hex;
-use fake::Fake;
+use fake::Fake as _;
 use fake::Faker;
 use mockito::Server;
 use serde_json::json;
@@ -12,7 +12,7 @@ use emily_client::apis::deposit_api;
 use emily_client::models::CreateDepositRequestBody;
 use signer::bitcoin::MockBitcoinInteract;
 use signer::blocklist_client::BlocklistClient;
-use signer::context::Context;
+use signer::context::Context as _;
 use signer::emily_client::EmilyClient;
 use signer::emily_client::MockEmilyInteract;
 use signer::keys::PrivateKey;
