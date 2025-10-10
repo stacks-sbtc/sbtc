@@ -346,20 +346,20 @@ impl StacksInteract for TestHarness {
         todo!()
     }
 
-    async fn get_block(&self, block_id: StacksBlockId) -> Result<NakamotoBlock, Error> {
+    async fn get_block(&self, block_id: &StacksBlockId) -> Result<NakamotoBlock, Error> {
         self.stacks_blocks
             .iter()
-            .skip_while(|(id, _, _)| &block_id != id)
+            .skip_while(|(id, _, _)| block_id != id)
             .map(|(_, block, _)| block)
             .next()
             .cloned()
             .ok_or(Error::MissingBlock)
     }
-    async fn get_tenure(&self, block_id: StacksBlockId) -> Result<TenureBlocks, Error> {
+    async fn get_tenure(&self, block_id: &StacksBlockId) -> Result<TenureBlocks, Error> {
         let (stx_block_id, stx_block, btc_block_id) = self
             .stacks_blocks
             .iter()
-            .find(|(id, _, _)| &block_id == id)
+            .find(|(id, _, _)| block_id == id)
             .ok_or(Error::MissingBlock)?;
 
         let blocks: Vec<NakamotoBlock> = self
@@ -383,14 +383,16 @@ impl StacksInteract for TestHarness {
                 .stacks_blocks
                 .iter()
                 .find(|(_, _, block_id)| block_id == btc_block_id)
-                .map(|(stx_block_id, _, _)| *stx_block_id)
+                .map(|(stx_block_id, _, _)| stx_block_id)
+                .cloned()
                 .unwrap(),
             parent_consensus_hash: ConsensusHash([0; 20]),
             parent_tenure_start_block_id: StacksBlockId::first_mined(),
             tip_block_id: self
                 .stacks_blocks
                 .last()
-                .map(|(block_id, _, _)| *block_id)
+                .map(|(block_id, _, _)| block_id)
+                .cloned()
                 .unwrap(),
             tip_height: self.stacks_blocks.len() as u64,
             reward_cycle: 0,

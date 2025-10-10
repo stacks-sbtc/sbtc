@@ -274,7 +274,7 @@ impl PgRead {
         )
         .bind(chain_tip)
         .bind(i64::try_from(id.request_id).map_err(Error::ConversionDatabaseInt)?)
-        .bind(id.block_hash)
+        .bind(&id.block_hash)
         .fetch_optional(executor)
         .await
         .map_err(Error::SqlxQuery)
@@ -320,7 +320,7 @@ impl PgRead {
         )
         .bind(signer_public_key)
         .bind(i64::try_from(id.request_id).map_err(Error::ConversionDatabaseInt)?)
-        .bind(id.block_hash)
+        .bind(&id.block_hash)
         .fetch_optional(executor)
         .await
         .map_err(Error::SqlxQuery)
@@ -1031,8 +1031,8 @@ impl PgRead {
             "#,
         )
         .bind(aggregate_key)
-        .bind(id.txid)
-        .bind(id.block_hash)
+        .bind(&id.txid)
+        .bind(&id.block_hash)
         .bind(i64::try_from(id.request_id).map_err(Error::ConversionDatabaseInt)?)
         .fetch_all(executor)
         .await
@@ -1593,7 +1593,7 @@ impl PgRead {
         };
 
         Ok(Some(WithdrawalRequestReport {
-            id: *id,
+            id: id.clone(), // TODO: Should probably take `id` by value since we're cloning it anyway
             amount: summary.amount,
             max_fee: summary.max_fee,
             is_accepted: summary.is_accepted,
@@ -2151,7 +2151,7 @@ impl PgRead {
         )
         .bind(txid)
         .bind(i64::try_from(id.request_id).map_err(Error::ConversionDatabaseInt)?)
-        .bind(id.block_hash)
+        .bind(&id.block_hash)
         .fetch_one(executor)
         .await
         .map_err(Error::SqlxQuery)
@@ -2186,7 +2186,7 @@ impl PgRead {
             "#,
         )
         .bind(i64::try_from(id.request_id).map_err(Error::ConversionDatabaseInt)?)
-        .bind(id.block_hash)
+        .bind(&id.block_hash)
         .fetch_one(&mut *executor)
         .await
         .map_err(Error::SqlxQuery)?;

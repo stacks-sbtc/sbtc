@@ -244,7 +244,7 @@ pub trait StacksInteract: Send + Sync {
     /// Stacks block ID.
     fn get_block(
         &self,
-        block_id: StacksBlockId,
+        block_id: &StacksBlockId,
     ) -> impl Future<Output = Result<NakamotoBlock, Error>> + Send;
     /// Fetch all Nakamoto ancestor blocks within the same tenure as the
     /// given block ID from a Stacks node.
@@ -257,7 +257,7 @@ pub trait StacksInteract: Send + Sync {
     /// the size of the blocks within the tenure.
     fn get_tenure(
         &self,
-        block_id: StacksBlockId,
+        block_id: &StacksBlockId,
     ) -> impl Future<Output = Result<TenureBlocks, Error>> + Send;
     /// Get information about the current tenure.
     ///
@@ -1004,7 +1004,7 @@ impl StacksClient {
     /// If the given block ID does not exist or is an ID for a non-Nakamoto
     /// block then a Result::Err is returned.
     #[tracing::instrument(skip(self))]
-    async fn get_block(&self, block_id: StacksBlockId) -> Result<NakamotoBlock, Error> {
+    async fn get_block(&self, block_id: &StacksBlockId) -> Result<NakamotoBlock, Error> {
         let path = format!("/v3/blocks/{}", block_id.to_hex());
         let url = self
             .endpoint
@@ -1029,7 +1029,7 @@ impl StacksClient {
             .map_err(Error::UnexpectedStacksResponse)?;
 
         NakamotoBlock::consensus_deserialize(&mut &*resp)
-            .map_err(|err| Error::DecodeNakamotoBlock(err, block_id))
+            .map_err(|err| Error::DecodeNakamotoBlock(err, block_id.clone()))
     }
 
     /// Fetch all Nakamoto ancestor blocks within the same tenure as the
@@ -1042,10 +1042,10 @@ impl StacksClient {
     /// If the given block ID does not exist or is an ID for a non-Nakamoto
     /// block then a Result::Err is returned.
     #[tracing::instrument(skip(self))]
-    async fn get_tenure(&self, block_id: StacksBlockId) -> Result<TenureBlocks, Error> {
+    async fn get_tenure(&self, block_id: &StacksBlockId) -> Result<TenureBlocks, Error> {
         tracing::debug!("making initial request for nakamoto blocks within the tenure");
         let mut tenure_blocks = self.get_tenure_raw(block_id).await?;
-        let mut prev_last_block_id = block_id;
+        let mut prev_last_block_id = block_id.clone();
 
         // Given the response size limit of GET /v3/tenures/<block-id>
         // requests, there could be more blocks that we need to fetch.
@@ -1059,10 +1059,10 @@ impl StacksClient {
             if last_block_id == prev_last_block_id {
                 break;
             }
-            prev_last_block_id = last_block_id;
 
             tracing::debug!(%last_block_id, "fetching more nakamoto blocks within the tenure");
-            let blocks = self.get_tenure_raw(last_block_id).await?;
+            let blocks = self.get_tenure_raw(&last_block_id).await?;
+
             // The first block in the GET /v3/tenures/<block-id> response
             // is always the block related to the given <block-id>. But we
             // already have that block, so we can skip adding it again.
@@ -1075,7 +1075,9 @@ impl StacksClient {
                 None => return Err(Error::EmptyStacksTenure),
             }
 
-            tenure_blocks.extend(blocks.into_iter().skip(1))
+            tenure_blocks.extend(blocks.into_iter().skip(1));
+
+            prev_last_block_id = last_block_id;
         }
 
         // If Self::get_tenure_raw returns with Ok(_) then the Vec will
@@ -1104,7 +1106,7 @@ impl StacksClient {
     /// * If the given block ID does not exist or is an ID for a
     ///   non-Nakamoto block then a Result::Err is returned.
     #[tracing::instrument(skip(self))]
-    async fn get_tenure_raw(&self, block_id: StacksBlockId) -> Result<Vec<NakamotoBlock>, Error> {
+    async fn get_tenure_raw(&self, block_id: &StacksBlockId) -> Result<Vec<NakamotoBlock>, Error> {
         let path = format!("/v3/tenures/{}", block_id.to_hex());
         let url = self
             .endpoint
@@ -1137,7 +1139,7 @@ impl StacksClient {
 
         while !bytes.is_empty() {
             let block = NakamotoBlock::consensus_deserialize(bytes)
-                .map_err(|err| Error::DecodeNakamotoTenure(err, block_id))?;
+                .map_err(|err| Error::DecodeNakamotoTenure(err, block_id.clone()))?;
 
             blocks.push(block);
         }
@@ -1275,7 +1277,7 @@ impl StacksClient {
 pub async fn fetch_unknown_ancestors<S, D>(
     stacks: &S,
     db: &D,
-    block_id: StacksBlockId,
+    block_id: &StacksBlockId,
 ) -> Result<Vec<TenureBlockHeaders>, Error>
 where
     S: StacksInteract,
@@ -1305,12 +1307,15 @@ where
             break;
         };
         // We've seen this parent already, so time to stop.
-        if db.stacks_block_exists(header.parent_block_id).await? {
+        if db
+            .stacks_block_exists(header.parent_block_id.clone())
+            .await?
+        {
             tracing::debug!("parent block known in the database");
             break;
         }
         // There are more blocks to fetch, so let's get them.
-        let tenure_blocks = stacks.get_tenure(header.parent_block_id).await?;
+        let tenure_blocks = stacks.get_tenure(&header.parent_block_id).await?;
         headers.push(tenure_blocks.into());
     }
 
@@ -1530,11 +1535,11 @@ impl StacksInteract for StacksClient {
         self.submit_tx(tx).await
     }
 
-    async fn get_block(&self, block_id: StacksBlockId) -> Result<NakamotoBlock, Error> {
+    async fn get_block(&self, block_id: &StacksBlockId) -> Result<NakamotoBlock, Error> {
         self.get_block(block_id).await
     }
 
-    async fn get_tenure(&self, block_id: StacksBlockId) -> Result<TenureBlocks, Error> {
+    async fn get_tenure(&self, block_id: &StacksBlockId) -> Result<TenureBlocks, Error> {
         self.get_tenure(block_id).await
     }
 
@@ -1756,11 +1761,11 @@ impl StacksInteract for ApiFallbackClient<StacksClient> {
         self.exec(|client, _| client.submit_tx(tx)).await
     }
 
-    async fn get_block(&self, block_id: StacksBlockId) -> Result<NakamotoBlock, Error> {
+    async fn get_block(&self, block_id: &StacksBlockId) -> Result<NakamotoBlock, Error> {
         self.exec(|client, _| client.get_block(block_id)).await
     }
 
-    async fn get_tenure(&self, block_id: StacksBlockId) -> Result<TenureBlocks, Error> {
+    async fn get_tenure(&self, block_id: &StacksBlockId) -> Result<TenureBlocks, Error> {
         self.exec(|client, _| client.get_tenure(block_id)).await
     }
 
@@ -1878,7 +1883,7 @@ mod tests {
         let client: ApiFallbackClient<StacksClient> = TryFrom::try_from(&settings).unwrap();
 
         let info = client.get_tenure_info().await.unwrap();
-        let tenures = fetch_unknown_ancestors(&client, &db, info.tip_block_id).await;
+        let tenures = fetch_unknown_ancestors(&client, &db, &info.tip_block_id).await;
 
         let blocks = tenures.unwrap();
         let headers = blocks
@@ -1997,7 +2002,7 @@ mod tests {
 
         let block_id = StacksBlockId::from_hex(TENURE_END_BLOCK_ID).unwrap();
         // The moment of truth, do the requests succeed?
-        let blocks = client.get_tenure(block_id).await.unwrap().blocks;
+        let blocks = client.get_tenure(&block_id).await.unwrap().blocks;
         assert!(blocks.len() > 1);
 
         // We know that the blocks are ordered as a chain, and we know the
@@ -2585,7 +2590,7 @@ mod tests {
         let storage = Store::new_shared();
 
         let info = client.get_tenure_info().await.unwrap();
-        let blocks = fetch_unknown_ancestors(&client, &storage, info.tenure_start_block_id)
+        let blocks = fetch_unknown_ancestors(&client, &storage, &info.tenure_start_block_id)
             .await
             .unwrap();
         assert!(!blocks.is_empty());

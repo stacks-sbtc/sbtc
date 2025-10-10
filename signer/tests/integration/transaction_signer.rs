@@ -115,7 +115,7 @@ async fn signing_set_validation_check_for_stacks_transactions() {
 
     let (mut req, _) = crate::complete_deposit::make_complete_deposit(&setup);
 
-    req.deployer = ctx.config().signer.deployer;
+    req.deployer = ctx.config().signer.deployer.clone();
     let network = InMemoryNetwork::new();
     let mut tx_signer = TxSignerEventLoop {
         network: network.connect(),
@@ -205,7 +205,7 @@ async fn signing_set_validation_ignores_aggregate_key_in_request() {
 
     let (mut req, _) = crate::complete_deposit::make_complete_deposit(&setup);
 
-    req.deployer = ctx.config().signer.deployer;
+    req.deployer = ctx.config().signer.deployer.clone();
     let network = InMemoryNetwork::new();
     let mut tx_signer = TxSignerEventLoop {
         network: network.connect(),
@@ -302,7 +302,7 @@ async fn signer_rejects_stacks_txns_with_too_high_a_fee(
 
     let (mut req, _) = crate::complete_deposit::make_complete_deposit(&setup);
 
-    req.deployer = ctx.config().signer.deployer;
+    req.deployer = ctx.config().signer.deployer.clone();
     let network = InMemoryNetwork::new();
     let mut tx_signer = TxSignerEventLoop {
         network: network.connect(),
@@ -389,7 +389,7 @@ async fn signer_rejects_multiple_attempts_in_tenure() {
 
     let (mut req, _) = crate::complete_deposit::make_complete_deposit(&setup);
 
-    req.deployer = ctx.config().signer.deployer;
+    req.deployer = ctx.config().signer.deployer.clone();
     let network = InMemoryNetwork::new();
     let mut tx_signer = TxSignerEventLoop {
         network: network.connect(),

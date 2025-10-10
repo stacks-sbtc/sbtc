@@ -428,7 +428,7 @@ impl<C: Context, B> BlockObserver<C, B> {
         let stacks_block_headers = crate::stacks::api::fetch_unknown_ancestors(
             &stacks_client,
             &db,
-            tenure_info.tip_block_id,
+            &tenure_info.tip_block_id,
         )
         .await?;
 
@@ -749,10 +749,10 @@ where
     }
 
     let stacks = ctx.get_stacks_client();
-    let deployer = ctx.config().signer.deployer;
+    let deployer = &ctx.config().signer.deployer;
 
     for contract in SMART_CONTRACTS {
-        if !contract.is_deployed(&stacks, &deployer).await? {
+        if !contract.is_deployed(&stacks, deployer).await? {
             return Ok(false);
         }
     }

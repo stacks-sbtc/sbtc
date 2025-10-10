@@ -214,7 +214,7 @@ impl StacksBlock {
         Self {
             block_hash: Faker.fake(),
             block_height: self.block_height + 1,
-            parent_hash: self.block_hash,
+            parent_hash: self.block_hash.clone(),
             bitcoin_anchor: self.bitcoin_anchor,
         }
     }
