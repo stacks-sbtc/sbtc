@@ -661,11 +661,7 @@ where
                     })
                 });
                 client.expect_submit_tx().times(5).returning(|_| {
-                    Box::pin(async {
-                        Ok(SubmitTxResponse::Acceptance(
-                            Faker.fake::<StacksTxId>().into_inner(),
-                        ))
-                    })
+                    Box::pin(async { Ok(SubmitTxResponse::Acceptance(Faker.fake::<StacksTxId>())) })
                 });
             })
             .await;
