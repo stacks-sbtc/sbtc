@@ -51,6 +51,7 @@ use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::StacksBlock;
 use crate::storage::model::StacksBlockHeight;
+use crate::storage::model::StacksTxId;
 use crate::storage::model::ToLittleEndianOrder as _;
 use crate::util::ApiFallbackClient;
 
@@ -583,7 +584,7 @@ impl std::error::Error for TxRejection {}
 #[serde(untagged)]
 pub enum SubmitTxResponse {
     /// The transaction ID for the submitted transaction.
-    Acceptance(Txid),
+    Acceptance(StacksTxId),
     /// The response when the transaction is rejected from the node.
     Rejection(TxRejection),
 }
