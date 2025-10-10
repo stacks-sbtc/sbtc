@@ -8,6 +8,8 @@ use std::ops::Deref;
 use std::ops::{Add, Sub};
 
 use bitcoin::hashes::Hash as _;
+use bitcoin::hex::DisplayHex as _;
+use bitcoin::hex::FromHex as _;
 use bitcoin::{OutPoint, ScriptBuf};
 use bitvec::array::BitArray;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
@@ -918,92 +920,114 @@ impl AsRef<BitcoinBlockHash> for BitcoinBlockRef {
 }
 
 /// The Stacks block ID. This is different from the block header hash.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(transparent)]
-pub struct StacksBlockHash(StacksBlockId);
+pub struct StacksBlockHash([u8; 32]);
 
 impl StacksBlockHash {
     /// Return the inner bytes for the block hash.
     pub fn into_bytes(self) -> [u8; 32] {
-        self.0.into_bytes()
+        self.0
     }
-}
 
-impl Deref for StacksBlockHash {
-    type Target = StacksBlockId;
-    fn deref(&self) -> &Self::Target {
+    /// Return the inner bytes for the block hash.
+    pub fn to_bytes(&self) -> &[u8; 32] {
         &self.0
+    }
+
+    /// Return the block hash as a hex string.
+    pub fn to_hex(&self) -> String {
+        self.0.to_hex_string(bitcoin::hex::Case::Lower)
     }
 }
 
 impl From<StacksBlockId> for StacksBlockHash {
     fn from(value: StacksBlockId) -> Self {
-        Self(value)
+        Self(value.into_bytes())
     }
 }
 
 impl From<StacksBlockHash> for StacksBlockId {
     fn from(value: StacksBlockHash) -> Self {
-        value.0
+        StacksBlockId(value.0)
     }
 }
 
 impl From<[u8; 32]> for StacksBlockHash {
     fn from(bytes: [u8; 32]) -> Self {
-        Self(StacksBlockId(bytes))
+        Self(bytes)
     }
 }
 
 impl std::fmt::Display for StacksBlockHash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
+        self.0.as_hex().fmt(f)
     }
 }
 
 /// Stacks transaction ID
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct StacksTxId(blockstack_lib::burnchains::Txid);
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct StacksTxId([u8; 32]);
 
 impl StacksTxId {
-    /// Return the inner bytes for the block hash.
+    /// Return the inner bytes for the txid.
     pub fn into_bytes(self) -> [u8; 32] {
-        self.0.into_bytes()
+        self.0
+    }
+
+    /// Return the inner bytes for the tx id.
+    pub fn to_bytes(&self) -> &[u8; 32] {
+        &self.0
     }
 
     /// Returns the inner Txid.
     pub fn into_inner(self) -> blockstack_lib::burnchains::Txid {
-        self.0
+        blockstack_lib::burnchains::Txid(self.0)
+    }
+
+    /// Create a StacksTxId from a hex string.
+    pub fn from_hex(data: &str) -> Result<Self, Error> {
+        <[u8; 32]>::from_hex(data)
+            .map(Self)
+            .map_err(Error::DecodeHexTxid)
+    }
+}
+
+impl serde::Serialize for StacksTxId {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let inst = self.0.to_lower_hex_string();
+        s.serialize_str(inst.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for StacksTxId {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<StacksTxId, D::Error> {
+        let inst_str = String::deserialize(d)?;
+        StacksTxId::from_hex(&inst_str).map_err(serde::de::Error::custom)
     }
 }
 
 impl std::fmt::Display for StacksTxId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl Deref for StacksTxId {
-    type Target = blockstack_lib::burnchains::Txid;
-    fn deref(&self) -> &Self::Target {
-        &self.0
+        self.0.as_hex().fmt(f)
     }
 }
 
 impl From<blockstack_lib::burnchains::Txid> for StacksTxId {
     fn from(value: blockstack_lib::burnchains::Txid) -> Self {
-        Self(value)
+        Self(value.0)
     }
 }
 
 impl From<StacksTxId> for blockstack_lib::burnchains::Txid {
     fn from(value: StacksTxId) -> Self {
-        value.0
+        blockstack_lib::burnchains::Txid(value.0)
     }
 }
 
 impl From<[u8; 32]> for StacksTxId {
     fn from(bytes: [u8; 32]) -> Self {
-        Self(blockstack_lib::burnchains::Txid(bytes))
+        Self(bytes)
     }
 }
 
@@ -1244,7 +1268,7 @@ pub struct BitcoinWithdrawalOutput {
 
 impl From<sbtc::events::StacksTxid> for StacksTxId {
     fn from(value: sbtc::events::StacksTxid) -> Self {
-        Self(blockstack_lib::burnchains::Txid(value.0))
+        Self(value.0)
     }
 }
 
