@@ -1587,29 +1587,29 @@ async fn fetching_withdrawal_request_votes() {
 
     let signer_decisions = [
         WithdrawalSigner {
-            txid: txid,
-            block_hash: block_hash,
+            txid,
+            block_hash,
             request_id,
             signer_pub_key: shares.signer_set_public_keys[0],
             is_accepted: true,
         },
         WithdrawalSigner {
-            txid: txid,
-            block_hash: block_hash,
+            txid,
+            block_hash,
             request_id,
             signer_pub_key: shares.signer_set_public_keys[1],
             is_accepted: false,
         },
         WithdrawalSigner {
-            txid: txid,
-            block_hash: block_hash,
+            txid,
+            block_hash,
             request_id,
             signer_pub_key: shares.signer_set_public_keys[2],
             is_accepted: true,
         },
         WithdrawalSigner {
-            txid: txid,
-            block_hash: block_hash,
+            txid,
+            block_hash,
             request_id,
             signer_pub_key: shares.signer_set_public_keys[3],
             is_accepted: true,
@@ -1621,12 +1621,12 @@ async fn fetching_withdrawal_request_votes() {
         // withdrawal request and stacks block are in the database to
         // satisfy the foreign key constraints.
         let block = StacksBlock {
-            block_hash: block_hash,
+            block_hash,
             ..fake::Faker.fake_with_rng::<StacksBlock, _>(&mut rng)
         };
         let req = model::WithdrawalRequest {
-            txid: txid,
-            block_hash: block_hash,
+            txid,
+            block_hash,
             request_id,
             ..fake::Faker.fake_with_rng::<model::WithdrawalRequest, _>(&mut rng)
         };
