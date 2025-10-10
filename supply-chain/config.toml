@@ -109,10 +109,6 @@ criteria = "safe-to-deploy"
 version = "2.0.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.atomic-waker]]
-version = "1.1.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.attohttpc]]
 version = "0.24.1"
 criteria = "safe-to-deploy"
@@ -1606,15 +1602,7 @@ version = "0.1.15"
 criteria = "safe-to-deploy"
 
 [[exemptions.stacks-common]]
-version = "0.0.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.stacks-common]]
-version = "0.0.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.stacks-common]]
-version = "0.0.1@git:6c769636d5d598d1872960ca2744ad1b64fa6385"
+version = "0.0.1@git:bd9ee6310516b31ef4ecce07e42e73ed0f774ada"
 criteria = "safe-to-deploy"
 
 [[exemptions.stringprep]]
@@ -1775,10 +1763,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.tower-service]]
 version = "0.3.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.tracing-log]]
-version = "0.2.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.tracing-serde]]
