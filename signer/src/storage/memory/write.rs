@@ -51,12 +51,12 @@ impl DbWrite for SharedStore {
 
         store
             .stacks_blocks
-            .insert(block.block_hash.clone(), block.clone());
+            .insert(block.block_hash, block.clone());
         store
             .bitcoin_anchor_to_stacks_blocks
             .entry(block.bitcoin_anchor)
             .or_default()
-            .push(block.block_hash.clone());
+            .push(block.block_hash);
         Ok(())
     }
 
@@ -99,18 +99,18 @@ impl DbWrite for SharedStore {
 
         let pk = (
             withdraw_request.request_id,
-            withdraw_request.block_hash.clone(),
+            withdraw_request.block_hash,
         );
 
         store
             .stacks_block_to_withdrawal_requests
-            .entry(pk.1.clone())
+            .entry(pk.1)
             .or_default()
-            .push(pk.clone());
+            .push(pk);
 
         store
             .withdrawal_requests
-            .insert(pk.clone(), withdraw_request.clone());
+            .insert(pk, withdraw_request.clone());
 
         Ok(())
     }
@@ -148,7 +148,7 @@ impl DbWrite for SharedStore {
 
         store
             .withdrawal_request_to_signers
-            .entry((decision.request_id, decision.block_hash.clone()))
+            .entry((decision.request_id, decision.block_hash))
             .or_default()
             .push(decision.clone());
 
@@ -187,12 +187,12 @@ impl DbWrite for SharedStore {
         blocks.iter().for_each(|block| {
             store
                 .stacks_blocks
-                .insert(block.block_hash.clone(), block.clone());
+                .insert(block.block_hash, block.clone());
             store
                 .bitcoin_anchor_to_stacks_blocks
                 .entry(block.bitcoin_anchor)
                 .or_default()
-                .push(block.block_hash.clone());
+                .push(block.block_hash);
         });
 
         Ok(())
@@ -222,7 +222,7 @@ impl DbWrite for SharedStore {
 
         store
             .rotate_keys_transactions
-            .entry(key_rotation.block_hash.clone())
+            .entry(key_rotation.block_hash)
             .or_default()
             .push(key_rotation.clone());
 
@@ -313,7 +313,7 @@ impl DbWrite for SharedStore {
 
         withdrawal_outputs.iter().for_each(|output| {
             store.bitcoin_withdrawal_outputs.insert(
-                (output.request_id, output.stacks_block_hash.clone()),
+                (output.request_id, output.stacks_block_hash),
                 output.clone(),
             );
         });

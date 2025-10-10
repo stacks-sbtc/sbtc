@@ -220,7 +220,7 @@ where
             .iter()
             .filter_map(|b| {
                 if b.bitcoin_anchor == bitcoin_chain_tip.block_hash {
-                    Some(b.block_hash.clone())
+                    Some(b.block_hash)
                 } else {
                     None
                 }
@@ -727,7 +727,7 @@ where
         // Create test data for the withdrawal request
         let stacks_block: StacksBlock = fake::Faker.fake_with_rng(&mut rng);
         let withdrawal_req = model::WithdrawalRequest {
-            block_hash: stacks_block.block_hash.clone(),
+            block_hash: stacks_block.block_hash,
             ..fake::Faker.fake_with_rng::<model::WithdrawalRequest, _>(&mut rng)
         };
 
@@ -879,7 +879,7 @@ where
         // Create test data for the withdrawal request
         let stacks_block: StacksBlock = fake::Faker.fake_with_rng(&mut rng);
         let withdrawal_req = model::WithdrawalRequest {
-            block_hash: stacks_block.block_hash.clone(),
+            block_hash: stacks_block.block_hash,
             ..fake::Faker.fake_with_rng(&mut rng)
         };
 

@@ -4886,7 +4886,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
         request_id: 23,
         bitcoin_block_height: bitcoin_chain_tip.block_height,
         amount: 10_000_000,
-        block_hash: stacks_chain_tip.clone(),
+        block_hash: stacks_chain_tip,
         recipient: withdrawal_recipient.script_pubkey.clone().into(),
         max_fee: 100_000,
         txid: StacksTxId::from([123; 32]),
@@ -5647,8 +5647,8 @@ mod get_eligible_pending_withdrawal_requests {
         for (signer_pub_key, is_accepted) in signer_votes {
             let signer = WithdrawalSigner {
                 request_id: request.request_id,
-                block_hash: request.block_hash.clone(),
-                txid: request.txid.clone(),
+                block_hash: request.block_hash,
+                txid: request.txid,
                 signer_pub_key,
                 is_accepted,
             };
@@ -5671,7 +5671,7 @@ mod get_eligible_pending_withdrawal_requests {
     ) -> WithdrawalRequest {
         let withdrawal_request = WithdrawalRequest {
             request_id: next_request_id(),
-            block_hash: stacks_block.block_hash.clone(),
+            block_hash: stacks_block.block_hash,
             bitcoin_block_height: bitcoin_block.block_height,
             amount,
             max_fee,

@@ -278,7 +278,7 @@ impl TestSweepSetup {
     /// blockchain identified by the sweep chain tip.
     pub async fn store_stacks_genesis_block(&self, db: &PgStore) {
         let block = model::StacksBlock {
-            block_hash: self.stacks_genesis_block.clone(),
+            block_hash: self.stacks_genesis_block,
             block_height: 0u64.into(),
             parent_hash: StacksBlockId::first_mined().into(),
             bitcoin_anchor: self.sweep_block_hash.into(),
@@ -363,7 +363,7 @@ impl TestSweepSetup {
 
     pub async fn store_withdrawal_request(&self, db: &PgStore) {
         let block = model::StacksBlock {
-            block_hash: self.withdrawal_request.block_hash.clone(),
+            block_hash: self.withdrawal_request.block_hash,
             block_height: 1u64.into(), // Sweep setup creates two stacks blocks, and withdrawal request is in the second one.
             parent_hash: Faker.fake_with_rng(&mut OsRng),
             bitcoin_anchor: self.sweep_block_hash.into(),
@@ -372,8 +372,8 @@ impl TestSweepSetup {
 
         let withdrawal_request = model::WithdrawalRequest {
             request_id: self.withdrawal_request.request_id,
-            txid: self.withdrawal_request.txid.clone(),
-            block_hash: self.withdrawal_request.block_hash.clone(),
+            txid: self.withdrawal_request.txid,
+            block_hash: self.withdrawal_request.block_hash,
             recipient: self.withdrawal_request.clone().script_pubkey,
             amount: self.withdrawal_request.amount,
             max_fee: self.withdrawal_request.max_fee,
@@ -420,7 +420,7 @@ impl TestSweepSetup {
 
         let event = KeyRotationEvent {
             txid: fake::Faker.fake(),
-            block_hash: self.stacks_genesis_block.clone(),
+            block_hash: self.stacks_genesis_block,
             aggregate_key: self.aggregated_signer.keypair.public_key().into(),
             signer_set,
             signatures_required: self.signatures_required,
@@ -807,9 +807,9 @@ impl TestSweepSetup2 {
             .iter()
             .scan(initial_state, |parent_block, withdrawal| {
                 let child_block = model::StacksBlock {
-                    block_hash: withdrawal.request.block_hash.clone(),
+                    block_hash: withdrawal.request.block_hash,
                     block_height: parent_block.block_height + 1,
-                    parent_hash: parent_block.block_hash.clone(),
+                    parent_hash: parent_block.block_hash,
                     bitcoin_anchor: withdrawal.block_ref.block_hash,
                 };
                 *parent_block = child_block.clone();
@@ -1074,8 +1074,8 @@ impl TestSweepSetup2 {
         for (index, withdrawal) in self.withdrawals.iter().enumerate() {
             let swept_output = BitcoinWithdrawalOutput {
                 request_id: withdrawal.request.request_id,
-                stacks_txid: withdrawal.request.txid.clone(),
-                stacks_block_hash: withdrawal.request.block_hash.clone(),
+                stacks_txid: withdrawal.request.txid,
+                stacks_block_hash: withdrawal.request.block_hash,
                 bitcoin_chain_tip: sweep.block_hash.into(),
                 is_valid_tx: true,
                 validation_result: WithdrawalValidationResult::Ok,
@@ -1175,8 +1175,8 @@ impl TestSweepSetup2 {
                 .zip(withdrawal.request.signer_bitmap)
                 .map(|(signer_pub_key, is_rejected)| model::WithdrawalSigner {
                     request_id: withdrawal.request.request_id,
-                    block_hash: withdrawal.request.block_hash.clone(),
-                    txid: withdrawal.request.txid.clone(),
+                    block_hash: withdrawal.request.block_hash,
+                    txid: withdrawal.request.txid,
                     signer_pub_key,
                     is_accepted: !is_rejected,
                 })
@@ -1197,8 +1197,8 @@ impl TestSweepSetup2 {
         for withdrawal in self.withdrawals.iter() {
             let withdrawal_request = model::WithdrawalRequest {
                 request_id: withdrawal.request.request_id,
-                txid: withdrawal.request.txid.clone(),
-                block_hash: withdrawal.request.block_hash.clone(),
+                txid: withdrawal.request.txid,
+                block_hash: withdrawal.request.block_hash,
                 recipient: withdrawal.request.clone().script_pubkey,
                 amount: withdrawal.request.amount,
                 max_fee: withdrawal.request.max_fee,
@@ -1261,7 +1261,7 @@ impl TestSweepSetup2 {
 
         let event = KeyRotationEvent {
             txid: fake::Faker.fake(),
-            block_hash: self.stacks_blocks.first().unwrap().block_hash.clone(),
+            block_hash: self.stacks_blocks.first().unwrap().block_hash,
             aggregate_key: self.signers.signer.keypair.public_key().into(),
             signer_set: self.signers.keys.clone(),
             signatures_required: self.signatures_required,

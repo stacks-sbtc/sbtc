@@ -131,8 +131,8 @@ impl TestRotateKeySetup {
         ));
         let rotate_key_tx = KeyRotationEvent {
             address,
-            block_hash: self.block_hash.clone(),
-            txid: self.txid.clone(),
+            block_hash: self.block_hash,
+            txid: self.txid,
             aggregate_key,
             signer_set: self.signer_keys.clone(),
             signatures_required: self.signatures_required,

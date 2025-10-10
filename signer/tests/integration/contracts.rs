@@ -91,7 +91,7 @@ impl<S: StacksInteract> SignerStxState<S> {
         let tx = unsigned.finalize_transaction();
 
         match self.stacks_client.submit_tx(&tx).await.unwrap() {
-            SubmitTxResponse::Acceptance(txid) => txid.into(),
+            SubmitTxResponse::Acceptance(txid) => txid,
             SubmitTxResponse::Rejection(err) => panic!("{}", serde_json::to_string(&err).unwrap()),
         }
     }

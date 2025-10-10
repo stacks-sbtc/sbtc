@@ -352,8 +352,8 @@ impl WithdrawalRequest {
     pub fn qualified_id(&self) -> QualifiedRequestId {
         QualifiedRequestId {
             request_id: self.request_id,
-            txid: self.txid.clone(),
-            block_hash: self.block_hash.clone(),
+            txid: self.txid,
+            block_hash: self.block_hash,
         }
     }
 }
@@ -381,8 +381,8 @@ impl WithdrawalSigner {
     pub fn qualified_id(&self) -> QualifiedRequestId {
         QualifiedRequestId {
             request_id: self.request_id,
-            txid: self.txid.clone(),
-            block_hash: self.block_hash.clone(),
+            txid: self.txid,
+            block_hash: self.block_hash,
         }
     }
 }
@@ -495,8 +495,8 @@ impl SweptWithdrawalRequest {
     pub fn qualified_id(&self) -> QualifiedRequestId {
         QualifiedRequestId {
             request_id: self.request_id,
-            txid: self.txid.clone(),
-            block_hash: self.block_hash.clone(),
+            txid: self.txid,
+            block_hash: self.block_hash,
         }
     }
 }

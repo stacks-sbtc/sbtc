@@ -481,7 +481,7 @@ mod tests {
         let event = CompletedDepositEvent {
             outpoint: deposit_request.outpoint(),
             txid: stacks_txid,
-            block_id: stacks_chaintip.block_hash.clone(),
+            block_id: stacks_chaintip.block_hash,
             amount: deposit_request.amount - btc_fee,
             sweep_block_hash: bitcoin_block.block_hash,
             sweep_block_height: bitcoin_block.block_height,
@@ -531,7 +531,7 @@ mod tests {
             request_id,
             outpoint: OutPoint { txid: *txid, vout: 0 },
             txid: fake::Faker.fake_with_rng(&mut rng),
-            block_id: stacks_block.block_hash.clone(),
+            block_id: stacks_block.block_hash,
             fee: 1,
             signer_bitmap: BitArray::<_>::ZERO,
             sweep_block_hash: bitcoin_block.block_hash,
@@ -576,7 +576,7 @@ mod tests {
         let request_id = 1;
         let event = WithdrawalRequest {
             request_id,
-            block_hash: stacks_first_block.block_hash.clone(),
+            block_hash: stacks_first_block.block_hash,
             amount: 100,
             max_fee: 1,
             recipient: fake::Faker.fake_with_rng(&mut rng),
@@ -592,7 +592,7 @@ mod tests {
         assert_eq!(db.withdrawal_requests.len(), 1);
         assert!(
             db.withdrawal_requests
-                .contains_key(&(request_id, stacks_first_block.block_hash.clone()))
+                .contains_key(&(request_id, stacks_first_block.block_hash))
         );
     }
 
@@ -629,7 +629,7 @@ mod tests {
         let request_id = 1;
         let event = WithdrawalRejectEvent {
             request_id,
-            block_id: stacks_chaintip.block_hash.clone(),
+            block_id: stacks_chaintip.block_hash,
             txid: fake::Faker.fake_with_rng(&mut rng),
             signer_bitmap: BitArray::<_>::ZERO,
         };

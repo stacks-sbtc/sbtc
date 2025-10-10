@@ -1243,7 +1243,7 @@ where
         let submit_tx_result = self.context.get_stacks_client().submit_tx(&tx?).await;
 
         match submit_tx_result {
-            Ok(SubmitTxResponse::Acceptance(txid)) => Ok(txid.into()),
+            Ok(SubmitTxResponse::Acceptance(txid)) => Ok(txid),
             Ok(SubmitTxResponse::Rejection(err)) => Err(err.into()),
             Err(err) => Err(err),
         }
