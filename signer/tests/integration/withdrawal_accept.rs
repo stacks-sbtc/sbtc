@@ -49,7 +49,7 @@ fn make_withdrawal_accept(data: &TestSweepSetup2) -> (AcceptWithdrawalV1, ReqCon
             vout: 2,
         },
         // This points to the withdrawal request transaction.
-        id: data.withdrawal_ids()[0],
+        id: data.withdrawal_ids()[0].clone(),
         // This is the assessed transaction fee for fulfilling the withdrawal
         // request.
         tx_fee: fee,
@@ -70,7 +70,7 @@ fn make_withdrawal_accept(data: &TestSweepSetup2) -> (AcceptWithdrawalV1, ReqCon
             block_hash: sweep_tx_info.block_hash,
             block_height: sweep_tx_info.block_height,
         },
-        stacks_chain_tip: data.withdrawals[0].request.block_hash,
+        stacks_chain_tip: data.withdrawals[0].request.block_hash.clone(),
         // This value means that the signer will go back 20 blocks when
         // looking for pending and accepted withdrawal requests.
         context_window: 20,

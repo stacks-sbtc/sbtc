@@ -220,7 +220,7 @@ where
             .iter()
             .filter_map(|b| {
                 if b.bitcoin_anchor == bitcoin_chain_tip.block_hash {
-                    Some(b.block_hash)
+                    Some(b.block_hash.clone())
                 } else {
                     None
                 }
@@ -662,7 +662,9 @@ where
                 });
                 client.expect_submit_tx().times(5).returning(|_| {
                     Box::pin(async {
-                        Ok(SubmitTxResponse::Acceptance(*Faker.fake::<StacksTxId>()))
+                        Ok(SubmitTxResponse::Acceptance(
+                            Faker.fake::<StacksTxId>().into_inner(),
+                        ))
                     })
                 });
             })
@@ -729,7 +731,7 @@ where
         // Create test data for the withdrawal request
         let stacks_block: StacksBlock = fake::Faker.fake_with_rng(&mut rng);
         let withdrawal_req = model::WithdrawalRequest {
-            block_hash: stacks_block.block_hash,
+            block_hash: stacks_block.block_hash.clone(),
             ..fake::Faker.fake_with_rng::<model::WithdrawalRequest, _>(&mut rng)
         };
 
@@ -881,7 +883,7 @@ where
         // Create test data for the withdrawal request
         let stacks_block: StacksBlock = fake::Faker.fake_with_rng(&mut rng);
         let withdrawal_req = model::WithdrawalRequest {
-            block_hash: stacks_block.block_hash,
+            block_hash: stacks_block.block_hash.clone(),
             ..fake::Faker.fake_with_rng(&mut rng)
         };
 

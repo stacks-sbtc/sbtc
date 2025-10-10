@@ -367,7 +367,7 @@ impl TestData {
             let parent = blocks.last().unwrap(); // Guaranteed to be at least one block
 
             let mut stacks_block: model::StacksBlock = fake::Faker.fake_with_rng(rng);
-            stacks_block.parent_hash = parent.block_hash;
+            stacks_block.parent_hash = parent.block_hash.clone();
             stacks_block.block_height = parent.block_height + 1;
             stacks_block.bitcoin_anchor = parent.bitcoin_anchor;
 
@@ -474,7 +474,7 @@ impl WithdrawData {
             .fold(
                 (Self::new(), next_withdraw_request_id),
                 |(mut withdraw_requests, next_withdraw_request_id), _| {
-                    let stacks_block_hash = stacks_blocks.choose(rng).unwrap().block_hash; // Guaranteed to be non-empty
+                    let stacks_block_hash = stacks_blocks.choose(rng).unwrap().block_hash.clone(); // Guaranteed to be non-empty
 
                     let mut withdraw_request: model::WithdrawalRequest =
                         fake::Faker.fake_with_rng(rng);
@@ -490,8 +490,8 @@ impl WithdrawData {
                         .copied()
                         .map(|signer_pub_key| model::WithdrawalSigner {
                             request_id: withdraw_request.request_id,
-                            block_hash: withdraw_request.block_hash,
-                            txid: withdraw_request.txid,
+                            block_hash: withdraw_request.block_hash.clone(),
+                            txid: withdraw_request.txid.clone(),
                             signer_pub_key,
                             is_accepted: fake::Faker.fake_with_rng(rng),
                         })
@@ -557,14 +557,14 @@ struct StacksBlockSummary {
 impl StacksBlockSummary {
     fn summarize(block: &model::StacksBlock) -> Self {
         Self {
-            block_hash: block.block_hash,
+            block_hash: block.block_hash.clone(),
             block_height: block.block_height,
         }
     }
 
     fn hallucinate_parent(block: &model::StacksBlock) -> Self {
         Self {
-            block_hash: block.parent_hash,
+            block_hash: block.parent_hash.clone(),
             block_height: 1337u64.into(), // Arbitrary number
         }
     }

@@ -83,7 +83,7 @@ pub async fn new_block_handler(state: State<ApiState<impl Context>>, body: Strin
         // Although the following line can panic, our unit tests hit this
         // code path so if tests pass then this will work in production.
         let contract_name = ContractName::from(SBTC_REGISTRY_CONTRACT_NAME);
-        let issuer = StandardPrincipalData::from(api.ctx.config().signer.deployer);
+        let issuer = StandardPrincipalData::from(api.ctx.config().signer.deployer.clone());
         QualifiedContractIdentifier::new(issuer, contract_name)
     });
 
@@ -100,7 +100,7 @@ pub async fn new_block_handler(state: State<ApiState<impl Context>>, body: Strin
     };
 
     let stacks_chaintip = StacksBlock {
-        block_hash: new_block_event.index_block_hash.into(),
+        block_hash: new_block_event.index_block_hash.clone().into(),
         block_height: new_block_event.block_height.into(),
         parent_hash: new_block_event.parent_index_block_hash.into(),
         bitcoin_anchor: new_block_event.burn_block_hash.into(),
@@ -137,7 +137,7 @@ pub async fn new_block_handler(state: State<ApiState<impl Context>>, body: Strin
     for (ev, txid) in events {
         let tx_info = TxInfo {
             txid: sbtc::events::StacksTxid(txid.0),
-            block_id,
+            block_id: block_id.clone(),
         };
         let res = match RegistryEvent::try_new(ev.value, tx_info) {
             Ok(RegistryEvent::CompletedDeposit(event)) => {
@@ -398,7 +398,7 @@ mod tests {
         // unexpected contract are filtered out. So we manually switch the
         // address to some random one and check the output. To do that we
         // do a string replace for the expected one with the fishy one.
-        let issuer = StandardPrincipalData::from(ctx.config().signer.deployer);
+        let issuer = StandardPrincipalData::from(ctx.config().signer.deployer.clone());
         let contract_name = ContractName::from(SBTC_REGISTRY_CONTRACT_NAME);
         let identifier = QualifiedContractIdentifier::new(issuer, contract_name.clone());
 
@@ -481,7 +481,7 @@ mod tests {
         let event = CompletedDepositEvent {
             outpoint: deposit_request.outpoint(),
             txid: stacks_txid,
-            block_id: stacks_chaintip.block_hash,
+            block_id: stacks_chaintip.block_hash.clone(),
             amount: deposit_request.amount - btc_fee,
             sweep_block_hash: bitcoin_block.block_hash,
             sweep_block_height: bitcoin_block.block_height,
@@ -531,7 +531,7 @@ mod tests {
             request_id,
             outpoint: OutPoint { txid: *txid, vout: 0 },
             txid: fake::Faker.fake_with_rng(&mut rng),
-            block_id: stacks_block.block_hash,
+            block_id: stacks_block.block_hash.clone(),
             fee: 1,
             signer_bitmap: BitArray::<_>::ZERO,
             sweep_block_hash: bitcoin_block.block_hash,
@@ -576,7 +576,7 @@ mod tests {
         let request_id = 1;
         let event = WithdrawalRequest {
             request_id,
-            block_hash: stacks_first_block.block_hash,
+            block_hash: stacks_first_block.block_hash.clone(),
             amount: 100,
             max_fee: 1,
             recipient: fake::Faker.fake_with_rng(&mut rng),
@@ -592,7 +592,7 @@ mod tests {
         assert_eq!(db.withdrawal_requests.len(), 1);
         assert!(
             db.withdrawal_requests
-                .contains_key(&(request_id, stacks_first_block.block_hash))
+                .contains_key(&(request_id, stacks_first_block.block_hash.clone()))
         );
     }
 
@@ -629,7 +629,7 @@ mod tests {
         let request_id = 1;
         let event = WithdrawalRejectEvent {
             request_id,
-            block_id: stacks_chaintip.block_hash,
+            block_id: stacks_chaintip.block_hash.clone(),
             txid: fake::Faker.fake_with_rng(&mut rng),
             signer_bitmap: BitArray::<_>::ZERO,
         };
@@ -657,7 +657,7 @@ mod tests {
 
         let block_id: StacksBlockId = StacksBlockId(fake::Faker.fake_with_rng(&mut rng));
         let event = KeyRotationEvent {
-            block_id,
+            block_id: block_id.clone(),
             txid: sbtc::events::StacksTxid(fake::Faker.fake_with_rng(&mut rng)),
             new_aggregate_pubkey: SECP256K1.generate_keypair(&mut rng).1,
             new_keys: (0..3)

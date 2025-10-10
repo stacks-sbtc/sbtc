@@ -140,8 +140,8 @@ impl AsContractCall for InitiateWithdrawalRequest {
     const CONTRACT_NAME: &'static str = "sbtc-withdrawal";
     const FUNCTION_NAME: &'static str = "initiate-withdrawal-request";
     /// The stacks address that deployed the contract.
-    fn deployer_address(&self) -> StacksAddress {
-        self.deployer
+    fn deployer_address(&self) -> &StacksAddress {
+        &self.deployer
     }
     /// The arguments to the clarity function.
     fn as_contract_args(&self) -> Vec<ClarityValue> {
@@ -159,13 +159,13 @@ impl AsContractCall for InitiateWithdrawalRequest {
 /// do, which is store all stacks blocks and store the transactions that we
 /// care about, which, naturally, are sBTC related transactions.
 #[test_case(ContractCallWrapper(InitiateWithdrawalRequest {
-    deployer: *testing::wallet::WALLET.0.address(),
+    deployer: testing::wallet::WALLET.0.address().clone(),
 }); "initiate-withdrawal")]
 #[test_case(ContractCallWrapper(CompleteDepositV1 {
     outpoint: bitcoin::OutPoint::null(),
     amount: 123654,
     recipient: PrincipalData::parse("ST1RQHF4VE5CZ6EK3MZPZVQBA0JVSMM9H5PMHMS1Y").unwrap(),
-    deployer: *testing::wallet::WALLET.0.address(),
+    deployer: testing::wallet::WALLET.0.address().clone(),
     sweep_txid: BitcoinTxId::from([0; 32]),
     sweep_block_hash: BitcoinBlockHash::from([0; 32]),
     sweep_block_height: 7u64.into(),
@@ -174,7 +174,7 @@ impl AsContractCall for InitiateWithdrawalRequest {
     outpoint: bitcoin::OutPoint::null(),
     amount: 123654,
     recipient: PrincipalData::parse("ST1RQHF4VE5CZ6EK3MZPZVQBA0JVSMM9H5PMHMS1Y.my-contract-name").unwrap(),
-    deployer: *testing::wallet::WALLET.0.address(),
+    deployer: testing::wallet::WALLET.0.address().clone(),
     sweep_txid: BitcoinTxId::from([0; 32]),
     sweep_block_hash: BitcoinBlockHash::from([0; 32]),
     sweep_block_height: 7u64.into(),
@@ -188,7 +188,7 @@ impl AsContractCall for InitiateWithdrawalRequest {
     outpoint: bitcoin::OutPoint::null(),
     tx_fee: 3500,
     signer_bitmap: 0,
-    deployer: *testing::wallet::WALLET.0.address(),
+    deployer: testing::wallet::WALLET.0.address().clone(),
     sweep_block_hash: BitcoinBlockHash::from([0; 32]),
     sweep_block_height: 7u64.into(),
 }); "accept-withdrawal")]
@@ -199,11 +199,11 @@ impl AsContractCall for InitiateWithdrawalRequest {
 	block_hash: StacksBlockHash::from([0; 32]),
     },
     signer_bitmap: 0,
-    deployer: *testing::wallet::WALLET.0.address(),
+    deployer: testing::wallet::WALLET.0.address().clone(),
 }); "reject-withdrawal")]
 #[test_case(ContractCallWrapper(RotateKeysV1::new(
     &testing::wallet::WALLET.0,
-    *testing::wallet::WALLET.0.address(),
+    testing::wallet::WALLET.0.address().clone(),
     &signer::keys::PublicKey::from_slice(&[0x02; 33]).unwrap()
 )); "rotate-keys")]
 #[tokio::test]
@@ -1522,7 +1522,7 @@ async fn fetching_withdrawal_signer_decisions() {
         )
         .bind(new_time_str) // Bind as string
         .bind(i64::try_from(withdrawal.request_id).unwrap())
-        .bind(withdrawal.block_hash)
+        .bind(withdrawal.block_hash.clone())
         .bind(signer_pub_key)
         .execute(pg_store.pool())
         .await
@@ -1587,29 +1587,29 @@ async fn fetching_withdrawal_request_votes() {
 
     let signer_decisions = [
         WithdrawalSigner {
-            txid,
-            block_hash,
+            txid: txid.clone(),
+            block_hash: block_hash.clone(),
             request_id,
             signer_pub_key: shares.signer_set_public_keys[0],
             is_accepted: true,
         },
         WithdrawalSigner {
-            txid,
-            block_hash,
+            txid: txid.clone(),
+            block_hash: block_hash.clone(),
             request_id,
             signer_pub_key: shares.signer_set_public_keys[1],
             is_accepted: false,
         },
         WithdrawalSigner {
-            txid,
-            block_hash,
+            txid: txid.clone(),
+            block_hash: block_hash.clone(),
             request_id,
             signer_pub_key: shares.signer_set_public_keys[2],
             is_accepted: true,
         },
         WithdrawalSigner {
-            txid,
-            block_hash,
+            txid: txid.clone(),
+            block_hash: block_hash.clone(),
             request_id,
             signer_pub_key: shares.signer_set_public_keys[3],
             is_accepted: true,
@@ -1621,12 +1621,12 @@ async fn fetching_withdrawal_request_votes() {
         // withdrawal request and stacks block are in the database to
         // satisfy the foreign key constraints.
         let block = StacksBlock {
-            block_hash,
+            block_hash: block_hash.clone(),
             ..fake::Faker.fake_with_rng::<StacksBlock, _>(&mut rng)
         };
         let req = model::WithdrawalRequest {
-            txid,
-            block_hash,
+            txid: txid.clone(),
+            block_hash: block_hash.clone(),
             request_id,
             ..fake::Faker.fake_with_rng::<model::WithdrawalRequest, _>(&mut rng)
         };
@@ -2317,7 +2317,7 @@ async fn get_swept_withdrawal_requests_returns_swept_withdrawal_requests() {
     let withdrawal_request = model::WithdrawalRequest {
         request_id: 1,
         txid: fake::Faker.fake_with_rng(&mut rng),
-        block_hash: stacks_block.block_hash,
+        block_hash: stacks_block.block_hash.clone(),
         recipient: fake::Faker.fake_with_rng(&mut rng),
         amount: 1_000,
         max_fee: 1_000,
@@ -2326,8 +2326,8 @@ async fn get_swept_withdrawal_requests_returns_swept_withdrawal_requests() {
     };
     let swept_output = BitcoinWithdrawalOutput {
         request_id: withdrawal_request.request_id,
-        stacks_txid: withdrawal_request.txid,
-        stacks_block_hash: withdrawal_request.block_hash,
+        stacks_txid: withdrawal_request.txid.clone(),
+        stacks_block_hash: withdrawal_request.block_hash.clone(),
         bitcoin_chain_tip: bitcoin_block.block_hash,
         ..Faker.fake_with_rng(&mut rng)
     };
@@ -2368,7 +2368,7 @@ async fn get_swept_withdrawal_requests_returns_swept_withdrawal_requests() {
     let expected = SweptWithdrawalRequest {
         output_index: swept_output.output_index,
         amount: withdrawal_request.amount,
-        txid: withdrawal_request.txid,
+        txid: withdrawal_request.txid.clone(),
         sweep_block_hash: bitcoin_block.block_hash,
         sweep_block_height: bitcoin_block.block_height,
         sweep_txid: swept_output.bitcoin_txid,
@@ -2442,7 +2442,7 @@ async fn get_swept_withdrawal_requests_does_not_return_unswept_withdrawal_reques
     let withdrawal_request = model::WithdrawalRequest {
         request_id: 1,
         txid: fake::Faker.fake_with_rng(&mut rng),
-        block_hash: stacks_block.block_hash,
+        block_hash: stacks_block.block_hash.clone(),
         recipient: fake::Faker.fake_with_rng(&mut rng),
         amount: 1_000,
         max_fee: 1_000,
@@ -2567,14 +2567,14 @@ async fn get_swept_deposit_requests_does_not_return_deposit_requests_with_respon
     let setup_fork_event_block = StacksBlock {
         block_hash: fake::Faker.fake_with_rng(&mut rng),
         block_height: stacks_tip.block_height + 1,
-        parent_hash: stacks_tip.block_hash,
+        parent_hash: stacks_tip.block_hash.clone(),
         // For `setup_fork`, the stacks block is not in the canonical chain
         bitcoin_anchor: fake::Faker.fake_with_rng(&mut rng),
     };
     let setup_canonical_event_block = StacksBlock {
         block_hash: fake::Faker.fake_with_rng(&mut rng),
         block_height: stacks_tip.block_height + 1,
-        parent_hash: stacks_tip.block_hash,
+        parent_hash: stacks_tip.block_hash.clone(),
         // For `setup_canonical`, the stacks block is in the canonical chain
         bitcoin_anchor: chain_tip,
     };
@@ -2597,7 +2597,7 @@ async fn get_swept_deposit_requests_does_not_return_deposit_requests_with_respon
     // For `setup_canonical`, the event block is on the canonical chain
     let event = CompletedDepositEvent {
         txid: fake::Faker.fake_with_rng::<StacksTxId, _>(&mut rng),
-        block_id: setup_canonical_event_block.block_hash,
+        block_id: setup_canonical_event_block.block_hash.clone(),
         amount: setup_canonical.deposit_request.amount,
         outpoint: setup_canonical.deposit_request.outpoint,
         sweep_block_hash: setup_canonical.deposit_block_hash.into(),
@@ -2710,7 +2710,7 @@ async fn get_swept_withdrawal_requests_does_not_return_withdrawal_requests_with_
     let withdrawal_request = model::WithdrawalRequest {
         request_id: 1,
         txid: fake::Faker.fake_with_rng(&mut rng),
-        block_hash: stacks_block.block_hash,
+        block_hash: stacks_block.block_hash.clone(),
         recipient: fake::Faker.fake_with_rng(&mut rng),
         amount: 1_000,
         max_fee: 1_000,
@@ -2719,8 +2719,8 @@ async fn get_swept_withdrawal_requests_does_not_return_withdrawal_requests_with_
     };
     let swept_output = BitcoinWithdrawalOutput {
         request_id: withdrawal_request.request_id,
-        stacks_txid: withdrawal_request.txid,
-        stacks_block_hash: withdrawal_request.block_hash,
+        stacks_txid: withdrawal_request.txid.clone(),
+        stacks_block_hash: withdrawal_request.block_hash.clone(),
         bitcoin_chain_tip: bitcoin_block.block_hash,
         ..Faker.fake_with_rng(&mut rng)
     };
@@ -2733,7 +2733,7 @@ async fn get_swept_withdrawal_requests_does_not_return_withdrawal_requests_with_
         request_id: withdrawal_request.request_id,
         sweep_block_hash: bitcoin_block.block_hash,
         sweep_txid: sweep_tx_ref.txid,
-        block_id: stacks_block.block_hash,
+        block_id: stacks_block.block_hash.clone(),
         ..Faker.fake_with_rng(&mut rng)
     };
 
@@ -3113,7 +3113,7 @@ async fn get_swept_withdrawal_requests_response_tx_reorged() {
     let withdrawal_request = model::WithdrawalRequest {
         request_id: 1,
         txid: fake::Faker.fake_with_rng(&mut rng),
-        block_hash: stacks_block.block_hash,
+        block_hash: stacks_block.block_hash.clone(),
         recipient: fake::Faker.fake_with_rng(&mut rng),
         amount: 1_000,
         max_fee: 1_000,
@@ -3122,8 +3122,8 @@ async fn get_swept_withdrawal_requests_response_tx_reorged() {
     };
     let swept_output = BitcoinWithdrawalOutput {
         request_id: withdrawal_request.request_id,
-        stacks_txid: withdrawal_request.txid,
-        stacks_block_hash: withdrawal_request.block_hash,
+        stacks_txid: withdrawal_request.txid.clone(),
+        stacks_block_hash: withdrawal_request.block_hash.clone(),
         bitcoin_chain_tip: bitcoin_block.block_hash,
         ..Faker.fake_with_rng(&mut rng)
     };
@@ -3788,7 +3788,7 @@ async fn withdrawal_report_with_no_withdrawal_request_or_no_block() {
     let qualified_id = QualifiedRequestId {
         request_id: Faker.fake_with_rng::<u32, _>(&mut rng) as u64,
         txid: Faker.fake_with_rng(&mut rng),
-        block_hash: stacks_chain_tip,
+        block_hash: stacks_chain_tip.clone(),
     };
 
     let maybe_report = db
@@ -3871,7 +3871,7 @@ async fn withdrawal_report_with_no_withdrawal_votes() {
     // block height in the withdrawal request. In this case, there is no
     // sweep transaction in the database, so it doesn't matter.
     let withdrawal_request = WithdrawalRequest {
-        block_hash: stacks_chain_tip,
+        block_hash: stacks_chain_tip.clone(),
         bitcoin_block_height: bitcoin_chain_tip_ref.block_height,
         ..Faker.fake_with_rng(&mut rng)
     };
@@ -3900,8 +3900,8 @@ async fn withdrawal_report_with_no_withdrawal_votes() {
 
     let withdrawal_decision = WithdrawalSigner {
         request_id: qualified_id.request_id,
-        block_hash: qualified_id.block_hash,
-        txid: qualified_id.txid,
+        block_hash: qualified_id.block_hash.clone(),
+        txid: qualified_id.txid.clone(),
         signer_pub_key: *signer_public_key,
         is_accepted: true,
     };
@@ -3982,7 +3982,7 @@ async fn withdrawal_report_with_withdrawal_request_reorged() {
     // Okay let's put the withdrawal request in the database on the stacks
     // chain tip.
     let withdrawal_request = WithdrawalRequest {
-        block_hash: stacks_chain_tip_block.block_hash,
+        block_hash: stacks_chain_tip_block.block_hash.clone(),
         bitcoin_block_height: bitcoin_chain_tip_ref.block_height,
         ..Faker.fake_with_rng(&mut rng)
     };
@@ -4066,7 +4066,7 @@ async fn withdrawal_report_with_withdrawal_request_fulfilled() {
     // height in the withdrawal request. In this case, the sweep
     // transaction is confirmed on the chain tip of the bitcoin blockchain.
     let withdrawal_request = WithdrawalRequest {
-        block_hash: stacks_chain_tip_block.block_hash,
+        block_hash: stacks_chain_tip_block.block_hash.clone(),
         bitcoin_block_height: bitcoin_chain_tip_ref.block_height - 1,
         ..Faker.fake_with_rng(&mut rng)
     };
@@ -4082,8 +4082,8 @@ async fn withdrawal_report_with_withdrawal_request_fulfilled() {
     // place the sweep on the bitcoin chain tip.
     let swept_output = BitcoinWithdrawalOutput {
         request_id: qualified_id.request_id,
-        stacks_txid: qualified_id.txid,
-        stacks_block_hash: qualified_id.block_hash,
+        stacks_txid: qualified_id.txid.clone(),
+        stacks_block_hash: qualified_id.block_hash.clone(),
         bitcoin_chain_tip,
         ..Faker.fake_with_rng(&mut rng)
     };
@@ -4167,7 +4167,7 @@ async fn withdrawal_report_with_withdrawal_request_swept_but_swept_reorged() {
     for (block_height, block) in test_data.stacks_blocks.iter_mut().enumerate() {
         block.block_height = block_height.into();
         block.parent_hash = parent_hash;
-        parent_hash = block.block_hash;
+        parent_hash = block.block_hash.clone();
     }
     test_data.write_to(&db).await;
 
@@ -4182,7 +4182,7 @@ async fn withdrawal_report_with_withdrawal_request_swept_but_swept_reorged() {
     // the chain.
     assert_eq!(stacks_block.block_height, 1u64.into());
     let withdrawal_request = WithdrawalRequest {
-        block_hash: stacks_block.block_hash,
+        block_hash: stacks_block.block_hash.clone(),
         bitcoin_block_height: bitcoin_chain_tip_ref.block_height,
         ..Faker.fake_with_rng(&mut rng)
     };
@@ -4198,8 +4198,8 @@ async fn withdrawal_report_with_withdrawal_request_swept_but_swept_reorged() {
     // place the sweep on the bitcoin chain tip.
     let swept_output = BitcoinWithdrawalOutput {
         request_id: qualified_id.request_id,
-        stacks_txid: qualified_id.txid,
-        stacks_block_hash: qualified_id.block_hash,
+        stacks_txid: qualified_id.txid.clone(),
+        stacks_block_hash: qualified_id.block_hash.clone(),
         bitcoin_chain_tip: bitcoin_chain_tip_ref.block_hash,
         ..Faker.fake_with_rng(&mut rng)
     };
@@ -4313,7 +4313,7 @@ async fn withdrawal_report_with_withdrawal_request_swept_but_swept_reorged2() {
     for (block_height, block) in test_data.stacks_blocks.iter_mut().enumerate() {
         block.block_height = block_height.into();
         block.parent_hash = parent_hash;
-        parent_hash = block.block_hash;
+        parent_hash = block.block_hash.clone();
     }
     test_data.write_to(&db).await;
 
@@ -4333,7 +4333,7 @@ async fn withdrawal_report_with_withdrawal_request_swept_but_swept_reorged2() {
     );
 
     let withdrawal_request = WithdrawalRequest {
-        block_hash: stacks_chain_tip.block_hash,
+        block_hash: stacks_chain_tip.block_hash.clone(),
         bitcoin_block_height: bitcoin_chain_tip.block_height,
         ..Faker.fake_with_rng(&mut rng)
     };
@@ -4349,8 +4349,8 @@ async fn withdrawal_report_with_withdrawal_request_swept_but_swept_reorged2() {
     // place the sweep on the bitcoin chain tip.
     let swept_output = BitcoinWithdrawalOutput {
         request_id: qualified_id.request_id,
-        stacks_txid: qualified_id.txid,
-        stacks_block_hash: qualified_id.block_hash,
+        stacks_txid: qualified_id.txid.clone(),
+        stacks_block_hash: qualified_id.block_hash.clone(),
         bitcoin_chain_tip: bitcoin_chain_tip.block_hash,
         ..Faker.fake_with_rng(&mut rng)
     };
@@ -4476,7 +4476,7 @@ async fn withdrawal_report_with_withdrawal_request_confirmed() {
         .unwrap();
 
     let withdrawal_request = WithdrawalRequest {
-        block_hash: stacks_chain_tip_block.block_hash,
+        block_hash: stacks_chain_tip_block.block_hash.clone(),
         bitcoin_block_height: bitcoin_chain_tip_ref.block_height - 1,
         ..Faker.fake_with_rng(&mut rng)
     };
@@ -4491,8 +4491,8 @@ async fn withdrawal_report_with_withdrawal_request_confirmed() {
     // yet.
     let withdrawal_decision = WithdrawalSigner {
         request_id: qualified_id.request_id,
-        block_hash: qualified_id.block_hash,
-        txid: qualified_id.txid,
+        block_hash: qualified_id.block_hash.clone(),
+        txid: qualified_id.txid.clone(),
         signer_pub_key: *signer_public_key,
         is_accepted: false,
     };
@@ -4882,7 +4882,7 @@ async fn compare_in_memory_stacks_chain_tip() {
         blocks.push(StacksBlock {
             block_hash: hex_to_block_hash(block_hash).into(),
             block_height: root.block_height + 1,
-            parent_hash: root.block_hash,
+            parent_hash: root.block_hash.clone(),
             bitcoin_anchor: root_anchor.block_hash,
         })
     }
@@ -5147,7 +5147,7 @@ async fn get_stacks_block(
             .unwrap();
 
         if in_canonical_stacks_blockchain {
-            return block.block_hash;
+            return block.block_hash.clone();
         }
     }
 
@@ -5426,7 +5426,7 @@ async fn pending_rejected_withdrawal_rejected_already_rejected() {
 
     // Create the forked block that will contain the reject event
     let forked_stacks_block = StacksBlock {
-        parent_hash: fork_base.block_hash,
+        parent_hash: fork_base.block_hash.clone(),
         block_height: fork_base.block_height + 1,
         bitcoin_anchor: fork_base.bitcoin_anchor,
         ..fake::Faker.fake_with_rng(&mut rng)
@@ -5569,7 +5569,7 @@ async fn pending_rejected_withdrawal_already_accepted() {
 
     let forked_withdrawal_output = BitcoinWithdrawalOutput {
         request_id: request.request_id,
-        stacks_block_hash: request.block_hash,
+        stacks_block_hash: request.block_hash.clone(),
         ..fake::Faker.fake_with_rng(&mut rng)
     };
     db.write_bitcoin_withdrawals_outputs(slice::from_ref(&forked_withdrawal_output))
@@ -5608,7 +5608,7 @@ async fn pending_rejected_withdrawal_already_accepted() {
     // Now let's add a withdrawal output in the canonical chain
     let canonical_withdrawal_output = BitcoinWithdrawalOutput {
         request_id: request.request_id,
-        stacks_block_hash: request.block_hash,
+        stacks_block_hash: request.block_hash.clone(),
         ..fake::Faker.fake_with_rng(&mut rng)
     };
     db.write_bitcoin_withdrawals_outputs(slice::from_ref(&canonical_withdrawal_output))
@@ -5680,8 +5680,8 @@ async fn is_withdrawal_inflight_catches_withdrawals_with_rows_in_table() {
     let bitcoin_txid: model::BitcoinTxId = Faker.fake_with_rng(&mut rng);
     let output = BitcoinWithdrawalOutput {
         request_id: id.request_id,
-        stacks_txid: id.txid,
-        stacks_block_hash: id.block_hash,
+        stacks_txid: id.txid.clone(),
+        stacks_block_hash: id.block_hash.clone(),
         bitcoin_chain_tip: chain_tip,
         bitcoin_txid,
         is_valid_tx: true,
@@ -5755,8 +5755,8 @@ async fn is_withdrawal_inflight_catches_withdrawals_in_package() {
 
     let output = BitcoinWithdrawalOutput {
         request_id: id.request_id,
-        stacks_txid: id.txid,
-        stacks_block_hash: id.block_hash,
+        stacks_txid: id.txid.clone(),
+        stacks_block_hash: id.block_hash.clone(),
         bitcoin_chain_tip: chain_tip,
         bitcoin_txid: bitcoin_txid3,
         is_valid_tx: true,
@@ -5853,8 +5853,8 @@ async fn is_withdrawal_active_for_considered_withdrawal() {
 
     let output = BitcoinWithdrawalOutput {
         request_id: qualified_id.request_id,
-        stacks_txid: qualified_id.txid,
-        stacks_block_hash: qualified_id.block_hash,
+        stacks_txid: qualified_id.txid.clone(),
+        stacks_block_hash: qualified_id.block_hash.clone(),
         bitcoin_chain_tip: chain_tip.block_hash,
         is_valid_tx: true,
         validation_result: WithdrawalValidationResult::Ok,
@@ -6172,8 +6172,8 @@ async fn writing_key_rotation_transactions() {
     // This one has the same txid and block hash as key_rotation2, but
     // different contents. However, this one will not be written.
     let key_rotation3 = KeyRotationEvent {
-        txid: key_rotation2.txid,
-        block_hash: key_rotation2.block_hash,
+        txid: key_rotation2.txid.clone(),
+        block_hash: key_rotation2.block_hash.clone(),
         ..Faker.fake_with_rng(&mut rng)
     };
 
@@ -6194,8 +6194,8 @@ async fn writing_key_rotation_transactions() {
         WHERE txid = $1
           AND block_hash = $2"#,
     )
-    .bind(key_rotation2.txid)
-    .bind(key_rotation2.block_hash)
+    .bind(&key_rotation2.txid)
+    .bind(&key_rotation2.block_hash)
     .fetch_one(db.pool())
     .await
     .unwrap();
@@ -6268,8 +6268,8 @@ mod get_pending_accepted_withdrawal_requests {
         for vote in votes {
             let signer = model::WithdrawalSigner {
                 request_id: request.request_id,
-                block_hash: request.block_hash,
-                txid: request.txid,
+                block_hash: request.block_hash.clone(),
+                txid: request.txid.clone(),
                 signer_pub_key: Faker.fake(),
                 is_accepted: *vote,
             };
@@ -6294,7 +6294,7 @@ mod get_pending_accepted_withdrawal_requests {
     ) -> WithdrawalRequest {
         let withdrawal_request = WithdrawalRequest {
             request_id,
-            block_hash: stacks_block.block_hash,
+            block_hash: stacks_block.block_hash.clone(),
             bitcoin_block_height: bitcoin_block.block_height,
             ..Faker.fake()
         };
@@ -6317,7 +6317,7 @@ mod get_pending_accepted_withdrawal_requests {
     ) {
         db.write_withdrawal_reject_event(&WithdrawalRejectEvent {
             request_id: request.request_id,
-            block_id: stacks_block.block_hash,
+            block_id: stacks_block.block_hash.clone(),
             ..Faker.fake()
         })
         .await
@@ -6347,8 +6347,8 @@ mod get_pending_accepted_withdrawal_requests {
             bitcoin_txid: bitcoin_sweep_tx.txid,
             bitcoin_chain_tip: *at_bitcoin_block,
             is_valid_tx: true,
-            stacks_txid: request.txid,
-            stacks_block_hash: request.block_hash,
+            stacks_txid: request.txid.clone(),
+            stacks_block_hash: request.block_hash.clone(),
             request_id: request.request_id,
             validation_result: WithdrawalValidationResult::Ok,
             output_index: 2,

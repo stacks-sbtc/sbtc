@@ -58,9 +58,9 @@ impl PgWrite {
             VALUES ($1, $2, $3, $4)
             ON CONFLICT DO NOTHING",
         )
-        .bind(block.block_hash)
+        .bind(&block.block_hash)
         .bind(i64::try_from(block.block_height).map_err(Error::ConversionDatabaseInt)?)
-        .bind(block.parent_hash)
+        .bind(&block.parent_hash)
         .bind(block.bitcoin_anchor)
         .execute(executor)
         .await
@@ -249,8 +249,8 @@ impl PgWrite {
             ON CONFLICT DO NOTHING",
         )
         .bind(i64::try_from(request.request_id).map_err(Error::ConversionDatabaseInt)?)
-        .bind(request.txid)
-        .bind(request.block_hash)
+        .bind(&request.txid)
+        .bind(&request.block_hash)
         .bind(&request.recipient)
         .bind(i64::try_from(request.amount).map_err(Error::ConversionDatabaseInt)?)
         .bind(i64::try_from(request.max_fee).map_err(Error::ConversionDatabaseInt)?)
@@ -313,8 +313,8 @@ impl PgWrite {
             ON CONFLICT DO NOTHING",
         )
         .bind(i64::try_from(decision.request_id).map_err(Error::ConversionDatabaseInt)?)
-        .bind(decision.txid)
-        .bind(decision.block_hash)
+        .bind(&decision.txid)
+        .bind(&decision.block_hash)
         .bind(decision.signer_pub_key)
         .bind(decision.is_accepted)
         .execute(executor)
@@ -521,8 +521,8 @@ impl PgWrite {
                 ($1, $2, $3, $4, $5, $6)
             ON CONFLICT DO NOTHING"#,
         )
-        .bind(key_rotation.txid)
-        .bind(key_rotation.block_hash)
+        .bind(&key_rotation.txid)
+        .bind(&key_rotation.block_hash)
         .bind(&key_rotation.address)
         .bind(key_rotation.aggregate_key)
         .bind(&key_rotation.signer_set)
@@ -555,8 +555,8 @@ impl PgWrite {
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
         )
-        .bind(event.txid)
-        .bind(event.block_id)
+        .bind(&event.txid)
+        .bind(&event.block_id)
         .bind(i64::try_from(event.amount).map_err(Error::ConversionDatabaseInt)?)
         .bind(event.outpoint.txid.to_byte_array())
         .bind(i64::from(event.outpoint.vout))
@@ -593,8 +593,8 @@ impl PgWrite {
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
         )
-        .bind(event.txid)
-        .bind(event.block_id)
+        .bind(&event.txid)
+        .bind(&event.block_id)
         .bind(i64::try_from(event.request_id).map_err(Error::ConversionDatabaseInt)?)
         .bind(event.signer_bitmap.into_inner())
         .bind(event.outpoint.txid.to_byte_array())
@@ -627,8 +627,8 @@ impl PgWrite {
         )
         VALUES ($1, $2, $3, $4)",
         )
-        .bind(event.txid)
-        .bind(event.block_id)
+        .bind(&event.txid)
+        .bind(&event.block_id)
         .bind(i64::try_from(event.request_id).map_err(Error::ConversionDatabaseInt)?)
         .bind(event.signer_bitmap.into_inner())
         .execute(executor)
@@ -865,8 +865,8 @@ impl PgWrite {
                 i64::try_from(withdrawal_output.request_id)
                     .map_err(Error::ConversionDatabaseInt)?,
             );
-            stacks_txid.push(withdrawal_output.stacks_txid);
-            stacks_block_hash.push(withdrawal_output.stacks_block_hash);
+            stacks_txid.push(withdrawal_output.stacks_txid.clone());
+            stacks_block_hash.push(withdrawal_output.stacks_block_hash.clone());
             validation_result.push(withdrawal_output.validation_result);
             is_valid_tx.push(withdrawal_output.is_valid_tx);
         }

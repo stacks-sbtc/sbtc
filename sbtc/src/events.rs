@@ -139,7 +139,7 @@ pub enum RegistryEvent {
 }
 
 /// A type that points to a transaction in a stacks block.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub struct TxInfo {
     /// The transaction ID
     pub txid: StacksTxid,
@@ -312,21 +312,21 @@ impl RawTupleData {
     fn remove_u128(&mut self, field: &'static str) -> Result<u128, EventError> {
         match self.data_map.remove(field) {
             Some(ClarityValue::UInt(val)) => Ok(val),
-            _ => Err(EventError::TupleEventField(field, self.tx_info)),
+            _ => Err(EventError::TupleEventField(field, self.tx_info.clone())),
         }
     }
     /// Extract the buff value from the given field
     fn remove_buff(&mut self, field: &'static str) -> Result<Vec<u8>, EventError> {
         match self.data_map.remove(field) {
             Some(ClarityValue::Sequence(SequenceData::Buffer(buf))) => Ok(buf.data),
-            _ => Err(EventError::TupleEventField(field, self.tx_info)),
+            _ => Err(EventError::TupleEventField(field, self.tx_info.clone())),
         }
     }
     /// Extract the principal value from the given field
     fn remove_principal(&mut self, field: &'static str) -> Result<PrincipalData, EventError> {
         match self.data_map.remove(field) {
             Some(ClarityValue::Principal(principal)) => Ok(principal),
-            _ => Err(EventError::TupleEventField(field, self.tx_info)),
+            _ => Err(EventError::TupleEventField(field, self.tx_info.clone())),
         }
     }
     /// Extract the string value from the given field
@@ -335,16 +335,16 @@ impl RawTupleData {
             Some(ClarityValue::Sequence(SequenceData::String(CharType::ASCII(ascii)))) => {
                 String::from_utf8(ascii.data).map_err(EventError::ClarityStringConversion)
             }
-            _ => Err(EventError::TupleEventField(field, self.tx_info)),
+            _ => Err(EventError::TupleEventField(field, self.tx_info.clone())),
         }
     }
     /// Extract the tuple value from the given field
     fn remove_tuple(&mut self, field: &'static str) -> Result<Self, EventError> {
         match self.data_map.remove(field) {
             Some(ClarityValue::Tuple(TupleData { data_map, .. })) => {
-                Ok(Self::new(data_map, self.tx_info))
+                Ok(Self::new(data_map, self.tx_info.clone()))
             }
-            _ => Err(EventError::TupleEventField(field, self.tx_info)),
+            _ => Err(EventError::TupleEventField(field, self.tx_info.clone())),
         }
     }
 
@@ -352,7 +352,7 @@ impl RawTupleData {
     fn remove_list(&mut self, field: &'static str) -> Result<Vec<ClarityValue>, EventError> {
         match self.data_map.remove(field) {
             Some(ClarityValue::Sequence(SequenceData::List(list))) => Ok(list.data),
-            _ => Err(EventError::TupleEventField(field, self.tx_info)),
+            _ => Err(EventError::TupleEventField(field, self.tx_info.clone())),
         }
     }
 
@@ -725,7 +725,10 @@ impl RawTupleData {
                 ClarityValue::Sequence(SequenceData::Buffer(buf)) => {
                     PublicKey::from_slice(&buf.data).map_err(EventError::ClarityPublicKeyConversion)
                 }
-                _ => Err(EventError::ClarityUnexpectedValue(val.into(), self.tx_info)),
+                _ => Err(EventError::ClarityUnexpectedValue(
+                    val.into(),
+                    self.tx_info.clone(),
+                )),
             })
             .collect::<Result<Vec<PublicKey>, EventError>>()?;
 
@@ -752,9 +755,9 @@ mod tests {
 
     use bitcoin::key::CompressedPublicKey;
     use bitcoin::key::TweakedPublicKey;
-    use clarity::vm::types::BUFF_33;
     use clarity::vm::types::ListData;
     use clarity::vm::types::ListTypeData;
+    use clarity::vm::types::TypeSignature;
     use rand::rngs::OsRng;
     use secp256k1::SECP256K1;
 
@@ -990,7 +993,7 @@ mod tests {
                         .iter()
                         .map(|key| ClarityValue::buff_from(key.serialize().into()).unwrap())
                         .collect(),
-                    type_signature: ListTypeData::new_list(BUFF_33.clone(), 128)
+                    type_signature: ListTypeData::new_list(TypeSignature::BUFFER_33.clone(), 128)
                         .expect("Expected list"),
                 })),
             ),

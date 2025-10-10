@@ -187,8 +187,8 @@ impl AsContractCall for InitiateWithdrawalRequest {
     const CONTRACT_NAME: &'static str = "sbtc-withdrawal";
     const FUNCTION_NAME: &'static str = "initiate-withdrawal-request";
     /// The stacks address that deployed the contract.
-    fn deployer_address(&self) -> StacksAddress {
-        self.deployer
+    fn deployer_address(&self) -> &StacksAddress {
+        &self.deployer
     }
     /// The arguments to the clarity function.
     fn as_contract_args(&self) -> Vec<ClarityValue> {
@@ -408,7 +408,7 @@ async fn exec_withdraw(ctx: &Context, args: WithdrawArgs) -> Result<(), Error> {
         amount: args.amount,
         recipient,
         max_fee: args.max_fee,
-        deployer: ctx.deployer,
+        deployer: ctx.deployer.clone(),
     };
 
     let payload = TransactionPayload::ContractCall(withdrawal_request.as_contract_call());
@@ -463,7 +463,7 @@ async fn create_stacks_tx(
     let conditions = payload.post_conditions();
 
     let auth = SinglesigSpendingCondition {
-        signer: *sender_addr.bytes(),
+        signer: sender_addr.bytes().clone(),
         nonce,
         tx_fee: 1000,
         hash_mode: SinglesigHashMode::P2PKH,
