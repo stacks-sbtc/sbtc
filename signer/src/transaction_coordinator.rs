@@ -51,8 +51,8 @@ use crate::metrics::STACKS_BLOCKCHAIN;
 use crate::network;
 use crate::signature::TaprootSignature;
 use crate::stacks::api::FeePriority;
-use crate::stacks::api::GetNakamotoStartHeight as _;
 use crate::stacks::api::RejectionReason;
+use crate::stacks::api::StacksEpochInfo;
 use crate::stacks::api::StacksInteract as _;
 use crate::stacks::api::SubmitTxResponse;
 use crate::stacks::api::TxRejection;
@@ -267,19 +267,24 @@ where
         if self.is_epoch3 {
             return Ok(true);
         }
-        tracing::debug!("checked for whether we are in epoch 3 or later");
-        let pox_info = self.context.get_stacks_client().get_pox_info().await?;
 
-        let Some(nakamoto_start_height) = pox_info.nakamoto_start_height() else {
-            return Ok(false);
-        };
+        tracing::debug!("checking for whether we are in epoch 3.0 or later");
+        let epoch_info = self.context.get_stacks_client().get_epoch_info().await?;
 
-        let is_epoch3 = pox_info.current_burnchain_block_height > *nakamoto_start_height;
-        if is_epoch3 {
-            self.is_epoch3 = is_epoch3;
-            tracing::debug!("we are in epoch 3 or later; time to do work");
+        match epoch_info {
+            StacksEpochInfo::PreNakamoto {
+                current_bitcoin_height,
+                nakamoto_start_height,
+            } => {
+                tracing::debug!(%current_bitcoin_height, %nakamoto_start_height, "the stacks node has not reached epoch 3.0; skipping this round");
+                Ok(false)
+            }
+            StacksEpochInfo::PostNakamoto { nakamoto_start_height } => {
+                tracing::debug!(%nakamoto_start_height, "the stacks node is in epoch 3.0 or later; proceeding");
+                self.is_epoch3 = true;
+                Ok(true)
+            }
         }
-        Ok(is_epoch3)
     }
 
     /// A function for processing new blocks

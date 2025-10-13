@@ -43,6 +43,7 @@ use crate::keys::PublicKey;
 use crate::stacks::api::AccountInfo;
 use crate::stacks::api::FeePriority;
 use crate::stacks::api::SignerSetInfo;
+use crate::stacks::api::StacksEpochInfo;
 use crate::stacks::api::StacksInteract;
 use crate::stacks::api::SubmitTxResponse;
 use crate::stacks::api::TenureBlocks;
@@ -456,6 +457,30 @@ impl StacksInteract for TestHarness {
         };
 
         Ok(result)
+    }
+
+    async fn get_epoch_info(&self) -> Result<StacksEpochInfo, Error> {
+        // Current burnchain (Bitcoin) height from the last Bitcoin block we have.
+        let current = self
+            .bitcoin_blocks
+            .last()
+            .map(|b| b.height)
+            .unwrap_or_default();
+
+        // For tests, use the first Stacks block's chain_length as the Epoch 3.0 start.
+        let maybe_start = self
+            .stacks_blocks
+            .first()
+            .map(|(_, block, _)| BitcoinBlockHeight::from(block.header.chain_length));
+
+        match maybe_start {
+            Some(start) if current < start => Ok(StacksEpochInfo::PreNakamoto {
+                current_bitcoin_height: current,
+                nakamoto_start_height: start,
+            }),
+            Some(start) => Ok(StacksEpochInfo::PostNakamoto { nakamoto_start_height: start }),
+            None => Err(Error::MissingNakamotoStartHeight),
+        }
     }
 
     async fn get_node_info(&self) -> Result<RPCPeerInfoData, Error> {

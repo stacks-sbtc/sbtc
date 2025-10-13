@@ -22,8 +22,8 @@ use crate::bitcoin::GetTransactionFeeResult;
 use crate::bitcoin::rpc::{BitcoinBlockHeader, BitcoinBlockInfo};
 use crate::context::SbtcLimits;
 use crate::keys::PrivateKey;
-use crate::stacks::api::SignerSetInfo;
 use crate::stacks::api::TenureBlocks;
+use crate::stacks::api::{SignerSetInfo, StacksEpochInfo};
 use crate::stacks::wallet::SignerWallet;
 use crate::storage::Transactable;
 use crate::storage::model::BitcoinTxId;
@@ -523,6 +523,10 @@ impl StacksInteract for WrappedMockStacksInteract {
 
     async fn get_pox_info(&self) -> Result<RPCPoxInfoData, Error> {
         self.inner.lock().await.get_pox_info().await
+    }
+
+    async fn get_epoch_info(&self) -> Result<StacksEpochInfo, Error> {
+        self.inner.lock().await.get_epoch_info().await
     }
 
     async fn get_node_info(&self) -> Result<RPCPeerInfoData, Error> {

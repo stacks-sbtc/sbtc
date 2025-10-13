@@ -288,6 +288,10 @@ pub trait StacksInteract: Send + Sync {
     /// Get information about the current PoX state.
     fn get_pox_info(&self) -> impl Future<Output = Result<RPCPoxInfoData, Error>> + Send;
 
+    /// Attempt to get the Bitcoin block height at which Epoch 3.0 starts. If
+    /// Epoch 3.0 is not found in the PoX info, then `None` is returned.
+    fn get_epoch_info(&self) -> impl Future<Output = Result<StacksEpochInfo, Error>> + Send;
+
     /// Get information about the current node.
     fn get_node_info(&self) -> impl Future<Output = Result<RPCPeerInfoData, Error>> + Send;
 
@@ -643,6 +647,52 @@ impl TryFrom<AccountEntryResponse> for AccountInfo {
             nonce: value.nonce,
             unlock_height: value.unlock_height.into(),
         })
+    }
+}
+
+// Minimal PoX info view to avoid enum deserialization issues.
+#[derive(Debug, Deserialize)]
+struct PoxInfoEpoch {
+    epoch_id: String,
+    start_height: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct PoxInfoMinimal {
+    current_burnchain_block_height: u64,
+    epochs: Vec<PoxInfoEpoch>,
+}
+
+/// Information regarding whether or not we are in pre- or post-Nakamoto
+/// era.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StacksEpochInfo {
+    /// We are in the pre-Nakamoto era.
+    PreNakamoto {
+        /// The current bitcoin block height.
+        current_bitcoin_height: BitcoinBlockHeight,
+        /// The bitcoin block height at which the Nakamoto era starts.
+        nakamoto_start_height: BitcoinBlockHeight,
+    },
+    /// We are in the post-Nakamoto era.
+    PostNakamoto {
+        /// The bitcoin block height at which the Nakamoto era started.
+        nakamoto_start_height: BitcoinBlockHeight,
+    },
+}
+
+impl StacksEpochInfo {
+    /// Returns true if we are in the post-Nakamoto era.
+    pub fn is_post_nakamoto(&self) -> bool {
+        matches!(self, StacksEpochInfo::PostNakamoto { .. })
+    }
+
+    /// Returns the bitcoin block height at which the Nakamoto era starts (epoch 3.0).
+    pub fn nakamoto_start_height(&self) -> BitcoinBlockHeight {
+        match self {
+            StacksEpochInfo::PreNakamoto { nakamoto_start_height, .. } => *nakamoto_start_height,
+            StacksEpochInfo::PostNakamoto { nakamoto_start_height } => *nakamoto_start_height,
+        }
     }
 }
 
@@ -1242,6 +1292,49 @@ impl StacksClient {
             .map_err(Error::UnexpectedStacksResponse)
     }
 
+    /// Attempt to get the Bitcoin block height at which Epoch 3.0 starts. If
+    /// Epoch 3.0 is not found in the PoX info, then `None` is returned.
+    #[tracing::instrument(skip(self))]
+    pub async fn get_epoch_info(&self) -> Result<StacksEpochInfo, Error> {
+        let path = "/v2/pox";
+        let url = self
+            .endpoint
+            .join(path)
+            .map_err(|err| Error::PathJoin(err, self.endpoint.clone(), Cow::Borrowed(path)))?;
+
+        tracing::debug!("making request to the stacks node for the current PoX info");
+        let response = self
+            .client
+            .get(url.clone())
+            .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await
+            .map_err(Error::StacksNodeRequest)?;
+
+        let pox_info: PoxInfoMinimal = response
+            .error_for_status()
+            .map_err(Error::StacksNodeResponse)?
+            .json()
+            .await
+            .map_err(Error::UnexpectedStacksResponse)?;
+
+        let current = BitcoinBlockHeight::from(pox_info.current_burnchain_block_height);
+        let maybe_start = pox_info
+            .epochs
+            .into_iter()
+            .find(|e| e.epoch_id == "Epoch30")
+            .map(|e| BitcoinBlockHeight::from(e.start_height));
+
+        match maybe_start {
+            Some(start) if current < start => Ok(StacksEpochInfo::PreNakamoto {
+                current_bitcoin_height: current,
+                nakamoto_start_height: start,
+            }),
+            Some(start) => Ok(StacksEpochInfo::PostNakamoto { nakamoto_start_height: start }),
+            None => Err(Error::MissingNakamotoStartHeight),
+        }
+    }
+
     /// Get information about the current node.
     #[tracing::instrument(skip(self))]
     pub async fn get_node_info(&self) -> Result<RPCPeerInfoData, Error> {
@@ -1649,6 +1742,10 @@ impl StacksInteract for StacksClient {
         self.get_pox_info().await
     }
 
+    async fn get_epoch_info(&self) -> Result<StacksEpochInfo, Error> {
+        self.get_epoch_info().await
+    }
+
     async fn get_node_info(&self) -> Result<RPCPeerInfoData, Error> {
         self.get_node_info().await
     }
@@ -1796,6 +1893,10 @@ impl StacksInteract for ApiFallbackClient<StacksClient> {
 
     async fn get_pox_info(&self) -> Result<RPCPoxInfoData, Error> {
         self.exec(|client, _| client.get_pox_info()).await
+    }
+
+    async fn get_epoch_info(&self) -> Result<StacksEpochInfo, Error> {
+        self.exec(|client, _| client.get_epoch_info()).await
     }
 
     async fn get_node_info(&self) -> Result<RPCPeerInfoData, Error> {
@@ -2553,6 +2654,165 @@ mod tests {
         let nakamoto_start_height = resp.nakamoto_start_height();
         assert!(nakamoto_start_height.is_some());
         assert_eq!(nakamoto_start_height.unwrap(), 232u64.into());
+    }
+
+    #[tokio::test]
+    async fn get_epoch_info_works() {
+        let raw_json_response =
+            include_str!("../../tests/fixtures/stacksapi-get-pox-info-test-data.json");
+
+        let mut stacks_node_server = mockito::Server::new_async().await;
+        let mock = stacks_node_server
+            .mock("GET", "/v2/pox")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(raw_json_response)
+            .expect(1)
+            .create();
+
+        let client =
+            StacksClient::new(url::Url::parse(stacks_node_server.url().as_str()).unwrap()).unwrap();
+        let resp = client.get_epoch_info().await.unwrap();
+
+        match resp {
+            StacksEpochInfo::PreNakamoto { nakamoto_start_height, .. } => {
+                assert_eq!(nakamoto_start_height, BitcoinBlockHeight::from(232u64));
+            }
+            StacksEpochInfo::PostNakamoto { .. } => {
+                // OK: current >= 232 in the fixture
+            }
+        }
+
+        mock.assert();
+    }
+
+    #[tokio::test]
+    async fn get_epoch_info_errors_when_epoch30_missing() {
+        let raw_json_response = r#"{
+            "current_burnchain_block_height": 1000,
+            "epochs": [
+                { "epoch_id": "Epoch10", "start_height": 0 },
+                { "epoch_id": "Epoch20", "start_height": 500 }
+            ]
+        }"#;
+
+        let mut stacks_node_server = mockito::Server::new_async().await;
+        let mock = stacks_node_server
+            .mock("GET", "/v2/pox")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(raw_json_response)
+            .expect(1)
+            .create();
+
+        let client = StacksClient::new(stacks_node_server.url().parse().unwrap()).unwrap();
+        let err = client.get_epoch_info().await.unwrap_err();
+        assert!(matches!(err, Error::MissingNakamotoStartHeight));
+        mock.assert();
+    }
+
+    #[tokio::test]
+    async fn get_epoch_info_pre_nakamoto() {
+        // current < Epoch30 start -> PreNakamoto
+        let raw_json_response = r#"{
+            "current_burnchain_block_height": 1999,
+            "epochs": [
+                { "epoch_id": "Epoch10", "start_height": 0 },
+                { "epoch_id": "Epoch30", "start_height": 2000 }
+            ]
+        }"#;
+
+        let mut stacks_node_server = mockito::Server::new_async().await;
+        let mock = stacks_node_server
+            .mock("GET", "/v2/pox")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(raw_json_response)
+            .expect(1)
+            .create();
+
+        let client = StacksClient::new(stacks_node_server.url().parse().unwrap()).unwrap();
+        let resp = client.get_epoch_info().await.unwrap();
+
+        match resp {
+            StacksEpochInfo::PreNakamoto {
+                current_bitcoin_height,
+                nakamoto_start_height,
+            } => {
+                assert_eq!(current_bitcoin_height, BitcoinBlockHeight::from(1999u64));
+                assert_eq!(nakamoto_start_height, BitcoinBlockHeight::from(2000u64));
+            }
+            _ => panic!("expected PreNakamoto"),
+        }
+        mock.assert();
+    }
+
+    #[tokio::test]
+    async fn get_epoch_info_post_nakamoto() {
+        // current >= Epoch30 start -> PostNakamoto
+        let raw_json_response = r#"{
+            "current_burnchain_block_height": 2000,
+            "epochs": [
+                { "epoch_id": "Epoch10", "start_height": 0 },
+                { "epoch_id": "Epoch30", "start_height": 2000 }
+            ]
+        }"#;
+
+        let mut stacks_node_server = mockito::Server::new_async().await;
+        let mock = stacks_node_server
+            .mock("GET", "/v2/pox")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(raw_json_response)
+            .expect(1)
+            .create();
+
+        let client = StacksClient::new(stacks_node_server.url().parse().unwrap()).unwrap();
+        let resp = client.get_epoch_info().await.unwrap();
+
+        match resp {
+            StacksEpochInfo::PostNakamoto { nakamoto_start_height } => {
+                assert_eq!(nakamoto_start_height, BitcoinBlockHeight::from(2000u64));
+            }
+            _ => panic!("expected PostNakamoto"),
+        }
+        mock.assert();
+    }
+
+    #[tokio::test]
+    async fn get_epoch_info_ignores_unknown_epochs_after_epoch30() {
+        // Unknown epochs (strings) after Epoch30 should not break parsing.
+        let raw_json_response = r#"{
+            "current_burnchain_block_height": 2500,
+            "epochs": [
+                { "epoch_id": "Epoch10", "start_height": 0 },
+                { "epoch_id": "Epoch11", "start_height": 232 },
+                { "epoch_id": "Epoch12", "start_height": 1456 },
+                { "epoch_id": "Epoch30", "start_height": 2000 },
+                { "epoch_id": "Epoch9999", "start_height": 3000 },
+                { "epoch_id": "SomeFutureEpoch", "start_height": 4000 }
+            ]
+        }"#;
+
+        let mut stacks_node_server = mockito::Server::new_async().await;
+        let mock = stacks_node_server
+            .mock("GET", "/v2/pox")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(raw_json_response)
+            .expect(1)
+            .create();
+
+        let client = StacksClient::new(stacks_node_server.url().parse().unwrap()).unwrap();
+        let resp = client.get_epoch_info().await.unwrap();
+
+        match resp {
+            StacksEpochInfo::PostNakamoto { nakamoto_start_height } => {
+                assert_eq!(nakamoto_start_height, BitcoinBlockHeight::from(2000u64));
+            }
+            _ => panic!("expected PostNakamoto"),
+        }
+        mock.assert();
     }
 
     #[tokio::test]
