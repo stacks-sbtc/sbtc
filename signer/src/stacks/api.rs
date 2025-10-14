@@ -1308,10 +1308,7 @@ where
             break;
         };
         // We've seen this parent already, so time to stop.
-        if db
-            .stacks_block_exists(header.parent_block_id.clone())
-            .await?
-        {
+        if db.stacks_block_exists(&header.parent_block_id).await? {
             tracing::debug!("parent block known in the database");
             break;
         }

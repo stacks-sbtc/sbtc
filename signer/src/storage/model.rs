@@ -958,6 +958,12 @@ impl From<StacksBlockId> for StacksBlockHash {
     }
 }
 
+impl From<&StacksBlockId> for StacksBlockHash {
+    fn from(value: &StacksBlockId) -> Self {
+        Self(value.0)
+    }
+}
+
 impl From<StacksBlockHash> for StacksBlockId {
     fn from(value: StacksBlockHash) -> Self {
         StacksBlockId(value.0)

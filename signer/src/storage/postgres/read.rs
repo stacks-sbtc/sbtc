@@ -1656,7 +1656,7 @@ impl PgRead {
 
     async fn stacks_block_exists<'e, E>(
         executor: &'e mut E,
-        block_id: StacksBlockId,
+        block_id: &StacksBlockId,
     ) -> Result<bool, Error>
     where
         &'e mut E: sqlx::PgExecutor<'e>,
@@ -2804,7 +2804,7 @@ impl DbRead for PgStore {
             .await
     }
 
-    async fn stacks_block_exists(&self, block_id: StacksBlockId) -> Result<bool, Error> {
+    async fn stacks_block_exists(&self, block_id: &StacksBlockId) -> Result<bool, Error> {
         PgRead::stacks_block_exists(self.get_connection().await?.as_mut(), block_id).await
     }
 
@@ -3236,7 +3236,7 @@ impl DbRead for PgTransaction<'_> {
 
     async fn stacks_block_exists(
         &self,
-        block_id: clarity::types::chainstate::StacksBlockId,
+        block_id: &clarity::types::chainstate::StacksBlockId,
     ) -> Result<bool, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::stacks_block_exists(tx.as_mut(), block_id).await

@@ -100,12 +100,11 @@ pub async fn new_block_handler(state: State<ApiState<impl Context>>, body: Strin
     };
 
     let stacks_chaintip = StacksBlock {
-        block_hash: new_block_event.index_block_hash.clone().into(),
+        block_hash: new_block_event.index_block_hash.into(),
         block_height: new_block_event.block_height.into(),
         parent_hash: new_block_event.parent_index_block_hash.into(),
         bitcoin_anchor: new_block_event.burn_block_hash.into(),
     };
-    let block_id = new_block_event.index_block_hash;
 
     let span = tracing::span::Span::current();
     span.record("block_hash", stacks_chaintip.block_hash.to_hex());
@@ -137,7 +136,7 @@ pub async fn new_block_handler(state: State<ApiState<impl Context>>, body: Strin
     for (ev, txid) in events {
         let tx_info = TxInfo {
             txid: sbtc::events::StacksTxid(txid.0),
-            block_id: block_id.clone(),
+            block_id: stacks_chaintip.block_hash.into(),
         };
         let res = match RegistryEvent::try_new(ev.value, tx_info) {
             Ok(RegistryEvent::CompletedDeposit(event)) => {
