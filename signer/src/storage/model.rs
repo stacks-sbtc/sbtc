@@ -919,18 +919,17 @@ impl AsRef<BitcoinBlockHash> for BitcoinBlockRef {
     }
 }
 
-/// The Stacks block ID. This is different from the block header hash.
+/// The Stacks block ID. This type mirrors the `StacksBlockId` type in
+/// stacks-core, not the `BlockHeaderHash` type.
 ///
-/// This type is serialized, deserialized, and displayed as a lowercase
-/// hex string, and mirrors what stacks-core does for the
+/// This type is displayed as a lowercase hex string, and mirrors what
+/// stacks-core does for the
 /// `stacks_common::types::chainstate::StacksBlockId` type.
 ///
-/// The stacks-core Serialize and Deserialize implementations can be found
-/// in [1-2], and the Display implementation can be found in [2-3].
+/// The stacks-core Display implementation can be found in [1-2].
 ///
-/// [1]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stacks-common/src/util/macros.rs#L623-L641>
+/// [1]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stacks-common/src/util/macros.rs#L499-L511>
 /// [2]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stacks-common/src/types/chainstate.rs#L366-L370>
-/// [3]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stacks-common/src/util/macros.rs#L499-L511>
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(transparent)]
 pub struct StacksBlockHash([u8; 32]);
@@ -954,7 +953,7 @@ impl StacksBlockHash {
 
 impl From<StacksBlockId> for StacksBlockHash {
     fn from(value: StacksBlockId) -> Self {
-        Self(value.into_bytes())
+        Self(value.0)
     }
 }
 
