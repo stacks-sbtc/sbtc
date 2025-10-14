@@ -66,7 +66,7 @@ use signer::message::Payload;
 use signer::network::MessageTransfer as _;
 use signer::stacks::api::SignerSetInfo;
 use signer::stacks::api::StacksClient;
-use signer::stacks::api::StacksEpochInfo;
+use signer::stacks::api::StacksEpochStatus;
 use signer::stacks::api::StacksInteract;
 use signer::stacks::wallet::SignerWallet;
 use signer::storage::model::BitcoinBlockHeight;
@@ -561,8 +561,8 @@ async fn mock_stacks_core<D, B, E>(
             Box::pin(std::future::ready(Ok(tenure)))
         });
 
-        client.expect_get_epoch_info().returning(|| {
-            Box::pin(std::future::ready(Ok(StacksEpochInfo::PostNakamoto {
+        client.expect_get_epoch_status().returning(|| {
+            Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
                 nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
             })))
         });
@@ -3723,8 +3723,8 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
                 Box::pin(std::future::ready(Ok(tenure)))
             });
 
-            client.expect_get_epoch_info().returning(|| {
-                Box::pin(std::future::ready(Ok(StacksEpochInfo::PostNakamoto {
+            client.expect_get_epoch_status().returning(|| {
+                Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
                     nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
                 })))
             });
@@ -4442,8 +4442,8 @@ async fn test_conservative_initial_sbtc_limits() {
                 Box::pin(std::future::ready(Ok(tenure)))
             });
 
-            client.expect_get_epoch_info().returning(|| {
-                Box::pin(std::future::ready(Ok(StacksEpochInfo::PostNakamoto {
+            client.expect_get_epoch_status().returning(|| {
+                Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
                     nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
                 })))
             });

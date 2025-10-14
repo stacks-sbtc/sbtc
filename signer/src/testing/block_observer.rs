@@ -14,15 +14,12 @@ use blockstack_lib::chainstate::nakamoto::NakamotoBlockHeader;
 use blockstack_lib::chainstate::stacks::StacksTransaction;
 use blockstack_lib::net::api::getcontractsrc::ContractSrcResponse;
 use blockstack_lib::net::api::getinfo::RPCPeerInfoData;
-use blockstack_lib::net::api::getpoxinfo::RPCPoxEpoch;
-use blockstack_lib::net::api::getpoxinfo::RPCPoxInfoData;
 use blockstack_lib::net::api::getsortition::SortitionInfo;
 use blockstack_lib::net::api::gettenureinfo::RPCGetTenureInfo;
 use blockstack_lib::types::chainstate::StacksAddress;
 use blockstack_lib::types::chainstate::StacksBlockId;
 use clarity::types::chainstate::BurnchainHeaderHash;
 use clarity::types::chainstate::SortitionId;
-use clarity::vm::costs::ExecutionCost;
 use emily_client::models::DepositStatus;
 use rand::seq::IteratorRandom as _;
 use sbtc::deposits::CreateDepositRequest;
@@ -43,7 +40,7 @@ use crate::keys::PublicKey;
 use crate::stacks::api::AccountInfo;
 use crate::stacks::api::FeePriority;
 use crate::stacks::api::SignerSetInfo;
-use crate::stacks::api::StacksEpochInfo;
+use crate::stacks::api::StacksEpochStatus;
 use crate::stacks::api::StacksInteract;
 use crate::stacks::api::SubmitTxResponse;
 use crate::stacks::api::TenureBlocks;
@@ -431,35 +428,7 @@ impl StacksInteract for TestHarness {
         Ok(500_000)
     }
 
-    async fn get_pox_info(&self) -> Result<RPCPoxInfoData, Error> {
-        let nakamoto_start_height = self
-            .stacks_blocks
-            .first()
-            .map(|(_, block, _)| block.header.chain_length)
-            .unwrap_or_default();
-        let data = get_pox_info_data();
-
-        let result = RPCPoxInfoData {
-            epochs: vec![RPCPoxEpoch {
-                epoch_id: clarity::types::StacksEpochId::Epoch30,
-                start_height: nakamoto_start_height,
-                end_height: 9223372036854776000,
-                network_epoch: 11,
-                block_limit: ExecutionCost {
-                    write_length: 15_000_000,
-                    write_count: 15_000,
-                    read_length: 100_000_000,
-                    read_count: 15_000,
-                    runtime: 5_000_000_000,
-                },
-            }],
-            ..data
-        };
-
-        Ok(result)
-    }
-
-    async fn get_epoch_info(&self) -> Result<StacksEpochInfo, Error> {
+    async fn get_epoch_status(&self) -> Result<StacksEpochStatus, Error> {
         // Current burnchain (Bitcoin) height from the last Bitcoin block we have.
         let current = self
             .bitcoin_blocks
@@ -474,11 +443,11 @@ impl StacksInteract for TestHarness {
             .map(|(_, block, _)| BitcoinBlockHeight::from(block.header.chain_length));
 
         match maybe_start {
-            Some(start) if current < start => Ok(StacksEpochInfo::PreNakamoto {
+            Some(start) if current < start => Ok(StacksEpochStatus::PreNakamoto {
                 current_bitcoin_height: current,
                 nakamoto_start_height: start,
             }),
-            Some(start) => Ok(StacksEpochInfo::PostNakamoto { nakamoto_start_height: start }),
+            Some(start) => Ok(StacksEpochStatus::PostNakamoto { nakamoto_start_height: start }),
             None => Err(Error::MissingNakamotoStartHeight),
         }
     }
@@ -572,48 +541,6 @@ impl EmilyInteract for TestHarness {
     async fn get_limits(&self) -> Result<SbtcLimits, Error> {
         Ok(SbtcLimits::unlimited())
     }
-}
-
-fn get_pox_info_data() -> RPCPoxInfoData {
-    let raw_json_response = r#"
-    {
-        "contract_id": "ST000000000000000000002AMW42H.pox-4",
-        "pox_activation_threshold_ustx": 700073322473389,
-        "first_burnchain_block_height": 0,
-        "current_burnchain_block_height": 1880,
-        "prepare_phase_block_length": 5,
-        "reward_phase_block_length": 15,
-        "reward_slots": 30,
-        "rejection_fraction": null,
-        "total_liquid_supply_ustx": 70007332247338910,
-        "current_cycle": {
-            "id": 94,
-            "min_threshold_ustx": 583400000000000,
-            "stacked_ustx": 5250510000000000,
-            "is_pox_active": true
-        },
-        "next_cycle": {
-            "id": 95,
-            "min_threshold_ustx": 583400000000000,
-            "min_increment_ustx": 8750916530917,
-            "stacked_ustx": 5250510000000000,
-            "prepare_phase_start_block_height": 1895,
-            "blocks_until_prepare_phase": 15,
-            "reward_phase_start_block_height": 1900,
-            "blocks_until_reward_phase": 20,
-            "ustx_until_pox_rejection": null
-        },
-        "epochs": [],
-        "min_amount_ustx": 583400000000000,
-        "prepare_cycle_length": 5,
-        "reward_cycle_id": 94,
-        "reward_cycle_length": 20,
-        "rejection_votes_left_required": null,
-        "next_reward_cycle_in": 20,
-        "contract_versions": []
-    }"#;
-
-    serde_json::from_str::<RPCPoxInfoData>(raw_json_response).unwrap()
 }
 
 fn get_node_info_data() -> RPCPeerInfoData {

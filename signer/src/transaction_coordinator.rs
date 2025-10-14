@@ -52,7 +52,7 @@ use crate::network;
 use crate::signature::TaprootSignature;
 use crate::stacks::api::FeePriority;
 use crate::stacks::api::RejectionReason;
-use crate::stacks::api::StacksEpochInfo;
+use crate::stacks::api::StacksEpochStatus;
 use crate::stacks::api::StacksInteract as _;
 use crate::stacks::api::SubmitTxResponse;
 use crate::stacks::api::TxRejection;
@@ -268,18 +268,18 @@ where
             return Ok(true);
         }
 
-        tracing::debug!("checking for whether we are in epoch 3.0 or later");
-        let epoch_info = self.context.get_stacks_client().get_epoch_info().await?;
+        tracing::debug!("checking whether we are in epoch 3.0 or later");
+        let epoch_status = self.context.get_stacks_client().get_epoch_status().await?;
 
-        match epoch_info {
-            StacksEpochInfo::PreNakamoto {
+        match epoch_status {
+            StacksEpochStatus::PreNakamoto {
                 current_bitcoin_height,
                 nakamoto_start_height,
             } => {
                 tracing::debug!(%current_bitcoin_height, %nakamoto_start_height, "the stacks node has not reached epoch 3.0; skipping this round");
                 Ok(false)
             }
-            StacksEpochInfo::PostNakamoto { nakamoto_start_height } => {
+            StacksEpochStatus::PostNakamoto { nakamoto_start_height } => {
                 tracing::debug!(%nakamoto_start_height, "the stacks node is in epoch 3.0 or later; proceeding");
                 self.is_epoch3 = true;
                 Ok(true)

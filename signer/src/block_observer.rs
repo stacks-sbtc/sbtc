@@ -283,7 +283,7 @@ impl<C: Context, B> BlockObserver<C, B> {
         let nakamoto_start_height = self
             .context
             .get_stacks_client()
-            .get_epoch_info()
+            .get_epoch_status()
             .await?
             .nakamoto_start_height();
 

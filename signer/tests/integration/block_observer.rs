@@ -38,7 +38,7 @@ use signer::error::Error;
 use signer::keys::PublicKey;
 use signer::keys::SignerScriptPubKey as _;
 use signer::stacks::api::SignerSetInfo;
-use signer::stacks::api::StacksEpochInfo;
+use signer::stacks::api::StacksEpochStatus;
 use signer::stacks::api::TenureBlocks;
 use signer::storage::DbWrite as _;
 use signer::storage::model;
@@ -143,8 +143,8 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
             .expect_get_tenure()
             .returning(|_| Box::pin(std::future::ready(TenureBlocks::nearly_empty())));
 
-        client.expect_get_epoch_info().returning(|| {
-            Box::pin(std::future::ready(Ok(StacksEpochInfo::PostNakamoto {
+        client.expect_get_epoch_status().returning(|| {
+            Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
                 nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
             })))
         });
@@ -421,8 +421,8 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
             Box::pin(std::future::ready(Ok(tenure)))
         });
 
-        client.expect_get_epoch_info().returning(|| {
-            Box::pin(std::future::ready(Ok(StacksEpochInfo::PostNakamoto {
+        client.expect_get_epoch_status().returning(|| {
+            Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
                 nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
             })))
         });
@@ -893,8 +893,8 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
         client
             .expect_get_tenure()
             .returning(|_| Box::pin(std::future::ready(TenureBlocks::nearly_empty())));
-        client.expect_get_epoch_info().returning(|| {
-            Box::pin(std::future::ready(Ok(StacksEpochInfo::PostNakamoto {
+        client.expect_get_epoch_status().returning(|| {
+            Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
                 nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
             })))
         });
@@ -1214,8 +1214,8 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
         client
             .expect_get_tenure()
             .returning(|_| Box::pin(std::future::ready(TenureBlocks::nearly_empty())));
-        client.expect_get_epoch_info().returning(|| {
-            Box::pin(std::future::ready(Ok(StacksEpochInfo::PostNakamoto {
+        client.expect_get_epoch_status().returning(|| {
+            Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
                 nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
             })))
         });
@@ -1403,8 +1403,8 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
         client
             .expect_get_tenure()
             .returning(|_| Box::pin(std::future::ready(TenureBlocks::nearly_empty())));
-        client.expect_get_epoch_info().returning(|| {
-            Box::pin(std::future::ready(Ok(StacksEpochInfo::PostNakamoto {
+        client.expect_get_epoch_status().returning(|| {
+            Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
                 nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
             })))
         });
@@ -1643,8 +1643,8 @@ async fn block_observer_ignores_coinbase() {
             Box::pin(std::future::ready(Ok(tenure)))
         });
 
-        client.expect_get_epoch_info().returning(|| {
-            Box::pin(std::future::ready(Ok(StacksEpochInfo::PostNakamoto {
+        client.expect_get_epoch_status().returning(|| {
+            Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
                 nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
             })))
         });

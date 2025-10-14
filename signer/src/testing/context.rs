@@ -9,8 +9,8 @@ use blockstack_lib::chainstate::burn::ConsensusHash;
 use blockstack_lib::{
     chainstate::{nakamoto::NakamotoBlock, stacks::StacksTransaction},
     net::api::{
-        getcontractsrc::ContractSrcResponse, getinfo::RPCPeerInfoData, getpoxinfo::RPCPoxInfoData,
-        getsortition::SortitionInfo, gettenureinfo::RPCGetTenureInfo,
+        getcontractsrc::ContractSrcResponse, getinfo::RPCPeerInfoData, getsortition::SortitionInfo,
+        gettenureinfo::RPCGetTenureInfo,
     },
 };
 use clarity::types::chainstate::{StacksAddress, StacksBlockId};
@@ -23,7 +23,7 @@ use crate::bitcoin::rpc::{BitcoinBlockHeader, BitcoinBlockInfo};
 use crate::context::SbtcLimits;
 use crate::keys::PrivateKey;
 use crate::stacks::api::TenureBlocks;
-use crate::stacks::api::{SignerSetInfo, StacksEpochInfo};
+use crate::stacks::api::{SignerSetInfo, StacksEpochStatus};
 use crate::stacks::wallet::SignerWallet;
 use crate::storage::Transactable;
 use crate::storage::model::BitcoinTxId;
@@ -521,12 +521,8 @@ impl StacksInteract for WrappedMockStacksInteract {
             .await
     }
 
-    async fn get_pox_info(&self) -> Result<RPCPoxInfoData, Error> {
-        self.inner.lock().await.get_pox_info().await
-    }
-
-    async fn get_epoch_info(&self) -> Result<StacksEpochInfo, Error> {
-        self.inner.lock().await.get_epoch_info().await
+    async fn get_epoch_status(&self) -> Result<StacksEpochStatus, Error> {
+        self.inner.lock().await.get_epoch_status().await
     }
 
     async fn get_node_info(&self) -> Result<RPCPeerInfoData, Error> {

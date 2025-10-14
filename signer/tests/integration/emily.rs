@@ -11,7 +11,7 @@ use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc_json::Utxo;
 use fake::Fake as _;
 use futures::future::join_all;
-use signer::stacks::api::StacksEpochInfo;
+use signer::stacks::api::StacksEpochStatus;
 use signer::storage::model::BitcoinBlockHeight;
 use signer::testing::btc::MockBitcoinBlockHashStreamProvider;
 use signer::testing::storage::model::TestBitcoinTxInfo;
@@ -339,8 +339,8 @@ async fn deposit_flow() {
                 .once()
                 .returning(|_| Box::pin(std::future::ready(TenureBlocks::nearly_empty())));
 
-            client.expect_get_epoch_info().returning(|| {
-                Box::pin(std::future::ready(Ok(StacksEpochInfo::PostNakamoto {
+            client.expect_get_epoch_status().returning(|| {
+                Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
                     nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
                 })))
             });
