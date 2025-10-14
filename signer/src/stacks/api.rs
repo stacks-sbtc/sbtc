@@ -31,7 +31,6 @@ use blockstack_lib::net::api::postfeerate::RPCFeeEstimate;
 use blockstack_lib::net::api::postfeerate::RPCFeeEstimateResponse;
 use blockstack_lib::types::chainstate::StacksAddress;
 use blockstack_lib::types::chainstate::StacksBlockId;
-use clarity::types::StacksEpochId;
 use clarity::vm::Value;
 use clarity::vm::types::OptionalData;
 use clarity::vm::types::TupleData;
@@ -66,6 +65,8 @@ const TX_FEE_TX_SIZE_MULTIPLIER: u64 = 2 * MINIMUM_TX_FEE_RATE_PER_BYTE;
 /// The max fee in microSTX for a stacks transaction. Used as a backstop in
 /// case the stacks node returns wonky values. This is 10 STX.
 const MAX_TX_FEE: u64 = 10_000_000;
+
+const EPOCH_3_0_ID: &str = "Epoch30";
 
 /// This is the name of the MAP in the sbtc-registry smart contract that
 /// stores the status of a withdrawal request.
@@ -288,8 +289,12 @@ pub trait StacksInteract: Send + Sync {
     /// Get information about the current PoX state.
     fn get_pox_info(&self) -> impl Future<Output = Result<RPCPoxInfoData, Error>> + Send;
 
-    /// Attempt to get the Bitcoin block height at which Epoch 3.0 starts. If
-    /// Epoch 3.0 is not found in the PoX info, then `None` is returned.
+    /// Attempt to get information from a Stacks node about whether or not it is
+    /// in a pre- or post-Nakamoto epoch (3.0).
+    ///
+    /// Returns a [`StacksEpochInfo`] variant if successful. If the Stacks node
+    /// does not report an entry for Epoch 3.0, then an
+    /// [`Error::MissingNakamotoStartHeight`] error is returned.
     fn get_epoch_info(&self) -> impl Future<Output = Result<StacksEpochInfo, Error>> + Send;
 
     /// Get information about the current node.
@@ -313,26 +318,6 @@ pub trait StacksInteract: Send + Sync {
         &self,
         sender: &StacksAddress,
     ) -> impl Future<Output = Result<Amount, Error>> + Send;
-}
-
-/// A trait for getting the start height of the first EPOCH 3.0 block on the
-/// Stacks blockchain.
-pub trait GetNakamotoStartHeight {
-    /// Get the start height of the first EPOCH 3.0 block on the Stacks
-    /// blockchain.
-    fn nakamoto_start_height(&self) -> Option<BitcoinBlockHeight>;
-}
-
-impl GetNakamotoStartHeight for RPCPoxInfoData {
-    fn nakamoto_start_height(&self) -> Option<BitcoinBlockHeight> {
-        self.epochs.iter().find_map(|epoch| {
-            if epoch.epoch_id == StacksEpochId::Epoch30 {
-                Some(epoch.start_height.into())
-            } else {
-                None
-            }
-        })
-    }
 }
 
 /// This struct represents a non-empty subset of the Stacks blocks that
@@ -1292,8 +1277,7 @@ impl StacksClient {
             .map_err(Error::UnexpectedStacksResponse)
     }
 
-    /// Attempt to get the Bitcoin block height at which Epoch 3.0 starts. If
-    /// Epoch 3.0 is not found in the PoX info, then `None` is returned.
+    /// Get epoch and burnchain information from the Stacks node.
     #[tracing::instrument(skip(self))]
     pub async fn get_epoch_info(&self) -> Result<StacksEpochInfo, Error> {
         let path = "/v2/pox";
@@ -1322,7 +1306,7 @@ impl StacksClient {
         let maybe_start = pox_info
             .epochs
             .into_iter()
-            .find(|e| e.epoch_id == "Epoch30")
+            .find(|e| e.epoch_id == EPOCH_3_0_ID)
             .map(|e| BitcoinBlockHeight::from(e.start_height));
 
         match maybe_start {
@@ -1378,10 +1362,7 @@ where
 {
     let starting_tenure = stacks.get_tenure(block_id).await?;
     let mut headers: Vec<TenureBlockHeaders> = vec![starting_tenure.into()];
-    let pox_info = stacks.get_pox_info().await?;
-    let nakamoto_start_height = pox_info
-        .nakamoto_start_height()
-        .ok_or(Error::MissingNakamotoStartHeight)?;
+    let nakamoto_start_height = stacks.get_epoch_info().await?.nakamoto_start_height();
 
     while let Some(tenure) = headers.last() {
         // We won't get anymore Nakamoto blocks before this point, so
@@ -1948,6 +1929,7 @@ mod tests {
     use crate::storage::DbWrite as _;
     use crate::storage::memory::Store;
 
+    use assert_matches::assert_matches;
     use clarity::types::Address as _;
     use clarity::vm::ClarityName;
     use clarity::vm::types::{
@@ -2628,7 +2610,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_pox_info_and_get_nakamoto_start_height_works() {
+    async fn get_pox_info_works() {
         let raw_json_response =
             include_str!("../../tests/fixtures/stacksapi-get-pox-info-test-data.json");
 
@@ -2650,14 +2632,10 @@ mod tests {
 
         assert_eq!(resp, expected);
         mock.assert();
-
-        let nakamoto_start_height = resp.nakamoto_start_height();
-        assert!(nakamoto_start_height.is_some());
-        assert_eq!(nakamoto_start_height.unwrap(), 232u64.into());
     }
 
     #[tokio::test]
-    async fn get_epoch_info_works() {
+    async fn get_epoch_info_works_with_full_response_body() {
         let raw_json_response =
             include_str!("../../tests/fixtures/stacksapi-get-pox-info-test-data.json");
 
@@ -2674,14 +2652,9 @@ mod tests {
             StacksClient::new(url::Url::parse(stacks_node_server.url().as_str()).unwrap()).unwrap();
         let resp = client.get_epoch_info().await.unwrap();
 
-        match resp {
-            StacksEpochInfo::PreNakamoto { nakamoto_start_height, .. } => {
-                assert_eq!(nakamoto_start_height, BitcoinBlockHeight::from(232u64));
-            }
-            StacksEpochInfo::PostNakamoto { .. } => {
-                // OK: current >= 232 in the fixture
-            }
-        }
+        assert_matches!(resp, StacksEpochInfo::PostNakamoto { nakamoto_start_height }
+            if nakamoto_start_height == BitcoinBlockHeight::from(232u64)
+        );
 
         mock.assert();
     }
@@ -2707,7 +2680,7 @@ mod tests {
 
         let client = StacksClient::new(stacks_node_server.url().parse().unwrap()).unwrap();
         let err = client.get_epoch_info().await.unwrap_err();
-        assert!(matches!(err, Error::MissingNakamotoStartHeight));
+        assert_matches!(err, Error::MissingNakamotoStartHeight);
         mock.assert();
     }
 
@@ -2734,16 +2707,11 @@ mod tests {
         let client = StacksClient::new(stacks_node_server.url().parse().unwrap()).unwrap();
         let resp = client.get_epoch_info().await.unwrap();
 
-        match resp {
-            StacksEpochInfo::PreNakamoto {
-                current_bitcoin_height,
-                nakamoto_start_height,
-            } => {
-                assert_eq!(current_bitcoin_height, BitcoinBlockHeight::from(1999u64));
-                assert_eq!(nakamoto_start_height, BitcoinBlockHeight::from(2000u64));
-            }
-            _ => panic!("expected PreNakamoto"),
-        }
+        assert_matches!(resp, StacksEpochInfo::PreNakamoto { current_bitcoin_height, nakamoto_start_height }
+            if current_bitcoin_height == BitcoinBlockHeight::from(1999u64)
+            && nakamoto_start_height == BitcoinBlockHeight::from(2000u64)
+        );
+
         mock.assert();
     }
 
@@ -2770,12 +2738,12 @@ mod tests {
         let client = StacksClient::new(stacks_node_server.url().parse().unwrap()).unwrap();
         let resp = client.get_epoch_info().await.unwrap();
 
-        match resp {
-            StacksEpochInfo::PostNakamoto { nakamoto_start_height } => {
-                assert_eq!(nakamoto_start_height, BitcoinBlockHeight::from(2000u64));
-            }
-            _ => panic!("expected PostNakamoto"),
-        }
+        assert_matches!(
+            resp,
+            StacksEpochInfo::PostNakamoto { nakamoto_start_height }
+                if nakamoto_start_height == BitcoinBlockHeight::from(2000u64)
+        );
+
         mock.assert();
     }
 
@@ -2806,12 +2774,12 @@ mod tests {
         let client = StacksClient::new(stacks_node_server.url().parse().unwrap()).unwrap();
         let resp = client.get_epoch_info().await.unwrap();
 
-        match resp {
-            StacksEpochInfo::PostNakamoto { nakamoto_start_height } => {
-                assert_eq!(nakamoto_start_height, BitcoinBlockHeight::from(2000u64));
-            }
-            _ => panic!("expected PostNakamoto"),
-        }
+        assert_matches!(
+            resp,
+            StacksEpochInfo::PostNakamoto { nakamoto_start_height }
+                if nakamoto_start_height == BitcoinBlockHeight::from(2000u64)
+        );
+
         mock.assert();
     }
 

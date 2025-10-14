@@ -11,6 +11,8 @@ use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc_json::Utxo;
 use fake::Fake as _;
 use futures::future::join_all;
+use signer::stacks::api::StacksEpochInfo;
+use signer::storage::model::BitcoinBlockHeight;
 use signer::testing::btc::MockBitcoinBlockHashStreamProvider;
 use signer::testing::storage::model::TestBitcoinTxInfo;
 use signer::util::Sleep;
@@ -18,7 +20,6 @@ use test_case::test_case;
 use test_log::test;
 use url::Url;
 
-use blockstack_lib::net::api::getpoxinfo::RPCPoxInfoData;
 use blockstack_lib::net::api::getsortition::SortitionInfo;
 use clarity::types::chainstate::BurnchainHeaderHash;
 use emily_client::apis::deposit_api;
@@ -338,13 +339,10 @@ async fn deposit_flow() {
                 .once()
                 .returning(|_| Box::pin(std::future::ready(TenureBlocks::nearly_empty())));
 
-            client.expect_get_pox_info().once().returning(|| {
-                let raw_json_response =
-                    include_str!("../../tests/fixtures/stacksapi-get-pox-info-test-data.json");
-                Box::pin(async move {
-                    serde_json::from_str::<RPCPoxInfoData>(raw_json_response)
-                        .map_err(Error::JsonSerialize)
-                })
+            client.expect_get_epoch_info().returning(|| {
+                Box::pin(std::future::ready(Ok(StacksEpochInfo::PostNakamoto {
+                    nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
+                })))
             });
 
             // The coordinator may try to further process the deposit to submit

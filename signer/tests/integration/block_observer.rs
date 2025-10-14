@@ -13,7 +13,6 @@ use bitcoin::consensus::encode::serialize_hex;
 use bitcoincore_rpc::RpcApi as _;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlockHeader;
-use blockstack_lib::net::api::getpoxinfo::RPCPoxInfoData;
 use clarity::types::chainstate::StacksAddress;
 use clarity::vm::types::PrincipalData;
 use emily_client::apis::deposit_api;
@@ -39,10 +38,12 @@ use signer::error::Error;
 use signer::keys::PublicKey;
 use signer::keys::SignerScriptPubKey as _;
 use signer::stacks::api::SignerSetInfo;
+use signer::stacks::api::StacksEpochInfo;
 use signer::stacks::api::TenureBlocks;
 use signer::storage::DbWrite as _;
 use signer::storage::model;
 use signer::storage::model::BitcoinBlockHash;
+use signer::storage::model::BitcoinBlockHeight;
 use signer::storage::model::DkgSharesStatus;
 use signer::storage::model::EncryptedDkgShares;
 use signer::storage::model::TaprootScriptHash;
@@ -76,9 +77,6 @@ use crate::setup::TestSweepSetup;
 use crate::setup::fetch_canonical_bitcoin_blockchain;
 use crate::transaction_coordinator::mock_reqwests_status_code_error;
 use crate::utxo_construction::make_deposit_request;
-
-pub const GET_POX_INFO_JSON: &str =
-    include_str!("../../tests/fixtures/stacksapi-get-pox-info-test-data.json");
 
 /// The [`BlockObserver::load_latest_deposit_requests`] function is
 /// supposed to fetch all deposit requests from Emily and persist the ones
@@ -145,10 +143,10 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
             .expect_get_tenure()
             .returning(|_| Box::pin(std::future::ready(TenureBlocks::nearly_empty())));
 
-        client.expect_get_pox_info().returning(|| {
-            let response = serde_json::from_str::<RPCPoxInfoData>(GET_POX_INFO_JSON)
-                .map_err(Error::JsonSerialize);
-            Box::pin(std::future::ready(response))
+        client.expect_get_epoch_info().returning(|| {
+            Box::pin(std::future::ready(Ok(StacksEpochInfo::PostNakamoto {
+                nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
+            })))
         });
 
         client
@@ -423,10 +421,10 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
             Box::pin(std::future::ready(Ok(tenure)))
         });
 
-        client.expect_get_pox_info().returning(|| {
-            let response = serde_json::from_str::<RPCPoxInfoData>(GET_POX_INFO_JSON)
-                .map_err(Error::JsonSerialize);
-            Box::pin(std::future::ready(response))
+        client.expect_get_epoch_info().returning(|| {
+            Box::pin(std::future::ready(Ok(StacksEpochInfo::PostNakamoto {
+                nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
+            })))
         });
 
         // The signer set info is not necessary for this test.
@@ -895,10 +893,10 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
         client
             .expect_get_tenure()
             .returning(|_| Box::pin(std::future::ready(TenureBlocks::nearly_empty())));
-        client.expect_get_pox_info().returning(|| {
-            let response = serde_json::from_str::<RPCPoxInfoData>(GET_POX_INFO_JSON)
-                .map_err(Error::JsonSerialize);
-            Box::pin(std::future::ready(response))
+        client.expect_get_epoch_info().returning(|| {
+            Box::pin(std::future::ready(Ok(StacksEpochInfo::PostNakamoto {
+                nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
+            })))
         });
         client
             .expect_get_sortition_info()
@@ -1216,10 +1214,10 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
         client
             .expect_get_tenure()
             .returning(|_| Box::pin(std::future::ready(TenureBlocks::nearly_empty())));
-        client.expect_get_pox_info().returning(|| {
-            let response = serde_json::from_str::<RPCPoxInfoData>(GET_POX_INFO_JSON)
-                .map_err(Error::JsonSerialize);
-            Box::pin(std::future::ready(response))
+        client.expect_get_epoch_info().returning(|| {
+            Box::pin(std::future::ready(Ok(StacksEpochInfo::PostNakamoto {
+                nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
+            })))
         });
         client
             .expect_get_sortition_info()
@@ -1405,10 +1403,10 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
         client
             .expect_get_tenure()
             .returning(|_| Box::pin(std::future::ready(TenureBlocks::nearly_empty())));
-        client.expect_get_pox_info().returning(|| {
-            let response = serde_json::from_str::<RPCPoxInfoData>(GET_POX_INFO_JSON)
-                .map_err(Error::JsonSerialize);
-            Box::pin(std::future::ready(response))
+        client.expect_get_epoch_info().returning(|| {
+            Box::pin(std::future::ready(Ok(StacksEpochInfo::PostNakamoto {
+                nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
+            })))
         });
         client
             .expect_get_sortition_info()
@@ -1645,10 +1643,10 @@ async fn block_observer_ignores_coinbase() {
             Box::pin(std::future::ready(Ok(tenure)))
         });
 
-        client.expect_get_pox_info().returning(|| {
-            let response = serde_json::from_str::<RPCPoxInfoData>(GET_POX_INFO_JSON)
-                .map_err(Error::JsonSerialize);
-            Box::pin(std::future::ready(response))
+        client.expect_get_epoch_info().returning(|| {
+            Box::pin(std::future::ready(Ok(StacksEpochInfo::PostNakamoto {
+                nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
+            })))
         });
 
         client.expect_get_contract_source().returning(|_, _| {
