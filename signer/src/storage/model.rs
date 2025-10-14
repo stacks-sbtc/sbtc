@@ -920,6 +920,17 @@ impl AsRef<BitcoinBlockHash> for BitcoinBlockRef {
 }
 
 /// The Stacks block ID. This is different from the block header hash.
+///
+/// This type is serialized, deserialized, and displayed as a lowercase
+/// hex string, and mirrors what stacks-core does for the
+/// `stacks_common::types::chainstate::StacksBlockId` type.
+///
+/// The stacks-core Serialize and Deserialize implementations can be found
+/// in [1-2], and the Display implementation can be found in [2-3].
+///
+/// [1]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stacks-common/src/util/macros.rs#L623-L641>
+/// [2]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stacks-common/src/types/chainstate.rs#L366-L370>
+/// [3]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stacks-common/src/util/macros.rs#L499-L511>
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(transparent)]
 pub struct StacksBlockHash([u8; 32]);
@@ -965,11 +976,18 @@ impl std::fmt::Display for StacksBlockHash {
     }
 }
 
-/// Stacks transaction ID
+/// The ID for a Stacks transaction.
 ///
-/// This type is serialized, deserialized, and displayed the a lowercase
-/// hex string, which mirrors what stacks-core does for the
+/// This type is serialized, deserialized, and displayed as a lowercase
+/// hex string, and mirrors what stacks-core does for the
 /// `blockstack_lib::burnchains::Txid` type.
+///
+/// The stacks-core Serialize and Deserialize implementations can be found
+/// in [1-2], and the Display implementation can be found in [2-3].
+///
+/// [1]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stacks-common/src/util/macros.rs#L623-L641>
+/// [2]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stackslib/src/burnchains/mod.rs#L54-L59>
+/// [3]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stacks-common/src/util/macros.rs#L499-L511>
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StacksTxId([u8; 32]);
 
@@ -979,7 +997,7 @@ impl StacksTxId {
         self.0
     }
 
-    /// Return the inner bytes for the tx id.
+    /// Return the inner bytes for the txid.
     pub fn to_bytes(&self) -> &[u8; 32] {
         &self.0
     }
@@ -1696,7 +1714,10 @@ impl Deref for DbMultiaddr {
 
 #[cfg(test)]
 mod tests {
+    use std::marker::PhantomData;
+
     use fake::Fake as _;
+    use test_case::test_case;
 
     use sbtc::events::FromLittleEndianOrder as _;
 
@@ -1732,5 +1753,19 @@ mod tests {
         let round_trip = bitcoin::Txid::from_le_bytes(block_hash.to_le_bytes());
 
         assert_eq!(block_hash, round_trip);
+    }
+
+    #[test_case(PhantomData::<(StacksTxId, blockstack_lib::burnchains::Txid)>; "StacksTxId")]
+    #[test_case(PhantomData::<(StacksBlockHash, StacksBlockId)>; "StacksBlockHash")]
+    fn stacks_type_display_impl<L, F>(_: PhantomData<(L, F)>)
+    where
+        L: From<[u8; 32]> + std::fmt::Display,
+        F: From<[u8; 32]> + std::fmt::Display,
+    {
+        let mut rng = get_rng();
+        let txid_bytes: [u8; 32] = fake::Faker.fake_with_rng(&mut rng);
+        let local_type = L::from(txid_bytes);
+        let foriegn_type = F::from(txid_bytes);
+        assert_eq!(foriegn_type.to_string(), local_type.to_string());
     }
 }
