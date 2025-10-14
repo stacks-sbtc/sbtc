@@ -1415,7 +1415,7 @@ where
         chain_tip: &model::BitcoinBlockHash,
         wallet: &SignerWallet,
     ) -> Result<StacksTransaction, Error> {
-        let txid = req.txid.clone();
+        let txid = req.txid;
 
         let signal_stream = self
             .context
