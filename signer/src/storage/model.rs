@@ -966,6 +966,10 @@ impl std::fmt::Display for StacksBlockHash {
 }
 
 /// Stacks transaction ID
+///
+/// This type is serialized, deserialized, and displayed the a lowercase
+/// hex string, which mirrors what stacks-core does for the
+/// `blockstack_lib::burnchains::Txid` type.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StacksTxId([u8; 32]);
 
@@ -978,11 +982,6 @@ impl StacksTxId {
     /// Return the inner bytes for the tx id.
     pub fn to_bytes(&self) -> &[u8; 32] {
         &self.0
-    }
-
-    /// Returns the inner Txid.
-    pub fn into_inner(self) -> blockstack_lib::burnchains::Txid {
-        blockstack_lib::burnchains::Txid(self.0)
     }
 
     /// Create a StacksTxId from a hex string.

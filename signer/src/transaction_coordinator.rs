@@ -1199,7 +1199,7 @@ where
             contract_tx: contract_call.into(),
             nonce: tx.get_origin_nonce(),
             tx_fee: tx.get_tx_fee(),
-            txid: tx.txid(),
+            txid: tx.txid().into(),
         };
 
         self.process_sign_request(sign_request, bitcoin_chain_tip, multi_tx, wallet)
@@ -1306,7 +1306,7 @@ where
             contract_tx: contract_call.into(),
             nonce: tx.get_origin_nonce(),
             tx_fee: tx.get_tx_fee(),
-            txid: tx.txid(),
+            txid: tx.txid().into(),
         };
 
         Ok((sign_request, multi_tx))
@@ -1366,7 +1366,7 @@ where
             contract_tx: contract_call.into(),
             nonce: tx.get_origin_nonce(),
             tx_fee: tx.get_tx_fee(),
-            txid: tx.txid(),
+            txid: tx.txid().into(),
         };
 
         Ok((sign_request, multi_tx))
@@ -1400,7 +1400,7 @@ where
             contract_tx: contract_call.into(),
             nonce: tx.get_origin_nonce(),
             tx_fee: tx.get_tx_fee(),
-            txid: tx.txid(),
+            txid: tx.txid().into(),
         };
 
         Ok((sign_request, multi_tx))
@@ -2293,7 +2293,7 @@ where
             contract_tx: contract_deploy.into(),
             nonce: tx.get_origin_nonce(),
             tx_fee: tx.get_tx_fee(),
-            txid: tx.txid(),
+            txid: tx.txid().into(),
         };
 
         Ok((sign_request, multi_tx))

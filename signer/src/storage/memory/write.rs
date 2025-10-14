@@ -49,9 +49,7 @@ impl DbWrite for SharedStore {
         let mut store = self.lock().await;
         store.version += 1;
 
-        store
-            .stacks_blocks
-            .insert(block.block_hash, block.clone());
+        store.stacks_blocks.insert(block.block_hash, block.clone());
         store
             .bitcoin_anchor_to_stacks_blocks
             .entry(block.bitcoin_anchor)
@@ -97,10 +95,7 @@ impl DbWrite for SharedStore {
         let mut store = self.lock().await;
         store.version += 1;
 
-        let pk = (
-            withdraw_request.request_id,
-            withdraw_request.block_hash,
-        );
+        let pk = (withdraw_request.request_id, withdraw_request.block_hash);
 
         store
             .stacks_block_to_withdrawal_requests
@@ -185,9 +180,7 @@ impl DbWrite for SharedStore {
         store.version += 1;
 
         blocks.iter().for_each(|block| {
-            store
-                .stacks_blocks
-                .insert(block.block_hash, block.clone());
+            store.stacks_blocks.insert(block.block_hash, block.clone());
             store
                 .bitcoin_anchor_to_stacks_blocks
                 .entry(block.bitcoin_anchor)

@@ -428,7 +428,8 @@ async fn signer_rejects_multiple_attempts_in_tenure() {
     wallet.set_nonce(request.nonce);
     request.txid = MultisigTx::new_tx(&request.contract_tx, &wallet, request.tx_fee)
         .tx()
-        .txid();
+        .txid()
+        .into();
 
     // Try to sign the sign request for the first time in this tenure
     let result = tx_signer
@@ -447,7 +448,8 @@ async fn signer_rejects_multiple_attempts_in_tenure() {
     wallet.set_nonce(new_request.nonce);
     new_request.txid = MultisigTx::new_tx(&new_request.contract_tx, &wallet, new_request.tx_fee)
         .tx()
-        .txid();
+        .txid()
+        .into();
 
     assert_ne!(new_request.tx_fee, request.tx_fee);
     assert_ne!(new_request.nonce, request.nonce);
