@@ -930,7 +930,7 @@ impl AsRef<BitcoinBlockHash> for BitcoinBlockRef {
 ///
 /// [1]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stacks-common/src/util/macros.rs#L499-L511>
 /// [2]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stacks-common/src/types/chainstate.rs#L366-L370>
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(transparent)]
 pub struct StacksBlockHash([u8; 32]);
 
@@ -981,6 +981,12 @@ impl std::fmt::Display for StacksBlockHash {
     }
 }
 
+impl std::fmt::Debug for StacksBlockHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.as_hex().fmt(f)
+    }
+}
+
 /// The ID for a Stacks transaction.
 ///
 /// This type is serialized, deserialized, and displayed as a lowercase
@@ -993,7 +999,7 @@ impl std::fmt::Display for StacksBlockHash {
 /// [1]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stacks-common/src/util/macros.rs#L623-L641>
 /// [2]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stackslib/src/burnchains/mod.rs#L54-L59>
 /// [3]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stacks-common/src/util/macros.rs#L499-L511>
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StacksTxId([u8; 32]);
 
 impl StacksTxId {
@@ -1030,6 +1036,12 @@ impl<'de> serde::Deserialize<'de> for StacksTxId {
 }
 
 impl std::fmt::Display for StacksTxId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.as_hex().fmt(f)
+    }
+}
+
+impl std::fmt::Debug for StacksTxId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.as_hex().fmt(f)
     }
@@ -1764,13 +1776,17 @@ mod tests {
     #[test_case(PhantomData::<(StacksBlockHash, StacksBlockId)>; "StacksBlockHash")]
     fn stacks_type_display_impl<L, F>(_: PhantomData<(L, F)>)
     where
-        L: From<[u8; 32]> + std::fmt::Display,
-        F: From<[u8; 32]> + std::fmt::Display,
+        L: From<[u8; 32]> + std::fmt::Display + std::fmt::Debug,
+        F: From<[u8; 32]> + std::fmt::Display + std::fmt::Debug,
     {
         let mut rng = get_rng();
         let txid_bytes: [u8; 32] = fake::Faker.fake_with_rng(&mut rng);
         let local_type = L::from(txid_bytes);
         let foriegn_type = F::from(txid_bytes);
         assert_eq!(foriegn_type.to_string(), local_type.to_string());
+
+        let debug_local_type = format!("{:?}", local_type);
+        let debug_foriegn_type = format!("{:?}", foriegn_type);
+        assert_eq!(debug_local_type, debug_foriegn_type);
     }
 }
