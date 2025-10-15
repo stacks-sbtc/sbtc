@@ -9,7 +9,7 @@ use blockstack_lib::chainstate::burn::ConsensusHash;
 use blockstack_lib::{
     chainstate::{nakamoto::NakamotoBlock, stacks::StacksTransaction},
     net::api::{
-        getcontractsrc::ContractSrcResponse, getinfo::RPCPeerInfoData, getpoxinfo::RPCPoxInfoData,
+        getcontractsrc::ContractSrcResponse, getpoxinfo::RPCPoxInfoData,
         getsortition::SortitionInfo, gettenureinfo::RPCGetTenureInfo,
     },
 };
@@ -22,6 +22,7 @@ use crate::bitcoin::GetTransactionFeeResult;
 use crate::bitcoin::rpc::{BitcoinBlockHeader, BitcoinBlockInfo};
 use crate::context::SbtcLimits;
 use crate::keys::PrivateKey;
+use crate::stacks::api::GetNodeInfoResponse;
 use crate::stacks::api::SignerSetInfo;
 use crate::stacks::api::TenureBlocks;
 use crate::stacks::wallet::SignerWallet;
@@ -525,7 +526,7 @@ impl StacksInteract for WrappedMockStacksInteract {
         self.inner.lock().await.get_pox_info().await
     }
 
-    async fn get_node_info(&self) -> Result<RPCPeerInfoData, Error> {
+    async fn get_node_info(&self) -> Result<GetNodeInfoResponse, Error> {
         self.inner.lock().await.get_node_info().await
     }
 

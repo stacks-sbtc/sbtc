@@ -13,7 +13,6 @@ use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlockHeader;
 use blockstack_lib::chainstate::stacks::StacksTransaction;
 use blockstack_lib::net::api::getcontractsrc::ContractSrcResponse;
-use blockstack_lib::net::api::getinfo::RPCPeerInfoData;
 use blockstack_lib::net::api::getpoxinfo::RPCPoxEpoch;
 use blockstack_lib::net::api::getpoxinfo::RPCPoxInfoData;
 use blockstack_lib::net::api::getsortition::SortitionInfo;
@@ -42,6 +41,7 @@ use crate::error::Error;
 use crate::keys::PublicKey;
 use crate::stacks::api::AccountInfo;
 use crate::stacks::api::FeePriority;
+use crate::stacks::api::GetNodeInfoResponse;
 use crate::stacks::api::SignerSetInfo;
 use crate::stacks::api::StacksInteract;
 use crate::stacks::api::SubmitTxResponse;
@@ -458,16 +458,13 @@ impl StacksInteract for TestHarness {
         Ok(result)
     }
 
-    async fn get_node_info(&self) -> Result<RPCPeerInfoData, Error> {
-        let data = get_node_info_data();
+    async fn get_node_info(&self) -> Result<GetNodeInfoResponse, Error> {
+        let mut data = get_node_info_data();
 
-        let result = RPCPeerInfoData {
-            burn_block_height: self.bitcoin_blocks.len() as u64,
-            stacks_tip_height: self.stacks_blocks.len() as u64,
-            ..data
-        };
+        data.burn_block_height = (self.bitcoin_blocks.len() as u64).into();
+        data.stacks_tip_height = (self.stacks_blocks.len() as u64).into();
 
-        Ok(result)
+        Ok(data)
     }
 
     async fn get_contract_source(
@@ -591,7 +588,7 @@ fn get_pox_info_data() -> RPCPoxInfoData {
     serde_json::from_str::<RPCPoxInfoData>(raw_json_response).unwrap()
 }
 
-fn get_node_info_data() -> RPCPeerInfoData {
+fn get_node_info_data() -> GetNodeInfoResponse {
     let raw_json_response = r#"
     {
         "peer_version": 4207599114,
@@ -625,5 +622,5 @@ fn get_node_info_data() -> RPCPeerInfoData {
         "stackerdbs": []
     }"#;
 
-    serde_json::from_str::<RPCPeerInfoData>(raw_json_response).unwrap()
+    serde_json::from_str::<GetNodeInfoResponse>(raw_json_response).unwrap()
 }

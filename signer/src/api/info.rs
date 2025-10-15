@@ -237,23 +237,14 @@ impl InfoResponse {
     /// Populates the Stacks node tip information from the provided Stacks client.
     /// This uses the `/v2/info` RPC endpoint to populate the information.
     async fn populate_stacks_node_info(&mut self, stacks_client: &impl StacksInteract) {
-        let tenure_info = stacks_client.get_tenure_info().await;
         let node_info = stacks_client.get_node_info().await;
-
-        match tenure_info {
-            Ok(tenure_info) => {
-                self.stacks.node_tip = Some(ChainTipInfo {
-                    block_hash: tenure_info.tip_block_id,
-                    block_height: tenure_info.tip_height.into(),
-                });
-            }
-            Err(error) => {
-                tracing::error!(%error, "error getting stacks tenure info");
-            }
-        }
 
         match node_info {
             Ok(node_info) => {
+                self.stacks.node_tip = Some(ChainTipInfo {
+                    block_hash: node_info.stacks_chain_tip(),
+                    block_height: node_info.stacks_tip_height,
+                });
                 self.stacks.node_bitcoin_block_height = Some(node_info.burn_block_height.into());
                 self.stacks.node_version = Some(node_info.server_version);
             }
@@ -322,10 +313,11 @@ mod tests {
         time::Duration,
     };
 
-    use blockstack_lib::net::api::{getinfo::RPCPeerInfoData, gettenureinfo::RPCGetTenureInfo};
+    use blockstack_lib::net::api::gettenureinfo::RPCGetTenureInfo;
     use clarity::types::chainstate::StacksAddress;
     use fake::{Fake as _, Faker};
 
+    use crate::stacks::api::GetNodeInfoResponse;
     use crate::{
         api::ApiState,
         error::Error,
@@ -577,7 +569,7 @@ mod tests {
             })
             .await;
 
-        static NODE_INFO_RESPONSE: LazyLock<RPCPeerInfoData> = LazyLock::new(|| {
+        static NODE_INFO_RESPONSE: LazyLock<GetNodeInfoResponse> = LazyLock::new(|| {
             let json = include_str!("../../tests/fixtures/stacksapi-get-node-info-test-data.json");
             serde_json::from_str(json).unwrap()
         });
