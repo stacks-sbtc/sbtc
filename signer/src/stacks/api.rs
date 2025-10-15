@@ -631,16 +631,30 @@ impl TryFrom<AccountEntryResponse> for AccountInfo {
     }
 }
 
-// Minimal PoX info view to avoid enum deserialization issues.
+/// Minimal model type representing an epoch entry in a `/v2/pox` response,
+/// including only fields which we currently use.
+///
+/// Specifically, we do *not* use the `StacksEpochId` enum type from stacks-core
+/// as it would break if Stacks introduces new epochs prior to our dependencies
+/// being updated.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 struct PoxEpoch {
+    /// String representation of the epoch ID, e.g. `Epoch11`, `Epoch30`, `Epoch33`, etc.
     epoch_id: String,
+    /// The Bitcoin block height at which this epoch activates.
     start_height: BitcoinBlockHeight,
 }
 
+/// Minimal response type for the `/v2/pox` endpoint, including only fields
+/// which we currently use.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 struct PoxResponse {
+    /// The current Bitcoin block height, as known by the Stacks node based on
+    /// its current Stacks tenure. Note that if the Stacks node is behind, this
+    /// may be lower than the actual current Bitcoin block height.
     current_burnchain_block_height: BitcoinBlockHeight,
+    /// The list of all known epochs, including their start heights. Used
+    /// primarily to determine the start height of Stacks epoch 3.0 (Nakamoto).
     epochs: Vec<PoxEpoch>,
 }
 
