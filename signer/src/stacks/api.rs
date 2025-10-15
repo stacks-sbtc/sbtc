@@ -658,15 +658,16 @@ struct PoxResponse {
     epochs: Vec<PoxEpoch>,
 }
 
-/// Information regarding whether or not we are in pre- or post-Nakamoto
-/// era.
+/// Information regarding whether or not we are in pre- or post-Nakamoto era.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StacksEpochStatus {
     /// We are in the pre-Nakamoto era.
     PreNakamoto {
-        /// The current bitcoin block height.
-        current_bitcoin_height: BitcoinBlockHeight,
-        /// The bitcoin block height at which the Nakamoto era starts.
+        /// The current Bitcoin block height, as known by the Stacks node based on
+        /// its current Stacks tenure. Note that if the Stacks node is behind, this
+        /// may be lower than the actual current Bitcoin block height.
+        reported_bitcoin_height: BitcoinBlockHeight,
+        /// The bitcoin block height at which the Nakamoto era (epoch 3.0+) starts.
         nakamoto_start_height: BitcoinBlockHeight,
     },
     /// We are in the post-Nakamoto era.
@@ -698,7 +699,7 @@ impl TryFrom<PoxResponse> for StacksEpochStatus {
 
         match maybe_start {
             Some(start) if current < start => Ok(StacksEpochStatus::PreNakamoto {
-                current_bitcoin_height: current,
+                reported_bitcoin_height: current,
                 nakamoto_start_height: start,
             }),
             Some(start) => Ok(StacksEpochStatus::PostNakamoto { nakamoto_start_height: start }),
@@ -2683,8 +2684,8 @@ mod tests {
         let client = StacksClient::new(stacks_node_server.url().parse().unwrap()).unwrap();
         let resp = client.get_epoch_status().await.unwrap();
 
-        assert_matches!(resp, StacksEpochStatus::PreNakamoto { current_bitcoin_height, nakamoto_start_height }
-            if current_bitcoin_height == BitcoinBlockHeight::from(1999u64)
+        assert_matches!(resp, StacksEpochStatus::PreNakamoto { reported_bitcoin_height, nakamoto_start_height }
+            if reported_bitcoin_height == BitcoinBlockHeight::from(1999u64)
             && nakamoto_start_height == BitcoinBlockHeight::from(2000u64)
         );
 

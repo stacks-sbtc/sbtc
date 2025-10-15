@@ -444,7 +444,7 @@ impl StacksInteract for TestHarness {
 
         match maybe_start {
             Some(start) if current < start => Ok(StacksEpochStatus::PreNakamoto {
-                current_bitcoin_height: current,
+                reported_bitcoin_height: current,
                 nakamoto_start_height: start,
             }),
             Some(start) => Ok(StacksEpochStatus::PostNakamoto { nakamoto_start_height: start }),
