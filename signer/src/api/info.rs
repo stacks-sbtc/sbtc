@@ -245,7 +245,7 @@ impl InfoResponse {
                     block_hash: node_info.stacks_chain_tip(),
                     block_height: node_info.stacks_tip_height,
                 });
-                self.stacks.node_bitcoin_block_height = Some(node_info.burn_block_height.into());
+                self.stacks.node_bitcoin_block_height = Some(node_info.burn_block_height);
                 self.stacks.node_version = Some(node_info.server_version);
             }
             Err(error) => {
@@ -614,7 +614,7 @@ mod tests {
         );
         assert_eq!(
             result.stacks.node_bitcoin_block_height,
-            Some(NODE_INFO_RESPONSE.burn_block_height.into())
+            Some(NODE_INFO_RESPONSE.burn_block_height)
         );
         assert_eq!(
             result.stacks.node_version.expect("no node version"),
