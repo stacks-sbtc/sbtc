@@ -669,7 +669,8 @@ pub struct GetNodeInfoResponse {
 }
 
 impl GetNodeInfoResponse {
-    /// Create a StacksBlockHash from the tip of the canonical stacks blockchain.
+    /// Create a StacksBlockId from the tip information of the canonical
+    /// stacks blockchain.
     pub fn stacks_chain_tip(&self) -> StacksBlockId {
         StacksBlockId::new(&self.stacks_tip_consensus_hash, &self.stacks_tip)
     }
