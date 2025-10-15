@@ -3236,7 +3236,7 @@ impl DbRead for PgTransaction<'_> {
 
     async fn stacks_block_exists(
         &self,
-        block_id: &clarity::types::chainstate::StacksBlockId,
+        block_id: &StacksBlockId,
     ) -> Result<bool, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::stacks_block_exists(tx.as_mut(), block_id).await
