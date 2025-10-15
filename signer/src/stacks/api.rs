@@ -652,6 +652,9 @@ impl TryFrom<AccountEntryResponse> for AccountInfo {
 /// This type contains only a subset of the full response from stacks-core,
 /// you can find the full response here:
 /// <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stackslib/src/net/api/getinfo.rs#L53-L85>
+///
+/// Note that the stacks blockchain information here is the same
+/// corresponding fields returned from the `/v3/tenures/info` response.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GetNodeInfoResponse {
     /// The height of the tip of the canonical bitcoin blockchain.

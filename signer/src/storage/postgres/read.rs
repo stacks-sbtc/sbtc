@@ -3234,10 +3234,7 @@ impl DbRead for PgTransaction<'_> {
         PgRead::get_bitcoin_blocks_with_transaction(tx.as_mut(), txid).await
     }
 
-    async fn stacks_block_exists(
-        &self,
-        block_id: &StacksBlockId,
-    ) -> Result<bool, Error> {
+    async fn stacks_block_exists(&self, block_id: &StacksBlockId) -> Result<bool, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::stacks_block_exists(tx.as_mut(), block_id).await
     }
