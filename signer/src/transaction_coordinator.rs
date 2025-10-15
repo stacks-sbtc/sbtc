@@ -273,10 +273,14 @@ where
 
         match epoch_status {
             StacksEpochStatus::PreNakamoto {
-                reported_bitcoin_height: current_bitcoin_height,
+                reported_bitcoin_height,
                 nakamoto_start_height,
             } => {
-                tracing::debug!(%current_bitcoin_height, %nakamoto_start_height, "the stacks node has not reached epoch 3.0; skipping this round");
+                tracing::debug!(
+                    %reported_bitcoin_height,
+                    %nakamoto_start_height,
+                    "the stacks node has not reached epoch 3.0; skipping this round"
+                );
                 Ok(false)
             }
             StacksEpochStatus::PostNakamoto { nakamoto_start_height } => {
