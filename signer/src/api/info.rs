@@ -313,7 +313,6 @@ mod tests {
         time::Duration,
     };
 
-    use blockstack_lib::net::api::gettenureinfo::RPCGetTenureInfo;
     use clarity::types::chainstate::StacksAddress;
     use fake::{Fake as _, Faker};
 
@@ -352,11 +351,6 @@ mod tests {
             .with_stacks_client(|client| {
                 client
                     .expect_get_node_info()
-                    .once()
-                    .returning(|| Box::pin(async { Err(Error::Dummy) }));
-
-                client
-                    .expect_get_tenure_info()
                     .once()
                     .returning(|| Box::pin(async { Err(Error::Dummy) }));
 
@@ -423,11 +417,6 @@ mod tests {
             .with_stacks_client(|client| {
                 client
                     .expect_get_node_info()
-                    .once()
-                    .returning(|| Box::pin(async { Err(Error::Dummy) }));
-
-                client
-                    .expect_get_tenure_info()
                     .once()
                     .returning(|| Box::pin(async { Err(Error::Dummy) }));
 
@@ -512,11 +501,6 @@ mod tests {
                     .returning(|| Box::pin(async { Err(Error::Dummy) }));
 
                 client
-                    .expect_get_tenure_info()
-                    .once()
-                    .returning(|| Box::pin(async { Err(Error::Dummy) }));
-
-                client
                     .expect_get_current_signers_aggregate_key()
                     .once()
                     .returning(|_| Box::pin(async { Err(Error::Dummy) }));
@@ -574,22 +558,12 @@ mod tests {
             serde_json::from_str(json).unwrap()
         });
 
-        static TENURE_INFO_RESPONSE: LazyLock<RPCGetTenureInfo> = LazyLock::new(|| {
-            let json = include_str!("../../tests/fixtures/stacksapi-v3-tenures-info-data.json");
-            serde_json::from_str(json).unwrap()
-        });
-
         context
             .with_stacks_client(|client| {
                 client
                     .expect_get_node_info()
                     .once()
                     .returning(|| Box::pin(async { Ok(NODE_INFO_RESPONSE.clone()) }));
-
-                client
-                    .expect_get_tenure_info()
-                    .once()
-                    .returning(|| Box::pin(async move { Ok(TENURE_INFO_RESPONSE.clone()) }));
 
                 client
                     .expect_get_current_signers_aggregate_key()
@@ -606,11 +580,11 @@ mod tests {
         };
         assert_eq!(
             stacks_node_tip.block_hash,
-            TENURE_INFO_RESPONSE.tip_block_id
+            NODE_INFO_RESPONSE.stacks_chain_tip()
         );
         assert_eq!(
             stacks_node_tip.block_height,
-            TENURE_INFO_RESPONSE.tip_height.into()
+            NODE_INFO_RESPONSE.stacks_tip_height
         );
         assert_eq!(
             result.stacks.node_bitcoin_block_height,
@@ -663,11 +637,6 @@ mod tests {
             .with_stacks_client(|client| {
                 client
                     .expect_get_node_info()
-                    .once()
-                    .returning(|| Box::pin(async { Err(Error::Dummy) }));
-
-                client
-                    .expect_get_tenure_info()
                     .once()
                     .returning(|| Box::pin(async { Err(Error::Dummy) }));
 
