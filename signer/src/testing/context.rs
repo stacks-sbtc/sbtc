@@ -9,8 +9,8 @@ use blockstack_lib::chainstate::burn::ConsensusHash;
 use blockstack_lib::{
     chainstate::{nakamoto::NakamotoBlock, stacks::StacksTransaction},
     net::api::{
-        getcontractsrc::ContractSrcResponse,
-        getsortition::SortitionInfo, gettenureinfo::RPCGetTenureInfo,
+        getcontractsrc::ContractSrcResponse, getsortition::SortitionInfo,
+        gettenureinfo::RPCGetTenureInfo,
     },
 };
 use clarity::types::chainstate::{StacksAddress, StacksBlockId};
@@ -24,8 +24,8 @@ use crate::context::SbtcLimits;
 use crate::keys::PrivateKey;
 use crate::stacks::api::GetNodeInfoResponse;
 use crate::stacks::api::SignerSetInfo;
-use crate::stacks::api::TenureBlocks;
 use crate::stacks::api::StacksEpochStatus;
+use crate::stacks::api::TenureBlocks;
 use crate::stacks::wallet::SignerWallet;
 use crate::storage::Transactable;
 use crate::storage::model::BitcoinTxId;
