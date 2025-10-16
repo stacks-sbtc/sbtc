@@ -34,7 +34,6 @@ use crate::keys::PublicKey;
 use crate::keys::SignerScriptPubKey as _;
 use crate::metrics::BITCOIN_BLOCKCHAIN;
 use crate::metrics::Metrics;
-use crate::stacks::api::GetNakamotoStartHeight as _;
 use crate::stacks::api::SignerSetInfo;
 use crate::stacks::api::StacksInteract as _;
 use crate::stacks::api::TenureBlockHeaders;
@@ -281,10 +280,12 @@ impl<C: Context, B> BlockObserver<C, B> {
             return Ok(());
         }
 
-        let pox_info = self.context.get_stacks_client().get_pox_info().await?;
-        let nakamoto_start_height = pox_info
-            .nakamoto_start_height()
-            .ok_or(Error::MissingNakamotoStartHeight)?;
+        let nakamoto_start_height = self
+            .context
+            .get_stacks_client()
+            .get_epoch_status()
+            .await?
+            .nakamoto_start_height();
 
         self.context
             .state()

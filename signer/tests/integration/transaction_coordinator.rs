@@ -23,7 +23,6 @@ use blockstack_lib::chainstate::stacks::StacksTransaction;
 use blockstack_lib::chainstate::stacks::TokenTransferMemo;
 use blockstack_lib::chainstate::stacks::TransactionPayload;
 use blockstack_lib::net::api::getcontractsrc::ContractSrcResponse;
-use blockstack_lib::net::api::getpoxinfo::RPCPoxInfoData;
 use blockstack_lib::net::api::getsortition::SortitionInfo;
 use clarity::types::chainstate::StacksAddress;
 use clarity::types::chainstate::StacksBlockId;
@@ -67,8 +66,10 @@ use signer::message::Payload;
 use signer::network::MessageTransfer as _;
 use signer::stacks::api::SignerSetInfo;
 use signer::stacks::api::StacksClient;
+use signer::stacks::api::StacksEpochStatus;
 use signer::stacks::api::StacksInteract;
 use signer::stacks::wallet::SignerWallet;
+use signer::storage::model::BitcoinBlockHeight;
 use signer::storage::model::KeyRotationEvent;
 use signer::storage::model::WithdrawalTxOutput;
 use signer::testing::btc::get_canonical_chain_tip;
@@ -167,9 +168,6 @@ use crate::utxo_construction::generate_withdrawal;
 use crate::utxo_construction::make_deposit_request;
 
 type IntegrationTestContext<Stacks> = TestContext<PgStore, BitcoinCoreClient, Stacks, EmilyClient>;
-
-pub const GET_POX_INFO_JSON: &str =
-    include_str!("../../tests/fixtures/stacksapi-get-pox-info-test-data.json");
 
 async fn run_dkg<Rng, C>(
     ctx: &C,
@@ -563,10 +561,10 @@ async fn mock_stacks_core<D, B, E>(
             Box::pin(std::future::ready(Ok(tenure)))
         });
 
-        client.expect_get_pox_info().returning(|| {
-            let response = serde_json::from_str::<RPCPoxInfoData>(GET_POX_INFO_JSON)
-                .map_err(Error::JsonSerialize);
-            Box::pin(std::future::ready(response))
+        client.expect_get_epoch_status().returning(|| {
+            Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
+                nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
+            })))
         });
 
         client
@@ -3725,10 +3723,10 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
                 Box::pin(std::future::ready(Ok(tenure)))
             });
 
-            client.expect_get_pox_info().returning(|| {
-                let response = serde_json::from_str::<RPCPoxInfoData>(GET_POX_INFO_JSON)
-                    .map_err(Error::JsonSerialize);
-                Box::pin(std::future::ready(response))
+            client.expect_get_epoch_status().returning(|| {
+                Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
+                    nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
+                })))
             });
 
             client
@@ -4444,10 +4442,10 @@ async fn test_conservative_initial_sbtc_limits() {
                 Box::pin(std::future::ready(Ok(tenure)))
             });
 
-            client.expect_get_pox_info().returning(|| {
-                let response = serde_json::from_str::<RPCPoxInfoData>(GET_POX_INFO_JSON)
-                    .map_err(Error::JsonSerialize);
-                Box::pin(std::future::ready(response))
+            client.expect_get_epoch_status().returning(|| {
+                Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
+                    nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
+                })))
             });
 
             client
