@@ -1782,11 +1782,11 @@ mod tests {
         let mut rng = get_rng();
         let txid_bytes: [u8; 32] = fake::Faker.fake_with_rng(&mut rng);
         let local_type = L::from(txid_bytes);
-        let foriegn_type = F::from(txid_bytes);
-        assert_eq!(foriegn_type.to_string(), local_type.to_string());
+        let foreign_type = F::from(txid_bytes);
+        assert_eq!(foreign_type.to_string(), local_type.to_string());
 
         let debug_local_type = format!("{:?}", local_type);
-        let debug_foriegn_type = format!("{:?}", foriegn_type);
-        assert_eq!(debug_local_type, debug_foriegn_type);
+        let debug_foreign_type = format!("{:?}", foreign_type);
+        assert_eq!(debug_local_type, debug_foreign_type);
     }
 }
