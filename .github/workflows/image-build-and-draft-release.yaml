@@ -128,7 +128,7 @@ jobs:
         id: upload_attestation
         uses: stacks-sbtc/actions/upload-artifact@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
-          name: attestation-files-${{ github.event.client_payload.tag_name }}
+          name: name: attestation-files-${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }}
           overwrite: true
           path: |
             ${{ env.ATTESTATION_FILE }}
