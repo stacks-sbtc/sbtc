@@ -4027,7 +4027,7 @@ async fn test_get_btc_state_with_available_sweep_transactions_and_rbf() {
     let db = testing::storage::new_test_database().await;
 
     let client = BitcoinCoreClient::new(
-        "http://localhost:18443",
+        regtest::BITCOIN_CORE_RPC_ENDPOINT,
         regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
         regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
     )
