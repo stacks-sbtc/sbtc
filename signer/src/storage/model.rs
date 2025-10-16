@@ -947,7 +947,7 @@ impl StacksBlockHash {
 
     /// Return the block hash as a hex string.
     pub fn to_hex(&self) -> String {
-        self.0.to_hex_string(bitcoin::hex::Case::Lower)
+        self.0.to_lower_hex_string()
     }
 }
 
