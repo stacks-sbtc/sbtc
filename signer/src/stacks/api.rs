@@ -288,7 +288,7 @@ pub trait StacksInteract: Send + Sync {
     /// Attempt to get information from a Stacks node about whether or not it is
     /// in a pre- or post-Nakamoto epoch (3.0).
     ///
-    /// Returns a [`StacksEpochInfo`] variant if successful. If the Stacks node
+    /// Returns a [`StacksEpochStatus`] variant if successful. If the Stacks node
     /// does not report an entry for Epoch 3.0, then an
     /// [`Error::MissingNakamotoStartHeight`] error is returned.
     fn get_epoch_status(&self) -> impl Future<Output = Result<StacksEpochStatus, Error>> + Send;
