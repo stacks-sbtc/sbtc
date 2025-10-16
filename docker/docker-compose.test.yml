@@ -2,21 +2,15 @@ services:
 
   bitcoind:
     container_name: bitcoind
-    image: bitcoin/bitcoin:25.2@sha256:14b4777166cba8de36b62ce72801038760a8f490122781b66d40592c8c69ebda
+    image: lncm/bitcoind:v25.1
     volumes:
-      - ../signer/tests/service-configs/bitcoin.conf:/root/.bitcoin/bitcoin.conf
+      - ../signer/tests/service-configs/bitcoin.conf:/data/.bitcoin/bitcoin.conf:ro
     restart: on-failure
     # For some reason, the CMD in the original Dockerfile is set to publish
     # events on zeromq, and it seems to interfere with the events that we
     # want to publish. So we overwrite the CMD by just setting the
     # -logtimestamps argument in the command here.
     command: [ "-logtimestamps" ]
-    entrypoint:
-      - /bin/bash
-      - -c
-      - |
-        set -e
-        bitcoind
     stop_grace_period: 10s
     ports:
       - "127.0.0.1:18443:18443"
