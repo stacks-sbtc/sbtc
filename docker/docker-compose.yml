@@ -283,7 +283,7 @@ services:
   # Bitcoin / Burnchain.
   # --------------------
   bitcoin:
-    image: bitcoin/bitcoin:25.2@sha256:14b4777166cba8de36b62ce72801038760a8f490122781b66d40592c8c69ebda
+    image: bitcoin/bitcoin:25.2
     ports:
       - "127.0.0.1:18443:18443"
       - "127.0.0.1:28332:28332"
@@ -305,7 +305,7 @@ services:
       - bitcoin-mempool
 
   bitcoin-miner:
-    image: bitcoin/bitcoin:25.2@sha256:14b4777166cba8de36b62ce72801038760a8f490122781b66d40592c8c69ebda
+    image: bitcoin/bitcoin:25.2
     depends_on:
       bitcoin:
         condition: service_healthy
