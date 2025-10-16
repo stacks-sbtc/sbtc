@@ -286,7 +286,6 @@ services:
     image: bitcoin/bitcoin:25.2
     ports:
       - "127.0.0.1:18443:18443"
-      - "127.0.0.1:28332:28332"
     volumes:
       - ./bitcoin/bitcoin.conf:/root/.bitcoin/bitcoin.conf
     entrypoint:
