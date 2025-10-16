@@ -50,6 +50,7 @@ use crate::storage::DbRead;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::StacksBlock;
+use crate::storage::model::StacksBlockHash;
 use crate::storage::model::StacksBlockHeight;
 use crate::storage::model::StacksTxId;
 use crate::storage::model::ToLittleEndianOrder as _;
@@ -668,14 +669,14 @@ pub struct GetNodeInfoResponse {
     /// block id.
     stacks_tip: BlockHeaderHash,
     /// The consensus hash of the tip of the canonical stacks blockchain.
-    stacks_tip_consensus_hash: ConsensusHash,
+    pub stacks_tip_consensus_hash: ConsensusHash,
 }
 
 impl GetNodeInfoResponse {
-    /// Create a StacksBlockId from the tip information of the canonical
+    /// Create a StacksBlockHash from the tip information of the canonical
     /// stacks blockchain.
-    pub fn stacks_chain_tip(&self) -> StacksBlockId {
-        StacksBlockId::new(&self.stacks_tip_consensus_hash, &self.stacks_tip)
+    pub fn stacks_chain_tip(&self) -> StacksBlockHash {
+        StacksBlockId::new(&self.stacks_tip_consensus_hash, &self.stacks_tip).into()
     }
 }
 

@@ -242,7 +242,7 @@ impl InfoResponse {
         match node_info {
             Ok(node_info) => {
                 self.stacks.node_tip = Some(ChainTipInfo {
-                    block_hash: node_info.stacks_chain_tip(),
+                    block_hash: node_info.stacks_chain_tip().into(),
                     block_height: node_info.stacks_tip_height,
                 });
                 self.stacks.node_bitcoin_block_height = Some(node_info.burn_block_height);
@@ -580,7 +580,7 @@ mod tests {
         };
         assert_eq!(
             stacks_node_tip.block_hash,
-            NODE_INFO_RESPONSE.stacks_chain_tip()
+            NODE_INFO_RESPONSE.stacks_chain_tip().into()
         );
         assert_eq!(
             stacks_node_tip.block_height,
