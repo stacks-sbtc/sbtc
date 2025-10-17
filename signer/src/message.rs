@@ -192,7 +192,7 @@ pub struct StacksTransactionSignRequest {
     /// The transaction fee in microSTX.
     pub tx_fee: u64,
     /// The transaction ID of the associated contract call transaction.
-    pub txid: blockstack_lib::burnchains::Txid,
+    pub txid: StacksTxId,
 }
 
 impl StacksTransactionSignRequest {
@@ -213,7 +213,7 @@ impl StacksTransactionSignRequest {
 #[derive(Debug, Clone, PartialEq)]
 pub struct StacksTransactionSignature {
     /// Id of the signed transaction.
-    pub txid: blockstack_lib::burnchains::Txid,
+    pub txid: StacksTxId,
     /// A recoverable ECDSA signature over the transaction.
     pub signature: RecoverableSignature,
 }
@@ -231,6 +231,23 @@ pub struct BitcoinPreSignRequest {
     /// The total fee amount and the fee rate for the last transaction that
     /// used this UTXO as an input.
     pub last_fees: Option<Fees>,
+}
+
+impl std::fmt::Display for BitcoinPreSignRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "BitcoinPreSignRequest(request_package=[")?;
+        for (i, value) in self.request_package.iter().enumerate() {
+            if i > 0 {
+                write!(f, ",")?;
+            }
+            write!(f, "{value}")?;
+        }
+        write!(
+            f,
+            "], fee_rate={}, last_fees={:?})",
+            self.fee_rate, self.last_fees
+        )
+    }
 }
 
 /// An acknowledgment of a [`BitcoinPreSignRequest`].
@@ -306,11 +323,11 @@ mod tests {
     use std::marker::PhantomData;
 
     use super::*;
-    use crate::codec::{Decode, Encode};
-    use crate::ecdsa::{SignEcdsa, Signed};
+    use crate::codec::{Decode as _, Encode as _};
+    use crate::ecdsa::{SignEcdsa as _, Signed};
     use crate::keys::PrivateKey;
 
-    use rand::SeedableRng;
+    use rand::SeedableRng as _;
     use test_case::test_case;
 
     #[test_case(PhantomData::<SignerDepositDecision> ; "SignerDepositDecision")]

@@ -1,7 +1,9 @@
-use std::str::FromStr;
+//! CLI tool providing demo functionality for the sBTC signers.
+
+use std::str::FromStr as _;
 
 use bitcoin::consensus::encode::serialize_hex;
-use bitcoin::hex::DisplayHex;
+use bitcoin::hex::DisplayHex as _;
 use bitcoin::{Address, XOnlyPublicKey};
 use bitcoin::{
     Amount, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, absolute, transaction::Version,
@@ -34,9 +36,9 @@ use emily_client::{
 use sbtc::deposits::{DepositScriptInputs, ReclaimScriptInputs};
 use signer::config::Settings;
 use signer::context::Context as SignerCtx;
-use signer::keys::{PrivateKey, PublicKey, SignerScriptPubKey};
+use signer::keys::{PrivateKey, PublicKey, SignerScriptPubKey as _};
 use signer::signature::{RecoverableEcdsaSignature as _, sign_stacks_tx};
-use signer::stacks::api::{StacksClient, StacksInteract};
+use signer::stacks::api::{StacksClient, StacksInteract as _};
 use signer::stacks::contracts::{AsContractCall, AsTxPayload as _, ReqContext};
 use stacks_common::address::{
     AddressHashMode, C32_ADDRESS_VERSION_MAINNET_SINGLESIG, C32_ADDRESS_VERSION_TESTNET_SINGLESIG,
@@ -185,8 +187,8 @@ impl AsContractCall for InitiateWithdrawalRequest {
     const CONTRACT_NAME: &'static str = "sbtc-withdrawal";
     const FUNCTION_NAME: &'static str = "initiate-withdrawal-request";
     /// The stacks address that deployed the contract.
-    fn deployer_address(&self) -> StacksAddress {
-        self.deployer
+    fn deployer_address(&self) -> &StacksAddress {
+        &self.deployer
     }
     /// The arguments to the clarity function.
     fn as_contract_args(&self) -> Vec<ClarityValue> {
@@ -406,7 +408,7 @@ async fn exec_withdraw(ctx: &Context, args: WithdrawArgs) -> Result<(), Error> {
         amount: args.amount,
         recipient,
         max_fee: args.max_fee,
-        deployer: ctx.deployer,
+        deployer: ctx.deployer.clone(),
     };
 
     let payload = TransactionPayload::ContractCall(withdrawal_request.as_contract_call());
@@ -461,7 +463,7 @@ async fn create_stacks_tx(
     let conditions = payload.post_conditions();
 
     let auth = SinglesigSpendingCondition {
-        signer: sender_addr.bytes,
+        signer: sender_addr.bytes().clone(),
         nonce,
         tx_fee: 1000,
         hash_mode: SinglesigHashMode::P2PKH,

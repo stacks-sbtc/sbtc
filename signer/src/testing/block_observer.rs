@@ -1,32 +1,29 @@
 //! Test utilities for the block observer
 
 use std::collections::HashMap;
-use std::ops::Deref;
+use std::ops::Deref as _;
 
 use bitcoin::Amount;
 use bitcoin::BlockHash;
 use bitcoin::Txid;
-use bitcoin::hashes::Hash;
+use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc_json::GetTxOutResult;
 use blockstack_lib::chainstate::burn::ConsensusHash;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlockHeader;
 use blockstack_lib::chainstate::stacks::StacksTransaction;
 use blockstack_lib::net::api::getcontractsrc::ContractSrcResponse;
-use blockstack_lib::net::api::getinfo::RPCPeerInfoData;
-use blockstack_lib::net::api::getpoxinfo::RPCPoxEpoch;
-use blockstack_lib::net::api::getpoxinfo::RPCPoxInfoData;
 use blockstack_lib::net::api::getsortition::SortitionInfo;
 use blockstack_lib::net::api::gettenureinfo::RPCGetTenureInfo;
 use blockstack_lib::types::chainstate::StacksAddress;
 use blockstack_lib::types::chainstate::StacksBlockId;
 use clarity::types::chainstate::BurnchainHeaderHash;
 use clarity::types::chainstate::SortitionId;
-use clarity::vm::costs::ExecutionCost;
 use emily_client::models::DepositStatus;
-use rand::seq::IteratorRandom;
+use rand::seq::IteratorRandom as _;
 use sbtc::deposits::CreateDepositRequest;
 
+use crate::bitcoin::BitcoinBlockHashStreamProvider;
 use crate::bitcoin::BitcoinInteract;
 use crate::bitcoin::GetTransactionFeeResult;
 use crate::bitcoin::TransactionLookupHint;
@@ -41,7 +38,9 @@ use crate::error::Error;
 use crate::keys::PublicKey;
 use crate::stacks::api::AccountInfo;
 use crate::stacks::api::FeePriority;
+use crate::stacks::api::GetNodeInfoResponse;
 use crate::stacks::api::SignerSetInfo;
+use crate::stacks::api::StacksEpochStatus;
 use crate::stacks::api::StacksInteract;
 use crate::stacks::api::SubmitTxResponse;
 use crate::stacks::api::TenureBlocks;
@@ -197,6 +196,16 @@ impl TestHarness {
     }
 }
 
+impl BitcoinBlockHashStreamProvider for TestHarness {
+    type Error = Error;
+    fn get_block_hash_stream(
+        &self,
+    ) -> impl futures::Stream<Item = Result<BlockHash, Self::Error>> + Send + Sync + Unpin + 'static
+    {
+        self.spawn_block_hash_stream()
+    }
+}
+
 impl TryFrom<TestHarness> for ApiFallbackClient<TestHarness> {
     type Error = Error;
     fn try_from(value: TestHarness) -> Result<Self, Error> {
@@ -295,6 +304,10 @@ impl BitcoinInteract for TestHarness {
     async fn get_network_info(&self) -> Result<bitcoincore_rpc_json::GetNetworkInfoResult, Error> {
         unimplemented!()
     }
+
+    async fn get_best_block_hash(&self) -> Result<BlockHash, Error> {
+        unimplemented!()
+    }
 }
 
 impl StacksInteract for TestHarness {
@@ -302,7 +315,7 @@ impl StacksInteract for TestHarness {
         &self,
         _contract_principal: &StacksAddress,
     ) -> Result<Option<SignerSetInfo>, Error> {
-        todo!()
+        Ok(None)
     }
     async fn get_current_signers_aggregate_key(
         &self,
@@ -331,20 +344,20 @@ impl StacksInteract for TestHarness {
         todo!()
     }
 
-    async fn get_block(&self, block_id: StacksBlockId) -> Result<NakamotoBlock, Error> {
+    async fn get_block(&self, block_id: &StacksBlockId) -> Result<NakamotoBlock, Error> {
         self.stacks_blocks
             .iter()
-            .skip_while(|(id, _, _)| &block_id != id)
+            .skip_while(|(id, _, _)| block_id != id)
             .map(|(_, block, _)| block)
             .next()
             .cloned()
             .ok_or(Error::MissingBlock)
     }
-    async fn get_tenure(&self, block_id: StacksBlockId) -> Result<TenureBlocks, Error> {
+    async fn get_tenure(&self, block_id: &StacksBlockId) -> Result<TenureBlocks, Error> {
         let (stx_block_id, stx_block, btc_block_id) = self
             .stacks_blocks
             .iter()
-            .find(|(id, _, _)| &block_id == id)
+            .find(|(id, _, _)| block_id == id)
             .ok_or(Error::MissingBlock)?;
 
         let blocks: Vec<NakamotoBlock> = self
@@ -368,14 +381,16 @@ impl StacksInteract for TestHarness {
                 .stacks_blocks
                 .iter()
                 .find(|(_, _, block_id)| block_id == btc_block_id)
-                .map(|(stx_block_id, _, _)| *stx_block_id)
+                .map(|(stx_block_id, _, _)| stx_block_id)
+                .cloned()
                 .unwrap(),
             parent_consensus_hash: ConsensusHash([0; 20]),
             parent_tenure_start_block_id: StacksBlockId::first_mined(),
             tip_block_id: self
                 .stacks_blocks
                 .last()
-                .map(|(block_id, _, _)| *block_id)
+                .map(|(block_id, _, _)| block_id)
+                .cloned()
                 .unwrap(),
             tip_height: self.stacks_blocks.len() as u64,
             reward_cycle: 0,
@@ -402,6 +417,7 @@ impl StacksInteract for TestHarness {
             stacks_parent_ch: None,
             last_sortition_ch: None,
             committed_block_hash: None,
+            vrf_seed: None,
         })
     }
 
@@ -412,44 +428,37 @@ impl StacksInteract for TestHarness {
         Ok(500_000)
     }
 
-    async fn get_pox_info(&self) -> Result<RPCPoxInfoData, Error> {
-        let nakamoto_start_height = self
+    async fn get_epoch_status(&self) -> Result<StacksEpochStatus, Error> {
+        // Current burnchain (Bitcoin) height from the last Bitcoin block we have.
+        let current = self
+            .bitcoin_blocks
+            .last()
+            .map(|b| b.height)
+            .unwrap_or_default();
+
+        // For tests, use the first Stacks block's chain_length as the Epoch 3.0 start.
+        let maybe_start = self
             .stacks_blocks
             .first()
-            .map(|(_, block, _)| block.header.chain_length)
-            .unwrap_or_default();
-        let data = get_pox_info_data();
+            .map(|(_, block, _)| BitcoinBlockHeight::from(block.header.chain_length));
 
-        let result = RPCPoxInfoData {
-            epochs: vec![RPCPoxEpoch {
-                epoch_id: clarity::types::StacksEpochId::Epoch30,
-                start_height: nakamoto_start_height,
-                end_height: 9223372036854776000,
-                network_epoch: 11,
-                block_limit: ExecutionCost {
-                    write_length: 15_000_000,
-                    write_count: 15_000,
-                    read_length: 100_000_000,
-                    read_count: 15_000,
-                    runtime: 5_000_000_000,
-                },
-            }],
-            ..data
-        };
-
-        Ok(result)
+        match maybe_start {
+            Some(start) if current < start => Ok(StacksEpochStatus::PreNakamoto {
+                reported_bitcoin_height: current,
+                nakamoto_start_height: start,
+            }),
+            Some(start) => Ok(StacksEpochStatus::PostNakamoto { nakamoto_start_height: start }),
+            None => Err(Error::MissingNakamotoStartHeight),
+        }
     }
 
-    async fn get_node_info(&self) -> Result<RPCPeerInfoData, Error> {
-        let data = get_node_info_data();
+    async fn get_node_info(&self) -> Result<GetNodeInfoResponse, Error> {
+        let mut data = get_node_info_data();
 
-        let result = RPCPeerInfoData {
-            burn_block_height: self.bitcoin_blocks.len() as u64,
-            stacks_tip_height: self.stacks_blocks.len() as u64,
-            ..data
-        };
+        data.burn_block_height = (self.bitcoin_blocks.len() as u64).into();
+        data.stacks_tip_height = (self.stacks_blocks.len() as u64).into();
 
-        Ok(result)
+        Ok(data)
     }
 
     async fn get_contract_source(
@@ -531,49 +540,7 @@ impl EmilyInteract for TestHarness {
     }
 }
 
-fn get_pox_info_data() -> RPCPoxInfoData {
-    let raw_json_response = r#"
-    {
-        "contract_id": "ST000000000000000000002AMW42H.pox-4",
-        "pox_activation_threshold_ustx": 700073322473389,
-        "first_burnchain_block_height": 0,
-        "current_burnchain_block_height": 1880,
-        "prepare_phase_block_length": 5,
-        "reward_phase_block_length": 15,
-        "reward_slots": 30,
-        "rejection_fraction": null,
-        "total_liquid_supply_ustx": 70007332247338910,
-        "current_cycle": {
-            "id": 94,
-            "min_threshold_ustx": 583400000000000,
-            "stacked_ustx": 5250510000000000,
-            "is_pox_active": true
-        },
-        "next_cycle": {
-            "id": 95,
-            "min_threshold_ustx": 583400000000000,
-            "min_increment_ustx": 8750916530917,
-            "stacked_ustx": 5250510000000000,
-            "prepare_phase_start_block_height": 1895,
-            "blocks_until_prepare_phase": 15,
-            "reward_phase_start_block_height": 1900,
-            "blocks_until_reward_phase": 20,
-            "ustx_until_pox_rejection": null
-        },
-        "epochs": [],
-        "min_amount_ustx": 583400000000000,
-        "prepare_cycle_length": 5,
-        "reward_cycle_id": 94,
-        "reward_cycle_length": 20,
-        "rejection_votes_left_required": null,
-        "next_reward_cycle_in": 20,
-        "contract_versions": []
-    }"#;
-
-    serde_json::from_str::<RPCPoxInfoData>(raw_json_response).unwrap()
-}
-
-fn get_node_info_data() -> RPCPeerInfoData {
+fn get_node_info_data() -> GetNodeInfoResponse {
     let raw_json_response = r#"
     {
         "peer_version": 4207599114,
@@ -607,5 +574,5 @@ fn get_node_info_data() -> RPCPeerInfoData {
         "stackerdbs": []
     }"#;
 
-    serde_json::from_str::<RPCPeerInfoData>(raw_json_response).unwrap()
+    serde_json::from_str::<GetNodeInfoResponse>(raw_json_response).unwrap()
 }

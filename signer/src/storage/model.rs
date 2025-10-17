@@ -8,10 +8,13 @@ use std::ops::Deref;
 use std::ops::{Add, Sub};
 
 use bitcoin::hashes::Hash as _;
+use bitcoin::hex::DisplayHex as _;
+use bitcoin::hex::FromHex as _;
 use bitcoin::{OutPoint, ScriptBuf};
 use bitvec::array::BitArray;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
 use clarity::vm::types::PrincipalData;
+use libp2p::{Multiaddr, PeerId};
 use serde::{Deserialize, Serialize};
 use stacks_common::types::chainstate::BurnchainHeaderHash;
 use stacks_common::types::chainstate::StacksBlockId;
@@ -25,6 +28,19 @@ use crate::error::Error;
 use crate::keys::PublicKey;
 use crate::keys::PublicKeyXOnly;
 use crate::stacks::api::SignerSetInfo;
+
+/// A P2P peer which the signer has successfully connected to.
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
+pub struct P2PPeer {
+    /// The peer ID of the connected peer.
+    pub peer_id: DbPeerId,
+    /// The public key of the connected peer.
+    pub public_key: PublicKey,
+    /// The address of the connected peer.
+    pub address: DbMultiaddr,
+    /// The timestamp of the last successful dial to the peer.
+    pub last_dialed_at: Timestamp,
+}
 
 /// A bitcoin transaction output (TXO) relevant for the sBTC signers.
 ///
@@ -174,7 +190,7 @@ impl StacksBlock {
         Self {
             block_hash: block.block_id().into(),
             block_height: block.header.chain_length.into(),
-            parent_hash: block.header.parent_block_id.into(),
+            parent_hash: block.header.parent_block_id.clone().into(),
             bitcoin_anchor: *bitcoin_anchor,
         }
     }
@@ -690,7 +706,7 @@ pub enum TxPrevoutType {
 ///
 /// A request-id and a Stacks Block ID is enough to uniquely identify the
 /// request, but we add in the transaction ID for completeness.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct QualifiedRequestId {
     /// The ID that was generated in the clarity contract call for the
     /// withdrawal request.
@@ -903,74 +919,149 @@ impl AsRef<BitcoinBlockHash> for BitcoinBlockRef {
     }
 }
 
-/// The Stacks block ID. This is different from the block header hash.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+/// The Stacks block ID. This type mirrors the `StacksBlockId` type in
+/// stacks-core, not the `BlockHeaderHash` type.
+///
+/// This type is displayed as a lowercase hex string, and mirrors what
+/// stacks-core does for the
+/// `stacks_common::types::chainstate::StacksBlockId` type.
+///
+/// The stacks-core Display implementation can be found in [1-2].
+///
+/// [1]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stacks-common/src/util/macros.rs#L499-L511>
+/// [2]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stacks-common/src/types/chainstate.rs#L366-L370>
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(transparent)]
-pub struct StacksBlockHash(StacksBlockId);
+pub struct StacksBlockHash([u8; 32]);
 
-impl Deref for StacksBlockHash {
-    type Target = StacksBlockId;
-    fn deref(&self) -> &Self::Target {
+impl StacksBlockHash {
+    /// Return the inner bytes for the block hash.
+    pub fn into_bytes(self) -> [u8; 32] {
+        self.0
+    }
+
+    /// Return the inner bytes for the block hash.
+    pub fn to_bytes(&self) -> &[u8; 32] {
         &self.0
+    }
+
+    /// Return the block hash as a hex string.
+    pub fn to_hex(&self) -> String {
+        self.0.to_lower_hex_string()
     }
 }
 
 impl From<StacksBlockId> for StacksBlockHash {
     fn from(value: StacksBlockId) -> Self {
-        Self(value)
+        Self(value.0)
+    }
+}
+
+impl From<&StacksBlockId> for StacksBlockHash {
+    fn from(value: &StacksBlockId) -> Self {
+        Self(value.0)
     }
 }
 
 impl From<StacksBlockHash> for StacksBlockId {
     fn from(value: StacksBlockHash) -> Self {
-        value.0
+        StacksBlockId(value.0)
     }
 }
 
 impl From<[u8; 32]> for StacksBlockHash {
     fn from(bytes: [u8; 32]) -> Self {
-        Self(StacksBlockId(bytes))
+        Self(bytes)
     }
 }
 
 impl std::fmt::Display for StacksBlockHash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
+        self.0.as_hex().fmt(f)
     }
 }
 
-/// Stacks transaction ID
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct StacksTxId(blockstack_lib::burnchains::Txid);
+impl std::fmt::Debug for StacksBlockHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.as_hex().fmt(f)
+    }
+}
+
+/// The ID for a Stacks transaction.
+///
+/// This type is serialized, deserialized, and displayed as a lowercase
+/// hex string, and mirrors what stacks-core does for the
+/// `blockstack_lib::burnchains::Txid` type.
+///
+/// The stacks-core Serialize and Deserialize implementations can be found
+/// in [1-2], and the Display implementation can be found in [2-3].
+///
+/// [1]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stacks-common/src/util/macros.rs#L623-L641>
+/// [2]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stackslib/src/burnchains/mod.rs#L54-L59>
+/// [3]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stacks-common/src/util/macros.rs#L499-L511>
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct StacksTxId([u8; 32]);
+
+impl StacksTxId {
+    /// Return the inner bytes for the txid.
+    pub fn into_bytes(self) -> [u8; 32] {
+        self.0
+    }
+
+    /// Return the inner bytes for the txid.
+    pub fn to_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+
+    /// Create a StacksTxId from a hex string.
+    pub fn from_hex(data: &str) -> Result<Self, Error> {
+        <[u8; 32]>::from_hex(data)
+            .map(Self)
+            .map_err(Error::DecodeHexTxid)
+    }
+}
+
+impl serde::Serialize for StacksTxId {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let inst = self.0.to_lower_hex_string();
+        s.serialize_str(inst.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for StacksTxId {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<StacksTxId, D::Error> {
+        let inst_str = String::deserialize(d)?;
+        StacksTxId::from_hex(&inst_str).map_err(serde::de::Error::custom)
+    }
+}
 
 impl std::fmt::Display for StacksTxId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        self.0.as_hex().fmt(f)
     }
 }
 
-impl Deref for StacksTxId {
-    type Target = blockstack_lib::burnchains::Txid;
-    fn deref(&self) -> &Self::Target {
-        &self.0
+impl std::fmt::Debug for StacksTxId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.as_hex().fmt(f)
     }
 }
 
 impl From<blockstack_lib::burnchains::Txid> for StacksTxId {
     fn from(value: blockstack_lib::burnchains::Txid) -> Self {
-        Self(value)
+        Self(value.0)
     }
 }
 
 impl From<StacksTxId> for blockstack_lib::burnchains::Txid {
     fn from(value: StacksTxId) -> Self {
-        value.0
+        blockstack_lib::burnchains::Txid(value.0)
     }
 }
 
 impl From<[u8; 32]> for StacksTxId {
     fn from(bytes: [u8; 32]) -> Self {
-        Self(blockstack_lib::burnchains::Txid(bytes))
+        Self(bytes)
     }
 }
 
@@ -1211,7 +1302,7 @@ pub struct BitcoinWithdrawalOutput {
 
 impl From<sbtc::events::StacksTxid> for StacksTxId {
     fn from(value: sbtc::events::StacksTxid) -> Self {
-        Self(blockstack_lib::burnchains::Txid(value.0))
+        Self(value.0)
     }
 }
 
@@ -1604,11 +1695,48 @@ impl From<time::OffsetDateTime> for Timestamp {
     }
 }
 
+/// A newtype over [`PeerId`] which implements encode/decode for sqlx.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct DbPeerId(PeerId);
+
+impl From<PeerId> for DbPeerId {
+    fn from(value: PeerId) -> Self {
+        Self(value)
+    }
+}
+
+impl Deref for DbPeerId {
+    type Target = PeerId;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A newtype over [`Multiaddr`] which implements encode/decode for sqlx.
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct DbMultiaddr(Multiaddr);
+
+impl From<Multiaddr> for DbMultiaddr {
+    fn from(value: Multiaddr) -> Self {
+        Self(value)
+    }
+}
+
+impl Deref for DbMultiaddr {
+    type Target = Multiaddr;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use fake::Fake;
+    use std::marker::PhantomData;
 
-    use sbtc::events::FromLittleEndianOrder;
+    use fake::Fake as _;
+    use test_case::test_case;
+
+    use sbtc::events::FromLittleEndianOrder as _;
 
     use crate::testing::get_rng;
 
@@ -1624,7 +1752,7 @@ mod tests {
         assert_eq!(block_hash, round_trip);
 
         let stacks_hash = BurnchainHeaderHash(fake::Faker.fake_with_rng(&mut rng));
-        let block_hash = BitcoinBlockHash::from(stacks_hash);
+        let block_hash = BitcoinBlockHash::from(stacks_hash.clone());
         let round_trip = BurnchainHeaderHash::from(block_hash);
         assert_eq!(stacks_hash, round_trip);
     }
@@ -1642,5 +1770,23 @@ mod tests {
         let round_trip = bitcoin::Txid::from_le_bytes(block_hash.to_le_bytes());
 
         assert_eq!(block_hash, round_trip);
+    }
+
+    #[test_case(PhantomData::<(StacksTxId, blockstack_lib::burnchains::Txid)>; "StacksTxId")]
+    #[test_case(PhantomData::<(StacksBlockHash, StacksBlockId)>; "StacksBlockHash")]
+    fn stacks_type_display_impl<L, F>(_: PhantomData<(L, F)>)
+    where
+        L: From<[u8; 32]> + std::fmt::Display + std::fmt::Debug,
+        F: From<[u8; 32]> + std::fmt::Display + std::fmt::Debug,
+    {
+        let mut rng = get_rng();
+        let txid_bytes: [u8; 32] = fake::Faker.fake_with_rng(&mut rng);
+        let local_type = L::from(txid_bytes);
+        let foreign_type = F::from(txid_bytes);
+        assert_eq!(foreign_type.to_string(), local_type.to_string());
+
+        let debug_local_type = format!("{:?}", local_type);
+        let debug_foreign_type = format!("{:?}", foreign_type);
+        assert_eq!(debug_local_type, debug_foreign_type);
     }
 }

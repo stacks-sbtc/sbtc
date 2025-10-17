@@ -29,11 +29,11 @@ use bitcoin::taproot::Signature;
 use bitcoin::taproot::TaprootSpendInfo;
 use bitcoin::transaction::Version;
 use bitvec::array::BitArray;
-use bitvec::field::BitField;
+use bitvec::field::BitField as _;
 use sbtc::idpack::BitmapSegmenter;
 use sbtc::idpack::Decodable as _;
 use sbtc::idpack::Encodable as _;
-use sbtc::idpack::Segmenter;
+use sbtc::idpack::Segmenter as _;
 use sbtc::idpack::Segments;
 use secp256k1::SECP256K1;
 use secp256k1::XOnlyPublicKey;
@@ -313,7 +313,7 @@ impl SbtcRequests {
     ///
     /// This function can fail if the output amounts are greater than the
     /// input amounts.
-    pub fn construct_transactions(&self) -> Result<Vec<UnsignedTransaction>, Error> {
+    pub fn construct_transactions(&self) -> Result<Vec<UnsignedTransaction<'_>>, Error> {
         if self.deposits.is_empty() && self.withdrawals.is_empty() {
             tracing::info!("No deposits or withdrawals so no BTC transaction");
             return Ok(Vec::new());
@@ -1034,7 +1034,7 @@ impl<'a> UnsignedTransaction<'a> {
     ///
     /// Other noteworthy assumptions is that the signers' UTXO is always a
     /// key-spend path only taproot UTXO.
-    pub fn construct_digests(&self) -> Result<SignatureHashes, Error> {
+    pub fn construct_digests(&self) -> Result<SignatureHashes<'_>, Error> {
         let deposit_requests = self.requests.iter().filter_map(RequestRef::as_deposit);
         let deposit_utxos = deposit_requests.clone().map(DepositRequest::as_tx_out);
         // All the transaction's inputs are used to construct the sighash
@@ -1405,7 +1405,7 @@ pub trait TxDeconstructor: BitcoinInputsOutputs {
     /// This function must return `Some(_)` for each `index` where
     /// `self.inputs().get(index)` returns `Some(_)`, and must be `None`
     /// otherwise.
-    fn prevout(&self, index: usize) -> Option<PrevoutRef>;
+    fn prevout(&self, index: usize) -> Option<PrevoutRef<'_>>;
 
     /// Return all inputs in this transaction if it is an sBTC transaction.
     ///
@@ -1611,7 +1611,7 @@ pub trait TxDeconstructor: BitcoinInputsOutputs {
 }
 
 impl TxDeconstructor for BitcoinTxInfo {
-    fn prevout(&self, index: usize) -> Option<PrevoutRef> {
+    fn prevout(&self, index: usize) -> Option<PrevoutRef<'_>> {
         let vin = self.vin.get(index)?;
         let prevout = vin.prevout.as_ref()?;
         Some(PrevoutRef {
@@ -1626,21 +1626,21 @@ impl TxDeconstructor for BitcoinTxInfo {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
-    use std::str::FromStr;
+    use std::str::FromStr as _;
     use std::sync::atomic::AtomicU64;
 
     use super::*;
     use bitcoin::CompressedPublicKey;
     use bitcoin::Txid;
     use bitcoin::hashes::Hash as _;
-    use bitcoin::key::TapTweak;
+    use bitcoin::key::TapTweak as _;
     use bitcoin::opcodes::all::OP_RETURN;
     use bitcoin::script::Instruction;
     use clarity::vm::types::PrincipalData;
     use fake::Fake as _;
     use model::SignerVote;
     use more_asserts::assert_ge;
-    use rand::distributions::Distribution;
+    use rand::distributions::Distribution as _;
     use rand::distributions::Uniform;
     use rand::rngs::OsRng;
     use sbtc::deposits::DepositScriptInputs;

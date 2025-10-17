@@ -35,6 +35,7 @@ use sbtc::testing::regtest::AsUtxo;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::to_value;
+use signer::bitcoin::poller::BitcoinChainTipPoller;
 use signer::bitcoin::utxo::DepositRequest;
 use signer::error::Error;
 use signer::stacks::api::ClarityName;
@@ -66,7 +67,7 @@ use signer::context::Context as _;
 use signer::context::SignerEvent;
 use signer::context::SignerSignal;
 use signer::emily_client::EmilyClient;
-use signer::keys::SignerScriptPubKey;
+use signer::keys::SignerScriptPubKey as _;
 use signer::stacks::api::StacksClient;
 use signer::stacks::api::StacksInteract as _;
 use signer::storage::DbRead as _;
@@ -74,10 +75,9 @@ use signer::storage::model::StacksPrincipal;
 use signer::testing;
 use signer::testing::context::TestContext;
 use signer::testing::context::*;
-use signer::testing::storage::DbReadTestExt;
+use signer::testing::storage::DbReadTestExt as _;
 use url::Url;
 
-const BITCOIN_CORE_ZMQ_ENDPOINT: &str = "tcp://localhost:28332";
 const DEVENV_DEPLOYER: &str = "SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS";
 const DEVENV_STACKS_API: &str = "http://127.0.0.1:3999";
 
@@ -112,9 +112,11 @@ async fn process_blocks_simple_fork() {
     })
     .await;
 
+    let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
+
     let block_observer = BlockObserver {
         context: ctx.clone(),
-        bitcoin_blocks: testing::btc::new_zmq_block_hash_stream(BITCOIN_CORE_ZMQ_ENDPOINT).await,
+        bitcoin_block_source,
     };
 
     // We need to wait for the block observer to be up
@@ -138,9 +140,11 @@ async fn process_blocks_simple_fork() {
 
     // Let's wait for the block observer signal
     let signal = signal_rx.recv();
-    let Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved)) = signal.await else {
-        panic!("Not the right signal")
-    };
+    match signal.await {
+        Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref)))
+            if *block_ref.block_hash == block_1a => {}
+        _ => panic!("Not the right signal"),
+    }
 
     let (bitcoin_tip_original, _) = db.get_chain_tips().await;
     assert_eq!(block_1a, bitcoin_tip_original.block_hash.into());
@@ -156,9 +160,11 @@ async fn process_blocks_simple_fork() {
 
     // Let's wait for the block observer signal
     let signal = signal_rx.recv();
-    let Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved)) = signal.await else {
-        panic!("Not the right signal")
-    };
+    match signal.await {
+        Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref)))
+            if *block_ref.block_hash == block_2b => {}
+        _ => panic!("Not the right signal"),
+    }
 
     let (bitcoin_tip_fork, _) = db.get_chain_tips().await;
     assert_eq!(block_2b, bitcoin_tip_fork.block_hash.into());

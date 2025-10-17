@@ -6,6 +6,7 @@ mod new_block;
 mod router;
 mod status;
 
+pub use info::build_info;
 pub use new_block::new_block_handler;
 pub use router::get_router;
 

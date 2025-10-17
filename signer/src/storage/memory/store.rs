@@ -1,6 +1,7 @@
 //! In-memory store implementation - useful for tests
 
 use bitcoin::OutPoint;
+use libp2p::PeerId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
@@ -115,6 +116,9 @@ pub struct Store {
     /// Bitcoin withdrawal outputs
     pub bitcoin_withdrawal_outputs:
         HashMap<(u64, model::StacksBlockHash), model::BitcoinWithdrawalOutput>,
+
+    /// Stored P2P peers
+    pub p2p_peers: HashMap<(PeerId, PublicKey), model::P2PPeer>,
 }
 
 impl Store {
@@ -282,7 +286,7 @@ impl Store {
         .filter_map(|block| self.bitcoin_anchor_to_stacks_blocks.get(&block.block_hash))
         .flatten()
         .filter_map(|stacks_block_hash| self.stacks_blocks.get(stacks_block_hash))
-        .max_by_key(|block| (block.block_height, block.block_hash.to_bytes()))
+        .max_by_key(|block| (block.block_height, block.block_hash.into_bytes()))
         .cloned()
     }
 

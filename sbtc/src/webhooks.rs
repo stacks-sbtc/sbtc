@@ -22,7 +22,6 @@
 
 use blockstack_lib::burnchains::Txid;
 use blockstack_lib::chainstate::stacks::StacksTransaction;
-use blockstack_lib::net::api::HexDeser;
 use clarity::vm::types::QualifiedContractIdentifier;
 use clarity::vm::types::Value as ClarityValue;
 use serde::Deserialize;
@@ -30,6 +29,7 @@ use stacks_common::codec::StacksMessageCodec;
 use stacks_common::types::chainstate::BlockHeaderHash;
 use stacks_common::types::chainstate::BurnchainHeaderHash;
 use stacks_common::types::chainstate::StacksBlockId;
+use stacks_common::util::HexDeser;
 
 use crate::error::Error;
 
@@ -86,7 +86,7 @@ pub struct NewBlockEvent {
 /// This matches the json value that is defined in stacks-core[^1]. It
 /// contains the raw transaction and the result of the transaction.
 ///
-/// <https://github.com/stacks-network/stacks-core/blob/09c4b066e25104be8b066e8f7530ff0c6df4ccd5/testnet/stacks-node/src/event_dispatcher.rs#L499-L511>
+/// [^1]: <!-- https://github.com/stacks-network/stacks-core/blob/09c4b066e25104be8b066e8f7530ff0c6df4ccd5/testnet/stacks-node/src/event_dispatcher.rs#L499-L511 -->
 #[derive(Debug, Deserialize)]
 pub struct TransactionReceipt {
     /// The id of this transaction .
@@ -195,7 +195,7 @@ where
 {
     let hex_str = <String>::deserialize(deserializer)?;
     let hex_str = hex_str.trim_start_matches("0x");
-    <T as HexDeser>::try_from(hex_str).map_err(serde::de::Error::custom)
+    <T as HexDeser>::try_from_hex(hex_str).map_err(serde::de::Error::custom)
 }
 
 /// This is for deserializing fields in webhooks that were effectively

@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use bitcoin::ScriptBuf;
 use fake::Dummy as _;
-use fake::Fake;
+use fake::Fake as _;
 
 use crate::bitcoin::utxo::BitcoinInputsOutputs;
 use crate::bitcoin::utxo::PrevoutRef;
@@ -17,7 +17,7 @@ use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::StacksBlockHeight;
 
-use rand::seq::SliceRandom;
+use rand::seq::SliceRandom as _;
 
 /// A slimmed down [`BitcoinTxInfo`] type that can be used to implement the
 /// [`TxDeconstructor`] trait.
@@ -62,7 +62,7 @@ impl BitcoinInputsOutputs for TestBitcoinTxInfo {
 }
 
 impl TxDeconstructor for TestBitcoinTxInfo {
-    fn prevout(&self, index: usize) -> Option<PrevoutRef> {
+    fn prevout(&self, index: usize) -> Option<PrevoutRef<'_>> {
         let input = self.tx.input.get(index)?;
         let prevout = self.prevouts.get(index)?;
         Some(PrevoutRef {
@@ -536,6 +536,14 @@ impl BitcoinBlockRef {
         Self {
             block_hash: block.parent_hash,
             block_height: 1337u64.into(), // Arbitrary number
+        }
+    }
+
+    /// Returns the bitcoin genesis block
+    pub fn genesis() -> Self {
+        Self {
+            block_hash: BitcoinBlockHash::from([0; 32]),
+            block_height: 0u64.into(),
         }
     }
 }

@@ -3,6 +3,7 @@
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::future::Future;
+use std::sync::LazyLock;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -18,11 +19,9 @@ use blockstack_lib::chainstate::stacks::TransactionPayload;
 use blockstack_lib::chainstate::stacks::db::blocks::MINIMUM_TX_FEE_RATE_PER_BYTE;
 use blockstack_lib::clarity::vm::types::PrincipalData;
 use blockstack_lib::clarity::vm::types::StandardPrincipalData;
-use blockstack_lib::codec::StacksMessageCodec;
+use blockstack_lib::codec::StacksMessageCodec as _;
 use blockstack_lib::net::api::getaccount::AccountEntryResponse;
 use blockstack_lib::net::api::getcontractsrc::ContractSrcResponse;
-use blockstack_lib::net::api::getinfo::RPCPeerInfoData;
-use blockstack_lib::net::api::getpoxinfo::RPCPoxInfoData;
 use blockstack_lib::net::api::getsortition::SortitionInfo;
 use blockstack_lib::net::api::gettenureinfo::RPCGetTenureInfo;
 use blockstack_lib::net::api::postfeerate::FeeRateEstimateRequestBody;
@@ -30,7 +29,7 @@ use blockstack_lib::net::api::postfeerate::RPCFeeEstimate;
 use blockstack_lib::net::api::postfeerate::RPCFeeEstimateResponse;
 use blockstack_lib::types::chainstate::StacksAddress;
 use blockstack_lib::types::chainstate::StacksBlockId;
-use clarity::types::StacksEpochId;
+use clarity::types::chainstate::BlockHeaderHash;
 use clarity::vm::Value;
 use clarity::vm::types::OptionalData;
 use clarity::vm::types::TupleData;
@@ -49,7 +48,9 @@ use crate::storage::DbRead;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::StacksBlock;
+use crate::storage::model::StacksBlockHash;
 use crate::storage::model::StacksBlockHeight;
+use crate::storage::model::StacksTxId;
 use crate::storage::model::ToLittleEndianOrder as _;
 use crate::util::ApiFallbackClient;
 
@@ -65,6 +66,8 @@ const TX_FEE_TX_SIZE_MULTIPLIER: u64 = 2 * MINIMUM_TX_FEE_RATE_PER_BYTE;
 /// The max fee in microSTX for a stacks transaction. Used as a backstop in
 /// case the stacks node returns wonky values. This is 10 STX.
 const MAX_TX_FEE: u64 = 10_000_000;
+
+const EPOCH_3_0_ID: &str = "Epoch30";
 
 /// This is the name of the MAP in the sbtc-registry smart contract that
 /// stores the status of a withdrawal request.
@@ -88,11 +91,13 @@ const CURRENT_AGGREGATE_PUBKEY_DATA_VAR_NAME: &str = "current-aggregate-pubkey";
 
 /// This is a dummy STX transfer payload used only for estimating STX
 /// transfer costs.
-const DUMMY_STX_TRANSFER_PAYLOAD: TransactionPayload = TransactionPayload::TokenTransfer(
-    PrincipalData::Standard(StandardPrincipalData(0, [0; 20])),
-    0,
-    TokenTransferMemo([0; 34]),
-);
+static DUMMY_STX_TRANSFER_PAYLOAD: LazyLock<TransactionPayload> = LazyLock::new(|| {
+    TransactionPayload::TokenTransfer(
+        PrincipalData::Standard(StandardPrincipalData::null_principal()),
+        0,
+        TokenTransferMemo([0; 34]),
+    )
+});
 
 /// The names of all the read-only functions, data variables, and map names
 /// used in the signers for any of the sbtc smart contracts.
@@ -241,7 +246,7 @@ pub trait StacksInteract: Send + Sync {
     /// Stacks block ID.
     fn get_block(
         &self,
-        block_id: StacksBlockId,
+        block_id: &StacksBlockId,
     ) -> impl Future<Output = Result<NakamotoBlock, Error>> + Send;
     /// Fetch all Nakamoto ancestor blocks within the same tenure as the
     /// given block ID from a Stacks node.
@@ -254,7 +259,7 @@ pub trait StacksInteract: Send + Sync {
     /// the size of the blocks within the tenure.
     fn get_tenure(
         &self,
-        block_id: StacksBlockId,
+        block_id: &StacksBlockId,
     ) -> impl Future<Output = Result<TenureBlocks, Error>> + Send;
     /// Get information about the current tenure.
     ///
@@ -282,11 +287,16 @@ pub trait StacksInteract: Send + Sync {
     where
         T: AsTxPayload + Send + Sync;
 
-    /// Get information about the current PoX state.
-    fn get_pox_info(&self) -> impl Future<Output = Result<RPCPoxInfoData, Error>> + Send;
+    /// Attempt to get information from a Stacks node about whether or not it is
+    /// in a pre- or post-Nakamoto epoch (3.0).
+    ///
+    /// Returns a [`StacksEpochStatus`] variant if successful. If the Stacks node
+    /// does not report an entry for Epoch 3.0, then an
+    /// [`Error::MissingNakamotoStartHeight`] error is returned.
+    fn get_epoch_status(&self) -> impl Future<Output = Result<StacksEpochStatus, Error>> + Send;
 
     /// Get information about the current node.
-    fn get_node_info(&self) -> impl Future<Output = Result<RPCPeerInfoData, Error>> + Send;
+    fn get_node_info(&self) -> impl Future<Output = Result<GetNodeInfoResponse, Error>> + Send;
 
     /// Get the source of a deployed smart contract.
     ///
@@ -306,26 +316,6 @@ pub trait StacksInteract: Send + Sync {
         &self,
         sender: &StacksAddress,
     ) -> impl Future<Output = Result<Amount, Error>> + Send;
-}
-
-/// A trait for getting the start height of the first EPOCH 3.0 block on the
-/// Stacks blockchain.
-pub trait GetNakamotoStartHeight {
-    /// Get the start height of the first EPOCH 3.0 block on the Stacks
-    /// blockchain.
-    fn nakamoto_start_height(&self) -> Option<BitcoinBlockHeight>;
-}
-
-impl GetNakamotoStartHeight for RPCPoxInfoData {
-    fn nakamoto_start_height(&self) -> Option<BitcoinBlockHeight> {
-        self.epochs.iter().find_map(|epoch| {
-            if epoch.epoch_id == StacksEpochId::Epoch30 {
-                Some(epoch.start_height.into())
-            } else {
-                None
-            }
-        })
-    }
 }
 
 /// This struct represents a non-empty subset of the Stacks blocks that
@@ -580,7 +570,7 @@ impl std::error::Error for TxRejection {}
 #[serde(untagged)]
 pub enum SubmitTxResponse {
     /// The transaction ID for the submitted transaction.
-    Acceptance(Txid),
+    Acceptance(StacksTxId),
     /// The response when the transaction is rejected from the node.
     Rejection(TxRejection),
 }
@@ -640,6 +630,115 @@ impl TryFrom<AccountEntryResponse> for AccountInfo {
             nonce: value.nonce,
             unlock_height: value.unlock_height.into(),
         })
+    }
+}
+
+/// The response from a GET /v2/info request to stacks-core
+///
+/// This type contains only a subset of the full response from stacks-core,
+/// you can find the full response here:
+/// <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stackslib/src/net/api/getinfo.rs#L53-L85>
+///
+/// Note that the stacks blockchain information here is the same
+/// corresponding fields returned from the `/v3/tenures/info` response.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct GetNodeInfoResponse {
+    /// The height of the tip of the canonical bitcoin blockchain.
+    pub burn_block_height: BitcoinBlockHeight,
+    /// The version of the stacks node that is connected to this signer.
+    pub server_version: String,
+    /// The height of the tip of the canonical stacks blockchain.
+    pub stacks_tip_height: StacksBlockHeight,
+    /// The block header hash of the tip of the canonical stacks
+    /// blockchain. This is hashed with the consensus hash to create the
+    /// block id.
+    stacks_tip: BlockHeaderHash,
+    /// The consensus hash of the tip of the canonical stacks blockchain.
+    pub stacks_tip_consensus_hash: ConsensusHash,
+}
+
+impl GetNodeInfoResponse {
+    /// Create a StacksBlockHash from the tip information of the canonical
+    /// stacks blockchain.
+    pub fn stacks_chain_tip(&self) -> StacksBlockHash {
+        StacksBlockId::new(&self.stacks_tip_consensus_hash, &self.stacks_tip).into()
+    }
+}
+
+/// Minimal model type representing an epoch entry in a `/v2/pox` response,
+/// including only fields which we currently use.
+///
+/// Specifically, we do *not* use the `StacksEpochId` enum type from stacks-core
+/// as it would break if Stacks introduces new epochs prior to our dependencies
+/// being updated.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+struct PoxEpoch {
+    /// String representation of the epoch ID, e.g. `Epoch11`, `Epoch30`, `Epoch33`, etc.
+    epoch_id: String,
+    /// The Bitcoin block height at which this epoch activates.
+    start_height: BitcoinBlockHeight,
+}
+
+/// Minimal response type for the `/v2/pox` endpoint, including only fields
+/// which we currently use.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+struct PoxResponse {
+    /// The current Bitcoin block height, as known by the Stacks node based on
+    /// its current Stacks tenure. Note that if the Stacks node is behind, this
+    /// may be lower than the actual current Bitcoin block height.
+    current_burnchain_block_height: BitcoinBlockHeight,
+    /// The list of all known epochs, including their start heights. Used
+    /// primarily to determine the start height of Stacks epoch 3.0 (Nakamoto).
+    epochs: Vec<PoxEpoch>,
+}
+
+/// Information regarding whether or not we are in pre- or post-Nakamoto era.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StacksEpochStatus {
+    /// We are in the pre-Nakamoto era.
+    PreNakamoto {
+        /// The current Bitcoin block height, as known by the Stacks node based on
+        /// its current Stacks tenure. Note that if the Stacks node is behind, this
+        /// may be lower than the actual current Bitcoin block height.
+        reported_bitcoin_height: BitcoinBlockHeight,
+        /// The bitcoin block height at which the Nakamoto era (epoch 3.0+) starts.
+        nakamoto_start_height: BitcoinBlockHeight,
+    },
+    /// We are in the post-Nakamoto era.
+    PostNakamoto {
+        /// The bitcoin block height at which the Nakamoto era started.
+        nakamoto_start_height: BitcoinBlockHeight,
+    },
+}
+
+impl StacksEpochStatus {
+    /// Returns the bitcoin block height at which the Nakamoto era starts (epoch 3.0).
+    pub fn nakamoto_start_height(&self) -> BitcoinBlockHeight {
+        match self {
+            StacksEpochStatus::PreNakamoto { nakamoto_start_height, .. } => *nakamoto_start_height,
+            StacksEpochStatus::PostNakamoto { nakamoto_start_height } => *nakamoto_start_height,
+        }
+    }
+}
+
+impl TryFrom<PoxResponse> for StacksEpochStatus {
+    type Error = Error;
+    fn try_from(value: PoxResponse) -> Result<Self, Self::Error> {
+        let current = value.current_burnchain_block_height;
+        let maybe_start = value
+            .epochs
+            .into_iter()
+            .find(|e| e.epoch_id == EPOCH_3_0_ID)
+            .map(|e| e.start_height);
+
+        match maybe_start {
+            Some(start) if current < start => Ok(StacksEpochStatus::PreNakamoto {
+                reported_bitcoin_height: current,
+                nakamoto_start_height: start,
+            }),
+            Some(start) => Ok(StacksEpochStatus::PostNakamoto { nakamoto_start_height: start }),
+            None => Err(Error::MissingNakamotoStartHeight),
+        }
     }
 }
 
@@ -1001,7 +1100,7 @@ impl StacksClient {
     /// If the given block ID does not exist or is an ID for a non-Nakamoto
     /// block then a Result::Err is returned.
     #[tracing::instrument(skip(self))]
-    async fn get_block(&self, block_id: StacksBlockId) -> Result<NakamotoBlock, Error> {
+    async fn get_block(&self, block_id: &StacksBlockId) -> Result<NakamotoBlock, Error> {
         let path = format!("/v3/blocks/{}", block_id.to_hex());
         let url = self
             .endpoint
@@ -1026,7 +1125,7 @@ impl StacksClient {
             .map_err(Error::UnexpectedStacksResponse)?;
 
         NakamotoBlock::consensus_deserialize(&mut &*resp)
-            .map_err(|err| Error::DecodeNakamotoBlock(err, block_id))
+            .map_err(|err| Error::DecodeNakamotoBlock(err, block_id.clone()))
     }
 
     /// Fetch all Nakamoto ancestor blocks within the same tenure as the
@@ -1039,10 +1138,10 @@ impl StacksClient {
     /// If the given block ID does not exist or is an ID for a non-Nakamoto
     /// block then a Result::Err is returned.
     #[tracing::instrument(skip(self))]
-    async fn get_tenure(&self, block_id: StacksBlockId) -> Result<TenureBlocks, Error> {
+    async fn get_tenure(&self, block_id: &StacksBlockId) -> Result<TenureBlocks, Error> {
         tracing::debug!("making initial request for nakamoto blocks within the tenure");
         let mut tenure_blocks = self.get_tenure_raw(block_id).await?;
-        let mut prev_last_block_id = block_id;
+        let mut prev_last_block_id = block_id.clone();
 
         // Given the response size limit of GET /v3/tenures/<block-id>
         // requests, there could be more blocks that we need to fetch.
@@ -1056,10 +1155,10 @@ impl StacksClient {
             if last_block_id == prev_last_block_id {
                 break;
             }
-            prev_last_block_id = last_block_id;
 
             tracing::debug!(%last_block_id, "fetching more nakamoto blocks within the tenure");
-            let blocks = self.get_tenure_raw(last_block_id).await?;
+            let blocks = self.get_tenure_raw(&last_block_id).await?;
+
             // The first block in the GET /v3/tenures/<block-id> response
             // is always the block related to the given <block-id>. But we
             // already have that block, so we can skip adding it again.
@@ -1072,7 +1171,9 @@ impl StacksClient {
                 None => return Err(Error::EmptyStacksTenure),
             }
 
-            tenure_blocks.extend(blocks.into_iter().skip(1))
+            tenure_blocks.extend(blocks.into_iter().skip(1));
+
+            prev_last_block_id = last_block_id;
         }
 
         // If Self::get_tenure_raw returns with Ok(_) then the Vec will
@@ -1101,7 +1202,7 @@ impl StacksClient {
     /// * If the given block ID does not exist or is an ID for a
     ///   non-Nakamoto block then a Result::Err is returned.
     #[tracing::instrument(skip(self))]
-    async fn get_tenure_raw(&self, block_id: StacksBlockId) -> Result<Vec<NakamotoBlock>, Error> {
+    async fn get_tenure_raw(&self, block_id: &StacksBlockId) -> Result<Vec<NakamotoBlock>, Error> {
         let path = format!("/v3/tenures/{}", block_id.to_hex());
         let url = self
             .endpoint
@@ -1134,7 +1235,7 @@ impl StacksClient {
 
         while !bytes.is_empty() {
             let block = NakamotoBlock::consensus_deserialize(bytes)
-                .map_err(|err| Error::DecodeNakamotoTenure(err, block_id))?;
+                .map_err(|err| Error::DecodeNakamotoTenure(err, block_id.clone()))?;
 
             blocks.push(block);
         }
@@ -1213,7 +1314,7 @@ impl StacksClient {
 
     /// Get PoX information from the Stacks node.
     #[tracing::instrument(skip(self))]
-    pub async fn get_pox_info(&self) -> Result<RPCPoxInfoData, Error> {
+    pub async fn get_pox_info(&self) -> Result<PoxResponse, Error> {
         let path = "/v2/pox";
         let url = self
             .endpoint
@@ -1239,7 +1340,7 @@ impl StacksClient {
 
     /// Get information about the current node.
     #[tracing::instrument(skip(self))]
-    pub async fn get_node_info(&self) -> Result<RPCPeerInfoData, Error> {
+    pub async fn get_node_info(&self) -> Result<GetNodeInfoResponse, Error> {
         let path = "/v2/info";
         let url = self
             .endpoint
@@ -1272,7 +1373,7 @@ impl StacksClient {
 pub async fn fetch_unknown_ancestors<S, D>(
     stacks: &S,
     db: &D,
-    block_id: StacksBlockId,
+    block_id: &StacksBlockId,
 ) -> Result<Vec<TenureBlockHeaders>, Error>
 where
     S: StacksInteract,
@@ -1280,10 +1381,7 @@ where
 {
     let starting_tenure = stacks.get_tenure(block_id).await?;
     let mut headers: Vec<TenureBlockHeaders> = vec![starting_tenure.into()];
-    let pox_info = stacks.get_pox_info().await?;
-    let nakamoto_start_height = pox_info
-        .nakamoto_start_height()
-        .ok_or(Error::MissingNakamotoStartHeight)?;
+    let nakamoto_start_height = stacks.get_epoch_status().await?.nakamoto_start_height();
 
     while let Some(tenure) = headers.last() {
         // We won't get anymore Nakamoto blocks before this point, so
@@ -1302,12 +1400,12 @@ where
             break;
         };
         // We've seen this parent already, so time to stop.
-        if db.stacks_block_exists(header.parent_block_id).await? {
+        if db.stacks_block_exists(&header.parent_block_id).await? {
             tracing::debug!("parent block known in the database");
             break;
         }
         // There are more blocks to fetch, so let's get them.
-        let tenure_blocks = stacks.get_tenure(header.parent_block_id).await?;
+        let tenure_blocks = stacks.get_tenure(&header.parent_block_id).await?;
         headers.push(tenure_blocks.into());
     }
 
@@ -1527,11 +1625,11 @@ impl StacksInteract for StacksClient {
         self.submit_tx(tx).await
     }
 
-    async fn get_block(&self, block_id: StacksBlockId) -> Result<NakamotoBlock, Error> {
+    async fn get_block(&self, block_id: &StacksBlockId) -> Result<NakamotoBlock, Error> {
         self.get_block(block_id).await
     }
 
-    async fn get_tenure(&self, block_id: StacksBlockId) -> Result<TenureBlocks, Error> {
+    async fn get_tenure(&self, block_id: &StacksBlockId) -> Result<TenureBlocks, Error> {
         self.get_tenure(block_id).await
     }
 
@@ -1605,7 +1703,7 @@ impl StacksInteract for StacksClient {
         // doesn't depend on the recipient, amount, or memo. So a
         // dummy transfer payload will do.
         let stx_transfer_estimate_response = self
-            .get_fee_estimate(&DUMMY_STX_TRANSFER_PAYLOAD, None)
+            .get_fee_estimate(&*DUMMY_STX_TRANSFER_PAYLOAD, None)
             .await;
 
         // If we get a valid response, then we use the fee estimate we received,
@@ -1637,11 +1735,11 @@ impl StacksInteract for StacksClient {
         }
     }
 
-    async fn get_pox_info(&self) -> Result<RPCPoxInfoData, Error> {
-        self.get_pox_info().await
+    async fn get_epoch_status(&self) -> Result<StacksEpochStatus, Error> {
+        self.get_pox_info().await?.try_into()
     }
 
-    async fn get_node_info(&self) -> Result<RPCPeerInfoData, Error> {
+    async fn get_node_info(&self) -> Result<GetNodeInfoResponse, Error> {
         self.get_node_info().await
     }
 
@@ -1753,11 +1851,11 @@ impl StacksInteract for ApiFallbackClient<StacksClient> {
         self.exec(|client, _| client.submit_tx(tx)).await
     }
 
-    async fn get_block(&self, block_id: StacksBlockId) -> Result<NakamotoBlock, Error> {
+    async fn get_block(&self, block_id: &StacksBlockId) -> Result<NakamotoBlock, Error> {
         self.exec(|client, _| client.get_block(block_id)).await
     }
 
-    async fn get_tenure(&self, block_id: StacksBlockId) -> Result<TenureBlocks, Error> {
+    async fn get_tenure(&self, block_id: &StacksBlockId) -> Result<TenureBlocks, Error> {
         self.exec(|client, _| client.get_tenure(block_id)).await
     }
 
@@ -1786,11 +1884,11 @@ impl StacksInteract for ApiFallbackClient<StacksClient> {
             .await
     }
 
-    async fn get_pox_info(&self) -> Result<RPCPoxInfoData, Error> {
-        self.exec(|client, _| client.get_pox_info()).await
+    async fn get_epoch_status(&self) -> Result<StacksEpochStatus, Error> {
+        self.exec(|client, _| client.get_epoch_status()).await
     }
 
-    async fn get_node_info(&self) -> Result<RPCPeerInfoData, Error> {
+    async fn get_node_info(&self) -> Result<GetNodeInfoResponse, Error> {
         self.exec(|client, _| client.get_node_info()).await
     }
 
@@ -1836,10 +1934,11 @@ mod tests {
     use crate::config::NetworkKind;
     use crate::keys::{PrivateKey, PublicKey};
     use crate::stacks::wallet::get_full_tx_size;
-    use crate::storage::DbWrite;
+    use crate::storage::DbWrite as _;
     use crate::storage::memory::Store;
 
-    use clarity::types::Address;
+    use assert_matches::assert_matches;
+    use clarity::types::Address as _;
     use clarity::vm::ClarityName;
     use clarity::vm::types::{
         BuffData, BufferLength, ListData, ListTypeData, SequenceData, SequenceSubtype,
@@ -1851,7 +1950,7 @@ mod tests {
     use test_log::test;
 
     use super::*;
-    use std::io::Read;
+    use std::io::Read as _;
 
     fn generate_wallet(num_keys: u16, signatures_required: u16) -> SignerWallet {
         let network_kind = NetworkKind::Regtest;
@@ -1875,7 +1974,7 @@ mod tests {
         let client: ApiFallbackClient<StacksClient> = TryFrom::try_from(&settings).unwrap();
 
         let info = client.get_tenure_info().await.unwrap();
-        let tenures = fetch_unknown_ancestors(&client, &db, info.tip_block_id).await;
+        let tenures = fetch_unknown_ancestors(&client, &db, &info.tip_block_id).await;
 
         let blocks = tenures.unwrap();
         let headers = blocks
@@ -1994,7 +2093,7 @@ mod tests {
 
         let block_id = StacksBlockId::from_hex(TENURE_END_BLOCK_ID).unwrap();
         // The moment of truth, do the requests succeed?
-        let blocks = client.get_tenure(block_id).await.unwrap().blocks;
+        let blocks = client.get_tenure(&block_id).await.unwrap().blocks;
         assert!(blocks.len() > 1);
 
         // We know that the blocks are ordered as a chain, and we know the
@@ -2438,11 +2537,11 @@ mod tests {
         let client =
             StacksClient::new(url::Url::parse(stacks_node_server.url().as_str()).unwrap()).unwrap();
 
-        let expected_fee = get_full_tx_size(&DUMMY_STX_TRANSFER_PAYLOAD, &wallet).unwrap()
+        let expected_fee = get_full_tx_size(&*DUMMY_STX_TRANSFER_PAYLOAD, &wallet).unwrap()
             * TX_FEE_TX_SIZE_MULTIPLIER;
 
         let resp = client
-            .estimate_fees(&wallet, &DUMMY_STX_TRANSFER_PAYLOAD, FeePriority::High)
+            .estimate_fees(&wallet, &*DUMMY_STX_TRANSFER_PAYLOAD, FeePriority::High)
             .await
             .unwrap();
 
@@ -2488,7 +2587,7 @@ mod tests {
         let client =
             StacksClient::new(url::Url::parse(stacks_node_server.url().as_str()).unwrap()).unwrap();
         let resp = client
-            .get_fee_estimate(&DUMMY_STX_TRANSFER_PAYLOAD, None)
+            .get_fee_estimate(&*DUMMY_STX_TRANSFER_PAYLOAD, None)
             .await
             .unwrap();
         let expected: RPCFeeEstimateResponse = serde_json::from_str(raw_json_response).unwrap();
@@ -2498,19 +2597,19 @@ mod tests {
         // Now lets check that the interface function returns the requested
         // priority fees.
         let fee = client
-            .estimate_fees(&wallet, &DUMMY_STX_TRANSFER_PAYLOAD, FeePriority::Low)
+            .estimate_fees(&wallet, &*DUMMY_STX_TRANSFER_PAYLOAD, FeePriority::Low)
             .await
             .unwrap();
         assert_eq!(fee, 7679);
 
         let fee = client
-            .estimate_fees(&wallet, &DUMMY_STX_TRANSFER_PAYLOAD, FeePriority::Medium)
+            .estimate_fees(&wallet, &*DUMMY_STX_TRANSFER_PAYLOAD, FeePriority::Medium)
             .await
             .unwrap();
         assert_eq!(fee, 7680);
 
         let fee = client
-            .estimate_fees(&wallet, &DUMMY_STX_TRANSFER_PAYLOAD, FeePriority::High)
+            .estimate_fees(&wallet, &*DUMMY_STX_TRANSFER_PAYLOAD, FeePriority::High)
             .await
             .unwrap();
         assert_eq!(fee, 25505);
@@ -2519,7 +2618,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_pox_info_and_get_nakamoto_start_height_works() {
+    async fn get_pox_info_works() {
         let raw_json_response =
             include_str!("../../tests/fixtures/stacksapi-get-pox-info-test-data.json");
 
@@ -2537,14 +2636,159 @@ mod tests {
         let client =
             StacksClient::new(url::Url::parse(stacks_node_server.url().as_str()).unwrap()).unwrap();
         let resp = client.get_pox_info().await.unwrap();
-        let expected: RPCPoxInfoData = serde_json::from_str(raw_json_response).unwrap();
+        let expected: PoxResponse = serde_json::from_str(raw_json_response).unwrap();
 
         assert_eq!(resp, expected);
         mock.assert();
+    }
 
-        let nakamoto_start_height = resp.nakamoto_start_height();
-        assert!(nakamoto_start_height.is_some());
-        assert_eq!(nakamoto_start_height.unwrap(), 232u64.into());
+    #[tokio::test]
+    async fn get_epoch_info_works_with_full_response_body() {
+        let raw_json_response =
+            include_str!("../../tests/fixtures/stacksapi-get-pox-info-test-data.json");
+
+        let mut stacks_node_server = mockito::Server::new_async().await;
+        let mock = stacks_node_server
+            .mock("GET", "/v2/pox")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(raw_json_response)
+            .expect(1)
+            .create();
+
+        let client =
+            StacksClient::new(url::Url::parse(stacks_node_server.url().as_str()).unwrap()).unwrap();
+        let resp = client.get_epoch_status().await.unwrap();
+
+        assert_matches!(resp, StacksEpochStatus::PostNakamoto { nakamoto_start_height }
+            if nakamoto_start_height == BitcoinBlockHeight::from(232u64)
+        );
+
+        mock.assert();
+    }
+
+    #[tokio::test]
+    async fn get_epoch_info_errors_when_epoch30_missing() {
+        let raw_json_response = r#"{
+            "current_burnchain_block_height": 1000,
+            "epochs": [
+                { "epoch_id": "Epoch10", "start_height": 0 },
+                { "epoch_id": "Epoch20", "start_height": 500 }
+            ]
+        }"#;
+
+        let mut stacks_node_server = mockito::Server::new_async().await;
+        let mock = stacks_node_server
+            .mock("GET", "/v2/pox")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(raw_json_response)
+            .expect(1)
+            .create();
+
+        let client = StacksClient::new(stacks_node_server.url().parse().unwrap()).unwrap();
+        let err = client.get_epoch_status().await.unwrap_err();
+        assert_matches!(err, Error::MissingNakamotoStartHeight);
+        mock.assert();
+    }
+
+    #[tokio::test]
+    async fn get_epoch_info_pre_nakamoto() {
+        // current < Epoch30 start -> PreNakamoto
+        let raw_json_response = r#"{
+            "current_burnchain_block_height": 1999,
+            "epochs": [
+                { "epoch_id": "Epoch10", "start_height": 0 },
+                { "epoch_id": "Epoch30", "start_height": 2000 }
+            ]
+        }"#;
+
+        let mut stacks_node_server = mockito::Server::new_async().await;
+        let mock = stacks_node_server
+            .mock("GET", "/v2/pox")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(raw_json_response)
+            .expect(1)
+            .create();
+
+        let client = StacksClient::new(stacks_node_server.url().parse().unwrap()).unwrap();
+        let resp = client.get_epoch_status().await.unwrap();
+
+        assert_matches!(resp, StacksEpochStatus::PreNakamoto { reported_bitcoin_height, nakamoto_start_height }
+            if reported_bitcoin_height == BitcoinBlockHeight::from(1999u64)
+            && nakamoto_start_height == BitcoinBlockHeight::from(2000u64)
+        );
+
+        mock.assert();
+    }
+
+    #[tokio::test]
+    async fn get_epoch_info_post_nakamoto() {
+        // current >= Epoch30 start -> PostNakamoto
+        let raw_json_response = r#"{
+            "current_burnchain_block_height": 2000,
+            "epochs": [
+                { "epoch_id": "Epoch10", "start_height": 0 },
+                { "epoch_id": "Epoch30", "start_height": 2000 }
+            ]
+        }"#;
+
+        let mut stacks_node_server = mockito::Server::new_async().await;
+        let mock = stacks_node_server
+            .mock("GET", "/v2/pox")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(raw_json_response)
+            .expect(1)
+            .create();
+
+        let client = StacksClient::new(stacks_node_server.url().parse().unwrap()).unwrap();
+        let resp = client.get_epoch_status().await.unwrap();
+
+        assert_matches!(
+            resp,
+            StacksEpochStatus::PostNakamoto { nakamoto_start_height }
+                if nakamoto_start_height == BitcoinBlockHeight::from(2000u64)
+        );
+
+        mock.assert();
+    }
+
+    #[tokio::test]
+    async fn get_epoch_info_ignores_unknown_epochs_after_epoch30() {
+        // Unknown epochs (strings) after Epoch30 should not break parsing.
+        let raw_json_response = r#"{
+            "current_burnchain_block_height": 2500,
+            "epochs": [
+                { "epoch_id": "Epoch10", "start_height": 0 },
+                { "epoch_id": "Epoch11", "start_height": 232 },
+                { "epoch_id": "Epoch12", "start_height": 1456 },
+                { "epoch_id": "Epoch30", "start_height": 2000 },
+                { "epoch_id": "Epoch9999", "start_height": 3000 },
+                { "epoch_id": "SomeFutureEpoch", "start_height": 4000 }
+            ]
+        }"#;
+
+        let mut stacks_node_server = mockito::Server::new_async().await;
+        let mock = stacks_node_server
+            .mock("GET", "/v2/pox")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(raw_json_response)
+            .expect(1)
+            .create();
+
+        let client = StacksClient::new(stacks_node_server.url().parse().unwrap()).unwrap();
+        let resp = client.get_epoch_status().await.unwrap();
+
+        assert_matches!(
+            resp,
+            StacksEpochStatus::PostNakamoto { nakamoto_start_height }
+                if nakamoto_start_height == BitcoinBlockHeight::from(2000u64)
+        );
+
+        mock.assert();
     }
 
     #[tokio::test]
@@ -2566,7 +2810,7 @@ mod tests {
         let client =
             StacksClient::new(url::Url::parse(stacks_node_server.url().as_str()).unwrap()).unwrap();
         let resp = client.get_node_info().await.unwrap();
-        let expected: RPCPeerInfoData = serde_json::from_str(raw_json_response).unwrap();
+        let expected: GetNodeInfoResponse = serde_json::from_str(raw_json_response).unwrap();
 
         assert_eq!(resp, expected);
         mock.assert();
@@ -2582,7 +2826,7 @@ mod tests {
         let storage = Store::new_shared();
 
         let info = client.get_tenure_info().await.unwrap();
-        let blocks = fetch_unknown_ancestors(&client, &storage, info.tenure_start_block_id)
+        let blocks = fetch_unknown_ancestors(&client, &storage, &info.tenure_start_block_id)
             .await
             .unwrap();
         assert!(!blocks.is_empty());

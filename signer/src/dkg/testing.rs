@@ -137,12 +137,12 @@ impl StateMachine {
         }
 
         // Check the pending counts, if specified.
-        if let Some(expected_pending) = expected_pending {
-            if pending_count != expected_pending {
-                results.push(format!(
-                    "expected {expected_pending} pending messages of type {message_type:?}, got {pending_count}"
-                ));
-            }
+        if let Some(expected_pending) = expected_pending
+            && pending_count != expected_pending
+        {
+            results.push(format!(
+                "expected {expected_pending} pending messages of type {message_type:?}, got {pending_count}"
+            ));
         }
 
         if results.is_empty() {

@@ -76,6 +76,26 @@ pub struct TxRequestIds {
     pub withdrawals: Vec<QualifiedRequestId>,
 }
 
+impl std::fmt::Display for TxRequestIds {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "TxRequestIds(deposits=[")?;
+        for (i, value) in self.deposits.iter().enumerate() {
+            if i > 0 {
+                write!(f, ",")?;
+            }
+            write!(f, "{value}")?;
+        }
+        write!(f, "], withdrawals=[")?;
+        for (i, value) in self.withdrawals.iter().enumerate() {
+            if i > 0 {
+                write!(f, ",")?;
+            }
+            write!(f, "{value}")?;
+        }
+        write!(f, "])")
+    }
+}
+
 impl From<&Requests<'_>> for TxRequestIds {
     fn from(requests: &Requests) -> Self {
         let mut deposits = Vec::new();
@@ -137,7 +157,7 @@ impl BitcoinPreSignRequest {
         &self,
         db: &D,
         btc_ctx: &BitcoinTxContext,
-    ) -> Result<ValidationCache, Error>
+    ) -> Result<ValidationCache<'_>, Error>
     where
         D: DbRead,
     {
@@ -329,7 +349,7 @@ impl BitcoinPreSignRequest {
         }
 
         deposits.sort_by_key(|(request, _)| request.outpoint);
-        withdrawals.sort_by_key(|(_, report)| report.id);
+        withdrawals.sort_by_key(|(_, report)| report.id.clone());
         let reports = SbtcReports {
             deposits,
             withdrawals,
@@ -544,7 +564,7 @@ pub struct SbtcReports {
 
 impl SbtcReports {
     /// Create the transaction with witness data using the requests.
-    pub fn create_transaction(&self) -> Result<UnsignedTransaction, Error> {
+    pub fn create_transaction(&self) -> Result<UnsignedTransaction<'_>, Error> {
         let deposits = self
             .deposits
             .iter()

@@ -26,6 +26,7 @@ pub const DUMMY_SORTITION_INFO: SortitionInfo = SortitionInfo {
     stacks_parent_ch: None,
     last_sortition_ch: None,
     committed_block_hash: None,
+    vrf_seed: None,
 };
 
 /// Some dummy tenure info

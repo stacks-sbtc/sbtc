@@ -1,10 +1,12 @@
 //! This module contains implementations of structs that make reading from
 //! and writing from postgres easy.
 
-use std::ops::Deref;
+use std::ops::Deref as _;
 use std::str::FromStr as _;
 
 use bitcoin::hashes::Hash as _;
+use libp2p::Multiaddr;
+use libp2p::PeerId;
 use sqlx::encode::IsNull;
 use sqlx::error::BoxDynError;
 use sqlx::postgres::PgArgumentBuffer;
@@ -26,6 +28,8 @@ use crate::storage::model::StacksPrincipal;
 use crate::storage::model::StacksTxId;
 use crate::storage::model::TaprootScriptHash;
 
+use super::model::DbMultiaddr;
+use super::model::DbPeerId;
 use super::model::Timestamp;
 
 /// The PostgreSQL epoch is 2000-01-01 00:00:00 UTC
@@ -281,7 +285,7 @@ impl sqlx::Type<sqlx::Postgres> for StacksBlockHash {
 
 impl<'r> sqlx::Encode<'r, sqlx::Postgres> for StacksBlockHash {
     fn encode_by_ref(&self, buf: &mut PgArgumentBuffer) -> Result<IsNull, BoxDynError> {
-        <[u8; 32] as sqlx::Encode<'r, sqlx::Postgres>>::encode_by_ref(&self.to_bytes(), buf)
+        <[u8; 32] as sqlx::Encode<'r, sqlx::Postgres>>::encode_by_ref(self.to_bytes(), buf)
     }
 }
 
@@ -335,7 +339,7 @@ impl sqlx::Type<sqlx::Postgres> for StacksTxId {
 
 impl<'r> sqlx::Encode<'r, sqlx::Postgres> for StacksTxId {
     fn encode_by_ref(&self, buf: &mut PgArgumentBuffer) -> Result<IsNull, BoxDynError> {
-        <[u8; 32] as sqlx::Encode<'r, sqlx::Postgres>>::encode_by_ref(&self.to_bytes(), buf)
+        <[u8; 32] as sqlx::Encode<'r, sqlx::Postgres>>::encode_by_ref(self.to_bytes(), buf)
     }
 }
 
@@ -420,5 +424,86 @@ impl<'r> sqlx::Decode<'r, sqlx::Postgres> for Timestamp {
             .ok_or("failed to construct OffsetDateTime from decoded TIMESTAMPTZ value")?;
 
         Ok(datetime.into()) // Convert OffsetDateTime to Timestamp
+    }
+}
+
+// --- sqlx Type implementations for DbPeerId ---
+
+impl sqlx::Type<sqlx::Postgres> for DbPeerId {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        // Stored as TEXT, so delegate to String's type info
+        <String as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+
+    fn compatible(ty: &sqlx::postgres::PgTypeInfo) -> bool {
+        <String as sqlx::Type<sqlx::Postgres>>::compatible(ty)
+    }
+}
+
+impl<'q> sqlx::Encode<'q, sqlx::Postgres> for DbPeerId {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<IsNull, BoxDynError> {
+        // Convert PeerId to its base58 string representation for storage
+        let peer_id_str = self.to_base58();
+        peer_id_str.encode_by_ref(buf)
+    }
+
+    fn size_hint(&self) -> usize {
+        // Provide a reasonable estimate or delegate if possible.
+        // For dynamic strings, an exact hint is hard.
+        // This is often optional but can help with performance.
+        self.to_base58().size_hint()
+    }
+}
+
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for DbPeerId {
+    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, BoxDynError> {
+        // Decode the TEXT from the database as a String
+        let peer_id_str = <String as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        // Parse the string back into a PeerId
+        PeerId::from_str(&peer_id_str)
+            .map(DbPeerId::from)
+            .map_err(|e| format!("Failed to parse PeerId from database string: {e}").into())
+    }
+}
+
+// --- sqlx Type implementations for DbMultiaddr ---
+
+impl sqlx::Type<sqlx::Postgres> for DbMultiaddr {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        // Stored as TEXT, so delegate to String's type info
+        <String as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+
+    fn compatible(ty: &sqlx::postgres::PgTypeInfo) -> bool {
+        <String as sqlx::Type<sqlx::Postgres>>::compatible(ty)
+    }
+}
+
+impl<'q> sqlx::Encode<'q, sqlx::Postgres> for DbMultiaddr {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<IsNull, BoxDynError> {
+        // Convert Multiaddr to its string representation for storage
+        let multiaddr_str = self.to_string();
+        multiaddr_str.encode_by_ref(buf)
+    }
+
+    fn size_hint(&self) -> usize {
+        self.to_string().size_hint()
+    }
+}
+
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for DbMultiaddr {
+    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, BoxDynError> {
+        // Decode the TEXT from the database as a String
+        let multiaddr_str = <String as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        // Parse the string back into a Multiaddr
+        Multiaddr::from_str(&multiaddr_str)
+            .map(DbMultiaddr::from)
+            .map_err(|e| format!("Failed to parse Multiaddr from database string: {e}").into())
     }
 }

@@ -11,12 +11,15 @@ use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc_json::Utxo;
 use fake::Fake as _;
 use futures::future::join_all;
+use signer::stacks::api::StacksEpochStatus;
+use signer::storage::model::BitcoinBlockHeight;
+use signer::testing::btc::MockBitcoinBlockHashStreamProvider;
 use signer::testing::storage::model::TestBitcoinTxInfo;
+use signer::util::Sleep;
 use test_case::test_case;
 use test_log::test;
 use url::Url;
 
-use blockstack_lib::net::api::getpoxinfo::RPCPoxInfoData;
 use blockstack_lib::net::api::getsortition::SortitionInfo;
 use clarity::types::chainstate::BurnchainHeaderHash;
 use emily_client::apis::deposit_api;
@@ -32,23 +35,23 @@ use signer::block_observer;
 use signer::context::Context;
 use signer::context::RequestDeciderEvent;
 use signer::emily_client::EmilyClient;
-use signer::emily_client::EmilyInteract;
+use signer::emily_client::EmilyInteract as _;
 use signer::error::Error;
 use signer::keys;
 use signer::keys::PublicKey;
 use signer::keys::SignerScriptPubKey as _;
 use signer::network;
 use signer::stacks::api::TenureBlocks;
-use signer::storage::DbRead;
-use signer::storage::DbWrite;
+use signer::storage::DbRead as _;
+use signer::storage::DbWrite as _;
 use signer::storage::model;
 use signer::storage::model::DepositSigner;
 use signer::testing;
-use signer::testing::context::BuildContext;
-use signer::testing::context::ConfigureBitcoinClient;
-use signer::testing::context::ConfigureEmilyClient;
-use signer::testing::context::ConfigureStacksClient;
-use signer::testing::context::ConfigureStorage;
+use signer::testing::context::BuildContext as _;
+use signer::testing::context::ConfigureBitcoinClient as _;
+use signer::testing::context::ConfigureEmilyClient as _;
+use signer::testing::context::ConfigureStacksClient as _;
+use signer::testing::context::ConfigureStorage as _;
 use signer::testing::context::TestContext;
 use signer::testing::context::WrappedMock;
 use signer::testing::get_rng;
@@ -336,13 +339,10 @@ async fn deposit_flow() {
                 .once()
                 .returning(|_| Box::pin(std::future::ready(TenureBlocks::nearly_empty())));
 
-            client.expect_get_pox_info().once().returning(|| {
-                let raw_json_response =
-                    include_str!("../../tests/fixtures/stacksapi-get-pox-info-test-data.json");
-                Box::pin(async move {
-                    serde_json::from_str::<RPCPoxInfoData>(raw_json_response)
-                        .map_err(Error::JsonSerialize)
-                })
+            client.expect_get_epoch_status().returning(|| {
+                Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
+                    nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
+                })))
             });
 
             // The coordinator may try to further process the deposit to submit
@@ -368,13 +368,10 @@ async fn deposit_flow() {
         })
         .await;
 
-    let (block_observer_stream_tx, block_observer_stream_rx) = tokio::sync::mpsc::channel(1);
-    let block_stream: tokio_stream::wrappers::ReceiverStream<Result<bitcoin::BlockHash, Error>> =
-        block_observer_stream_rx.into();
-
+    let bitcoin_block_source = MockBitcoinBlockHashStreamProvider::default();
     let block_observer = block_observer::BlockObserver {
         context: context.clone(),
-        bitcoin_blocks: block_stream,
+        bitcoin_block_source: bitcoin_block_source.clone(),
     };
 
     let block_observer_handle = tokio::spawn(async move { block_observer.run().await });
@@ -415,12 +412,9 @@ async fn deposit_flow() {
         .expect("cannot create emily deposit");
 
     // Wake up block observer to process the new block
-    block_observer_stream_tx
-        .send(Ok(deposit_block_hash))
-        .await
-        .unwrap();
+    bitcoin_block_source.send(Ok(deposit_block_hash));
 
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    Sleep::for_millis(500).await;
 
     // Ensure we picked up the new tip
     assert_eq!(
@@ -494,7 +488,7 @@ async fn deposit_flow() {
 
     // Wake coordinator up (again)
     context
-        .signal(RequestDeciderEvent::NewRequestsHandled.into())
+        .signal(RequestDeciderEvent::NewRequestsHandled(bitcoin_chain_tip).into())
         .expect("failed to signal");
 
     // Await the `wait_for_tx_task` to receive the first transaction broadcasted.

@@ -293,7 +293,7 @@ impl BitmapSegmenter {
 
 #[cfg(test)]
 mod tests {
-    use crate::idpack::Encodable;
+    use crate::idpack::Encodable as _;
 
     use super::*;
     use assert_matches::assert_matches;
