@@ -146,7 +146,7 @@ pub async fn deploy_smart_contracts() -> &'static SignerStxState<ApiFallbackClie
     outpoint: bitcoin::OutPoint::null(),
     amount: 123654789,
     recipient: PrincipalData::parse("SN2V7WTJ7BHR03MPHZ1C9A9ZR6NZGR4WM8HT4V67Y").unwrap(),
-    deployer: *testing::wallet::WALLET.0.address(),
+    deployer: testing::wallet::WALLET.0.address().clone(),
     sweep_txid: BitcoinTxId::from([0; 32]),
     sweep_block_hash: BitcoinBlockHash::from([0; 32]),
     sweep_block_height: 7u64.into(),
@@ -155,7 +155,7 @@ pub async fn deploy_smart_contracts() -> &'static SignerStxState<ApiFallbackClie
     outpoint: bitcoin::OutPoint::null(),
     amount: 123654,
     recipient: PrincipalData::parse("ST1RQHF4VE5CZ6EK3MZPZVQBA0JVSMM9H5PMHMS1Y.my-contract-name").unwrap(),
-    deployer: *testing::wallet::WALLET.0.address(),
+    deployer: testing::wallet::WALLET.0.address().clone(),
     sweep_txid: BitcoinTxId::from([0; 32]),
     sweep_block_hash: BitcoinBlockHash::from([0; 32]),
     sweep_block_height: 7u64.into(),
@@ -169,7 +169,7 @@ pub async fn deploy_smart_contracts() -> &'static SignerStxState<ApiFallbackClie
     outpoint: bitcoin::OutPoint::null(),
     tx_fee: 2500,
     signer_bitmap: 0,
-    deployer: *testing::wallet::WALLET.0.address(),
+    deployer: testing::wallet::WALLET.0.address().clone(),
     sweep_block_hash: BitcoinBlockHash::from([0; 32]),
     sweep_block_height: 7u64.into(),
 }); "accept-withdrawal")]
@@ -177,7 +177,7 @@ pub async fn deploy_smart_contracts() -> &'static SignerStxState<ApiFallbackClie
     amount: 22500,
     recipient: (0x00, vec![0; 20]),
     max_fee: 3000,
-    deployer: *testing::wallet::WALLET.0.address(),
+    deployer: testing::wallet::WALLET.0.address().clone(),
 }); "create-withdrawal")]
 #[test_case(ContractCallWrapper(RejectWithdrawalV1 {
     id: QualifiedRequestId {
@@ -186,11 +186,11 @@ pub async fn deploy_smart_contracts() -> &'static SignerStxState<ApiFallbackClie
 	    block_hash: StacksBlockHash::from([0; 32]),
     },
     signer_bitmap: 0,
-    deployer: *testing::wallet::WALLET.0.address(),
+    deployer: testing::wallet::WALLET.0.address().clone(),
 }); "reject-withdrawal")]
 #[test_case(ContractCallWrapper(RotateKeysV1::new(
     &testing::wallet::WALLET.0,
-    *testing::wallet::WALLET.0.address(),
+    testing::wallet::WALLET.0.address().clone(),
     &signer::keys::PublicKey::from_slice(&[0x02; 33]).unwrap()
 )); "rotate-keys")]
 #[tokio::test]
@@ -248,7 +248,7 @@ async fn is_deposit_completed_works() {
         let username = regtest::BITCOIN_CORE_RPC_USERNAME.to_string();
         let password = regtest::BITCOIN_CORE_RPC_PASSWORD.to_string();
         let auth = bitcoincore_rpc::Auth::UserPass(username, password);
-        bitcoincore_rpc::Client::new("http://localhost:18443", auth).unwrap()
+        bitcoincore_rpc::Client::new(regtest::BITCOIN_CORE_RPC_ENDPOINT, auth).unwrap()
     };
     let mut rng = get_rng();
 
@@ -272,7 +272,7 @@ async fn is_deposit_completed_works() {
         outpoint,
         amount: 123654789,
         recipient: PrincipalData::parse("SN2V7WTJ7BHR03MPHZ1C9A9ZR6NZGR4WM8HT4V67Y").unwrap(),
-        deployer: *testing::wallet::WALLET.0.address(),
+        deployer: testing::wallet::WALLET.0.address().clone(),
         sweep_txid: BitcoinTxId::from([0; 32]),
         sweep_block_hash: BitcoinBlockHash::from(chain_tip_info.best_block_hash),
         sweep_block_height: (chain_tip_info.blocks).into(),
@@ -302,7 +302,7 @@ async fn is_withdrawal_completed_rejection_works() {
         let username = regtest::BITCOIN_CORE_RPC_USERNAME.to_string();
         let password = regtest::BITCOIN_CORE_RPC_PASSWORD.to_string();
         let auth = bitcoincore_rpc::Auth::UserPass(username, password);
-        bitcoincore_rpc::Client::new("http://localhost:18443", auth).unwrap()
+        bitcoincore_rpc::Client::new(regtest::BITCOIN_CORE_RPC_ENDPOINT, auth).unwrap()
     };
 
     let signers = deploy_smart_contracts().await;
@@ -313,8 +313,8 @@ async fn is_withdrawal_completed_rejection_works() {
     let mint_sbtc = ContractCallWrapper(CompleteDepositV1 {
         outpoint: bitcoin::OutPoint::new(txid.into(), 0),
         amount: 123654789,
-        recipient: PrincipalData::from(*testing::wallet::WALLET.0.address()),
-        deployer: *testing::wallet::WALLET.0.address(),
+        recipient: PrincipalData::from(testing::wallet::WALLET.0.address().clone()),
+        deployer: testing::wallet::WALLET.0.address().clone(),
         sweep_txid: BitcoinTxId::from([0; 32]),
         sweep_block_hash: chain_tip_info.best_block_hash.into(),
         sweep_block_height: chain_tip_info.blocks.into(),
@@ -326,7 +326,7 @@ async fn is_withdrawal_completed_rejection_works() {
         amount: 22500,
         recipient: (0x00, vec![0; 20]),
         max_fee: 3000,
-        deployer: *testing::wallet::WALLET.0.address(),
+        deployer: testing::wallet::WALLET.0.address().clone(),
     });
 
     signers.sign_and_submit(&start_withdrawal).await;
@@ -345,7 +345,7 @@ async fn is_withdrawal_completed_rejection_works() {
             txid: StacksTxId::from([0; 32]),
         },
         signer_bitmap: 0,
-        deployer: *testing::wallet::WALLET.0.address(),
+        deployer: testing::wallet::WALLET.0.address().clone(),
     });
 
     signers.sign_and_submit(&reject_withdrawal).await;

@@ -45,7 +45,7 @@ pub const BITCOIN_CORE_RPC_USERNAME: &str = "devnet";
 /// The password for RPC calls in bitcoin-core
 pub const BITCOIN_CORE_RPC_PASSWORD: &str = "devnet";
 /// Default RPC endpoint for regtest bitcoin-core
-pub const BITCOIN_CORE_RPC_ENDPOINT: &str = "http://localhost:18443";
+pub const BITCOIN_CORE_RPC_ENDPOINT: &str = "http://127.0.0.1:18443";
 
 /// The fallback fee in bitcoin core
 pub const BITCOIN_CORE_FALLBACK_FEE: Amount = Amount::from_sat(1000);
@@ -81,7 +81,7 @@ pub fn initialize_blockchain() -> (&'static Client, &'static Faucet) {
         let username = BITCOIN_CORE_RPC_USERNAME.to_string();
         let password = BITCOIN_CORE_RPC_PASSWORD.to_string();
         let auth = Auth::UserPass(username, password);
-        Client::new("http://localhost:18443", auth).unwrap()
+        Client::new(BITCOIN_CORE_RPC_ENDPOINT, auth).unwrap()
     });
 
     let faucet = FAUCET.get_or_init(|| {
@@ -112,7 +112,7 @@ pub fn initialize_blockchain_devenv() -> (&'static Client, &'static Faucet) {
         let password = BITCOIN_CORE_RPC_PASSWORD.to_string();
         let auth = Auth::UserPass(username, password);
         Client::new(
-            &format!("http://127.0.0.1:18443/wallet/{BITCOIN_CORE_WALLET_NAME}"),
+            &format!("{BITCOIN_CORE_RPC_ENDPOINT}/wallet/{BITCOIN_CORE_WALLET_NAME}"),
             auth,
         )
         .unwrap()

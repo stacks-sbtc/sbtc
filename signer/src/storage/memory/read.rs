@@ -219,7 +219,7 @@ impl DbRead for SharedStore {
             .lock()
             .await
             .withdrawal_request_to_signers
-            .get(&(request_id, *block_hash))
+            .get(&(request_id, block_hash.clone()))
             .cloned()
             .unwrap_or_default())
     }
@@ -241,13 +241,13 @@ impl DbRead for SharedStore {
                 decisions
                     .iter()
                     .find(|decision| &decision.signer_pub_key == signer_public_key)
-                    .map(|_| *pk)
+                    .map(|_| pk.clone())
             })
             .collect();
 
         let result = withdrawal_requests
             .into_iter()
-            .filter(|x| !voted.contains(&(x.request_id, x.block_hash)))
+            .filter(|x| !voted.contains(&(x.request_id, x.block_hash.clone())))
             .collect();
 
         Ok(result)
@@ -630,7 +630,7 @@ impl DbRead for SharedStore {
             .bitcoin_withdrawal_outputs
             .values()
             .filter(|x| txs.contains(&x.bitcoin_txid))
-            .map(|x| (x.request_id, x.stacks_block_hash))
+            .map(|x| (x.request_id, x.stacks_block_hash.clone()))
             .collect::<HashSet<_>>();
 
         // Compute the total amount from all of these swept withdrawal
@@ -731,7 +731,7 @@ impl DbRead for SharedStore {
                         anchor.block_height >= context_window_end_block.block_height
                     })
             })
-            .map(|stacks_block| stacks_block.block_hash)
+            .map(|stacks_block| stacks_block.block_hash.clone())
             .collect();
 
         let withdrawal_signers: Vec<_> = store

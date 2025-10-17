@@ -51,8 +51,8 @@ use crate::metrics::STACKS_BLOCKCHAIN;
 use crate::network;
 use crate::signature::TaprootSignature;
 use crate::stacks::api::FeePriority;
-use crate::stacks::api::GetNakamotoStartHeight as _;
 use crate::stacks::api::RejectionReason;
+use crate::stacks::api::StacksEpochStatus;
 use crate::stacks::api::StacksInteract as _;
 use crate::stacks::api::SubmitTxResponse;
 use crate::stacks::api::TxRejection;
@@ -267,19 +267,28 @@ where
         if self.is_epoch3 {
             return Ok(true);
         }
-        tracing::debug!("checked for whether we are in epoch 3 or later");
-        let pox_info = self.context.get_stacks_client().get_pox_info().await?;
 
-        let Some(nakamoto_start_height) = pox_info.nakamoto_start_height() else {
-            return Ok(false);
-        };
+        tracing::debug!("checking whether we are in epoch 3.0 or later");
+        let epoch_status = self.context.get_stacks_client().get_epoch_status().await?;
 
-        let is_epoch3 = pox_info.current_burnchain_block_height > *nakamoto_start_height;
-        if is_epoch3 {
-            self.is_epoch3 = is_epoch3;
-            tracing::debug!("we are in epoch 3 or later; time to do work");
+        match epoch_status {
+            StacksEpochStatus::PreNakamoto {
+                reported_bitcoin_height,
+                nakamoto_start_height,
+            } => {
+                tracing::debug!(
+                    %reported_bitcoin_height,
+                    %nakamoto_start_height,
+                    "the stacks node has not reached epoch 3.0; skipping this round"
+                );
+                Ok(false)
+            }
+            StacksEpochStatus::PostNakamoto { nakamoto_start_height } => {
+                tracing::debug!(%nakamoto_start_height, "the stacks node is in epoch 3.0 or later; proceeding");
+                self.is_epoch3 = true;
+                Ok(true)
+            }
         }
-        Ok(is_epoch3)
     }
 
     /// A function for processing new blocks
@@ -770,7 +779,7 @@ where
     ) -> Result<(), Error> {
         let db = self.context.get_storage();
         let stacks = self.context.get_stacks_client();
-        let deployer = self.context.config().signer.deployer;
+        let deployer = self.context.config().signer.deployer.clone();
 
         // Fetch deposit requests from the database where
         // there has been a confirmed bitcoin transaction associated with
@@ -951,7 +960,7 @@ where
         request: model::SweptWithdrawalRequest,
     ) -> Result<(), Error> {
         let stacks = self.context.get_stacks_client();
-        let deployer = self.context.config().signer.deployer;
+        let deployer = self.context.config().signer.deployer.clone();
 
         let is_completed = stacks
             .is_withdrawal_completed(&deployer, request.request_id)
@@ -1017,7 +1026,7 @@ where
     ) -> Result<(), Error> {
         let db = self.context.get_storage();
         let stacks = self.context.get_stacks_client();
-        let deployer = self.context.config().signer.deployer;
+        let deployer = self.context.config().signer.deployer.clone();
 
         let is_completed = stacks
             .is_withdrawal_completed(&deployer, request.request_id)
@@ -1284,7 +1293,7 @@ where
             amount: req.amount - assessed_bitcoin_fee.to_sat(),
             outpoint,
             recipient: req.recipient.into(),
-            deployer: self.context.config().signer.deployer,
+            deployer: self.context.config().signer.deployer.clone(),
             sweep_txid: req.sweep_txid,
             sweep_block_hash: req.sweep_block_hash,
             sweep_block_height: req.sweep_block_height,
@@ -1346,7 +1355,7 @@ where
             outpoint,
             tx_fee: assessed_bitcoin_fee.to_sat(),
             signer_bitmap: 0,
-            deployer: self.context.config().signer.deployer,
+            deployer: self.context.config().signer.deployer.clone(),
             sweep_block_hash: req.sweep_block_hash,
             sweep_block_height: req.sweep_block_height,
         };
@@ -1382,7 +1391,7 @@ where
         let reject_withdrawal_v1 = RejectWithdrawalV1 {
             id: req.qualified_id(),
             signer_bitmap: 0,
-            deployer: self.context.config().signer.deployer,
+            deployer: self.context.config().signer.deployer.clone(),
         };
         let contract_call = ContractCall::RejectWithdrawalV1(Box::new(reject_withdrawal_v1));
 
@@ -1414,7 +1423,7 @@ where
         chain_tip: &model::BitcoinBlockHash,
         wallet: &SignerWallet,
     ) -> Result<StacksTransaction, Error> {
-        let txid = req.txid;
+        let txid = req.txid.clone();
 
         let signal_stream = self
             .context
@@ -2230,7 +2239,7 @@ where
 
         // Maybe this smart contract has already been deployed, let's check
         // that first.
-        let deployer = self.context.config().signer.deployer;
+        let deployer = self.context.config().signer.deployer.clone();
         if contract_deploy.is_deployed(&stacks, &deployer).await? {
             return Ok(());
         }

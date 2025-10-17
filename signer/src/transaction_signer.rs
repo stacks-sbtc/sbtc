@@ -518,7 +518,10 @@ where
         let txid = multi_sig.tx().txid();
 
         if txid != request.txid {
-            return Err(Error::SignerCoordinatorTxidMismatch(txid, request.txid));
+            return Err(Error::SignerCoordinatorTxidMismatch(
+                txid,
+                request.txid.clone(),
+            ));
         }
 
         let signature = crate::signature::sign_stacks_tx(multi_sig.tx(), &self.signer_private_key);
@@ -611,7 +614,7 @@ where
             origin: *origin_public_key,
             aggregate_key: signer_set_info.aggregate_key,
             signatures_required: signer_set_info.signatures_required,
-            deployer: self.context.config().signer.deployer,
+            deployer: self.context.config().signer.deployer.clone(),
         };
         let ctx = &self.context;
 

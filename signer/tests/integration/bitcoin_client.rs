@@ -11,7 +11,7 @@ use url::Url;
 
 #[tokio::test]
 async fn test_get_block_not_found() {
-    let url: Url = "http://devnet:devnet@localhost:18443".parse().unwrap();
+    let url: Url = "http://devnet:devnet@127.0.0.1:18443".parse().unwrap();
     let client = BitcoinCoreClient::try_from(&url).unwrap();
     let result = client.inner_client().get_block(&BlockHash::all_zeros());
 
@@ -30,7 +30,7 @@ async fn test_get_block_works() {
     let (_, faucet) = regtest::initialize_blockchain();
     let blocks = faucet.generate_blocks(5);
 
-    let url: Url = "http://devnet:devnet@localhost:18443".parse().unwrap();
+    let url: Url = "http://devnet:devnet@127.0.0.1:18443".parse().unwrap();
 
     let client = ApiFallbackClient::<BitcoinCoreClient>::new(vec![
         BitcoinCoreClient::try_from(&url).unwrap(),
@@ -58,7 +58,7 @@ async fn test_get_block_works() {
 #[ignore = "This test needs to be completed (i.e. with inputs/outputs"]
 #[tokio::test]
 async fn broadcast_tx_works() {
-    let url: Url = "http://devnet:devnet@localhost:18443".parse().unwrap();
+    let url: Url = "http://devnet:devnet@127.0.0.1:18443".parse().unwrap();
     let client = ApiFallbackClient::<BitcoinCoreClient>::try_from([url].as_slice()).unwrap();
 
     let tx = bitcoin::Transaction {
@@ -74,7 +74,7 @@ async fn broadcast_tx_works() {
 #[tokio::test]
 async fn calculate_transaction_fee_works_confirmed() {
     let client = BitcoinCoreClient::new(
-        "http://localhost:18443",
+        regtest::BITCOIN_CORE_RPC_ENDPOINT,
         regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
         regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
     )
@@ -143,7 +143,7 @@ async fn calculate_transaction_fee_works_confirmed() {
 #[tokio::test]
 async fn calculate_transaction_fee_works_mempool() {
     let client = BitcoinCoreClient::new(
-        "http://localhost:18443",
+        regtest::BITCOIN_CORE_RPC_ENDPOINT,
         regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
         regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
     )

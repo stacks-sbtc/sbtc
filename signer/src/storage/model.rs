@@ -188,7 +188,7 @@ impl StacksBlock {
         Self {
             block_hash: block.block_id().into(),
             block_height: block.header.chain_length.into(),
-            parent_hash: block.header.parent_block_id.into(),
+            parent_hash: block.header.parent_block_id.clone().into(),
             bitcoin_anchor: *bitcoin_anchor,
         }
     }
@@ -350,8 +350,8 @@ impl WithdrawalRequest {
     pub fn qualified_id(&self) -> QualifiedRequestId {
         QualifiedRequestId {
             request_id: self.request_id,
-            txid: self.txid,
-            block_hash: self.block_hash,
+            txid: self.txid.clone(),
+            block_hash: self.block_hash.clone(),
         }
     }
 }
@@ -379,8 +379,8 @@ impl WithdrawalSigner {
     pub fn qualified_id(&self) -> QualifiedRequestId {
         QualifiedRequestId {
             request_id: self.request_id,
-            txid: self.txid,
-            block_hash: self.block_hash,
+            txid: self.txid.clone(),
+            block_hash: self.block_hash.clone(),
         }
     }
 }
@@ -493,8 +493,8 @@ impl SweptWithdrawalRequest {
     pub fn qualified_id(&self) -> QualifiedRequestId {
         QualifiedRequestId {
             request_id: self.request_id,
-            txid: self.txid,
-            block_hash: self.block_hash,
+            txid: self.txid.clone(),
+            block_hash: self.block_hash.clone(),
         }
     }
 }
@@ -704,7 +704,7 @@ pub enum TxPrevoutType {
 ///
 /// A request-id and a Stacks Block ID is enough to uniquely identify the
 /// request, but we add in the transaction ID for completeness.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct QualifiedRequestId {
     /// The ID that was generated in the clarity contract call for the
     /// withdrawal request.
@@ -918,9 +918,16 @@ impl AsRef<BitcoinBlockHash> for BitcoinBlockRef {
 }
 
 /// The Stacks block ID. This is different from the block header hash.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(transparent)]
 pub struct StacksBlockHash(StacksBlockId);
+
+impl StacksBlockHash {
+    /// Return the inner bytes for the block hash.
+    pub fn into_bytes(self) -> [u8; 32] {
+        self.0.into_bytes()
+    }
+}
 
 impl Deref for StacksBlockHash {
     type Target = StacksBlockId;
@@ -954,8 +961,20 @@ impl std::fmt::Display for StacksBlockHash {
 }
 
 /// Stacks transaction ID
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StacksTxId(blockstack_lib::burnchains::Txid);
+
+impl StacksTxId {
+    /// Return the inner bytes for the block hash.
+    pub fn into_bytes(self) -> [u8; 32] {
+        self.0.into_bytes()
+    }
+
+    /// Returns the inner Txid.
+    pub fn into_inner(self) -> blockstack_lib::burnchains::Txid {
+        self.0
+    }
+}
 
 impl std::fmt::Display for StacksTxId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1672,7 +1691,7 @@ mod tests {
         assert_eq!(block_hash, round_trip);
 
         let stacks_hash = BurnchainHeaderHash(fake::Faker.fake_with_rng(&mut rng));
-        let block_hash = BitcoinBlockHash::from(stacks_hash);
+        let block_hash = BitcoinBlockHash::from(stacks_hash.clone());
         let round_trip = BurnchainHeaderHash::from(block_hash);
         assert_eq!(stacks_hash, round_trip);
     }

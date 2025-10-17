@@ -349,7 +349,7 @@ impl BitcoinPreSignRequest {
         }
 
         deposits.sort_by_key(|(request, _)| request.outpoint);
-        withdrawals.sort_by_key(|(_, report)| report.id);
+        withdrawals.sort_by_key(|(_, report)| report.id.clone());
         let reports = SbtcReports {
             deposits,
             withdrawals,
@@ -487,8 +487,8 @@ impl BitcoinTxValidationData {
                 bitcoin_chain_tip: self.chain_tip,
                 output_index: output_index as u32 + 2,
                 request_id: report.id.request_id,
-                stacks_txid: report.id.txid,
-                stacks_block_hash: report.id.block_hash,
+                stacks_txid: report.id.txid.clone(),
+                stacks_block_hash: report.id.block_hash.clone(),
                 validation_result: report.validate(
                     self.chain_tip_height,
                     output_index + 2,
@@ -1040,8 +1040,8 @@ impl WithdrawalRequestReport {
     fn to_withdrawal_request(&self, votes: &SignerVotes) -> WithdrawalRequest {
         WithdrawalRequest {
             request_id: self.id.request_id,
-            txid: self.id.txid,
-            block_hash: self.id.block_hash,
+            txid: self.id.txid.clone(),
+            block_hash: self.id.block_hash.clone(),
             amount: self.amount,
             max_fee: self.max_fee,
             script_pubkey: self.recipient.clone().into(),
