@@ -248,7 +248,7 @@ async fn is_deposit_completed_works() {
         let username = regtest::BITCOIN_CORE_RPC_USERNAME.to_string();
         let password = regtest::BITCOIN_CORE_RPC_PASSWORD.to_string();
         let auth = bitcoincore_rpc::Auth::UserPass(username, password);
-        bitcoincore_rpc::Client::new("http://localhost:18443", auth).unwrap()
+        bitcoincore_rpc::Client::new(regtest::BITCOIN_CORE_RPC_ENDPOINT, auth).unwrap()
     };
     let mut rng = get_rng();
 
@@ -302,7 +302,7 @@ async fn is_withdrawal_completed_rejection_works() {
         let username = regtest::BITCOIN_CORE_RPC_USERNAME.to_string();
         let password = regtest::BITCOIN_CORE_RPC_PASSWORD.to_string();
         let auth = bitcoincore_rpc::Auth::UserPass(username, password);
-        bitcoincore_rpc::Client::new("http://localhost:18443", auth).unwrap()
+        bitcoincore_rpc::Client::new(regtest::BITCOIN_CORE_RPC_ENDPOINT, auth).unwrap()
     };
 
     let signers = deploy_smart_contracts().await;
