@@ -1208,7 +1208,7 @@ where
             contract_tx: contract_call.into(),
             nonce: tx.get_origin_nonce(),
             tx_fee: tx.get_tx_fee(),
-            txid: tx.txid(),
+            txid: tx.txid().into(),
         };
 
         self.process_sign_request(sign_request, bitcoin_chain_tip, multi_tx, wallet)
@@ -1252,7 +1252,7 @@ where
         let submit_tx_result = self.context.get_stacks_client().submit_tx(&tx?).await;
 
         match submit_tx_result {
-            Ok(SubmitTxResponse::Acceptance(txid)) => Ok(txid.into()),
+            Ok(SubmitTxResponse::Acceptance(txid)) => Ok(txid),
             Ok(SubmitTxResponse::Rejection(err)) => Err(err.into()),
             Err(err) => Err(err),
         }
@@ -1315,7 +1315,7 @@ where
             contract_tx: contract_call.into(),
             nonce: tx.get_origin_nonce(),
             tx_fee: tx.get_tx_fee(),
-            txid: tx.txid(),
+            txid: tx.txid().into(),
         };
 
         Ok((sign_request, multi_tx))
@@ -1375,7 +1375,7 @@ where
             contract_tx: contract_call.into(),
             nonce: tx.get_origin_nonce(),
             tx_fee: tx.get_tx_fee(),
-            txid: tx.txid(),
+            txid: tx.txid().into(),
         };
 
         Ok((sign_request, multi_tx))
@@ -1409,7 +1409,7 @@ where
             contract_tx: contract_call.into(),
             nonce: tx.get_origin_nonce(),
             tx_fee: tx.get_tx_fee(),
-            txid: tx.txid(),
+            txid: tx.txid().into(),
         };
 
         Ok((sign_request, multi_tx))
@@ -1424,7 +1424,7 @@ where
         chain_tip: &model::BitcoinBlockHash,
         wallet: &SignerWallet,
     ) -> Result<StacksTransaction, Error> {
-        let txid = req.txid.clone();
+        let txid = req.txid;
 
         let signal_stream = self
             .context
@@ -2302,7 +2302,7 @@ where
             contract_tx: contract_deploy.into(),
             nonce: tx.get_origin_nonce(),
             tx_fee: tx.get_tx_fee(),
-            txid: tx.txid(),
+            txid: tx.txid().into(),
         };
 
         Ok((sign_request, multi_tx))

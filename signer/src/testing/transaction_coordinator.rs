@@ -220,7 +220,7 @@ where
             .iter()
             .filter_map(|b| {
                 if b.bitcoin_anchor == bitcoin_chain_tip.block_hash {
-                    Some(b.block_hash.clone())
+                    Some(b.block_hash)
                 } else {
                     None
                 }
@@ -661,11 +661,7 @@ where
                     })
                 });
                 client.expect_submit_tx().times(5).returning(|_| {
-                    Box::pin(async {
-                        Ok(SubmitTxResponse::Acceptance(
-                            Faker.fake::<StacksTxId>().into_inner(),
-                        ))
-                    })
+                    Box::pin(async { Ok(SubmitTxResponse::Acceptance(Faker.fake::<StacksTxId>())) })
                 });
             })
             .await;
@@ -731,7 +727,7 @@ where
         // Create test data for the withdrawal request
         let stacks_block: StacksBlock = fake::Faker.fake_with_rng(&mut rng);
         let withdrawal_req = model::WithdrawalRequest {
-            block_hash: stacks_block.block_hash.clone(),
+            block_hash: stacks_block.block_hash,
             ..fake::Faker.fake_with_rng::<model::WithdrawalRequest, _>(&mut rng)
         };
 
@@ -824,7 +820,7 @@ where
         let outpoint = withdrawal_req.withdrawal_outpoint();
         assert_eq!(sign_request.tx_fee, 123000);
         assert_eq!(sign_request.aggregate_key, Some(bitcoin_aggregate_key));
-        assert_eq!(sign_request.txid, multi_tx.tx().txid());
+        assert_eq!(sign_request.txid, multi_tx.tx().txid().into());
         assert_eq!(sign_request.nonce, multi_tx.tx().get_origin_nonce());
         if let StacksTx::ContractCall(ContractCall::AcceptWithdrawalV1(call)) =
             sign_request.contract_tx
@@ -883,7 +879,7 @@ where
         // Create test data for the withdrawal request
         let stacks_block: StacksBlock = fake::Faker.fake_with_rng(&mut rng);
         let withdrawal_req = model::WithdrawalRequest {
-            block_hash: stacks_block.block_hash.clone(),
+            block_hash: stacks_block.block_hash,
             ..fake::Faker.fake_with_rng(&mut rng)
         };
 
@@ -927,7 +923,7 @@ where
 
         assert_eq!(sign_request.tx_fee, 123000);
         assert_eq!(sign_request.aggregate_key, Some(bitcoin_aggregate_key));
-        assert_eq!(sign_request.txid, multi_tx.tx().txid());
+        assert_eq!(sign_request.txid, multi_tx.tx().txid().into());
         assert_eq!(sign_request.nonce, multi_tx.tx().get_origin_nonce());
 
         let StacksTx::ContractCall(ContractCall::RejectWithdrawalV1(call)) =

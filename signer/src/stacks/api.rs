@@ -22,7 +22,6 @@ use blockstack_lib::clarity::vm::types::StandardPrincipalData;
 use blockstack_lib::codec::StacksMessageCodec as _;
 use blockstack_lib::net::api::getaccount::AccountEntryResponse;
 use blockstack_lib::net::api::getcontractsrc::ContractSrcResponse;
-use blockstack_lib::net::api::getinfo::RPCPeerInfoData;
 use blockstack_lib::net::api::getsortition::SortitionInfo;
 use blockstack_lib::net::api::gettenureinfo::RPCGetTenureInfo;
 use blockstack_lib::net::api::postfeerate::FeeRateEstimateRequestBody;
@@ -30,6 +29,7 @@ use blockstack_lib::net::api::postfeerate::RPCFeeEstimate;
 use blockstack_lib::net::api::postfeerate::RPCFeeEstimateResponse;
 use blockstack_lib::types::chainstate::StacksAddress;
 use blockstack_lib::types::chainstate::StacksBlockId;
+use clarity::types::chainstate::BlockHeaderHash;
 use clarity::vm::Value;
 use clarity::vm::types::OptionalData;
 use clarity::vm::types::TupleData;
@@ -48,7 +48,9 @@ use crate::storage::DbRead;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::StacksBlock;
+use crate::storage::model::StacksBlockHash;
 use crate::storage::model::StacksBlockHeight;
+use crate::storage::model::StacksTxId;
 use crate::storage::model::ToLittleEndianOrder as _;
 use crate::util::ApiFallbackClient;
 
@@ -294,7 +296,7 @@ pub trait StacksInteract: Send + Sync {
     fn get_epoch_status(&self) -> impl Future<Output = Result<StacksEpochStatus, Error>> + Send;
 
     /// Get information about the current node.
-    fn get_node_info(&self) -> impl Future<Output = Result<RPCPeerInfoData, Error>> + Send;
+    fn get_node_info(&self) -> impl Future<Output = Result<GetNodeInfoResponse, Error>> + Send;
 
     /// Get the source of a deployed smart contract.
     ///
@@ -568,7 +570,7 @@ impl std::error::Error for TxRejection {}
 #[serde(untagged)]
 pub enum SubmitTxResponse {
     /// The transaction ID for the submitted transaction.
-    Acceptance(Txid),
+    Acceptance(StacksTxId),
     /// The response when the transaction is rejected from the node.
     Rejection(TxRejection),
 }
@@ -628,6 +630,38 @@ impl TryFrom<AccountEntryResponse> for AccountInfo {
             nonce: value.nonce,
             unlock_height: value.unlock_height.into(),
         })
+    }
+}
+
+/// The response from a GET /v2/info request to stacks-core
+///
+/// This type contains only a subset of the full response from stacks-core,
+/// you can find the full response here:
+/// <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stackslib/src/net/api/getinfo.rs#L53-L85>
+///
+/// Note that the stacks blockchain information here is the same
+/// corresponding fields returned from the `/v3/tenures/info` response.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct GetNodeInfoResponse {
+    /// The height of the tip of the canonical bitcoin blockchain.
+    pub burn_block_height: BitcoinBlockHeight,
+    /// The version of the stacks node that is connected to this signer.
+    pub server_version: String,
+    /// The height of the tip of the canonical stacks blockchain.
+    pub stacks_tip_height: StacksBlockHeight,
+    /// The block header hash of the tip of the canonical stacks
+    /// blockchain. This is hashed with the consensus hash to create the
+    /// block id.
+    stacks_tip: BlockHeaderHash,
+    /// The consensus hash of the tip of the canonical stacks blockchain.
+    pub stacks_tip_consensus_hash: ConsensusHash,
+}
+
+impl GetNodeInfoResponse {
+    /// Create a StacksBlockHash from the tip information of the canonical
+    /// stacks blockchain.
+    pub fn stacks_chain_tip(&self) -> StacksBlockHash {
+        StacksBlockId::new(&self.stacks_tip_consensus_hash, &self.stacks_tip).into()
     }
 }
 
@@ -1306,7 +1340,7 @@ impl StacksClient {
 
     /// Get information about the current node.
     #[tracing::instrument(skip(self))]
-    pub async fn get_node_info(&self) -> Result<RPCPeerInfoData, Error> {
+    pub async fn get_node_info(&self) -> Result<GetNodeInfoResponse, Error> {
         let path = "/v2/info";
         let url = self
             .endpoint
@@ -1366,10 +1400,7 @@ where
             break;
         };
         // We've seen this parent already, so time to stop.
-        if db
-            .stacks_block_exists(header.parent_block_id.clone())
-            .await?
-        {
+        if db.stacks_block_exists(&header.parent_block_id).await? {
             tracing::debug!("parent block known in the database");
             break;
         }
@@ -1708,7 +1739,7 @@ impl StacksInteract for StacksClient {
         self.get_pox_info().await?.try_into()
     }
 
-    async fn get_node_info(&self) -> Result<RPCPeerInfoData, Error> {
+    async fn get_node_info(&self) -> Result<GetNodeInfoResponse, Error> {
         self.get_node_info().await
     }
 
@@ -1857,7 +1888,7 @@ impl StacksInteract for ApiFallbackClient<StacksClient> {
         self.exec(|client, _| client.get_epoch_status()).await
     }
 
-    async fn get_node_info(&self) -> Result<RPCPeerInfoData, Error> {
+    async fn get_node_info(&self) -> Result<GetNodeInfoResponse, Error> {
         self.exec(|client, _| client.get_node_info()).await
     }
 
@@ -2779,7 +2810,7 @@ mod tests {
         let client =
             StacksClient::new(url::Url::parse(stacks_node_server.url().as_str()).unwrap()).unwrap();
         let resp = client.get_node_info().await.unwrap();
-        let expected: RPCPeerInfoData = serde_json::from_str(raw_json_response).unwrap();
+        let expected: GetNodeInfoResponse = serde_json::from_str(raw_json_response).unwrap();
 
         assert_eq!(resp, expected);
         mock.assert();

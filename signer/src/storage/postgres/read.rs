@@ -274,7 +274,7 @@ impl PgRead {
         )
         .bind(chain_tip)
         .bind(i64::try_from(id.request_id).map_err(Error::ConversionDatabaseInt)?)
-        .bind(&id.block_hash)
+        .bind(id.block_hash)
         .fetch_optional(executor)
         .await
         .map_err(Error::SqlxQuery)
@@ -320,7 +320,7 @@ impl PgRead {
         )
         .bind(signer_public_key)
         .bind(i64::try_from(id.request_id).map_err(Error::ConversionDatabaseInt)?)
-        .bind(&id.block_hash)
+        .bind(id.block_hash)
         .fetch_optional(executor)
         .await
         .map_err(Error::SqlxQuery)
@@ -1031,8 +1031,8 @@ impl PgRead {
             "#,
         )
         .bind(aggregate_key)
-        .bind(&id.txid)
-        .bind(&id.block_hash)
+        .bind(id.txid)
+        .bind(id.block_hash)
         .bind(i64::try_from(id.request_id).map_err(Error::ConversionDatabaseInt)?)
         .fetch_all(executor)
         .await
@@ -1656,7 +1656,7 @@ impl PgRead {
 
     async fn stacks_block_exists<'e, E>(
         executor: &'e mut E,
-        block_id: StacksBlockId,
+        block_id: &StacksBlockId,
     ) -> Result<bool, Error>
     where
         &'e mut E: sqlx::PgExecutor<'e>,
@@ -2151,7 +2151,7 @@ impl PgRead {
         )
         .bind(txid)
         .bind(i64::try_from(id.request_id).map_err(Error::ConversionDatabaseInt)?)
-        .bind(&id.block_hash)
+        .bind(id.block_hash)
         .fetch_one(executor)
         .await
         .map_err(Error::SqlxQuery)
@@ -2186,7 +2186,7 @@ impl PgRead {
             "#,
         )
         .bind(i64::try_from(id.request_id).map_err(Error::ConversionDatabaseInt)?)
-        .bind(&id.block_hash)
+        .bind(id.block_hash)
         .fetch_one(&mut *executor)
         .await
         .map_err(Error::SqlxQuery)?;
@@ -2804,7 +2804,7 @@ impl DbRead for PgStore {
             .await
     }
 
-    async fn stacks_block_exists(&self, block_id: StacksBlockId) -> Result<bool, Error> {
+    async fn stacks_block_exists(&self, block_id: &StacksBlockId) -> Result<bool, Error> {
         PgRead::stacks_block_exists(self.get_connection().await?.as_mut(), block_id).await
     }
 
@@ -3234,10 +3234,7 @@ impl DbRead for PgTransaction<'_> {
         PgRead::get_bitcoin_blocks_with_transaction(tx.as_mut(), txid).await
     }
 
-    async fn stacks_block_exists(
-        &self,
-        block_id: clarity::types::chainstate::StacksBlockId,
-    ) -> Result<bool, Error> {
+    async fn stacks_block_exists(&self, block_id: &StacksBlockId) -> Result<bool, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::stacks_block_exists(tx.as_mut(), block_id).await
     }

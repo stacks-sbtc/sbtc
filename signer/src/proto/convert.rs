@@ -547,7 +547,7 @@ impl From<StacksTransactionSignRequest> for proto::StacksTransactionSignRequest 
             aggregate_key: value.aggregate_key.map(Into::into),
             nonce: value.nonce,
             tx_fee: value.tx_fee,
-            txid: Some(StacksTxId::from(value.txid).into()),
+            txid: Some(value.txid.into()),
             contract_tx: Some(contract_tx),
         }
     }
@@ -579,7 +579,7 @@ impl TryFrom<proto::StacksTransactionSignRequest> for StacksTransactionSignReque
             aggregate_key: None,
             nonce: value.nonce,
             tx_fee: value.tx_fee,
-            txid: StacksTxId::try_from(value.txid.required()?)?.into(),
+            txid: StacksTxId::try_from(value.txid.required()?)?,
             contract_tx,
         })
     }
@@ -1136,7 +1136,7 @@ impl TryFrom<proto::WstsMessage> for WstsMessage {
 impl From<StacksTransactionSignature> for proto::StacksTransactionSignature {
     fn from(value: StacksTransactionSignature) -> Self {
         proto::StacksTransactionSignature {
-            txid: Some(StacksTxId::from(value.txid).into()),
+            txid: Some(value.txid.into()),
             signature: Some(value.signature.into()),
         }
     }
@@ -1146,7 +1146,7 @@ impl TryFrom<proto::StacksTransactionSignature> for StacksTransactionSignature {
     type Error = Error;
     fn try_from(value: proto::StacksTransactionSignature) -> Result<Self, Self::Error> {
         Ok(StacksTransactionSignature {
-            txid: StacksTxId::try_from(value.txid.required()?)?.into(),
+            txid: StacksTxId::try_from(value.txid.required()?)?,
             signature: value.signature.required()?.try_into()?,
         })
     }

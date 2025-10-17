@@ -431,7 +431,7 @@ async fn process_complete_deposit() {
         .with_stacks_client(|client| {
             client.expect_submit_tx().once().returning(move |tx| {
                 let tx = tx.clone();
-                let txid = tx.txid();
+                let txid = tx.txid().into();
                 let broadcasted_transaction_tx = broadcasted_transaction_tx.clone();
                 Box::pin(async move {
                     broadcasted_transaction_tx
@@ -621,7 +621,7 @@ async fn mock_stacks_core<D, B, E>(
         // expectation here.
         client.expect_submit_tx().returning(move |tx| {
             let tx = tx.clone();
-            let txid = tx.txid();
+            let txid = tx.txid().into();
             let broadcast_stacks_tx = broadcast_stacks_tx.clone();
             Box::pin(async move {
                 broadcast_stacks_tx.send(tx).unwrap();
@@ -920,7 +920,7 @@ async fn run_dkg_from_scratch() {
 
             client.expect_submit_tx().returning(move |tx| {
                 let tx = tx.clone();
-                let txid = tx.txid();
+                let txid = tx.txid().into();
                 let broadcast_stacks_tx = broadcast_stacks_tx.clone();
                 Box::pin(async move {
                     broadcast_stacks_tx.send(tx).expect("Failed to send result");
@@ -1339,7 +1339,7 @@ async fn run_subsequent_dkg() {
 
             client.expect_submit_tx().returning(move |tx| {
                 let tx = tx.clone();
-                let txid = tx.txid();
+                let txid = tx.txid().into();
                 let broadcast_stacks_tx = broadcast_stacks_tx.clone();
                 Box::pin(async move {
                     broadcast_stacks_tx.send(tx).expect("Failed to send result");
@@ -4884,7 +4884,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
         request_id: 23,
         bitcoin_block_height: bitcoin_chain_tip.block_height,
         amount: 10_000_000,
-        block_hash: stacks_chain_tip.clone(),
+        block_hash: stacks_chain_tip,
         recipient: withdrawal_recipient.script_pubkey.clone().into(),
         max_fee: 100_000,
         txid: StacksTxId::from([123; 32]),
@@ -5315,7 +5315,7 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
                 .times(if expect_tx { 1 } else { 0 })
                 .returning(move |tx| {
                     let tx = tx.clone();
-                    let txid = tx.txid();
+                    let txid = tx.txid().into();
                     let broadcasted_transaction_tx = broadcasted_transaction_tx.clone();
                     Box::pin(async move {
                         broadcasted_transaction_tx
@@ -5645,8 +5645,8 @@ mod get_eligible_pending_withdrawal_requests {
         for (signer_pub_key, is_accepted) in signer_votes {
             let signer = WithdrawalSigner {
                 request_id: request.request_id,
-                block_hash: request.block_hash.clone(),
-                txid: request.txid.clone(),
+                block_hash: request.block_hash,
+                txid: request.txid,
                 signer_pub_key,
                 is_accepted,
             };
@@ -5669,7 +5669,7 @@ mod get_eligible_pending_withdrawal_requests {
     ) -> WithdrawalRequest {
         let withdrawal_request = WithdrawalRequest {
             request_id: next_request_id(),
-            block_hash: stacks_block.block_hash.clone(),
+            block_hash: stacks_block.block_hash,
             bitcoin_block_height: bitcoin_block.block_height,
             amount,
             max_fee,

@@ -341,9 +341,9 @@ where
 
         let msg = SignerWithdrawalDecision {
             request_id: withdrawal_request.request_id,
-            block_hash: withdrawal_request.block_hash.clone(),
+            block_hash: withdrawal_request.block_hash,
             accepted: is_accepted,
-            txid: withdrawal_request.txid.clone(),
+            txid: withdrawal_request.txid,
         };
 
         let signer_decision = WithdrawalSigner {
@@ -383,7 +383,7 @@ where
                 Error::WithdrawalBitcoinAddressFromScript(
                     err,
                     req.request_id,
-                    req.block_hash.clone().into(),
+                    req.block_hash.into(),
                 )
             })?;
 
@@ -497,10 +497,10 @@ where
     ) -> Result<(), Error> {
         let signer_decision = WithdrawalSigner {
             request_id: decision.request_id,
-            block_hash: decision.block_hash.clone(),
+            block_hash: decision.block_hash,
             signer_pub_key,
             is_accepted: decision.accepted,
-            txid: decision.txid.clone(),
+            txid: decision.txid,
         };
 
         // TODO: we need to check to see if we have the withdrawal request
