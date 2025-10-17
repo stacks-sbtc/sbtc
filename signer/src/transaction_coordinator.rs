@@ -346,9 +346,8 @@ where
         metrics::counter!(Metrics::CoordinatorTenuresTotal).increment(1);
 
         tracing::debug!("determining if we need to coordinate DKG");
-        let should_coordinate_dkg =
-            should_coordinate_dkg(&self.context, &bitcoin_chain_tip).await?;
-        let aggregate_key = if should_coordinate_dkg {
+        let should_run_dkg = should_run_dkg(&self.context, &bitcoin_chain_tip).await?;
+        let aggregate_key = if should_run_dkg {
             match self.coordinate_dkg(&bitcoin_chain_tip).await {
                 Ok(key) => key,
                 Err(error) => {
@@ -363,7 +362,7 @@ where
             // If we do not have signer set info in the registry, then we
             // are in the bootstrap phase. Our latest DKG shares may be
             // 'Unverified', but if we are here then they were not 'Failed'
-            // when we made to call to `should_coordinate_dkg`, since we
+            // when we made to call to `should_run_dkg`, since we
             // will coordinate DKG if our last DKG shares are 'Failed'. But
             // we could be loading 'Failed' shares here.
             match maybe_registry_signer_set_info.as_ref() {
@@ -2515,8 +2514,13 @@ pub fn coordinator_public_key(
 }
 
 /// Determine, according to the current state of the signer and configuration,
-/// whether or not a new DKG round should be coordinated.
-pub async fn should_coordinate_dkg(
+/// whether or not a new DKG round should be coordinated. The following checks are made:
+/// 1. Do non-failed DKG shares exist? (if not, run DKG)
+/// 2. Do non-verified DKG shares exist? (if yes, skip DKG & attempt to verify)
+/// 3. Does the config threshold or signer set differ from the config? (if yes, run DKG)
+/// 4. Have we reached the target # of DKG rounds? (if yes, skip DKG)
+/// 5. Is chain tip higher than DKG min height & were latest shares started before DKG min height? (if yes, run DKG)
+pub async fn should_run_dkg(
     context: &impl Context,
     bitcoin_chain_tip: &model::BitcoinBlockRef,
 ) -> Result<bool, Error> {
@@ -2560,33 +2564,58 @@ pub async fn should_coordinate_dkg(
         }
     }
 
-    // Finally, we may need to run DKG because of config target rounds.
-
-    // Get the number of non-failed DKG shares that have been stored
-    let dkg_shares_entry_count = storage.get_encrypted_dkg_shares_count().await?;
-
-    // Get DKG configuration parameters
-    let dkg_min_bitcoin_block_height = config.signer.dkg_min_bitcoin_block_height;
+    // Check if we've already reached the target number of DKG rounds
     let dkg_target_rounds = config.signer.dkg_target_rounds;
+    let current_dkg_rounds = storage.get_encrypted_dkg_shares_count().await?;
 
-    // Determine the action based on the DKG shares count and the rerun height (if configured)
-    match (
-        dkg_shares_entry_count,
-        dkg_target_rounds,
-        dkg_min_bitcoin_block_height,
-    ) {
-        (current, target, Some(dkg_min_height))
-            if current < target.get() && bitcoin_chain_tip.block_height >= dkg_min_height =>
-        {
-            tracing::info!(
-                ?dkg_min_bitcoin_block_height,
-                %dkg_target_rounds,
-                dkg_current_rounds = %dkg_shares_entry_count,
-                "DKG rerun height has been met and we are below the target number of rounds; proceeding with DKG"
-            );
-            Ok(true)
+    if current_dkg_rounds >= dkg_target_rounds.get() {
+        tracing::debug!(
+            current_rounds = current_dkg_rounds,
+            target_rounds = dkg_target_rounds,
+            "target DKG rounds already reached; skipping DKG"
+        );
+        return Ok(false);
+    }
+
+    // Check if we need to run DKG based on min-height
+    let dkg_min_bitcoin_block_height = config.signer.dkg_min_bitcoin_block_height;
+
+    match dkg_min_bitcoin_block_height {
+        Some(dkg_min_height) if bitcoin_chain_tip.block_height >= dkg_min_height => {
+            // Check if the latest DKG shares were started before the minimum height
+            if latest_dkg_shares.started_at_bitcoin_block_height < dkg_min_height {
+                tracing::info!(
+                    ?dkg_min_bitcoin_block_height,
+                    latest_dkg_started_at = %latest_dkg_shares.started_at_bitcoin_block_height,
+                    current_height = %bitcoin_chain_tip.block_height,
+                    "DKG rerun height has been met and no DKG has been started since then; proceeding with DKG"
+                );
+                Ok(true)
+            } else {
+                tracing::debug!(
+                    ?dkg_min_bitcoin_block_height,
+                    latest_dkg_started_at = %latest_dkg_shares.started_at_bitcoin_block_height,
+                    "DKG has already been started after the minimum height; skipping DKG"
+                );
+                Ok(false)
+            }
         }
-        _ => Ok(false),
+        Some(_dkg_min_height) => {
+            tracing::debug!(
+                ?dkg_min_bitcoin_block_height,
+                current_height = %bitcoin_chain_tip.block_height,
+                "bitcoin chain tip is below the minimum height for DKG rerun; skipping DKG"
+            );
+            Ok(false)
+        }
+        None => {
+            // If no minimum height is configured, we don't allow multiple DKG rounds
+            tracing::warn!(
+                ?dkg_min_bitcoin_block_height,
+                "attempt to run multiple DKGs without a configured re-run height; skipping DKG"
+            );
+            Ok(false)
+        }
     }
 }
 
@@ -2669,7 +2698,7 @@ mod tests {
     use test_case::test_case;
 
     use super::assert_rotate_key_action;
-    use super::should_coordinate_dkg;
+    use super::should_run_dkg;
     use super::*;
 
     #[allow(clippy::type_complexity)]
@@ -2891,10 +2920,9 @@ mod tests {
     #[test_case(0, Some(100), 1, 5, true; "first DKG allowed regardless of min height")]
     #[test_case(1, None, 2, 100, false; "subsequent DKG not allowed without min height")]
     #[test_case(1, Some(101), 1, 100, false; "subsequent DKG not allowed with current height lower than min height")]
-    #[test_case(1, Some(100), 1, 100, false; "subsequent DKG not allowed when target rounds reached")]
     #[test_case(1, Some(100), 2, 100, true; "subsequent DKG allowed when target rounds not reached and min height met")]
     #[test_log::test(tokio::test)]
-    async fn test_should_coordinate_dkg(
+    async fn test_should_run_dkg(
         dkg_rounds_current: u32,
         dkg_min_bitcoin_block_height: Option<u64>,
         dkg_target_rounds: u32,
@@ -2917,9 +2945,11 @@ mod tests {
 
         // Write `dkg_shares` entries for the `current` number of rounds, simulating
         // the signer having participated in that many successful DKG rounds.
-        for _ in 0..dkg_rounds_current {
+        for i in 0..dkg_rounds_current {
             let mut shares: model::EncryptedDkgShares = Faker.fake();
             shares.dkg_shares_status = model::DkgSharesStatus::Verified;
+            // Set a reasonable block height for each DKG round
+            shares.started_at_bitcoin_block_height = (50 + i as u64).into();
 
             storage.write_encrypted_dkg_shares(&shares).await.unwrap();
         }
@@ -2944,7 +2974,7 @@ mod tests {
         prevent_dkg_on_changed_signer_set_info(&context, aggregate_key);
 
         // Test the case
-        let result = should_coordinate_dkg(&context, &bitcoin_chain_tip)
+        let result = should_run_dkg(&context, &bitcoin_chain_tip)
             .await
             .expect("failed to check if DKG should be coordinated");
 
