@@ -111,6 +111,13 @@ jobs:
       HOSTED_ZONE_ID: ${{ vars.HOSTED_ZONE_ID }}
       NUM_SIGNER_API_KEYS: ${{ vars.NUM_SIGNER_API_KEYS }}
     steps:
+      - name: Test Prints
+        id: test_prints
+        run: |
+          echo "${{ needs.resolve-env.outputs.environment }}"
+          echo "$AWS_REGION"
+          echo "${{ env.AWS_REGION }}
+
       - name: Checkout Repository
         id: checkout_repository
         uses: stacks-sbtc/actions/checkout@a1754bb138bf66f595c6c42068fbc2e09a447e73
