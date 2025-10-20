@@ -1,9 +1,22 @@
 name: Deploy Emily
 
 on:
-  push:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment name"
+        required: true
+        default: environment/devnet
+        type: choice
+        options:
+          - environment/devnet
+          - environment/testnet
+          - environment/mainnet
+          - environment/staging
+          - environment/private-mainnet
+  pull_request:
     branches:
-      - 'environment/*'
+      - main
 
 concurrency:
   group: deploy-emily-${{ github.ref || github.run_id }}
@@ -16,12 +29,78 @@ env:
 
 permissions:
   id-token: write
+  contents: read
+  issues: read
+  pull-requests: read
 
 jobs:
+  resolve-env:
+    name: Resolve Environment
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.set_env.outputs.environment }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Resolve Environment
+        id: set_env
+        run: |
+          ALLOWED_ENVS=("environment/devnet" "environment/testnet" "environment/mainnet" "environment/staging" "environment/private-mainnet")
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${GITHUB_REF_NAME}" != "main" ]; then
+              echo "### The workflow_dispatch can only be run on main branch." >> $GITHUB_STEP_SUMMARY
+              exit 1
+            fi
+
+            ENVIRONMENT="${{ github.event.inputs.environment }}"
+
+            VALID=false
+            for env in "${ALLOWED_ENVS[@]}"; do
+              if [ "$ENVIRONMENT" = "$env" ]; then
+                VALID=true
+                break
+              fi
+            done
+
+            if [ "$VALID" != "true" ]; then
+              echo "### Invalid workflow_dispatch environment: $ENVIRONMENT" >> $GITHUB_STEP_SUMMARY
+              echo "### Allowed environments: ${ALLOWED_ENVS[*]}" >> $GITHUB_STEP_SUMMARY
+              exit 1
+            fi
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            LABELS=$(gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/labels --jq '.[].name')
+
+            MATCHED_ENVS=()
+            for label in $LABELS; do
+              for env in "${ALLOWED_ENVS[@]}"; do
+                if [ "$label" = "$env" ]; then
+                  MATCHED_ENVS+=("$label")
+                fi
+              done
+            done
+
+            if [ "${#MATCHED_ENVS[@]}" -eq 0 ]; then
+              echo "### No valid environment label found on PR. Please add one of: ${ALLOWED_ENVS[*]}" >> $GITHUB_STEP_SUMMARY
+              exit 1
+            elif [ "${#MATCHED_ENVS[@]}" -gt 1 ]; then
+              echo "### Multiple environment labels found: ${MATCHED_ENVS[*]}. Please use only one." >> $GITHUB_STEP_SUMMARY
+              exit 1
+            fi
+
+            ENVIRONMENT="${MATCHED_ENVS[0]}"
+          else
+            echo "### Unsupported trigger: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+          echo "environment=$ENVIRONMENT" >> $GITHUB_OUTPUT
+
   diff:
     name: Build & Diff Emily
     runs-on: ubuntu-latest
-    environment: ${{ github.ref_name }}
+    needs: resolve-env
+    environment: ${{ needs.resolve-env.outputs.environment }}
     env:
       AWS_ACCOUNT: ${{ vars.AWS_ACCOUNT }}
       AWS_DEPLOYMENT_PROFILE: ${{ vars.AWS_DEPLOYMENT_PROFILE }}
@@ -34,18 +113,18 @@ jobs:
     steps:
       - name: Checkout Repository
         id: checkout_repository
-        uses: stacks-sbtc/actions/checkout@181f8c67da2707c66b5e31f24e7418c47adefdd1
+        uses: stacks-sbtc/actions/checkout@a1754bb138bf66f595c6c42068fbc2e09a447e73
 
       - name: Configure AWS Credentials via OIDC
         id: configure_aws
-        uses: stacks-sbtc/actions/aws/configure-aws-credentials@181f8c67da2707c66b5e31f24e7418c47adefdd1
+        uses: stacks-sbtc/actions/aws/configure-aws-credentials@a1754bb138bf66f595c6c42068fbc2e09a447e73
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Rust
         id: setup_rust
-        uses: stacks-sbtc/actions/setup-rust-toolchain@181f8c67da2707c66b5e31f24e7418c47adefdd1
+        uses: stacks-sbtc/actions/setup-rust-toolchain@a1754bb138bf66f595c6c42068fbc2e09a447e73
 
       - name: Install Cargo Lambda
         id: install_cargo_lambda
@@ -54,7 +133,7 @@ jobs:
 
       - name: Setup Node
         id: setup_node
-        uses: stacks-sbtc/actions/setup-node@181f8c67da2707c66b5e31f24e7418c47adefdd1
+        uses: stacks-sbtc/actions/setup-node@a1754bb138bf66f595c6c42068fbc2e09a447e73
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -114,14 +193,15 @@ jobs:
       - name: Approved Deployment
         id: approved_deployment
         run: |
-          echo "Emily Deployment Approved!"
+          echo "### Emily Deployment Approved!" >> $GITHUB_STEP_SUMMARY
 
   deploy:
     name: Deploy Emily
     runs-on: ubuntu-latest
     needs:
       - approve
-    environment: ${{ github.ref_name }}
+      - resolve-env
+    environment: ${{ needs.resolve-env.outputs.environment }}
     env:
       AWS_ACCOUNT: ${{ vars.AWS_ACCOUNT }}
       AWS_DEPLOYMENT_PROFILE: ${{ vars.AWS_DEPLOYMENT_PROFILE }}
@@ -134,18 +214,18 @@ jobs:
     steps:
       - name: Checkout Repository
         id: checkout_repository
-        uses: stacks-sbtc/actions/checkout@181f8c67da2707c66b5e31f24e7418c47adefdd1
+        uses: stacks-sbtc/actions/checkout@a1754bb138bf66f595c6c42068fbc2e09a447e73
 
       - name: Configure AWS Credentials via OIDC
         id: configure_aws
-        uses: stacks-sbtc/actions/aws/configure-aws-credentials@181f8c67da2707c66b5e31f24e7418c47adefdd1
+        uses: stacks-sbtc/actions/aws/configure-aws-credentials@a1754bb138bf66f595c6c42068fbc2e09a447e73
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Rust
         id: setup_rust
-        uses: stacks-sbtc/actions/setup-rust-toolchain@181f8c67da2707c66b5e31f24e7418c47adefdd1
+        uses: stacks-sbtc/actions/setup-rust-toolchain@a1754bb138bf66f595c6c42068fbc2e09a447e73
 
       - name: Install Cargo Lambda
         id: install_cargo_lambda
@@ -154,7 +234,7 @@ jobs:
 
       - name: Setup Node
         id: setup_node
-        uses: stacks-sbtc/actions/setup-node@181f8c67da2707c66b5e31f24e7418c47adefdd1
+        uses: stacks-sbtc/actions/setup-node@a1754bb138bf66f595c6c42068fbc2e09a447e73
         with:
           node-version: ${{ env.NODE_VERSION }}
 
