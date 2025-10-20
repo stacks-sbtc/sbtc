@@ -116,7 +116,7 @@ jobs:
         run: |
           echo "${{ needs.resolve-env.outputs.environment }}"
           echo "$AWS_REGION"
-          echo "${{ env.AWS_REGION }}
+          echo "${{ env.AWS_REGION }}"
 
       - name: Checkout Repository
         id: checkout_repository
