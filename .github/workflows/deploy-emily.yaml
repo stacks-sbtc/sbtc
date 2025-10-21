@@ -183,24 +183,12 @@ jobs:
             echo '```'
           } >> $GITHUB_STEP_SUMMARY
 
-  approve:
-    name: Approve Emily Deployment
-    runs-on: ubuntu-latest
-    needs:
-      - diff
-    environment: approve-emily-deployment
-    steps:
-      - name: Approved Deployment
-        id: approved_deployment
-        run: |
-          echo "### Emily Deployment Approved!" >> $GITHUB_STEP_SUMMARY
-
   deploy:
     name: Deploy Emily
     runs-on: ubuntu-latest
     needs:
-      - approve
       - resolve-env
+      - diff
     environment: ${{ needs.resolve-env.outputs.environment }}
     env:
       AWS_ACCOUNT: ${{ vars.AWS_ACCOUNT }}
