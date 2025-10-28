@@ -6,14 +6,14 @@ on:
       environment:
         description: "Environment name"
         required: true
-        default: environment/devnet
+        default: environment/sbtc-devnet
         type: choice
         options:
-          - environment/devnet
-          - environment/testnet
-          - environment/mainnet
-          - environment/staging
-          - environment/private-mainnet
+          - environment/sbtc-devnet
+          - environment/sbtc-testnet
+          - environment/sbtc-mainnet
+          - environment/sbtc-staging
+          - environment/sbtc-private-mainnet
   pull_request:
     branches:
       - main
@@ -45,7 +45,7 @@ jobs:
       - name: Resolve Environment
         id: set_env
         run: |
-          ALLOWED_ENVS=("environment/devnet" "environment/testnet" "environment/mainnet" "environment/staging" "environment/private-mainnet")
+          ALLOWED_ENVS=("environment/sbtc-devnet" "environment/sbtc-testnet" "environment/sbtc-mainnet" "environment/sbtc-staging" "environment/sbtc-private-mainnet")
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             if [ "${GITHUB_REF_NAME}" != "main" ]; then
