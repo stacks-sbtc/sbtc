@@ -10,15 +10,8 @@ BEGIN;
 -- this should delete nothing, just added for consistency.
 DELETE FROM sbtc_signer.deposit_signers ds
 USING sbtc_signer.deposit_requests dr
-WHERE ds.deposit_request_txid = dr.txid
-  AND ds.deposit_request_output_index = dr.output_index
-  AND dr.reclaim_script_hash IS NULL;
-
-
-DELETE FROM sbtc_signer.swept_deposits sd
-USING sbtc_signer.deposit_requests dr
-WHERE sd.deposit_request_txid = dr.txid
-  AND sd.deposit_request_output_index = dr.output_index
+WHERE ds.txid = dr.txid
+  AND ds.output_index = dr.output_index
   AND dr.reclaim_script_hash IS NULL;
 
 DELETE FROM sbtc_signer.deposit_requests
