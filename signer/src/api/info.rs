@@ -122,15 +122,20 @@ impl IntoResponse for InfoResponse {
 /// Handler for the `/info` endpoint. This method is infallible and returns
 /// `null` for any missing information.
 pub async fn info_handler<C: Context>(state: State<ApiState<C>>) -> InfoResponse {
-    let bitcoin_client = state.ctx.get_bitcoin_client();
-    let stacks_client = state.ctx.get_stacks_client();
-    let storage = state.ctx.get_storage();
-    let config = state.ctx.config();
+    build_info(&state.ctx).await
+}
+
+/// Helper function to populate [`InfoResponse`] from given [`Context`]
+pub async fn build_info<C: Context>(ctx: &C) -> InfoResponse {
+    let bitcoin_client = ctx.get_bitcoin_client();
+    let stacks_client = ctx.get_stacks_client();
+    let storage = ctx.get_storage();
+    let config = ctx.config();
 
     let mut response = InfoResponse::default();
 
     response.populate_config_info(config);
-    response.populate_local_chain_info(&storage).await;
+    response.populate_local_chain_info(&storage, ctx).await;
     response.populate_bitcoin_node_info(&bitcoin_client).await;
     response.populate_stacks_node_info(&stacks_client).await;
     response
@@ -163,25 +168,11 @@ impl InfoResponse {
     }
 
     /// Populates the local Bitcoin and Stacks chain tip information.
-    async fn populate_local_chain_info(&mut self, storage: &impl DbRead) {
-        let bitcoin_tip = storage.get_bitcoin_canonical_chain_tip().await;
+    async fn populate_local_chain_info<C: Context, R: DbRead>(&mut self, storage: &R, ctx: &C) {
+        let bitcoin_tip = ctx.state().bitcoin_chain_tip();
 
         match bitcoin_tip {
-            Ok(Some(local_bitcoin_chain_tip)) => {
-                let bitcoin_block = storage
-                    .get_bitcoin_block(&local_bitcoin_chain_tip)
-                    .await
-                    .inspect_err(|error| {
-                        tracing::error!(%error, "error reading bitcoin block from the database")
-                    });
-
-                let Ok(Some(bitcoin_block)) = bitcoin_block else {
-                    tracing::error!(
-                        "canonical tip found but could not retrieve block from the database"
-                    );
-                    return;
-                };
-
+            Some(bitcoin_block) => {
                 self.bitcoin.signer_tip = Some(ChainTipInfo {
                     block_hash: bitcoin_block.block_hash,
                     block_height: bitcoin_block.block_height,
@@ -206,11 +197,8 @@ impl InfoResponse {
                     }
                 }
             }
-            Ok(None) => {
-                tracing::debug!("no local bitcoin tip found in the database.");
-            }
-            Err(error) => {
-                tracing::error!(%error, "error reading bitcoin tip from the database");
+            None => {
+                tracing::debug!("no local bitcoin tip found in the signer's state");
             }
         }
     }
@@ -336,14 +324,14 @@ mod tests {
 
     use blockstack_lib::net::api::{getinfo::RPCPeerInfoData, gettenureinfo::RPCGetTenureInfo};
     use clarity::types::chainstate::StacksAddress;
-    use fake::{Fake, Faker};
+    use fake::{Fake as _, Faker};
 
     use crate::{
         api::ApiState,
         error::Error,
         storage::{
-            DbWrite,
-            model::{BitcoinBlock, StacksBlock},
+            DbWrite as _,
+            model::{BitcoinBlock, BitcoinBlockRef, StacksBlock},
         },
         testing::context::*,
     };
@@ -352,7 +340,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_all_null() {
-        let mut context = TestContext::default_mocked();
+        let context = TestContext::default_mocked();
 
         context
             .with_bitcoin_client(|client| {
@@ -423,7 +411,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_local_chain_info() {
-        let mut context = TestContext::default_mocked();
+        let context = TestContext::default_mocked();
 
         context
             .with_bitcoin_client(|client| {
@@ -462,6 +450,9 @@ mod tests {
 
         let bitcoin_block: BitcoinBlock = Faker.fake();
         storage.write_bitcoin_block(&bitcoin_block).await.unwrap();
+        context
+            .state()
+            .set_bitcoin_chain_tip(BitcoinBlockRef::from(&bitcoin_block));
 
         let stacks_block = StacksBlock {
             bitcoin_anchor: bitcoin_block.block_hash,
@@ -489,7 +480,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_bitcoin_node_info() {
-        let mut context = TestContext::default_mocked();
+        let context = TestContext::default_mocked();
 
         let get_network_info_response_json =
             include_str!("../../tests/fixtures/bitcoind-getnetworkinfo-data.json");
@@ -570,7 +561,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stacks_node_info() {
-        let mut context = TestContext::default_mocked();
+        let context = TestContext::default_mocked();
 
         context
             .with_bitcoin_client(|client| {
@@ -641,7 +632,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_config_info() {
-        let mut context = TestContext::builder()
+        let context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
             .modify_settings(|settings| {

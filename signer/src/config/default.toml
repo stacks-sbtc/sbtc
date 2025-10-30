@@ -61,20 +61,13 @@ rpc_endpoints = [
     "http://devnet:devnet@127.0.0.1:18443",
 ]
 
-# The URI(s) of the Bitcoin Core ZMQ block hash stream(s) to connect to.
+# The interval, in seconds, at which the signer will poll the Bitcoin Core RPC
+# for the latest block hash. This is used to determine the current chain tip.
 #
-# You may optionally specify multiple endpoints if you have them. They will be
-# tried in order until one succeeds, and it will attempt failover to the next
-# endpoint if the connection is lost.
-#
-# Format: ["tcp://<host>:<port>", ..]
-# Default: <none>
-# Required: true
-# Environment: SIGNER_BITCOIN__BLOCK_HASH_STREAM_ENDPOINTS
-# Environment Example: tcp://10.0.0.1:28332,tcp://10.0.0.2:28332
-block_hash_stream_endpoints = [
-    "tcp://127.0.0.1:28332"
-]
+# Default: 5
+# Required: false
+# Environment: SIGNER_BITCOIN__CHAIN_TIP_POLLING_INTERVAL
+# chain_tip_polling_interval = 5
 
 # !! ==============================================================================
 # !! Stacks Node Configuration
@@ -100,7 +93,6 @@ endpoints = ["http://127.0.0.1:20443"]
 # Format: "<hex-encoded-private-key>" (64 or 66 hex-characters)
 # Required: true
 # Environment: SIGNER_SIGNER__PRIVATE_KEY
-# TODO(715): Remove default value.
 private_key = "41634762d89dfa09133a4a8e9c1378d0161d29cd0a9433b51f1e3d32947a73dc"
 
 # Specifies which network to use when constructing and sending transactions
@@ -112,13 +104,11 @@ private_key = "41634762d89dfa09133a4a8e9c1378d0161d29cd0a9433b51f1e3d32947a73dc"
 # Required: true
 # Possible values: mainnet, testnet, regtest
 # Environment: SIGNER_SIGNER__NETWORK
-# TODO(715): Change to mainnet.
 network = "regtest"
 
 # The address that deployed the sbtc smart contracts.
 #
 # Required: true
-# TODO(715): Change after SCs have been deployed.
 deployer = "SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS"
 
 # The signer database endpoint (pgsql connection string)
@@ -134,7 +124,6 @@ db_endpoint = "postgresql://postgres:postgres@127.0.0.1:5432/signer"
 # Bootstrap signer set must contain the public key of the signer itself.
 #
 # Required: true Environment: SIGNER_SIGNER__BOOTSTRAP_SIGNING_SET
-# TODO(715): Change after initial signing set has been determined.
 bootstrap_signing_set = [
     "035249137286c077ccee65ecc43e724b9b9e5a588e3d7f51e3b62f9624c2a49e46",
     "031a4d9f4903da97498945a4e01a5023a1d53bc96ad670bfe03adf8a06c52e6380",
@@ -146,7 +135,6 @@ bootstrap_signing_set = [
 # `bootstrap_signing_set`. Must be strictly positive.
 #
 # Required: true Environment: SIGNER_SIGNER__BOOTSTRAP_SIGNATURES_REQUIRED
-# TODO(715): Change as specified by sBTC SIP.
 bootstrap_signatures_required = 2
 
 # Seconds to wait before processing a new Bitcoin block.

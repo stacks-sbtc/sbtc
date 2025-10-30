@@ -18,19 +18,21 @@ use crate::error;
 use crate::keys;
 use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
-use crate::keys::SignerScriptPubKey;
+use crate::keys::SignerScriptPubKey as _;
 use crate::network;
 use crate::network::in_memory2::SignerNetwork;
 use crate::stacks::api::AccountInfo;
 use crate::stacks::api::MockStacksInteract;
+use crate::stacks::api::SignerSetInfo;
 use crate::stacks::api::SubmitTxResponse;
 use crate::stacks::contracts::AcceptWithdrawalV1;
-use crate::stacks::contracts::AsContractCall;
+use crate::stacks::contracts::AsContractCall as _;
 use crate::stacks::contracts::ContractCall;
 use crate::stacks::contracts::RejectWithdrawalV1;
 use crate::stacks::contracts::StacksTx;
 use crate::storage::DbRead;
 use crate::storage::DbWrite;
+use crate::storage::Transactable;
 use crate::storage::model;
 use crate::storage::model::StacksBlock;
 use crate::storage::model::StacksTxId;
@@ -54,7 +56,7 @@ use clarity::vm::types::BuffData;
 use clarity::vm::types::SequenceData;
 use fake::Fake as _;
 use fake::Faker;
-use rand::seq::IteratorRandom;
+use rand::seq::IteratorRandom as _;
 
 use super::context::TestContext;
 use super::context::WrappedMock;
@@ -177,7 +179,7 @@ impl<Storage>
         >,
     >
 where
-    Storage: DbRead + DbWrite + Clone + Sync + Send + 'static,
+    Storage: DbRead + DbWrite + Transactable + Clone + Sync + Send + 'static,
 {
     /// Asserts that TxCoordinatorEventLoop::get_pending_requests processes withdrawals
     pub async fn assert_processes_withdrawals(mut self) {
@@ -424,8 +426,13 @@ where
         self.context
             .with_stacks_client(|client| {
                 client
-                    .expect_get_current_signers_aggregate_key()
-                    .returning(move |_| Box::pin(std::future::ready(Ok(Some(aggregate_key)))));
+                    .expect_get_current_signer_set_info()
+                    .returning(move |_| {
+                        Box::pin(std::future::ready(Ok(Some(SignerSetInfo {
+                            aggregate_key,
+                            ..fake::Faker.fake_with_rng(&mut rng)
+                        }))))
+                    });
             })
             .await;
 
@@ -489,7 +496,7 @@ where
         // Signal `RequestDeciderEvent::NewRequestsHandled` to trigger the coordinator.
         handle
             .context
-            .signal(RequestDeciderEvent::NewRequestsHandled.into())
+            .signal(RequestDeciderEvent::NewRequestsHandled(bitcoin_chain_tip).into())
             .expect("failed to signal");
 
         // Await the `wait_for_tx_task` to receive the first transaction broadcasted.
@@ -577,8 +584,13 @@ where
         self.context
             .with_stacks_client(|client| {
                 client
-                    .expect_get_current_signers_aggregate_key()
-                    .returning(move |_| Box::pin(std::future::ready(Ok(Some(aggregate_key)))));
+                    .expect_get_current_signer_set_info()
+                    .returning(move |_| {
+                        Box::pin(std::future::ready(Ok(Some(SignerSetInfo {
+                            aggregate_key,
+                            ..fake::Faker.fake_with_rng(&mut rng)
+                        }))))
+                    });
             })
             .await;
 
@@ -682,7 +694,7 @@ where
         // Signal `TxSignerEvent::NewRequestsHandled` to trigger the coordinator.
         handle
             .context
-            .signal(RequestDeciderEvent::NewRequestsHandled.into())
+            .signal(RequestDeciderEvent::NewRequestsHandled(bitcoin_chain_tip).into())
             .expect("failed to signal");
 
         // Await the `wait_for_tx_task` to receive the first transaction broadcasted.
@@ -708,7 +720,7 @@ where
     }
 
     /// Assert we get a withdrawal accept tx
-    pub async fn assert_construct_withdrawal_accept_stacks_sign_request(mut self) {
+    pub async fn assert_construct_withdrawal_accept_stacks_sign_request(self) {
         let mut rng = get_rng();
         let signer_network = SignerNetwork::single(&self.context);
         let private_key = PrivateKey::new(&mut rng);
@@ -809,7 +821,7 @@ where
 
         let outpoint = withdrawal_req.withdrawal_outpoint();
         assert_eq!(sign_request.tx_fee, 123000);
-        assert_eq!(sign_request.aggregate_key, bitcoin_aggregate_key);
+        assert_eq!(sign_request.aggregate_key, Some(bitcoin_aggregate_key));
         assert_eq!(sign_request.txid, multi_tx.tx().txid());
         assert_eq!(sign_request.nonce, multi_tx.tx().get_origin_nonce());
         if let StacksTx::ContractCall(ContractCall::AcceptWithdrawalV1(call)) =
@@ -860,7 +872,7 @@ where
     }
 
     /// Assert we get a withdrawal reject tx
-    pub async fn assert_construct_withdrawal_reject_stacks_sign_request(mut self) {
+    pub async fn assert_construct_withdrawal_reject_stacks_sign_request(self) {
         let mut rng = get_rng();
         let signer_network = SignerNetwork::single(&self.context);
         let private_key = PrivateKey::new(&mut rng);
@@ -912,7 +924,7 @@ where
             .expect("Failed to construct withdrawal reject stacks sign request");
 
         assert_eq!(sign_request.tx_fee, 123000);
-        assert_eq!(sign_request.aggregate_key, bitcoin_aggregate_key);
+        assert_eq!(sign_request.aggregate_key, Some(bitcoin_aggregate_key));
         assert_eq!(sign_request.txid, multi_tx.tx().txid());
         assert_eq!(sign_request.nonce, multi_tx.tx().get_origin_nonce());
 
@@ -1445,7 +1457,6 @@ where
             .run_dkg(
                 bitcoin_chain_tip,
                 dkg_txid.into(),
-                rng,
                 model::DkgSharesStatus::Verified,
             )
             .await;

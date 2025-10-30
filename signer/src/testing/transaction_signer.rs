@@ -15,7 +15,7 @@ use crate::keys::PublicKey;
 use crate::network;
 use crate::network::MessageTransfer;
 use crate::storage;
-use crate::storage::DbRead;
+use crate::storage::DbRead as _;
 use crate::storage::DbWrite;
 use crate::storage::model;
 use crate::testing;
@@ -59,6 +59,7 @@ where
                 context_window,
                 wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
                 threshold,
+                last_presign_block: None,
                 rng,
                 dkg_begin_pause: None,
                 dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
@@ -270,7 +271,6 @@ async fn run_dkg_and_store_results_for_signers<'s: 'r, 'r, S, Rng>(
         .run_dkg(
             bitcoin_chain_tip,
             dkg_txid.into(),
-            rng,
             model::DkgSharesStatus::Verified,
         )
         .await;

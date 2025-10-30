@@ -1,6 +1,8 @@
+use libp2p::PeerId;
+
 use crate::{
     error::Error,
-    keys::PublicKeyXOnly,
+    keys::{PublicKey, PublicKeyXOnly},
     storage::{
         DbWrite,
         model::{
@@ -333,11 +335,11 @@ impl DbWrite for SharedStore {
         let mut store = self.lock().await;
         store.version += 1;
 
-        if let Some((_, shares)) = store.encrypted_dkg_shares.get_mut(&aggregate_key.into()) {
-            if shares.dkg_shares_status == DkgSharesStatus::Unverified {
-                shares.dkg_shares_status = DkgSharesStatus::Failed;
-                return Ok(true);
-            }
+        if let Some((_, shares)) = store.encrypted_dkg_shares.get_mut(&aggregate_key.into())
+            && shares.dkg_shares_status == DkgSharesStatus::Unverified
+        {
+            shares.dkg_shares_status = DkgSharesStatus::Failed;
+            return Ok(true);
         }
         Ok(false)
     }
@@ -349,13 +351,41 @@ impl DbWrite for SharedStore {
         let mut store = self.lock().await;
         store.version += 1;
 
-        if let Some((_, shares)) = store.encrypted_dkg_shares.get_mut(&aggregate_key.into()) {
-            if shares.dkg_shares_status == DkgSharesStatus::Unverified {
-                shares.dkg_shares_status = DkgSharesStatus::Verified;
-                return Ok(true);
-            }
+        if let Some((_, shares)) = store.encrypted_dkg_shares.get_mut(&aggregate_key.into())
+            && shares.dkg_shares_status == DkgSharesStatus::Unverified
+        {
+            shares.dkg_shares_status = DkgSharesStatus::Verified;
+            return Ok(true);
         }
         Ok(false)
+    }
+
+    async fn update_peer_connection(
+        &self,
+        pub_key: &PublicKey,
+        peer_id: &PeerId,
+        address: libp2p::Multiaddr,
+    ) -> Result<(), Error> {
+        let mut store = self.lock().await;
+
+        let now = time::OffsetDateTime::now_utc().into();
+        match store.p2p_peers.entry((*peer_id, *pub_key)) {
+            std::collections::hash_map::Entry::Occupied(mut occupied_entry) => {
+                let peer = occupied_entry.get_mut();
+                peer.address = address.into();
+                peer.last_dialed_at = now;
+            }
+            std::collections::hash_map::Entry::Vacant(vacant_entry) => {
+                vacant_entry.insert(model::P2PPeer {
+                    public_key: *pub_key,
+                    peer_id: (*peer_id).into(),
+                    address: address.into(),
+                    last_dialed_at: now,
+                });
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -501,5 +531,16 @@ impl DbWrite for InMemoryTransaction {
         X: Into<PublicKeyXOnly> + Send,
     {
         self.store.verify_dkg_shares(aggregate_key).await
+    }
+
+    async fn update_peer_connection(
+        &self,
+        pub_key: &PublicKey,
+        peer_id: &PeerId,
+        address: libp2p::Multiaddr,
+    ) -> Result<(), Error> {
+        self.store
+            .update_peer_connection(pub_key, peer_id, address)
+            .await
     }
 }

@@ -76,6 +76,26 @@ pub struct TxRequestIds {
     pub withdrawals: Vec<QualifiedRequestId>,
 }
 
+impl std::fmt::Display for TxRequestIds {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "TxRequestIds(deposits=[")?;
+        for (i, value) in self.deposits.iter().enumerate() {
+            if i > 0 {
+                write!(f, ",")?;
+            }
+            write!(f, "{value}")?;
+        }
+        write!(f, "], withdrawals=[")?;
+        for (i, value) in self.withdrawals.iter().enumerate() {
+            if i > 0 {
+                write!(f, ",")?;
+            }
+            write!(f, "{value}")?;
+        }
+        write!(f, "])")
+    }
+}
+
 impl From<&Requests<'_>> for TxRequestIds {
     fn from(requests: &Requests) -> Self {
         let mut deposits = Vec::new();
@@ -137,7 +157,7 @@ impl BitcoinPreSignRequest {
         &self,
         db: &D,
         btc_ctx: &BitcoinTxContext,
-    ) -> Result<ValidationCache, Error>
+    ) -> Result<ValidationCache<'_>, Error>
     where
         D: DbRead,
     {
@@ -544,7 +564,7 @@ pub struct SbtcReports {
 
 impl SbtcReports {
     /// Create the transaction with witness data using the requests.
-    pub fn create_transaction(&self) -> Result<UnsignedTransaction, Error> {
+    pub fn create_transaction(&self) -> Result<UnsignedTransaction<'_>, Error> {
         let deposits = self
             .deposits
             .iter()
@@ -1070,7 +1090,7 @@ mod tests {
             lock_time: LockTime::from_height(u16::MAX),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
-            reclaim_script_hash: TaprootScriptHash::new(),
+            reclaim_script_hash: TaprootScriptHash::zeros(),
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
@@ -1088,7 +1108,7 @@ mod tests {
             lock_time: LockTime::from_height(u16::MAX),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
-            reclaim_script_hash: TaprootScriptHash::new(),
+            reclaim_script_hash: TaprootScriptHash::zeros(),
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
@@ -1106,7 +1126,7 @@ mod tests {
             lock_time: LockTime::from_height(u16::MAX),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
-            reclaim_script_hash: TaprootScriptHash::new(),
+            reclaim_script_hash: TaprootScriptHash::zeros(),
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
@@ -1124,7 +1144,7 @@ mod tests {
             lock_time: LockTime::from_height(u16::MAX),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
-            reclaim_script_hash: TaprootScriptHash::new(),
+            reclaim_script_hash: TaprootScriptHash::zeros(),
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
@@ -1142,7 +1162,7 @@ mod tests {
             lock_time: LockTime::from_height(u16::MAX),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
-            reclaim_script_hash: TaprootScriptHash::new(),
+            reclaim_script_hash: TaprootScriptHash::zeros(),
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
@@ -1160,7 +1180,7 @@ mod tests {
             lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 1),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
-            reclaim_script_hash: TaprootScriptHash::new(),
+            reclaim_script_hash: TaprootScriptHash::zeros(),
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
@@ -1178,7 +1198,7 @@ mod tests {
             lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 2),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
-            reclaim_script_hash: TaprootScriptHash::new(),
+            reclaim_script_hash: TaprootScriptHash::zeros(),
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
@@ -1196,7 +1216,7 @@ mod tests {
             lock_time: LockTime::from_512_second_intervals(u16::MAX),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
-            reclaim_script_hash: TaprootScriptHash::new(),
+            reclaim_script_hash: TaprootScriptHash::zeros(),
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
@@ -1214,7 +1234,7 @@ mod tests {
             lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 3),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
-            reclaim_script_hash: TaprootScriptHash::new(),
+            reclaim_script_hash: TaprootScriptHash::zeros(),
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
@@ -1232,7 +1252,7 @@ mod tests {
             lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 3),
             outpoint: OutPoint::new(bitcoin::Txid::from_byte_array([1; 32]), 0),
             deposit_script: ScriptBuf::new(),
-            reclaim_script_hash: TaprootScriptHash::new(),
+            reclaim_script_hash: TaprootScriptHash::zeros(),
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
@@ -1250,7 +1270,7 @@ mod tests {
             lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 3),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
-            reclaim_script_hash: TaprootScriptHash::new(),
+            reclaim_script_hash: TaprootScriptHash::zeros(),
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
@@ -1268,7 +1288,7 @@ mod tests {
             lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 3),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
-            reclaim_script_hash: TaprootScriptHash::new(),
+            reclaim_script_hash: TaprootScriptHash::zeros(),
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
@@ -1286,7 +1306,7 @@ mod tests {
             lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 3),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
-            reclaim_script_hash: TaprootScriptHash::new(),
+            reclaim_script_hash: TaprootScriptHash::zeros(),
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
@@ -1304,7 +1324,7 @@ mod tests {
             lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 3),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
-            reclaim_script_hash: TaprootScriptHash::new(),
+            reclaim_script_hash: TaprootScriptHash::zeros(),
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
@@ -1322,7 +1342,7 @@ mod tests {
             lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 3),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
-            reclaim_script_hash: TaprootScriptHash::new(),
+            reclaim_script_hash: TaprootScriptHash::zeros(),
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
@@ -1340,7 +1360,7 @@ mod tests {
             lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 3),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
-            reclaim_script_hash: TaprootScriptHash::new(),
+            reclaim_script_hash: TaprootScriptHash::zeros(),
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
@@ -1358,7 +1378,7 @@ mod tests {
             lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 3),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
-            reclaim_script_hash: TaprootScriptHash::new(),
+            reclaim_script_hash: TaprootScriptHash::zeros(),
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
@@ -1376,7 +1396,7 @@ mod tests {
             lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 3),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
-            reclaim_script_hash: TaprootScriptHash::new(),
+            reclaim_script_hash: TaprootScriptHash::zeros(),
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Unverified),
         },
@@ -1394,7 +1414,7 @@ mod tests {
             lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 3),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
-            reclaim_script_hash: TaprootScriptHash::new(),
+            reclaim_script_hash: TaprootScriptHash::zeros(),
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Failed),
         },
@@ -1412,7 +1432,7 @@ mod tests {
             lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 3),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
-            reclaim_script_hash: TaprootScriptHash::new(),
+            reclaim_script_hash: TaprootScriptHash::zeros(),
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: None,
         },
@@ -2002,7 +2022,7 @@ mod tests {
                 max_fee: 1000,
                 lock_time: LockTime::from_height(100),
                 deposit_script: ScriptBuf::new(),
-                reclaim_script_hash: TaprootScriptHash::new(),
+                reclaim_script_hash: TaprootScriptHash::zeros(),
                 signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
                 dkg_shares_status: Some(DkgSharesStatus::Verified),
             },
@@ -2117,7 +2137,7 @@ mod tests {
                 assert_eq!(a1, a2);
                 assert_eq!(m1, m2);
             }
-            (result, expected) => panic!("Expected {:?} but got {:?}", expected, result),
+            (result, expected) => panic!("Expected {expected:?} but got {result:?}"),
         };
     }
 

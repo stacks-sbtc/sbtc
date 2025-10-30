@@ -39,7 +39,7 @@ pub struct WithdrawalInfo {
     #[serde(rename = "stacksBlockHeight")]
     pub stacks_block_height: u64,
     #[serde(rename = "status")]
-    pub status: models::Status,
+    pub status: models::WithdrawalStatus,
     /// The hex encoded txid of the stacks transaction that generated this event.
     #[serde(rename = "txid")]
     pub txid: String,
@@ -56,7 +56,7 @@ impl WithdrawalInfo {
         sender: String,
         stacks_block_hash: String,
         stacks_block_height: u64,
-        status: models::Status,
+        status: models::WithdrawalStatus,
         txid: String,
     ) -> WithdrawalInfo {
         WithdrawalInfo {

@@ -1,5 +1,4 @@
 //! A module with helper query functions.
-//!
 
 use crate::error::Error;
 use crate::storage::model;

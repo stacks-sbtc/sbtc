@@ -19,7 +19,7 @@ use utoipa::ToSchema;
 use warp::{reject::Reject, reply::Reply};
 
 use crate::{
-    api::models::chainstate::Chainstate,
+    api::models::{chainstate::Chainstate, common::DepositStatus},
     database::entries::{
         chainstate::ChainstateEntry, deposit::DepositEntryKey, withdrawal::WithdrawalEntryKey,
     },
@@ -38,6 +38,8 @@ pub enum Inconsistency {
 }
 
 /// Errors from the internal API logic.
+/// Note that this error may be returned to the client, so it must not contain
+/// any sensitive information.
 #[derive(thiserror::Error, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ValidationError {
     /// The withdrawal is confirmed but missing the fulfillment data.
@@ -54,6 +56,17 @@ pub enum ValidationError {
         "incomplete withdrawal limit configuration: rolling_withdrawal_blocks and rolling_withdrawal_cap must be provided together"
     )]
     IncompleteWithdrawalLimitConfig,
+
+    /// The deposit includes a replaced_by_tx field, but its status is not RBF.
+    /// Only deposits with status RBF may include a replaced_by_tx.
+    #[error(
+        "deposit with replaced_by_tx is only valid if status is RBF, but got status {0:?} for txid: {1}, vout: {2}"
+    )]
+    InvalidReplacedByTxStatus(DepositStatus, String, u32),
+
+    /// The deposit has status RBF but is missing the replaced_by_tx field.
+    #[error("missing replaced_by_tx for RBF deposit with txid: {0}, vout: {1}")]
+    DepositMissingReplacementTx(String, u32),
 }
 
 /// Errors from the internal API logic.

@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 use std::sync::{
     RwLock,
-    atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 
 use bitcoin::Amount;
@@ -11,7 +11,7 @@ use hashbrown::HashSet;
 use libp2p::PeerId;
 
 use crate::keys::PublicKey;
-use crate::storage::model::BitcoinBlockHash;
+use crate::stacks::api::SignerSetInfo;
 use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::BitcoinBlockRef;
 
@@ -22,67 +22,51 @@ use crate::storage::model::BitcoinBlockRef;
 pub struct SignerState {
     current_signer_set: SignerSet,
     current_limits: RwLock<SbtcLimits>,
-    current_aggregate_key: RwLock<Option<PublicKey>>,
-    current_signatures_required: AtomicU16,
+    registry_signing_set_info: RwLock<Option<SignerSetInfo>>,
     sbtc_contracts_deployed: AtomicBool,
     sbtc_bitcoin_start_height: AtomicU64,
     is_sbtc_bitcoin_start_height_set: AtomicBool,
     // The current bitcoin chain tip. This gets updated at the end of the
     // block observer's duties when it observes a new bitcoin block.
-    bitcoin_chain_tip: RwLock<BitcoinBlockRef>,
+    bitcoin_chain_tip: RwLock<Option<BitcoinBlockRef>>,
 }
 
 impl SignerState {
-    /// Get the current signer set.
+    /// Get the set of signers that this signer is currently configured to
+    /// communicate with in the p2p network.
     pub fn current_signer_set(&self) -> &SignerSet {
         &self.current_signer_set
     }
 
-    /// Get the current number of signatures required.
-    pub fn current_signatures_required(&self) -> u16 {
-        self.current_signatures_required.load(Ordering::SeqCst)
-    }
-
-    /// Set the current number of signatures required.
-    pub fn set_current_signatures_required(&self, signatures_required: u16) {
-        self.current_signatures_required
-            .store(signatures_required, Ordering::SeqCst);
-    }
-
-    /// Return the public keys of the current signer set.
-    pub fn current_signer_public_keys(&self) -> BTreeSet<PublicKey> {
-        self.current_signer_set
-            .get_signers()
-            .into_iter()
-            .map(|signer| signer.public_key)
-            .collect()
-    }
-
-    /// Replace the current signer set with the given set of public keys.
+    /// Set the set of signers that this signer is allow us to communicate
+    /// with.
+    #[cfg(any(test, feature = "testing"))]
     pub fn update_current_signer_set(&self, public_keys: BTreeSet<PublicKey>) {
         self.current_signer_set.replace_signers(public_keys);
     }
 
-    /// Return the current aggregate key from the cache.
-    #[allow(clippy::unwrap_in_result)]
-    pub fn current_aggregate_key(&self) -> Option<PublicKey> {
-        self.current_aggregate_key
-            .read()
-            .expect("BUG: Failed to acquire read lock")
-            .as_ref()
-            .copied()
+    /// Replace the current signer set info with the given input.
+    pub fn update_registry_signer_set_info(&self, info: SignerSetInfo) {
+        self.registry_signing_set_info
+            .write()
+            .expect("BUG: Failed to acquire write lock of signer set info")
+            .replace(info);
     }
 
-    /// Set the current aggregate key to the given public key.
-    pub fn set_current_aggregate_key(&self, aggregate_key: PublicKey) {
-        self.current_aggregate_key
-            .write()
-            .expect("BUG: Failed to acquire write lock")
-            .replace(aggregate_key);
+    /// Return the signer set info that is currently stored in the smart
+    /// contract.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn registry_signer_set_info(&self) -> Option<SignerSetInfo> {
+        self.registry_signing_set_info
+            .read()
+            .expect("BUG: Failed to acquire read lock of signer set info")
+            .as_ref()
+            .cloned()
     }
 
     /// Get the current bitcoin chain tip.
-    pub fn bitcoin_chain_tip(&self) -> BitcoinBlockRef {
+    #[allow(clippy::unwrap_in_result)]
+    pub fn bitcoin_chain_tip(&self) -> Option<BitcoinBlockRef> {
         self.bitcoin_chain_tip
             .read()
             .expect("BUG: Failed to acquire read lock")
@@ -91,12 +75,10 @@ impl SignerState {
 
     /// Set the current bitcoin chain tip.
     pub fn set_bitcoin_chain_tip(&self, chain_tip: BitcoinBlockRef) {
-        let mut block = self
-            .bitcoin_chain_tip
+        self.bitcoin_chain_tip
             .write()
-            .expect("BUG: Failed to acquire write lock");
-
-        *block = chain_tip;
+            .expect("BUG: Failed to acquire write lock")
+            .replace(chain_tip);
     }
 
     /// Get the current sBTC limits.
@@ -151,18 +133,14 @@ impl Default for SignerState {
     fn default() -> Self {
         Self {
             current_signer_set: Default::default(),
-            current_signatures_required: AtomicU16::new(0),
             current_limits: RwLock::new(SbtcLimits::zero()),
-            current_aggregate_key: RwLock::new(None),
+            registry_signing_set_info: RwLock::new(None),
             sbtc_contracts_deployed: Default::default(),
             sbtc_bitcoin_start_height: Default::default(),
             is_sbtc_bitcoin_start_height_set: Default::default(),
             // The block hash here is often used as the parent block hash
             // of the genesis block on bitcoin.
-            bitcoin_chain_tip: RwLock::new(BitcoinBlockRef {
-                block_height: 0u64.into(),
-                block_hash: BitcoinBlockHash::from([0; 32]),
-            }),
+            bitcoin_chain_tip: RwLock::new(None),
         }
     }
 }
@@ -551,11 +529,17 @@ impl SignerSet {
             .len()
     }
 
-    /// Returns true if the two signer sets have the same public keys.
-    pub fn has_same_pubkeys(&self, other: &BTreeSet<PublicKey>) -> bool {
-        let self_pubkeys: BTreeSet<PublicKey> =
-            self.get_signers().iter().map(|s| *s.public_key()).collect();
-        &self_pubkeys == other
+    /// Gets the signer public key for the given peer ID, returning `None` if
+    /// the peer ID is not in the signer set or otherwise unknown.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn get_pubkey_for_peer(&self, peer_id: &PeerId) -> Option<PublicKey> {
+        #[allow(clippy::expect_used)]
+        self.signers
+            .read()
+            .expect("BUG: Failed to acquire read lock")
+            .iter()
+            .find(|signer| signer.peer_id() == peer_id)
+            .map(|signer| *signer.public_key())
     }
 }
 

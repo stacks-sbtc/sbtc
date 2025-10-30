@@ -18,7 +18,7 @@ use bitcoin::transaction::Version;
 use bitcoincore_rpc::RpcApi as _;
 use bitvec::array::BitArray;
 use clarity::vm::types::PrincipalData;
-use fake::Fake;
+use fake::Fake as _;
 use rand::Rng as _;
 use rand::distributions::Uniform;
 use rand::rngs::OsRng;
@@ -32,11 +32,11 @@ use signer::bitcoin::utxo::DepositRequest;
 use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
 use signer::bitcoin::utxo::SignerUtxo;
-use signer::bitcoin::utxo::TxDeconstructor;
+use signer::bitcoin::utxo::TxDeconstructor as _;
 use signer::bitcoin::utxo::WithdrawalRequest;
 use signer::config::Settings;
 use signer::context::SbtcLimits;
-use signer::keys::SignerScriptPubKey;
+use signer::keys::SignerScriptPubKey as _;
 use signer::storage::model::TaprootScriptHash;
 use stacks_common::types::chainstate::StacksAddress;
 
@@ -128,9 +128,10 @@ where
         signer_bitmap: BitArray::ZERO,
         amount: dep.amount,
         deposit_script: dep.deposit_script.clone(),
-        reclaim_script_hash: TaprootScriptHash::from_script_buf(&dep.reclaim_script),
+        reclaim_script_hash: TaprootScriptHash::from(&dep.reclaim_script),
         signers_public_key: dep.signers_public_key,
     };
+
     (deposit_tx, req, dep)
 }
 
@@ -249,7 +250,7 @@ fn deposits_add_to_controlled_amounts() {
 
     // The moment of truth, does the network accept the transaction?
     rpc.send_raw_transaction(&unsigned.tx).unwrap();
-    faucet.generate_blocks(1);
+    faucet.generate_block();
 
     // The signer's balance should now reflect the deposit.
     let signers_balance = signer.get_balance(rpc);
@@ -269,7 +270,7 @@ fn withdrawals_reduce_to_signers_amounts() {
 
     // Start off with some initial UTXOs to work with.
     faucet.send_to(100_000_000, &signer.address);
-    faucet.generate_blocks(1);
+    faucet.generate_block();
 
     assert_eq!(signer.get_balance(rpc).to_sat(), 100_000_000);
 
@@ -366,7 +367,7 @@ fn withdrawals_reduce_to_signers_amounts() {
 
     // Ship it
     rpc.send_raw_transaction(&tx).unwrap();
-    faucet.generate_blocks(1);
+    faucet.generate_block();
 
     // Let's make sure their ending balances are correct. We start with the
     // Withdrawal recipient.

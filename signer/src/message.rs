@@ -181,9 +181,10 @@ impl From<model::WithdrawalSigner> for SignerWithdrawalDecision {
 /// Represents a request to sign a Stacks transaction.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StacksTransactionSignRequest {
-    /// This is the bitcoin aggregate key that was output from DKG. It is used
-    /// to identify the signing set for the transaction.
-    pub aggregate_key: PublicKey,
+    /// **Deprecated**. This is the aggregate key that was output from DKG.
+    /// It was used to identify the signing set for the transaction, but is
+    /// unnecessary now.
+    pub aggregate_key: Option<PublicKey>,
     /// The contract call transaction to sign.
     pub contract_tx: StacksTx,
     /// The nonce to use for the transaction.
@@ -232,6 +233,23 @@ pub struct BitcoinPreSignRequest {
     pub last_fees: Option<Fees>,
 }
 
+impl std::fmt::Display for BitcoinPreSignRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "BitcoinPreSignRequest(request_package=[")?;
+        for (i, value) in self.request_package.iter().enumerate() {
+            if i > 0 {
+                write!(f, ",")?;
+            }
+            write!(f, "{value}")?;
+        }
+        write!(
+            f,
+            "], fee_rate={}, last_fees={:?})",
+            self.fee_rate, self.last_fees
+        )
+    }
+}
+
 /// An acknowledgment of a [`BitcoinPreSignRequest`].
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BitcoinPreSignAck;
@@ -262,9 +280,9 @@ impl From<crate::storage::model::BitcoinTxId> for WstsMessageId {
 impl std::fmt::Display for WstsMessageId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            WstsMessageId::Sweep(txid) => write!(f, "sweep({})", txid),
+            WstsMessageId::Sweep(txid) => write!(f, "sweep({txid})"),
             WstsMessageId::DkgVerification(aggregate_key) => {
-                write!(f, "dkg-verification({})", aggregate_key)
+                write!(f, "dkg-verification({aggregate_key})")
             }
             WstsMessageId::Dkg(id) => {
                 write!(f, "dkg({})", hex::encode(id))
@@ -305,11 +323,11 @@ mod tests {
     use std::marker::PhantomData;
 
     use super::*;
-    use crate::codec::{Decode, Encode};
-    use crate::ecdsa::{SignEcdsa, Signed};
+    use crate::codec::{Decode as _, Encode as _};
+    use crate::ecdsa::{SignEcdsa as _, Signed};
     use crate::keys::PrivateKey;
 
-    use rand::SeedableRng;
+    use rand::SeedableRng as _;
     use test_case::test_case;
 
     #[test_case(PhantomData::<SignerDepositDecision> ; "SignerDepositDecision")]

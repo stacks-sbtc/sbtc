@@ -12,6 +12,7 @@ use bitcoin::{OutPoint, ScriptBuf};
 use bitvec::array::BitArray;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
 use clarity::vm::types::PrincipalData;
+use libp2p::{Multiaddr, PeerId};
 use serde::{Deserialize, Serialize};
 use stacks_common::types::chainstate::BurnchainHeaderHash;
 use stacks_common::types::chainstate::StacksBlockId;
@@ -24,6 +25,20 @@ use crate::block_observer::Deposit;
 use crate::error::Error;
 use crate::keys::PublicKey;
 use crate::keys::PublicKeyXOnly;
+use crate::stacks::api::SignerSetInfo;
+
+/// A P2P peer which the signer has successfully connected to.
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
+pub struct P2PPeer {
+    /// The peer ID of the connected peer.
+    pub peer_id: DbPeerId,
+    /// The public key of the connected peer.
+    pub public_key: PublicKey,
+    /// The address of the connected peer.
+    pub address: DbMultiaddr,
+    /// The timestamp of the last successful dial to the peer.
+    pub last_dialed_at: Timestamp,
+}
 
 /// A bitcoin transaction output (TXO) relevant for the sBTC signers.
 ///
@@ -159,7 +174,7 @@ impl From<bitcoin::Block> for BitcoinBlock {
 pub struct StacksBlock {
     /// Block hash.
     pub block_hash: StacksBlockHash,
-    /// Block height.    
+    /// Block height.
     pub block_height: StacksBlockHeight,
     /// Hash of the parent block.
     pub parent_hash: StacksBlockHash,
@@ -229,7 +244,7 @@ impl From<Deposit> for DepositRequest {
             .filter_map(|tx_in| Some(tx_in.prevout?.script_pubkey.script.into()))
             .collect();
 
-        let reclaim_script_hash = TaprootScriptHash::from_script_buf(&deposit.info.reclaim_script);
+        let reclaim_script_hash = TaprootScriptHash::from(&deposit.info.reclaim_script);
 
         Self {
             txid: deposit.info.outpoint.txid.into(),
@@ -388,7 +403,7 @@ pub struct SweptDepositRequest {
     /// The block id of the bitcoin block that includes the sweep
     /// transaction.
     pub sweep_block_hash: BitcoinBlockHash,
-    /// The block height of the block referenced by the `sweep_block_hash`.   
+    /// The block height of the block referenced by the `sweep_block_hash`.
     pub sweep_block_height: BitcoinBlockHeight,
     /// Transaction ID of the deposit request transaction.
     pub txid: BitcoinTxId,
@@ -433,7 +448,7 @@ pub struct SweptWithdrawalRequest {
     /// The block id of the stacks block that includes this sweep
     /// transaction.
     pub sweep_block_hash: BitcoinBlockHash,
-    /// The block height of the block that includes the sweep transaction.    
+    /// The block height of the block that includes the sweep transaction.
     pub sweep_block_height: BitcoinBlockHeight,
     /// Request ID of the withdrawal request. These are supposed to be
     /// unique, but there can be duplicates if there is a reorg that
@@ -518,6 +533,24 @@ pub struct EncryptedDkgShares {
     pub started_at_bitcoin_block_height: BitcoinBlockHeight,
 }
 
+impl EncryptedDkgShares {
+    /// Return the public keys of the signers that participated in the DKG
+    /// associated with these shares.
+    pub fn signer_set_public_keys(&self) -> BTreeSet<PublicKey> {
+        self.signer_set_public_keys.iter().copied().collect()
+    }
+}
+
+impl From<EncryptedDkgShares> for SignerSetInfo {
+    fn from(value: EncryptedDkgShares) -> Self {
+        SignerSetInfo {
+            aggregate_key: value.aggregate_key,
+            signer_set: value.signer_set_public_keys(),
+            signatures_required: value.signature_share_threshold,
+        }
+    }
+}
+
 /// Persisted public DKG shares from other signers
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
@@ -538,6 +571,16 @@ pub struct KeyRotationEvent {
     /// The number of signatures required for the multi-sig wallet.
     #[sqlx(try_from = "i32")]
     pub signatures_required: u16,
+}
+
+impl From<KeyRotationEvent> for SignerSetInfo {
+    fn from(value: KeyRotationEvent) -> Self {
+        SignerSetInfo {
+            aggregate_key: value.aggregate_key,
+            signer_set: value.signer_set.into_iter().collect(),
+            signatures_required: value.signatures_required,
+        }
+    }
 }
 
 /// A struct containing how a signer voted for a deposit or withdrawal
@@ -1023,38 +1066,34 @@ impl From<bitcoin::TapNodeHash> for TaprootScriptHash {
     }
 }
 
-#[cfg(feature = "testing")]
-impl Default for TaprootScriptHash {
-    fn default() -> Self {
-        Self::from_byte_array([0; 32])
-    }
-}
-
 impl TaprootScriptHash {
     /// Create a new taproot script hash with all zeroes
     #[cfg(feature = "testing")]
-    pub fn new() -> Self {
-        Default::default()
+    pub fn zeros() -> Self {
+        Self::from([0; 32])
     }
     /// Return the inner bytes for the taproot script hash
-    pub fn into_bytes(&self) -> [u8; 32] {
+    pub fn to_byte_array(&self) -> [u8; 32] {
         self.0.to_byte_array()
     }
+}
 
-    /// Convert a byte array into a taproot script hash.
-    pub fn from_byte_array(bytes: [u8; 32]) -> Self {
-        bitcoin::TapNodeHash::from_byte_array(bytes).into()
-    }
-
-    /// Compute a taproot script hash from a script pubkey.
-    pub fn from_script_pubkey(script_pubkey: &ScriptPubKey) -> Self {
-        Self::from_script_buf(script_pubkey)
-    }
-
-    /// Compute a taproot script hash from a scriptbuf
-    pub fn from_script_buf(script_buf: &ScriptBuf) -> Self {
+impl From<&ScriptBuf> for TaprootScriptHash {
+    fn from(script_buf: &ScriptBuf) -> Self {
         bitcoin::TapNodeHash::from_script(script_buf, bitcoin::taproot::LeafVersion::TapScript)
             .into()
+    }
+}
+
+impl From<&ScriptPubKey> for TaprootScriptHash {
+    fn from(script_pub_key: &ScriptPubKey) -> Self {
+        Self::from(&script_pub_key.0)
+    }
+}
+
+impl From<[u8; 32]> for TaprootScriptHash {
+    fn from(bytes: [u8; 32]) -> Self {
+        bitcoin::TapNodeHash::from_byte_array(bytes).into()
     }
 }
 
@@ -1576,11 +1615,45 @@ impl From<time::OffsetDateTime> for Timestamp {
     }
 }
 
+/// A newtype over [`PeerId`] which implements encode/decode for sqlx.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct DbPeerId(PeerId);
+
+impl From<PeerId> for DbPeerId {
+    fn from(value: PeerId) -> Self {
+        Self(value)
+    }
+}
+
+impl Deref for DbPeerId {
+    type Target = PeerId;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A newtype over [`Multiaddr`] which implements encode/decode for sqlx.
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct DbMultiaddr(Multiaddr);
+
+impl From<Multiaddr> for DbMultiaddr {
+    fn from(value: Multiaddr) -> Self {
+        Self(value)
+    }
+}
+
+impl Deref for DbMultiaddr {
+    type Target = Multiaddr;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use fake::Fake;
+    use fake::Fake as _;
 
-    use sbtc::events::FromLittleEndianOrder;
+    use sbtc::events::FromLittleEndianOrder as _;
 
     use crate::testing::get_rng;
 

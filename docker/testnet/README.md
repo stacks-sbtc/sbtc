@@ -26,7 +26,7 @@ to tweak the config file a little.
 
 | Network         | Archive                                                                                              | Example Config                           |
 | --------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| Bitcoin regtest | [archive](https://drive.google.com/drive/u/3/folders/1KvpmIxvX8Rh7H8Th91qbc_HsbhQLi13V)              | [example config](./bitcoin/bitcoin.conf) |
+| Bitcoin regtest | [archive](https://drive.google.com/drive/folders/1FtZP6RJIfooOsqF0qhhUGaPt1EsKSFxQ)              | [example config](./bitcoin/bitcoin.conf) |
 | Stacks testnet  | [archive](https://archive.hiro.so/testnet/stacks-blockchain/testnet-stacks-blockchain-latest.tar.gz) | [example config](./stacks/Config.toml)   |
 
 ## Configuration
@@ -43,7 +43,6 @@ Clone this repository and `cd` to this directory.
   - The provided Emily API key.
   - The provided signer private key.
   - The host/port of your Bitcoin node RPC endpoint.
-  - The host/port of your Bitcoin zmqpubhash endpoint.
   - The host/port of your Stacks RPC endpoint.
   - The URI to a Postgresql DB.
 
@@ -105,22 +104,12 @@ events_keys = [
 
 We will provide you with a starter `.env` file that has the following fields:
 
-```
+```text
 STREAM_NAME=<provided_stream_name>
 SIGNER_SIGNER__PRIVATE_KEY=<provided_private_key>
 EMILY_API_KEY=<provided_emily_api_key>
 AWS_ACCESS_KEY_ID=<provided_access_key_id>
 AWS_SECRET_ACCESS_KEY=<provided_secret_access_key>
-```
-
-### Configure ZMQ endpoints for your Bitcoin node
-
-If you have used the [configuration](./bitcoin/bitcoin.conf) from this
-repository, you are all set.
-
-```conf
-zmqpubhashblock=tcp://*:28332
-zmqpubrawblock=tcp://*:28332
 ```
 
 ### Configure the blocklist client

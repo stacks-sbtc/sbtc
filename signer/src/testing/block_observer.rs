@@ -1,12 +1,12 @@
 //! Test utilities for the block observer
 
 use std::collections::HashMap;
-use std::ops::Deref;
+use std::ops::Deref as _;
 
 use bitcoin::Amount;
 use bitcoin::BlockHash;
 use bitcoin::Txid;
-use bitcoin::hashes::Hash;
+use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc_json::GetTxOutResult;
 use blockstack_lib::chainstate::burn::ConsensusHash;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
@@ -23,10 +23,11 @@ use blockstack_lib::types::chainstate::StacksBlockId;
 use clarity::types::chainstate::BurnchainHeaderHash;
 use clarity::types::chainstate::SortitionId;
 use clarity::vm::costs::ExecutionCost;
-use emily_client::models::Status;
-use rand::seq::IteratorRandom;
+use emily_client::models::DepositStatus;
+use rand::seq::IteratorRandom as _;
 use sbtc::deposits::CreateDepositRequest;
 
+use crate::bitcoin::BitcoinBlockHashStreamProvider;
 use crate::bitcoin::BitcoinInteract;
 use crate::bitcoin::GetTransactionFeeResult;
 use crate::bitcoin::TransactionLookupHint;
@@ -41,6 +42,7 @@ use crate::error::Error;
 use crate::keys::PublicKey;
 use crate::stacks::api::AccountInfo;
 use crate::stacks::api::FeePriority;
+use crate::stacks::api::SignerSetInfo;
 use crate::stacks::api::StacksInteract;
 use crate::stacks::api::SubmitTxResponse;
 use crate::stacks::api::TenureBlocks;
@@ -196,6 +198,16 @@ impl TestHarness {
     }
 }
 
+impl BitcoinBlockHashStreamProvider for TestHarness {
+    type Error = Error;
+    fn get_block_hash_stream(
+        &self,
+    ) -> impl futures::Stream<Item = Result<BlockHash, Self::Error>> + Send + Sync + Unpin + 'static
+    {
+        self.spawn_block_hash_stream()
+    }
+}
+
 impl TryFrom<TestHarness> for ApiFallbackClient<TestHarness> {
     type Error = Error;
     fn try_from(value: TestHarness) -> Result<Self, Error> {
@@ -294,15 +306,18 @@ impl BitcoinInteract for TestHarness {
     async fn get_network_info(&self) -> Result<bitcoincore_rpc_json::GetNetworkInfoResult, Error> {
         unimplemented!()
     }
+
+    async fn get_best_block_hash(&self) -> Result<BlockHash, Error> {
+        unimplemented!()
+    }
 }
 
 impl StacksInteract for TestHarness {
-    async fn get_current_signer_set(
+    async fn get_current_signer_set_info(
         &self,
         _contract_principal: &StacksAddress,
-    ) -> Result<Vec<PublicKey>, Error> {
-        // issue #118
-        todo!()
+    ) -> Result<Option<SignerSetInfo>, Error> {
+        Ok(None)
     }
     async fn get_current_signers_aggregate_key(
         &self,
@@ -402,6 +417,7 @@ impl StacksInteract for TestHarness {
             stacks_parent_ch: None,
             last_sortition_ch: None,
             committed_block_hash: None,
+            vrf_seed: None,
         })
     }
 
@@ -490,10 +506,10 @@ impl EmilyInteract for TestHarness {
 
     async fn get_deposits_with_status(
         &self,
-        status: Status,
+        status: DepositStatus,
     ) -> Result<Vec<CreateDepositRequest>, Error> {
         match status {
-            Status::Pending => Ok(self.pending_deposits.clone()),
+            DepositStatus::Pending => Ok(self.pending_deposits.clone()),
             _ => Ok(Vec::new()),
         }
     }
