@@ -47,6 +47,7 @@ jobs:
         id: set_env
         run: |
           ALLOWED_ENVS=("environment/sbtc-devnet" "environment/sbtc-testnet" "environment/sbtc-mainnet" "environment/sbtc-staging" "environment/sbtc-private-mainnet")
+          SHOULD_RUN=true
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             if [ "${GITHUB_REF_NAME}" != "main" ]; then
@@ -54,7 +55,6 @@ jobs:
               exit 1
             fi
 
-            SHOULD_RUN=true
             ENVIRONMENT="${{ github.event.inputs.environment }}"
 
             VALID=false
