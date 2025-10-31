@@ -50,10 +50,8 @@ struct DepositStatusSummary {
     max_fee: u64,
     /// The deposit script used so that the signers' can spend funds.
     deposit_script: model::ScriptPubKey,
-    /// The reclaim script for the deposit.
-    reclaim_script: model::ScriptPubKey,
     /// The hash of reclaim script for the deposit.
-    reclaim_script_hash: Option<model::TaprootScriptHash>,
+    reclaim_script_hash: model::TaprootScriptHash,
     /// The public key used in the deposit script.
     signers_public_key: PublicKeyXOnly,
 }
@@ -406,7 +404,6 @@ impl PgRead {
               , dr.max_fee
               , dr.lock_time
               , dr.spend_script AS deposit_script
-              , dr.reclaim_script
               , dr.reclaim_script_hash
               , dr.signers_public_key
               , bc.block_height
@@ -847,7 +844,6 @@ impl PgRead {
                 deposit_requests.txid
               , deposit_requests.output_index
               , deposit_requests.spend_script
-              , deposit_requests.reclaim_script
               , deposit_requests.reclaim_script_hash
               , deposit_requests.recipient
               , deposit_requests.amount
@@ -906,7 +902,6 @@ impl PgRead {
                     deposit_requests.txid
                   , deposit_requests.output_index
                   , deposit_requests.spend_script
-                  , deposit_requests.reclaim_script
                   , deposit_requests.reclaim_script_hash
                   , deposit_requests.recipient
                   , deposit_requests.amount
@@ -936,7 +931,6 @@ impl PgRead {
                 accepted_deposits.txid
               , accepted_deposits.output_index
               , accepted_deposits.spend_script
-              , accepted_deposits.reclaim_script
               , accepted_deposits.reclaim_script_hash
               , accepted_deposits.recipient
               , accepted_deposits.amount
@@ -1107,7 +1101,6 @@ impl PgRead {
                 .map_err(Error::DisabledLockTime)?,
             outpoint: bitcoin::OutPoint::new((*txid).into(), output_index),
             deposit_script: summary.deposit_script.into(),
-            reclaim_script: summary.reclaim_script.into(),
             reclaim_script_hash: summary.reclaim_script_hash,
             signers_public_key: summary.signers_public_key.into(),
             dkg_shares_status: dkg_shares.map(|shares| shares.dkg_shares_status),
@@ -2427,7 +2420,6 @@ impl PgRead {
             SELECT txid
                  , output_index
                  , spend_script
-                 , reclaim_script
                  , reclaim_script_hash
                  , recipient
                  , amount
