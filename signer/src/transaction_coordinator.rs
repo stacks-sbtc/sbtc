@@ -346,8 +346,7 @@ where
         metrics::counter!(Metrics::CoordinatorTenuresTotal).increment(1);
 
         tracing::debug!("determining if we need to coordinate DKG");
-        let should_coordinate_dkg =
-            should_coordinate_dkg(&self.context, &bitcoin_chain_tip).await?;
+        let should_coordinate_dkg = should_run_dkg(&self.context, &bitcoin_chain_tip).await?;
         let aggregate_key = if should_coordinate_dkg {
             match self.coordinate_dkg(&bitcoin_chain_tip).await {
                 Ok(key) => key,
@@ -363,7 +362,7 @@ where
             // If we do not have signer set info in the registry, then we
             // are in the bootstrap phase. Our latest DKG shares may be
             // 'Unverified', but if we are here then they were not 'Failed'
-            // when we made to call to `should_coordinate_dkg`, since we
+            // when we made to call to `should_run_dkg`, since we
             // will coordinate DKG if our last DKG shares are 'Failed'. But
             // we could be loading 'Failed' shares here.
             match maybe_registry_signer_set_info.as_ref() {
@@ -2515,8 +2514,8 @@ pub fn coordinator_public_key(
 }
 
 /// Determine, according to the current state of the signer and configuration,
-/// whether or not a new DKG round should be coordinated.
-pub async fn should_coordinate_dkg(
+/// whether or not a new DKG round should run.
+pub async fn should_run_dkg(
     context: &impl Context,
     bitcoin_chain_tip: &model::BitcoinBlockRef,
 ) -> Result<bool, Error> {
@@ -2560,34 +2559,21 @@ pub async fn should_coordinate_dkg(
         }
     }
 
-    // Finally, we may need to run DKG because of config target rounds.
-
-    // Get the number of non-failed DKG shares that have been stored
-    let dkg_shares_entry_count = storage.get_encrypted_dkg_shares_count().await?;
-
-    // Get DKG configuration parameters
-    let dkg_min_bitcoin_block_height = config.signer.dkg_min_bitcoin_block_height;
-    let dkg_target_rounds = config.signer.dkg_target_rounds;
-
-    // Determine the action based on the DKG shares count and the rerun height (if configured)
-    match (
-        dkg_shares_entry_count,
-        dkg_target_rounds,
-        dkg_min_bitcoin_block_height,
-    ) {
-        (current, target, Some(dkg_min_height))
-            if current < target.get() && bitcoin_chain_tip.block_height >= dkg_min_height =>
-        {
-            tracing::info!(
-                ?dkg_min_bitcoin_block_height,
-                %dkg_target_rounds,
-                dkg_current_rounds = %dkg_shares_entry_count,
-                "DKG rerun height has been met and we are below the target number of rounds; proceeding with DKG"
-            );
-            Ok(true)
-        }
-        _ => Ok(false),
+    // If the config specifies a `dkg_min_bitcoin_block_height` then we want to
+    // run DKG if we don't have non-failed shares created after that height.
+    if let Some(dkg_min_height) = config.signer.dkg_min_bitcoin_block_height
+        && latest_dkg_shares.started_at_bitcoin_block_height < dkg_min_height
+        && bitcoin_chain_tip.block_height >= dkg_min_height
+    {
+        tracing::info!(
+            %dkg_min_height,
+            "reached DKG minimum height and no non-failed shares after that; proceeding with DKG"
+        );
+        return Ok(true);
     }
+
+    // If we reach here then nothing suggested we want to run DKG
+    Ok(false)
 }
 
 /// Assert, given the last dkg and smart contract current aggregate key, if we
@@ -2648,8 +2634,6 @@ pub fn adjust_nonce(wallet: &SignerWallet, error: &Error) {
 
 #[cfg(test)]
 mod tests {
-    use std::num::NonZeroU32;
-
     use crate::bitcoin::MockBitcoinInteract;
     use crate::context::Context as _;
     use crate::emily_client::MockEmilyInteract;
@@ -2658,18 +2642,18 @@ mod tests {
     use crate::network::in_memory2::WanNetwork;
     use crate::stacks::api::MockStacksInteract;
     use crate::storage::memory::SharedStore;
-    use crate::storage::model::BitcoinBlockHeight;
+    use crate::storage::model::{BitcoinBlockHeight, DkgSharesStatus};
     use crate::storage::{DbWrite as _, model};
-    use crate::testing;
     use crate::testing::context::*;
     use crate::testing::transaction_coordinator::TestEnvironment;
+    use crate::testing::{self, get_rng};
 
     use fake::{Fake as _, Faker};
     use rand::SeedableRng as _;
     use test_case::test_case;
 
     use super::assert_rotate_key_action;
-    use super::should_coordinate_dkg;
+    use super::should_run_dkg;
     use super::*;
 
     #[allow(clippy::type_complexity)]
@@ -2887,20 +2871,45 @@ mod tests {
             .await;
     }
 
-    #[test_case(0, None, 1, 100, true; "first DKG allowed without min height")]
-    #[test_case(0, Some(100), 1, 5, true; "first DKG allowed regardless of min height")]
-    #[test_case(1, None, 2, 100, false; "subsequent DKG not allowed without min height")]
-    #[test_case(1, Some(101), 1, 100, false; "subsequent DKG not allowed with current height lower than min height")]
-    #[test_case(1, Some(100), 1, 100, false; "subsequent DKG not allowed when target rounds reached")]
-    #[test_case(1, Some(100), 2, 100, true; "subsequent DKG allowed when target rounds not reached and min height met")]
+    #[test_case(&[], None, 100, true; "no dkg, no min")]
+    #[test_case(&[], Some(100), 99, true; "no dkg, min not reached")]
+    #[test_case(&[], Some(100), 100, true; "no dkg, min reached")]
+    #[test_case(&[], Some(100), 101, true; "no dkg, min exceeded")]
+    #[test_case(&[(DkgSharesStatus::Unverified, 15)], None, 100, false; "unverified shares, no min")]
+    #[test_case(&[(DkgSharesStatus::Verified, 15)], None, 100, false; "verified shares, no min")]
+    #[test_case(&[(DkgSharesStatus::Failed, 15)], None, 100, true; "failed shares, no min")]
+    #[test_case(&[(DkgSharesStatus::Unverified, 15)], Some(100), 99, false; "unverified shares, min not reached")]
+    #[test_case(&[(DkgSharesStatus::Verified, 15)], Some(100), 99, false; "verified shares, min not reached")]
+    #[test_case(&[(DkgSharesStatus::Failed, 15)], Some(100), 99, true; "failed shares, min not reached")]
+    #[test_case(&[(DkgSharesStatus::Unverified, 15)], Some(100), 100, false; "unverified shares, min reached")]
+    #[test_case(&[(DkgSharesStatus::Verified, 15)], Some(100), 100, true; "verified shares, min reached")]
+    #[test_case(&[(DkgSharesStatus::Failed, 15)], Some(100), 100, true; "failed shares, min reached")]
+    #[test_case(
+        &[(DkgSharesStatus::Verified, 15), (DkgSharesStatus::Unverified, 99)],
+        Some(100), 101, false; "unverified shares before min, min reached")]
+    #[test_case(
+        &[(DkgSharesStatus::Verified, 15), (DkgSharesStatus::Verified, 99)],
+        Some(100), 101, true; "verified shares before min, min reached")]
+    #[test_case(
+        &[(DkgSharesStatus::Verified, 15), (DkgSharesStatus::Failed, 99)],
+        Some(100), 101, true; "failed shares before min, min reached")]
+    #[test_case(
+        &[(DkgSharesStatus::Verified, 15), (DkgSharesStatus::Unverified, 101)],
+        Some(100), 101, false; "unverified shares after min, min reached")]
+    #[test_case(
+        &[(DkgSharesStatus::Verified, 15), (DkgSharesStatus::Verified, 101)],
+        Some(100), 101, false; "verified shares after min, min reached")]
+    #[test_case(
+        &[(DkgSharesStatus::Verified, 15), (DkgSharesStatus::Failed, 101)],
+        Some(100), 101, true; "failed shares after min, min reached")]
     #[test_log::test(tokio::test)]
-    async fn test_should_coordinate_dkg(
-        dkg_rounds_current: u32,
+    async fn test_should_run_dkg(
+        dkg_shares: &[(DkgSharesStatus, u64)],
         dkg_min_bitcoin_block_height: Option<u64>,
-        dkg_target_rounds: u32,
         chain_tip_height: u64,
-        should_allow: bool,
+        expect_dkg: bool,
     ) {
+        let mut rng = get_rng();
         let chain_tip_height = chain_tip_height.into();
         let dkg_min_bitcoin_block_height =
             dkg_min_bitcoin_block_height.map(BitcoinBlockHeight::from);
@@ -2909,25 +2918,24 @@ mod tests {
             .with_mocked_clients()
             .modify_settings(|s| {
                 s.signer.dkg_min_bitcoin_block_height = dkg_min_bitcoin_block_height;
-                s.signer.dkg_target_rounds = NonZeroU32::new(dkg_target_rounds).unwrap();
             })
             .build();
 
         let storage = context.get_storage_mut();
 
-        // Write `dkg_shares` entries for the `current` number of rounds, simulating
-        // the signer having participated in that many successful DKG rounds.
-        for _ in 0..dkg_rounds_current {
-            let mut shares: model::EncryptedDkgShares = Faker.fake();
-            shares.dkg_shares_status = model::DkgSharesStatus::Verified;
-
+        for (dkg_status, dkg_height) in dkg_shares {
+            let shares = model::EncryptedDkgShares {
+                dkg_shares_status: *dkg_status,
+                started_at_bitcoin_block_height: (*dkg_height).into(),
+                ..Faker.fake_with_rng(&mut rng)
+            };
             storage.write_encrypted_dkg_shares(&shares).await.unwrap();
         }
 
         // Dummy chain tip hash which will be used to fetch the block height
         let bitcoin_chain_tip = model::BitcoinBlockRef {
             block_height: chain_tip_height,
-            block_hash: Faker.fake(),
+            block_hash: Faker.fake_with_rng(&mut rng),
         };
 
         // Write a bitcoin block at the given height, simulating the chain tip.
@@ -2935,21 +2943,21 @@ mod tests {
             .write_bitcoin_block(&model::BitcoinBlock {
                 block_hash: bitcoin_chain_tip.block_hash,
                 block_height: bitcoin_chain_tip.block_height,
-                parent_hash: Faker.fake(),
+                parent_hash: Faker.fake_with_rng(&mut rng),
             })
             .await
             .unwrap();
 
-        let aggregate_key = Faker.fake();
+        let aggregate_key = Faker.fake_with_rng(&mut rng);
         prevent_dkg_on_changed_signer_set_info(&context, aggregate_key);
 
         // Test the case
-        let result = should_coordinate_dkg(&context, &bitcoin_chain_tip)
+        let result = should_run_dkg(&context, &bitcoin_chain_tip)
             .await
             .expect("failed to check if DKG should be coordinated");
 
         // Assert the result
-        assert_eq!(result, should_allow);
+        assert_eq!(result, expect_dkg);
     }
 
     fn public_key_from_seed(seed: u64) -> PublicKey {
