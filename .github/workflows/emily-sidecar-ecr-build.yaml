@@ -1,9 +1,22 @@
 name: Build Docker Image for Emily Sidecar
 
 on:
-  push:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment name"
+        required: true
+        default: environment/sbtc-devnet
+        type: choice
+        options:
+          - environment/sbtc-devnet
+          - environment/sbtc-testnet
+          - environment/sbtc-mainnet
+          - environment/sbtc-staging
+          - environment/sbtc-private-mainnet
+  pull_request:
     branches:
-      - 'environment/*'
+      - main
 
 concurrency:
   group: docker-build-emily-sidecar-${{ github.ref || github.run_id }}
@@ -14,15 +27,83 @@ permissions:
   contents: read
   attestations: write
   packages: write
+  issues: read
+  pull-requests: read
 
 env:
   docker_platforms: "linux/amd64"
 
 jobs:
+  resolve-env:
+    name: Resolve Environment
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.set_env.outputs.environment }}
+      should_run: ${{ steps.set_env.outputs.should_run }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Resolve Environment
+        id: set_env
+        run: |
+          ALLOWED_ENVS=("environment/sbtc-devnet" "environment/sbtc-testnet" "environment/sbtc-mainnet" "environment/sbtc-staging" "environment/sbtc-private-mainnet")
+          SHOULD_RUN=true
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${GITHUB_REF_NAME}" != "main" ]; then
+              echo "### The workflow_dispatch can only be run on main branch." >> $GITHUB_STEP_SUMMARY
+              exit 1
+            fi
+
+            ENVIRONMENT="${{ github.event.inputs.environment }}"
+
+            VALID=false
+            for env in "${ALLOWED_ENVS[@]}"; do
+              if [ "$ENVIRONMENT" = "$env" ]; then
+                VALID=true
+                break
+              fi
+            done
+
+            if [ "$VALID" != "true" ]; then
+              echo "### Invalid workflow_dispatch environment: $ENVIRONMENT" >> $GITHUB_STEP_SUMMARY
+              echo "### Allowed environments: ${ALLOWED_ENVS[*]}" >> $GITHUB_STEP_SUMMARY
+              exit 1
+            fi
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            LABELS=$(gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/labels --jq '.[].name')
+
+            MATCHED_ENVS=()
+            for label in $LABELS; do
+              for env in "${ALLOWED_ENVS[@]}"; do
+                if [ "$label" = "$env" ]; then
+                  MATCHED_ENVS+=("$label")
+                fi
+              done
+            done
+
+            if [ "${#MATCHED_ENVS[@]}" -eq 0 ]; then
+              echo "### No valid environment label found on PR. Please add one of: ${ALLOWED_ENVS[*]}" >> $GITHUB_STEP_SUMMARY
+              SHOULD_RUN=false
+            elif [ "${#MATCHED_ENVS[@]}" -gt 1 ]; then
+              echo "### Multiple environment labels found: ${MATCHED_ENVS[*]}. Please use only one." >> $GITHUB_STEP_SUMMARY
+              exit 1
+            fi
+
+            ENVIRONMENT="${MATCHED_ENVS[0]}"
+          else
+            echo "### Unsupported trigger: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+          echo "environment=$ENVIRONMENT" >> $GITHUB_OUTPUT
+          echo "should_run=$SHOULD_RUN" >> $GITHUB_OUTPUT
+
   image:
     name: Build Image
     runs-on: ubuntu-latest
-    environment: ${{ github.ref_name }}
+    if: needs.resolve-env.outputs.should_run == 'true'
+    environment: ${{ needs.resolve-env.outputs.environment }}
     steps:
       - name: Configure AWS Credentials via OIDC
         id: configure_aws
