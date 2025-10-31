@@ -1,9 +1,9 @@
 BEGIN;
--- We want to set reclaim_scipt_hash to NOT NULL, since we dropping
--- reclaim_script and reclaim_script_hash now will replace the reclaim_script
--- functionality. In order to do so, we need to delete all rows where 
--- reclaim_script_hash IS NULL, and rows from another tables pointing via
--- FOREIGHN KEY to rows where reclaim_script_hash IS NULL.
+-- We want to add a NOT NULL constraint on the deposit_request.reclaim_scipt_hash 
+-- column and drop the deposit_request.reclaim_script column. In order to do so,
+-- we need to delete all rows where the reclaim_script_hash column IS NULL, as
+-- well as all rows from other tables with FOREIGN KEY pointers to the
+-- deposit_request table where reclaim_script_hash column IS NULL.
 
 
 -- Since deposit_signers references deposit requests with ON DELETE CASCADE
