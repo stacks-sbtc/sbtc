@@ -930,8 +930,7 @@ impl AsRef<BitcoinBlockHash> for BitcoinBlockRef {
 ///
 /// [1]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stacks-common/src/util/macros.rs#L499-L511>
 /// [2]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stacks-common/src/types/chainstate.rs#L366-L370>
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
-#[serde(transparent)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StacksBlockHash([u8; 32]);
 
 impl StacksBlockHash {
@@ -984,6 +983,13 @@ impl std::fmt::Display for StacksBlockHash {
 impl std::fmt::Debug for StacksBlockHash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.as_hex().fmt(f)
+    }
+}
+
+impl serde::Serialize for StacksBlockHash {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let inst = self.to_hex();
+        s.serialize_str(inst.as_str())
     }
 }
 
