@@ -1724,6 +1724,7 @@ mod tests {
     #[test_case(
         &[(DkgSharesStatus::Verified, 15), (DkgSharesStatus::Failed, 101)],
         Some(100), 101, true; "failed shares after min, min reached")]
+    #[test_case(&[(DkgSharesStatus::Verified, 100)], Some(100), 100, false; "verified shares matching min and chain tip")]
     #[test_log::test(tokio::test)]
     async fn test_assert_allow_dkg_begin(
         dkg_shares: &[(DkgSharesStatus, u64)],
