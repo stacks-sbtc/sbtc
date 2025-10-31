@@ -294,7 +294,7 @@ impl DbRead for SharedStore {
             .unwrap_or_else(Vec::new))
     }
 
-    async fn stacks_block_exists(&self, block_id: StacksBlockId) -> Result<bool, Error> {
+    async fn stacks_block_exists(&self, block_id: &StacksBlockId) -> Result<bool, Error> {
         Ok(self
             .lock()
             .await
@@ -991,7 +991,7 @@ impl DbRead for InMemoryTransaction {
         self.store.get_bitcoin_blocks_with_transaction(txid).await
     }
 
-    async fn stacks_block_exists(&self, block_id: StacksBlockId) -> Result<bool, Error> {
+    async fn stacks_block_exists(&self, block_id: &StacksBlockId) -> Result<bool, Error> {
         self.store.stacks_block_exists(block_id).await
     }
 

@@ -42,13 +42,14 @@ fn build_deposit_reclaim_outputs(
     let mut tx_outs = Vec::with_capacity(amounts.len());
     let mut deposits = Vec::with_capacity(amounts.len());
     let mut reclaims = Vec::with_capacity(amounts.len());
+    let actual_recipient = recipient.unwrap_or(StacksAddress::burn_address(false));
 
     for &amount in amounts {
         let secret_key = SecretKey::new(&mut OsRng);
-        let actual_recipient = recipient.unwrap_or(StacksAddress::burn_address(false));
+
         let deposit = DepositScriptInputs {
             signers_public_key: secret_key.x_only_public_key(SECP256K1).0,
-            recipient: PrincipalData::from(actual_recipient),
+            recipient: PrincipalData::from(actual_recipient.clone()),
             max_fee,
         };
         let reclaim = ReclaimScriptInputs::try_new(lock_time, reclaim_user_script.clone()).unwrap();

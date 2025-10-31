@@ -416,7 +416,7 @@ impl TestSweepSetup {
         )
         .unwrap();
 
-        let address = *wallet.address();
+        let address = wallet.address().clone();
 
         let event = KeyRotationEvent {
             txid: fake::Faker.fake(),
@@ -622,7 +622,7 @@ impl TestSignerSet {
     pub fn address(&self, signatures_required: u16) -> StacksAddress {
         let wallet =
             SignerWallet::new(&self.keys, signatures_required, NetworkKind::Regtest, 0).unwrap();
-        *wallet.address()
+        wallet.address().clone()
     }
 }
 

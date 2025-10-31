@@ -1593,7 +1593,7 @@ impl PgRead {
         };
 
         Ok(Some(WithdrawalRequestReport {
-            id: *id,
+            id: id.clone(), // TODO: Should probably take `id` by value since we're cloning it anyway
             amount: summary.amount,
             max_fee: summary.max_fee,
             is_accepted: summary.is_accepted,
@@ -1656,7 +1656,7 @@ impl PgRead {
 
     async fn stacks_block_exists<'e, E>(
         executor: &'e mut E,
-        block_id: StacksBlockId,
+        block_id: &StacksBlockId,
     ) -> Result<bool, Error>
     where
         &'e mut E: sqlx::PgExecutor<'e>,
@@ -2804,7 +2804,7 @@ impl DbRead for PgStore {
             .await
     }
 
-    async fn stacks_block_exists(&self, block_id: StacksBlockId) -> Result<bool, Error> {
+    async fn stacks_block_exists(&self, block_id: &StacksBlockId) -> Result<bool, Error> {
         PgRead::stacks_block_exists(self.get_connection().await?.as_mut(), block_id).await
     }
 
@@ -3234,10 +3234,7 @@ impl DbRead for PgTransaction<'_> {
         PgRead::get_bitcoin_blocks_with_transaction(tx.as_mut(), txid).await
     }
 
-    async fn stacks_block_exists(
-        &self,
-        block_id: clarity::types::chainstate::StacksBlockId,
-    ) -> Result<bool, Error> {
+    async fn stacks_block_exists(&self, block_id: &StacksBlockId) -> Result<bool, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::stacks_block_exists(tx.as_mut(), block_id).await
     }

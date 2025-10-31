@@ -46,6 +46,7 @@ use crate::storage::model;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::DkgSharesStatus;
 use crate::storage::model::SigHash;
+use crate::storage::model::StacksTxId;
 use crate::wsts_state_machine::FrostCoordinator;
 use crate::wsts_state_machine::SignerStateMachine;
 use crate::wsts_state_machine::StateMachineId;
@@ -514,7 +515,7 @@ where
         wallet.set_nonce(request.nonce);
 
         let multi_sig = MultisigTx::new_tx(&request.contract_tx, &wallet, request.tx_fee);
-        let txid = multi_sig.tx().txid();
+        let txid: StacksTxId = multi_sig.tx().txid().into();
 
         if txid != request.txid {
             return Err(Error::SignerCoordinatorTxidMismatch(txid, request.txid));
@@ -610,7 +611,7 @@ where
             origin: *origin_public_key,
             aggregate_key: signer_set_info.aggregate_key,
             signatures_required: signer_set_info.signatures_required,
-            deployer: self.context.config().signer.deployer,
+            deployer: self.context.config().signer.deployer.clone(),
         };
         let ctx = &self.context;
 

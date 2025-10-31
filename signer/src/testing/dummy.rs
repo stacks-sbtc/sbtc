@@ -321,14 +321,6 @@ pub fn stacks_tx<R: rand::RngCore + ?Sized>(
     }
 }
 
-/// Dummy stacks transaction ID
-pub fn stacks_txid<R: rand::RngCore + ?Sized>(
-    config: &fake::Faker,
-    rng: &mut R,
-) -> blockstack_lib::burnchains::Txid {
-    blockstack_lib::burnchains::Txid(config.fake_with_rng(rng))
-}
-
 /// Dummy signature
 pub fn recoverable_signature<R>(config: &fake::Faker, rng: &mut R) -> RecoverableSignature
 where

@@ -66,11 +66,11 @@ Below is the output on a machine that is able to build and run all the sources a
 
 ```text
 --- sBTC tool versions ---
-cargo 1.89.0 (c24e10642 2025-06-23)
+cargo 1.90.0 (840b83a10 2025-07-30)
 cargo-lambda 1.6.2 (2025-01-17Z)
 pnpm 9.1.0
 GNU Make 3.81
-uv 0.7.3 (Homebrew 2025-05-07)
+uv 0.8.13 (Homebrew 2025-08-21)
 ```
 
 ### Building
