@@ -396,9 +396,9 @@ impl Iterator for StacksBlockIter {
     fn next(&mut self) -> Option<Self::Item> {
         let header = self.iter.next()?;
         Some(StacksBlock {
-            block_hash: header.block_id.into(),
+            block_hash: header.block_id,
             block_height: header.block_height,
-            parent_hash: header.parent_block_id.into(),
+            parent_hash: header.parent_block_id,
             bitcoin_anchor: self.anchor_block_hash,
         })
     }
@@ -1099,7 +1099,7 @@ impl StacksClient {
             .map_err(Error::UnexpectedStacksResponse)?;
 
         NakamotoBlock::consensus_deserialize(&mut &*resp)
-            .map_err(|err| Error::DecodeNakamotoBlock(err, block_id.clone()))
+            .map_err(|err| Error::DecodeNakamotoBlock(err, *block_id))
     }
 
     /// Fetch all Nakamoto ancestor blocks within the same tenure as the
@@ -1115,7 +1115,7 @@ impl StacksClient {
     async fn get_tenure(&self, block_id: &StacksBlockHash) -> Result<TenureBlockHeaders, Error> {
         tracing::debug!("making initial request for nakamoto blocks within the tenure");
         let mut tenure_headers = self.get_tenure_raw(block_id).await?;
-        let mut prev_last_block_id = block_id.clone();
+        let mut prev_last_block_id = *block_id;
 
         // Given the response size limit of GET /v3/tenures/<block-id>
         // requests, there could be more blocks that we need to fetch.
@@ -1358,7 +1358,7 @@ where
     D: DbRead + Send + Sync,
 {
     let starting_tenure = stacks.get_tenure(block_id).await?;
-    let mut headers: Vec<TenureBlockHeaders> = vec![starting_tenure.into()];
+    let mut headers: Vec<TenureBlockHeaders> = vec![starting_tenure];
     let nakamoto_start_height = stacks.get_epoch_status().await?.nakamoto_start_height();
 
     while let Some(tenure) = headers.last() {
@@ -1384,7 +1384,7 @@ where
         }
         // There are more blocks to fetch, so let's get them.
         let tenure_blocks = stacks.get_tenure(&header.parent_block_id).await?;
-        headers.push(tenure_blocks.into());
+        headers.push(tenure_blocks);
     }
 
     headers.reverse();
