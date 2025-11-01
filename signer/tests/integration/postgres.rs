@@ -296,7 +296,12 @@ async fn checking_stacks_blocks_exists_works() {
     // Okay, this table is empty and so none of the blocks have
     // been saved yet.
     let any_exist = futures::stream::iter(blocks.iter())
-        .any(|block| async { store.stacks_block_exists(&block.block_id()).await.unwrap() })
+        .any(|block| async {
+            store
+                .stacks_block_exists(&block.block_id().into())
+                .await
+                .unwrap()
+        })
         .await;
     assert!(!any_exist);
 
@@ -309,7 +314,12 @@ async fn checking_stacks_blocks_exists_works() {
 
     // Now each of them should exist.
     let all_exist = futures::stream::iter(blocks.iter())
-        .all(|block| async { store.stacks_block_exists(&block.block_id()).await.unwrap() })
+        .all(|block| async {
+            store
+                .stacks_block_exists(&block.block_id().into())
+                .await
+                .unwrap()
+        })
         .await;
     assert!(all_exist);
     signer::testing::storage::drop_db(store).await;
