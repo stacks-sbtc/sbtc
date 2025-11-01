@@ -97,7 +97,6 @@ use signer::keys::PrivateKey;
 use signer::network::in_memory2::SignerNetwork;
 use signer::network::in_memory2::WanNetwork;
 use signer::request_decider::RequestDeciderEventLoop;
-use signer::stacks::api::TenureBlocks;
 use signer::stacks::contracts::AcceptWithdrawalV1;
 use signer::stacks::contracts::AsContractCall;
 use signer::stacks::contracts::RejectWithdrawalV1;
@@ -137,6 +136,7 @@ use signer::network::in_memory::InMemoryNetwork;
 use signer::stacks::api::AccountInfo;
 use signer::stacks::api::MockStacksInteract;
 use signer::stacks::api::SubmitTxResponse;
+use signer::stacks::api::TenureBlockHeaders;
 use signer::stacks::contracts::CompleteDepositV1;
 use signer::stacks::contracts::SMART_CONTRACTS;
 use signer::storage::model;
@@ -556,7 +556,7 @@ async fn mock_stacks_core<D, B, E>(
 
         let chain_tip = model::BitcoinBlockHash::from(chain_tip_info.hash);
         client.expect_get_tenure().returning(move |_| {
-            let mut tenure = TenureBlocks::nearly_empty().unwrap();
+            let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
             tenure.anchor_block_hash = chain_tip;
             Box::pin(std::future::ready(Ok(tenure)))
         });
@@ -3718,7 +3718,7 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
 
             let chain_tip = model::BitcoinBlockHash::from(chain_tip_info.hash);
             client.expect_get_tenure().returning(move |_| {
-                let mut tenure = TenureBlocks::nearly_empty().unwrap();
+                let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
                 tenure.anchor_block_hash = chain_tip;
                 Box::pin(std::future::ready(Ok(tenure)))
             });
@@ -4437,7 +4437,7 @@ async fn test_conservative_initial_sbtc_limits() {
 
             let chain_tip = model::BitcoinBlockHash::from(chain_tip_info.hash);
             client.expect_get_tenure().returning(move |_| {
-                let mut tenure = TenureBlocks::nearly_empty().unwrap();
+                let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
                 tenure.anchor_block_hash = chain_tip;
                 Box::pin(std::future::ready(Ok(tenure)))
             });

@@ -41,7 +41,7 @@ use signer::keys;
 use signer::keys::PublicKey;
 use signer::keys::SignerScriptPubKey as _;
 use signer::network;
-use signer::stacks::api::TenureBlocks;
+use signer::stacks::api::TenureBlockHeaders;
 use signer::storage::DbRead as _;
 use signer::storage::DbWrite as _;
 use signer::storage::model;
@@ -337,7 +337,7 @@ async fn deposit_flow() {
             client
                 .expect_get_tenure()
                 .once()
-                .returning(|_| Box::pin(std::future::ready(TenureBlocks::nearly_empty())));
+                .returning(|_| Box::pin(std::future::ready(TenureBlockHeaders::nearly_empty())));
 
             client.expect_get_epoch_status().returning(|| {
                 Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {

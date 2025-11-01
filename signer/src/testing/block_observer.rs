@@ -8,13 +8,11 @@ use bitcoin::BlockHash;
 use bitcoin::Txid;
 use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc_json::GetTxOutResult;
-use blockstack_lib::chainstate::burn::ConsensusHash;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlockHeader;
 use blockstack_lib::chainstate::stacks::StacksTransaction;
 use blockstack_lib::net::api::getcontractsrc::ContractSrcResponse;
 use blockstack_lib::net::api::getsortition::SortitionInfo;
-use blockstack_lib::net::api::gettenureinfo::RPCGetTenureInfo;
 use blockstack_lib::types::chainstate::StacksAddress;
 use blockstack_lib::types::chainstate::StacksBlockId;
 use clarity::types::chainstate::BurnchainHeaderHash;
@@ -39,14 +37,18 @@ use crate::keys::PublicKey;
 use crate::stacks::api::AccountInfo;
 use crate::stacks::api::FeePriority;
 use crate::stacks::api::GetNodeInfoResponse;
+use crate::stacks::api::GetTenureInfoResponse;
 use crate::stacks::api::SignerSetInfo;
+use crate::stacks::api::StacksBlockHeader;
 use crate::stacks::api::StacksEpochStatus;
 use crate::stacks::api::StacksInteract;
 use crate::stacks::api::SubmitTxResponse;
-use crate::stacks::api::TenureBlocks;
+use crate::stacks::api::TenureBlockHeaders;
 use crate::stacks::wallet::SignerWallet;
 use crate::storage::model;
 use crate::storage::model::BitcoinBlockHeight;
+use crate::storage::model::ConsensusHash;
+use crate::storage::model::StacksBlockHash;
 use crate::testing::dummy;
 use crate::util::ApiFallbackClient;
 
@@ -344,55 +346,53 @@ impl StacksInteract for TestHarness {
         todo!()
     }
 
-    async fn get_block(&self, block_id: &StacksBlockId) -> Result<NakamotoBlock, Error> {
+    async fn get_block(&self, block_id: &StacksBlockHash) -> Result<NakamotoBlock, Error> {
         self.stacks_blocks
             .iter()
-            .skip_while(|(id, _, _)| block_id != id)
+            .skip_while(|(id, _, _)| id != &block_id.into())
             .map(|(_, block, _)| block)
             .next()
             .cloned()
             .ok_or(Error::MissingBlock)
     }
-    async fn get_tenure(&self, block_id: &StacksBlockId) -> Result<TenureBlocks, Error> {
+    async fn get_tenure(&self, block_id: &StacksBlockHash) -> Result<TenureBlockHeaders, Error> {
         let (stx_block_id, stx_block, btc_block_id) = self
             .stacks_blocks
             .iter()
-            .find(|(id, _, _)| block_id == id)
+            .find(|(id, _, _)| id == &block_id.into())
             .ok_or(Error::MissingBlock)?;
 
-        let blocks: Vec<NakamotoBlock> = self
+        let headers: Vec<StacksBlockHeader> = self
             .stacks_blocks
             .iter()
             .skip_while(|(_, _, block_id)| block_id != btc_block_id)
             .take_while(|(block_id, _, _)| block_id != stx_block_id)
             .map(|(_, block, _)| block)
             .chain(std::iter::once(stx_block))
-            .cloned()
+            .map(|block| block.header.clone().into())
             .collect();
 
-        TenureBlocks::from_blocks(blocks)
+        TenureBlockHeaders::from_headers(headers)
     }
-    async fn get_tenure_info(&self) -> Result<RPCGetTenureInfo, Error> {
+    async fn get_tenure_info(&self) -> Result<GetTenureInfoResponse, Error> {
         let (_, _, btc_block_id) = self.stacks_blocks.last().unwrap();
 
-        Ok(RPCGetTenureInfo {
-            consensus_hash: ConsensusHash([0; 20]),
+        Ok(GetTenureInfoResponse {
+            consensus_hash: ConsensusHash::new([0; 20]),
             tenure_start_block_id: self
                 .stacks_blocks
                 .iter()
                 .find(|(_, _, block_id)| block_id == btc_block_id)
-                .map(|(stx_block_id, _, _)| stx_block_id)
-                .cloned()
+                .map(|(stx_block_id, _, _)| stx_block_id.clone().into())
                 .unwrap(),
-            parent_consensus_hash: ConsensusHash([0; 20]),
-            parent_tenure_start_block_id: StacksBlockId::first_mined(),
+            parent_consensus_hash: ConsensusHash::new([0; 20]),
+            parent_tenure_start_block_id: StacksBlockId::first_mined().into(),
             tip_block_id: self
                 .stacks_blocks
                 .last()
-                .map(|(block_id, _, _)| block_id)
-                .cloned()
+                .map(|(block_id, _, _)| block_id.clone().into())
                 .unwrap(),
-            tip_height: self.stacks_blocks.len() as u64,
+            tip_height: (self.stacks_blocks.len() as u64).into(),
             reward_cycle: 0,
         })
     }
@@ -411,7 +411,7 @@ impl StacksInteract for TestHarness {
             burn_header_timestamp: 0,
             sortition_id: SortitionId([0; 32]),
             parent_sortition_id: SortitionId([0; 32]),
-            consensus_hash: ConsensusHash([0; 20]),
+            consensus_hash: ConsensusHash::new([0; 20]).into(),
             was_sortition: true,
             miner_pk_hash160: None,
             stacks_parent_ch: None,
