@@ -380,11 +380,7 @@ where
         let network = bitcoin::Network::from(self.context.config().signer.network);
         let receiver_address = bitcoin::Address::from_script(&req.recipient, network.params())
             .map_err(|err| {
-                Error::WithdrawalBitcoinAddressFromScript(
-                    err,
-                    req.request_id,
-                    req.block_hash.into(),
-                )
+                Error::WithdrawalBitcoinAddressFromScript(err, req.request_id, req.block_hash)
             })?;
 
         let can_accept = client
