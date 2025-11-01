@@ -948,6 +948,19 @@ impl StacksBlockHash {
     pub fn to_hex(&self) -> String {
         self.0.to_lower_hex_string()
     }
+
+    /// Create a StacksBlockHash from a hex string.
+    pub fn from_hex(data: &str) -> Result<Self, Error> {
+        <[u8; 32]>::from_hex(data)
+            .map(Self)
+            .map_err(Error::DecodeHexTxid)
+    }
+
+    /// Create a StacksBlockHash from a byte array.
+    #[cfg(any(test, feature = "testing"))]
+    pub const fn new(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
 }
 
 impl From<StacksBlockId> for StacksBlockHash {
@@ -964,6 +977,12 @@ impl From<&StacksBlockId> for StacksBlockHash {
 
 impl From<StacksBlockHash> for StacksBlockId {
     fn from(value: StacksBlockHash) -> Self {
+        StacksBlockId(value.0)
+    }
+}
+
+impl From<&StacksBlockHash> for StacksBlockId {
+    fn from(value: &StacksBlockHash) -> Self {
         StacksBlockId(value.0)
     }
 }
@@ -990,6 +1009,96 @@ impl serde::Serialize for StacksBlockHash {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let inst = self.to_hex();
         s.serialize_str(inst.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for StacksBlockHash {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<StacksBlockHash, D::Error> {
+        let inst_str = String::deserialize(d)?;
+        StacksBlockHash::from_hex(&inst_str).map_err(serde::de::Error::custom)
+    }
+}
+
+/// The Stacks block ID. This type mirrors the `StacksBlockId` type in
+/// stacks-core, not the `BlockHeaderHash` type.
+///
+/// This type is displayed as a lowercase hex string, and mirrors what
+/// stacks-core does for the
+/// `stacks_common::types::chainstate::StacksBlockId` type.
+///
+/// The stacks-core Display implementation can be found in [1-2].
+///
+/// [1]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stacks-common/src/util/macros.rs#L499-L511>
+/// [2]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stacks-common/src/types/chainstate.rs#L366-L370>
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ConsensusHash([u8; 20]);
+
+impl ConsensusHash {
+    /// Return the inner bytes for the consensus hash.
+    pub fn into_bytes(self) -> [u8; 20] {
+        self.0
+    }
+
+    /// Return the block hash as a hex string.
+    pub fn to_hex(&self) -> String {
+        self.0.to_lower_hex_string()
+    }
+
+    /// Create a ConsensusHash from a hex string.
+    pub fn from_hex(data: &str) -> Result<Self, Error> {
+        <[u8; 20]>::from_hex(data)
+            .map(Self)
+            .map_err(Error::DecodeHexTxid)
+    }
+
+    /// Create a ConsensusHash from a byte array.
+    #[cfg(any(test, feature = "testing"))]
+    pub const fn new(bytes: [u8; 20]) -> Self {
+        Self(bytes)
+    }
+}
+
+impl From<stacks_common::types::chainstate::ConsensusHash> for ConsensusHash {
+    fn from(value: stacks_common::types::chainstate::ConsensusHash) -> Self {
+        Self(value.0)
+    }
+}
+
+impl From<ConsensusHash> for stacks_common::types::chainstate::ConsensusHash {
+    fn from(value: ConsensusHash) -> Self {
+        stacks_common::types::chainstate::ConsensusHash(value.0)
+    }
+}
+
+impl From<[u8; 20]> for ConsensusHash {
+    fn from(bytes: [u8; 20]) -> Self {
+        Self(bytes)
+    }
+}
+
+impl std::fmt::Display for ConsensusHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.as_hex().fmt(f)
+    }
+}
+
+impl std::fmt::Debug for ConsensusHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.as_hex().fmt(f)
+    }
+}
+
+impl serde::Serialize for ConsensusHash {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let inst = self.to_hex();
+        s.serialize_str(&inst)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ConsensusHash {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<ConsensusHash, D::Error> {
+        let inst_str = String::deserialize(d)?;
+        ConsensusHash::from_hex(&inst_str).map_err(serde::de::Error::custom)
     }
 }
 
@@ -1683,6 +1792,14 @@ pub struct BitcoinBlockHeight(u64);
 #[serde(transparent)]
 pub struct StacksBlockHeight(u64);
 
+impl StacksBlockHeight {
+    /// Create a StacksBlockHeight from a u64.
+    #[cfg(any(test, feature = "testing"))]
+    pub const fn new(height: u64) -> Self {
+        Self(height)
+    }
+}
+
 /// A newtype over [`time::OffsetDateTime`] which implements encode/decode for sqlx
 /// and integrates seamlessly with the Postgres `TIMESTAMPTZ` type.
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -1778,15 +1895,17 @@ mod tests {
         assert_eq!(block_hash, round_trip);
     }
 
-    #[test_case(PhantomData::<(StacksTxId, blockstack_lib::burnchains::Txid)>; "StacksTxId")]
-    #[test_case(PhantomData::<(StacksBlockHash, StacksBlockId)>; "StacksBlockHash")]
-    fn stacks_type_display_impl<L, F>(_: PhantomData<(L, F)>)
+    #[test_case(PhantomData::<([u8; 32], StacksTxId, blockstack_lib::burnchains::Txid)>; "StacksTxId")]
+    #[test_case(PhantomData::<([u8; 32], StacksBlockHash, StacksBlockId)>; "StacksBlockHash")]
+    #[test_case(PhantomData::<([u8; 20], ConsensusHash, stacks_common::types::chainstate::ConsensusHash)>; "ConsensusHash")]
+    fn stacks_type_display_impl<B, L, F>(_: PhantomData<(B, L, F)>)
     where
-        L: From<[u8; 32]> + std::fmt::Display + std::fmt::Debug,
-        F: From<[u8; 32]> + std::fmt::Display + std::fmt::Debug,
+        L: From<B> + std::fmt::Display + std::fmt::Debug,
+        F: From<B> + std::fmt::Display + std::fmt::Debug,
+        B: fake::Dummy<fake::Faker> + Copy,
     {
         let mut rng = get_rng();
-        let txid_bytes: [u8; 32] = fake::Faker.fake_with_rng(&mut rng);
+        let txid_bytes: B = fake::Faker.fake_with_rng(&mut rng);
         let local_type = L::from(txid_bytes);
         let foreign_type = F::from(txid_bytes);
         assert_eq!(foreign_type.to_string(), local_type.to_string());
