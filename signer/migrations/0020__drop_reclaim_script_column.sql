@@ -1,4 +1,3 @@
-BEGIN;
 -- We want to add a NOT NULL constraint on the deposit_request.reclaim_scipt_hash 
 -- column and drop the deposit_request.reclaim_script column. In order to do so,
 -- we need to delete all rows where the reclaim_script_hash column IS NULL, as
@@ -22,5 +21,3 @@ ALTER COLUMN reclaim_script_hash SET NOT NULL;
 
 ALTER TABLE sbtc_signer.deposit_requests
 DROP COLUMN reclaim_script;
-
-COMMIT;
