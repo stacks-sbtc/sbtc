@@ -73,6 +73,20 @@ enum Error {
     InvalidStacksAddress(String),
     #[error("Invalid deployer: {0}")]
     InvalidDeployer(String),
+    #[error("missing aggregate key in contract")]
+    MissingAggregateKeyInContract,
+    #[error("bitcoin address from script error: {0}")]
+    AddressFromBitcoinScript(#[from] bitcoin::address::FromScriptError),
+    #[error("failed to generate address from public key")]
+    StacksAddressFromPublicKey,
+    #[error("could not parse the recipient string into PrincipalData: {0}")]
+    ParsePrincipalData(String),
+}
+
+impl From<signer::error::Error> for Error {
+    fn from(error: signer::error::Error) -> Self {
+        Error::SignerError(Box::new(error))
+    }
 }
 
 #[derive(Debug, Parser)]
@@ -241,15 +255,18 @@ impl Context {
         self.stacks_client
             .get_current_signers_aggregate_key(&self.deployer)
             .await
-            .map_err(Box::new)
-            .map_err(Error::SignerError)
+            .map_err(Error::from)
     }
 }
 
+// The allowed clippy lint is necessary because the expanded version of the
+// function, the one produced because of the #[tokio::main] procedural
+// macro, uses unwrap or expect.
+#[allow(clippy::unwrap_in_result)]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = CliArgs::parse();
-    let ctx = Context::new(&args).expect("failed to create context");
+    let ctx = Context::new(&args)?;
 
     match args.command {
         CliCommand::Deposit(args) => exec_deposit(&ctx, args).await?,
@@ -357,7 +374,7 @@ async fn exec_donation(ctx: &Context, args: DonationArgs) -> Result<(), Error> {
     let aggregate_key = ctx
         .get_current_aggregate_key()
         .await?
-        .expect("missing aggregate key in contract");
+        .ok_or(Error::MissingAggregateKeyInContract)?;
 
     let unsigned_tx = get_transaction(
         &ctx.bitcoin_client,
@@ -392,7 +409,7 @@ async fn exec_info(ctx: &Context) -> Result<(), Error> {
     let x_only: XOnlyPublicKey = aggregate_key.into();
     println!("Signers xonly pubkey: {x_only}");
 
-    let address = Address::from_script(&x_only.signers_script_pubkey(), ctx.network).unwrap();
+    let address = Address::from_script(&x_only.signers_script_pubkey(), ctx.network)?;
     println!("Signers regtest bitcoin address (for donation): {address}");
 
     println!("Stacks address (for demo recipient): {DEMO_STACKS_ADDR}");
@@ -427,9 +444,7 @@ async fn create_stacks_tx(
     payload: TransactionPayload,
     sender_sk: String,
 ) -> Result<StacksTransaction, Error> {
-    let private_key = PrivateKey::from_str(&sender_sk)
-        .map_err(Box::new)
-        .map_err(Error::SignerError)?;
+    let private_key = PrivateKey::from_str(&sender_sk)?;
     let public_key = PublicKey::from_private_key(&private_key);
 
     let (tx_version, chain_id, addr_version) = match ctx.network {
@@ -451,14 +466,8 @@ async fn create_stacks_tx(
         1,
         &vec![public_key.into()],
     )
-    .expect("failed to generate address from public key");
-    let nonce = ctx
-        .stacks_client
-        .get_account(&sender_addr)
-        .await
-        .map_err(Box::new)
-        .map_err(Error::SignerError)?
-        .nonce;
+    .ok_or(Error::StacksAddressFromPublicKey)?;
+    let nonce = ctx.stacks_client.get_account(&sender_addr).await?.nonce;
 
     let conditions = payload.post_conditions();
 
@@ -521,7 +530,7 @@ async fn create_bitcoin_deposit_transaction(
     let aggregate_key = ctx
         .get_current_aggregate_key()
         .await?
-        .expect("missing aggregate key in contract");
+        .ok_or(Error::MissingAggregateKeyInContract)?;
 
     let deposit_script = DepositScriptInputs {
         signers_public_key: aggregate_key.into(),
@@ -628,7 +637,8 @@ async fn exec_fund_btc(ctx: &Context, args: FundBtcArgs) -> Result<(), Error> {
 }
 
 async fn exec_fund_stx(ctx: &Context, args: FundStxArgs) -> Result<(), Error> {
-    let recipient = PrincipalData::parse(&args.recipient).expect("cannot parse recipient");
+    let recipient = PrincipalData::parse(&args.recipient)
+        .map_err(|_| Error::ParsePrincipalData(args.recipient))?;
 
     let payload = TransactionPayload::TokenTransfer(
         recipient,
@@ -652,7 +662,6 @@ async fn exec_generate_block(ctx: &Context, args: GenerateBlockArgs) -> Result<(
     let recipient = Address::from_str("bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080")?
         .require_network(ctx.network)?;
     ctx.bitcoin_client
-        .generate_to_address(args.count, &recipient)
-        .expect("failed generate blocks");
+        .generate_to_address(args.count, &recipient)?;
     Ok(())
 }
