@@ -1102,8 +1102,8 @@ impl StacksClient {
             .map_err(|err| Error::DecodeNakamotoBlock(err, *block_id))
     }
 
-    /// Fetch all Nakamoto ancestor blocks within the same tenure as the
-    /// given block ID from a Stacks node.
+    /// Fetch all Nakamoto ancestor block headers within the same tenure as
+    /// the given block ID from a Stacks node.
     ///
     /// The response includes the Nakamoto block for the given block id.
     ///
@@ -1164,7 +1164,7 @@ impl StacksClient {
 
     /// Make a GET /v3/tenures/<block-id> request for Nakamoto ancestor
     /// blocks with the same tenure as the given block ID from a Stacks
-    /// node.
+    /// node, and return the relevant parts of the headers of those blocks.
     ///
     /// # Notes
     ///
@@ -1206,19 +1206,16 @@ impl StacksClient {
             .map_err(Error::UnexpectedStacksResponse)?;
 
         let bytes: &mut &[u8] = &mut resp.as_ref();
-        let mut blocks = Vec::new();
+        let mut headers = Vec::new();
 
         while !bytes.is_empty() {
             let block = NakamotoBlock::consensus_deserialize(bytes)
                 .map_err(|err| Error::DecodeNakamotoTenure(err, *block_id))?;
 
-            blocks.push(block);
+            headers.push(block.header.into());
         }
 
-        Ok(blocks
-            .into_iter()
-            .map(|block| block.header.into())
-            .collect())
+        Ok(headers)
     }
 
     /// Get information about the current tenure.

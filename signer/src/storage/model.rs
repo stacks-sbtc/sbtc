@@ -1019,17 +1019,17 @@ impl<'de> serde::Deserialize<'de> for StacksBlockHash {
     }
 }
 
-/// The Stacks block ID. This type mirrors the `StacksBlockId` type in
-/// stacks-core, not the `BlockHeaderHash` type.
+/// The Stacks consensus hash. This type mirrors the `ConsensusHash` type in
+/// stacks-core.
 ///
 /// This type is displayed as a lowercase hex string, and mirrors what
 /// stacks-core does for the
-/// `stacks_common::types::chainstate::StacksBlockId` type.
+/// [`stacks_common::types::chainstate::ConsensusHash`] type.
 ///
 /// The stacks-core Display implementation can be found in [1-2].
 ///
 /// [1]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stacks-common/src/util/macros.rs#L499-L511>
-/// [2]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stacks-common/src/types/chainstate.rs#L366-L370>
+/// [2]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stacks-common/src/types/chainstate.rs#L382-L386>
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ConsensusHash([u8; 20]);
 
@@ -1854,9 +1854,13 @@ impl Deref for DbMultiaddr {
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Debug;
+    use std::fmt::Display;
     use std::marker::PhantomData;
 
     use fake::Fake as _;
+    use serde::Deserialize;
+    use serde::Serialize;
     use test_case::test_case;
 
     use sbtc::events::FromLittleEndianOrder as _;
@@ -1898,10 +1902,10 @@ mod tests {
     #[test_case(PhantomData::<([u8; 32], StacksTxId, blockstack_lib::burnchains::Txid)>; "StacksTxId")]
     #[test_case(PhantomData::<([u8; 32], StacksBlockHash, StacksBlockId)>; "StacksBlockHash")]
     #[test_case(PhantomData::<([u8; 20], ConsensusHash, stacks_common::types::chainstate::ConsensusHash)>; "ConsensusHash")]
-    fn stacks_type_display_impl<B, L, F>(_: PhantomData<(B, L, F)>)
+    fn stacks_type_display_debug_impl<B, L, F>(_: PhantomData<(B, L, F)>)
     where
-        L: From<B> + std::fmt::Display + std::fmt::Debug,
-        F: From<B> + std::fmt::Display + std::fmt::Debug,
+        L: From<B> + Display + Debug,
+        F: From<B> + Display + Debug,
         B: fake::Dummy<fake::Faker> + Copy,
     {
         let mut rng = get_rng();
@@ -1913,5 +1917,33 @@ mod tests {
         let debug_local_type = format!("{:?}", local_type);
         let debug_foreign_type = format!("{:?}", foreign_type);
         assert_eq!(debug_local_type, debug_foreign_type);
+    }
+
+    #[test_case(PhantomData::<([u8; 32], StacksTxId, blockstack_lib::burnchains::Txid)>; "StacksTxId")]
+    #[test_case(PhantomData::<([u8; 32], StacksBlockHash, StacksBlockId)>; "StacksBlockHash")]
+    #[test_case(PhantomData::<([u8; 20], ConsensusHash, stacks_common::types::chainstate::ConsensusHash)>; "ConsensusHash")]
+    fn stacks_type_serde_impl<B, L, F>(_: PhantomData<(B, L, F)>)
+    where
+        L: From<B> + Display + Debug + Serialize + for<'de> Deserialize<'de> + PartialEq,
+        F: From<B> + Display + Debug + Serialize + for<'de> Deserialize<'de> + PartialEq,
+        B: fake::Dummy<fake::Faker> + Copy,
+    {
+        let mut rng = get_rng();
+        let txid_bytes: B = fake::Faker.fake_with_rng(&mut rng);
+        let local_type = L::from(txid_bytes);
+        let foreign_type = F::from(txid_bytes);
+
+        let json_local_type = serde_json::to_string(&local_type).unwrap();
+        let json_foreign_type = serde_json::to_string(&foreign_type).unwrap();
+        assert_eq!(json_local_type, json_foreign_type);
+
+        assert_eq!(local_type.to_string(), json_local_type);
+        assert_eq!(foreign_type.to_string(), json_foreign_type);
+
+        let local_type_des = serde_json::from_str::<L>(&json_foreign_type).unwrap();
+        let foreign_type_des = serde_json::from_str::<F>(&json_local_type).unwrap();
+        assert_eq!(foreign_type, foreign_type_des);
+        assert_eq!(local_type, local_type_des);
+        assert_eq!(foreign_type_des.to_string(), local_type_des.to_string());
     }
 }
