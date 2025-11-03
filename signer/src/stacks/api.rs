@@ -2067,20 +2067,39 @@ mod tests {
 
         // Testnet currently has the following structure:
         //
-        // BTC 1865 <- 319
+        // BTC 1865 <- Stacks 319
         // BTC 1900 -- nakamoto_start_height
         // BTC 1901 <- Stacks 320, ..., 744
         // BTC 1998 <- Stacks 745, ..., 750, ...
-        //
+
+        // This is the block id for block 319 (pre-Nakamoto) on testnet
+        let pre_nakamoto_block_id = StacksBlockId::from_hex(
+            "0d7cb8c66040d87fc17f39e1b5c36bc7fb5c4d97cc611a168e2cca186848be1e",
+        )
+        .unwrap();
+        assert!(
+            client
+                .check_pre_nakamoto_block(&pre_nakamoto_block_id)
+                .await
+                .is_ok()
+        );
+
         // This is the block id for block 750 on testnet
-        let tip_block_id = StacksBlockId::from_hex(
+        let nakamoto_block_id = StacksBlockId::from_hex(
             "ad133146e79ff5eccf9eecc51d9eea35947031c5d91d61afc3a1df63d6c198e7",
         )
         .unwrap();
+        assert!(
+            client
+                .check_pre_nakamoto_block(&nakamoto_block_id)
+                .await
+                .is_err()
+        );
 
-        let tenures = fetch_unknown_ancestors(&client, &db, &tip_block_id).await;
+        let tenures = fetch_unknown_ancestors(&client, &db, &nakamoto_block_id).await;
 
         let blocks = tenures.unwrap();
+
         let headers = blocks
             .into_iter()
             .flat_map(TenureBlockHeaders::into_iter)
