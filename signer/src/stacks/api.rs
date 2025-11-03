@@ -250,7 +250,7 @@ pub trait StacksInteract: Send + Sync {
     ) -> impl Future<Output = Result<NakamotoBlock, Error>> + Send;
 
     /// Returns `Ok` if the given block ID is a pre-Nakamoto block, otherwise
-    /// (the block doesn't exists or is a Nakamoto one) `Err` is returned.
+    /// (the block doesn't exist or is a Nakamoto one) `Err` is returned.
     fn check_pre_nakamoto_block(
         &self,
         block_id: &StacksBlockId,
@@ -1137,7 +1137,7 @@ impl StacksClient {
     }
 
     /// Returns `Ok` if the given block ID is a pre-Nakamoto block, otherwise
-    /// (the block doesn't exists or is a Nakamoto one) `Err` is returned.
+    /// (the block doesn't exist or is a Nakamoto one) `Err` is returned.
     #[tracing::instrument(skip(self))]
     async fn check_pre_nakamoto_block(&self, block_id: &StacksBlockId) -> Result<(), Error> {
         let path = format!("/v2/blocks/{}", block_id.to_hex());
@@ -1158,10 +1158,7 @@ impl StacksClient {
 
         response
             .error_for_status()
-            .map_err(Error::StacksNodeResponse)?
-            .bytes()
-            .await
-            .map_err(Error::UnexpectedStacksResponse)
+            .map_err(Error::StacksNodeResponse)
             .map(|_| ())
     }
 
