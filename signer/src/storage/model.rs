@@ -1937,8 +1937,8 @@ mod tests {
         let json_foreign_type = serde_json::to_string(&foreign_type).unwrap();
         assert_eq!(json_local_type, json_foreign_type);
 
-        assert_eq!(local_type.to_string(), json_local_type);
-        assert_eq!(foreign_type.to_string(), json_foreign_type);
+        assert_eq!(json_local_type, format!("\"{local_type}\""));
+        assert_eq!(json_foreign_type, format!("\"{foreign_type}\""));
 
         let local_type_des = serde_json::from_str::<L>(&json_foreign_type).unwrap();
         let foreign_type_des = serde_json::from_str::<F>(&json_local_type).unwrap();
