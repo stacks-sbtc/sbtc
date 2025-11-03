@@ -6423,7 +6423,7 @@ async fn reuse_nonce_attack() {
     for (request, info) in deposit_requests.iter().zip(deposit_infos.iter()) {
         assert_eq!(deposit_tx.compute_txid(), request.outpoint.txid);
 
-        let body = build_emily_request(&info, &deposit_tx);
+        let body = build_emily_request(info, &deposit_tx);
         let _ = deposit_api::create_deposit(emily_client.config(), body)
             .await
             .unwrap();
