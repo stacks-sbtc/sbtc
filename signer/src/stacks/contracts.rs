@@ -32,7 +32,6 @@ use blockstack_lib::chainstate::stacks::TransactionSmartContract;
 use blockstack_lib::clarity::vm::ClarityName;
 use blockstack_lib::clarity::vm::ContractName;
 use blockstack_lib::clarity::vm::Value as ClarityValue;
-use blockstack_lib::clarity::vm::types::BUFF_33;
 use blockstack_lib::clarity::vm::types::BuffData;
 use blockstack_lib::clarity::vm::types::ListData;
 use blockstack_lib::clarity::vm::types::ListTypeData;
@@ -41,6 +40,7 @@ use blockstack_lib::clarity::vm::types::SequenceData;
 use blockstack_lib::types::chainstate::StacksAddress;
 use blockstack_lib::util_lib::strings::StacksString;
 use clarity::vm::ClarityVersion;
+use clarity::vm::types::TypeSignature;
 
 use crate::DEPOSIT_DUST_LIMIT;
 use crate::WITHDRAWAL_BLOCKS_EXPIRY;
@@ -80,7 +80,7 @@ pub const SMART_CONTRACTS: [SmartContract; 5] = [
 ///
 /// Except for the origin, this data is not fetched from the signer that
 /// sent the request, but is instead internal to the current signer.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct ReqContext {
     /// This signer's current view of the chain tip of the canonical
     /// bitcoin blockchain. It is the block hash and height of the block on
@@ -162,13 +162,13 @@ pub trait AsContractCall {
     /// The specific function name that relates to this struct.
     const FUNCTION_NAME: &'static str;
     /// The stacks address that deployed the contract.
-    fn deployer_address(&self) -> StacksAddress;
+    fn deployer_address(&self) -> &StacksAddress;
     /// The arguments to the clarity function.
     fn as_contract_args(&self) -> Vec<ClarityValue>;
     /// Convert this struct to a Stacks contract call.
     fn as_contract_call(&self) -> TransactionContractCall {
         TransactionContractCall {
-            address: self.deployer_address(),
+            address: self.deployer_address().clone(),
             // The following From::from calls are more dangerous than they
             // appear. Under the hood they call their TryFrom::try_from
             // implementation and then unwrap them(!). We check that this
@@ -328,8 +328,8 @@ impl AsContractCall for CompleteDepositV1 {
     const CONTRACT_NAME: &'static str = "sbtc-deposit";
     const FUNCTION_NAME: &'static str = "complete-deposit-wrapper";
 
-    fn deployer_address(&self) -> StacksAddress {
-        self.deployer
+    fn deployer_address(&self) -> &StacksAddress {
+        &self.deployer
     }
     /// Construct the input arguments to the complete-deposit-wrapper
     /// contract call.
@@ -620,7 +620,7 @@ impl DepositErrorMsg {
     fn into_error(self, ctx: &ReqContext, tx: &CompleteDepositV1) -> Error {
         Error::DepositValidation(Box::new(DepositValidationError {
             error: self,
-            context: *ctx,
+            context: ctx.clone(),
             tx: tx.clone(),
         }))
     }
@@ -677,8 +677,8 @@ impl AsContractCall for AcceptWithdrawalV1 {
     const CONTRACT_NAME: &'static str = "sbtc-withdrawal";
     const FUNCTION_NAME: &'static str = "accept-withdrawal-request";
 
-    fn deployer_address(&self) -> StacksAddress {
-        self.deployer
+    fn deployer_address(&self) -> &StacksAddress {
+        &self.deployer
     }
     fn as_contract_args(&self) -> Vec<ClarityValue> {
         let txid_data = self.outpoint.txid.to_le_bytes().to_vec();
@@ -1012,10 +1012,12 @@ pub enum WithdrawalErrorMsg {
 }
 
 impl WithdrawalErrorMsg {
+    // TODO: We shouldn't accept references just to clone them; this was the smaller change to
+    // make right now for handling epoch 3.3 and stacks-core 3.2.0.0.2.
     fn into_error(self, ctx: &ReqContext, tx: &AcceptWithdrawalV1) -> Error {
         Error::WithdrawalAcceptValidation(Box::new(WithdrawalAcceptValidationError {
             error: self,
-            context: *ctx,
+            context: ctx.clone(),
             tx: tx.clone(),
         }))
     }
@@ -1056,10 +1058,12 @@ pub enum WithdrawalRejectErrorMsg {
 }
 
 impl WithdrawalRejectErrorMsg {
+    // TODO: We shouldn't accept references just to clone them; this was the smaller change to
+    // make right now for handling epoch 3.3 and stacks-core 3.2.0.0.2.
     fn into_error(self, ctx: &ReqContext, tx: &RejectWithdrawalV1) -> Error {
         Error::WithdrawalRejectValidation(Box::new(WithdrawalRejectValidationError {
             error: self,
-            context: *ctx,
+            context: ctx.clone(),
             tx: tx.clone(),
         }))
     }
@@ -1100,8 +1104,8 @@ impl AsContractCall for RejectWithdrawalV1 {
     const CONTRACT_NAME: &'static str = "sbtc-withdrawal";
     const FUNCTION_NAME: &'static str = "reject-withdrawal-request";
 
-    fn deployer_address(&self) -> StacksAddress {
-        self.deployer
+    fn deployer_address(&self) -> &StacksAddress {
+        &self.deployer
     }
     fn as_contract_args(&self) -> Vec<ClarityValue> {
         vec![
@@ -1253,7 +1257,7 @@ impl RotateKeysV1 {
             Some(shares) => Ok(Self {
                 aggregate_key: shares.aggregate_key,
                 new_keys: shares.signer_set_public_keys(),
-                deployer: ctx.config().signer.deployer,
+                deployer: ctx.config().signer.deployer.clone(),
                 signatures_required: shares.signature_share_threshold,
             }),
             None => Err(Error::MissingDkgShares(aggregate_key.into())),
@@ -1275,7 +1279,7 @@ impl RotateKeysV1 {
             // given type is too large. None of this is true for us, the
             // depth is 1 or 2 and the size is 128 * 33 bytes, which is
             // under the limit of 1 MB.
-            ListTypeData::new_list(BUFF_33.clone(), crate::MAX_KEYS as u32)
+            ListTypeData::new_list(TypeSignature::BUFFER_33.clone(), crate::MAX_KEYS as u32)
                 .expect("Error: legal ListTypeData marked as invalid")
         })
     }
@@ -1294,8 +1298,8 @@ impl AsContractCall for RotateKeysV1 {
     const CONTRACT_NAME: &'static str = "sbtc-bootstrap-signers";
     const FUNCTION_NAME: &'static str = "rotate-keys-wrapper";
 
-    fn deployer_address(&self) -> StacksAddress {
-        self.deployer
+    fn deployer_address(&self) -> &StacksAddress {
+        &self.deployer
     }
 
     /// The arguments to the contract call function
@@ -1454,10 +1458,12 @@ pub enum RotateKeysErrorMsg {
 }
 
 impl RotateKeysErrorMsg {
+    // TODO: We shouldn't accept references just to clone them; this was the smaller change to
+    // make right now for handling epoch 3.3 and stacks-core 3.2.0.0.2.
     fn into_error(self, ctx: &ReqContext, tx: &RotateKeysV1) -> Error {
         Error::RotateKeysValidation(Box::new(RotateKeysValidationError {
             error: self,
-            context: *ctx,
+            context: ctx.clone(),
             tx: tx.clone(),
         }))
     }

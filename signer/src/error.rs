@@ -17,6 +17,7 @@ use crate::stacks::contracts::WithdrawalAcceptValidationError;
 use crate::stacks::contracts::WithdrawalRejectValidationError;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::SigHash;
+use crate::storage::model::StacksTxId;
 use crate::transaction_signer::StacksSignRequestId;
 use crate::wsts_state_machine::StateMachineId;
 
@@ -471,7 +472,7 @@ pub enum Error {
     /// An error when we exceeded the timeout when trying to sign a stacks
     /// transaction.
     #[error("took too long to receive enough signatures for transaction: {0}")]
-    SignatureTimeout(blockstack_lib::burnchains::Txid),
+    SignatureTimeout(StacksTxId),
 
     /// An error when attempting to generically decode bytes using the
     /// trait implementation.
@@ -627,10 +628,7 @@ pub enum Error {
     #[error(
         "signer and coordinator txid mismatch. Signer produced txid {0}, but coordinator sent txid {1}"
     )]
-    SignerCoordinatorTxidMismatch(
-        blockstack_lib::burnchains::Txid,
-        blockstack_lib::burnchains::Txid,
-    ),
+    SignerCoordinatorTxidMismatch(StacksTxId, StacksTxId),
 
     /// Observer dropped
     #[error("observer dropped")]

@@ -83,7 +83,7 @@ pub async fn new_block_handler(state: State<ApiState<impl Context>>, body: Strin
         // Although the following line can panic, our unit tests hit this
         // code path so if tests pass then this will work in production.
         let contract_name = ContractName::from(SBTC_REGISTRY_CONTRACT_NAME);
-        let issuer = StandardPrincipalData::from(api.ctx.config().signer.deployer);
+        let issuer = StandardPrincipalData::from(api.ctx.config().signer.deployer.clone());
         QualifiedContractIdentifier::new(issuer, contract_name)
     });
 
@@ -105,7 +105,6 @@ pub async fn new_block_handler(state: State<ApiState<impl Context>>, body: Strin
         parent_hash: new_block_event.parent_index_block_hash.into(),
         bitcoin_anchor: new_block_event.burn_block_hash.into(),
     };
-    let block_id = new_block_event.index_block_hash;
 
     let span = tracing::span::Span::current();
     span.record("block_hash", stacks_chaintip.block_hash.to_hex());
@@ -137,7 +136,7 @@ pub async fn new_block_handler(state: State<ApiState<impl Context>>, body: Strin
     for (ev, txid) in events {
         let tx_info = TxInfo {
             txid: sbtc::events::StacksTxid(txid.0),
-            block_id,
+            block_id: stacks_chaintip.block_hash.into(),
         };
         let res = match RegistryEvent::try_new(ev.value, tx_info) {
             Ok(RegistryEvent::CompletedDeposit(event)) => {
@@ -398,7 +397,7 @@ mod tests {
         // unexpected contract are filtered out. So we manually switch the
         // address to some random one and check the output. To do that we
         // do a string replace for the expected one with the fishy one.
-        let issuer = StandardPrincipalData::from(ctx.config().signer.deployer);
+        let issuer = StandardPrincipalData::from(ctx.config().signer.deployer.clone());
         let contract_name = ContractName::from(SBTC_REGISTRY_CONTRACT_NAME);
         let identifier = QualifiedContractIdentifier::new(issuer, contract_name.clone());
 
@@ -657,7 +656,7 @@ mod tests {
 
         let block_id: StacksBlockId = StacksBlockId(fake::Faker.fake_with_rng(&mut rng));
         let event = KeyRotationEvent {
-            block_id,
+            block_id: block_id.clone(),
             txid: sbtc::events::StacksTxid(fake::Faker.fake_with_rng(&mut rng)),
             new_aggregate_pubkey: SECP256K1.generate_keypair(&mut rng).1,
             new_keys: (0..3)

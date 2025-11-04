@@ -140,8 +140,8 @@ impl AsContractCall for InitiateWithdrawalRequest {
     const CONTRACT_NAME: &'static str = "sbtc-withdrawal";
     const FUNCTION_NAME: &'static str = "initiate-withdrawal-request";
     /// The stacks address that deployed the contract.
-    fn deployer_address(&self) -> StacksAddress {
-        self.deployer
+    fn deployer_address(&self) -> &StacksAddress {
+        &self.deployer
     }
     /// The arguments to the clarity function.
     fn as_contract_args(&self) -> Vec<ClarityValue> {
@@ -159,13 +159,13 @@ impl AsContractCall for InitiateWithdrawalRequest {
 /// do, which is store all stacks blocks and store the transactions that we
 /// care about, which, naturally, are sBTC related transactions.
 #[test_case(ContractCallWrapper(InitiateWithdrawalRequest {
-    deployer: *testing::wallet::WALLET.0.address(),
+    deployer: testing::wallet::WALLET.0.address().clone(),
 }); "initiate-withdrawal")]
 #[test_case(ContractCallWrapper(CompleteDepositV1 {
     outpoint: bitcoin::OutPoint::null(),
     amount: 123654,
     recipient: PrincipalData::parse("ST1RQHF4VE5CZ6EK3MZPZVQBA0JVSMM9H5PMHMS1Y").unwrap(),
-    deployer: *testing::wallet::WALLET.0.address(),
+    deployer: testing::wallet::WALLET.0.address().clone(),
     sweep_txid: BitcoinTxId::from([0; 32]),
     sweep_block_hash: BitcoinBlockHash::from([0; 32]),
     sweep_block_height: 7u64.into(),
@@ -174,7 +174,7 @@ impl AsContractCall for InitiateWithdrawalRequest {
     outpoint: bitcoin::OutPoint::null(),
     amount: 123654,
     recipient: PrincipalData::parse("ST1RQHF4VE5CZ6EK3MZPZVQBA0JVSMM9H5PMHMS1Y.my-contract-name").unwrap(),
-    deployer: *testing::wallet::WALLET.0.address(),
+    deployer: testing::wallet::WALLET.0.address().clone(),
     sweep_txid: BitcoinTxId::from([0; 32]),
     sweep_block_hash: BitcoinBlockHash::from([0; 32]),
     sweep_block_height: 7u64.into(),
@@ -188,7 +188,7 @@ impl AsContractCall for InitiateWithdrawalRequest {
     outpoint: bitcoin::OutPoint::null(),
     tx_fee: 3500,
     signer_bitmap: 0,
-    deployer: *testing::wallet::WALLET.0.address(),
+    deployer: testing::wallet::WALLET.0.address().clone(),
     sweep_block_hash: BitcoinBlockHash::from([0; 32]),
     sweep_block_height: 7u64.into(),
 }); "accept-withdrawal")]
@@ -199,11 +199,11 @@ impl AsContractCall for InitiateWithdrawalRequest {
 	block_hash: StacksBlockHash::from([0; 32]),
     },
     signer_bitmap: 0,
-    deployer: *testing::wallet::WALLET.0.address(),
+    deployer: testing::wallet::WALLET.0.address().clone(),
 }); "reject-withdrawal")]
 #[test_case(ContractCallWrapper(RotateKeysV1::new(
     &testing::wallet::WALLET.0,
-    *testing::wallet::WALLET.0.address(),
+    testing::wallet::WALLET.0.address().clone(),
     &signer::keys::PublicKey::from_slice(&[0x02; 33]).unwrap()
 )); "rotate-keys")]
 #[tokio::test]
@@ -296,7 +296,7 @@ async fn checking_stacks_blocks_exists_works() {
     // Okay, this table is empty and so none of the blocks have
     // been saved yet.
     let any_exist = futures::stream::iter(blocks.iter())
-        .any(|block| async { store.stacks_block_exists(block.block_id()).await.unwrap() })
+        .any(|block| async { store.stacks_block_exists(&block.block_id()).await.unwrap() })
         .await;
     assert!(!any_exist);
 
@@ -309,7 +309,7 @@ async fn checking_stacks_blocks_exists_works() {
 
     // Now each of them should exist.
     let all_exist = futures::stream::iter(blocks.iter())
-        .all(|block| async { store.stacks_block_exists(block.block_id()).await.unwrap() })
+        .all(|block| async { store.stacks_block_exists(&block.block_id()).await.unwrap() })
         .await;
     assert!(all_exist);
     signer::testing::storage::drop_db(store).await;

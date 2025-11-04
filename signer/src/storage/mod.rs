@@ -286,7 +286,7 @@ pub trait DbRead {
     /// Returns whether the given block ID is stored.
     fn stacks_block_exists(
         &self,
-        block_id: StacksBlockId,
+        block_id: &StacksBlockId,
     ) -> impl Future<Output = Result<bool, Error>> + Send;
 
     /// Return the applicable DKG shares for the

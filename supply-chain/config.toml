@@ -109,10 +109,6 @@ criteria = "safe-to-deploy"
 version = "2.0.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.atomic-waker]]
-version = "1.1.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.attohttpc]]
 version = "0.24.1"
 criteria = "safe-to-deploy"
@@ -199,6 +195,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.base-x]]
 version = "0.2.11"
+criteria = "safe-to-deploy"
+
+[[exemptions.base16ct]]
+version = "0.2.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.base58ck]]
@@ -365,6 +365,10 @@ criteria = "safe-to-deploy"
 version = "0.8.20"
 criteria = "safe-to-deploy"
 
+[[exemptions.crypto-bigint]]
+version = "0.5.5"
+criteria = "safe-to-deploy"
+
 [[exemptions.crypto-mac]]
 version = "0.8.0"
 criteria = "safe-to-deploy"
@@ -441,6 +445,10 @@ criteria = "safe-to-deploy"
 version = "0.9.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.ecdsa]]
+version = "0.16.9"
+criteria = "safe-to-deploy"
+
 [[exemptions.ed25519]]
 version = "2.2.3"
 criteria = "safe-to-deploy"
@@ -451,6 +459,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.either]]
 version = "1.12.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.elliptic-curve]]
+version = "0.13.8"
 criteria = "safe-to-deploy"
 
 [[exemptions.enum-as-inner]]
@@ -483,6 +495,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.fallible-streaming-iterator]]
 version = "0.1.9"
+criteria = "safe-to-deploy"
+
+[[exemptions.ff]]
+version = "0.13.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.finl_unicode]]
@@ -559,6 +575,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.gimli]]
 version = "0.28.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.group]]
+version = "0.13.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.h2]]
@@ -747,6 +767,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.jsonrpc]]
 version = "0.18.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.k256]]
+version = "0.13.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.keccak]]
@@ -1321,6 +1345,10 @@ criteria = "safe-to-deploy"
 version = "0.7.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.rfc6979]]
+version = "0.4.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.ring]]
 version = "0.16.20"
 criteria = "safe-to-deploy"
@@ -1415,6 +1443,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.sct]]
 version = "0.7.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.sec1]]
+version = "0.7.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.secp256k1]]
@@ -1570,7 +1602,7 @@ version = "0.1.15"
 criteria = "safe-to-deploy"
 
 [[exemptions.stacks-common]]
-version = "0.0.1@git:6c769636d5d598d1872960ca2744ad1b64fa6385"
+version = "0.0.1@git:bd9ee6310516b31ef4ecce07e42e73ed0f774ada"
 criteria = "safe-to-deploy"
 
 [[exemptions.stringprep]]
@@ -1653,14 +1685,6 @@ criteria = "safe-to-deploy"
 version = "1.1.8"
 criteria = "safe-to-deploy"
 
-[[exemptions.tikv-jemalloc-sys]]
-version = "0.5.4+5.3.0-patched"
-criteria = "safe-to-deploy"
-
-[[exemptions.tikv-jemallocator]]
-version = "0.5.4"
-criteria = "safe-to-deploy"
-
 [[exemptions.time]]
 version = "0.1.44"
 criteria = "safe-to-deploy"
@@ -1739,10 +1763,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.tower-service]]
 version = "0.3.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.tracing-log]]
-version = "0.2.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.tracing-serde]]

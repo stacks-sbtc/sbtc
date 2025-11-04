@@ -349,7 +349,7 @@ impl BitcoinPreSignRequest {
         }
 
         deposits.sort_by_key(|(request, _)| request.outpoint);
-        withdrawals.sort_by_key(|(_, report)| report.id);
+        withdrawals.sort_by_key(|(_, report)| report.id.clone());
         let reports = SbtcReports {
             deposits,
             withdrawals,

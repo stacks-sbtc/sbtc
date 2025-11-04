@@ -37,6 +37,7 @@ hashbrown.workspace = true
 hex.workspace = true
 include_dir.workspace = true
 libp2p.workspace = true
+libp2p-identity.workspace = true
 lru.workspace = true
 metrics.workspace = true
 metrics-exporter-prometheus.workspace = true
