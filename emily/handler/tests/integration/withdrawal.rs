@@ -1056,7 +1056,7 @@ async fn emily_process_withdrawal_updates_when_some_of_them_are_unknown() {
 
 #[tokio::test]
 async fn emily_handles_withdrawal_requests_on_forks() {
-    // The only thing we care about this heights is that the block
+    // The only thing we care about regarding these heights is that the block
     // associated with first withdrawal will be orphaned after the reorg.
     const PRE_REORG_BEGIN: u64 = 1000;
     const PRE_REORG_END: u64 = 1015;
