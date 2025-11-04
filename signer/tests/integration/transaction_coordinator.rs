@@ -1,5 +1,4 @@
 use std::collections::BTreeSet;
-use std::num::NonZeroU32;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -77,7 +76,7 @@ use signer::testing::get_rng;
 
 use signer::testing::FuturesIterExt as _;
 use signer::transaction_coordinator::given_key_is_coordinator;
-use signer::transaction_coordinator::should_coordinate_dkg;
+use signer::transaction_coordinator::should_run_dkg;
 use signer::transaction_signer::STACKS_SIGN_REQUEST_LRU_SIZE;
 use signer::transaction_signer::assert_allow_dkg_begin;
 use signer::util::FutureExt as _;
@@ -1128,9 +1127,6 @@ async fn run_dkg_if_signer_set_changes(scenario: RunDkgSignerSetScenario, expect
     let ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_mocked_clients()
-        .modify_settings(|settings| {
-            settings.signer.dkg_target_rounds = std::num::NonZero::<u32>::new(1).unwrap();
-        })
         .build();
 
     let chaintip: model::BitcoinBlockRef = Faker.fake_with_rng(&mut rng);
@@ -1158,7 +1154,7 @@ async fn run_dkg_if_signer_set_changes(scenario: RunDkgSignerSetScenario, expect
         .expect("failed to write dkg shares");
 
     // Before any change DKG shouldn't be triggered
-    assert!(!should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+    assert!(!should_run_dkg(&ctx, &chaintip).await.unwrap());
     assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_err());
 
     // Alter the registry based on the test
@@ -1195,10 +1191,10 @@ async fn run_dkg_if_signer_set_changes(scenario: RunDkgSignerSetScenario, expect
     }
 
     if expect_dkg {
-        assert!(should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+        assert!(should_run_dkg(&ctx, &chaintip).await.unwrap());
         assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_ok());
     } else {
-        assert!(!should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+        assert!(!should_run_dkg(&ctx, &chaintip).await.unwrap());
         assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_err());
     }
     testing::storage::drop_db(db).await;
@@ -1211,7 +1207,7 @@ async fn run_dkg_if_signer_set_changes(scenario: RunDkgSignerSetScenario, expect
 #[tokio::test]
 async fn skip_dkg_if_latest_shares_unverified(
     latest_shares_status: DkgSharesStatus,
-    should_run_dkg: bool,
+    expect_dkg: bool,
 ) {
     let mut rng = get_rng();
     let db = testing::storage::new_test_database().await;
@@ -1219,28 +1215,32 @@ async fn skip_dkg_if_latest_shares_unverified(
         .with_storage(db.clone())
         .with_mocked_clients()
         .modify_settings(|settings| {
-            // We want to run DKG twice
-            settings.signer.dkg_target_rounds = std::num::NonZero::<u32>::new(2).unwrap();
-            settings.signer.dkg_min_bitcoin_block_height = Some(0u64.into());
+            // We want to run DKG twice, so ensure the min height doesn't
+            // prevent it.
+            settings.signer.dkg_min_bitcoin_block_height = Some(1u64.into());
         })
         .build();
 
     // First DKG run result
     let dkg_shares = model::EncryptedDkgShares {
         dkg_shares_status: latest_shares_status,
+        started_at_bitcoin_block_height: 0u64.into(),
         ..Faker.fake_with_rng(&mut rng)
     };
     db.write_encrypted_dkg_shares(&dkg_shares)
         .await
         .expect("failed to write dkg shares");
 
-    let chaintip: model::BitcoinBlockRef = Faker.fake_with_rng(&mut rng);
+    let chaintip = model::BitcoinBlockRef {
+        block_height: 1u64.into(),
+        ..Faker.fake_with_rng(&mut rng)
+    };
 
-    if should_run_dkg {
-        assert!(should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+    if expect_dkg {
+        assert!(should_run_dkg(&ctx, &chaintip).await.unwrap());
         assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_ok());
     } else {
-        assert!(!should_coordinate_dkg(&ctx, &chaintip).await.unwrap());
+        assert!(!should_run_dkg(&ctx, &chaintip).await.unwrap());
         assert!(assert_allow_dkg_begin(&ctx, &chaintip).await.is_err());
     }
 
@@ -1298,7 +1298,6 @@ async fn run_subsequent_dkg() {
             .with_storage(db.clone())
             .with_mocked_clients()
             .modify_settings(|settings| {
-                settings.signer.dkg_target_rounds = NonZeroU32::new(2).unwrap();
                 settings.signer.dkg_min_bitcoin_block_height = Some(10u64.into());
             })
             .build();
@@ -1314,6 +1313,8 @@ async fn run_subsequent_dkg() {
             aggregate_key: aggregate_key_1,
             signer_set_public_keys: signer_set_public_keys.iter().copied().collect(),
             dkg_shares_status: DkgSharesStatus::Verified,
+            // Ensure this DKG run doesn't prevent a new DKG round
+            started_at_bitcoin_block_height: 0u64.into(),
             ..Faker.fake()
         })
         .await
@@ -1549,6 +1550,9 @@ async fn pseudo_random_dkg() {
 
     let network = WanNetwork::default();
 
+    // We need at least 1 block for the `started_at_bitcoin_block_height`
+    // manipulation
+    faucet.generate_block();
     let chain_tip_info = get_canonical_chain_tip(rpc);
 
     // =========================================================================
@@ -1567,8 +1571,8 @@ async fn pseudo_random_dkg() {
             .with_emily_client(emily_client.clone())
             .with_mocked_stacks_client()
             .modify_settings(|settings| {
-                settings.signer.dkg_target_rounds = NonZeroU32::new(20).unwrap();
-                settings.signer.dkg_min_bitcoin_block_height = Some(0u64.into());
+                // We have at least one block, this will not prevent another DKG
+                settings.signer.dkg_min_bitcoin_block_height = Some(1u64.into());
             })
             .build();
 
@@ -1734,7 +1738,8 @@ async fn pseudo_random_dkg() {
         let pg_result = sqlx::query(
             r#"
             UPDATE sbtc_signer.dkg_shares
-            SET aggregate_key = $1
+            SET aggregate_key = $1,
+                started_at_bitcoin_block_height = 0
             WHERE aggregate_key = $2
             "#,
         )
@@ -1812,9 +1817,11 @@ async fn pseudo_random_dkg() {
             new_shares.started_at_bitcoin_block_hash,
             first_shares.started_at_bitcoin_block_hash
         );
+        // We changed `started_at_bitcoin_block_height` on the original one
+        assert_eq!(first_shares.started_at_bitcoin_block_height, (0u64).into());
         assert_eq!(
             new_shares.started_at_bitcoin_block_height,
-            first_shares.started_at_bitcoin_block_height
+            original_shares.started_at_bitcoin_block_height
         );
 
         // Let's check to see if the private shares are the same. We cannot
@@ -1836,8 +1843,29 @@ async fn pseudo_random_dkg() {
     // =========================================================================
 
     // Let's run DKG a third time, where this time we expect new secret
-    // shares to be generated.
+    // shares to be generated. We need to change the DKG started at height to
+    // allow a new DKG round.
+    let new_shares = db.get_latest_encrypted_dkg_shares().await.unwrap().unwrap();
+    for (_, db, _, _) in signers.iter() {
+        let count = db.get_encrypted_dkg_shares_count().await.unwrap();
+        assert_eq!(count, 2);
+
+        let pg_result = sqlx::query(
+            r#"
+            UPDATE sbtc_signer.dkg_shares
+            SET started_at_bitcoin_block_height = 0
+            WHERE aggregate_key = $1
+            "#,
+        )
+        .bind(new_shares.aggregate_key)
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+        assert_eq!(pg_result.rows_affected(), 1);
+    }
     faucet.generate_block();
+
     // Now we wait for all signers to say that their tenure has completed,
     // which means that no more actions are going to take place for any of
     // the signers.
@@ -2306,7 +2334,6 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
             .with_emily_client(emily_client.clone())
             .with_mocked_stacks_client()
             .modify_settings(|settings| {
-                settings.signer.dkg_target_rounds = NonZeroU32::new(2).unwrap();
                 settings.signer.dkg_min_bitcoin_block_height = Some(dkg_run_two_height.into());
                 settings.signer.bitcoin_processing_delay = Duration::from_millis(200);
             })
@@ -3186,7 +3213,6 @@ async fn skip_signer_activites_after_key_rotation() {
             .with_emily_client(emily_client.clone())
             .with_mocked_stacks_client()
             .modify_settings(|settings| {
-                settings.signer.dkg_target_rounds = NonZeroU32::new(2).unwrap();
                 settings.signer.dkg_min_bitcoin_block_height = Some(dkg_run_two_height.into());
                 settings.signer.bitcoin_processing_delay = Duration::from_millis(200);
             })
@@ -5957,7 +5983,7 @@ async fn should_handle_dkg_coordination_failure() {
 
     // Verify DKG should run
     assert!(
-        transaction_coordinator::should_coordinate_dkg(&context, &chain_tip)
+        transaction_coordinator::should_run_dkg(&context, &chain_tip)
             .await
             .unwrap(),
         "DKG should be triggered since no shares exist yet"
@@ -5996,7 +6022,7 @@ async fn should_handle_dkg_coordination_failure() {
 
     // We're verifying that the coordinator is currently processing
     // requests correctly. Since we previously checked that
-    // 'should_coordinate_dkg' will trigger and we set the
+    // 'should_run_dkg' will trigger and we set the
     // 'dkg_max_duration' to 10 milliseconds we expect that DKG will run
     // and fail.
     coordinator
