@@ -1062,6 +1062,7 @@ async fn emily_handles_withdrawal_requests_on_forks() {
     const PRE_REORG_END: u64 = 1015;
     const POST_REORG_BEGIN: u64 = 1010;
     const POST_REORG_END: u64 = 1020;
+    const FINAL_REORG_END: u64 = 1025;
 
     let configuration = clean_setup().await;
 
@@ -1073,7 +1074,7 @@ async fn emily_handles_withdrawal_requests_on_forks() {
         .map(|height| new_test_chainstate(height, height, 0))
         .collect();
 
-    batch_set_chainstates(&configuration, pre_reorg_chain).await;
+    batch_set_chainstates(&configuration, pre_reorg_chain.clone()).await;
 
     // Create a withdrawal request anchored to initial chainstate.
 
@@ -1158,5 +1159,24 @@ async fn emily_handles_withdrawal_requests_on_forks() {
     assert_eq!(
         withdrawal.stacks_block_hash, chaintip.stacks_block_hash,
         "Withdrawal should be anchored to the canonical chainstate"
+    );
+
+    // Now we reorg back to initial chain
+    let mut new_chain: Vec<Chainstate> = (PRE_REORG_END..FINAL_REORG_END)
+        .map(|height| new_test_chainstate(height, height, 0))
+        .collect();
+    let mut final_chain = pre_reorg_chain.last_chunk::<2>().unwrap().to_vec();
+    final_chain.append(&mut new_chain);
+    batch_set_chainstates(&configuration, final_chain.clone()).await;
+
+    // Check that now old withdrawal is returned.
+    let withdrawal = apis::withdrawal_api::get_withdrawal(&configuration, request_id)
+        .await
+        .expect("Received an error after making a valid get withdrawal api call.");
+
+    assert_eq!(withdrawal.txid, "test_txid_pre_reorg".to_string());
+    assert_eq!(
+        withdrawal.stacks_block_hash,
+        old_chaintip.stacks_block_hash.clone()
     );
 }
