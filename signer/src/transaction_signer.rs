@@ -47,6 +47,7 @@ use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::DkgSharesStatus;
 use crate::storage::model::SigHash;
 use crate::storage::model::StacksTxId;
+use crate::transaction_coordinator::should_run_dkg;
 use crate::wsts_state_machine::FrostCoordinator;
 use crate::wsts_state_machine::SignerStateMachine;
 use crate::wsts_state_machine::StateMachineId;
@@ -130,7 +131,7 @@ pub const STACKS_SIGN_REQUEST_LRU_SIZE: NonZeroUsize = NonZeroUsize::new(2).expe
 ///     SM --> |WSTS message| RWSM(Relay to WSTS state machine)
 /// ```
 #[derive(Debug)]
-pub struct TxSignerEventLoop<Context, Network, Rng> {
+pub struct TxSignerEventLoop<Context, Network> {
     /// The signer context.
     pub context: Context,
     /// Interface to the signer network.
@@ -146,8 +147,6 @@ pub struct TxSignerEventLoop<Context, Network, Rng> {
     pub last_presign_block: Option<BitcoinBlockHash>,
     /// How many bitcoin blocks back from the chain tip the signer will look for requests.
     pub context_window: u16,
-    /// Random number generator used for encryption
-    pub rng: Rng,
     /// The time the signer should pause for after receiving a DKG begin message
     /// before relaying to give the other signers time to catch up.
     pub dkg_begin_pause: Option<Duration>,
@@ -243,17 +242,15 @@ fn run_loop_message_filter(signal: &SignerSignal) -> bool {
     }
 }
 
-impl<C, N, Rng> TxSignerEventLoop<C, N, Rng>
+impl<C, N> TxSignerEventLoop<C, N>
 where
     C: Context,
     N: network::MessageTransfer,
-    Rng: rand::RngCore + rand::CryptoRng,
 {
     /// Creates a new instance of the [`TxSignerEventLoop`] using the given
     /// [`Context`] (and its `config()`),
-    /// [`MessageTransfer`](network::MessageTransfer), and random number
-    /// generator.
-    pub fn new(context: C, network: N, rng: Rng) -> Result<Self, Error> {
+    /// [`MessageTransfer`](network::MessageTransfer).
+    pub fn new(context: C, network: N) -> Result<Self, Error> {
         // The _ as usize cast is fine, since we know that
         // MAX_SIGNER_STATE_MACHINES is less than u32::MAX, and we only support
         // running this binary on 32 or 64-bit CPUs.
@@ -274,7 +271,6 @@ where
             wsts_state_machines: LruCache::new(max_state_machines),
             threshold,
             last_presign_block: None,
-            rng,
             dkg_begin_pause,
             dkg_verification_state_machines: LruCache::new(
                 NonZeroUsize::new(5).ok_or(Error::TypeConversion)?,
@@ -1592,98 +1588,10 @@ pub async fn assert_allow_dkg_begin(
     context: &impl Context,
     bitcoin_chain_tip: &model::BitcoinBlockRef,
 ) -> Result<(), Error> {
-    let storage = context.get_storage();
-    let config = context.config();
-
-    let latest_dkg_shares = storage.get_latest_non_failed_dkg_shares().await?;
-    let Some(latest_dkg_shares) = latest_dkg_shares else {
-        tracing::info!("no non-failed DKG shares exist; proceeding with DKG");
-        return Ok(());
-    };
-
-    // If the latest shares are unverified, we want to prioritize verifying them
-    // instead of doing new DKG rounds. If we fail to do so they will eventually
-    // be marked as failed, and we will resume DKG-ing.
-    if latest_dkg_shares.dkg_shares_status == model::DkgSharesStatus::Unverified {
-        tracing::warn!("latest shares are unverified; aborting");
+    let allow_dkg = should_run_dkg(context, bitcoin_chain_tip).await?;
+    if !allow_dkg {
+        tracing::warn!("attempted to run dkg when it should not run; aborting");
         return Err(Error::DkgHasAlreadyRun);
-    }
-
-    // If the registry has signer set info, we may need to run DKG based on it
-    if let Some(registry_signer_info) = context.state().registry_signer_set_info() {
-        // If the registry differs from the config we may need to run DKG
-        if registry_signer_info.signatures_required != config.signer.bootstrap_signatures_required
-            || registry_signer_info.signer_set != config.signer.bootstrap_signing_set
-        {
-            // If we don't have new shares for the config already, we need DKG
-            if latest_dkg_shares.signature_share_threshold
-                != config.signer.bootstrap_signatures_required
-                || latest_dkg_shares.signer_set_public_keys() != config.signer.bootstrap_signing_set
-            {
-                tracing::info!(
-                    "signer set config differs from registry and latest DKG shares; proceeding with DKG"
-                );
-                return Ok(());
-            } else {
-                tracing::debug!(
-                    "signer set config differs from registry, but we already have verified shares for it; checking other conditions"
-                );
-            }
-        }
-    }
-
-    // Finally, we may need to run DKG because of config target rounds.
-
-    // Get the number of non-failed DKG shares that have been stored
-    let dkg_shares_entry_count = storage.get_encrypted_dkg_shares_count().await?;
-
-    // Get DKG configuration parameters
-    let dkg_min_bitcoin_block_height = config.signer.dkg_min_bitcoin_block_height;
-    let dkg_target_rounds = config.signer.dkg_target_rounds;
-
-    // Determine the action based on the DKG shares count and the rerun height (if configured)
-    match (
-        dkg_shares_entry_count,
-        dkg_target_rounds,
-        dkg_min_bitcoin_block_height,
-    ) {
-        (current, target, Some(dkg_min_height)) => {
-            if current >= target.get() {
-                tracing::warn!(
-                    ?dkg_min_bitcoin_block_height,
-                    %dkg_target_rounds,
-                    dkg_current_rounds = %dkg_shares_entry_count,
-                    "The target number of DKG shares has been reached; aborting"
-                );
-                return Err(Error::DkgHasAlreadyRun);
-            }
-            if bitcoin_chain_tip.block_height < dkg_min_height {
-                tracing::warn!(
-                    ?dkg_min_bitcoin_block_height,
-                    %dkg_target_rounds,
-                    dkg_current_rounds = %dkg_shares_entry_count,
-                    "bitcoin chain tip is below the minimum height for DKG rerun; aborting"
-                );
-                return Err(Error::DkgHasAlreadyRun);
-            }
-            tracing::info!(
-                ?dkg_min_bitcoin_block_height,
-                %dkg_target_rounds,
-                dkg_current_rounds = %dkg_shares_entry_count,
-                "DKG rerun height has been met and we are below the target number of rounds; proceeding with DKG"
-            );
-        }
-        // Note that we account for all (0, _, _) cases in the early return when
-        // we fetch the latest non failed DKG shares
-        (_, _, None) => {
-            tracing::warn!(
-                ?dkg_min_bitcoin_block_height,
-                %dkg_target_rounds,
-                dkg_current_rounds = %dkg_shares_entry_count,
-                "attempt to run multiple DKGs without a configured re-run height; aborting"
-            );
-            return Err(Error::DkgHasAlreadyRun);
-        }
     }
 
     Ok(())
@@ -1722,7 +1630,7 @@ pub enum ChainTipStatus {
 
 #[cfg(test)]
 mod tests {
-    use std::num::{NonZeroU32, NonZeroUsize};
+    use std::num::NonZeroUsize;
 
     use bitcoin::Txid;
     use fake::{Fake as _, Faker};
@@ -1735,8 +1643,8 @@ mod tests {
     use crate::stacks::api::MockStacksInteract;
     use crate::storage::memory::SharedStore;
     use crate::storage::{DbWrite as _, model};
-    use crate::testing;
     use crate::testing::context::*;
+    use crate::testing::{self, get_rng};
 
     use super::*;
 
@@ -1780,67 +1688,92 @@ mod tests {
             .assert_should_be_able_to_participate_in_dkg()
             .await;
     }
-
-    #[test_case(0, None, 1, 100, true; "first DKG allowed without min height")]
-    #[test_case(0, Some(100), 1, 5, true; "first DKG allowed regardless of min height")]
-    #[test_case(1, None, 2, 100, false; "subsequent DKG not allowed without min height")]
-    #[test_case(1, Some(101), 1, 100, false; "subsequent DKG not allowed with current height lower than min height")]
-    #[test_case(1, Some(100), 1, 100, false; "subsequent DKG not allowed when target rounds reached")]
-    #[test_case(1, Some(100), 2, 100, true; "subsequent DKG allowed when target rounds not reached and min height met")]
+    #[test_case(&[], None, 100, true; "no dkg, no min")]
+    #[test_case(&[], Some(100), 99, true; "no dkg, min not reached")]
+    #[test_case(&[], Some(100), 100, true; "no dkg, min reached")]
+    #[test_case(&[], Some(100), 101, true; "no dkg, min exceeded")]
+    #[test_case(&[(DkgSharesStatus::Unverified, 15)], None, 100, false; "unverified shares, no min")]
+    #[test_case(&[(DkgSharesStatus::Verified, 15)], None, 100, false; "verified shares, no min")]
+    #[test_case(&[(DkgSharesStatus::Failed, 15)], None, 100, true; "failed shares, no min")]
+    #[test_case(&[(DkgSharesStatus::Unverified, 15)], Some(100), 99, false; "unverified shares, min not reached")]
+    #[test_case(&[(DkgSharesStatus::Verified, 15)], Some(100), 99, false; "verified shares, min not reached")]
+    #[test_case(&[(DkgSharesStatus::Failed, 15)], Some(100), 99, true; "failed shares, min not reached")]
+    #[test_case(&[(DkgSharesStatus::Unverified, 15)], Some(100), 100, false; "unverified shares, min reached")]
+    #[test_case(&[(DkgSharesStatus::Verified, 15)], Some(100), 100, true; "verified shares, min reached")]
+    #[test_case(&[(DkgSharesStatus::Failed, 15)], Some(100), 100, true; "failed shares, min reached")]
+    #[test_case(
+        &[(DkgSharesStatus::Verified, 15), (DkgSharesStatus::Unverified, 99)],
+        Some(100), 101, false; "unverified shares before min, min reached")]
+    #[test_case(
+        &[(DkgSharesStatus::Verified, 15), (DkgSharesStatus::Verified, 99)],
+        Some(100), 101, true; "verified shares before min, min reached")]
+    #[test_case(
+        &[(DkgSharesStatus::Verified, 15), (DkgSharesStatus::Failed, 99)],
+        Some(100), 101, true; "failed shares before min, min reached")]
+    #[test_case(
+        &[(DkgSharesStatus::Verified, 15), (DkgSharesStatus::Unverified, 101)],
+        Some(100), 101, false; "unverified shares after min, min reached")]
+    #[test_case(
+        &[(DkgSharesStatus::Verified, 15), (DkgSharesStatus::Verified, 101)],
+        Some(100), 101, false; "verified shares after min, min reached")]
+    #[test_case(
+        &[(DkgSharesStatus::Verified, 15), (DkgSharesStatus::Failed, 101)],
+        Some(100), 101, true; "failed shares after min, min reached")]
+    #[test_case(&[(DkgSharesStatus::Verified, 100)], Some(100), 100, false; "verified shares matching min and chain tip")]
     #[test_log::test(tokio::test)]
     async fn test_assert_allow_dkg_begin(
-        dkg_rounds_current: u32,
+        dkg_shares: &[(DkgSharesStatus, u64)],
         dkg_min_bitcoin_block_height: Option<u64>,
-        dkg_target_rounds: u32,
         chain_tip_height: u64,
-        should_allow: bool,
+        expect_dkg: bool,
     ) {
+        let mut rng = get_rng();
         let chain_tip_height = chain_tip_height.into();
-        let dkg_min_bitcoin_block_height = dkg_min_bitcoin_block_height.map(Into::into);
+        let dkg_min_bitcoin_block_height =
+            dkg_min_bitcoin_block_height.map(model::BitcoinBlockHeight::from);
         let context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
             .modify_settings(|s| {
                 s.signer.dkg_min_bitcoin_block_height = dkg_min_bitcoin_block_height;
-                s.signer.dkg_target_rounds = NonZeroU32::new(dkg_target_rounds).unwrap();
             })
             .build();
 
         let storage = context.get_storage_mut();
 
-        // Write `dkg_shares` entries for the `current` number of rounds, simulating
-        // the signer having participated in that many successful DKG rounds.
-        for _ in 0..dkg_rounds_current {
-            let mut shares: model::EncryptedDkgShares = Faker.fake();
-            shares.dkg_shares_status = model::DkgSharesStatus::Verified;
-
+        for (dkg_status, dkg_height) in dkg_shares {
+            let shares = model::EncryptedDkgShares {
+                dkg_shares_status: *dkg_status,
+                started_at_bitcoin_block_height: (*dkg_height).into(),
+                ..Faker.fake_with_rng(&mut rng)
+            };
             storage.write_encrypted_dkg_shares(&shares).await.unwrap();
         }
 
         // Dummy chain tip hash which will be used to fetch the block height
         let bitcoin_chain_tip = model::BitcoinBlockRef {
-            block_hash: Faker.fake(),
             block_height: chain_tip_height,
+            block_hash: Faker.fake_with_rng(&mut rng),
         };
 
         // Write a bitcoin block at the given height, simulating the chain tip.
         storage
             .write_bitcoin_block(&model::BitcoinBlock {
-                block_height: chain_tip_height,
-                parent_hash: Faker.fake(),
                 block_hash: bitcoin_chain_tip.block_hash,
+                block_height: bitcoin_chain_tip.block_height,
+                parent_hash: Faker.fake_with_rng(&mut rng),
             })
             .await
             .unwrap();
 
-        let aggregate_key = Faker.fake();
+        let aggregate_key = Faker.fake_with_rng(&mut rng);
         prevent_dkg_on_changed_signer_set_info(&context, aggregate_key);
 
         // Test the case
         let result = assert_allow_dkg_begin(&context, &bitcoin_chain_tip).await;
 
         // Assert the result
-        match should_allow {
+        match expect_dkg {
             true => assert!(result.is_ok()),
             false => assert!(matches!(result, Err(Error::DkgHasAlreadyRun))),
         }
@@ -1891,7 +1824,6 @@ mod tests {
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             threshold: 1,
             last_presign_block: None,
-            rng: rand::rngs::OsRng,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
@@ -1960,7 +1892,6 @@ mod tests {
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             last_presign_block: None,
             threshold: 1,
-            rng: rand::rngs::OsRng,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
@@ -2047,7 +1978,6 @@ mod tests {
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             threshold: 1,
             last_presign_block: None,
-            rng: rand::rngs::OsRng,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
