@@ -34,7 +34,6 @@ use crate::keys::PublicKey;
 use crate::keys::SignerScriptPubKey as _;
 use crate::metrics::BITCOIN_BLOCKCHAIN;
 use crate::metrics::Metrics;
-use crate::stacks::api::GetNakamotoStartHeight as _;
 use crate::stacks::api::SignerSetInfo;
 use crate::stacks::api::StacksInteract as _;
 use crate::stacks::api::TenureBlockHeaders;
@@ -281,10 +280,12 @@ impl<C: Context, B> BlockObserver<C, B> {
             return Ok(());
         }
 
-        let pox_info = self.context.get_stacks_client().get_pox_info().await?;
-        let nakamoto_start_height = pox_info
-            .nakamoto_start_height()
-            .ok_or(Error::MissingNakamotoStartHeight)?;
+        let nakamoto_start_height = self
+            .context
+            .get_stacks_client()
+            .get_epoch_status()
+            .await?
+            .nakamoto_start_height();
 
         self.context
             .state()
@@ -428,7 +429,7 @@ impl<C: Context, B> BlockObserver<C, B> {
         let stacks_block_headers = crate::stacks::api::fetch_unknown_ancestors(
             &stacks_client,
             &db,
-            tenure_info.tip_block_id,
+            &tenure_info.tip_block_id,
         )
         .await?;
 
@@ -749,10 +750,10 @@ where
     }
 
     let stacks = ctx.get_stacks_client();
-    let deployer = ctx.config().signer.deployer;
+    let deployer = &ctx.config().signer.deployer;
 
     for contract in SMART_CONTRACTS {
-        if !contract.is_deployed(&stacks, &deployer).await? {
+        if !contract.is_deployed(&stacks, deployer).await? {
             return Ok(false);
         }
     }

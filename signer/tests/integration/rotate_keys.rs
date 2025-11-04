@@ -127,7 +127,7 @@ impl TestRotateKeySetup {
     pub async fn store_rotate_keys(&self, db: &PgStore) {
         let aggregate_key: PublicKey = self.aggregate_key();
         let address = StacksPrincipal::from(clarity::vm::types::PrincipalData::from(
-            *self.wallet.address(),
+            self.wallet.address().clone(),
         ));
         let rotate_key_tx = KeyRotationEvent {
             address,
@@ -332,7 +332,7 @@ async fn rotate_key_validation_wrong_signing_set() {
     let setup_other = TestRotateKeySetup::new(&db, 2, 3, &mut rng).await;
     let rotate_key_tx_other = RotateKeysV1::new(
         &setup_other.wallet,
-        rotate_key_tx.deployer_address(),
+        rotate_key_tx.deployer_address().clone(),
         &setup.aggregate_key(),
     );
 
@@ -382,7 +382,7 @@ async fn rotate_key_validation_wrong_aggregate_key() {
     let setup_other = TestRotateKeySetup::new(&db, 2, 3, &mut rng).await;
     let rotate_key_tx_other = RotateKeysV1::new(
         &setup.wallet,
-        rotate_key_tx.deployer_address(),
+        rotate_key_tx.deployer_address().clone(),
         &setup_other.aggregate_key(),
     );
 
@@ -437,7 +437,7 @@ async fn rotate_key_validation_wrong_signatures_required() {
     .unwrap();
     let rotate_key_tx_other = RotateKeysV1::new(
         &wallet_other,
-        rotate_key_tx.deployer_address(),
+        rotate_key_tx.deployer_address().clone(),
         &setup.aggregate_key(),
     );
 

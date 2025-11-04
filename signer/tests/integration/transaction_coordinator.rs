@@ -23,7 +23,6 @@ use blockstack_lib::chainstate::stacks::StacksTransaction;
 use blockstack_lib::chainstate::stacks::TokenTransferMemo;
 use blockstack_lib::chainstate::stacks::TransactionPayload;
 use blockstack_lib::net::api::getcontractsrc::ContractSrcResponse;
-use blockstack_lib::net::api::getpoxinfo::RPCPoxInfoData;
 use blockstack_lib::net::api::getsortition::SortitionInfo;
 use clarity::types::chainstate::StacksAddress;
 use clarity::types::chainstate::StacksBlockId;
@@ -67,8 +66,10 @@ use signer::message::Payload;
 use signer::network::MessageTransfer as _;
 use signer::stacks::api::SignerSetInfo;
 use signer::stacks::api::StacksClient;
+use signer::stacks::api::StacksEpochStatus;
 use signer::stacks::api::StacksInteract;
 use signer::stacks::wallet::SignerWallet;
+use signer::storage::model::BitcoinBlockHeight;
 use signer::storage::model::KeyRotationEvent;
 use signer::storage::model::WithdrawalTxOutput;
 use signer::testing::btc::get_canonical_chain_tip;
@@ -167,9 +168,6 @@ use crate::utxo_construction::generate_withdrawal;
 use crate::utxo_construction::make_deposit_request;
 
 type IntegrationTestContext<Stacks> = TestContext<PgStore, BitcoinCoreClient, Stacks, EmilyClient>;
-
-pub const GET_POX_INFO_JSON: &str =
-    include_str!("../../tests/fixtures/stacksapi-get-pox-info-test-data.json");
 
 async fn run_dkg<Rng, C>(
     ctx: &C,
@@ -433,7 +431,7 @@ async fn process_complete_deposit() {
         .with_stacks_client(|client| {
             client.expect_submit_tx().once().returning(move |tx| {
                 let tx = tx.clone();
-                let txid = tx.txid();
+                let txid = tx.txid().into();
                 let broadcasted_transaction_tx = broadcasted_transaction_tx.clone();
                 Box::pin(async move {
                     broadcasted_transaction_tx
@@ -563,10 +561,10 @@ async fn mock_stacks_core<D, B, E>(
             Box::pin(std::future::ready(Ok(tenure)))
         });
 
-        client.expect_get_pox_info().returning(|| {
-            let response = serde_json::from_str::<RPCPoxInfoData>(GET_POX_INFO_JSON)
-                .map_err(Error::JsonSerialize);
-            Box::pin(std::future::ready(response))
+        client.expect_get_epoch_status().returning(|| {
+            Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
+                nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
+            })))
         });
 
         client
@@ -623,7 +621,7 @@ async fn mock_stacks_core<D, B, E>(
         // expectation here.
         client.expect_submit_tx().returning(move |tx| {
             let tx = tx.clone();
-            let txid = tx.txid();
+            let txid = tx.txid().into();
             let broadcast_stacks_tx = broadcast_stacks_tx.clone();
             Box::pin(async move {
                 broadcast_stacks_tx.send(tx).unwrap();
@@ -922,7 +920,7 @@ async fn run_dkg_from_scratch() {
 
             client.expect_submit_tx().returning(move |tx| {
                 let tx = tx.clone();
-                let txid = tx.txid();
+                let txid = tx.txid().into();
                 let broadcast_stacks_tx = broadcast_stacks_tx.clone();
                 Box::pin(async move {
                     broadcast_stacks_tx.send(tx).expect("Failed to send result");
@@ -1069,7 +1067,7 @@ async fn run_dkg_from_scratch() {
     );
     let rotate_keys = RotateKeysV1::new(
         &signer_wallet,
-        signers.first().unwrap().0.config().signer.deployer,
+        signers.first().unwrap().0.config().signer.deployer.clone(),
         aggregate_keys.iter().next().unwrap(),
     );
     assert_eq!(contract_call.function_args, rotate_keys.as_contract_args());
@@ -1341,7 +1339,7 @@ async fn run_subsequent_dkg() {
 
             client.expect_submit_tx().returning(move |tx| {
                 let tx = tx.clone();
-                let txid = tx.txid();
+                let txid = tx.txid().into();
                 let broadcast_stacks_tx = broadcast_stacks_tx.clone();
                 Box::pin(async move {
                     broadcast_stacks_tx.send(tx).expect("Failed to send result");
@@ -1497,7 +1495,7 @@ async fn run_subsequent_dkg() {
     );
     let rotate_keys = RotateKeysV1::new(
         &signer_wallet,
-        signers.first().unwrap().0.config().signer.deployer,
+        signers.first().unwrap().0.config().signer.deployer.clone(),
         &new_aggregate_key,
     );
 
@@ -3725,10 +3723,10 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
                 Box::pin(std::future::ready(Ok(tenure)))
             });
 
-            client.expect_get_pox_info().returning(|| {
-                let response = serde_json::from_str::<RPCPoxInfoData>(GET_POX_INFO_JSON)
-                    .map_err(Error::JsonSerialize);
-                Box::pin(std::future::ready(response))
+            client.expect_get_epoch_status().returning(|| {
+                Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
+                    nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
+                })))
             });
 
             client
@@ -4029,7 +4027,7 @@ async fn test_get_btc_state_with_available_sweep_transactions_and_rbf() {
     let db = testing::storage::new_test_database().await;
 
     let client = BitcoinCoreClient::new(
-        "http://localhost:18443",
+        regtest::BITCOIN_CORE_RPC_ENDPOINT,
         regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
         regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
     )
@@ -4444,10 +4442,10 @@ async fn test_conservative_initial_sbtc_limits() {
                 Box::pin(std::future::ready(Ok(tenure)))
             });
 
-            client.expect_get_pox_info().returning(|| {
-                let response = serde_json::from_str::<RPCPoxInfoData>(GET_POX_INFO_JSON)
-                    .map_err(Error::JsonSerialize);
-                Box::pin(std::future::ready(response))
+            client.expect_get_epoch_status().returning(|| {
+                Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
+                    nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
+                })))
             });
 
             client
@@ -4848,7 +4846,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
             aggregate_key: shares.aggregate_key,
             signer_set: shares.signer_set_public_keys.clone(),
             signatures_required: shares.signature_share_threshold,
-            address: PrincipalData::from(ctx.config().signer.deployer).into(),
+            address: PrincipalData::from(ctx.config().signer.deployer.clone()).into(),
         };
         db.write_rotate_keys_transaction(&event).await.unwrap();
     }
@@ -5317,7 +5315,7 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
                 .times(if expect_tx { 1 } else { 0 })
                 .returning(move |tx| {
                     let tx = tx.clone();
-                    let txid = tx.txid();
+                    let txid = tx.txid().into();
                     let broadcasted_transaction_tx = broadcasted_transaction_tx.clone();
                     Box::pin(async move {
                         broadcasted_transaction_tx
@@ -6200,7 +6198,7 @@ async fn reuse_nonce_attack() {
     let signatures_required = 2;
     let (_, signer_wallet, signer_key_pairs) =
         generate_random_signers(&mut rng, 3, signatures_required);
-    let deployer = *signer_wallet.address();
+    let deployer = signer_wallet.address().clone();
 
     testing_api::wipe_databases(&emily_client.config().as_testing())
         .await
@@ -6256,7 +6254,7 @@ async fn reuse_nonce_attack() {
             .modify_settings(|settings| {
                 settings.signer.bootstrap_signatures_required = signatures_required;
                 settings.signer.bootstrap_signing_set = signer_set_public_keys.clone();
-                settings.signer.deployer = deployer;
+                settings.signer.deployer = deployer.clone();
                 settings.signer.requests_processing_delay = Duration::from_secs(1);
                 settings.signer.bitcoin_processing_delay = Duration::from_secs(1);
             })

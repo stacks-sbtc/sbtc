@@ -661,9 +661,7 @@ where
                     })
                 });
                 client.expect_submit_tx().times(5).returning(|_| {
-                    Box::pin(async {
-                        Ok(SubmitTxResponse::Acceptance(*Faker.fake::<StacksTxId>()))
-                    })
+                    Box::pin(async { Ok(SubmitTxResponse::Acceptance(Faker.fake::<StacksTxId>())) })
                 });
             })
             .await;
@@ -822,7 +820,7 @@ where
         let outpoint = withdrawal_req.withdrawal_outpoint();
         assert_eq!(sign_request.tx_fee, 123000);
         assert_eq!(sign_request.aggregate_key, Some(bitcoin_aggregate_key));
-        assert_eq!(sign_request.txid, multi_tx.tx().txid());
+        assert_eq!(sign_request.txid, multi_tx.tx().txid().into());
         assert_eq!(sign_request.nonce, multi_tx.tx().get_origin_nonce());
         if let StacksTx::ContractCall(ContractCall::AcceptWithdrawalV1(call)) =
             sign_request.contract_tx
@@ -925,7 +923,7 @@ where
 
         assert_eq!(sign_request.tx_fee, 123000);
         assert_eq!(sign_request.aggregate_key, Some(bitcoin_aggregate_key));
-        assert_eq!(sign_request.txid, multi_tx.tx().txid());
+        assert_eq!(sign_request.txid, multi_tx.tx().txid().into());
         assert_eq!(sign_request.nonce, multi_tx.tx().get_origin_nonce());
 
         let StacksTx::ContractCall(ContractCall::RejectWithdrawalV1(call)) =

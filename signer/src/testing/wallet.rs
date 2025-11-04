@@ -127,8 +127,8 @@ impl AsContractCall for InitiateWithdrawalRequest {
     const CONTRACT_NAME: &'static str = "sbtc-withdrawal";
     const FUNCTION_NAME: &'static str = "initiate-withdrawal-request";
     /// The stacks address that deployed the contract.
-    fn deployer_address(&self) -> StacksAddress {
-        self.deployer
+    fn deployer_address(&self) -> &StacksAddress {
+        &self.deployer
     }
     /// The arguments to the clarity function.
     fn as_contract_args(&self) -> Vec<ClarityValue> {
