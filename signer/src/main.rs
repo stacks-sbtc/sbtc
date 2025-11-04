@@ -433,7 +433,7 @@ async fn run_signer_info_logger(ctx: impl Context) {
 async fn run_transaction_signer(ctx: impl Context) -> Result<(), Error> {
     let network = P2PNetwork::new(&ctx);
 
-    transaction_signer::TxSignerEventLoop::new(ctx, network, rand::thread_rng())?
+    transaction_signer::TxSignerEventLoop::new(ctx, network)?
         .run()
         .await
 }

@@ -130,7 +130,7 @@ pub const STACKS_SIGN_REQUEST_LRU_SIZE: NonZeroUsize = NonZeroUsize::new(2).expe
 ///     SM --> |WSTS message| RWSM(Relay to WSTS state machine)
 /// ```
 #[derive(Debug)]
-pub struct TxSignerEventLoop<Context, Network, Rng> {
+pub struct TxSignerEventLoop<Context, Network> {
     /// The signer context.
     pub context: Context,
     /// Interface to the signer network.
@@ -146,8 +146,6 @@ pub struct TxSignerEventLoop<Context, Network, Rng> {
     pub last_presign_block: Option<BitcoinBlockHash>,
     /// How many bitcoin blocks back from the chain tip the signer will look for requests.
     pub context_window: u16,
-    /// Random number generator used for encryption
-    pub rng: Rng,
     /// The time the signer should pause for after receiving a DKG begin message
     /// before relaying to give the other signers time to catch up.
     pub dkg_begin_pause: Option<Duration>,
@@ -243,17 +241,15 @@ fn run_loop_message_filter(signal: &SignerSignal) -> bool {
     }
 }
 
-impl<C, N, Rng> TxSignerEventLoop<C, N, Rng>
+impl<C, N> TxSignerEventLoop<C, N>
 where
     C: Context,
     N: network::MessageTransfer,
-    Rng: rand::RngCore + rand::CryptoRng,
 {
     /// Creates a new instance of the [`TxSignerEventLoop`] using the given
     /// [`Context`] (and its `config()`),
-    /// [`MessageTransfer`](network::MessageTransfer), and random number
-    /// generator.
-    pub fn new(context: C, network: N, rng: Rng) -> Result<Self, Error> {
+    /// [`MessageTransfer`](network::MessageTransfer).
+    pub fn new(context: C, network: N) -> Result<Self, Error> {
         // The _ as usize cast is fine, since we know that
         // MAX_SIGNER_STATE_MACHINES is less than u32::MAX, and we only support
         // running this binary on 32 or 64-bit CPUs.
@@ -274,7 +270,6 @@ where
             wsts_state_machines: LruCache::new(max_state_machines),
             threshold,
             last_presign_block: None,
-            rng,
             dkg_begin_pause,
             dkg_verification_state_machines: LruCache::new(
                 NonZeroUsize::new(5).ok_or(Error::TypeConversion)?,
@@ -1891,7 +1886,6 @@ mod tests {
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             threshold: 1,
             last_presign_block: None,
-            rng: rand::rngs::OsRng,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
@@ -1960,7 +1954,6 @@ mod tests {
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             last_presign_block: None,
             threshold: 1,
-            rng: rand::rngs::OsRng,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
@@ -2047,7 +2040,6 @@ mod tests {
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
             threshold: 1,
             last_presign_block: None,
-            rng: rand::rngs::OsRng,
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
