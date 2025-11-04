@@ -445,7 +445,7 @@ mod proptests {
         );
         prop_assert_eq!(Leb128::calculate_size(value), expected_len);
 
-        let (decoded, read_byte_count) = Leb128::try_decode(&bytes).unwrap();
+        let (decoded, read_byte_count) = Leb128::try_decode(&bytes)?;
         prop_assert_eq!(decoded, value);
         prop_assert_eq!(read_byte_count, expected_len);
 
