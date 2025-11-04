@@ -75,8 +75,12 @@ jobs:
         id: setup_rust
         uses: stacks-sbtc/actions/setup-rust-toolchain@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
-          components: clippy, rustfmt, machete
+          components: clippy, rustfmt
           cache-key: "rust-tests"
+
+      - name: Install Machete
+        id: install_machete
+        run: cargo install cargo-machete
 
       - name: Install Package Dependencies
         id: install_dependencies
