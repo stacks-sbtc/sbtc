@@ -51,6 +51,7 @@ CLIPPY_FLAGS = -D warnings
 lint:
 	$(CARGO_FMT) -- --check
 	$(CARGO_CLIPPY_BASE) -- $(CLIPPY_FLAGS)
+	cargo machete
 	pnpm --recursive run lint
 
 fix:
