@@ -5,8 +5,9 @@
 -- deposit_request table where reclaim_script_hash column IS NULL.
 
 
--- Since deposit_signers references deposit requests with ON DELETE CASCADE
--- this should delete nothing, just added for consistency.
+-- Since the deposit_signers table references the deposit_requests table with
+-- ON DELETE CASCADE, the following DELETE FROM query is not strictly necessary.
+-- However, it was added to make the deletion explicit.
 DELETE FROM sbtc_signer.deposit_signers ds
 USING sbtc_signer.deposit_requests dr
 WHERE ds.txid = dr.txid
