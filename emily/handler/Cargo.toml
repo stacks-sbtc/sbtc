@@ -30,7 +30,6 @@ chrono.workspace = true
 clap.workspace = true
 clarity.workspace = true
 config.workspace = true
-futures.workspace = true
 hex.workspace = true
 reqwest.workspace = true
 serde.workspace = true
