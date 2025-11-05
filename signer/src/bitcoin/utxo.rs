@@ -3222,7 +3222,7 @@ mod tests {
         1.0,
         0, 0; "should_reject_deposits_under_dust_limit")]
     #[test_case(
-        &vec![
+        &[
             create_deposit(10_000, 1_000, 0),
             create_deposit(11_000, 100, 0),
             create_deposit(12_000, 2_000, 0),
@@ -3232,7 +3232,7 @@ mod tests {
         1.0,
         2, 22_000; "should_accept_all_deposits_above_or_equal_min_fee")]
     #[test_case(
-        &vec![
+        &[
             create_deposit(10_000, 10_000, 0),
             create_deposit(10_000, 10_000, 0),
             create_deposit(10_000, 10_000, 0),
@@ -3243,7 +3243,7 @@ mod tests {
         1.0,
         3, 30_000; "should_accept_deposits_until_max_mintable_reached")]
     #[test_case(
-        &vec![
+        &[
             create_deposit(10_000, 10_000, 0),
             create_deposit(10_000, 10_000, 0),
         ],
@@ -3256,7 +3256,7 @@ mod tests {
         1.0,
         0, 0; "should_handle_empty_deposit_list")]
     #[test_case(
-        &vec![
+        &[
             create_deposit(10_000, 0, 0),
             create_deposit(11_000, 10_000, 0),
             create_deposit(9_000, 10_000, 0),
@@ -3279,7 +3279,7 @@ mod tests {
         1.0,
         0, 0; "should_reject_single_deposit_exceeding_per_deposit_cap")]
     #[test_case(
-        &vec![
+        &[
             create_deposit(5_000, 2_000, 0),
             create_deposit(15_000, 2_000, 0),
         ],
@@ -3287,7 +3287,7 @@ mod tests {
         1.0,
         1, 15_000; "should_reject_deposits_below_per_deposit_minimum")]
     #[test_case(
-        &vec![
+        &[
             create_deposit(10_000, 10_000, 0), // accepted
             create_deposit(DEPOSIT_DUST_LIMIT + 999, 10_000, 0), // rejected (1 below dust limit) min_fee is 1_000
             create_deposit(9_000, 10_000, 0),  // rejected (below per_deposit_minimum)

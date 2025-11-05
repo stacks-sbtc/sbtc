@@ -7,7 +7,6 @@ use bitcoincore_rpc::RpcApi as _;
 use fake::Fake as _;
 use fake::Faker;
 use lru::LruCache;
-use rand::SeedableRng as _;
 use rand::rngs::OsRng;
 use signer::bitcoin::MockBitcoinInteract;
 use signer::emily_client::MockEmilyInteract;
@@ -79,7 +78,6 @@ type MockedTxSigner = TxSignerEventLoop<
         WrappedMock<MockEmilyInteract>,
     >,
     SignerNetworkInstance,
-    OsRng,
 >;
 
 /// Test that [`TxSignerEventLoop::assert_valid_stacks_tx_sign_request`]
@@ -125,7 +123,6 @@ async fn signing_set_validation_check_for_stacks_transactions() {
         signer_private_key: setup.aggregated_signer.keypair.secret_key().into(),
         threshold: 2,
         last_presign_block: None,
-        rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
@@ -215,7 +212,6 @@ async fn signing_set_validation_ignores_aggregate_key_in_request() {
         signer_private_key: setup.aggregated_signer.keypair.secret_key().into(),
         threshold: 2,
         last_presign_block: None,
-        rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
@@ -311,7 +307,6 @@ async fn signer_rejects_stacks_txns_with_too_high_a_fee(
         wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
         signer_private_key: setup.aggregated_signer.keypair.secret_key().into(),
         threshold: 2,
-        rng: rand::rngs::StdRng::seed_from_u64(51),
         last_presign_block: None,
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
@@ -399,7 +394,6 @@ async fn signer_rejects_multiple_attempts_in_tenure() {
         signer_private_key: setup.aggregated_signer.keypair.secret_key().into(),
         threshold: 2,
         last_presign_block: None,
-        rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
@@ -540,7 +534,6 @@ async fn assert_should_be_able_to_handle_sbtc_requests() {
         signer_private_key: setup.aggregated_signer.keypair.secret_key().into(),
         threshold: 2,
         last_presign_block: None,
-        rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
@@ -688,7 +681,6 @@ async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is_ok:
         // one of the public keys that we stored in the DKG shares table.
         signer_private_key: setup.signers.private_key(),
         threshold: 2,
-        rng: rand::rngs::StdRng::seed_from_u64(51),
         last_presign_block: None,
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
@@ -785,7 +777,6 @@ pub async fn presign_request_ignore_request_if_already_processed_this_block() {
         // one of the public keys that we stored in the DKG shares table.
         signer_private_key: setup.signers.private_key(),
         threshold: 2,
-        rng: rand::rngs::StdRng::seed_from_u64(51),
         last_presign_block: None,
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
@@ -874,7 +865,6 @@ async fn new_state_machine_per_valid_sighash() {
         signer_private_key: setup.signers.private_key(),
         threshold: 2,
         last_presign_block: None,
-        rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
@@ -999,7 +989,6 @@ async fn nonce_response_unique_nonces() {
         // one of the public keys that we stored in the DKG shares table.
         signer_private_key: setup.signers.private_key(),
         threshold: 2,
-        rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
         last_presign_block: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
@@ -1174,7 +1163,6 @@ async fn max_one_state_machine_per_bitcoin_block_hash_for_dkg() {
         signer_private_key: ctx.config().signer.private_key,
         threshold: 2,
         last_presign_block: None,
-        rng: rand::rngs::StdRng::seed_from_u64(51),
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
