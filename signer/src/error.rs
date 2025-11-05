@@ -226,10 +226,11 @@ pub enum Error {
     #[error("observed a tenure identified by a StacksBlockId with with no blocks")]
     EmptyStacksTenure,
 
-    /// This happens when StacksClient::get_tenure_raw returns an array of blocks which starts
-    /// with a block with id {0}, while we expect it to return an array of blocks starting with
-    /// a block with id {1}
-    #[error("get_tenure_raw returned unexpected response: {0}. Expected: {1}")]
+    /// This happens when StacksClient::get_tenure_headers_raw returns an
+    /// array of blocks which starts with a block with id {0}, while we
+    /// expect it to return an array of blocks starting with a block with
+    /// id {1}
+    #[error("get_tenure_headers_raw returned unexpected response: {0}. Expected: {1}")]
     GetTenureRawMismatch(StacksBlockHash, StacksBlockHash),
 
     /// Received an error in call to estimatesmartfee RPC call

@@ -358,7 +358,10 @@ impl StacksInteract for TestHarness {
     async fn check_pre_nakamoto_block(&self, _: &StacksBlockHash) -> Result<(), Error> {
         unimplemented!()
     }
-    async fn get_tenure(&self, block_id: &StacksBlockHash) -> Result<TenureBlockHeaders, Error> {
+    async fn get_tenure_headers(
+        &self,
+        block_id: &StacksBlockHash,
+    ) -> Result<TenureBlockHeaders, Error> {
         let (stx_block_id, stx_block, btc_block_id) = self
             .stacks_blocks
             .iter()

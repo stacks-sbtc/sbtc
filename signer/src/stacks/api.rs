@@ -264,7 +264,7 @@ pub trait StacksInteract: Send + Sync {
     /// endpoint on stacks-core nodes, but responses from that endpoint are
     /// capped at ~16 MB. This function returns all blocks, regardless of
     /// the size of the blocks within the tenure.
-    fn get_tenure(
+    fn get_tenure_headers(
         &self,
         block_id: &StacksBlockHash,
     ) -> impl Future<Output = Result<TenureBlockHeaders, Error>> + Send;
@@ -1146,9 +1146,12 @@ impl StacksClient {
     /// If the given block ID does not exist or is an ID for a non-Nakamoto
     /// block then a Result::Err is returned.
     #[tracing::instrument(skip(self))]
-    async fn get_tenure(&self, block_id: &StacksBlockHash) -> Result<TenureBlockHeaders, Error> {
+    async fn get_tenure_headers(
+        &self,
+        block_id: &StacksBlockHash,
+    ) -> Result<TenureBlockHeaders, Error> {
         tracing::debug!("making initial request for nakamoto blocks within the tenure");
-        let mut tenure_headers = self.get_tenure_raw(block_id).await?;
+        let mut tenure_headers = self.get_tenure_headers_raw(block_id).await?;
         let mut prev_last_block_id = *block_id;
 
         // Given the response size limit of GET /v3/tenures/<block-id>
@@ -1165,7 +1168,7 @@ impl StacksClient {
             }
 
             tracing::debug!(%last_block_id, "fetching more nakamoto blocks within the tenure");
-            let headers = self.get_tenure_raw(&last_block_id).await?;
+            let headers = self.get_tenure_headers_raw(&last_block_id).await?;
 
             // The first block in the GET /v3/tenures/<block-id> response
             // is always the block related to the given <block-id>. But we
@@ -1184,7 +1187,7 @@ impl StacksClient {
             prev_last_block_id = last_block_id;
         }
 
-        // If Self::get_tenure_raw returns with Ok(_) then the Vec will
+        // If Self::get_tenure_headers_raw returns with Ok(_) then the Vec will
         // include at least 1 Nakamoto block. Since we bail if there is an
         // error, this vector has at least one element.
         let Some(header) = tenure_headers.last() else {
@@ -1208,7 +1211,7 @@ impl StacksClient {
     /// * If the given block ID does not exist or is an ID for a
     ///   non-Nakamoto block then a Result::Err is returned.
     #[tracing::instrument(skip(self))]
-    async fn get_tenure_raw(
+    async fn get_tenure_headers_raw(
         &self,
         block_id: &StacksBlockHash,
     ) -> Result<Vec<StacksBlockHeader>, Error> {
@@ -1388,7 +1391,7 @@ where
     S: StacksInteract,
     D: DbRead + Send + Sync,
 {
-    let starting_tenure = stacks.get_tenure(block_id).await?;
+    let starting_tenure = stacks.get_tenure_headers(block_id).await?;
     let mut headers: Vec<TenureBlockHeaders> = vec![starting_tenure];
     let nakamoto_start_height = stacks.get_epoch_status().await?.nakamoto_start_height();
 
@@ -1416,7 +1419,7 @@ where
         // There are more blocks to fetch, so let's get them. This assumes
         // optimistically that the parent is still a Nakamoto block (and so has
         // a tenure); if that's not the case, we get an `Err` here.
-        let tenure_headers_result = stacks.get_tenure(&header.parent_block_id).await;
+        let tenure_headers_result = stacks.get_tenure_headers(&header.parent_block_id).await;
         let tenure_headers = match tenure_headers_result {
             Ok(tenure_headers) => tenure_headers,
             Err(error) => {
@@ -1666,8 +1669,11 @@ impl StacksInteract for StacksClient {
         self.check_pre_nakamoto_block(block_id).await
     }
 
-    async fn get_tenure(&self, block_id: &StacksBlockHash) -> Result<TenureBlockHeaders, Error> {
-        self.get_tenure(block_id).await
+    async fn get_tenure_headers(
+        &self,
+        block_id: &StacksBlockHash,
+    ) -> Result<TenureBlockHeaders, Error> {
+        self.get_tenure_headers(block_id).await
     }
 
     async fn get_tenure_info(&self) -> Result<GetTenureInfoResponse, Error> {
@@ -1897,8 +1903,12 @@ impl StacksInteract for ApiFallbackClient<StacksClient> {
             .await
     }
 
-    async fn get_tenure(&self, block_id: &StacksBlockHash) -> Result<TenureBlockHeaders, Error> {
-        self.exec(|client, _| client.get_tenure(block_id)).await
+    async fn get_tenure_headers(
+        &self,
+        block_id: &StacksBlockHash,
+    ) -> Result<TenureBlockHeaders, Error> {
+        self.exec(|client, _| client.get_tenure_headers(block_id))
+            .await
     }
 
     async fn get_tenure_info(&self) -> Result<GetTenureInfoResponse, Error> {
@@ -2198,7 +2208,7 @@ mod tests {
 
         let block_id = StacksBlockHash::from_hex(TENURE_END_BLOCK_ID).unwrap();
         // The moment of truth, do the requests succeed?
-        let headers = client.get_tenure(&block_id).await.unwrap().headers;
+        let headers = client.get_tenure_headers(&block_id).await.unwrap().headers;
         assert!(headers.len() > 1);
 
         // We know that the blocks are ordered as a chain, and we know the

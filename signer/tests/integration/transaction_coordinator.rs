@@ -553,7 +553,7 @@ async fn mock_stacks_core<D, B, E>(
         });
 
         let chain_tip = model::BitcoinBlockHash::from(chain_tip_info.hash);
-        client.expect_get_tenure().returning(move |_| {
+        client.expect_get_tenure_headers().returning(move |_| {
             let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
             tenure.anchor_block_hash = chain_tip;
             Box::pin(std::future::ready(Ok(tenure)))
@@ -3735,7 +3735,7 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
             });
 
             let chain_tip = model::BitcoinBlockHash::from(chain_tip_info.hash);
-            client.expect_get_tenure().returning(move |_| {
+            client.expect_get_tenure_headers().returning(move |_| {
                 let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
                 tenure.anchor_block_hash = chain_tip;
                 Box::pin(std::future::ready(Ok(tenure)))
@@ -4453,7 +4453,7 @@ async fn test_conservative_initial_sbtc_limits() {
             });
 
             let chain_tip = model::BitcoinBlockHash::from(chain_tip_info.hash);
-            client.expect_get_tenure().returning(move |_| {
+            client.expect_get_tenure_headers().returning(move |_| {
                 let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
                 tenure.anchor_block_hash = chain_tip;
                 Box::pin(std::future::ready(Ok(tenure)))

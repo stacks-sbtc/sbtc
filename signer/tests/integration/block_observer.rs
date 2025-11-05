@@ -140,7 +140,7 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
         });
 
         client
-            .expect_get_tenure()
+            .expect_get_tenure_headers()
             .returning(|_| Box::pin(std::future::ready(TenureBlockHeaders::nearly_empty())));
 
         client.expect_get_epoch_status().returning(|| {
@@ -415,7 +415,7 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
             .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
 
         let chain_tip = BitcoinBlockHash::from(chain_tip_info.hash);
-        client.expect_get_tenure().returning(move |_| {
+        client.expect_get_tenure_headers().returning(move |_| {
             let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
             tenure.anchor_block_hash = chain_tip;
             Box::pin(std::future::ready(Ok(tenure)))
@@ -891,7 +891,7 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
             Box::pin(std::future::ready(response))
         });
         client
-            .expect_get_tenure()
+            .expect_get_tenure_headers()
             .returning(|_| Box::pin(std::future::ready(TenureBlockHeaders::nearly_empty())));
         client.expect_get_epoch_status().returning(|| {
             Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
@@ -1212,7 +1212,7 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
             Box::pin(std::future::ready(response))
         });
         client
-            .expect_get_tenure()
+            .expect_get_tenure_headers()
             .returning(|_| Box::pin(std::future::ready(TenureBlockHeaders::nearly_empty())));
         client.expect_get_epoch_status().returning(|| {
             Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
@@ -1401,7 +1401,7 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
             Box::pin(std::future::ready(response))
         });
         client
-            .expect_get_tenure()
+            .expect_get_tenure_headers()
             .returning(|_| Box::pin(std::future::ready(TenureBlockHeaders::nearly_empty())));
         client.expect_get_epoch_status().returning(|| {
             Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
@@ -1637,7 +1637,7 @@ async fn block_observer_ignores_coinbase() {
             .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
 
         let chain_tip = BitcoinBlockHash::from(chain_tip_info.hash);
-        client.expect_get_tenure().returning(move |_| {
+        client.expect_get_tenure_headers().returning(move |_| {
             let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
             tenure.anchor_block_hash = chain_tip;
             Box::pin(std::future::ready(Ok(tenure)))

@@ -335,7 +335,7 @@ async fn deposit_flow() {
                 .returning(move || Box::pin(async move { Ok(DUMMY_TENURE_INFO.clone()) }));
 
             client
-                .expect_get_tenure()
+                .expect_get_tenure_headers()
                 .once()
                 .returning(|_| Box::pin(std::future::ready(TenureBlockHeaders::nearly_empty())));
 
