@@ -2048,7 +2048,8 @@ mod tests {
         let pre_nakamoto_block_id = StacksBlockId::from_hex(
             "0d7cb8c66040d87fc17f39e1b5c36bc7fb5c4d97cc611a168e2cca186848be1e",
         )
-        .unwrap();
+        .unwrap()
+        .into();
         assert!(
             client
                 .check_pre_nakamoto_block(&pre_nakamoto_block_id)
@@ -2060,7 +2061,8 @@ mod tests {
         let nakamoto_block_id = StacksBlockId::from_hex(
             "ad133146e79ff5eccf9eecc51d9eea35947031c5d91d61afc3a1df63d6c198e7",
         )
-        .unwrap();
+        .unwrap()
+        .into();
         assert!(
             client
                 .check_pre_nakamoto_block(&nakamoto_block_id)
