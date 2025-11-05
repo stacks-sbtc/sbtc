@@ -86,6 +86,10 @@ jobs:
         id: install_dependencies
         run: make install-pnpm
 
+      - name: Check Unused Dependencies
+        id: check_unused_dependencies
+        run: cargo machete
+
       - name: Lint (Rust & Pnpm)
         id: lint_rust_and_pnpm
         run: make lint
