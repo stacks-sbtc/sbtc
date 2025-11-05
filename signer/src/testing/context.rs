@@ -486,6 +486,14 @@ impl StacksInteract for WrappedMockStacksInteract {
         self.inner.lock().await.get_block(block_id).await
     }
 
+    async fn check_pre_nakamoto_block(&self, block_id: &StacksBlockHash) -> Result<(), Error> {
+        self.inner
+            .lock()
+            .await
+            .check_pre_nakamoto_block(block_id)
+            .await
+    }
+
     async fn get_tenure(&self, block_id: &StacksBlockHash) -> Result<TenureBlockHeaders, Error> {
         self.inner.lock().await.get_tenure(block_id).await
     }
