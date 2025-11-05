@@ -40,7 +40,7 @@ async fn adding_and_then_updating_single_accout_limit_works() {
 
     // Arrange.
     // --------
-    let limits_to_set = vec![
+    let limits_to_set = [
         (
             "test_account",
             AccountLimits {
@@ -100,7 +100,7 @@ async fn adding_and_then_updating_single_accout_limit_works() {
 
     // Set the expected account caps at the end to be the most recently
     // applied limits.
-    let expected_account_caps: HashMap<String, AccountLimits> = vec![
+    let expected_account_caps: HashMap<String, AccountLimits> = [
         (
             "test_account_2",
             AccountLimits {
@@ -181,7 +181,7 @@ async fn test_updating_account_limits_via_global_limit_works() {
 
     // Arrange.
     // --------
-    let account_limits_to_set_individually = vec![
+    let account_limits_to_set_individually = [
         (
             "test_account_1",
             AccountLimits {
@@ -219,7 +219,7 @@ async fn test_updating_account_limits_via_global_limit_works() {
 
     // Set the expected account caps at the end to be the most recently
     // applied limits.
-    let account_limits_to_set_globally: HashMap<String, AccountLimits> = vec![
+    let account_limits_to_set_globally: HashMap<String, AccountLimits> = [
         (
             "test_account_2",
             AccountLimits {
@@ -272,7 +272,7 @@ async fn test_updating_account_limits_via_global_limit_works() {
 
     // Set the expected account caps at the end to be the most recently
     // applied limits.
-    let expected_global_account_limits: HashMap<String, AccountLimits> = vec![
+    let expected_global_account_limits: HashMap<String, AccountLimits> = [
         (
             "test_account_1",
             AccountLimits {

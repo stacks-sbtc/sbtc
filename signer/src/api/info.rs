@@ -72,7 +72,6 @@ pub struct ConfigInfo {
     pub dkg_begin_pause: u64,
     pub max_deposits_per_bitcoin_block: u16,
     pub dkg_min_bitcoin_block_height: Option<BitcoinBlockHeight>,
-    pub dkg_target_rounds: u32,
 }
 
 #[derive(Debug, Serialize)]
@@ -163,7 +162,6 @@ impl InfoResponse {
             dkg_begin_pause: config.signer.dkg_begin_pause.unwrap_or(0),
             max_deposits_per_bitcoin_block: config.signer.max_deposits_per_bitcoin_tx.get(),
             dkg_min_bitcoin_block_height: config.signer.dkg_min_bitcoin_block_height,
-            dkg_target_rounds: config.signer.dkg_target_rounds.get(),
         });
     }
 
@@ -307,11 +305,7 @@ impl InfoResponse {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        num::{NonZeroU16, NonZeroU32},
-        sync::LazyLock,
-        time::Duration,
-    };
+    use std::{num::NonZeroU16, sync::LazyLock, time::Duration};
 
     use clarity::types::chainstate::StacksAddress;
     use fake::{Fake as _, Faker};
@@ -615,7 +609,6 @@ mod tests {
                 settings.signer.max_deposits_per_bitcoin_tx = NonZeroU16::new(6).unwrap();
                 settings.signer.dkg_min_bitcoin_block_height =
                     Some(BitcoinBlockHeight::from(102u64));
-                settings.signer.dkg_target_rounds = NonZeroU32::new(7).unwrap();
             })
             .build();
 
@@ -689,6 +682,5 @@ mod tests {
             config.dkg_min_bitcoin_block_height,
             settings.dkg_min_bitcoin_block_height
         );
-        assert_eq!(config.dkg_target_rounds, settings.dkg_target_rounds.get());
     }
 }
