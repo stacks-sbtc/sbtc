@@ -127,14 +127,13 @@ jobs:
           tags: |
             type=raw,value=sbtc-emily-sidecar-${{ github.ref_name }}
             type=raw,value=sbtc-emily-sidecar-${{ github.sha }}
-            type=raw,value=sbtc-emily-sidecar-latest,enable=${{ github.ref_name == 'environment/mainnet' }}
 
       - name: Build and Push
         id: docker_build
         uses: stacks-sbtc/actions/docker/build-push-action@a1754bb138bf66f595c6c42068fbc2e09a447e73
         with:
           file: ./docker/sbtc/emily-sidecar/Dockerfile
-          context: ./docker/sbtc
+          context: .
           platforms: ${{ env.docker_platforms }}
           tags: ${{ steps.docker_metadata.outputs.tags }}
           labels: ${{ steps.docker_metadata.outputs.labels }}
