@@ -792,6 +792,7 @@ impl From<BitcoinTxId> for bitcoin::Txid {
     }
 }
 
+#[cfg(any(test, feature = "testing"))]
 impl From<[u8; 32]> for BitcoinTxId {
     fn from(bytes: [u8; 32]) -> Self {
         Self(bitcoin::Txid::from_byte_array(bytes))
@@ -861,6 +862,7 @@ impl From<BitcoinBlockHash> for bitcoin::BlockHash {
     }
 }
 
+#[cfg(any(test, feature = "testing"))]
 impl From<[u8; 32]> for BitcoinBlockHash {
     fn from(bytes: [u8; 32]) -> Self {
         Self(bitcoin::BlockHash::from_byte_array(bytes))
@@ -987,6 +989,7 @@ impl From<&StacksBlockHash> for StacksBlockId {
     }
 }
 
+#[cfg(any(test, feature = "testing"))]
 impl From<[u8; 32]> for StacksBlockHash {
     fn from(bytes: [u8; 32]) -> Self {
         Self(bytes)
@@ -1070,6 +1073,7 @@ impl From<ConsensusHash> for stacks_common::types::chainstate::ConsensusHash {
     }
 }
 
+#[cfg(any(test, feature = "testing"))]
 impl From<[u8; 20]> for ConsensusHash {
     fn from(bytes: [u8; 20]) -> Self {
         Self(bytes)
@@ -1174,6 +1178,7 @@ impl From<StacksTxId> for blockstack_lib::burnchains::Txid {
     }
 }
 
+#[cfg(any(test, feature = "testing"))]
 impl From<[u8; 32]> for StacksTxId {
     fn from(bytes: [u8; 32]) -> Self {
         Self(bytes)
@@ -1286,6 +1291,7 @@ impl From<&ScriptPubKey> for TaprootScriptHash {
     }
 }
 
+#[cfg(any(test, feature = "testing"))]
 impl From<[u8; 32]> for TaprootScriptHash {
     fn from(bytes: [u8; 32]) -> Self {
         bitcoin::TapNodeHash::from_byte_array(bytes).into()
