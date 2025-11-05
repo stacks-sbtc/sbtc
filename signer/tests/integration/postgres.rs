@@ -2405,7 +2405,7 @@ async fn get_swept_withdrawal_requests_returns_swept_withdrawal_requests(
     }
 
     // There should only be one request in the database and it has a sweep
-    // trasnaction so the length should be 1.
+    // transaction so the length should be 1.
     let mut requests = db
         .get_swept_withdrawal_requests(&bitcoin_block.block_hash, context_window)
         .await
