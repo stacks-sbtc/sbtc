@@ -32,7 +32,7 @@ x-common-vars:
 # Templates.
 # ------------------------------------------------------------------------------
 x-stacks-blockchain: &stacks-blockchain
-  image: blockstack/stacks-core:release-3.3.0.0.0-rc2@sha256:1b895681b073bc791f89182e9f985cc46d30552049ba8e9f7f16a19aec9c6a86
+  image: blockstack/stacks-core:3.3.0.0.0@sha256:752c4afd384a163461cfceaa52f66f48c96bb5f43fe2730b4306d830ff0cf886
   profiles:
     - default
 
