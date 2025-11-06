@@ -312,7 +312,7 @@ async fn is_in_canonical_chain(
     )
     .await
     .inspect_err(
-        |error| tracing::warn!(%error, "Failed to get canonical block at height for withdrawal"),
+        |error| tracing::warn!(%error, withdrawal_id=withdrawal.key.request_id, "Failed to get canonical block at height for withdrawal"),
     )?;
     Ok(canonical_block_at_height.key.hash == withdrawal.key.stacks_block_hash)
 }
