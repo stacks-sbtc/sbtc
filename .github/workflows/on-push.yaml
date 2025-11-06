@@ -80,7 +80,7 @@ jobs:
 
       - name: Install Machete
         id: install_machete
-        run: cargo install cargo-machete
+        run: cargo install cargo-machete@0.9.1
 
       - name: Install Package Dependencies
         id: install_dependencies
