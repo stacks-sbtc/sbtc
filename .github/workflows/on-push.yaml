@@ -80,7 +80,7 @@ jobs:
 
       - name: Install Machete
         id: install_machete
-        run: cargo install cargo-machete@0.9.1
+        run: cargo install --git https://github.com/bnjbvr/cargo-machete --rev 7959c845782fed02ee69303126d4a12d64f1db18 cargo-machete
 
       - name: Install Package Dependencies
         id: install_dependencies
