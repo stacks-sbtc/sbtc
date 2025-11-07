@@ -1745,12 +1745,13 @@ async fn only_completed_deposit_can_have_fulfillment_signer(status: DepositStatu
     )
     .await;
 
+    assert!(response.is_ok());
+    let deposits = response.unwrap().deposits;
+    assert_eq!(deposits.len(), 1);
+    let deposit = deposits.first().unwrap();
+
     if status != DepositStatus::Confirmed {
         // Check response correctness
-        let response = response.expect("Batch update should return 200 OK");
-        let deposits = response.deposits;
-        assert_eq!(deposits.len(), 1);
-        let deposit = deposits.first().unwrap();
         assert_eq!(deposit.status, 400);
         assert!(deposit.deposit.clone().unwrap().is_none());
         let status_str: String = status
@@ -1780,16 +1781,7 @@ async fn only_completed_deposit_can_have_fulfillment_signer(status: DepositStatu
         .expect("Received an error after making a valid get deposit api call.");
         assert_eq!(response.bitcoin_txid, bitcoin_txid);
     } else {
-        assert!(response.is_ok());
-        let response = response.unwrap();
-        let deposit = response
-            .deposits
-            .first()
-            .expect("No deposit in response")
-            .deposit
-            .clone()
-            .unwrap()
-            .unwrap();
+        let deposit = deposit.deposit.clone().unwrap().unwrap();
         assert_eq!(deposit.bitcoin_txid, bitcoin_txid);
         assert_eq!(deposit.status, status);
         assert_eq!(deposit.fulfillment, fulfillment);
