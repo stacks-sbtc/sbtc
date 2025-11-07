@@ -1238,7 +1238,7 @@ async fn only_confirmed_withdrawals_can_have_fulfillment_sidecar(status: Withdra
             withdrawals: vec![WithdrawalUpdate {
                 request_id,
                 fulfillment: fulfillment.clone(),
-                status: status.clone(),
+                status: status,
                 status_message: "foo".into(),
             }],
         },
@@ -1347,7 +1347,7 @@ async fn only_confirmed_withdrawals_can_have_fulfillment_signer(status: Withdraw
             withdrawals: vec![WithdrawalUpdate {
                 request_id,
                 fulfillment: fulfillment.clone(),
-                status: status.clone(),
+                status: status,
                 status_message: "foo".into(),
             }],
         },
