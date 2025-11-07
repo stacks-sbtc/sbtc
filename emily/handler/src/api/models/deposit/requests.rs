@@ -242,8 +242,8 @@ impl UpdateDepositsRequestBody {
                 Err(
                     ref error @ ValidationError::DepositFulfillmentNotConfirmed(
                         ref status,
-                        ref txid,
-                        outindex,
+                        ref bitcoin_txid,
+                        bitcoin_tx_output_index,
                     ),
                 ) => {
                     tracing::warn!(
