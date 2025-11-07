@@ -9,7 +9,6 @@ use serde::Deserialize;
 use stacks_common::types::chainstate::StacksAddress;
 use std::collections::BTreeSet;
 use std::num::NonZeroU16;
-use std::num::NonZeroU32;
 use std::num::NonZeroU64;
 use std::path::Path;
 use url::Url;
@@ -37,6 +36,12 @@ pub const MAX_BITCOIN_PROCESSING_DELAY_SECONDS: u64 = 300;
 
 /// Maximum configurable delay (in seconds) before processing new SBTC requests.
 pub const MAX_REQUESTS_PROCESSING_DELAY_SECONDS: u64 = 300;
+
+/// Maximum configurable interval (in seconds) for polling Bitcoin chain tips.
+/// This cannot be too large otherwise signers risk becoming out-of-sync with
+/// other signers, and in the role of signer potentially falling outside of the
+/// coordinator's timeouts.
+pub const MAX_BITCOIN_CHAIN_TIP_POLLING_INTERVAL_SECONDS: u64 = 10;
 
 /// Maximum amount of signers supported by our smart contracts
 /// See https://github.com/stacks-sbtc/sbtc/issues/1694
@@ -130,9 +135,48 @@ pub struct BitcoinConfig {
     #[serde(deserialize_with = "url_deserializer_vec")]
     pub rpc_endpoints: Vec<Url>,
 
-    /// Bitcoin ZeroMQ block-hash stream endpoint.
-    #[serde(deserialize_with = "url_deserializer_vec")]
-    pub block_hash_stream_endpoints: Vec<Url>,
+    /// The number of seconds to wait between polling for new canonical block
+    /// hashes (`getbestblockhash`).
+    #[serde(deserialize_with = "duration_seconds_deserializer")]
+    pub chain_tip_polling_interval: std::time::Duration,
+}
+
+impl Validatable for BitcoinConfig {
+    fn validate(&self, _: &Settings) -> Result<(), ConfigError> {
+        // At least one endpoint must be provided.
+        if self.rpc_endpoints.is_empty() {
+            return Err(ConfigError::Message(
+                "[bitcoin.rpc_endpoints] At least one Bitcoin RPC endpoint must be provided"
+                    .to_string(),
+            ));
+        }
+
+        // Validate each endpoint configuration.
+        for endpoint in &self.rpc_endpoints {
+            if !["http", "https"].contains(&endpoint.scheme()) {
+                return Err(ConfigError::Message(
+                    "[bitcoin.rpc_endpoints] Invalid URL scheme: must be HTTP or HTTPS".to_string(),
+                ));
+            }
+
+            if endpoint.host_str().is_none() {
+                return Err(ConfigError::Message(
+                    "[bitcoin.rpc_endpoints] Invalid URL: host is required".to_string(),
+                ));
+            }
+        }
+
+        if self.chain_tip_polling_interval.as_secs()
+            > MAX_BITCOIN_CHAIN_TIP_POLLING_INTERVAL_SECONDS
+        {
+            return Err(ConfigError::Message(
+                "[bitcoin.chain_tip_polling_interval] Maximum polling interval exceeded"
+                    .to_string(),
+            ));
+        }
+
+        Ok(())
+    }
 }
 
 /// Signer network configuration
@@ -345,15 +389,9 @@ pub struct SignerConfig {
     pub max_deposits_per_bitcoin_tx: NonZeroU16,
     /// Configures a DKG re-run Bitcoin block height. If this is set and DKG has
     /// already been run, the coordinator will attempt to re-run DKG after this
-    /// block height is met if `dkg_target_rounds` has not been reached. If DKG
-    /// has never been run, this configuration has no effect.
+    /// block height is met if there are no non-failed shares created after that
+    /// height. If DKG has never been run, this configuration has no effect.
     pub dkg_min_bitcoin_block_height: Option<BitcoinBlockHeight>,
-    /// Configures a target number of DKG rounds to run/accept. If this is set
-    /// and the number of DKG shares is less than this number, the coordinator
-    /// will continue to run DKG rounds until this number of rounds is reached,
-    /// assuming the conditions for `dkg_min_bitcoin_block_height` are also met.
-    /// If DKG has never been run, this configuration has no effect.
-    pub dkg_target_rounds: NonZeroU32,
     /// The number of bitcoin blocks after a DKG start where we attempt to
     /// verify the shares. After this many blocks, we mark the shares as failed.
     pub dkg_verification_window: u16,
@@ -496,7 +534,6 @@ impl Settings {
             .with_list_parse_key("signer.p2p.listen_on")
             .with_list_parse_key("signer.p2p.public_endpoints")
             .with_list_parse_key("bitcoin.rpc_endpoints")
-            .with_list_parse_key("bitcoin.block_hash_stream_endpoints")
             .with_list_parse_key("stacks.endpoints")
             .with_list_parse_key("emily.endpoints")
             .prefix_separator("_");
@@ -516,10 +553,10 @@ impl Settings {
             "signer.max_deposits_per_bitcoin_tx",
             DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX,
         )?;
-        cfg_builder = cfg_builder.set_default("signer.dkg_target_rounds", 1)?;
         cfg_builder = cfg_builder.set_default("emily.pagination_timeout", 10)?;
         cfg_builder = cfg_builder.set_default("signer.dkg_verification_window", 10)?;
         cfg_builder = cfg_builder.set_default("signer.stacks_fees_max_ustx", 1_500_000)?;
+        cfg_builder = cfg_builder.set_default("bitcoin.chain_tip_polling_interval", 5)?;
 
         if let Some(path) = config_path {
             cfg_builder = cfg_builder.add_source(File::from(path.as_ref()));
@@ -537,6 +574,7 @@ impl Settings {
 
     /// Perform validation on the configuration.
     fn validate(&self) -> Result<(), ConfigError> {
+        self.bitcoin.validate(self)?;
         self.signer.validate(self)?;
         self.stacks.validate(self)?;
         self.emily.validate(self)?;
@@ -568,9 +606,10 @@ impl Validatable for StacksConfig {
 #[cfg(test)]
 mod tests {
     use std::net::SocketAddr;
-    use std::str::FromStr;
+    use std::str::FromStr as _;
     use std::time::Duration;
 
+    use assert_matches::assert_matches;
     use tempfile;
     use toml_edit::DocumentMut;
 
@@ -580,7 +619,7 @@ mod tests {
     use crate::testing::get_rng;
     use crate::testing::set_var;
 
-    use fake::Fake;
+    use fake::Fake as _;
     use fake::Faker;
 
     use super::*;
@@ -634,6 +673,10 @@ mod tests {
         assert_eq!(settings.bitcoin.rpc_endpoints[0].username(), "devnet");
         assert_eq!(settings.bitcoin.rpc_endpoints[0].password(), Some("devnet"));
         assert_eq!(
+            settings.bitcoin.chain_tip_polling_interval,
+            Duration::from_secs(5)
+        );
+        assert_eq!(
             settings.signer.event_observer.bind,
             "0.0.0.0:8801".parse::<SocketAddr>().unwrap()
         );
@@ -661,10 +704,6 @@ mod tests {
             Duration::from_secs(30)
         );
         assert_eq!(settings.signer.dkg_max_duration, Duration::from_secs(120));
-        assert_eq!(
-            settings.signer.dkg_target_rounds,
-            NonZeroU32::new(1).unwrap()
-        );
         assert_eq!(settings.signer.dkg_verification_window, 10);
         assert_eq!(settings.signer.dkg_min_bitcoin_block_height, None);
         assert_eq!(settings.emily.pagination_timeout, Duration::from_secs(10));
@@ -726,11 +765,7 @@ mod tests {
             "SIGNER_BITCOIN__RPC_ENDPOINTS",
             "http://user:pass@localhost:1234,http://foo:bar@localhost:5678",
         );
-
-        set_var(
-            "SIGNER_BITCOIN__BLOCK_HASH_STREAM_ENDPOINTS",
-            "tcp://localhost:1234,tcp://localhost:5678",
-        );
+        set_var("SIGNER_BITCOIN__CHAIN_TIP_POLLING_INTERVAL", "10");
 
         let settings = Settings::new_from_default_config().unwrap();
 
@@ -747,17 +782,9 @@ mod tests {
                 .rpc_endpoints
                 .contains(&url("http://foo:bar@localhost:5678"))
         );
-        assert!(
-            settings
-                .bitcoin
-                .block_hash_stream_endpoints
-                .contains(&url("tcp://localhost:1234"))
-        );
-        assert!(
-            settings
-                .bitcoin
-                .block_hash_stream_endpoints
-                .contains(&url("tcp://localhost:5678"))
+        assert_eq!(
+            settings.bitcoin.chain_tip_polling_interval,
+            Duration::from_secs(10)
         );
     }
 
@@ -777,6 +804,32 @@ mod tests {
     }
 
     #[test]
+    fn config_errors_if_bitcoin_polling_interval_exceeds_max() {
+        clear_env();
+
+        let interval_secs = (MAX_BITCOIN_CHAIN_TIP_POLLING_INTERVAL_SECONDS + 1).to_string();
+        set_var("SIGNER_BITCOIN__CHAIN_TIP_POLLING_INTERVAL", interval_secs);
+
+        assert_matches!(
+            Settings::new_from_default_config(),
+            Err(ConfigError::Message(msg)) if msg.contains("polling interval exceeded")
+        );
+    }
+
+    // TODO: Re-enable this test once we have a decision on how to handle deserialization
+    // of a Vec<Url> with empty strings.
+    // #[test]
+    // fn config_errors_if_no_bitcoin_rpc_endpoints() {
+    //     clear_env();
+    //     set_var("SIGNER_BITCOIN__RPC_ENDPOINTS", "");
+
+    //     assert_matches!(
+    //         Settings::new_from_default_config(),
+    //         Err(ConfigError::Message(msg)) if msg.contains("At least one Bitcoin RPC endpoint must be provided")
+    //     );
+    // }
+
+    #[test]
     fn config_bails_if_pubkey_of_this_signer_not_in_bootstrap_signer_set() {
         clear_env();
 
@@ -793,7 +846,7 @@ mod tests {
                 );
             }
             _ => {
-                panic!("Expected ConfigError::Message, got: {:#?}", error);
+                panic!("Expected ConfigError::Message, got: {error:#?}");
             }
         }
     }
@@ -835,24 +888,6 @@ mod tests {
         assert_eq!(
             settings.signer.dkg_min_bitcoin_block_height,
             Some(42u64.into())
-        );
-    }
-
-    #[test]
-    fn default_config_toml_loads_dkg_target_rounds() {
-        clear_env();
-
-        let settings = Settings::new_from_default_config().unwrap();
-        assert_eq!(
-            settings.signer.dkg_target_rounds,
-            NonZeroU32::new(1).unwrap()
-        );
-
-        set_var("SIGNER_SIGNER__DKG_TARGET_ROUNDS", "42");
-        let settings = Settings::new_from_default_config().unwrap();
-        assert_eq!(
-            settings.signer.dkg_target_rounds,
-            NonZeroU32::new(42).unwrap()
         );
     }
 

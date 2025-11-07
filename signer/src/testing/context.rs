@@ -9,8 +9,8 @@ use blockstack_lib::chainstate::burn::ConsensusHash;
 use blockstack_lib::{
     chainstate::{nakamoto::NakamotoBlock, stacks::StacksTransaction},
     net::api::{
-        getcontractsrc::ContractSrcResponse, getinfo::RPCPeerInfoData, getpoxinfo::RPCPoxInfoData,
-        getsortition::SortitionInfo, gettenureinfo::RPCGetTenureInfo,
+        getcontractsrc::ContractSrcResponse, getsortition::SortitionInfo,
+        gettenureinfo::RPCGetTenureInfo,
     },
 };
 use clarity::types::chainstate::{StacksAddress, StacksBlockId};
@@ -21,7 +21,10 @@ use tokio::time::error::Elapsed;
 use crate::bitcoin::GetTransactionFeeResult;
 use crate::bitcoin::rpc::{BitcoinBlockHeader, BitcoinBlockInfo};
 use crate::context::SbtcLimits;
+use crate::keys::PrivateKey;
+use crate::stacks::api::GetNodeInfoResponse;
 use crate::stacks::api::SignerSetInfo;
+use crate::stacks::api::StacksEpochStatus;
 use crate::stacks::api::TenureBlocks;
 use crate::stacks::wallet::SignerWallet;
 use crate::storage::Transactable;
@@ -420,6 +423,10 @@ impl BitcoinInteract for WrappedMockBitcoinInteract {
     async fn get_network_info(&self) -> Result<bitcoincore_rpc_json::GetNetworkInfoResult, Error> {
         self.inner.lock().await.get_network_info().await
     }
+
+    async fn get_best_block_hash(&self) -> Result<bitcoin::BlockHash, Error> {
+        self.inner.lock().await.get_best_block_hash().await
+    }
 }
 
 impl StacksInteract for WrappedMockStacksInteract {
@@ -477,11 +484,19 @@ impl StacksInteract for WrappedMockStacksInteract {
         self.inner.lock().await.submit_tx(tx).await
     }
 
-    async fn get_block(&self, block_id: StacksBlockId) -> Result<NakamotoBlock, Error> {
+    async fn get_block(&self, block_id: &StacksBlockId) -> Result<NakamotoBlock, Error> {
         self.inner.lock().await.get_block(block_id).await
     }
 
-    async fn get_tenure(&self, block_id: StacksBlockId) -> Result<TenureBlocks, Error> {
+    async fn check_pre_nakamoto_block(&self, block_id: &StacksBlockId) -> Result<(), Error> {
+        self.inner
+            .lock()
+            .await
+            .check_pre_nakamoto_block(block_id)
+            .await
+    }
+
+    async fn get_tenure(&self, block_id: &StacksBlockId) -> Result<TenureBlocks, Error> {
         self.inner.lock().await.get_tenure(block_id).await
     }
 
@@ -516,11 +531,11 @@ impl StacksInteract for WrappedMockStacksInteract {
             .await
     }
 
-    async fn get_pox_info(&self) -> Result<RPCPoxInfoData, Error> {
-        self.inner.lock().await.get_pox_info().await
+    async fn get_epoch_status(&self) -> Result<StacksEpochStatus, Error> {
+        self.inner.lock().await.get_epoch_status().await
     }
 
-    async fn get_node_info(&self) -> Result<RPCPeerInfoData, Error> {
+    async fn get_node_info(&self) -> Result<GetNodeInfoResponse, Error> {
         self.inner.lock().await.get_node_info().await
     }
 
@@ -688,6 +703,17 @@ where
         let mut config = self.get_config();
         f(&mut config.settings);
         ContextBuilder { config }
+    }
+
+    /// Helper for configuring the context's settings with the specified signer
+    /// private key.
+    fn with_private_key(
+        self,
+        private_key: PrivateKey,
+    ) -> ContextBuilder<Storage, Bitcoin, Stacks, Emily> {
+        self.modify_settings(|settings| {
+            settings.signer.private_key = private_key;
+        })
     }
 }
 
@@ -955,6 +981,7 @@ mod tests {
 
     use tokio::sync::Notify;
 
+    use crate::storage::model;
     use crate::{
         context::{Context as _, SignerEvent, SignerSignal},
         testing::context::*,
@@ -983,9 +1010,9 @@ mod tests {
 
         let recv1 = tokio::spawn(async move {
             let signal = recv.recv().await.unwrap();
-            assert_eq!(
+            assert_matches::assert_matches!(
                 signal,
-                SignerSignal::Event(SignerEvent::BitcoinBlockObserved)
+                SignerSignal::Event(SignerEvent::BitcoinBlockObserved(_))
             );
             signal
         });
@@ -1001,9 +1028,9 @@ mod tests {
             let mut cloned_receiver = context_clone.get_signal_receiver();
             recv_task_started_clone.store(true, Ordering::Relaxed);
             let signal = cloned_receiver.recv().await.unwrap();
-            assert_eq!(
+            assert_matches::assert_matches!(
                 signal,
-                SignerSignal::Event(SignerEvent::BitcoinBlockObserved)
+                SignerSignal::Event(SignerEvent::BitcoinBlockObserved(_))
             );
             recv_count_clone.fetch_add(1, Ordering::Relaxed);
             recv_signal_received_clone.store(true, Ordering::Relaxed);
@@ -1014,8 +1041,9 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
 
+        let chain_tip_ref = model::BitcoinBlockRef::genesis();
         context
-            .signal(SignerEvent::BitcoinBlockObserved.into())
+            .signal(SignerEvent::BitcoinBlockObserved(chain_tip_ref).into())
             .unwrap();
 
         while !recv_signal_received.load(Ordering::Relaxed) {

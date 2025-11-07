@@ -9,7 +9,7 @@ use crate::{
         validation::{DepositRequestReport, WithdrawalRequestReport},
     },
     error::Error,
-    keys::{PublicKey, PublicKeyXOnly, SignerScriptPubKey},
+    keys::{PublicKey, PublicKeyXOnly, SignerScriptPubKey as _},
     storage::{
         DbRead,
         model::{self, BitcoinBlockHeight, DkgSharesStatus},
@@ -294,7 +294,7 @@ impl DbRead for SharedStore {
             .unwrap_or_else(Vec::new))
     }
 
-    async fn stacks_block_exists(&self, block_id: StacksBlockId) -> Result<bool, Error> {
+    async fn stacks_block_exists(&self, block_id: &StacksBlockId) -> Result<bool, Error> {
         Ok(self
             .lock()
             .await
@@ -338,6 +338,19 @@ impl DbRead for SharedStore {
             .encrypted_dkg_shares
             .values()
             .filter(|(_, shares)| shares.dkg_shares_status == DkgSharesStatus::Verified)
+            .max_by_key(|(time, _)| time)
+            .map(|(_, shares)| shares.clone()))
+    }
+
+    async fn get_latest_non_failed_dkg_shares(
+        &self,
+    ) -> Result<Option<model::EncryptedDkgShares>, Error> {
+        Ok(self
+            .lock()
+            .await
+            .encrypted_dkg_shares
+            .values()
+            .filter(|(_, shares)| shares.dkg_shares_status != DkgSharesStatus::Failed)
             .max_by_key(|(time, _)| time)
             .map(|(_, shares)| shares.clone()))
     }
@@ -771,6 +784,12 @@ impl DbRead for SharedStore {
 
         Ok(result)
     }
+
+    async fn get_p2p_peers(&self) -> Result<Vec<model::P2PPeer>, Error> {
+        let store = self.lock().await;
+        let peers = store.p2p_peers.values().cloned().collect();
+        Ok(peers)
+    }
 }
 
 impl DbRead for InMemoryTransaction {
@@ -972,7 +991,7 @@ impl DbRead for InMemoryTransaction {
         self.store.get_bitcoin_blocks_with_transaction(txid).await
     }
 
-    async fn stacks_block_exists(&self, block_id: StacksBlockId) -> Result<bool, Error> {
+    async fn stacks_block_exists(&self, block_id: &StacksBlockId) -> Result<bool, Error> {
         self.store.stacks_block_exists(block_id).await
     }
 
@@ -996,6 +1015,12 @@ impl DbRead for InMemoryTransaction {
         &self,
     ) -> Result<Option<model::EncryptedDkgShares>, Error> {
         self.store.get_latest_verified_dkg_shares().await
+    }
+
+    async fn get_latest_non_failed_dkg_shares(
+        &self,
+    ) -> Result<Option<model::EncryptedDkgShares>, Error> {
+        self.store.get_latest_non_failed_dkg_shares().await
     }
 
     async fn get_encrypted_dkg_shares_count(&self) -> Result<u32, Error> {
@@ -1128,5 +1153,9 @@ impl DbRead for InMemoryTransaction {
         sighash: &model::SigHash,
     ) -> Result<Option<(bool, PublicKeyXOnly)>, Error> {
         self.store.will_sign_bitcoin_tx_sighash(sighash).await
+    }
+
+    async fn get_p2p_peers(&self) -> Result<Vec<model::P2PPeer>, Error> {
+        self.store.get_p2p_peers().await
     }
 }

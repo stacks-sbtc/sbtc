@@ -1593,7 +1593,7 @@ impl PgRead {
         };
 
         Ok(Some(WithdrawalRequestReport {
-            id: *id,
+            id: id.clone(), // TODO: Should probably take `id` by value since we're cloning it anyway
             amount: summary.amount,
             max_fee: summary.max_fee,
             is_accepted: summary.is_accepted,
@@ -1656,7 +1656,7 @@ impl PgRead {
 
     async fn stacks_block_exists<'e, E>(
         executor: &'e mut E,
-        block_id: StacksBlockId,
+        block_id: &StacksBlockId,
     ) -> Result<bool, Error>
     where
         &'e mut E: sqlx::PgExecutor<'e>,
@@ -1760,6 +1760,36 @@ impl PgRead {
               , started_at_bitcoin_block_height
             FROM sbtc_signer.dkg_shares
             WHERE dkg_shares_status = 'verified'
+            ORDER BY created_at DESC
+            LIMIT 1;
+            "#,
+        )
+        .fetch_optional(executor)
+        .await
+        .map_err(Error::SqlxQuery)
+    }
+
+    async fn get_latest_non_failed_dkg_shares<'e, E>(
+        executor: &'e mut E,
+    ) -> Result<Option<model::EncryptedDkgShares>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
+        sqlx::query_as::<_, model::EncryptedDkgShares>(
+            r#"
+            SELECT
+                aggregate_key
+              , tweaked_aggregate_key
+              , script_pubkey
+              , encrypted_private_shares
+              , public_shares
+              , signer_set_public_keys
+              , signature_share_threshold
+              , dkg_shares_status
+              , started_at_bitcoin_block_hash
+              , started_at_bitcoin_block_height
+            FROM sbtc_signer.dkg_shares
+            WHERE dkg_shares_status != 'failed'
             ORDER BY created_at DESC
             LIMIT 1;
             "#,
@@ -2513,6 +2543,26 @@ impl PgRead {
         .await
         .map_err(Error::SqlxQuery)
     }
+
+    async fn get_p2p_peers<'e, E>(executor: &'e mut E) -> Result<Vec<model::P2PPeer>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
+        sqlx::query_as::<_, model::P2PPeer>(
+            r#"
+            SELECT 
+                peer_id
+              , public_key
+              , address
+              , last_dialed_at
+            FROM 
+                sbtc_signer.p2p_peers
+            "#,
+        )
+        .fetch_all(executor)
+        .await
+        .map_err(Error::SqlxQuery)
+    }
 }
 
 impl DbRead for PgStore {
@@ -2754,7 +2804,7 @@ impl DbRead for PgStore {
             .await
     }
 
-    async fn stacks_block_exists(&self, block_id: StacksBlockId) -> Result<bool, Error> {
+    async fn stacks_block_exists(&self, block_id: &StacksBlockId) -> Result<bool, Error> {
         PgRead::stacks_block_exists(self.get_connection().await?.as_mut(), block_id).await
     }
 
@@ -2778,6 +2828,12 @@ impl DbRead for PgStore {
         &self,
     ) -> Result<Option<model::EncryptedDkgShares>, Error> {
         PgRead::get_latest_verified_dkg_shares(self.get_connection().await?.as_mut()).await
+    }
+
+    async fn get_latest_non_failed_dkg_shares(
+        &self,
+    ) -> Result<Option<model::EncryptedDkgShares>, Error> {
+        PgRead::get_latest_non_failed_dkg_shares(self.get_connection().await?.as_mut()).await
     }
 
     async fn get_encrypted_dkg_shares_count(&self) -> Result<u32, Error> {
@@ -2937,6 +2993,10 @@ impl DbRead for PgStore {
             signer_public_key,
         )
         .await
+    }
+
+    async fn get_p2p_peers(&self) -> Result<Vec<model::P2PPeer>, Error> {
+        PgRead::get_p2p_peers(self.get_connection().await?.as_mut()).await
     }
 }
 
@@ -3174,10 +3234,7 @@ impl DbRead for PgTransaction<'_> {
         PgRead::get_bitcoin_blocks_with_transaction(tx.as_mut(), txid).await
     }
 
-    async fn stacks_block_exists(
-        &self,
-        block_id: clarity::types::chainstate::StacksBlockId,
-    ) -> Result<bool, Error> {
+    async fn stacks_block_exists(&self, block_id: &StacksBlockId) -> Result<bool, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::stacks_block_exists(tx.as_mut(), block_id).await
     }
@@ -3205,6 +3262,13 @@ impl DbRead for PgTransaction<'_> {
     ) -> Result<Option<model::EncryptedDkgShares>, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::get_latest_verified_dkg_shares(tx.as_mut()).await
+    }
+
+    async fn get_latest_non_failed_dkg_shares(
+        &self,
+    ) -> Result<Option<model::EncryptedDkgShares>, Error> {
+        let mut tx = self.tx.lock().await;
+        PgRead::get_latest_non_failed_dkg_shares(tx.as_mut()).await
     }
 
     async fn get_encrypted_dkg_shares_count(&self) -> Result<u32, Error> {
@@ -3360,5 +3424,10 @@ impl DbRead for PgTransaction<'_> {
     ) -> Result<Option<(bool, crate::keys::PublicKeyXOnly)>, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::will_sign_bitcoin_tx_sighash(tx.as_mut(), sighash).await
+    }
+
+    async fn get_p2p_peers(&self) -> Result<Vec<model::P2PPeer>, Error> {
+        let mut tx = self.tx.lock().await;
+        PgRead::get_p2p_peers(tx.as_mut()).await
     }
 }

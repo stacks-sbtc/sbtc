@@ -1,7 +1,7 @@
 //! Generic bin-packing functionality
 
 use sbtc::idpack::BitmapSegmenter;
-use sbtc::idpack::Segmenter;
+use sbtc::idpack::Segmenter as _;
 
 use crate::MAX_MEMPOOL_PACKAGE_SIZE;
 use crate::MAX_MEMPOOL_PACKAGE_TX_COUNT;
@@ -500,9 +500,9 @@ impl<T: Weighted> BestFitPackager<T> {
 mod tests {
     use super::*;
     use bitvec::array::BitArray;
-    use bitvec::field::BitField;
+    use bitvec::field::BitField as _;
     use rand::Rng;
-    use rand::prelude::SliceRandom;
+    use rand::prelude::SliceRandom as _;
     use signer::testing::get_rng;
     use std::sync::atomic::AtomicU64;
     use test_case::test_case;
@@ -1178,9 +1178,7 @@ mod tests {
                 let size = segmenter.estimate_size(&withdrawal_ids).unwrap();
                 assert!(
                     size <= OP_RETURN_AVAILABLE_SIZE,
-                    "withdrawal IDs exceed OP_RETURN size: {} > {}",
-                    size,
-                    OP_RETURN_AVAILABLE_SIZE
+                    "withdrawal IDs exceed OP_RETURN size: {size} > {OP_RETURN_AVAILABLE_SIZE}"
                 );
             }
         }

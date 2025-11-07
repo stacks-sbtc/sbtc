@@ -4,8 +4,8 @@
 
 use crate::idpack::{
     Segments,
-    codec::{Decodable, Encodable},
-    segmenters::{BitmapSegmenter, Segmenter},
+    codec::{Decodable as _, Encodable as _},
+    segmenters::{BitmapSegmenter, Segmenter as _},
 };
 use proptest::prelude::*;
 use std::collections::BTreeSet;
@@ -106,13 +106,13 @@ fn roundtrip_test(values: &[u64]) -> Result<(), String> {
 
     // Step 1: Package the values into segments
     let segmenter = BitmapSegmenter;
-    let segments = segmenter.package(values).expect("segmentation failed");
+    let segments = segmenter.package(values).map_err(|e| e.to_string())?;
 
     // Step 2: Encode the segments to bytes
     let encoded_bytes = segments.encode();
 
     // Step 3: Decode the bytes back to segments
-    let decoded_segments = Segments::decode(&encoded_bytes).expect("decoding failed");
+    let decoded_segments = Segments::decode(&encoded_bytes).map_err(|e| e.to_string())?;
 
     // Step 4: Extract values from decoded segments
     let decoded_values = decoded_segments.values().collect::<Vec<_>>();
@@ -132,8 +132,7 @@ fn roundtrip_test(values: &[u64]) -> Result<(), String> {
     for (idx, (original, decoded)) in values.iter().zip(decoded_values.iter()).enumerate() {
         if original != decoded {
             return Err(format!(
-                "mismatch at index {}: original={}, decoded={}",
-                idx, original, decoded
+                "mismatch at index {idx}: original={original}, decoded={decoded}"
             ));
         }
     }

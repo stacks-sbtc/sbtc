@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use aws_sdk_dynamodb::types::AttributeValue;
 use aws_sdk_dynamodb::types::error::ConditionalCheckFailedException;
 use serde_dynamo::Item;
-use strum::IntoEnumIterator;
+use strum::IntoEnumIterator as _;
 
 use tracing::{debug, warn};
 
@@ -302,6 +302,21 @@ pub async fn set_withdrawal_entry(
     put_entry_with_version::<WithdrawalTablePrimaryIndex>(context, entry).await
 }
 
+async fn is_in_canonical_chain(
+    context: &EmilyContext,
+    withdrawal: &WithdrawalEntry,
+) -> Result<bool, Error> {
+    let canonical_block_at_height = get_chainstate_entry_at_height(
+        context,
+        &withdrawal.stacks_block_height,
+    )
+    .await
+    .inspect_err(
+        |error| tracing::warn!(%error, withdrawal_id=withdrawal.key.request_id, "Failed to get canonical block at height for withdrawal"),
+    )?;
+    Ok(canonical_block_at_height.key.hash == withdrawal.key.stacks_block_hash)
+}
+
 /// Get withdrawal entry.
 pub async fn get_withdrawal_entry(
     context: &EmilyContext,
@@ -320,10 +335,29 @@ pub async fn get_withdrawal_entry(
     match entries.as_slice() {
         [] => Err(Error::NotFound),
         [withdrawal] => Ok(withdrawal.clone()),
-        _ => {
+        withdrawals => {
+            let mut in_canonical_chain = Vec::new();
+            for withdrawal in withdrawals {
+                let is_canonical = is_in_canonical_chain(context, withdrawal)
+                    .await
+                    // According to program logic, is_in_canonical_chain should never fail,
+                    // so we log the error and return an internal server error.
+                    .map_err(|_| Error::InternalServer)?;
+                if is_canonical {
+                    in_canonical_chain.push(withdrawal.clone());
+                }
+            }
+
+            if in_canonical_chain.len() == 1 {
+                // SAFETY: The collection is guaranteed to have one item per the length check immediately above.
+                return Ok(in_canonical_chain[0].clone());
+            }
+            if in_canonical_chain.is_empty() {
+                return Err(Error::NotFound);
+            }
             warn!(
                 request_id = %key,
-                entries = %serde_json::to_string_pretty(&entries)?,
+                canonical_withdrawals = %serde_json::to_string_pretty(&in_canonical_chain)?,
                 "Found too many withdrawals",
             );
             Err(Error::TooManyWithdrawalEntries(*key))
@@ -558,12 +592,12 @@ pub async fn add_chainstate_entry(
     // Get the current api state and give up if reorging.
     let mut api_state = get_api_state(context).await?;
     debug!("Adding chainstate entry, current api state: {api_state:?}");
-    if let ApiStatus::Reorg(reorg_chaintip) = &api_state.api_status {
-        if reorg_chaintip.key != entry.key {
-            let message = "Attempting to update chainstate during a reorg";
-            warn!(?entry, ?reorg_chaintip, message);
-            return Err(Error::InconsistentState(Inconsistency::ItemUpdate(message)));
-        }
+    if let ApiStatus::Reorg(reorg_chaintip) = &api_state.api_status
+        && reorg_chaintip.key != entry.key
+    {
+        let message = "Attempting to update chainstate during a reorg";
+        warn!(?entry, ?reorg_chaintip, message);
+        return Err(Error::InconsistentState(Inconsistency::ItemUpdate(message)));
     }
 
     // Get the existing chainstate entry for height. If there's a conflict
@@ -735,7 +769,7 @@ async fn get_oldest_stacks_block_for_bitcoin_block(
     .ok_or(Error::NotFound)
 }
 
-// Returns oldest stacks block height, ancored to some block in range
+// Returns oldest stacks block height, anchored to some block in range
 // [range_start_bitcoin_height; range_end_bitcoin_height] (both sides inclusive)
 // If no stacks block is found, returns Error::NotFound.
 #[tracing::instrument(skip(context))]
@@ -839,10 +873,10 @@ pub async fn get_limits(context: &EmilyContext) -> Result<Limits, Error> {
         } else if limit_by_account.contains_key(account) {
             // If the account is already in the map then update the entry if the current
             // entry is newer.
-            if let Some(existing_entry) = limit_by_account.get_mut(account) {
-                if existing_entry.key.timestamp < entry.key.timestamp {
-                    *existing_entry = entry.clone();
-                }
+            if let Some(existing_entry) = limit_by_account.get_mut(account)
+                && existing_entry.key.timestamp < entry.key.timestamp
+            {
+                *existing_entry = entry.clone();
             }
         } else {
             // If the account isn't in the map then insert it.

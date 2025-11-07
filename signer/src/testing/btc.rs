@@ -1,5 +1,7 @@
 //! Helper functions for the bitcoin module
 
+use std::time::Duration;
+
 use bitcoin::Amount;
 use bitcoin::BlockHash;
 use bitcoin::OutPoint;
@@ -17,11 +19,17 @@ use bitcoincore_rpc_json::GetChainTipsResultStatus;
 use bitcoincore_rpc_json::GetChainTipsResultTip;
 use emily_client::models::CreateDepositRequestBody;
 use futures::StreamExt as _;
-use tokio_stream::wrappers::ReceiverStream;
+use sbtc::testing::regtest::BITCOIN_CORE_RPC_ENDPOINT;
+use sbtc::testing::regtest::BITCOIN_CORE_RPC_PASSWORD;
+use sbtc::testing::regtest::BITCOIN_CORE_RPC_USERNAME;
+use tokio::sync::broadcast;
+use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
+use crate::bitcoin::BitcoinBlockHashStreamProvider;
+use crate::bitcoin::poller::BitcoinChainTipPoller;
+use crate::bitcoin::rpc::BitcoinCoreClient;
 use crate::bitcoin::utxo;
-use crate::bitcoin::zmq::BitcoinCoreMessageStream;
-use crate::error::Error;
 
 /// Return a transaction that is kinda like the signers' transaction,
 /// but it does not service any requests, and it does not have any
@@ -68,32 +76,6 @@ impl utxo::DepositRequest {
     }
 }
 
-/// Create a new BlockHash stream for messages from bitcoin core over the
-/// ZMQ interface.
-///
-/// The returned object implements Stream + Send + Sync, which is sometimes
-/// needed in our integration tests.
-///
-/// # Notes
-///
-/// This function panics if it cannot establish a connection the bitcoin
-/// core in 10 seconds.
-pub async fn new_zmq_block_hash_stream(endpoint: &str) -> ReceiverStream<Result<BlockHash, Error>> {
-    let zmq_stream = BitcoinCoreMessageStream::new_from_endpoint(endpoint)
-        .await
-        .unwrap();
-
-    let (sender, receiver) = tokio::sync::mpsc::channel(100);
-    tokio::spawn(async move {
-        let mut stream = zmq_stream.to_block_hash_stream();
-        while let Some(block) = stream.next().await {
-            sender.send(block).await.unwrap();
-        }
-    });
-
-    ReceiverStream::new(receiver)
-}
-
 /// Return the canonical (active) chain tip from `get_chain_tips`
 pub fn get_canonical_chain_tip(rpc: &Client) -> GetChainTipsResultTip {
     rpc.get_chain_tips()
@@ -102,4 +84,83 @@ pub fn get_canonical_chain_tip(rpc: &Client) -> GetChainTipsResultTip {
         .find(|t| t.status == GetChainTipsResultStatus::Active)
         .unwrap()
         .clone()
+}
+
+impl BitcoinCoreClient {
+    /// Creates a new [`BitcoinCoreClient`] for the regtest network based on the
+    /// defaults in the `sbtc` crate.
+    pub fn new_regtest() -> Self {
+        Self::new(
+            BITCOIN_CORE_RPC_ENDPOINT,
+            BITCOIN_CORE_RPC_USERNAME.to_string(),
+            BITCOIN_CORE_RPC_PASSWORD.to_string(),
+        )
+        .expect("Failed to create BitcoinCoreClient for regtest")
+    }
+}
+
+impl BitcoinChainTipPoller {
+    /// Creates a new `BitcoinChainTipPoller` for the regtest network with a
+    /// short polling interval and initialization timeout suitable for tests.
+    pub async fn start_for_regtest() -> Self {
+        BitcoinChainTipPoller::start_new(
+            BitcoinCoreClient::new_regtest(),
+            Duration::from_millis(100),
+        )
+        .await
+    }
+}
+
+const DEFAULT_MANUAL_PROVIDER_CAPACITY: usize = 128;
+
+/// A [`BlockHashStreamProvider`] that allows manual sending of block hashes.
+///
+/// This is useful for tests where you want to control the exact sequence and
+/// timing of block hash notifications or you want to run a block observer
+/// without a bitcoin node. It uses a broadcast channel internally, so multiple
+/// streams can subscribe to the same sequence of manually sent items.
+#[derive(Clone, Debug)]
+pub struct MockBitcoinBlockHashStreamProvider {
+    sender: broadcast::Sender<Result<BlockHash, BroadcastStreamRecvError>>,
+}
+
+impl MockBitcoinBlockHashStreamProvider {
+    /// Creates a new `MockBitcoinBlockHashStreamProvider` with the specified buffer capacity
+    /// for its internal broadcast channel.
+    pub fn with_capacity(capacity: usize) -> Self {
+        let (sender, _receiver) = broadcast::channel(capacity);
+        Self { sender }
+    }
+
+    /// Sends a block hash result to all subscribers of this provider.
+    #[track_caller]
+    pub fn send(&self, item: Result<BlockHash, BroadcastStreamRecvError>) {
+        self.sender
+            .send(item)
+            .expect("failed to send item to broadcast channel: no active receivers.");
+    }
+}
+
+impl Default for MockBitcoinBlockHashStreamProvider {
+    fn default() -> Self {
+        Self::with_capacity(DEFAULT_MANUAL_PROVIDER_CAPACITY)
+    }
+}
+
+impl BitcoinBlockHashStreamProvider for MockBitcoinBlockHashStreamProvider {
+    type Error = BroadcastStreamRecvError;
+
+    fn get_block_hash_stream(
+        &self,
+    ) -> impl futures::Stream<Item = Result<BlockHash, BroadcastStreamRecvError>>
+    + Send
+    + Sync
+    + Unpin
+    + 'static {
+        let receiver = self.sender.subscribe();
+        BroadcastStream::new(receiver).map(|result_from_broadcast| match result_from_broadcast {
+            Ok(item) => item,
+            Err(error) => Err(error),
+        })
+    }
 }

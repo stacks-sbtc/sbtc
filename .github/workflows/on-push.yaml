@@ -78,21 +78,21 @@ jobs:
           components: clippy, rustfmt
           cache-key: "rust-tests"
 
+      - name: Install Machete
+        id: install_machete
+        run: cargo install --git https://github.com/bnjbvr/cargo-machete --rev 7959c845782fed02ee69303126d4a12d64f1db18 cargo-machete
+
       - name: Install Package Dependencies
         id: install_dependencies
         run: make install-pnpm
 
-      - name: Lint (Rustfmt)
-        id: lint_rustfmt
-        run: cargo fmt --all -- --check
+      - name: Check Unused Dependencies
+        id: check_unused_dependencies
+        run: cargo machete
 
-      - name: Lint (Clippy)
-        id: lint_clippy
-        run: cargo clippy -- -D warnings
-
-      - name: Lint (pnpm)
-        id: lint_pnpm
-        run: pnpm --recursive run lint
+      - name: Lint (Rust & Pnpm)
+        id: lint_rust_and_pnpm
+        run: make lint
 
       - name: Lint (Protobuf)
         id: lint_protobuf

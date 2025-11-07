@@ -21,15 +21,14 @@ pub mod wsts;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::ops::Deref;
-use std::time::Duration;
 
 use bitcoin::TapSighashType;
 use bitcoin::Witness;
-use bitcoin::key::TapTweak;
+use bitcoin::key::TapTweak as _;
 use secp256k1::SECP256K1;
 
-use rand::RngCore;
-use rand::SeedableRng;
+use rand::RngCore as _;
+use rand::SeedableRng as _;
 use rand::rngs::{OsRng, StdRng};
 
 use crate::bitcoin::utxo::UnsignedTransaction;
@@ -169,46 +168,6 @@ pub fn get_rng() -> StdRng {
     // will only appear if the test fails (by default).
     eprintln!("Test executed with seed: {seed}");
     StdRng::seed_from_u64(seed)
-}
-
-/// Async sleep extensions.
-pub trait SleepAsyncExt {
-    /// Sleeps for the specified duration asynchronously.
-    fn sleep(self) -> impl Future<Output = ()>;
-}
-
-impl SleepAsyncExt for std::time::Duration {
-    async fn sleep(self) {
-        tokio::time::sleep(self).await;
-    }
-}
-
-/// Async extensions for `Future` types.
-pub trait FutureExt: Future {
-    /// Wraps the future with a timeout that expires after the specified duration.
-    #[track_caller]
-    fn with_timeout(self, duration: std::time::Duration) -> tokio::time::Timeout<Self>
-    where
-        Self: Sized,
-    {
-        tokio::time::timeout(duration, self)
-    }
-}
-
-impl<F: Future> FutureExt for F {}
-
-/// A utility struct for sleeping asynchronously.
-pub struct Sleep;
-impl Sleep {
-    /// Sleeps for the specified number of seconds asynchronously.
-    pub async fn for_secs(secs: u64) {
-        Duration::from_secs(secs).sleep().await;
-    }
-
-    /// Sleeps for the specified number of milliseconds asynchronously.
-    pub async fn for_millis(millis: u64) {
-        Duration::from_millis(millis).sleep().await;
-    }
 }
 
 /// A wrapper type used by `join_all` to ensure that the results are processed.
@@ -392,7 +351,7 @@ impl<T, E: Display, I: IntoIterator<Item = Result<T, E>>> ResultIterExt<T, E> fo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures::future::FutureExt;
+    use futures::future::FutureExt as _;
     use std::boxed::Box;
     use std::pin::Pin;
 

@@ -135,4 +135,9 @@ impl BitcoinInteract for ApiFallbackClient<BitcoinCoreClient> {
         self.exec(|client, _| async { client.get_network_info() })
             .await
     }
+
+    async fn get_best_block_hash(&self) -> Result<BlockHash, Error> {
+        self.exec(|client, _| async { client.get_best_block_hash() })
+            .await
+    }
 }

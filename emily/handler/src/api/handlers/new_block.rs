@@ -136,7 +136,7 @@ pub async fn new_block(
         for (ev, txid) in events {
             let tx_info = TxInfo {
                 txid: sbtc::events::StacksTxid(txid.0),
-                block_id: new_block_event.index_block_hash,
+                block_id: new_block_event.index_block_hash.clone(),
             };
             match RegistryEvent::try_new(ev.value, tx_info) {
                 Ok(RegistryEvent::CompletedDeposit(event)) => {
@@ -381,8 +381,8 @@ mod test {
     use super::*;
     use bitcoin::{
         BlockHash, OutPoint, ScriptBuf, Txid,
-        hashes::Hash,
-        hex::DisplayHex,
+        hashes::Hash as _,
+        hex::DisplayHex as _,
         key::rand::{random, rngs::OsRng},
         secp256k1,
     };

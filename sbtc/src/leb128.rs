@@ -339,7 +339,7 @@ mod tests {
         // Attempt to read the last "garbage byte" (should error)
         match cursor.read_leb128() {
             Err(Error::IncompleteSequence) => {} // Expected
-            other => panic!("expected IncompleteSequence error, got {:?}", other),
+            other => panic!("expected IncompleteSequence error, got {other:?}"),
         }
         assert_eq!(cursor.position(), 5);
         cursor.set_position(cursor.position() + 1); // Skip past the invalid byte
@@ -347,7 +347,7 @@ mod tests {
         // Attempt read at end (should error)
         match cursor.read_leb128() {
             Err(Error::IndexOutOfBounds) => {} // Expected
-            other => panic!("expected IndexOutOfBounds error, got {:?}", other),
+            other => panic!("expected IndexOutOfBounds error, got {other:?}"),
         }
 
         // Position should remain unchanged after error
@@ -369,7 +369,7 @@ mod tests {
         cursor.set_position(large_but_valid_pos);
         match cursor.read_leb128() {
             Err(Error::IndexOutOfBounds) => {} // Expected
-            other => panic!("Expected IndexOutOfBounds error, got {:?}", other),
+            other => panic!("Expected IndexOutOfBounds error, got {other:?}"),
         }
     }
 
@@ -445,7 +445,7 @@ mod proptests {
         );
         prop_assert_eq!(Leb128::calculate_size(value), expected_len);
 
-        let (decoded, read_byte_count) = Leb128::try_decode(&bytes).unwrap();
+        let (decoded, read_byte_count) = Leb128::try_decode(&bytes)?;
         prop_assert_eq!(decoded, value);
         prop_assert_eq!(read_byte_count, expected_len);
 

@@ -211,7 +211,7 @@ impl From<&stacks_common::util::secp256k1::Secp256k1PublicKey> for PublicKey {
 
 impl From<PublicKey> for libp2p::identity::PeerId {
     fn from(value: PublicKey) -> Self {
-        let key = libp2p::identity::secp256k1::PublicKey::try_from_bytes(&value.0.serialize())
+        let key = libp2p_identity::secp256k1::PublicKey::try_from_bytes(&value.0.serialize())
             .expect("BUG: rust-secp256k1 public keys should map to libp2p public keys");
         libp2p::identity::PeerId::from_public_key(&key.into())
     }
@@ -493,7 +493,7 @@ mod tests {
     impl Key<p256k1::keys::PublicKey> {
         fn new() -> Self {
             // Under the hood this uses a rand::thread_rng() for randomness.
-            let private_key = Secp256k1PrivateKey::new();
+            let private_key = Secp256k1PrivateKey::random();
             let pub_key = Secp256k1PublicKey::from_private(&private_key);
             let bytes = pub_key.to_bytes_compressed();
             Key(p256k1::keys::PublicKey::try_from(bytes.as_slice()).unwrap())
@@ -503,7 +503,7 @@ mod tests {
     impl Key<Secp256k1PublicKey> {
         fn new() -> Self {
             // Under the hood this uses a rand::thread_rng() for randomness.
-            let private_key = Secp256k1PrivateKey::new();
+            let private_key = Secp256k1PrivateKey::random();
             Key(Secp256k1PublicKey::from_private(&private_key))
         }
     }

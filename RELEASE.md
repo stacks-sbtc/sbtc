@@ -85,22 +85,26 @@ MUST:
 The `gh` executable can quickly [verify attestations][5]:
 
 ```bash
-> gh attestation verify oci://index.docker.io/blockstack/sbtc:signer-0.0.9-rc6 -R stacks-network/sbtc
-Loaded digest sha256:3bba86a5c2dfdbda61209dc728ab208406a909c8b5affba45da5bb4ccb27ad0d for oci://index.docker.io/blockstack/sbtc:signer-0.0.9-rc6
+> gh attestation verify oci://ghcr.io/stacks-sbtc/sbtc:signer-v1.1.1 -R stacks-sbtc/sbtc
+Loaded digest sha256:43af7e711c42e9566e884b6df1a887fce2f10a2d2bd455e5f73661f829b9ff34 for oci://ghcr.io/stacks-sbtc/sbtc:signer-v1.1.1
 Loaded 1 attestation from GitHub API
 
 The following policy criteria will be enforced:
-- OIDC Issuer must match:................... https://token.actions.githubusercontent.com
-- Source Repository Owner URI must match:... https://github.com/stacks-network
-- Source Repository URI must match:......... https://github.com/stacks-network/sbtc
 - Predicate type must match:................ https://slsa.dev/provenance/v1
-- Subject Alternative Name must match regex: (?i)^https://github.com/stacks-network/sbtc/
+- Source Repository Owner URI must match:... https://github.com/stacks-sbtc
+- Source Repository URI must match:......... https://github.com/stacks-sbtc/sbtc
+- Subject Alternative Name must match regex: (?i)^https://github.com/stacks-sbtc/sbtc/
+- OIDC Issuer must match:................... https://token.actions.githubusercontent.com
 
 ✓ Verification succeeded!
 
-sha256:3bba86a5c2dfdbda61209dc728ab208406a909c8b5affba45da5bb4ccb27ad0d was attested by:
-REPO                 PREDICATE_TYPE                  WORKFLOW
-stacks-network/sbtc  https://slsa.dev/provenance/v1  .github/workflows/image-build.yaml@refs/tags/0.0.9-rc6
+The following 1 attestation matched the policy criteria
+
+- Attestation #1
+  - Build repo:..... stacks-sbtc/sbtc
+  - Build workflow:. .github/workflows/image-build-and-draft-release.yaml@refs/heads/main
+  - Signer repo:.... stacks-sbtc/sbtc
+  - Signer workflow: .github/workflows/image-build-and-draft-release.yaml@refs/heads/main
 ```
 
 ## References

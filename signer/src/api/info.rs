@@ -72,7 +72,6 @@ pub struct ConfigInfo {
     pub dkg_begin_pause: u64,
     pub max_deposits_per_bitcoin_block: u16,
     pub dkg_min_bitcoin_block_height: Option<BitcoinBlockHeight>,
-    pub dkg_target_rounds: u32,
 }
 
 #[derive(Debug, Serialize)]
@@ -122,11 +121,15 @@ impl IntoResponse for InfoResponse {
 /// Handler for the `/info` endpoint. This method is infallible and returns
 /// `null` for any missing information.
 pub async fn info_handler<C: Context>(state: State<ApiState<C>>) -> InfoResponse {
-    let bitcoin_client = state.ctx.get_bitcoin_client();
-    let stacks_client = state.ctx.get_stacks_client();
-    let storage = state.ctx.get_storage();
-    let config = state.ctx.config();
-    let ctx = &state.ctx;
+    build_info(&state.ctx).await
+}
+
+/// Helper function to populate [`InfoResponse`] from given [`Context`]
+pub async fn build_info<C: Context>(ctx: &C) -> InfoResponse {
+    let bitcoin_client = ctx.get_bitcoin_client();
+    let stacks_client = ctx.get_stacks_client();
+    let storage = ctx.get_storage();
+    let config = ctx.config();
 
     let mut response = InfoResponse::default();
 
@@ -159,7 +162,6 @@ impl InfoResponse {
             dkg_begin_pause: config.signer.dkg_begin_pause.unwrap_or(0),
             max_deposits_per_bitcoin_block: config.signer.max_deposits_per_bitcoin_tx.get(),
             dkg_min_bitcoin_block_height: config.signer.dkg_min_bitcoin_block_height,
-            dkg_target_rounds: config.signer.dkg_target_rounds.get(),
         });
     }
 
@@ -233,24 +235,15 @@ impl InfoResponse {
     /// Populates the Stacks node tip information from the provided Stacks client.
     /// This uses the `/v2/info` RPC endpoint to populate the information.
     async fn populate_stacks_node_info(&mut self, stacks_client: &impl StacksInteract) {
-        let tenure_info = stacks_client.get_tenure_info().await;
         let node_info = stacks_client.get_node_info().await;
-
-        match tenure_info {
-            Ok(tenure_info) => {
-                self.stacks.node_tip = Some(ChainTipInfo {
-                    block_hash: tenure_info.tip_block_id,
-                    block_height: tenure_info.tip_height.into(),
-                });
-            }
-            Err(error) => {
-                tracing::error!(%error, "error getting stacks tenure info");
-            }
-        }
 
         match node_info {
             Ok(node_info) => {
-                self.stacks.node_bitcoin_block_height = Some(node_info.burn_block_height.into());
+                self.stacks.node_tip = Some(ChainTipInfo {
+                    block_hash: node_info.stacks_chain_tip().into(),
+                    block_height: node_info.stacks_tip_height,
+                });
+                self.stacks.node_bitcoin_block_height = Some(node_info.burn_block_height);
                 self.stacks.node_version = Some(node_info.server_version);
             }
             Err(error) => {
@@ -312,21 +305,17 @@ impl InfoResponse {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        num::{NonZeroU16, NonZeroU32},
-        sync::LazyLock,
-        time::Duration,
-    };
+    use std::{num::NonZeroU16, sync::LazyLock, time::Duration};
 
-    use blockstack_lib::net::api::{getinfo::RPCPeerInfoData, gettenureinfo::RPCGetTenureInfo};
     use clarity::types::chainstate::StacksAddress;
-    use fake::{Fake, Faker};
+    use fake::{Fake as _, Faker};
 
+    use crate::stacks::api::GetNodeInfoResponse;
     use crate::{
         api::ApiState,
         error::Error,
         storage::{
-            DbWrite,
+            DbWrite as _,
             model::{BitcoinBlock, BitcoinBlockRef, StacksBlock},
         },
         testing::context::*,
@@ -356,11 +345,6 @@ mod tests {
             .with_stacks_client(|client| {
                 client
                     .expect_get_node_info()
-                    .once()
-                    .returning(|| Box::pin(async { Err(Error::Dummy) }));
-
-                client
-                    .expect_get_tenure_info()
                     .once()
                     .returning(|| Box::pin(async { Err(Error::Dummy) }));
 
@@ -427,11 +411,6 @@ mod tests {
             .with_stacks_client(|client| {
                 client
                     .expect_get_node_info()
-                    .once()
-                    .returning(|| Box::pin(async { Err(Error::Dummy) }));
-
-                client
-                    .expect_get_tenure_info()
                     .once()
                     .returning(|| Box::pin(async { Err(Error::Dummy) }));
 
@@ -516,11 +495,6 @@ mod tests {
                     .returning(|| Box::pin(async { Err(Error::Dummy) }));
 
                 client
-                    .expect_get_tenure_info()
-                    .once()
-                    .returning(|| Box::pin(async { Err(Error::Dummy) }));
-
-                client
                     .expect_get_current_signers_aggregate_key()
                     .once()
                     .returning(|_| Box::pin(async { Err(Error::Dummy) }));
@@ -573,13 +547,8 @@ mod tests {
             })
             .await;
 
-        static NODE_INFO_RESPONSE: LazyLock<RPCPeerInfoData> = LazyLock::new(|| {
+        static NODE_INFO_RESPONSE: LazyLock<GetNodeInfoResponse> = LazyLock::new(|| {
             let json = include_str!("../../tests/fixtures/stacksapi-get-node-info-test-data.json");
-            serde_json::from_str(json).unwrap()
-        });
-
-        static TENURE_INFO_RESPONSE: LazyLock<RPCGetTenureInfo> = LazyLock::new(|| {
-            let json = include_str!("../../tests/fixtures/stacksapi-v3-tenures-info-data.json");
             serde_json::from_str(json).unwrap()
         });
 
@@ -589,11 +558,6 @@ mod tests {
                     .expect_get_node_info()
                     .once()
                     .returning(|| Box::pin(async { Ok(NODE_INFO_RESPONSE.clone()) }));
-
-                client
-                    .expect_get_tenure_info()
-                    .once()
-                    .returning(|| Box::pin(async move { Ok(TENURE_INFO_RESPONSE.clone()) }));
 
                 client
                     .expect_get_current_signers_aggregate_key()
@@ -610,15 +574,15 @@ mod tests {
         };
         assert_eq!(
             stacks_node_tip.block_hash,
-            TENURE_INFO_RESPONSE.tip_block_id
+            NODE_INFO_RESPONSE.stacks_chain_tip().into()
         );
         assert_eq!(
             stacks_node_tip.block_height,
-            TENURE_INFO_RESPONSE.tip_height.into()
+            NODE_INFO_RESPONSE.stacks_tip_height
         );
         assert_eq!(
             result.stacks.node_bitcoin_block_height,
-            Some(NODE_INFO_RESPONSE.burn_block_height.into())
+            Some(NODE_INFO_RESPONSE.burn_block_height)
         );
         assert_eq!(
             result.stacks.node_version.expect("no node version"),
@@ -645,7 +609,6 @@ mod tests {
                 settings.signer.max_deposits_per_bitcoin_tx = NonZeroU16::new(6).unwrap();
                 settings.signer.dkg_min_bitcoin_block_height =
                     Some(BitcoinBlockHeight::from(102u64));
-                settings.signer.dkg_target_rounds = NonZeroU32::new(7).unwrap();
             })
             .build();
 
@@ -667,11 +630,6 @@ mod tests {
             .with_stacks_client(|client| {
                 client
                     .expect_get_node_info()
-                    .once()
-                    .returning(|| Box::pin(async { Err(Error::Dummy) }));
-
-                client
-                    .expect_get_tenure_info()
                     .once()
                     .returning(|| Box::pin(async { Err(Error::Dummy) }));
 
@@ -724,6 +682,5 @@ mod tests {
             config.dkg_min_bitcoin_block_height,
             settings.dkg_min_bitcoin_block_height
         );
-        assert_eq!(config.dkg_target_rounds, settings.dkg_target_rounds.get());
     }
 }

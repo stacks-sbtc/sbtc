@@ -6,12 +6,12 @@ use std::{
 };
 
 use secp256k1::XOnlyPublicKey;
-use wsts::state_machine::{OperationResult, SignError, coordinator::Coordinator};
+use wsts::state_machine::{OperationResult, SignError, coordinator::Coordinator as _};
 
 use crate::{
     keys::PublicKey,
     signature::TaprootSignature,
-    wsts_state_machine::{FrostCoordinator, WstsCoordinator},
+    wsts_state_machine::{FrostCoordinator, WstsCoordinator as _},
 };
 
 use super::wsts::WstsNetMessageType;
@@ -414,7 +414,7 @@ mod tests {
     use wsts::net::Message;
 
     use crate::testing::get_rng;
-    use crate::{dkg::testing::*, testing::IterTestExt};
+    use crate::{dkg::testing::*, testing::IterTestExt as _};
 
     use super::{
         State, WstsNetMessageType, WstsNetMessageType::NonceRequest,
@@ -666,10 +666,10 @@ mod tests {
 
         // Unwrap our nonce responses.
         let Message::NonceResponse(nonce_response1) = nonce_response1 else {
-            panic!("expected nonce response, got {:?}", nonce_response1);
+            panic!("expected nonce response, got {nonce_response1:?}");
         };
         let Message::NonceResponse(nonce_response2) = nonce_response2 else {
-            panic!("expected nonce response, got {:?}", nonce_response2);
+            panic!("expected nonce response, got {nonce_response2:?}");
         };
 
         // Create signature share requests, populated with the nonce responses

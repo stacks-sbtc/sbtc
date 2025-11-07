@@ -13,8 +13,10 @@ use bitvec::array::BitArray;
 use blockstack_lib::chainstate::{nakamoto, stacks};
 use clarity::util::secp256k1::Secp256k1PublicKey;
 use fake::Dummy;
-use fake::Fake;
+use fake::Fake as _;
 use fake::Faker;
+use libp2p::Multiaddr;
+use libp2p::PeerId;
 use p256k1::point::Point;
 use p256k1::scalar::Scalar;
 use polynomial::Polynomial;
@@ -55,7 +57,7 @@ use crate::bitcoin::utxo::Fees;
 use crate::bitcoin::utxo::SignerBtcState;
 use crate::bitcoin::utxo::SignerUtxo;
 use crate::bitcoin::validation::TxRequestIds;
-use crate::codec::Encode;
+use crate::codec::Encode as _;
 use crate::ecdsa::Signed;
 use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
@@ -86,6 +88,8 @@ use crate::storage::model::StacksTxId;
 use crate::storage::model::TaprootScriptHash;
 use crate::storage::model::WithdrawalAcceptEvent;
 use crate::storage::model::WithdrawalRejectEvent;
+
+use super::network::MultiaddrExt as _;
 
 /// Dummy block
 pub fn block<R: rand::RngCore + ?Sized>(
@@ -315,14 +319,6 @@ pub fn stacks_tx<R: rand::RngCore + ?Sized>(
         )
         .unwrap(),
     }
-}
-
-/// Dummy stacks transaction ID
-pub fn stacks_txid<R: rand::RngCore + ?Sized>(
-    config: &fake::Faker,
-    rng: &mut R,
-) -> blockstack_lib::burnchains::Txid {
-    blockstack_lib::burnchains::Txid(config.fake_with_rng(rng))
 }
 
 /// Dummy signature
@@ -792,6 +788,21 @@ impl fake::Dummy<fake::Faker> for model::Timestamp {
         time::OffsetDateTime::from_unix_timestamp(unix_timestamp)
             .expect("failed to create OffsetDateTime")
             .into()
+    }
+}
+
+impl fake::Dummy<fake::Faker> for model::P2PPeer {
+    fn dummy_with_rng<R: rand::RngCore + ?Sized>(config: &fake::Faker, rng: &mut R) -> Self {
+        let public_key: PublicKey = config.fake_with_rng(rng);
+        let multiaddr = Multiaddr::random_memory(rng);
+        let peer_id: PeerId = public_key.into();
+
+        model::P2PPeer {
+            peer_id: peer_id.into(),
+            public_key,
+            address: multiaddr.into(),
+            last_dialed_at: Faker.fake_with_rng(rng),
+        }
     }
 }
 

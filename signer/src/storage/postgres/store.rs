@@ -2,7 +2,7 @@
 use crate::storage::model::{StacksBlockHash, StacksBlockHeight};
 use crate::storage::{Transactable, TransactionHandle};
 use crate::{error::Error, storage::postgres::PGSQL_MIGRATIONS};
-use sqlx::Executor;
+use sqlx::Executor as _;
 use sqlx::pool::PoolConnection;
 use sqlx::{PgExecutor, postgres::PgPoolOptions};
 use tokio::sync::Mutex;

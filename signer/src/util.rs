@@ -8,11 +8,52 @@ use std::{
         Arc,
         atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
     },
+    time::Duration,
 };
 
 use thiserror::Error;
 
 use crate::error::Error;
+
+/// Async sleep extensions.
+pub trait SleepAsyncExt {
+    /// Sleeps for the specified duration asynchronously.
+    fn sleep(self) -> impl Future<Output = ()>;
+}
+
+impl SleepAsyncExt for std::time::Duration {
+    async fn sleep(self) {
+        tokio::time::sleep(self).await;
+    }
+}
+
+/// Async extensions for `Future` types.
+pub trait FutureExt: Future {
+    /// Wraps the future with a timeout that expires after the specified duration.
+    #[track_caller]
+    fn with_timeout(self, duration: std::time::Duration) -> tokio::time::Timeout<Self>
+    where
+        Self: Sized,
+    {
+        tokio::time::timeout(duration, self)
+    }
+}
+
+impl<F: Future> FutureExt for F {}
+
+/// A utility struct for sleeping asynchronously.
+pub struct Sleep;
+impl Sleep {
+    /// Sleeps for the specified number of seconds asynchronously.
+    pub async fn for_secs(secs: u64) {
+        Duration::from_secs(secs).sleep().await;
+    }
+
+    /// Sleeps for the specified number of milliseconds asynchronously.
+    pub async fn for_millis(millis: u64) {
+        Duration::from_millis(millis).sleep().await;
+    }
+}
 
 /// Extension trait for `Vec`.
 pub trait CollectionExt {

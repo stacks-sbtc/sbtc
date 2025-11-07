@@ -19,14 +19,14 @@ use bitcoin::TxOut;
 use bitcoin::Txid;
 use bitcoin::Witness;
 use bitcoin::absolute::LockTime;
-use bitcoin::key::TapTweak;
+use bitcoin::key::TapTweak as _;
 use bitcoin::sighash::Prevouts;
 use bitcoin::sighash::SighashCache;
 use bitcoin::transaction::Version;
 use bitcoincore_rpc::Auth;
 use bitcoincore_rpc::Client;
 use bitcoincore_rpc::Error as BtcRpcError;
-use bitcoincore_rpc::RpcApi;
+use bitcoincore_rpc::RpcApi as _;
 use bitcoincore_rpc::json::ImportDescriptors;
 use bitcoincore_rpc::json::ListUnspentQueryOptions;
 use bitcoincore_rpc::json::ListUnspentResultEntry;
@@ -44,6 +44,8 @@ use std::sync::OnceLock;
 pub const BITCOIN_CORE_RPC_USERNAME: &str = "devnet";
 /// The password for RPC calls in bitcoin-core
 pub const BITCOIN_CORE_RPC_PASSWORD: &str = "devnet";
+/// Default RPC endpoint for regtest bitcoin-core
+pub const BITCOIN_CORE_RPC_ENDPOINT: &str = "http://127.0.0.1:18443";
 
 /// The fallback fee in bitcoin core
 pub const BITCOIN_CORE_FALLBACK_FEE: Amount = Amount::from_sat(1000);
@@ -79,7 +81,7 @@ pub fn initialize_blockchain() -> (&'static Client, &'static Faucet) {
         let username = BITCOIN_CORE_RPC_USERNAME.to_string();
         let password = BITCOIN_CORE_RPC_PASSWORD.to_string();
         let auth = Auth::UserPass(username, password);
-        Client::new("http://localhost:18443", auth).unwrap()
+        Client::new(BITCOIN_CORE_RPC_ENDPOINT, auth).unwrap()
     });
 
     let faucet = FAUCET.get_or_init(|| {
@@ -110,7 +112,7 @@ pub fn initialize_blockchain_devenv() -> (&'static Client, &'static Faucet) {
         let password = BITCOIN_CORE_RPC_PASSWORD.to_string();
         let auth = Auth::UserPass(username, password);
         Client::new(
-            &format!("http://127.0.0.1:18443/wallet/{BITCOIN_CORE_WALLET_NAME}"),
+            &format!("{BITCOIN_CORE_RPC_ENDPOINT}/wallet/{BITCOIN_CORE_WALLET_NAME}"),
             auth,
         )
         .unwrap()
@@ -167,6 +169,18 @@ pub struct Recipient {
     pub address: Address,
     /// The script pubkey associated with the above keypair.
     pub script_pubkey: ScriptBuf,
+}
+
+/// Models the result of "listdescriptors"
+#[derive(Clone, PartialEq, Eq, Debug, serde::Deserialize)]
+struct ListDescriptorsResult {
+    pub wallet_name: String,
+    pub descriptors: Vec<ListDescriptorsInner>,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, serde::Deserialize)]
+struct ListDescriptorsInner {
+    pub desc: String,
 }
 
 fn descriptor_base(public_key: &PublicKey, kind: AddressType) -> String {
@@ -269,6 +283,22 @@ impl Faucet {
         let desc = descriptor_base(&public_key, kind);
         let descriptor_info = self.rpc.get_descriptor_info(&desc).unwrap();
 
+        // This isn't part of the bitcoincore_rpc API, unfortunately.
+        let wallet: ListDescriptorsResult = self
+            .rpc
+            .call("listdescriptors", &[])
+            .expect("failed to list descriptors");
+
+        if wallet
+            .descriptors
+            .iter()
+            .any(|d| d.desc == descriptor_info.descriptor)
+        {
+            // The descriptor is already tracked, no need to import it again.
+            // This avoids a scan of the entire blockchain.
+            return;
+        }
+
         let req = ImportDescriptors {
             descriptor: descriptor_info.descriptor,
             label: label.map(ToString::to_string),
@@ -278,6 +308,7 @@ impl Faucet {
             next_index: None,
             range: None,
         };
+
         let response = self.rpc.import_descriptors(req).unwrap();
         response.into_iter().for_each(|item| assert!(item.success));
     }

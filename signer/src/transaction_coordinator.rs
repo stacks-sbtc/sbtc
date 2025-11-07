@@ -13,13 +13,13 @@ use blockstack_lib::chainstate::stacks::StacksTransaction;
 use futures::Stream;
 use futures::StreamExt as _;
 use futures::future::try_join_all;
-use sha2::Digest;
+use sha2::Digest as _;
 
 use crate::WITHDRAWAL_BLOCKS_EXPIRY;
 use crate::WITHDRAWAL_DUST_LIMIT;
 use crate::WITHDRAWAL_EXPIRY_BUFFER;
 use crate::WITHDRAWAL_MIN_CONFIRMATIONS;
-use crate::bitcoin::BitcoinInteract;
+use crate::bitcoin::BitcoinInteract as _;
 use crate::bitcoin::TransactionLookupHint;
 use crate::bitcoin::utxo;
 use crate::bitcoin::utxo::Fees;
@@ -35,7 +35,7 @@ use crate::context::TxCoordinatorEvent;
 use crate::context::TxSignerEvent;
 use crate::ecdsa::SignEcdsa as _;
 use crate::ecdsa::Signed;
-use crate::emily_client::EmilyInteract;
+use crate::emily_client::EmilyInteract as _;
 use crate::error::Error;
 use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
@@ -51,9 +51,9 @@ use crate::metrics::STACKS_BLOCKCHAIN;
 use crate::network;
 use crate::signature::TaprootSignature;
 use crate::stacks::api::FeePriority;
-use crate::stacks::api::GetNakamotoStartHeight;
 use crate::stacks::api::RejectionReason;
-use crate::stacks::api::StacksInteract;
+use crate::stacks::api::StacksEpochStatus;
+use crate::stacks::api::StacksInteract as _;
 use crate::stacks::api::SubmitTxResponse;
 use crate::stacks::api::TxRejection;
 use crate::stacks::contracts::AcceptWithdrawalV1;
@@ -68,6 +68,7 @@ use crate::stacks::wallet::MultisigTx;
 use crate::stacks::wallet::SignerWallet;
 use crate::storage::DbRead;
 use crate::storage::model;
+use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::StacksTxId;
 use crate::wsts_state_machine::FireCoordinator;
 use crate::wsts_state_machine::FrostCoordinator;
@@ -201,7 +202,7 @@ fn run_loop_message_filter(signal: &SignerSignal) -> bool {
     matches!(
         signal,
         SignerSignal::Event(SignerEvent::RequestDecider(
-            RequestDeciderEvent::NewRequestsHandled,
+            RequestDeciderEvent::NewRequestsHandled(_),
         )) | SignerSignal::Command(SignerCommand::Shutdown)
     )
 }
@@ -231,22 +232,18 @@ where
             match message {
                 SignerSignal::Command(SignerCommand::Shutdown) => break,
                 SignerSignal::Command(SignerCommand::P2PPublish(_)) => {}
-                SignerSignal::Event(event) => {
-                    if let SignerEvent::RequestDecider(RequestDeciderEvent::NewRequestsHandled) =
-                        event
-                    {
-                        tracing::debug!("received signal; processing requests");
-                        if let Err(error) = self.process_new_blocks().await {
-                            tracing::error!(
-                                %error,
-                                "error processing requests; skipping this round"
-                            );
-                        }
-                        tracing::trace!("sending tenure completed signal");
-                        self.context
-                            .signal(TxCoordinatorEvent::TenureCompleted.into())?;
+                SignerSignal::Event(SignerEvent::RequestDecider(
+                    RequestDeciderEvent::NewRequestsHandled(chain_tip),
+                )) => {
+                    tracing::debug!("received signal; processing requests");
+                    if let Err(error) = self.process_new_blocks(chain_tip).await {
+                        tracing::error!(%error, "error processing requests; skipping this round");
                     }
+                    tracing::trace!("sending tenure completed signal");
+                    self.context
+                        .signal(TxCoordinatorEvent::TenureCompleted.into())?;
                 }
+                SignerSignal::Event(_) => {}
             }
         }
 
@@ -270,29 +267,49 @@ where
         if self.is_epoch3 {
             return Ok(true);
         }
-        tracing::debug!("checked for whether we are in epoch 3 or later");
-        let pox_info = self.context.get_stacks_client().get_pox_info().await?;
 
-        let Some(nakamoto_start_height) = pox_info.nakamoto_start_height() else {
-            return Ok(false);
-        };
+        tracing::debug!("checking whether we are in epoch 3.0 or later");
+        let epoch_status = self.context.get_stacks_client().get_epoch_status().await?;
 
-        let is_epoch3 = pox_info.current_burnchain_block_height > *nakamoto_start_height;
-        if is_epoch3 {
-            self.is_epoch3 = is_epoch3;
-            tracing::debug!("we are in epoch 3 or later; time to do work");
+        match epoch_status {
+            StacksEpochStatus::PreNakamoto {
+                reported_bitcoin_height,
+                nakamoto_start_height,
+            } => {
+                tracing::debug!(
+                    %reported_bitcoin_height,
+                    %nakamoto_start_height,
+                    "the stacks node has not reached epoch 3.0; skipping this round"
+                );
+                Ok(false)
+            }
+            StacksEpochStatus::PostNakamoto { nakamoto_start_height } => {
+                tracing::debug!(%nakamoto_start_height, "the stacks node is in epoch 3.0 or later; proceeding");
+                self.is_epoch3 = true;
+                Ok(true)
+            }
         }
-        Ok(is_epoch3)
     }
 
     /// A function for processing new blocks
     #[tracing::instrument(skip_all, fields(
         public_key = %self.signer_public_key(),
-        bitcoin_tip_hash = tracing::field::Empty,
-        bitcoin_tip_height = tracing::field::Empty,
+        bitcoin_tip_hash = %bitcoin_chain_tip.block_hash,
+        bitcoin_tip_height = %bitcoin_chain_tip.block_height,
     ))]
-    pub async fn process_new_blocks(&mut self) -> Result<(), Error> {
+    pub async fn process_new_blocks(
+        &mut self,
+        bitcoin_chain_tip: BitcoinBlockRef,
+    ) -> Result<(), Error> {
         if !self.is_epoch3().await? {
+            return Ok(());
+        }
+
+        // If we are not the coordinator, then we have no business
+        // coordinating DKG or constructing bitcoin and stacks
+        // transactions, might as well return early.
+        if !self.is_coordinator(bitcoin_chain_tip.as_ref()) {
+            tracing::debug!("we are not the coordinator, so nothing to do");
             return Ok(());
         }
 
@@ -302,46 +319,40 @@ where
             tokio::time::sleep(bitcoin_processing_delay).await;
         }
 
-        let bitcoin_chain_tip = self
-            .context
-            .state()
-            .bitcoin_chain_tip()
-            .ok_or(Error::NoChainTip)?;
+        // If we need to bail here then there is some bug in the code,
+        // since `process_new_blocks` should only be called after the state
+        // has been updated with the bitcoin chain tip.
+        let Some(state_chain_tip) = self.context.state().bitcoin_chain_tip() else {
+            tracing::error!("no bitcoin chain tip in state, skipping processing");
+            return Err(Error::NoChainTip);
+        };
 
-        let span = tracing::Span::current();
-        span.record(
-            "bitcoin_tip_hash",
-            tracing::field::display(bitcoin_chain_tip.block_hash),
-        );
-        span.record("bitcoin_tip_height", *bitcoin_chain_tip.block_height);
-
-        let registry_signer_set_info = self.context.state().registry_signer_set_info();
-
-        // If we are not the coordinator, then we have no business
-        // coordinating DKG or constructing bitcoin and stacks
-        // transactions, might as well return early.
-        if !self.is_coordinator(bitcoin_chain_tip.as_ref()) {
-            // Before returning, we also check if all the smart contracts are
-            // deployed: we do this as some other coordinator could have deployed
-            // them, in which case we need to updated our state.
-            self.all_smart_contracts_deployed().await?;
-
-            tracing::debug!("we are not the coordinator, so nothing to do");
+        // The bitcoin chain tip could have changed since we observed the
+        // bitcoin block given as an input here. If so, we can safely skip
+        // processing this block since other signers are likely to ignore
+        // us.
+        if bitcoin_chain_tip != state_chain_tip {
+            tracing::info!(
+                state_bitcoin_tip_hash = %state_chain_tip.block_hash,
+                state_bitcoin_tip_height = %state_chain_tip.block_height,
+                "bitcoin chain tip has changed, skipping processing"
+            );
             return Ok(());
         }
+
+        let maybe_registry_signer_set_info = self.context.state().registry_signer_set_info();
 
         tracing::debug!("we are the coordinator");
         metrics::counter!(Metrics::CoordinatorTenuresTotal).increment(1);
 
         tracing::debug!("determining if we need to coordinate DKG");
-        let should_coordinate_dkg =
-            should_coordinate_dkg(&self.context, &bitcoin_chain_tip).await?;
+        let should_coordinate_dkg = should_run_dkg(&self.context, &bitcoin_chain_tip).await?;
         let aggregate_key = if should_coordinate_dkg {
             match self.coordinate_dkg(&bitcoin_chain_tip).await {
                 Ok(key) => key,
                 Err(error) => {
                     tracing::error!(%error, "failed to coordinate DKG; using existing aggregate key");
-                    registry_signer_set_info
+                    maybe_registry_signer_set_info
                         .as_ref()
                         .map(|info| info.aggregate_key)
                         .ok_or(Error::MissingAggregateKey(*bitcoin_chain_tip.block_hash))?
@@ -351,10 +362,10 @@ where
             // If we do not have signer set info in the registry, then we
             // are in the bootstrap phase. Our latest DKG shares may be
             // 'Unverified', but if we are here then they were not 'Failed'
-            // when we made to call to `should_coordinate_dkg`, since we
+            // when we made to call to `should_run_dkg`, since we
             // will coordinate DKG if our last DKG shares are 'Failed'. But
             // we could be loading 'Failed' shares here.
-            match registry_signer_set_info.as_ref() {
+            match maybe_registry_signer_set_info.as_ref() {
                 Some(info) => info.aggregate_key,
                 None => self
                     .context
@@ -371,8 +382,12 @@ where
         tracing::debug!("loading the signer stacks wallet");
         let wallet = self.get_signer_wallet().await?;
 
-        self.deploy_smart_contracts(chain_tip_hash, &wallet, &aggregate_key)
-            .await?;
+        if !self.context.state().sbtc_contracts_deployed() {
+            self.deploy_smart_contracts(chain_tip_hash, &wallet, &aggregate_key)
+                .await?;
+
+            return Ok(());
+        }
 
         let rotate_key_txid = self.check_and_submit_rotate_key_transaction(
             &bitcoin_chain_tip,
@@ -392,7 +407,7 @@ where
             return Ok(());
         }
 
-        let signer_public_keys = registry_signer_set_info
+        let signer_public_keys = maybe_registry_signer_set_info
             .map(|info| info.signer_set)
             .ok_or_else(|| Error::NoKeyRotationEvent)?;
 
@@ -426,10 +441,6 @@ where
         wallet: &SignerWallet,
         aggregate_key: &PublicKey,
     ) -> Result<Option<StacksTxId>, Error> {
-        if !self.all_smart_contracts_deployed().await? {
-            return Ok(None);
-        }
-
         let last_dkg = self
             .context
             .get_storage()
@@ -543,6 +554,7 @@ where
         let signal_stream = self.context.as_signal_stream(presign_ack_filter);
 
         // Send the presign request message
+        tracing::debug!(request = %sbtc_requests, "sending pre-sign request");
         self.send_message(sbtc_requests, bitcoin_chain_tip).await?;
 
         tokio::pin!(signal_stream);
@@ -767,7 +779,7 @@ where
     ) -> Result<(), Error> {
         let db = self.context.get_storage();
         let stacks = self.context.get_stacks_client();
-        let deployer = self.context.config().signer.deployer;
+        let deployer = self.context.config().signer.deployer.clone();
 
         // Fetch deposit requests from the database where
         // there has been a confirmed bitcoin transaction associated with
@@ -948,7 +960,7 @@ where
         request: model::SweptWithdrawalRequest,
     ) -> Result<(), Error> {
         let stacks = self.context.get_stacks_client();
-        let deployer = self.context.config().signer.deployer;
+        let deployer = self.context.config().signer.deployer.clone();
 
         let is_completed = stacks
             .is_withdrawal_completed(&deployer, request.request_id)
@@ -1014,7 +1026,7 @@ where
     ) -> Result<(), Error> {
         let db = self.context.get_storage();
         let stacks = self.context.get_stacks_client();
-        let deployer = self.context.config().signer.deployer;
+        let deployer = self.context.config().signer.deployer.clone();
 
         let is_completed = stacks
             .is_withdrawal_completed(&deployer, request.request_id)
@@ -1195,7 +1207,7 @@ where
             contract_tx: contract_call.into(),
             nonce: tx.get_origin_nonce(),
             tx_fee: tx.get_tx_fee(),
-            txid: tx.txid(),
+            txid: tx.txid().into(),
         };
 
         self.process_sign_request(sign_request, bitcoin_chain_tip, multi_tx, wallet)
@@ -1239,7 +1251,7 @@ where
         let submit_tx_result = self.context.get_stacks_client().submit_tx(&tx?).await;
 
         match submit_tx_result {
-            Ok(SubmitTxResponse::Acceptance(txid)) => Ok(txid.into()),
+            Ok(SubmitTxResponse::Acceptance(txid)) => Ok(txid),
             Ok(SubmitTxResponse::Rejection(err)) => Err(err.into()),
             Err(err) => Err(err),
         }
@@ -1281,7 +1293,7 @@ where
             amount: req.amount - assessed_bitcoin_fee.to_sat(),
             outpoint,
             recipient: req.recipient.into(),
-            deployer: self.context.config().signer.deployer,
+            deployer: self.context.config().signer.deployer.clone(),
             sweep_txid: req.sweep_txid,
             sweep_block_hash: req.sweep_block_hash,
             sweep_block_height: req.sweep_block_height,
@@ -1302,7 +1314,7 @@ where
             contract_tx: contract_call.into(),
             nonce: tx.get_origin_nonce(),
             tx_fee: tx.get_tx_fee(),
-            txid: tx.txid(),
+            txid: tx.txid().into(),
         };
 
         Ok((sign_request, multi_tx))
@@ -1343,7 +1355,7 @@ where
             outpoint,
             tx_fee: assessed_bitcoin_fee.to_sat(),
             signer_bitmap: 0,
-            deployer: self.context.config().signer.deployer,
+            deployer: self.context.config().signer.deployer.clone(),
             sweep_block_hash: req.sweep_block_hash,
             sweep_block_height: req.sweep_block_height,
         };
@@ -1362,7 +1374,7 @@ where
             contract_tx: contract_call.into(),
             nonce: tx.get_origin_nonce(),
             tx_fee: tx.get_tx_fee(),
-            txid: tx.txid(),
+            txid: tx.txid().into(),
         };
 
         Ok((sign_request, multi_tx))
@@ -1379,7 +1391,7 @@ where
         let reject_withdrawal_v1 = RejectWithdrawalV1 {
             id: req.qualified_id(),
             signer_bitmap: 0,
-            deployer: self.context.config().signer.deployer,
+            deployer: self.context.config().signer.deployer.clone(),
         };
         let contract_call = ContractCall::RejectWithdrawalV1(Box::new(reject_withdrawal_v1));
 
@@ -1396,7 +1408,7 @@ where
             contract_tx: contract_call.into(),
             nonce: tx.get_origin_nonce(),
             tx_fee: tx.get_tx_fee(),
-            txid: tx.txid(),
+            txid: tx.txid().into(),
         };
 
         Ok((sign_request, multi_tx))
@@ -1826,19 +1838,13 @@ where
         }
     }
 
-    // Determine if the current coordinator is the coordinator.
-    //
-    // The coordinator is decided using the hash of the bitcoin
-    // chain tip. We don't use the chain tip directly because
-    // it typically starts with a lot of leading zeros.
-    //
-    // Note that this function is technically not fallible,
-    // but for now we have chosen to return phantom errors
-    // instead of adding expects/unwraps in the code.
-    // Ideally the code should be formulated in a way to guarantee
-    // it being infallible without relying on sequentially coupling
-    // expressions. However, that is left for future work.
-    fn is_coordinator(&self, bitcoin_chain_tip: &model::BitcoinBlockHash) -> bool {
+    /// Determine if this signer is the signer set's coordinator for the
+    /// specified bitcoin block hash.
+    ///
+    /// The coordinator is decided using the hash of the bitcoin chain tip.
+    /// We don't use the chain tip directly because it typically starts
+    /// with a lot of leading zeros.
+    pub fn is_coordinator(&self, bitcoin_chain_tip: &model::BitcoinBlockHash) -> bool {
         given_key_is_coordinator(
             self.signer_public_key(),
             bitcoin_chain_tip,
@@ -2221,6 +2227,7 @@ where
     }
 
     /// Deploy an sBTC smart contract to the stacks node.
+    #[tracing::instrument(skip_all, fields(smart_contract = %contract_deploy))]
     async fn deploy_smart_contract(
         &mut self,
         contract_deploy: SmartContract,
@@ -2232,7 +2239,7 @@ where
 
         // Maybe this smart contract has already been deployed, let's check
         // that first.
-        let deployer = self.context.config().signer.deployer;
+        let deployer = self.context.config().signer.deployer.clone();
         if contract_deploy.is_deployed(&stacks, &deployer).await? {
             return Ok(());
         }
@@ -2294,7 +2301,7 @@ where
             contract_tx: contract_deploy.into(),
             nonce: tx.get_origin_nonce(),
             tx_fee: tx.get_tx_fee(),
-            txid: tx.txid(),
+            txid: tx.txid().into(),
         };
 
         Ok((sign_request, multi_tx))
@@ -2309,34 +2316,12 @@ where
         wallet: &SignerWallet,
         bitcoin_aggregate_key: &PublicKey,
     ) -> Result<(), Error> {
-        if self.all_smart_contracts_deployed().await? {
-            return Ok(());
-        }
-
         for contract in SMART_CONTRACTS {
             self.deploy_smart_contract(contract, chain_tip, bitcoin_aggregate_key, wallet)
                 .await?;
         }
 
         Ok(())
-    }
-
-    async fn all_smart_contracts_deployed(&mut self) -> Result<bool, Error> {
-        if self.context.state().sbtc_contracts_deployed() {
-            return Ok(true);
-        }
-
-        let stacks = self.context.get_stacks_client();
-        let deployer = self.context.config().signer.deployer;
-
-        for contract in SMART_CONTRACTS {
-            if !contract.is_deployed(&stacks, &deployer).await? {
-                return Ok(false);
-            }
-        }
-
-        self.context.state().set_sbtc_contracts_deployed();
-        Ok(true)
     }
 
     async fn get_signer_wallet(&self) -> Result<SignerWallet, Error> {
@@ -2529,73 +2514,66 @@ pub fn coordinator_public_key(
 }
 
 /// Determine, according to the current state of the signer and configuration,
-/// whether or not a new DKG round should be coordinated.
-pub async fn should_coordinate_dkg(
+/// whether or not a new DKG round should run.
+pub async fn should_run_dkg(
     context: &impl Context,
     bitcoin_chain_tip: &model::BitcoinBlockRef,
 ) -> Result<bool, Error> {
     let storage = context.get_storage();
     let config = context.config();
 
+    let latest_dkg_shares = storage.get_latest_non_failed_dkg_shares().await?;
+    let Some(latest_dkg_shares) = latest_dkg_shares else {
+        tracing::info!("no non-failed DKG shares exist; proceeding with DKG");
+        return Ok(true);
+    };
+
     // If the latest shares are unverified, we want to prioritize verifying them
     // instead of doing new DKG rounds. If we fail to do so they will eventually
     // be marked as failed, and we will resume DKG-ing.
-    let latest_dkg_shares = storage.get_latest_encrypted_dkg_shares().await?;
-    if latest_dkg_shares.map(|s| s.dkg_shares_status) == Some(model::DkgSharesStatus::Unverified) {
+    if latest_dkg_shares.dkg_shares_status == model::DkgSharesStatus::Unverified {
         tracing::debug!("latest shares are unverified; skipping DKG");
         return Ok(false);
     }
 
-    // If we do not have a key rotation event in the database, we will
-    // allow DKG below if we have not run DKG yet.
+    // If the registry has signer set info, we may need to run DKG based on it
     if let Some(registry_signer_info) = context.state().registry_signer_set_info() {
-        // Trigger DKG if signatures_required has changed
-        if registry_signer_info.signatures_required != config.signer.bootstrap_signatures_required {
-            tracing::info!("signatures required has changed; proceeding with DKG");
-            return Ok(true);
-        }
-
-        // Trigger DKG if signer set changes
-        if registry_signer_info.signer_set != config.signer.bootstrap_signing_set {
-            tracing::info!("signer set has changed; proceeding with DKG");
-            return Ok(true);
-        }
-    }
-
-    // Get the number of DKG shares that have been stored
-    let dkg_shares_entry_count = storage.get_encrypted_dkg_shares_count().await?;
-
-    // Get DKG configuration parameters
-    let dkg_min_bitcoin_block_height = config.signer.dkg_min_bitcoin_block_height;
-    let dkg_target_rounds = config.signer.dkg_target_rounds;
-
-    // Determine the action based on the DKG shares count and the rerun height (if configured)
-    match (
-        dkg_shares_entry_count,
-        dkg_target_rounds,
-        dkg_min_bitcoin_block_height,
-    ) {
-        (0, _, _) => {
-            tracing::info!(
-                ?dkg_min_bitcoin_block_height,
-                %dkg_target_rounds,
-                "no DKG shares exist; proceeding with DKG"
-            );
-            Ok(true)
-        }
-        (current, target, Some(dkg_min_height))
-            if current < target.get() && bitcoin_chain_tip.block_height >= dkg_min_height =>
+        // If the registry differs from the config we may need to run DKG
+        if registry_signer_info.signatures_required != config.signer.bootstrap_signatures_required
+            || registry_signer_info.signer_set != config.signer.bootstrap_signing_set
         {
-            tracing::info!(
-                ?dkg_min_bitcoin_block_height,
-                %dkg_target_rounds,
-                dkg_current_rounds = %dkg_shares_entry_count,
-                "DKG rerun height has been met and we are below the target number of rounds; proceeding with DKG"
-            );
-            Ok(true)
+            // If we don't have new shares for the config already, we need DKG
+            if latest_dkg_shares.signature_share_threshold
+                != config.signer.bootstrap_signatures_required
+                || latest_dkg_shares.signer_set_public_keys() != config.signer.bootstrap_signing_set
+            {
+                tracing::info!(
+                    "signer set config differs from registry and latest DKG shares; proceeding with DKG"
+                );
+                return Ok(true);
+            } else {
+                tracing::debug!(
+                    "signer set config differs from registry, but we already have verified shares for it; checking other conditions"
+                );
+            }
         }
-        _ => Ok(false),
     }
+
+    // If the config specifies a `dkg_min_bitcoin_block_height` then we want to
+    // run DKG if we don't have non-failed shares created after that height.
+    if let Some(dkg_min_height) = config.signer.dkg_min_bitcoin_block_height
+        && latest_dkg_shares.started_at_bitcoin_block_height < dkg_min_height
+        && bitcoin_chain_tip.block_height >= dkg_min_height
+    {
+        tracing::info!(
+            %dkg_min_height,
+            "reached DKG minimum height and no non-failed shares after that; proceeding with DKG"
+        );
+        return Ok(true);
+    }
+
+    // If we reach here then nothing suggested we want to run DKG
+    Ok(false)
 }
 
 /// Assert, given the last dkg and smart contract current aggregate key, if we
@@ -2656,27 +2634,27 @@ pub fn adjust_nonce(wallet: &SignerWallet, error: &Error) {
 
 #[cfg(test)]
 mod tests {
-    use std::num::NonZeroU32;
-
     use crate::bitcoin::MockBitcoinInteract;
-    use crate::context::Context;
+    use crate::context::Context as _;
     use crate::emily_client::MockEmilyInteract;
     use crate::error::Error;
     use crate::keys::{PrivateKey, PublicKey};
+    use crate::network::in_memory2::WanNetwork;
     use crate::stacks::api::MockStacksInteract;
     use crate::storage::memory::SharedStore;
-    use crate::storage::model::BitcoinBlockHeight;
-    use crate::storage::{DbWrite, model};
-    use crate::testing;
+    use crate::storage::model::{BitcoinBlockHeight, DkgSharesStatus};
+    use crate::storage::{DbWrite as _, model};
     use crate::testing::context::*;
     use crate::testing::transaction_coordinator::TestEnvironment;
+    use crate::testing::{self, get_rng};
 
-    use fake::{Fake, Faker};
+    use fake::{Fake as _, Faker};
     use rand::SeedableRng as _;
     use test_case::test_case;
 
     use super::assert_rotate_key_action;
-    use super::should_coordinate_dkg;
+    use super::should_run_dkg;
+    use super::*;
 
     #[allow(clippy::type_complexity)]
     fn test_environment() -> TestEnvironment<
@@ -2755,6 +2733,110 @@ mod tests {
         more_asserts::assert_gt!(start.elapsed(), delay + baseline_elapsed);
     }
 
+    /// Check that we skip processing bitcoin blocks if the chain tip in
+    /// the state doesn't match the block hash passed in.
+    #[tokio::test]
+    async fn should_skip_processing_bitcoin_blocks_if_chain_tip_has_changed() {
+        let mut rng = testing::get_rng();
+        let ctx = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .modify_settings(|settings| {
+                settings.signer.bootstrap_signatures_required = 1;
+                settings.signer.bootstrap_signing_set =
+                    std::iter::once(settings.signer.public_key()).collect();
+            })
+            .build();
+
+        let network = WanNetwork::default();
+        let net = network.connect(&ctx);
+
+        let mut ev = TxCoordinatorEventLoop {
+            network: net.spawn(),
+            context: ctx.clone(),
+            context_window: 10000,
+            private_key: ctx.config().signer.private_key,
+            signing_round_max_duration: Duration::from_secs(10),
+            bitcoin_presign_request_max_duration: Duration::from_secs(10),
+            threshold: ctx.config().signer.bootstrap_signatures_required,
+            dkg_max_duration: Duration::from_secs(10),
+            is_epoch3: true,
+        };
+
+        let chain_tip1: BitcoinBlockRef = fake::Faker.fake_with_rng(&mut rng);
+        let chain_tip2: BitcoinBlockRef = fake::Faker.fake_with_rng(&mut rng);
+
+        // There is only one signer in the signer set, us, so we should
+        // always be coordinator.
+        assert!(ev.is_coordinator(&chain_tip1.block_hash));
+        assert!(ev.is_coordinator(&chain_tip2.block_hash));
+
+        // We should bail if the chain tip is not set.
+        let error = ev.process_new_blocks(chain_tip2).await.unwrap_err();
+        assert_matches::assert_matches!(error, Error::NoChainTip);
+
+        // Now the chain tip in the state is set but it does not match the
+        // chain tip passed in, so we should bail early and return Ok(())
+        ctx.state().set_bitcoin_chain_tip(chain_tip1);
+        ev.process_new_blocks(chain_tip2).await.unwrap();
+
+        // Now the chain tip in the state matches the chain tip passed in,
+        // so we should process the blocks. However, we do not have any
+        // signer set info in the state, so we'll bail with an error.
+        let error = ev.process_new_blocks(chain_tip1).await.unwrap_err();
+        assert_matches::assert_matches!(error, Error::MissingAggregateKey(_));
+    }
+
+    /// Check that we skip processing bitcoin blocks if the chain tip in
+    /// the state doesn't match the block hash passed in.
+    #[tokio::test]
+    async fn should_skip_processing_bitcoin_blocks_if_not_coordinator() {
+        let mut rng = testing::get_rng();
+        let ctx = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .modify_settings(|settings| {
+                // If we are the coordinator then we will wait for 10
+                // seconds. However, in this test we shouldn't be the
+                // coordinator, so we should exit early. If there is a bug
+                // and we are the coordinator then we'll end up waiting for
+                // one second due to the timeout below.
+                settings.signer.bitcoin_processing_delay = Duration::from_secs(10);
+            })
+            .build();
+
+        let network = WanNetwork::default();
+        let net = network.connect(&ctx);
+
+        let mut ev = TxCoordinatorEventLoop {
+            network: net.spawn(),
+            context: ctx.clone(),
+            context_window: 10000,
+            private_key: PrivateKey::new(&mut rng),
+            signing_round_max_duration: Duration::from_secs(10),
+            bitcoin_presign_request_max_duration: Duration::from_secs(10),
+            threshold: ctx.config().signer.bootstrap_signatures_required,
+            dkg_max_duration: Duration::from_secs(10),
+            is_epoch3: true,
+        };
+
+        let chain_tip1: BitcoinBlockRef = fake::Faker.fake_with_rng(&mut rng);
+        // The given private key is randomly generated so it is unlikely to
+        // be part of the bootstrap signing set, and so unlikely to be
+        // coordinator.
+        assert!(!ev.is_coordinator(&chain_tip1.block_hash));
+
+        ctx.state().set_bitcoin_chain_tip(chain_tip1);
+
+        // `process_new_blocks` will exit early since we are not the
+        // coordinator. If we were the cooridnator then we would try to
+        // wait for 10 seconds, resulting in a timeout error.
+        tokio::time::timeout(Duration::from_secs(1), ev.process_new_blocks(chain_tip1))
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
     #[tokio::test]
     async fn should_get_signer_utxo_simple() {
         test_environment().assert_get_signer_utxo_simple().await;
@@ -2789,20 +2871,46 @@ mod tests {
             .await;
     }
 
-    #[test_case(0, None, 1, 100, true; "first DKG allowed without min height")]
-    #[test_case(0, Some(100), 1, 5, true; "first DKG allowed regardless of min height")]
-    #[test_case(1, None, 2, 100, false; "subsequent DKG not allowed without min height")]
-    #[test_case(1, Some(101), 1, 100, false; "subsequent DKG not allowed with current height lower than min height")]
-    #[test_case(1, Some(100), 1, 100, false; "subsequent DKG not allowed when target rounds reached")]
-    #[test_case(1, Some(100), 2, 100, true; "subsequent DKG allowed when target rounds not reached and min height met")]
+    #[test_case(&[], None, 100, true; "no dkg, no min")]
+    #[test_case(&[], Some(100), 99, true; "no dkg, min not reached")]
+    #[test_case(&[], Some(100), 100, true; "no dkg, min reached")]
+    #[test_case(&[], Some(100), 101, true; "no dkg, min exceeded")]
+    #[test_case(&[(DkgSharesStatus::Unverified, 15)], None, 100, false; "unverified shares, no min")]
+    #[test_case(&[(DkgSharesStatus::Verified, 15)], None, 100, false; "verified shares, no min")]
+    #[test_case(&[(DkgSharesStatus::Failed, 15)], None, 100, true; "failed shares, no min")]
+    #[test_case(&[(DkgSharesStatus::Unverified, 15)], Some(100), 99, false; "unverified shares, min not reached")]
+    #[test_case(&[(DkgSharesStatus::Verified, 15)], Some(100), 99, false; "verified shares, min not reached")]
+    #[test_case(&[(DkgSharesStatus::Failed, 15)], Some(100), 99, true; "failed shares, min not reached")]
+    #[test_case(&[(DkgSharesStatus::Unverified, 15)], Some(100), 100, false; "unverified shares, min reached")]
+    #[test_case(&[(DkgSharesStatus::Verified, 15)], Some(100), 100, true; "verified shares, min reached")]
+    #[test_case(&[(DkgSharesStatus::Failed, 15)], Some(100), 100, true; "failed shares, min reached")]
+    #[test_case(
+        &[(DkgSharesStatus::Verified, 15), (DkgSharesStatus::Unverified, 99)],
+        Some(100), 101, false; "unverified shares before min, min reached")]
+    #[test_case(
+        &[(DkgSharesStatus::Verified, 15), (DkgSharesStatus::Verified, 99)],
+        Some(100), 101, true; "verified shares before min, min reached")]
+    #[test_case(
+        &[(DkgSharesStatus::Verified, 15), (DkgSharesStatus::Failed, 99)],
+        Some(100), 101, true; "failed shares before min, min reached")]
+    #[test_case(
+        &[(DkgSharesStatus::Verified, 15), (DkgSharesStatus::Unverified, 101)],
+        Some(100), 101, false; "unverified shares after min, min reached")]
+    #[test_case(
+        &[(DkgSharesStatus::Verified, 15), (DkgSharesStatus::Verified, 101)],
+        Some(100), 101, false; "verified shares after min, min reached")]
+    #[test_case(
+        &[(DkgSharesStatus::Verified, 15), (DkgSharesStatus::Failed, 101)],
+        Some(100), 101, true; "failed shares after min, min reached")]
+    #[test_case(&[(DkgSharesStatus::Verified, 100)], Some(100), 100, false; "verified shares matching min and chain tip")]
     #[test_log::test(tokio::test)]
-    async fn test_should_coordinate_dkg(
-        dkg_rounds_current: u32,
+    async fn test_should_run_dkg(
+        dkg_shares: &[(DkgSharesStatus, u64)],
         dkg_min_bitcoin_block_height: Option<u64>,
-        dkg_target_rounds: u32,
         chain_tip_height: u64,
-        should_allow: bool,
+        expect_dkg: bool,
     ) {
+        let mut rng = get_rng();
         let chain_tip_height = chain_tip_height.into();
         let dkg_min_bitcoin_block_height =
             dkg_min_bitcoin_block_height.map(BitcoinBlockHeight::from);
@@ -2811,25 +2919,24 @@ mod tests {
             .with_mocked_clients()
             .modify_settings(|s| {
                 s.signer.dkg_min_bitcoin_block_height = dkg_min_bitcoin_block_height;
-                s.signer.dkg_target_rounds = NonZeroU32::new(dkg_target_rounds).unwrap();
             })
             .build();
 
         let storage = context.get_storage_mut();
 
-        // Write `dkg_shares` entries for the `current` number of rounds, simulating
-        // the signer having participated in that many successful DKG rounds.
-        for _ in 0..dkg_rounds_current {
-            let mut shares: model::EncryptedDkgShares = Faker.fake();
-            shares.dkg_shares_status = model::DkgSharesStatus::Verified;
-
+        for (dkg_status, dkg_height) in dkg_shares {
+            let shares = model::EncryptedDkgShares {
+                dkg_shares_status: *dkg_status,
+                started_at_bitcoin_block_height: (*dkg_height).into(),
+                ..Faker.fake_with_rng(&mut rng)
+            };
             storage.write_encrypted_dkg_shares(&shares).await.unwrap();
         }
 
         // Dummy chain tip hash which will be used to fetch the block height
         let bitcoin_chain_tip = model::BitcoinBlockRef {
             block_height: chain_tip_height,
-            block_hash: Faker.fake(),
+            block_hash: Faker.fake_with_rng(&mut rng),
         };
 
         // Write a bitcoin block at the given height, simulating the chain tip.
@@ -2837,21 +2944,21 @@ mod tests {
             .write_bitcoin_block(&model::BitcoinBlock {
                 block_hash: bitcoin_chain_tip.block_hash,
                 block_height: bitcoin_chain_tip.block_height,
-                parent_hash: Faker.fake(),
+                parent_hash: Faker.fake_with_rng(&mut rng),
             })
             .await
             .unwrap();
 
-        let aggregate_key = Faker.fake();
+        let aggregate_key = Faker.fake_with_rng(&mut rng);
         prevent_dkg_on_changed_signer_set_info(&context, aggregate_key);
 
         // Test the case
-        let result = should_coordinate_dkg(&context, &bitcoin_chain_tip)
+        let result = should_run_dkg(&context, &bitcoin_chain_tip)
             .await
             .expect("failed to check if DKG should be coordinated");
 
         // Assert the result
-        assert_eq!(result, should_allow);
+        assert_eq!(result, expect_dkg);
     }
 
     fn public_key_from_seed(seed: u64) -> PublicKey {
@@ -3068,11 +3175,11 @@ mod tests {
         // window of 10 bitcoin blocks
         match result {
             Ok((needs_verification, needs_rotate_key)) => {
-                assert_eq!(needs_verification, false);
-                assert_eq!(needs_rotate_key, false);
+                assert!(!needs_verification);
+                assert!(!needs_rotate_key);
             }
             Err(e) => {
-                panic!("expected success but got error: {:?}", e)
+                panic!("expected success but got error: {e:?}")
             }
         }
     }
