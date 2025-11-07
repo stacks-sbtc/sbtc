@@ -1054,7 +1054,6 @@ async fn update_deposits_is_forbidden_for_signer(
         assert_eq!(deposits.len(), 1);
         let deposit = deposits.first().unwrap();
         assert_eq!(deposit.status, 403);
-        println!("Deposit: {:?}", deposit);
         assert!(deposit.deposit.clone().unwrap().is_none());
         assert_eq!(deposit.error.clone().unwrap().unwrap(), "Forbidden");
 
@@ -1753,7 +1752,6 @@ async fn only_completed_deposit_can_have_fulfillment_signer(status: DepositStatu
         assert_eq!(deposits.len(), 1);
         let deposit = deposits.first().unwrap();
         assert_eq!(deposit.status, 400);
-        println!("Deposit: {:?}", deposit);
         assert!(deposit.deposit.clone().unwrap().is_none());
         let status_str: String = status
             .to_string()

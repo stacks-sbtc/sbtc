@@ -162,7 +162,7 @@ impl DepositUpdate {
         if self.status != DepositStatus::Confirmed && self.fulfillment.is_some() {
             return Err(error::ValidationError::DepositFulfillmentNotConfirmed(
                 self.status,
-                self.bitcoin_txid.clone(),
+                self.bitcoin_txid,
                 self.bitcoin_tx_output_index,
             ));
         }
