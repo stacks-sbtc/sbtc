@@ -1274,6 +1274,8 @@ async fn only_confirmed_withdrawals_can_have_fulfillment_sidecar(status: Withdra
             .await
             .expect("Received an error after making a valid get withdrawal api call.");
         assert_eq!(response.request_id, request_id);
+        assert!(matches!(response.status, WithdrawalStatus::Pending));
+        assert!(response.fulfillment.is_none());
     }
 }
 
@@ -1366,5 +1368,7 @@ async fn only_confirmed_withdrawals_can_have_fulfillment_signer(status: Withdraw
             .await
             .expect("Received an error after making a valid get withdrawal api call.");
         assert_eq!(response.request_id, request_id);
+        assert!(matches!(response.status, WithdrawalStatus::Pending));
+        assert!(response.fulfillment.is_none());
     }
 }

@@ -1773,6 +1773,8 @@ async fn only_completed_deposit_can_have_fulfillment_signer(status: DepositStatu
         .await
         .expect("Received an error after making a valid get deposit api call.");
         assert_eq!(response.bitcoin_txid, bitcoin_txid);
+        assert!(matches!(response.status, DepositStatus::Pending));
+        assert!(response.fulfillment.is_none());
     } else {
         let deposit = deposit.deposit.clone().unwrap().unwrap();
         assert_eq!(deposit.bitcoin_txid, bitcoin_txid);
@@ -1881,6 +1883,8 @@ async fn only_completed_deposit_can_have_fulfillment_sidecar(status: DepositStat
         .await
         .expect("Received an error after making a valid get deposit api call.");
         assert_eq!(response.bitcoin_txid, bitcoin_txid);
+        assert!(matches!(response.status, DepositStatus::Pending));
+        assert!(response.fulfillment.is_none());
     } else {
         let deposit = deposit.deposit.clone().unwrap().unwrap();
         assert_eq!(deposit.bitcoin_txid, bitcoin_txid);
