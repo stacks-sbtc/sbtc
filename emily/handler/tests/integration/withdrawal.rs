@@ -14,6 +14,7 @@ use testing_emily_client::models::{
 
 use crate::common::batch_set_chainstates;
 use crate::common::clean_setup;
+use crate::common::handler_withdrawal_status;
 use crate::common::new_test_chainstate;
 
 const RECIPIENT: &str = "TEST_RECIPIENT";
@@ -1260,21 +1261,12 @@ async fn only_confirmed_withdrawals_can_have_fulfillment_sidecar(status: Withdra
         // Check response correctness
         assert_eq!(withdrawal.status, 400);
         assert!(withdrawal.withdrawal.clone().unwrap().is_none());
-        let status_str: String = status
-            .to_string()
-            .chars()
-            .enumerate()
-            .map(|(i, c)| {
-                if i == 0 {
-                    c.to_uppercase().next().unwrap()
-                } else {
-                    c
-                }
-            })
-            .collect();
-        let expected_error = format!(
-            "withdrawal with fulfillment data must be confirmed, but got status {status_str} for request id: {request_id}",
-        );
+        let expected_error =
+            emily_handler::common::error::ValidationError::WithdrawalFulfillmentNotConfirmed(
+                handler_withdrawal_status(status),
+                request_id,
+            )
+            .to_string();
         assert_eq!(withdrawal.error.clone().unwrap().unwrap(), expected_error);
 
         // Check that withdrawal wasn't updated
@@ -1361,21 +1353,12 @@ async fn only_confirmed_withdrawals_can_have_fulfillment_signer(status: Withdraw
         // Check response correctness
         assert_eq!(withdrawal.status, 400);
         assert!(withdrawal.withdrawal.clone().unwrap().is_none());
-        let status_str: String = status
-            .to_string()
-            .chars()
-            .enumerate()
-            .map(|(i, c)| {
-                if i == 0 {
-                    c.to_uppercase().next().unwrap()
-                } else {
-                    c
-                }
-            })
-            .collect();
-        let expected_error = format!(
-            "withdrawal with fulfillment data must be confirmed, but got status {status_str} for request id: {request_id}",
-        );
+        let expected_error =
+            emily_handler::common::error::ValidationError::WithdrawalFulfillmentNotConfirmed(
+                handler_withdrawal_status(status),
+                request_id,
+            )
+            .to_string();
         assert_eq!(withdrawal.error.clone().unwrap().unwrap(), expected_error);
 
         // Check that withdrawal wasn't updated

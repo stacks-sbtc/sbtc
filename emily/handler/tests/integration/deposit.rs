@@ -19,7 +19,7 @@ use testing_emily_client::{
     models::{CreateDepositRequestBody, Deposit, DepositInfo, DepositParameters, DepositUpdate},
 };
 
-use crate::common::{StandardError, clean_setup};
+use crate::common::{StandardError, clean_setup, handler_deposit_status};
 
 const BLOCK_HASH: &str = "";
 const BLOCK_HEIGHT: u64 = 0;
@@ -1754,21 +1754,14 @@ async fn only_completed_deposit_can_have_fulfillment_signer(status: DepositStatu
         // Check response correctness
         assert_eq!(deposit.status, 400);
         assert!(deposit.deposit.clone().unwrap().is_none());
-        let status_str: String = status
-            .to_string()
-            .chars()
-            .enumerate()
-            .map(|(i, c)| {
-                if i == 0 {
-                    c.to_uppercase().next().unwrap()
-                } else {
-                    c
-                }
-            })
-            .collect();
-        let expected_error = format!(
-            "deposit with fulfillment data must be confirmed, but got status {status_str} for txid: {bitcoin_txid}, vout: {bitcoin_tx_output_index}"
-        );
+
+        let expected_error =
+            emily_handler::common::error::ValidationError::DepositFulfillmentNotConfirmed(
+                handler_deposit_status(status),
+                bitcoin_txid.clone(),
+                bitcoin_tx_output_index,
+            )
+            .to_string();
         assert_eq!(deposit.error.clone().unwrap().unwrap(), expected_error);
 
         // Check that deposit wasn't updated
@@ -1870,21 +1863,13 @@ async fn only_completed_deposit_can_have_fulfillment_sidecar(status: DepositStat
 
         assert_eq!(deposit.status, 400);
         assert!(deposit.deposit.clone().unwrap().is_none());
-        let status_str: String = status
-            .to_string()
-            .chars()
-            .enumerate()
-            .map(|(i, c)| {
-                if i == 0 {
-                    c.to_uppercase().next().unwrap()
-                } else {
-                    c
-                }
-            })
-            .collect();
-        let expected_error = format!(
-            "deposit with fulfillment data must be confirmed, but got status {status_str} for txid: {bitcoin_txid}, vout: {bitcoin_tx_output_index}"
-        );
+        let expected_error =
+            emily_handler::common::error::ValidationError::DepositFulfillmentNotConfirmed(
+                handler_deposit_status(status),
+                bitcoin_txid.clone(),
+                bitcoin_tx_output_index,
+            )
+            .to_string();
         assert_eq!(deposit.error.clone().unwrap().unwrap(), expected_error);
 
         // Check that deposit wasn't updated
