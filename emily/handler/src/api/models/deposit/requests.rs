@@ -247,8 +247,8 @@ impl UpdateDepositsRequestBody {
                     ),
                 ) => {
                     tracing::warn!(
-                        %txid,
-                        bitcoin_tx_output_index = outindex,
+                        %bitcoin_txid,
+                        bitcoin_tx_output_index,
                         ?status,
                         "failed to update deposit: fulfillment is only allowed for confirmed deposits.",
                     );
