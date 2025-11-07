@@ -1245,26 +1245,19 @@ async fn only_confirmed_withdrawals_can_have_fulfillment_sidecar(status: Withdra
     )
     .await;
 
+    assert!(response.is_ok());
+    let response = response.unwrap();
+    let withdrawals = response.withdrawals;
+    assert_eq!(withdrawals.len(), 1);
+    let withdrawal = withdrawals.first().unwrap();
+
     if status == WithdrawalStatus::Confirmed {
-        assert!(response.is_ok());
-        let response = response.unwrap();
-        let withdrawal = response
-            .withdrawals
-            .first()
-            .expect("No withdrawal in response")
-            .withdrawal
-            .clone()
-            .unwrap()
-            .unwrap();
+        let withdrawal = withdrawal.withdrawal.clone().unwrap().unwrap();
         assert_eq!(withdrawal.request_id, request_id);
         assert_eq!(withdrawal.status, status);
         assert_eq!(withdrawal.fulfillment, fulfillment);
     } else {
         // Check response correctness
-        let response = response.expect("Batch update should return 200 OK");
-        let withdrawals = response.withdrawals;
-        assert_eq!(withdrawals.len(), 1);
-        let withdrawal = withdrawals.first().unwrap();
         assert_eq!(withdrawal.status, 400);
         assert!(withdrawal.withdrawal.clone().unwrap().is_none());
         let status_str: String = status
@@ -1354,26 +1347,18 @@ async fn only_confirmed_withdrawals_can_have_fulfillment_signer(status: Withdraw
     )
     .await;
 
+    assert!(response.is_ok());
+    let response = response.unwrap();
+    assert_eq!(response.withdrawals.len(), 1);
+    let withdrawal = response.withdrawals.first().unwrap();
+
     if status == WithdrawalStatus::Confirmed {
-        assert!(response.is_ok());
-        let response = response.unwrap();
-        let withdrawal = response
-            .withdrawals
-            .first()
-            .expect("No withdrawal in response")
-            .withdrawal
-            .clone()
-            .unwrap()
-            .unwrap();
+        let withdrawal = withdrawal.withdrawal.clone().unwrap().unwrap();
         assert_eq!(withdrawal.request_id, request_id);
         assert_eq!(withdrawal.status, status);
         assert_eq!(withdrawal.fulfillment, fulfillment);
     } else {
         // Check response correctness
-        let response = response.expect("Batch update should return 200 OK");
-        let withdrawals = response.withdrawals;
-        assert_eq!(withdrawals.len(), 1);
-        let withdrawal = withdrawals.first().unwrap();
         assert_eq!(withdrawal.status, 400);
         assert!(withdrawal.withdrawal.clone().unwrap().is_none());
         let status_str: String = status
