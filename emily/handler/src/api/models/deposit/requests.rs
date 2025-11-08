@@ -250,7 +250,7 @@ impl UpdateDepositsRequestBody {
                         %bitcoin_txid,
                         bitcoin_tx_output_index,
                         ?status,
-                        "failed to update deposit: fulfillment is only allowed for confirmed deposits.",
+                        "failed to update deposit: fulfillment data is only allowed for confirmed deposits.",
                     );
                     deposits.push((index, Err(error.clone())));
                 }
