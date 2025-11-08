@@ -1,4 +1,4 @@
-# Variables.
+# Variables
 # ------------------------------------------------------------------------------
 x-common-vars:
   - &BTC_ADDR miEJtNKa3ASpA19v5ZhvbKTEieYjLpzCYT
@@ -29,7 +29,7 @@ x-common-vars:
   - &REWARD_RECIPIENT ${REWARD_RECIPIENT:-STQM73RQC4EX0A07KWG1J5ECZJYBZS4SJ4ERC6WN} # priv: 6ad9cadb42d4edbfbe0c5bfb3b8a4125ddced021c4174f829b714ccbf527f02001
   - &EXIT_FROM_MONITOR 1 # set to "1" to automatically shut down via monitor.ts
 
-# Templates.
+# Templates
 # ------------------------------------------------------------------------------
 x-stacks-blockchain: &stacks-blockchain
   image: blockstack/stacks-core:3.3.0.0.1@sha256:b7fd10e489c81da12d8e1b956dec5d35bf8fd98874a6d32127bdee19cad0a235
