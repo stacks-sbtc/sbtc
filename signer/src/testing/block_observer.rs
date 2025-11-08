@@ -353,6 +353,9 @@ impl StacksInteract for TestHarness {
             .cloned()
             .ok_or(Error::MissingBlock)
     }
+    async fn check_pre_nakamoto_block(&self, _: &StacksBlockId) -> Result<(), Error> {
+        unimplemented!()
+    }
     async fn get_tenure(&self, block_id: &StacksBlockId) -> Result<TenureBlocks, Error> {
         let (stx_block_id, stx_block, btc_block_id) = self
             .stacks_blocks

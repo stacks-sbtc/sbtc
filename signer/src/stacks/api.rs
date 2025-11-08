@@ -248,6 +248,14 @@ pub trait StacksInteract: Send + Sync {
         &self,
         block_id: &StacksBlockId,
     ) -> impl Future<Output = Result<NakamotoBlock, Error>> + Send;
+
+    /// Returns `Ok` if the given block ID is a pre-Nakamoto block, otherwise
+    /// (the block doesn't exist or is a Nakamoto one) `Err` is returned.
+    fn check_pre_nakamoto_block(
+        &self,
+        block_id: &StacksBlockId,
+    ) -> impl Future<Output = Result<(), Error>> + Send;
+
     /// Fetch all Nakamoto ancestor blocks within the same tenure as the
     /// given block ID from a Stacks node.
     ///
@@ -1128,6 +1136,32 @@ impl StacksClient {
             .map_err(|err| Error::DecodeNakamotoBlock(err, block_id.clone()))
     }
 
+    /// Returns `Ok` if the given block ID is a pre-Nakamoto block, otherwise
+    /// (the block doesn't exist or is a Nakamoto one) `Err` is returned.
+    #[tracing::instrument(skip(self))]
+    async fn check_pre_nakamoto_block(&self, block_id: &StacksBlockId) -> Result<(), Error> {
+        let path = format!("/v2/blocks/{}", block_id.to_hex());
+        let url = self
+            .endpoint
+            .join(&path)
+            .map_err(|err| Error::PathJoin(err, self.endpoint.clone(), Cow::Owned(path)))?;
+
+        tracing::debug!("making request to the stacks node for the raw pre-nakamoto block");
+
+        let response = self
+            .client
+            .get(url)
+            .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await
+            .map_err(Error::StacksNodeRequest)?;
+
+        response
+            .error_for_status()
+            .map_err(Error::StacksNodeResponse)
+            .map(|_| ())
+    }
+
     /// Fetch all Nakamoto ancestor blocks within the same tenure as the
     /// given block ID from a Stacks node.
     ///
@@ -1404,8 +1438,32 @@ where
             tracing::debug!("parent block known in the database");
             break;
         }
-        // There are more blocks to fetch, so let's get them.
-        let tenure_blocks = stacks.get_tenure(&header.parent_block_id).await?;
+        // There are more blocks to fetch, so let's get them. This assumes
+        // optimistically that the parent is still a Nakamoto block (and so has
+        // a tenure); if that's not the case, we get an `Err` here.
+        let tenure_blocks_result = stacks.get_tenure(&header.parent_block_id).await;
+        let tenure_blocks = match tenure_blocks_result {
+            Ok(tenure_blocks) => tenure_blocks,
+            Err(error) => {
+                // A 404 could mean that we reached the Nakamoto start height
+                // and we tried fetching a tenure for a pre-Nakamoto block
+                if let Error::StacksNodeResponse(ref req_error) = error
+                    && req_error.status() == Some(reqwest::StatusCode::NOT_FOUND)
+                    && stacks
+                        .check_pre_nakamoto_block(&header.parent_block_id)
+                        .await
+                        .is_ok()
+                {
+                    tracing::debug!(
+                        %nakamoto_start_height,
+                        last_chain_length = %tenure.anchor_block_height,
+                        "all Nakamoto blocks fetched; stopping"
+                    );
+                    break;
+                }
+                return Err(error);
+            }
+        };
         headers.push(tenure_blocks.into());
     }
 
@@ -1627,6 +1685,10 @@ impl StacksInteract for StacksClient {
 
     async fn get_block(&self, block_id: &StacksBlockId) -> Result<NakamotoBlock, Error> {
         self.get_block(block_id).await
+    }
+
+    async fn check_pre_nakamoto_block(&self, block_id: &StacksBlockId) -> Result<(), Error> {
+        self.check_pre_nakamoto_block(block_id).await
     }
 
     async fn get_tenure(&self, block_id: &StacksBlockId) -> Result<TenureBlocks, Error> {
@@ -1855,6 +1917,11 @@ impl StacksInteract for ApiFallbackClient<StacksClient> {
         self.exec(|client, _| client.get_block(block_id)).await
     }
 
+    async fn check_pre_nakamoto_block(&self, block_id: &StacksBlockId) -> Result<(), Error> {
+        self.exec(|client, _| client.check_pre_nakamoto_block(block_id))
+            .await
+    }
+
     async fn get_tenure(&self, block_id: &StacksBlockId) -> Result<TenureBlocks, Error> {
         self.exec(|client, _| client.get_tenure(block_id)).await
     }
@@ -1950,6 +2017,7 @@ mod tests {
     use test_log::test;
 
     use super::*;
+    use std::collections::HashSet;
     use std::io::Read as _;
 
     fn generate_wallet(num_keys: u16, signatures_required: u16) -> SignerWallet {
@@ -1981,6 +2049,66 @@ mod tests {
             .into_iter()
             .flat_map(TenureBlockHeaders::into_iter)
             .collect::<Vec<_>>();
+        db.write_stacks_block_headers(headers).await.unwrap();
+
+        crate::testing::storage::drop_db(db).await;
+    }
+
+    #[ignore = "This is an integration test that uses the real testnet"]
+    #[test(tokio::test)]
+    async fn fetch_unknown_ancestors_works_in_testnet() {
+        let db = crate::testing::storage::new_test_database().await;
+
+        let client =
+            StacksClient::new(Url::parse("https://api.testnet.hiro.so/").unwrap()).unwrap();
+
+        // Testnet currently has the following structure:
+        //
+        // BTC 1865 <- Stacks 319
+        // BTC 1900 -- nakamoto_start_height
+        // BTC 1901 <- Stacks 320, ..., 744
+        // BTC 1998 <- Stacks 745, ..., 750, ...
+
+        // This is the block id for block 319 (pre-Nakamoto) on testnet
+        let pre_nakamoto_block_id = StacksBlockId::from_hex(
+            "0d7cb8c66040d87fc17f39e1b5c36bc7fb5c4d97cc611a168e2cca186848be1e",
+        )
+        .unwrap();
+        assert!(
+            client
+                .check_pre_nakamoto_block(&pre_nakamoto_block_id)
+                .await
+                .is_ok()
+        );
+
+        // This is the block id for block 750 on testnet
+        let nakamoto_block_id = StacksBlockId::from_hex(
+            "ad133146e79ff5eccf9eecc51d9eea35947031c5d91d61afc3a1df63d6c198e7",
+        )
+        .unwrap();
+        assert!(
+            client
+                .check_pre_nakamoto_block(&nakamoto_block_id)
+                .await
+                .is_err()
+        );
+
+        let tenures = fetch_unknown_ancestors(&client, &db, &nakamoto_block_id).await;
+
+        let blocks = tenures.unwrap();
+
+        let headers = blocks
+            .into_iter()
+            .flat_map(TenureBlockHeaders::into_iter)
+            .collect::<Vec<_>>();
+
+        let blocks = headers
+            .iter()
+            .map(|b| *b.block_height)
+            .collect::<HashSet<_>>();
+        let expected = (320..=750).collect();
+        assert_eq!(blocks, expected);
+
         db.write_stacks_block_headers(headers).await.unwrap();
 
         crate::testing::storage::drop_db(db).await;
