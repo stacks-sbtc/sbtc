@@ -78,8 +78,8 @@ pub enum ValidationError {
     )]
     WithdrawalFulfillmentNotConfirmed(WithdrawalStatus, u64),
 
-    /// The deposit have fulfillment data, but is not confirmed. Only confirmed deposits can have
-    /// fulfillment data.
+    /// A deposit update had fulfillment data where the status was not `Confirmed`.
+    /// Only Confirmed deposits can have fulfillment data.
     #[error(
         "deposit with fulfillment data must be confirmed, but got status {0:?} for txid: {1}, vout: {2}"
     )]
