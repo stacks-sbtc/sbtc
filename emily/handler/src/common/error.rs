@@ -71,8 +71,8 @@ pub enum ValidationError {
     #[error("missing replaced_by_tx for RBF deposit with txid: {0}, vout: {1}")]
     DepositMissingReplacementTx(String, u32),
 
-    /// The withdrawal have fulfillment data, but is not confirmed. Only confirmed withdrawals can have
-    /// fulfillment data.
+    /// A withdrawal update had fulfillment data where the status was not `Confirmed`.
+    /// Only confirmed withdrawals can have fulfillment data.
     #[error(
         "withdrawal with fulfillment data must be confirmed, but got status {0:?} for request id: {1}"
     )]
