@@ -155,7 +155,7 @@ impl UpdateWithdrawalsRequestBody {
                     tracing::warn!(
                         request_id,
                         ?status,
-                        "failed to update withdrawal: withdrawal is not confirmed, but has a fulfillment."
+                        "failed to update withdrawal: fulfillment data is only allowed for confirmed withdrawals."
                     );
                     withdrawals.push((index, Err(error.clone())));
                 }
