@@ -5,15 +5,11 @@ use std::{ops::Deref, sync::Arc};
 
 use bitcoin::{Amount, Txid};
 use bitcoincore_rpc_json::GetTxOutResult;
-use blockstack_lib::chainstate::burn::ConsensusHash;
 use blockstack_lib::{
     chainstate::{nakamoto::NakamotoBlock, stacks::StacksTransaction},
-    net::api::{
-        getcontractsrc::ContractSrcResponse, getsortition::SortitionInfo,
-        gettenureinfo::RPCGetTenureInfo,
-    },
+    net::api::{getcontractsrc::ContractSrcResponse, getsortition::SortitionInfo},
 };
-use clarity::types::chainstate::{StacksAddress, StacksBlockId};
+use clarity::types::chainstate::StacksAddress;
 use emily_client::models::DepositStatus;
 use tokio::sync::{Mutex, broadcast};
 use tokio::time::error::Elapsed;
@@ -23,12 +19,14 @@ use crate::bitcoin::rpc::{BitcoinBlockHeader, BitcoinBlockInfo};
 use crate::context::SbtcLimits;
 use crate::keys::PrivateKey;
 use crate::stacks::api::GetNodeInfoResponse;
+use crate::stacks::api::GetTenureInfoResponse;
 use crate::stacks::api::SignerSetInfo;
 use crate::stacks::api::StacksEpochStatus;
-use crate::stacks::api::TenureBlocks;
+use crate::stacks::api::TenureBlockHeaders;
 use crate::stacks::wallet::SignerWallet;
 use crate::storage::Transactable;
-use crate::storage::model::BitcoinTxId;
+use crate::storage::model::ConsensusHash;
+use crate::storage::model::{BitcoinTxId, StacksBlockHash};
 use crate::{
     bitcoin::{
         BitcoinInteract, MockBitcoinInteract, rpc::GetTxResponse, utxo::UnsignedTransaction,
@@ -484,11 +482,11 @@ impl StacksInteract for WrappedMockStacksInteract {
         self.inner.lock().await.submit_tx(tx).await
     }
 
-    async fn get_block(&self, block_id: &StacksBlockId) -> Result<NakamotoBlock, Error> {
+    async fn get_block(&self, block_id: &StacksBlockHash) -> Result<NakamotoBlock, Error> {
         self.inner.lock().await.get_block(block_id).await
     }
 
-    async fn check_pre_nakamoto_block(&self, block_id: &StacksBlockId) -> Result<(), Error> {
+    async fn check_pre_nakamoto_block(&self, block_id: &StacksBlockHash) -> Result<(), Error> {
         self.inner
             .lock()
             .await
@@ -496,11 +494,14 @@ impl StacksInteract for WrappedMockStacksInteract {
             .await
     }
 
-    async fn get_tenure(&self, block_id: &StacksBlockId) -> Result<TenureBlocks, Error> {
-        self.inner.lock().await.get_tenure(block_id).await
+    async fn get_tenure_headers(
+        &self,
+        block_id: &StacksBlockHash,
+    ) -> Result<TenureBlockHeaders, Error> {
+        self.inner.lock().await.get_tenure_headers(block_id).await
     }
 
-    async fn get_tenure_info(&self) -> Result<RPCGetTenureInfo, Error> {
+    async fn get_tenure_info(&self) -> Result<GetTenureInfoResponse, Error> {
         self.inner.lock().await.get_tenure_info().await
     }
 

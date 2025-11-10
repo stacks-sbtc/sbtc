@@ -1,7 +1,6 @@
 use std::collections::BTreeSet;
 
 use bitcoin::OutPoint;
-use clarity::types::chainstate::StacksBlockId;
 
 use crate::{
     DEPOSIT_LOCKTIME_BLOCK_BUFFER, MAX_MEMPOOL_PACKAGE_TX_COUNT, MAX_REORG_BLOCK_COUNT,
@@ -17,7 +16,7 @@ use crate::{
     keys::{PublicKey, PublicKeyXOnly},
     storage::{
         DbRead,
-        model::{self, BitcoinBlockHeight, StacksBlockHeight},
+        model::{self, BitcoinBlockHeight, StacksBlockHash, StacksBlockHeight},
     },
 };
 
@@ -1656,7 +1655,7 @@ impl PgRead {
 
     async fn stacks_block_exists<'e, E>(
         executor: &'e mut E,
-        block_id: &StacksBlockId,
+        block_id: &StacksBlockHash,
     ) -> Result<bool, Error>
     where
         &'e mut E: sqlx::PgExecutor<'e>,
@@ -1667,7 +1666,7 @@ impl PgRead {
             FROM sbtc_signer.stacks_blocks
             WHERE block_hash = $1;"#,
         )
-        .bind(block_id.0)
+        .bind(block_id)
         .fetch_optional(executor)
         .await
         .map(|row| row.is_some())
@@ -2804,7 +2803,7 @@ impl DbRead for PgStore {
             .await
     }
 
-    async fn stacks_block_exists(&self, block_id: &StacksBlockId) -> Result<bool, Error> {
+    async fn stacks_block_exists(&self, block_id: &StacksBlockHash) -> Result<bool, Error> {
         PgRead::stacks_block_exists(self.get_connection().await?.as_mut(), block_id).await
     }
 
@@ -3234,7 +3233,7 @@ impl DbRead for PgTransaction<'_> {
         PgRead::get_bitcoin_blocks_with_transaction(tx.as_mut(), txid).await
     }
 
-    async fn stacks_block_exists(&self, block_id: &StacksBlockId) -> Result<bool, Error> {
+    async fn stacks_block_exists(&self, block_id: &StacksBlockHash) -> Result<bool, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::stacks_block_exists(tx.as_mut(), block_id).await
     }

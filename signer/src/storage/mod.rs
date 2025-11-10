@@ -16,7 +16,6 @@ pub mod util;
 use std::collections::BTreeSet;
 use std::future::Future;
 
-use blockstack_lib::types::chainstate::StacksBlockId;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
 
@@ -28,6 +27,7 @@ use crate::keys::PublicKey;
 use crate::keys::PublicKeyXOnly;
 use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::CompletedDepositEvent;
+use crate::storage::model::StacksBlockHash;
 use crate::storage::model::WithdrawalAcceptEvent;
 use crate::storage::model::WithdrawalRejectEvent;
 
@@ -286,7 +286,7 @@ pub trait DbRead {
     /// Returns whether the given block ID is stored.
     fn stacks_block_exists(
         &self,
-        block_id: &StacksBlockId,
+        block_id: &StacksBlockHash,
     ) -> impl Future<Output = Result<bool, Error>> + Send;
 
     /// Return the applicable DKG shares for the
