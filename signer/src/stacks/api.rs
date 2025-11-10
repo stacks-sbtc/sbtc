@@ -3,6 +3,7 @@
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::future::Future;
+use std::ops::RangeInclusive;
 use std::sync::LazyLock;
 use std::time::Duration;
 use std::time::Instant;
@@ -43,6 +44,7 @@ use crate::error::Error;
 use crate::keys::PublicKey;
 use crate::metrics::Metrics;
 use crate::storage::DbRead;
+use crate::storage::DbWrite;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::ConsensusHash;
@@ -1378,24 +1380,26 @@ impl StacksClient {
 }
 
 /// Fetch all Nakamoto block headers that are not already stored in the
-/// datastore, starting at the given [`StacksBlockId`].
-///
-/// This function returns the headers sorted in ascending order. So entries
-/// at lower indices correspond to Stacks block with lower block height.
-pub async fn fetch_unknown_ancestors<S, D>(
+/// datastore, starting at the given [`StacksBlockHash`] and store them in
+/// the database.
+pub async fn update_db_with_unknown_ancestors<S, D>(
     stacks: &S,
     db: &D,
     block_id: &StacksBlockHash,
-) -> Result<Vec<TenureBlockHeaders>, Error>
+) -> Result<RangeInclusive<u64>, Error>
 where
     S: StacksInteract,
-    D: DbRead + Send + Sync,
+    D: DbRead + DbWrite + Send + Sync,
 {
-    let starting_tenure = stacks.get_tenure_headers(block_id).await?;
-    let mut headers: Vec<TenureBlockHeaders> = vec![starting_tenure];
+    let mut tenure = stacks.get_tenure_headers(block_id).await?;
+    let start_height = tenure.headers().iter().map(|h| *h.block_height).max().unwrap_or(0);
     let nakamoto_start_height = stacks.get_epoch_status().await?.nakamoto_start_height();
+    
+    db.truncate_stacks_blocks_temp_table().await?;
 
-    while let Some(tenure) = headers.last() {
+    loop {
+        tracing::debug!("writing tenure headers to the database");
+        db.write_stacks_blocks_temp(&tenure).await?;
         // We won't get anymore Nakamoto blocks before this point, so
         // time to stop.
         if tenure.anchor_block_height <= nakamoto_start_height {
@@ -1442,11 +1446,15 @@ where
                 return Err(error);
             }
         };
-        headers.push(tenure_headers);
+        tenure = tenure_headers;
     }
 
-    headers.reverse();
-    Ok(headers)
+    let min_height = tenure.headers().iter().map(|h| *h.block_height).min().unwrap_or(0);
+
+    db.copy_from_stacks_blocks_temp_table().await?;
+    db.truncate_stacks_blocks_temp_table().await?;
+
+    Ok(std::ops::RangeInclusive::new(min_height, start_height))
 }
 
 /// A deserializer for Clarity's [`Value`] type that deserializes a hex-encoded
@@ -1986,7 +1994,6 @@ mod tests {
     use crate::config::NetworkKind;
     use crate::keys::{PrivateKey, PublicKey};
     use crate::stacks::wallet::get_full_tx_size;
-    use crate::storage::DbWrite as _;
     use crate::storage::memory::Store;
 
     use assert_matches::assert_matches;
@@ -2002,7 +2009,6 @@ mod tests {
     use test_log::test;
 
     use super::*;
-    use std::collections::HashSet;
     use std::io::Read as _;
 
     fn generate_wallet(num_keys: u16, signatures_required: u16) -> SignerWallet {
@@ -2027,14 +2033,9 @@ mod tests {
         let client: ApiFallbackClient<StacksClient> = TryFrom::try_from(&settings).unwrap();
 
         let info = client.get_tenure_info().await.unwrap();
-        let tenures = fetch_unknown_ancestors(&client, &db, &info.tip_block_id).await;
+        let tenures = update_db_with_unknown_ancestors(&client, &db, &info.tip_block_id).await;
 
-        let blocks = tenures.unwrap();
-        let headers = blocks
-            .into_iter()
-            .flat_map(TenureBlockHeaders::into_iter)
-            .collect::<Vec<_>>();
-        db.write_stacks_block_headers(headers).await.unwrap();
+        assert!(tenures.is_ok());
 
         crate::testing::storage::drop_db(db).await;
     }
@@ -2080,23 +2081,13 @@ mod tests {
                 .is_err()
         );
 
-        let tenures = fetch_unknown_ancestors(&client, &db, &nakamoto_block_id).await;
+        let tenures = update_db_with_unknown_ancestors(&client, &db, &nakamoto_block_id).await;
 
-        let blocks = tenures.unwrap();
+        let block_height_range = tenures.unwrap();
 
-        let headers = blocks
-            .into_iter()
-            .flat_map(TenureBlockHeaders::into_iter)
-            .collect::<Vec<_>>();
 
-        let blocks = headers
-            .iter()
-            .map(|b| *b.block_height)
-            .collect::<HashSet<_>>();
-        let expected = (320..=750).collect();
-        assert_eq!(blocks, expected);
-
-        db.write_stacks_block_headers(headers).await.unwrap();
+        let expected = RangeInclusive::new(320, 750);
+        assert_eq!(block_height_range, expected);
 
         crate::testing::storage::drop_db(db).await;
     }
@@ -2941,10 +2932,9 @@ mod tests {
         let storage = Store::new_shared();
 
         let info = client.get_tenure_info().await.unwrap();
-        let blocks = fetch_unknown_ancestors(&client, &storage, &info.tenure_start_block_id)
+        update_db_with_unknown_ancestors(&client, &storage, &info.tenure_start_block_id)
             .await
             .unwrap();
-        assert!(!blocks.is_empty());
     }
 
     #[test_case("0x1A3B5C7D9E", 112665066910; "uppercase-112665066910")]

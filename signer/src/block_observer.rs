@@ -36,7 +36,6 @@ use crate::metrics::BITCOIN_BLOCKCHAIN;
 use crate::metrics::Metrics;
 use crate::stacks::api::SignerSetInfo;
 use crate::stacks::api::StacksInteract as _;
-use crate::stacks::api::TenureBlockHeaders;
 use crate::stacks::contracts::SMART_CONTRACTS;
 use crate::storage::DbRead;
 use crate::storage::DbWrite;
@@ -426,19 +425,12 @@ impl<C: Context, B> BlockObserver<C, B> {
         let tenure_info = stacks_client.get_tenure_info().await?;
 
         tracing::debug!("fetching unknown ancestral blocks from stacks-core");
-        let stacks_block_headers = crate::stacks::api::fetch_unknown_ancestors(
+        crate::stacks::api::update_db_with_unknown_ancestors(
             &stacks_client,
             &db,
             &tenure_info.tip_block_id,
         )
         .await?;
-
-        let headers = stacks_block_headers
-            .into_iter()
-            .flat_map(TenureBlockHeaders::into_iter)
-            .collect::<Vec<_>>();
-
-        db.write_stacks_block_headers(headers).await?;
 
         tracing::debug!("finished processing stacks block");
         Ok(())
