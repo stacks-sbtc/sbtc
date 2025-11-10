@@ -1,5 +1,5 @@
 #[derive(Debug, thiserror::Error)]
-pub enum Error {
+pub enum DockerTestingError {
     #[error(transparent)]
     TestContainers(#[from] testcontainers::TestcontainersError),
 
@@ -7,7 +7,7 @@ pub enum Error {
     UrlParse(#[from] url::ParseError),
 
     #[error(transparent)]
-    BitcoinCoreRpc(#[from] bitcoincore_rpc::Error),
+    ImageSpecific(#[from] Box<dyn std::error::Error + Send + Sync>),
 
     #[error("connectivity checks did not succeed within the allotted time")]
     StartupConnectivityTimeout,

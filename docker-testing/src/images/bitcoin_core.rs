@@ -11,7 +11,7 @@ use testcontainers::core::WaitFor;
 use testcontainers::runners::AsyncRunner;
 use url::Url;
 
-use crate::error::Error;
+use crate::error::DockerTestingError;
 use crate::logging;
 
 use super::container_name;
@@ -37,7 +37,7 @@ impl Defaults {
 /// This struct is created using a [`BitcoinCoreBuilder`].
 pub struct BitcoinCoreConfig {
     pub version: String,
-    pub cmd: Vec<String>,
+    pub extra_cmd_args: Vec<String>,
     pub startup_timeout: Duration,
     pub rpc_username: String,
     pub rpc_password: String,
@@ -45,27 +45,11 @@ pub struct BitcoinCoreConfig {
     pub network: Network,
 }
 
-/// A builder for creating a `BitcoinCoreConfig`.
-#[derive(Default)]
-pub struct BitcoinCoreBuilder {
-    config: BitcoinCoreConfig,
-}
-
 impl Default for BitcoinCoreConfig {
     fn default() -> Self {
         Self {
             version: Defaults::BITCOIN_CORE_VERSION.to_string(),
-            cmd: vec![
-                "-chain=regtest".into(),
-                "-server".into(),
-                "-rpcbind=0.0.0.0".into(),
-                format!("-rpcuser={}", Defaults::RPC_USERNAME),
-                format!("-rpcpassword={}", Defaults::RPC_PASSWORD),
-                "-rpcallowip=0.0.0.0/0".into(),
-                "-rpcallowip=::/0".into(),
-                "-txindex".into(),
-                "-fallbackfee=0.00001".into(),
-            ],
+            extra_cmd_args: vec![],
             startup_timeout: Defaults::STARTUP_TIMEOUT,
             rpc_username: Defaults::RPC_USERNAME.to_string(),
             rpc_password: Defaults::RPC_PASSWORD.to_string(),
@@ -73,6 +57,12 @@ impl Default for BitcoinCoreConfig {
             network: Defaults::NETWORK,
         }
     }
+}
+
+/// A builder for creating a `BitcoinCoreConfig`.
+#[derive(Default)]
+pub struct BitcoinCoreBuilder {
+    config: BitcoinCoreConfig,
 }
 
 impl BitcoinCoreBuilder {
@@ -83,12 +73,12 @@ impl BitcoinCoreBuilder {
     /// Docker image repository, meaning that the image author must also have
     /// published a tag with the specified version upon new Bitcoin Core
     /// releases.
-    pub fn using_version(mut self, version: impl Into<String>) -> Result<Self, Error> {
+    pub fn using_version(mut self, version: impl Into<String>) -> Result<Self, BitcoinCoreError> {
         let version = version.into();
         // Validate that the version string is in the expected format.
         let parts: Vec<_> = version.split('.').collect();
         if parts.len() != 2 || parts.iter().any(|&p| p.is_empty() || p.parse::<u32>().is_err()) {
-            return Err(Error::InvalidVersionFormat(version));
+            return Err(BitcoinCoreError::InvalidVersionFormat(version));
         }
 
         self.config.version = version.into();
@@ -96,8 +86,8 @@ impl BitcoinCoreBuilder {
     }
 
     /// Adds a command-line argument to the bitcoind process.
-    pub fn with_cmd_arg(mut self, arg: impl Into<String>) -> Self {
-        self.config.cmd.push(arg.into());
+    pub fn add_cmd_arg<Arg: Into<String>>(mut self, arg: Arg) -> Self {
+        self.config.extra_cmd_args.push(arg.into());
         self
     }
 
@@ -122,7 +112,12 @@ impl BitcoinCoreBuilder {
         self
     }
 
-    pub fn start(self) -> impl Future<Output = Result<BitcoinCore, Error>> {
+    pub fn using_network(mut self, network: Network) -> Self {
+        self.config.network = network;
+        self
+    }
+
+    pub fn start(self) -> impl Future<Output = Result<BitcoinCore, DockerTestingError>> {
         let config = self.config;
         async move {
             BitcoinCore::start(
@@ -133,7 +128,7 @@ impl BitcoinCoreBuilder {
         }
     }
 
-    pub fn start_with_state<S>(self, state: S) -> impl Future<Output = Result<BitcoinCore<S>, Error>> {
+    pub fn start_with_state<State>(self, state: State) -> impl Future<Output = Result<BitcoinCore<State>, DockerTestingError>> {
         let config = self.config;
         async move {
             BitcoinCore::start(
@@ -145,11 +140,11 @@ impl BitcoinCoreBuilder {
     }
 }
 
-pub struct BitcoinCore<S = ()> {
+pub struct BitcoinCore<State = ()> {
     container: ContainerAsync<GenericImage>,
     rpc_endpoint: Url,
     rpc_client: bitcoincore_rpc::Client,
-    state: S,
+    state: State,
 }
 
 impl BitcoinCore<()> {
@@ -158,16 +153,27 @@ impl BitcoinCore<()> {
         BitcoinCoreBuilder::default()
     }
 
-    pub async fn start_with_defaults() -> Result<BitcoinCore<()>, Error> {
+    /// Starts a new `BitcoinCore` container with default configuration.
+    pub async fn start_with_defaults() -> Result<BitcoinCore<()>, DockerTestingError> {
         Self::start(BitcoinCoreConfig::default(), ()).await
     }
 }
 
-impl<S> BitcoinCore<S> {
-    async fn start(config: BitcoinCoreConfig, state: S) -> Result<BitcoinCore<S>, Error> {
+impl<State> BitcoinCore<State> {
+    async fn start<E: Into<DockerTestingError>>(config: BitcoinCoreConfig, state: State) -> Result<BitcoinCore<State>, E> {
         let wait_strategy = WaitFor::message_on_stdout("dnsseed thread exit");
-        let cmd: Vec<String> = vec![
-            "-chain=regtest".into(),
+
+        let network = match config.network {
+            Network::Bitcoin => "mainnet",
+            Network::Testnet => "testnet",
+            Network::Regtest => "regtest",
+            Network::Signet => "signet",
+            Network::Testnet4 => "testnet4",
+            _ => "regtest", // Default to regtest for unknown networks
+        };
+
+        let mut cmd: Vec<String> = vec![
+            format!("-chain={network}"),
             "-server".into(),
             "-rpcbind=0.0.0.0".into(),
             format!("-rpcuser={}", config.rpc_username),
@@ -175,14 +181,13 @@ impl<S> BitcoinCore<S> {
             "-rpcallowip=0.0.0.0/0".into(),
             "-rpcallowip=::/0".into(),
             "-txindex".into(),
-            "-zmqpubhashblock=tcp://*:28332".into(),
-            "-zmqpubrawblock=tcp://*:28332".into(),
             "-fallbackfee=0.00001".into(),
         ];
+        cmd.extend(config.extra_cmd_args);
 
         let bitcoind = GenericImage::new("bitcoin/bitcoin", &config.version)
             .with_wait_for(wait_strategy)
-            .with_entrypoint(&format!("/opt/bitcoin-{version}/bin/bitcoind", version = &config.version))
+            //.with_entrypoint(&format!("/opt/bitcoin-{version}/bin/bitcoind", version = &config.version))
             .with_cmd(cmd)
             .with_container_name(container_name("bitcoind"))
             .with_mapped_port(0, ContainerPort::Tcp(config.rpc_port))
@@ -200,12 +205,12 @@ impl<S> BitcoinCore<S> {
             super::wait_for_tcp_connectivity(&host_str, rpc_port, Duration::from_secs(5)).await;
         });
 
-        tokio::try_join!(check_rpc).map_err(|_| Error::StartupConnectivityTimeout)?;
+        tokio::try_join!(check_rpc).map_err(|_| BitcoinCoreError::StartupConnectivityTimeout)?;
 
         // Create a client which is used for the `as_ref()` implementation,
         // returning a reference to the client.
-        let auth = Auth::UserPass(Defaults::RPC_USERNAME.into(), Defaults::RPC_PASSWORD.into());
-        let rpc_client = Client::new(rpc_endpoint.as_str(), auth).map_err(Error::BitcoinCoreRpc)?;
+        let auth = Auth::UserPass(config.rpc_username, config.rpc_password);
+        let rpc_client = Client::new(rpc_endpoint.as_str(), auth).map_err(BitcoinCoreError::Rpc)?;
 
         Ok(Self {
             container: bitcoind,
@@ -229,21 +234,21 @@ impl<S> BitcoinCore<S> {
     /// This is primarily for when the caller needs an owned instance of a
     /// [`Client`]. If you only need a client reference you may use
     /// [`as_ref()`](BitcoinCore::as_ref).
-    pub fn rpc_client(&self) -> Result<bitcoincore_rpc::Client, Error> {
+    pub fn rpc_client(&self) -> Result<bitcoincore_rpc::Client, BitcoinCoreError> {
         let auth = Auth::UserPass(Defaults::RPC_USERNAME.into(), Defaults::RPC_PASSWORD.into());
-        Client::new(self.rpc_endpoint.as_str(), auth).map_err(Error::BitcoinCoreRpc)
+        Client::new(self.rpc_endpoint.as_str(), auth).map_err(BitcoinCoreError::Rpc)
     }
 
     /// Stops the bitcoin core container and returns a result indicating success or failure.
-    pub async fn stop(self) -> Result<(), Error> {
+    pub async fn stop(self) -> Result<(), DockerTestingError> {
         self.container
             .stop_with_timeout(Some(0))
             .await
-            .map_err(Error::TestContainers)
+            .map_err(DockerTestingError::TestContainers)
     }
 
     /// Returns a reference to the attached state of the BitcoinCore instance.
-    pub fn state(&self) -> &S {
+    pub fn state(&self) -> &State {
         &self.state
     }
 }
