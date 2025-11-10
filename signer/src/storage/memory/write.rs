@@ -3,6 +3,7 @@ use libp2p::PeerId;
 use crate::{
     error::Error,
     keys::{PublicKey, PublicKeyXOnly},
+    stacks::api::TenureBlockHeaders,
     storage::{
         DbWrite,
         model::{
@@ -387,6 +388,18 @@ impl DbWrite for SharedStore {
 
         Ok(())
     }
+
+    async fn copy_from_stacks_blocks_temp_table(&self) -> Result<(), Error> {
+        unimplemented!()
+    }
+
+    async fn truncate_stacks_blocks_temp_table(&self) -> Result<(), Error> {
+        unimplemented!()
+    }
+
+    async fn write_stacks_blocks_temp(&self, _: &TenureBlockHeaders) -> Result<(), Error> {
+        unimplemented!()
+    }
 }
 
 impl DbWrite for InMemoryTransaction {
@@ -542,5 +555,17 @@ impl DbWrite for InMemoryTransaction {
         self.store
             .update_peer_connection(pub_key, peer_id, address)
             .await
+    }
+
+    async fn copy_from_stacks_blocks_temp_table(&self) -> Result<(), Error> {
+        self.store.copy_from_stacks_blocks_temp_table().await
+    }
+
+    async fn truncate_stacks_blocks_temp_table(&self) -> Result<(), Error> {
+        self.store.truncate_stacks_blocks_temp_table().await
+    }
+
+    async fn write_stacks_blocks_temp(&self, headers: &TenureBlockHeaders) -> Result<(), Error> {
+        self.store.write_stacks_blocks_temp(headers).await
     }
 }

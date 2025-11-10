@@ -2,6 +2,7 @@ use super::{PgStore, PgTransaction};
 use crate::{
     error::Error,
     keys::{PublicKey, PublicKeyXOnly},
+    stacks::api::TenureBlockHeaders,
     storage::{
         DbWrite,
         model::{
@@ -1002,6 +1003,115 @@ impl PgWrite {
 
         Ok(())
     }
+
+    async fn copy_from_stacks_blocks_temp_table<'e, E>(executor: &'e mut E) -> Result<(), Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
+        sqlx::query(
+            r#"
+            INSERT INTO sbtc_signer.stacks_blocks (
+                block_hash
+              , block_height
+              , parent_hash
+              , bitcoin_anchor
+              , created_at
+            )
+            SELECT
+                block_hash
+              , block_height
+              , parent_hash
+              , bitcoin_anchor
+              , created_at
+            FROM sbtc_signer.stacks_blocks_temp
+            ON CONFLICT DO NOTHING;
+            "#,
+        )
+        .execute(executor)
+        .await
+        .map_err(Error::SqlxQuery)?;
+
+        Ok(())
+    }
+
+    async fn truncate_stacks_blocks_temp_table<'e, E>(executor: &'e mut E) -> Result<(), Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
+        sqlx::query("TRUNCATE TABLE sbtc_signer.stacks_blocks_temp;")
+            .execute(executor)
+            .await
+            .map_err(Error::SqlxQuery)?;
+
+        Ok(())
+    }
+
+    async fn write_stacks_blocks_temp<'e, E>(
+        executor: &'e mut E,
+        tenure_headers: &TenureBlockHeaders,
+    ) -> Result<(), Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
+        let headers = tenure_headers.headers();
+
+        if headers.is_empty() {
+            return Ok(());
+        }
+        let mut block_ids = Vec::with_capacity(headers.len());
+        let mut parent_block_ids = Vec::with_capacity(headers.len());
+        let mut chain_lengths = Vec::<i64>::with_capacity(headers.len());
+        let mut bitcoin_anchors = Vec::with_capacity(headers.len());
+
+        for header in headers {
+            block_ids.push(header.block_id);
+            parent_block_ids.push(header.parent_block_id);
+            let block_height =
+                i64::try_from(header.block_height).map_err(Error::ConversionDatabaseInt)?;
+            chain_lengths.push(block_height);
+            bitcoin_anchors.push(tenure_headers.anchor_block_hash);
+        }
+
+        sqlx::query(
+            r#"
+            WITH block_hashes AS (
+                SELECT ROW_NUMBER() OVER (), block_hash
+                FROM UNNEST($1::bytea[]) AS block_hash
+            )
+            , parent_hashes AS (
+                SELECT ROW_NUMBER() OVER (), parent_hash
+                FROM UNNEST($2::bytea[]) AS parent_hash
+            )
+            , block_heights AS (
+                SELECT ROW_NUMBER() OVER (), block_height
+                FROM UNNEST($3::bigint[]) AS block_height
+            )
+            , bitcoin_anchors AS (
+                SELECT ROW_NUMBER() OVER (), bitcoin_anchor
+                FROM UNNEST($4::bytea[]) AS bitcoin_anchor
+            )
+            INSERT INTO sbtc_signer.stacks_blocks (block_hash, block_height, parent_hash, bitcoin_anchor)
+            SELECT
+                block_hash
+              , block_height
+              , parent_hash
+              , bitcoin_anchor
+            FROM block_hashes
+            JOIN parent_hashes USING (row_number)
+            JOIN block_heights USING (row_number)
+            JOIN bitcoin_anchors USING (row_number)
+            ON CONFLICT DO NOTHING"#,
+        )
+        .bind(&block_ids)
+        .bind(&parent_block_ids)
+        .bind(&chain_lengths)
+        .bind(&bitcoin_anchors)
+        .execute(executor)
+        .await
+        .map_err(Error::SqlxQuery)?;
+
+        Ok(())
+    }
 }
 
 impl DbWrite for PgStore {
@@ -1163,6 +1273,21 @@ impl DbWrite for PgStore {
             address,
         )
         .await
+    }
+
+    async fn copy_from_stacks_blocks_temp_table(&self) -> Result<(), Error> {
+        let mut conn = self.get_connection().await?;
+        PgWrite::copy_from_stacks_blocks_temp_table(conn.as_mut()).await
+    }
+
+    async fn truncate_stacks_blocks_temp_table(&self) -> Result<(), Error> {
+        let mut conn = self.get_connection().await?;
+        PgWrite::truncate_stacks_blocks_temp_table(conn.as_mut()).await
+    }
+
+    async fn write_stacks_blocks_temp(&self, headers: &TenureBlockHeaders) -> Result<(), Error> {
+        let mut conn = self.get_connection().await?;
+        PgWrite::write_stacks_blocks_temp(conn.as_mut(), headers).await
     }
 }
 
@@ -1336,5 +1461,20 @@ impl DbWrite for PgTransaction<'_> {
     ) -> Result<(), Error> {
         let mut tx = self.tx.lock().await;
         PgWrite::update_peer_connection(tx.as_mut(), pub_key, peer_id, address).await
+    }
+
+    async fn copy_from_stacks_blocks_temp_table(&self) -> Result<(), Error> {
+        let mut tx = self.tx.lock().await;
+        PgWrite::copy_from_stacks_blocks_temp_table(tx.as_mut()).await
+    }
+
+    async fn truncate_stacks_blocks_temp_table(&self) -> Result<(), Error> {
+        let mut tx = self.tx.lock().await;
+        PgWrite::truncate_stacks_blocks_temp_table(tx.as_mut()).await
+    }
+
+    async fn write_stacks_blocks_temp(&self, headers: &TenureBlockHeaders) -> Result<(), Error> {
+        let mut tx = self.tx.lock().await;
+        PgWrite::write_stacks_blocks_temp(tx.as_mut(), headers).await
     }
 }
