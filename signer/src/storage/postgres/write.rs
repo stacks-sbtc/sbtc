@@ -1090,7 +1090,12 @@ impl PgWrite {
                 SELECT ROW_NUMBER() OVER (), bitcoin_anchor
                 FROM UNNEST($4::bytea[]) AS bitcoin_anchor
             )
-            INSERT INTO sbtc_signer.stacks_blocks (block_hash, block_height, parent_hash, bitcoin_anchor)
+            INSERT INTO sbtc_signer.stacks_blocks_temp (
+                block_hash
+              , block_height
+              , parent_hash
+              , bitcoin_anchor
+            )
             SELECT
                 block_hash
               , block_height
