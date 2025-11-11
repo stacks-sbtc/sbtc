@@ -1126,6 +1126,7 @@ impl DbWrite for PgStore {
         PgWrite::write_bitcoin_block(self.get_connection().await?.as_mut(), block).await
     }
 
+    #[cfg(any(test, feature = "testing"))]
     async fn write_stacks_block(&self, block: &model::StacksBlock) -> Result<(), Error> {
         PgWrite::write_stacks_block(self.get_connection().await?.as_mut(), block).await
     }
@@ -1177,6 +1178,7 @@ impl DbWrite for PgStore {
         PgWrite::write_bitcoin_transactions(self.get_connection().await?.as_mut(), txs).await
     }
 
+    #[cfg(any(test, feature = "testing"))]
     async fn write_stacks_block_headers(
         &self,
         blocks: Vec<model::StacksBlock>,
@@ -1304,6 +1306,7 @@ impl DbWrite for PgTransaction<'_> {
         PgWrite::write_bitcoin_block(tx.as_mut(), block).await
     }
 
+    #[cfg(any(test, feature = "testing"))]
     async fn write_stacks_block(&self, block: &model::StacksBlock) -> Result<(), Error> {
         let mut tx = self.tx.lock().await;
         PgWrite::write_stacks_block(tx.as_mut(), block).await
@@ -1362,6 +1365,7 @@ impl DbWrite for PgTransaction<'_> {
         PgWrite::write_bitcoin_transactions(tx.as_mut(), txs).await
     }
 
+    #[cfg(any(test, feature = "testing"))]
     async fn write_stacks_block_headers(
         &self,
         headers: Vec<model::StacksBlock>,
