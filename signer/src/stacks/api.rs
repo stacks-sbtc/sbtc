@@ -391,6 +391,23 @@ impl TenureBlockHeaders {
             anchor_block_height: info.burn_block_height.into(),
         })
     }
+
+    /// Get the minimum block height in the tenure.
+    pub fn min_height(&self) -> StacksBlockHeight {
+        // SAFETY: It is okay to unwrap here because we know that the
+        // tenure is non-empty. The struct upholds this invariant upon
+        // creation.
+        self.headers.iter().map(|h| h.block_height).min().unwrap()
+    }
+
+    /// Get the height of the block with the greatest height of all blocks
+    /// held within this struct.
+    pub fn end_height(&self) -> StacksBlockHeight {
+        // SAFETY: It is okay to unwrap here because we know that the
+        // tenure is non-empty. The struct upholds this invariant upon
+        // creation.
+        self.headers.iter().map(|h| h.block_height).max().unwrap()
+    }
 }
 
 /// An iterator over [`StacksBlock`]s
@@ -1382,19 +1399,30 @@ impl StacksClient {
 /// Fetch all Nakamoto block headers that are not already stored in the
 /// datastore, starting at the given [`StacksBlockHash`] and store them in
 /// the database.
+///
+/// This function fetches all unknown nakamoto blocks that are on the
+/// canonical chain identified by the given StacksBlockHash chain tip that
+/// not already stored in the database. It fetches these blocks one tenure
+/// at a time, and then writes them to the `stacks_blocks_temp` table.
+/// After all such blocks have been fetched, the function copies the blocks
+/// from the `stacks_blocks_temp` table to the `stacks_blocks` table.
+/// Things are done this way to ensure that updates to the `stacks_blocks`
+/// table are completed atomically.
 pub async fn update_db_with_unknown_ancestors<S, D>(
     stacks: &S,
     db: &D,
     block_id: &StacksBlockHash,
-) -> Result<RangeInclusive<u64>, Error>
+) -> Result<RangeInclusive<StacksBlockHeight>, Error>
 where
     S: StacksInteract,
     D: DbRead + DbWrite + Send + Sync,
 {
     let mut tenure = stacks.get_tenure_headers(block_id).await?;
-    let start_height = tenure.headers().iter().map(|h| *h.block_height).max().unwrap_or(0);
+    let end_height = tenure.end_height();
     let nakamoto_start_height = stacks.get_epoch_status().await?.nakamoto_start_height();
-    
+
+    // Truncate the `stacks_blocks_temp` table to ensure that we start with
+    // a clean slate.
     db.truncate_stacks_blocks_temp_table().await?;
 
     loop {
@@ -1449,12 +1477,13 @@ where
         tenure = tenure_headers;
     }
 
-    let min_height = tenure.headers().iter().map(|h| *h.block_height).min().unwrap_or(0);
+    let min_height = tenure.min_height();
 
     db.copy_from_stacks_blocks_temp_table().await?;
     db.truncate_stacks_blocks_temp_table().await?;
 
-    Ok(std::ops::RangeInclusive::new(min_height, start_height))
+    tracing::debug!(%min_height, %end_height, "finished updating the stacks_blocks table");
+    Ok(RangeInclusive::new(min_height, end_height))
 }
 
 /// A deserializer for Clarity's [`Value`] type that deserializes a hex-encoded
@@ -2085,9 +2114,22 @@ mod tests {
 
         let block_height_range = tenures.unwrap();
 
-
-        let expected = RangeInclusive::new(320, 750);
+        let expected =
+            RangeInclusive::new(StacksBlockHeight::new(320), StacksBlockHeight::new(750));
         assert_eq!(block_height_range, expected);
+
+        let (min_block_height, max_block_height) = sqlx::query_as::<_, (i64, i64)>(
+            r#"SELECT 
+                 MIN(block_height) as min_block_height
+               , MAX(block_height) as max_block_height
+             FROM sbtc_signer.stacks_blocks"#,
+        )
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+
+        assert_eq!(min_block_height, **expected.start() as i64);
+        assert_eq!(max_block_height, **expected.end() as i64);
 
         crate::testing::storage::drop_db(db).await;
     }
