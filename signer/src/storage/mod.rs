@@ -626,7 +626,7 @@ pub trait DbWrite {
     /// `stacks_blocks` table.
     fn copy_from_stacks_blocks_temp_table(&self) -> impl Future<Output = Result<(), Error>> + Send;
 
-    /// Truncates the "stacks_blocks_temp" table.
+    /// Truncates the `stacks_blocks_temp` table.
     fn truncate_stacks_blocks_temp_table(&self) -> impl Future<Output = Result<(), Error>> + Send;
 
     /// Write the stacks block headers to the `stacks_blocks_temp` table.
