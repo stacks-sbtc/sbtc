@@ -42,6 +42,7 @@ impl PgWrite {
         Ok(())
     }
 
+    #[cfg(any(test, feature = "testing"))]
     async fn write_stacks_block<'e, E>(
         executor: &'e mut E,
         block: &model::StacksBlock,
@@ -392,6 +393,7 @@ impl PgWrite {
         Ok(())
     }
 
+    #[cfg(any(test, feature = "testing"))]
     async fn write_stacks_block_headers<'e, E>(
         executor: &'e mut E,
         blocks: Vec<model::StacksBlock>,

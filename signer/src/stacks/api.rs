@@ -357,6 +357,7 @@ impl From<NakamotoBlockHeader> for StacksBlockHeader {
 /// This struct represents a non-empty subset of the Stacks block headers
 /// that were created during a tenure.
 #[derive(Debug)]
+#[cfg_attr(any(test, feature = "testing"), derive(Clone))]
 pub struct TenureBlockHeaders {
     /// The subset of Stacks block headers that of Nakamoto blocks that
     /// were created during a tenure. This is always non-empty.

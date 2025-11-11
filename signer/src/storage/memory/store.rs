@@ -45,6 +45,9 @@ pub struct Store {
     /// Stacks blocks
     pub stacks_blocks: HashMap<model::StacksBlockHash, model::StacksBlock>,
 
+    /// Stacks blocks in the temporary table.
+    pub stacks_blocks_temp: HashMap<model::StacksBlockHash, model::StacksBlock>,
+
     /// Deposit requests
     pub deposit_requests: HashMap<DepositRequestPk, model::DepositRequest>,
 

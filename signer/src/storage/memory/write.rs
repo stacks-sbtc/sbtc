@@ -390,15 +390,34 @@ impl DbWrite for SharedStore {
     }
 
     async fn copy_from_stacks_blocks_temp_table(&self) -> Result<(), Error> {
-        unimplemented!()
+        let mut store = self.lock().await;
+        store.version += 1;
+
+        let temp_blocks = store.stacks_blocks_temp.clone();
+        store.stacks_blocks.extend(temp_blocks.into_iter());
+
+        Ok(())
     }
 
     async fn truncate_stacks_blocks_temp_table(&self) -> Result<(), Error> {
-        unimplemented!()
+        let mut store = self.lock().await;
+        store.version += 1;
+
+        store.stacks_blocks_temp.clear();
+
+        Ok(())
     }
 
-    async fn write_stacks_blocks_temp(&self, _: &TenureBlockHeaders) -> Result<(), Error> {
-        unimplemented!()
+    async fn write_stacks_blocks_temp(&self, headers: &TenureBlockHeaders) -> Result<(), Error> {
+        let block_iter = headers.clone().into_iter();
+        let mut store = self.lock().await;
+        store.version += 1;
+
+        store
+            .stacks_blocks_temp
+            .extend(block_iter.map(|header| (header.block_hash, header)));
+
+        Ok(())
     }
 }
 
@@ -407,6 +426,7 @@ impl DbWrite for InMemoryTransaction {
         self.store.write_bitcoin_block(block).await
     }
 
+    #[cfg(any(test, feature = "testing"))]
     async fn write_stacks_block(&self, block: &model::StacksBlock) -> Result<(), Error> {
         self.store.write_stacks_block(block).await
     }
@@ -459,6 +479,7 @@ impl DbWrite for InMemoryTransaction {
         self.store.write_bitcoin_transactions(txs).await
     }
 
+    #[cfg(any(test, feature = "testing"))]
     async fn write_stacks_block_headers(
         &self,
         headers: Vec<model::StacksBlock>,

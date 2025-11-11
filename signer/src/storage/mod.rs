@@ -476,6 +476,7 @@ pub trait DbWrite {
     ) -> impl Future<Output = Result<(), Error>> + Send;
 
     /// Write a stacks block.
+    #[cfg(any(test, feature = "testing"))]
     fn write_stacks_block(
         &self,
         block: &model::StacksBlock,
@@ -524,6 +525,7 @@ pub trait DbWrite {
     ) -> impl Future<Output = Result<(), Error>> + Send;
 
     /// Write the stacks block ids and their parent block ids.
+    #[cfg(any(test, feature = "testing"))]
     fn write_stacks_block_headers(
         &self,
         headers: Vec<model::StacksBlock>,
