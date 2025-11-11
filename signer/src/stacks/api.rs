@@ -1426,7 +1426,6 @@ where
     db.truncate_stacks_blocks_temp_table().await?;
 
     loop {
-        tracing::debug!("writing tenure headers to the database");
         db.write_stacks_blocks_temp(&tenure).await?;
         // We won't get anymore Nakamoto blocks before this point, so
         // time to stop.
