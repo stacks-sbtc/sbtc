@@ -126,7 +126,7 @@ impl TestContainers {
             .await
     }
 
-    /// Get the Bitcoin container
+    /// Get the database container
     pub async fn database(&self) -> &DatabaseContainer {
         self.database
             .get_or_init(|| DatabaseContainer::from_containers(self))

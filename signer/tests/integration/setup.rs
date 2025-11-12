@@ -104,7 +104,7 @@ impl IntoEmilyTestingConfig for EmilyApiConfiguration {
 
 // TODO: copied from BitcoinCoreClient::get_tx_info to avoid instantiating a
 // client with some possibly wrong config; move that one to a static function or
-// remove the dependecy from `TestSweepSetup`
+// remove the dependency from `TestSweepSetup`
 #[allow(clippy::result_large_err)]
 fn get_tx_info(
     rpc: &Client,
