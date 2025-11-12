@@ -102,6 +102,38 @@ impl IntoEmilyTestingConfig for EmilyApiConfiguration {
     }
 }
 
+// TODO: copied from BitcoinCoreClient::get_tx_info to avoid instantiating a
+// client with some possibly wrong config; move that one to a static function or
+// remove the dependecy from `TestSweepSetup`
+#[allow(clippy::result_large_err)]
+fn get_tx_info(
+    rpc: &Client,
+    txid: &bitcoin::Txid,
+    block_hash: &bitcoin::BlockHash,
+) -> Result<Option<BitcoinTxInfo>, signer::error::Error> {
+    let args = [
+        serde_json::to_value(txid).map_err(signer::error::Error::JsonSerialize)?,
+        // This is the verbosity level. The acceptable values are 0, 1,
+        // and 2, and we want the 2 because it will include all the
+        // required fields of the type.
+        serde_json::Value::Number(serde_json::value::Number::from(2u32)),
+        serde_json::to_value(block_hash).map_err(signer::error::Error::JsonSerialize)?,
+    ];
+
+    match rpc.call::<BitcoinTxInfo>("getrawtransaction", &args) {
+        Ok(tx_info) => Ok(Some(tx_info)),
+        // If the `block_hash` is not found then the message is "Block
+        // hash not found", while if the transaction is not found in an
+        // actual block then the message is "No such transaction found
+        // in the provided block. Use `gettransaction` for wallet
+        // transactions." In both cases the code is the same.
+        Err(bitcoincore_rpc::Error::JsonRpc(bitcoincore_rpc::jsonrpc::Error::Rpc(
+            bitcoincore_rpc::jsonrpc::error::RpcError { code: -5, .. },
+        ))) => Ok(None),
+        Err(err) => Err(signer::error::Error::BitcoinCoreGetTransaction(err, *txid)),
+    }
+}
+
 /// A struct containing an actual deposit and a sweep transaction. The
 /// sweep transaction was signed with the `signer` field's public key.
 pub struct TestSweepSetup {
@@ -234,15 +266,9 @@ impl TestSweepSetup {
         let sweep_block_height =
             rpc.get_block_header_info(&sweep_block_hash).unwrap().height as u64;
 
-        let settings = Settings::new_from_default_config().unwrap();
-        let client = BitcoinCoreClient::try_from(&settings.bitcoin.rpc_endpoints[0]).unwrap();
-        let sweep_tx_info = client
-            .get_tx_info(&txid, &sweep_block_hash)
-            .unwrap()
-            .unwrap();
+        let sweep_tx_info = get_tx_info(rpc, &txid, &sweep_block_hash).unwrap().unwrap();
 
-        let deposit_tx_info = client
-            .get_tx_info(&deposit_tx.compute_txid(), &deposit_block_hash)
+        let deposit_tx_info = get_tx_info(rpc, &deposit_tx.compute_txid(), &deposit_block_hash)
             .unwrap()
             .unwrap();
 

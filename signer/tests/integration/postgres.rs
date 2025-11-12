@@ -19,6 +19,7 @@ use more_asserts::assert_gt;
 use more_asserts::assert_le;
 use rand::seq::IteratorRandom as _;
 use rand::seq::SliceRandom as _;
+use sbtc::testing::containers::TestContainersBuilder;
 use signer::WITHDRAWAL_BLOCKS_EXPIRY;
 use signer::bitcoin::validation::WithdrawalRequestStatus;
 use signer::bitcoin::validation::WithdrawalValidationResult;
@@ -81,6 +82,7 @@ use signer::testing::get_rng;
 use test_case::test_case;
 use test_log::test;
 
+use crate::containers::TestContainersBuilderExt as _;
 use crate::setup::SweepAmounts;
 use crate::setup::TestSignerSet;
 use crate::setup::TestSweepSetup;
@@ -90,7 +92,9 @@ use crate::setup::fetch_canonical_bitcoin_blockchain;
 
 #[tokio::test]
 async fn should_be_able_to_query_bitcoin_blocks() {
-    let store = testing::storage::new_test_database().await;
+    let stack = TestContainersBuilder::start_database().await;
+    let store = stack.database().await.get_store().await;
+
     let mut rng = get_rng();
 
     let test_model_params = testing::storage::model::Params {
@@ -129,7 +133,6 @@ async fn should_be_able_to_query_bitcoin_blocks() {
             .expect("failed_to_execute_query");
         assert!(result.is_none());
     }
-    signer::testing::storage::drop_db(store).await;
 }
 
 struct InitiateWithdrawalRequest {

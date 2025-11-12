@@ -1,0 +1,13 @@
+services:
+  postgres:
+    image: postgres:16.6-bookworm@sha256:c965017e1d29eb03e18a11abc25f5e3cd78cb5ac799d495922264b8489d5a3a1
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready --username=postgres --dbname=signer" ]
+      interval: 1s
+      timeout: 1s
+      retries: 10

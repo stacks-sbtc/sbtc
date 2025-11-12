@@ -78,4 +78,13 @@ pub enum Error {
     #[cfg(feature = "webhooks")]
     #[error("got an error when attempting to call StacksMessageCodec::consensus_deserialize {0}")]
     StacksCodec(#[source] blockstack_lib::codec::Error),
+
+    /// Test containers compose error
+    #[cfg(feature = "testing")]
+    #[error("test containers compose error: {0}")]
+    ComposeError(#[source] testcontainers::compose::ComposeError),
+    /// Got an error while interacting with test containers
+    #[cfg(feature = "testing")]
+    #[error("got an error while interacting with test containers: {0}")]
+    Testcontainers(#[source] testcontainers::TestcontainersError),
 }

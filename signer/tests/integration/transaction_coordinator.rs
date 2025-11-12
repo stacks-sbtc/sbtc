@@ -42,6 +42,7 @@ use rand::rngs::OsRng;
 use sbtc::deposits::CreateDepositRequest;
 use sbtc::deposits::DepositScriptInputs;
 use sbtc::deposits::ReclaimScriptInputs;
+use sbtc::testing::containers::TestContainersBuilder;
 use sbtc::testing::regtest;
 use sbtc::testing::regtest::AsUtxo as _;
 use sbtc::testing::regtest::Recipient;
@@ -151,6 +152,7 @@ use signer::transaction_signer::TxSignerEventLoop;
 use tokio::sync::broadcast::Sender;
 
 use crate::complete_deposit::make_complete_deposit;
+use crate::containers::TestContainersBuilderExt as _;
 use crate::contracts::SignerStxState;
 use crate::setup::AsBlockRef as _;
 use crate::setup::IntoEmilyTestingConfig as _;
@@ -319,9 +321,19 @@ fn mock_deploy_all_contracts() -> Box<dyn FnOnce(&mut MockStacksInteract)> {
 
 #[test(tokio::test)]
 async fn process_complete_deposit() {
-    let db = testing::storage::new_test_database().await;
+    let stack = TestContainersBuilder::new()
+        .with_bitcoin()
+        .with_database()
+        .start()
+        .await;
+    let bitcoin = stack.bitcoin().await;
+    let db = stack.database().await.get_store().await;
+
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+    let client = bitcoin.get_client();
+
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
 
     let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
 
@@ -343,7 +355,7 @@ async fn process_complete_deposit() {
 
     let mut context = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(client)
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
@@ -528,8 +540,6 @@ async fn process_complete_deposit() {
         contract_call.function_args,
         complete_deposit.as_contract_args()
     );
-
-    testing::storage::drop_db(db).await;
 }
 
 /// Mock the stacks client to return dummy data for the given context.

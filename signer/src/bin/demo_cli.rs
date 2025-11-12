@@ -259,10 +259,6 @@ impl Context {
     }
 }
 
-// The allowed clippy lint is necessary because the expanded version of the
-// function, the one produced because of the #[tokio::main] procedural
-// macro, uses unwrap or expect.
-#[allow(clippy::unwrap_in_result)]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = CliArgs::parse();

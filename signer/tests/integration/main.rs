@@ -12,6 +12,7 @@ mod bitcoin_validation;
 mod block_observer;
 mod communication;
 mod complete_deposit;
+mod containers;
 mod contracts;
 mod emily;
 mod postgres;
