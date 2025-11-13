@@ -1784,6 +1784,7 @@ async fn only_completed_deposit_can_have_fulfillment(status: DepositStatus, is_s
         assert!(matches!(response.status, DepositStatus::Pending));
         assert!(response.fulfillment.is_none());
     } else {
+        assert_eq!(deposit.status, 200);
         let deposit = deposit.deposit.clone().unwrap().unwrap();
         assert_eq!(deposit.bitcoin_txid, bitcoin_txid);
         assert_eq!(deposit.status, status);
