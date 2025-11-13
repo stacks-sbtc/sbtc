@@ -1,6 +1,7 @@
 FROM rust:1.91.0-slim-bookworm AS build
 
 ARG GIT_COMMIT
+RUN echo "aaaaa"
 RUN echo "Debug: GIT_COMMIT='$GIT_COMMIT'"
 RUN echo "Debug: whoami=$(whoami)"
 RUN echo "Debug: shell=$SHELL"
