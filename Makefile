@@ -26,7 +26,7 @@ install-pnpm:
 install: install-py install-pnpm
 
 build: blocklist-client-codegen emily-client-codegen contracts
-	cargo $(CARGO_FLAGS) build --all-targets $(CARGO_EXCLUDES) ${CARGO_BUILD_ARGS}
+	cargo $(CARGO_FLAGS) build --bins --lib $(CARGO_EXCLUDES) ${CARGO_BUILD_ARGS}
 
 test-py:
 	uv run --directory emily_cron python -m unittest discover
