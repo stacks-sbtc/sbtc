@@ -23,7 +23,7 @@ pub const DATABASE_URL_BASE: &str = "postgres://postgres:postgres@localhost:5432
 /// weird bug in sqlx. The issue that can crop up with pool reuse is
 /// basically a PoolTimeOut error. This is a known issue:
 /// https://github.com/launchbadge/sqlx/issues/2567
-fn get_connection_pool(url: &str) -> sqlx::PgPool {
+pub fn get_connection_pool(url: &str) -> sqlx::PgPool {
     sqlx::postgres::PgPoolOptions::new()
         .max_connections(1)
         .min_connections(1)
