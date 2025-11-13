@@ -1,4 +1,4 @@
-use bitcoin::hashes::Hash;
+use bitcoin::hashes::Hash as _;
 use blockstack_lib::types::chainstate::StacksAddress;
 use rand::rngs::OsRng;
 use sbtc::testing::regtest;
@@ -8,18 +8,18 @@ use signer::stacks::contracts::AsContractCall as _;
 use signer::stacks::contracts::RejectWithdrawalV1;
 use signer::stacks::contracts::ReqContext;
 use signer::stacks::contracts::WithdrawalRejectErrorMsg;
-use signer::storage::DbWrite;
+use signer::storage::DbWrite as _;
 use signer::storage::model;
 use signer::storage::model::BitcoinTxSigHash;
 use signer::storage::postgres::PgStore;
 use signer::testing;
 use signer::testing::get_rng;
 
-use fake::Fake;
+use fake::Fake as _;
 use signer::WITHDRAWAL_BLOCKS_EXPIRY;
 use signer::WITHDRAWAL_MIN_CONFIRMATIONS;
 use signer::testing::context::*;
-use signer::testing::storage::DbReadTestExt;
+use signer::testing::storage::DbReadTestExt as _;
 
 use crate::setup::SweepAmounts;
 use crate::setup::TestSignerSet;

@@ -1,11 +1,6 @@
 
 # cargo-vet audits file
 
-[[audits.base16ct]]
-who = "xoloki <xoloki@gmail.com>"
-criteria = "safe-to-deploy"
-version = "0.2.0"
-
 [[audits.bitcoinconsensus]]
 who = "cylewitruk <cyle.witruk@outlook.com>"
 criteria = "safe-to-deploy"
@@ -17,31 +12,28 @@ Note that this library does use C bindings and thus FFI and unsafe. There are pa
 This library is provided by the rust-bitcoin GH organization which also maintains the bitcoin and secp256k1 crates which we use extensively.
 """
 
-[[audits.crypto-bigint]]
-who = "xoloki <xoloki@gmail.com>"
+[[audits.libp2p-identity]]
+who = "cylewitruk <cyle.witruk@outlook.com>"
 criteria = "safe-to-deploy"
-version = "0.5.5"
+delta = "0.2.10 -> 0.2.12"
+notes = "This patch switches to k256 from libsecp256k1 for secp256k1 handling"
 
-[[audits.elliptic-curve]]
-who = "xoloki <xoloki@gmail.com>"
+[[audits.libsecp256k1]]
+who = "cylewitruk <cyle.witruk@outlook.com>"
 criteria = "safe-to-deploy"
-version = "0.13.8"
-
-[[audits.ff]]
-who = "xoloki <xoloki@gmail.com>"
-criteria = "safe-to-deploy"
-version = "0.13.1"
-
-[[audits.group]]
-who = "xoloki <xoloki@gmail.com>"
-criteria = "safe-to-deploy"
-version = "0.13.0"
+delta = "0.7.1 -> 0.7.2"
 
 [[audits.p256k1]]
 who = "cylewitruk <cyle.witruk@outlook.com>"
 criteria = "safe-to-deploy"
 version = "7.2.2"
 notes = "This change only adds wrapping to some additional bindings so that they get mangled and avoid linking errors."
+
+[[audits.stacks-common]]
+who = "cylewitruk <cyle.witruk@outlook.com>"
+criteria = "safe-to-deploy"
+version = "0.0.1"
+notes = "I did not fully review the changes in this diff -- they are Stacks-internal."
 
 [[audits.webpki-roots]]
 who = "djordon <dan.jordon@gmail.com>"
@@ -72,10 +64,4 @@ version = "14.0.0"
 who = "djordon <dan.jordon@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "14.0.0 -> 14.0.0@git:11e2316aa0edf996f8e8f9ccbbbfd4bd2975ed1d"
-importable = false
-
-[[audits.wsts]]
-who = "xoloki <xoloki@gmail.com>"
-criteria = "safe-to-deploy"
-delta = "14.0.0@git:11e2316aa0edf996f8e8f9ccbbbfd4bd2975ed1d -> 15.0.0@git:f354dedeb0f7bede14575553be6d35454309cf02"
 importable = false

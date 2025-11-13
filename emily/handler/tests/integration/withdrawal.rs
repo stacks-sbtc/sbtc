@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use test_case::test_case;
 
 use testing_emily_client::apis;
+use testing_emily_client::apis::chainstate_api::get_chain_tip;
 use testing_emily_client::apis::chainstate_api::set_chainstate;
 use testing_emily_client::apis::configuration::Configuration;
 use testing_emily_client::models::{
@@ -11,7 +12,9 @@ use testing_emily_client::models::{
     WithdrawalInfo, WithdrawalParameters, WithdrawalStatus, WithdrawalUpdate,
 };
 
+use crate::common::batch_set_chainstates;
 use crate::common::clean_setup;
+use crate::common::new_test_chainstate;
 
 const RECIPIENT: &str = "TEST_RECIPIENT";
 const SENDER: &str = "TEST_SENDER";
@@ -1049,4 +1052,131 @@ async fn emily_process_withdrawal_updates_when_some_of_them_are_unknown() {
     .await
     .expect("Received an error after making a valid get withdrawals api call.");
     assert_eq!(withdrawals.withdrawals.len(), 1);
+}
+
+#[tokio::test]
+async fn emily_handles_withdrawal_requests_on_forks() {
+    // The only thing we care about regarding these heights is that the block
+    // associated with first withdrawal will be orphaned after the reorg.
+    const PRE_REORG_BEGIN: u64 = 1000;
+    const PRE_REORG_END: u64 = 1015;
+    const POST_REORG_BEGIN: u64 = 1010;
+    const POST_REORG_END: u64 = 1020;
+    const FINAL_REORG_END: u64 = 1025;
+
+    let configuration = clean_setup().await;
+
+    // During this test request ID should be similar for all withdrawals.
+    let request_id = 1;
+
+    // Set initial chainstate.
+    let pre_reorg_chain: Vec<Chainstate> = (PRE_REORG_BEGIN..PRE_REORG_END)
+        .map(|height| new_test_chainstate(height, height, 0))
+        .collect();
+
+    batch_set_chainstates(&configuration, pre_reorg_chain.clone()).await;
+
+    // Create a withdrawal request anchored to initial chainstate.
+
+    let chaintip = get_chain_tip(&configuration)
+        .await
+        .expect("Failed to get chain tip");
+
+    // Saving this chaintip for further checks.
+    let old_chaintip = chaintip.clone();
+
+    let withdrawal_request = CreateWithdrawalRequestBody {
+        amount: 10000,
+        parameters: Box::new(WithdrawalParameters { max_fee: 100 }),
+        recipient: RECIPIENT.into(),
+        sender: SENDER.into(),
+        request_id,
+        stacks_block_hash: chaintip.stacks_block_hash.clone(),
+        stacks_block_height: chaintip.stacks_block_height,
+        txid: "test_txid_pre_reorg".to_string(),
+    };
+    apis::withdrawal_api::create_withdrawal(&configuration, withdrawal_request)
+        .await
+        .expect("Received an error after making a valid create withdrawal request api call.");
+
+    // Check that the withdrawal request is created.
+    let withdrawal = apis::withdrawal_api::get_withdrawal(&configuration, request_id)
+        .await
+        .expect("Received an error after making a valid get withdrawal api call.");
+
+    assert_eq!(withdrawal.txid, "test_txid_pre_reorg".to_string());
+    assert_eq!(
+        withdrawal.stacks_block_hash,
+        chaintip.stacks_block_hash.clone()
+    );
+
+    // Now we will create a reorg chain, and update Emily with it.
+
+    let post_reorg_chain: Vec<Chainstate> = (POST_REORG_BEGIN..POST_REORG_END)
+        .map(|height| new_test_chainstate(height, height, 1))
+        .collect();
+    batch_set_chainstates(&configuration, post_reorg_chain).await;
+
+    // Create a withdrawal request with same request ID, but anchored to the new chainstate.
+
+    let chaintip = get_chain_tip(&configuration)
+        .await
+        .expect("Failed to get chain tip");
+
+    // Sanity check
+    assert_ne!(
+        chaintip.stacks_block_hash, old_chaintip.stacks_block_hash,
+        "Chaintip should be different after reorg"
+    );
+
+    let withdrawal_request = CreateWithdrawalRequestBody {
+        amount: 10000,
+        parameters: Box::new(WithdrawalParameters { max_fee: 100 }),
+        recipient: RECIPIENT.into(),
+        sender: SENDER.into(),
+        request_id,
+        stacks_block_hash: chaintip.stacks_block_hash.clone(),
+        stacks_block_height: chaintip.stacks_block_height,
+        txid: "test_txid_post_reorg".to_string(),
+    };
+
+    apis::withdrawal_api::create_withdrawal(&configuration, withdrawal_request)
+        .await
+        .expect("Received an error after making a valid create withdrawal request api call.");
+
+    // Now, Emily have two withdrawals with the same request ID, but anchored to different chainstates.
+    // Emily should return withdrawal anchored to canonical chainstate.
+
+    let withdrawal = apis::withdrawal_api::get_withdrawal(&configuration, request_id)
+        .await
+        .expect("Received an error after making a valid get withdrawal api call.");
+
+    assert_eq!(
+        withdrawal.txid,
+        "test_txid_post_reorg".to_string(),
+        "Withdrawal should be anchored to the canonical chainstate"
+    );
+    assert_eq!(
+        withdrawal.stacks_block_hash, chaintip.stacks_block_hash,
+        "Withdrawal should be anchored to the canonical chainstate"
+    );
+
+    // Now we reorg back to initial chain
+    let mut new_chain: Vec<Chainstate> = (PRE_REORG_END..FINAL_REORG_END)
+        .map(|height| new_test_chainstate(height, height, 0))
+        .collect();
+    let mut final_chain = pre_reorg_chain.last_chunk::<2>().unwrap().to_vec();
+    final_chain.append(&mut new_chain);
+    batch_set_chainstates(&configuration, final_chain.clone()).await;
+
+    // Check that now old withdrawal is returned.
+    let withdrawal = apis::withdrawal_api::get_withdrawal(&configuration, request_id)
+        .await
+        .expect("Received an error after making a valid get withdrawal api call.");
+
+    assert_eq!(withdrawal.txid, "test_txid_pre_reorg".to_string());
+    assert_eq!(
+        withdrawal.stacks_block_hash,
+        old_chaintip.stacks_block_hash.clone()
+    );
 }

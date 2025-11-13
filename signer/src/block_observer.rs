@@ -28,28 +28,28 @@ use crate::bitcoin::utxo::TxDeconstructor as _;
 use crate::context::Context;
 use crate::context::SbtcLimits;
 use crate::context::SignerEvent;
-use crate::emily_client::EmilyInteract;
+use crate::emily_client::EmilyInteract as _;
 use crate::error::Error;
 use crate::keys::PublicKey;
 use crate::keys::SignerScriptPubKey as _;
 use crate::metrics::BITCOIN_BLOCKCHAIN;
 use crate::metrics::Metrics;
-use crate::stacks::api::GetNakamotoStartHeight as _;
 use crate::stacks::api::SignerSetInfo;
-use crate::stacks::api::StacksInteract;
+use crate::stacks::api::StacksInteract as _;
 use crate::stacks::api::TenureBlockHeaders;
+use crate::stacks::contracts::SMART_CONTRACTS;
 use crate::storage::DbRead;
 use crate::storage::DbWrite;
-use crate::storage::Transactable;
-use crate::storage::TransactionHandle;
+use crate::storage::Transactable as _;
+use crate::storage::TransactionHandle as _;
 use crate::storage::model;
 use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::EncryptedDkgShares;
-use crate::util::FutureExt;
+use crate::util::FutureExt as _;
 use bitcoin::Amount;
 use bitcoin::BlockHash;
 use bitcoin::ScriptBuf;
-use futures::stream::StreamExt;
+use futures::stream::StreamExt as _;
 use sbtc::deposits::CreateDepositRequest;
 use sbtc::deposits::DepositInfo;
 use std::collections::HashSet;
@@ -280,10 +280,12 @@ impl<C: Context, B> BlockObserver<C, B> {
             return Ok(());
         }
 
-        let pox_info = self.context.get_stacks_client().get_pox_info().await?;
-        let nakamoto_start_height = pox_info
-            .nakamoto_start_height()
-            .ok_or(Error::MissingNakamotoStartHeight)?;
+        let nakamoto_start_height = self
+            .context
+            .get_stacks_client()
+            .get_epoch_status()
+            .await?
+            .nakamoto_start_height();
 
         self.context
             .state()
@@ -427,7 +429,7 @@ impl<C: Context, B> BlockObserver<C, B> {
         let stacks_block_headers = crate::stacks::api::fetch_unknown_ancestors(
             &stacks_client,
             &db,
-            tenure_info.tip_block_id,
+            &tenure_info.tip_block_id,
         )
         .await?;
 
@@ -726,7 +728,7 @@ where
     let address = &ctx.config().signer.deployer;
     // If the sBTC contracts have not been deployed, then we don't have any
     // signer set info in the registry.
-    if !ctx.state().sbtc_contracts_deployed() {
+    if !are_sbtc_contracts_deployed(ctx).await? {
         return Ok(None);
     }
 
@@ -735,14 +737,42 @@ where
     stacks.get_current_signer_set_info(address).await
 }
 
+/// Check if all the sBTC smart contracts have been deployed.
+async fn are_sbtc_contracts_deployed<C>(ctx: &C) -> Result<bool, Error>
+where
+    C: Context,
+{
+    // First check if we already know if the contracts have been deployed.
+    // If we get false, then it could be that we are just starting the
+    // application, so we'll need to check our node.
+    if ctx.state().sbtc_contracts_deployed() {
+        return Ok(true);
+    }
+
+    let stacks = ctx.get_stacks_client();
+    let deployer = &ctx.config().signer.deployer;
+
+    for contract in SMART_CONTRACTS {
+        if !contract.is_deployed(&stacks, deployer).await? {
+            return Ok(false);
+        }
+    }
+
+    // If we get here, then all the smart contracts have been deployed.
+    // Let's store that fact so that we don't need to query our Stacks node
+    // again.
+    ctx.state().set_sbtc_contracts_deployed();
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use bitcoin::Amount;
     use bitcoin::BlockHash;
     use bitcoin::TxOut;
     use bitcoin::hashes::Hash as _;
-    use fake::Dummy;
-    use fake::Fake;
+    use fake::Dummy as _;
+    use fake::Fake as _;
     use model::BitcoinTxId;
     use model::ScriptPubKey;
     use test_log::test;

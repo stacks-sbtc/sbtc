@@ -1,5 +1,7 @@
 //! Integration tests for bitcoin-forking behaviours
 
+use std::slice;
+
 use bitcoin::Sequence;
 use bitcoin::Transaction;
 use bitcoin::TxIn;
@@ -7,10 +9,10 @@ use bitcoin::TxOut;
 use bitcoin::Witness;
 use bitcoin::absolute::LockTime;
 use bitcoin::transaction::Version;
-use sbtc::testing::regtest::AsUtxo;
+use sbtc::testing::regtest::AsUtxo as _;
 use serde::Deserialize;
 use serde_json::to_value;
-use signer::bitcoin::BitcoinInteract;
+use signer::bitcoin::BitcoinInteract as _;
 
 use bitcoin::AddressType;
 use bitcoin::Amount;
@@ -73,7 +75,7 @@ async fn getrawtransaction_simple_fork() {
             regtest::p2wpkh_sign_transaction(&mut tx, input_index, utxo, keypair)
         }
         AddressType::P2tr => {
-            regtest::p2tr_sign_transaction(&mut tx, input_index, &[utxo.clone()], keypair)
+            regtest::p2tr_sign_transaction(&mut tx, input_index, slice::from_ref(utxo), keypair)
         }
         _ => unimplemented!(),
     };
@@ -142,7 +144,7 @@ async fn getrawtransaction_simple_fork() {
             regtest::p2wpkh_sign_transaction(&mut tx, input_index, utxo, keypair)
         }
         AddressType::P2tr => {
-            regtest::p2tr_sign_transaction(&mut tx, input_index, &[utxo.clone()], keypair)
+            regtest::p2tr_sign_transaction(&mut tx, input_index, slice::from_ref(utxo), keypair)
         }
         _ => unimplemented!(),
     };

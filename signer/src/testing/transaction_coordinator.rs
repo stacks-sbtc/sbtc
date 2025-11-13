@@ -18,7 +18,7 @@ use crate::error;
 use crate::keys;
 use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
-use crate::keys::SignerScriptPubKey;
+use crate::keys::SignerScriptPubKey as _;
 use crate::network;
 use crate::network::in_memory2::SignerNetwork;
 use crate::stacks::api::AccountInfo;
@@ -26,7 +26,7 @@ use crate::stacks::api::MockStacksInteract;
 use crate::stacks::api::SignerSetInfo;
 use crate::stacks::api::SubmitTxResponse;
 use crate::stacks::contracts::AcceptWithdrawalV1;
-use crate::stacks::contracts::AsContractCall;
+use crate::stacks::contracts::AsContractCall as _;
 use crate::stacks::contracts::ContractCall;
 use crate::stacks::contracts::RejectWithdrawalV1;
 use crate::stacks::contracts::StacksTx;
@@ -56,7 +56,7 @@ use clarity::vm::types::BuffData;
 use clarity::vm::types::SequenceData;
 use fake::Fake as _;
 use fake::Faker;
-use rand::seq::IteratorRandom;
+use rand::seq::IteratorRandom as _;
 
 use super::context::TestContext;
 use super::context::WrappedMock;
@@ -661,9 +661,7 @@ where
                     })
                 });
                 client.expect_submit_tx().times(5).returning(|_| {
-                    Box::pin(async {
-                        Ok(SubmitTxResponse::Acceptance(*Faker.fake::<StacksTxId>()))
-                    })
+                    Box::pin(async { Ok(SubmitTxResponse::Acceptance(Faker.fake::<StacksTxId>())) })
                 });
             })
             .await;
@@ -822,7 +820,7 @@ where
         let outpoint = withdrawal_req.withdrawal_outpoint();
         assert_eq!(sign_request.tx_fee, 123000);
         assert_eq!(sign_request.aggregate_key, Some(bitcoin_aggregate_key));
-        assert_eq!(sign_request.txid, multi_tx.tx().txid());
+        assert_eq!(sign_request.txid, multi_tx.tx().txid().into());
         assert_eq!(sign_request.nonce, multi_tx.tx().get_origin_nonce());
         if let StacksTx::ContractCall(ContractCall::AcceptWithdrawalV1(call)) =
             sign_request.contract_tx
@@ -925,7 +923,7 @@ where
 
         assert_eq!(sign_request.tx_fee, 123000);
         assert_eq!(sign_request.aggregate_key, Some(bitcoin_aggregate_key));
-        assert_eq!(sign_request.txid, multi_tx.tx().txid());
+        assert_eq!(sign_request.txid, multi_tx.tx().txid().into());
         assert_eq!(sign_request.nonce, multi_tx.tx().get_origin_nonce());
 
         let StacksTx::ContractCall(ContractCall::RejectWithdrawalV1(call)) =

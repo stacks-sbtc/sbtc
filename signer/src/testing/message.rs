@@ -1,7 +1,7 @@
 //! Test utilities for signer message
 
-use fake::Fake;
-use rand::seq::SliceRandom;
+use fake::Fake as _;
+use rand::seq::SliceRandom as _;
 use stacks_common::types::chainstate::StacksAddress;
 
 use crate::message;
@@ -86,7 +86,7 @@ impl fake::Dummy<fake::Faker> for message::StacksTransactionSignRequest {
             tx_fee: 123,
             nonce: 1,
             aggregate_key: None,
-            txid: config.fake_with_rng::<StacksTxId, _>(rng).into(),
+            txid: config.fake_with_rng::<StacksTxId, _>(rng),
         }
     }
 }
@@ -94,7 +94,7 @@ impl fake::Dummy<fake::Faker> for message::StacksTransactionSignRequest {
 impl fake::Dummy<fake::Faker> for message::StacksTransactionSignature {
     fn dummy_with_rng<R: rand::RngCore + ?Sized>(config: &fake::Faker, rng: &mut R) -> Self {
         Self {
-            txid: dummy::stacks_txid(config, rng),
+            txid: fake::Faker.fake_with_rng(rng),
             signature: dummy::recoverable_signature(config, rng),
         }
     }

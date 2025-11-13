@@ -12,7 +12,7 @@ use signer::storage::model::BitcoinTxId;
 use signer::testing;
 use signer::testing::get_rng;
 
-use fake::Fake;
+use fake::Fake as _;
 use signer::testing::context::*;
 
 use crate::setup::SweepAmounts;
@@ -49,7 +49,7 @@ fn make_withdrawal_accept(data: &TestSweepSetup2) -> (AcceptWithdrawalV1, ReqCon
             vout: 2,
         },
         // This points to the withdrawal request transaction.
-        id: data.withdrawal_ids()[0],
+        id: data.withdrawal_ids()[0].clone(),
         // This is the assessed transaction fee for fulfilling the withdrawal
         // request.
         tx_fee: fee,

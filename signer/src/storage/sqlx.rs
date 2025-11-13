@@ -1,7 +1,7 @@
 //! This module contains implementations of structs that make reading from
 //! and writing from postgres easy.
 
-use std::ops::Deref;
+use std::ops::Deref as _;
 use std::str::FromStr as _;
 
 use bitcoin::hashes::Hash as _;
@@ -285,7 +285,7 @@ impl sqlx::Type<sqlx::Postgres> for StacksBlockHash {
 
 impl<'r> sqlx::Encode<'r, sqlx::Postgres> for StacksBlockHash {
     fn encode_by_ref(&self, buf: &mut PgArgumentBuffer) -> Result<IsNull, BoxDynError> {
-        <[u8; 32] as sqlx::Encode<'r, sqlx::Postgres>>::encode_by_ref(&self.to_bytes(), buf)
+        <[u8; 32] as sqlx::Encode<'r, sqlx::Postgres>>::encode_by_ref(self.to_bytes(), buf)
     }
 }
 
@@ -339,7 +339,7 @@ impl sqlx::Type<sqlx::Postgres> for StacksTxId {
 
 impl<'r> sqlx::Encode<'r, sqlx::Postgres> for StacksTxId {
     fn encode_by_ref(&self, buf: &mut PgArgumentBuffer) -> Result<IsNull, BoxDynError> {
-        <[u8; 32] as sqlx::Encode<'r, sqlx::Postgres>>::encode_by_ref(&self.to_bytes(), buf)
+        <[u8; 32] as sqlx::Encode<'r, sqlx::Postgres>>::encode_by_ref(self.to_bytes(), buf)
     }
 }
 

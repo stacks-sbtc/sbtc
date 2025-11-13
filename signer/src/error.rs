@@ -2,7 +2,6 @@
 use std::borrow::Cow;
 
 use bitcoin::script::PushBytesError;
-use blockstack_lib::types::chainstate::StacksBlockId;
 
 use crate::bitcoin::validation::WithdrawalCapContext;
 use crate::blocklist_client::BlocklistClientError;
@@ -17,6 +16,8 @@ use crate::stacks::contracts::WithdrawalAcceptValidationError;
 use crate::stacks::contracts::WithdrawalRejectValidationError;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::SigHash;
+use crate::storage::model::StacksBlockHash;
+use crate::storage::model::StacksTxId;
 use crate::transaction_signer::StacksSignRequestId;
 use crate::wsts_state_machine::StateMachineId;
 
@@ -225,11 +226,12 @@ pub enum Error {
     #[error("observed a tenure identified by a StacksBlockId with with no blocks")]
     EmptyStacksTenure,
 
-    /// This happens when StacksClient::get_tenure_raw returns an array of blocks which starts
-    /// with a block with id {0}, while we expect it to return an array of blocks starting with
-    /// a block with id {1}
-    #[error("get_tenure_raw returned unexpected response: {0}. Expected: {1}")]
-    GetTenureRawMismatch(StacksBlockId, StacksBlockId),
+    /// This happens when StacksClient::get_tenure_headers_raw returns an
+    /// array of blocks which starts with a block with id {0}, while we
+    /// expect it to return an array of blocks starting with a block with
+    /// id {1}
+    #[error("get_tenure_headers_raw returned unexpected response: {0}. Expected: {1}")]
+    GetTenureRawMismatch(StacksBlockHash, StacksBlockHash),
 
     /// Received an error in call to estimatesmartfee RPC call
     #[error("failed to get fee estimate from bitcoin-core for target {1}. {0}")]
@@ -312,11 +314,11 @@ pub enum Error {
 
     /// Parsing the Hex Error
     #[error("could not decode the Nakamoto block with ID: {1}; {0}")]
-    DecodeNakamotoBlock(#[source] blockstack_lib::codec::Error, StacksBlockId),
+    DecodeNakamotoBlock(#[source] blockstack_lib::codec::Error, StacksBlockHash),
 
     /// Thrown when parsing a Nakamoto block within a given tenure.
     #[error("could not decode Nakamoto block from tenure with block: {1}; {0}")]
-    DecodeNakamotoTenure(#[source] blockstack_lib::codec::Error, StacksBlockId),
+    DecodeNakamotoTenure(#[source] blockstack_lib::codec::Error, StacksBlockHash),
 
     /// Failed to validate the complete-deposit contract call transaction.
     #[error("deposit validation error: {0}")]
@@ -471,7 +473,7 @@ pub enum Error {
     /// An error when we exceeded the timeout when trying to sign a stacks
     /// transaction.
     #[error("took too long to receive enough signatures for transaction: {0}")]
-    SignatureTimeout(blockstack_lib::burnchains::Txid),
+    SignatureTimeout(StacksTxId),
 
     /// An error when attempting to generically decode bytes using the
     /// trait implementation.
@@ -627,10 +629,7 @@ pub enum Error {
     #[error(
         "signer and coordinator txid mismatch. Signer produced txid {0}, but coordinator sent txid {1}"
     )]
-    SignerCoordinatorTxidMismatch(
-        blockstack_lib::burnchains::Txid,
-        blockstack_lib::burnchains::Txid,
-    ),
+    SignerCoordinatorTxidMismatch(StacksTxId, StacksTxId),
 
     /// Observer dropped
     #[error("observer dropped")]
@@ -700,7 +699,7 @@ pub enum Error {
     WithdrawalBitcoinAddressFromScript(
         #[source] bitcoin::address::FromScriptError,
         u64,
-        StacksBlockId,
+        StacksBlockHash,
     ),
 
     /// Could not parse hex script.

@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::ops::Deref;
+use std::ops::Deref as _;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -13,14 +13,13 @@ use bitcoin::consensus::encode::serialize_hex;
 use bitcoincore_rpc::RpcApi as _;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlockHeader;
-use blockstack_lib::net::api::getpoxinfo::RPCPoxInfoData;
 use clarity::types::chainstate::StacksAddress;
 use clarity::vm::types::PrincipalData;
 use emily_client::apis::deposit_api;
 use emily_client::models::CreateDepositRequestBody;
 use fake::Fake as _;
 use fake::Faker;
-use rand::seq::SliceRandom;
+use rand::seq::SliceRandom as _;
 use sbtc::deposits::CreateDepositRequest;
 use sbtc::deposits::DepositScriptInputs;
 use sbtc::deposits::ReclaimScriptInputs;
@@ -39,10 +38,12 @@ use signer::error::Error;
 use signer::keys::PublicKey;
 use signer::keys::SignerScriptPubKey as _;
 use signer::stacks::api::SignerSetInfo;
-use signer::stacks::api::TenureBlocks;
-use signer::storage::DbWrite;
+use signer::stacks::api::StacksEpochStatus;
+use signer::stacks::api::TenureBlockHeaders;
+use signer::storage::DbWrite as _;
 use signer::storage::model;
 use signer::storage::model::BitcoinBlockHash;
+use signer::storage::model::BitcoinBlockHeight;
 use signer::storage::model::DkgSharesStatus;
 use signer::storage::model::EncryptedDkgShares;
 use signer::storage::model::TaprootScriptHash;
@@ -67,7 +68,7 @@ use signer::testing::context::TestContext;
 use signer::testing::context::*;
 use signer::testing::get_rng;
 use signer::testing::storage::model::TestData;
-use signer::transaction_coordinator::should_coordinate_dkg;
+use signer::transaction_coordinator::should_run_dkg;
 use signer::transaction_signer::assert_allow_dkg_begin;
 use url::Url;
 
@@ -76,9 +77,6 @@ use crate::setup::TestSweepSetup;
 use crate::setup::fetch_canonical_bitcoin_blockchain;
 use crate::transaction_coordinator::mock_reqwests_status_code_error;
 use crate::utxo_construction::make_deposit_request;
-
-pub const GET_POX_INFO_JSON: &str =
-    include_str!("../../tests/fixtures/stacksapi-get-pox-info-test-data.json");
 
 /// The [`BlockObserver::load_latest_deposit_requests`] function is
 /// supposed to fetch all deposit requests from Emily and persist the ones
@@ -142,18 +140,26 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
         });
 
         client
-            .expect_get_tenure()
-            .returning(|_| Box::pin(std::future::ready(TenureBlocks::nearly_empty())));
+            .expect_get_tenure_headers()
+            .returning(|_| Box::pin(std::future::ready(TenureBlockHeaders::nearly_empty())));
 
-        client.expect_get_pox_info().returning(|| {
-            let response = serde_json::from_str::<RPCPoxInfoData>(GET_POX_INFO_JSON)
-                .map_err(Error::JsonSerialize);
-            Box::pin(std::future::ready(response))
+        client.expect_get_epoch_status().returning(|| {
+            Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
+                nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
+            })))
         });
 
         client
             .expect_get_sortition_info()
             .returning(move |_| Box::pin(std::future::ready(Ok(DUMMY_SORTITION_INFO.clone()))));
+
+        client.expect_get_contract_source().returning(|_, _| {
+            Box::pin(async {
+                Err(Error::StacksNodeResponse(
+                    mock_reqwests_status_code_error(404).await,
+                ))
+            })
+        });
     })
     .await;
 
@@ -397,6 +403,7 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
         .with_mocked_stacks_client()
         .build();
 
+    ctx.state().set_sbtc_contracts_deployed();
     let mut signal_receiver = ctx.get_signal_receiver();
 
     // The block observer reaches out to the stacks node to get the most
@@ -408,17 +415,22 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
             .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
 
         let chain_tip = BitcoinBlockHash::from(chain_tip_info.hash);
-        client.expect_get_tenure().returning(move |_| {
-            let mut tenure = TenureBlocks::nearly_empty().unwrap();
+        client.expect_get_tenure_headers().returning(move |_| {
+            let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
             tenure.anchor_block_hash = chain_tip;
             Box::pin(std::future::ready(Ok(tenure)))
         });
 
-        client.expect_get_pox_info().returning(|| {
-            let response = serde_json::from_str::<RPCPoxInfoData>(GET_POX_INFO_JSON)
-                .map_err(Error::JsonSerialize);
-            Box::pin(std::future::ready(response))
+        client.expect_get_epoch_status().returning(|| {
+            Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
+                nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
+            })))
         });
+
+        // The signer set info is not necessary for this test.
+        client
+            .expect_get_current_signer_set_info()
+            .returning(|_| Box::pin(std::future::ready(Ok(None))));
     })
     .await;
 
@@ -879,12 +891,12 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
             Box::pin(std::future::ready(response))
         });
         client
-            .expect_get_tenure()
-            .returning(|_| Box::pin(std::future::ready(TenureBlocks::nearly_empty())));
-        client.expect_get_pox_info().returning(|| {
-            let response = serde_json::from_str::<RPCPoxInfoData>(GET_POX_INFO_JSON)
-                .map_err(Error::JsonSerialize);
-            Box::pin(std::future::ready(response))
+            .expect_get_tenure_headers()
+            .returning(|_| Box::pin(std::future::ready(TenureBlockHeaders::nearly_empty())));
+        client.expect_get_epoch_status().returning(|| {
+            Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
+                nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
+            })))
         });
         client
             .expect_get_sortition_info()
@@ -1108,12 +1120,12 @@ async fn next_headers_to_process_ignores_known_headers() {
     testing::storage::drop_db(db).await;
 }
 
-/// The [`get_signer_set_and_aggregate_key`] function is supposed to fetch
-/// the signing set that is in the sbtc-registry by querying the stacks
-/// node if the smart contracts have been deployed and returning None if
-/// they have not.
+/// The [`get_signer_set_info`] function is supposed to fetch the signing
+/// set that is in the sbtc-registry by querying the stacks node if the
+/// smart contracts have been deployed and returning None if they have not
+/// or if the smart contract contains only null data.
 #[tokio::test]
-async fn get_signer_set_info_falls_back() {
+async fn get_signer_set_info_checks_for_contract_deployment() {
     let db = testing::storage::new_test_database().await;
 
     let mut rng = get_rng();
@@ -1141,18 +1153,23 @@ async fn get_signer_set_info_falls_back() {
         client
             .expect_get_current_signer_set_info()
             .returning(move |_| Box::pin(std::future::ready(Ok(Some(signer_set_info2.clone())))));
+
+        client.expect_get_contract_source().returning(|_, _| {
+            Box::pin(async {
+                Err(Error::StacksNodeResponse(
+                    mock_reqwests_status_code_error(404).await,
+                ))
+            })
+        });
     })
     .await;
 
-    // We have no rows in the DKG shares table and no rotate-keys
-    // transactions, so there should be no aggregate key, since that only
-    // happens after DKG, but we should always know the current signer set.
-    // Signatures required should fall back to config value.
     let info = get_signer_set_info(&ctx).await.unwrap();
     assert!(info.is_none());
 
-    // Alright, now that we have a rotate-keys transaction, we can check if
-    // it is preferred over the DKG shares table.
+    // Alright, now we set that the contracts have been deployed, so we no
+    // longer ask the stacks node about whether the they have been deployed
+    // or not and just query the smart contract.
     ctx.state().set_sbtc_contracts_deployed();
     let info = get_signer_set_info(&ctx).await.unwrap().unwrap();
 
@@ -1195,12 +1212,12 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
             Box::pin(std::future::ready(response))
         });
         client
-            .expect_get_tenure()
-            .returning(|_| Box::pin(std::future::ready(TenureBlocks::nearly_empty())));
-        client.expect_get_pox_info().returning(|| {
-            let response = serde_json::from_str::<RPCPoxInfoData>(GET_POX_INFO_JSON)
-                .map_err(Error::JsonSerialize);
-            Box::pin(std::future::ready(response))
+            .expect_get_tenure_headers()
+            .returning(|_| Box::pin(std::future::ready(TenureBlockHeaders::nearly_empty())));
+        client.expect_get_epoch_status().returning(|| {
+            Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
+                nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
+            })))
         });
         client
             .expect_get_sortition_info()
@@ -1220,6 +1237,14 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
                     Ok(info.map(Into::into))
                 })
             });
+
+        client.expect_get_contract_source().returning(|_, _| {
+            Box::pin(async {
+                Err(Error::StacksNodeResponse(
+                    mock_reqwests_status_code_error(404).await,
+                ))
+            })
+        });
     })
     .await;
 
@@ -1376,16 +1401,24 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
             Box::pin(std::future::ready(response))
         });
         client
-            .expect_get_tenure()
-            .returning(|_| Box::pin(std::future::ready(TenureBlocks::nearly_empty())));
-        client.expect_get_pox_info().returning(|| {
-            let response = serde_json::from_str::<RPCPoxInfoData>(GET_POX_INFO_JSON)
-                .map_err(Error::JsonSerialize);
-            Box::pin(std::future::ready(response))
+            .expect_get_tenure_headers()
+            .returning(|_| Box::pin(std::future::ready(TenureBlockHeaders::nearly_empty())));
+        client.expect_get_epoch_status().returning(|| {
+            Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
+                nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
+            })))
         });
         client
             .expect_get_sortition_info()
             .returning(|_| Box::pin(std::future::ready(Ok(DUMMY_SORTITION_INFO.clone()))));
+
+        client.expect_get_contract_source().returning(|_, _| {
+            Box::pin(async {
+                Err(Error::StacksNodeResponse(
+                    mock_reqwests_status_code_error(404).await,
+                ))
+            })
+        });
     })
     .await;
 
@@ -1469,7 +1502,7 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
     assert_eq!(storage.get_encrypted_dkg_shares_count().await.unwrap(), 0);
 
     // Signers and coordinator should allow DKG
-    assert!(should_coordinate_dkg(&ctx, &db_chain_tip).await.unwrap());
+    assert!(should_run_dkg(&ctx, &db_chain_tip).await.unwrap());
     assert!(assert_allow_dkg_begin(&ctx, &db_chain_tip).await.is_ok());
 
     // Okay now let's add in some DKG shares into the database.
@@ -1486,7 +1519,7 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
     prevent_dkg_on_changed_signer_set_info(&ctx, dkg_shares.aggregate_key);
 
     // Signers and coordinator should NOT allow DKG
-    assert!(!should_coordinate_dkg(&ctx, &db_chain_tip).await.unwrap());
+    assert!(!should_run_dkg(&ctx, &db_chain_tip).await.unwrap());
     assert!(assert_allow_dkg_begin(&ctx, &db_chain_tip).await.is_err());
 
     // While in the verification window, we expect the share to stay in pending
@@ -1520,7 +1553,7 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
         assert_eq!(storage.get_encrypted_dkg_shares_count().await.unwrap(), 1);
 
         // Signers and coordinator should NOT allow DKG
-        assert!(!should_coordinate_dkg(&ctx, &db_chain_tip).await.unwrap());
+        assert!(!should_run_dkg(&ctx, &db_chain_tip).await.unwrap());
         assert!(assert_allow_dkg_begin(&ctx, &db_chain_tip).await.is_err());
     }
 
@@ -1556,7 +1589,7 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
     assert_eq!(storage.get_encrypted_dkg_shares_count().await.unwrap(), 0);
 
     // Signers and coordinator should allow again DKG
-    assert!(should_coordinate_dkg(&ctx, &db_chain_tip).await.unwrap());
+    assert!(should_run_dkg(&ctx, &db_chain_tip).await.unwrap());
     assert!(assert_allow_dkg_begin(&ctx, &db_chain_tip).await.is_ok());
 
     testing::storage::drop_db(db).await;
@@ -1604,16 +1637,24 @@ async fn block_observer_ignores_coinbase() {
             .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
 
         let chain_tip = BitcoinBlockHash::from(chain_tip_info.hash);
-        client.expect_get_tenure().returning(move |_| {
-            let mut tenure = TenureBlocks::nearly_empty().unwrap();
+        client.expect_get_tenure_headers().returning(move |_| {
+            let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
             tenure.anchor_block_hash = chain_tip;
             Box::pin(std::future::ready(Ok(tenure)))
         });
 
-        client.expect_get_pox_info().returning(|| {
-            let response = serde_json::from_str::<RPCPoxInfoData>(GET_POX_INFO_JSON)
-                .map_err(Error::JsonSerialize);
-            Box::pin(std::future::ready(response))
+        client.expect_get_epoch_status().returning(|| {
+            Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
+                nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
+            })))
+        });
+
+        client.expect_get_contract_source().returning(|_, _| {
+            Box::pin(async {
+                Err(Error::StacksNodeResponse(
+                    mock_reqwests_status_code_error(404).await,
+                ))
+            })
         });
     })
     .await;
