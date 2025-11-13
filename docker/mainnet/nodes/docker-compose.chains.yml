@@ -42,7 +42,7 @@ services:
 
   stacks-core:
     # this version can be outdated, check the last image on: https://hub.docker.com/r/blockstack/stacks-core/tags
-    image: blockstack/stacks-core:3.2.0.0.2@sha256:67c7574782c3b7f95a592d46d881d261524a4bc1c5cf4e66d54d39f330e4bf69
+    image: blockstack/stacks-core:3.3.0.0.1@sha256:b7fd10e489c81da12d8e1b956dec5d35bf8fd98874a6d32127bdee19cad0a235
     container_name: stacks-core
     restart: on-failure:3
     ports:
