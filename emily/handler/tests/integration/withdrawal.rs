@@ -1261,6 +1261,7 @@ async fn only_confirmed_withdrawals_can_have_fulfillment(
     let withdrawal = withdrawals.first().unwrap();
 
     if status == WithdrawalStatus::Confirmed {
+        assert_eq!(withdrawal.status, 200);
         let withdrawal = withdrawal.withdrawal.clone().unwrap().unwrap();
         assert_eq!(withdrawal.request_id, request_id);
         assert_eq!(withdrawal.status, status);
