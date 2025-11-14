@@ -13,6 +13,7 @@ use bitcoin::Amount;
 use bitcoin::BlockHash;
 use bitcoin::Transaction;
 use bitcoin::hashes::Hash as _;
+use bitcoin::relative::Height;
 use bitcoincore_rpc::RpcApi as _;
 use bitcoincore_rpc_json::GetChainTipsResultTip;
 use bitvec::array::BitArray;
@@ -40,6 +41,7 @@ use more_asserts::assert_lt;
 use rand::rngs::OsRng;
 
 use sbtc::deposits::CreateDepositRequest;
+use sbtc::deposits::DepositInfo;
 use sbtc::deposits::DepositScriptInputs;
 use sbtc::deposits::ReclaimScriptInputs;
 use sbtc::testing::regtest;
@@ -71,6 +73,7 @@ use signer::stacks::wallet::SignerWallet;
 use signer::storage::model::BitcoinBlockHeight;
 use signer::storage::model::KeyRotationEvent;
 use signer::storage::model::WithdrawalTxOutput;
+use signer::testing::btc::build_emily_request;
 use signer::testing::btc::get_canonical_chain_tip;
 use signer::testing::get_rng;
 
@@ -2157,13 +2160,13 @@ async fn sign_bitcoin_transaction() {
     let amount = 2_500_000;
     let signers_public_key = shares.aggregate_key.into();
     let max_fee = amount / 2;
-    let (deposit_tx, deposit_request, _) =
+    let (deposit_tx, deposit_request, deposit_info) =
         make_deposit_request(&depositor, amount, utxo, max_fee, signers_public_key);
     rpc.send_raw_transaction(&deposit_tx).unwrap();
 
     assert_eq!(deposit_tx.compute_txid(), deposit_request.outpoint.txid);
 
-    let body = deposit_request.as_emily_request(&deposit_tx);
+    let body = build_emily_request(&deposit_info, &deposit_tx);
     let _ = deposit_api::create_deposit(emily_client.config(), body)
         .await
         .unwrap();
@@ -2498,13 +2501,13 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     let amount = 2_500_000;
     let signers_public_key = shares1.aggregate_key.into();
     let max_fee = amount / 2;
-    let (deposit_tx, deposit_request, _) =
+    let (deposit_tx, deposit_request, deposit_info) =
         make_deposit_request(&depositor1, amount, utxo, max_fee, signers_public_key);
     rpc.send_raw_transaction(&deposit_tx).unwrap();
 
     assert_eq!(deposit_tx.compute_txid(), deposit_request.outpoint.txid);
 
-    let body = deposit_request.as_emily_request(&deposit_tx);
+    let body = build_emily_request(&deposit_info, &deposit_tx);
     let _ = deposit_api::create_deposit(emily_client.config(), body)
         .await
         .unwrap();
@@ -2615,11 +2618,11 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     let amount = 3_500_000;
     let signers_public_key2 = shares2.aggregate_key.into();
     let max_fee = amount / 2;
-    let (deposit_tx, deposit_request, _) =
+    let (deposit_tx, _, deposit_info) =
         make_deposit_request(&depositor2, amount, utxo, max_fee, signers_public_key2);
     rpc.send_raw_transaction(&deposit_tx).unwrap();
 
-    let body = deposit_request.as_emily_request(&deposit_tx);
+    let body = build_emily_request(&deposit_info, &deposit_tx);
     deposit_api::create_deposit(emily_client.config(), body)
         .await
         .unwrap();
@@ -2628,11 +2631,11 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     let amount = 4_500_000;
     let signers_public_key1 = shares1.aggregate_key.into();
     let max_fee = amount / 2;
-    let (deposit_tx, deposit_request, _) =
+    let (deposit_tx, _, deposit_info) =
         make_deposit_request(&depositor1, amount, utxo, max_fee, signers_public_key1);
     rpc.send_raw_transaction(&deposit_tx).unwrap();
 
-    let body = deposit_request.as_emily_request(&deposit_tx);
+    let body = build_emily_request(&deposit_info, &deposit_tx);
     deposit_api::create_deposit(emily_client.config(), body)
         .await
         .unwrap();
@@ -3051,13 +3054,13 @@ async fn wsts_ids_set_during_dkg_and_signing_rounds() {
     let amount = 2_500_000;
     let signers_public_key = shares.aggregate_key.into();
     let max_fee = amount / 2;
-    let (deposit_tx, deposit_request, _) =
+    let (deposit_tx, deposit_request, deposit_info) =
         make_deposit_request(&depositor, amount, utxo, max_fee, signers_public_key);
     rpc.send_raw_transaction(&deposit_tx).unwrap();
 
     assert_eq!(deposit_tx.compute_txid(), deposit_request.outpoint.txid);
 
-    let body = deposit_request.as_emily_request(&deposit_tx);
+    let body = build_emily_request(&deposit_info, &deposit_tx);
     let _ = deposit_api::create_deposit(emily_client.config(), body)
         .await
         .unwrap();
@@ -3378,13 +3381,13 @@ async fn skip_signer_activites_after_key_rotation() {
     let amount = 2_500_000;
     let signers_public_key = shares1.aggregate_key.into();
     let max_fee = amount / 2;
-    let (deposit_tx, deposit_request, _) =
+    let (deposit_tx, deposit_request, deposit_info) =
         make_deposit_request(&depositor1, amount, utxo, max_fee, signers_public_key);
     rpc.send_raw_transaction(&deposit_tx).unwrap();
 
     assert_eq!(deposit_tx.compute_txid(), deposit_request.outpoint.txid);
 
-    let body = deposit_request.as_emily_request(&deposit_tx);
+    let body = build_emily_request(&deposit_info, &deposit_tx);
     let _ = deposit_api::create_deposit(emily_client.config(), body)
         .await
         .unwrap();
@@ -3474,11 +3477,11 @@ async fn skip_signer_activites_after_key_rotation() {
 
     let amount = 3_500_000;
     let max_fee = amount / 2;
-    let (deposit_tx, deposit_request, _) =
+    let (deposit_tx, _, deposit_info) =
         make_deposit_request(&depositor2, amount, utxo, max_fee, signers_public_key);
     rpc.send_raw_transaction(&deposit_tx).unwrap();
 
-    let body = deposit_request.as_emily_request(&deposit_tx);
+    let body = build_emily_request(&deposit_info, &deposit_tx);
     deposit_api::create_deposit(emily_client.config(), body)
         .await
         .unwrap();
@@ -6115,7 +6118,7 @@ fn make_deposit_requests<U>(
     utxo: U,
     max_fee: u64,
     signers_public_key: bitcoin::XOnlyPublicKey,
-) -> (Transaction, Vec<DepositRequest>)
+) -> (Transaction, Vec<DepositRequest>, Vec<DepositInfo>)
 where
     U: regtest::AsUtxo,
 {
@@ -6161,6 +6164,7 @@ where
     regtest::p2tr_sign_transaction(&mut deposit_tx, 0, &[utxo], &depositor.keypair);
 
     let mut requests = vec![];
+    let mut infos = vec![];
     for (index, amount) in amounts.iter().enumerate() {
         let req = CreateDepositRequest {
             outpoint: bitcoin::OutPoint::new(deposit_tx.compute_txid(), index as u32),
@@ -6168,19 +6172,29 @@ where
             reclaim_script: reclaim_script.clone(),
         };
 
+        infos.push(DepositInfo {
+            outpoint: req.outpoint,
+            max_fee,
+            deposit_script: req.deposit_script,
+            amount: *amount,
+            reclaim_script: req.reclaim_script,
+            signers_public_key,
+            recipient: deposit_inputs.recipient.clone(),
+            lock_time: bitcoin::relative::LockTime::Blocks(Height::from_height(50)),
+        });
+
         requests.push(DepositRequest {
             outpoint: req.outpoint,
             max_fee,
             signer_bitmap: BitArray::ZERO,
             amount: *amount,
             deposit_script: deposit_script.clone(),
-            reclaim_script: reclaim_script.clone(),
-            reclaim_script_hash: Some(model::TaprootScriptHash::from(&reclaim_script)),
+            reclaim_script_hash: model::TaprootScriptHash::from(&reclaim_script),
             signers_public_key,
         });
     }
 
-    (deposit_tx, requests)
+    (deposit_tx, requests, infos)
 }
 
 /// This test requires a running stacks node.
@@ -6413,15 +6427,15 @@ async fn reuse_nonce_attack() {
     let signers_public_key = shares.aggregate_key.into();
     let max_fee = 50_000;
 
-    let (deposit_tx, deposit_requests) =
+    let (deposit_tx, deposit_requests, deposit_infos) =
         make_deposit_requests(&depositor, &amounts, utxo, max_fee, signers_public_key);
 
     rpc.send_raw_transaction(&deposit_tx).unwrap();
 
-    for request in &deposit_requests {
+    for (request, info) in deposit_requests.iter().zip(deposit_infos.iter()) {
         assert_eq!(deposit_tx.compute_txid(), request.outpoint.txid);
 
-        let body = request.as_emily_request(&deposit_tx);
+        let body = build_emily_request(info, &deposit_tx);
         let _ = deposit_api::create_deposit(emily_client.config(), body)
             .await
             .unwrap();
