@@ -13,6 +13,7 @@ use bitcoin::Amount;
 use bitcoin::BlockHash;
 use bitcoin::Transaction;
 use bitcoin::hashes::Hash as _;
+use bitcoin::relative::Height;
 use bitcoincore_rpc::RpcApi as _;
 use bitcoincore_rpc_json::GetChainTipsResultTip;
 use bitvec::array::BitArray;
@@ -6179,7 +6180,7 @@ where
             reclaim_script: req.reclaim_script,
             signers_public_key,
             recipient: deposit_inputs.recipient.clone(),
-            lock_time: bitcoin::relative::LockTime::ZERO,
+            lock_time: bitcoin::relative::LockTime::Blocks(Height::from_height(50)),
         });
 
         requests.push(DepositRequest {
