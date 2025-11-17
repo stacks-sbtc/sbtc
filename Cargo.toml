@@ -79,7 +79,7 @@ sqlx = { version = "0.8.3", default-features = false, features = [ "postgres", "
 strum = { version = "0.26.3", default-features = false, features = ["derive"] }
 thiserror = { version = "2.0.11", default-features = false }
 time = { version = "0.3.37", default-features = false, features = ["serde"] }
-tokio = { version = "1.43.0", default-features = false, features = ["signal", "macros", "rt-multi-thread", "rt"] }
+tokio = { version = "1.48.0", default-features = false, features = ["signal", "macros", "rt-multi-thread", "rt"] }
 tokio-stream = { version = "0.1.15", default-features = false, features = ["sync"] }
 tonic = { version = "0.12.3", default-features = false, features = ["prost"] }
 tonic-build = { version = "0.12.3", default-features = false, features = ["prost"] }
@@ -102,6 +102,7 @@ test-case = { version = "3.3.1", default-features = false }
 test-log = { version = "0.2.17", default-features = false, features = ["trace"] }
 toml_edit = { version = "0.22.22", default-features = false, features = ["display"] }
 tower = { version = "0.5.2", default-features = false, features = ["util"] }
+testcontainers = { git = "https://github.com/testcontainers/testcontainers-rs", rev = "9aae21e7330f3ad22a7742c82dd5eea465928510", default-features = false, features = ["docker-compose"] }
 
 [workspace.lints.rust]
 missing_docs = "deny"
