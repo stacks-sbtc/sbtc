@@ -75,6 +75,13 @@ impl WithdrawalUpdate {
         self,
         chainstate: Chainstate,
     ) -> Result<ValidatedWithdrawalUpdate, error::ValidationError> {
+        // Only confirmed withdrawals can have a fulfillment.
+        if self.status != WithdrawalStatus::Confirmed && self.fulfillment.is_some() {
+            return Err(ValidationError::WithdrawalFulfillmentNotConfirmed(
+                self.status,
+                self.request_id,
+            ));
+        }
         // Make status entry.
         let status_entry: WithdrawalStatusEntry = match self.status {
             WithdrawalStatus::Confirmed => {
@@ -136,6 +143,19 @@ impl UpdateWithdrawalsRequestBody {
                     tracing::warn!(
                         request_id,
                         "failed to update withdrawal: request missing fulfillment for completed request."
+                    );
+                    withdrawals.push((index, Err(error.clone())));
+                }
+                Err(
+                    ref error @ ValidationError::WithdrawalFulfillmentNotConfirmed(
+                        ref status,
+                        request_id,
+                    ),
+                ) => {
+                    tracing::warn!(
+                        request_id,
+                        ?status,
+                        "failed to update withdrawal: fulfillment data is only allowed for confirmed withdrawals."
                     );
                     withdrawals.push((index, Err(error.clone())));
                 }
