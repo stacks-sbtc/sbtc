@@ -394,7 +394,7 @@ impl TenureBlockHeaders {
     }
 
     /// Get the minimum block height in the tenure.
-    pub fn min_height(&self) -> StacksBlockHeight {
+    pub fn start_height(&self) -> StacksBlockHeight {
         // SAFETY: It is okay to unwrap here because we know that the
         // tenure is non-empty. The struct upholds this invariant upon
         // creation.
@@ -1477,13 +1477,13 @@ where
         tenure = tenure_headers;
     }
 
-    let min_height = tenure.min_height();
+    let start_height = tenure.start_height();
 
     db.copy_from_stacks_blocks_temp_table().await?;
     db.truncate_stacks_blocks_temp_table().await?;
 
-    tracing::debug!(%min_height, %end_height, "finished updating the stacks_blocks table");
-    Ok(RangeInclusive::new(min_height, end_height))
+    tracing::debug!(%start_height, %end_height, "finished updating the stacks_blocks table");
+    Ok(RangeInclusive::new(start_height, end_height))
 }
 
 /// A deserializer for Clarity's [`Value`] type that deserializes a hex-encoded
