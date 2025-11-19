@@ -1423,7 +1423,7 @@ where
     let nakamoto_start_height = stacks.get_epoch_status().await?.nakamoto_start_height();
 
     // Truncate the `stacks_blocks_temp` table to ensure that we start with
-    // a clean slate.
+    // a clean state.
     db.truncate_stacks_blocks_temp_table().await?;
 
     loop {
