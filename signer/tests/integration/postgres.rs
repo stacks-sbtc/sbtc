@@ -2579,33 +2579,22 @@ async fn get_swept_deposit_requests_does_not_return_deposit_requests_with_respon
     // Setup the stacks blocks
     let stacks_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
 
-    let setup_fork_event_block = StacksBlockHeader {
-        block_id: fake::Faker.fake_with_rng(&mut rng),
+    let setup_fork_event_block = StacksBlock {
+        block_hash: fake::Faker.fake_with_rng(&mut rng),
         block_height: stacks_tip.block_height + 1,
-        parent_block_id: stacks_tip.block_hash,
-        consensus_hash: fake::Faker.fake_with_rng(&mut rng),
+        parent_hash: stacks_tip.block_hash,
+        // For `setup_fork`, the stacks block is not in the canonical chain
+        bitcoin_anchor: fake::Faker.fake_with_rng(&mut rng),
     };
-    let mut setup_fork_event_block_tenure =
-        TenureBlockHeaders::from_headers(vec![setup_fork_event_block.clone()]).unwrap();
-    // For `setup_fork`, the stacks block is not in the canonical chain
-    setup_fork_event_block_tenure.anchor_block_hash = fake::Faker.fake_with_rng(&mut rng);
-
-    let setup_canonical_event_block = StacksBlockHeader {
-        block_id: fake::Faker.fake_with_rng(&mut rng),
+    let setup_canonical_event_block = StacksBlock {
+        block_hash: fake::Faker.fake_with_rng(&mut rng),
         block_height: stacks_tip.block_height + 1,
-        parent_block_id: stacks_tip.block_hash,
-        consensus_hash: fake::Faker.fake_with_rng(&mut rng),
+        parent_hash: stacks_tip.block_hash,
+        // For `setup_canonical`, the stacks block is in the canonical chain
+        bitcoin_anchor: chain_tip,
     };
-    let mut setup_canonical_event_block_tenure =
-        TenureBlockHeaders::from_headers(vec![setup_canonical_event_block.clone()]).unwrap();
-    // For `setup_canonical`, the stacks block is in the canonical chain
-    setup_canonical_event_block_tenure.anchor_block_hash = chain_tip;
-    db.write_stacks_block_headers(&setup_fork_event_block_tenure)
-        .await
-        .unwrap();
-    db.write_stacks_block_headers(&setup_canonical_event_block_tenure)
-        .await
-        .unwrap();
+    db.write_stacks_block(&setup_fork_event_block).await.unwrap();
+    db.write_stacks_block(&setup_canonical_event_block).await.unwrap();
 
     // First, let's check we get both deposits
     let requests = db
@@ -2619,7 +2608,7 @@ async fn get_swept_deposit_requests_does_not_return_deposit_requests_with_respon
     // For `setup_canonical`, the event block is on the canonical chain
     let event = CompletedDepositEvent {
         txid: fake::Faker.fake_with_rng::<StacksTxId, _>(&mut rng),
-        block_id: setup_canonical_event_block.block_id,
+        block_id: setup_canonical_event_block.block_hash,
         amount: setup_canonical.deposit_request.amount,
         outpoint: setup_canonical.deposit_request.outpoint,
         sweep_block_hash: setup_canonical.deposit_block_hash.into(),
@@ -2631,7 +2620,7 @@ async fn get_swept_deposit_requests_does_not_return_deposit_requests_with_respon
     // For `setup_fork`, the event block is not on the canonical chain
     let event = CompletedDepositEvent {
         txid: fake::Faker.fake_with_rng::<StacksTxId, _>(&mut rng),
-        block_id: setup_fork_event_block.block_id,
+        block_id: setup_fork_event_block.block_hash,
         amount: setup_fork.deposit_request.amount,
         outpoint: setup_fork.deposit_request.outpoint,
         sweep_block_hash: setup_fork.deposit_block_hash.into(),
@@ -2654,7 +2643,7 @@ async fn get_swept_deposit_requests_does_not_return_deposit_requests_with_respon
     let setup_fork_event_block = StacksBlock {
         block_hash: fake::Faker.fake_with_rng(&mut rng),
         block_height: setup_canonical_event_block.block_height + 1,
-        parent_hash: setup_canonical_event_block.parent_block_id,
+        parent_hash: setup_canonical_event_block.parent_hash,
         bitcoin_anchor: chain_tip,
     };
     db.write_stacks_block(&setup_fork_event_block)
