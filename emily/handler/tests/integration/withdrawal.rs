@@ -14,6 +14,7 @@ use testing_emily_client::models::{
 
 use crate::common::batch_set_chainstates;
 use crate::common::clean_setup;
+use crate::common::handler_withdrawal_status;
 use crate::common::new_test_chainstate;
 
 const RECIPIENT: &str = "TEST_RECIPIENT";
@@ -1179,4 +1180,110 @@ async fn emily_handles_withdrawal_requests_on_forks() {
         withdrawal.stacks_block_hash,
         old_chaintip.stacks_block_hash.clone()
     );
+}
+
+#[test_case(WithdrawalStatus::Accepted, true; "accepted_sidecar")]
+#[test_case(WithdrawalStatus::Pending, true; "pending_sidecar")]
+#[test_case(WithdrawalStatus::Confirmed, true; "confirmed_sidecar")]
+#[test_case(WithdrawalStatus::Failed, true; "failed_sidecar")]
+#[test_case(WithdrawalStatus::Accepted, false; "accepted_signer")]
+#[tokio::test]
+async fn only_confirmed_withdrawals_can_have_fulfillment(
+    status: WithdrawalStatus,
+    is_sidecar: bool,
+) {
+    // the testing configuration has privileged access to all endpoints.
+    let testing_configuration = clean_setup().await;
+
+    // the user configuration access depends on the api_key.
+    let user_configuration = testing_configuration.clone();
+    // Arrange.
+    // --------
+    let request_id = 1;
+
+    let chainstate = Chainstate {
+        stacks_block_hash: "test_block_hash".to_string(),
+        stacks_block_height: 1,
+        bitcoin_block_height: Some(Some(1)),
+    };
+
+    set_chainstate(&testing_configuration, chainstate.clone())
+        .await
+        .expect("Received an error after making a valid set chainstate api call.");
+
+    // Setup test withdrawal transaction.
+    let request = CreateWithdrawalRequestBody {
+        amount: 10000,
+        parameters: Box::new(WithdrawalParameters { max_fee: 100 }),
+        recipient: RECIPIENT.into(),
+        sender: SENDER.into(),
+        request_id,
+        stacks_block_hash: chainstate.stacks_block_hash.clone(),
+        stacks_block_height: chainstate.stacks_block_height,
+        txid: "test_txid".to_string(),
+    };
+
+    // Create the withdrawal with the privileged configuration.
+    apis::withdrawal_api::create_withdrawal(&testing_configuration, request.clone())
+        .await
+        .expect("Received an error after making a valid create withdrawal request api call.");
+
+    let fulfillment = Some(Some(Box::new(Fulfillment {
+        bitcoin_block_hash: "bitcoin_block_hash".to_string(),
+        bitcoin_block_height: 23,
+        bitcoin_tx_index: 45,
+        bitcoin_txid: "test_fulfillment_bitcoin_txid".to_string(),
+        btc_fee: 2314,
+        stacks_txid: "test_fulfillment_stacks_txid".to_string(),
+    })));
+
+    let request = UpdateWithdrawalsRequestBody {
+        withdrawals: vec![WithdrawalUpdate {
+            request_id,
+            fulfillment: fulfillment.clone(),
+            status,
+            status_message: "foo".into(),
+        }],
+    };
+    let withdrawals = if is_sidecar {
+        apis::withdrawal_api::update_withdrawals_sidecar(&user_configuration, request)
+            .await
+            .unwrap()
+            .withdrawals
+    } else {
+        apis::withdrawal_api::update_withdrawals_signer(&user_configuration, request)
+            .await
+            .unwrap()
+            .withdrawals
+    };
+
+    assert_eq!(withdrawals.len(), 1);
+    let withdrawal = withdrawals.first().unwrap();
+
+    if status == WithdrawalStatus::Confirmed {
+        assert_eq!(withdrawal.status, 200);
+        let withdrawal = withdrawal.withdrawal.clone().unwrap().unwrap();
+        assert_eq!(withdrawal.request_id, request_id);
+        assert_eq!(withdrawal.status, status);
+        assert_eq!(withdrawal.fulfillment, fulfillment);
+    } else {
+        // Check response correctness
+        assert_eq!(withdrawal.status, 400);
+        assert!(withdrawal.withdrawal.clone().unwrap().is_none());
+        let expected_error =
+            emily_handler::common::error::ValidationError::WithdrawalFulfillmentNotConfirmed(
+                handler_withdrawal_status(status),
+                request_id,
+            )
+            .to_string();
+        assert_eq!(withdrawal.error.clone().unwrap().unwrap(), expected_error);
+
+        // Check that withdrawal wasn't updated
+        let response = apis::withdrawal_api::get_withdrawal(&user_configuration, request_id)
+            .await
+            .expect("Received an error after making a valid get withdrawal api call.");
+        assert_eq!(response.request_id, request_id);
+        assert!(matches!(response.status, WithdrawalStatus::Pending));
+        assert!(response.fulfillment.is_none());
+    }
 }

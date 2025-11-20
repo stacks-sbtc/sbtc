@@ -171,6 +171,10 @@ start_height = $STACKS_31_HEIGHT
 epoch_name = "3.2"
 start_height = $STACKS_32_HEIGHT
 
+[[burnchain.epochs]]
+epoch_name = "3.3"
+start_height = $STACKS_33_HEIGHT
+
 [[ustx_balance]]
 address = "ST2SBXRBJJTH7GV5J93HJ62W2NRRQ46XYBK92Y039" # sBTC deployer
 amount = 10000000000000000

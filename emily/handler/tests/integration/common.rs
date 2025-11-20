@@ -1,8 +1,12 @@
 //! Common module for useful test functions.
 
 use crate::config::SETTINGS;
+use emily_handler::api::models::common::DepositStatus as HandlerDepositStatus;
+use emily_handler::api::models::common::WithdrawalStatus as HandlerWithdrawalStatus;
 use serde::{Deserialize, Serialize};
 use testing_emily_client::models::Chainstate;
+use testing_emily_client::models::DepositStatus as TestingDepositStatus;
+use testing_emily_client::models::WithdrawalStatus as TestingWithdrawalStatus;
 use testing_emily_client::{
     apis::{
         self,
@@ -79,5 +83,25 @@ where
             },
             e => panic!("Unexpected openapi error type found while extracting error data: {e}."),
         }
+    }
+}
+
+/// Converts `testing_emily_client::models::DepositStatus` => `emily_handler::api::models::common::DepositStatus`
+pub fn handler_deposit_status(status: TestingDepositStatus) -> HandlerDepositStatus {
+    match status {
+        TestingDepositStatus::Accepted => HandlerDepositStatus::Accepted,
+        TestingDepositStatus::Confirmed => HandlerDepositStatus::Confirmed,
+        TestingDepositStatus::Failed => HandlerDepositStatus::Failed,
+        TestingDepositStatus::Pending => HandlerDepositStatus::Pending,
+        TestingDepositStatus::Rbf => HandlerDepositStatus::Rbf,
+    }
+}
+/// Converts `testing_emily_client::models::WithdrawalStatus` => `emily_handler::api::models::common::WithdrawalStatus`
+pub fn handler_withdrawal_status(status: TestingWithdrawalStatus) -> HandlerWithdrawalStatus {
+    match status {
+        TestingWithdrawalStatus::Accepted => HandlerWithdrawalStatus::Accepted,
+        TestingWithdrawalStatus::Confirmed => HandlerWithdrawalStatus::Confirmed,
+        TestingWithdrawalStatus::Failed => HandlerWithdrawalStatus::Failed,
+        TestingWithdrawalStatus::Pending => HandlerWithdrawalStatus::Pending,
     }
 }

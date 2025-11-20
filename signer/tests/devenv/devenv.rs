@@ -250,8 +250,7 @@ where
         signer_bitmap: BitArray::ZERO,
         amount: dep.amount,
         deposit_script: dep.deposit_script.clone(),
-        reclaim_script: dep.reclaim_script.clone(),
-        reclaim_script_hash: Some(reclaim_script_hash),
+        reclaim_script_hash,
         signers_public_key: dep.signers_public_key,
     };
     (deposit_tx, req, dep)
@@ -394,7 +393,7 @@ async fn orphaned_deposit() {
         height: 0,
     };
     let max_fee = deposit_amount / 2;
-    let (deposit_tx, deposit_request, _) = make_deposit_request(
+    let (deposit_tx, deposit_request, deposit_info) = make_deposit_request(
         &depositor,
         deposit_amount,
         depositor_utxo.clone(),
@@ -408,7 +407,7 @@ async fn orphaned_deposit() {
         bitcoin_tx_output_index: deposit_request.outpoint.vout,
         bitcoin_txid: deposit_request.outpoint.txid.to_string(),
         deposit_script: deposit_request.deposit_script.to_hex_string(),
-        reclaim_script: deposit_request.reclaim_script.to_hex_string(),
+        reclaim_script: deposit_info.reclaim_script.to_hex_string(),
         transaction_hex: serialize_hex(&deposit_tx),
     };
 

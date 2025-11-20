@@ -150,9 +150,17 @@ impl DepositUpdate {
             bitcoin_tx_output_index: self.bitcoin_tx_output_index,
             bitcoin_txid: self.bitcoin_txid.clone(),
         };
-        // Only RBF transactions can have a replaced_by_tx.
+        // Only RBF deposits can have a replaced_by_tx.
         if self.status != DepositStatus::Rbf && self.replaced_by_tx.is_some() {
             return Err(error::ValidationError::InvalidReplacedByTxStatus(
+                self.status,
+                self.bitcoin_txid,
+                self.bitcoin_tx_output_index,
+            ));
+        }
+        // Only confirmed deposits can have a fulfillment.
+        if self.status != DepositStatus::Confirmed && self.fulfillment.is_some() {
+            return Err(error::ValidationError::DepositFulfillmentNotConfirmed(
                 self.status,
                 self.bitcoin_txid,
                 self.bitcoin_tx_output_index,
@@ -228,6 +236,21 @@ impl UpdateDepositsRequestBody {
                         %bitcoin_txid,
                         bitcoin_tx_output_index,
                         "failed to update deposit: request missing fulfillment for completed request."
+                    );
+                    deposits.push((index, Err(error.clone())));
+                }
+                Err(
+                    ref error @ ValidationError::DepositFulfillmentNotConfirmed(
+                        ref status,
+                        ref bitcoin_txid,
+                        bitcoin_tx_output_index,
+                    ),
+                ) => {
+                    tracing::warn!(
+                        %bitcoin_txid,
+                        bitcoin_tx_output_index,
+                        ?status,
+                        "failed to update deposit: fulfillment data is only allowed for confirmed deposits.",
                     );
                     deposits.push((index, Err(error.clone())));
                 }

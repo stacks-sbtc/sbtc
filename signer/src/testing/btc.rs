@@ -29,7 +29,6 @@ use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use crate::bitcoin::BitcoinBlockHashStreamProvider;
 use crate::bitcoin::poller::BitcoinChainTipPoller;
 use crate::bitcoin::rpc::BitcoinCoreClient;
-use crate::bitcoin::utxo;
 
 /// Return a transaction that is kinda like the signers' transaction,
 /// but it does not service any requests, and it does not have any
@@ -63,16 +62,17 @@ pub fn base_signer_transaction() -> Transaction {
     }
 }
 
-impl utxo::DepositRequest {
-    /// Transform this deposit request into the body that Emily expects.
-    pub fn as_emily_request(&self, tx: &Transaction) -> CreateDepositRequestBody {
-        CreateDepositRequestBody {
-            bitcoin_tx_output_index: self.outpoint.vout,
-            bitcoin_txid: self.outpoint.txid.to_string(),
-            deposit_script: self.deposit_script.to_hex_string(),
-            reclaim_script: self.reclaim_script.to_hex_string(),
-            transaction_hex: serialize_hex(tx),
-        }
+/// Builds the body that Emily expects from this deposit info and transaction
+pub fn build_emily_request(
+    info: &sbtc::deposits::DepositInfo,
+    tx: &Transaction,
+) -> CreateDepositRequestBody {
+    CreateDepositRequestBody {
+        bitcoin_tx_output_index: info.outpoint.vout,
+        bitcoin_txid: info.outpoint.txid.to_string(),
+        deposit_script: info.deposit_script.to_hex_string(),
+        reclaim_script: info.reclaim_script.to_hex_string(),
+        transaction_hex: serialize_hex(tx),
     }
 }
 

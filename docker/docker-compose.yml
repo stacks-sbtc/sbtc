@@ -1,4 +1,4 @@
-# Variables.
+# Variables
 # ------------------------------------------------------------------------------
 x-common-vars:
   - &BTC_ADDR miEJtNKa3ASpA19v5ZhvbKTEieYjLpzCYT
@@ -22,16 +22,17 @@ x-common-vars:
   - &STACKS_30_HEIGHT ${STACKS_30_HEIGHT:-232}
   - &STACKS_31_HEIGHT ${STACKS_31_HEIGHT:-233}
   - &STACKS_32_HEIGHT ${STACKS_32_HEIGHT:-234}
+  - &STACKS_33_HEIGHT ${STACKS_33_HEIGHT:-235}
   - &STACKING_CYCLES ${STACKING_CYCLES:-1} # number of cycles to stack-stx or stack-extend for
   - &POX_PREPARE_LENGTH ${POX_PREPARE_LENGTH:-5}
   - &POX_REWARD_LENGTH ${POX_REWARD_LENGTH:-20}
   - &REWARD_RECIPIENT ${REWARD_RECIPIENT:-STQM73RQC4EX0A07KWG1J5ECZJYBZS4SJ4ERC6WN} # priv: 6ad9cadb42d4edbfbe0c5bfb3b8a4125ddced021c4174f829b714ccbf527f02001
   - &EXIT_FROM_MONITOR 1 # set to "1" to automatically shut down via monitor.ts
 
-# Templates.
+# Templates
 # ------------------------------------------------------------------------------
 x-stacks-blockchain: &stacks-blockchain
-  image: blockstack/stacks-core:3.2.0.0.2@sha256:67c7574782c3b7f95a592d46d881d261524a4bc1c5cf4e66d54d39f330e4bf69
+  image: blockstack/stacks-core:3.3.0.0.1@sha256:b7fd10e489c81da12d8e1b956dec5d35bf8fd98874a6d32127bdee19cad0a235
   profiles:
     - default
 
@@ -358,6 +359,7 @@ services:
       STACKS_30_HEIGHT: *STACKS_30_HEIGHT
       STACKS_31_HEIGHT: *STACKS_31_HEIGHT
       STACKS_32_HEIGHT: *STACKS_32_HEIGHT
+      STACKS_33_HEIGHT: *STACKS_33_HEIGHT
       POX_PREPARE_LENGTH: *POX_PREPARE_LENGTH
       POX_REWARD_LENGTH: *POX_REWARD_LENGTH
       REWARD_RECIPIENT: *REWARD_RECIPIENT

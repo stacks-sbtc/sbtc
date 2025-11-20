@@ -49,10 +49,8 @@ struct DepositStatusSummary {
     max_fee: u64,
     /// The deposit script used so that the signers' can spend funds.
     deposit_script: model::ScriptPubKey,
-    /// The reclaim script for the deposit.
-    reclaim_script: model::ScriptPubKey,
     /// The hash of reclaim script for the deposit.
-    reclaim_script_hash: Option<model::TaprootScriptHash>,
+    reclaim_script_hash: model::TaprootScriptHash,
     /// The public key used in the deposit script.
     signers_public_key: PublicKeyXOnly,
 }
@@ -255,19 +253,41 @@ impl PgRead {
     {
         sqlx::query_as::<_, model::BitcoinTxRef>(
             r#"
-            SELECT
-                bwo.bitcoin_txid AS txid
-              , bt.block_hash
-            FROM sbtc_signer.withdrawal_requests AS wr
-            JOIN sbtc_signer.bitcoin_withdrawals_outputs AS bwo
-              ON bwo.request_id = wr.request_id
-             AND bwo.stacks_block_hash = wr.block_hash
-            JOIN sbtc_signer.bitcoin_transactions AS bt
-              ON bt.txid = bwo.bitcoin_txid
-            JOIN sbtc_signer.bitcoin_blockchain_until($1, wr.bitcoin_block_height) AS bbu
-              ON bbu.block_hash = bt.block_hash
-            WHERE wr.request_id = $2
-              AND wr.block_hash = $3
+            -- get_withdrawal_sweep_info
+            WITH potential_transactions AS (
+                SELECT
+                    bwo.bitcoin_txid AS txid
+                  , bt.block_hash
+                  , wr.bitcoin_block_height
+                FROM sbtc_signer.withdrawal_requests AS wr
+                JOIN sbtc_signer.bitcoin_withdrawals_outputs AS bwo
+                  ON bwo.request_id = wr.request_id
+                  AND bwo.stacks_block_hash = wr.block_hash
+                JOIN sbtc_signer.bitcoin_transactions AS bt
+                  ON bt.txid = bwo.bitcoin_txid
+                WHERE wr.request_id = $2
+                  AND wr.block_hash = $3
+
+                UNION
+
+                SELECT
+                    bwto.txid
+                  , bt.block_hash
+                  , wr.bitcoin_block_height
+                FROM sbtc_signer.withdrawal_requests AS wr
+                JOIN sbtc_signer.bitcoin_withdrawal_tx_outputs AS bwto
+                  ON bwto.request_id = wr.request_id
+                JOIN sbtc_signer.bitcoin_transactions AS bt
+                  ON bt.txid = bwto.txid
+                WHERE wr.request_id = $2
+                  AND wr.block_hash = $3
+            )
+            SELECT 
+                pt.txid
+              , pt.block_hash
+            FROM potential_transactions AS pt
+            JOIN sbtc_signer.bitcoin_blockchain_until($1, pt.bitcoin_block_height) AS bbu
+              ON bbu.block_hash = pt.block_hash
             LIMIT 1
             "#,
         )
@@ -405,7 +425,6 @@ impl PgRead {
               , dr.max_fee
               , dr.lock_time
               , dr.spend_script AS deposit_script
-              , dr.reclaim_script
               , dr.reclaim_script_hash
               , dr.signers_public_key
               , bc.block_height
@@ -846,7 +865,6 @@ impl PgRead {
                 deposit_requests.txid
               , deposit_requests.output_index
               , deposit_requests.spend_script
-              , deposit_requests.reclaim_script
               , deposit_requests.reclaim_script_hash
               , deposit_requests.recipient
               , deposit_requests.amount
@@ -905,7 +923,6 @@ impl PgRead {
                     deposit_requests.txid
                   , deposit_requests.output_index
                   , deposit_requests.spend_script
-                  , deposit_requests.reclaim_script
                   , deposit_requests.reclaim_script_hash
                   , deposit_requests.recipient
                   , deposit_requests.amount
@@ -935,7 +952,6 @@ impl PgRead {
                 accepted_deposits.txid
               , accepted_deposits.output_index
               , accepted_deposits.spend_script
-              , accepted_deposits.reclaim_script
               , accepted_deposits.reclaim_script_hash
               , accepted_deposits.recipient
               , accepted_deposits.amount
@@ -1106,7 +1122,6 @@ impl PgRead {
                 .map_err(Error::DisabledLockTime)?,
             outpoint: bitcoin::OutPoint::new((*txid).into(), output_index),
             deposit_script: summary.deposit_script.into(),
-            reclaim_script: summary.reclaim_script.into(),
             reclaim_script_hash: summary.reclaim_script_hash,
             signers_public_key: summary.signers_public_key.into(),
             dkg_shares_status: dkg_shares.map(|shares| shares.dkg_shares_status),
@@ -1317,7 +1332,7 @@ impl PgRead {
         sqlx::query_as::<_, model::WithdrawalRequest>(
             r#"
             -- get_pending_accepted_withdrawal_requests
-            WITH recursive
+            WITH RECURSIVE
 
             -- Get all withdrawal requests which have a bitcoin block height
             -- of at least minimum height provided.
@@ -1339,8 +1354,13 @@ impl PgRead {
                 LEFT JOIN sbtc_signer.bitcoin_withdrawals_outputs bwo
                     ON bwo.request_id = wr.request_id
                     AND bwo.stacks_block_hash = wr.block_hash
+
+                LEFT JOIN sbtc_signer.bitcoin_withdrawal_tx_outputs bwto
+                    ON bwto.request_id = wr.request_id
+
                 LEFT JOIN sbtc_signer.bitcoin_transactions bt
                     ON bt.txid = bwo.bitcoin_txid
+                    OR bt.txid = bwto.txid
 
                 -- Join in any rejection events we know about.
                 LEFT JOIN sbtc_signer.withdrawal_reject_events AS wre
@@ -1515,8 +1535,11 @@ impl PgRead {
             LEFT JOIN sbtc_signer.bitcoin_withdrawals_outputs AS bwo
                 ON bwo.request_id = wr.request_id
                 AND bwo.stacks_block_hash = wr.block_hash
+            LEFT JOIN sbtc_signer.bitcoin_withdrawal_tx_outputs bwto
+                ON bwto.request_id = wr.request_id
             LEFT JOIN bitcoin_transactions AS bc_trx
                 ON bc_trx.txid = bwo.bitcoin_txid
+                OR bc_trx.txid = bwto.txid
             LEFT JOIN bitcoin_blockchain
                 ON bc_trx.block_hash = bitcoin_blockchain.block_hash
             -- Request not rejected
@@ -2336,7 +2359,8 @@ impl PgRead {
         };
 
         sqlx::query_as::<_, model::SweptWithdrawalRequest>(
-            "
+            r#"
+                -- get_swept_withdrawal_requests
                 WITH RECURSIVE bitcoin_blockchain AS (
                     SELECT
                         block_hash
@@ -2362,48 +2386,61 @@ impl PgRead {
                         ON parent.block_hash = last.parent_hash
                     JOIN bitcoin_blockchain AS bb
                         ON bb.block_hash = parent.bitcoin_anchor
+                ),
+                swept_withdrawals AS (
+                    SELECT
+                        bwto.output_index
+                      , bwto.txid         AS sweep_txid
+                      , bb.block_hash     AS sweep_block_hash
+                      , bb.block_height   AS sweep_block_height
+                      , bwto.request_id
+                    FROM sbtc_signer.bitcoin_withdrawal_tx_outputs AS bwto
+                    JOIN sbtc_signer.bitcoin_transactions AS bt
+                      ON bt.txid = bwto.txid
+                    JOIN bitcoin_blockchain AS bb
+                      ON bb.block_hash = bt.block_hash
+
+                    UNION
+
+                    SELECT
+                        bwo.output_index
+                      , bwo.bitcoin_txid AS sweep_txid
+                      , bb.block_hash    AS sweep_block_hash
+                      , bb.block_height  AS sweep_block_height
+                      , bwo.request_id
+                    FROM sbtc_signer.bitcoin_withdrawals_outputs AS bwo
+                    JOIN sbtc_signer.bitcoin_transactions AS bt
+                      ON bt.txid = bwo.bitcoin_txid
+                    JOIN bitcoin_blockchain AS bb
+                      ON bb.block_hash = bt.block_hash
+                ),
+                completed_withdrawals AS (
+                    SELECT wae.request_id
+                    FROM sbtc_signer.withdrawal_accept_events AS wae
+                    JOIN stacks_blockchain AS sb
+                      ON sb.block_hash = wae.block_hash
                 )
                 SELECT
-                    bwo.output_index AS output_index
-                  , bwo.bitcoin_txid AS sweep_txid
-                  , bc_blocks.block_hash AS sweep_block_hash
-                  , bc_blocks.block_height AS sweep_block_height
-                  , wr.request_id
-                  , wr.txid
-                  , wr.block_hash AS block_hash
-                  , wr.recipient
-                  , wr.amount
-                  , wr.max_fee
-                  , wr.sender_address
-                FROM sbtc_signer.bitcoin_withdrawals_outputs AS bwo
-                JOIN sbtc_signer.bitcoin_transactions AS bt
-                    ON bt.txid = bwo.bitcoin_txid
-                JOIN sbtc_signer.withdrawal_requests AS wr
-                    ON wr.request_id = bwo.request_id
-                    AND wr.block_hash = bwo.stacks_block_hash
-                JOIN bitcoin_blockchain AS bc_blocks
-                    ON bc_blocks.block_hash = bt.block_hash
-                LEFT JOIN sbtc_signer.withdrawal_accept_events AS wae
-                    ON wae.request_id = wr.request_id
-                LEFT JOIN stacks_blockchain AS sb
-                    ON sb.block_hash = wae.block_hash
-
-                GROUP BY
-                    bwo.output_index
-                  , bwo.bitcoin_txid
-                  , bc_blocks.block_hash
-                  , bc_blocks.block_height
-                  , wr.request_id
+                    sw.output_index
+                  , sw.sweep_txid
+                  , sw.sweep_block_hash
+                  , sw.sweep_block_height
+                  , sw.request_id
                   , wr.txid
                   , wr.block_hash
                   , wr.recipient
                   , wr.amount
                   , wr.max_fee
                   , wr.sender_address
-
-                HAVING
-                    COUNT(sb.block_hash) = 0
-        ",
+                FROM swept_withdrawals AS sw
+                JOIN sbtc_signer.withdrawal_requests AS wr
+                  ON wr.request_id = sw.request_id
+                JOIN stacks_blockchain AS sb
+                  ON sb.block_hash = wr.block_hash
+                LEFT JOIN completed_withdrawals AS cw
+                  ON cw.request_id = sw.request_id
+                WHERE cw.request_id IS NULL
+        "#,
         )
         .bind(chain_tip)
         .bind(i32::from(context_window))
@@ -2426,7 +2463,6 @@ impl PgRead {
             SELECT txid
                  , output_index
                  , spend_script
-                 , reclaim_script
                  , reclaim_script_hash
                  , recipient
                  , amount

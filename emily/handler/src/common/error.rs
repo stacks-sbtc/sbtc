@@ -19,7 +19,10 @@ use utoipa::ToSchema;
 use warp::{reject::Reject, reply::Reply};
 
 use crate::{
-    api::models::{chainstate::Chainstate, common::DepositStatus},
+    api::models::{
+        chainstate::Chainstate,
+        common::{DepositStatus, WithdrawalStatus},
+    },
     database::entries::{
         chainstate::ChainstateEntry, deposit::DepositEntryKey, withdrawal::WithdrawalEntryKey,
     },
@@ -67,6 +70,20 @@ pub enum ValidationError {
     /// The deposit has status RBF but is missing the replaced_by_tx field.
     #[error("missing replaced_by_tx for RBF deposit with txid: {0}, vout: {1}")]
     DepositMissingReplacementTx(String, u32),
+
+    /// A withdrawal update had fulfillment data where the status was not `Confirmed`.
+    /// Only confirmed withdrawals can have fulfillment data.
+    #[error(
+        "withdrawal with fulfillment data must be confirmed, but got status {0:?} for request id: {1}"
+    )]
+    WithdrawalFulfillmentNotConfirmed(WithdrawalStatus, u64),
+
+    /// A deposit update had fulfillment data where the status was not `Confirmed`.
+    /// Only Confirmed deposits can have fulfillment data.
+    #[error(
+        "deposit with fulfillment data must be confirmed, but got status {0:?} for txid: {1}, vout: {2}"
+    )]
+    DepositFulfillmentNotConfirmed(DepositStatus, String, u32),
 }
 
 /// Errors from the internal API logic.
