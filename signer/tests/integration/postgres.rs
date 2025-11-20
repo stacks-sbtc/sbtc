@@ -2692,7 +2692,7 @@ async fn get_swept_deposit_requests_does_not_return_deposit_requests_with_respon
     let setup_fork_event_block = StacksBlock {
         block_hash: fake::Faker.fake_with_rng(&mut rng),
         block_height: setup_canonical_event_block.block_height + 1,
-        parent_hash: setup_canonical_event_block.parent_hash,
+        parent_hash: setup_canonical_event_block.block_hash,
         bitcoin_anchor: chain_tip,
     };
     db.write_stacks_block(&setup_fork_event_block)
