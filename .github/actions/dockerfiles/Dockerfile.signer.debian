@@ -1,10 +1,5 @@
 FROM debian:bookworm-slim AS build
 
-# Install Rust manually for ARM64 compatibility
-RUN apt-get update && apt-get install -y curl build-essential
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-ENV PATH="/root/.cargo/bin:${PATH}"
-
 ARG GIT_COMMIT
 RUN echo "aaaaa"
 RUN echo "Debug: GIT_COMMIT='$GIT_COMMIT'"
