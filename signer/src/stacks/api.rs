@@ -1406,11 +1406,10 @@ impl StacksClient {
 /// This function fetches all unknown nakamoto blocks that are on the
 /// canonical chain identified by the given StacksBlockHash chain tip that
 /// not already stored in the database. It fetches these blocks one tenure
-/// at a time, and then writes them to the `stacks_blocks_temp` table.
-/// After all such blocks have been fetched, the function copies the blocks
-/// from the `stacks_blocks_temp` table to the `stacks_blocks` table.
-/// Things are done this way to ensure that updates to the `stacks_blocks`
-/// table are completed atomically.
+/// at a time, and then writes them to the `stacks_blocks` table in a
+/// transaction. After all such blocks have been fetched, the function
+/// commits the written blocks. Things are done this way to ensure that
+/// updates to the `stacks_blocks` table are done atomically.
 pub async fn update_db_with_unknown_ancestors<S, D>(
     stacks: &S,
     storage: &D,
