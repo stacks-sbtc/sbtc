@@ -179,7 +179,7 @@ impl DbWrite for SharedStore {
         store.version += 1;
 
         store
-            .stacks_blocks_temp
+            .stacks_blocks
             .extend(block_iter.map(|header| (header.block_hash, header)));
 
         Ok(())
