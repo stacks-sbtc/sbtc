@@ -1,4 +1,4 @@
-FROM debian:bookworm-slim AS build
+FROM --platform=$BUILDPLATFORM rust:1.91.0-slim-bookworm AS build
 
 ARG GIT_COMMIT
 RUN echo "aaaaa"
