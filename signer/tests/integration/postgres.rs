@@ -2642,8 +2642,12 @@ async fn get_swept_deposit_requests_does_not_return_deposit_requests_with_respon
         // For `setup_canonical`, the stacks block is in the canonical chain
         bitcoin_anchor: chain_tip,
     };
-    db.write_stacks_block(&setup_fork_event_block).await.unwrap();
-    db.write_stacks_block(&setup_canonical_event_block).await.unwrap();
+    db.write_stacks_block(&setup_fork_event_block)
+        .await
+        .unwrap();
+    db.write_stacks_block(&setup_canonical_event_block)
+        .await
+        .unwrap();
 
     // First, let's check we get both deposits
     let requests = db
