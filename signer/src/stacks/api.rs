@@ -45,6 +45,8 @@ use crate::keys::PublicKey;
 use crate::metrics::Metrics;
 use crate::storage::DbRead;
 use crate::storage::DbWrite;
+use crate::storage::Transactable;
+use crate::storage::TransactionHandle as _;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::ConsensusHash;
@@ -1411,13 +1413,14 @@ impl StacksClient {
 /// table are completed atomically.
 pub async fn update_db_with_unknown_ancestors<S, D>(
     stacks: &S,
-    db: &D,
+    storage: &D,
     block_id: &StacksBlockHash,
 ) -> Result<RangeInclusive<StacksBlockHeight>, Error>
 where
     S: StacksInteract,
-    D: DbRead + DbWrite + Send + Sync,
+    D: Transactable + Send + Sync,
 {
+    let db = storage.begin_transaction().await?;
     let mut tenure = stacks.get_tenure_headers(block_id).await?;
     let end_height = tenure.end_height();
     let nakamoto_start_height = stacks.get_epoch_status().await?.nakamoto_start_height();
@@ -1481,6 +1484,7 @@ where
 
     db.copy_from_stacks_blocks_temp_table().await?;
     db.truncate_stacks_blocks_temp_table().await?;
+    db.commit().await?;
 
     tracing::debug!(%start_height, %end_height, "finished updating the stacks_blocks table");
     Ok(RangeInclusive::new(start_height, end_height))
