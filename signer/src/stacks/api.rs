@@ -2122,16 +2122,18 @@ mod tests {
             RangeInclusive::new(StacksBlockHeight::new(320), StacksBlockHeight::new(750));
         assert_eq!(block_height_range, expected);
 
-        let (min_block_height, max_block_height) = sqlx::query_as::<_, (i64, i64)>(
+        let (min_block_height, max_block_height, count) = sqlx::query_as::<_, (i64, i64, i64)>(
             r#"SELECT 
                  MIN(block_height) as min_block_height
                , MAX(block_height) as max_block_height
+               , COUNT(DISTINCT block_hash) as count
              FROM sbtc_signer.stacks_blocks"#,
         )
         .fetch_one(db.pool())
         .await
         .unwrap();
 
+        assert_eq!(count, max_block_height - min_block_height + 1);
         assert_eq!(min_block_height, **expected.start() as i64);
         assert_eq!(max_block_height, **expected.end() as i64);
 
