@@ -257,7 +257,7 @@ impl SignerWallet {
     ///   signatures.
     pub fn as_unsigned_tx_auth(&self, tx_fee: u64) -> OrderIndependentMultisigSpendingCondition {
         OrderIndependentMultisigSpendingCondition {
-            signer: *self.address.bytes(),
+            signer: self.address.bytes().clone(),
             nonce: self.nonce.fetch_add(1, Ordering::Relaxed),
             tx_fee,
             hash_mode: SignerWallet::hash_mode(),
@@ -434,9 +434,9 @@ where
 mod tests {
     use blockstack_lib::chainstate::stacks::TransactionPayload;
     use blockstack_lib::clarity::vm::Value as ClarityValue;
-    use fake::Fake;
+    use fake::Fake as _;
     use rand::rngs::OsRng;
-    use rand::seq::SliceRandom;
+    use rand::seq::SliceRandom as _;
     use secp256k1::Keypair;
     use secp256k1::SECP256K1;
 
@@ -449,11 +449,11 @@ mod tests {
     use crate::stacks::contracts::ReqContext;
     use crate::storage::model::KeyRotationEvent;
     use crate::storage::model::StacksPrincipal;
-    use crate::testing::context::ConfigureMockedClients;
+    use crate::testing::context::ConfigureMockedClients as _;
     use crate::testing::context::TestContext;
     use crate::testing::context::*;
     use crate::testing::get_rng;
-    use crate::testing::storage::DbReadTestExt;
+    use crate::testing::storage::DbReadTestExt as _;
     use crate::testing::storage::model::TestData;
 
     use super::*;
@@ -473,13 +473,23 @@ mod tests {
         }
     }
 
-    struct TestContractCall;
+    struct TestContractCall {
+        deployer: StacksAddress,
+    }
+
+    impl Default for TestContractCall {
+        fn default() -> Self {
+            Self {
+                deployer: StacksAddress::burn_address(false),
+            }
+        }
+    }
 
     impl AsContractCall for TestContractCall {
         const CONTRACT_NAME: &'static str = "all-the-sbtc";
         const FUNCTION_NAME: &'static str = "mint-it-all";
-        fn deployer_address(&self) -> StacksAddress {
-            StacksAddress::burn_address(false)
+        fn deployer_address(&self) -> &StacksAddress {
+            &self.deployer
         }
         fn as_contract_args(&self) -> Vec<ClarityValue> {
             Vec::new()
@@ -529,7 +539,8 @@ mod tests {
         let public_keys: Vec<_> = key_pairs.iter().map(|kp| kp.public_key().into()).collect();
         let wallet = SignerWallet::new(&public_keys, signatures_required, network, 1).unwrap();
 
-        let mut tx_signer = MultisigTx::new_contract_call(TestContractCall, &wallet, TX_FEE);
+        let mut tx_signer =
+            MultisigTx::new_contract_call(TestContractCall::default(), &wallet, TX_FEE);
         let tx = tx_signer.tx();
 
         // We can give any number of signatures between the required
@@ -580,7 +591,8 @@ mod tests {
         let public_keys: Vec<_> = key_pairs.iter().map(|kp| kp.public_key().into()).collect();
         let wallet = SignerWallet::new(&public_keys, signatures_required, network, 1).unwrap();
 
-        let mut tx_signer = MultisigTx::new_contract_call(TestContractCall, &wallet, TX_FEE);
+        let mut tx_signer =
+            MultisigTx::new_contract_call(TestContractCall::default(), &wallet, TX_FEE);
 
         // The accumulated signatures start off empty
         assert!(tx_signer.signatures.values().all(Option::is_none));
@@ -698,7 +710,7 @@ mod tests {
             txid: fake::Faker.fake_with_rng(&mut rng),
             block_hash: stacks_chain_tip,
             address: StacksPrincipal::from(clarity::vm::types::PrincipalData::from(
-                *wallet1.address(),
+                wallet1.address().clone(),
             )),
             aggregate_key: *wallet1.stacks_aggregate_key(),
             signer_set: signer_keys.clone(),
@@ -755,7 +767,8 @@ mod tests {
 
         let wallet = SignerWallet::new(&public_keys, signatures_required, network_kind, 0).unwrap();
 
-        let payload = TransactionPayload::ContractCall(TestContractCall.as_contract_call());
+        let payload =
+            TransactionPayload::ContractCall(TestContractCall::default().as_contract_call());
 
         let payload_size = payload.tx_payload().serialize_to_vec().len() as u64;
 

@@ -29,11 +29,11 @@ use bitcoin::taproot::Signature;
 use bitcoin::taproot::TaprootSpendInfo;
 use bitcoin::transaction::Version;
 use bitvec::array::BitArray;
-use bitvec::field::BitField;
+use bitvec::field::BitField as _;
 use sbtc::idpack::BitmapSegmenter;
 use sbtc::idpack::Decodable as _;
 use sbtc::idpack::Encodable as _;
-use sbtc::idpack::Segmenter;
+use sbtc::idpack::Segmenter as _;
 use sbtc::idpack::Segments;
 use secp256k1::SECP256K1;
 use secp256k1::XOnlyPublicKey;
@@ -313,7 +313,7 @@ impl SbtcRequests {
     ///
     /// This function can fail if the output amounts are greater than the
     /// input amounts.
-    pub fn construct_transactions(&self) -> Result<Vec<UnsignedTransaction>, Error> {
+    pub fn construct_transactions(&self) -> Result<Vec<UnsignedTransaction<'_>>, Error> {
         if self.deposits.is_empty() && self.withdrawals.is_empty() {
             tracing::info!("No deposits or withdrawals so no BTC transaction");
             return Ok(Vec::new());
@@ -1034,7 +1034,7 @@ impl<'a> UnsignedTransaction<'a> {
     ///
     /// Other noteworthy assumptions is that the signers' UTXO is always a
     /// key-spend path only taproot UTXO.
-    pub fn construct_digests(&self) -> Result<SignatureHashes, Error> {
+    pub fn construct_digests(&self) -> Result<SignatureHashes<'_>, Error> {
         let deposit_requests = self.requests.iter().filter_map(RequestRef::as_deposit);
         let deposit_utxos = deposit_requests.clone().map(DepositRequest::as_tx_out);
         // All the transaction's inputs are used to construct the sighash
@@ -1405,7 +1405,7 @@ pub trait TxDeconstructor: BitcoinInputsOutputs {
     /// This function must return `Some(_)` for each `index` where
     /// `self.inputs().get(index)` returns `Some(_)`, and must be `None`
     /// otherwise.
-    fn prevout(&self, index: usize) -> Option<PrevoutRef>;
+    fn prevout(&self, index: usize) -> Option<PrevoutRef<'_>>;
 
     /// Return all inputs in this transaction if it is an sBTC transaction.
     ///
@@ -1611,7 +1611,7 @@ pub trait TxDeconstructor: BitcoinInputsOutputs {
 }
 
 impl TxDeconstructor for BitcoinTxInfo {
-    fn prevout(&self, index: usize) -> Option<PrevoutRef> {
+    fn prevout(&self, index: usize) -> Option<PrevoutRef<'_>> {
         let vin = self.vin.get(index)?;
         let prevout = vin.prevout.as_ref()?;
         Some(PrevoutRef {
@@ -1626,21 +1626,21 @@ impl TxDeconstructor for BitcoinTxInfo {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
-    use std::str::FromStr;
+    use std::str::FromStr as _;
     use std::sync::atomic::AtomicU64;
 
     use super::*;
     use bitcoin::CompressedPublicKey;
     use bitcoin::Txid;
     use bitcoin::hashes::Hash as _;
-    use bitcoin::key::TapTweak;
+    use bitcoin::key::TapTweak as _;
     use bitcoin::opcodes::all::OP_RETURN;
     use bitcoin::script::Instruction;
     use clarity::vm::types::PrincipalData;
     use fake::Fake as _;
     use model::SignerVote;
     use more_asserts::assert_ge;
-    use rand::distributions::Distribution;
+    use rand::distributions::Distribution as _;
     use rand::distributions::Uniform;
     use rand::rngs::OsRng;
     use sbtc::deposits::DepositScriptInputs;
@@ -3228,7 +3228,7 @@ mod tests {
         1.0,
         0, 0; "should_reject_deposits_under_dust_limit")]
     #[test_case(
-        &vec![
+        &[
             create_deposit(10_000, 1_000, 0),
             create_deposit(11_000, 100, 0),
             create_deposit(12_000, 2_000, 0),
@@ -3238,7 +3238,7 @@ mod tests {
         1.0,
         2, 22_000; "should_accept_all_deposits_above_or_equal_min_fee")]
     #[test_case(
-        &vec![
+        &[
             create_deposit(10_000, 10_000, 0),
             create_deposit(10_000, 10_000, 0),
             create_deposit(10_000, 10_000, 0),
@@ -3249,7 +3249,7 @@ mod tests {
         1.0,
         3, 30_000; "should_accept_deposits_until_max_mintable_reached")]
     #[test_case(
-        &vec![
+        &[
             create_deposit(10_000, 10_000, 0),
             create_deposit(10_000, 10_000, 0),
         ],
@@ -3262,7 +3262,7 @@ mod tests {
         1.0,
         0, 0; "should_handle_empty_deposit_list")]
     #[test_case(
-        &vec![
+        &[
             create_deposit(10_000, 0, 0),
             create_deposit(11_000, 10_000, 0),
             create_deposit(9_000, 10_000, 0),
@@ -3285,7 +3285,7 @@ mod tests {
         1.0,
         0, 0; "should_reject_single_deposit_exceeding_per_deposit_cap")]
     #[test_case(
-        &vec![
+        &[
             create_deposit(5_000, 2_000, 0),
             create_deposit(15_000, 2_000, 0),
         ],
@@ -3293,7 +3293,7 @@ mod tests {
         1.0,
         1, 15_000; "should_reject_deposits_below_per_deposit_minimum")]
     #[test_case(
-        &vec![
+        &[
             create_deposit(10_000, 10_000, 0), // accepted
             create_deposit(DEPOSIT_DUST_LIMIT + 999, 10_000, 0), // rejected (1 below dust limit) min_fee is 1_000
             create_deposit(9_000, 10_000, 0),  // rejected (below per_deposit_minimum)

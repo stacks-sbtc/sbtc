@@ -54,6 +54,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set up QEMU for ARM64 emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
       ## Checkout the branch of the release provided.
       ## This requires that a release branch exists for the tag.
       - name: Checkout Repository
@@ -130,7 +135,7 @@ jobs:
         id: upload_attestation
         uses: stacks-sbtc/actions/upload-artifact@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
-          name: attestation-files
+          name: attestation-files-${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }}
           overwrite: true
           path: |
             ${{ env.ATTESTATION_FILE }}

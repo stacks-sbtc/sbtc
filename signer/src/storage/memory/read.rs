@@ -1,7 +1,5 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use clarity::types::chainstate::StacksBlockId;
-
 use crate::{
     DEPOSIT_LOCKTIME_BLOCK_BUFFER,
     bitcoin::{
@@ -9,10 +7,10 @@ use crate::{
         validation::{DepositRequestReport, WithdrawalRequestReport},
     },
     error::Error,
-    keys::{PublicKey, PublicKeyXOnly, SignerScriptPubKey},
+    keys::{PublicKey, PublicKeyXOnly, SignerScriptPubKey as _},
     storage::{
         DbRead,
-        model::{self, BitcoinBlockHeight, DkgSharesStatus},
+        model::{self, BitcoinBlockHeight, DkgSharesStatus, StacksBlockHash},
         util::get_utxo,
     },
 };
@@ -294,12 +292,8 @@ impl DbRead for SharedStore {
             .unwrap_or_else(Vec::new))
     }
 
-    async fn stacks_block_exists(&self, block_id: StacksBlockId) -> Result<bool, Error> {
-        Ok(self
-            .lock()
-            .await
-            .stacks_blocks
-            .contains_key(&block_id.into()))
+    async fn stacks_block_exists(&self, block_id: &StacksBlockHash) -> Result<bool, Error> {
+        Ok(self.lock().await.stacks_blocks.contains_key(block_id))
     }
 
     async fn get_encrypted_dkg_shares<X>(
@@ -991,7 +985,7 @@ impl DbRead for InMemoryTransaction {
         self.store.get_bitcoin_blocks_with_transaction(txid).await
     }
 
-    async fn stacks_block_exists(&self, block_id: StacksBlockId) -> Result<bool, Error> {
+    async fn stacks_block_exists(&self, block_id: &StacksBlockHash) -> Result<bool, Error> {
         self.store.stacks_block_exists(block_id).await
     }
 

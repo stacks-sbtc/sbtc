@@ -192,7 +192,7 @@ pub struct StacksTransactionSignRequest {
     /// The transaction fee in microSTX.
     pub tx_fee: u64,
     /// The transaction ID of the associated contract call transaction.
-    pub txid: blockstack_lib::burnchains::Txid,
+    pub txid: StacksTxId,
 }
 
 impl StacksTransactionSignRequest {
@@ -213,7 +213,7 @@ impl StacksTransactionSignRequest {
 #[derive(Debug, Clone, PartialEq)]
 pub struct StacksTransactionSignature {
     /// Id of the signed transaction.
-    pub txid: blockstack_lib::burnchains::Txid,
+    pub txid: StacksTxId,
     /// A recoverable ECDSA signature over the transaction.
     pub signature: RecoverableSignature,
 }
@@ -323,11 +323,11 @@ mod tests {
     use std::marker::PhantomData;
 
     use super::*;
-    use crate::codec::{Decode, Encode};
-    use crate::ecdsa::{SignEcdsa, Signed};
+    use crate::codec::{Decode as _, Encode as _};
+    use crate::ecdsa::{SignEcdsa as _, Signed};
     use crate::keys::PrivateKey;
 
-    use rand::SeedableRng;
+    use rand::SeedableRng as _;
     use test_case::test_case;
 
     #[test_case(PhantomData::<SignerDepositDecision> ; "SignerDepositDecision")]

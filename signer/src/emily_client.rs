@@ -1,6 +1,6 @@
 //! Emily API client module
 
-use std::str::FromStr;
+use std::str::FromStr as _;
 use std::time::Duration;
 use std::time::Instant;
 

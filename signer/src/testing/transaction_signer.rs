@@ -15,7 +15,7 @@ use crate::keys::PublicKey;
 use crate::network;
 use crate::network::MessageTransfer;
 use crate::storage;
-use crate::storage::DbRead;
+use crate::storage::DbRead as _;
 use crate::storage::DbWrite;
 use crate::storage::model;
 use crate::testing;
@@ -31,15 +31,14 @@ use tokio::time::error::Elapsed;
 use super::context::*;
 
 /// A test harness for the signer event loop.
-pub struct TxSignerEventLoopHarness<Context, M, Rng> {
+pub struct TxSignerEventLoopHarness<Context, M> {
     context: Context,
-    event_loop: EventLoop<Context, M, Rng>,
+    event_loop: EventLoop<Context, M>,
 }
 
-impl<Ctx, M, Rng> TxSignerEventLoopHarness<Ctx, M, Rng>
+impl<Ctx, M> TxSignerEventLoopHarness<Ctx, M>
 where
     Ctx: Context + 'static,
-    Rng: rand::RngCore + rand::CryptoRng + Send + Sync + 'static,
     M: MessageTransfer + Send + Sync + 'static,
 {
     /// Create the test harness.
@@ -49,7 +48,6 @@ where
         context_window: u16,
         signer_private_key: PrivateKey,
         threshold: u32,
-        rng: Rng,
     ) -> Self {
         Self {
             event_loop: transaction_signer::TxSignerEventLoop {
@@ -60,7 +58,6 @@ where
                 wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
                 threshold,
                 last_presign_block: None,
-                rng,
                 dkg_begin_pause: None,
                 dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
                 stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
@@ -118,7 +115,7 @@ where
     }
 }
 
-type EventLoop<Context, M, Rng> = transaction_signer::TxSignerEventLoop<Context, M, Rng>;
+type EventLoop<Context, M> = transaction_signer::TxSignerEventLoop<Context, M>;
 
 impl blocklist_client::BlocklistChecker for () {
     async fn can_accept(&self, _address: &str) -> Result<bool, Error> {
@@ -164,7 +161,6 @@ where
                     self.context_window,
                     signer_info.signer_private_key,
                     self.signing_threshold,
-                    rng.clone(),
                 );
 
                 event_loop_harness.start()

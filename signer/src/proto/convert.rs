@@ -68,7 +68,6 @@ use crate::storage::model::QualifiedRequestId;
 use crate::storage::model::StacksBlockHash;
 use crate::storage::model::StacksPrincipal;
 use crate::storage::model::StacksTxId;
-use crate::wsts_state_machine::DkgSignerCommitments;
 
 use super::wsts_message;
 
@@ -548,7 +547,7 @@ impl From<StacksTransactionSignRequest> for proto::StacksTransactionSignRequest 
             aggregate_key: value.aggregate_key.map(Into::into),
             nonce: value.nonce,
             tx_fee: value.tx_fee,
-            txid: Some(StacksTxId::from(value.txid).into()),
+            txid: Some(value.txid.into()),
             contract_tx: Some(contract_tx),
         }
     }
@@ -580,7 +579,7 @@ impl TryFrom<proto::StacksTransactionSignRequest> for StacksTransactionSignReque
             aggregate_key: None,
             nonce: value.nonce,
             tx_fee: value.tx_fee,
-            txid: StacksTxId::try_from(value.txid.required()?)?.into(),
+            txid: StacksTxId::try_from(value.txid.required()?)?,
             contract_tx,
         })
     }
@@ -1137,7 +1136,7 @@ impl TryFrom<proto::WstsMessage> for WstsMessage {
 impl From<StacksTransactionSignature> for proto::StacksTransactionSignature {
     fn from(value: StacksTransactionSignature) -> Self {
         proto::StacksTransactionSignature {
-            txid: Some(StacksTxId::from(value.txid).into()),
+            txid: Some(value.txid.into()),
             signature: Some(value.signature.into()),
         }
     }
@@ -1147,7 +1146,7 @@ impl TryFrom<proto::StacksTransactionSignature> for StacksTransactionSignature {
     type Error = Error;
     fn try_from(value: proto::StacksTransactionSignature) -> Result<Self, Self::Error> {
         Ok(StacksTransactionSignature {
-            txid: StacksTxId::try_from(value.txid.required()?)?.into(),
+            txid: StacksTxId::try_from(value.txid.required()?)?,
             signature: value.signature.required()?.try_into()?,
         })
     }
@@ -1588,26 +1587,12 @@ impl TryFrom<proto::PartyCommitment> for (u32, PolyCommitment) {
     }
 }
 
-impl TryFrom<proto::DkgSignerCommitment> for DkgSignerCommitments {
-    type Error = Error;
-    fn try_from(value: proto::DkgSignerCommitment) -> Result<Self, Self::Error> {
-        let commitments = value
-            .commitment
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<Vec<_>, Error>>()?;
-
-        Ok(DkgSignerCommitments { comms: commitments })
-    }
-}
-
 impl From<DkgPublicShares> for proto::SignerDkgPublicShares {
     fn from(value: DkgPublicShares) -> Self {
         proto::SignerDkgPublicShares {
             dkg_id: value.dkg_id,
             signer_id: value.signer_id,
             commitments: value.comms.into_iter().map(|v| v.into()).collect(),
-            kex_public_key: Some(value.kex_public_key.into()),
         }
     }
 }
@@ -1616,7 +1601,6 @@ impl TryFrom<proto::SignerDkgPublicShares> for DkgPublicShares {
     type Error = Error;
     fn try_from(value: proto::SignerDkgPublicShares) -> Result<Self, Self::Error> {
         Ok(DkgPublicShares {
-            kex_public_key: value.kex_public_key.required()?.try_into()?,
             dkg_id: value.dkg_id,
             signer_id: value.signer_id,
             comms: value

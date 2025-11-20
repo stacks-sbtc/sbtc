@@ -21,7 +21,7 @@ use bitcoin::taproot::NodeInfo;
 use bitcoin::taproot::TaprootSpendInfo;
 use bitcoin::transaction::Version;
 use bitcoincore_rpc::Error as BtcRpcError;
-use bitcoincore_rpc::RpcApi;
+use bitcoincore_rpc::RpcApi as _;
 use bitcoincore_rpc::jsonrpc::error::Error as JsonRpcError;
 use bitcoincore_rpc::jsonrpc::error::RpcError;
 
@@ -33,7 +33,7 @@ use sbtc::deposits::DepositScriptInputs;
 use sbtc::deposits::ReclaimScriptInputs;
 use sbtc::testing::deposits::TxSetup;
 use sbtc::testing::regtest;
-use sbtc::testing::regtest::AsUtxo;
+use sbtc::testing::regtest::AsUtxo as _;
 use sbtc::testing::regtest::Recipient;
 use secp256k1::SECP256K1;
 use secp256k1::SecretKey;

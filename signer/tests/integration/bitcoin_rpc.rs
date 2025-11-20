@@ -8,17 +8,17 @@ use bitcoin::Sequence;
 use bitcoin::Txid;
 use bitcoin::Witness;
 use bitcoin::absolute::LockTime;
-use bitcoin::hashes::Hash;
+use bitcoin::hashes::Hash as _;
 use bitcoin::transaction::Version;
-use bitcoincore_rpc::RpcApi;
+use bitcoincore_rpc::RpcApi as _;
 use bitcoincore_rpc_json::Utxo;
-use fake::{Fake, Faker};
+use fake::{Fake as _, Faker};
 use rand::rngs::OsRng;
 use sbtc::testing::regtest;
-use sbtc::testing::regtest::AsUtxo;
+use sbtc::testing::regtest::AsUtxo as _;
 use sbtc::testing::regtest::Recipient;
 use sbtc::testing::regtest::p2wpkh_sign_transaction;
-use signer::bitcoin::BitcoinInteract;
+use signer::bitcoin::BitcoinInteract as _;
 use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::storage::model::BitcoinBlockHash;
 use signer::storage::model::BitcoinTxId;
@@ -26,7 +26,7 @@ use signer::storage::model::BitcoinTxId;
 #[test]
 fn btc_client_getstransaction() {
     let client = BitcoinCoreClient::new(
-        "http://localhost:18443",
+        regtest::BITCOIN_CORE_RPC_ENDPOINT,
         regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
         regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
     )
@@ -69,7 +69,7 @@ fn btc_client_getstransaction() {
 #[test]
 fn btc_client_getblockheader() {
     let client = BitcoinCoreClient::new(
-        "http://localhost:18443",
+        regtest::BITCOIN_CORE_RPC_ENDPOINT,
         regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
         regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
     )
@@ -94,7 +94,7 @@ fn btc_client_getblockheader() {
 #[test]
 fn btc_client_gets_transaction_info() {
     let client = BitcoinCoreClient::new(
-        "http://localhost:18443",
+        regtest::BITCOIN_CORE_RPC_ENDPOINT,
         regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
         regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
     )
@@ -136,7 +136,7 @@ fn btc_client_gets_transaction_info() {
 #[test]
 fn btc_client_gets_transaction_info_missing_tx() {
     let client = BitcoinCoreClient::new(
-        "http://localhost:18443",
+        regtest::BITCOIN_CORE_RPC_ENDPOINT,
         regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
         regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
     )
@@ -176,7 +176,7 @@ fn btc_client_gets_transaction_info_missing_tx() {
 #[test]
 fn btc_client_unsubmitted_tx() {
     let client = BitcoinCoreClient::new(
-        "http://localhost:18443",
+        regtest::BITCOIN_CORE_RPC_ENDPOINT,
         regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
         regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
     )
@@ -197,7 +197,7 @@ fn btc_client_unsubmitted_tx() {
 fn estimate_fee_rate() {
     let _ = regtest::initialize_blockchain();
     let btc_client = BitcoinCoreClient::new(
-        "http://localhost:18443",
+        regtest::BITCOIN_CORE_RPC_ENDPOINT,
         regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
         regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
     )
@@ -212,7 +212,7 @@ fn estimate_fee_rate() {
 #[tokio::test]
 async fn get_tx_spending_prevout() {
     let client = BitcoinCoreClient::new(
-        "http://localhost:18443",
+        regtest::BITCOIN_CORE_RPC_ENDPOINT,
         regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
         regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
     )
@@ -277,7 +277,7 @@ async fn get_tx_spending_prevout() {
 #[tokio::test]
 async fn get_tx_spending_prevout_nonexistent_txid() {
     let client = BitcoinCoreClient::new(
-        "http://localhost:18443",
+        regtest::BITCOIN_CORE_RPC_ENDPOINT,
         regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
         regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
     )
@@ -300,7 +300,7 @@ async fn get_tx_spending_prevout_nonexistent_txid() {
 #[tokio::test]
 async fn get_mempool_descendants() {
     let client = BitcoinCoreClient::new(
-        "http://localhost:18443",
+        regtest::BITCOIN_CORE_RPC_ENDPOINT,
         regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
         regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
     )
@@ -432,7 +432,7 @@ async fn get_mempool_descendants() {
 #[tokio::test]
 async fn get_tx_out_confirmed_no_mempool() {
     let client = BitcoinCoreClient::new(
-        "http://localhost:18443",
+        regtest::BITCOIN_CORE_RPC_ENDPOINT,
         regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
         regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
     )
@@ -457,7 +457,7 @@ async fn get_tx_out_confirmed_no_mempool() {
 #[tokio::test]
 async fn get_tx_out_confirmed_with_mempool() {
     let client = BitcoinCoreClient::new(
-        "http://localhost:18443",
+        regtest::BITCOIN_CORE_RPC_ENDPOINT,
         regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
         regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
     )
@@ -482,7 +482,7 @@ async fn get_tx_out_confirmed_with_mempool() {
 #[tokio::test]
 async fn get_tx_out_unconfirmed_no_mempool() {
     let client = BitcoinCoreClient::new(
-        "http://localhost:18443",
+        regtest::BITCOIN_CORE_RPC_ENDPOINT,
         regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
         regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
     )
@@ -504,7 +504,7 @@ async fn get_tx_out_unconfirmed_no_mempool() {
 #[tokio::test]
 async fn get_tx_out_unconfirmed_with_mempool() {
     let client = BitcoinCoreClient::new(
-        "http://localhost:18443",
+        regtest::BITCOIN_CORE_RPC_ENDPOINT,
         regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
         regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
     )
