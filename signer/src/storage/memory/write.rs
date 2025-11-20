@@ -173,21 +173,14 @@ impl DbWrite for SharedStore {
         Ok(())
     }
 
-    async fn write_stacks_block_headers(
-        &self,
-        blocks: Vec<model::StacksBlock>,
-    ) -> Result<(), Error> {
+    async fn write_stacks_block_headers(&self, headers: &TenureBlockHeaders) -> Result<(), Error> {
+        let block_iter = headers.clone().into_iter();
         let mut store = self.lock().await;
         store.version += 1;
 
-        blocks.iter().for_each(|block| {
-            store.stacks_blocks.insert(block.block_hash, block.clone());
-            store
-                .bitcoin_anchor_to_stacks_blocks
-                .entry(block.bitcoin_anchor)
-                .or_default()
-                .push(block.block_hash);
-        });
+        store
+            .stacks_blocks_temp
+            .extend(block_iter.map(|header| (header.block_hash, header)));
 
         Ok(())
     }
@@ -388,37 +381,6 @@ impl DbWrite for SharedStore {
 
         Ok(())
     }
-
-    async fn copy_from_stacks_blocks_temp_table(&self) -> Result<(), Error> {
-        let mut store = self.lock().await;
-        store.version += 1;
-
-        let temp_blocks = store.stacks_blocks_temp.clone();
-        store.stacks_blocks.extend(temp_blocks.into_iter());
-
-        Ok(())
-    }
-
-    async fn truncate_stacks_blocks_temp_table(&self) -> Result<(), Error> {
-        let mut store = self.lock().await;
-        store.version += 1;
-
-        store.stacks_blocks_temp.clear();
-
-        Ok(())
-    }
-
-    async fn write_stacks_blocks_temp(&self, headers: &TenureBlockHeaders) -> Result<(), Error> {
-        let block_iter = headers.clone().into_iter();
-        let mut store = self.lock().await;
-        store.version += 1;
-
-        store
-            .stacks_blocks_temp
-            .extend(block_iter.map(|header| (header.block_hash, header)));
-
-        Ok(())
-    }
 }
 
 impl DbWrite for InMemoryTransaction {
@@ -479,11 +441,7 @@ impl DbWrite for InMemoryTransaction {
         self.store.write_bitcoin_transactions(txs).await
     }
 
-    #[cfg(any(test, feature = "testing"))]
-    async fn write_stacks_block_headers(
-        &self,
-        headers: Vec<model::StacksBlock>,
-    ) -> Result<(), Error> {
+    async fn write_stacks_block_headers(&self, headers: &TenureBlockHeaders) -> Result<(), Error> {
         self.store.write_stacks_block_headers(headers).await
     }
 
@@ -576,17 +534,5 @@ impl DbWrite for InMemoryTransaction {
         self.store
             .update_peer_connection(pub_key, peer_id, address)
             .await
-    }
-
-    async fn copy_from_stacks_blocks_temp_table(&self) -> Result<(), Error> {
-        self.store.copy_from_stacks_blocks_temp_table().await
-    }
-
-    async fn truncate_stacks_blocks_temp_table(&self) -> Result<(), Error> {
-        self.store.truncate_stacks_blocks_temp_table().await
-    }
-
-    async fn write_stacks_blocks_temp(&self, headers: &TenureBlockHeaders) -> Result<(), Error> {
-        self.store.write_stacks_blocks_temp(headers).await
     }
 }

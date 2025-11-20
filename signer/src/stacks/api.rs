@@ -1425,12 +1425,8 @@ where
     let end_height = tenure.end_height();
     let nakamoto_start_height = stacks.get_epoch_status().await?.nakamoto_start_height();
 
-    // Truncate the `stacks_blocks_temp` table to ensure that we start with
-    // a clean state.
-    db.truncate_stacks_blocks_temp_table().await?;
-
     loop {
-        db.write_stacks_blocks_temp(&tenure).await?;
+        db.write_stacks_block_headers(&tenure).await?;
         // We won't get anymore Nakamoto blocks before this point, so
         // time to stop.
         if tenure.anchor_block_height <= nakamoto_start_height {
@@ -1482,8 +1478,6 @@ where
 
     let start_height = tenure.start_height();
 
-    db.copy_from_stacks_blocks_temp_table().await?;
-    db.truncate_stacks_blocks_temp_table().await?;
     db.commit().await?;
 
     tracing::debug!(%start_height, %end_height, "finished updating the stacks_blocks table");

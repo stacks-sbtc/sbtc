@@ -525,10 +525,9 @@ pub trait DbWrite {
     ) -> impl Future<Output = Result<(), Error>> + Send;
 
     /// Write the stacks block ids and their parent block ids.
-    #[cfg(any(test, feature = "testing"))]
     fn write_stacks_block_headers(
         &self,
-        headers: Vec<model::StacksBlock>,
+        headers: &TenureBlockHeaders,
     ) -> impl Future<Output = Result<(), Error>> + Send;
 
     /// Write encrypted DKG shares
@@ -620,18 +619,5 @@ pub trait DbWrite {
         pub_key: &PublicKey,
         peer_id: &PeerId,
         address: Multiaddr,
-    ) -> impl Future<Output = Result<(), Error>> + Send;
-
-    /// Copies the contents of the `stacks_blocks_temp` table into the
-    /// `stacks_blocks` table.
-    fn copy_from_stacks_blocks_temp_table(&self) -> impl Future<Output = Result<(), Error>> + Send;
-
-    /// Truncates the `stacks_blocks_temp` table.
-    fn truncate_stacks_blocks_temp_table(&self) -> impl Future<Output = Result<(), Error>> + Send;
-
-    /// Write the stacks block headers to the `stacks_blocks_temp` table.
-    fn write_stacks_blocks_temp(
-        &self,
-        headers: &TenureBlockHeaders,
     ) -> impl Future<Output = Result<(), Error>> + Send;
 }

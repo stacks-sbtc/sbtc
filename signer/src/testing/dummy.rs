@@ -75,6 +75,7 @@ use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::BitcoinTxId;
 use crate::storage::model::CompletedDepositEvent;
+use crate::storage::model::ConsensusHash;
 use crate::storage::model::DkgSharesStatus;
 use crate::storage::model::EncryptedDkgShares;
 use crate::storage::model::KeyRotationEvent;
@@ -622,6 +623,12 @@ impl fake::Dummy<fake::Faker> for BitcoinBlockHeight {
 impl fake::Dummy<fake::Faker> for StacksBlockHeight {
     fn dummy_with_rng<R: rand::Rng + ?Sized>(_config: &fake::Faker, rng: &mut R) -> Self {
         rng.gen_range(0..i64::MAX as u64).into()
+    }
+}
+
+impl fake::Dummy<fake::Faker> for ConsensusHash {
+    fn dummy_with_rng<R: rand::Rng + ?Sized>(config: &fake::Faker, rng: &mut R) -> Self {
+        ConsensusHash::new(config.fake_with_rng(rng))
     }
 }
 

@@ -23,6 +23,8 @@ use signer::WITHDRAWAL_BLOCKS_EXPIRY;
 use signer::bitcoin::validation::WithdrawalRequestStatus;
 use signer::bitcoin::validation::WithdrawalValidationResult;
 use signer::context::SbtcLimits;
+use signer::stacks::api::StacksBlockHeader;
+use signer::stacks::api::TenureBlockHeaders;
 use signer::storage::model::BitcoinBlockHeight;
 use signer::storage::model::DkgSharesStatus;
 use signer::storage::model::KeyRotationEvent;
@@ -233,11 +235,12 @@ async fn writing_stacks_blocks_works<T: AsContractCall>(contract: ContractCallWr
 
     // Okay now to save these blocks. We check that all of these blocks are
     // saved and that the transaction that we care about is saved as well.
-    let headers = blocks
+    let stacks_headers = blocks
         .iter()
-        .map(|block| StacksBlock::from_nakamoto_block(block, &[0; 32].into()))
-        .collect::<Vec<_>>();
-    store.write_stacks_block_headers(headers).await.unwrap();
+        .map(|block| block.header.clone().into())
+        .collect::<Vec<StacksBlockHeader>>();
+    let headers = TenureBlockHeaders::from_headers(stacks_headers).unwrap();
+    store.write_stacks_block_headers(&headers).await.unwrap();
 
     // First check that all blocks are saved
     let sql = "SELECT COUNT(*) FROM sbtc_signer.stacks_blocks";
@@ -255,11 +258,12 @@ async fn writing_stacks_blocks_works<T: AsContractCall>(contract: ContractCallWr
 
     // Last let, we check that attempting to store identical blocks is an
     // idempotent operation.
-    let headers = blocks
+    let stacks_headers = blocks
         .iter()
-        .map(|block| StacksBlock::from_nakamoto_block(block, &[0; 32].into()))
-        .collect::<Vec<_>>();
-    store.write_stacks_block_headers(headers).await.unwrap();
+        .map(|block| block.header.clone().into())
+        .collect::<Vec<StacksBlockHeader>>();
+    let headers = TenureBlockHeaders::from_headers(stacks_headers).unwrap();
+    store.write_stacks_block_headers(&headers).await.unwrap();
 
     let sql = "SELECT COUNT(*) FROM sbtc_signer.stacks_blocks";
     let stored_block_count_again = sqlx::query_scalar::<_, i64>(sql)
@@ -306,11 +310,12 @@ async fn checking_stacks_blocks_exists_works() {
     assert!(!any_exist);
 
     // Okay now to save these blocks.
-    let headers = blocks
+    let stacks_headers = blocks
         .iter()
-        .map(|block| StacksBlock::from_nakamoto_block(block, &[0; 32].into()))
-        .collect::<Vec<_>>();
-    store.write_stacks_block_headers(headers).await.unwrap();
+        .map(|block| block.header.clone().into())
+        .collect::<Vec<StacksBlockHeader>>();
+    let headers = TenureBlockHeaders::from_headers(stacks_headers).unwrap();
+    store.write_stacks_block_headers(&headers).await.unwrap();
 
     // Now each of them should exist.
     let all_exist = futures::stream::iter(blocks.iter())
@@ -2574,26 +2579,33 @@ async fn get_swept_deposit_requests_does_not_return_deposit_requests_with_respon
     // Setup the stacks blocks
     let stacks_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
 
-    let setup_fork_event_block = StacksBlock {
-        block_hash: fake::Faker.fake_with_rng(&mut rng),
+    let setup_fork_event_block = StacksBlockHeader {
+        block_id: fake::Faker.fake_with_rng(&mut rng),
         block_height: stacks_tip.block_height + 1,
-        parent_hash: stacks_tip.block_hash,
-        // For `setup_fork`, the stacks block is not in the canonical chain
-        bitcoin_anchor: fake::Faker.fake_with_rng(&mut rng),
+        parent_block_id: stacks_tip.block_hash,
+        consensus_hash: fake::Faker.fake_with_rng(&mut rng),
     };
-    let setup_canonical_event_block = StacksBlock {
-        block_hash: fake::Faker.fake_with_rng(&mut rng),
+    let mut setup_fork_event_block_tenure =
+        TenureBlockHeaders::from_headers(vec![setup_fork_event_block.clone()]).unwrap();
+    // For `setup_fork`, the stacks block is not in the canonical chain
+    setup_fork_event_block_tenure.anchor_block_hash = fake::Faker.fake_with_rng(&mut rng);
+
+    let setup_canonical_event_block = StacksBlockHeader {
+        block_id: fake::Faker.fake_with_rng(&mut rng),
         block_height: stacks_tip.block_height + 1,
-        parent_hash: stacks_tip.block_hash,
-        // For `setup_canonical`, the stacks block is in the canonical chain
-        bitcoin_anchor: chain_tip,
+        parent_block_id: stacks_tip.block_hash,
+        consensus_hash: fake::Faker.fake_with_rng(&mut rng),
     };
-    db.write_stacks_block_headers(vec![
-        setup_fork_event_block.clone(),
-        setup_canonical_event_block.clone(),
-    ])
-    .await
-    .unwrap();
+    let mut setup_canonical_event_block_tenure =
+        TenureBlockHeaders::from_headers(vec![setup_canonical_event_block.clone()]).unwrap();
+    // For `setup_canonical`, the stacks block is in the canonical chain
+    setup_canonical_event_block_tenure.anchor_block_hash = chain_tip;
+    db.write_stacks_block_headers(&setup_fork_event_block_tenure)
+        .await
+        .unwrap();
+    db.write_stacks_block_headers(&setup_canonical_event_block_tenure)
+        .await
+        .unwrap();
 
     // First, let's check we get both deposits
     let requests = db
@@ -2607,7 +2619,7 @@ async fn get_swept_deposit_requests_does_not_return_deposit_requests_with_respon
     // For `setup_canonical`, the event block is on the canonical chain
     let event = CompletedDepositEvent {
         txid: fake::Faker.fake_with_rng::<StacksTxId, _>(&mut rng),
-        block_id: setup_canonical_event_block.block_hash,
+        block_id: setup_canonical_event_block.block_id,
         amount: setup_canonical.deposit_request.amount,
         outpoint: setup_canonical.deposit_request.outpoint,
         sweep_block_hash: setup_canonical.deposit_block_hash.into(),
@@ -2619,7 +2631,7 @@ async fn get_swept_deposit_requests_does_not_return_deposit_requests_with_respon
     // For `setup_fork`, the event block is not on the canonical chain
     let event = CompletedDepositEvent {
         txid: fake::Faker.fake_with_rng::<StacksTxId, _>(&mut rng),
-        block_id: setup_fork_event_block.block_hash,
+        block_id: setup_fork_event_block.block_id,
         amount: setup_fork.deposit_request.amount,
         outpoint: setup_fork.deposit_request.outpoint,
         sweep_block_hash: setup_fork.deposit_block_hash.into(),
@@ -2642,7 +2654,7 @@ async fn get_swept_deposit_requests_does_not_return_deposit_requests_with_respon
     let setup_fork_event_block = StacksBlock {
         block_hash: fake::Faker.fake_with_rng(&mut rng),
         block_height: setup_canonical_event_block.block_height + 1,
-        parent_hash: setup_canonical_event_block.block_hash,
+        parent_hash: setup_canonical_event_block.parent_block_id,
         bitcoin_anchor: chain_tip,
     };
     db.write_stacks_block(&setup_fork_event_block)
