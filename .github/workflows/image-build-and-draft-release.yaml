@@ -86,24 +86,24 @@ jobs:
           images: |
             ${{ env.ghcr_org }}/sbtc
           tags: |
-            type=raw,value=${{ matrix.docker_platforms }}.${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }}-${{ matrix.dist }}
-            type=raw,value=${{ matrix.docker_platforms }}.${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }},enable=${{ matrix.dist == 'debian' }}
-            type=raw,value=${{ matrix.docker_platforms }}.${{ matrix.docker_target }}-latest,enable=${{ env.latest_release == github.event.client_payload.tag_name && matrix.dist == 'debian' }}
-            type=raw,value=${{ matrix.docker_platforms }}.${{ matrix.docker_target }}-latest-${{ matrix.dist }},enable=${{ env.latest_release == github.event.client_payload.tag_name }}
-
-      ## Build docker image for release
-      - name: Build and Push ( ${{ matrix.dist }} ${{ matrix.docker_platforms }} ${{ matrix.docker_target }} )
-        id: docker_build
-        uses: stacks-sbtc/actions/docker/build-push-action@942832cc7f86ead03c05b7035cd4b9573dd6c617
-        with:
-          file: ./.github/actions/dockerfiles/Dockerfile.${{ matrix.docker_target }}.${{ matrix.dist }}
-          platforms: ${{ matrix.docker_platforms }}
-          tags: ${{ steps.docker_metadata.outputs.tags }}
-          labels: ${{ steps.docker_metadata.outputs.labels }}
-          target: ${{ matrix.docker_target }}
-          push: true
-          build-args: |
-            GIT_COMMIT=${{ github.event.client_payload.tag_name }}
+            # Sanitize platform by replacing / with -
+            type=raw,value=${{ matrix.docker_platforms | replace('/', '-') }}.${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }}-${{ matrix.dist }}
+            type=raw,value=${{ matrix.docker_platforms | replace('/', '-') }}.${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }},enable=${{ matrix.dist == 'debian' }}
+            type=raw,value=${{ matrix.docker_platforms | replace('/', '-') }}.${{ matrix.docker_target }}-latest,enable=${{ env.latest_release == github.event.client_payload.tag_name && matrix.dist == 'debian' }}
+            type=raw,value=${{ matrix.docker_platforms | replace('/', '-') }}.${{ matrix.docker_target }}-latest-${{ matrix.dist }},enable=${{ env.latest_release == github.event.client_payload.tag_name }}
+            ## Build docker image for release
+            - name: Build and Push ( ${{ matrix.dist }} ${{ matrix.docker_platforms }} ${{ matrix.docker_target }} )
+              id: docker_build
+              uses: stacks-sbtc/actions/docker/build-push-action@942832cc7f86ead03c05b7035cd4b9573dd6c617
+              with:
+                file: ./.github/actions/dockerfiles/Dockerfile.${{ matrix.docker_target }}.${{ matrix.dist }}
+                platforms: ${{ matrix.docker_platforms }}
+                tags: ${{ steps.docker_metadata.outputs.tags }}
+                labels: ${{ steps.docker_metadata.outputs.labels }}
+                target: ${{ matrix.docker_target }}
+                push: true
+                build-args: |
+                  GIT_COMMIT=${{ github.event.client_payload.tag_name }}
 
       - name: Save digest as output
         id: save_digest
