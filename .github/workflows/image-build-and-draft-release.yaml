@@ -121,14 +121,20 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh attestation download oci://${{ env.ghcr_org }}/sbtc:${{ matrix.docker_platforms }}.${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }}-${{ matrix.dist }} -R ${{ github.repository_owner }}/sbtc
+          # Sanitize the platform for the tag name
+          SANITIZED_PLATFORM="${{ matrix.docker_platforms }}"
+          SANITIZED_PLATFORM="${SANITIZED_PLATFORM//\//-}"
           
-          # Rename the attestation bundle (replace ":" with "_")
+          # Use the actual tag format that was built
+          ACTUAL_TAG="${SANITIZED_PLATFORM}.${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }}-${{ matrix.dist }}"
+          
+          echo "Downloading attestation for tag: $ACTUAL_TAG"
+          gh attestation download oci://${{ env.ghcr_org }}/sbtc:$ACTUAL_TAG -R ${{ github.repository }}
+          
+          # Rest of your code...
           ATTESTATION_FILE="$(echo "${{ steps.docker_build.outputs.digest }}.jsonl" | tr ':' '_')"
           mv "${{ steps.docker_build.outputs.digest }}.jsonl" "$ATTESTATION_FILE"
           echo "ATTESTATION_FILE=$ATTESTATION_FILE" >> $GITHUB_ENV
-          
-          # Generate trusted root
           gh attestation trusted-root > trusted_root.jsonl
 
       - name: Upload Attestation Files as Artifacts
