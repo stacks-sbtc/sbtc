@@ -138,7 +138,7 @@ pub async fn new_block_handler(state: State<ApiState<impl Context>>, body: Strin
             txid: sbtc::events::StacksTxid(txid.0),
             block_id: stacks_chaintip.block_hash.into(),
         };
-        let res = match RegistryEvent::try_new(ev.value, tx_info) {
+        let res = match RegistryEvent::try_new(ev.raw_value, tx_info) {
             Ok(RegistryEvent::CompletedDeposit(event)) => {
                 handle_completed_deposit(&api.ctx, event.into()).await
             }
@@ -738,7 +738,7 @@ mod tests {
         };
         assert!(
             RegistryEvent::try_new(
-                failing_event.contract_event.as_ref().unwrap().value.clone(),
+                failing_event.contract_event.as_ref().unwrap().raw_value.clone(),
                 tx_info
             )
             .is_err()

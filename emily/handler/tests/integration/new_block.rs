@@ -44,7 +44,7 @@ where
         block_id: new_block_event.index_block_hash,
     };
     let deposit_event = deposit_event.contract_event.as_ref().unwrap();
-    let registry_event = RegistryEvent::try_new(deposit_event.value.clone(), tx_info)
+    let registry_event = RegistryEvent::try_new(deposit_event.raw_value.clone(), tx_info)
         .expect("Failed to parse RegistryEvent");
 
     // Check if registry_event matches the expected variant
