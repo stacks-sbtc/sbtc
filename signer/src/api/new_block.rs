@@ -736,13 +736,8 @@ mod tests {
             txid: sbtc::events::StacksTxid([0; 32]),
             block_id: StacksBlockId([0; 32]),
         };
-        assert!(
-            RegistryEvent::try_new(
-                failing_event.contract_event.as_ref().unwrap().raw_value.clone(),
-                tx_info
-            )
-            .is_err()
-        );
+        let contract_event = failing_event.contract_event.as_ref().unwrap();
+        assert!(RegistryEvent::try_new(contract_event.raw_value.clone(), tx_info).is_err());
 
         let res = new_block_handler(state, body).await;
 
