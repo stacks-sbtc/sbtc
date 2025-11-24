@@ -170,7 +170,8 @@ pub struct SmartContractEvent {
     /// config when specifying events.
     pub topic: String,
     /// The actual event
-    pub value: ClarityValue,
+    #[serde(deserialize_with = "deserialize_webhook_codec")]
+    pub raw_value: ClarityValue,
 }
 
 /// This is for deserializing fields that were effectively serialized the
