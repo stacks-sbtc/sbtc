@@ -121,27 +121,24 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Sanitize the platform for the tag name
-          SANITIZED_PLATFORM="${{ matrix.docker_platforms }}"
-          SANITIZED_PLATFORM="${SANITIZED_PLATFORM//\//-}"
+          # MINIMAL FIX: Replace / with - in platform for tag
+          SANITIZED_PLATFORM="${{ matrix.docker_platforms//\//- }}"
+          gh attestation download oci://${{ env.ghcr_org }}/sbtc:$SANITIZED_PLATFORM.${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }}-${{ matrix.dist }} -R ${{ github.repository }}
           
-          # Use the actual tag format that was built
-          ACTUAL_TAG="${SANITIZED_PLATFORM}.${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }}-${{ matrix.dist }}"
-          
-          echo "Downloading attestation for tag: $ACTUAL_TAG"
-          gh attestation download oci://${{ env.ghcr_org }}/sbtc:$ACTUAL_TAG -R ${{ github.repository }}
-          
-          # Rest of your code...
+          # Rename the attestation bundle (replace ":" with "_")
           ATTESTATION_FILE="$(echo "${{ steps.docker_build.outputs.digest }}.jsonl" | tr ':' '_')"
           mv "${{ steps.docker_build.outputs.digest }}.jsonl" "$ATTESTATION_FILE"
           echo "ATTESTATION_FILE=$ATTESTATION_FILE" >> $GITHUB_ENV
+          
+          # Generate trusted root
           gh attestation trusted-root > trusted_root.jsonl
 
       - name: Upload Attestation Files as Artifacts
         id: upload_attestation
         uses: stacks-sbtc/actions/upload-artifact@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
-          name: attestation-files-${{ matrix.docker_platforms }}-${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }}
+          # MINIMAL FIX: Replace / with - in platform for artifact name  
+          name: attestation-files-${{ matrix.docker_platforms//\//- }}-${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }}
           overwrite: true
           path: |
             ${{ env.ATTESTATION_FILE }}
