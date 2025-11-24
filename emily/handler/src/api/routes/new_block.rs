@@ -7,18 +7,23 @@ use crate::context::EmilyContext;
 use super::handlers;
 
 /// New block routes.
-pub fn routes(
-    context: EmilyContext,
-) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    new_block(context.clone())
+pub fn routes<F>(
+    context: F,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
+where
+    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
+{
+    new_block(context)
 }
 
 /// New block endpoint.
-fn new_block(
-    context: EmilyContext,
-) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    warp::any()
-        .map(move || context.clone())
+fn new_block<F>(
+    context: F,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
+where
+    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
+{
+    context
         .and(warp::path!("new_block"))
         .and(warp::post())
         .and(warp::body::json())

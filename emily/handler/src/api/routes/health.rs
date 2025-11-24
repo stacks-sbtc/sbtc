@@ -6,18 +6,24 @@ use super::handlers;
 use warp::Filter;
 
 /// Health routes.
-pub fn routes(
-    context: EmilyContext,
-) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+pub fn routes<F>(
+    context: F,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
+where
+    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
+{
     get_health(context)
 }
 
 /// Get health endpoint.
-fn get_health(
-    context: EmilyContext,
-) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    warp::path("health")
-        .map(move || context.clone())
+fn get_health<F>(
+    context: F,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
+where
+    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
+{
+    context
+        .and(warp::path("health"))
         .and(warp::get())
         .then(handlers::health::get_health)
 }

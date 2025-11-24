@@ -6,9 +6,12 @@ use crate::context::EmilyContext;
 use super::handlers;
 
 /// Deposit routes.
-pub fn routes(
-    context: EmilyContext,
-) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+pub fn routes<F>(
+    context: F,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
+where
+    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
+{
     get_deposit(context.clone())
         .or(get_deposits_for_transaction(context.clone()))
         .or(get_deposits(context.clone()))
@@ -20,22 +23,26 @@ pub fn routes(
 }
 
 /// Get deposit endpoint.
-fn get_deposit(
-    context: EmilyContext,
-) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    warp::any()
-        .map(move || context.clone())
+fn get_deposit<F>(
+    context: F,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
+where
+    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
+{
+    context
         .and(warp::path!("deposit" / String / u32))
         .and(warp::get())
         .then(handlers::deposit::get_deposit)
 }
 
 /// Get deposits for transaction endpoint.
-fn get_deposits_for_transaction(
-    context: EmilyContext,
-) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    warp::any()
-        .map(move || context.clone())
+fn get_deposits_for_transaction<F>(
+    context: F,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
+where
+    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
+{
+    context
         .and(warp::path!("deposit" / String))
         .and(warp::get())
         .and(warp::query())
@@ -43,11 +50,13 @@ fn get_deposits_for_transaction(
 }
 
 /// Get deposits endpoint.
-fn get_deposits(
-    context: EmilyContext,
-) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    warp::any()
-        .map(move || context.clone())
+fn get_deposits<F>(
+    context: F,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
+where
+    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
+{
+    context
         .and(warp::path!("deposit"))
         .and(warp::get())
         .and(warp::query())
@@ -55,11 +64,13 @@ fn get_deposits(
 }
 
 /// Get deposits for recipient endpoint.
-fn get_deposits_for_recipient(
-    context: EmilyContext,
-) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    warp::any()
-        .map(move || context.clone())
+fn get_deposits_for_recipient<F>(
+    context: F,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
+where
+    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
+{
+    context
         .and(warp::path!("deposit" / "recipient" / String))
         .and(warp::get())
         .and(warp::query())
@@ -67,11 +78,13 @@ fn get_deposits_for_recipient(
 }
 
 /// Get deposits for reclaim pubkey endpoint.
-fn get_deposits_for_reclaim_pubkeys(
-    context: EmilyContext,
-) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    warp::any()
-        .map(move || context.clone())
+fn get_deposits_for_reclaim_pubkeys<F>(
+    context: F,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
+where
+    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
+{
+    context
         .and(warp::path!("deposit" / "reclaim-pubkeys" / String))
         .and(warp::get())
         .and(warp::query())
@@ -79,11 +92,13 @@ fn get_deposits_for_reclaim_pubkeys(
 }
 
 /// Create deposit endpoint.
-fn create_deposit(
-    context: EmilyContext,
-) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    warp::any()
-        .map(move || context.clone())
+fn create_deposit<F>(
+    context: F,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
+where
+    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
+{
+    context
         .and(warp::path!("deposit"))
         .and(warp::post())
         .and(warp::body::json())
@@ -91,11 +106,13 @@ fn create_deposit(
 }
 
 /// Update deposits from signer endpoint.
-fn update_deposits_signer(
-    context: EmilyContext,
-) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    warp::any()
-        .map(move || context.clone())
+fn update_deposits_signer<F>(
+    context: F,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
+where
+    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
+{
+    context
         .and(warp::path!("deposit"))
         .and(warp::put())
         .and(warp::body::json())
@@ -103,11 +120,13 @@ fn update_deposits_signer(
 }
 
 /// Update deposits from sidecar endpoint.
-fn update_deposits_sidecar(
-    context: EmilyContext,
-) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    warp::any()
-        .map(move || context.clone())
+fn update_deposits_sidecar<F>(
+    context: F,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
+where
+    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
+{
+    context
         .and(warp::path!("deposit_private"))
         .and(warp::put())
         .and(warp::body::json())

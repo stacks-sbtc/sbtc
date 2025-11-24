@@ -38,6 +38,10 @@ pub struct GeneralArgs {
     /// DynamoDB endpoint.
     #[arg(long, default_value = "http://localhost:8000")]
     pub dynamodb_endpoint: String,
+    /// Whether to skip finding the dynamodb tables on startup. If true, table
+    /// names must be provided in each request via `x-context-*` headers.
+    #[arg(long, default_value = "false")]
+    pub skip_tables: bool,
 }
 
 /// Server related arguments.
@@ -62,6 +66,7 @@ async fn main() {
                 pretty_logs,
                 log_directives,
                 dynamodb_endpoint,
+                skip_tables,
             },
     } = Cli::parse();
 
@@ -70,7 +75,7 @@ async fn main() {
 
     // Setup context.
     // TODO(389 + 358): Handle config pickup in a way that will only fail for the relevant call.
-    let context: EmilyContext = EmilyContext::local_instance(&dynamodb_endpoint)
+    let context: EmilyContext = EmilyContext::local_instance(&dynamodb_endpoint, skip_tables)
         .await
         .unwrap();
     info!(lambdaContext = ?context);

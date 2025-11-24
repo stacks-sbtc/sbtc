@@ -6,9 +6,12 @@ use crate::context::EmilyContext;
 use super::handlers;
 
 /// Withdrawal routes.
-pub fn routes(
-    context: EmilyContext,
-) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+pub fn routes<F>(
+    context: F,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
+where
+    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
+{
     get_withdrawal(context.clone())
         .or(get_withdrawals(context.clone()))
         .or(get_withdrawals_for_recipient(context.clone()))
@@ -19,22 +22,26 @@ pub fn routes(
 }
 
 /// Get withdrawal endpoint.
-fn get_withdrawal(
-    context: EmilyContext,
-) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    warp::any()
-        .map(move || context.clone())
+fn get_withdrawal<F>(
+    context: F,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
+where
+    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
+{
+    context
         .and(warp::path!("withdrawal" / u64))
         .and(warp::get())
         .then(handlers::withdrawal::get_withdrawal)
 }
 
 /// Get withdrawals endpoint.
-fn get_withdrawals(
-    context: EmilyContext,
-) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    warp::any()
-        .map(move || context.clone())
+fn get_withdrawals<F>(
+    context: F,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
+where
+    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
+{
+    context
         .and(warp::path("withdrawal"))
         .and(warp::get())
         .and(warp::query())
@@ -42,11 +49,13 @@ fn get_withdrawals(
 }
 
 /// Get withdrawals for recipient endpoint.
-fn get_withdrawals_for_recipient(
-    context: EmilyContext,
-) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    warp::any()
-        .map(move || context.clone())
+fn get_withdrawals_for_recipient<F>(
+    context: F,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
+where
+    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
+{
+    context
         .and(warp::path!("withdrawal" / "recipient" / String))
         .and(warp::get())
         .and(warp::query())
@@ -54,11 +63,13 @@ fn get_withdrawals_for_recipient(
 }
 
 /// Get withdrawals for sender endpoint.
-fn get_withdrawals_for_sender(
-    context: EmilyContext,
-) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    warp::any()
-        .map(move || context.clone())
+fn get_withdrawals_for_sender<F>(
+    context: F,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
+where
+    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
+{
+    context
         .and(warp::path!("withdrawal" / "sender" / String))
         .and(warp::get())
         .and(warp::query())
@@ -66,11 +77,13 @@ fn get_withdrawals_for_sender(
 }
 
 /// Create withdrawal endpoint.
-fn create_withdrawal(
-    context: EmilyContext,
-) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    warp::any()
-        .map(move || context.clone())
+fn create_withdrawal<F>(
+    context: F,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
+where
+    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
+{
+    context
         .and(warp::path("withdrawal"))
         .and(warp::post())
         .and(warp::body::json())
@@ -78,11 +91,13 @@ fn create_withdrawal(
 }
 
 /// Update withdrawals from signer endpoint.
-fn update_withdrawals_signer(
-    context: EmilyContext,
-) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    warp::any()
-        .map(move || context.clone())
+fn update_withdrawals_signer<F>(
+    context: F,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
+where
+    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
+{
+    context
         .and(warp::path("withdrawal"))
         .and(warp::put())
         .and(warp::body::json())
@@ -90,11 +105,13 @@ fn update_withdrawals_signer(
 }
 
 /// Update withdrawals from sidecar endpoint.
-fn update_withdrawals_sidecar(
-    context: EmilyContext,
-) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    warp::any()
-        .map(move || context.clone())
+fn update_withdrawals_sidecar<F>(
+    context: F,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
+where
+    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
+{
+    context
         .and(warp::path("withdrawal_private"))
         .and(warp::put())
         .and(warp::body::json())

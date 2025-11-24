@@ -8,6 +8,8 @@ pub mod common;
 pub mod config;
 /// Deposit test module.
 pub mod deposit;
+/// Health test module.
+pub mod health;
 /// Limit test module.
 pub mod limits;
 /// New block test module.
