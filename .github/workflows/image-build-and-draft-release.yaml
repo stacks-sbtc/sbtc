@@ -122,7 +122,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # MINIMAL FIX: Replace / with - in platform for tag
-          SANITIZED_PLATFORM="${{{ matrix.docker_platforms }}/\//-}"
+          SANITIZED_PLATFORM="{{ matrix.docker_platforms }}"
+          SANITIZED_PLATFORM="${SANITIZED_PLATFORM//\//-}"
           gh attestation download oci://${{ env.ghcr_org }}/sbtc:$SANITIZED_PLATFORM.${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }}-${{ matrix.dist }} -R ${{ github.repository }}
           
           # Rename the attestation bundle (replace ":" with "_")
