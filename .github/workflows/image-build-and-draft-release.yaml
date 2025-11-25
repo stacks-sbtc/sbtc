@@ -120,11 +120,12 @@ jobs:
         id: download_attestation
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DOCKER_PLATFORM: ${{ matrix.docker_platforms }}
         run: |
           # MINIMAL FIX: Replace / with - in platform for tag
-          SANITIZED_PLATFORM="{{ matrix.docker_platforms }}"
-          SANITIZED_PLATFORM="${SANITIZED_PLATFORM//\//-}"
-          gh attestation download oci://${{ env.ghcr_org }}/sbtc:$SANITIZED_PLATFORM.${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }}-${{ matrix.dist }} -R ${{ github.repository }}
+          SANITIZED_PLATFORM="${DOCKER_PLATFORM//\//-}"
+          echo "Downloading attestation for tag: $SANITIZED_PLATFORM.${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }}-${{ matrix.dist }}"
+          gh attestation download "oci://${{ env.ghcr_org }}/sbtc:$SANITIZED_PLATFORM.${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }}-${{ matrix.dist }}" -R ${{ github.repository }}
           
           # Rename the attestation bundle (replace ":" with "_")
           ATTESTATION_FILE="$(echo "${{ steps.docker_build.outputs.digest }}.jsonl" | tr ':' '_')"
