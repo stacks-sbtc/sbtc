@@ -1,17 +1,21 @@
+# 1. Add xx helper
+FROM --platform=$BUILDPLATFORM tonistiigi/xx:master AS xx
+
+# 2. Keep running on BUILDPLATFORM (Fast)
 FROM --platform=$BUILDPLATFORM rust:1.91.0-slim-bookworm AS build
 
+# Copy xx scripts
+COPY --from=xx / /
+
 ARG GIT_COMMIT
-RUN echo "aaaaa"
-RUN echo "Debug: GIT_COMMIT='$GIT_COMMIT'"
-RUN echo "Debug: whoami=$(whoami)"
-RUN echo "Debug: shell=$SHELL"
 RUN test -n "$GIT_COMMIT" || (echo "GIT_COMMIT not set" && false)
 
 ARG CARGO_BUILD_ARGS="--release --locked"
+# 3. Receive the TARGETPLATFORM argument automatically from Docker
+ARG TARGETPLATFORM
 
 # Install dependencies.
-RUN apt-get update
-RUN apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libclang-dev \
     git \
     pkg-config \
@@ -20,20 +24,34 @@ RUN apt-get install -y --no-install-recommends \
     protobuf-compiler \
     npm \
     default-jre \
-    g++ && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+    g++ \
+    # Add clang and lld for cross-compilation linking
+    clang \
+    lld \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# 4. xx-apt installs the target architecture libraries (e.g. openssl for arm64)
+#    into the correct location without overwriting host libs.
+RUN xx-apt-get install -y gcc g++ libssl-dev zlib1g-dev
 
 RUN npm install -g pnpm@9 && \
     npm install -g @openapitools/openapi-generator-cli
 
 WORKDIR /code/sbtc
 COPY . .
+
+# 5. Run the build through xx-cargo so it targets the correct arch
 RUN make install-pnpm && make build
-RUN cargo build --bin signer ${CARGO_BUILD_ARGS}
+RUN xx-cargo build --bin signer ${CARGO_BUILD_ARGS} && \
+    # Move the binary to a predictable location regardless of architecture
+    xx-verify --static target/$(xx-cargo --print-target-triple)/release/signer && \
+    cp target/$(xx-cargo --print-target-triple)/release/signer /signer-binary
 
 # Create Docker image to run the signer.
 FROM debian:bookworm-slim AS signer
-COPY --from=build /code/sbtc/target/release/signer /usr/local/bin/signer
+
+# 6. Copy the binary from the predictable location
+COPY --from=build /signer-binary /usr/local/bin/signer
 
 RUN apt-get update && \
     apt-get install -y curl && \
@@ -43,9 +61,6 @@ RUN apt-get update && \
     echo "Package: gh\nPin: origin cli.github.com\nPin-Priority: 1001" > /etc/apt/preferences.d/gh-cli && \
     apt-get update && \
     apt-get install -y gh
-
-# ca-certificates is required to establish TLS connections.
-# gettext provides envsubst
 
 RUN apt-get install -y ca-certificates gettext --no-install-recommends && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
