@@ -131,6 +131,7 @@ jobs:
           ATTESTATION_FILE="$(echo "${{ steps.docker_build.outputs.digest }}.jsonl" | tr ':' '_')"
           mv "${{ steps.docker_build.outputs.digest }}.jsonl" "$ATTESTATION_FILE"
           echo "ATTESTATION_FILE=$ATTESTATION_FILE" >> $GITHUB_ENV
+          echo "SANITIZED_PLATFORM=$SANITIZED_PLATFORM" >> $GITHUB_ENV
           
           # Generate trusted root
           gh attestation trusted-root > trusted_root.jsonl
@@ -139,8 +140,8 @@ jobs:
         id: upload_attestation
         uses: stacks-sbtc/actions/upload-artifact@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
-          # MINIMAL FIX: Remove platform from artifact name to avoid slash issues
-          name: attestation-files-${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }}
+          # MINIMAL FIX: Use sanitized platform to avoid overwrites
+          name: attestation-files-${{ env.SANITIZED_PLATFORM }}-${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }}
           overwrite: true
           path: |
             ${{ env.ATTESTATION_FILE }}
