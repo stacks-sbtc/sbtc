@@ -1,12 +1,7 @@
-# ------------------------------------------------------------------------------
-# Build Stage
-# We pin --platform=$BUILDPLATFORM so this runs natively on the runner (AMD64)
-# even when building for ARM64. This is crucial for speed.
-# ------------------------------------------------------------------------------
+
     FROM --platform=$BUILDPLATFORM rust:1.91.0-slim-bookworm AS build
 
     ARG GIT_COMMIT
-    # Docker automatically populates these arguments:
     ARG TARGETARCH
     ARG BUILDARCH
     
@@ -22,8 +17,6 @@
         apt-get update
     
     # 2. Install Host Dependencies (Tools needed to RUN the build on AMD64)
-    # We added 'clang' and 'libclang-dev' which fixes the "Unable to find libclang" error
-    # We added 'findutils' to ensure the 'find' command exists for locating libclang
     RUN apt-get install -y --no-install-recommends \
         git \
         pkg-config \
@@ -53,29 +46,17 @@
     WORKDIR /code/sbtc
     COPY . .
     
-    # ------------------------------------------------------------------------------
-    # FIX 1: Split the Makefile
-    # We DO NOT run `make build`. `make build` runs `cargo build`, which tries to 
-    # compile everything using default settings (causing the arch mismatch).
-    # Instead, we run ONLY the code generation steps here on the host architecture.
-    # We explicitly set LIBCLANG_PATH here so bindgen works during codegen.
-    # ------------------------------------------------------------------------------
+    # Generate emily and blocklist clients
     RUN export LIBCLANG_PATH="$(find /usr/lib/llvm-* -name lib -type d | head -n 1)" && \
         make install-pnpm && \
         make blocklist-client-codegen emily-client-codegen contracts
     
-    # ------------------------------------------------------------------------------
-    # 5. Rust Cross-Compilation Logic
-    # Now we manually run cargo build for the signer only, setting the correct linkers
-    # ------------------------------------------------------------------------------
+    # Compile main binary
     RUN \
         # Ensure Clang is found
         export LIBCLANG_PATH="$(find /usr/lib/llvm-* -name lib -type d | head -n 1)" && \
         # Allow pkg-config to look for cross-compiled libraries
         export PKG_CONFIG_ALLOW_CROSS=1 && \
-        #
-        # LOGIC: Check if we are building for ARM64 or AMD64
-        #
         if [ "$TARGETARCH" = "arm64" ]; then \
             echo "Building for ARM64..."; \
             rustup target add aarch64-unknown-linux-gnu; \
@@ -97,13 +78,8 @@
             mkdir -p /output && cp target/release/signer /output/signer; \
         fi
     
-    # ------------------------------------------------------------------------------
-    # Final Runtime Stage
-    # This stage runs on the TARGET architecture (no --platform flag)
-    # ------------------------------------------------------------------------------
     FROM debian:bookworm-slim AS signer
     
-    # We copy from the standardized /output/ directory
     COPY --from=build /output/signer /usr/local/bin/signer
     
     RUN apt-get update && \
