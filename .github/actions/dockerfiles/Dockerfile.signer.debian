@@ -1,11 +1,18 @@
 # 1. Add xx helper
-FROM --platform=$BUILDPLATFORM tonistiigi/xx:master AS xx
+FROM --platform=$BUILDPLATFORM rust:1.91.0-slim-musl AS build
 
 # 2. Keep running on BUILDPLATFORM (Fast)
 FROM --platform=$BUILDPLATFORM rust:1.91.0-slim-bookworm AS build
 
 # Copy xx scripts
 COPY --from=xx / /
+
+# Install MUSL-based toolchain and linker for cross-compilation
+RUN rustup target add aarch64-unknown-linux-musl && \
+    rustup target add x86_64-unknown-linux-musl
+
+# Install musl dependencies for the target architecture
+RUN xx-apt-get install -y musl-tools
 
 ARG GIT_COMMIT
 RUN test -n "$GIT_COMMIT" || (echo "GIT_COMMIT not set" && false)
@@ -30,9 +37,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     lld \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Install clang and lld for cross-compilation linking
 # 4. xx-apt installs the target architecture libraries (e.g. openssl for arm64)
 #    into the correct location without overwriting host libs.
-RUN xx-apt-get install -y gcc g++ libssl-dev zlib1g-dev
+RUN xx-apt-get install -y gcc g++ libssl-dev zlib1g-dev \
+    # Add a necessary tool for determining the target library paths
+    file \ 
+    # Install pkg-config for the target architecture
+    pkg-config-${TARGETPLATFORM/linux\//}-cross
 
 RUN npm install -g pnpm@9 && \
     npm install -g @openapitools/openapi-generator-cli
@@ -41,8 +53,18 @@ WORKDIR /code/sbtc
 COPY . .
 
 # 5. Run the build through xx-cargo so it targets the correct arch
-RUN make install-pnpm && make build
-RUN xx-cargo build --bin signer ${CARGO_BUILD_ARGS} && \
+RUN make install-pnpm
+
+# Add this before xx-cargo build to ensure musl is used
+ENV RUSTFLAGS="-C target-feature=+crt-static"
+
+# New RUN block to export OpenSSL paths for cross-compilation
+# This explicitly sets the library paths so openssl-sys can find the correct ARM libraries.
+RUN export PKG_CONFIG_PATH=$(find /usr/lib/ -name pkgconfig -type d -print -quit) && \
+    export OPENSSL_DIR=/usr && \
+    export OPENSSL_STATIC=true && \
+    xx-cargo build --bin signer ${CARGO_BUILD_ARGS} && \
+    --target $(xx-cargo --print-target-triple | sed 's/gnu/musl/g') && \
     # Move the binary to a predictable location regardless of architecture
     xx-verify --static target/$(xx-cargo --print-target-triple)/release/signer && \
     cp target/$(xx-cargo --print-target-triple)/release/signer /signer-binary
