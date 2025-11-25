@@ -1,88 +1,113 @@
-# We will use the 'slim-musl' base image for static linking.
-# Stage 1: xx helper (Must specify correct repository/user)
-FROM --platform=$BUILDPLATFORM tonistiigi/xx:master AS xx
+# ------------------------------------------------------------------------------
+# Build Stage
+# We pin --platform=$BUILDPLATFORM so this runs natively on the runner (AMD64)
+# even when building for ARM64, ensuring speed.
+# ------------------------------------------------------------------------------
+    FROM --platform=$BUILDPLATFORM rust:1.91.0-slim-bookworm AS build
 
-# Stage 2: Build Stage (Runs on AMD64 for speed)
-# Switch to MUSL-based Rust image for static compilation
-FROM --platform=$BUILDPLATFORM rust:1.91.0-slim-musl AS build
-# Note: Stage name 'build' is reused from the original to match internal logic,
-# but using unique names like 'rust_build' and 'signer_build' is better practice.
-
-# Copy xx scripts for cross-compilation
-COPY --from=xx / /
-
-ARG GIT_COMMIT
-RUN test -n "$GIT_COMMIT" || (echo "GIT_COMMIT not set" && false)
-
-ARG CARGO_BUILD_ARGS="--release --locked"
-# Receive the TARGETPLATFORM argument automatically from Docker
-ARG TARGETPLATFORM
-
-# Install MUSL-based toolchain and linker for cross-compilation
-RUN rustup target add aarch64-unknown-linux-musl x86_64-unknown-linux-musl
-
-# Install dependencies.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libclang-dev \
-    git \
-    pkg-config \
-    libssl-dev \
-    make \
-    protobuf-compiler \
-    npm \
-    default-jre \
-    g++ \
-    clang \
-    lld \
-    # Add musl-tools for cross-linking
-    musl-tools \
-    # Add file utility for xx-verify
-    file \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# xx-apt installs the target architecture libraries (e.g., musl-dev libs)
-# We install the target architecture's SSL libraries here.
-RUN xx-apt-get install -y gcc g++ libssl-dev zlib1g-dev
-
-RUN npm install -g pnpm@9 && \
-    npm install -g @openapitools/openapi-generator-cli
-
-WORKDIR /code/sbtc
-COPY . .
-
-# Environment variables for static linking
-# This enables static linking against the musl standard C library.
-ENV RUSTFLAGS="-C target-feature=+crt-static"
-ENV PKG_CONFIG_ALLOW_CROSS=1
-
-# We must explicitly target the MUSL triple derived from the TARGETPLATFORM
-RUN make install-pnpm && make build
-RUN xx-cargo build --bin signer ${CARGO_BUILD_ARGS} \
-    --target $(xx-cargo --print-target-triple | sed 's/gnu/musl/g') && \
-    # Move the binary to a predictable location regardless of architecture
-    cp target/$(xx-cargo --print-target-triple | sed 's/gnu/musl/g')/release/signer /signer-binary
-
-# Stage 3: Final Signer Image (Minimal)
-FROM debian:bookworm-slim AS signer
-
-# Copy the statically linked binary
-COPY --from=build /signer-binary /usr/local/bin/signer
-
-RUN apt-get update && \
-    apt-get install -y curl && \
-    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
-    chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list && \
-    echo "Package: gh\nPin: origin cli.github.com\nPin-Priority: 1001" > /etc/apt/preferences.d/gh-cli && \
-    apt-get update && \
-    apt-get install -y gh
-
-# ca-certificates is required to establish TLS connections.
-# gettext provides envsubst
-
-RUN apt-get install -y ca-certificates gettext --no-install-recommends && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# FIX: Use the Exec Form (JSON array) for CMD to prevent the command string from being
-# treated as a single file path, which caused the initial error.
-CMD ["/usr/local/bin/signer", "--config", "/signer-config.toml", "--migrate-db"]
+    ARG GIT_COMMIT
+    # Docker automatically populates these two arguments:
+    ARG TARGETARCH
+    ARG BUILDARCH
+    
+    # Ensure GIT_COMMIT is passed
+    RUN test -n "$GIT_COMMIT" || (echo "GIT_COMMIT not set" && false)
+    
+    ARG CARGO_BUILD_ARGS="--release --locked"
+    
+    # 1. Setup Debian for Multi-Architecture
+    # We need to enable arm64 package sources so we can download the ARM versions 
+    # of libssl-dev and libc to link against.
+    RUN dpkg --add-architecture arm64 && \
+        dpkg --add-architecture amd64 && \
+        apt-get update
+    
+    # 2. Install Host Dependencies (Tools needed to RUN the build)
+    RUN apt-get install -y --no-install-recommends \
+        git \
+        pkg-config \
+        make \
+        protobuf-compiler \
+        npm \
+        default-jre \
+        curl \
+        # Install host C++ compiler for build scripts (proc-macros, etc)
+        g++ \
+        # Install host SSL headers (if build scripts need them)
+        libssl-dev
+    
+    # 3. Install Cross-Compilation Toolchains & Target Dependencies
+    # We install the cross-compilers and the ARM64 version of OpenSSL
+    RUN apt-get install -y --no-install-recommends \
+        gcc-aarch64-linux-gnu \
+        g++-aarch64-linux-gnu \
+        libc6-dev-arm64-cross \
+        # Install ARM64 libraries to link against
+        libssl-dev:arm64 \
+        && apt-get clean && rm -rf /var/lib/apt/lists/*
+    
+    # Install Node tools
+    RUN npm install -g pnpm@9 && \
+        npm install -g @openapitools/openapi-generator-cli
+    
+    WORKDIR /code/sbtc
+    COPY . .
+    
+    # 4. Run the code generation steps (runs on host architecture)
+    RUN make install-pnpm && make build
+    
+    # 5. Rust Cross-Compilation Logic
+    # This block configures environment variables to tell cargo which linker to use.
+    # It then builds and moves the binary to a predictable location.
+    RUN \
+        # Set common env vars
+        export PKG_CONFIG_ALLOW_CROSS=1 && \
+        #
+        # LOGIC: Check if we are building for ARM64 or AMD64
+        #
+        if [ "$TARGETARCH" = "arm64" ]; then \
+            echo "Building for ARM64..."; \
+            # Install the Rust target
+            rustup target add aarch64-unknown-linux-gnu; \
+            # Configure Linkers for ARM64
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc; \
+            export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc; \
+            export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++; \
+            # Tell pkg-config where to find the ARM64 .pc files (for OpenSSL)
+            export PKG_CONFIG_PATH="/usr/lib/aarch64-linux-gnu/pkgconfig"; \
+            # Build
+            cargo build --target aarch64-unknown-linux-gnu --bin signer ${CARGO_BUILD_ARGS}; \
+            # Move binary to common path
+            mkdir -p /output && cp target/aarch64-unknown-linux-gnu/release/signer /output/signer; \
+        else \
+            echo "Building for AMD64..."; \
+            # Standard build (Host == Target)
+            cargo build --bin signer ${CARGO_BUILD_ARGS}; \
+            # Move binary to common path
+            mkdir -p /output && cp target/release/signer /output/signer; \
+        fi
+    
+    # ------------------------------------------------------------------------------
+    # Final Runtime Stage
+    # This stage uses the TARGET architecture (no --platform flag)
+    # ------------------------------------------------------------------------------
+    FROM debian:bookworm-slim AS signer
+    
+    # We copy from the standardized /output/ directory we created above
+    COPY --from=build /output/signer /usr/local/bin/signer
+    
+    RUN apt-get update && \
+        apt-get install -y curl && \
+        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
+        chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list && \
+        echo "Package: gh\nPin: origin cli.github.com\nPin-Priority: 1001" > /etc/apt/preferences.d/gh-cli && \
+        apt-get update && \
+        apt-get install -y gh
+    
+    # ca-certificates is required to establish TLS connections.
+    # gettext provides envsubst
+    RUN apt-get install -y ca-certificates gettext --no-install-recommends && \
+        apt-get clean && rm -rf /var/lib/apt/lists/*
+    
+    CMD ["/usr/local/bin/signer --config /signer-config.toml --migrate-db"]
