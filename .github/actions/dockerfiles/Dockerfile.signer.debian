@@ -1,25 +1,25 @@
-# 1. Add xx helper
+# We will use the 'slim-musl' base image for static linking.
+# Stage 1: xx helper (Must specify correct repository/user)
+FROM --platform=$BUILDPLATFORM tonistiigi/xx:master AS xx
+
+# Stage 2: Build Stage (Runs on AMD64 for speed)
+# Switch to MUSL-based Rust image for static compilation
 FROM --platform=$BUILDPLATFORM rust:1.91.0-slim-musl AS build
+# Note: Stage name 'build' is reused from the original to match internal logic,
+# but using unique names like 'rust_build' and 'signer_build' is better practice.
 
-# 2. Keep running on BUILDPLATFORM (Fast)
-FROM --platform=$BUILDPLATFORM rust:1.91.0-slim-bookworm AS build
-
-# Copy xx scripts
+# Copy xx scripts for cross-compilation
 COPY --from=xx / /
-
-# Install MUSL-based toolchain and linker for cross-compilation
-RUN rustup target add aarch64-unknown-linux-musl && \
-    rustup target add x86_64-unknown-linux-musl
-
-# Install musl dependencies for the target architecture
-RUN xx-apt-get install -y musl-tools
 
 ARG GIT_COMMIT
 RUN test -n "$GIT_COMMIT" || (echo "GIT_COMMIT not set" && false)
 
 ARG CARGO_BUILD_ARGS="--release --locked"
-# 3. Receive the TARGETPLATFORM argument automatically from Docker
+# Receive the TARGETPLATFORM argument automatically from Docker
 ARG TARGETPLATFORM
+
+# Install MUSL-based toolchain and linker for cross-compilation
+RUN rustup target add aarch64-unknown-linux-musl x86_64-unknown-linux-musl
 
 # Install dependencies.
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -32,19 +32,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     npm \
     default-jre \
     g++ \
-    # Add clang and lld for cross-compilation linking
     clang \
     lld \
+    # Add musl-tools for cross-linking
+    musl-tools \
+    # Add file utility for xx-verify
+    file \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install clang and lld for cross-compilation linking
-# 4. xx-apt installs the target architecture libraries (e.g. openssl for arm64)
-#    into the correct location without overwriting host libs.
-RUN xx-apt-get install -y gcc g++ libssl-dev zlib1g-dev \
-    # Add a necessary tool for determining the target library paths
-    file \ 
-    # Install pkg-config for the target architecture
-    pkg-config-${TARGETPLATFORM/linux\//}-cross
+# xx-apt installs the target architecture libraries (e.g., musl-dev libs)
+# We install the target architecture's SSL libraries here.
+RUN xx-apt-get install -y gcc g++ libssl-dev zlib1g-dev
 
 RUN npm install -g pnpm@9 && \
     npm install -g @openapitools/openapi-generator-cli
@@ -52,27 +50,22 @@ RUN npm install -g pnpm@9 && \
 WORKDIR /code/sbtc
 COPY . .
 
-# 5. Run the build through xx-cargo so it targets the correct arch
-RUN make install-pnpm
-
-# Add this before xx-cargo build to ensure musl is used
+# Environment variables for static linking
+# This enables static linking against the musl standard C library.
 ENV RUSTFLAGS="-C target-feature=+crt-static"
+ENV PKG_CONFIG_ALLOW_CROSS=1
 
-# New RUN block to export OpenSSL paths for cross-compilation
-# This explicitly sets the library paths so openssl-sys can find the correct ARM libraries.
-RUN export PKG_CONFIG_PATH=$(find /usr/lib/ -name pkgconfig -type d -print -quit) && \
-    export OPENSSL_DIR=/usr && \
-    export OPENSSL_STATIC=true && \
-    xx-cargo build --bin signer ${CARGO_BUILD_ARGS} && \
+# We must explicitly target the MUSL triple derived from the TARGETPLATFORM
+RUN make install-pnpm && make build
+RUN xx-cargo build --bin signer ${CARGO_BUILD_ARGS} \
     --target $(xx-cargo --print-target-triple | sed 's/gnu/musl/g') && \
     # Move the binary to a predictable location regardless of architecture
-    xx-verify --static target/$(xx-cargo --print-target-triple)/release/signer && \
-    cp target/$(xx-cargo --print-target-triple)/release/signer /signer-binary
+    cp target/$(xx-cargo --print-target-triple | sed 's/gnu/musl/g')/release/signer /signer-binary
 
-# Create Docker image to run the signer.
+# Stage 3: Final Signer Image (Minimal)
 FROM debian:bookworm-slim AS signer
 
-# 6. Copy the binary from the predictable location
+# Copy the statically linked binary
 COPY --from=build /signer-binary /usr/local/bin/signer
 
 RUN apt-get update && \
@@ -84,7 +77,12 @@ RUN apt-get update && \
     apt-get update && \
     apt-get install -y gh
 
+# ca-certificates is required to establish TLS connections.
+# gettext provides envsubst
+
 RUN apt-get install -y ca-certificates gettext --no-install-recommends && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-CMD ["/usr/local/bin/signer --config /signer-config.toml --migrate-db"]
+# FIX: Use the Exec Form (JSON array) for CMD to prevent the command string from being
+# treated as a single file path, which caused the initial error.
+CMD ["/usr/local/bin/signer", "--config", "/signer-config.toml", "--migrate-db"]
