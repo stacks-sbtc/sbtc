@@ -1,118 +1,82 @@
-# ------------------------------------------------------------------------------
-# Build Stage
-# We pin --platform=$BUILDPLATFORM so this runs natively on the runner (AMD64)
-# even when building for ARM64. This ensures speed.
-# ------------------------------------------------------------------------------
-    FROM --platform=$BUILDPLATFORM rust:1.91.0-slim-bookworm AS build
+FROM --platform=$BUILDPLATFORM rust:1.91.0-slim-bookworm AS build
 
-    # Docker automatically populates these arguments:
-    ARG TARGETARCH
-    ARG BUILDARCH
-    ARG CARGO_BUILD_ARGS="--release --locked"
+# Docker automatically populates these arguments:
+ARG TARGETARCH
+ARG BUILDARCH
+ARG CARGO_BUILD_ARGS="--release --locked"
+
+# 1. Setup Debian for Multi-Architecture
+# We enable arm64 so we can install ARM system libraries (OpenSSL, glibc)
+RUN dpkg --add-architecture arm64 && \
+    dpkg --add-architecture amd64 && \
+    apt-get update
+
+# 2. Install Host Dependencies (Tools needed to RUN the build on AMD64)
+RUN apt-get install -y --no-install-recommends \
+    git \
+    pkg-config \
+    make \
+    protobuf-compiler \
+    npm \
+    default-jre \
+    curl \
+    g++ \
+    libssl-dev \
+    clang \
+    libclang-dev \
+    findutils
     
-    # 1. Setup Debian for Multi-Architecture
-    # We enable arm64 so we can install ARM system libraries (OpenSSL, glibc)
-    RUN dpkg --add-architecture arm64 && \
-        dpkg --add-architecture amd64 && \
-        apt-get update
+# 3. Install Cross-Compilation Toolchains & Target Dependencies
+RUN apt-get install -y --no-install-recommends \
+    gcc-aarch64-linux-gnu \
+    g++-aarch64-linux-gnu \
+    libc6-dev-arm64-cross \
+    libssl-dev:arm64 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
     
-    # 2. Install Host Dependencies (Tools needed to RUN the build on AMD64)
-    # We added 'clang' and 'libclang-dev' which are often needed for bindgen
-    # We added 'findutils' to ensure the 'find' command exists for locating libclang
-    RUN apt-get install -y --no-install-recommends \
-        git \
-        pkg-config \
-        make \
-        protobuf-compiler \
-        npm \
-        default-jre \
-        curl \
-        g++ \
-        libssl-dev \
-        clang \
-        libclang-dev \
-        findutils
+RUN npm install -g pnpm@9 && \
+    npm install -g @openapitools/openapi-generator-cli
+
+WORKDIR /code/sbtc
+COPY . .
+
+RUN export LIBCLANG_PATH="$(find /usr/lib/llvm-* -name lib -type d | head -n 1)" && \
+    make install-pnpm && \
+    make blocklist-client-codegen emily-client-codegen contracts
+
+RUN \
+    export LIBCLANG_PATH="$(find /usr/lib/llvm-* -name lib -type d | head -n 1)" && \
+    export PKG_CONFIG_ALLOW_CROSS=1 && \
+    if [ "$TARGETARCH" = "arm64" ]; then \
+        echo "Building for ARM64..."; \
+        rustup target add aarch64-unknown-linux-gnu; \
+        export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc; \
+        export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc; \
+        export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++; \
+        export PKG_CONFIG_PATH="/usr/lib/aarch64-linux-gnu/pkgconfig"; \
+        cargo build --target aarch64-unknown-linux-gnu --bin blocklist-client ${CARGO_BUILD_ARGS}; \
+        mkdir -p /output && cp target/aarch64-unknown-linux-gnu/release/blocklist-client /output/blocklist-client; \
+    else \
+        echo "Building for AMD64..."; \
+        cargo build --bin blocklist-client ${CARGO_BUILD_ARGS}; \
+        mkdir -p /output && cp target/release/blocklist-client /output/blocklist-client; \
+    fi
+
+FROM debian:bookworm-slim AS blocklist-client
+COPY --from=build /output/blocklist-client /usr/local/bin/blocklist-client
+
+RUN apt-get update && \
+    apt-get install -y curl && \
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list && \
+    echo "Package: gh\nPin: origin cli.github.com\nPin-Priority: 1001" > /etc/apt/preferences.d/gh-cli && \
+    apt-get update && \
+    apt-get install -y gh
     
-    # 3. Install Cross-Compilation Toolchains & Target Dependencies
-    # These are the compilers and libraries for the TARGET (ARM64)
-    RUN apt-get install -y --no-install-recommends \
-        gcc-aarch64-linux-gnu \
-        g++-aarch64-linux-gnu \
-        libc6-dev-arm64-cross \
-        libssl-dev:arm64 \
-        && apt-get clean && rm -rf /var/lib/apt/lists/*
-    
-    RUN npm install -g pnpm@9 && \
-        npm install -g @openapitools/openapi-generator-cli
-    
-    WORKDIR /code/sbtc
-    COPY . .
-    
-    # ------------------------------------------------------------------------------
-    # Split the Makefile
-    # We DO NOT run `make build`. `make build` runs `cargo build`, which tries to 
-    # compile everything using default settings (causing the arch mismatch).
-    # Instead, we run ONLY the code generation steps here on the host architecture.
-    # We explicitly set LIBCLANG_PATH here so bindgen works during codegen.
-    # ------------------------------------------------------------------------------
-    RUN export LIBCLANG_PATH="$(find /usr/lib/llvm-* -name lib -type d | head -n 1)" && \
-        make install-pnpm && \
-        make blocklist-client-codegen emily-client-codegen contracts
-    
-    # ------------------------------------------------------------------------------
-    # Rust Cross-Compilation Logic
-    # Now we manually run cargo build for the blocklist-client only
-    # ------------------------------------------------------------------------------
-    RUN \
-        # Ensure Clang is found
-        export LIBCLANG_PATH="$(find /usr/lib/llvm-* -name lib -type d | head -n 1)" && \
-        # Allow pkg-config to look for cross-compiled libraries
-        export PKG_CONFIG_ALLOW_CROSS=1 && \
-        #
-        # LOGIC: Check if we are building for ARM64 or AMD64
-        #
-        if [ "$TARGETARCH" = "arm64" ]; then \
-            echo "Building for ARM64..."; \
-            rustup target add aarch64-unknown-linux-gnu; \
-            # Configure Linkers for ARM64
-            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc; \
-            export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc; \
-            export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++; \
-            # Point pkg-config to the ARM64 OpenSSL libraries
-            export PKG_CONFIG_PATH="/usr/lib/aarch64-linux-gnu/pkgconfig"; \
-            # Build specifically for ARM64
-            cargo build --target aarch64-unknown-linux-gnu --bin blocklist-client ${CARGO_BUILD_ARGS}; \
-            # Normalize output path
-            mkdir -p /output && cp target/aarch64-unknown-linux-gnu/release/blocklist-client /output/blocklist-client; \
-        else \
-            echo "Building for AMD64..."; \
-            # Standard build (Host == Target)
-            cargo build --bin blocklist-client ${CARGO_BUILD_ARGS}; \
-            # Normalize output path
-            mkdir -p /output && cp target/release/blocklist-client /output/blocklist-client; \
-        fi
-    
-    # ------------------------------------------------------------------------------
-    # Final Runtime Stage
-    # This stage runs on the TARGET architecture (no --platform flag)
-    # ------------------------------------------------------------------------------
-    FROM debian:bookworm-slim AS blocklist-client
-    
-    # We copy from the standardized /output/ directory
-    COPY --from=build /output/blocklist-client /usr/local/bin/blocklist-client
-    
-    RUN apt-get update && \
-        apt-get install -y curl && \
-        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
-        chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \
-        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list && \
-        echo "Package: gh\nPin: origin cli.github.com\nPin-Priority: 1001" > /etc/apt/preferences.d/gh-cli && \
-        apt-get update && \
-        apt-get install -y gh
-    
-    # ca-certificates is required to establish TLS connections.
-    # gettext provides envsubst
-    RUN apt-get install -y ca-certificates gettext --no-install-recommends && \
-        apt-get clean && rm -rf /var/lib/apt/lists/*
-    
-    CMD ["/usr/local/bin/blocklist-client"]
+# ca-certificates is required to establish TLS connections.
+# gettext provides envsubst
+RUN apt-get install -y ca-certificates gettext --no-install-recommends && \
+apt-get clean && rm -rf /var/lib/apt/lists/*
+
+CMD ["/usr/local/bin/blocklist-client"]
