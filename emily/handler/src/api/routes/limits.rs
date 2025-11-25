@@ -26,9 +26,9 @@ fn get_limits<F>(
 where
     F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
 {
-    context
-        .and(warp::path!("limits"))
+    warp::path!("limits")
         .and(warp::get())
+        .and(context)
         .then(handlers::limits::get_limits)
 }
 
@@ -39,10 +39,10 @@ fn set_limits<F>(
 where
     F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
 {
-    context
-        .and(warp::path!("limits"))
+    warp::path!("limits")
         .and(warp::post())
         .and(warp::body::json())
+        .and(context)
         .then(handlers::limits::set_limits)
 }
 
@@ -53,10 +53,10 @@ fn set_limits_for_account<F>(
 where
     F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
 {
-    context
-        .and(warp::path!("limits" / String))
+    warp::path!("limits" / String)
         .and(warp::post())
         .and(warp::body::json())
+        .and(context)
         .then(handlers::limits::set_limits_for_account)
 }
 
@@ -67,8 +67,8 @@ fn get_limits_for_account<F>(
 where
     F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
 {
-    context
-        .and(warp::path!("limits" / String))
+    warp::path!("limits" / String)
         .and(warp::get())
+        .and(context)
         .then(handlers::limits::get_limits_for_account)
 }

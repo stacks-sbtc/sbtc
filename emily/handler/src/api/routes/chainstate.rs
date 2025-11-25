@@ -26,9 +26,9 @@ fn get_chain_tip<F>(
 where
     F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
 {
-    context
-        .and(warp::path!("chainstate"))
+    warp::path!("chainstate")
         .and(warp::get())
+        .and(context)
         .then(handlers::chainstate::get_chain_tip)
 }
 
@@ -39,9 +39,9 @@ fn get_chainstate_at_height<F>(
 where
     F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
 {
-    context
-        .and(warp::path!("chainstate" / u64))
+    warp::path!("chainstate" / u64)
         .and(warp::get())
+        .and(context)
         .then(handlers::chainstate::get_chainstate_at_height)
 }
 
@@ -52,10 +52,10 @@ fn set_chainstate<F>(
 where
     F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
 {
-    context
-        .and(warp::path!("chainstate"))
+    warp::path!("chainstate")
         .and(warp::post())
         .and(warp::body::json())
+        .and(context)
         .then(handlers::chainstate::set_chainstate)
 }
 
@@ -66,10 +66,10 @@ fn update_chainstate<F>(
 where
     F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
 {
-    context
-        .and(warp::path!("chainstate"))
+    warp::path!("chainstate")
         .and(warp::put())
         .and(warp::body::json())
+        .and(context)
         .then(handlers::chainstate::update_chainstate)
 }
 

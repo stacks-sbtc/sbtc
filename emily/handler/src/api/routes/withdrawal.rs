@@ -28,9 +28,9 @@ fn get_withdrawal<F>(
 where
     F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
 {
-    context
-        .and(warp::path!("withdrawal" / u64))
+    warp::path!("withdrawal" / u64)
         .and(warp::get())
+        .and(context)
         .then(handlers::withdrawal::get_withdrawal)
 }
 
@@ -41,10 +41,10 @@ fn get_withdrawals<F>(
 where
     F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
 {
-    context
-        .and(warp::path("withdrawal"))
+    warp::path("withdrawal")
         .and(warp::get())
         .and(warp::query())
+        .and(context)
         .then(handlers::withdrawal::get_withdrawals)
 }
 
@@ -55,10 +55,10 @@ fn get_withdrawals_for_recipient<F>(
 where
     F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
 {
-    context
-        .and(warp::path!("withdrawal" / "recipient" / String))
+    warp::path!("withdrawal" / "recipient" / String)
         .and(warp::get())
         .and(warp::query())
+        .and(context)
         .then(handlers::withdrawal::get_withdrawals_for_recipient)
 }
 
@@ -69,10 +69,10 @@ fn get_withdrawals_for_sender<F>(
 where
     F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
 {
-    context
-        .and(warp::path!("withdrawal" / "sender" / String))
+    warp::path!("withdrawal" / "sender" / String)
         .and(warp::get())
         .and(warp::query())
+        .and(context)
         .then(handlers::withdrawal::get_withdrawals_for_sender)
 }
 
@@ -83,10 +83,10 @@ fn create_withdrawal<F>(
 where
     F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
 {
-    context
-        .and(warp::path("withdrawal"))
+    warp::path("withdrawal")
         .and(warp::post())
         .and(warp::body::json())
+        .and(context)
         .then(handlers::withdrawal::create_withdrawal)
 }
 
@@ -97,10 +97,10 @@ fn update_withdrawals_signer<F>(
 where
     F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
 {
-    context
-        .and(warp::path("withdrawal"))
+    warp::path("withdrawal")
         .and(warp::put())
         .and(warp::body::json())
+        .and(context)
         .then(handlers::withdrawal::update_withdrawals_signer)
 }
 
@@ -111,10 +111,10 @@ fn update_withdrawals_sidecar<F>(
 where
     F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
 {
-    context
-        .and(warp::path("withdrawal_private"))
+    warp::path("withdrawal_private")
         .and(warp::put())
         .and(warp::body::json())
+        .and(context)
         .then(handlers::withdrawal::update_withdrawals_sidecar)
 }
 

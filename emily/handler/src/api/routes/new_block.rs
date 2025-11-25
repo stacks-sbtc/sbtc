@@ -23,9 +23,9 @@ fn new_block<F>(
 where
     F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
 {
-    context
-        .and(warp::path!("new_block"))
+    warp::path!("new_block")
         .and(warp::post())
         .and(warp::body::json())
+        .and(context)
         .then(handlers::new_block::new_block)
 }

@@ -29,9 +29,9 @@ fn get_deposit<F>(
 where
     F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
 {
-    context
-        .and(warp::path!("deposit" / String / u32))
+    warp::path!("deposit" / String / u32)
         .and(warp::get())
+        .and(context)
         .then(handlers::deposit::get_deposit)
 }
 
@@ -42,10 +42,10 @@ fn get_deposits_for_transaction<F>(
 where
     F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
 {
-    context
-        .and(warp::path!("deposit" / String))
+    warp::path!("deposit" / String)
         .and(warp::get())
         .and(warp::query())
+        .and(context)
         .then(handlers::deposit::get_deposits_for_transaction)
 }
 
@@ -56,10 +56,10 @@ fn get_deposits<F>(
 where
     F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
 {
-    context
-        .and(warp::path!("deposit"))
+    warp::path!("deposit")
         .and(warp::get())
         .and(warp::query())
+        .and(context)
         .then(handlers::deposit::get_deposits)
 }
 
@@ -70,10 +70,10 @@ fn get_deposits_for_recipient<F>(
 where
     F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
 {
-    context
-        .and(warp::path!("deposit" / "recipient" / String))
+    warp::path!("deposit" / "recipient" / String)
         .and(warp::get())
         .and(warp::query())
+        .and(context)
         .then(handlers::deposit::get_deposits_for_recipient)
 }
 
@@ -84,10 +84,10 @@ fn get_deposits_for_reclaim_pubkeys<F>(
 where
     F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
 {
-    context
-        .and(warp::path!("deposit" / "reclaim-pubkeys" / String))
+    warp::path!("deposit" / "reclaim-pubkeys" / String)
         .and(warp::get())
         .and(warp::query())
+        .and(context)
         .then(handlers::deposit::get_deposits_for_reclaim_pubkeys)
 }
 
@@ -98,10 +98,10 @@ fn create_deposit<F>(
 where
     F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
 {
-    context
-        .and(warp::path!("deposit"))
+    warp::path!("deposit")
         .and(warp::post())
         .and(warp::body::json())
+        .and(context)
         .then(handlers::deposit::create_deposit)
 }
 
@@ -112,10 +112,10 @@ fn update_deposits_signer<F>(
 where
     F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
 {
-    context
-        .and(warp::path!("deposit"))
+    warp::path!("deposit")
         .and(warp::put())
         .and(warp::body::json())
+        .and(context)
         .then(handlers::deposit::update_deposits_signer)
 }
 
@@ -126,10 +126,10 @@ fn update_deposits_sidecar<F>(
 where
     F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
 {
-    context
-        .and(warp::path!("deposit_private"))
+    warp::path!("deposit_private")
         .and(warp::put())
         .and(warp::body::json())
+        .and(context)
         .then(handlers::deposit::update_deposits_sidecar)
 }
 

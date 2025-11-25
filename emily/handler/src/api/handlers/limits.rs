@@ -58,7 +58,7 @@ pub async fn get_limits(context: EmilyContext) -> impl warp::reply::Reply {
     security(("ApiGatewayKey" = []))
 )]
 #[instrument(skip(context))]
-pub async fn set_limits(context: EmilyContext, limits: Limits) -> impl warp::reply::Reply {
+pub async fn set_limits(limits: Limits, context: EmilyContext) -> impl warp::reply::Reply {
     // Internal handler so `?` can be used correctly while still returning a reply.
     async fn handler(
         context: EmilyContext,
@@ -125,8 +125,8 @@ pub async fn set_limits(context: EmilyContext, limits: Limits) -> impl warp::rep
 )]
 #[instrument(skip(context))]
 pub async fn get_limits_for_account(
-    context: EmilyContext,
     account: String,
+    context: EmilyContext,
 ) -> impl warp::reply::Reply {
     // Internal handler so `?` can be used correctly while still returning a reply.
     async fn handler(
@@ -167,9 +167,9 @@ pub async fn get_limits_for_account(
 )]
 #[instrument(skip(context))]
 pub async fn set_limits_for_account(
-    context: EmilyContext,
     account: String,
     body: crate::api::models::limits::AccountLimits,
+    context: EmilyContext,
 ) -> impl warp::reply::Reply {
     // Internal handler so `?` can be used correctly while still returning a reply.
     async fn handler(

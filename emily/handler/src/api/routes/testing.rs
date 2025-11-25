@@ -22,8 +22,8 @@ fn wipe_databases<F>(
 where
     F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
 {
-    context
-        .and(warp::path!("testing" / "wipe"))
+    warp::path!("testing" / "wipe")
         .and(warp::post())
+        .and(context)
         .then(handlers::testing::wipe_databases)
 }

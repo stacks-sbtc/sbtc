@@ -22,9 +22,9 @@ fn get_health<F>(
 where
     F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
 {
-    context
-        .and(warp::path("health"))
+    warp::path("health")
         .and(warp::get())
+        .and(context)
         .then(handlers::health::get_health)
 }
 
