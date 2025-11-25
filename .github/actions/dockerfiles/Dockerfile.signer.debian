@@ -1,12 +1,12 @@
 # ------------------------------------------------------------------------------
 # Build Stage
 # We pin --platform=$BUILDPLATFORM so this runs natively on the runner (AMD64)
-# even when building for ARM64, ensuring speed.
+# even when building for ARM64. This is crucial for speed.
 # ------------------------------------------------------------------------------
     FROM --platform=$BUILDPLATFORM rust:1.91.0-slim-bookworm AS build
 
     ARG GIT_COMMIT
-    # Docker automatically populates these two arguments:
+    # Docker automatically populates these arguments:
     ARG TARGETARCH
     ARG BUILDARCH
     
@@ -16,13 +16,13 @@
     ARG CARGO_BUILD_ARGS="--release --locked"
     
     # 1. Setup Debian for Multi-Architecture
-    # We need to enable arm64 package sources so we can download the ARM versions 
-    # of libssl-dev and libc to link against.
+    # We enable arm64 so we can install ARM system libraries (OpenSSL, glibc)
     RUN dpkg --add-architecture arm64 && \
         dpkg --add-architecture amd64 && \
         apt-get update
     
-    # 2. Install Host Dependencies (Tools needed to RUN the build)
+    # 2. Install Host Dependencies (Tools needed to RUN the build on AMD64)
+    # We added 'clang' and 'libclang-dev' which fixes the "Unable to find libclang" error
     RUN apt-get install -y --no-install-recommends \
         git \
         pkg-config \
@@ -31,69 +31,83 @@
         npm \
         default-jre \
         curl \
-        # Install host C++ compiler for build scripts (proc-macros, etc)
         g++ \
-        # Install host SSL headers (if build scripts need them)
-        libssl-dev
+        libssl-dev \
+        clang \
+        libclang-dev
     
     # 3. Install Cross-Compilation Toolchains & Target Dependencies
-    # We install the cross-compilers and the ARM64 version of OpenSSL
+    # These are the compilers and libraries for the TARGET (ARM64)
     RUN apt-get install -y --no-install-recommends \
         gcc-aarch64-linux-gnu \
         g++-aarch64-linux-gnu \
         libc6-dev-arm64-cross \
-        # Install ARM64 libraries to link against
         libssl-dev:arm64 \
         && apt-get clean && rm -rf /var/lib/apt/lists/*
     
-    # Install Node tools
     RUN npm install -g pnpm@9 && \
         npm install -g @openapitools/openapi-generator-cli
     
     WORKDIR /code/sbtc
     COPY . .
     
-    # 4. Run the code generation steps (runs on host architecture)
-    RUN make install-pnpm && make build
+    # ------------------------------------------------------------------------------
+    # FIX 1: Set LIBCLANG_PATH
+    # The bindgen crate needs to find libclang.so on the host to generate bindings.
+    # ------------------------------------------------------------------------------
+    RUN export LIBCLANG_PATH="$(find /usr/lib/llvm-* -name lib -type d | head -n 1)" && \
+        echo "LIBCLANG_PATH=${LIBCLANG_PATH}" >> $GITHUB_ENV && \
+        echo "LIBCLANG_PATH=${LIBCLANG_PATH}" >> /etc/environment
     
+    # ------------------------------------------------------------------------------
+    # FIX 2: Split the Makefile
+    # We DO NOT run `make build`. `make build` runs `cargo build`, which tries to 
+    # compile everything using default settings (causing the arch mismatch).
+    # Instead, we run ONLY the code generation steps here on the host architecture.
+    # ------------------------------------------------------------------------------
+    RUN make install-pnpm && \
+        make blocklist-client-codegen emily-client-codegen contracts
+    
+    # ------------------------------------------------------------------------------
     # 5. Rust Cross-Compilation Logic
-    # This block configures environment variables to tell cargo which linker to use.
-    # It then builds and moves the binary to a predictable location.
+    # Now we manually run cargo build for the signer only, setting the correct linkers
+    # ------------------------------------------------------------------------------
     RUN \
-        # Set common env vars
+        # Ensure Clang is found
+        export LIBCLANG_PATH="$(find /usr/lib/llvm-* -name lib -type d | head -n 1)" && \
+        # Allow pkg-config to look for cross-compiled libraries
         export PKG_CONFIG_ALLOW_CROSS=1 && \
         #
         # LOGIC: Check if we are building for ARM64 or AMD64
         #
         if [ "$TARGETARCH" = "arm64" ]; then \
             echo "Building for ARM64..."; \
-            # Install the Rust target
             rustup target add aarch64-unknown-linux-gnu; \
             # Configure Linkers for ARM64
             export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc; \
             export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc; \
             export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++; \
-            # Tell pkg-config where to find the ARM64 .pc files (for OpenSSL)
+            # Point pkg-config to the ARM64 OpenSSL libraries
             export PKG_CONFIG_PATH="/usr/lib/aarch64-linux-gnu/pkgconfig"; \
-            # Build
+            # Build specifically for ARM64
             cargo build --target aarch64-unknown-linux-gnu --bin signer ${CARGO_BUILD_ARGS}; \
-            # Move binary to common path
+            # Normalize output path
             mkdir -p /output && cp target/aarch64-unknown-linux-gnu/release/signer /output/signer; \
         else \
             echo "Building for AMD64..."; \
             # Standard build (Host == Target)
             cargo build --bin signer ${CARGO_BUILD_ARGS}; \
-            # Move binary to common path
+            # Normalize output path
             mkdir -p /output && cp target/release/signer /output/signer; \
         fi
     
     # ------------------------------------------------------------------------------
     # Final Runtime Stage
-    # This stage uses the TARGET architecture (no --platform flag)
+    # This stage runs on the TARGET architecture (no --platform flag)
     # ------------------------------------------------------------------------------
     FROM debian:bookworm-slim AS signer
     
-    # We copy from the standardized /output/ directory we created above
+    # We copy from the standardized /output/ directory
     COPY --from=build /output/signer /usr/local/bin/signer
     
     RUN apt-get update && \
