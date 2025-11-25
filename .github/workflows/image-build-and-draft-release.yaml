@@ -55,7 +55,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up QEMU for ARM64 emulation
-        uses: docker/setup-qemu-action@v3
+        uses: stacks-sbtc/actions/docker/setup-qemu-action@main
         with:
           platforms: arm64
 
