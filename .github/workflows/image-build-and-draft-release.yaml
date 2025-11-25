@@ -122,7 +122,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # MINIMAL FIX: Replace / with - in platform for tag
-          SANITIZED_PLATFORM="${{ matrix.docker_platforms//\//- }}"
+          SANITIZED_PLATFORM="${{{ matrix.docker_platforms }}/\//-}"
           gh attestation download oci://${{ env.ghcr_org }}/sbtc:$SANITIZED_PLATFORM.${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }}-${{ matrix.dist }} -R ${{ github.repository }}
           
           # Rename the attestation bundle (replace ":" with "_")
@@ -137,8 +137,8 @@ jobs:
         id: upload_attestation
         uses: stacks-sbtc/actions/upload-artifact@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
-          # MINIMAL FIX: Replace / with - in platform for artifact name  
-          name: attestation-files-${{ matrix.docker_platforms//\//- }}-${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }}
+          # MINIMAL FIX: Remove platform from artifact name to avoid slash issues
+          name: attestation-files-${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }}
           overwrite: true
           path: |
             ${{ env.ATTESTATION_FILE }}
