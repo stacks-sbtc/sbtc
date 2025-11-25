@@ -23,6 +23,7 @@
     
     # 2. Install Host Dependencies (Tools needed to RUN the build on AMD64)
     # We added 'clang' and 'libclang-dev' which fixes the "Unable to find libclang" error
+    # We added 'findutils' to ensure the 'find' command exists for locating libclang
     RUN apt-get install -y --no-install-recommends \
         git \
         pkg-config \
@@ -34,7 +35,8 @@
         g++ \
         libssl-dev \
         clang \
-        libclang-dev
+        libclang-dev \
+        findutils
     
     # 3. Install Cross-Compilation Toolchains & Target Dependencies
     # These are the compilers and libraries for the TARGET (ARM64)
@@ -52,20 +54,14 @@
     COPY . .
     
     # ------------------------------------------------------------------------------
-    # FIX 1: Set LIBCLANG_PATH
-    # The bindgen crate needs to find libclang.so on the host to generate bindings.
-    # ------------------------------------------------------------------------------
-    RUN export LIBCLANG_PATH="$(find /usr/lib/llvm-* -name lib -type d | head -n 1)" && \
-        echo "LIBCLANG_PATH=${LIBCLANG_PATH}" >> $GITHUB_ENV && \
-        echo "LIBCLANG_PATH=${LIBCLANG_PATH}" >> /etc/environment
-    
-    # ------------------------------------------------------------------------------
-    # FIX 2: Split the Makefile
+    # FIX 1: Split the Makefile
     # We DO NOT run `make build`. `make build` runs `cargo build`, which tries to 
     # compile everything using default settings (causing the arch mismatch).
     # Instead, we run ONLY the code generation steps here on the host architecture.
+    # We explicitly set LIBCLANG_PATH here so bindgen works during codegen.
     # ------------------------------------------------------------------------------
-    RUN make install-pnpm && \
+    RUN export LIBCLANG_PATH="$(find /usr/lib/llvm-* -name lib -type d | head -n 1)" && \
+        make install-pnpm && \
         make blocklist-client-codegen emily-client-codegen contracts
     
     # ------------------------------------------------------------------------------
