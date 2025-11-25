@@ -1,99 +1,99 @@
 
-    FROM --platform=$BUILDPLATFORM rust:1.91.0-slim-bookworm AS build
+FROM --platform=$BUILDPLATFORM rust:1.91.0-slim-bookworm AS build
 
-    ARG GIT_COMMIT
-    ARG TARGETARCH
-    ARG BUILDARCH
+ARG GIT_COMMIT
+ARG TARGETARCH
+ARG BUILDARCH
+
+# Ensure GIT_COMMIT is passed
+RUN test -n "$GIT_COMMIT" || (echo "GIT_COMMIT not set" && false)
+
+ARG CARGO_BUILD_ARGS="--release --locked"
+
+# 1. Setup Debian for Multi-Architecture
+# We enable arm64 so we can install ARM system libraries (OpenSSL, glibc)
+RUN dpkg --add-architecture arm64 && \
+    dpkg --add-architecture amd64 && \
+    apt-get update
     
-    # Ensure GIT_COMMIT is passed
-    RUN test -n "$GIT_COMMIT" || (echo "GIT_COMMIT not set" && false)
+# 2. Install Host Dependencies (Tools needed to RUN the build on AMD64)
+RUN apt-get install -y --no-install-recommends \
+    git \
+    pkg-config \
+    make \
+    protobuf-compiler \
+    npm \
+    default-jre \
+    curl \
+    g++ \
+    libssl-dev \
+    clang \
+    libclang-dev \
+    findutils
     
-    ARG CARGO_BUILD_ARGS="--release --locked"
+# 3. Install Cross-Compilation Toolchains & Target Dependencies
+# These are the compilers and libraries for the TARGET (ARM64)
+RUN apt-get install -y --no-install-recommends \
+    gcc-aarch64-linux-gnu \
+    g++-aarch64-linux-gnu \
+    libc6-dev-arm64-cross \
+    libssl-dev:arm64 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
     
-    # 1. Setup Debian for Multi-Architecture
-    # We enable arm64 so we can install ARM system libraries (OpenSSL, glibc)
-    RUN dpkg --add-architecture arm64 && \
-        dpkg --add-architecture amd64 && \
-        apt-get update
+RUN npm install -g pnpm@9 && \
+    npm install -g @openapitools/openapi-generator-cli
     
-    # 2. Install Host Dependencies (Tools needed to RUN the build on AMD64)
-    RUN apt-get install -y --no-install-recommends \
-        git \
-        pkg-config \
-        make \
-        protobuf-compiler \
-        npm \
-        default-jre \
-        curl \
-        g++ \
-        libssl-dev \
-        clang \
-        libclang-dev \
-        findutils
+WORKDIR /code/sbtc
+COPY . .
     
-    # 3. Install Cross-Compilation Toolchains & Target Dependencies
-    # These are the compilers and libraries for the TARGET (ARM64)
-    RUN apt-get install -y --no-install-recommends \
-        gcc-aarch64-linux-gnu \
-        g++-aarch64-linux-gnu \
-        libc6-dev-arm64-cross \
-        libssl-dev:arm64 \
-        && apt-get clean && rm -rf /var/lib/apt/lists/*
+# Generate emily and blocklist clients
+RUN export LIBCLANG_PATH="$(find /usr/lib/llvm-* -name lib -type d | head -n 1)" && \
+    make install-pnpm && \
+    make blocklist-client-codegen emily-client-codegen contracts
     
-    RUN npm install -g pnpm@9 && \
-        npm install -g @openapitools/openapi-generator-cli
+# Compile main binary
+RUN \
+    # Ensure Clang is found
+    export LIBCLANG_PATH="$(find /usr/lib/llvm-* -name lib -type d | head -n 1)" && \
+    # Allow pkg-config to look for cross-compiled libraries
+    export PKG_CONFIG_ALLOW_CROSS=1 && \
+    if [ "$TARGETARCH" = "arm64" ]; then \
+        echo "Building for ARM64..."; \
+        rustup target add aarch64-unknown-linux-gnu; \
+        # Configure Linkers for ARM64
+        export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc; \
+        export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc; \
+        export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++; \
+        # Point pkg-config to the ARM64 OpenSSL libraries
+        export PKG_CONFIG_PATH="/usr/lib/aarch64-linux-gnu/pkgconfig"; \
+        # Build specifically for ARM64
+        cargo build --target aarch64-unknown-linux-gnu --bin signer ${CARGO_BUILD_ARGS}; \
+        # Normalize output path
+        mkdir -p /output && cp target/aarch64-unknown-linux-gnu/release/signer /output/signer; \
+    else \
+        echo "Building for AMD64..."; \
+        # Standard build (Host == Target)
+        cargo build --bin signer ${CARGO_BUILD_ARGS}; \
+        # Normalize output path
+        mkdir -p /output && cp target/release/signer /output/signer; \
+    fi
     
-    WORKDIR /code/sbtc
-    COPY . .
+FROM debian:bookworm-slim AS signer
     
-    # Generate emily and blocklist clients
-    RUN export LIBCLANG_PATH="$(find /usr/lib/llvm-* -name lib -type d | head -n 1)" && \
-        make install-pnpm && \
-        make blocklist-client-codegen emily-client-codegen contracts
+COPY --from=build /output/signer /usr/local/bin/signer
     
-    # Compile main binary
-    RUN \
-        # Ensure Clang is found
-        export LIBCLANG_PATH="$(find /usr/lib/llvm-* -name lib -type d | head -n 1)" && \
-        # Allow pkg-config to look for cross-compiled libraries
-        export PKG_CONFIG_ALLOW_CROSS=1 && \
-        if [ "$TARGETARCH" = "arm64" ]; then \
-            echo "Building for ARM64..."; \
-            rustup target add aarch64-unknown-linux-gnu; \
-            # Configure Linkers for ARM64
-            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc; \
-            export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc; \
-            export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++; \
-            # Point pkg-config to the ARM64 OpenSSL libraries
-            export PKG_CONFIG_PATH="/usr/lib/aarch64-linux-gnu/pkgconfig"; \
-            # Build specifically for ARM64
-            cargo build --target aarch64-unknown-linux-gnu --bin signer ${CARGO_BUILD_ARGS}; \
-            # Normalize output path
-            mkdir -p /output && cp target/aarch64-unknown-linux-gnu/release/signer /output/signer; \
-        else \
-            echo "Building for AMD64..."; \
-            # Standard build (Host == Target)
-            cargo build --bin signer ${CARGO_BUILD_ARGS}; \
-            # Normalize output path
-            mkdir -p /output && cp target/release/signer /output/signer; \
-        fi
+RUN apt-get update && \
+    apt-get install -y curl && \
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list && \
+    echo "Package: gh\nPin: origin cli.github.com\nPin-Priority: 1001" > /etc/apt/preferences.d/gh-cli && \
+    apt-get update && \
+    apt-get install -y gh
     
-    FROM debian:bookworm-slim AS signer
+# ca-certificates is required to establish TLS connections.
+# gettext provides envsubst
+RUN apt-get install -y ca-certificates gettext --no-install-recommends && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
     
-    COPY --from=build /output/signer /usr/local/bin/signer
-    
-    RUN apt-get update && \
-        apt-get install -y curl && \
-        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
-        chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \
-        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list && \
-        echo "Package: gh\nPin: origin cli.github.com\nPin-Priority: 1001" > /etc/apt/preferences.d/gh-cli && \
-        apt-get update && \
-        apt-get install -y gh
-    
-    # ca-certificates is required to establish TLS connections.
-    # gettext provides envsubst
-    RUN apt-get install -y ca-certificates gettext --no-install-recommends && \
-        apt-get clean && rm -rf /var/lib/apt/lists/*
-    
-        CMD ["/usr/local/bin/signer", "--config", "/signer-config.toml", "--migrate-db"]
+CMD ["/usr/local/bin/signer", "--config", "/signer-config.toml", "--migrate-db"]
