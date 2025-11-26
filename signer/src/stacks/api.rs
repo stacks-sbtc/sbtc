@@ -1425,12 +1425,10 @@ where
             Err(error) => {
                 // A 404 could mean that we reached the Nakamoto start height
                 // and we tried fetching a tenure for a pre-Nakamoto block
-                if let Error::StacksNodeResponse(ref req_error) = error
-                    && req_error.status() == Some(reqwest::StatusCode::NOT_FOUND)
-                    && stacks
-                        .check_pre_nakamoto_block(&header.parent_block_id)
-                        .await
-                        .is_ok()
+                if stacks
+                    .check_pre_nakamoto_block(&header.parent_block_id)
+                    .await
+                    .is_ok()
                 {
                     tracing::debug!(
                         %nakamoto_start_height,
@@ -2040,12 +2038,17 @@ mod tests {
     }
 
     #[ignore = "This is an integration test that uses the real testnet"]
-    #[test(tokio::test)]
-    async fn fetch_unknown_ancestors_works_in_testnet() {
+    #[test_case(|url| StacksClient::new(url).unwrap(); "stacks-client")]
+    #[test_case(|url| ApiFallbackClient::new(vec![StacksClient::new(url).unwrap()]).unwrap(); "fallback-client")]
+    #[tokio::test]
+    async fn fetch_unknown_ancestors_works_in_testnet<F, C>(client: F)
+    where
+        C: StacksInteract,
+        F: Fn(Url) -> C,
+    {
         let db = crate::testing::storage::new_test_database().await;
 
-        let client =
-            StacksClient::new(Url::parse("https://api.testnet.hiro.so/").unwrap()).unwrap();
+        let client = client(Url::parse("https://api.testnet.hiro.so/").unwrap());
 
         // Testnet currently has the following structure:
         //
