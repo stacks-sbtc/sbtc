@@ -19,7 +19,7 @@ use testing_emily_client::{
     models::{CreateDepositRequestBody, Deposit, DepositInfo, DepositParameters, DepositUpdate},
 };
 
-use crate::common::{StandardError, clean_setup, handler_deposit_status};
+use crate::common::{StandardError, clean_test_setup, handler_deposit_status, new_test_setup};
 
 const BLOCK_HASH: &str = "";
 const BLOCK_HEIGHT: u64 = 0;
@@ -137,7 +137,7 @@ impl DepositTxnData {
 
 #[tokio::test]
 async fn create_and_get_deposit_happy_path() {
-    let configuration = clean_setup().await;
+    let (configuration, tables) = new_test_setup().await;
 
     // Arrange.
     // --------
@@ -202,11 +202,13 @@ async fn create_and_get_deposit_happy_path() {
     // -------
     assert_eq!(expected_deposit, created_deposit);
     assert_eq!(expected_deposit, gotten_deposit);
+
+    clean_test_setup(tables).await;
 }
 
 #[tokio::test]
 async fn wipe_databases_test() {
-    let configuration = clean_setup().await;
+    let (configuration, tables) = new_test_setup().await;
 
     // Arrange.
     // --------
@@ -255,11 +257,13 @@ async fn wipe_databases_test() {
     // Assert.
     // -------
     assert_eq!(attempted_get.status_code, 404);
+
+    clean_test_setup(tables).await;
 }
 
 #[tokio::test]
 async fn get_deposits_for_transaction() {
-    let configuration = clean_setup().await;
+    let (configuration, tables) = new_test_setup().await;
 
     // Arrange.
     // --------
@@ -334,11 +338,13 @@ async fn get_deposits_for_transaction() {
             .expect("Failed to order the expected deposits")
     });
     assert_eq!(expected_deposits, gotten_deposits.deposits);
+
+    clean_test_setup(tables).await;
 }
 
 #[tokio::test]
 async fn get_deposits() {
-    let configuration = clean_setup().await;
+    let (configuration, tables) = new_test_setup().await;
 
     // Arrange.
     // --------
@@ -438,11 +444,13 @@ async fn get_deposits() {
     expected_deposit_infos.sort_by(arbitrary_deposit_info_partial_cmp);
     gotten_deposit_infos.sort_by(arbitrary_deposit_info_partial_cmp);
     assert_eq!(expected_deposit_infos, gotten_deposit_infos);
+
+    clean_test_setup(tables).await;
 }
 
 #[tokio::test]
 async fn get_deposits_for_recipient() {
-    let configuration = clean_setup().await;
+    let (configuration, tables) = new_test_setup().await;
 
     // Arrange.
     // --------
@@ -549,11 +557,13 @@ async fn get_deposits_for_recipient() {
         // Assert that the expected and actual deposit infos are the same.
         assert_eq!(expected_deposit_infos, actual_deposit_infos);
     }
+
+    clean_test_setup(tables).await;
 }
 
 #[tokio::test]
 async fn get_deposits_for_reclaim_pubkeys() {
-    let configuration = clean_setup().await;
+    let (configuration, tables) = new_test_setup().await;
     // Arrange.
     // --------
 
@@ -692,11 +702,13 @@ async fn get_deposits_for_reclaim_pubkeys() {
         assert_eq!(expected_deposit_infos.len(), actual_deposit_infos.len());
         assert_eq!(expected_deposit_infos, actual_deposit_infos);
     }
+
+    clean_test_setup(tables).await;
 }
 
 #[tokio::test]
 async fn update_deposits() {
-    let configuration = clean_setup().await;
+    let (configuration, tables) = new_test_setup().await;
     // Arrange.
     // --------
     let amounts = vec![DEPOSIT_AMOUNT_SATS; 2];
@@ -809,6 +821,8 @@ async fn update_deposits() {
     updated_deposits.sort_by(arbitrary_deposit_partial_cmp);
     expected_deposits.sort_by(arbitrary_deposit_partial_cmp);
     assert_eq!(expected_deposits, updated_deposits);
+
+    clean_test_setup(tables).await;
 }
 
 #[test_case(DepositStatus::Pending; "pending")]
@@ -818,7 +832,7 @@ async fn update_deposits() {
 #[test_case(DepositStatus::Rbf; "rbf")]
 #[tokio::test]
 async fn create_deposit_handles_duplicates(status: DepositStatus) {
-    let configuration = clean_setup().await;
+    let (configuration, tables) = new_test_setup().await;
     // Arrange.
     // --------
     let bitcoin_tx_output_index = 0;
@@ -916,6 +930,8 @@ async fn create_deposit_handles_duplicates(status: DepositStatus) {
     .expect("Received an error after making a valid get deposit api call.");
     assert_eq!(response.bitcoin_txid, bitcoin_txid);
     assert_eq!(response.status, status);
+
+    clean_test_setup(tables).await;
 }
 
 #[test_case(DepositStatus::Pending, DepositStatus::Pending, true; "pending_to_pending")]
@@ -944,7 +960,7 @@ async fn update_deposits_is_forbidden_for_signer(
     is_forbidden: bool,
 ) {
     // the testing configuration has privileged access to all endpoints.
-    let testing_configuration = clean_setup().await;
+    let (testing_configuration, tables) = new_test_setup().await;
 
     // the user configuration access depends on the api_key.
     let user_configuration = testing_configuration.clone();
@@ -1081,6 +1097,8 @@ async fn update_deposits_is_forbidden_for_signer(
         assert_eq!(deposit.bitcoin_txid, bitcoin_txid);
         assert_eq!(deposit.status, new_status);
     }
+
+    clean_test_setup(tables).await;
 }
 
 #[test_case(DepositStatus::Pending, DepositStatus::Accepted; "pending_to_accepted")]
@@ -1103,7 +1121,7 @@ async fn update_deposits_is_not_forbidden_for_sidecar(
     new_status: DepositStatus,
 ) {
     // the testing configuration has privileged access to all endpoints.
-    let testing_configuration = clean_setup().await;
+    let (testing_configuration, tables) = new_test_setup().await;
 
     // the user configuration access depends on the api_key.
     let user_configuration = testing_configuration.clone();
@@ -1217,12 +1235,14 @@ async fn update_deposits_is_not_forbidden_for_sidecar(
         .unwrap();
     assert_eq!(deposit.bitcoin_txid, bitcoin_txid);
     assert_eq!(deposit.status, new_status);
+
+    clean_test_setup(tables).await;
 }
 
 #[tokio::test]
 async fn rbf_status_saved_successfully() {
     // the testing configuration has privileged access to all endpoints.
-    let testing_configuration = clean_setup().await;
+    let (testing_configuration, tables) = new_test_setup().await;
 
     // the user configuration access depends on the api_key.
     let user_configuration = testing_configuration.clone();
@@ -1295,6 +1315,8 @@ async fn rbf_status_saved_successfully() {
         response.replaced_by_tx,
         Some(Some("replaced_by_txid".to_string()))
     );
+
+    clean_test_setup(tables).await;
 }
 
 #[test_case(DepositStatus::Pending; "pending")]
@@ -1304,7 +1326,7 @@ async fn rbf_status_saved_successfully() {
 #[tokio::test]
 async fn replaced_by_tx_for_not_rbf_transactions_is_bad_request(status: DepositStatus) {
     // the testing configuration has privileged access to all endpoints.
-    let testing_configuration = clean_setup().await;
+    let (testing_configuration, tables) = new_test_setup().await;
 
     // the user configuration access depends on the api_key.
     let user_configuration = testing_configuration.clone();
@@ -1385,12 +1407,14 @@ async fn replaced_by_tx_for_not_rbf_transactions_is_bad_request(status: DepositS
     assert_eq!(response.bitcoin_txid, bitcoin_txid);
     assert!(response.replaced_by_tx.is_none());
     assert_eq!(response.status, DepositStatus::Pending);
+
+    clean_test_setup(tables).await;
 }
 
 #[tokio::test]
 async fn emily_process_deposit_updates_when_some_of_them_already_accepted() {
     // the testing configuration has privileged access to all endpoints.
-    let testing_configuration = clean_setup().await;
+    let (testing_configuration, tables) = new_test_setup().await;
 
     // Create two deposits.
     let bitcoin_tx_output_index = 0;
@@ -1542,12 +1566,14 @@ async fn emily_process_deposit_updates_when_some_of_them_already_accepted() {
     .await
     .expect("Received an error after making a valid get deposits api call.");
     assert_eq!(deposits.deposits.len(), 2);
+
+    clean_test_setup(tables).await;
 }
 
 #[tokio::test]
 async fn emily_process_deposit_updates_when_some_of_them_are_unknown() {
     // the testing configuration has privileged access to all endpoints.
-    let testing_configuration = clean_setup().await;
+    let (testing_configuration, tables) = new_test_setup().await;
 
     // Create two deposits, but sending only one of them to Emily.
     let bitcoin_tx_output_index = 0;
@@ -1672,6 +1698,8 @@ async fn emily_process_deposit_updates_when_some_of_them_are_unknown() {
     .await
     .expect("Received an error after making a valid get deposits api call.");
     assert_eq!(deposits.deposits.len(), 1);
+
+    clean_test_setup(tables).await;
 }
 
 #[test_case(DepositStatus::Rbf, true; "rbf_sidecar")]
@@ -1683,7 +1711,7 @@ async fn emily_process_deposit_updates_when_some_of_them_are_unknown() {
 #[tokio::test]
 async fn only_completed_deposit_can_have_fulfillment(status: DepositStatus, is_sidecar: bool) {
     // the testing configuration has privileged access to all endpoints.
-    let testing_configuration = clean_setup().await;
+    let (testing_configuration, tables) = new_test_setup().await;
 
     // the user configuration access depends on the api_key.
     let user_configuration = testing_configuration.clone();
@@ -1790,4 +1818,6 @@ async fn only_completed_deposit_can_have_fulfillment(status: DepositStatus, is_s
         assert_eq!(deposit.status, status);
         assert_eq!(deposit.fulfillment, fulfillment);
     }
+
+    clean_test_setup(tables).await;
 }
