@@ -1,16 +1,17 @@
 {
     "anchored_cost": {
-        "read_count": 22,
-        "read_length": 33549,
-        "runtime": 73067,
+        "read_count": 24,
+        "read_length": 40070,
+        "runtime": 85481,
         "write_count": 6,
         "write_length": 216
     },
-    "block_hash": "0x53fd8cfcd5203274dc960e7f48f9971e5791bda9b51484e3c9635b209901c6cc",
-    "block_height": 253,
-    "burn_block_hash": "0x013b81f12774594243704a9ca20a546813141ee5587c845955e42f588f753316",
-    "burn_block_height": 137,
-    "burn_block_time": 1725050780,
+    "block_hash": "0xdaf90b750f5dc3f7ba047fbce000a86e518c3747f62cbc8091d57602a5f7aa02",
+    "block_height": 257,
+    "block_time": 1764620355,
+    "burn_block_hash": "0x2a5e5eb69db282b61bd00ef5697cdb4a173f3276702914dabdfb2d5fa54bb5a6",
+    "burn_block_height": 269,
+    "burn_block_time": 1764620349,
     "confirmed_microblocks_cost": {
         "read_count": 0,
         "read_length": 0,
@@ -18,25 +19,26 @@
         "write_count": 0,
         "write_length": 0
     },
+    "consensus_hash": "0xd58db2f0ffd49d6ab19d272f6e89e1a8619aba9b",
     "cycle_number": null,
     "events": [
         {
             "committed": true,
             "contract_event": {
                 "contract_identifier": "SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS.sbtc-registry",
-                "raw_value": "0x0c0000000706616d6f756e7401000000000000000000000000000057e40c626c6f636b2d6865696768740100000000000000000000000000000089076d61782d6665650100000000000000000000000000000bb809726563697069656e740c0000000209686173686279746573020000001400000000000000000000000000000000000000000776657273696f6e0200000001000a726571756573742d696401000000000000000000000000000000010673656e6465720515b67e6a475c7001d2d1f8589527f8357f0c13944405746f7069630d000000117769746864726177616c2d637265617465",
+                "raw_value": "0x0c0000000706616d6f756e7401000000000000000000000000001312d90c626c6f636b2d686569676874010000000000000000000000000000010d076d61782d6665650100000000000000000000000000004e2009726563697069656e740c00000002096861736862797465730200000014c893b9327dcf35a76e8abf8e7a6f18926e5feeea0776657273696f6e0200000001040a726571756573742d696401000000000000000000000000000000020673656e646572051ac893b9327dcf35a76e8abf8e7a6f18926e5feeea05746f7069630d000000117769746864726177616c2d637265617465",
                 "topic": "print",
                 "value": {
                     "Tuple": {
                         "data_map": {
                             "amount": {
-                                "UInt": 22500
+                                "UInt": 1250009
                             },
                             "block-height": {
-                                "UInt": 137
+                                "UInt": 269
                             },
                             "max-fee": {
-                                "UInt": 3000
+                                "UInt": 20000
                             },
                             "recipient": {
                                 "Tuple": {
@@ -45,26 +47,26 @@
                                             "Sequence": {
                                                 "Buffer": {
                                                     "data": [
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0
+                                                        200,
+                                                        147,
+                                                        185,
+                                                        50,
+                                                        125,
+                                                        207,
+                                                        53,
+                                                        167,
+                                                        110,
+                                                        138,
+                                                        191,
+                                                        142,
+                                                        122,
+                                                        111,
+                                                        24,
+                                                        146,
+                                                        110,
+                                                        95,
+                                                        238,
+                                                        234
                                                     ]
                                                 }
                                             }
@@ -73,7 +75,7 @@
                                             "Sequence": {
                                                 "Buffer": {
                                                     "data": [
-                                                        0
+                                                        4
                                                     ]
                                                 }
                                             }
@@ -96,33 +98,33 @@
                                 }
                             },
                             "request-id": {
-                                "UInt": 1
+                                "UInt": 2
                             },
                             "sender": {
                                 "Principal": {
                                     "Standard": [
-                                        21,
+                                        26,
                                         [
-                                            182,
-                                            126,
-                                            106,
-                                            71,
-                                            92,
-                                            112,
-                                            1,
-                                            210,
-                                            209,
-                                            248,
-                                            88,
-                                            149,
-                                            39,
-                                            248,
+                                            200,
+                                            147,
+                                            185,
+                                            50,
+                                            125,
+                                            207,
                                             53,
-                                            127,
-                                            12,
-                                            19,
-                                            148,
-                                            68
+                                            167,
+                                            110,
+                                            138,
+                                            191,
+                                            142,
+                                            122,
+                                            111,
+                                            24,
+                                            146,
+                                            110,
+                                            95,
+                                            238,
+                                            234
                                         ]
                                     ]
                                 }
@@ -190,56 +192,37 @@
                     }
                 }
             },
-            "event_index": 2,
-            "txid": "0x25982fe028733fe0158fa3972b68fe93ade7f242fb51283c3bc18145d0248d9a",
+            "event_index": 3,
+            "txid": "0x1c5692012435bab58299c775b79d511b3cc2670d7614ffcd4968cb62dc40ce04",
             "type": "contract_event"
         }
     ],
-    "index_block_hash": "0x75b02b9884ec41c05f2cfa6e20823328321518dd0b027e7b609b63d4d1ea7c78",
+    "index_block_hash": "0xcd58e65589bd8facbddce59169e0a1a81c955268fe041108b3b1909a0986937e",
     "matured_miner_rewards": [],
-    "miner_signature": "0x00bedd886bbc3b72e4bb3427cfd6acc8466036f20942511d0f0468ed1c8c32614436d0ccca5ac783e344f6c02356e63696c48e55a84e21d9af3539c3568207e734",
-    "miner_txid": "0xbfe53413948e7683414635d3976c851686a5d9d851658ddf85f706c185d82811",
-    "parent_block_hash": "0x992d155d9dcb80e00eec8f2acea43b5d9a054b6295f0da7c9965f438c0eb9e73",
-    "parent_burn_block_hash": "0x013b81f12774594243704a9ca20a546813141ee5587c845955e42f588f753316",
-    "parent_burn_block_height": 137,
-    "parent_burn_block_timestamp": 1725050780,
-    "parent_index_block_hash": "0xbed2058c54b8b9763f9f79e576e5fece4a02d71452b33879c9e5628bc3aa5993",
+    "miner_signature": "0x013d93ae63ef652f09cc799c9983e0b6ec92d2aec76055e5b4f668bba8c2dd5ab9111ea3797c5f2523a41f467ba65f98d626f72481f3a4ee7d69f919c610a15591",
+    "miner_txid": "0xe38e632f403302ac887c86a7602dc6c5f302a0ee48fa55ed3a5ae979133069fb",
+    "parent_block_hash": "0xe18d91ad8c080bcf9e56f0545f38123486a7820ff5ddb025de9296487e45200c",
+    "parent_burn_block_hash": "0x2a5e5eb69db282b61bd00ef5697cdb4a173f3276702914dabdfb2d5fa54bb5a6",
+    "parent_burn_block_height": 269,
+    "parent_burn_block_timestamp": 1764620349,
+    "parent_index_block_hash": "0x73f51efb464e8ab461a91b5a387a318f07b010173cea91e02471b8d4e5a4923b",
     "parent_microblock": "0x0000000000000000000000000000000000000000000000000000000000000000",
     "parent_microblock_sequence": 0,
-    "pox_v1_unlock_height": 104,
-    "pox_v2_unlock_height": 106,
-    "pox_v3_unlock_height": 109,
+    "pox_v1_unlock_height": 205,
+    "pox_v2_unlock_height": 207,
+    "pox_v3_unlock_height": 210,
     "reward_set": null,
-    "signer_bitvec": "000800000001ff",
+    "signer_bitvec": "0007000000017f",
     "signer_signature": [
-        "0092c2fa7aaefaa5206120e04c5d61795af734a824dc8b6d8affabe758928735a97407046f66c6ae9dab300f4701c28f85d68667688ccd47d86431f7fa55e25603",
-        "00a3b00b00ec5d2d5834a4b1465e403a130d4f133fd11ad73909648bc92f012c1a63c222121b76c34b96f126b74be3d3ade874560705ff6d0428f65f50f8d0a25d",
-        "00c986c82e76a6edf5df6214fa759d656a3ff2d4e823f9152e09dd7a731696e1fd0019c26b92dc1c015f60ad22f47114fc81ab2b95d3dd3aa93cb7aa2918c84cb5"
+        "001052283017215ef604ace517500b064d085dbbe7ec2afdc9cd80a7df7c85d73e7e2a2de43b2adb09004dfb0d47b02eb36c82cd9eb261cd7c55407f6df34944a7",
+        "013aff5003d4f7915e241bfa7260f9df66ba212299692ba6db272a6649757da4f6787f2278f57382e986a636ef01eb7de2d0a53a515f41f1042d13184177a088a1"
     ],
-    "signer_signature_hash": "0x53fd8cfcd5203274dc960e7f48f9971e5791bda9b51484e3c9635b209901c6cc",
+    "signer_signature_hash": "0xdaf90b750f5dc3f7ba047fbce000a86e518c3747f62cbc8091d57602a5f7aa02",
+    "tenure_height": 65,
     "transactions": [
         {
             "burnchain_op": null,
-            "contract_abi": null,
-            "execution_cost": {
-                "read_count": 22,
-                "read_length": 33549,
-                "runtime": 73067,
-                "write_count": 6,
-                "write_length": 216
-            },
-            "microblock_hash": null,
-            "microblock_parent_hash": null,
-            "microblock_sequence": null,
-            "raw_result": "0x070100000000000000000000000000000001",
-            "raw_tx": "0x80800000000405b67e6a475c7001d2d1f8589527f8357f0c1394440000000000000006000000000001e0780000000302016f58f74296efb304398634e681a4300aa93f39155a371ca4406d4aa5dfb76c752a234176a9f1fb636cbd50593b3626a5f5894b06f288e740e9d3aa02d5aec3d1020010afd9f14faa159d31153a821079fdcfd80bfe3662e840eda2383665a113402b66ec622af0ec2c052d8ff5cb508d296fe164dbcc8653ad552625f33947d61944020044e318502c37f69f6e4d0c75825cc47a5f4707d08308288400f4a4f1c434151c24e2a5d10e532bb67e3819babcc4e8d0e5ca4f96dac116349fae44b38d9ba78c00020301000000000215b67e6a475c7001d2d1f8589527f8357f0c1394440f736274632d7769746864726177616c1b696e6974696174652d7769746864726177616c2d726571756573740000000301000000000000000000000000000057e40c0000000209686173686279746573020000001400000000000000000000000000000000000000000776657273696f6e0200000001000100000000000000000000000000000bb8",
-            "status": "success",
-            "tx_index": 0,
-            "txid": "0x25982fe028733fe0158fa3972b68fe93ade7f242fb51283c3bc18145d0248d9a"
-        },
-        {
-            "burnchain_op": null,
-            "contract_abi": null,
+            "contract_interface": null,
             "execution_cost": {
                 "read_count": 0,
                 "read_length": 0,
@@ -251,10 +234,31 @@
             "microblock_parent_hash": null,
             "microblock_sequence": null,
             "raw_result": "0x0703",
-            "raw_tx": "0x80800000000400ad08341feab8ea788ef8045c343d21dcedc4483e000000000000004a000000000000012c0001b348a285f5dff4de0fafbee44934100167310a0ec0c930a75ba3993c0a2a3e6b1bce06c337d8445cdf65bf41423b187fa42aa4a4e0cd1cbe1095aeafbda8fe8c03020000000000051a62b0e91cc557e583c3d1f9dfe468ace76d2f037400000000000003e800000000000000000000000000000000000000000000000000000000000000000000",
+            "raw_tx": "0x8080000000040079596b2995032f42672a1610356aa2fe09886a6d000000000000003f000000000000012c0001c98a83f70998f562d92925011ab30de9bb53667c13e37c54a369d5bbfa9ce80f5d69a1f5bb6f4eb8a74b33a9cc0a5b0a710a1d9d819833ad67d7432492e412d703020000000000051a68de2dbb6c14aaba2900031876ea3771599edd3a00000000000003e800000000000000000000000000000000000000000000000000000000000000000000",
+            "status": "success",
+            "tx_index": 0,
+            "txid": "0x88997cb02465a30d11c7f34b71c26059c1f3ccbdf5558b6280d6a4e07db59155",
+            "vm_error": null
+        },
+        {
+            "burnchain_op": null,
+            "contract_interface": null,
+            "execution_cost": {
+                "read_count": 24,
+                "read_length": 40070,
+                "runtime": 85481,
+                "write_count": 6,
+                "write_length": 216
+            },
+            "microblock_hash": null,
+            "microblock_parent_hash": null,
+            "microblock_sequence": null,
+            "raw_result": "0x070100000000000000000000000000000002",
+            "raw_tx": "0x80800000000400c893b9327dcf35a76e8abf8e7a6f18926e5feeea000000000000000100000000000003e8000024ab7fb06392f308c7814349057246d5808b5bc1e83d0a0aa8dc50ae3fdfee8a08cbc9d5a4f32e27f2b7ee4cb938d8df0a6702b9992e508da59641e824db54f30301000000000215f08277fe51877c890918bb778e0192309b307c390f736274632d7769746864726177616c1b696e6974696174652d7769746864726177616c2d726571756573740000000301000000000000000000000000001312d90c00000002096861736862797465730200000014c893b9327dcf35a76e8abf8e7a6f18926e5feeea0776657273696f6e0200000001040100000000000000000000000000004e20",
             "status": "success",
             "tx_index": 1,
-            "txid": "0x538cb5f2bc1f77892b5b9ef7281c8bdd4c4d6792a80b06fa61fd48c7819b7dfe"
+            "txid": "0x1c5692012435bab58299c775b79d511b3cc2670d7614ffcd4968cb62dc40ce04",
+            "vm_error": null
         }
     ]
 }

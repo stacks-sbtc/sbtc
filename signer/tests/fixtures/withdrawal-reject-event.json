@@ -1,16 +1,17 @@
 {
     "anchored_cost": {
-        "read_count": 31,
-        "read_length": 51115,
-        "runtime": 92633,
+        "read_count": 33,
+        "read_length": 63016,
+        "runtime": 114259,
         "write_count": 5,
         "write_length": 22
     },
-    "block_hash": "0x4a4e03eef3326030f42faba09c8bb0177b52f39d9d90c9502de0075c90da2fa6",
-    "block_height": 350,
-    "burn_block_hash": "0x45edc2fdd174ef2949f1370ec67302ccd29c20a6ac58da0895ac77b0783caa04",
-    "burn_block_height": 142,
-    "burn_block_time": 1725051080,
+    "block_hash": "0x0d5657f94058708307172031402407d61fa13ab871d7f39bedab37c5d98c6b1a",
+    "block_height": 548,
+    "block_time": 1764621126,
+    "burn_block_hash": "0x1c40a7f8e8cae542a54264b1c69f5f02f9a8fe0d9310ea82dfd6bf3670851642",
+    "burn_block_height": 318,
+    "burn_block_time": 1764621115,
     "confirmed_microblocks_cost": {
         "read_count": 0,
         "read_length": 0,
@@ -18,19 +19,20 @@
         "write_count": 0,
         "write_length": 0
     },
+    "consensus_hash": "0xb3d287d57618414d3a09db2399c4a336ecb5af49",
     "cycle_number": null,
     "events": [
         {
             "committed": true,
             "contract_event": {
                 "contract_identifier": "SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS.sbtc-registry",
-                "raw_value": "0x0c000000030a726571756573742d696401000000000000000000000000000000020d7369676e65722d6269746d6170010000000000000000000000000000000005746f7069630d000000117769746864726177616c2d72656a656374",
+                "raw_value": "0x0c000000030a726571756573742d696401000000000000000000000000000000030d7369676e65722d6269746d6170010000000000000000000000000000000005746f7069630d000000117769746864726177616c2d72656a656374",
                 "topic": "print",
                 "value": {
                     "Tuple": {
                         "data_map": {
                             "request-id": {
-                                "UInt": 1
+                                "UInt": 3
                             },
                             "signer-bitmap": {
                                 "UInt": 0
@@ -80,40 +82,40 @@
                 }
             },
             "event_index": 2,
-            "txid": "0x95e3d38a1a0c001886b3d1d3a4ed376bf9e44cfc2820164457fe4e9a5fa2e450",
+            "txid": "0x620a4bdb93ebca1d18b4d838fc9e86c044536946058488d404b1f8412983ae3a",
             "type": "contract_event"
         }
     ],
-    "index_block_hash": "0xfc1b44b2db9997d9f37ea1c8704318ed8c1bce2f077b6e73fb583deac167ce98",
+    "index_block_hash": "0xb34484670f65aca44663c95c4a1b0872017c8a409346ca7b3fe98ec160c9dca1",
     "matured_miner_rewards": [],
-    "miner_signature": "0x008572bf213cbab23671fa186206d7f1292b1d7c83d4b0be59bac4de7bb2dc537c2a273bf61496991515c11ef8f25a951b054e98a9286fe3913972ce1169828f5f",
-    "miner_txid": "0x5be6482d26dcabc102ad7be7010721fd78115df08f3b58cd91e734ab1d3d4871",
-    "parent_block_hash": "0x81d59937124973abb27d07466d47e2e3155f72149f66f2d2830f64426fd05960",
-    "parent_burn_block_hash": "0x45edc2fdd174ef2949f1370ec67302ccd29c20a6ac58da0895ac77b0783caa04",
-    "parent_burn_block_height": 142,
-    "parent_burn_block_timestamp": 1725051080,
-    "parent_index_block_hash": "0x96b3f5a3f19af33ccc66bed0adde0fcf93322fcc9b6ddacd93c3968cbfb248de",
+    "miner_signature": "0x00850c2a735e2650e6a7d2a12aa7083ec89415cef097c88e0a3c7c4c7ab16c78382ab747bf8ab2c2177dbc0b598fa05f7c4892656014301c8293ec3106d16f795f",
+    "miner_txid": "0x385845afa2c6da3c3b45ebae8a43c40d1d73c4dee9313dd73c9abce168c64691",
+    "parent_block_hash": "0x92aabbb3079be012d079a7204e94fd41f26c82f4d92a8725da1b14f0a0b13b66",
+    "parent_burn_block_hash": "0x1c40a7f8e8cae542a54264b1c69f5f02f9a8fe0d9310ea82dfd6bf3670851642",
+    "parent_burn_block_height": 318,
+    "parent_burn_block_timestamp": 1764621115,
+    "parent_index_block_hash": "0xaeaa8883cddb36966dccb2912a28c73516cb8b4b11eb1a7f292b73ab68fba9e4",
     "parent_microblock": "0x0000000000000000000000000000000000000000000000000000000000000000",
     "parent_microblock_sequence": 0,
-    "pox_v1_unlock_height": 104,
-    "pox_v2_unlock_height": 106,
-    "pox_v3_unlock_height": 109,
+    "pox_v1_unlock_height": 205,
+    "pox_v2_unlock_height": 207,
+    "pox_v3_unlock_height": 210,
     "reward_set": null,
-    "signer_bitvec": "000800000001ff",
+    "signer_bitvec": "0007000000017f",
     "signer_signature": [
-        "01a05e94db0e82a0a1e6c35851be3cae5bf1dbb30a64bffe014ab6ced36204c14d27ac483b6cfbe73d88ffcd1a596796627b462c156789bae78263f53419e7c5e2",
-        "013731592cf7585654652375443057ef78bd2267a504343a528e41fba2630baa726fc34ccfe8f9ff42a4f81508ff99a904b08d7260c059b9d986b4a9d26af5dbdd",
-        "00b229992c67772f5480f3d5ac1ed17833a824850bc8c36d11369902cdee27cb5d58872086086613200c085e58657b7e6c604d1a87abe62645ba4f9f8f5a6060f6"
+        "009b2f95dcd3e634537cb387b9a7a773b6bd488f2410e47458af68492f0740c5bb58ccb6be781d6b156badd041aeee80e82e8102299abd693a91a4803e0b411cde",
+        "003e73b92e9cd7c1e431c98bee8f8e780a88bb4406128ea7db030189d65097077e06ad52222c5722f89f6c5b5f8ad097d7390eb93ccd8a9faf4ccd460a1c7e1eb7"
     ],
-    "signer_signature_hash": "0x4a4e03eef3326030f42faba09c8bb0177b52f39d9d90c9502de0075c90da2fa6",
+    "signer_signature_hash": "0x0d5657f94058708307172031402407d61fa13ab871d7f39bedab37c5d98c6b1a",
+    "tenure_height": 114,
     "transactions": [
         {
             "burnchain_op": null,
-            "contract_abi": null,
+            "contract_interface": null,
             "execution_cost": {
-                "read_count": 31,
-                "read_length": 51115,
-                "runtime": 92633,
+                "read_count": 33,
+                "read_length": 63016,
+                "runtime": 114259,
                 "write_count": 5,
                 "write_length": 22
             },
@@ -121,14 +123,15 @@
             "microblock_parent_hash": null,
             "microblock_sequence": null,
             "raw_result": "0x0703",
-            "raw_tx": "0x80800000000405b67e6a475c7001d2d1f8589527f8357f0c1394440000000000000009000000000001e078000000030201a6f5f94c13e46ca387c8466f3a0523aa613b05e61a311c51cef6464e57de95d640c8545a9c1d26d162604e66b572e107fd8f5bd03edd55676feded60597047f20201e62b36a7c870c182f9484177cd69436d6a06714ded3ab6016ed6551217aafc7c5c67f62a6ce8dec212435dbf4aa5a4d2dc7385210565377b790fbc71ddac82b4020104a0503fe0a76914b9fabc1b467bdfd278be772695d8ab2256bedde47d78db4b0c288644be085cb4f6efd1db68eae4977592c3408bb87da2299677046d943dd000020301000000000215b67e6a475c7001d2d1f8589527f8357f0c1394440f736274632d7769746864726177616c1972656a6563742d7769746864726177616c2d726571756573740000000201000000000000000000000000000000020100000000000000000000000000000000",
+            "raw_tx": "0x80800000000405f08277fe51877c890918bb778e0192309b307c390000000000000016000000000001e0780000000302000538788b6707b25b786bf61467eda7b4af5b5e3e51f0de2b16ef4b9fd5c2a01e76ed70e6ea35a4bf2a66e18f0f1baedf7062c403808499bfd175b4afb0aabd1802016822522a0a53e71f52f91034c0a90444a34a04c0ba6f514d0f3d0790430757390d808148fbfbc7331c5c86069e4c43c0c822a3161bc1bb2aaf93486686041adf0201780f8a28b65d9cf7e5ac50b65a056e63498a85039420fb44b9f1868968e7948832363e85b266bcccf4ec36f82afbf121ff1f4cf5ba5c42bd31ae5363d7e6f45000020301000000000215f08277fe51877c890918bb778e0192309b307c390f736274632d7769746864726177616c1972656a6563742d7769746864726177616c2d726571756573740000000201000000000000000000000000000000030100000000000000000000000000000000",
             "status": "success",
             "tx_index": 0,
-            "txid": "0x95e3d38a1a0c001886b3d1d3a4ed376bf9e44cfc2820164457fe4e9a5fa2e450"
+            "txid": "0x620a4bdb93ebca1d18b4d838fc9e86c044536946058488d404b1f8412983ae3a",
+            "vm_error": null
         },
         {
             "burnchain_op": null,
-            "contract_abi": null,
+            "contract_interface": null,
             "execution_cost": {
                 "read_count": 0,
                 "read_length": 0,
@@ -140,10 +143,11 @@
             "microblock_parent_hash": null,
             "microblock_sequence": null,
             "raw_result": "0x0703",
-            "raw_tx": "0x80800000000400ad08341feab8ea788ef8045c343d21dcedc4483e0000000000000069000000000000012c0001a4721b7dd6b315354d3c8fc35d0c5cb7862cc640ac4116569c5ed8709e1fe6e80b76dadaedcb8be1c1d9299e97296263e6ff0364b1979a705bed3dfa0e123da603020000000000051a62b0e91cc557e583c3d1f9dfe468ace76d2f037400000000000003e800000000000000000000000000000000000000000000000000000000000000000000",
+            "raw_tx": "0x8080000000040068de2dbb6c14aaba2900031876ea3771599edd3a000000000000008f000000000000012c0000dcc160d62ed8fb02c8e0c3032ee5895158b499df30fb1a9fc2da5db87d038de84abf8dd2910d7b24b1579d74caffbbcf54b028de4ec55d162de87938eb8b514c03020000000000051a7ce8e31e9120f4b3cb7bea0fed9de8556cadceb900000000000003e800000000000000000000000000000000000000000000000000000000000000000000",
             "status": "success",
             "tx_index": 1,
-            "txid": "0xff33ff3a54b1379f9297ff2840afb4ab17e799ec3bf80f430d0e1aa15bd9d5b7"
+            "txid": "0xa4894cbb4eb028bc3f9ff6a72c706eef5f533c22aac26d1e12bb291a103f8bad",
+            "vm_error": null
         }
     ]
 }
