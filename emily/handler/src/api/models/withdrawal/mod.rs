@@ -82,8 +82,10 @@ pub struct Withdrawal {
 pub struct PreFulfillment {
     /// Expected bitcoin block height on which signers will _try_ to fullfill
     /// withdrawal request.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub maybe_expected_height: Option<u64>,
     /// Expected txid of the transaction fullfilling withdrawal request
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub maybe_expected_txid: Option<String>,
 }
 
