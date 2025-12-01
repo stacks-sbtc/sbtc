@@ -5,6 +5,7 @@
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **fulfillment** | Option<[**models::Fulfillment**](Fulfillment.md)> |  | [optional]
+**pre_fulfillment** | [**models::PreFulfillment**](PreFulfillment.md) |  | 
 **request_id** | **u64** | The id of the Stacks withdrawal request that initiated the sBTC operation. | 
 **status** | [**models::WithdrawalStatus**](WithdrawalStatus.md) |  | 
 **status_message** | **String** | The status message of the withdrawal. | 

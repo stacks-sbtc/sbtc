@@ -59,6 +59,7 @@ use super::CorsSupport;
         api::models::deposit::responses::UpdateDepositsResponse,
         // Withdrawal Models.
         api::models::withdrawal::Withdrawal,
+        api::models::withdrawal::PreFulfillment,
         api::models::withdrawal::responses::WithdrawalWithStatus,
         api::models::withdrawal::WithdrawalInfo,
         api::models::withdrawal::WithdrawalParameters,
