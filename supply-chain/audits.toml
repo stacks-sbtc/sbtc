@@ -23,17 +23,38 @@ who = "cylewitruk <cyle.witruk@outlook.com>"
 criteria = "safe-to-deploy"
 delta = "0.7.1 -> 0.7.2"
 
+[[audits.p256]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+version = "0.13.2"
+
 [[audits.p256k1]]
 who = "cylewitruk <cyle.witruk@outlook.com>"
 criteria = "safe-to-deploy"
 version = "7.2.2"
 notes = "This change only adds wrapping to some additional bindings so that they get mangled and avoid linking errors."
 
+[[audits.primeorder]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+version = "0.13.6"
+
+[[audits.serdect]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+version = "0.2.0"
+
 [[audits.stacks-common]]
 who = "cylewitruk <cyle.witruk@outlook.com>"
 criteria = "safe-to-deploy"
 version = "0.0.1"
 notes = "I did not fully review the changes in this diff -- they are Stacks-internal."
+
+[[audits.stacks-common]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.0.1 -> 0.0.1@git:1cba695b09690790b1220b0f5d149f70f78ddea5"
+importable = false
 
 [[audits.webpki-roots]]
 who = "djordon <dan.jordon@gmail.com>"
