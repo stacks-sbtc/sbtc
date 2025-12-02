@@ -23,9 +23,9 @@ sbtc = { path = "./sbtc" }
 testing-emily-client = { path = "./.generated-sources/emily/client/rust/testing" }
 
 # Stacks-Core Dependencies
-clarity = { git = "https://github.com/stacks-network/stacks-core", rev = "bd9ee6310516b31ef4ecce07e42e73ed0f774ada", default-features = false }
-stacks-common = { git = "https://github.com/stacks-network/stacks-core", rev = "bd9ee6310516b31ef4ecce07e42e73ed0f774ada", default-features = false }
-stackslib = { git = "https://github.com/stacks-network/stacks-core", rev = "bd9ee6310516b31ef4ecce07e42e73ed0f774ada", default-features = false }
+clarity = { git = "https://github.com/stacks-network/stacks-core", rev = "1cba695b09690790b1220b0f5d149f70f78ddea5", default-features = false }
+stacks-common = { git = "https://github.com/stacks-network/stacks-core", rev = "1cba695b09690790b1220b0f5d149f70f78ddea5", default-features = false }
+stackslib = { git = "https://github.com/stacks-network/stacks-core", rev = "1cba695b09690790b1220b0f5d149f70f78ddea5", default-features = false }
 
 # Trust Machines Dependencies
 wsts = { git = "https://github.com/stacks-sbtc/wsts", rev = "11e2316aa0edf996f8e8f9ccbbbfd4bd2975ed1d" }
