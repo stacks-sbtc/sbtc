@@ -14,7 +14,7 @@ permissions:
 
 ## Define which docker arch to build for
 env:
-  docker_platforms: "linux/amd64"
+  docker_platforms: "linux/amd64,linux/arm64"
   latest_release: $(curl -s https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r .tag_name)
 
 concurrency:
