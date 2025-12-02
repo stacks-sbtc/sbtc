@@ -13,6 +13,7 @@ use bitcoin::OutPoint;
 use blockstack_lib::burnchains::Txid;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlockHeader;
+use blockstack_lib::chainstate::stacks::StacksBlock as PreNakamotoBlock;
 use blockstack_lib::chainstate::stacks::StacksTransaction;
 use blockstack_lib::chainstate::stacks::TokenTransferMemo;
 use blockstack_lib::chainstate::stacks::TransactionPayload;
@@ -1152,10 +1153,18 @@ impl StacksClient {
             .await
             .map_err(Error::StacksNodeRequest)?;
 
-        response
+        let resp = response
             .error_for_status()
-            .map_err(Error::StacksNodeResponse)
-            .map(|_| ())
+            .map_err(Error::StacksNodeResponse)?
+            .bytes()
+            .await
+            .map_err(Error::UnexpectedStacksResponse)?;
+
+        // Ensure we got a pre nakamoto block, just in case they change the v2
+        // API to be forward compatible
+        let _ = PreNakamotoBlock::consensus_deserialize(&mut &*resp).map_err(Error::StacksCodec)?;
+
+        Ok(())
     }
 
     /// Fetch all Nakamoto ancestor block headers within the same tenure as
@@ -1455,12 +1464,10 @@ where
             Err(error) => {
                 // A 404 could mean that we reached the Nakamoto start height
                 // and we tried fetching a tenure for a pre-Nakamoto block
-                if let Error::StacksNodeResponse(ref req_error) = error
-                    && req_error.status() == Some(reqwest::StatusCode::NOT_FOUND)
-                    && stacks
-                        .check_pre_nakamoto_block(&header.parent_block_id)
-                        .await
-                        .is_ok()
+                if stacks
+                    .check_pre_nakamoto_block(&header.parent_block_id)
+                    .await
+                    .is_ok()
                 {
                     tracing::debug!(
                         %nakamoto_start_height,
@@ -2067,12 +2074,17 @@ mod tests {
     }
 
     #[ignore = "This is an integration test that uses the real testnet"]
-    #[test(tokio::test)]
-    async fn fetch_unknown_ancestors_works_in_testnet() {
+    #[test_case(|url| StacksClient::new(url).unwrap(); "stacks-client")]
+    #[test_case(|url| ApiFallbackClient::new(vec![StacksClient::new(url).unwrap()]).unwrap(); "fallback-client")]
+    #[tokio::test]
+    async fn fetch_unknown_ancestors_works_in_testnet<F, C>(client: F)
+    where
+        C: StacksInteract,
+        F: Fn(Url) -> C,
+    {
         let db = crate::testing::storage::new_test_database().await;
 
-        let client =
-            StacksClient::new(Url::parse("https://api.testnet.hiro.so/").unwrap()).unwrap();
+        let client = client(Url::parse("https://api.testnet.hiro.so/").unwrap());
 
         // Testnet currently has the following structure:
         //
