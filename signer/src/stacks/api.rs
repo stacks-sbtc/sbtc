@@ -12,6 +12,7 @@ use bitcoin::OutPoint;
 use blockstack_lib::burnchains::Txid;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlockHeader;
+use blockstack_lib::chainstate::stacks::StacksBlock as PreNakamotoBlock;
 use blockstack_lib::chainstate::stacks::StacksTransaction;
 use blockstack_lib::chainstate::stacks::TokenTransferMemo;
 use blockstack_lib::chainstate::stacks::TransactionPayload;
@@ -1130,10 +1131,18 @@ impl StacksClient {
             .await
             .map_err(Error::StacksNodeRequest)?;
 
-        response
+        let resp = response
             .error_for_status()
-            .map_err(Error::StacksNodeResponse)
-            .map(|_| ())
+            .map_err(Error::StacksNodeResponse)?
+            .bytes()
+            .await
+            .map_err(Error::UnexpectedStacksResponse)?;
+
+        // Ensure we got a pre nakamoto block, just in case they change the v2
+        // API to be forward compatible
+        let _ = PreNakamotoBlock::consensus_deserialize(&mut &*resp).map_err(Error::StacksCodec)?;
+
+        Ok(())
     }
 
     /// Fetch all Nakamoto ancestor block headers within the same tenure as
