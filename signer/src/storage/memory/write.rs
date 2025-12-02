@@ -3,6 +3,7 @@ use libp2p::PeerId;
 use crate::{
     error::Error,
     keys::{PublicKey, PublicKeyXOnly},
+    stacks::api::TenureBlockHeaders,
     storage::{
         DbWrite,
         model::{
@@ -172,20 +173,17 @@ impl DbWrite for SharedStore {
         Ok(())
     }
 
-    async fn write_stacks_block_headers(
-        &self,
-        blocks: Vec<model::StacksBlock>,
-    ) -> Result<(), Error> {
+    async fn write_stacks_block_headers(&self, headers: &TenureBlockHeaders) -> Result<(), Error> {
         let mut store = self.lock().await;
         store.version += 1;
 
-        blocks.iter().for_each(|block| {
-            store.stacks_blocks.insert(block.block_hash, block.clone());
+        headers.clone().into_iter().for_each(|header| {
             store
                 .bitcoin_anchor_to_stacks_blocks
-                .entry(block.bitcoin_anchor)
+                .entry(headers.anchor_block_hash)
                 .or_default()
-                .push(block.block_hash);
+                .push(header.block_hash);
+            store.stacks_blocks.insert(header.block_hash, header);
         });
 
         Ok(())
@@ -394,6 +392,7 @@ impl DbWrite for InMemoryTransaction {
         self.store.write_bitcoin_block(block).await
     }
 
+    #[cfg(any(test, feature = "testing"))]
     async fn write_stacks_block(&self, block: &model::StacksBlock) -> Result<(), Error> {
         self.store.write_stacks_block(block).await
     }
@@ -446,10 +445,7 @@ impl DbWrite for InMemoryTransaction {
         self.store.write_bitcoin_transactions(txs).await
     }
 
-    async fn write_stacks_block_headers(
-        &self,
-        headers: Vec<model::StacksBlock>,
-    ) -> Result<(), Error> {
+    async fn write_stacks_block_headers(&self, headers: &TenureBlockHeaders) -> Result<(), Error> {
         self.store.write_stacks_block_headers(headers).await
     }
 

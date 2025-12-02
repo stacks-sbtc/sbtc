@@ -24,6 +24,8 @@ use signer::WITHDRAWAL_BLOCKS_EXPIRY;
 use signer::bitcoin::validation::WithdrawalRequestStatus;
 use signer::bitcoin::validation::WithdrawalValidationResult;
 use signer::context::SbtcLimits;
+use signer::stacks::api::StacksBlockHeader;
+use signer::stacks::api::TenureBlockHeaders;
 use signer::storage::model::BitcoinBlockHeight;
 use signer::storage::model::DkgSharesStatus;
 use signer::storage::model::KeyRotationEvent;
@@ -234,11 +236,12 @@ async fn writing_stacks_blocks_works<T: AsContractCall>(contract: ContractCallWr
 
     // Okay now to save these blocks. We check that all of these blocks are
     // saved and that the transaction that we care about is saved as well.
-    let headers = blocks
+    let stacks_headers = blocks
         .iter()
-        .map(|block| StacksBlock::from_nakamoto_block(block, &[0; 32].into()))
-        .collect::<Vec<_>>();
-    store.write_stacks_block_headers(headers).await.unwrap();
+        .map(|block| block.header.clone().into())
+        .collect::<Vec<StacksBlockHeader>>();
+    let headers = TenureBlockHeaders::from_headers(stacks_headers).unwrap();
+    store.write_stacks_block_headers(&headers).await.unwrap();
 
     // First check that all blocks are saved
     let sql = "SELECT COUNT(*) FROM sbtc_signer.stacks_blocks";
@@ -256,11 +259,12 @@ async fn writing_stacks_blocks_works<T: AsContractCall>(contract: ContractCallWr
 
     // Last let, we check that attempting to store identical blocks is an
     // idempotent operation.
-    let headers = blocks
+    let stacks_headers = blocks
         .iter()
-        .map(|block| StacksBlock::from_nakamoto_block(block, &[0; 32].into()))
-        .collect::<Vec<_>>();
-    store.write_stacks_block_headers(headers).await.unwrap();
+        .map(|block| block.header.clone().into())
+        .collect::<Vec<StacksBlockHeader>>();
+    let headers = TenureBlockHeaders::from_headers(stacks_headers).unwrap();
+    store.write_stacks_block_headers(&headers).await.unwrap();
 
     let sql = "SELECT COUNT(*) FROM sbtc_signer.stacks_blocks";
     let stored_block_count_again = sqlx::query_scalar::<_, i64>(sql)
@@ -307,11 +311,12 @@ async fn checking_stacks_blocks_exists_works() {
     assert!(!any_exist);
 
     // Okay now to save these blocks.
-    let headers = blocks
+    let stacks_headers = blocks
         .iter()
-        .map(|block| StacksBlock::from_nakamoto_block(block, &[0; 32].into()))
-        .collect::<Vec<_>>();
-    store.write_stacks_block_headers(headers).await.unwrap();
+        .map(|block| block.header.clone().into())
+        .collect::<Vec<StacksBlockHeader>>();
+    let headers = TenureBlockHeaders::from_headers(stacks_headers).unwrap();
+    store.write_stacks_block_headers(&headers).await.unwrap();
 
     // Now each of them should exist.
     let all_exist = futures::stream::iter(blocks.iter())
@@ -2637,12 +2642,12 @@ async fn get_swept_deposit_requests_does_not_return_deposit_requests_with_respon
         // For `setup_canonical`, the stacks block is in the canonical chain
         bitcoin_anchor: chain_tip,
     };
-    db.write_stacks_block_headers(vec![
-        setup_fork_event_block.clone(),
-        setup_canonical_event_block.clone(),
-    ])
-    .await
-    .unwrap();
+    db.write_stacks_block(&setup_fork_event_block)
+        .await
+        .unwrap();
+    db.write_stacks_block(&setup_canonical_event_block)
+        .await
+        .unwrap();
 
     // First, let's check we get both deposits
     let requests = db

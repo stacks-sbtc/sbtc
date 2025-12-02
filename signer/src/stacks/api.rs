@@ -3,6 +3,7 @@
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::future::Future;
+use std::ops::RangeInclusive;
 use std::sync::LazyLock;
 use std::time::Duration;
 use std::time::Instant;
@@ -42,7 +43,10 @@ use crate::config::Settings;
 use crate::error::Error;
 use crate::keys::PublicKey;
 use crate::metrics::Metrics;
-use crate::storage::DbRead;
+use crate::storage::DbRead as _;
+use crate::storage::DbWrite as _;
+use crate::storage::Transactable;
+use crate::storage::TransactionHandle as _;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::ConsensusHash;
@@ -355,6 +359,7 @@ impl From<NakamotoBlockHeader> for StacksBlockHeader {
 /// This struct represents a non-empty subset of the Stacks block headers
 /// that were created during a tenure.
 #[derive(Debug)]
+#[cfg_attr(any(test, feature = "testing"), derive(Clone))]
 pub struct TenureBlockHeaders {
     /// The subset of Stacks block headers that of Nakamoto blocks that
     /// were created during a tenure. This is always non-empty.
@@ -388,6 +393,23 @@ impl TenureBlockHeaders {
             anchor_block_hash: info.burn_block_hash.into(),
             anchor_block_height: info.burn_block_height.into(),
         })
+    }
+
+    /// Get the minimum block height in the tenure.
+    pub fn start_height(&self) -> StacksBlockHeight {
+        // SAFETY: It is okay to unwrap here because we know that the
+        // tenure is non-empty. The struct upholds this invariant upon
+        // creation.
+        self.headers.iter().map(|h| h.block_height).min().unwrap()
+    }
+
+    /// Get the height of the block with the greatest height of all blocks
+    /// held within this struct.
+    pub fn end_height(&self) -> StacksBlockHeight {
+        // SAFETY: It is okay to unwrap here because we know that the
+        // tenure is non-empty. The struct upholds this invariant upon
+        // creation.
+        self.headers.iter().map(|h| h.block_height).max().unwrap()
     }
 }
 
@@ -1378,24 +1400,32 @@ impl StacksClient {
 }
 
 /// Fetch all Nakamoto block headers that are not already stored in the
-/// datastore, starting at the given [`StacksBlockId`].
+/// datastore, starting at the given [`StacksBlockHash`] and store them in
+/// the database.
 ///
-/// This function returns the headers sorted in ascending order. So entries
-/// at lower indices correspond to Stacks block with lower block height.
-pub async fn fetch_unknown_ancestors<S, D>(
+/// This function fetches all unknown nakamoto blocks that are on the
+/// canonical chain identified by the given StacksBlockHash chain tip that
+/// not already stored in the database. It fetches these blocks one tenure
+/// at a time, and then writes them to the `stacks_blocks` table in a
+/// transaction. After all such blocks have been fetched, the function
+/// commits the written blocks. Things are done this way to ensure that
+/// updates to the `stacks_blocks` table are done atomically.
+pub async fn update_db_with_unknown_ancestors<S, D>(
     stacks: &S,
-    db: &D,
+    storage: &D,
     block_id: &StacksBlockHash,
-) -> Result<Vec<TenureBlockHeaders>, Error>
+) -> Result<RangeInclusive<StacksBlockHeight>, Error>
 where
     S: StacksInteract,
-    D: DbRead + Send + Sync,
+    D: Transactable + Send + Sync,
 {
-    let starting_tenure = stacks.get_tenure_headers(block_id).await?;
-    let mut headers: Vec<TenureBlockHeaders> = vec![starting_tenure];
+    let db = storage.begin_transaction().await?;
+    let mut tenure = stacks.get_tenure_headers(block_id).await?;
+    let end_height = tenure.end_height();
     let nakamoto_start_height = stacks.get_epoch_status().await?.nakamoto_start_height();
 
-    while let Some(tenure) = headers.last() {
+    loop {
+        db.write_stacks_block_headers(&tenure).await?;
         // We won't get anymore Nakamoto blocks before this point, so
         // time to stop.
         if tenure.anchor_block_height <= nakamoto_start_height {
@@ -1442,11 +1472,15 @@ where
                 return Err(error);
             }
         };
-        headers.push(tenure_headers);
+        tenure = tenure_headers;
     }
 
-    headers.reverse();
-    Ok(headers)
+    let start_height = tenure.start_height();
+
+    db.commit().await?;
+
+    tracing::debug!(%start_height, %end_height, "finished updating the stacks_blocks table");
+    Ok(RangeInclusive::new(start_height, end_height))
 }
 
 /// A deserializer for Clarity's [`Value`] type that deserializes a hex-encoded
@@ -1986,7 +2020,6 @@ mod tests {
     use crate::config::NetworkKind;
     use crate::keys::{PrivateKey, PublicKey};
     use crate::stacks::wallet::get_full_tx_size;
-    use crate::storage::DbWrite as _;
     use crate::storage::memory::Store;
 
     use assert_matches::assert_matches;
@@ -2002,7 +2035,6 @@ mod tests {
     use test_log::test;
 
     use super::*;
-    use std::collections::HashSet;
     use std::io::Read as _;
 
     fn generate_wallet(num_keys: u16, signatures_required: u16) -> SignerWallet {
@@ -2027,14 +2059,9 @@ mod tests {
         let client: ApiFallbackClient<StacksClient> = TryFrom::try_from(&settings).unwrap();
 
         let info = client.get_tenure_info().await.unwrap();
-        let tenures = fetch_unknown_ancestors(&client, &db, &info.tip_block_id).await;
+        let tenures = update_db_with_unknown_ancestors(&client, &db, &info.tip_block_id).await;
 
-        let blocks = tenures.unwrap();
-        let headers = blocks
-            .into_iter()
-            .flat_map(TenureBlockHeaders::into_iter)
-            .collect::<Vec<_>>();
-        db.write_stacks_block_headers(headers).await.unwrap();
+        assert!(tenures.is_ok());
 
         crate::testing::storage::drop_db(db).await;
     }
@@ -2080,23 +2107,28 @@ mod tests {
                 .is_err()
         );
 
-        let tenures = fetch_unknown_ancestors(&client, &db, &nakamoto_block_id).await;
+        let tenures = update_db_with_unknown_ancestors(&client, &db, &nakamoto_block_id).await;
 
-        let blocks = tenures.unwrap();
+        let block_height_range = tenures.unwrap();
 
-        let headers = blocks
-            .into_iter()
-            .flat_map(TenureBlockHeaders::into_iter)
-            .collect::<Vec<_>>();
+        let expected =
+            RangeInclusive::new(StacksBlockHeight::new(320), StacksBlockHeight::new(750));
+        assert_eq!(block_height_range, expected);
 
-        let blocks = headers
-            .iter()
-            .map(|b| *b.block_height)
-            .collect::<HashSet<_>>();
-        let expected = (320..=750).collect();
-        assert_eq!(blocks, expected);
+        let (min_block_height, max_block_height, count) = sqlx::query_as::<_, (i64, i64, i64)>(
+            r#"SELECT 
+                 MIN(block_height) as min_block_height
+               , MAX(block_height) as max_block_height
+               , COUNT(DISTINCT block_hash) as count
+             FROM sbtc_signer.stacks_blocks"#,
+        )
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
 
-        db.write_stacks_block_headers(headers).await.unwrap();
+        assert_eq!(count, max_block_height - min_block_height + 1);
+        assert_eq!(min_block_height, **expected.start() as i64);
+        assert_eq!(max_block_height, **expected.end() as i64);
 
         crate::testing::storage::drop_db(db).await;
     }
@@ -2941,10 +2973,9 @@ mod tests {
         let storage = Store::new_shared();
 
         let info = client.get_tenure_info().await.unwrap();
-        let blocks = fetch_unknown_ancestors(&client, &storage, &info.tenure_start_block_id)
+        update_db_with_unknown_ancestors(&client, &storage, &info.tenure_start_block_id)
             .await
             .unwrap();
-        assert!(!blocks.is_empty());
     }
 
     #[test_case("0x1A3B5C7D9E", 112665066910; "uppercase-112665066910")]
