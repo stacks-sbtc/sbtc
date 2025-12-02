@@ -174,20 +174,17 @@ impl DbWrite for SharedStore {
     }
 
     async fn write_stacks_block_headers(&self, headers: &TenureBlockHeaders) -> Result<(), Error> {
-        let block_iter = headers.clone().into_iter();
         let mut store = self.lock().await;
         store.version += 1;
 
-        headers.headers().iter().for_each(|header| {
+        headers.clone().into_iter().for_each(|header| {
             store
                 .bitcoin_anchor_to_stacks_blocks
                 .entry(headers.anchor_block_hash)
                 .or_default()
-                .push(header.block_id);
+                .push(header.block_hash);
+            store.stacks_blocks.insert(header.block_hash, header);
         });
-        store
-            .stacks_blocks
-            .extend(block_iter.map(|header| (header.block_hash, header)));
 
         Ok(())
     }
