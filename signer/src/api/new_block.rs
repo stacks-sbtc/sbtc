@@ -294,8 +294,6 @@ async fn handle_key_rotation(ctx: &impl Context, event: KeyRotationEvent) -> Res
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr as _;
-
     use super::*;
 
     use axum::body::Body;
@@ -342,10 +340,10 @@ mod tests {
     const ROTATE_KEYS_AND_INVALID_EVENT_WEBHOOK: &str =
         include_str!("../../tests/fixtures/rotate-keys-and-invalid-event.json");
 
-    #[test_case(COMPLETED_DEPOSIT_WEBHOOK, |db| !db.completed_deposit_events.contains_key(&OutPoint::from_str("ff4e5b94f52349b03e8a6da513329dacf7eb9c68759724fe5e8c10f6bce0e4aa:0").unwrap()); "completed-deposit")]
-    #[test_case(WITHDRAWAL_CREATE_WEBHOOK, |db| !db.withdrawal_requests.contains_key(&(2, StacksBlockId::from_hex("cd58e65589bd8facbddce59169e0a1a81c955268fe041108b3b1909a0986937e").unwrap().into())); "withdrawal-create")]
+    #[test_case(COMPLETED_DEPOSIT_WEBHOOK, |db| !db.completed_deposit_events.contains_key(&OutPoint::null()); "completed-deposit")]
+    #[test_case(WITHDRAWAL_CREATE_WEBHOOK, |db| !db.withdrawal_requests.contains_key(&(1, StacksBlockId::from_hex("75b02b9884ec41c05f2cfa6e20823328321518dd0b027e7b609b63d4d1ea7c78").unwrap().into())); "withdrawal-create")]
     #[test_case(WITHDRAWAL_ACCEPT_WEBHOOK, |db| !db.withdrawal_accept_events.contains_key(&1); "withdrawal-accept")]
-    #[test_case(WITHDRAWAL_REJECT_WEBHOOK, |db| !db.withdrawal_reject_events.contains_key(&3); "withdrawal-reject")]
+    #[test_case(WITHDRAWAL_REJECT_WEBHOOK, |db| !db.withdrawal_reject_events.contains_key(&1); "withdrawal-reject")]
     #[test_case(ROTATE_KEYS_WEBHOOK, |db| db.rotate_keys_transactions.is_empty(); "rotate-keys")]
     #[tokio::test]
     async fn test_events<F>(body_str: &str, table_is_empty: F)

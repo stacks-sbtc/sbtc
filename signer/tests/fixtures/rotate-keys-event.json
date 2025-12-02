@@ -1,17 +1,17 @@
 {
     "anchored_cost": {
-        "read_count": 17,
-        "read_length": 29856,
-        "runtime": 121639,
-        "write_count": 5,
-        "write_length": 241
+        "read_count": 20,
+        "read_length": 25282,
+        "runtime": 180360,
+        "write_count": 6,
+        "write_length": 266
     },
-    "block_hash": "0xfa6f834c0d1ad0fc13d15a0947ceba114358f8efed0316bc8a5bca13b6902f77",
-    "block_height": 39,
-    "block_time": 1764619814,
-    "burn_block_hash": "0x338300b9a0ec2da796b7ddf551c4b6417bffd91fe2a378ad430a076c99665a62",
-    "burn_block_height": 235,
-    "burn_block_time": 1764619808,
+    "block_hash": "0x628838c7167591943eb6eeb88949b13c0ae6e7a323de6f4217101bd5028ebcca",
+    "block_height": 47,
+    "block_time": 1730980672,
+    "burn_block_hash": "0x094f2504beaff25578ce059dc7a780c205f901f889483ab0b350bfebc1bc48b5",
+    "burn_block_height": 237,
+    "burn_block_time": 1730980669,
     "confirmed_microblocks_cost": {
         "read_count": 0,
         "read_length": 0,
@@ -19,14 +19,13 @@
         "write_count": 0,
         "write_length": 0
     },
-    "consensus_hash": "0xeb2359c7fa0d3ad12591d174b118a26c6cff0fdc",
     "cycle_number": null,
     "events": [
         {
             "committed": true,
             "contract_event": {
                 "contract_identifier": "SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS.sbtc-registry",
-                "raw_value": "0x0c000000050b6e65772d616464726573730515f08277fe51877c890918bb778e0192309b307c39146e65772d6167677265676174652d7075626b65790200000021032d5bb880054bd1879ad4b6f507cb821bbc3e1f4ea2eaae73d35d71ca0683a46d086e65772d6b6579730b00000003020000002102007311430123d4cad97f4f7e86e023b28143130a18099ecf094d36fef0f6135c0200000021031a4d9f4903da97498945a4e01a5023a1d53bc96ad670bfe03adf8a06c52e63800200000021035249137286c077ccee65ecc43e724b9b9e5a588e3d7f51e3b62f9624c2a49e46176e65772d7369676e61747572652d7468726573686f6c64010000000000000000000000000000000205746f7069630d0000000c6b65792d726f746174696f6e",
+                "raw_value": "0x0c000000050b6e65772d616464726573730515f08277fe51877c890918bb778e0192309b307c39146e65772d6167677265676174652d7075626b6579020000002102e77bbc2ff7d6a0bb53d0a736a1a95032c6251b9e54a2187d7fc9405ce330e943086e65772d6b6579730b00000003020000002102007311430123d4cad97f4f7e86e023b28143130a18099ecf094d36fef0f6135c0200000021031a4d9f4903da97498945a4e01a5023a1d53bc96ad670bfe03adf8a06c52e63800200000021035249137286c077ccee65ecc43e724b9b9e5a588e3d7f51e3b62f9624c2a49e46176e65772d7369676e61747572652d7468726573686f6c64010000000000000000000000000000000205746f7069630d0000000c6b65792d726f746174696f6e",
                 "topic": "print",
                 "value": {
                     "Tuple": {
@@ -64,39 +63,39 @@
                                 "Sequence": {
                                     "Buffer": {
                                         "data": [
-                                            3,
-                                            45,
-                                            91,
-                                            184,
-                                            128,
-                                            5,
-                                            75,
-                                            209,
-                                            135,
-                                            154,
-                                            212,
-                                            182,
-                                            245,
-                                            7,
-                                            203,
-                                            130,
-                                            27,
+                                            2,
+                                            231,
+                                            123,
                                             188,
-                                            62,
-                                            31,
-                                            78,
+                                            47,
+                                            247,
+                                            214,
+                                            160,
+                                            187,
+                                            83,
+                                            208,
+                                            167,
+                                            54,
+                                            161,
+                                            169,
+                                            80,
+                                            50,
+                                            198,
+                                            37,
+                                            27,
+                                            158,
+                                            84,
                                             162,
-                                            234,
-                                            174,
-                                            115,
-                                            211,
-                                            93,
-                                            113,
-                                            202,
-                                            6,
-                                            131,
-                                            164,
-                                            109
+                                            24,
+                                            125,
+                                            127,
+                                            201,
+                                            64,
+                                            92,
+                                            227,
+                                            48,
+                                            233,
+                                            67
                                         ]
                                     }
                                 }
@@ -300,19 +299,19 @@
                 }
             },
             "event_index": 0,
-            "txid": "0x9fdd1ff724cf2408c0ec5ab296e06d017438a426311548ffaee390bd47804f87",
+            "txid": "0xa9a493ccd6186b61f72fff3a106522ea008bb95fc415c70a1e9e2fc299b09eac",
             "type": "contract_event"
         }
     ],
-    "index_block_hash": "0xe1cf3e43cd1ca84862524c2dd5aca4b5a6b9a31840c322a1780e6e4f7ff8aa3c",
+    "index_block_hash": "0x7afdfc0be0557dae593f7c7fd6f0df8cd344ee8b579110062d1f4e3946aa41eb",
     "matured_miner_rewards": [],
-    "miner_signature": "0x00d21559ad9996bc21526e4f6ec608a91fc768b92294e948b5139d30e86bedf3117b21c82fd09b973c8737f1e05077611e284533dd8f8ef5e8bee83bf9c5a092c7",
-    "miner_txid": "0x773b3e9ab77e29f5167341bd0e93ba9bb2af997b9730a0d067c790893079cc93",
-    "parent_block_hash": "0x71179d2f3d5a5b2871a66afe4f00e4f8c7676242529d9907e9bcef5bef4700d6",
-    "parent_burn_block_hash": "0x338300b9a0ec2da796b7ddf551c4b6417bffd91fe2a378ad430a076c99665a62",
-    "parent_burn_block_height": 235,
-    "parent_burn_block_timestamp": 1764619808,
-    "parent_index_block_hash": "0x6d8f678aa95fed6379df497f89adce9765b9f2533cd29a3b4ca25d68fadff837",
+    "miner_signature": "0x00f0d0eb6937c08a66334237b2458bd19d0ae0ad70c08f66bf2be586c22034a1954b87e97d732bf9c5782a8e3a48aa177a24cf006deac06784734bd2a7742cabe4",
+    "miner_txid": "0x08b60476a8549ef7b04a9210b2ece88207caefcd71654be7ed2a97218f05022b",
+    "parent_block_hash": "0xee15ba694fad86493b7ac36bbed2b0051098467bb6514e8f415e8f0c9dcd0855",
+    "parent_burn_block_hash": "0x094f2504beaff25578ce059dc7a780c205f901f889483ab0b350bfebc1bc48b5",
+    "parent_burn_block_height": 237,
+    "parent_burn_block_timestamp": 1730980669,
+    "parent_index_block_hash": "0xb586080b47665ca1e64fb390c36286fc7d3b4789f0ab1e399f1ea6bfe8b87c16",
     "parent_microblock": "0x0000000000000000000000000000000000000000000000000000000000000000",
     "parent_microblock_sequence": 0,
     "pox_v1_unlock_height": 205,
@@ -321,35 +320,34 @@
     "reward_set": null,
     "signer_bitvec": "000800000001ff",
     "signer_signature": [
-        "01429ac475206d745c37421789ef6b9bbb5e4fc1fe34c9fe6daa598ede8e6bcf333ef8c2d7b03a463f3536713ef3eb6c0ba0844d2718df003f349a3b48a127f591",
-        "0148714003d7eebf81e3c16033323c2f4723eb199a9ceabeaebf6a45f8782540443fcbc1ee689d2dca8c04bb6c4921219c7c487d0d0ba2ab4bf04307b6c1a50d79"
+        "0065f05966e576587a63464a3cd185d028c7ed8474b74791e2b74b81a6fe8245b5056f4b628ea8ae24b88f6de6e981ed761220b57bd5f33cb36e05f28d60107e12",
+        "002fd875c9831056c325d13ab5805c61da612dcaaede0ac0a1e1952fb3064d0e26683e3b17163af2eb9b3379b1920e08fd6544a667202b806adcb8388a0d5a645b"
     ],
-    "signer_signature_hash": "0xfa6f834c0d1ad0fc13d15a0947ceba114358f8efed0316bc8a5bca13b6902f77",
-    "tenure_height": 31,
+    "signer_signature_hash": "0x628838c7167591943eb6eeb88949b13c0ae6e7a323de6f4217101bd5028ebcca",
+    "tenure_height": 32,
     "transactions": [
         {
             "burnchain_op": null,
-            "contract_interface": null,
+            "contract_abi": null,
             "execution_cost": {
-                "read_count": 17,
-                "read_length": 29856,
-                "runtime": 121639,
-                "write_count": 5,
-                "write_length": 241
+                "read_count": 20,
+                "read_length": 25282,
+                "runtime": 180360,
+                "write_count": 6,
+                "write_length": 266
             },
             "microblock_hash": null,
             "microblock_parent_hash": null,
             "microblock_sequence": null,
             "raw_result": "0x0703",
-            "raw_tx": "0x80800000000405f08277fe51877c890918bb778e0192309b307c3900000000000000050000000000004a580000000302019303a4358dcfc5c1303cd528b76800efffee7b9dfdca83ae4244230cdce7e9521dd2e58145bce523cadb40fff1f44a4e06327311575516afd13eb6dd481de03600031a4d9f4903da97498945a4e01a5023a1d53bc96ad670bfe03adf8a06c52e63800200dd187e4e02545948a56984986cb8ea3e365456cc2cb1ed1f14cf98dac06142640f1b0dc531da185fe66c23e7cbe83b5af3d2445389915a5a1ed2f2bd42662b9500020301000000000215f08277fe51877c890918bb778e0192309b307c3916736274632d626f6f7473747261702d7369676e65727313726f746174652d6b6579732d77726170706572000000030b00000003020000002102007311430123d4cad97f4f7e86e023b28143130a18099ecf094d36fef0f6135c0200000021031a4d9f4903da97498945a4e01a5023a1d53bc96ad670bfe03adf8a06c52e63800200000021035249137286c077ccee65ecc43e724b9b9e5a588e3d7f51e3b62f9624c2a49e460200000021032d5bb880054bd1879ad4b6f507cb821bbc3e1f4ea2eaae73d35d71ca0683a46d0100000000000000000000000000000002",
+            "raw_tx": "0x80800000000405f08277fe51877c890918bb778e0192309b307c3900000000000000050000000000002ccf000000030002007311430123d4cad97f4f7e86e023b28143130a18099ecf094d36fef0f6135c0200973520ac9d2d5db93bddcb789b7b17e6020382cd3b97e6247994516f88cfff5f4d2d8d584d50443e19ef5ae0c9313956b33d4d6be701321bc40425aea449ccf20200d488848e9bdff4c47564ba8e91fc5edb09a8860d9412361d03e9c0ad1049f0600858b19f7caca776b37bd57cc3968e2a9e9d932e0cb501f3a9932ca285cfaf4600020301000000000215f08277fe51877c890918bb778e0192309b307c3916736274632d626f6f7473747261702d7369676e65727313726f746174652d6b6579732d77726170706572000000030b00000003020000002102007311430123d4cad97f4f7e86e023b28143130a18099ecf094d36fef0f6135c0200000021031a4d9f4903da97498945a4e01a5023a1d53bc96ad670bfe03adf8a06c52e63800200000021035249137286c077ccee65ecc43e724b9b9e5a588e3d7f51e3b62f9624c2a49e46020000002102e77bbc2ff7d6a0bb53d0a736a1a95032c6251b9e54a2187d7fc9405ce330e9430100000000000000000000000000000002",
             "status": "success",
             "tx_index": 0,
-            "txid": "0x9fdd1ff724cf2408c0ec5ab296e06d017438a426311548ffaee390bd47804f87",
-            "vm_error": null
+            "txid": "0xa9a493ccd6186b61f72fff3a106522ea008bb95fc415c70a1e9e2fc299b09eac"
         },
         {
             "burnchain_op": null,
-            "contract_interface": null,
+            "contract_abi": null,
             "execution_cost": {
                 "read_count": 0,
                 "read_length": 0,
@@ -361,11 +359,10 @@
             "microblock_parent_hash": null,
             "microblock_sequence": null,
             "raw_result": "0x0703",
-            "raw_tx": "0x8080000000040079596b2995032f42672a1610356aa2fe09886a6d0000000000000002000000000000012c0001c7ab433c92bd9f9bde8bb83e439284cbc77328cd843c7d5821a33f6969eb880718491cc98522a2cdcb31bd710db0c63e0221c45030d0ccb0f4dc3123c7310baf03020000000000051a68de2dbb6c14aaba2900031876ea3771599edd3a00000000000003e800000000000000000000000000000000000000000000000000000000000000000000",
+            "raw_tx": "0x8080000000040068de2dbb6c14aaba2900031876ea3771599edd3a0000000000000004000000000000012c0001cf853ab98e69ca34c8386bf85782871c301ea98a5a174fd97d8fff2aa6a1804404b56e23f7c38e4ed80067f4d9665bc6563d20fa7a321bfcf0a9ca726bab51e303020000000000051a7ce8e31e9120f4b3cb7bea0fed9de8556cadceb900000000000003e800000000000000000000000000000000000000000000000000000000000000000000",
             "status": "success",
             "tx_index": 1,
-            "txid": "0x779ed80749fca8dd53feefbbc5bb1fcb394a6404975ed61f681c22f0df05f58e",
-            "vm_error": null
+            "txid": "0xe77dba0e1ba5f08a400a530d01f499885d5bb7e782a91174be6ac4494771044f"
         }
     ]
 }
