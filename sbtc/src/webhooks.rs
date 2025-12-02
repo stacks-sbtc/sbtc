@@ -28,10 +28,47 @@ use stacks_common::codec::StacksMessageCodec;
 use stacks_common::types::chainstate::BlockHeaderHash;
 use stacks_common::types::chainstate::BurnchainHeaderHash;
 use stacks_common::types::chainstate::StacksBlockId;
-use stacks_common::util::HexDeser;
 
 use crate::error::Error;
 use crate::events::StacksTxid;
+
+/// A trait for deserializing hex encoded strings into the type.
+pub trait DeserializeHex: Sized {
+    /// Try to deserialize the given string into the type.
+    fn try_from_hex(hex: &str) -> Result<Self, Error>;
+}
+
+impl DeserializeHex for StacksTxid {
+    fn try_from_hex(hex: &str) -> Result<Self, Error> {
+        <[u8; 32]>::from_hex(hex)
+            .map(Self)
+            .map_err(Error::DecodeHexTxid)
+    }
+}
+
+impl DeserializeHex for BlockHeaderHash {
+    fn try_from_hex(hex: &str) -> Result<Self, Error> {
+        <[u8; 32]>::from_hex(hex)
+            .map(Self)
+            .map_err(Error::DecodeHexTxid)
+    }
+}
+
+impl DeserializeHex for BurnchainHeaderHash {
+    fn try_from_hex(hex: &str) -> Result<Self, Error> {
+        <[u8; 32]>::from_hex(hex)
+            .map(Self)
+            .map_err(Error::DecodeHexTxid)
+    }
+}
+
+impl DeserializeHex for StacksBlockId {
+    fn try_from_hex(hex: &str) -> Result<Self, Error> {
+        <[u8; 32]>::from_hex(hex)
+            .map(Self)
+            .map_err(Error::DecodeHexTxid)
+    }
+}
 
 /// This struct represents the body of POST /new_block events from a stacks
 /// node.
@@ -90,13 +127,6 @@ impl StacksTxid {
     }
 }
 
-impl<'de> serde::Deserialize<'de> for StacksTxid {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<StacksTxid, D::Error> {
-        let inst_str = String::deserialize(d)?;
-        StacksTxid::from_hex(&inst_str).map_err(serde::de::Error::custom)
-    }
-}
-
 /// An event that was emitted during the execution of the transaction. It
 /// is defined in [^1].
 ///
@@ -104,6 +134,7 @@ impl<'de> serde::Deserialize<'de> for StacksTxid {
 #[derive(Debug, Deserialize)]
 pub struct TransactionEvent {
     /// The id of the transaction that generated the event.
+    #[serde(deserialize_with = "deserialize_hex")]
     pub txid: StacksTxid,
     /// This corresponds to the negation of the value in the
     /// [`StacksTransactionReceipt.post_condition_aborted`] field.
@@ -147,11 +178,11 @@ pub struct SmartContractEvent {
 pub fn deserialize_hex<'de, D, T>(deserializer: D) -> Result<T, D::Error>
 where
     D: serde::Deserializer<'de>,
-    T: HexDeser,
+    T: DeserializeHex,
 {
     let hex_str = <String>::deserialize(deserializer)?;
     let hex_str = hex_str.trim_start_matches("0x");
-    <T as HexDeser>::try_from_hex(hex_str).map_err(serde::de::Error::custom)
+    <T as DeserializeHex>::try_from_hex(hex_str).map_err(serde::de::Error::custom)
 }
 
 /// This is for deserializing fields in webhooks that were effectively
