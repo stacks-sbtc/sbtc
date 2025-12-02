@@ -20,8 +20,7 @@
 //! Unfortunately, sometimes the same type is serialized using two
 //! different methods for two different parts of the same payload.
 
-use blockstack_lib::burnchains::Txid;
-use blockstack_lib::chainstate::stacks::StacksTransaction;
+use bitcoin::hex::FromHex as _;
 use clarity::vm::types::QualifiedContractIdentifier;
 use clarity::vm::types::Value as ClarityValue;
 use serde::Deserialize;
@@ -32,6 +31,7 @@ use stacks_common::types::chainstate::StacksBlockId;
 use stacks_common::util::HexDeser;
 
 use crate::error::Error;
+use crate::events::StacksTxid;
 
 /// This struct represents the body of POST /new_block events from a stacks
 /// node.
@@ -65,8 +65,6 @@ pub struct NewBlockEvent {
     /// The events associated with transactions within the block. These are
     /// only the events that we have configured our stacks node to send.
     pub events: Vec<TransactionEvent>,
-    /// The transactions and their results that included within the block.
-    pub transactions: Vec<TransactionReceipt>,
     /// The block hash of the parent Stacks block in the blockchain.
     #[serde(deserialize_with = "deserialize_hex")]
     pub parent_block_hash: BlockHeaderHash,
@@ -83,56 +81,20 @@ pub struct NewBlockEvent {
     pub parent_burn_block_timestamp: u64,
 }
 
-/// This matches the json value that is defined in stacks-core[^1]. It
-/// contains the raw transaction and the result of the transaction.
-///
-/// [^1]: <!-- https://github.com/stacks-network/stacks-core/blob/09c4b066e25104be8b066e8f7530ff0c6df4ccd5/testnet/stacks-node/src/event_dispatcher.rs#L499-L511 -->
-#[derive(Debug, Deserialize)]
-pub struct TransactionReceipt {
-    /// The id of this transaction .
-    #[serde(deserialize_with = "deserialize_webhook_codec")]
-    pub txid: Txid,
-    /// Can drop, just a sequence
-    pub tx_index: u32,
-    /// Probably should be an enum
-    pub status: String,
-    /// These are probably bytes as hex
-    #[serde(rename = "raw_result", deserialize_with = "deserialize_webhook_codec")]
-    pub result: ClarityValue,
-    /// This is the raw transaction and is always sent. But, this field is
-    /// overloaded. It is a burn chain "operation" whenever this field
-    /// value is "0x00" and is a regular stacks transaction otherwise. We
-    /// replace "0x00" with [`None`] here.
-    #[serde(rename = "raw_tx", deserialize_with = "deserialize_tx")]
-    pub tx: Option<StacksTransaction>,
+impl StacksTxid {
+    /// Create a StacksTxid from a hex string.
+    pub fn from_hex(hex: &str) -> Result<Self, Error> {
+        <[u8; 32]>::from_hex(hex)
+            .map(Self)
+            .map_err(Error::DecodeHexTxid)
+    }
 }
 
-/// The type of event that occurred within the transaction.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TransactionEventType {
-    /// A smart contract event
-    ContractEvent,
-    /// A STX transfer event
-    StxTransferEvent,
-    /// An STX mint event
-    StxMintEvent,
-    /// An STX burn event
-    StxBurnEvent,
-    /// An STX lock event
-    StxLockEvent,
-    /// A transfer event for a NFT
-    NftTransferEvent,
-    /// A non-fungible-token mint event
-    NftMintEvent,
-    /// A non-fungible-token burn event
-    NftBurnEvent,
-    /// A fungible-token transfer event
-    FtTransferEvent,
-    /// A fungible-token mint event
-    FtMintEvent,
-    /// A fungible-token burn event
-    FtBurnEvent,
+impl<'de> serde::Deserialize<'de> for StacksTxid {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<StacksTxid, D::Error> {
+        let inst_str = String::deserialize(d)?;
+        StacksTxid::from_hex(&inst_str).map_err(serde::de::Error::custom)
+    }
 }
 
 /// An event that was emitted during the execution of the transaction. It
@@ -142,17 +104,10 @@ pub enum TransactionEventType {
 #[derive(Debug, Deserialize)]
 pub struct TransactionEvent {
     /// The id of the transaction that generated the event.
-    #[serde(deserialize_with = "deserialize_webhook_codec")]
-    pub txid: Txid,
-    /// can drop, just a sequence
-    pub event_index: u64,
+    pub txid: StacksTxid,
     /// This corresponds to the negation of the value in the
     /// [`StacksTransactionReceipt.post_condition_aborted`] field.
     pub committed: bool,
-    /// The type of event that this is. We only care about contract events,
-    /// so we only have the corresponding fields for it.
-    #[serde(rename = "type")]
-    pub event_type: TransactionEventType,
     /// The actual event
     pub contract_event: Option<SmartContractEvent>,
 }
@@ -217,28 +172,6 @@ where
     let hex_str = <String>::deserialize(deserializer)?;
     let hex_str = hex_str.trim_start_matches("0x");
     deserialize_codec(hex_str).map_err(serde::de::Error::custom)
-}
-
-/// This is for deserializing stacks transactions in the raw_tx field.
-///
-/// # Notes
-///
-/// This returns [`Ok(None)`] whenever the "raw_tx" is "0x00", which
-/// corresponds to a burn-chain operation.
-pub fn deserialize_tx<'de, D>(deserializer: D) -> Result<Option<StacksTransaction>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let hex_str = <String>::deserialize(deserializer)?;
-    let hex_str = hex_str.trim_start_matches("0x");
-
-    if hex_str == "00" {
-        return Ok(None);
-    }
-
-    deserialize_codec(hex_str)
-        .map_err(serde::de::Error::custom)
-        .map(Some)
 }
 
 /// This if for deserializing hex encoded strings where the raw bytes were generated using
@@ -349,7 +282,7 @@ mod tests {
             "e012ca1ad766b2abe03c1cb661930af72fd29f6d197a7d8e4280b54bf2883dec",
         )
         .unwrap();
-        let expected_txid = deserialize_codec::<Txid>(
+        let expected_txid = StacksTxid::from_hex(
             "a17854a5c99a99940fbd42df6d964c5ef3afab6b6744f1c4be5912cf90ecd1f9",
         )
         .unwrap();
@@ -357,6 +290,6 @@ mod tests {
         // We test some fields to make sure that everything is okay.
         assert_eq!(event.block_height, 449);
         assert_eq!(event.block_hash, expected_block_hash);
-        assert_eq!(event.transactions.first().unwrap().txid, expected_txid);
+        assert_eq!(event.events.first().unwrap().txid, expected_txid);
     }
 }
