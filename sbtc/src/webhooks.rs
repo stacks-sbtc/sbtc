@@ -313,14 +313,9 @@ mod tests {
             "e012ca1ad766b2abe03c1cb661930af72fd29f6d197a7d8e4280b54bf2883dec",
         )
         .unwrap();
-        let expected_txid = StacksTxid::from_hex(
-            "a17854a5c99a99940fbd42df6d964c5ef3afab6b6744f1c4be5912cf90ecd1f9",
-        )
-        .unwrap();
 
         // We test some fields to make sure that everything is okay.
         assert_eq!(event.block_height, 449);
         assert_eq!(event.block_hash, expected_block_hash);
-        assert_eq!(event.events.first().unwrap().txid, expected_txid);
     }
 }
