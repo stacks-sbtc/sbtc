@@ -23,9 +23,9 @@ sbtc = { path = "./sbtc" }
 testing-emily-client = { path = "./.generated-sources/emily/client/rust/testing" }
 
 # Stacks-Core Dependencies
-clarity = { git = "https://github.com/stacks-network/stacks-core", rev = "bd9ee6310516b31ef4ecce07e42e73ed0f774ada", default-features = false }
-stacks-common = { git = "https://github.com/stacks-network/stacks-core", rev = "bd9ee6310516b31ef4ecce07e42e73ed0f774ada", default-features = false }
-stackslib = { git = "https://github.com/stacks-network/stacks-core", rev = "bd9ee6310516b31ef4ecce07e42e73ed0f774ada", default-features = false }
+clarity = { git = "https://github.com/stacks-network/stacks-core", rev = "1cba695b09690790b1220b0f5d149f70f78ddea5", default-features = false }
+stacks-common = { git = "https://github.com/stacks-network/stacks-core", rev = "1cba695b09690790b1220b0f5d149f70f78ddea5", default-features = false }
+stackslib = { git = "https://github.com/stacks-network/stacks-core", rev = "1cba695b09690790b1220b0f5d149f70f78ddea5", default-features = false }
 
 # Trust Machines Dependencies
 wsts = { git = "https://github.com/stacks-sbtc/wsts", rev = "11e2316aa0edf996f8e8f9ccbbbfd4bd2975ed1d" }
@@ -104,7 +104,8 @@ test-case = { version = "3.3.1", default-features = false }
 test-log = { version = "0.2.17", default-features = false, features = ["trace"] }
 toml_edit = { version = "0.22.22", default-features = false, features = ["display"] }
 tower = { version = "0.5.2", default-features = false, features = ["util"] }
-reqwest_codegen = { package = "reqwest", version = "0.12.4", default-features = false, features = ["json", "multipart"] }
+# This matches the generated openapi client version to customize the http client in tests
+reqwest_012 = { package = "reqwest", version = "0.12.4", default-features = false, features = ["json", "multipart"] }
 
 [workspace.lints.rust]
 missing_docs = "deny"
