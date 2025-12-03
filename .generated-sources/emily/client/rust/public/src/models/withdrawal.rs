@@ -32,6 +32,8 @@ pub struct Withdrawal {
     pub last_update_height: u64,
     #[serde(rename = "parameters")]
     pub parameters: Box<models::WithdrawalParameters>,
+    #[serde(rename = "preFulfillment")]
+    pub pre_fulfillment: Box<models::PreFulfillment>,
     /// The recipient's hex-encoded Bitcoin scriptPubKey.
     #[serde(rename = "recipient")]
     pub recipient: String,
@@ -64,6 +66,7 @@ impl Withdrawal {
         last_update_block_hash: String,
         last_update_height: u64,
         parameters: models::WithdrawalParameters,
+        pre_fulfillment: models::PreFulfillment,
         recipient: String,
         request_id: u64,
         sender: String,
@@ -79,6 +82,7 @@ impl Withdrawal {
             last_update_block_hash,
             last_update_height,
             parameters: Box::new(parameters),
+            pre_fulfillment: Box::new(pre_fulfillment),
             recipient,
             request_id,
             sender,

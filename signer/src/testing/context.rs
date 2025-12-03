@@ -25,6 +25,7 @@ use crate::stacks::api::StacksEpochStatus;
 use crate::stacks::api::TenureBlockHeaders;
 use crate::stacks::wallet::SignerWallet;
 use crate::storage::Transactable;
+use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::ConsensusHash;
 use crate::storage::model::{BitcoinTxId, StacksBlockHash};
 use crate::{
@@ -606,11 +607,12 @@ impl EmilyInteract for WrappedMockEmilyInteract {
     async fn accept_withdrawals<'a>(
         &'a self,
         transaction: &'a UnsignedTransaction<'a>,
+        expected_height: BitcoinBlockHeight,
     ) -> Result<emily_client::models::UpdateWithdrawalsResponse, Error> {
         self.inner
             .lock()
             .await
-            .accept_withdrawals(transaction)
+            .accept_withdrawals(transaction, expected_height)
             .await
     }
 

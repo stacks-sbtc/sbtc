@@ -4410,7 +4410,7 @@ async fn test_conservative_initial_sbtc_limits() {
             });
 
             // We don't care about this
-            client.expect_accept_withdrawals().returning(|_| {
+            client.expect_accept_withdrawals().returning(|_, _| {
                 Box::pin(std::future::ready(Err(Error::InvalidStacksResponse(
                     "dummy",
                 ))))

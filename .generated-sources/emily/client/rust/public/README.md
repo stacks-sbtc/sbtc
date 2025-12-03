@@ -77,6 +77,7 @@ Class | Method | HTTP request | Description
  - [GetWithdrawalsResponse](docs/GetWithdrawalsResponse.md)
  - [HealthData](docs/HealthData.md)
  - [Limits](docs/Limits.md)
+ - [PreFulfillment](docs/PreFulfillment.md)
  - [UpdateDepositsRequestBody](docs/UpdateDepositsRequestBody.md)
  - [UpdateDepositsResponse](docs/UpdateDepositsResponse.md)
  - [UpdateWithdrawalsRequestBody](docs/UpdateWithdrawalsRequestBody.md)

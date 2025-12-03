@@ -5,7 +5,7 @@ use warp::reply::{Reply, json, with_status};
 use crate::api::models::common::WithdrawalStatus;
 use crate::api::models::common::requests::BasicPaginationQuery;
 use crate::api::models::withdrawal::responses::WithdrawalWithStatus;
-use crate::api::models::withdrawal::{Withdrawal, WithdrawalInfo};
+use crate::api::models::withdrawal::{PreFulfillment, Withdrawal, WithdrawalInfo};
 use crate::api::models::withdrawal::{
     requests::{CreateWithdrawalRequestBody, GetWithdrawalsQuery, UpdateWithdrawalsRequestBody},
     responses::{GetWithdrawalsResponse, UpdateWithdrawalsResponse},
@@ -279,6 +279,10 @@ pub async fn create_withdrawal(
                 message: "Just received withdrawal".to_string(),
                 stacks_block_hash: stacks_block_hash.clone(),
                 stacks_block_height,
+                pre_fulfillment: PreFulfillment {
+                    maybe_expected_height: None,
+                    maybe_expected_txid: None,
+                },
             }],
             status,
             last_update_block_hash: stacks_block_hash,
