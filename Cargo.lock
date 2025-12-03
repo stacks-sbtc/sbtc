@@ -5314,7 +5314,6 @@ dependencies = [
  "serde",
  "serde_json",
  "stacks-common",
- "stackslib",
  "test-case",
  "thiserror 2.0.11",
 ]
