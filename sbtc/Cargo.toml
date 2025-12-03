@@ -27,6 +27,7 @@ bitcoincore-rpc-json = { workspace = true, optional = true }
 hex = { workspace = true, optional = true }
 
 [dev-dependencies]
+hex = { workspace = true }
 assert_matches.workspace = true
 bitcoincore-rpc.workspace = true
 bitcoincore-rpc-json.workspace = true
