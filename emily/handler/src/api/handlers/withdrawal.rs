@@ -39,7 +39,7 @@ use warp::http::StatusCode;
     )
 )]
 #[instrument(skip(context))]
-pub async fn get_withdrawal(context: EmilyContext, request_id: u64) -> impl warp::reply::Reply {
+pub async fn get_withdrawal(request_id: u64, context: EmilyContext) -> impl warp::reply::Reply {
     // Internal handler so `?` can be used correctly while still returning a reply.
     async fn handler(
         context: EmilyContext,
@@ -80,8 +80,8 @@ pub async fn get_withdrawal(context: EmilyContext, request_id: u64) -> impl warp
 )]
 #[instrument(skip(context))]
 pub async fn get_withdrawals(
-    context: EmilyContext,
     query: GetWithdrawalsQuery,
+    context: EmilyContext,
 ) -> impl warp::reply::Reply {
     // Internal handler so `?` can be used correctly while still returning a reply.
     async fn handler(
@@ -131,9 +131,9 @@ pub async fn get_withdrawals(
 )]
 #[instrument(skip(context))]
 pub async fn get_withdrawals_for_recipient(
-    context: EmilyContext,
     recipient: String,
     query: BasicPaginationQuery,
+    context: EmilyContext,
 ) -> impl warp::reply::Reply {
     debug!("in get_withdrawals_for_recipient: {recipient}");
     // Internal handler so `?` can be used correctly while still returning a reply.
@@ -184,9 +184,9 @@ pub async fn get_withdrawals_for_recipient(
 )]
 #[instrument(skip(context))]
 pub async fn get_withdrawals_for_sender(
-    context: EmilyContext,
     sender: String,
     query: BasicPaginationQuery,
+    context: EmilyContext,
 ) -> impl warp::reply::Reply {
     debug!("in get_withdrawals_for_sender: {sender}");
     // Internal handler so `?` can be used correctly while still returning a reply.
@@ -234,8 +234,8 @@ pub async fn get_withdrawals_for_sender(
 )]
 #[instrument(skip(context))]
 pub async fn create_withdrawal(
-    context: EmilyContext,
     body: CreateWithdrawalRequestBody,
+    context: EmilyContext,
 ) -> impl warp::reply::Reply {
     // Internal handler so `?` can be used correctly while still returning a reply.
     async fn handler(
@@ -319,8 +319,8 @@ pub async fn create_withdrawal(
 )]
 #[instrument(skip(context))]
 pub async fn update_withdrawals_signer(
-    context: EmilyContext,
     body: UpdateWithdrawalsRequestBody,
+    context: EmilyContext,
 ) -> impl warp::reply::Reply {
     tracing::debug!("in update withdrawals");
     // Internal handler so `?` can be used correctly while still returning a reply.
@@ -363,8 +363,8 @@ pub async fn update_withdrawals_signer(
 )]
 #[instrument(skip(context))]
 pub async fn update_withdrawals_sidecar(
-    context: EmilyContext,
     body: UpdateWithdrawalsRequestBody,
+    context: EmilyContext,
 ) -> impl warp::reply::Reply {
     tracing::debug!("in update withdrawals");
     // Internal handler so `?` can be used correctly while still returning a reply.

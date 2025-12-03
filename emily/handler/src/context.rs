@@ -150,7 +150,7 @@ impl EmilyContext {
         })
     }
     /// Create a local testing instance.
-    pub async fn local_instance(dynamodb_endpoint: &str) -> Result<Self, Error> {
+    pub async fn local_instance(dynamodb_endpoint: &str, skip_tables: bool) -> Result<Self, Error> {
         use std::collections::HashMap;
 
         // Get config that always points to the dynamodb table directly
@@ -162,25 +162,32 @@ impl EmilyContext {
             .build();
         let dynamodb_client = Client::new(&sdk_config);
 
-        // Get the names of the existing tables so we can populate from them.
-        let table_names = dynamodb_client
-            .list_tables()
-            // Get at most 20 table names - there should be 3...
-            .limit(20)
-            .send()
-            .await
-            .expect("Failed setting up settings from table names")
-            .table_names
-            .unwrap_or_default();
-
-        // Attempt to get all the tables by searching the output of the
-        // list tables operation.
-        let mut table_name_map: HashMap<&str, String> = HashMap::new();
         let tables_to_find: Vec<&str> = vec!["Deposit", "Chainstate", "Withdrawal", "Limit"];
-        for name in table_names {
-            for table_to_find in &tables_to_find {
-                if name.contains(table_to_find) {
-                    table_name_map.insert(table_to_find, name.clone());
+        let mut table_name_map: HashMap<&str, String> = HashMap::new();
+
+        if skip_tables {
+            for name in tables_to_find {
+                table_name_map.insert(name, format!("missing-table-{name}"));
+            }
+        } else {
+            // Get the names of the existing tables so we can populate from them.
+            let table_names = dynamodb_client
+                .list_tables()
+                // Get at most 20 table names - there should be 3...
+                .limit(20)
+                .send()
+                .await
+                .expect("Failed setting up settings from table names")
+                .table_names
+                .unwrap_or_default();
+
+            // Attempt to get all the tables by searching the output of the
+            // list tables operation.
+            for name in table_names {
+                for table_to_find in &tables_to_find {
+                    if name.contains(table_to_find) {
+                        table_name_map.insert(table_to_find, name.clone());
+                    }
                 }
             }
         }

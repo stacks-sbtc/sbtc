@@ -1,10 +1,15 @@
 //! Route definitions for the Emily API.
 
+#[cfg(feature = "testing")]
+use std::convert::Infallible;
+
 use crate::context::EmilyContext;
 
 use super::handlers;
 use tracing::debug;
 use warp::Filter;
+#[cfg(feature = "testing")]
+use warp::http::HeaderMap;
 
 /// Chainstate routes.
 mod chainstate;
@@ -42,6 +47,8 @@ where
 pub fn routes(
     context: EmilyContext,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    let context = with_context(context);
+
     // `.boxed()` erases the deeply nested filter type from multiple `.or()` calls,
     // making the return type manageable and preventing compilation errors and runtime stack overflows.
     health::routes(context.clone())
@@ -69,6 +76,8 @@ pub fn routes(
 pub fn routes(
     context: EmilyContext,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    let context = warp::any().map(move || context.clone());
+
     health::routes(context.clone())
         .or(new_block::routes(context.clone()))
         .boxed()
@@ -118,4 +127,39 @@ fn verbose_not_found_route()
                 warp::http::StatusCode::NOT_FOUND,
             )
         })
+}
+
+/// A Filter to dynamically change the context when running tests
+#[cfg(feature = "testing")]
+fn with_context(
+    context: EmilyContext,
+) -> impl Filter<Extract = (EmilyContext,), Error = Infallible> + Clone {
+    warp::header::headers_cloned().map(move |headers: HeaderMap| {
+        let mut context = context.clone();
+
+        let get_header = |key| {
+            headers
+                .get(key)
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_string())
+        };
+
+        if let Some(h) = get_header("x-context-deposit") {
+            context.settings.deposit_table_name = h;
+        }
+        if let Some(h) = get_header("x-context-withdrawal") {
+            context.settings.withdrawal_table_name = h;
+        }
+        if let Some(h) = get_header("x-context-chainstate") {
+            context.settings.chainstate_table_name = h;
+        }
+        if let Some(h) = get_header("x-context-limit") {
+            context.settings.limit_table_name = h;
+        }
+        if let Some(h) = get_header("x-context-version") {
+            context.settings.version = h;
+        }
+
+        context
+    })
 }

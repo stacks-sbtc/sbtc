@@ -65,8 +65,8 @@ pub async fn get_chain_tip(context: EmilyContext) -> impl warp::reply::Reply {
 )]
 #[instrument(skip(context))]
 pub async fn get_chainstate_at_height(
-    context: EmilyContext,
     height: u64,
+    context: EmilyContext,
 ) -> impl warp::reply::Reply {
     debug!("Attempting to get chainstate at height: {height:?}");
     // Internal handler so `?` can be used correctly while still returning a reply.
@@ -101,7 +101,7 @@ pub async fn get_chainstate_at_height(
     security(("ApiGatewayKey" = []))
 )]
 #[instrument(skip(context))]
-pub async fn set_chainstate(context: EmilyContext, body: Chainstate) -> impl warp::reply::Reply {
+pub async fn set_chainstate(body: Chainstate, context: EmilyContext) -> impl warp::reply::Reply {
     debug!("Attempting to set chainstate: {body:?}");
     // Internal handler so `?` can be used correctly while still returning a reply.
     async fn handler(
@@ -142,8 +142,8 @@ pub async fn set_chainstate(context: EmilyContext, body: Chainstate) -> impl war
 )]
 #[instrument(skip(context))]
 pub async fn update_chainstate(
-    context: EmilyContext,
     request: Chainstate,
+    context: EmilyContext,
 ) -> impl warp::reply::Reply {
     debug!("Attempting to update chainstate: {request:?}");
     // Internal handler so `?` can be used correctly while still returning a reply.

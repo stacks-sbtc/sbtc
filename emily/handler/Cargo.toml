@@ -15,7 +15,6 @@ name = "emily-server"
 [features]
 default = []
 testing = []
-populate = ["testing"]
 
 [dependencies]
 # Local crates
@@ -51,6 +50,7 @@ warp_lambda.workspace = true
 sbtc = { workspace = true, features = ["testing"] }
 
 # External crates
+reqwest_012.workspace = true
 test-case.workspace = true
 testing-emily-client.workspace = true
 

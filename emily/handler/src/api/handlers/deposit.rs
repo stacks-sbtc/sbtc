@@ -51,9 +51,9 @@ use crate::database::entries::deposit::{
 )]
 #[instrument(skip(context))]
 pub async fn get_deposit(
-    context: EmilyContext,
     bitcoin_txid: String,
     bitcoin_tx_output_index: u32,
+    context: EmilyContext,
 ) -> impl warp::reply::Reply {
     tracing::debug!("in get deposit");
     // Internal handler so `?` can be used correctly while still returning a reply.
@@ -103,9 +103,9 @@ pub async fn get_deposit(
 )]
 #[instrument(skip(context))]
 pub async fn get_deposits_for_transaction(
-    context: EmilyContext,
     bitcoin_txid: String,
     query: GetDepositsForTransactionQuery,
+    context: EmilyContext,
 ) -> impl warp::reply::Reply {
     tracing::debug!("in get deposits for transaction");
     // Internal handler so `?` can be used correctly while still returning a reply.
@@ -160,8 +160,8 @@ pub async fn get_deposits_for_transaction(
 )]
 #[instrument(skip(context))]
 pub async fn get_deposits(
-    context: EmilyContext,
     query: GetDepositsQuery,
+    context: EmilyContext,
 ) -> impl warp::reply::Reply {
     tracing::debug!("in get deposits");
     // Internal handler so `?` can be used correctly while still returning a reply.
@@ -211,9 +211,9 @@ pub async fn get_deposits(
 )]
 #[instrument(skip(context))]
 pub async fn get_deposits_for_recipient(
-    context: EmilyContext,
     recipient: String,
     query: BasicPaginationQuery,
+    context: EmilyContext,
 ) -> impl warp::reply::Reply {
     tracing::debug!("in get deposits for recipient: {recipient}");
     // Internal handler so `?` can be used correctly while still returning a reply.
@@ -263,9 +263,9 @@ pub async fn get_deposits_for_recipient(
 )]
 #[instrument(skip(context))]
 pub async fn get_deposits_for_reclaim_pubkeys(
-    context: EmilyContext,
     reclaim_pubkeys: String,
     query: BasicPaginationQuery,
+    context: EmilyContext,
 ) -> impl warp::reply::Reply {
     tracing::debug!("in get deposits for reclaim pubkey: {reclaim_pubkeys}");
     // Internal handler so `?` can be used correctly while still returning a reply.
@@ -314,8 +314,8 @@ pub async fn get_deposits_for_reclaim_pubkeys(
 )]
 #[instrument(skip(context))]
 pub async fn create_deposit(
-    context: EmilyContext,
     body: CreateDepositRequestBody,
+    context: EmilyContext,
 ) -> impl warp::reply::Reply {
     tracing::debug!(
         bitcoin_txid = %body.bitcoin_txid,
@@ -423,8 +423,8 @@ pub async fn create_deposit(
 )]
 #[instrument(skip(context))]
 pub async fn update_deposits_signer(
-    context: EmilyContext,
     body: UpdateDepositsRequestBody,
+    context: EmilyContext,
 ) -> impl warp::reply::Reply {
     tracing::debug!("in update deposits");
     // Internal handler so `?` can be used correctly while still returning a reply.
@@ -467,8 +467,8 @@ pub async fn update_deposits_signer(
 )]
 #[instrument(skip(context))]
 pub async fn update_deposits_sidecar(
-    context: EmilyContext,
     body: UpdateDepositsRequestBody,
+    context: EmilyContext,
 ) -> impl warp::reply::Reply {
     tracing::debug!("in update deposits");
     // Internal handler so `?` can be used correctly while still returning a reply.
