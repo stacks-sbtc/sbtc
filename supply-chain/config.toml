@@ -1601,10 +1601,6 @@ criteria = "safe-to-deploy"
 version = "0.1.15"
 criteria = "safe-to-deploy"
 
-[[exemptions.stacks-common]]
-version = "0.0.1@git:bd9ee6310516b31ef4ecce07e42e73ed0f774ada"
-criteria = "safe-to-deploy"
-
 [[exemptions.stringprep]]
 version = "0.1.4"
 criteria = "safe-to-deploy"

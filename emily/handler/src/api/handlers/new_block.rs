@@ -138,7 +138,7 @@ pub async fn new_block(
                 txid: sbtc::events::StacksTxid(txid.0),
                 block_id: new_block_event.index_block_hash.clone(),
             };
-            match RegistryEvent::try_new(ev.value, tx_info) {
+            match RegistryEvent::try_new(ev.raw_value, tx_info) {
                 Ok(RegistryEvent::CompletedDeposit(event)) => {
                     let deposit_maybe = handle_completed_deposit(&context, event).await;
                     match deposit_maybe {
