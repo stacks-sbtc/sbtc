@@ -62,7 +62,7 @@ jobs:
 
       - name: Setup Buildx
         id: setup_buildx
-        uses: stacks-sbtc/actions/docker/setup-buildx-action@main
+        uses: stacks-sbtc/actions/docker/setup-buildx-action@181f8c67da2707c66b5e31f24e7418c47adefdd1
 
       ## if the repo owner is not `stacks-network`, default to a docker-org of the repo owner (i.e. github user id)
       ## this allows forks to run the docker push workflows without having to hardcode a dockerhub org (but it does require docker hub user to match github username)

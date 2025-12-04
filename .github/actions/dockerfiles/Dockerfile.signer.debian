@@ -2,7 +2,6 @@ FROM --platform=$BUILDPLATFORM rust:1.91.0-slim-bookworm AS build
 
 ARG GIT_COMMIT
 ARG TARGETARCH
-ARG BUILDARCH
 
 RUN test -n "$GIT_COMMIT" || (echo "GIT_COMMIT not set" && false)
 

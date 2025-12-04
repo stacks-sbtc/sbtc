@@ -2,7 +2,6 @@ FROM --platform=$BUILDPLATFORM rust:1.91.0-slim-bookworm AS build
 
 # Docker automatically populates these arguments:
 ARG TARGETARCH
-ARG BUILDARCH
 ARG CARGO_BUILD_ARGS="--release --locked"
 
 # 1. Setup Debian for Multi-Architecture
