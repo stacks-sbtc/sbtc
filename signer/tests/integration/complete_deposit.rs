@@ -1,7 +1,7 @@
 use blockstack_lib::types::chainstate::StacksAddress;
 use rand::rngs::OsRng;
 
-use sbtc::testing::regtest;
+use sbtc::testing::containers::TestContainersBuilder;
 use signer::error::Error;
 use signer::stacks::contracts::AsContractCall as _;
 use signer::stacks::contracts::CompleteDepositV1;
@@ -17,6 +17,7 @@ use signer::testing::get_rng;
 use fake::Fake as _;
 use signer::DEPOSIT_DUST_LIMIT;
 
+use crate::containers::BitcoinContainerExt as _;
 use crate::setup::SweepAmounts;
 use crate::setup::TestSignerSet;
 use crate::setup::TestSweepSetup;
@@ -154,8 +155,13 @@ async fn complete_deposit_validation_happy_path() {
     // This is just setup and should be essentially the same between tests.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
+
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+
+    let setup = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 1_000_000, &mut rng);
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -195,7 +201,7 @@ async fn complete_deposit_validation_happy_path() {
     // toml config file.
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
@@ -220,8 +226,13 @@ async fn complete_deposit_validation_signer_no_dkg_shares() {
     // transactions and a transaction sweeping in the deposited funds.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
+
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+
+    let setup = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 1_000_000, &mut rng);
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -263,7 +274,7 @@ async fn complete_deposit_validation_signer_no_dkg_shares() {
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
@@ -285,8 +296,13 @@ async fn complete_deposit_validation_deployer_mismatch() {
     // transactions and a transaction sweeping in the deposited funds.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
+
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+
+    let setup = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 1_000_000, &mut rng);
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -325,7 +341,7 @@ async fn complete_deposit_validation_deployer_mismatch() {
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
@@ -354,8 +370,13 @@ async fn complete_deposit_validation_missing_deposit_request() {
     // transactions and a transaction sweeping in the deposited funds.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
+
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+
+    let setup = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 1_000_000, &mut rng);
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -388,7 +409,7 @@ async fn complete_deposit_validation_missing_deposit_request() {
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
@@ -417,8 +438,13 @@ async fn complete_deposit_validation_recipient_mismatch() {
     // transactions and a transaction sweeping in the deposited funds.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
+
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+
+    let setup = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 1_000_000, &mut rng);
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -458,7 +484,7 @@ async fn complete_deposit_validation_recipient_mismatch() {
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
@@ -500,7 +526,11 @@ async fn complete_deposit_validation_fee_too_low() {
     // transactions and a transaction sweeping in the deposited funds.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
+
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     let signers = TestSignerSet::new(&mut rng);
     // We are trying to trigger the AmountBelowDustLimit error.
@@ -518,7 +548,7 @@ async fn complete_deposit_validation_fee_too_low() {
         max_fee: 80_000,
         is_deposit: true,
     };
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &[amounts]);
+    let mut setup = TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &[amounts]);
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -536,7 +566,7 @@ async fn complete_deposit_validation_fee_too_low() {
 
     // Normal: we submit the transaction sweeping the funds. It gets
     // confirmed; this generates a new bitcoin block behind the scene.
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.submit_sweep_tx(faucet);
 
     // Normal: When a new bitcoin block is generated, we need to update the
     // signer's database with blockchain data.
@@ -598,7 +628,7 @@ async fn complete_deposit_validation_fee_too_low() {
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
@@ -651,8 +681,13 @@ async fn complete_deposit_validation_fee_too_high() {
     // transactions and a transaction sweeping in the deposited funds.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
-    let mut setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
+
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+
+    let mut setup = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 1_000_000, &mut rng);
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -696,7 +731,7 @@ async fn complete_deposit_validation_fee_too_high() {
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
@@ -725,8 +760,13 @@ async fn complete_deposit_validation_sweep_tx_missing() {
     // transactions and a transaction sweeping in the deposited funds.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
+
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+
+    let setup = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 1_000_000, &mut rng);
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -767,7 +807,7 @@ async fn complete_deposit_validation_sweep_tx_missing() {
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
@@ -796,8 +836,13 @@ async fn complete_deposit_validation_sweep_reorged() {
     // transactions and a transaction sweeping in the deposited funds.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
+
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+
+    let setup = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 1_000_000, &mut rng);
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -847,7 +892,7 @@ async fn complete_deposit_validation_sweep_reorged() {
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
@@ -877,8 +922,13 @@ async fn complete_deposit_validation_deposit_not_in_sweep() {
     // transactions and a transaction sweeping in the deposited funds.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
+
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+
+    let setup = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 1_000_000, &mut rng);
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -920,7 +970,7 @@ async fn complete_deposit_validation_deposit_not_in_sweep() {
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
@@ -950,8 +1000,13 @@ async fn complete_deposit_validation_deposit_incorrect_fee() {
     // transactions and a transaction sweeping in the deposited funds.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
+
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+
+    let setup = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 1_000_000, &mut rng);
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -991,7 +1046,7 @@ async fn complete_deposit_validation_deposit_incorrect_fee() {
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
@@ -1020,8 +1075,13 @@ async fn complete_deposit_validation_deposit_invalid_sweep() {
     // transactions and a transaction sweeping in the deposited funds.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
+
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+
+    let setup = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 1_000_000, &mut rng);
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -1065,7 +1125,7 @@ async fn complete_deposit_validation_deposit_invalid_sweep() {
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
@@ -1094,8 +1154,13 @@ async fn complete_deposit_validation_request_completed() {
     // This is just setup and should be essentially the same between tests.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
+
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+
+    let setup = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 1_000_000, &mut rng);
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -1135,7 +1200,7 @@ async fn complete_deposit_validation_request_completed() {
     // toml config file.
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();

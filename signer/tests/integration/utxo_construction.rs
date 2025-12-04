@@ -138,7 +138,7 @@ where
 /// This test just checks that many of the methods on the Recipient struct
 /// work as advertised.
 #[test]
-fn helper_struct_methods_work() {
+fn helper_struct_methods_work_serialgroup() {
     let (rpc, faucet) = regtest::initialize_blockchain();
     let signer = Recipient::new(AddressType::P2tr);
 
@@ -175,7 +175,7 @@ fn helper_struct_methods_work() {
 /// Check that deposits, when sent with the expected format, are
 /// spent using the transactions generated in the utxo module.
 #[test]
-fn deposits_add_to_controlled_amounts() {
+fn deposits_add_to_controlled_amounts_serialgroup() {
     let (rpc, faucet) = regtest::initialize_blockchain();
     let fee = regtest::BITCOIN_CORE_FALLBACK_FEE.to_sat();
 
@@ -260,7 +260,7 @@ fn deposits_add_to_controlled_amounts() {
 }
 
 #[test]
-fn withdrawals_reduce_to_signers_amounts() {
+fn withdrawals_reduce_to_signers_amounts_serialgroup() {
     const FEE_RATE: f64 = 10.0;
 
     let (rpc, faucet) = regtest::initialize_blockchain();
@@ -385,7 +385,7 @@ fn withdrawals_reduce_to_signers_amounts() {
 #[test_case(0; "no withdrawals")]
 #[test_case(1; "single withdrawals")]
 #[test_case(11; "multiple withdrawals")]
-fn parse_withdrawal_ids(withdrawal_numbers: u64) {
+fn parse_withdrawal_ids_serialgroup(withdrawal_numbers: u64) {
     const FEE_RATE: f64 = 10.0;
 
     let (rpc, faucet) = regtest::initialize_blockchain();

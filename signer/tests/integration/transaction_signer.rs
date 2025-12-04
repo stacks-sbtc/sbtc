@@ -8,7 +8,9 @@ use fake::Fake as _;
 use fake::Faker;
 use lru::LruCache;
 use rand::rngs::OsRng;
+use sbtc::testing::containers::TestContainersBuilder;
 use signer::bitcoin::MockBitcoinInteract;
+use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::emily_client::MockEmilyInteract;
 use signer::message::Payload;
 use signer::network::in_memory2::SignerNetworkInstance;
@@ -60,6 +62,7 @@ use wsts::net::DkgBegin;
 use wsts::net::Message as WstsNetMessage;
 use wsts::net::NonceRequest;
 
+use crate::containers::BitcoinContainerExt as _;
 use crate::setup::SweepAmounts;
 use crate::setup::TestSignerSet;
 use crate::setup::TestSweepSetup;
@@ -88,17 +91,21 @@ async fn signing_set_validation_check_for_stacks_transactions() {
 
     let mut rng = get_rng();
 
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_emily_client()
         .with_mocked_stacks_client()
         .build();
-    let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
 
     // This confirms a deposit transaction, and has a nice helper function
     // for storing a real deposit.
-    let mut setup = TestSweepSetup::new_setup(rpc, faucet, 10000, &mut rng);
+    let mut setup = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 10000, &mut rng);
 
     // Let's get the blockchain data into the database.
     let chain_tip = BitcoinBlockRef {
@@ -177,17 +184,21 @@ async fn signing_set_validation_ignores_aggregate_key_in_request() {
 
     let mut rng = get_rng();
 
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_emily_client()
         .with_mocked_stacks_client()
         .build();
-    let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
 
     // This confirms a deposit transaction, and has a nice helper function
     // for storing a real deposit.
-    let mut setup = TestSweepSetup::new_setup(rpc, faucet, 10000, &mut rng);
+    let mut setup = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 10000, &mut rng);
 
     // Let's get the blockchain data into the database.
     let chain_tip = BitcoinBlockRef {
@@ -268,9 +279,14 @@ async fn signer_rejects_stacks_txns_with_too_high_a_fee(
 
     let mut rng = get_rng();
 
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_emily_client()
         .with_mocked_stacks_client()
         .build();
@@ -279,11 +295,9 @@ async fn signer_rejects_stacks_txns_with_too_high_a_fee(
     // unrelated error, since we mock reaching out to the stacks node.
     set_deposit_incomplete(&mut ctx).await;
 
-    let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
-
     // This confirms a deposit transaction, and has a nice helper function
     // for storing a real deposit.
-    let mut setup = TestSweepSetup::new_setup(rpc, faucet, 10000, &mut rng);
+    let mut setup = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 10000, &mut rng);
 
     // Let's get the blockchain data into the database.
     let chain_tip = BitcoinBlockRef {
@@ -354,9 +368,14 @@ async fn signer_rejects_multiple_attempts_in_tenure() {
 
     let mut rng = get_rng();
 
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_emily_client()
         .with_mocked_stacks_client()
         .build();
@@ -365,11 +384,9 @@ async fn signer_rejects_multiple_attempts_in_tenure() {
     // unrelated error, since we mock reaching out to the stacks node.
     set_deposit_incomplete(&mut ctx).await;
 
-    let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
-
     // This confirms a deposit transaction, and has a nice helper function
     // for storing a real deposit.
-    let mut setup = TestSweepSetup::new_setup(rpc, faucet, 10000, &mut rng);
+    let mut setup = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 10000, &mut rng);
 
     // Let's get the blockchain data into the database.
     let chain_tip = BitcoinBlockRef {
@@ -490,10 +507,13 @@ async fn assert_should_be_able_to_handle_sbtc_requests() {
         .build();
     ctx.state().update_current_limits(SbtcLimits::unlimited());
 
-    let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     // Create a test setup with a confirmed deposit transaction
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 10000, &mut rng);
+    let setup = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 10000, &mut rng);
     // Backfill the blockchain data into the database
     let chain_tip = BitcoinBlockRef {
         block_hash: setup.sweep_block_hash.into(),
@@ -626,7 +646,10 @@ async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is_ok:
         .with_mocked_clients()
         .build();
 
-    let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     let signers = TestSignerSet::new(&mut rng);
     // Create a test setup object so that we can easily create proper DKG
@@ -637,7 +660,7 @@ async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is_ok:
         max_fee: 10000,
         is_deposit: true,
     };
-    let setup = TestSweepSetup2::new_setup(signers, faucet, &[amounts]);
+    let setup = TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &[amounts]);
 
     let block_header = rpc
         .get_block_header_info(&setup.deposit_block_hash)
@@ -722,7 +745,10 @@ pub async fn presign_request_ignore_request_if_already_processed_this_block() {
         .with_mocked_clients()
         .build();
 
-    let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     let signers = TestSignerSet::new(&mut rng);
     // Create a test setup object so that we can easily create proper DKG
@@ -733,7 +759,7 @@ pub async fn presign_request_ignore_request_if_already_processed_this_block() {
         max_fee: 10000,
         is_deposit: true,
     };
-    let setup = TestSweepSetup2::new_setup(signers, faucet, &[amounts]);
+    let setup = TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &[amounts]);
 
     let block_header = rpc
         .get_block_header_info(&setup.deposit_block_hash)
@@ -831,7 +857,7 @@ pub async fn presign_request_ignore_request_if_already_processed_this_block() {
 }
 
 #[test_log::test(tokio::test)]
-async fn new_state_machine_per_valid_sighash() {
+async fn new_state_machine_per_valid_sighash_serialgroup() {
     let db = testing::storage::new_test_database().await;
 
     let mut rng = get_rng();
@@ -847,7 +873,7 @@ async fn new_state_machine_per_valid_sighash() {
     // Create a test setup object so that we can easily create proper DKG
     // shares in the database. Note that calling TestSweepSetup2::new_setup
     // creates two bitcoin blocks.
-    let setup = TestSweepSetup2::new_setup(signers, faucet, &[]);
+    let setup = TestSweepSetup2::new_setup(signers, BitcoinCoreClient::new_regtest(), faucet, &[]);
 
     setup.store_dkg_shares(&db).await;
 
@@ -956,7 +982,7 @@ async fn new_state_machine_per_valid_sighash() {
 /// Let's check that we always generate unique nonces for each sign
 /// request.
 #[test_log::test(tokio::test)]
-async fn nonce_response_unique_nonces() {
+async fn nonce_response_unique_nonces_serialgroup() {
     let db = testing::storage::new_test_database().await;
 
     let mut rng = get_rng();
@@ -972,7 +998,7 @@ async fn nonce_response_unique_nonces() {
     // Create a test setup object so that we can simply create proper DKG
     // shares in the database. Note that calling TestSweepSetup2::new_setup
     // creates two bitcoin blocks.
-    let setup = TestSweepSetup2::new_setup(signers, faucet, &[]);
+    let setup = TestSweepSetup2::new_setup(signers, BitcoinCoreClient::new_regtest(), faucet, &[]);
 
     setup.store_dkg_shares(&db).await;
 
@@ -1139,7 +1165,10 @@ async fn max_one_state_machine_per_bitcoin_block_hash_for_dkg() {
         .build();
 
     // Let's make sure that the database has the chain tip.
-    let (rpc, _) = sbtc::testing::regtest::initialize_blockchain();
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+
     let headers = &get_canonical_chain_tip(rpc);
     let chain_tip = BitcoinBlockRef {
         block_hash: headers.hash.into(),

@@ -43,7 +43,7 @@ use secp256k1::SecretKey;
 /// We check that we can validate a transaction in the mempool using the
 /// electrum and bitcoin-core clients
 #[test]
-fn tx_validation_from_mempool() {
+fn tx_validation_from_mempool_serialgroup() {
     let max_fee: u64 = 15000;
     let amount_sats = 49_900_000;
     let lock_time = 150;
@@ -101,7 +101,7 @@ fn tx_validation_from_mempool() {
 /// We do not attempt to create an actual P2TR deposit, but an
 /// (unsupported) P2SH deposit.
 #[test]
-fn minimal_push_check() {
+fn minimal_push_check_serialgroup() {
     let fee = regtest::BITCOIN_CORE_FALLBACK_FEE.to_sat();
 
     let (rpc, faucet) = regtest::initialize_blockchain();
@@ -212,7 +212,7 @@ fn minimal_push_check() {
 ///    transaction that tries to spend the transaction from (3) should be
 ///    rejected.
 #[test]
-fn op_csv_disabled() {
+fn op_csv_disabled_serialgroup() {
     let fee = regtest::BITCOIN_CORE_FALLBACK_FEE.to_sat();
 
     let (rpc, faucet) = regtest::initialize_blockchain();
@@ -408,7 +408,7 @@ fn op_csv_disabled() {
 /// 4. Confirm the transaction and check that the balance is what it is
 ///    supposed to be, less the bitcoin transaction fees.
 #[test]
-fn reclaiming_rejected_deposits() {
+fn reclaiming_rejected_deposits_serialgroup() {
     let max_fee: u64 = 15000;
     let amount_sats = 49_900_000;
     let lock_time = 5;

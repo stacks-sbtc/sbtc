@@ -7,8 +7,8 @@ use bitcoin::consensus::encode::serialize_hex;
 use fake::Fake as _;
 use fake::Faker;
 use mockito::Server;
+use sbtc::testing::containers::TestContainersBuilder;
 use serde_json::json;
-use url::Url;
 
 use emily_client::apis::deposit_api;
 use emily_client::models::CreateDepositRequestBody;
@@ -31,11 +31,12 @@ use signer::testing;
 use signer::testing::context::*;
 use signer::testing::get_rng;
 use signer::testing::request_decider::TestEnvironment;
-use testing_emily_client::apis::testing_api;
 
-use crate::setup::IntoEmilyTestingConfig as _;
+use crate::containers::BitcoinContainerExt as _;
 use crate::setup::TestSweepSetup;
 use crate::setup::backfill_bitcoin_blocks;
+use crate::setup::clean_emily_setup;
+use crate::setup::new_emily_setup;
 
 #[allow(clippy::type_complexity)]
 fn test_environment(
@@ -146,11 +147,14 @@ async fn handle_pending_deposit_request_address_script_pub_key() {
         .with_mocked_clients()
         .build();
 
-    let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     // This confirms a deposit transaction, and has a nice helper function
     // for storing a real deposit.
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 10000, &mut rng);
+    let setup = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 10000, &mut rng);
 
     // Let's get the blockchain data into the database.
     let chain_tip: BitcoinBlockHash = setup.sweep_block_hash.into();
@@ -232,11 +236,14 @@ async fn handle_pending_deposit_request_not_in_signing_set() {
         .with_mocked_clients()
         .build();
 
-    let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     // This confirms a deposit transaction, and has a nice helper function
     // for storing a real deposit.
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 10000, &mut rng);
+    let setup = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 10000, &mut rng);
 
     // Let's get the blockchain data into the database.
     let chain_tip: BitcoinBlockHash = setup.sweep_block_hash.into();
@@ -314,20 +321,17 @@ async fn persist_received_deposit_decision_fetches_missing_deposit_requests() {
 
     let mut rng = get_rng();
 
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(1),
-        None,
-    )
-    .unwrap();
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
-    testing_api::wipe_databases(&emily_client.config().as_testing())
-        .await
-        .unwrap();
+    let (emily_config, emily_tables) = new_emily_setup().await;
+    let emily_client = EmilyClient::new(emily_config, Duration::from_secs(1), None);
 
     let ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_emily_client(emily_client.clone())
         .with_mocked_stacks_client()
         .build();
@@ -337,11 +341,9 @@ async fn persist_received_deposit_decision_fetches_missing_deposit_requests() {
     // error when trying to send a message at the end.
     let _rec = ctx.get_signal_receiver();
 
-    let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
-
     // This confirms a deposit transaction, and has a nice helper function
     // for storing a real deposit.
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 10000, &mut rng);
+    let setup = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 10000, &mut rng);
 
     // Let's get the blockchain data into the database.
     let chain_tip: BitcoinBlockHash = setup.sweep_block_hash.into();
@@ -419,6 +421,7 @@ async fn persist_received_deposit_decision_fetches_missing_deposit_requests() {
     assert!(deposit_request_exists);
 
     testing::storage::drop_db(db).await;
+    clean_emily_setup(emily_tables).await;
 }
 
 /// Test `RequestDeciderEventLoop` behaviour in case of blocklist client
@@ -442,11 +445,14 @@ async fn blocklist_client_retry(num_failures: u8, failing_iters: u8) {
         .with_mocked_clients()
         .build();
 
-    let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     // This confirms a deposit transaction, and has a nice helper function
     // for storing a real deposit.
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 10000, &mut rng);
+    let setup = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 10000, &mut rng);
 
     // Let's get the blockchain data into the database.
     let chain_tip: BitcoinBlockHash = setup.sweep_block_hash.into();
@@ -581,10 +587,13 @@ async fn do_not_procceed_with_blocked_addresses(is_withdrawal: bool, is_blocked:
         .with_mocked_clients()
         .build();
 
-    let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     // Creating test setup which will help store transactions and requests
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 10000, &mut rng);
+    let setup = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 10000, &mut rng);
 
     // Let's get the blockchain data into the database.
     let chain_tip: BitcoinBlockHash = setup.sweep_block_hash.into();
