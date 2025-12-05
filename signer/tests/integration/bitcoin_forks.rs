@@ -31,7 +31,7 @@ pub struct GenerateBlockJson {
 
 /// Test checking `getrawtransaction` behaviour after a fork
 #[test_log::test(tokio::test)]
-async fn getrawtransaction_simple_fork() {
+async fn getrawtransaction_simple_fork_serialgroup() {
     // We don't really need a context, we just need the bitcoin client
     let ctx = TestContext::builder()
         .with_in_memory_storage()
@@ -188,7 +188,7 @@ async fn getrawtransaction_simple_fork() {
 /// Test checking `getrawtransaction` behaviour when querying for a specific tx
 /// between reorgs.
 #[test_log::test(tokio::test)]
-async fn getrawtransaction_single_tx_regorged() {
+async fn getrawtransaction_single_tx_regorged_serialgroup() {
     // We don't really need a context, we just need the bitcoin client
     let ctx = TestContext::builder()
         .with_in_memory_storage()

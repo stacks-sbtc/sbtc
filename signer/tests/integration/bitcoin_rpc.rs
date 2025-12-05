@@ -24,7 +24,7 @@ use signer::storage::model::BitcoinBlockHash;
 use signer::storage::model::BitcoinTxId;
 
 #[test]
-fn btc_client_getstransaction() {
+fn btc_client_getstransaction_serialgroup() {
     let client = BitcoinCoreClient::new(
         regtest::BITCOIN_CORE_RPC_ENDPOINT,
         regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
@@ -67,7 +67,7 @@ fn btc_client_getstransaction() {
 }
 
 #[test]
-fn btc_client_getblockheader() {
+fn btc_client_getblockheader_serialgroup() {
     let client = BitcoinCoreClient::new(
         regtest::BITCOIN_CORE_RPC_ENDPOINT,
         regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
@@ -92,7 +92,7 @@ fn btc_client_getblockheader() {
 }
 
 #[test]
-fn btc_client_gets_transaction_info() {
+fn btc_client_gets_transaction_info_serialgroup() {
     let client = BitcoinCoreClient::new(
         regtest::BITCOIN_CORE_RPC_ENDPOINT,
         regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
@@ -134,7 +134,7 @@ fn btc_client_gets_transaction_info() {
 }
 
 #[test]
-fn btc_client_gets_transaction_info_missing_tx() {
+fn btc_client_gets_transaction_info_missing_tx_serialgroup() {
     let client = BitcoinCoreClient::new(
         regtest::BITCOIN_CORE_RPC_ENDPOINT,
         regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
@@ -174,7 +174,7 @@ fn btc_client_gets_transaction_info_missing_tx() {
 }
 
 #[test]
-fn btc_client_unsubmitted_tx() {
+fn btc_client_unsubmitted_tx_serialgroup() {
     let client = BitcoinCoreClient::new(
         regtest::BITCOIN_CORE_RPC_ENDPOINT,
         regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
@@ -194,7 +194,7 @@ fn btc_client_unsubmitted_tx() {
 /// not ensure that bitcoin-core has enough transactions to estimate fees
 /// in the test, we just check that fee is positive.
 #[test]
-fn estimate_fee_rate() {
+fn estimate_fee_rate_serialgroup() {
     let _ = regtest::initialize_blockchain();
     let btc_client = BitcoinCoreClient::new(
         regtest::BITCOIN_CORE_RPC_ENDPOINT,
@@ -210,7 +210,7 @@ fn estimate_fee_rate() {
 }
 
 #[tokio::test]
-async fn get_tx_spending_prevout() {
+async fn get_tx_spending_prevout_serialgroup() {
     let client = BitcoinCoreClient::new(
         regtest::BITCOIN_CORE_RPC_ENDPOINT,
         regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
@@ -275,7 +275,7 @@ async fn get_tx_spending_prevout() {
 }
 
 #[tokio::test]
-async fn get_tx_spending_prevout_nonexistent_txid() {
+async fn get_tx_spending_prevout_nonexistent_txid_serialgroup() {
     let client = BitcoinCoreClient::new(
         regtest::BITCOIN_CORE_RPC_ENDPOINT,
         regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
@@ -298,7 +298,7 @@ async fn get_tx_spending_prevout_nonexistent_txid() {
 }
 
 #[tokio::test]
-async fn get_mempool_descendants() {
+async fn get_mempool_descendants_serialgroup() {
     let client = BitcoinCoreClient::new(
         regtest::BITCOIN_CORE_RPC_ENDPOINT,
         regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
@@ -430,7 +430,7 @@ async fn get_mempool_descendants() {
 }
 
 #[tokio::test]
-async fn get_tx_out_confirmed_no_mempool() {
+async fn get_tx_out_confirmed_no_mempool_serialgroup() {
     let client = BitcoinCoreClient::new(
         regtest::BITCOIN_CORE_RPC_ENDPOINT,
         regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
@@ -455,7 +455,7 @@ async fn get_tx_out_confirmed_no_mempool() {
 }
 
 #[tokio::test]
-async fn get_tx_out_confirmed_with_mempool() {
+async fn get_tx_out_confirmed_with_mempool_serialgroup() {
     let client = BitcoinCoreClient::new(
         regtest::BITCOIN_CORE_RPC_ENDPOINT,
         regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
@@ -480,7 +480,7 @@ async fn get_tx_out_confirmed_with_mempool() {
 }
 
 #[tokio::test]
-async fn get_tx_out_unconfirmed_no_mempool() {
+async fn get_tx_out_unconfirmed_no_mempool_serialgroup() {
     let client = BitcoinCoreClient::new(
         regtest::BITCOIN_CORE_RPC_ENDPOINT,
         regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
@@ -502,7 +502,7 @@ async fn get_tx_out_unconfirmed_no_mempool() {
 }
 
 #[tokio::test]
-async fn get_tx_out_unconfirmed_with_mempool() {
+async fn get_tx_out_unconfirmed_with_mempool_serialgroup() {
     let client = BitcoinCoreClient::new(
         regtest::BITCOIN_CORE_RPC_ENDPOINT,
         regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),

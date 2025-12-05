@@ -1,11 +1,12 @@
 use bitcoin::BlockHash;
 use futures::StreamExt as _;
-use sbtc::testing::regtest;
+use sbtc::testing::containers::TestContainersBuilder;
 use signer::bitcoin::BitcoinBlockHashStreamProvider as _;
-use signer::bitcoin::poller::BitcoinChainTipPoller;
 use signer::util::Sleep;
 use test_log::test;
 use tokio::sync::mpsc::error::TryRecvError;
+
+use crate::containers::BitcoinContainerExt as _;
 
 /// This tests that our bitcoin block hash stream receives new block hashes
 /// from bitcoin-core as it receives blocks. We create the stream, generate
@@ -14,9 +15,12 @@ use tokio::sync::mpsc::error::TryRecvError;
 /// they are supposed to be little-endian formatted.
 #[test(tokio::test)]
 async fn chain_tip_poller_streams_chain_tips() {
-    let (_, faucet) = regtest::initialize_blockchain();
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let faucet = bitcoin.get_faucet();
 
-    let mut block_hash_stream = BitcoinChainTipPoller::start_for_regtest()
+    let mut block_hash_stream = bitcoin
+        .start_chain_tip_poller()
         .await
         .get_block_hash_stream();
 

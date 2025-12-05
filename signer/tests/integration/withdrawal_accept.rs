@@ -1,7 +1,7 @@
 use bitcoin::OutPoint;
 use blockstack_lib::types::chainstate::StacksAddress;
 use rand::rngs::OsRng;
-use sbtc::testing::regtest;
+use sbtc::testing::containers::TestContainersBuilder;
 use signer::error::Error;
 use signer::stacks::contracts::AcceptWithdrawalV1;
 use signer::stacks::contracts::AsContractCall as _;
@@ -15,6 +15,7 @@ use signer::testing::get_rng;
 use fake::Fake as _;
 use signer::testing::context::*;
 
+use crate::containers::BitcoinContainerExt as _;
 use crate::setup::SweepAmounts;
 use crate::setup::TestSignerSet;
 use crate::setup::TestSweepSetup2;
@@ -101,13 +102,18 @@ async fn accept_withdrawal_validation_happy_path() {
     // and should be essentially the same between tests.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
+
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup =
+        TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &WITHDRAWAL_AMOUNT);
 
     // Normal: The withdrawal must be swept on bitcoin.
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.submit_sweep_tx(faucet);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't
@@ -136,7 +142,7 @@ async fn accept_withdrawal_validation_happy_path() {
     // This should not return an Err.
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
@@ -160,13 +166,18 @@ async fn accept_withdrawal_validation_withdrawal_signer_no_dkg_shares() {
     // sweeping out the funds for a withdrawal request.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
+
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup =
+        TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &WITHDRAWAL_AMOUNT);
 
     // Normal: The withdrawal must be swept on bitcoin.
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.submit_sweep_tx(faucet);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't
@@ -200,7 +211,7 @@ async fn accept_withdrawal_validation_withdrawal_signer_no_dkg_shares() {
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
@@ -222,13 +233,18 @@ async fn accept_withdrawal_validation_deployer_mismatch() {
     // sweeping out the funds for a withdrawal request.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
+
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup =
+        TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &WITHDRAWAL_AMOUNT);
 
     // Normal: The withdrawal must be swept on bitcoin.
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.submit_sweep_tx(faucet);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't
@@ -259,7 +275,7 @@ async fn accept_withdrawal_validation_deployer_mismatch() {
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
@@ -288,13 +304,18 @@ async fn accept_withdrawal_validation_missing_withdrawal_request() {
     // sweeping out the funds for a withdrawal request.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
+
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup =
+        TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &WITHDRAWAL_AMOUNT);
 
     // Normal: The withdrawal must be swept on bitcoin.
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.submit_sweep_tx(faucet);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't
@@ -326,7 +347,7 @@ async fn accept_withdrawal_validation_missing_withdrawal_request() {
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
@@ -355,13 +376,18 @@ async fn accept_withdrawal_validation_recipient_mismatch() {
     // sweeping out the funds for a withdrawal request.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
+
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup =
+        TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &WITHDRAWAL_AMOUNT);
 
     // Normal: The withdrawal must be swept on bitcoin.
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.submit_sweep_tx(faucet);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't
@@ -393,7 +419,7 @@ async fn accept_withdrawal_validation_recipient_mismatch() {
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
@@ -422,13 +448,18 @@ async fn accept_withdrawal_validation_invalid_amount() {
     // sweeping out the funds for a withdrawal request.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
+
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup =
+        TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &WITHDRAWAL_AMOUNT);
 
     // Normal: The withdrawal must be swept on bitcoin.
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.submit_sweep_tx(faucet);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't
@@ -458,7 +489,7 @@ async fn accept_withdrawal_validation_invalid_amount() {
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
@@ -487,13 +518,17 @@ async fn accept_withdrawal_validation_invalid_fee() {
     // sweeping out the funds for a withdrawal request.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup =
+        TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &WITHDRAWAL_AMOUNT);
 
     // Normal: The withdrawal must be swept on bitcoin.
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.submit_sweep_tx(faucet);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't
@@ -532,7 +567,7 @@ async fn accept_withdrawal_validation_invalid_fee() {
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
@@ -561,13 +596,17 @@ async fn accept_withdrawal_validation_sweep_tx_missing() {
     // sweeping out the funds for a withdrawal request.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup =
+        TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &WITHDRAWAL_AMOUNT);
 
     // Normal: The withdrawal must be swept on bitcoin.
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.submit_sweep_tx(faucet);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't
@@ -601,7 +640,7 @@ async fn accept_withdrawal_validation_sweep_tx_missing() {
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
@@ -630,13 +669,17 @@ async fn accept_withdrawal_validation_sweep_reorged() {
     // sweeping out the funds for a withdrawal request.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup =
+        TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &WITHDRAWAL_AMOUNT);
 
     // Normal: The withdrawal must be swept on bitcoin.
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.submit_sweep_tx(faucet);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't
@@ -678,7 +721,7 @@ async fn accept_withdrawal_validation_sweep_reorged() {
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
@@ -708,13 +751,17 @@ async fn accept_withdrawal_validation_withdrawal_not_in_sweep() {
     // sweeping out the funds for a withdrawal request.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup =
+        TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &WITHDRAWAL_AMOUNT);
 
     // Normal: The withdrawal must be swept on bitcoin.
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.submit_sweep_tx(faucet);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't
@@ -749,7 +796,7 @@ async fn accept_withdrawal_validation_withdrawal_not_in_sweep() {
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
@@ -779,13 +826,17 @@ async fn accept_withdrawal_validation_withdrawal_incorrect_fee() {
     // sweeping out the funds for a withdrawal request.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup =
+        TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &WITHDRAWAL_AMOUNT);
 
     // Normal: The withdrawal must be swept on bitcoin.
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.submit_sweep_tx(faucet);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't
@@ -816,7 +867,7 @@ async fn accept_withdrawal_validation_withdrawal_incorrect_fee() {
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
@@ -845,13 +896,17 @@ async fn accept_withdrawal_validation_withdrawal_invalid_sweep() {
     // sweeping out the funds for a withdrawal request.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup =
+        TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &WITHDRAWAL_AMOUNT);
 
     // Normal: The withdrawal must be swept on bitcoin.
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.submit_sweep_tx(faucet);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't
@@ -887,7 +942,7 @@ async fn accept_withdrawal_validation_withdrawal_invalid_sweep() {
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
@@ -917,13 +972,17 @@ async fn accept_withdrawal_validation_request_completed() {
     // and should be essentially the same between tests.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup =
+        TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &WITHDRAWAL_AMOUNT);
 
     // Normal: The withdrawal must be swept on bitcoin.
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.submit_sweep_tx(faucet);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't
@@ -952,7 +1011,7 @@ async fn accept_withdrawal_validation_request_completed() {
     // This should not return an Err.
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();

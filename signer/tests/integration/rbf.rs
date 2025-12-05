@@ -137,7 +137,7 @@ struct RbfContext {
     [8., 16.],
     [5, 100]
 )]
-pub fn transaction_with_rbf(
+pub fn transaction_with_rbf_serialgroup(
     rbf_deposits: usize,
     rbf_withdrawals: usize,
     rbf_fee_rate: f64,

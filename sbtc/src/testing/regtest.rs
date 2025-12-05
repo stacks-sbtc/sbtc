@@ -56,13 +56,15 @@ pub const BITCOIN_CORE_FALLBACK_FEE: Amount = Amount::from_sat(1000);
 pub const MIN_BLOCKCHAIN_HEIGHT: u64 = 101;
 
 /// The name of our wallet on bitcoin-core
-const BITCOIN_CORE_WALLET_NAME: &str = "integration-tests-wallet";
+pub const BITCOIN_CORE_WALLET_NAME: &str = "integration-tests-wallet";
 
 /// The faucet has a fixed secret key so that any mined amounts are
 /// preserved between test runs.
-const FAUCET_SECRET_KEY: &str = "0000000000000000000000000000000000000000000000000000000000000001";
+pub const FAUCET_SECRET_KEY: &str =
+    "0000000000000000000000000000000000000000000000000000000000000001";
 
-const FAUCET_LABEL: Option<&str> = Some("faucet");
+/// Label used for the test wallet tracking
+pub const FAUCET_LABEL: Option<&str> = Some("faucet");
 
 /// Initializes a blockchain and wallet on bitcoin-core. It can be called
 /// multiple times (even concurrently) but only generates the client and
@@ -74,7 +76,7 @@ const FAUCET_LABEL: Option<&str> = Some("faucet");
 /// * Loads a "faucet" private-public key pair with a P2WPKH address.
 /// * Has the bitcoin-core wallet watch the generated address.
 /// * Ensures that the faucet has at least 1 bitcoin spent to its address.
-pub fn initialize_blockchain() -> (&'static Client, &'static Faucet) {
+pub fn initialize_blockchain() -> (&'static Client, &'static Faucet<'static>) {
     static BTC_CLIENT: OnceLock<Client> = OnceLock::new();
     static FAUCET: OnceLock<Faucet> = OnceLock::new();
     let rpc = BTC_CLIENT.get_or_init(|| {
@@ -104,7 +106,7 @@ pub fn initialize_blockchain() -> (&'static Client, &'static Faucet) {
 /// Similar to `initialize_blockchain`, but for devenv.
 /// Note that this will not generate a spendable coinbase since advancing the
 /// bitcoin chain too quickly may break devenv Stacks.
-pub fn initialize_blockchain_devenv() -> (&'static Client, &'static Faucet) {
+pub fn initialize_blockchain_devenv() -> (&'static Client, &'static Faucet<'static>) {
     static BTC_CLIENT: OnceLock<Client> = OnceLock::new();
     static FAUCET: OnceLock<Faucet> = OnceLock::new();
     let rpc = BTC_CLIENT.get_or_init(|| {
@@ -133,7 +135,8 @@ pub fn initialize_blockchain_devenv() -> (&'static Client, &'static Faucet) {
     (rpc, faucet)
 }
 
-fn get_or_create_wallet(rpc: &Client, wallet: &str) {
+/// Load or register a new Bitcoin wallet
+pub fn get_or_create_wallet(rpc: &Client, wallet: &str) {
     match rpc.load_wallet(wallet) {
         // Success
         Ok(_) => (),
@@ -151,13 +154,13 @@ fn get_or_create_wallet(rpc: &Client, wallet: &str) {
 
 /// Struct representing the bitcoin miner, all coins are usually generated
 /// to this recipient.
-pub struct Faucet {
+pub struct Faucet<'a> {
     /// The public/private key pair.
     pub keypair: secp256k1::Keypair,
     /// The address associated with the above keypair.
     pub address: Address,
     /// The rpc client for interacting with bitcoin core.
-    pub rpc: &'static Client,
+    pub rpc: &'a Client,
 }
 
 /// Helper struct for representing an address we control on bitcoin.
@@ -255,8 +258,9 @@ impl Recipient {
     }
 }
 
-impl Faucet {
-    fn new(secret_key: &str, kind: AddressType, rpc: &'static Client) -> Self {
+impl<'a> Faucet<'a> {
+    /// Create a new `Faucet`
+    pub fn new(secret_key: &str, kind: AddressType, rpc: &'a Client) -> Self {
         let keypair = secp256k1::Keypair::from_seckey_str_global(secret_key).unwrap();
         let pk = keypair.public_key();
         let address = match kind {
@@ -276,7 +280,7 @@ impl Faucet {
     ///
     /// Note: this is needed in order for get_utxos and get_balance to work
     /// as expected.
-    fn track_address(&self, label: Option<&str>) {
+    pub fn track_address(&self, label: Option<&str>) {
         let public_key = PublicKey::new(self.keypair.public_key());
         let kind = self.address.address_type().unwrap();
 
@@ -378,6 +382,17 @@ impl Faucet {
         };
         self.rpc.send_raw_transaction(&tx).unwrap();
         OutPoint::new(tx.compute_txid(), 0)
+    }
+
+    /// Generate some transactions to ensure bitcoincore has enough data to
+    /// estimate fees
+    pub fn generate_fee_data(&self) {
+        for _ in 0..10 {
+            self.send_to(1000, &self.address);
+            self.send_to(1001, &self.address);
+            self.send_to(1002, &self.address);
+            self.generate_block();
+        }
     }
 }
 
