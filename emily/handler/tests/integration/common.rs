@@ -1,8 +1,11 @@
 //! Common module for useful test functions.
 
+use std::str::FromStr as _;
+
 use crate::config::SETTINGS;
 use emily_handler::api::models::common::DepositStatus as HandlerDepositStatus;
 use emily_handler::api::models::common::WithdrawalStatus as HandlerWithdrawalStatus;
+use sbtc::testing::emily::EmilyTables;
 use serde::{Deserialize, Serialize};
 use testing_emily_client::models::Chainstate;
 use testing_emily_client::models::DepositStatus as TestingDepositStatus;
@@ -18,9 +21,11 @@ use testing_emily_client::{
 /// Standard error type.
 pub type StandardError = TestError<ErrorResponse>;
 
-/// Setup test.
-pub async fn clean_setup() -> Configuration {
-    let configuration = testing_emily_client::apis::configuration::Configuration {
+/// Setup test and dynamodb tables
+pub async fn new_test_setup() -> (Configuration, EmilyTables) {
+    let tables = EmilyTables::new().await;
+
+    let mut configuration = testing_emily_client::apis::configuration::Configuration {
         base_path: format!("http://{}:{}", SETTINGS.server.host, SETTINGS.server.port),
         api_key: Some(ApiKey {
             prefix: None,
@@ -28,10 +33,31 @@ pub async fn clean_setup() -> Configuration {
         }),
         ..Default::default()
     };
-    apis::testing_api::wipe_databases(&configuration)
-        .await
-        .expect("Failed to wipe databases during test clean setup.");
-    configuration
+
+    let mut headers = reqwest_012::header::HeaderMap::new();
+    for (shortname, table_name) in [
+        ("deposit", &tables.deposit),
+        ("withdrawal", &tables.withdrawal),
+        ("chainstate", &tables.chainstate),
+        ("limit", &tables.limit),
+    ] {
+        headers.insert(
+            reqwest_012::header::HeaderName::from_str(&format!("x-context-{shortname}")).unwrap(),
+            reqwest_012::header::HeaderValue::from_str(table_name).unwrap(),
+        );
+    }
+
+    configuration.client = reqwest_012::ClientBuilder::new()
+        .default_headers(headers)
+        .build()
+        .unwrap();
+
+    (configuration, tables)
+}
+
+/// Cleanup dynamodb tables
+pub async fn clean_test_setup(tables: EmilyTables) {
+    tables.delete().await
 }
 
 /// Make a test chainstate.

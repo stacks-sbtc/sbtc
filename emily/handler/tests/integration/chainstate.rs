@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 use testing_emily_client::apis;
 use testing_emily_client::models::Chainstate;
 
-use crate::common::{batch_set_chainstates, clean_setup, new_test_chainstate};
+use crate::common::{batch_set_chainstates, clean_test_setup, new_test_chainstate, new_test_setup};
 use test_case::test_case;
 
 /// An arbitrary fully ordered partial cmp comparator for Chainstate.
@@ -20,7 +20,7 @@ fn arbitrary_chainstate_partial_cmp(a: &Chainstate, b: &Chainstate) -> Ordering 
 #[test_case(1123, 1128; "create-5-chainstates")]
 #[tokio::test]
 async fn create_and_get_chainstate_happy_path(min_height: u64, max_height: u64) {
-    let configuration = clean_setup().await;
+    let (configuration, tables) = new_test_setup().await;
 
     // Arrange.
     // --------
@@ -57,7 +57,9 @@ async fn create_and_get_chainstate_happy_path(min_height: u64, max_height: u64) 
     gotten_chainstates.sort_by(arbitrary_chainstate_partial_cmp);
     assert_eq!(expected_chainstates, created_chainstates);
     assert_eq!(expected_chainstates, gotten_chainstates);
-    assert_eq!(expected_chaintip, gotten_chaintip)
+    assert_eq!(expected_chaintip, gotten_chaintip);
+
+    clean_test_setup(tables).await;
 }
 
 #[test_case(1123, 1124, 1125; "standard-reorg")]
@@ -69,7 +71,7 @@ async fn create_and_get_chainstate_reorg_happy_path(
     reorg_height: u64,
     max_height: u64,
 ) {
-    let configuration = clean_setup().await;
+    let (configuration, tables) = new_test_setup().await;
 
     // Arrange.
     // --------
@@ -96,13 +98,15 @@ async fn create_and_get_chainstate_reorg_happy_path(
     // --------
     assert_eq!(expected_post_reorg_chaintip, created_reorged_chainstate);
     assert_eq!(expected_post_reorg_chaintip, gotten_post_reorg_chaintip);
+
+    clean_test_setup(tables).await;
 }
 
 #[test_case(1110, 1220, 1227; "standard-reorg")]
 #[test_case(1125, 1120, 1127; "reorg-to-tip-below-any-existing-entry")]
 #[tokio::test]
 async fn too_old_chaintip_to_reorg(min_height: u64, reorg_height: u64, max_height: u64) {
-    let configuration = clean_setup().await;
+    let (configuration, tables) = new_test_setup().await;
 
     // Arrange.
     // --------
@@ -131,12 +135,14 @@ async fn too_old_chaintip_to_reorg(min_height: u64, reorg_height: u64, max_heigh
     // Assert.
     // --------
     assert_eq!(gotten_pre_reorg_chaintip, gotten_post_reorg_chaintip);
+
+    clean_test_setup(tables).await;
 }
 
 #[test_case(1123, 1128; "replay-5-chainstates-out-of-order")]
 #[tokio::test]
 async fn create_and_replay_does_not_initiate_reorg(min_height: u64, max_height: u64) {
-    let configuration = clean_setup().await;
+    let (configuration, tables) = new_test_setup().await;
 
     // Arrange.
     // --------
@@ -182,5 +188,7 @@ async fn create_and_replay_does_not_initiate_reorg(min_height: u64, max_height: 
     gotten_chainstates.sort_by(arbitrary_chainstate_partial_cmp);
     assert_eq!(expected_chainstates, created_chainstates);
     assert_eq!(expected_chainstates, gotten_chainstates);
-    assert_eq!(expected_chaintip, gotten_chaintip)
+    assert_eq!(expected_chaintip, gotten_chaintip);
+
+    clean_test_setup(tables).await;
 }

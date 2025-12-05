@@ -10,11 +10,12 @@ use testing_emily_client::models::Limits;
 use testing_emily_client::models::{CreateWithdrawalRequestBody, WithdrawalParameters};
 
 use crate::common::StandardError;
-use crate::common::{batch_set_chainstates, clean_setup, new_test_chainstate};
+use crate::common::clean_test_setup;
+use crate::common::{batch_set_chainstates, new_test_chainstate, new_test_setup};
 
 #[tokio::test]
 async fn empty_default_is_as_expected() {
-    let configuration = clean_setup().await;
+    let (configuration, tables) = new_test_setup().await;
 
     let expected_empty_default = models::Limits {
         available_to_withdraw: Some(None),
@@ -32,11 +33,13 @@ async fn empty_default_is_as_expected() {
         .expect("Failed to get limits during empty default test.");
 
     assert_eq!(limits, expected_empty_default);
+
+    clean_test_setup(tables).await;
 }
 
 #[tokio::test]
 async fn adding_and_then_updating_single_accout_limit_works() {
-    let configuration = clean_setup().await;
+    let (configuration, tables) = new_test_setup().await;
 
     // Arrange.
     // --------
@@ -173,11 +176,13 @@ async fn adding_and_then_updating_single_accout_limit_works() {
     // -------
     assert_eq!(individually_retrieved_account_caps, expected_account_caps);
     assert_eq!(global_limits, expected_limits);
+
+    clean_test_setup(tables).await;
 }
 
 #[tokio::test]
 async fn test_updating_account_limits_via_global_limit_works() {
-    let configuration = clean_setup().await;
+    let (configuration, tables) = new_test_setup().await;
 
     // Arrange.
     // --------
@@ -367,6 +372,8 @@ async fn test_updating_account_limits_via_global_limit_works() {
     );
     assert_eq!(global_limits_returned_on_set, expected_global_limits);
     assert_eq!(global_limits, expected_global_limits);
+
+    clean_test_setup(tables).await;
 }
 
 #[test_case(Some(100), None)]
@@ -376,7 +383,7 @@ async fn test_incomplete_rolling_withdrawal_limit_config_returns_error(
     rolling_withdrawal_blocks: Option<u64>,
     rolling_withdrawal_cap: Option<u64>,
 ) {
-    let configuration = clean_setup().await;
+    let (configuration, tables) = new_test_setup().await;
 
     // Arrange.
     let limits = Limits {
@@ -398,6 +405,8 @@ async fn test_incomplete_rolling_withdrawal_limit_config_returns_error(
 
     // Assert.
     assert_eq!(result.status_code, 400);
+
+    clean_test_setup(tables).await;
 }
 
 #[test_case(Some(100), Some(100))]
@@ -407,7 +416,7 @@ async fn test_complete_rolling_withdrawal_limit_config_works(
     rolling_withdrawal_blocks: Option<u64>,
     rolling_withdrawal_cap: Option<u64>,
 ) {
-    let configuration = clean_setup().await;
+    let (configuration, tables) = new_test_setup().await;
 
     let limits = Limits {
         available_to_withdraw: Some(rolling_withdrawal_cap),
@@ -433,13 +442,15 @@ async fn test_complete_rolling_withdrawal_limit_config_works(
     let global_limits = apis::limits_api::get_limits(&configuration).await;
     assert!(global_limits.is_ok());
     assert_eq!(global_limits.unwrap(), limits);
+
+    clean_test_setup(tables).await;
 }
 
 // Tests correctness of available_to_withdraw calculation in case, where there is no chainstate
 // on height (tip - window size).
 #[tokio::test]
 async fn test_available_to_withdraw_no_chainstate_in_db_at_target_height() {
-    let configuration = clean_setup().await;
+    let (configuration, tables) = new_test_setup().await;
 
     // Set limits
     let limits = Limits {
@@ -491,11 +502,13 @@ async fn test_available_to_withdraw_no_chainstate_in_db_at_target_height() {
 
     assert!(limits.is_ok());
     assert_eq!(limits.unwrap().available_to_withdraw, Some(Some(9000)));
+
+    clean_test_setup(tables).await;
 }
 
 #[tokio::test]
 async fn test_available_to_withdraw_success() {
-    let configuration = clean_setup().await;
+    let (configuration, tables) = new_test_setup().await;
 
     // Set limits
     let limits = Limits {
@@ -566,5 +579,7 @@ async fn test_available_to_withdraw_success() {
     let limits = apis::limits_api::get_limits(&configuration)
         .await
         .expect("failed to get limits during a valid api call");
-    assert_eq!(limits.available_to_withdraw, Some(Some(7000)))
+    assert_eq!(limits.available_to_withdraw, Some(Some(7000)));
+
+    clean_test_setup(tables).await;
 }

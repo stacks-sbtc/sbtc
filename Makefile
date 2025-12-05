@@ -37,7 +37,7 @@ test:
 	make test-py
 	pnpm --recursive test
 
-test-build:
+test-build: emily-cdk-synth
 	cargo $(CARGO_FLAGS) test build --features "testing"  $(CARGO_EXCLUDES) --no-run --locked ${CARGO_BUILD_ARGS}
 
 CARGO_FMT = cargo $(CARGO_FLAGS) fmt --all
@@ -48,7 +48,7 @@ CARGO_CLIPPY_BASE = cargo $(CARGO_FLAGS) clippy --workspace --all-targets --all-
     --exclude testing-emily-client
 CLIPPY_FLAGS = -D warnings
 
-lint:
+lint: emily-cdk-synth
 	$(CARGO_FMT) -- --check
 	$(CARGO_CLIPPY_BASE) -- $(CLIPPY_FLAGS)
 	pnpm --recursive run lint
@@ -81,7 +81,7 @@ NEXTEST_ARCHIVE_FILE := target/nextest/nextest-archive.tar.zst
 NEXTEST_SERIAL_ARCHIVE_FILE := target/nextest/nextest-archive-serial.tar.zst
 
 # Creates nextest archives
-nextest-archive:
+nextest-archive: emily-cdk-synth
 	cargo $(CARGO_FLAGS) nextest archive --features "testing" $(CARGO_EXCLUDES) --lib --archive-file $(NEXTEST_ARCHIVE_FILE) ${CARGO_BUILD_ARGS}
 	cargo $(CARGO_FLAGS) nextest archive --features "testing" $(CARGO_EXCLUDES) --archive-file $(NEXTEST_SERIAL_ARCHIVE_FILE) --test integration ${CARGO_BUILD_ARGS}
 

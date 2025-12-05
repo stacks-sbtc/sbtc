@@ -122,11 +122,19 @@ jobs:
         id: checkout_Repository
         uses: stacks-sbtc/actions/checkout@181f8c67da2707c66b5e31f24e7418c47adefdd1
 
+      - name: Setup Pnpm
+        id: setup_pnpm
+        uses: stacks-sbtc/actions/setup-pnpm@181f8c67da2707c66b5e31f24e7418c47adefdd1
+
       - name: Setup Rust
         id: setup_rust
         uses: stacks-sbtc/actions/setup-rust-toolchain@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           cache-key: "rust-tests"
+
+      - name: Install Package Dependencies
+        id: install_dependencies
+        run: make install-pnpm
 
       - name: Install Action
         id: install_action
