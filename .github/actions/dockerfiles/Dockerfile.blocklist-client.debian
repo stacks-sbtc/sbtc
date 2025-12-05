@@ -18,7 +18,6 @@ RUN apt-get install -y --no-install-recommends \
     protobuf-compiler \
     npm \
     default-jre \
-    curl \
     g++ \
     libssl-dev \
     clang \
@@ -39,15 +38,12 @@ RUN npm install -g pnpm@9 && \
 WORKDIR /code/sbtc
 COPY . .
 
-RUN export LIBCLANG_PATH="$(find /usr/lib/llvm-* -name lib -type d | head -n 1)" && \
-    make install-pnpm && \
-    make blocklist-client-codegen emily-client-codegen contracts
 
 RUN \
     export LIBCLANG_PATH="$(find /usr/lib/llvm-* -name lib -type d | head -n 1)" && \
-    export PKG_CONFIG_ALLOW_CROSS=1 && \
     if [ "$TARGETARCH" = "arm64" ]; then \
         echo "Building for ARM64..."; \
+        export PKG_CONFIG_ALLOW_CROSS=1 && \
         rustup target add aarch64-unknown-linux-gnu; \
         export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc; \
         export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc; \
@@ -72,10 +68,10 @@ RUN apt-get update && \
     echo "Package: gh\nPin: origin cli.github.com\nPin-Priority: 1001" > /etc/apt/preferences.d/gh-cli && \
     apt-get update && \
     apt-get install -y gh
-    
+
 # ca-certificates is required to establish TLS connections.
 # gettext provides envsubst
 RUN apt-get install -y ca-certificates gettext --no-install-recommends && \
-apt-get clean && rm -rf /var/lib/apt/lists/*
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 CMD ["/usr/local/bin/blocklist-client"]
