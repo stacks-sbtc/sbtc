@@ -14,7 +14,7 @@ permissions:
 
 ## Define which docker arch to build for
 env:
-  docker_platforms: "linux/amd64"
+  docker_platforms: "linux/amd64,linux/arm64"
   latest_release: $(curl -s https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r .tag_name)
 
 concurrency:
@@ -59,6 +59,10 @@ jobs:
         uses: stacks-sbtc/actions/checkout@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           ref: refs/tags/${{ github.event.client_payload.tag_name }}
+
+      - name: Setup Buildx
+        id: setup_buildx
+        uses: stacks-sbtc/actions/docker/setup-buildx-action@181f8c67da2707c66b5e31f24e7418c47adefdd1
 
       ## if the repo owner is not `stacks-network`, default to a docker-org of the repo owner (i.e. github user id)
       ## this allows forks to run the docker push workflows without having to hardcode a dockerhub org (but it does require docker hub user to match github username)
