@@ -127,19 +127,14 @@ async fn create_table(client: &Client, table_name: String, props: &serde_json::V
         let name = attr["AttributeName"].as_str().unwrap();
         let type_str = attr["AttributeType"].as_str().unwrap();
 
-        let scalar_type = match type_str {
-            "S" => ScalarAttributeType::S,
-            "N" => ScalarAttributeType::N,
-            "B" => ScalarAttributeType::B,
-            _ => panic!("unknown attribute type: {type_str}"),
-        };
+        let scalar_type = ScalarAttributeType::try_parse(type_str).expect("unknown attribute type");
 
         attributes.push(
             AttributeDefinition::builder()
                 .attribute_name(name)
                 .attribute_type(scalar_type)
                 .build()
-                .unwrap(),
+                .expect("failed to build attribute definition"),
         );
     }
 
@@ -166,24 +161,20 @@ fn parse_key_schema(schema_json: &serde_json::Value) -> Vec<KeySchemaElement> {
         let name = key["AttributeName"].as_str().unwrap();
         let type_str = key["KeyType"].as_str().unwrap();
 
-        let key_type = match type_str {
-            "HASH" => KeyType::Hash,
-            "RANGE" => KeyType::Range,
-            _ => panic!("unknown key type: {type_str}"),
-        };
+        let key_type = KeyType::try_parse(type_str).expect("unknown key type");
 
         keys.push(
             KeySchemaElement::builder()
                 .attribute_name(name)
                 .key_type(key_type)
                 .build()
-                .unwrap(),
+                .expect("failed to build key schema"),
         );
     }
     keys
 }
 
-fn parse_gsis(gsi_array: &Vec<serde_json::Value>) -> Vec<GlobalSecondaryIndex> {
+fn parse_gsis(gsi_array: &[serde_json::Value]) -> Vec<GlobalSecondaryIndex> {
     let mut indexes = Vec::new();
 
     for gsi in gsi_array {
@@ -195,12 +186,7 @@ fn parse_gsis(gsi_array: &Vec<serde_json::Value>) -> Vec<GlobalSecondaryIndex> {
 
         let mut proj_builder = Projection::builder();
 
-        let proj_type = match proj_type_str {
-            "ALL" => ProjectionType::All,
-            "KEYS_ONLY" => ProjectionType::KeysOnly,
-            "INCLUDE" => ProjectionType::Include,
-            _ => panic!("unknown projection type: {proj_type_str}"),
-        };
+        let proj_type = ProjectionType::try_parse(proj_type_str).expect("unknown projection type");
         proj_builder = proj_builder.projection_type(proj_type);
 
         if proj_type_str == "INCLUDE"
@@ -218,7 +204,7 @@ fn parse_gsis(gsi_array: &Vec<serde_json::Value>) -> Vec<GlobalSecondaryIndex> {
             .set_key_schema(Some(key_schema))
             .set_projection(Some(proj_builder.build()));
 
-        indexes.push(gsi_builder.build().unwrap());
+        indexes.push(gsi_builder.build().expect("failed to build gsi"));
     }
 
     indexes
@@ -230,7 +216,7 @@ async fn delete_table(client: &Client, table_name: &str) {
         .table_name(table_name)
         .send()
         .await
-        .unwrap();
+        .expect("failed to delete table");
 }
 
 fn get_test_client() -> Client {
