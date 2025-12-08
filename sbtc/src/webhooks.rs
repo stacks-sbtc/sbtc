@@ -42,7 +42,7 @@ impl DeserializeHex for StacksTxid {
     fn try_from_hex(hex: &str) -> Result<Self, Error> {
         <[u8; 32]>::from_hex(hex)
             .map(Self)
-            .map_err(Error::DecodeHexTxid)
+            .map_err(|error| Error::DecodeHexArray(error, "StacksTxid"))
     }
 }
 
@@ -50,7 +50,7 @@ impl DeserializeHex for BlockHeaderHash {
     fn try_from_hex(hex: &str) -> Result<Self, Error> {
         <[u8; 32]>::from_hex(hex)
             .map(Self)
-            .map_err(Error::DecodeHexTxid)
+            .map_err(|error| Error::DecodeHexArray(error, "BlockHeaderHash"))
     }
 }
 
@@ -58,7 +58,7 @@ impl DeserializeHex for BurnchainHeaderHash {
     fn try_from_hex(hex: &str) -> Result<Self, Error> {
         <[u8; 32]>::from_hex(hex)
             .map(Self)
-            .map_err(Error::DecodeHexTxid)
+            .map_err(|error| Error::DecodeHexArray(error, "BurnchainHeaderHash"))
     }
 }
 
@@ -66,7 +66,7 @@ impl DeserializeHex for StacksBlockId {
     fn try_from_hex(hex: &str) -> Result<Self, Error> {
         <[u8; 32]>::from_hex(hex)
             .map(Self)
-            .map_err(Error::DecodeHexTxid)
+            .map_err(|error| Error::DecodeHexArray(error, "StacksBlockId"))
     }
 }
 
@@ -221,7 +221,11 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::marker::PhantomData;
+
     use super::*;
+
+    use test_case::test_case;
 
     /// This was captured using a slightly modified version of the above
     /// function against a stacks-node running Nakamoto on commit
@@ -308,5 +312,52 @@ mod tests {
         // We test some fields to make sure that everything is okay.
         assert_eq!(event.block_height, 449);
         assert_eq!(event.block_hash, expected_block_hash);
+    }
+
+    trait StacksFromHex: Sized {
+        fn from_hex(hex: &str) -> Result<Self, stacks_common::util::HexError>;
+    }
+
+    impl StacksFromHex for StacksBlockId {
+        fn from_hex(hex: &str) -> Result<Self, stacks_common::util::HexError> {
+            Self::from_hex(hex)
+        }
+    }
+
+    impl StacksFromHex for BlockHeaderHash {
+        fn from_hex(hex: &str) -> Result<Self, stacks_common::util::HexError> {
+            Self::from_hex(hex)
+        }
+    }
+
+    impl StacksFromHex for BurnchainHeaderHash {
+        fn from_hex(hex: &str) -> Result<Self, stacks_common::util::HexError> {
+            Self::from_hex(hex)
+        }
+    }
+
+    /// Let's make sure that we decode hex the same way that stacks core
+    /// does.
+    #[test_case(PhantomData::<StacksBlockId>; "StacksBlockId")]
+    #[test_case(PhantomData::<BlockHeaderHash>; "BlockHeaderHash")]
+    #[test_case(PhantomData::<BurnchainHeaderHash>; "BurnchainHeaderHash")]
+    fn stacks_type_display_debug_impl<T>(_: PhantomData<T>)
+    where
+        T: DeserializeHex + StacksFromHex + PartialEq + std::fmt::Debug,
+    {
+        let hex_strings = [
+            "e012ca1ad766b2abe03c1cb661930af72fd29f6d197a7d8e4280b54bf2883dec",
+            "7d4db9d88dd86c31c75a351e4974940db55f6db77c9d49881dd0028946c661ac",
+            "646ebc3118346162ae38cd0973ce4fd6e890a1684c3775c2fe3b0a186c5ad0c8",
+            "e012ca1ad766b2abe03c1cb661930af72fd29f6d197a7d8e4280b54bf2883dec",
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        ];
+
+        for hex_string in hex_strings {
+            let native_way = T::from_hex(hex_string).unwrap();
+            let local_way = T::try_from_hex(hex_string).unwrap();
+            assert_eq!(native_way, local_way);
+        }
     }
 }
