@@ -118,15 +118,6 @@ pub struct NewBlockEvent {
     pub parent_burn_block_timestamp: u64,
 }
 
-impl StacksTxid {
-    /// Create a StacksTxid from a hex string.
-    pub fn from_hex(hex: &str) -> Result<Self, Error> {
-        <[u8; 32]>::from_hex(hex)
-            .map(Self)
-            .map_err(Error::DecodeHexTxid)
-    }
-}
-
 /// An event that was emitted during the execution of the transaction. It
 /// is defined in [^1].
 ///
