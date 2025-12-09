@@ -319,6 +319,12 @@ impl StacksInteract for TestHarness {
     ) -> Result<Option<SignerSetInfo>, Error> {
         Ok(None)
     }
+    async fn get_tenure_headers_light(
+        &self,
+        _burnchain_block_height: BitcoinBlockHeight,
+    ) -> Result<TenureBlockHeaders, Error> {
+        todo!()
+    }
     async fn get_current_signers_aggregate_key(
         &self,
         _contract_principal: &StacksAddress,

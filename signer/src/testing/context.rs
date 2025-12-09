@@ -439,6 +439,17 @@ impl StacksInteract for WrappedMockStacksInteract {
             .await
     }
 
+    async fn get_tenure_headers_light(
+        &self,
+        burnchain_block_height: crate::storage::model::BitcoinBlockHeight,
+    ) -> Result<TenureBlockHeaders, Error> {
+        self.inner
+            .lock()
+            .await
+            .get_tenure_headers_light(burnchain_block_height)
+            .await
+    }
+
     async fn get_current_signers_aggregate_key(
         &self,
         contract_principal: &StacksAddress,

@@ -4,6 +4,7 @@ use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::future::Future;
 use std::ops::RangeInclusive;
+use std::str::FromStr;
 use std::sync::LazyLock;
 use std::time::Duration;
 use std::time::Instant;
@@ -328,10 +329,16 @@ pub trait StacksInteract: Send + Sync {
         &self,
         sender: &StacksAddress,
     ) -> impl Future<Output = Result<Amount, Error>> + Send;
+
+    /// Get tenure headers for given bitcoin block height
+    fn get_tenure_headers_light(
+        &self,
+        burnchain_block_height: BitcoinBlockHeight,
+    ) -> impl Future<Output = Result<TenureBlockHeaders, Error>> + Send;
 }
 
 /// A slimmed down [`NakamotoBlockHeader`]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct StacksBlockHeader {
     /// The total number of StacksBlocks and NakamotoBlocks preceding this
     /// block in this block's history.
@@ -359,7 +366,7 @@ impl From<NakamotoBlockHeader> for StacksBlockHeader {
 
 /// This struct represents a non-empty subset of the Stacks block headers
 /// that were created during a tenure.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 #[cfg_attr(any(test, feature = "testing"), derive(Clone))]
 pub struct TenureBlockHeaders {
     /// The subset of Stacks block headers that of Nakamoto blocks that
@@ -1458,7 +1465,9 @@ where
         // There are more blocks to fetch, so let's get them. This assumes
         // optimistically that the parent is still a Nakamoto block (and so has
         // a tenure); if that's not the case, we get an `Err` here.
-        let tenure_headers_result = stacks.get_tenure_headers(&header.parent_block_id).await;
+        let tenure_headers_result = stacks
+            .get_tenure_headers_light(tenure.anchor_block_height - 1)
+            .await;
         let tenure_headers = match tenure_headers_result {
             Ok(tenure_headers) => tenure_headers,
             Err(error) => {
@@ -1574,7 +1583,83 @@ fn extract_signatures_required(value: Value) -> Result<Option<u16>, Error> {
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct GetTenureHeadersLightApiResponse {
+    pub consensus_hash: String,
+    pub burn_block_height: u64,
+    pub burn_block_hash: String,
+    pub stacks_blocks: Vec<GetTenureHeadersLightApiStacksBlock>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GetTenureHeadersLightApiStacksBlock {
+    pub block_id: String,
+    pub header_type: String,
+    pub block_hash: String,
+    pub parent_block_id: String,
+    pub height: u64,
+}
+
+impl TryFrom<GetTenureHeadersLightApiResponse> for TenureBlockHeaders {
+    type Error = Error;
+    fn try_from(value: GetTenureHeadersLightApiResponse) -> Result<Self, Error> {
+        let tenure_headers = TenureBlockHeaders {
+            headers: value
+                .stacks_blocks
+                .iter()
+                .map(|header| {
+                    Ok::<StacksBlockHeader, Error>(StacksBlockHeader {
+                        block_height: header.height.into(),
+                        block_id: StacksBlockHash::from_hex(&header.block_id)
+                            .map_err(|error| Error::TypeConversion)?,
+                        parent_block_id: StacksBlockHash::from_hex(&header.parent_block_id)
+                            .map_err(|error| Error::TypeConversion)?,
+                        consensus_hash: ConsensusHash::from_hex(&header.block_hash)
+                            .map_err(|error| Error::TypeConversion)?,
+                    })
+                })
+                .collect::<Result<Vec<StacksBlockHeader>, Error>>()?,
+            anchor_block_hash: BitcoinBlockHash::from(
+                bitcoin::BlockHash::from_str(&value.burn_block_hash)
+                    .map_err(|error| Error::TypeConversion)?,
+            ),
+            anchor_block_height: value.burn_block_height.into(),
+        };
+        Ok(tenure_headers)
+    }
+}
+
 impl StacksInteract for StacksClient {
+    #[tracing::instrument(skip(self))]
+    async fn get_tenure_headers_light(
+        &self,
+        burnchain_block_height: BitcoinBlockHeight,
+    ) -> Result<TenureBlockHeaders, Error> {
+        // let burnchain_block_hash = self.
+
+        // GET /v3/tenures/blocks/<consensus-hash>
+        // GET /v3/tenures/blocks/hash/<bitcoin-block-hash>
+        // GET /v3/tenures/blocks/height/<bitcoin-block-height>
+        let path = format!("/v3/tenures/blocks/height/{}", burnchain_block_height);
+        let url = self
+            .endpoint
+            .join(&path)
+            .map_err(|err| Error::PathJoin(err, self.endpoint.clone(), Cow::Owned(path)))?;
+
+        tracing::debug!("making request to the stacks node for the tenure headers");
+
+        let response = self
+            .client
+            .get(url)
+            .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await
+            .map_err(Error::StacksNodeRequest)?
+            .json::<GetTenureHeadersLightApiResponse>()
+            .await?;
+        Ok(response.try_into()?)
+    }
+
     async fn get_current_signer_set_info(
         &self,
         contract_principal: &StacksAddress,
@@ -1883,6 +1968,20 @@ impl StacksInteract for ApiFallbackClient<StacksClient> {
         .await
     }
 
+    async fn get_tenure_headers_light(
+        &self,
+        burnchain_block_height: BitcoinBlockHeight,
+    ) -> Result<TenureBlockHeaders, Error> {
+        self.exec(|client, retry| async move {
+            let result = client
+                .get_tenure_headers_light(burnchain_block_height)
+                .await;
+            retry.abort_if(|| matches!(result, Err(Error::InvalidStacksResponse(_))));
+            result
+        })
+        .await
+    }
+
     async fn get_current_signers_aggregate_key(
         &self,
         contract_principal: &StacksAddress,
@@ -2043,6 +2142,7 @@ mod tests {
 
     use super::*;
     use std::io::Read as _;
+    use std::str::FromStr;
 
     fn generate_wallet(num_keys: u16, signatures_required: u16) -> SignerWallet {
         let network_kind = NetworkKind::Regtest;
@@ -3018,5 +3118,34 @@ mod tests {
         let address = StacksAddress::burn_address(false);
         let account = client.get_account(&address).await.unwrap();
         assert_eq!(account.nonce, 0);
+    }
+
+    #[tokio::test]
+    async fn get_tenure_headers_light() {
+        let url = url::Url::from_str("https://api.hiro.so/").unwrap();
+        let client = StacksClient::new(url).unwrap();
+
+        let tenure_headers = client
+            .get_tenure_headers_light(900_000u32.into())
+            .await
+            .unwrap();
+
+        let old_headers = client
+            .get_tenure_headers(
+                &StacksBlockHash::from_hex(
+                    "e8ab147057dc77f10063199e56b4110b3aff637d27337762c0415ac692f9db27",
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(tenure_headers.anchor_block_hash, old_headers.anchor_block_hash);
+        assert_eq!(tenure_headers.anchor_block_height, old_headers.anchor_block_height);
+        let mut light_sorted = tenure_headers.headers;
+        let mut old_sorted = old_headers.headers;
+        light_sorted.sort();
+        old_sorted.sort();
+        assert_eq!(light_sorted, old_sorted);
     }
 }
