@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [package.metadata.cargo-machete]
-ignored = ["bitcoincore-rpc-json", "stackslib"]
+ignored = ["bitcoincore-rpc-json"]
 
 [features]
 default = []
@@ -30,7 +30,6 @@ bitcoincore-rpc-json = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 hex = { workspace = true, optional = true }
 hyper_014 = { workspace = true, optional = true }
-stackslib = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 
 [dev-dependencies]
