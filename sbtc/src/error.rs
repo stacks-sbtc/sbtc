@@ -70,12 +70,17 @@ pub enum Error {
     },
 
     /// This is thrown when failing to parse a hex string into bytes.
-    #[cfg(feature = "webhooks")]
+    #[cfg(any(test, feature = "webhooks"))]
     #[error("could not decode the hex string into bytes: {0}")]
     DecodeHexBytes(#[source] hex::FromHexError),
+    /// This is thrown when failing to parse a hex string into bytes when
+    /// deserializing a string into a Stacks type.
+    #[cfg(any(test, feature = "webhooks"))]
+    #[error("could not parse hex to Stacks type {1}: {0}")]
+    DecodeHexArray(#[source] bitcoin::hex::HexToArrayError, &'static str),
     /// An error when attempting to generically decode bytes using the
     /// trait implementation.
-    #[cfg(feature = "webhooks")]
+    #[cfg(any(test, feature = "webhooks"))]
     #[error("got an error when attempting to call StacksMessageCodec::consensus_deserialize {0}")]
-    StacksCodec(#[source] blockstack_lib::codec::Error),
+    StacksCodec(#[source] stacks_common::codec::Error),
 }

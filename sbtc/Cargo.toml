@@ -9,7 +9,7 @@ ignored = ["bitcoincore-rpc-json", "stackslib"]
 [features]
 default = []
 testing = ["dep:bitcoincore-rpc", "dep:bitcoincore-rpc-json"]
-webhooks = ["dep:stackslib", "dep:hex"]
+webhooks = ["dep:hex"]
 
 [dependencies]
 bitcoin.workspace = true
@@ -25,9 +25,9 @@ thiserror.workspace = true
 bitcoincore-rpc = { workspace = true, optional = true }
 bitcoincore-rpc-json = { workspace = true, optional = true }
 hex = { workspace = true, optional = true }
-stackslib = { workspace = true, optional = true }
 
 [dev-dependencies]
+hex.workspace = true 
 assert_matches.workspace = true
 bitcoincore-rpc.workspace = true
 bitcoincore-rpc-json.workspace = true

@@ -11,7 +11,7 @@ pub mod events;
 pub mod idpack;
 pub mod leb128;
 
-#[cfg(feature = "webhooks")]
+#[cfg(any(test, feature = "webhooks"))]
 pub mod webhooks;
 
 #[cfg(any(test, feature = "testing"))]
