@@ -1379,10 +1379,22 @@ async fn pre_fulfillment_stored_correctly() {
         .await
         .expect("Received an error after making a valid create withdrawal request api call.");
 
-    let expected_expected_height = 100;
+    // Right after creation txid should be none and height should be chainstate.bitcoin_block_height + 6
+    let withdrawal = apis::withdrawal_api::get_withdrawal(&user_configuration, request_id)
+        .await
+        .unwrap();
+    let received_expected_height = withdrawal
+        .pre_fulfillment
+        .maybe_expected_height
+        .unwrap()
+        .unwrap();
+    assert!(withdrawal.pre_fulfillment.maybe_expected_txid.is_none());
+    assert_eq!(7, received_expected_height);
+
+    // Now signer updates withdrawal with expected txid
     let expected_expected_txid = "txid".to_string();
     let pre_fulfillment = PreFulfillment {
-        maybe_expected_height: Some(Some(expected_expected_height)),
+        maybe_expected_height: None,
         maybe_expected_txid: Some(Some(expected_expected_txid.clone())),
     };
 
@@ -1395,10 +1407,13 @@ async fn pre_fulfillment_stored_correctly() {
             status_message: "foo".into(),
         }],
     };
+
     let withdrawals = apis::withdrawal_api::update_withdrawals_signer(&user_configuration, request)
         .await
         .unwrap()
         .withdrawals;
+
+    // After signer's update, txid should be same as signer provided while height should stay untouched
 
     assert_eq!(withdrawals.len(), 1);
     let withdrawal = withdrawals.first().unwrap().clone();
@@ -1413,7 +1428,7 @@ async fn pre_fulfillment_stored_correctly() {
         .unwrap()
         .unwrap();
 
-    assert_eq!(expected_expected_height, received_expected_height);
+    assert_eq!(7, received_expected_height);
     assert_eq!(expected_expected_txid, received_expected_txid);
 
     let withdrawal = apis::withdrawal_api::get_withdrawal(&user_configuration, request_id)
@@ -1430,6 +1445,6 @@ async fn pre_fulfillment_stored_correctly() {
         .unwrap()
         .unwrap();
 
-    assert_eq!(expected_expected_height, received_expected_height);
+    assert_eq!(7, received_expected_height);
     assert_eq!(expected_expected_txid, received_expected_txid);
 }

@@ -44,7 +44,6 @@ use clarity::vm::types::TypeSignature;
 
 use crate::DEPOSIT_DUST_LIMIT;
 use crate::WITHDRAWAL_BLOCKS_EXPIRY;
-use crate::WITHDRAWAL_MIN_CONFIRMATIONS;
 use crate::bitcoin::BitcoinInteract as _;
 use crate::bitcoin::validation::WithdrawalRequestStatus;
 use crate::context::Context;
@@ -60,6 +59,7 @@ use crate::storage::model::DkgSharesStatus;
 use crate::storage::model::QualifiedRequestId;
 use crate::storage::model::StacksBlockHash;
 use crate::storage::model::ToLittleEndianOrder as _;
+use sbtc::WITHDRAWAL_MIN_CONFIRMATIONS;
 
 use super::api::StacksInteract;
 

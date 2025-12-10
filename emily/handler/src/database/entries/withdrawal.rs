@@ -694,11 +694,28 @@ impl WithdrawalUpdatePackage {
         entry
             .latest_event()?
             .ensure_following_event_is_valid(&update.event)?;
+
+        // keep old data for prefulfillment details if None was provided.
+        let latest_event_prefulfillment = &entry.latest_event()?.pre_fulfillment;
+        let update_prefulfillment = &update.event.pre_fulfillment;
+        let maybe_expected_height = update_prefulfillment
+            .maybe_expected_height
+            .or(latest_event_prefulfillment.maybe_expected_height);
+        let maybe_expected_txid = update_prefulfillment
+            .maybe_expected_txid
+            .clone()
+            .or(latest_event_prefulfillment.maybe_expected_txid.clone());
+        let mut new_event = update.event;
+        new_event.pre_fulfillment = PreFulfillment {
+            maybe_expected_height,
+            maybe_expected_txid,
+        };
+
         // Create the withdrawal update package.
         Ok(WithdrawalUpdatePackage {
             key,
             version: entry.version,
-            event: update.event,
+            event: new_event,
         })
     }
 }

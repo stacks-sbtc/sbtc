@@ -263,6 +263,15 @@ pub async fn create_withdrawal(
 
         let status = WithdrawalStatus::Pending;
 
+        let chainstate =
+            accessors::get_chainstate_entry_at_height(&context, &stacks_block_height).await;
+
+        let maybe_expected_height = chainstate
+            .map(|chainstate| chainstate.bitcoin_height)
+            .ok()
+            .flatten()
+            .map(|height| height + sbtc::WITHDRAWAL_MIN_CONFIRMATIONS);
+
         // Make table entry.
         let withdrawal_entry: WithdrawalEntry = WithdrawalEntry {
             key: WithdrawalEntryKey {
@@ -280,7 +289,7 @@ pub async fn create_withdrawal(
                 stacks_block_hash: stacks_block_hash.clone(),
                 stacks_block_height,
                 pre_fulfillment: PreFulfillment {
-                    maybe_expected_height: None,
+                    maybe_expected_height,
                     maybe_expected_txid: None,
                 },
             }],
