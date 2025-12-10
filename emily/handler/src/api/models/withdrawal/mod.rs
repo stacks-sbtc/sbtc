@@ -58,7 +58,7 @@ pub struct Withdrawal {
     pub fulfillment: Option<Fulfillment>,
     /// Details about withdrawal which was approved and is processed. Note that this details are not final, and may change,
     /// as well as any value of this parameter does not guarantee that the withdrawal will be processed at all.
-    pub pre_fulfillment: PreFulfillment,
+    pub expected_fulfillment_info: ExpectedFulfillmentInfo,
     /// The hex encoded txid of the stacks transaction that generated this event.
     pub txid: String,
 }
@@ -79,14 +79,14 @@ pub struct Withdrawal {
     ToResponse,
 )]
 #[serde(rename_all = "camelCase")]
-pub struct PreFulfillment {
+pub struct ExpectedFulfillmentInfo {
     /// Expected bitcoin block height on which signers will _try_ to fullfill
     /// withdrawal request.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub maybe_expected_height: Option<u64>,
+    pub expected_height: Option<u64>,
     /// Expected txid of the transaction fullfilling withdrawal request
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub maybe_expected_txid: Option<String>,
+    pub expected_txid: Option<String>,
 }
 
 /// Withdrawal parameters.

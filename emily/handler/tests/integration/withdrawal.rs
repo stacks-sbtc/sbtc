@@ -8,7 +8,7 @@ use testing_emily_client::apis::chainstate_api::get_chain_tip;
 use testing_emily_client::apis::chainstate_api::set_chainstate;
 use testing_emily_client::apis::configuration::Configuration;
 use testing_emily_client::models::{
-    Chainstate, CreateWithdrawalRequestBody, Fulfillment, PreFulfillment,
+    Chainstate, CreateWithdrawalRequestBody, ExpectedFulfillmentInfo, Fulfillment,
     UpdateWithdrawalsRequestBody, Withdrawal, WithdrawalInfo, WithdrawalParameters,
     WithdrawalStatus, WithdrawalUpdate,
 };
@@ -88,9 +88,9 @@ async fn create_and_get_withdrawal_happy_path() {
     let expected = Withdrawal {
         amount,
         fulfillment: None,
-        pre_fulfillment: Box::new(PreFulfillment {
-            maybe_expected_height: None,
-            maybe_expected_txid: None,
+        expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
+            expected_height: None,
+            expected_txid: None,
         }),
         last_update_block_hash: BLOCK_HASH.into(),
         last_update_height: BLOCK_HEIGHT,
@@ -463,9 +463,9 @@ async fn update_withdrawals() {
         let withdrawal_update = WithdrawalUpdate {
             request_id,
             fulfillment: Some(Some(Box::new(update_fulfillment.clone()))),
-            pre_fulfillment: Box::new(PreFulfillment {
-                maybe_expected_height: None,
-                maybe_expected_txid: None,
+            expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
+                expected_height: None,
+                expected_txid: None,
             }),
             status: update_status,
             status_message: update_status_message.into(),
@@ -475,9 +475,9 @@ async fn update_withdrawals() {
         let expected = Withdrawal {
             amount,
             fulfillment: Some(Some(Box::new(update_fulfillment.clone()))),
-            pre_fulfillment: Box::new(PreFulfillment {
-                maybe_expected_height: None,
-                maybe_expected_txid: None,
+            expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
+                expected_height: None,
+                expected_txid: None,
             }),
             last_update_block_hash: update_chainstate.stacks_block_hash.clone(),
             last_update_height: update_chainstate.stacks_block_height,
@@ -598,9 +598,9 @@ async fn update_withdrawals_is_forbidden_for_signer(
                 withdrawals: vec![WithdrawalUpdate {
                     request_id,
                     fulfillment,
-                    pre_fulfillment: Box::new(PreFulfillment {
-                        maybe_expected_height: None,
-                        maybe_expected_txid: None,
+                    expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
+                        expected_height: None,
+                        expected_txid: None,
                     }),
                     status: previous_status,
                     status_message: "foo".into(),
@@ -629,9 +629,9 @@ async fn update_withdrawals_is_forbidden_for_signer(
         UpdateWithdrawalsRequestBody {
             withdrawals: vec![WithdrawalUpdate {
                 request_id,
-                pre_fulfillment: Box::new(PreFulfillment {
-                    maybe_expected_height: None,
-                    maybe_expected_txid: None,
+                expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
+                    expected_height: None,
+                    expected_txid: None,
                 }),
                 fulfillment,
                 status: new_status,
@@ -739,9 +739,9 @@ async fn update_withdrawals_is_not_forbidden_for_sidecar(
             UpdateWithdrawalsRequestBody {
                 withdrawals: vec![WithdrawalUpdate {
                     request_id,
-                    pre_fulfillment: Box::new(PreFulfillment {
-                        maybe_expected_height: None,
-                        maybe_expected_txid: None,
+                    expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
+                        expected_height: None,
+                        expected_txid: None,
                     }),
                     fulfillment,
                     status: previous_status,
@@ -771,9 +771,9 @@ async fn update_withdrawals_is_not_forbidden_for_sidecar(
         UpdateWithdrawalsRequestBody {
             withdrawals: vec![WithdrawalUpdate {
                 request_id,
-                pre_fulfillment: Box::new(PreFulfillment {
-                    maybe_expected_height: None,
-                    maybe_expected_txid: None,
+                expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
+                    expected_height: None,
+                    expected_txid: None,
                 }),
                 fulfillment,
                 status: new_status,
@@ -874,9 +874,9 @@ async fn emily_process_withdrawal_updates_when_some_of_them_already_accepted() {
         withdrawals: vec![WithdrawalUpdate {
             request_id: create_withdrawal_body1.request_id,
             fulfillment: None,
-            pre_fulfillment: Box::new(PreFulfillment {
-                maybe_expected_height: None,
-                maybe_expected_txid: None,
+            expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
+                expected_height: None,
+                expected_txid: None,
             }),
             status: WithdrawalStatus::Accepted,
             status_message: "First update".into(),
@@ -923,9 +923,9 @@ async fn emily_process_withdrawal_updates_when_some_of_them_already_accepted() {
             WithdrawalUpdate {
                 request_id: create_withdrawal_body1.request_id,
                 fulfillment: None,
-                pre_fulfillment: Box::new(PreFulfillment {
-                    maybe_expected_height: None,
-                    maybe_expected_txid: None,
+                expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
+                    expected_height: None,
+                    expected_txid: None,
                 }),
                 status: WithdrawalStatus::Accepted,
                 status_message: "Second update".into(),
@@ -933,9 +933,9 @@ async fn emily_process_withdrawal_updates_when_some_of_them_already_accepted() {
             WithdrawalUpdate {
                 request_id: create_withdrawal_body2.request_id,
                 fulfillment: None,
-                pre_fulfillment: Box::new(PreFulfillment {
-                    maybe_expected_height: None,
-                    maybe_expected_txid: None,
+                expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
+                    expected_height: None,
+                    expected_txid: None,
                 }),
                 status: WithdrawalStatus::Accepted,
                 status_message: "Second update".into(),
@@ -1042,9 +1042,9 @@ async fn emily_process_withdrawal_updates_when_some_of_them_are_unknown() {
             WithdrawalUpdate {
                 request_id: create_withdrawal_body1.request_id,
                 fulfillment: None,
-                pre_fulfillment: Box::new(PreFulfillment {
-                    maybe_expected_height: None,
-                    maybe_expected_txid: None,
+                expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
+                    expected_height: None,
+                    expected_txid: None,
                 }),
                 status: WithdrawalStatus::Accepted,
                 status_message: "Second update".into(),
@@ -1052,9 +1052,9 @@ async fn emily_process_withdrawal_updates_when_some_of_them_are_unknown() {
             WithdrawalUpdate {
                 request_id: create_withdrawal_body2.request_id,
                 fulfillment: None,
-                pre_fulfillment: Box::new(PreFulfillment {
-                    maybe_expected_height: None,
-                    maybe_expected_txid: None,
+                expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
+                    expected_height: None,
+                    expected_txid: None,
                 }),
                 status: WithdrawalStatus::Accepted,
                 status_message: "Second update".into(),
@@ -1290,9 +1290,9 @@ async fn only_confirmed_withdrawals_can_have_fulfillment(
         withdrawals: vec![WithdrawalUpdate {
             request_id,
             fulfillment: fulfillment.clone(),
-            pre_fulfillment: Box::new(PreFulfillment {
-                maybe_expected_height: None,
-                maybe_expected_txid: None,
+            expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
+                expected_height: None,
+                expected_txid: None,
             }),
             status,
             status_message: "foo".into(),
@@ -1342,7 +1342,7 @@ async fn only_confirmed_withdrawals_can_have_fulfillment(
 }
 
 #[tokio::test]
-async fn pre_fulfillment_stored_correctly() {
+async fn expected_fulfillment_info_stored_correctly() {
     // the testing configuration has privileged access to all endpoints.
     let testing_configuration = clean_setup().await;
 
@@ -1384,25 +1384,30 @@ async fn pre_fulfillment_stored_correctly() {
         .await
         .unwrap();
     let received_expected_height = withdrawal
-        .pre_fulfillment
-        .maybe_expected_height
+        .expected_fulfillment_info
+        .expected_height
         .unwrap()
         .unwrap();
-    assert!(withdrawal.pre_fulfillment.maybe_expected_txid.is_none());
+    assert!(
+        withdrawal
+            .expected_fulfillment_info
+            .expected_txid
+            .is_none()
+    );
     assert_eq!(7, received_expected_height);
 
     // Now signer updates withdrawal with expected txid
     let expected_expected_txid = "txid".to_string();
-    let pre_fulfillment = PreFulfillment {
-        maybe_expected_height: None,
-        maybe_expected_txid: Some(Some(expected_expected_txid.clone())),
+    let expected_fulfillment_info = ExpectedFulfillmentInfo {
+        expected_height: None,
+        expected_txid: Some(Some(expected_expected_txid.clone())),
     };
 
     let request = UpdateWithdrawalsRequestBody {
         withdrawals: vec![WithdrawalUpdate {
             request_id,
             fulfillment: None,
-            pre_fulfillment: Box::new(pre_fulfillment),
+            expected_fulfillment_info: Box::new(expected_fulfillment_info),
             status: WithdrawalStatus::Accepted,
             status_message: "foo".into(),
         }],
@@ -1418,13 +1423,17 @@ async fn pre_fulfillment_stored_correctly() {
     assert_eq!(withdrawals.len(), 1);
     let withdrawal = withdrawals.first().unwrap().clone();
 
-    let received_pre_fulfillment = withdrawal.withdrawal.unwrap().unwrap().pre_fulfillment;
-    let received_expected_height = received_pre_fulfillment
-        .maybe_expected_height
+    let received_expected_fulfillment_info = withdrawal
+        .withdrawal
+        .unwrap()
+        .unwrap()
+        .expected_fulfillment_info;
+    let received_expected_height = received_expected_fulfillment_info
+        .expected_height
         .unwrap()
         .unwrap();
-    let received_expected_txid = received_pre_fulfillment
-        .maybe_expected_txid
+    let received_expected_txid = received_expected_fulfillment_info
+        .expected_txid
         .unwrap()
         .unwrap();
 
@@ -1435,13 +1444,13 @@ async fn pre_fulfillment_stored_correctly() {
         .await
         .unwrap();
 
-    let received_pre_fulfillment = withdrawal.pre_fulfillment;
-    let received_expected_height = received_pre_fulfillment
-        .maybe_expected_height
+    let received_expected_fulfillment_info = withdrawal.expected_fulfillment_info;
+    let received_expected_height = received_expected_fulfillment_info
+        .expected_height
         .unwrap()
         .unwrap();
-    let received_expected_txid = received_pre_fulfillment
-        .maybe_expected_txid
+    let received_expected_txid = received_expected_fulfillment_info
+        .expected_txid
         .unwrap()
         .unwrap();
 

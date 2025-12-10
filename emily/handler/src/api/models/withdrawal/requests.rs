@@ -5,7 +5,7 @@ use utoipa::ToSchema;
 
 use crate::api::models::chainstate::Chainstate;
 use crate::api::models::common::{Fulfillment, WithdrawalStatus};
-use crate::api::models::withdrawal::{PreFulfillment, WithdrawalParameters};
+use crate::api::models::withdrawal::{ExpectedFulfillmentInfo, WithdrawalParameters};
 use crate::common::error::{self, ValidationError};
 use crate::database::entries::WithdrawalStatusEntry;
 use crate::database::entries::withdrawal::{
@@ -64,7 +64,7 @@ pub struct WithdrawalUpdate {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fulfillment: Option<Fulfillment>,
     /// Details of the process of fulfilling the withdrawal
-    pub pre_fulfillment: PreFulfillment,
+    pub expected_fulfillment_info: ExpectedFulfillmentInfo,
 }
 
 impl WithdrawalUpdate {
@@ -104,7 +104,7 @@ impl WithdrawalUpdate {
             message: self.status_message,
             stacks_block_height: chainstate.stacks_block_height,
             stacks_block_hash: chainstate.stacks_block_hash,
-            pre_fulfillment: self.pre_fulfillment,
+            expected_fulfillment_info: self.expected_fulfillment_info,
         };
         // Return the validated update.
         Ok(ValidatedWithdrawalUpdate {

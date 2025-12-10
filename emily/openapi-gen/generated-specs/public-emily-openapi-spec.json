@@ -2180,6 +2180,24 @@
           }
         }
       },
+      "ExpectedFulfillmentInfo": {
+        "type": "object",
+        "description": "Withdrawal parameters.",
+        "properties": {
+          "expectedHeight": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Expected bitcoin block height on which signers will _try_ to fullfill\nwithdrawal request.",
+            "nullable": true,
+            "minimum": 0
+          },
+          "expectedTxid": {
+            "type": "string",
+            "description": "Expected txid of the transaction fullfilling withdrawal request",
+            "nullable": true
+          }
+        }
+      },
       "Fulfillment": {
         "type": "object",
         "description": "Data about the fulfillment of an sBTC Operation.",
@@ -2365,24 +2383,6 @@
           }
         }
       },
-      "PreFulfillment": {
-        "type": "object",
-        "description": "Withdrawal parameters.",
-        "properties": {
-          "maybeExpectedHeight": {
-            "type": "integer",
-            "format": "int64",
-            "description": "Expected bitcoin block height on which signers will _try_ to fullfill\nwithdrawal request.",
-            "nullable": true,
-            "minimum": 0
-          },
-          "maybeExpectedTxid": {
-            "type": "string",
-            "description": "Expected txid of the transaction fullfilling withdrawal request",
-            "nullable": true
-          }
-        }
-      },
       "UpdateDepositsRequestBody": {
         "type": "object",
         "description": "Request structure for update deposit request.",
@@ -2462,7 +2462,7 @@
           "status",
           "statusMessage",
           "parameters",
-          "preFulfillment",
+          "expectedFulfillmentInfo",
           "txid"
         ],
         "properties": {
@@ -2471,6 +2471,9 @@
             "format": "int64",
             "description": "Amount of BTC being withdrawn in satoshis.",
             "minimum": 0
+          },
+          "expectedFulfillmentInfo": {
+            "$ref": "#/components/schemas/ExpectedFulfillmentInfo"
           },
           "fulfillment": {
             "allOf": [
@@ -2492,9 +2495,6 @@
           },
           "parameters": {
             "$ref": "#/components/schemas/WithdrawalParameters"
-          },
-          "preFulfillment": {
-            "$ref": "#/components/schemas/PreFulfillment"
           },
           "recipient": {
             "type": "string",
@@ -2630,9 +2630,12 @@
           "requestId",
           "status",
           "statusMessage",
-          "preFulfillment"
+          "expectedFulfillmentInfo"
         ],
         "properties": {
+          "expectedFulfillmentInfo": {
+            "$ref": "#/components/schemas/ExpectedFulfillmentInfo"
+          },
           "fulfillment": {
             "allOf": [
               {
@@ -2640,9 +2643,6 @@
               }
             ],
             "nullable": true
-          },
-          "preFulfillment": {
-            "$ref": "#/components/schemas/PreFulfillment"
           },
           "requestId": {
             "type": "integer",

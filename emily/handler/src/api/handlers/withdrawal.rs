@@ -5,7 +5,7 @@ use warp::reply::{Reply, json, with_status};
 use crate::api::models::common::WithdrawalStatus;
 use crate::api::models::common::requests::BasicPaginationQuery;
 use crate::api::models::withdrawal::responses::WithdrawalWithStatus;
-use crate::api::models::withdrawal::{PreFulfillment, Withdrawal, WithdrawalInfo};
+use crate::api::models::withdrawal::{ExpectedFulfillmentInfo, Withdrawal, WithdrawalInfo};
 use crate::api::models::withdrawal::{
     requests::{CreateWithdrawalRequestBody, GetWithdrawalsQuery, UpdateWithdrawalsRequestBody},
     responses::{GetWithdrawalsResponse, UpdateWithdrawalsResponse},
@@ -266,7 +266,7 @@ pub async fn create_withdrawal(
         let chainstate =
             accessors::get_chainstate_entry_at_height(&context, &stacks_block_height).await;
 
-        let maybe_expected_height = chainstate
+        let expected_height = chainstate
             .map(|chainstate| chainstate.bitcoin_height)
             .ok()
             .flatten()
@@ -288,9 +288,9 @@ pub async fn create_withdrawal(
                 message: "Just received withdrawal".to_string(),
                 stacks_block_hash: stacks_block_hash.clone(),
                 stacks_block_height,
-                pre_fulfillment: PreFulfillment {
-                    maybe_expected_height,
-                    maybe_expected_txid: None,
+                expected_fulfillment_info: ExpectedFulfillmentInfo {
+                    expected_height,
+                    expected_txid: None,
                 },
             }],
             status,

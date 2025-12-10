@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 /// WithdrawalUpdate : A singular Withdrawal update that contains only the fields pertinent to updating the status of a withdrawal. This includes the key related data in addition to status history related data.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WithdrawalUpdate {
+    #[serde(rename = "expectedFulfillmentInfo")]
+    pub expected_fulfillment_info: Box<models::ExpectedFulfillmentInfo>,
     #[serde(
         rename = "fulfillment",
         default,
@@ -21,8 +23,6 @@ pub struct WithdrawalUpdate {
         skip_serializing_if = "Option::is_none"
     )]
     pub fulfillment: Option<Option<Box<models::Fulfillment>>>,
-    #[serde(rename = "preFulfillment")]
-    pub pre_fulfillment: Box<models::PreFulfillment>,
     /// The id of the Stacks withdrawal request that initiated the sBTC operation.
     #[serde(rename = "requestId")]
     pub request_id: u64,
@@ -36,14 +36,14 @@ pub struct WithdrawalUpdate {
 impl WithdrawalUpdate {
     /// A singular Withdrawal update that contains only the fields pertinent to updating the status of a withdrawal. This includes the key related data in addition to status history related data.
     pub fn new(
-        pre_fulfillment: models::PreFulfillment,
+        expected_fulfillment_info: models::ExpectedFulfillmentInfo,
         request_id: u64,
         status: models::WithdrawalStatus,
         status_message: String,
     ) -> WithdrawalUpdate {
         WithdrawalUpdate {
+            expected_fulfillment_info: Box::new(expected_fulfillment_info),
             fulfillment: None,
-            pre_fulfillment: Box::new(pre_fulfillment),
             request_id,
             status,
             status_message,

@@ -6,7 +6,7 @@ use crate::{
     api::models::{
         chainstate::Chainstate,
         common::WithdrawalStatus,
-        withdrawal::{PreFulfillment, Withdrawal, WithdrawalInfo, WithdrawalParameters},
+        withdrawal::{ExpectedFulfillmentInfo, Withdrawal, WithdrawalInfo, WithdrawalParameters},
     },
     common::error::{Error, Inconsistency, ValidationError},
 };
@@ -141,9 +141,9 @@ impl WithdrawalEntry {
                 message: "Reprocessing withdrawal status after reorg.".to_string(),
                 stacks_block_height: chainstate.stacks_block_height,
                 stacks_block_hash: chainstate.stacks_block_hash.clone(),
-                pre_fulfillment: PreFulfillment {
-                    maybe_expected_height: None,
-                    maybe_expected_txid: None,
+                expected_fulfillment_info: ExpectedFulfillmentInfo {
+                    expected_height: None,
+                    expected_txid: None,
                 },
             }]
         }
@@ -195,7 +195,7 @@ impl TryFrom<WithdrawalEntry> for Withdrawal {
             WithdrawalStatusEntry::Confirmed(fulfillment) => Some(fulfillment.clone()),
             _ => None,
         };
-        let pre_fulfillment = latest_event.pre_fulfillment.clone();
+        let expected_fulfillment_info = latest_event.expected_fulfillment_info.clone();
 
         // Create withdrawal from table entry.
         Ok(Withdrawal {
@@ -214,7 +214,7 @@ impl TryFrom<WithdrawalEntry> for Withdrawal {
             },
             txid: withdrawal_entry.txid,
             fulfillment,
-            pre_fulfillment,
+            expected_fulfillment_info,
         })
     }
 }
@@ -242,7 +242,7 @@ pub struct WithdrawalEvent {
     /// Stacks block hash associated with the height of this update.
     pub stacks_block_hash: String,
     /// Information about fulfillment process of the withdrawal request
-    pub pre_fulfillment: PreFulfillment,
+    pub expected_fulfillment_info: ExpectedFulfillmentInfo,
 }
 
 /// Implementation of withdrawal event.
@@ -695,20 +695,21 @@ impl WithdrawalUpdatePackage {
             .latest_event()?
             .ensure_following_event_is_valid(&update.event)?;
 
-        // keep old data for prefulfillment details if None was provided.
-        let latest_event_prefulfillment = &entry.latest_event()?.pre_fulfillment;
-        let update_prefulfillment = &update.event.pre_fulfillment;
-        let maybe_expected_height = update_prefulfillment
-            .maybe_expected_height
-            .or(latest_event_prefulfillment.maybe_expected_height);
-        let maybe_expected_txid = update_prefulfillment
-            .maybe_expected_txid
-            .clone()
-            .or(latest_event_prefulfillment.maybe_expected_txid.clone());
+        // keep old data for expected_fulfillment details if None was provided.
+        let latest_event_expected_fulfillment = &entry.latest_event()?.expected_fulfillment_info;
+        let update_expected_fulfillment = &update.event.expected_fulfillment_info;
+        let expected_height = update_expected_fulfillment
+            .expected_height
+            .or(latest_event_expected_fulfillment.expected_height);
+        let expected_txid = update_expected_fulfillment.expected_txid.clone().or(
+            latest_event_expected_fulfillment
+                .expected_txid
+                .clone(),
+        );
         let mut new_event = update.event;
-        new_event.pre_fulfillment = PreFulfillment {
-            maybe_expected_height,
-            maybe_expected_txid,
+        new_event.expected_fulfillment_info = ExpectedFulfillmentInfo {
+            expected_height,
+            expected_txid,
         };
 
         // Create the withdrawal update package.
@@ -724,7 +725,7 @@ impl WithdrawalUpdatePackage {
 mod tests {
     use crate::api::models::chainstate::Chainstate;
     use crate::api::models::common::Fulfillment;
-    use crate::api::models::withdrawal::PreFulfillment;
+    use crate::api::models::withdrawal::ExpectedFulfillmentInfo;
     use crate::database::entries::WithdrawalStatusEntry;
     use crate::{
         api::models::common::WithdrawalStatus,
@@ -743,9 +744,9 @@ mod tests {
             message: "message".to_string(),
             stacks_block_height: 1,
             stacks_block_hash: "hash".to_string(),
-            pre_fulfillment: PreFulfillment {
-                maybe_expected_height: None,
-                maybe_expected_txid: None,
+            expected_fulfillment_info: ExpectedFulfillmentInfo {
+                expected_height: None,
+                expected_txid: None,
             },
         };
 
@@ -754,9 +755,9 @@ mod tests {
             message: "message".to_string(),
             stacks_block_height: 2,
             stacks_block_hash: "hash".to_string(),
-            pre_fulfillment: PreFulfillment {
-                maybe_expected_height: None,
-                maybe_expected_txid: None,
+            expected_fulfillment_info: ExpectedFulfillmentInfo {
+                expected_height: None,
+                expected_txid: None,
             },
         };
 
@@ -795,9 +796,9 @@ mod tests {
             message: "message".to_string(),
             stacks_block_height: 1,
             stacks_block_hash: "hash".to_string(),
-            pre_fulfillment: PreFulfillment {
-                maybe_expected_height: None,
-                maybe_expected_txid: None,
+            expected_fulfillment_info: ExpectedFulfillmentInfo {
+                expected_height: None,
+                expected_txid: None,
             },
         };
 
@@ -806,9 +807,9 @@ mod tests {
             message: "message".to_string(),
             stacks_block_height: 2,
             stacks_block_hash: "hash".to_string(),
-            pre_fulfillment: PreFulfillment {
-                maybe_expected_height: None,
-                maybe_expected_txid: None,
+            expected_fulfillment_info: ExpectedFulfillmentInfo {
+                expected_height: None,
+                expected_txid: None,
             },
         };
 
@@ -856,9 +857,9 @@ mod tests {
             message: "initial test pending".to_string(),
             stacks_block_height: 2,
             stacks_block_hash: "hash2".to_string(),
-            pre_fulfillment: PreFulfillment {
-                maybe_expected_height: None,
-                maybe_expected_txid: None,
+            expected_fulfillment_info: ExpectedFulfillmentInfo {
+                expected_height: None,
+                expected_txid: None,
             },
         };
 
@@ -867,9 +868,9 @@ mod tests {
             message: "accepted".to_string(),
             stacks_block_height: 4,
             stacks_block_hash: "hash4".to_string(),
-            pre_fulfillment: PreFulfillment {
-                maybe_expected_height: None,
-                maybe_expected_txid: None,
+            expected_fulfillment_info: ExpectedFulfillmentInfo {
+                expected_height: None,
+                expected_txid: None,
             },
         };
 
@@ -879,9 +880,9 @@ mod tests {
             message: "confirmed".to_string(),
             stacks_block_height: 6,
             stacks_block_hash: "hash6".to_string(),
-            pre_fulfillment: PreFulfillment {
-                maybe_expected_height: None,
-                maybe_expected_txid: None,
+            expected_fulfillment_info: ExpectedFulfillmentInfo {
+                expected_height: None,
+                expected_txid: None,
             },
         };
 

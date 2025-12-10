@@ -11,12 +11,12 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// PreFulfillment : Withdrawal parameters.
+/// ExpectedFulfillmentInfo : Withdrawal parameters.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
-pub struct PreFulfillment {
+pub struct ExpectedFulfillmentInfo {
     /// Expected bitcoin block height on which signers will _try_ to fullfill withdrawal request.
     #[serde(
-        rename = "maybeExpectedHeight",
+        rename = "expectedHeight",
         default,
         with = "::serde_with::rust::double_option",
         skip_serializing_if = "Option::is_none"
@@ -24,7 +24,7 @@ pub struct PreFulfillment {
     pub expected_height: Option<Option<u64>>,
     /// Expected txid of the transaction fullfilling withdrawal request
     #[serde(
-        rename = "maybeExpectedTxid",
+        rename = "expectedTxid",
         default,
         with = "::serde_with::rust::double_option",
         skip_serializing_if = "Option::is_none"
@@ -32,10 +32,10 @@ pub struct PreFulfillment {
     pub expected_txid: Option<Option<String>>,
 }
 
-impl PreFulfillment {
+impl ExpectedFulfillmentInfo {
     /// Withdrawal parameters.
-    pub fn new() -> PreFulfillment {
-        PreFulfillment {
+    pub fn new() -> ExpectedFulfillmentInfo {
+        ExpectedFulfillmentInfo {
             expected_height: None,
             expected_txid: None,
         }

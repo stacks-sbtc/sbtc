@@ -21,7 +21,7 @@ pub struct PreFulfillment {
         with = "::serde_with::rust::double_option",
         skip_serializing_if = "Option::is_none"
     )]
-    pub maybe_expected_height: Option<Option<u64>>,
+    pub expected_height: Option<Option<u64>>,
     /// Expected txid of the transaction fullfilling withdrawal request
     #[serde(
         rename = "maybeExpectedTxid",
@@ -29,15 +29,15 @@ pub struct PreFulfillment {
         with = "::serde_with::rust::double_option",
         skip_serializing_if = "Option::is_none"
     )]
-    pub maybe_expected_txid: Option<Option<String>>,
+    pub expected_txid: Option<Option<String>>,
 }
 
 impl PreFulfillment {
     /// Withdrawal parameters.
     pub fn new() -> PreFulfillment {
         PreFulfillment {
-            maybe_expected_height: None,
-            maybe_expected_txid: None,
+            expected_height: None,
+            expected_txid: None,
         }
     }
 }

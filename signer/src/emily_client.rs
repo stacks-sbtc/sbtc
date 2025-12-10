@@ -17,7 +17,7 @@ use emily_client::apis::limits_api;
 use emily_client::apis::withdrawal_api;
 use emily_client::models::DepositInfo;
 use emily_client::models::DepositUpdate;
-use emily_client::models::PreFulfillment;
+use emily_client::models::ExpectedFulfillmentInfo;
 use emily_client::models::UpdateDepositsRequestBody;
 use emily_client::models::UpdateDepositsResponse;
 use emily_client::models::UpdateWithdrawalsRequestBody;
@@ -348,9 +348,9 @@ impl EmilyInteract for EmilyClient {
                 request_id: withdrawal.request_id,
                 fulfillment: None,
                 status: WithdrawalStatus::Accepted,
-                pre_fulfillment: Box::new(PreFulfillment {
-                    maybe_expected_height: Some(Some(*expected_height)),
-                    maybe_expected_txid: Some(Some(expected_txid.clone())),
+                expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
+                    expected_height: Some(Some(*expected_height)),
+                    expected_txid: Some(Some(expected_txid.clone())),
                 }),
                 status_message: "".to_string(),
             })
