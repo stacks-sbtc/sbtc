@@ -701,16 +701,13 @@ impl WithdrawalUpdatePackage {
         let expected_height = update_expected_fulfillment
             .expected_height
             .or(latest_event_expected_fulfillment.expected_height);
-        let expected_txid = update_expected_fulfillment.expected_txid.clone().or(
-            latest_event_expected_fulfillment
-                .expected_txid
-                .clone(),
-        );
+        let expected_txid = update_expected_fulfillment
+            .expected_txid
+            .clone()
+            .or(latest_event_expected_fulfillment.expected_txid.clone());
         let mut new_event = update.event;
-        new_event.expected_fulfillment_info = ExpectedFulfillmentInfo {
-            expected_height,
-            expected_txid,
-        };
+        new_event.expected_fulfillment_info =
+            ExpectedFulfillmentInfo { expected_height, expected_txid };
 
         // Create the withdrawal update package.
         Ok(WithdrawalUpdatePackage {
