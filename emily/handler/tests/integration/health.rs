@@ -1,10 +1,10 @@
 use testing_emily_client::apis::health_api;
 
-use crate::common::clean_setup;
+use crate::common::{clean_test_setup, new_test_setup};
 
 #[tokio::test]
 async fn test_dynamic_context() {
-    let mut configuration = clean_setup().await;
+    let (mut configuration, tables) = new_test_setup().await;
 
     let version = health_api::check_health(&configuration)
         .await
@@ -29,4 +29,6 @@ async fn test_dynamic_context() {
         .unwrap()
         .version;
     assert_eq!(version, "custom-version");
+
+    clean_test_setup(tables).await;
 }
