@@ -1214,6 +1214,9 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
         client
             .expect_get_tenure_info()
             .returning(|| Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
+        client
+            .expect_get_node_info()
+            .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
         client.expect_get_block().returning(|_| {
             let response = Ok(NakamotoBlock {
                 header: NakamotoBlockHeader::empty(),
@@ -1403,6 +1406,9 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
         client
             .expect_get_tenure_info()
             .returning(|| Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
+        client
+            .expect_get_node_info()
+            .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
         client.expect_get_block().returning(|_| {
             let response = Ok(NakamotoBlock {
                 header: NakamotoBlockHeader::empty(),

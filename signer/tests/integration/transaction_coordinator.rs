@@ -1590,6 +1590,13 @@ async fn pseudo_random_dkg() {
 
         let network = network.connect(&ctx);
 
+        ctx.with_stacks_client(|client| {
+            client
+                .expect_get_node_info()
+                .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
+        })
+        .await;
+
         signers.push((ctx, db, kp, network));
     }
 
@@ -2016,6 +2023,13 @@ async fn sign_bitcoin_transaction() {
 
         let network = network.connect(&ctx);
 
+        ctx.with_stacks_client(|client| {
+            client
+                .expect_get_node_info()
+                .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
+        })
+        .await;
+
         signers.push((ctx, db, kp, network));
     }
 
@@ -2352,6 +2366,12 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
         backfill_bitcoin_blocks(&db, rpc, &chain_tip_info.hash).await;
 
         let network = network.connect(&ctx);
+        ctx.with_stacks_client(|client| {
+            client
+                .expect_get_node_info()
+                .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
+        })
+        .await;
 
         signers.push((ctx, db, kp, network));
     }
@@ -2868,6 +2888,13 @@ async fn wsts_ids_set_during_dkg_and_signing_rounds() {
 
         let network = network.connect(&ctx);
 
+        ctx.with_stacks_client(|client| {
+            client
+                .expect_get_node_info()
+                .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
+        })
+        .await;
+
         signers.push((ctx, db, kp, network));
     }
 
@@ -3231,6 +3258,13 @@ async fn skip_signer_activites_after_key_rotation() {
         backfill_bitcoin_blocks(&db, rpc, &chain_tip_info.hash).await;
 
         let network = network.connect(&ctx);
+
+        ctx.with_stacks_client(|client| {
+            client
+                .expect_get_node_info()
+                .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
+        })
+        .await;
 
         signers.push((ctx, db, kp, network));
     }
@@ -3703,6 +3737,13 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
         backfill_bitcoin_blocks(&db, rpc, &chain_tip_info.hash).await;
 
         let network = network.connect(&ctx);
+
+        ctx.with_stacks_client(|client| {
+            client
+                .expect_get_node_info()
+                .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
+        })
+        .await;
 
         signers.push((ctx, db, kp, network));
     }
@@ -4366,6 +4407,13 @@ async fn test_conservative_initial_sbtc_limits() {
             })
             .build();
 
+        ctx.with_stacks_client(|client| {
+            client
+                .expect_get_node_info()
+                .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
+        })
+        .await;
+
         // We do not want to run DKG because we think that the signer set
         // has changed.
         let aggregate_key = Faker.fake_with_rng(&mut rng);
@@ -4743,6 +4791,13 @@ async fn sign_bitcoin_transaction_withdrawals() {
         backfill_bitcoin_blocks(&db, rpc, &chain_tip_info.hash).await;
 
         let network = network.connect(&ctx);
+
+        ctx.with_stacks_client(|client| {
+            client
+                .expect_get_node_info()
+                .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
+        })
+        .await;
 
         signers.push((ctx, db, kp, network));
     }
