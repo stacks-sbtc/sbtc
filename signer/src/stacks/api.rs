@@ -1506,6 +1506,7 @@ fn extract_signatures_required(value: Value) -> Result<Option<u16>, Error> {
 
 #[derive(Debug, Deserialize)]
 struct GetTenureHeadersLightApiResponse {
+    #[serde(rename = "consensus_hash")]
     pub _consensus_hash: String,
     pub burn_block_height: u64,
     pub burn_block_hash: String,
@@ -1515,7 +1516,9 @@ struct GetTenureHeadersLightApiResponse {
 #[derive(Debug, Deserialize)]
 struct GetTenureHeadersLightApiStacksBlock {
     pub block_id: String,
+    #[serde(rename = "header_type")]
     pub _header_type: String,
+    #[serde(rename = "block_hash")]
     pub _block_hash: String,
     pub parent_block_id: String,
     pub height: u64,
@@ -2964,6 +2967,7 @@ mod tests {
     }
 
     // I don't think we really need this test, just for wip.
+    // This is just to show that new function indeed returns same as the old one
     #[tokio::test]
     async fn get_tenure_headers() {
         let url = url::Url::from_str("https://api.hiro.so/").unwrap();
@@ -2980,6 +2984,9 @@ mod tests {
             )
             .await
             .unwrap();
+
+        assert_eq!(old_headers.len(), 37);
+        assert_eq!(tenure_headers.headers.len(), 39);
 
         for header in old_headers {
             assert!(tenure_headers.headers.contains(&header));
