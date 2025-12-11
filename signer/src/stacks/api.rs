@@ -4,7 +4,7 @@ use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::future::Future;
 use std::ops::RangeInclusive;
-use std::str::FromStr;
+use std::str::FromStr as _;
 use std::sync::LazyLock;
 use std::time::Duration;
 use std::time::Instant;
@@ -318,7 +318,7 @@ pub trait StacksInteract: Send + Sync {
     ) -> impl Future<Output = Result<Amount, Error>> + Send;
 
     /// Get tenure headers for given bitcoin block height
-    fn get_tenure_headers_light(
+    fn get_tenure_headers(
         &self,
         burnchain_block_height: BitcoinBlockHeight,
     ) -> impl Future<Output = Result<TenureBlockHeaders, Error>> + Send;
@@ -1357,9 +1357,7 @@ where
     D: Transactable + Send + Sync,
 {
     let db = storage.begin_transaction().await?;
-    let mut tenure = stacks
-        .get_tenure_headers_light(burnchain_block_height)
-        .await?;
+    let mut tenure = stacks.get_tenure_headers(burnchain_block_height).await?;
     let end_height = tenure.end_height();
     let nakamoto_start_height = stacks.get_epoch_status().await?.nakamoto_start_height();
 
@@ -1389,7 +1387,7 @@ where
         // optimistically that the parent is still a Nakamoto block (and so has
         // a tenure); if that's not the case, we get an `Err` here.
         let tenure_headers_result = stacks
-            .get_tenure_headers_light(tenure.anchor_block_height - 1)
+            .get_tenure_headers(tenure.anchor_block_height - 1)
             .await;
         let tenure_headers = match tenure_headers_result {
             Ok(tenure_headers) => tenure_headers,
@@ -1552,7 +1550,7 @@ impl TryFrom<GetTenureHeadersLightApiResponse> for TenureBlockHeaders {
 
 impl StacksInteract for StacksClient {
     #[tracing::instrument(skip(self))]
-    async fn get_tenure_headers_light(
+    async fn get_tenure_headers(
         &self,
         burnchain_block_height: BitcoinBlockHeight,
     ) -> Result<TenureBlockHeaders, Error> {
@@ -1882,14 +1880,12 @@ impl StacksInteract for ApiFallbackClient<StacksClient> {
         .await
     }
 
-    async fn get_tenure_headers_light(
+    async fn get_tenure_headers(
         &self,
         burnchain_block_height: BitcoinBlockHeight,
     ) -> Result<TenureBlockHeaders, Error> {
         self.exec(|client, retry| async move {
-            let result = client
-                .get_tenure_headers_light(burnchain_block_height)
-                .await;
+            let result = client.get_tenure_headers(burnchain_block_height).await;
             retry.abort_if(|| matches!(result, Err(Error::InvalidStacksResponse(_))));
             result
         })
@@ -2047,8 +2043,6 @@ mod tests {
     use test_log::test;
 
     use super::*;
-    use std::io::Read as _;
-    use std::str::FromStr;
 
     fn generate_wallet(num_keys: u16, signatures_required: u16) -> SignerWallet {
         let network_kind = NetworkKind::Regtest;
@@ -2072,7 +2066,12 @@ mod tests {
         let client: ApiFallbackClient<StacksClient> = TryFrom::try_from(&settings).unwrap();
 
         let info = client.get_tenure_info().await.unwrap();
-        let tenures = update_db_with_unknown_ancestors(&client, &db, &info.tip_block_id).await;
+        let btc_info = client
+            .get_sortition_info(&info.consensus_hash)
+            .await
+            .unwrap();
+        let tenures =
+            update_db_with_unknown_ancestors(&client, &db, btc_info.burn_block_height.into()).await;
 
         assert!(tenures.is_ok());
 
@@ -2125,7 +2124,7 @@ mod tests {
                 .is_err()
         );
 
-        let tenures = update_db_with_unknown_ancestors(&client, &db, &nakamoto_block_id).await;
+        let tenures = update_db_with_unknown_ancestors(&client, &db, 1998u64.into()).await;
 
         let block_height_range = tenures.unwrap();
 
@@ -2190,12 +2189,12 @@ mod tests {
         // Okay we need to set up the server to returned what a stacks node
         // would return. We load up a file that contains a response from an
         // actual stacks node in regtest mode.
-        let path = format!("tests/fixtures/stacksapi-v3-tenures-blocks.json");
+        let path = "tests/fixtures/stacksapi-v3-tenures-blocks.json".to_string();
 
         let mut stacks_node_server = mockito::Server::new_async().await;
-        let endpoint_tenure_headers = format!("/v3/tenures/blocks/height/900000");
+        let endpoint_tenure_headers = "/v3/tenures/blocks/height/900000".to_string();
         let first_mock = stacks_node_server
-            .mock("GET", endpoint_path_tenure_end.as_str())
+            .mock("GET", endpoint_tenure_headers.as_str())
             .with_status(200)
             .with_body_from_file(path)
             .expect(1)
@@ -2204,13 +2203,10 @@ mod tests {
         let client = client(url::Url::parse(stacks_node_server.url().as_str()).unwrap());
 
         // The moment of truth, do the requests succeed?
-        let headers = client
-            .get_tenure_headers_light(900_000u64.into())
-            .await
-            .unwrap();
-        assert_eq!(headers.len(), 39);
-        assert_eq!(headers.start_height(), 1507195);
-        assert_eq!(headers.end_height(), 1507233);
+        let headers = client.get_tenure_headers(900_000u64.into()).await.unwrap();
+        assert_eq!(headers.headers.len(), 39);
+        assert_eq!(headers.start_height(), 1507195u64.into());
+        assert_eq!(headers.end_height(), 1507233u64.into());
 
         first_mock.assert();
     }
@@ -2928,7 +2924,11 @@ mod tests {
         let storage = Store::new_shared();
 
         let info = client.get_tenure_info().await.unwrap();
-        update_db_with_unknown_ancestors(&client, &storage, &info.tenure_start_block_id)
+        let btc_info = client
+            .get_sortition_info(&info.consensus_hash)
+            .await
+            .unwrap();
+        update_db_with_unknown_ancestors(&client, &storage, btc_info.burn_block_height.into())
             .await
             .unwrap();
     }
@@ -2965,14 +2965,11 @@ mod tests {
 
     // I don't think we really need this test, just for wip.
     #[tokio::test]
-    async fn get_tenure_headers_light() {
+    async fn get_tenure_headers() {
         let url = url::Url::from_str("https://api.hiro.so/").unwrap();
         let client = StacksClient::new(url).unwrap();
 
-        let tenure_headers = client
-            .get_tenure_headers_light(900_000u32.into())
-            .await
-            .unwrap();
+        let tenure_headers = client.get_tenure_headers(900_000u32.into()).await.unwrap();
 
         let old_headers = client
             .get_tenure_headers_raw(
@@ -2985,7 +2982,7 @@ mod tests {
             .unwrap();
 
         for header in old_headers {
-            assert!(tenure_headers.headers.contains(header));
+            assert!(tenure_headers.headers.contains(&header));
         }
     }
 }

@@ -439,14 +439,14 @@ impl StacksInteract for WrappedMockStacksInteract {
             .await
     }
 
-    async fn get_tenure_headers_light(
+    async fn get_tenure_headers(
         &self,
         burnchain_block_height: crate::storage::model::BitcoinBlockHeight,
     ) -> Result<TenureBlockHeaders, Error> {
         self.inner
             .lock()
             .await
-            .get_tenure_headers_light(burnchain_block_height)
+            .get_tenure_headers(burnchain_block_height)
             .await
     }
 

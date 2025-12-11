@@ -319,12 +319,6 @@ impl StacksInteract for TestHarness {
     ) -> Result<Option<SignerSetInfo>, Error> {
         Ok(None)
     }
-    async fn get_tenure_headers_light(
-        &self,
-        _burnchain_block_height: BitcoinBlockHeight,
-    ) -> Result<TenureBlockHeaders, Error> {
-        todo!()
-    }
     async fn get_current_signers_aggregate_key(
         &self,
         _contract_principal: &StacksAddress,
@@ -366,12 +360,18 @@ impl StacksInteract for TestHarness {
     }
     async fn get_tenure_headers(
         &self,
-        block_id: &StacksBlockHash,
+        burnchain_block_height: BitcoinBlockHeight,
     ) -> Result<TenureBlockHeaders, Error> {
+        let burnchain_hash = self
+            .bitcoin_blocks
+            .iter()
+            .find(|block| block.height == burnchain_block_height)
+            .ok_or(Error::MissingBlock)?
+            .block_hash;
         let (stx_block_id, stx_block, btc_block_id) = self
             .stacks_blocks
             .iter()
-            .find(|(id, _, _)| id == &block_id.into())
+            .find(|(_, _, btc_hash)| &burnchain_hash == btc_hash)
             .ok_or(Error::MissingBlock)?;
 
         let headers: Vec<StacksBlockHeader> = self
