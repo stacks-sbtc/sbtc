@@ -53,6 +53,7 @@ use signer::storage::model::TxPrevout;
 use signer::storage::model::TxPrevoutType;
 use signer::storage::postgres::PgStore;
 use signer::testing::btc::get_canonical_chain_tip;
+use signer::testing::stacks::DUMMY_NODE_INFO;
 use signer::testing::stacks::DUMMY_SORTITION_INFO;
 use signer::testing::stacks::DUMMY_TENURE_INFO;
 use testing_emily_client::apis::testing_api;
@@ -413,6 +414,9 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
         client
             .expect_get_tenure_info()
             .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
+        client
+            .expect_get_node_info()
+            .returning(move || Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
 
         let chain_tip = BitcoinBlockHash::from(chain_tip_info.hash);
         client.expect_get_tenure_headers().returning(move |_| {
@@ -901,6 +905,9 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
         client
             .expect_get_sortition_info()
             .returning(move |_| Box::pin(std::future::ready(Ok(DUMMY_SORTITION_INFO.clone()))));
+        client
+            .expect_get_node_info()
+            .returning(move || Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
 
         // The coordinator broadcasts a rotate keys transaction if it is
         // not up-to-date with their view of the current aggregate key. The
@@ -1635,6 +1642,9 @@ async fn block_observer_ignores_coinbase() {
         client
             .expect_get_tenure_info()
             .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
+        client
+            .expect_get_node_info()
+            .returning(move || Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
 
         let chain_tip = BitcoinBlockHash::from(chain_tip_info.hash);
         client.expect_get_tenure_headers().returning(move |_| {

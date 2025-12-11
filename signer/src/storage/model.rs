@@ -1783,6 +1783,15 @@ impl StacksBlockHeight {
 )]
 #[serde(transparent)]
 pub struct BitcoinBlockHeight(u64);
+
+impl BitcoinBlockHeight {
+    /// Create a BitcoinBlockHeight from a u64.
+    #[cfg(any(test, feature = "testing"))]
+    pub const fn new(height: u64) -> Self {
+        Self(height)
+    }
+}
+
 /// Stacks block height
 #[derive(
     Debug, Default, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
