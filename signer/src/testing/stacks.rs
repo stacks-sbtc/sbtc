@@ -39,7 +39,7 @@ pub const DUMMY_NODE_INFO: GetNodeInfoResponse = GetNodeInfoResponse {
     server_version: String::new(),
     stacks_tip_consensus_hash: ConsensusHash::new([0; 20]),
     stacks_tip_height: StacksBlockHeight::new(0u64),
-    stacks_tip: BlockHeaderHash { 0: [0; 32] },
+    stacks_tip: BlockHeaderHash([0; 32]),
 };
 
 /// Some dummy tenure info

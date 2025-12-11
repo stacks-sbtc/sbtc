@@ -139,6 +139,9 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
             });
             Box::pin(std::future::ready(response))
         });
+        client
+            .expect_get_node_info()
+            .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
 
         client
             .expect_get_tenure_headers()

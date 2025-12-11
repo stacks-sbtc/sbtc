@@ -112,6 +112,7 @@ use signer::storage::model::StacksTxId;
 use signer::storage::model::WithdrawalRequest;
 use signer::storage::postgres::PgStore;
 use signer::testing::IterTestExt as _;
+use signer::testing::stacks::DUMMY_NODE_INFO;
 use signer::testing::stacks::DUMMY_SORTITION_INFO;
 use signer::testing::stacks::DUMMY_TENURE_INFO;
 use signer::testing::storage::DbReadTestExt as _;
@@ -713,6 +714,12 @@ async fn deploy_smart_contracts_coordinator() {
 
         ctx.with_stacks_client(|client| mock_deploy_all_contracts()(client))
             .await;
+        ctx.with_stacks_client(|client| {
+            client
+                .expect_get_node_info()
+                .returning(move || Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
+        })
+        .await;
         mock_stacks_core(ctx, chain_tip_info.clone(), db, broadcast_stacks_tx).await;
     }
 
