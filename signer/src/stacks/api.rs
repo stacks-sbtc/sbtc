@@ -1357,7 +1357,9 @@ where
     D: Transactable + Send + Sync,
 {
     let db = storage.begin_transaction().await?;
-    let mut tenure = stacks.get_tenure_headers_light(burnchain_block_height).await?;
+    let mut tenure = stacks
+        .get_tenure_headers_light(burnchain_block_height)
+        .await?;
     let end_height = tenure.end_height();
     let nakamoto_start_height = stacks.get_epoch_status().await?.nakamoto_start_height();
 
@@ -2189,7 +2191,6 @@ mod tests {
         // would return. We load up a file that contains a response from an
         // actual stacks node in regtest mode.
         let path = format!("tests/fixtures/stacksapi-v3-tenures-blocks.json");
-    
 
         let mut stacks_node_server = mockito::Server::new_async().await;
         let endpoint_tenure_headers = format!("/v3/tenures/blocks/height/900000");
@@ -2203,13 +2204,15 @@ mod tests {
         let client = client(url::Url::parse(stacks_node_server.url().as_str()).unwrap());
 
         // The moment of truth, do the requests succeed?
-        let headers = client.get_tenure_headers_light(900_000u64.into()).await.unwrap();
+        let headers = client
+            .get_tenure_headers_light(900_000u64.into())
+            .await
+            .unwrap();
         assert_eq!(headers.len(), 39);
         assert_eq!(headers.start_height(), 1507195);
         assert_eq!(headers.end_height(), 1507233);
 
         first_mock.assert();
-
     }
 
     #[tokio::test]
