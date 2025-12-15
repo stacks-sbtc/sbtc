@@ -42,6 +42,7 @@ use crate::storage::DbWrite;
 use crate::storage::Transactable as _;
 use crate::storage::TransactionHandle as _;
 use crate::storage::model;
+use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::EncryptedDkgShares;
 use crate::util::FutureExt as _;
@@ -170,12 +171,27 @@ where
                     )
                     .increment(1);
 
-                    if let Err(error) = self.process_bitcoin_blocks_until(block_hash).await {
-                        tracing::warn!(%error, %block_hash, "could not process bitcoin blocks");
+                    let latest_processed = self.process_bitcoin_blocks_until(block_hash).await;
+
+                    match latest_processed {
+                        Ok(block_ref) => {
+                            if let Some(block_ref) = block_ref {
+                                if let Err(error) =
+                                    self.process_stacks_blocks(block_ref.block_height).await
+                                {
+                                    tracing::warn!(%error, "could not process stacks blocks");
+                                }
+                            } else {
+                                tracing::warn!(%block_hash, "no bitcoin anchor provided; skipping stacks blocks processing");
+                            }
+                        }
+                        Err(error) => {
+                            tracing::warn!(%error, %block_hash, "could not process bitcoin blocks; skipping stacks blocks processing");
+                        }
                     }
 
-                    if let Err(error) = self.process_stacks_blocks().await {
-                        tracing::warn!(%error, "could not process stacks blocks");
+                    if let Err(error) = self.process_bitcoin_blocks_until(block_hash).await {
+                        tracing::warn!(%error, %block_hash, "could not process bitcoin blocks");
                     }
 
                     if let Err(error) = self.check_pending_dkg_shares(block_hash).await {
@@ -363,20 +379,31 @@ impl<C: Context, B> BlockObserver<C, B> {
     /// This means that if we stop processing blocks midway though,
     /// subsequent calls to this function will properly pick up from where
     /// we left off and update the database.
-    async fn process_bitcoin_blocks_until(&self, block_hash: BlockHash) -> Result<(), Error> {
+    ///
+    /// Returns `BitcoinBlockRef` to latest processed block
+    async fn process_bitcoin_blocks_until(
+        &self,
+        block_hash: BlockHash,
+    ) -> Result<Option<BitcoinBlockRef>, Error> {
         let block_headers = self.next_headers_to_process(block_hash).await?;
 
+        let mut last = None;
         for block_header in block_headers {
-            self.process_bitcoin_block(block_header).await?;
+            last = Some(self.process_bitcoin_block(block_header).await?);
         }
 
-        Ok(())
+        Ok(last)
     }
 
     /// Write the bitcoin block and any transactions that spend to any of
     /// the signers `scriptPubKey`s to the database.
+    ///
+    /// Returns `BitcoinBlockRef` to processed block.
     #[tracing::instrument(skip_all, fields(block_hash = %block_header.hash))]
-    async fn process_bitcoin_block(&self, block_header: BitcoinBlockHeader) -> Result<(), Error> {
+    async fn process_bitcoin_block(
+        &self,
+        block_header: BitcoinBlockHeader,
+    ) -> Result<BitcoinBlockRef, Error> {
         let block = self
             .context
             .get_bitcoin_client()
@@ -413,22 +440,27 @@ impl<C: Context, B> BlockObserver<C, B> {
         storage_tx.commit().await?;
 
         tracing::debug!("finished processing bitcoin block");
-        Ok(())
+        Ok(BitcoinBlockRef {
+            block_height: block.height,
+            block_hash: block.block_hash.into(),
+        })
     }
 
     /// Process all recent stacks blocks.
     #[tracing::instrument(skip_all)]
-    async fn process_stacks_blocks(&self) -> Result<(), Error> {
+    async fn process_stacks_blocks(
+        &self,
+        bitcoin_block_height: BitcoinBlockHeight,
+    ) -> Result<(), Error> {
         tracing::info!("processing stacks block");
         let stacks_client = self.context.get_stacks_client();
         let db = self.context.get_storage_mut();
-        let burn_block_height = stacks_client.get_node_info().await?.burn_block_height;
 
         tracing::debug!("fetching unknown ancestral blocks from stacks-core");
         crate::stacks::api::update_db_with_unknown_ancestors(
             &stacks_client,
             &db,
-            burn_block_height,
+            bitcoin_block_height,
         )
         .await?;
 
