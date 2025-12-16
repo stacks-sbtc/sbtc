@@ -1409,10 +1409,10 @@ where
                 // A 404 could also mean there is a bitcoin block with no stacks
                 // blocks anchored.
                 // TODO: can there be other reasons for a 404?
-                if let Error::StacksNodeResponse(ref reqwest_error) = error {
-                    if reqwest_error.status() == Some(StatusCode::NOT_FOUND) {
-                        continue;
-                    }
+                if let Error::StacksNodeResponse(ref reqwest_error) = error
+                    && reqwest_error.status() == Some(StatusCode::NOT_FOUND)
+                {
+                    continue;
                 }
                 return Err(error);
             }
