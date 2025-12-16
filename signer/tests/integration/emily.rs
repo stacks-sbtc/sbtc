@@ -56,7 +56,6 @@ use signer::testing::context::TestContext;
 use signer::testing::context::WrappedMock;
 use signer::testing::get_rng;
 use signer::testing::stacks::DUMMY_SORTITION_INFO;
-use signer::testing::stacks::DUMMY_TENURE_INFO;
 use signer::testing::storage::model::TestData;
 use signer::testing::transaction_coordinator::select_coordinator;
 use signer::testing::wsts::SignerSet;
@@ -329,11 +328,6 @@ async fn deposit_flow() {
     // Also mock stacks client (to return no new blocks)
     context
         .with_stacks_client(|client| {
-            client
-                .expect_get_tenure_info()
-                .once()
-                .returning(move || Box::pin(async move { Ok(DUMMY_TENURE_INFO.clone()) }));
-
             client
                 .expect_get_tenure_headers()
                 .once()

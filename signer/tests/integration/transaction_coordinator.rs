@@ -112,9 +112,7 @@ use signer::storage::model::StacksTxId;
 use signer::storage::model::WithdrawalRequest;
 use signer::storage::postgres::PgStore;
 use signer::testing::IterTestExt as _;
-use signer::testing::stacks::DUMMY_NODE_INFO;
 use signer::testing::stacks::DUMMY_SORTITION_INFO;
-use signer::testing::stacks::DUMMY_TENURE_INFO;
 use signer::testing::storage::DbReadTestExt as _;
 use signer::testing::storage::DbWriteTestExt as _;
 use signer::testing::transaction_coordinator::select_coordinator;
@@ -544,10 +542,6 @@ async fn mock_stacks_core<D, B, E>(
     broadcast_stacks_tx: Sender<StacksTransaction>,
 ) {
     ctx.with_stacks_client(|client| {
-        client
-            .expect_get_tenure_info()
-            .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
-
         client.expect_get_block().returning(|_| {
             let response = Ok(NakamotoBlock {
                 header: NakamotoBlockHeader::empty(),
@@ -714,12 +708,6 @@ async fn deploy_smart_contracts_coordinator() {
 
         ctx.with_stacks_client(|client| mock_deploy_all_contracts()(client))
             .await;
-        ctx.with_stacks_client(|client| {
-            client
-                .expect_get_node_info()
-                .returning(move || Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
-        })
-        .await;
         mock_stacks_core(ctx, chain_tip_info.clone(), db, broadcast_stacks_tx).await;
     }
 
@@ -1590,13 +1578,6 @@ async fn pseudo_random_dkg() {
 
         let network = network.connect(&ctx);
 
-        ctx.with_stacks_client(|client| {
-            client
-                .expect_get_node_info()
-                .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
-        })
-        .await;
-
         signers.push((ctx, db, kp, network));
     }
 
@@ -2023,13 +2004,6 @@ async fn sign_bitcoin_transaction() {
 
         let network = network.connect(&ctx);
 
-        ctx.with_stacks_client(|client| {
-            client
-                .expect_get_node_info()
-                .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
-        })
-        .await;
-
         signers.push((ctx, db, kp, network));
     }
 
@@ -2366,12 +2340,6 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
         backfill_bitcoin_blocks(&db, rpc, &chain_tip_info.hash).await;
 
         let network = network.connect(&ctx);
-        ctx.with_stacks_client(|client| {
-            client
-                .expect_get_node_info()
-                .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
-        })
-        .await;
 
         signers.push((ctx, db, kp, network));
     }
@@ -2888,13 +2856,6 @@ async fn wsts_ids_set_during_dkg_and_signing_rounds() {
 
         let network = network.connect(&ctx);
 
-        ctx.with_stacks_client(|client| {
-            client
-                .expect_get_node_info()
-                .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
-        })
-        .await;
-
         signers.push((ctx, db, kp, network));
     }
 
@@ -3258,13 +3219,6 @@ async fn skip_signer_activites_after_key_rotation() {
         backfill_bitcoin_blocks(&db, rpc, &chain_tip_info.hash).await;
 
         let network = network.connect(&ctx);
-
-        ctx.with_stacks_client(|client| {
-            client
-                .expect_get_node_info()
-                .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
-        })
-        .await;
 
         signers.push((ctx, db, kp, network));
     }
@@ -3738,13 +3692,6 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
 
         let network = network.connect(&ctx);
 
-        ctx.with_stacks_client(|client| {
-            client
-                .expect_get_node_info()
-                .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
-        })
-        .await;
-
         signers.push((ctx, db, kp, network));
     }
 
@@ -3773,10 +3720,6 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
 
         db.write_encrypted_dkg_shares(&shares).await.unwrap();
         ctx.with_stacks_client(|client| {
-            client
-                .expect_get_tenure_info()
-                .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
-
             client.expect_get_block().returning(|_| {
                 let response = Ok(NakamotoBlock {
                     header: NakamotoBlockHeader::empty(),
@@ -4407,13 +4350,6 @@ async fn test_conservative_initial_sbtc_limits() {
             })
             .build();
 
-        ctx.with_stacks_client(|client| {
-            client
-                .expect_get_node_info()
-                .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
-        })
-        .await;
-
         // We do not want to run DKG because we think that the signer set
         // has changed.
         let aggregate_key = Faker.fake_with_rng(&mut rng);
@@ -4498,10 +4434,6 @@ async fn test_conservative_initial_sbtc_limits() {
     for (ctx, _, _, _) in signers.iter_mut() {
         let signer_set = signer_set_public_keys.clone();
         ctx.with_stacks_client(|client| {
-            client
-                .expect_get_tenure_info()
-                .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
-
             client.expect_get_block().returning(|_| {
                 let response = Ok(NakamotoBlock {
                     header: NakamotoBlockHeader::empty(),
@@ -4791,13 +4723,6 @@ async fn sign_bitcoin_transaction_withdrawals() {
         backfill_bitcoin_blocks(&db, rpc, &chain_tip_info.hash).await;
 
         let network = network.connect(&ctx);
-
-        ctx.with_stacks_client(|client| {
-            client
-                .expect_get_node_info()
-                .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
-        })
-        .await;
 
         signers.push((ctx, db, kp, network));
     }

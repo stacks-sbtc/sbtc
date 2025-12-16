@@ -19,7 +19,6 @@ use crate::bitcoin::rpc::{BitcoinBlockHeader, BitcoinBlockInfo};
 use crate::context::SbtcLimits;
 use crate::keys::PrivateKey;
 use crate::stacks::api::GetNodeInfoResponse;
-use crate::stacks::api::GetTenureInfoResponse;
 use crate::stacks::api::SignerSetInfo;
 use crate::stacks::api::StacksEpochStatus;
 use crate::stacks::api::TenureBlockHeaders;
@@ -503,10 +502,6 @@ impl StacksInteract for WrappedMockStacksInteract {
             .await
             .check_pre_nakamoto_block(block_id)
             .await
-    }
-
-    async fn get_tenure_info(&self) -> Result<GetTenureInfoResponse, Error> {
-        self.inner.lock().await.get_tenure_info().await
     }
 
     async fn get_sortition_info(

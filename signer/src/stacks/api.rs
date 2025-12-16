@@ -260,11 +260,6 @@ pub trait StacksInteract: Send + Sync {
         block_id: &StacksBlockHash,
     ) -> impl Future<Output = Result<(), Error>> + Send;
 
-    /// Get information about the current tenure.
-    ///
-    /// This function is analogous to the GET /v3/tenures/info stacks node
-    /// endpoint for retrieving tenure information.
-    fn get_tenure_info(&self) -> impl Future<Output = Result<GetTenureInfoResponse, Error>> + Send;
     /// Get information about the sortition associated to a consensus hash
     fn get_sortition_info(
         &self,
@@ -637,27 +632,6 @@ impl GetNodeInfoResponse {
         let sortition_consensus_hash = blockstack_lib::chainstate::burn::ConsensusHash(bytes);
         StacksBlockId::new(&sortition_consensus_hash, &self.stacks_tip).into()
     }
-}
-
-/// The response from a GET /v3/tenures/info request to stacks-core.
-///
-/// This type contains the view of this node's current tenure.
-#[derive(Debug, PartialEq, Clone, serde::Deserialize)]
-pub struct GetTenureInfoResponse {
-    /// The highest known consensus hash (identifies the current tenure)
-    pub consensus_hash: ConsensusHash,
-    /// The tenure-start block ID of the current tenure
-    pub tenure_start_block_id: StacksBlockHash,
-    /// The consensus hash of the parent tenure
-    pub parent_consensus_hash: ConsensusHash,
-    /// The block hash of the parent tenure's start block
-    pub parent_tenure_start_block_id: StacksBlockHash,
-    /// The highest Stacks block ID in the current tenure
-    pub tip_block_id: StacksBlockHash,
-    /// The height of this tip
-    pub tip_height: StacksBlockHeight,
-    /// Which reward cycle we're in
-    pub reward_cycle: u64,
 }
 
 /// Minimal model type representing an epoch entry in a `/v2/pox` response,
@@ -1213,35 +1187,6 @@ impl StacksClient {
         Ok(headers)
     }
 
-    /// Get information about the current tenure.
-    ///
-    /// Uses the GET /v3/tenures/info stacks node endpoint for retrieving
-    /// tenure information.
-    #[tracing::instrument(skip(self))]
-    pub async fn get_tenure_info(&self) -> Result<GetTenureInfoResponse, Error> {
-        let path = "/v3/tenures/info";
-        let url = self
-            .endpoint
-            .join(path)
-            .map_err(|err| Error::PathJoin(err, self.endpoint.clone(), Cow::Borrowed(path)))?;
-
-        tracing::debug!("making request to the stacks node for the current tenure info");
-        let response = self
-            .client
-            .get(url.clone())
-            .timeout(REQUEST_TIMEOUT)
-            .send()
-            .await
-            .map_err(Error::StacksNodeRequest)?;
-
-        response
-            .error_for_status()
-            .map_err(Error::StacksNodeResponse)?
-            .json()
-            .await
-            .map_err(Error::UnexpectedStacksResponse)
-    }
-
     /// Get information about the sortition related to a consensus hash.
     ///
     /// Uses the GET /v3/sortitions stacks node endpoint for retrieving
@@ -1710,10 +1655,6 @@ impl StacksInteract for StacksClient {
         self.check_pre_nakamoto_block(block_id).await
     }
 
-    async fn get_tenure_info(&self) -> Result<GetTenureInfoResponse, Error> {
-        self.get_tenure_info().await
-    }
-
     async fn get_sortition_info(
         &self,
         consensus_hash: &ConsensusHash,
@@ -1949,10 +1890,6 @@ impl StacksInteract for ApiFallbackClient<StacksClient> {
             .await
     }
 
-    async fn get_tenure_info(&self) -> Result<GetTenureInfoResponse, Error> {
-        self.exec(|client, _| client.get_tenure_info()).await
-    }
-
     async fn get_sortition_info(
         &self,
         consensus_hash: &ConsensusHash,
@@ -2061,13 +1998,9 @@ mod tests {
         // a list of endpoints, so we use the fallback client.
         let client: ApiFallbackClient<StacksClient> = TryFrom::try_from(&settings).unwrap();
 
-        let info = client.get_tenure_info().await.unwrap();
-        let btc_info = client
-            .get_sortition_info(&info.consensus_hash)
-            .await
-            .unwrap();
-        let tenures =
-            update_db_with_unknown_ancestors(&client, &db, btc_info.burn_block_height.into()).await;
+        let info = client.get_node_info().await.unwrap();
+
+        let tenures = update_db_with_unknown_ancestors(&client, &db, info.burn_block_height).await;
 
         assert!(tenures.is_ok());
 
@@ -2233,41 +2166,6 @@ mod tests {
 
         assert_eq!(result, Amount::from_sat(1337));
         mock.assert();
-    }
-
-    #[test_case(|url| StacksClient::new(url).unwrap(); "stacks-client")]
-    #[test_case(|url| ApiFallbackClient::new(vec![StacksClient::new(url).unwrap()]).unwrap(); "fallback-client")]
-    #[tokio::test]
-    async fn get_tenure_info_works<F, C>(client: F)
-    where
-        C: StacksInteract,
-        F: Fn(Url) -> C,
-    {
-        let raw_json_response = r#"{
-            "consensus_hash": "e42b3a9ffce62376e1f36cf76c33cc23d9305de1",
-            "tenure_start_block_id": "e08c740242092eb0b5f74756ce203db048a5156e444df531a7c29e2d952cf628",
-            "parent_consensus_hash": "d9693fbdf0a9bab9ee5ffd3c4f52fef6e1da1899",
-            "parent_tenure_start_block_id": "8ff4eb1ed4a2f83faada29f6012b7f86f476eafed9921dff8d2c14cdfa30da94",
-            "tip_block_id": "8f61dc41560560e8122609e82966740075929ed663543d9ad6733f8fc32876c5",
-            "tip_height": 2037,
-            "reward_cycle": 11
-        }"#;
-
-        let mut stacks_node_server = mockito::Server::new_async().await;
-        let first_mock = stacks_node_server
-            .mock("GET", "/v3/tenures/info")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(raw_json_response)
-            .expect(1)
-            .create();
-
-        let client = client(url::Url::parse(stacks_node_server.url().as_str()).unwrap());
-        let resp = client.get_tenure_info().await.unwrap();
-        let expected: GetTenureInfoResponse = serde_json::from_str(raw_json_response).unwrap();
-
-        assert_eq!(resp, expected);
-        first_mock.assert();
     }
 
     /// Helper method for generating a list of public keys.
@@ -2919,12 +2817,9 @@ mod tests {
         let client: ApiFallbackClient<StacksClient> = TryFrom::try_from(&settings).unwrap();
         let storage = Store::new_shared();
 
-        let info = client.get_tenure_info().await.unwrap();
-        let btc_info = client
-            .get_sortition_info(&info.consensus_hash)
-            .await
-            .unwrap();
-        update_db_with_unknown_ancestors(&client, &storage, btc_info.burn_block_height.into())
+        let info = client.get_node_info().await.unwrap();
+
+        update_db_with_unknown_ancestors(&client, &storage, info.burn_block_height)
             .await
             .unwrap();
     }
