@@ -1360,11 +1360,13 @@ where
     let end_height = tenure.end_height();
     let nakamoto_start_height = stacks.get_epoch_status().await?.nakamoto_start_height();
 
+    let mut anchor_block_height = tenure.anchor_block_height;
+
     loop {
         db.write_stacks_block_headers(&tenure).await?;
         // We won't get anymore Nakamoto blocks before this point, so
         // time to stop.
-        if tenure.anchor_block_height <= nakamoto_start_height {
+        if anchor_block_height <= nakamoto_start_height {
             tracing::debug!(
                 %nakamoto_start_height,
                 last_chain_length = %tenure.anchor_block_height,
@@ -1385,9 +1387,8 @@ where
         // There are more blocks to fetch, so let's get them. This assumes
         // optimistically that the parent is still a Nakamoto block (and so has
         // a tenure); if that's not the case, we get an `Err` here.
-        let tenure_headers_result = stacks
-            .get_tenure_headers(tenure.anchor_block_height - 1)
-            .await;
+        let tenure_headers_result = stacks.get_tenure_headers(anchor_block_height - 1).await;
+        anchor_block_height = anchor_block_height - 1;
         let tenure_headers = match tenure_headers_result {
             Ok(tenure_headers) => tenure_headers,
             Err(error) => {
@@ -1404,6 +1405,14 @@ where
                         "all Nakamoto blocks fetched; stopping"
                     );
                     break;
+                }
+                // A 404 could also mean there is a bitcoin block with no stacks
+                // blocks anchored.
+                // TODO: can there be other reasons for a 404?
+                if let Error::StacksNodeResponse(ref reqwest_error) = error {
+                    if reqwest_error.status() == Some(StatusCode::NOT_FOUND) {
+                        continue;
+                    }
                 }
                 return Err(error);
             }
@@ -1553,11 +1562,13 @@ impl StacksInteract for StacksClient {
 
         let headers = self
             .client
-            .get(url)
+            .get(url.clone())
             .timeout(REQUEST_TIMEOUT)
             .send()
             .await
             .map_err(Error::StacksNodeRequest)?
+            .error_for_status()
+            .map_err(Error::StacksNodeResponse)?
             .json::<GetTenureHeadersApiResponse>()
             .await?
             .into();
@@ -2081,7 +2092,7 @@ mod tests {
         // BTC 1865 <- Stacks 319
         // BTC 1900 -- nakamoto_start_height
         // BTC 1901 <- Stacks 320, ..., 744
-        // BTC 1998 <- Stacks 745, ..., 750, ...
+        // BTC 1998 <- Stacks 745, ..., 750, ... 791
 
         // This is the block id for block 319 (pre-Nakamoto) on testnet
         let pre_nakamoto_block_id = StacksBlockId::from_hex(
@@ -2114,7 +2125,7 @@ mod tests {
         let block_height_range = tenures.unwrap();
 
         let expected =
-            RangeInclusive::new(StacksBlockHeight::new(320), StacksBlockHeight::new(750));
+            RangeInclusive::new(StacksBlockHeight::new(320), StacksBlockHeight::new(791));
         assert_eq!(block_height_range, expected);
 
         let (min_block_height, max_block_height, count) = sqlx::query_as::<_, (i64, i64, i64)>(
