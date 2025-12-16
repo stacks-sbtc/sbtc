@@ -49,7 +49,7 @@ cfg-if = { version = "1.0.0", default-features = false }
 chrono = { version = "0.4.41", default-features = false, features = ["serde"] }
 clap = { version = "4.5.27", default-features = false, features = ["derive", "env", "std", "help"] }
 config = { version = "0.14.1", default-features = false, features = ["toml"] }
-futures = { version = "0.3.31", default-features = false }
+futures = { version = "0.3.31", default-features = false, features = ["alloc"] }
 hashbrown = { version = "0.14.5", default-features = false }
 hex = { version = "0.4.3", default-features = false, features = ["std"] }
 http = { version = "1.2.0", default-features = false }
@@ -92,7 +92,9 @@ warp = { version = "0.3.7", default-features = false }
 warp_lambda = { version = "0.1.4", default-features = false }
 
 # Crates used only for testing
+aws-smithy-runtime = { version = "1.7.7", default-features = false, features = ["client"] }
 fake = { version = "3.1.0", default-features = false, features = ["derive", "time"] }
+hyper_014 = { package = "hyper", version = "0.14", default-features = false, features = ["client", "http1", "tcp"] }
 mockall = { version = "0.13.1", default-features = false }
 mockito = { version = "1.6.1", default-features = false }
 more-asserts = { version = "0.3.1", default-features = false }
@@ -102,6 +104,8 @@ test-case = { version = "3.3.1", default-features = false }
 test-log = { version = "0.2.17", default-features = false, features = ["trace"] }
 toml_edit = { version = "0.22.22", default-features = false, features = ["display"] }
 tower = { version = "0.5.2", default-features = false, features = ["util"] }
+# This matches the generated openapi client version to customize the http client in tests
+reqwest_012 = { package = "reqwest", version = "0.12.4", default-features = false, features = ["json", "multipart"] }
 
 [workspace.lints.rust]
 missing_docs = "deny"

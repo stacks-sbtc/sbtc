@@ -4,11 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [package.metadata.cargo-machete]
-ignored = ["bitcoincore-rpc-json", "stackslib"]
+ignored = ["bitcoincore-rpc-json"]
 
 [features]
 default = []
-testing = ["dep:bitcoincore-rpc", "dep:bitcoincore-rpc-json"]
+testing = ["dep:bitcoincore-rpc", "dep:bitcoincore-rpc-json", "dep:aws-config", "dep:aws-sdk-dynamodb", "dep:aws-smithy-runtime", "dep:hyper_014", "dep:tokio", "dep:futures"]
 webhooks = ["dep:hex"]
 
 [dependencies]
@@ -22,9 +22,15 @@ stacks-common.workspace = true
 thiserror.workspace = true
 
 # Optional Dependencies
+aws-config = { workspace = true, optional = true }
+aws-sdk-dynamodb = { workspace = true, optional = true }
+aws-smithy-runtime = { workspace = true, optional = true }
 bitcoincore-rpc = { workspace = true, optional = true }
 bitcoincore-rpc-json = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
 hex = { workspace = true, optional = true }
+hyper_014 = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
 
 [dev-dependencies]
 hex.workspace = true 
