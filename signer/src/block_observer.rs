@@ -171,27 +171,12 @@ where
                     )
                     .increment(1);
 
-                    let latest_processed = self.process_bitcoin_blocks_until(block_hash).await;
+                    let maybe_chain_tip = self.process_bitcoin_blocks_until(block_hash).await;
 
-                    match latest_processed {
-                        Ok(block_ref) => {
-                            if let Some(block_ref) = block_ref {
-                                if let Err(error) =
-                                    self.process_stacks_blocks(block_ref.block_height).await
-                                {
-                                    tracing::warn!(%error, "could not process stacks blocks");
-                                }
-                            } else {
-                                tracing::warn!(%block_hash, "no bitcoin anchor provided; skipping stacks blocks processing");
-                            }
+                    if let Ok(Some(block_ref)) = maybe_chain_tip.as_ref() {
+                        if let Err(error) = self.process_stacks_blocks(block_ref.block_height).await {
+                            tracing::warn!(%error, "could not process stacks blocks");
                         }
-                        Err(error) => {
-                            tracing::warn!(%error, %block_hash, "could not process bitcoin blocks; skipping stacks blocks processing");
-                        }
-                    }
-
-                    if let Err(error) = self.process_bitcoin_blocks_until(block_hash).await {
-                        tracing::warn!(%error, %block_hash, "could not process bitcoin blocks");
                     }
 
                     if let Err(error) = self.check_pending_dkg_shares(block_hash).await {
