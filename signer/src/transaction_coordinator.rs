@@ -698,7 +698,7 @@ where
             self.sign_and_broadcast(bitcoin_chain_tip.as_ref(), &mut transaction)
                 .await?;
 
-            let expected_height = bitcoin_chain_tip.block_height + WITHDRAWAL_MIN_CONFIRMATIONS;
+            let expected_height = bitcoin_chain_tip.block_height + WITHDRAWAL_MIN_CONFIRMATIONS + 1;
 
             // TODO: if this (considering also fallback clients) fails, we will
             // need to handle the inconsistency of having the sweep tx confirmed

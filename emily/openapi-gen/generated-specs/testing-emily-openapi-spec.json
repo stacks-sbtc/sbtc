@@ -3016,18 +3016,18 @@
       },
       "ExpectedFulfillmentInfo": {
         "type": "object",
-        "description": "Withdrawal parameters.",
+        "description": "Expected information about future fulfillment of the withdrawal.\nThis struct represents _estimate_ of how fulfillment for the\nwithdrawal will look like. This estimation is for reference only,\nand does not provide any guarantees.",
         "properties": {
           "expectedHeight": {
             "type": "integer",
             "format": "int64",
-            "description": "Expected bitcoin block height on which signers will _try_ to fullfill\nwithdrawal request.",
+            "description": "Expected bitcoin block height into which sweep transaction will be included into the block.",
             "nullable": true,
             "minimum": 0
           },
           "expectedTxid": {
             "type": "string",
-            "description": "Expected txid of the transaction fullfilling withdrawal request",
+            "description": "Expected txid of the sweep transaction.",
             "nullable": true
           }
         }
