@@ -313,7 +313,7 @@ jobs:
 
       - name: Run Integration Tests (Rust)
         id: run_rust_tests
-        run: cargo-nextest nextest --color always run --no-fail-fast --test-threads 1 --partition hash:${{ matrix.partition }}/2 --archive-file nextest-archive-serial.tar.zst
+        run: cargo-nextest nextest --color always run --no-fail-fast --test-threads 1 --partition hash:${{ matrix.partition }}/2 --archive-file nextest-archive-serial.tar.zst --workspace-remap .
 
       - name: Run Integration Tests (Python)
         id: run_python_tests
