@@ -2918,4 +2918,76 @@ mod tests {
             assert!(tenure_headers.headers.contains(&header));
         }
     }
+
+    #[tokio::test]
+    async fn get_tenure_headers_update_db_with_unknown_ancestors_processes_gaps() {}
+
+    #[tokio::test]
+    async fn get_tenure_headers_update_db_with_unknown_ancestors_bails_on_inconsecutive_tenures_blocks()
+     {
+        let raw_json_response_1000 = r#"{
+            "consensus_hash": "2cd83cba6930e50fe81d265c6f14d248c93f3de3",
+            "burn_block_height": 1000,
+            "burn_block_hash": "5cb8fc024a7c7f40c8890c92f15803dfb4fe3406d047db9e2a8492727127f00c",
+            "stacks_blocks": [
+            {
+                "block_id": "3d79a705ebbc16222b3d4515e68bb8e4791c0def1401bc66c036b4ca9bf3c8e2",
+                "header_type": "nakamoto",
+                "block_hash": "9bc75a898db459856f60fb1c6c2dbfad0bc48c4c25ec9d0c72da88b272fc63fa",
+                "parent_block_id": "ef7be9b052643210b8a115f1c4c7037a40cd562c5b8ae5f3d99751d8e2de4e78",
+                "height": 744
+            }
+            ]
+        }"#;
+
+        let raw_json_response_999 = r#"{
+            "consensus_hash": "2cd83cba6930e50fe81d265c6f14d248c93f3de3",
+            "burn_block_height": 999,
+            "burn_block_hash": "5cb8fc024a7c7f40c8890c92f15803dfb4fe3406d047db9e2a8492727127f00c",
+            "stacks_blocks": [
+            {
+                "block_id": "3d79a705ebbc16222b3d4515e68bb8e4791c0def1401bc66c036b4ca9bf3c8e2",
+                "header_type": "nakamoto",
+                "block_hash": "9bc75a898db459856f60fb1c6c2dbfad0bc48c4c25ec9d0c72da88b272fc63fa",
+                "parent_block_id": "ef7be9b052643210b8a115f1c4c7037a40cd562c5b8ae5f3d99751d8e2de4e78",
+                "height": 744
+            }
+            ]
+        }"#;
+
+        let raw_json_response_poxinfo =
+            include_str!("../../tests/fixtures/stacksapi-get-pox-info-test-data.json");
+
+        let mut stacks_node_server = mockito::Server::new_async().await;
+        let mock_1000 = stacks_node_server
+            .mock("GET", "/v3/tenures/blocks/height/1000")
+            .with_status(200)
+            .with_body(raw_json_response_1000)
+            .expect(1)
+            .create();
+        let mock_999 = stacks_node_server
+            .mock("GET", "/v3/tenures/blocks/height/999")
+            .with_status(200)
+            .with_body(raw_json_response_999)
+            .expect(1)
+            .create();
+        let mock_poxinfo = stacks_node_server
+            .mock("GET", "/v2/pox")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(raw_json_response_poxinfo)
+            .expect(1)
+            .create();
+
+        let client = StacksClient::new(stacks_node_server.url().parse().unwrap()).unwrap();
+        let db = crate::testing::storage::new_test_database().await;
+
+        let err = update_db_with_unknown_ancestors(&client, &db, 1000u64.into()).await;
+
+        assert!(matches!(err, Err(Error::MissingBlock)));
+
+        mock_1000.assert();
+        mock_999.assert();
+        mock_poxinfo.assert();
+    }
 }
