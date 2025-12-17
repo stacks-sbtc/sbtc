@@ -1798,18 +1798,6 @@ impl StacksInteract for ApiFallbackClient<StacksClient> {
         .await
     }
 
-    async fn get_tenure_headers(
-        &self,
-        burnchain_block_height: BitcoinBlockHeight,
-    ) -> Result<TenureBlockHeaders, Error> {
-        self.exec(|client, retry| async move {
-            let result = client.get_tenure_headers(burnchain_block_height).await;
-            retry.abort_if(|| matches!(result, Err(Error::InvalidStacksResponse(_))));
-            result
-        })
-        .await
-    }
-
     async fn get_current_signers_aggregate_key(
         &self,
         contract_principal: &StacksAddress,
@@ -1868,6 +1856,14 @@ impl StacksInteract for ApiFallbackClient<StacksClient> {
 
     async fn check_pre_nakamoto_block(&self, block_id: &StacksBlockHash) -> Result<(), Error> {
         self.exec(|client, _| client.check_pre_nakamoto_block(block_id))
+            .await
+    }
+
+    async fn get_tenure_headers(
+        &self,
+        block_height: BitcoinBlockHeight,
+    ) -> Result<TenureBlockHeaders, Error> {
+        self.exec(|client, _| client.get_tenure_headers(block_height))
             .await
     }
 
