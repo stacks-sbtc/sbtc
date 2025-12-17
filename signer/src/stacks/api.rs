@@ -2998,7 +2998,7 @@ mod tests {
             .create();
 
         let client = StacksClient::new(stacks_node_server.url().parse().unwrap()).unwrap();
-        let db = crate::testing::storage::new_test_database().await;
+        let storage = Store::new_shared();
 
         let result = update_db_with_unknown_ancestors(&client, &db, 1000u64.into())
             .await
@@ -3077,7 +3077,7 @@ mod tests {
             .create();
 
         let client = StacksClient::new(stacks_node_server.url().parse().unwrap()).unwrap();
-        let db = crate::testing::storage::new_test_database().await;
+        let storage = Store::new_shared();
 
         let err = update_db_with_unknown_ancestors(&client, &db, 1000u64.into()).await;
 
