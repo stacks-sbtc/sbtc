@@ -1484,19 +1484,30 @@ fn extract_signatures_required(value: Value) -> Result<Option<u16>, Error> {
     }
 }
 
+/// A struct, representing response from a /v3/tenures/blocks/height/{}
+/// endpoint of the Stacks node.
 #[derive(Debug, Deserialize)]
 struct GetTenureHeadersApiResponse {
+    /// Height of an anchor bitcoin block.
     #[serde(rename = "burn_block_height")]
     pub bitcoin_block_height: BitcoinBlockHeight,
+    /// Hash of an anchor bitcoin block.
     #[serde(rename = "burn_block_hash")]
     pub bitcoin_block_hash: BitcoinBlockHash,
+    /// List of stacks blocks, anchored to a bitcoin block.
     pub stacks_blocks: Vec<GetTenureHeadersApiStacksBlock>,
 }
 
+/// A struct, representing a stacks block header.
+/// Helper struct for representing response from a /v3/tenures/blocks/height/{}
+/// endpoint of the Stacks node. The full response is represented by [`GetTenureHeadersApiResponse`]
 #[derive(Debug, Deserialize)]
 struct GetTenureHeadersApiStacksBlock {
+    /// Hash of stacks block
     pub block_id: StacksBlockHash,
+    /// Hash of parent stacks block.
     pub parent_block_id: StacksBlockHash,
+    /// Height of stacks block.
     pub height: StacksBlockHeight,
 }
 
