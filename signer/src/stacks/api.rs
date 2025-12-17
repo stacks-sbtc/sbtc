@@ -1135,6 +1135,34 @@ impl StacksClient {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
+    async fn get_tenure_headers(
+        &self,
+        bitcoin_block_height: BitcoinBlockHeight,
+    ) -> Result<TenureBlockHeaders, Error> {
+        let path = format!("/v3/tenures/blocks/height/{}", bitcoin_block_height);
+        let url = self
+            .endpoint
+            .join(&path)
+            .map_err(|err| Error::PathJoin(err, self.endpoint.clone(), Cow::Owned(path)))?;
+
+        tracing::debug!("making request to the stacks node for the tenure headers");
+
+        let headers = self
+            .client
+            .get(url.clone())
+            .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await
+            .map_err(Error::StacksNodeRequest)?
+            .error_for_status()
+            .map_err(Error::StacksNodeResponse)?
+            .json::<GetTenureHeadersApiResponse>()
+            .await?
+            .into();
+        Ok(headers)
+    }
+
     /// Get information about the sortition related to a consensus hash.
     ///
     /// Uses the GET /v3/sortitions stacks node endpoint for retrieving
@@ -1478,34 +1506,6 @@ impl From<GetTenureHeadersApiResponse> for TenureBlockHeaders {
 }
 
 impl StacksInteract for StacksClient {
-    #[tracing::instrument(skip(self))]
-    async fn get_tenure_headers(
-        &self,
-        bitcoin_block_height: BitcoinBlockHeight,
-    ) -> Result<TenureBlockHeaders, Error> {
-        let path = format!("/v3/tenures/blocks/height/{}", bitcoin_block_height);
-        let url = self
-            .endpoint
-            .join(&path)
-            .map_err(|err| Error::PathJoin(err, self.endpoint.clone(), Cow::Owned(path)))?;
-
-        tracing::debug!("making request to the stacks node for the tenure headers");
-
-        let headers = self
-            .client
-            .get(url.clone())
-            .timeout(REQUEST_TIMEOUT)
-            .send()
-            .await
-            .map_err(Error::StacksNodeRequest)?
-            .error_for_status()
-            .map_err(Error::StacksNodeResponse)?
-            .json::<GetTenureHeadersApiResponse>()
-            .await?
-            .into();
-        Ok(headers)
-    }
-
     async fn get_current_signer_set_info(
         &self,
         contract_principal: &StacksAddress,
@@ -1639,6 +1639,14 @@ impl StacksInteract for StacksClient {
 
     async fn check_pre_nakamoto_block(&self, block_id: &StacksBlockHash) -> Result<(), Error> {
         self.check_pre_nakamoto_block(block_id).await
+    }
+
+    #[tracing::instrument(skip(self))]
+    async fn get_tenure_headers(
+        &self,
+        bitcoin_block_height: BitcoinBlockHeight,
+    ) -> Result<TenureBlockHeaders, Error> {
+        self.get_tenure_headers(bitcoin_block_height).await
     }
 
     async fn get_sortition_info(
