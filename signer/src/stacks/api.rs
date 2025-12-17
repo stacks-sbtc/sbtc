@@ -319,7 +319,7 @@ pub trait StacksInteract: Send + Sync {
     /// TODO: double-check that it is indeed _all_ blocks.
     fn get_tenure_headers(
         &self,
-        burnchain_block_height: BitcoinBlockHeight,
+        bitcoin_block_height: BitcoinBlockHeight,
     ) -> impl Future<Output = Result<TenureBlockHeaders, Error>> + Send;
 }
 
@@ -1242,14 +1242,14 @@ impl StacksClient {
 pub async fn update_db_with_unknown_ancestors<S, D>(
     stacks: &S,
     storage: &D,
-    burnchain_block_height: BitcoinBlockHeight,
+    bitcoin_block_height: BitcoinBlockHeight,
 ) -> Result<RangeInclusive<StacksBlockHeight>, Error>
 where
     S: StacksInteract,
     D: Transactable + Send + Sync,
 {
     let db = storage.begin_transaction().await?;
-    let mut tenure = stacks.get_tenure_headers(burnchain_block_height).await?;
+    let mut tenure = stacks.get_tenure_headers(bitcoin_block_height).await?;
     let end_height = tenure.end_height();
     let nakamoto_start_height = stacks.get_epoch_status().await?.nakamoto_start_height();
 
