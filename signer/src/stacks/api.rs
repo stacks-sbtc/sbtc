@@ -1362,7 +1362,34 @@ where
                 return Err(error);
             }
         };
-        tenure = tenure_headers;
+        let newest_block_in_older_tenure_height = tenure_headers.end_height();
+        let newest_block_in_older_tenure = tenure_headers
+            .headers
+            .iter()
+            .find(|header| header.block_height == newest_block_in_older_tenure_height);
+        let oldest_block_in_newer_tenure_height = tenure.start_height();
+        let oldest_block_in_newer_tenure = tenure
+            .headers
+            .iter()
+            .find(|header| header.block_height == oldest_block_in_newer_tenure_height);
+
+        if let Some(older_header) = newest_block_in_older_tenure
+            && let Some(newer_header) = oldest_block_in_newer_tenure
+            && newer_header.parent_block_id == older_header.block_id
+        {
+            tenure = tenure_headers;
+        } else {
+            // Essencially tenures are inconsecutive only when last comparison in this check is not true
+            // (newer_header.parent_block_id == older_header.block_id). If some of these headers is None,
+            // it is not an inconsecutive tenures, but an empty tenure or bug in
+            // `TenureBlockHeaders` implementation.
+            tracing::error!(
+                ?newest_block_in_older_tenure,
+                ?oldest_block_in_newer_tenure,
+                "stacks node returned inconsecutive tenures, while they must be consecutive"
+            );
+            return Err(Error::MissingBlock);
+        }
     }
 
     let start_height = tenure.start_height();
