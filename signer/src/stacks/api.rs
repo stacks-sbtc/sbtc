@@ -311,7 +311,12 @@ pub trait StacksInteract: Send + Sync {
         sender: &StacksAddress,
     ) -> impl Future<Output = Result<Amount, Error>> + Send;
 
-    /// Get tenure headers for given bitcoin block height
+    /// Fetch all Nakamoto blocks headers within the tenure anchored to a Bitcoin block
+    /// with given height.
+    ///
+    /// This function is analogous to the GET /v3/tenures/blocks/height/{}
+    /// endpoint on stacks-core nodes. This function returns headers of all block in given tenure.
+    /// TODO: double-check that it is indeed _all_ blocks.
     fn get_tenure_headers(
         &self,
         burnchain_block_height: BitcoinBlockHeight,
