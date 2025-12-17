@@ -1462,6 +1462,8 @@ fn extract_signatures_required(value: Value) -> Result<Option<u16>, Error> {
 
 /// A struct, representing response from a /v3/tenures/blocks/height/{}
 /// endpoint of the Stacks node.
+/// Schema of the responce:
+/// https://github.com/stacks-network/stacks-core/blob/e6c240e0c0dc763b1cff8fd5fca7b4c237da8bdb/docs/rpc/components/schemas/tenure-blocks.schema.yaml
 #[derive(Debug, Deserialize)]
 struct GetTenureHeadersApiResponse {
     /// Height of an anchor bitcoin block.
