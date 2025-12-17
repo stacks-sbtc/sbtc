@@ -173,10 +173,10 @@ where
 
                     let maybe_chain_tip = self.process_bitcoin_blocks_until(block_hash).await;
 
-                    if let Ok(Some(block_ref)) = maybe_chain_tip.as_ref() {
-                        if let Err(error) = self.process_stacks_blocks(block_ref.block_height).await {
-                            tracing::warn!(%error, "could not process stacks blocks");
-                        }
+                    if let Ok(Some(block_ref)) = maybe_chain_tip.as_ref()
+                        && let Err(error) = self.process_stacks_blocks(block_ref.block_height).await
+                    {
+                        tracing::warn!(%error, "could not process stacks blocks");
                     }
 
                     if let Err(error) = self.check_pending_dkg_shares(block_hash).await {
@@ -371,13 +371,13 @@ impl<C: Context, B> BlockObserver<C, B> {
         block_hash: BlockHash,
     ) -> Result<Option<BitcoinBlockRef>, Error> {
         let block_headers = self.next_headers_to_process(block_hash).await?;
-
-        let mut last = None;
-        for block_header in block_headers {
-            last = Some(self.process_bitcoin_block(block_header).await?);
+        for block_header in &block_headers {
+            self.process_bitcoin_block(block_header).await?;
         }
-
-        Ok(last)
+        Ok(block_headers.last().map(|header| BitcoinBlockRef {
+            block_height: header.height,
+            block_hash: header.hash.into(),
+        }))
     }
 
     /// Write the bitcoin block and any transactions that spend to any of
@@ -385,10 +385,7 @@ impl<C: Context, B> BlockObserver<C, B> {
     ///
     /// Returns `BitcoinBlockRef` to processed block.
     #[tracing::instrument(skip_all, fields(block_hash = %block_header.hash))]
-    async fn process_bitcoin_block(
-        &self,
-        block_header: BitcoinBlockHeader,
-    ) -> Result<BitcoinBlockRef, Error> {
+    async fn process_bitcoin_block(&self, block_header: &BitcoinBlockHeader) -> Result<(), Error> {
         let block = self
             .context
             .get_bitcoin_client()
@@ -425,10 +422,7 @@ impl<C: Context, B> BlockObserver<C, B> {
         storage_tx.commit().await?;
 
         tracing::debug!("finished processing bitcoin block");
-        Ok(BitcoinBlockRef {
-            block_height: block.height,
-            block_hash: block.block_hash.into(),
-        })
+        Ok(())
     }
 
     /// Process all recent stacks blocks.
