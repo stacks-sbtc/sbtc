@@ -3000,7 +3000,7 @@ mod tests {
         let client = StacksClient::new(stacks_node_server.url().parse().unwrap()).unwrap();
         let storage = Store::new_shared();
 
-        let result = update_db_with_unknown_ancestors(&client, &db, 1000u64.into())
+        let result = update_db_with_unknown_ancestors(&client, &storage, 1000u64.into())
             .await
             .unwrap();
 
@@ -3079,7 +3079,7 @@ mod tests {
         let client = StacksClient::new(stacks_node_server.url().parse().unwrap()).unwrap();
         let storage = Store::new_shared();
 
-        let err = update_db_with_unknown_ancestors(&client, &db, 1000u64.into()).await;
+        let err = update_db_with_unknown_ancestors(&client, &storage, 1000u64.into()).await;
 
         assert!(matches!(err, Err(Error::MissingBlock)));
 
