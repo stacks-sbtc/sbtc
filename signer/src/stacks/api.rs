@@ -1130,62 +1130,6 @@ impl StacksClient {
         Ok(())
     }
 
-    /// Make a GET /v3/tenures/<block-id> request for Nakamoto ancestor
-    /// blocks with the same tenure as the given block ID from a Stacks
-    /// node, and return the relevant parts of the headers of those blocks.
-    ///
-    /// # Notes
-    ///
-    /// * The GET /v3/tenures/<block-id> response is capped at ~16 MB, so a
-    ///   single request may not return all Nakamoto blocks.
-    /// * The response includes the Nakamoto block for the given block id.
-    /// * If the given block ID does not exist or is an ID for a
-    ///   non-Nakamoto block then a Result::Err is returned.
-    #[tracing::instrument(skip(self))]
-    async fn get_tenure_headers_raw(
-        &self,
-        block_id: &StacksBlockHash,
-    ) -> Result<Vec<StacksBlockHeader>, Error> {
-        let path = format!("/v3/tenures/{}", block_id.to_hex());
-        let url = self
-            .endpoint
-            .join(&path)
-            .map_err(|err| Error::PathJoin(err, self.endpoint.clone(), Cow::Owned(path)))?;
-
-        tracing::debug!("making request to the stacks node for the raw nakamoto block");
-
-        let response = self
-            .client
-            .get(url)
-            .timeout(REQUEST_TIMEOUT)
-            .send()
-            .await
-            .map_err(Error::StacksNodeRequest)?;
-
-        // The response here does not detail the number of blocks in the
-        // response. So we essentially take the same implementation given
-        // in [`StacksHttpResponse::decode_nakamoto_tenure`], which just
-        // keeps decoding until there are no more bytes.
-        let resp = response
-            .error_for_status()
-            .map_err(Error::StacksNodeResponse)?
-            .bytes()
-            .await
-            .map_err(Error::UnexpectedStacksResponse)?;
-
-        let bytes: &mut &[u8] = &mut resp.as_ref();
-        let mut headers = Vec::new();
-
-        while !bytes.is_empty() {
-            let block = NakamotoBlock::consensus_deserialize(bytes)
-                .map_err(|err| Error::DecodeNakamotoTenure(err, *block_id))?;
-
-            headers.push(block.header.into());
-        }
-
-        Ok(headers)
-    }
-
     /// Get information about the sortition related to a consensus hash.
     ///
     /// Uses the GET /v3/sortitions stacks node endpoint for retrieving
@@ -2889,33 +2833,6 @@ mod tests {
         let address = StacksAddress::burn_address(false);
         let account = client.get_account(&address).await.unwrap();
         assert_eq!(account.nonce, 0);
-    }
-
-    // I don't think we really need this test, just for wip.
-    // This is just to show that new function indeed returns same as the old one
-    #[tokio::test]
-    async fn get_tenure_headers() {
-        let url = url::Url::parse("https://api.hiro.so/").unwrap();
-        let client = StacksClient::new(url).unwrap();
-
-        let tenure_headers = client.get_tenure_headers(900_000u32.into()).await.unwrap();
-
-        let old_headers = client
-            .get_tenure_headers_raw(
-                &StacksBlockHash::from_hex(
-                    "e8ab147057dc77f10063199e56b4110b3aff637d27337762c0415ac692f9db27",
-                )
-                .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(old_headers.len(), 37);
-        assert_eq!(tenure_headers.headers.len(), 39);
-
-        for header in old_headers {
-            assert!(tenure_headers.headers.contains(&header));
-        }
     }
 
     /// This test checks that update_db_with_unknown_ancestors works well if there are
