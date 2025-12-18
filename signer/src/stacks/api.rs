@@ -1290,7 +1290,8 @@ where
     let mut anchor_block_height = tenure.anchor_block_height;
 
     loop {
-        std::thread::sleep(std::time::Duration::from_secs(10));
+        tracing::debug!("loop iteration");
+        std::thread::sleep(std::time::Duration::from_secs(5));
         db.write_stacks_block_headers(&tenure).await?;
         // We won't get anymore Nakamoto blocks before this point, so
         // time to stop.
@@ -1320,29 +1321,11 @@ where
         let tenure_headers = match tenure_headers_result {
             Ok(tenure_headers) => tenure_headers,
             Err(error) => {
-                // A 404 could mean that we reached the Nakamoto start height
-                // and we tried fetching a tenure for a pre-Nakamoto block
-                if stacks
-                    .check_pre_nakamoto_block(&header.parent_block_id)
-                    .await
-                    .is_ok()
-                {
-                    tracing::debug!(
-                        %nakamoto_start_height,
-                        last_chain_length = %tenure.anchor_block_height,
-                        "all Nakamoto blocks fetched; stopping"
-                    );
-                    break;
-                }
-                // A 404 could also mean there is a bitcoin block with no stacks
-                // blocks anchored.
-                // TODO: can there be other reasons for a 404?
-                if let Error::StacksNodeResponse(ref reqwest_error) = error
-                    && reqwest_error.status() == Some(StatusCode::NOT_FOUND)
-                {
-                    continue;
-                }
-                return Err(error);
+                tracing::warn!(
+                    %error,
+                    "error during fetching tenure headers"
+                );
+                continue;
             }
         };
         let newest_block_in_older_tenure = tenure_headers.end_header();
@@ -1995,7 +1978,7 @@ mod tests {
     #[ignore = "This is an integration test that uses the real testnet"]
     #[test_case(|url| StacksClient::new(url).unwrap(); "stacks-client")]
     #[test_case(|url| ApiFallbackClient::new(vec![StacksClient::new(url).unwrap()]).unwrap(); "fallback-client")]
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn fetch_unknown_ancestors_works_in_testnet<F, C>(client: F)
     where
         C: StacksInteract,
