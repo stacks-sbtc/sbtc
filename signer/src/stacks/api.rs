@@ -30,6 +30,7 @@ use blockstack_lib::net::api::postfeerate::RPCFeeEstimateResponse;
 use blockstack_lib::types::chainstate::StacksAddress;
 use blockstack_lib::types::chainstate::StacksBlockId;
 use clarity::types::chainstate::BlockHeaderHash;
+use clarity::types::chainstate::BurnchainHeaderHash;
 use clarity::vm::Value;
 use clarity::vm::types::OptionalData;
 use clarity::vm::types::TupleData;
@@ -1472,12 +1473,12 @@ struct GetTenureHeadersApiResponse {
     pub bitcoin_block_height: BitcoinBlockHeight,
     /// The block hash of the bitcoin block that anchors the stacks blocks in the `stacks_blocks` field.```
     #[serde(rename = "burn_block_hash")]
-    pub bitcoin_block_hash: BitcoinBlockHash,
+    pub bitcoin_block_hash: BurnchainHeaderHash,
     /// List of stacks blocks, anchored to a bitcoin block.
     pub stacks_blocks: Vec<GetTenureHeadersApiStacksBlock>,
 }
 
-/// A struct, representing a trimmed down stacks block header that is part 
+/// A struct, representing a trimmed down stacks block header that is part
 /// of the response from a GET /v3/tenures/blocks/height/{} request to stacks-core.
 /// The full response is represented by [`GetTenureHeadersApiResponse`]
 #[derive(Debug, Deserialize)]
@@ -1502,7 +1503,7 @@ impl From<GetTenureHeadersApiResponse> for TenureBlockHeaders {
                     parent_block_id: header.parent_block_id,
                 })
                 .collect::<Vec<StacksBlockHeader>>(),
-            anchor_block_hash: value.bitcoin_block_hash,
+            anchor_block_hash: value.bitcoin_block_hash.into(),
             anchor_block_height: value.bitcoin_block_height,
         }
     }
