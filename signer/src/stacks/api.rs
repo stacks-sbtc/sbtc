@@ -13,7 +13,6 @@ use bitcoin::OutPoint;
 use blockstack_lib::burnchains::Txid;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlockHeader;
-use blockstack_lib::chainstate::stacks::StacksBlock as PreNakamotoBlock;
 use blockstack_lib::chainstate::stacks::StacksTransaction;
 use blockstack_lib::chainstate::stacks::TokenTransferMemo;
 use blockstack_lib::chainstate::stacks::TransactionPayload;
@@ -252,13 +251,6 @@ pub trait StacksInteract: Send + Sync {
         &self,
         block_id: &StacksBlockHash,
     ) -> impl Future<Output = Result<NakamotoBlock, Error>> + Send;
-
-    /// Returns `Ok` if the given block ID is a pre-Nakamoto block, otherwise
-    /// (the block doesn't exist or is a Nakamoto one) `Err` is returned.
-    fn check_pre_nakamoto_block(
-        &self,
-        block_id: &StacksBlockHash,
-    ) -> impl Future<Output = Result<(), Error>> + Send;
 
     /// Get information about the sortition associated to a consensus hash
     fn get_sortition_info(
@@ -1108,39 +1100,6 @@ impl StacksClient {
             .map_err(|err| Error::DecodeNakamotoBlock(err, *block_id))
     }
 
-    /// Returns `Ok` if the given block ID is a pre-Nakamoto block, otherwise
-    /// (the block doesn't exist or is a Nakamoto one) `Err` is returned.
-    #[tracing::instrument(skip(self))]
-    async fn check_pre_nakamoto_block(&self, block_id: &StacksBlockHash) -> Result<(), Error> {
-        let path = format!("/v2/blocks/{}", block_id.to_hex());
-        let url = self
-            .endpoint
-            .join(&path)
-            .map_err(|err| Error::PathJoin(err, self.endpoint.clone(), Cow::Owned(path)))?;
-
-        tracing::debug!("making request to the stacks node for the raw pre-nakamoto block");
-
-        let response = self
-            .client
-            .get(url)
-            .timeout(REQUEST_TIMEOUT)
-            .send()
-            .await
-            .map_err(Error::StacksNodeRequest)?;
-
-        let resp = response
-            .error_for_status()
-            .map_err(Error::StacksNodeResponse)?
-            .bytes()
-            .await
-            .map_err(Error::UnexpectedStacksResponse)?;
-
-        // Ensure we got a pre nakamoto block, just in case they change the v2
-        // API to be forward compatible
-        let _ = PreNakamotoBlock::consensus_deserialize(&mut &*resp).map_err(Error::StacksCodec)?;
-        Ok(())
-    }
-
     #[tracing::instrument(skip(self))]
     async fn get_tenure_headers(
         &self,
@@ -1615,10 +1574,6 @@ impl StacksInteract for StacksClient {
         self.get_block(block_id).await
     }
 
-    async fn check_pre_nakamoto_block(&self, block_id: &StacksBlockHash) -> Result<(), Error> {
-        self.check_pre_nakamoto_block(block_id).await
-    }
-
     #[tracing::instrument(skip(self))]
     async fn get_tenure_headers(
         &self,
@@ -1845,11 +1800,6 @@ impl StacksInteract for ApiFallbackClient<StacksClient> {
         self.exec(|client, _| client.get_block(block_id)).await
     }
 
-    async fn check_pre_nakamoto_block(&self, block_id: &StacksBlockHash) -> Result<(), Error> {
-        self.exec(|client, _| client.check_pre_nakamoto_block(block_id))
-            .await
-    }
-
     async fn get_tenure_headers(
         &self,
         block_height: BitcoinBlockHeight,
@@ -1994,32 +1944,6 @@ mod tests {
         // BTC 1900 -- nakamoto_start_height
         // BTC 1901 <- Stacks 320, ..., 744
         // BTC 1998 <- Stacks 745, ..., 750, ... 791
-
-        // This is the block id for block 319 (pre-Nakamoto) on testnet
-        let pre_nakamoto_block_id = StacksBlockId::from_hex(
-            "0d7cb8c66040d87fc17f39e1b5c36bc7fb5c4d97cc611a168e2cca186848be1e",
-        )
-        .unwrap()
-        .into();
-        assert!(
-            client
-                .check_pre_nakamoto_block(&pre_nakamoto_block_id)
-                .await
-                .is_ok()
-        );
-
-        // This is the block id for block 750 on testnet
-        let nakamoto_block_id = StacksBlockId::from_hex(
-            "ad133146e79ff5eccf9eecc51d9eea35947031c5d91d61afc3a1df63d6c198e7",
-        )
-        .unwrap()
-        .into();
-        assert!(
-            client
-                .check_pre_nakamoto_block(&nakamoto_block_id)
-                .await
-                .is_err()
-        );
 
         let tenures = update_db_with_unknown_ancestors(&client, &db, 1998u64.into()).await;
 
