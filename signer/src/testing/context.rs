@@ -496,14 +496,6 @@ impl StacksInteract for WrappedMockStacksInteract {
         self.inner.lock().await.get_block(block_id).await
     }
 
-    async fn check_pre_nakamoto_block(&self, block_id: &StacksBlockHash) -> Result<(), Error> {
-        self.inner
-            .lock()
-            .await
-            .check_pre_nakamoto_block(block_id)
-            .await
-    }
-
     async fn get_sortition_info(
         &self,
         consensus_hash: &ConsensusHash,

@@ -354,9 +354,7 @@ impl StacksInteract for TestHarness {
             .cloned()
             .ok_or(Error::MissingBlock)
     }
-    async fn check_pre_nakamoto_block(&self, _: &StacksBlockHash) -> Result<(), Error> {
-        unimplemented!()
-    }
+
     async fn get_tenure_headers(
         &self,
         burnchain_block_height: BitcoinBlockHeight,
