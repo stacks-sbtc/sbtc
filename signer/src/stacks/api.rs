@@ -388,20 +388,28 @@ impl TenureBlockHeaders {
     }
 
     /// Get the minimum block height in the tenure.
-    pub fn start_height(&self) -> StacksBlockHeight {
+    pub fn start_header(&self) -> StacksBlockHeader {
         // SAFETY: It is okay to unwrap here because we know that the
         // tenure is non-empty. The struct upholds this invariant upon
         // creation.
-        self.headers.iter().map(|h| h.block_height).min().unwrap()
+        self.headers
+            .iter()
+            .min_by_key(|header| header.block_height)
+            .unwrap()
+            .clone()
     }
 
     /// Get the height of the block with the greatest height of all blocks
     /// held within this struct.
-    pub fn end_height(&self) -> StacksBlockHeight {
+    pub fn end_header(&self) -> StacksBlockHeader {
         // SAFETY: It is okay to unwrap here because we know that the
         // tenure is non-empty. The struct upholds this invariant upon
         // creation.
-        self.headers.iter().map(|h| h.block_height).max().unwrap()
+        self.headers
+            .iter()
+            .max_by_key(|header| header.block_height)
+            .unwrap()
+            .clone()
     }
 }
 
@@ -1279,7 +1287,7 @@ where
 {
     let db = storage.begin_transaction().await?;
     let mut tenure = stacks.get_tenure_headers(bitcoin_block_height).await?;
-    let end_height = tenure.end_height();
+    let end_height = tenure.end_header().block_height;
     let nakamoto_start_height = stacks.get_epoch_status().await?.nakamoto_start_height();
 
     let mut anchor_block_height = tenure.anchor_block_height;
@@ -1339,27 +1347,12 @@ where
                 return Err(error);
             }
         };
-        let newest_block_in_older_tenure_height = tenure_headers.end_height();
-        let newest_block_in_older_tenure = tenure_headers
-            .headers
-            .iter()
-            .find(|header| header.block_height == newest_block_in_older_tenure_height);
-        let oldest_block_in_newer_tenure_height = tenure.start_height();
-        let oldest_block_in_newer_tenure = tenure
-            .headers
-            .iter()
-            .find(|header| header.block_height == oldest_block_in_newer_tenure_height);
+        let newest_block_in_older_tenure = tenure_headers.end_header();
+        let oldest_block_in_newer_tenure = tenure.start_header();
 
-        if let Some(older_header) = newest_block_in_older_tenure
-            && let Some(newer_header) = oldest_block_in_newer_tenure
-            && newer_header.parent_block_id == older_header.block_id
-        {
+        if oldest_block_in_newer_tenure.parent_block_id == newest_block_in_older_tenure.block_id {
             tenure = tenure_headers;
         } else {
-            // Essencially tenures are inconsecutive only when last comparison in this check is not true
-            // (newer_header.parent_block_id == older_header.block_id). If some of these headers is None,
-            // it is not an inconsecutive tenures, but an empty tenure or bug in
-            // `TenureBlockHeaders` implementation.
             tracing::error!(
                 ?newest_block_in_older_tenure,
                 ?oldest_block_in_newer_tenure,
@@ -1369,7 +1362,7 @@ where
         }
     }
 
-    let start_height = tenure.start_height();
+    let start_height = tenure.start_header().block_height;
 
     db.commit().await?;
 
@@ -2128,8 +2121,8 @@ mod tests {
         // The moment of truth, do the requests succeed?
         let headers = client.get_tenure_headers(900_000u64.into()).await.unwrap();
         assert_eq!(headers.headers.len(), 39);
-        assert_eq!(headers.start_height(), 1507195u64.into());
-        assert_eq!(headers.end_height(), 1507233u64.into());
+        assert_eq!(headers.start_header().block_height, 1507195u64.into());
+        assert_eq!(headers.end_header().block_height, 1507233u64.into());
 
         first_mock.assert();
     }
