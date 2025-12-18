@@ -1477,9 +1477,9 @@ struct GetTenureHeadersApiResponse {
     pub stacks_blocks: Vec<GetTenureHeadersApiStacksBlock>,
 }
 
-/// A struct, representing a stacks block header.
-/// Helper struct for representing response from a /v3/tenures/blocks/height/{}
-/// endpoint of the Stacks node. The full response is represented by [`GetTenureHeadersApiResponse`]
+/// A struct, representing a trimmed down stacks block header that is part 
+/// of the response from a GET /v3/tenures/blocks/height/{} request to stacks-core.
+/// The full response is represented by [`GetTenureHeadersApiResponse`]
 #[derive(Debug, Deserialize)]
 struct GetTenureHeadersApiStacksBlock {
     /// Hash of stacks block
