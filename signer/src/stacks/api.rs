@@ -524,6 +524,36 @@ impl std::fmt::Display for TxRejection {
 
 impl std::error::Error for TxRejection {}
 
+/// A struct, representing the response from a GET /v3/tenures/blocks/height/{}
+/// request to a Stacks node.
+///
+/// The schema of the response can be found here:
+/// https://github.com/stacks-network/stacks-core/blob/e6c240e0c0dc763b1cff8fd5fca7b4c237da8bdb/docs/rpc/components/schemas/tenure-blocks.schema.yaml
+#[derive(Debug, Deserialize)]
+struct GetTenureHeadersApiResponse {
+    /// The height of the bitcoin block that anchors the stacks blocks in the `stacks_blocks` field.
+    #[serde(rename = "burn_block_height")]
+    pub bitcoin_block_height: BitcoinBlockHeight,
+    /// The block hash of the bitcoin block that anchors the stacks blocks in the `stacks_blocks` field.```
+    #[serde(rename = "burn_block_hash")]
+    pub bitcoin_block_hash: BitcoinBlockHash,
+    /// List of stacks blocks, anchored to a bitcoin block.
+    pub stacks_blocks: Vec<GetTenureHeadersApiStacksBlock>,
+}
+
+/// A struct, representing a trimmed down stacks block header that is part
+/// of the response from a GET /v3/tenures/blocks/height/{} request to stacks-core.
+/// The full response is represented by [`GetTenureHeadersApiResponse`]
+#[derive(Debug, Deserialize)]
+struct GetTenureHeadersApiStacksBlock {
+    /// Hash of stacks block
+    pub block_id: StacksBlockHash,
+    /// Hash of parent stacks block.
+    pub parent_block_id: StacksBlockHash,
+    /// Height of stacks block.
+    pub height: StacksBlockHeight,
+}
+
 /// The response from a POST /v2/transactions request
 ///
 /// The stacks node returns three types of responses, either:
@@ -1392,36 +1422,6 @@ fn extract_signatures_required(value: Value) -> Result<Option<u16>, Error> {
             "expected a uint but got something else",
         )),
     }
-}
-
-/// A struct, representing the response from a GET /v3/tenures/blocks/height/{}
-/// request to a Stacks node.
-///
-/// The schema of the response can be found here:
-/// https://github.com/stacks-network/stacks-core/blob/e6c240e0c0dc763b1cff8fd5fca7b4c237da8bdb/docs/rpc/components/schemas/tenure-blocks.schema.yaml
-#[derive(Debug, Deserialize)]
-struct GetTenureHeadersApiResponse {
-    /// The height of the bitcoin block that anchors the stacks blocks in the `stacks_blocks` field.
-    #[serde(rename = "burn_block_height")]
-    pub bitcoin_block_height: BitcoinBlockHeight,
-    /// The block hash of the bitcoin block that anchors the stacks blocks in the `stacks_blocks` field.```
-    #[serde(rename = "burn_block_hash")]
-    pub bitcoin_block_hash: BitcoinBlockHash,
-    /// List of stacks blocks, anchored to a bitcoin block.
-    pub stacks_blocks: Vec<GetTenureHeadersApiStacksBlock>,
-}
-
-/// A struct, representing a trimmed down stacks block header that is part
-/// of the response from a GET /v3/tenures/blocks/height/{} request to stacks-core.
-/// The full response is represented by [`GetTenureHeadersApiResponse`]
-#[derive(Debug, Deserialize)]
-struct GetTenureHeadersApiStacksBlock {
-    /// Hash of stacks block
-    pub block_id: StacksBlockHash,
-    /// Hash of parent stacks block.
-    pub parent_block_id: StacksBlockHash,
-    /// Height of stacks block.
-    pub height: StacksBlockHeight,
 }
 
 impl From<GetTenureHeadersApiResponse> for TenureBlockHeaders {
