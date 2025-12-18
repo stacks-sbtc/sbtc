@@ -1466,7 +1466,7 @@ fn extract_signatures_required(value: Value) -> Result<Option<u16>, Error> {
 /// https://github.com/stacks-network/stacks-core/blob/e6c240e0c0dc763b1cff8fd5fca7b4c237da8bdb/docs/rpc/components/schemas/tenure-blocks.schema.yaml
 #[derive(Debug, Deserialize)]
 struct GetTenureHeadersApiResponse {
-    /// Height of an anchor bitcoin block.
+    /// The height of the bitcoin block that anchors the stacks blocks in the `stacks_blocks` field.
     #[serde(rename = "burn_block_height")]
     pub bitcoin_block_height: BitcoinBlockHeight,
     /// Hash of an anchor bitcoin block.
