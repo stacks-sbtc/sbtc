@@ -30,7 +30,6 @@ use blockstack_lib::net::api::postfeerate::RPCFeeEstimateResponse;
 use blockstack_lib::types::chainstate::StacksAddress;
 use blockstack_lib::types::chainstate::StacksBlockId;
 use clarity::types::chainstate::BlockHeaderHash;
-use clarity::types::chainstate::BurnchainHeaderHash;
 use clarity::vm::Value;
 use clarity::vm::types::OptionalData;
 use clarity::vm::types::TupleData;
@@ -1293,6 +1292,7 @@ where
     let mut anchor_block_height = tenure.anchor_block_height;
 
     loop {
+        std::thread::sleep(std::time::Duration::from_secs(10));
         db.write_stacks_block_headers(&tenure).await?;
         // We won't get anymore Nakamoto blocks before this point, so
         // time to stop.
@@ -1466,7 +1466,7 @@ struct GetTenureHeadersApiResponse {
     pub bitcoin_block_height: BitcoinBlockHeight,
     /// The block hash of the bitcoin block that anchors the stacks blocks in the `stacks_blocks` field.```
     #[serde(rename = "burn_block_hash")]
-    pub bitcoin_block_hash: BurnchainHeaderHash,
+    pub bitcoin_block_hash: BitcoinBlockHash,
     /// List of stacks blocks, anchored to a bitcoin block.
     pub stacks_blocks: Vec<GetTenureHeadersApiStacksBlock>,
 }
@@ -1496,7 +1496,7 @@ impl From<GetTenureHeadersApiResponse> for TenureBlockHeaders {
                     parent_block_id: header.parent_block_id,
                 })
                 .collect::<Vec<StacksBlockHeader>>(),
-            anchor_block_hash: value.bitcoin_block_hash.into(),
+            anchor_block_hash: value.bitcoin_block_hash,
             anchor_block_height: value.bitcoin_block_height,
         }
     }
@@ -3083,5 +3083,23 @@ mod tests {
         mock_1000.assert();
         mock_999.assert();
         mock_poxinfo.assert();
+    }
+
+    #[tokio::test]
+    async fn get_tenure_headers_correctly_serializes_bitcoin_block_hash() {
+        let url = Url::parse("https://api.mainnet.hiro.so/").unwrap();
+        let client = StacksClient::new(url).unwrap();
+
+        let height = 900_000u64;
+
+        let headers = client.get_tenure_headers(height.into()).await.unwrap();
+        let block_hash = headers.anchor_block_hash;
+
+        // This hash is indeed hash of block 900_000
+        // https://mempool.space/block/000000000000000000010538edbfd2d5b809a33dd83f284aeea41c6d0d96968a
+        assert_eq!(
+            &format!("{}", block_hash),
+            "000000000000000000010538edbfd2d5b809a33dd83f284aeea41c6d0d96968a"
+        );
     }
 }
