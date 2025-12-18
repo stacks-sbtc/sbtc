@@ -387,7 +387,7 @@ impl TenureBlockHeaders {
     }
 
     /// Get the minimum block height in the tenure.
-    pub fn start_header(&self) -> StacksBlockHeader {
+    pub fn start_header(&self) -> &StacksBlockHeader {
         // SAFETY: It is okay to unwrap here because we know that the
         // tenure is non-empty. The struct upholds this invariant upon
         // creation.
@@ -395,12 +395,11 @@ impl TenureBlockHeaders {
             .iter()
             .min_by_key(|header| header.block_height)
             .unwrap()
-            .clone()
     }
 
     /// Get the height of the block with the greatest height of all blocks
     /// held within this struct.
-    pub fn end_header(&self) -> StacksBlockHeader {
+    pub fn end_header(&self) -> &StacksBlockHeader {
         // SAFETY: It is okay to unwrap here because we know that the
         // tenure is non-empty. The struct upholds this invariant upon
         // creation.
@@ -408,7 +407,6 @@ impl TenureBlockHeaders {
             .iter()
             .max_by_key(|header| header.block_height)
             .unwrap()
-            .clone()
     }
 }
 
