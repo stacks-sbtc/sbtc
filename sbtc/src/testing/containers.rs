@@ -101,9 +101,11 @@ impl TestContainers {
 
     /// Get the service exposed port given the internal port
     pub async fn get_service_port(&self, service: &str, internal_port: u16) -> Result<u16, Error> {
-        let container = self.compose.service(service).ok_or(Error::ComposeError(
-            testcontainers::compose::ComposeError::ServiceNotFound(service.to_string()),
-        ))?;
+        let container = self.compose.service(service).ok_or_else(|| {
+            Error::ComposeError(testcontainers::compose::ComposeError::ServiceNotFound(
+                service.to_string(),
+            ))
+        })?;
         container
             .get_host_port_ipv4(internal_port)
             .await
@@ -112,9 +114,11 @@ impl TestContainers {
 
     /// Get the service host
     pub async fn get_service_host(&self, service: &str) -> Result<url::Host, Error> {
-        let container = self.compose.service(service).ok_or(Error::ComposeError(
-            testcontainers::compose::ComposeError::ServiceNotFound(service.to_string()),
-        ))?;
+        let container = self.compose.service(service).ok_or_else(|| {
+            Error::ComposeError(testcontainers::compose::ComposeError::ServiceNotFound(
+                service.to_string(),
+            ))
+        })?;
         container.get_host().await.map_err(Error::Testcontainers)
     }
 
