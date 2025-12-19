@@ -1,6 +1,8 @@
 //! Integration testing helper functions for compose stack
 //!
 
+use std::mem::ManuallyDrop;
+
 use bitcoin::{AddressType, Amount};
 use bitcoincore_rpc::RpcApi as _;
 use testcontainers::compose::DockerCompose;
@@ -75,7 +77,9 @@ impl Default for TestContainersBuilder {
 /// A `TestContainers` manage an isolated docker stack for tests
 pub struct TestContainers {
     /// The underlying compose stack
-    compose: DockerCompose,
+    compose: ManuallyDrop<DockerCompose>,
+    /// By default the stack is downed on drop (triggered on test exit)
+    down_on_drop: bool,
     /// The Bitcoin container, if present
     bitcoin: OnceCell<BitcoinContainer>,
 }
@@ -84,7 +88,8 @@ impl TestContainers {
     pub fn new(config: TestContainersBuilder) -> Self {
         let compose = DockerCompose::with_local_client(&config.compose_files);
         Self {
-            compose,
+            compose: ManuallyDrop::new(compose),
+            down_on_drop: true,
             bitcoin: OnceCell::new(),
         }
     }
@@ -134,10 +139,32 @@ impl TestContainers {
             .await
     }
 
-    /// Use at the end of a test to keep the stack up after the test finishes
+    /// Use to keep the stack up after the test finishes
+    ///
+    /// ## Examples:
+    /// ```
+    /// let stack = TestContainersBuilder::start_bitcoin().await.keep_up();
+    /// ```
     #[allow(unused)]
-    pub fn keep_up(self) {
-        std::mem::forget(self);
+    pub fn keep_up(mut self) -> Self {
+        self.down_on_drop = false;
+        self
+    }
+}
+
+/// By default the compose stack is downed on "normal" test exit (success or
+/// fail/panic), so the container cannot be inspected after the run.
+/// To prevent it from being dropped we skip dropping `compose` if
+/// `down_on_drop` is false.
+impl Drop for TestContainers {
+    fn drop(&mut self) {
+        if self.down_on_drop {
+            // SAFETY: we drop it only here; we are dropping `self` so we cannot
+            // access `self.compose` anymore after dropping it.
+            unsafe {
+                ManuallyDrop::drop(&mut self.compose);
+            }
+        }
     }
 }
 

@@ -1,4 +1,6 @@
+use bitcoincore_rpc::RpcApi as _;
 use sbtc::testing::containers::BitcoinContainer;
+use sbtc::testing::containers::TestContainersBuilder;
 use signer::bitcoin::rpc::BitcoinCoreClient;
 
 pub trait BitcoinContainerExt {
@@ -12,25 +14,17 @@ impl BitcoinContainerExt for BitcoinContainer {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use bitcoincore_rpc::RpcApi as _;
-    use sbtc::testing::containers::TestContainersBuilder;
+#[tokio::test]
+async fn test_bitcoin() {
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
 
-    use super::*;
+    let rpc = bitcoin.rpc();
+    let faucet = bitcoin.get_faucet();
+    let client = bitcoin.get_client();
 
-    #[tokio::test]
-    async fn test_bitcoin() {
-        let stack = TestContainersBuilder::start_bitcoin().await;
-        let bitcoin = stack.bitcoin().await;
+    let block = faucet.generate_block();
 
-        let rpc = bitcoin.rpc();
-        let faucet = bitcoin.get_faucet();
-        let client = bitcoin.get_client();
-
-        let block = faucet.generate_block();
-
-        assert!(rpc.get_block(&block).is_ok());
-        assert_eq!(client.get_best_block_hash().unwrap(), block);
-    }
+    assert!(rpc.get_block(&block).is_ok());
+    assert_eq!(client.get_best_block_hash().unwrap(), block);
 }
