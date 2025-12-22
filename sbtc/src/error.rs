@@ -83,4 +83,19 @@ pub enum Error {
     #[cfg(any(test, feature = "webhooks"))]
     #[error("got an error when attempting to call StacksMessageCodec::consensus_deserialize {0}")]
     StacksCodec(#[source] stacks_common::codec::Error),
+
+    /// Error when parsing a URL
+    #[cfg(feature = "testing")]
+    #[error("could not parse the provided URL: {0}")]
+    InvalidUrl(#[source] url::ParseError),
+
+    /// Test containers compose error
+    #[cfg(feature = "testing")]
+    #[error("test containers compose error: {0}")]
+    ComposeError(#[source] testcontainers::compose::ComposeError),
+
+    /// Got an error while interacting with test containers
+    #[cfg(feature = "testing")]
+    #[error("got an error while interacting with test containers: {0}")]
+    Testcontainers(#[source] testcontainers::TestcontainersError),
 }
