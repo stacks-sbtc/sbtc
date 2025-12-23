@@ -18,7 +18,6 @@ use sha2::Digest as _;
 use crate::WITHDRAWAL_BLOCKS_EXPIRY;
 use crate::WITHDRAWAL_DUST_LIMIT;
 use crate::WITHDRAWAL_EXPIRY_BUFFER;
-use crate::WITHDRAWAL_MIN_CONFIRMATIONS;
 use crate::bitcoin::BitcoinInteract as _;
 use crate::bitcoin::TransactionLookupHint;
 use crate::bitcoin::utxo;
@@ -73,6 +72,7 @@ use crate::storage::model::StacksTxId;
 use crate::wsts_state_machine::FireCoordinator;
 use crate::wsts_state_machine::FrostCoordinator;
 use crate::wsts_state_machine::WstsCoordinator;
+use sbtc::WITHDRAWAL_MIN_CONFIRMATIONS;
 
 use bitcoin::hashes::Hash as _;
 use wsts::net::SignatureType;
@@ -698,6 +698,8 @@ where
             self.sign_and_broadcast(bitcoin_chain_tip.as_ref(), &mut transaction)
                 .await?;
 
+            let expected_height = bitcoin_chain_tip.block_height + WITHDRAWAL_MIN_CONFIRMATIONS + 1;
+
             // TODO: if this (considering also fallback clients) fails, we will
             // need to handle the inconsistency of having the sweep tx confirmed
             // but emily deposit still marked as pending.
@@ -713,7 +715,7 @@ where
             let _ = self
                 .context
                 .get_emily_client()
-                .accept_withdrawals(&transaction)
+                .accept_withdrawals(&transaction, expected_height)
                 .await
                 .inspect_err(|error| {
                     tracing::warn!(%error, "could not accept withdrawals on Emily");

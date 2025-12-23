@@ -5,6 +5,7 @@
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **amount** | **u64** | Amount of BTC being withdrawn in satoshis. | 
+**expected_fulfillment_info** | [**models::ExpectedFulfillmentInfo**](ExpectedFulfillmentInfo.md) |  | 
 **fulfillment** | Option<[**models::Fulfillment**](Fulfillment.md)> |  | [optional]
 **last_update_block_hash** | **String** | The most recent Stacks block hash the API was aware of when the withdrawal was last updated. If the most recent update is tied to an artifact on the Stacks blockchain then this hash is the Stacks block hash that contains that artifact. | 
 **last_update_height** | **u64** | The most recent Stacks block height the API was aware of when the withdrawal was last updated. If the most recent update is tied to an artifact on the Stacks blockchain then this height is the Stacks block height that contains that artifact. | 

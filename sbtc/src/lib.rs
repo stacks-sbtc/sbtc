@@ -47,3 +47,12 @@ pub const NUMS_X_COORDINATE: [u8; 32] = [
 /// have a known private key.
 pub static UNSPENDABLE_TAPROOT_KEY: LazyLock<XOnlyPublicKey> =
     LazyLock::new(|| XOnlyPublicKey::from_slice(&NUMS_X_COORDINATE).unwrap());
+
+/// This is the number of bitcoin blocks that the signers will wait before
+/// acting on a withdrawal request. We do this to ensure that the
+/// withdrawal request is deemed final on the Stacks blockchain.
+///
+/// The value here was taken from the last paragraph of the opening comment
+/// of https://github.com/stacks-network/sbtc/discussions/12 and in the
+/// comments of https://github.com/stacks-network/sbtc/issues/16.
+pub const WITHDRAWAL_MIN_CONFIRMATIONS: u64 = 6;

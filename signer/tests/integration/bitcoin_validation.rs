@@ -6,8 +6,8 @@ use rand::rngs::OsRng;
 use rand::seq::SliceRandom as _;
 use test_case::test_case;
 
+use sbtc::WITHDRAWAL_MIN_CONFIRMATIONS;
 use sbtc::testing::regtest;
-use signer::WITHDRAWAL_MIN_CONFIRMATIONS;
 use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
 use signer::bitcoin::validation::BitcoinTxContext;
