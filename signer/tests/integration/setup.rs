@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::ops::Deref as _;
+use std::str::FromStr as _;
 
 use bitcoin::AddressType;
 use bitcoin::Amount;
@@ -17,6 +18,7 @@ use fake::Faker;
 use rand::rngs::OsRng;
 use sbtc::deposits::CreateDepositRequest;
 use sbtc::deposits::DepositInfo;
+use sbtc::testing::emily::EmilyTables;
 use sbtc::testing::regtest;
 use sbtc::testing::regtest::Faucet;
 use sbtc::testing::regtest::Recipient;
@@ -1269,4 +1271,43 @@ impl TestSweepSetup2 {
         };
         db.write_rotate_keys_transaction(&event).await.unwrap();
     }
+}
+
+/// Setup a new set of dynamodb tables for Emily
+pub async fn new_emily_setup() -> (EmilyApiConfiguration, EmilyTables) {
+    let tables = EmilyTables::new().await;
+
+    let mut configuration = EmilyApiConfiguration {
+        base_path: "http://127.0.0.1:3031".to_string(),
+        api_key: Some(emily_client::apis::configuration::ApiKey {
+            prefix: None,
+            key: "testApiKey".to_string(),
+        }),
+        ..Default::default()
+    };
+
+    let mut headers = reqwest_012::header::HeaderMap::new();
+    for (shortname, table_name) in [
+        ("deposit", &tables.deposit),
+        ("withdrawal", &tables.withdrawal),
+        ("chainstate", &tables.chainstate),
+        ("limit", &tables.limit),
+    ] {
+        headers.insert(
+            reqwest_012::header::HeaderName::from_str(&format!("x-context-{shortname}")).unwrap(),
+            reqwest_012::header::HeaderValue::from_str(table_name).unwrap(),
+        );
+    }
+
+    configuration.client = reqwest_012::ClientBuilder::new()
+        .default_headers(headers)
+        .build()
+        .unwrap();
+
+    (configuration, tables)
+}
+
+/// Cleanup Emily dynamodb tables
+pub async fn clean_emily_setup(tables: EmilyTables) {
+    tables.delete().await
 }
