@@ -3,6 +3,6 @@ serial-integration = { max-threads = 1 }
 
 [[profile.default.overrides]]
 # All integration tests within a `serial` module
-# filter = "binary(integration) and test(::serial::)"
+# filter = "binary(integration) and test(/::serial.*::/)"
 filter = "all()" # TODO: remove this once all the tests have been correctly marked
 test-group = "serial-integration"

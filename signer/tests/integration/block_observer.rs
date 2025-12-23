@@ -78,64 +78,6 @@ use crate::setup::fetch_canonical_bitcoin_blockchain;
 use crate::transaction_coordinator::mock_reqwests_status_code_error;
 use crate::utxo_construction::make_deposit_request;
 
-/// The [`get_signer_set_info`] function is supposed to fetch the signing
-/// set that is in the sbtc-registry by querying the stacks node if the
-/// smart contracts have been deployed and returning None if they have not
-/// or if the smart contract contains only null data.
-#[tokio::test]
-async fn get_signer_set_info_checks_for_contract_deployment() {
-    let db = testing::storage::new_test_database().await;
-
-    let mut rng = get_rng();
-
-    let ctx = TestContext::builder()
-        .with_storage(db.clone())
-        .with_mocked_clients()
-        .build();
-
-    // We need stacks blocks for the rotate-keys transactions.
-    let test_params = testing::storage::model::Params {
-        num_bitcoin_blocks: 10,
-        num_stacks_blocks_per_bitcoin_block: 1,
-        num_deposit_requests_per_block: 0,
-        num_withdraw_requests_per_block: 0,
-        num_signers_per_request: 0,
-        consecutive_blocks: false,
-    };
-    let test_data = TestData::generate(&mut rng, &[], &test_params);
-    test_data.write_to(&db).await;
-
-    let signer_set_info: SignerSetInfo = Faker.fake_with_rng(&mut rng);
-    let signer_set_info2 = signer_set_info.clone();
-    ctx.with_stacks_client(|client| {
-        client
-            .expect_get_current_signer_set_info()
-            .returning(move |_| Box::pin(std::future::ready(Ok(Some(signer_set_info2.clone())))));
-
-        client.expect_get_contract_source().returning(|_, _| {
-            Box::pin(async {
-                Err(Error::StacksNodeResponse(
-                    mock_reqwests_status_code_error(404).await,
-                ))
-            })
-        });
-    })
-    .await;
-
-    let info = get_signer_set_info(&ctx).await.unwrap();
-    assert!(info.is_none());
-
-    // Alright, now we set that the contracts have been deployed, so we no
-    // longer ask the stacks node about whether the they have been deployed
-    // or not and just query the smart contract.
-    ctx.state().set_sbtc_contracts_deployed();
-    let info = get_signer_set_info(&ctx).await.unwrap().unwrap();
-
-    assert_eq!(signer_set_info, info);
-
-    testing::storage::drop_db(db).await;
-}
-
 mod serial {
     use super::*;
 
@@ -386,45 +328,49 @@ mod serial {
 
         testing::storage::drop_db(db).await;
     }
+}
 
-    async fn fetch_output(db: &PgStore, output_type: TxOutputType) -> Vec<TxOutput> {
-        sqlx::query_as::<_, TxOutput>(
-            r#"
-        SELECT
-            txid
-          , output_index
-          , amount
-          , script_pubkey
-          , output_type
-        FROM sbtc_signer.bitcoin_tx_outputs
-        WHERE output_type = $1
-        "#,
-        )
-        .bind(output_type)
-        .fetch_all(db.pool())
-        .await
-        .unwrap()
-    }
+async fn fetch_output(db: &PgStore, output_type: TxOutputType) -> Vec<TxOutput> {
+    sqlx::query_as::<_, TxOutput>(
+        r#"
+    SELECT
+        txid
+        , output_index
+        , amount
+        , script_pubkey
+        , output_type
+    FROM sbtc_signer.bitcoin_tx_outputs
+    WHERE output_type = $1
+    "#,
+    )
+    .bind(output_type)
+    .fetch_all(db.pool())
+    .await
+    .unwrap()
+}
 
-    async fn fetch_input(db: &PgStore, output_type: TxPrevoutType) -> Vec<TxPrevout> {
-        sqlx::query_as::<_, TxPrevout>(
-            r#"
-        SELECT
-            txid
-          , prevout_txid
-          , prevout_output_index
-          , amount
-          , script_pubkey
-          , prevout_type
-        FROM sbtc_signer.bitcoin_tx_inputs
-        WHERE prevout_type = $1
-        "#,
-        )
-        .bind(output_type)
-        .fetch_all(db.pool())
-        .await
-        .unwrap()
-    }
+async fn fetch_input(db: &PgStore, output_type: TxPrevoutType) -> Vec<TxPrevout> {
+    sqlx::query_as::<_, TxPrevout>(
+        r#"
+    SELECT
+        txid
+        , prevout_txid
+        , prevout_output_index
+        , amount
+        , script_pubkey
+        , prevout_type
+    FROM sbtc_signer.bitcoin_tx_inputs
+    WHERE prevout_type = $1
+    "#,
+    )
+    .bind(output_type)
+    .fetch_all(db.pool())
+    .await
+    .unwrap()
+}
+
+mod serial2 {
+    use super::*;
 
     /// The function tests that the block observer:
     /// 1. picks up donations and inserts the expected rows into the
@@ -1187,6 +1133,68 @@ mod serial {
 
         testing::storage::drop_db(db).await;
     }
+}
+
+/// The [`get_signer_set_info`] function is supposed to fetch the signing
+/// set that is in the sbtc-registry by querying the stacks node if the
+/// smart contracts have been deployed and returning None if they have not
+/// or if the smart contract contains only null data.
+#[tokio::test]
+async fn get_signer_set_info_checks_for_contract_deployment() {
+    let db = testing::storage::new_test_database().await;
+
+    let mut rng = get_rng();
+
+    let ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_mocked_clients()
+        .build();
+
+    // We need stacks blocks for the rotate-keys transactions.
+    let test_params = testing::storage::model::Params {
+        num_bitcoin_blocks: 10,
+        num_stacks_blocks_per_bitcoin_block: 1,
+        num_deposit_requests_per_block: 0,
+        num_withdraw_requests_per_block: 0,
+        num_signers_per_request: 0,
+        consecutive_blocks: false,
+    };
+    let test_data = TestData::generate(&mut rng, &[], &test_params);
+    test_data.write_to(&db).await;
+
+    let signer_set_info: SignerSetInfo = Faker.fake_with_rng(&mut rng);
+    let signer_set_info2 = signer_set_info.clone();
+    ctx.with_stacks_client(|client| {
+        client
+            .expect_get_current_signer_set_info()
+            .returning(move |_| Box::pin(std::future::ready(Ok(Some(signer_set_info2.clone())))));
+
+        client.expect_get_contract_source().returning(|_, _| {
+            Box::pin(async {
+                Err(Error::StacksNodeResponse(
+                    mock_reqwests_status_code_error(404).await,
+                ))
+            })
+        });
+    })
+    .await;
+
+    let info = get_signer_set_info(&ctx).await.unwrap();
+    assert!(info.is_none());
+
+    // Alright, now we set that the contracts have been deployed, so we no
+    // longer ask the stacks node about whether the they have been deployed
+    // or not and just query the smart contract.
+    ctx.state().set_sbtc_contracts_deployed();
+    let info = get_signer_set_info(&ctx).await.unwrap().unwrap();
+
+    assert_eq!(signer_set_info, info);
+
+    testing::storage::drop_db(db).await;
+}
+
+mod serial3 {
+    use super::*;
 
     /// This test checks that the signer state is updated with the latest the
     /// sbtc limits, current signer set, and current aggregate key after the
