@@ -2,6 +2,7 @@ use bitcoin::OutPoint;
 use blockstack_lib::types::chainstate::StacksAddress;
 use rand::rngs::OsRng;
 use sbtc::testing::regtest;
+use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::error::Error;
 use signer::stacks::contracts::AcceptWithdrawalV1;
 use signer::stacks::contracts::AsContractCall as _;
@@ -104,10 +105,15 @@ async fn accept_withdrawal_validation_happy_path() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup = TestSweepSetup2::new_setup(
+        signers,
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        &WITHDRAWAL_AMOUNT,
+    );
 
     // Normal: The withdrawal must be swept on bitcoin.
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.submit_sweep_tx(faucet);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't
@@ -163,10 +169,15 @@ async fn accept_withdrawal_validation_withdrawal_signer_no_dkg_shares() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup = TestSweepSetup2::new_setup(
+        signers,
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        &WITHDRAWAL_AMOUNT,
+    );
 
     // Normal: The withdrawal must be swept on bitcoin.
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.submit_sweep_tx(faucet);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't
@@ -225,10 +236,15 @@ async fn accept_withdrawal_validation_deployer_mismatch() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup = TestSweepSetup2::new_setup(
+        signers,
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        &WITHDRAWAL_AMOUNT,
+    );
 
     // Normal: The withdrawal must be swept on bitcoin.
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.submit_sweep_tx(faucet);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't
@@ -291,10 +307,15 @@ async fn accept_withdrawal_validation_missing_withdrawal_request() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup = TestSweepSetup2::new_setup(
+        signers,
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        &WITHDRAWAL_AMOUNT,
+    );
 
     // Normal: The withdrawal must be swept on bitcoin.
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.submit_sweep_tx(faucet);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't
@@ -358,10 +379,15 @@ async fn accept_withdrawal_validation_recipient_mismatch() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup = TestSweepSetup2::new_setup(
+        signers,
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        &WITHDRAWAL_AMOUNT,
+    );
 
     // Normal: The withdrawal must be swept on bitcoin.
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.submit_sweep_tx(faucet);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't
@@ -425,10 +451,15 @@ async fn accept_withdrawal_validation_invalid_amount() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup = TestSweepSetup2::new_setup(
+        signers,
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        &WITHDRAWAL_AMOUNT,
+    );
 
     // Normal: The withdrawal must be swept on bitcoin.
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.submit_sweep_tx(faucet);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't
@@ -490,10 +521,15 @@ async fn accept_withdrawal_validation_invalid_fee() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup = TestSweepSetup2::new_setup(
+        signers,
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        &WITHDRAWAL_AMOUNT,
+    );
 
     // Normal: The withdrawal must be swept on bitcoin.
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.submit_sweep_tx(faucet);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't
@@ -564,10 +600,15 @@ async fn accept_withdrawal_validation_sweep_tx_missing() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup = TestSweepSetup2::new_setup(
+        signers,
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        &WITHDRAWAL_AMOUNT,
+    );
 
     // Normal: The withdrawal must be swept on bitcoin.
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.submit_sweep_tx(faucet);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't
@@ -633,10 +674,15 @@ async fn accept_withdrawal_validation_sweep_reorged() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup = TestSweepSetup2::new_setup(
+        signers,
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        &WITHDRAWAL_AMOUNT,
+    );
 
     // Normal: The withdrawal must be swept on bitcoin.
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.submit_sweep_tx(faucet);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't
@@ -711,10 +757,15 @@ async fn accept_withdrawal_validation_withdrawal_not_in_sweep() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup = TestSweepSetup2::new_setup(
+        signers,
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        &WITHDRAWAL_AMOUNT,
+    );
 
     // Normal: The withdrawal must be swept on bitcoin.
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.submit_sweep_tx(faucet);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't
@@ -782,10 +833,15 @@ async fn accept_withdrawal_validation_withdrawal_incorrect_fee() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup = TestSweepSetup2::new_setup(
+        signers,
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        &WITHDRAWAL_AMOUNT,
+    );
 
     // Normal: The withdrawal must be swept on bitcoin.
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.submit_sweep_tx(faucet);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't
@@ -848,10 +904,15 @@ async fn accept_withdrawal_validation_withdrawal_invalid_sweep() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup = TestSweepSetup2::new_setup(
+        signers,
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        &WITHDRAWAL_AMOUNT,
+    );
 
     // Normal: The withdrawal must be swept on bitcoin.
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.submit_sweep_tx(faucet);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't
@@ -920,10 +981,15 @@ async fn accept_withdrawal_validation_request_completed() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &WITHDRAWAL_AMOUNT);
+    let mut setup = TestSweepSetup2::new_setup(
+        signers,
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        &WITHDRAWAL_AMOUNT,
+    );
 
     // Normal: The withdrawal must be swept on bitcoin.
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.submit_sweep_tx(faucet);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't

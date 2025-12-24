@@ -8,6 +8,7 @@ use fake::Fake as _;
 use fake::Faker;
 use mockito::Server;
 use serde_json::json;
+use signer::bitcoin::rpc::BitcoinCoreClient;
 use url::Url;
 
 use emily_client::apis::deposit_api;
@@ -150,7 +151,8 @@ async fn handle_pending_deposit_request_address_script_pub_key() {
 
     // This confirms a deposit transaction, and has a nice helper function
     // for storing a real deposit.
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 10000, &mut rng);
+    let setup =
+        TestSweepSetup::new_setup(BitcoinCoreClient::new_regtest(), faucet, 10000, &mut rng);
 
     // Let's get the blockchain data into the database.
     let chain_tip: BitcoinBlockHash = setup.sweep_block_hash.into();
@@ -236,7 +238,8 @@ async fn handle_pending_deposit_request_not_in_signing_set() {
 
     // This confirms a deposit transaction, and has a nice helper function
     // for storing a real deposit.
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 10000, &mut rng);
+    let setup =
+        TestSweepSetup::new_setup(BitcoinCoreClient::new_regtest(), faucet, 10000, &mut rng);
 
     // Let's get the blockchain data into the database.
     let chain_tip: BitcoinBlockHash = setup.sweep_block_hash.into();
@@ -341,7 +344,8 @@ async fn persist_received_deposit_decision_fetches_missing_deposit_requests() {
 
     // This confirms a deposit transaction, and has a nice helper function
     // for storing a real deposit.
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 10000, &mut rng);
+    let setup =
+        TestSweepSetup::new_setup(BitcoinCoreClient::new_regtest(), faucet, 10000, &mut rng);
 
     // Let's get the blockchain data into the database.
     let chain_tip: BitcoinBlockHash = setup.sweep_block_hash.into();
@@ -446,7 +450,8 @@ async fn blocklist_client_retry(num_failures: u8, failing_iters: u8) {
 
     // This confirms a deposit transaction, and has a nice helper function
     // for storing a real deposit.
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 10000, &mut rng);
+    let setup =
+        TestSweepSetup::new_setup(BitcoinCoreClient::new_regtest(), faucet, 10000, &mut rng);
 
     // Let's get the blockchain data into the database.
     let chain_tip: BitcoinBlockHash = setup.sweep_block_hash.into();
@@ -584,7 +589,8 @@ async fn do_not_procceed_with_blocked_addresses(is_withdrawal: bool, is_blocked:
     let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
 
     // Creating test setup which will help store transactions and requests
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 10000, &mut rng);
+    let setup =
+        TestSweepSetup::new_setup(BitcoinCoreClient::new_regtest(), faucet, 10000, &mut rng);
 
     // Let's get the blockchain data into the database.
     let chain_tip: BitcoinBlockHash = setup.sweep_block_hash.into();
