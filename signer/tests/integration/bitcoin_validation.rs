@@ -1,314 +1,310 @@
-mod serial {
-    use std::collections::HashSet;
-    use std::ops::Deref as _;
+use std::collections::HashSet;
+use std::ops::Deref as _;
 
-    use bitcoin::hashes::Hash as _;
-    use rand::rngs::OsRng;
-    use rand::seq::SliceRandom as _;
-    use test_case::test_case;
+use bitcoin::hashes::Hash as _;
+use rand::rngs::OsRng;
+use rand::seq::SliceRandom as _;
+use test_case::test_case;
 
-    use sbtc::testing::regtest;
-    use signer::WITHDRAWAL_MIN_CONFIRMATIONS;
-    use signer::bitcoin::utxo::SbtcRequests;
-    use signer::bitcoin::utxo::SignerBtcState;
-    use signer::bitcoin::validation::BitcoinTxContext;
-    use signer::bitcoin::validation::BitcoinTxValidationData;
-    use signer::bitcoin::validation::InputValidationResult;
-    use signer::bitcoin::validation::TxRequestIds;
-    use signer::bitcoin::validation::WithdrawalValidationResult;
-    use signer::context::Context;
-    use signer::context::SbtcLimits;
-    use signer::message::BitcoinPreSignRequest;
-    use signer::storage::DbRead as _;
-    use signer::storage::model::TxPrevoutType;
-    use signer::testing;
-    use signer::testing::context::TestContext;
-    use signer::testing::context::*;
-    use signer::testing::get_rng;
+use sbtc::testing::regtest;
+use signer::WITHDRAWAL_MIN_CONFIRMATIONS;
+use signer::bitcoin::utxo::SbtcRequests;
+use signer::bitcoin::utxo::SignerBtcState;
+use signer::bitcoin::validation::BitcoinTxContext;
+use signer::bitcoin::validation::BitcoinTxValidationData;
+use signer::bitcoin::validation::InputValidationResult;
+use signer::bitcoin::validation::TxRequestIds;
+use signer::bitcoin::validation::WithdrawalValidationResult;
+use signer::context::Context;
+use signer::context::SbtcLimits;
+use signer::message::BitcoinPreSignRequest;
+use signer::storage::DbRead as _;
+use signer::storage::model::TxPrevoutType;
+use signer::testing;
+use signer::testing::context::TestContext;
+use signer::testing::context::*;
+use signer::testing::get_rng;
 
-    use crate::setup::SweepAmounts;
-    use crate::setup::TestSignerSet;
-    use crate::setup::TestSweepSetup2;
-    use crate::setup::backfill_bitcoin_blocks;
+use crate::setup::SweepAmounts;
+use crate::setup::TestSignerSet;
+use crate::setup::TestSweepSetup2;
+use crate::setup::backfill_bitcoin_blocks;
 
-    const TEST_FEE_RATE: f64 = 10.0;
+const TEST_FEE_RATE: f64 = 10.0;
 
-    /// Create the signers' Bitcoin state object.
-    async fn signer_btc_state<C>(
-        ctx: &C,
-        request: &BitcoinPreSignRequest,
-        btc_ctx: &BitcoinTxContext,
-    ) -> SignerBtcState
-    where
-        C: Context + Send + Sync,
-    {
-        let signer_utxo = ctx
-            .get_storage()
-            .get_signer_utxo(&btc_ctx.chain_tip)
-            .await
-            .unwrap()
-            .unwrap();
-        SignerBtcState {
-            utxo: signer_utxo,
-            fee_rate: request.fee_rate,
-            public_key: btc_ctx.aggregate_key.into(),
-            last_fees: request.last_fees,
-            magic_bytes: [b'T', b'3'],
+/// Create the signers' Bitcoin state object.
+async fn signer_btc_state<C>(
+    ctx: &C,
+    request: &BitcoinPreSignRequest,
+    btc_ctx: &BitcoinTxContext,
+) -> SignerBtcState
+where
+    C: Context + Send + Sync,
+{
+    let signer_utxo = ctx
+        .get_storage()
+        .get_signer_utxo(&btc_ctx.chain_tip)
+        .await
+        .unwrap()
+        .unwrap();
+    SignerBtcState {
+        utxo: signer_utxo,
+        fee_rate: request.fee_rate,
+        public_key: btc_ctx.aggregate_key.into(),
+        last_fees: request.last_fees,
+        magic_bytes: [b'T', b'3'],
+    }
+}
+
+pub trait AssertConstantInvariants {
+    fn packages(&self) -> &[BitcoinTxValidationData];
+    fn assert_invariants(&self) {
+        for package in self.packages() {
+            let input_rows = package.to_input_rows();
+            let withdrawal_rows = package.to_withdrawal_rows();
+            let txids: HashSet<_> = input_rows
+                .iter()
+                .map(|row| row.txid)
+                .chain(withdrawal_rows.iter().map(|row| row.bitcoin_txid))
+                .collect();
+            let is_valid_tx: HashSet<_> = input_rows
+                .iter()
+                .map(|row| row.is_valid_tx)
+                .chain(withdrawal_rows.iter().map(|row| row.is_valid_tx))
+                .collect();
+            let chain_tip: HashSet<_> = input_rows
+                .iter()
+                .map(|row| row.chain_tip)
+                .chain(withdrawal_rows.iter().map(|row| row.bitcoin_chain_tip))
+                .collect();
+
+            assert_eq!(txids.len(), 1);
+            assert_eq!(is_valid_tx.len(), 1);
+            assert_eq!(chain_tip.len(), 1);
         }
     }
+}
 
-    pub trait AssertConstantInvariants {
-        fn packages(&self) -> &[BitcoinTxValidationData];
-        fn assert_invariants(&self) {
-            for package in self.packages() {
-                let input_rows = package.to_input_rows();
-                let withdrawal_rows = package.to_withdrawal_rows();
-                let txids: HashSet<_> = input_rows
-                    .iter()
-                    .map(|row| row.txid)
-                    .chain(withdrawal_rows.iter().map(|row| row.bitcoin_txid))
-                    .collect();
-                let is_valid_tx: HashSet<_> = input_rows
-                    .iter()
-                    .map(|row| row.is_valid_tx)
-                    .chain(withdrawal_rows.iter().map(|row| row.is_valid_tx))
-                    .collect();
-                let chain_tip: HashSet<_> = input_rows
-                    .iter()
-                    .map(|row| row.chain_tip)
-                    .chain(withdrawal_rows.iter().map(|row| row.bitcoin_chain_tip))
-                    .collect();
-
-                assert_eq!(txids.len(), 1);
-                assert_eq!(is_valid_tx.len(), 1);
-                assert_eq!(chain_tip.len(), 1);
-            }
-        }
+impl AssertConstantInvariants for Vec<BitcoinTxValidationData> {
+    fn packages(&self) -> &[BitcoinTxValidationData] {
+        self
     }
+}
 
-    impl AssertConstantInvariants for Vec<BitcoinTxValidationData> {
-        fn packages(&self) -> &[BitcoinTxValidationData] {
-            self
-        }
-    }
+#[tokio::test]
+async fn one_tx_per_request_set() {
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
+    let (rpc, faucet) = regtest::initialize_blockchain();
 
-    /// TODO: parallelize
-    #[tokio::test]
-    async fn one_tx_per_request_set() {
-        let db = testing::storage::new_test_database().await;
-        let mut rng = get_rng();
-        let (rpc, faucet) = regtest::initialize_blockchain();
+    let ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_first_bitcoin_core_client()
+        .with_mocked_stacks_client()
+        .with_mocked_emily_client()
+        .build();
+    ctx.state().update_current_limits(SbtcLimits::unlimited());
 
-        let ctx = TestContext::builder()
-            .with_storage(db.clone())
-            .with_first_bitcoin_core_client()
-            .with_mocked_stacks_client()
-            .with_mocked_emily_client()
-            .build();
-        ctx.state().update_current_limits(SbtcLimits::unlimited());
+    let signers = TestSignerSet::new(&mut rng);
+    let amounts = [SweepAmounts {
+        amount: 1_000_000,
+        max_fee: 500_000,
+        is_deposit: true,
+    }];
 
-        let signers = TestSignerSet::new(&mut rng);
-        let amounts = [SweepAmounts {
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
+    setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
+    backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
+
+    setup.store_stacks_genesis_block(&db).await;
+    setup.store_dkg_shares(&db).await;
+    setup.store_donation(&db).await;
+    setup.store_deposit_txs(&db).await;
+    setup.store_deposit_request(&db).await;
+    setup.store_deposit_decisions(&db).await;
+
+    let chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
+    let chain_tip_block = db.get_bitcoin_block(&chain_tip).await.unwrap().unwrap();
+
+    let aggregate_key = setup.signers.signer.keypair.public_key().into();
+
+    let request = BitcoinPreSignRequest {
+        request_package: vec![TxRequestIds {
+            deposits: setup.deposit_outpoints(),
+            withdrawals: Vec::new(),
+        }],
+        fee_rate: TEST_FEE_RATE,
+        last_fees: None,
+    };
+
+    let btc_ctx = BitcoinTxContext {
+        chain_tip: chain_tip_block.block_hash,
+        chain_tip_height: chain_tip_block.block_height,
+        signer_public_key: setup.signers.keys[0],
+        aggregate_key,
+    };
+
+    let validation_data = request
+        .construct_package_sighashes(&ctx, &btc_ctx)
+        .await
+        .unwrap();
+    // There are a few invariants that we uphold for our validation data.
+    // These are things like "the transaction ID per package must be the
+    // same", we check for them here.
+    validation_data.assert_invariants();
+    // We only had a package with one set of requests that were being
+    // handled.
+    assert_eq!(validation_data.len(), 1);
+
+    // We didn't give any withdrawals so the outputs vector should be
+    // empty (it only has signer outputs).
+    let set = &validation_data[0];
+    assert!(set.to_withdrawal_rows().is_empty());
+
+    // This transaction package
+    let input_rows = set.to_input_rows();
+    let [signer, deposit] = input_rows.last_chunk().unwrap();
+    assert_eq!(signer.prevout_type, TxPrevoutType::SignersInput);
+    assert_eq!(signer.validation_result, InputValidationResult::Ok);
+    assert_eq!(signer.prevout_txid.deref(), &setup.donation.txid);
+    assert_eq!(signer.prevout_output_index, setup.donation.vout);
+    assert!(signer.will_sign);
+    assert!(signer.is_valid_tx);
+
+    let deposit_outpoint = setup.deposits[0].0.outpoint;
+    assert_eq!(deposit.prevout_type, TxPrevoutType::Deposit);
+    assert_eq!(deposit.validation_result, InputValidationResult::Ok);
+    assert_eq!(deposit.prevout_txid.deref(), &deposit_outpoint.txid);
+    assert_eq!(deposit.prevout_output_index, deposit_outpoint.vout);
+    assert!(deposit.will_sign);
+    assert!(deposit.is_valid_tx);
+
+    testing::storage::drop_db(db).await;
+}
+
+/// Test that including a single invalid transaction in a set of requests
+/// results in the entire bitcoin transaction being invalid, and that will
+/// sign for the associated sighashes are all false.
+#[tokio::test]
+async fn one_invalid_deposit_invalidates_tx() {
+    let low_fee = 10;
+
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
+    let (rpc, faucet) = regtest::initialize_blockchain();
+
+    let ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_first_bitcoin_core_client()
+        .with_mocked_stacks_client()
+        .with_mocked_emily_client()
+        .build();
+    ctx.state().update_current_limits(SbtcLimits::unlimited());
+
+    let signers = TestSignerSet::new(&mut rng);
+    let amounts = [
+        SweepAmounts {
+            amount: 1_000_000,
+            max_fee: low_fee,
+            is_deposit: true,
+        },
+        SweepAmounts {
             amount: 1_000_000,
             max_fee: 500_000,
             is_deposit: true,
-        }];
+        },
+    ];
 
-        let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
-        setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
-        backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
+    // When making assertions below, we need to make sure that we're
+    // comparing the right deposits transaction outputs, so we sort.
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
+    setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
+    backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
 
-        setup.store_stacks_genesis_block(&db).await;
-        setup.store_dkg_shares(&db).await;
-        setup.store_donation(&db).await;
-        setup.store_deposit_txs(&db).await;
-        setup.store_deposit_request(&db).await;
-        setup.store_deposit_decisions(&db).await;
+    setup.store_stacks_genesis_block(&db).await;
+    setup.store_dkg_shares(&db).await;
+    setup.store_donation(&db).await;
+    setup.store_deposit_txs(&db).await;
+    setup.store_deposit_request(&db).await;
+    setup.store_deposit_decisions(&db).await;
 
-        let chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
-        let chain_tip_block = db.get_bitcoin_block(&chain_tip).await.unwrap().unwrap();
+    let chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
+    let chain_tip_block = db.get_bitcoin_block(&chain_tip).await.unwrap().unwrap();
 
-        let aggregate_key = setup.signers.signer.keypair.public_key().into();
+    let aggregate_key = setup.signers.signer.keypair.public_key().into();
 
-        let request = BitcoinPreSignRequest {
-            request_package: vec![TxRequestIds {
-                deposits: setup.deposit_outpoints(),
-                withdrawals: Vec::new(),
-            }],
-            fee_rate: TEST_FEE_RATE,
-            last_fees: None,
-        };
+    let request = BitcoinPreSignRequest {
+        request_package: vec![TxRequestIds {
+            deposits: setup.deposit_outpoints(),
+            withdrawals: Vec::new(),
+        }],
+        fee_rate: TEST_FEE_RATE,
+        last_fees: None,
+    };
 
-        let btc_ctx = BitcoinTxContext {
-            chain_tip: chain_tip_block.block_hash,
-            chain_tip_height: chain_tip_block.block_height,
-            signer_public_key: setup.signers.keys[0],
-            aggregate_key,
-        };
+    let btc_ctx = BitcoinTxContext {
+        chain_tip: chain_tip_block.block_hash,
+        chain_tip_height: chain_tip_block.block_height,
+        signer_public_key: setup.signers.keys[0],
+        aggregate_key,
+    };
 
-        let validation_data = request
-            .construct_package_sighashes(&ctx, &btc_ctx)
-            .await
-            .unwrap();
-        // There are a few invariants that we uphold for our validation data.
-        // These are things like "the transaction ID per package must be the
-        // same", we check for them here.
-        validation_data.assert_invariants();
-        // We only had a package with one set of requests that were being
-        // handled.
-        assert_eq!(validation_data.len(), 1);
+    let validation_data = request
+        .construct_package_sighashes(&ctx, &btc_ctx)
+        .await
+        .unwrap();
+    // There are a few invariants that we uphold for our validation data.
+    // These are things like "the transaction ID per package must be the
+    // same", we check for them here.
+    validation_data.assert_invariants();
+    // We only had a package with one set of requests that were being
+    // handled.
+    assert_eq!(validation_data.len(), 1);
 
-        // We didn't give any withdrawals so the outputs vector should be
-        // empty (it only has signer outputs).
-        let set = &validation_data[0];
-        assert!(set.to_withdrawal_rows().is_empty());
+    // We didn't give any withdrawals so the outputs vector should be
+    // empty (it only has signer outputs).
+    let set = &validation_data[0];
+    assert!(set.to_withdrawal_rows().is_empty());
 
-        // This transaction package
-        let input_rows = set.to_input_rows();
-        let [signer, deposit] = input_rows.last_chunk().unwrap();
-        assert_eq!(signer.prevout_type, TxPrevoutType::SignersInput);
-        assert_eq!(signer.validation_result, InputValidationResult::Ok);
-        assert_eq!(signer.prevout_txid.deref(), &setup.donation.txid);
-        assert_eq!(signer.prevout_output_index, setup.donation.vout);
-        assert!(signer.will_sign);
-        assert!(signer.is_valid_tx);
+    // The signer won't sign any of the sighashes, even though only one of
+    // the deposits have failed validation.
+    let input_rows = set.to_input_rows();
+    let signer = input_rows.first().unwrap();
+    assert_eq!(signer.prevout_type, TxPrevoutType::SignersInput);
+    assert_eq!(signer.validation_result, InputValidationResult::Ok);
+    assert_eq!(signer.prevout_txid.deref(), &setup.donation.txid);
+    assert_eq!(signer.prevout_output_index, setup.donation.vout);
+    assert!(!signer.will_sign);
+    assert!(!signer.is_valid_tx);
 
-        let deposit_outpoint = setup.deposits[0].0.outpoint;
-        assert_eq!(deposit.prevout_type, TxPrevoutType::Deposit);
-        assert_eq!(deposit.validation_result, InputValidationResult::Ok);
-        assert_eq!(deposit.prevout_txid.deref(), &deposit_outpoint.txid);
-        assert_eq!(deposit.prevout_output_index, deposit_outpoint.vout);
-        assert!(deposit.will_sign);
-        assert!(deposit.is_valid_tx);
+    let [deposit1, deposit2] = input_rows.last_chunk().unwrap();
 
-        testing::storage::drop_db(db).await;
-    }
+    let (validation_result1, validation_result2) = if setup.deposits[0].0.max_fee == low_fee {
+        (InputValidationResult::FeeTooHigh, InputValidationResult::Ok)
+    } else {
+        (InputValidationResult::Ok, InputValidationResult::FeeTooHigh)
+    };
 
-    /// Test that including a single invalid transaction in a set of requests
-    /// results in the entire bitcoin transaction being invalid, and that will
-    /// sign for the associated sighashes are all false.
-    ///
-    /// TODO: parallelize
-    #[tokio::test]
-    async fn one_invalid_deposit_invalidates_tx() {
-        let low_fee = 10;
+    let outpoint = setup.deposits[0].0.outpoint;
+    assert_eq!(deposit1.prevout_type, TxPrevoutType::Deposit);
+    assert_eq!(deposit1.validation_result, validation_result1);
+    assert_eq!(deposit1.prevout_txid.deref(), &outpoint.txid);
+    assert_eq!(deposit1.prevout_output_index, outpoint.vout);
+    assert!(!deposit1.will_sign);
+    assert!(!deposit1.is_valid_tx);
 
-        let db = testing::storage::new_test_database().await;
-        let mut rng = get_rng();
-        let (rpc, faucet) = regtest::initialize_blockchain();
+    let outpoint = setup.deposits[1].0.outpoint;
+    assert_eq!(deposit2.prevout_type, TxPrevoutType::Deposit);
+    assert_eq!(deposit2.validation_result, validation_result2);
+    assert_eq!(deposit2.prevout_txid.deref(), &outpoint.txid);
+    assert_eq!(deposit2.prevout_output_index, outpoint.vout);
+    assert!(!deposit2.will_sign);
+    assert!(!deposit2.is_valid_tx);
 
-        let ctx = TestContext::builder()
-            .with_storage(db.clone())
-            .with_first_bitcoin_core_client()
-            .with_mocked_stacks_client()
-            .with_mocked_emily_client()
-            .build();
-        ctx.state().update_current_limits(SbtcLimits::unlimited());
+    testing::storage::drop_db(db).await;
+}
 
-        let signers = TestSignerSet::new(&mut rng);
-        let amounts = [
-            SweepAmounts {
-                amount: 1_000_000,
-                max_fee: low_fee,
-                is_deposit: true,
-            },
-            SweepAmounts {
-                amount: 1_000_000,
-                max_fee: 500_000,
-                is_deposit: true,
-            },
-        ];
-
-        // When making assertions below, we need to make sure that we're
-        // comparing the right deposits transaction outputs, so we sort.
-        let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
-        setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
-        backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
-
-        setup.store_stacks_genesis_block(&db).await;
-        setup.store_dkg_shares(&db).await;
-        setup.store_donation(&db).await;
-        setup.store_deposit_txs(&db).await;
-        setup.store_deposit_request(&db).await;
-        setup.store_deposit_decisions(&db).await;
-
-        let chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
-        let chain_tip_block = db.get_bitcoin_block(&chain_tip).await.unwrap().unwrap();
-
-        let aggregate_key = setup.signers.signer.keypair.public_key().into();
-
-        let request = BitcoinPreSignRequest {
-            request_package: vec![TxRequestIds {
-                deposits: setup.deposit_outpoints(),
-                withdrawals: Vec::new(),
-            }],
-            fee_rate: TEST_FEE_RATE,
-            last_fees: None,
-        };
-
-        let btc_ctx = BitcoinTxContext {
-            chain_tip: chain_tip_block.block_hash,
-            chain_tip_height: chain_tip_block.block_height,
-            signer_public_key: setup.signers.keys[0],
-            aggregate_key,
-        };
-
-        let validation_data = request
-            .construct_package_sighashes(&ctx, &btc_ctx)
-            .await
-            .unwrap();
-        // There are a few invariants that we uphold for our validation data.
-        // These are things like "the transaction ID per package must be the
-        // same", we check for them here.
-        validation_data.assert_invariants();
-        // We only had a package with one set of requests that were being
-        // handled.
-        assert_eq!(validation_data.len(), 1);
-
-        // We didn't give any withdrawals so the outputs vector should be
-        // empty (it only has signer outputs).
-        let set = &validation_data[0];
-        assert!(set.to_withdrawal_rows().is_empty());
-
-        // The signer won't sign any of the sighashes, even though only one of
-        // the deposits have failed validation.
-        let input_rows = set.to_input_rows();
-        let signer = input_rows.first().unwrap();
-        assert_eq!(signer.prevout_type, TxPrevoutType::SignersInput);
-        assert_eq!(signer.validation_result, InputValidationResult::Ok);
-        assert_eq!(signer.prevout_txid.deref(), &setup.donation.txid);
-        assert_eq!(signer.prevout_output_index, setup.donation.vout);
-        assert!(!signer.will_sign);
-        assert!(!signer.is_valid_tx);
-
-        let [deposit1, deposit2] = input_rows.last_chunk().unwrap();
-
-        let (validation_result1, validation_result2) = if setup.deposits[0].0.max_fee == low_fee {
-            (InputValidationResult::FeeTooHigh, InputValidationResult::Ok)
-        } else {
-            (InputValidationResult::Ok, InputValidationResult::FeeTooHigh)
-        };
-
-        let outpoint = setup.deposits[0].0.outpoint;
-        assert_eq!(deposit1.prevout_type, TxPrevoutType::Deposit);
-        assert_eq!(deposit1.validation_result, validation_result1);
-        assert_eq!(deposit1.prevout_txid.deref(), &outpoint.txid);
-        assert_eq!(deposit1.prevout_output_index, outpoint.vout);
-        assert!(!deposit1.will_sign);
-        assert!(!deposit1.is_valid_tx);
-
-        let outpoint = setup.deposits[1].0.outpoint;
-        assert_eq!(deposit2.prevout_type, TxPrevoutType::Deposit);
-        assert_eq!(deposit2.validation_result, validation_result2);
-        assert_eq!(deposit2.prevout_txid.deref(), &outpoint.txid);
-        assert_eq!(deposit2.prevout_output_index, outpoint.vout);
-        assert!(!deposit2.will_sign);
-        assert!(!deposit2.is_valid_tx);
-
-        testing::storage::drop_db(db).await;
-    }
-
-    #[test_case(vec![
+#[test_case(vec![
     SweepAmounts {
         amount: 700_000,
         max_fee: 500_000,
@@ -320,7 +316,7 @@ mod serial {
         is_deposit: false,
     },
 ]; "one-withdrawal-one-deposit")]
-    #[test_case(vec![
+#[test_case(vec![
     SweepAmounts {
         amount: 123_456,
         max_fee: 50_000,
@@ -337,7 +333,7 @@ mod serial {
         is_deposit: false,
     },
 ]; "three-withdrawals")]
-    #[test_case(vec![
+#[test_case(vec![
     SweepAmounts {
         amount: 123_456,
         max_fee: 50_000,
@@ -354,265 +350,262 @@ mod serial {
         is_deposit: false,
     },
 ]; "two-withdrawals-one-deposit")]
-    /// TODO: parallelize
-    #[tokio::test]
-    async fn withdrawals_and_deposits_can_pass_validation(amounts: Vec<SweepAmounts>) {
-        let db = testing::storage::new_test_database().await;
-        let mut rng = get_rng();
-        let (rpc, faucet) = regtest::initialize_blockchain();
+#[tokio::test]
+async fn withdrawals_and_deposits_can_pass_validation(amounts: Vec<SweepAmounts>) {
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
+    let (rpc, faucet) = regtest::initialize_blockchain();
 
-        let ctx = TestContext::builder()
-            .with_storage(db.clone())
-            .with_first_bitcoin_core_client()
-            .with_mocked_stacks_client()
-            .with_mocked_emily_client()
-            .build();
+    let ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_first_bitcoin_core_client()
+        .with_mocked_stacks_client()
+        .with_mocked_emily_client()
+        .build();
 
-        ctx.state().update_current_limits(SbtcLimits::unlimited());
+    ctx.state().update_current_limits(SbtcLimits::unlimited());
 
-        let signers = TestSignerSet::new(&mut rng);
+    let signers = TestSignerSet::new(&mut rng);
 
-        // When making assertions below, we need to make sure that we're
-        // comparing the right deposits transaction outputs, so we sort.
-        let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
-        setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
-        backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
+    // When making assertions below, we need to make sure that we're
+    // comparing the right deposits transaction outputs, so we sort.
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
+    setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
+    backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
 
-        setup.store_stacks_genesis_block(&db).await;
-        setup.store_dkg_shares(&db).await;
-        setup.store_donation(&db).await;
-        setup.store_deposit_txs(&db).await;
-        setup.store_deposit_request(&db).await;
-        setup.store_deposit_decisions(&db).await;
-        // For the withdrawal
-        setup.store_withdrawal_requests(&db).await;
-        setup.store_withdrawal_decisions(&db).await;
+    setup.store_stacks_genesis_block(&db).await;
+    setup.store_dkg_shares(&db).await;
+    setup.store_donation(&db).await;
+    setup.store_deposit_txs(&db).await;
+    setup.store_deposit_request(&db).await;
+    setup.store_deposit_decisions(&db).await;
+    // For the withdrawal
+    setup.store_withdrawal_requests(&db).await;
+    setup.store_withdrawal_decisions(&db).await;
 
-        let chain_tip = faucet
-            .generate_blocks(WITHDRAWAL_MIN_CONFIRMATIONS)
-            .pop()
-            .unwrap();
-        backfill_bitcoin_blocks(&db, rpc, &chain_tip).await;
+    let chain_tip = faucet
+        .generate_blocks(WITHDRAWAL_MIN_CONFIRMATIONS)
+        .pop()
+        .unwrap();
+    backfill_bitcoin_blocks(&db, rpc, &chain_tip).await;
 
-        let chain_tip_ref = db
-            .get_bitcoin_canonical_chain_tip_ref()
-            .await
-            .unwrap()
-            .unwrap();
-        // Sanity check
-        assert_eq!(chain_tip, chain_tip_ref.block_hash.into());
+    let chain_tip_ref = db
+        .get_bitcoin_canonical_chain_tip_ref()
+        .await
+        .unwrap()
+        .unwrap();
+    // Sanity check
+    assert_eq!(chain_tip, chain_tip_ref.block_hash.into());
 
-        let aggregate_key = setup.signers.signer.keypair.public_key().into();
+    let aggregate_key = setup.signers.signer.keypair.public_key().into();
 
-        let request = BitcoinPreSignRequest {
-            request_package: vec![TxRequestIds {
-                deposits: setup.deposit_outpoints(),
-                withdrawals: setup.withdrawal_ids(),
-            }],
-            fee_rate: TEST_FEE_RATE,
-            last_fees: None,
-        };
+    let request = BitcoinPreSignRequest {
+        request_package: vec![TxRequestIds {
+            deposits: setup.deposit_outpoints(),
+            withdrawals: setup.withdrawal_ids(),
+        }],
+        fee_rate: TEST_FEE_RATE,
+        last_fees: None,
+    };
 
-        let btc_ctx = BitcoinTxContext {
-            chain_tip: chain_tip_ref.block_hash,
-            chain_tip_height: chain_tip_ref.block_height,
-            signer_public_key: setup.signers.keys[0],
-            aggregate_key,
-        };
+    let btc_ctx = BitcoinTxContext {
+        chain_tip: chain_tip_ref.block_hash,
+        chain_tip_height: chain_tip_ref.block_height,
+        signer_public_key: setup.signers.keys[0],
+        aggregate_key,
+    };
 
-        let validation_data = request
-            .construct_package_sighashes(&ctx, &btc_ctx)
-            .await
-            .unwrap();
+    let validation_data = request
+        .construct_package_sighashes(&ctx, &btc_ctx)
+        .await
+        .unwrap();
 
-        // There are a few invariants that we uphold for our validation data.
-        // These are things like "the transaction ID per package must be the
-        // same", we check for them here.
-        validation_data.assert_invariants();
-        // We only had a package with one set of requests that were being
-        // handled.
-        assert_eq!(validation_data.len(), 1);
+    // There are a few invariants that we uphold for our validation data.
+    // These are things like "the transaction ID per package must be the
+    // same", we check for them here.
+    validation_data.assert_invariants();
+    // We only had a package with one set of requests that were being
+    // handled.
+    assert_eq!(validation_data.len(), 1);
 
-        let output_rows = validation_data[0].to_withdrawal_rows();
-        let num_withdrawals = amounts.iter().filter(|am| !am.is_deposit).count();
-        assert_eq!(output_rows.len(), num_withdrawals);
-        let iter = output_rows.iter().zip(setup.withdrawals.iter()).enumerate();
+    let output_rows = validation_data[0].to_withdrawal_rows();
+    let num_withdrawals = amounts.iter().filter(|am| !am.is_deposit).count();
+    assert_eq!(output_rows.len(), num_withdrawals);
+    let iter = output_rows.iter().zip(setup.withdrawals.iter()).enumerate();
 
-        for (output_index, (row, withdrawal)) in iter {
-            assert_eq!(row.validation_result, WithdrawalValidationResult::Ok);
-            assert_eq!(row.request_id, withdrawal.request.request_id);
-            assert_eq!(row.stacks_block_hash, withdrawal.request.block_hash);
-            assert_eq!(row.stacks_txid, withdrawal.request.txid);
-            assert_eq!(row.output_index, output_index as u32 + 2);
-            assert!(row.is_valid_tx);
-        }
-
-        testing::storage::drop_db(db).await;
+    for (output_index, (row, withdrawal)) in iter {
+        assert_eq!(row.validation_result, WithdrawalValidationResult::Ok);
+        assert_eq!(row.request_id, withdrawal.request.request_id);
+        assert_eq!(row.stacks_block_hash, withdrawal.request.block_hash);
+        assert_eq!(row.stacks_txid, withdrawal.request.txid);
+        assert_eq!(row.output_index, output_index as u32 + 2);
+        assert!(row.is_valid_tx);
     }
 
-    /// TODO: parallelize
-    #[tokio::test]
-    async fn swept_withdrawals_fail_validation() {
-        let db = testing::storage::new_test_database().await;
-        let mut rng = get_rng();
-        let (rpc, faucet) = regtest::initialize_blockchain();
+    testing::storage::drop_db(db).await;
+}
 
-        let ctx = TestContext::builder()
-            .with_storage(db.clone())
-            .with_first_bitcoin_core_client()
-            .with_mocked_stacks_client()
-            .with_mocked_emily_client()
-            .build();
+#[tokio::test]
+async fn swept_withdrawals_fail_validation() {
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
+    let (rpc, faucet) = regtest::initialize_blockchain();
 
-        ctx.state().update_current_limits(SbtcLimits::unlimited());
+    let ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_first_bitcoin_core_client()
+        .with_mocked_stacks_client()
+        .with_mocked_emily_client()
+        .build();
 
-        let signers = TestSignerSet::new(&mut rng);
-        let amounts = [SweepAmounts {
+    ctx.state().update_current_limits(SbtcLimits::unlimited());
+
+    let signers = TestSignerSet::new(&mut rng);
+    let amounts = [SweepAmounts {
+        amount: 700_000,
+        max_fee: 500_000,
+        is_deposit: false,
+    }];
+
+    // When making assertions below, we need to make sure that we're
+    // comparing the right deposits transaction outputs, so we sort.
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
+    setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
+    backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
+
+    setup.store_stacks_genesis_block(&db).await;
+    setup.store_dkg_shares(&db).await;
+    setup.store_donation(&db).await;
+    setup.store_deposit_txs(&db).await;
+    setup.store_deposit_request(&db).await;
+    setup.store_deposit_decisions(&db).await;
+    // For the withdrawal
+    setup.store_withdrawal_requests(&db).await;
+    setup.store_withdrawal_decisions(&db).await;
+
+    // Let's confirm a sweep transaction
+    setup.submit_sweep_tx(rpc, faucet);
+    setup.store_bitcoin_withdrawals_outputs(&db).await;
+    setup.store_sweep_tx(&db).await;
+
+    // The sweep happened right away, even before the withdrawal request
+    // was final, so when we go to do validation without generated enough
+    // votes, it's possible that validation will fail for a reason that's
+    // different from what we're expecting.
+    let chain_tip = faucet
+        .generate_blocks(WITHDRAWAL_MIN_CONFIRMATIONS)
+        .pop()
+        .unwrap();
+    backfill_bitcoin_blocks(&db, rpc, &chain_tip).await;
+
+    let chain_tip_ref = db
+        .get_bitcoin_canonical_chain_tip_ref()
+        .await
+        .unwrap()
+        .unwrap();
+    let aggregate_key = setup.signers.signer.keypair.public_key().into();
+
+    let request = BitcoinPreSignRequest {
+        request_package: vec![TxRequestIds {
+            deposits: setup.deposit_outpoints(),
+            withdrawals: setup.withdrawal_ids(),
+        }],
+        fee_rate: TEST_FEE_RATE,
+        last_fees: None,
+    };
+
+    let btc_ctx = BitcoinTxContext {
+        chain_tip: chain_tip_ref.block_hash,
+        chain_tip_height: chain_tip_ref.block_height,
+        signer_public_key: setup.signers.keys[0],
+        aggregate_key,
+    };
+
+    let validation_data = request
+        .construct_package_sighashes(&ctx, &btc_ctx)
+        .await
+        .unwrap();
+
+    // There are a few invariants that we uphold for our validation data.
+    // These are things like "the transaction ID per package must be the
+    // same", we check for them here.
+    validation_data.assert_invariants();
+    // We only had a package with one set of requests that were being
+    // handled.
+    assert_eq!(validation_data.len(), 1);
+
+    let output_rows = validation_data[0].to_withdrawal_rows();
+    assert_eq!(output_rows.len(), 1);
+
+    let iter = output_rows.iter().zip(setup.withdrawals.iter()).enumerate();
+
+    for (output_index, (row, withdrawal)) in iter {
+        assert_eq!(
+            row.validation_result,
+            WithdrawalValidationResult::RequestFulfilled
+        );
+        assert_eq!(row.request_id, withdrawal.request.request_id);
+        assert_eq!(row.stacks_block_hash, withdrawal.request.block_hash);
+        assert_eq!(row.stacks_txid, withdrawal.request.txid);
+        assert_eq!(row.output_index, output_index as u32 + 2);
+        assert!(!row.is_valid_tx);
+    }
+
+    testing::storage::drop_db(db).await;
+}
+
+#[tokio::test]
+async fn cannot_sign_deposit_is_ok() {
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
+    let (rpc, faucet) = regtest::initialize_blockchain();
+
+    let signers = TestSignerSet::new(&mut rng);
+
+    let ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_first_bitcoin_core_client()
+        .with_mocked_stacks_client()
+        .with_mocked_emily_client()
+        .build();
+    ctx.state().update_current_limits(SbtcLimits::unlimited());
+
+    let amounts = [
+        SweepAmounts {
             amount: 700_000,
             max_fee: 500_000,
-            is_deposit: false,
-        }];
+            is_deposit: true,
+        },
+        SweepAmounts {
+            amount: 1_000_000,
+            max_fee: 500_000,
+            is_deposit: true,
+        },
+    ];
 
-        // When making assertions below, we need to make sure that we're
-        // comparing the right deposits transaction outputs, so we sort.
-        let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
-        setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
-        backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
+    // When making assertions below, we need to make sure that we're
+    // comparing the right deposits transaction outputs, so we sort.
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
+    setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
+    // Let's suppose that signer 0 cannot sign for the deposit, but that
+    // they still accept the deposit. That means the bitmap at signer 0
+    // will have a 1, since that means the signer did not sign for all
+    // the inputs in the transaction.
+    setup.deposits[0].1.signer_bitmap.set(0, true);
 
-        setup.store_stacks_genesis_block(&db).await;
-        setup.store_dkg_shares(&db).await;
-        setup.store_donation(&db).await;
-        setup.store_deposit_txs(&db).await;
-        setup.store_deposit_request(&db).await;
-        setup.store_deposit_decisions(&db).await;
-        // For the withdrawal
-        setup.store_withdrawal_requests(&db).await;
-        setup.store_withdrawal_decisions(&db).await;
+    backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
 
-        // Let's confirm a sweep transaction
-        setup.submit_sweep_tx(rpc, faucet);
-        setup.store_bitcoin_withdrawals_outputs(&db).await;
-        setup.store_sweep_tx(&db).await;
+    setup.store_stacks_genesis_block(&db).await;
+    setup.store_dkg_shares(&db).await;
+    setup.store_donation(&db).await;
+    setup.store_deposit_txs(&db).await;
+    setup.store_deposit_request(&db).await;
+    setup.store_deposit_decisions(&db).await;
 
-        // The sweep happened right away, even before the withdrawal request
-        // was final, so when we go to do validation without generated enough
-        // votes, it's possible that validation will fail for a reason that's
-        // different from what we're expecting.
-        let chain_tip = faucet
-            .generate_blocks(WITHDRAWAL_MIN_CONFIRMATIONS)
-            .pop()
-            .unwrap();
-        backfill_bitcoin_blocks(&db, rpc, &chain_tip).await;
-
-        let chain_tip_ref = db
-            .get_bitcoin_canonical_chain_tip_ref()
-            .await
-            .unwrap()
-            .unwrap();
-        let aggregate_key = setup.signers.signer.keypair.public_key().into();
-
-        let request = BitcoinPreSignRequest {
-            request_package: vec![TxRequestIds {
-                deposits: setup.deposit_outpoints(),
-                withdrawals: setup.withdrawal_ids(),
-            }],
-            fee_rate: TEST_FEE_RATE,
-            last_fees: None,
-        };
-
-        let btc_ctx = BitcoinTxContext {
-            chain_tip: chain_tip_ref.block_hash,
-            chain_tip_height: chain_tip_ref.block_height,
-            signer_public_key: setup.signers.keys[0],
-            aggregate_key,
-        };
-
-        let validation_data = request
-            .construct_package_sighashes(&ctx, &btc_ctx)
-            .await
-            .unwrap();
-
-        // There are a few invariants that we uphold for our validation data.
-        // These are things like "the transaction ID per package must be the
-        // same", we check for them here.
-        validation_data.assert_invariants();
-        // We only had a package with one set of requests that were being
-        // handled.
-        assert_eq!(validation_data.len(), 1);
-
-        let output_rows = validation_data[0].to_withdrawal_rows();
-        assert_eq!(output_rows.len(), 1);
-
-        let iter = output_rows.iter().zip(setup.withdrawals.iter()).enumerate();
-
-        for (output_index, (row, withdrawal)) in iter {
-            assert_eq!(
-                row.validation_result,
-                WithdrawalValidationResult::RequestFulfilled
-            );
-            assert_eq!(row.request_id, withdrawal.request.request_id);
-            assert_eq!(row.stacks_block_hash, withdrawal.request.block_hash);
-            assert_eq!(row.stacks_txid, withdrawal.request.txid);
-            assert_eq!(row.output_index, output_index as u32 + 2);
-            assert!(!row.is_valid_tx);
-        }
-
-        testing::storage::drop_db(db).await;
-    }
-
-    /// TODO: parallelize
-    #[tokio::test]
-    async fn cannot_sign_deposit_is_ok() {
-        let db = testing::storage::new_test_database().await;
-        let mut rng = get_rng();
-        let (rpc, faucet) = regtest::initialize_blockchain();
-
-        let signers = TestSignerSet::new(&mut rng);
-
-        let ctx = TestContext::builder()
-            .with_storage(db.clone())
-            .with_first_bitcoin_core_client()
-            .with_mocked_stacks_client()
-            .with_mocked_emily_client()
-            .build();
-        ctx.state().update_current_limits(SbtcLimits::unlimited());
-
-        let amounts = [
-            SweepAmounts {
-                amount: 700_000,
-                max_fee: 500_000,
-                is_deposit: true,
-            },
-            SweepAmounts {
-                amount: 1_000_000,
-                max_fee: 500_000,
-                is_deposit: true,
-            },
-        ];
-
-        // When making assertions below, we need to make sure that we're
-        // comparing the right deposits transaction outputs, so we sort.
-        let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
-        setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
-        // Let's suppose that signer 0 cannot sign for the deposit, but that
-        // they still accept the deposit. That means the bitmap at signer 0
-        // will have a 1, since that means the signer did not sign for all
-        // the inputs in the transaction.
-        setup.deposits[0].1.signer_bitmap.set(0, true);
-
-        backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
-
-        setup.store_stacks_genesis_block(&db).await;
-        setup.store_dkg_shares(&db).await;
-        setup.store_donation(&db).await;
-        setup.store_deposit_txs(&db).await;
-        setup.store_deposit_request(&db).await;
-        setup.store_deposit_decisions(&db).await;
-
-        // Here we update the database to specifically say that we cannot sign,
-        // but we accept the deposit, so we would if we could.
-        sqlx::query(
-            "
+    // Here we update the database to specifically say that we cannot sign,
+    // but we accept the deposit, so we would if we could.
+    sqlx::query(
+        "
         UPDATE sbtc_signer.deposit_signers
            SET can_sign = FALSE
              , can_accept = TRUE
@@ -620,337 +613,334 @@ mod serial {
            AND output_index = $2
            AND signer_pub_key = $3
     ",
-        )
-        .bind(setup.deposits[0].0.outpoint.txid.to_byte_array())
-        .bind(setup.deposits[0].0.outpoint.vout as i32)
-        .bind(setup.signers.keys[0])
-        .execute(db.pool())
+    )
+    .bind(setup.deposits[0].0.outpoint.txid.to_byte_array())
+    .bind(setup.deposits[0].0.outpoint.vout as i32)
+    .bind(setup.signers.keys[0])
+    .execute(db.pool())
+    .await
+    .unwrap();
+
+    let chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
+    let chain_tip_block = db.get_bitcoin_block(&chain_tip).await.unwrap().unwrap();
+
+    // Now we construct the validation data, including the sighashes.
+    let aggregate_key = setup.signers.signer.keypair.public_key().into();
+
+    let request = BitcoinPreSignRequest {
+        request_package: vec![TxRequestIds {
+            deposits: setup.deposit_outpoints(),
+            withdrawals: Vec::new(),
+        }],
+        fee_rate: TEST_FEE_RATE,
+        last_fees: None,
+    };
+
+    let btc_ctx = BitcoinTxContext {
+        chain_tip: chain_tip_block.block_hash,
+        chain_tip_height: chain_tip_block.block_height,
+        signer_public_key: setup.signers.keys[0],
+        aggregate_key,
+    };
+
+    let validation_data = request
+        .construct_package_sighashes(&ctx, &btc_ctx)
         .await
         .unwrap();
 
-        let chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
-        let chain_tip_block = db.get_bitcoin_block(&chain_tip).await.unwrap().unwrap();
+    // There are a few invariants that we uphold for our validation data.
+    // These are things like "the transaction ID per package must be the
+    // same", we check for them here.
+    validation_data.assert_invariants();
+    // We only had a package with one set of requests that were being
+    // handled.
+    assert_eq!(validation_data.len(), 1);
 
-        // Now we construct the validation data, including the sighashes.
-        let aggregate_key = setup.signers.signer.keypair.public_key().into();
+    // We didn't give any withdrawals so the outputs vector should be
+    // empty (it only has signer outputs).
+    let set = &validation_data[0];
+    assert!(set.to_withdrawal_rows().is_empty());
 
-        let request = BitcoinPreSignRequest {
-            request_package: vec![TxRequestIds {
-                deposits: setup.deposit_outpoints(),
-                withdrawals: Vec::new(),
-            }],
-            fee_rate: TEST_FEE_RATE,
-            last_fees: None,
-        };
+    // The signer won't sign the sighashes where they cannot sign, but the
+    // transaction is still valid, so they will sign the other sighashes.
+    let input_rows = set.to_input_rows();
+    let signer = input_rows.first().unwrap();
+    assert_eq!(input_rows.len(), 3);
+    assert_eq!(signer.prevout_type, TxPrevoutType::SignersInput);
+    assert_eq!(signer.validation_result, InputValidationResult::Ok);
+    assert_eq!(signer.prevout_txid.deref(), &setup.donation.txid);
+    assert_eq!(signer.prevout_output_index, setup.donation.vout);
+    assert!(signer.will_sign);
+    assert!(signer.is_valid_tx);
 
-        let btc_ctx = BitcoinTxContext {
-            chain_tip: chain_tip_block.block_hash,
-            chain_tip_height: chain_tip_block.block_height,
-            signer_public_key: setup.signers.keys[0],
-            aggregate_key,
-        };
+    let [deposit1, deposit2] = input_rows.last_chunk().unwrap();
+    let outpoint = setup.deposits[0].0.outpoint;
+    assert_eq!(deposit1.prevout_type, TxPrevoutType::Deposit);
+    assert_eq!(
+        deposit1.validation_result,
+        InputValidationResult::CannotSignUtxo
+    );
+    assert_eq!(deposit1.prevout_txid.deref(), &outpoint.txid);
+    assert_eq!(deposit1.prevout_output_index, outpoint.vout);
+    assert!(!deposit1.will_sign);
+    assert!(deposit1.is_valid_tx);
 
-        let validation_data = request
-            .construct_package_sighashes(&ctx, &btc_ctx)
-            .await
-            .unwrap();
+    let outpoint = setup.deposits[1].0.outpoint;
+    assert_eq!(deposit2.prevout_type, TxPrevoutType::Deposit);
+    assert_eq!(deposit2.validation_result, InputValidationResult::Ok);
+    assert_eq!(deposit2.prevout_txid.deref(), &outpoint.txid);
+    assert_eq!(deposit2.prevout_output_index, outpoint.vout);
+    assert!(deposit2.will_sign);
+    assert!(deposit2.is_valid_tx);
 
-        // There are a few invariants that we uphold for our validation data.
-        // These are things like "the transaction ID per package must be the
-        // same", we check for them here.
-        validation_data.assert_invariants();
-        // We only had a package with one set of requests that were being
-        // handled.
-        assert_eq!(validation_data.len(), 1);
+    // Let's make sure the sighashes still match
+    let sbtc_requests = SbtcRequests {
+        deposits: setup
+            .deposits
+            .iter()
+            .map(|(_, req, _)| req.clone())
+            .collect(),
+        withdrawals: Vec::new(),
+        signer_state: signer_btc_state(&ctx, &request, &btc_ctx).await,
+        accept_threshold: 2,
+        num_signers: 3,
+        sbtc_limits: SbtcLimits::unlimited(),
+        max_deposits_per_bitcoin_tx: ctx.config().signer.max_deposits_per_bitcoin_tx.get(),
+    };
+    let txs = sbtc_requests.construct_transactions().unwrap();
+    assert_eq!(txs.len(), 1);
 
-        // We didn't give any withdrawals so the outputs vector should be
-        // empty (it only has signer outputs).
-        let set = &validation_data[0];
-        assert!(set.to_withdrawal_rows().is_empty());
+    let tx = &txs[0];
+    let sighashes = tx.construct_digests().unwrap();
+    assert_eq!(sighashes.signers, *signer.sighash);
 
-        // The signer won't sign the sighashes where they cannot sign, but the
-        // transaction is still valid, so they will sign the other sighashes.
-        let input_rows = set.to_input_rows();
-        let signer = input_rows.first().unwrap();
-        assert_eq!(input_rows.len(), 3);
-        assert_eq!(signer.prevout_type, TxPrevoutType::SignersInput);
-        assert_eq!(signer.validation_result, InputValidationResult::Ok);
-        assert_eq!(signer.prevout_txid.deref(), &setup.donation.txid);
-        assert_eq!(signer.prevout_output_index, setup.donation.vout);
-        assert!(signer.will_sign);
-        assert!(signer.is_valid_tx);
+    assert_eq!(sighashes.deposits.len(), 2);
+    assert_eq!(sighashes.deposits[0].1, *deposit1.sighash);
+    assert_eq!(sighashes.deposits[1].1, *deposit2.sighash);
 
-        let [deposit1, deposit2] = input_rows.last_chunk().unwrap();
-        let outpoint = setup.deposits[0].0.outpoint;
-        assert_eq!(deposit1.prevout_type, TxPrevoutType::Deposit);
-        assert_eq!(
-            deposit1.validation_result,
-            InputValidationResult::CannotSignUtxo
-        );
-        assert_eq!(deposit1.prevout_txid.deref(), &outpoint.txid);
-        assert_eq!(deposit1.prevout_output_index, outpoint.vout);
-        assert!(!deposit1.will_sign);
-        assert!(deposit1.is_valid_tx);
+    testing::storage::drop_db(db).await;
+}
 
-        let outpoint = setup.deposits[1].0.outpoint;
-        assert_eq!(deposit2.prevout_type, TxPrevoutType::Deposit);
-        assert_eq!(deposit2.validation_result, InputValidationResult::Ok);
-        assert_eq!(deposit2.prevout_txid.deref(), &outpoint.txid);
-        assert_eq!(deposit2.prevout_output_index, outpoint.vout);
-        assert!(deposit2.will_sign);
-        assert!(deposit2.is_valid_tx);
+#[tokio::test]
+async fn sighashes_match_from_sbtc_requests_object() {
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
+    let (rpc, faucet) = regtest::initialize_blockchain();
 
-        // Let's make sure the sighashes still match
-        let sbtc_requests = SbtcRequests {
-            deposits: setup
-                .deposits
-                .iter()
-                .map(|(_, req, _)| req.clone())
-                .collect(),
+    let ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_first_bitcoin_core_client()
+        .with_mocked_stacks_client()
+        .with_mocked_emily_client()
+        .build();
+    ctx.state().update_current_limits(SbtcLimits::unlimited());
+
+    let signers = TestSignerSet::new(&mut rng);
+    let amounts = [
+        SweepAmounts {
+            amount: 700_000,
+            max_fee: 500_000,
+            is_deposit: true,
+        },
+        SweepAmounts {
+            amount: 1_000_000,
+            max_fee: 500_000,
+            is_deposit: true,
+        },
+    ];
+
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
+    setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
+    backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
+
+    setup.store_stacks_genesis_block(&db).await;
+    setup.store_dkg_shares(&db).await;
+    setup.store_donation(&db).await;
+    setup.store_deposit_txs(&db).await;
+    setup.store_deposit_request(&db).await;
+    setup.store_deposit_decisions(&db).await;
+
+    let chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
+    let chain_tip_block = db.get_bitcoin_block(&chain_tip).await.unwrap().unwrap();
+
+    let aggregate_key = setup.signers.signer.keypair.public_key().into();
+
+    let request = BitcoinPreSignRequest {
+        request_package: vec![TxRequestIds {
+            deposits: setup.deposit_outpoints(),
             withdrawals: Vec::new(),
-            signer_state: signer_btc_state(&ctx, &request, &btc_ctx).await,
-            accept_threshold: 2,
-            num_signers: 3,
-            sbtc_limits: SbtcLimits::unlimited(),
-            max_deposits_per_bitcoin_tx: ctx.config().signer.max_deposits_per_bitcoin_tx.get(),
-        };
-        let txs = sbtc_requests.construct_transactions().unwrap();
-        assert_eq!(txs.len(), 1);
+        }],
+        fee_rate: TEST_FEE_RATE,
+        last_fees: None,
+    };
 
-        let tx = &txs[0];
-        let sighashes = tx.construct_digests().unwrap();
-        assert_eq!(sighashes.signers, *signer.sighash);
+    let btc_ctx = BitcoinTxContext {
+        chain_tip: chain_tip_block.block_hash,
+        chain_tip_height: chain_tip_block.block_height,
+        signer_public_key: setup.signers.keys[0],
+        aggregate_key,
+    };
 
-        assert_eq!(sighashes.deposits.len(), 2);
-        assert_eq!(sighashes.deposits[0].1, *deposit1.sighash);
-        assert_eq!(sighashes.deposits[1].1, *deposit2.sighash);
+    let validation_data = request
+        .construct_package_sighashes(&ctx, &btc_ctx)
+        .await
+        .unwrap();
+    // There are a few invariants that we uphold for our validation data.
+    // These are things like "the transaction ID per package must be the
+    // same", we check for them here.
+    validation_data.assert_invariants();
+    // We only had a package with one set of requests that were being
+    // handled.
+    assert_eq!(validation_data.len(), 1);
 
-        testing::storage::drop_db(db).await;
-    }
+    // We didn't give any withdrawals so the outputs vector should be
+    // empty (it only has signer outputs).
+    let set = &validation_data[0];
+    assert!(set.to_withdrawal_rows().is_empty());
 
-    /// TODO: parallelize
-    #[tokio::test]
-    async fn sighashes_match_from_sbtc_requests_object() {
-        let db = testing::storage::new_test_database().await;
-        let mut rng = get_rng();
-        let (rpc, faucet) = regtest::initialize_blockchain();
+    // The signer won't sign any of the sighashes, even though all deposits
+    // have passed validation. The withdrawal will fail validation,
+    // invalidating the transaction.
+    let input_rows = set.to_input_rows();
+    let signer = input_rows.first().unwrap();
+    assert_eq!(input_rows.len(), 3);
+    assert_eq!(signer.prevout_type, TxPrevoutType::SignersInput);
+    assert_eq!(signer.validation_result, InputValidationResult::Ok);
+    assert_eq!(signer.prevout_txid.deref(), &setup.donation.txid);
+    assert_eq!(signer.prevout_output_index, setup.donation.vout);
+    assert!(signer.will_sign);
+    assert!(signer.is_valid_tx);
 
-        let ctx = TestContext::builder()
-            .with_storage(db.clone())
-            .with_first_bitcoin_core_client()
-            .with_mocked_stacks_client()
-            .with_mocked_emily_client()
-            .build();
-        ctx.state().update_current_limits(SbtcLimits::unlimited());
+    let [deposit1, deposit2] = input_rows.last_chunk().unwrap();
+    let outpoint = setup.deposits[0].0.outpoint;
+    assert_eq!(deposit1.prevout_type, TxPrevoutType::Deposit);
+    assert_eq!(deposit1.validation_result, InputValidationResult::Ok);
+    assert_eq!(deposit1.prevout_txid.deref(), &outpoint.txid);
+    assert_eq!(deposit1.prevout_output_index, outpoint.vout);
+    assert!(deposit1.will_sign);
+    assert!(deposit1.is_valid_tx);
 
-        let signers = TestSignerSet::new(&mut rng);
-        let amounts = [
-            SweepAmounts {
-                amount: 700_000,
-                max_fee: 500_000,
-                is_deposit: true,
-            },
-            SweepAmounts {
-                amount: 1_000_000,
-                max_fee: 500_000,
-                is_deposit: true,
-            },
-        ];
+    let outpoint = setup.deposits[1].0.outpoint;
+    assert_eq!(deposit2.prevout_type, TxPrevoutType::Deposit);
+    assert_eq!(deposit2.validation_result, InputValidationResult::Ok);
+    assert_eq!(deposit2.prevout_txid.deref(), &outpoint.txid);
+    assert_eq!(deposit2.prevout_output_index, outpoint.vout);
+    assert!(deposit2.will_sign);
+    assert!(deposit2.is_valid_tx);
 
-        let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
-        setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
-        backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
+    let sbtc_requests = SbtcRequests {
+        deposits: setup
+            .deposits
+            .iter()
+            .map(|(_, req, _)| req.clone())
+            .collect(),
+        withdrawals: Vec::new(),
+        signer_state: signer_btc_state(&ctx, &request, &btc_ctx).await,
+        accept_threshold: 2,
+        num_signers: 3,
+        sbtc_limits: SbtcLimits::unlimited(),
+        max_deposits_per_bitcoin_tx: ctx.config().signer.max_deposits_per_bitcoin_tx.get(),
+    };
+    let txs = sbtc_requests.construct_transactions().unwrap();
+    assert_eq!(txs.len(), 1);
 
-        setup.store_stacks_genesis_block(&db).await;
-        setup.store_dkg_shares(&db).await;
-        setup.store_donation(&db).await;
-        setup.store_deposit_txs(&db).await;
-        setup.store_deposit_request(&db).await;
-        setup.store_deposit_decisions(&db).await;
+    let tx = &txs[0];
+    let sighashes = tx.construct_digests().unwrap();
+    assert_eq!(sighashes.signers, *signer.sighash);
 
-        let chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
-        let chain_tip_block = db.get_bitcoin_block(&chain_tip).await.unwrap().unwrap();
+    assert_eq!(sighashes.deposits.len(), 2);
+    assert_eq!(sighashes.deposits[0].1, *deposit1.sighash);
+    assert_eq!(sighashes.deposits[1].1, *deposit2.sighash);
 
-        let aggregate_key = setup.signers.signer.keypair.public_key().into();
+    testing::storage::drop_db(db).await;
+}
 
-        let request = BitcoinPreSignRequest {
-            request_package: vec![TxRequestIds {
-                deposits: setup.deposit_outpoints(),
-                withdrawals: Vec::new(),
-            }],
-            fee_rate: TEST_FEE_RATE,
-            last_fees: None,
-        };
+#[tokio::test]
+async fn outcome_is_independent_of_input_order() {
+    let db = testing::storage::new_test_database().await;
+    let mut rng = OsRng;
+    let (rpc, faucet) = regtest::initialize_blockchain();
 
-        let btc_ctx = BitcoinTxContext {
-            chain_tip: chain_tip_block.block_hash,
-            chain_tip_height: chain_tip_block.block_height,
-            signer_public_key: setup.signers.keys[0],
-            aggregate_key,
-        };
+    let ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_first_bitcoin_core_client()
+        .with_mocked_stacks_client()
+        .with_mocked_emily_client()
+        .build();
+    ctx.state().update_current_limits(SbtcLimits::unlimited());
 
-        let validation_data = request
-            .construct_package_sighashes(&ctx, &btc_ctx)
-            .await
-            .unwrap();
-        // There are a few invariants that we uphold for our validation data.
-        // These are things like "the transaction ID per package must be the
-        // same", we check for them here.
-        validation_data.assert_invariants();
-        // We only had a package with one set of requests that were being
-        // handled.
-        assert_eq!(validation_data.len(), 1);
+    let signers = TestSignerSet::new(&mut rng);
+    let amounts = [
+        SweepAmounts {
+            amount: 1_500_000,
+            max_fee: 500_000,
+            is_deposit: true,
+        },
+        SweepAmounts {
+            amount: 700_000,
+            max_fee: 500_000,
+            is_deposit: true,
+        },
+        SweepAmounts {
+            amount: 1_000_000,
+            max_fee: 500_000,
+            is_deposit: true,
+        },
+        SweepAmounts {
+            amount: 2_000_000,
+            max_fee: 500_000,
+            is_deposit: true,
+        },
+    ];
 
-        // We didn't give any withdrawals so the outputs vector should be
-        // empty (it only has signer outputs).
-        let set = &validation_data[0];
-        assert!(set.to_withdrawal_rows().is_empty());
+    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
+    setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
+    backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
 
-        // The signer won't sign any of the sighashes, even though all deposits
-        // have passed validation. The withdrawal will fail validation,
-        // invalidating the transaction.
-        let input_rows = set.to_input_rows();
-        let signer = input_rows.first().unwrap();
-        assert_eq!(input_rows.len(), 3);
-        assert_eq!(signer.prevout_type, TxPrevoutType::SignersInput);
-        assert_eq!(signer.validation_result, InputValidationResult::Ok);
-        assert_eq!(signer.prevout_txid.deref(), &setup.donation.txid);
-        assert_eq!(signer.prevout_output_index, setup.donation.vout);
-        assert!(signer.will_sign);
-        assert!(signer.is_valid_tx);
+    setup.store_stacks_genesis_block(&db).await;
+    setup.store_dkg_shares(&db).await;
+    setup.store_donation(&db).await;
+    setup.store_deposit_txs(&db).await;
+    setup.store_deposit_request(&db).await;
+    setup.store_deposit_decisions(&db).await;
 
-        let [deposit1, deposit2] = input_rows.last_chunk().unwrap();
-        let outpoint = setup.deposits[0].0.outpoint;
-        assert_eq!(deposit1.prevout_type, TxPrevoutType::Deposit);
-        assert_eq!(deposit1.validation_result, InputValidationResult::Ok);
-        assert_eq!(deposit1.prevout_txid.deref(), &outpoint.txid);
-        assert_eq!(deposit1.prevout_output_index, outpoint.vout);
-        assert!(deposit1.will_sign);
-        assert!(deposit1.is_valid_tx);
+    let chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
+    let chain_tip_block = db.get_bitcoin_block(&chain_tip).await.unwrap().unwrap();
 
-        let outpoint = setup.deposits[1].0.outpoint;
-        assert_eq!(deposit2.prevout_type, TxPrevoutType::Deposit);
-        assert_eq!(deposit2.validation_result, InputValidationResult::Ok);
-        assert_eq!(deposit2.prevout_txid.deref(), &outpoint.txid);
-        assert_eq!(deposit2.prevout_output_index, outpoint.vout);
-        assert!(deposit2.will_sign);
-        assert!(deposit2.is_valid_tx);
+    let aggregate_key = setup.signers.signer.keypair.public_key().into();
 
-        let sbtc_requests = SbtcRequests {
-            deposits: setup
-                .deposits
-                .iter()
-                .map(|(_, req, _)| req.clone())
-                .collect(),
+    let mut request = BitcoinPreSignRequest {
+        request_package: vec![TxRequestIds {
+            deposits: setup.deposit_outpoints(),
             withdrawals: Vec::new(),
-            signer_state: signer_btc_state(&ctx, &request, &btc_ctx).await,
-            accept_threshold: 2,
-            num_signers: 3,
-            sbtc_limits: SbtcLimits::unlimited(),
-            max_deposits_per_bitcoin_tx: ctx.config().signer.max_deposits_per_bitcoin_tx.get(),
-        };
-        let txs = sbtc_requests.construct_transactions().unwrap();
-        assert_eq!(txs.len(), 1);
+        }],
+        fee_rate: TEST_FEE_RATE,
+        last_fees: None,
+    };
 
-        let tx = &txs[0];
-        let sighashes = tx.construct_digests().unwrap();
-        assert_eq!(sighashes.signers, *signer.sighash);
+    let btc_ctx = BitcoinTxContext {
+        chain_tip: chain_tip_block.block_hash,
+        chain_tip_height: chain_tip_block.block_height,
+        signer_public_key: setup.signers.keys[0],
+        aggregate_key,
+    };
 
-        assert_eq!(sighashes.deposits.len(), 2);
-        assert_eq!(sighashes.deposits[0].1, *deposit1.sighash);
-        assert_eq!(sighashes.deposits[1].1, *deposit2.sighash);
+    let validation_data1 = request
+        .construct_package_sighashes(&ctx, &btc_ctx)
+        .await
+        .unwrap();
+    let set1 = &validation_data1[0];
+    let input_rows1 = set1.to_input_rows();
 
-        testing::storage::drop_db(db).await;
-    }
+    request.request_package[0].deposits.shuffle(&mut rng);
+    let validation_data2 = request
+        .construct_package_sighashes(&ctx, &btc_ctx)
+        .await
+        .unwrap();
+    let set2 = &validation_data2[0];
+    let input_rows2 = set2.to_input_rows();
 
-    /// TODO: parallelize
-    #[tokio::test]
-    async fn outcome_is_independent_of_input_order() {
-        let db = testing::storage::new_test_database().await;
-        let mut rng = OsRng;
-        let (rpc, faucet) = regtest::initialize_blockchain();
+    assert_eq!(input_rows1, input_rows2);
 
-        let ctx = TestContext::builder()
-            .with_storage(db.clone())
-            .with_first_bitcoin_core_client()
-            .with_mocked_stacks_client()
-            .with_mocked_emily_client()
-            .build();
-        ctx.state().update_current_limits(SbtcLimits::unlimited());
-
-        let signers = TestSignerSet::new(&mut rng);
-        let amounts = [
-            SweepAmounts {
-                amount: 1_500_000,
-                max_fee: 500_000,
-                is_deposit: true,
-            },
-            SweepAmounts {
-                amount: 700_000,
-                max_fee: 500_000,
-                is_deposit: true,
-            },
-            SweepAmounts {
-                amount: 1_000_000,
-                max_fee: 500_000,
-                is_deposit: true,
-            },
-            SweepAmounts {
-                amount: 2_000_000,
-                max_fee: 500_000,
-                is_deposit: true,
-            },
-        ];
-
-        let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
-        setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
-        backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
-
-        setup.store_stacks_genesis_block(&db).await;
-        setup.store_dkg_shares(&db).await;
-        setup.store_donation(&db).await;
-        setup.store_deposit_txs(&db).await;
-        setup.store_deposit_request(&db).await;
-        setup.store_deposit_decisions(&db).await;
-
-        let chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
-        let chain_tip_block = db.get_bitcoin_block(&chain_tip).await.unwrap().unwrap();
-
-        let aggregate_key = setup.signers.signer.keypair.public_key().into();
-
-        let mut request = BitcoinPreSignRequest {
-            request_package: vec![TxRequestIds {
-                deposits: setup.deposit_outpoints(),
-                withdrawals: Vec::new(),
-            }],
-            fee_rate: TEST_FEE_RATE,
-            last_fees: None,
-        };
-
-        let btc_ctx = BitcoinTxContext {
-            chain_tip: chain_tip_block.block_hash,
-            chain_tip_height: chain_tip_block.block_height,
-            signer_public_key: setup.signers.keys[0],
-            aggregate_key,
-        };
-
-        let validation_data1 = request
-            .construct_package_sighashes(&ctx, &btc_ctx)
-            .await
-            .unwrap();
-        let set1 = &validation_data1[0];
-        let input_rows1 = set1.to_input_rows();
-
-        request.request_package[0].deposits.shuffle(&mut rng);
-        let validation_data2 = request
-            .construct_package_sighashes(&ctx, &btc_ctx)
-            .await
-            .unwrap();
-        let set2 = &validation_data2[0];
-        let input_rows2 = set2.to_input_rows();
-
-        assert_eq!(input_rows1, input_rows2);
-
-        testing::storage::drop_db(db).await;
-    }
+    testing::storage::drop_db(db).await;
 }
