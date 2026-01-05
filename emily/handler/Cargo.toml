@@ -23,6 +23,7 @@ sbtc = { workspace = true, features = ["webhooks"] }
 # External crates
 aws-config.workspace = true
 aws-sdk-dynamodb.workspace = true
+axum.workspace = true
 base64.workspace = true
 bitcoin.workspace = true
 clap.workspace = true

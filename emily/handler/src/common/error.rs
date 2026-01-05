@@ -13,6 +13,7 @@ use aws_sdk_dynamodb::{
         query::QueryError, scan::ScanError, update_item::UpdateItemError,
     },
 };
+use axum::response::IntoResponse;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -94,6 +95,11 @@ pub enum Error {
     /// or request body property, or non-valid JSON
     #[error("HTTP request failed with status code {0}: {1}")]
     HttpRequest(StatusCode, String),
+
+    /// The request was unacceptable. This may refer to a missing or improperly formatted parameter
+    /// or request body property, or non-valid JSON
+    #[error("HTTP request failed with status code {0}: {1}")]
+    HttpRequest2(axum::http::StatusCode, &'static str),
 
     /// Network error
     #[error("Network error: {0}")]
@@ -257,6 +263,7 @@ impl Error {
     pub fn status_code(&self) -> StatusCode {
         match self {
             Error::HttpRequest(code, _) => *code,
+            Error::HttpRequest2(code, _) => StatusCode::from_u16(code.as_u16()).unwrap(),
             Error::Network(_) => StatusCode::BAD_GATEWAY,
             Error::Forbidden => StatusCode::FORBIDDEN,
             Error::NotFound => StatusCode::NOT_FOUND,
@@ -402,5 +409,12 @@ impl Reply for Error {
     #[cfg(feature = "testing")]
     fn into_response(self) -> warp::reply::Response {
         self.into_response()
+    }
+}
+
+impl IntoResponse for Error {
+    fn into_response(self) -> axum::response::Response {
+        let status_code = axum::http::StatusCode::from_u16(self.status_code().as_u16()).unwrap();
+        (status_code, self.to_string()).into_response()
     }
 }

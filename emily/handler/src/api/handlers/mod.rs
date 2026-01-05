@@ -24,6 +24,24 @@ pub mod testing;
 /// Withdrawal handlers.
 pub mod withdrawal;
 
+/// Chainstate handlers.
+pub mod chainstate2;
+/// Deposit handlers.
+pub mod deposit2;
+/// Health handlers.
+pub mod health2;
+/// Internal handlers.
+pub mod internal2;
+/// Limit handlers.
+pub mod limits2;
+/// New block handlers.
+pub mod new_block2;
+/// Testing handlers.
+#[cfg(feature = "testing")]
+pub mod testing2;
+/// Withdrawal handlers.
+pub mod withdrawal2;
+
 /// Central error handler for Warp rejections, converting them to appropriate HTTP responses.
 pub async fn handle_rejection(err: Rejection) -> Result<impl Reply, Infallible> {
     if err.is_not_found() {
