@@ -1,5 +1,6 @@
 //! Handlers for Health endpoint endpoints.
 
+use axum::extract::State;
 use axum::http::StatusCode;
 
 use crate::common::error::Error;
@@ -19,7 +20,9 @@ use crate::{api::models::health::responses::HealthData, context::EmilyContext};
         (status = 500, description = "Internal server error", body = ErrorResponse)
     ),
 )]
-pub async fn get_health(context: EmilyContext) -> Result<(StatusCode, HealthData), Error> {
+pub async fn get_health(
+    State(context): State<EmilyContext>,
+) -> Result<(StatusCode, HealthData), Error> {
     // Handle and respond.
     let health_data = HealthData {
         version: context.settings.version.clone(),

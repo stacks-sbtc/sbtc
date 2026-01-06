@@ -1,5 +1,7 @@
 //! Request structures for deposit api calls.
-
+use axum::Json;
+use axum::response::IntoResponse;
+use axum::response::Response;
 use serde::{Deserialize, Serialize};
 use utoipa::{ToResponse, ToSchema};
 
@@ -59,6 +61,12 @@ pub struct Deposit {
     /// Transaction ID of the transaction that replaced this one via RBF.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub replaced_by_tx: Option<String>,
+}
+
+impl IntoResponse for Deposit {
+    fn into_response(self) -> Response {
+        Json(self).into_response()
+    }
 }
 
 /// Deposit parameters.

@@ -1,5 +1,8 @@
 //! Request structures for chainstate api calls.
 
+use axum::Json;
+use axum::response::IntoResponse;
+use axum::response::Response;
 use serde::{Deserialize, Serialize};
 use utoipa::{ToResponse, ToSchema};
 
@@ -26,4 +29,10 @@ pub struct Chainstate {
     pub stacks_block_hash: String,
     /// Bitcoin block height
     pub bitcoin_block_height: Option<u64>,
+}
+
+impl IntoResponse for Chainstate {
+    fn into_response(self) -> Response {
+        Json(self).into_response()
+    }
 }

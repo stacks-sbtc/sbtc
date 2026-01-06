@@ -1,5 +1,7 @@
 //! Response structures for deposit api calls.
-
+use axum::Json;
+use axum::response::IntoResponse;
+use axum::response::Response;
 use serde::{Deserialize, Serialize};
 use utoipa::{ToResponse, ToSchema};
 
@@ -15,6 +17,12 @@ pub struct GetDepositsForTransactionResponse {
     pub deposits: Vec<Deposit>,
 }
 
+impl IntoResponse for GetDepositsForTransactionResponse {
+    fn into_response(self) -> Response {
+        Json(self).into_response()
+    }
+}
+
 /// Response to get deposits request.
 #[derive(Clone, Default, Debug, PartialEq, Hash, Serialize, Deserialize, ToSchema, ToResponse)]
 #[serde(rename_all = "camelCase")]
@@ -25,12 +33,24 @@ pub struct GetDepositsResponse {
     pub deposits: Vec<DepositInfo>,
 }
 
+impl IntoResponse for GetDepositsResponse {
+    fn into_response(self) -> Response {
+        Json(self).into_response()
+    }
+}
+
 /// Response to update deposits request.
 #[derive(Clone, Default, Debug, PartialEq, Hash, Serialize, Deserialize, ToSchema, ToResponse)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateDepositsResponse {
     /// Deposit infos: deposits with a little less data.
     pub deposits: Vec<DepositWithStatus>,
+}
+
+impl IntoResponse for UpdateDepositsResponse {
+    fn into_response(self) -> Response {
+        Json(self).into_response()
+    }
 }
 
 /// Wrapper for deposit with status code. Used for multi-status responses.

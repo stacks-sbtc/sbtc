@@ -1,5 +1,8 @@
 //! Responses for withdrawal api calls.
 
+use axum::Json;
+use axum::response::IntoResponse;
+use axum::response::Response;
 use serde::{Deserialize, Serialize};
 use utoipa::{ToResponse, ToSchema};
 
@@ -15,12 +18,24 @@ pub struct GetWithdrawalsResponse {
     pub withdrawals: Vec<WithdrawalInfo>,
 }
 
+impl IntoResponse for GetWithdrawalsResponse {
+    fn into_response(self) -> Response {
+        Json(self).into_response()
+    }
+}
+
 /// Response to update withdrawals request.
 #[derive(Clone, Default, Debug, PartialEq, Hash, Serialize, Deserialize, ToSchema, ToResponse)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateWithdrawalsResponse {
     /// Updated withdrawals.
     pub withdrawals: Vec<WithdrawalWithStatus>,
+}
+
+impl IntoResponse for UpdateWithdrawalsResponse {
+    fn into_response(self) -> Response {
+        Json(self).into_response()
+    }
 }
 
 /// Wrapper for withdrawal with status code. Used for multi-status responses.
@@ -37,4 +52,10 @@ pub struct WithdrawalWithStatus {
     pub error: Option<String>,
     /// HTTP status code for the withdrawal processing result.
     pub status: u16,
+}
+
+impl IntoResponse for WithdrawalWithStatus {
+    fn into_response(self) -> Response {
+        Json(self).into_response()
+    }
 }

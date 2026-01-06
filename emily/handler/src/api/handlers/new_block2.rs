@@ -1,9 +1,11 @@
 //! Handlers for limits endpoints.
 use std::future::Future;
 
+use sbtc::webhooks::NewBlockEvent;
 use tracing::instrument;
 use warp::reply::Reply;
 
+use axum::extract::State;
 use axum::http::StatusCode;
 use clarity::vm::ContractName;
 use clarity::vm::types::QualifiedContractIdentifier;
@@ -19,7 +21,6 @@ use crate::api::models::chainstate::Chainstate;
 use crate::api::models::common::Fulfillment;
 use crate::api::models::common::{DepositStatus, WithdrawalStatus};
 use crate::api::models::deposit::requests::{DepositUpdate, UpdateDepositsRequestBody};
-use crate::api::models::new_block::NewBlockEventRaw;
 use crate::api::models::withdrawal::WithdrawalParameters;
 use crate::api::models::withdrawal::requests::{
     CreateWithdrawalRequestBody, UpdateWithdrawalsRequestBody, WithdrawalUpdate,
@@ -63,10 +64,10 @@ struct StacksBlock {
 )]
 #[instrument(skip_all, name = "new-block")]
 pub async fn new_block(
-    new_block_event: NewBlockEventRaw,
-    context: EmilyContext,
+    State(context): State<EmilyContext>,
+    new_block_event: String,
 ) -> Result<StatusCode, Error> {
-    let new_block_event = match new_block_event.deserialize() {
+    let new_block_event: NewBlockEvent = match serde_json::from_str(&new_block_event) {
         Ok(event) => event,
         Err(error) => {
             tracing::error!(%error, "failed to deserialize new block event");

@@ -1,10 +1,19 @@
 //! Emily Warp Service Binary.
 
+use axum::http::HeaderName;
+use axum::http::header::CONTENT_TYPE;
+use axum::http::Request;
 use clap::Args;
 use clap::Parser;
 use emily_handler::context::EmilyContext;
+use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
+use tower_http::trace::TraceLayer;
+use tower_http::cors::CorsLayer;
+use axum::http::Method;
+use tracing::Span;
 use tracing::info;
-use warp::Filter as _;
 
 use emily_handler::api;
 use emily_handler::logging;
@@ -81,16 +90,10 @@ async fn main() {
     info!(lambdaContext = ?context);
 
     // Create CORS configuration
-    let cors = warp::cors()
-        .allow_any_origin()
-        .allow_methods(vec!["GET", "POST", "OPTIONS"])
-        .allow_headers(vec!["content-type", "x-api-key"])
-        .build();
-
-    let routes = api::routes::routes(context)
-        .recover(api::handlers::handle_rejection)
-        .with(warp::log("api"))
-        .with(cors);
+    let cors = CorsLayer::new()
+        .allow_origin(tower_http::cors::Any)
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_headers([CONTENT_TYPE, HeaderName::from_static("x-api-key")]);
 
     // Create address.
     let addr_str = format!("{host}:{port}");
@@ -98,5 +101,33 @@ async fn main() {
     let addr: std::net::SocketAddr = addr_str.parse().expect("Failed to parse address");
 
     // Create warp service as a local service and listen at the address.
-    warp::serve(routes).run(addr).await;
+    // warp::serve(routes).run(addr).await;
+    let request_id = Arc::new(AtomicU64::new(0));
+
+    let app = api::routes::routes_axum()
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(|request: &Request<_>| {
+                    tracing::info_span!("api-request",
+                        uri = %request.uri(),
+                        method = %request.method(),
+                        id = tracing::field::Empty,
+                    )
+                })
+                .on_request(move |_: &Request<_>, span: &Span| {
+                    span.record("id", request_id.fetch_add(1, Ordering::SeqCst));
+                    tracing::trace!("processing request");
+                })
+                .on_response(api::routes::axum_log_response),
+        )
+        .layer(cors)
+        .with_state(context);
+
+    // Bind to the configured address and port
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .expect("failed to bind the emily API to configured address");
+
+    // Run our app with hyper
+    axum::serve(listener, app).await.unwrap();
 }

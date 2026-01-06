@@ -2,6 +2,10 @@
 
 use std::collections::HashMap;
 
+use axum::{
+    Json,
+    response::{IntoResponse, Response},
+};
 use serde::{Deserialize, Serialize};
 use utoipa::{ToResponse, ToSchema};
 
@@ -28,6 +32,12 @@ pub struct Limits {
     pub available_to_withdraw: Option<u64>,
     /// Represents the individual limits for requests coming from different accounts.
     pub account_caps: HashMap<String, AccountLimits>,
+}
+
+impl IntoResponse for Limits {
+    fn into_response(self) -> Response {
+        Json(self).into_response()
+    }
 }
 
 impl Limits {
@@ -83,4 +93,10 @@ pub struct AccountLimits {
     pub rolling_withdrawal_blocks: Option<u64>,
     /// Maximum total sBTC that can be withdrawn within the rolling withdrawal window.
     pub rolling_withdrawal_cap: Option<u64>,
+}
+
+impl IntoResponse for AccountLimits {
+    fn into_response(self) -> Response {
+        Json(self).into_response()
+    }
 }

@@ -1,5 +1,8 @@
 //! Structures for withdrawal api calls.
 
+use axum::Json;
+use axum::response::IntoResponse;
+use axum::response::Response;
 use serde::{Deserialize, Serialize};
 use utoipa::{ToResponse, ToSchema};
 
@@ -58,6 +61,12 @@ pub struct Withdrawal {
     pub fulfillment: Option<Fulfillment>,
     /// The hex encoded txid of the stacks transaction that generated this event.
     pub txid: String,
+}
+
+impl IntoResponse for Withdrawal {
+    fn into_response(self) -> Response {
+        Json(self).into_response()
+    }
 }
 
 /// Withdrawal parameters.

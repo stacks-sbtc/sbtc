@@ -1,4 +1,8 @@
 //! Handlers for withdrawal endpoints.
+use axum::extract::Json;
+use axum::extract::Path as UrlPath;
+use axum::extract::Query;
+use axum::extract::State;
 use axum::http::StatusCode;
 use tracing::{debug, instrument};
 
@@ -39,8 +43,8 @@ use crate::database::entries::withdrawal::{
 )]
 #[instrument(skip(context))]
 pub async fn get_withdrawal(
-    request_id: u64,
-    context: EmilyContext,
+    State(context): State<EmilyContext>,
+    UrlPath(request_id): UrlPath<u64>,
 ) -> Result<(StatusCode, Withdrawal), Error> {
     // Internal handler so `?` can be used correctly while still returning a reply.
     let withdrawal = accessors::get_withdrawal_entry(&context, &request_id)
@@ -70,8 +74,8 @@ pub async fn get_withdrawal(
 )]
 #[instrument(skip(context))]
 pub async fn get_withdrawals(
-    query: GetWithdrawalsQuery,
-    context: EmilyContext,
+    State(context): State<EmilyContext>,
+    Query(query): Query<GetWithdrawalsQuery>,
 ) -> Result<(StatusCode, GetWithdrawalsResponse), Error> {
     // Internal handler so `?` can be used correctly while still returning a reply.
     let (entries, next_token) = accessors::get_withdrawal_entries(
@@ -107,9 +111,9 @@ pub async fn get_withdrawals(
 )]
 #[instrument(skip(context))]
 pub async fn get_withdrawals_for_recipient(
-    recipient: String,
-    query: BasicPaginationQuery,
-    context: EmilyContext,
+    State(context): State<EmilyContext>,
+    UrlPath(recipient): UrlPath<String>,
+    Query(query): Query<BasicPaginationQuery>,
 ) -> Result<(StatusCode, GetWithdrawalsResponse), Error> {
     debug!("in get_withdrawals_for_recipient: {recipient}");
     let (entries, next_token) = accessors::get_withdrawal_entries_by_recipient(
@@ -148,9 +152,9 @@ pub async fn get_withdrawals_for_recipient(
 )]
 #[instrument(skip(context))]
 pub async fn get_withdrawals_for_sender(
-    sender: String,
-    query: BasicPaginationQuery,
-    context: EmilyContext,
+    State(context): State<EmilyContext>,
+    UrlPath(sender): UrlPath<String>,
+    Query(query): Query<BasicPaginationQuery>,
 ) -> Result<(StatusCode, GetWithdrawalsResponse), Error> {
     debug!("in get_withdrawals_for_sender: {sender}");
     let (entries, next_token) = accessors::get_withdrawal_entries_by_sender(
@@ -186,8 +190,8 @@ pub async fn get_withdrawals_for_sender(
 )]
 #[instrument(skip(context))]
 pub async fn create_withdrawal(
-    body: CreateWithdrawalRequestBody,
-    context: EmilyContext,
+    State(context): State<EmilyContext>,
+    Json(body): Json<CreateWithdrawalRequestBody>,
 ) -> Result<(StatusCode, Withdrawal), Error> {
     // Get the api state and error if the api state is claimed by a reorg.
     //
@@ -261,8 +265,8 @@ pub async fn create_withdrawal(
 )]
 #[instrument(skip(context))]
 pub async fn update_withdrawals_signer(
-    body: UpdateWithdrawalsRequestBody,
-    context: EmilyContext,
+    State(context): State<EmilyContext>,
+    Json(body): Json<UpdateWithdrawalsRequestBody>,
 ) -> Result<(StatusCode, UpdateWithdrawalsResponse), Error> {
     tracing::debug!("in update withdrawals");
     // Get the api state and error if the api state is claimed by a reorg.
@@ -295,8 +299,8 @@ pub async fn update_withdrawals_signer(
 )]
 #[instrument(skip(context))]
 pub async fn update_withdrawals_sidecar(
-    body: UpdateWithdrawalsRequestBody,
-    context: EmilyContext,
+    State(context): State<EmilyContext>,
+    Json(body): Json<UpdateWithdrawalsRequestBody>,
 ) -> Result<(StatusCode, UpdateWithdrawalsResponse), Error> {
     tracing::debug!("in update withdrawals");
     // Get the api state and error if the api state is claimed by a reorg.

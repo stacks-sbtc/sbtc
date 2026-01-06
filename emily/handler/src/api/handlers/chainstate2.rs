@@ -11,6 +11,9 @@ use crate::{
     context::EmilyContext,
     database::{accessors, entries::chainstate::ChainstateEntry},
 };
+use axum::Json;
+use axum::extract::Path as UrlPath;
+use axum::extract::State;
 use axum::http::StatusCode;
 use tracing::{debug, info, instrument, warn};
 
@@ -30,7 +33,9 @@ use tracing::{debug, info, instrument, warn};
     )
 )]
 #[instrument(skip(context))]
-pub async fn get_chain_tip(context: EmilyContext) -> Result<(StatusCode, Chainstate), Error> {
+pub async fn get_chain_tip(
+    State(context): State<EmilyContext>,
+) -> Result<(StatusCode, Chainstate), Error> {
     debug!("Attempting to get chain tip");
     // TODO(390): Handle multiple being in the tip list here.
     let api_state = accessors::get_api_state(&context).await?;
@@ -57,8 +62,8 @@ pub async fn get_chain_tip(context: EmilyContext) -> Result<(StatusCode, Chainst
 )]
 #[instrument(skip(context))]
 pub async fn get_chainstate_at_height(
-    height: u64,
-    context: EmilyContext,
+    State(context): State<EmilyContext>,
+    UrlPath(height): UrlPath<u64>,
 ) -> Result<(StatusCode, Chainstate), Error> {
     debug!("Attempting to get chainstate at height: {height:?}");
     // Get chainstate at height.
@@ -86,8 +91,8 @@ pub async fn get_chainstate_at_height(
 )]
 #[instrument(skip(context))]
 pub async fn set_chainstate(
-    chainstate: Chainstate,
-    context: EmilyContext,
+    State(context): State<EmilyContext>,
+    Json(chainstate): Json<Chainstate>,
 ) -> Result<(StatusCode, Chainstate), Error> {
     debug!("Attempting to set chainstate: {chainstate:?}");
     add_chainstate_entry_or_reorg(&context, &chainstate)
@@ -114,8 +119,8 @@ pub async fn set_chainstate(
 )]
 #[instrument(skip(context))]
 pub async fn update_chainstate(
-    chainstate: Chainstate,
-    context: EmilyContext,
+    State(context): State<EmilyContext>,
+    Json(chainstate): Json<Chainstate>,
 ) -> Result<(StatusCode, Chainstate), Error> {
     debug!("Attempting to update chainstate: {chainstate:?}");
     add_chainstate_entry_or_reorg(&context, &chainstate).await?;

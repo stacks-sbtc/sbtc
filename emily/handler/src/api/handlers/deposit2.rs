@@ -1,4 +1,8 @@
 //! Handlers for Deposit endpoints.
+use axum::extract::Json;
+use axum::extract::Path as UrlPath;
+use axum::extract::Query;
+use axum::extract::State;
 use axum::http::StatusCode;
 use bitcoin::ScriptBuf;
 use bitcoin::opcodes::all::{self as opcodes};
@@ -50,9 +54,9 @@ use crate::database::entries::deposit::{
 )]
 #[instrument(skip(context))]
 pub async fn get_deposit(
-    bitcoin_txid: String,
-    bitcoin_tx_output_index: u32,
-    context: EmilyContext,
+    State(context): State<EmilyContext>,
+    UrlPath(bitcoin_txid): UrlPath<String>,
+    UrlPath(bitcoin_tx_output_index): UrlPath<u32>,
 ) -> Result<(StatusCode, Deposit), Error> {
     tracing::debug!("in get deposit");
     let key = DepositEntryKey {
@@ -86,9 +90,9 @@ pub async fn get_deposit(
 )]
 #[instrument(skip(context))]
 pub async fn get_deposits_for_transaction(
-    bitcoin_txid: String,
-    query: GetDepositsForTransactionQuery,
-    context: EmilyContext,
+    State(context): State<EmilyContext>,
+    UrlPath(bitcoin_txid): UrlPath<String>,
+    Query(query): Query<GetDepositsForTransactionQuery>,
 ) -> Result<(StatusCode, GetDepositsForTransactionResponse), Error> {
     tracing::debug!("in get deposits for transaction");
     // TODO(506): Reverse this order of deposits so that the transactions are returned
@@ -131,8 +135,8 @@ pub async fn get_deposits_for_transaction(
 )]
 #[instrument(skip(context))]
 pub async fn get_deposits(
-    query: GetDepositsQuery,
-    context: EmilyContext,
+    State(context): State<EmilyContext>,
+    Query(query): Query<GetDepositsQuery>,
 ) -> Result<(StatusCode, GetDepositsResponse), Error> {
     tracing::debug!("in get deposits");
     let (entries, next_token) =
@@ -245,8 +249,8 @@ pub async fn get_deposits_for_reclaim_pubkeys(
 )]
 #[instrument(skip(context))]
 pub async fn create_deposit(
-    body: CreateDepositRequestBody,
-    context: EmilyContext,
+    State(context): State<EmilyContext>,
+    Json(body): Json<CreateDepositRequestBody>,
 ) -> Result<(StatusCode, Deposit), Error> {
     tracing::debug!(
         bitcoin_txid = %body.bitcoin_txid,
@@ -344,8 +348,8 @@ pub async fn create_deposit(
 )]
 #[instrument(skip(context))]
 pub async fn update_deposits_signer(
-    body: UpdateDepositsRequestBody,
-    context: EmilyContext,
+    State(context): State<EmilyContext>,
+    Json(body): Json<UpdateDepositsRequestBody>,
 ) -> Result<(StatusCode, UpdateDepositsResponse), Error> {
     tracing::debug!("in update deposits");
     // Get the api state and error if the api state is claimed by a reorg.
@@ -378,8 +382,8 @@ pub async fn update_deposits_signer(
 )]
 #[instrument(skip(context))]
 pub async fn update_deposits_sidecar(
-    body: UpdateDepositsRequestBody,
-    context: EmilyContext,
+    State(context): State<EmilyContext>,
+    Json(body): Json<UpdateDepositsRequestBody>,
 ) -> Result<(StatusCode, UpdateDepositsResponse), Error> {
     tracing::debug!("in update deposits");
     // Get the api state and error if the api state is claimed by a reorg.

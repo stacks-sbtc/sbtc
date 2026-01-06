@@ -10,6 +10,9 @@ use crate::{
         entries::limits::{GLOBAL_CAP_ACCOUNT, LimitEntry},
     },
 };
+use axum::Json;
+use axum::extract::Path as UrlPath;
+use axum::extract::State;
 use axum::http::StatusCode;
 use tracing::instrument;
 
@@ -26,7 +29,9 @@ use tracing::instrument;
     ),
 )]
 #[instrument(skip(context))]
-pub async fn get_limits(context: EmilyContext) -> Result<(StatusCode, Limits), Error> {
+pub async fn get_limits(
+    State(context): State<EmilyContext>,
+) -> Result<(StatusCode, Limits), Error> {
     let global_limits = accessors::get_limits(&context).await?;
     Ok((StatusCode::OK, global_limits))
 }
@@ -51,8 +56,8 @@ pub async fn get_limits(context: EmilyContext) -> Result<(StatusCode, Limits), E
 )]
 #[instrument(skip(context))]
 pub async fn set_limits(
-    limits: Limits,
-    context: EmilyContext,
+    State(context): State<EmilyContext>,
+    Json(limits): Json<Limits>,
 ) -> Result<(StatusCode, Limits), Error> {
     // Validate the withdrawal limit configuration.
     limits.validate()?;
@@ -110,8 +115,8 @@ pub async fn set_limits(
 )]
 #[instrument(skip(context))]
 pub async fn get_limits_for_account(
-    account: String,
-    context: EmilyContext,
+    State(context): State<EmilyContext>,
+    UrlPath(account): UrlPath<String>,
 ) -> Result<(StatusCode, AccountLimits), Error> {
     // Get the entry.
     let account_limit: AccountLimits = accessors::get_limit_for_account(&context, &account)
@@ -142,9 +147,9 @@ pub async fn get_limits_for_account(
 )]
 #[instrument(skip(context))]
 pub async fn set_limits_for_account(
-    account: String,
-    account_limit: crate::api::models::limits::AccountLimits,
-    context: EmilyContext,
+    State(context): State<EmilyContext>,
+    UrlPath(account): UrlPath<String>,
+    Json(account_limit): Json<AccountLimits>,
 ) -> Result<(StatusCode, AccountLimits), Error> {
     // Create the limit entry.
     let limit_entry = LimitEntry::from_account_limit(account, SystemTime::now(), &account_limit);
