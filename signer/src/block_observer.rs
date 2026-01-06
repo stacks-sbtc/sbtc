@@ -519,6 +519,19 @@ impl<C: Context, B> BlockObserver<C, B> {
         Ok(chain_tip)
     }
 
+    /// Set the `SignerState` object with current stacks chain tip.
+    async fn set_stacks_chain_tip(&self, chain_tip: BlockHash) -> Result<(), Error> {
+        let db = self.context.get_storage();
+        let chain_tip = db
+            .get_stacks_chain_tip(&chain_tip.into())
+            .await?
+            .map(model::StacksBlockRef::from)
+            .ok_or_else(|| Error::NoStacksChainTip)?;
+
+        self.context.state().set_stacks_chain_tip(chain_tip);
+        Ok(())
+    }
+
     /// Update the `SignerState` object with data that is unlikely to
     /// change until the arrival of the next bitcoin block.
     ///
@@ -528,6 +541,7 @@ impl<C: Context, B> BlockObserver<C, B> {
     /// * sBTC limits from Emily.
     /// * The current signer set.
     /// * The current aggregate key.
+    /// * The current stacks chain tip.
     /// * The current bitcoin chain tip.
     async fn update_signer_state(&self, chain_tip: BlockHash) -> Result<BitcoinBlockRef, Error> {
         tracing::info!("loading sbtc limits from Emily");
@@ -535,6 +549,9 @@ impl<C: Context, B> BlockObserver<C, B> {
 
         tracing::info!("updating the signer state with the current signer set");
         self.set_signer_set_info().await?;
+
+        tracing::info!("updating the signer state with the current bitcoin chain tip");
+        self.set_stacks_chain_tip(chain_tip).await?;
 
         tracing::info!("updating the signer state with the current bitcoin chain tip");
         self.set_bitcoin_chain_tip(chain_tip).await

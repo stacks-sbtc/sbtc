@@ -196,6 +196,25 @@ impl StacksBlock {
     }
 }
 
+/// Stacks block ref
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "testing", derive(fake::Dummy))]
+pub struct StacksBlockRef {
+    /// Block hash.
+    pub block_hash: StacksBlockHash,
+    /// Block height.
+    pub block_height: StacksBlockHeight,
+}
+
+impl From<StacksBlock> for StacksBlockRef {
+    fn from(block: StacksBlock) -> Self {
+        Self {
+            block_hash: block.block_hash,
+            block_height: block.block_height,
+        }
+    }
+}
+
 /// Deposit request.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
