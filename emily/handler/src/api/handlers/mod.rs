@@ -7,22 +7,22 @@ use tracing::error;
 use warp::{Rejection, Reply, http::StatusCode};
 
 /// Chainstate handlers.
-pub mod chainstate2;
+pub mod chainstate;
 /// Deposit handlers.
-pub mod deposit2;
+pub mod deposit;
 /// Health handlers.
-pub mod health2;
+pub mod health;
 /// Internal handlers.
-pub mod internal2;
+pub mod internal;
 /// Limit handlers.
-pub mod limits2;
+pub mod limits;
 /// New block handlers.
-pub mod new_block2;
+pub mod new_block;
 /// Testing handlers.
 #[cfg(feature = "testing")]
-pub mod testing2;
+pub mod testing;
 /// Withdrawal handlers.
-pub mod withdrawal2;
+pub mod withdrawal;
 
 /// Central error handler for Warp rejections, converting them to appropriate HTTP responses.
 pub async fn handle_rejection(err: Rejection) -> Result<impl Reply, Infallible> {
