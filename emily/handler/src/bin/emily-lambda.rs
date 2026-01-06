@@ -1,5 +1,6 @@
 //! Emily API entrypoint.
 
+use axum::Router;
 use axum::http::HeaderName;
 use axum::http::Method;
 use axum::http::Request;
@@ -37,7 +38,7 @@ async fn main() {
     //     .with(warp::log("api"))
     //     .with(cors);
 
-    let app = api::routes::routes_axum()
+    let router = api::routes::routes_axum()
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(|request: &Request<_>| {
@@ -50,7 +51,11 @@ async fn main() {
                 .on_response(api::routes::axum_log_response),
         )
         .layer(cors)
+        .layer(axum::middleware::from_fn_with_state(context.clone(), api::routes::inject_request_context))
         .with_state(context);
+
+    // We need to ignore the stage prefix that is passed in by AWS Lambda.
+    let app = Router::new().nest("/{*ignored}", router);
 
     // Create warp service.
     lambda_http::run(app).await.expect("An error occurred");

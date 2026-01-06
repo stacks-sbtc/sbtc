@@ -1,20 +1,16 @@
 //! Route definitions for the Emily API.
 
-#[cfg(feature = "testing")]
-use std::convert::Infallible;
 use std::time::Duration;
 
 use crate::context::EmilyContext;
 
 use super::handlers;
 use axum::body::Body;
+use axum::extract::State;
 use axum::response::Response;
 use axum::routing::put;
 use tracing::Span;
-use tracing::debug;
-use warp::Filter;
-#[cfg(feature = "testing")]
-use warp::http::HeaderMap;
+
 
 use axum::Router;
 use axum::extract::DefaultBodyLimit;
@@ -55,21 +51,6 @@ mod withdrawal;
 /// will be fine since it is twice as high as required.
 pub const EVENT_OBSERVER_BODY_LIMIT: usize = 8 * 1024 * 1024;
 
-// Filter that will print the response to the logs if set to debug.
-fn log_response<T>(reply: T) -> (impl warp::Reply,)
-where
-    T: warp::Reply,
-{
-    let as_response = reply.into_response();
-    tracing::debug!(
-        event = "response",
-        status = as_response.status().as_u16(),
-        body = ?as_response.body(),
-        headers = ?as_response.headers(),
-    );
-    (as_response,)
-}
-
 /// This function logs the response from an Axum route.
 pub fn axum_log_response(response: &Response<Body>, duration: Duration, _: &Span) {
     tracing::debug!(
@@ -79,35 +60,6 @@ pub fn axum_log_response(response: &Response<Body>, duration: Duration, _: &Span
         headers = ?response.headers(),
         duration_ms = duration.as_millis()
     );
-}
-
-/// This function sets up the Warp filters for handling all requests.
-#[cfg(feature = "testing")]
-pub fn routes(
-    context: EmilyContext,
-) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    let context = with_context(context);
-
-    // `.boxed()` erases the deeply nested filter type from multiple `.or()` calls,
-    // making the return type manageable and preventing compilation errors and runtime stack overflows.
-    health::routes(context.clone())
-        .or(new_block::routes(context.clone()))
-        .boxed()
-        .or(chainstate::routes(context.clone()))
-        .boxed()
-        .or(deposit::routes(context.clone()))
-        .boxed()
-        .or(withdrawal::routes(context.clone()))
-        .boxed()
-        .or(limits::routes(context.clone()))
-        .boxed()
-        .or(testing::routes(context))
-        .boxed()
-        .or(verbose_not_found_route())
-        .boxed()
-        // Convert reply to tuple to that more routes can be added to the returned filter.
-        .map(|reply| (reply,))
-        .map(log_response)
 }
 
 /// This function sets up the Axum routes for handling all requests.
@@ -153,72 +105,17 @@ pub fn routes_axum() -> Router<EmilyContext> {
         .route("/new_block", new_block)
 }
 
-/// This function sets the Warp filters for handling all requests.
-#[cfg(not(feature = "testing"))]
-pub fn routes(
-    context: EmilyContext,
-) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    let context = warp::any().map(move || context.clone());
 
-    health::routes(context.clone())
-        .or(new_block::routes(context.clone()))
-        .boxed()
-        .or(chainstate::routes(context.clone()))
-        .boxed()
-        .or(deposit::routes(context.clone()))
-        .boxed()
-        .or(withdrawal::routes(context.clone()))
-        .boxed()
-        .or(limits::routes(context))
-        .boxed()
-        // Convert reply to tuple to that more routes can be added to the returned filter.
-        .map(|reply| (reply,))
-        .map(log_response)
-}
+/// Inject the request context into the request.
+pub async fn inject_request_context(
+    State(mut context): State<EmilyContext>,
+    mut req: axum::http::Request<Body>,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
 
-/// This function sets up the routes expecting the AWS stage to be passed in as the very
-/// first segment of the path. AWS does this by default, and it's not something we can
-/// change.
-pub fn routes_with_stage_prefix(
-    context: EmilyContext,
-) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    // Get the AWS Stage name and then ignore it, but print it in the logs if
-    // we're in debug mode.
-    warp::path::param::<String>()
-        .and(routes(context))
-        .map(|stage, reply| {
-            debug!("AWS stage: {}", stage);
-            (reply,)
-        })
-}
-
-/// A verbose route that will return a 404 with the full path and peeked path.
-///
-/// This is useful if you called the API and it doesn't recognize the call that was made internally,
-/// but APIGateway let it through.
-#[cfg(feature = "testing")]
-fn verbose_not_found_route()
--> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    warp::any()
-        .and(warp::get())
-        .and(warp::path::full())
-        .and(warp::path::peek())
-        .map(|full_path, peek_path| {
-            warp::reply::with_status(
-                format!("Endpoint not found. Full: {full_path:?} | Peek: {peek_path:?}"),
-                warp::http::StatusCode::NOT_FOUND,
-            )
-        })
-}
-
-/// A Filter to dynamically change the context when running tests
-#[cfg(feature = "testing")]
-fn with_context(
-    context: EmilyContext,
-) -> impl Filter<Extract = (EmilyContext,), Error = Infallible> + Clone {
-    warp::header::headers_cloned().map(move |headers: HeaderMap| {
-        let mut context = context.clone();
-
+    #[cfg(feature = "testing")]
+    {
+        let headers = req.headers();
         let get_header = |key| {
             headers
                 .get(key)
@@ -241,7 +138,9 @@ fn with_context(
         if let Some(h) = get_header("x-context-version") {
             context.settings.version = h;
         }
+    }
 
-        context
-    })
+    req.extensions_mut().insert(context);
+
+    next.run(req).await
 }
