@@ -15,6 +15,7 @@ use sbtc::events::{
     WithdrawalRejectEvent,
 };
 
+use crate::api::models::new_block::NewBlockEventRaw;
 use crate::api::handlers::chainstate::set_chainstate;
 use crate::api::handlers::deposit::update_deposits_sidecar;
 use crate::api::handlers::withdrawal::{create_withdrawal, update_withdrawals_sidecar};
@@ -66,15 +67,9 @@ struct StacksBlock {
 #[instrument(skip_all, name = "new-block")]
 pub async fn new_block(
     Extension(context): Extension<EmilyContext>,
-    new_block_event: String,
+    Json(new_block_event): Json<NewBlockEventRaw>,
 ) -> Result<StatusCode, Error> {
-    let new_block_event: NewBlockEvent = match serde_json::from_str(&new_block_event) {
-        Ok(event) => event,
-        Err(error) => {
-            tracing::error!(%error, "failed to deserialize new block event");
-            return Err(error.into());
-        }
-    };
+    let new_block_event: NewBlockEvent = serde_json::from_str(&new_block_event.0)?;
 
     // Although the following line can panic, our unit tests hit this
     // code path so if tests pass then this will work in production.

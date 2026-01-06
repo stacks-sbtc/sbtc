@@ -3,8 +3,6 @@
 use serde::Deserialize;
 use utoipa::ToSchema;
 
-use sbtc::webhooks::NewBlockEvent;
-
 #[derive(Debug, Deserialize, ToSchema)]
 /// The raw payload of a new block event from a stacks node.
 /// This is the raw JSON string that is sent to the webhook.
@@ -12,10 +10,3 @@ use sbtc::webhooks::NewBlockEvent;
 /// the imported data types, we can't derive ToSchema for it to be used
 /// in the OpenAPI spec.
 pub struct NewBlockEventRaw(pub String);
-
-impl NewBlockEventRaw {
-    /// Deserialize the raw payload into a NewBlockEvent.
-    pub fn deserialize(&self) -> Result<NewBlockEvent, serde_json::Error> {
-        serde_json::from_str(&self.0)
-    }
-}

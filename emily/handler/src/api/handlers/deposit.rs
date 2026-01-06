@@ -34,6 +34,15 @@ use crate::database::entries::deposit::{
     ValidatedUpdateDepositsRequest,
 };
 
+/// Outpoint of a deposit.
+#[derive(Clone, Default, Debug, Eq, PartialEq, Hash, serde::Deserialize)]
+pub struct OutPoint {
+    /// Bitcoin transaction id.
+    pub txid: String,
+    /// Output index on the bitcoin transaction associated with this specific deposit.
+    pub index: u32,
+}
+
 /// Get deposit handler.
 #[utoipa::path(
     get,
@@ -55,14 +64,13 @@ use crate::database::entries::deposit::{
 #[instrument(skip(context))]
 pub async fn get_deposit(
     Extension(context): Extension<EmilyContext>,
-    UrlPath(bitcoin_txid): UrlPath<String>,
-    UrlPath(bitcoin_tx_output_index): UrlPath<u32>,
+    UrlPath(outpoint): UrlPath<OutPoint>,
 ) -> Result<(StatusCode, Deposit), Error> {
-    tracing::debug!("in get deposit");
     let key = DepositEntryKey {
-        bitcoin_txid,
-        bitcoin_tx_output_index,
+        bitcoin_txid: outpoint.txid,
+        bitcoin_tx_output_index: outpoint.index,
     };
+    tracing::debug!("in get deposit");
     let deposit: Deposit = accessors::get_deposit_entry(&context, &key)
         .await?
         .try_into()?;

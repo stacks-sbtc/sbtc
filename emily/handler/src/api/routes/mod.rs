@@ -74,8 +74,8 @@ pub fn routes_axum() -> Router<EmilyContext> {
         .route("/deposit_private", put(deposit::update_deposits_sidecar))
         .route("/deposit/recipient/{r}", get_deposits_for_recipient)
         .route("/deposit/reclaim-pubkeys/{r}", get_deposits_for_reclaim)
-        .route("/deposit/{txid}", get_deposits_for_transaction)
         .route("/deposit/{txid}/{index}", get(deposit::get_deposit))
+        .route("/deposit/{txid}", get_deposits_for_transaction)
         .route("/withdrawal", get(withdrawal::get_withdrawals))
         .route("/withdrawal", post(withdrawal::create_withdrawal))
         .route("/withdrawal", put(withdrawal::update_withdrawals_signer))
@@ -93,38 +93,48 @@ pub fn routes_axum() -> Router<EmilyContext> {
 }
 
 /// Inject the request context into the request.
+#[cfg(feature = "testing")]
 pub async fn inject_request_context(
     State(mut context): State<EmilyContext>,
     mut req: axum::http::Request<Body>,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
-    #[cfg(feature = "testing")]
-    {
-        let headers = req.headers();
-        let get_header = |key| {
-            headers
-                .get(key)
-                .and_then(|v| v.to_str().ok())
-                .map(|s| s.to_string())
-        };
+    let headers = req.headers();
+    let get_header = |key| {
+        headers
+            .get(key)
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string())
+    };
 
-        if let Some(h) = get_header("x-context-deposit") {
-            context.settings.deposit_table_name = h;
-        }
-        if let Some(h) = get_header("x-context-withdrawal") {
-            context.settings.withdrawal_table_name = h;
-        }
-        if let Some(h) = get_header("x-context-chainstate") {
-            context.settings.chainstate_table_name = h;
-        }
-        if let Some(h) = get_header("x-context-limit") {
-            context.settings.limit_table_name = h;
-        }
-        if let Some(h) = get_header("x-context-version") {
-            context.settings.version = h;
-        }
+    if let Some(h) = get_header("x-context-deposit") {
+        context.settings.deposit_table_name = h;
+    }
+    if let Some(h) = get_header("x-context-withdrawal") {
+        context.settings.withdrawal_table_name = h;
+    }
+    if let Some(h) = get_header("x-context-chainstate") {
+        context.settings.chainstate_table_name = h;
+    }
+    if let Some(h) = get_header("x-context-limit") {
+        context.settings.limit_table_name = h;
+    }
+    if let Some(h) = get_header("x-context-version") {
+        context.settings.version = h;
     }
 
+    req.extensions_mut().insert(context);
+
+    next.run(req).await
+}
+
+/// Inject the request context into the request.
+#[cfg(not(feature = "testing"))]
+pub async fn inject_request_context(
+    State(context): State<EmilyContext>,
+    mut req: axum::http::Request<Body>,
+    next: axum::middleware::Next,
+) -> Response {
     req.extensions_mut().insert(context);
 
     next.run(req).await
