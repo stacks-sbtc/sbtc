@@ -647,12 +647,11 @@ where
         aggregate_key: &PublicKey,
         signer_public_keys: &BTreeSet<PublicKey>,
     ) -> Result<(), Error> {
-        let storage = self.context.get_storage();
-
         // Fetch the stacks chain tip from the database.
-        let stacks_chain_tip = storage
-            .get_stacks_chain_tip(&bitcoin_chain_tip.block_hash)
-            .await?
+        let stacks_chain_tip = self
+            .context
+            .state()
+            .stacks_chain_tip()
             .ok_or(Error::NoStacksChainTip)?;
 
         let span = tracing::Span::current();

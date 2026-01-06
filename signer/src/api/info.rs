@@ -134,7 +134,7 @@ pub async fn build_info<C: Context>(ctx: &C) -> InfoResponse {
     let mut response = InfoResponse::default();
 
     response.populate_config_info(config);
-    response.populate_local_chain_info(&storage, ctx).await;
+    response.populate_local_chain_info(ctx).await;
     response.populate_bitcoin_node_info(&bitcoin_client).await;
     response.populate_stacks_node_info(&stacks_client).await;
     response
@@ -166,8 +166,9 @@ impl InfoResponse {
     }
 
     /// Populates the local Bitcoin and Stacks chain tip information.
-    async fn populate_local_chain_info<C: Context, R: DbRead>(&mut self, storage: &R, ctx: &C) {
+    async fn populate_local_chain_info<C: Context>(&mut self, ctx: &C) {
         let bitcoin_tip = ctx.state().bitcoin_chain_tip();
+        let stacks_tip = ctx.state().stacks_chain_tip();
 
         match bitcoin_tip {
             Some(bitcoin_block) => {
@@ -176,22 +177,15 @@ impl InfoResponse {
                     block_height: bitcoin_block.block_height,
                 });
 
-                let stacks_tip = storage
-                    .get_stacks_chain_tip(&bitcoin_block.block_hash)
-                    .await;
-
                 match stacks_tip {
-                    Ok(Some(local_stacks_chain_tip)) => {
+                    Some(local_stacks_chain_tip) => {
                         self.stacks.signer_tip = Some(ChainTipInfo {
                             block_hash: local_stacks_chain_tip.block_hash,
                             block_height: local_stacks_chain_tip.block_height,
                         });
                     }
-                    Ok(None) => {
+                    None => {
                         tracing::debug!("no local stacks tip found in the database.");
-                    }
-                    Err(error) => {
-                        tracing::error!(%error, "error reading local Stacks tip from the database");
                     }
                 }
             }
