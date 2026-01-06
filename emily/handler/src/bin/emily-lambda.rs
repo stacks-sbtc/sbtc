@@ -51,7 +51,10 @@ async fn main() {
                 .on_response(api::routes::axum_log_response),
         )
         .layer(cors)
-        .layer(axum::middleware::from_fn_with_state(context.clone(), api::routes::inject_request_context))
+        .layer(axum::middleware::from_fn_with_state(
+            context.clone(),
+            api::routes::inject_request_context,
+        ))
         .with_state(context);
 
     // We need to ignore the stage prefix that is passed in by AWS Lambda.

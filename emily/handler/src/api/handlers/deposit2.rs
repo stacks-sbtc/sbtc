@@ -170,9 +170,9 @@ pub async fn get_deposits(
 )]
 #[instrument(skip(context))]
 pub async fn get_deposits_for_recipient(
-    recipient: String,
-    query: BasicPaginationQuery,
-    context: EmilyContext,
+    State(context): State<EmilyContext>,
+    UrlPath(recipient): UrlPath<String>,
+    Query(query): Query<BasicPaginationQuery>,
 ) -> Result<(StatusCode, GetDepositsResponse), Error> {
     tracing::debug!("in get deposits for recipient: {recipient}");
     let (entries, next_token) = accessors::get_deposit_entries_by_recipient(
@@ -210,9 +210,9 @@ pub async fn get_deposits_for_recipient(
 )]
 #[instrument(skip(context))]
 pub async fn get_deposits_for_reclaim_pubkeys(
-    reclaim_pubkeys: String,
-    query: BasicPaginationQuery,
-    context: EmilyContext,
+    State(context): State<EmilyContext>,
+    UrlPath(reclaim_pubkeys): UrlPath<String>,
+    Query(query): Query<BasicPaginationQuery>,
 ) -> Result<(StatusCode, GetDepositsResponse), Error> {
     tracing::debug!("in get deposits for reclaim pubkey: {reclaim_pubkeys}");
     let reclaim_pubkeys_bytes = validate_reclaim_pubkeys(&reclaim_pubkeys)?;

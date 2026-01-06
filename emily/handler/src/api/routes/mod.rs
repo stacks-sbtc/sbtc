@@ -4,13 +4,11 @@ use std::time::Duration;
 
 use crate::context::EmilyContext;
 
-use super::handlers;
 use axum::body::Body;
 use axum::extract::State;
 use axum::response::Response;
 use axum::routing::put;
 use tracing::Span;
-
 
 use axum::Router;
 use axum::extract::DefaultBodyLimit;
@@ -25,22 +23,6 @@ use crate::api::handlers::new_block2;
 #[cfg(feature = "testing")]
 use crate::api::handlers::testing2;
 use crate::api::handlers::withdrawal2;
-
-/// Chainstate routes.
-mod chainstate;
-/// Deposit routes.
-mod deposit;
-/// Health routes.
-mod health;
-/// Limit routes.
-mod limits;
-/// NewBlock routes.
-mod new_block;
-/// Testing routes.
-#[cfg(feature = "testing")]
-mod testing;
-/// Withdrawal routes.
-mod withdrawal;
 
 /// Maximum request body size for the event observer endpoint.
 ///
@@ -66,6 +48,8 @@ pub fn axum_log_response(response: &Response<Body>, duration: Duration, _: &Span
 pub fn routes_axum() -> Router<EmilyContext> {
     let get_chainstate_at_height = get(chainstate2::get_chainstate_at_height);
     let get_deposits_for_transaction = get(deposit2::get_deposits_for_transaction);
+    let get_deposits_for_recipient = get(deposit2::get_deposits_for_recipient);
+    let get_deposits_for_reclaim_pubkeys = get(deposit2::get_deposits_for_reclaim_pubkeys);
     let get_withdrawals_for_recipient = get(withdrawal2::get_withdrawals_for_recipient);
     let get_withdrawals_for_sender = get(withdrawal2::get_withdrawals_for_sender);
     let new_block =
@@ -89,6 +73,8 @@ pub fn routes_axum() -> Router<EmilyContext> {
         .route("/deposit", post(deposit2::create_deposit))
         .route("/deposit", put(deposit2::update_deposits_signer))
         .route("/deposit_private", put(deposit2::update_deposits_sidecar))
+        .route("/deposit/recipient/{r}", get_deposits_for_recipient)
+        .route("/deposit/reclaim-pubkeys/{r}", get_deposits_for_reclaim_pubkeys)
         .route("/deposit/{txid}", get_deposits_for_transaction)
         .route("/deposit/{txid}/{index}", get(deposit2::get_deposit))
         .route("/withdrawal", get(withdrawal2::get_withdrawals))
@@ -105,14 +91,12 @@ pub fn routes_axum() -> Router<EmilyContext> {
         .route("/new_block", new_block)
 }
 
-
 /// Inject the request context into the request.
 pub async fn inject_request_context(
     State(mut context): State<EmilyContext>,
     mut req: axum::http::Request<Body>,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
-
     #[cfg(feature = "testing")]
     {
         let headers = req.headers();
