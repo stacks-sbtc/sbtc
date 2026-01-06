@@ -7,24 +7,6 @@ use tracing::error;
 use warp::{Rejection, Reply, http::StatusCode};
 
 /// Chainstate handlers.
-pub mod chainstate;
-/// Deposit handlers.
-pub mod deposit;
-/// Health handlers.
-pub mod health;
-/// Internal handlers.
-pub mod internal;
-/// Limit handlers.
-pub mod limits;
-/// New block handlers.
-pub mod new_block;
-/// Testing handlers.
-#[cfg(feature = "testing")]
-pub mod testing;
-/// Withdrawal handlers.
-pub mod withdrawal;
-
-/// Chainstate handlers.
 pub mod chainstate2;
 /// Deposit handlers.
 pub mod deposit2;

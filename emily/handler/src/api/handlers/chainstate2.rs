@@ -1,7 +1,7 @@
 //! Handlers for chainstate endpoints.
 use crate::{
     api::{
-        handlers::internal::{ExecuteReorgRequest, execute_reorg_handler},
+        handlers::internal2::{ExecuteReorgRequest, execute_reorg_handler},
         models::chainstate::Chainstate,
     },
     common::{

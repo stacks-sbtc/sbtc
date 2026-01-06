@@ -1,12 +1,13 @@
 //! Handlers for limits endpoints.
 use std::future::Future;
 
+use axum::Json;
+use axum::response::IntoResponse;
 use sbtc::webhooks::NewBlockEvent;
 use tracing::instrument;
-use warp::reply::Reply;
-
 use axum::extract::State;
 use axum::http::StatusCode;
+
 use clarity::vm::ContractName;
 use clarity::vm::types::QualifiedContractIdentifier;
 use sbtc::events::{
@@ -14,9 +15,9 @@ use sbtc::events::{
     WithdrawalRejectEvent,
 };
 
-use crate::api::handlers::chainstate::set_chainstate;
-use crate::api::handlers::deposit::update_deposits_sidecar;
-use crate::api::handlers::withdrawal::{create_withdrawal, update_withdrawals_sidecar};
+use crate::api::handlers::chainstate2::set_chainstate;
+use crate::api::handlers::deposit2::update_deposits_sidecar;
+use crate::api::handlers::withdrawal2::{create_withdrawal, update_withdrawals_sidecar};
 use crate::api::models::chainstate::Chainstate;
 use crate::api::models::common::Fulfillment;
 use crate::api::models::common::{DepositStatus, WithdrawalStatus};
@@ -106,12 +107,12 @@ pub async fn new_block(
     // Set the chainstate
     handle_internal_call(
         set_chainstate(
-            Chainstate {
+            State(context.clone()),
+            Json(Chainstate {
                 stacks_block_height: stacks_chaintip.block_height,
                 stacks_block_hash: stacks_chaintip.block_hash.clone(),
                 bitcoin_block_height: Some(new_block_event.burn_block_height as u64),
-            },
-            context.clone(),
+            }),
         ),
         "failed to update chainstate in Emily",
     )
@@ -184,8 +185,8 @@ pub async fn new_block(
     if !completed_deposits.is_empty() {
         handle_internal_call(
             update_deposits_sidecar(
-                UpdateDepositsRequestBody { deposits: completed_deposits },
-                context.clone(),
+                State(context.clone()),
+                Json(UpdateDepositsRequestBody { deposits: completed_deposits }),
             ),
             "failed to update deposits in Emily",
         )
@@ -197,7 +198,7 @@ pub async fn new_block(
     // to be updated.
     for withdrawal in created_withdrawals {
         handle_internal_call(
-            create_withdrawal(withdrawal, context.clone()),
+            create_withdrawal(State(context.clone()), Json(withdrawal)),
             "failed to create withdrawal in Emily",
         )
         .await?;
@@ -206,10 +207,10 @@ pub async fn new_block(
     if !updated_withdrawals.is_empty() {
         handle_internal_call(
             update_withdrawals_sidecar(
-                UpdateWithdrawalsRequestBody {
+                State(context.clone()),
+                Json(UpdateWithdrawalsRequestBody {
                     withdrawals: updated_withdrawals,
-                },
-                context.clone(),
+                }),
             ),
             "failed to update withdrawals in Emily",
         )
@@ -356,8 +357,8 @@ fn handle_withdrawal_reject(event: WithdrawalRejectEvent) -> WithdrawalUpdate {
 /// Helper function to handle internal API calls with error handling.
 async fn handle_internal_call<F, R>(api_call: F, error_msg: &str) -> Result<(), Error>
 where
-    F: Future<Output = R>,
-    R: Reply,
+    F: Future<Output = Result<(StatusCode, R), Error>>,
+    R: IntoResponse,
 {
     let response = api_call.await.into_response();
     if !response.status().is_success() {
