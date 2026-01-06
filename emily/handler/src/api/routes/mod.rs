@@ -62,7 +62,7 @@ pub fn routes_axum() -> Router<EmilyContext> {
         router = router.route("/testing/wipe", post(testing::wipe_databases));
     }
 
-    router
+    router = router
         .route("/health", get(health::get_health))
         .route("/chainstate", get(chainstate::get_chain_tip))
         .route("/chainstate/{height}", get_chainstate_at_height)
@@ -87,7 +87,9 @@ pub fn routes_axum() -> Router<EmilyContext> {
         .route("/limits", post(limits::set_limits))
         .route("/limits/{account}", get(limits::get_limits_for_account))
         .route("/limits/{account}", post(limits::set_limits_for_account))
-        .route("/new_block", new_block)
+        .route("/new_block", new_block);
+
+    router
 }
 
 /// Inject the request context into the request.
