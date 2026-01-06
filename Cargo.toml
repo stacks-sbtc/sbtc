@@ -90,7 +90,6 @@ tracing-subscriber = { version = "0.3.19", default-features = false, features = 
 url = { version = "2.5.4", default-features = false }
 utoipa = { version = "4.2.3", default-features = false }
 warp = { version = "0.3.7", default-features = false }
-warp_lambda = { version = "0.1.4", default-features = false }
 
 # Crates used only for testing
 aws-smithy-runtime = { version = "1.7.7", default-features = false, features = ["client"] }
