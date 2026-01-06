@@ -2,10 +2,10 @@
 
 use std::str::FromStr as _;
 
+use axum::http::StatusCode;
 use bitcoin::blockdata::transaction::Transaction;
 use bitcoin::consensus::encode;
 use bitcoin::{OutPoint, ScriptBuf, Txid};
-use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 

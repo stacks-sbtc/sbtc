@@ -9,14 +9,14 @@ The Emily API has two parts:
 
 ## Handler
 
-The emily handler is written in a rust crate that utilizes the `warp` and `utoipa` crates to create a filter based api server and generate an openapi template for the API that it serves respectively. As of writing this, the openapi template is published to `.generated-sources/emily/openapi`.
+The emily handler is written in a rust crate that utilizes the `axum` and `utoipa` crates to create a filter based api server and generate an openapi template for the API that it serves respectively. As of writing this, the openapi template is published to `.generated-sources/emily/openapi`.
 
 ### Compilation
 
 There are two binaries that this handler can create:
 
-1. `emily-server` - a warp server that expects to run on a host
-2. `emily-lambda` - a warp lambda that expects to run on an AWS lambda
+1. `emily-server` - a axum server that expects to run on a host
+2. `emily-lambda` - a axum lambda that expects to run on an AWS lambda
 
 For testing it makes the most sense to run the server version, but for deployment the lambda version needs to be compiled explicitly for deployment on an AWS lambda; it needs to be compiled with [`cargo lambda`](https://www.cargo-lambda.info/), and due to a limitation of a dependency of the `sbtc` crate it can only be compiled for `x86` processors.
 

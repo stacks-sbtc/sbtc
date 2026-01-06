@@ -1,6 +1,6 @@
 //! Handlers for testing endpoint endpoints.
 
-use axum::extract::State;
+use axum::extract::Extension;
 use axum::http::StatusCode;
 use tracing::instrument;
 
@@ -24,7 +24,9 @@ use crate::database::accessors;
     security(("ApiGatewayKey" = []))
 )]
 #[instrument(skip(context))]
-pub async fn wipe_databases(State(context): State<EmilyContext>) -> Result<StatusCode, Error> {
+pub async fn wipe_databases(
+    Extension(context): Extension<EmilyContext>,
+) -> Result<StatusCode, Error> {
     accessors::wipe_all_tables(&context).await?;
     Ok(StatusCode::NO_CONTENT)
 }

@@ -38,7 +38,6 @@ pub fn axum_log_response(response: &Response<Body>, duration: Duration, _: &Span
     tracing::debug!(
         event = "response",
         status = response.status().as_u16(),
-        body = ?response.body(),
         headers = ?response.headers(),
         duration_ms = duration.as_millis()
     );
@@ -49,7 +48,7 @@ pub fn routes_axum() -> Router<EmilyContext> {
     let get_chainstate_at_height = get(chainstate::get_chainstate_at_height);
     let get_deposits_for_transaction = get(deposit::get_deposits_for_transaction);
     let get_deposits_for_recipient = get(deposit::get_deposits_for_recipient);
-    let get_deposits_for_reclaim_pubkeys = get(deposit::get_deposits_for_reclaim_pubkeys);
+    let get_deposits_for_reclaim = get(deposit::get_deposits_for_reclaim_pubkeys);
     let get_withdrawals_for_recipient = get(withdrawal::get_withdrawals_for_recipient);
     let get_withdrawals_for_sender = get(withdrawal::get_withdrawals_for_sender);
     let new_block =
@@ -74,7 +73,7 @@ pub fn routes_axum() -> Router<EmilyContext> {
         .route("/deposit", put(deposit::update_deposits_signer))
         .route("/deposit_private", put(deposit::update_deposits_sidecar))
         .route("/deposit/recipient/{r}", get_deposits_for_recipient)
-        .route("/deposit/reclaim-pubkeys/{r}", get_deposits_for_reclaim_pubkeys)
+        .route("/deposit/reclaim-pubkeys/{r}", get_deposits_for_reclaim)
         .route("/deposit/{txid}", get_deposits_for_transaction)
         .route("/deposit/{txid}/{index}", get(deposit::get_deposit))
         .route("/withdrawal", get(withdrawal::get_withdrawals))

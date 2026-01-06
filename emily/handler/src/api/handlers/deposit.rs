@@ -1,8 +1,8 @@
 //! Handlers for Deposit endpoints.
+use axum::extract::Extension;
 use axum::extract::Json;
 use axum::extract::Path as UrlPath;
 use axum::extract::Query;
-use axum::extract::State;
 use axum::http::StatusCode;
 use bitcoin::ScriptBuf;
 use bitcoin::opcodes::all::{self as opcodes};
@@ -54,7 +54,7 @@ use crate::database::entries::deposit::{
 )]
 #[instrument(skip(context))]
 pub async fn get_deposit(
-    State(context): State<EmilyContext>,
+    Extension(context): Extension<EmilyContext>,
     UrlPath(bitcoin_txid): UrlPath<String>,
     UrlPath(bitcoin_tx_output_index): UrlPath<u32>,
 ) -> Result<(StatusCode, Deposit), Error> {
@@ -90,7 +90,7 @@ pub async fn get_deposit(
 )]
 #[instrument(skip(context))]
 pub async fn get_deposits_for_transaction(
-    State(context): State<EmilyContext>,
+    Extension(context): Extension<EmilyContext>,
     UrlPath(bitcoin_txid): UrlPath<String>,
     Query(query): Query<GetDepositsForTransactionQuery>,
 ) -> Result<(StatusCode, GetDepositsForTransactionResponse), Error> {
@@ -135,7 +135,7 @@ pub async fn get_deposits_for_transaction(
 )]
 #[instrument(skip(context))]
 pub async fn get_deposits(
-    State(context): State<EmilyContext>,
+    Extension(context): Extension<EmilyContext>,
     Query(query): Query<GetDepositsQuery>,
 ) -> Result<(StatusCode, GetDepositsResponse), Error> {
     tracing::debug!("in get deposits");
@@ -170,7 +170,7 @@ pub async fn get_deposits(
 )]
 #[instrument(skip(context))]
 pub async fn get_deposits_for_recipient(
-    State(context): State<EmilyContext>,
+    Extension(context): Extension<EmilyContext>,
     UrlPath(recipient): UrlPath<String>,
     Query(query): Query<BasicPaginationQuery>,
 ) -> Result<(StatusCode, GetDepositsResponse), Error> {
@@ -210,7 +210,7 @@ pub async fn get_deposits_for_recipient(
 )]
 #[instrument(skip(context))]
 pub async fn get_deposits_for_reclaim_pubkeys(
-    State(context): State<EmilyContext>,
+    Extension(context): Extension<EmilyContext>,
     UrlPath(reclaim_pubkeys): UrlPath<String>,
     Query(query): Query<BasicPaginationQuery>,
 ) -> Result<(StatusCode, GetDepositsResponse), Error> {
@@ -249,7 +249,7 @@ pub async fn get_deposits_for_reclaim_pubkeys(
 )]
 #[instrument(skip(context))]
 pub async fn create_deposit(
-    State(context): State<EmilyContext>,
+    Extension(context): Extension<EmilyContext>,
     Json(body): Json<CreateDepositRequestBody>,
 ) -> Result<(StatusCode, Deposit), Error> {
     tracing::debug!(
@@ -348,7 +348,7 @@ pub async fn create_deposit(
 )]
 #[instrument(skip(context))]
 pub async fn update_deposits_signer(
-    State(context): State<EmilyContext>,
+    Extension(context): Extension<EmilyContext>,
     Json(body): Json<UpdateDepositsRequestBody>,
 ) -> Result<(StatusCode, UpdateDepositsResponse), Error> {
     tracing::debug!("in update deposits");
@@ -382,7 +382,7 @@ pub async fn update_deposits_signer(
 )]
 #[instrument(skip(context))]
 pub async fn update_deposits_sidecar(
-    State(context): State<EmilyContext>,
+    Extension(context): Extension<EmilyContext>,
     Json(body): Json<UpdateDepositsRequestBody>,
 ) -> Result<(StatusCode, UpdateDepositsResponse), Error> {
     tracing::debug!("in update deposits");
@@ -595,11 +595,13 @@ fn validate_reclaim_pubkeys(reclaim_pubkeys: &str) -> Result<Vec<[u8; 32]>, Erro
         .split('-')
         .map(|s| {
             hex::decode(s)
-                .map_err(|_| Error::HttpRequest2(StatusCode::BAD_REQUEST, "invalid pubkey"))
+                .map_err(|_| {
+                    Error::HttpRequest(StatusCode::BAD_REQUEST, "invalid pubkey".to_string())
+                })
                 .and_then(|bytes| {
-                    bytes
-                        .try_into()
-                        .map_err(|_| Error::HttpRequest2(StatusCode::BAD_REQUEST, "invalid pubkey"))
+                    bytes.try_into().map_err(|_| {
+                        Error::HttpRequest(StatusCode::BAD_REQUEST, "invalid pubkey".to_string())
+                    })
                 })
         })
         .collect()

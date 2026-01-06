@@ -1,8 +1,8 @@
 //! Handlers for withdrawal endpoints.
+use axum::extract::Extension;
 use axum::extract::Json;
 use axum::extract::Path as UrlPath;
 use axum::extract::Query;
-use axum::extract::State;
 use axum::http::StatusCode;
 use tracing::{debug, instrument};
 
@@ -43,7 +43,7 @@ use crate::database::entries::withdrawal::{
 )]
 #[instrument(skip(context))]
 pub async fn get_withdrawal(
-    State(context): State<EmilyContext>,
+    Extension(context): Extension<EmilyContext>,
     UrlPath(request_id): UrlPath<u64>,
 ) -> Result<(StatusCode, Withdrawal), Error> {
     // Internal handler so `?` can be used correctly while still returning a reply.
@@ -74,7 +74,7 @@ pub async fn get_withdrawal(
 )]
 #[instrument(skip(context))]
 pub async fn get_withdrawals(
-    State(context): State<EmilyContext>,
+    Extension(context): Extension<EmilyContext>,
     Query(query): Query<GetWithdrawalsQuery>,
 ) -> Result<(StatusCode, GetWithdrawalsResponse), Error> {
     // Internal handler so `?` can be used correctly while still returning a reply.
@@ -111,7 +111,7 @@ pub async fn get_withdrawals(
 )]
 #[instrument(skip(context))]
 pub async fn get_withdrawals_for_recipient(
-    State(context): State<EmilyContext>,
+    Extension(context): Extension<EmilyContext>,
     UrlPath(recipient): UrlPath<String>,
     Query(query): Query<BasicPaginationQuery>,
 ) -> Result<(StatusCode, GetWithdrawalsResponse), Error> {
@@ -152,7 +152,7 @@ pub async fn get_withdrawals_for_recipient(
 )]
 #[instrument(skip(context))]
 pub async fn get_withdrawals_for_sender(
-    State(context): State<EmilyContext>,
+    Extension(context): Extension<EmilyContext>,
     UrlPath(sender): UrlPath<String>,
     Query(query): Query<BasicPaginationQuery>,
 ) -> Result<(StatusCode, GetWithdrawalsResponse), Error> {
@@ -190,7 +190,7 @@ pub async fn get_withdrawals_for_sender(
 )]
 #[instrument(skip(context))]
 pub async fn create_withdrawal(
-    State(context): State<EmilyContext>,
+    Extension(context): Extension<EmilyContext>,
     Json(body): Json<CreateWithdrawalRequestBody>,
 ) -> Result<(StatusCode, Withdrawal), Error> {
     // Get the api state and error if the api state is claimed by a reorg.
@@ -265,7 +265,7 @@ pub async fn create_withdrawal(
 )]
 #[instrument(skip(context))]
 pub async fn update_withdrawals_signer(
-    State(context): State<EmilyContext>,
+    Extension(context): Extension<EmilyContext>,
     Json(body): Json<UpdateWithdrawalsRequestBody>,
 ) -> Result<(StatusCode, UpdateWithdrawalsResponse), Error> {
     tracing::debug!("in update withdrawals");
@@ -299,7 +299,7 @@ pub async fn update_withdrawals_signer(
 )]
 #[instrument(skip(context))]
 pub async fn update_withdrawals_sidecar(
-    State(context): State<EmilyContext>,
+    Extension(context): Extension<EmilyContext>,
     Json(body): Json<UpdateWithdrawalsRequestBody>,
 ) -> Result<(StatusCode, UpdateWithdrawalsResponse), Error> {
     tracing::debug!("in update withdrawals");

@@ -2,11 +2,11 @@
 use std::future::Future;
 
 use axum::Json;
+use axum::extract::Extension;
+use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use sbtc::webhooks::NewBlockEvent;
 use tracing::instrument;
-use axum::extract::State;
-use axum::http::StatusCode;
 
 use clarity::vm::ContractName;
 use clarity::vm::types::QualifiedContractIdentifier;
@@ -65,7 +65,7 @@ struct StacksBlock {
 )]
 #[instrument(skip_all, name = "new-block")]
 pub async fn new_block(
-    State(context): State<EmilyContext>,
+    Extension(context): Extension<EmilyContext>,
     new_block_event: String,
 ) -> Result<StatusCode, Error> {
     let new_block_event: NewBlockEvent = match serde_json::from_str(&new_block_event) {
@@ -107,7 +107,7 @@ pub async fn new_block(
     // Set the chainstate
     handle_internal_call(
         set_chainstate(
-            State(context.clone()),
+            Extension(context.clone()),
             Json(Chainstate {
                 stacks_block_height: stacks_chaintip.block_height,
                 stacks_block_hash: stacks_chaintip.block_hash.clone(),
@@ -185,7 +185,7 @@ pub async fn new_block(
     if !completed_deposits.is_empty() {
         handle_internal_call(
             update_deposits_sidecar(
-                State(context.clone()),
+                Extension(context.clone()),
                 Json(UpdateDepositsRequestBody { deposits: completed_deposits }),
             ),
             "failed to update deposits in Emily",
@@ -198,7 +198,7 @@ pub async fn new_block(
     // to be updated.
     for withdrawal in created_withdrawals {
         handle_internal_call(
-            create_withdrawal(State(context.clone()), Json(withdrawal)),
+            create_withdrawal(Extension(context.clone()), Json(withdrawal)),
             "failed to create withdrawal in Emily",
         )
         .await?;
@@ -207,7 +207,7 @@ pub async fn new_block(
     if !updated_withdrawals.is_empty() {
         handle_internal_call(
             update_withdrawals_sidecar(
-                State(context.clone()),
+                Extension(context.clone()),
                 Json(UpdateWithdrawalsRequestBody {
                     withdrawals: updated_withdrawals,
                 }),

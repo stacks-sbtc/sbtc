@@ -11,8 +11,8 @@ use crate::{
     },
 };
 use axum::Json;
+use axum::extract::Extension;
 use axum::extract::Path as UrlPath;
-use axum::extract::State;
 use axum::http::StatusCode;
 use tracing::instrument;
 
@@ -30,7 +30,7 @@ use tracing::instrument;
 )]
 #[instrument(skip(context))]
 pub async fn get_limits(
-    State(context): State<EmilyContext>,
+    Extension(context): Extension<EmilyContext>,
 ) -> Result<(StatusCode, Limits), Error> {
     let global_limits = accessors::get_limits(&context).await?;
     Ok((StatusCode::OK, global_limits))
@@ -56,7 +56,7 @@ pub async fn get_limits(
 )]
 #[instrument(skip(context))]
 pub async fn set_limits(
-    State(context): State<EmilyContext>,
+    Extension(context): Extension<EmilyContext>,
     Json(limits): Json<Limits>,
 ) -> Result<(StatusCode, Limits), Error> {
     // Validate the withdrawal limit configuration.
@@ -115,7 +115,7 @@ pub async fn set_limits(
 )]
 #[instrument(skip(context))]
 pub async fn get_limits_for_account(
-    State(context): State<EmilyContext>,
+    Extension(context): Extension<EmilyContext>,
     UrlPath(account): UrlPath<String>,
 ) -> Result<(StatusCode, AccountLimits), Error> {
     // Get the entry.
@@ -147,7 +147,7 @@ pub async fn get_limits_for_account(
 )]
 #[instrument(skip(context))]
 pub async fn set_limits_for_account(
-    State(context): State<EmilyContext>,
+    Extension(context): Extension<EmilyContext>,
     UrlPath(account): UrlPath<String>,
     Json(account_limit): Json<AccountLimits>,
 ) -> Result<(StatusCode, AccountLimits), Error> {

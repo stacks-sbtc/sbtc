@@ -12,8 +12,8 @@ use crate::{
     database::{accessors, entries::chainstate::ChainstateEntry},
 };
 use axum::Json;
+use axum::extract::Extension;
 use axum::extract::Path as UrlPath;
-use axum::extract::State;
 use axum::http::StatusCode;
 use tracing::{debug, info, instrument, warn};
 
@@ -34,7 +34,7 @@ use tracing::{debug, info, instrument, warn};
 )]
 #[instrument(skip(context))]
 pub async fn get_chain_tip(
-    State(context): State<EmilyContext>,
+    Extension(context): Extension<EmilyContext>,
 ) -> Result<(StatusCode, Chainstate), Error> {
     debug!("Attempting to get chain tip");
     // TODO(390): Handle multiple being in the tip list here.
@@ -62,7 +62,7 @@ pub async fn get_chain_tip(
 )]
 #[instrument(skip(context))]
 pub async fn get_chainstate_at_height(
-    State(context): State<EmilyContext>,
+    Extension(context): Extension<EmilyContext>,
     UrlPath(height): UrlPath<u64>,
 ) -> Result<(StatusCode, Chainstate), Error> {
     debug!("Attempting to get chainstate at height: {height:?}");
@@ -91,7 +91,7 @@ pub async fn get_chainstate_at_height(
 )]
 #[instrument(skip(context))]
 pub async fn set_chainstate(
-    State(context): State<EmilyContext>,
+    Extension(context): Extension<EmilyContext>,
     Json(chainstate): Json<Chainstate>,
 ) -> Result<(StatusCode, Chainstate), Error> {
     debug!("Attempting to set chainstate: {chainstate:?}");
@@ -119,7 +119,7 @@ pub async fn set_chainstate(
 )]
 #[instrument(skip(context))]
 pub async fn update_chainstate(
-    State(context): State<EmilyContext>,
+    Extension(context): Extension<EmilyContext>,
     Json(chainstate): Json<Chainstate>,
 ) -> Result<(StatusCode, Chainstate), Error> {
     debug!("Attempting to update chainstate: {chainstate:?}");

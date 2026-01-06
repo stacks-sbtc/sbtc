@@ -33,11 +33,6 @@ async fn main() {
         .allow_headers([CONTENT_TYPE, HeaderName::from_static("x-api-key")]);
 
     // Setup service filters.
-    // let service_filter = api::routes::routes_with_stage_prefix(context)
-    //     .recover(api::handlers::handle_rejection)
-    //     .with(warp::log("api"))
-    //     .with(cors);
-
     let router = api::routes::routes_axum()
         .layer(
             TraceLayer::new_for_http()
@@ -60,6 +55,6 @@ async fn main() {
     // We need to ignore the stage prefix that is passed in by AWS Lambda.
     let app = Router::new().nest("/{*ignored}", router);
 
-    // Create warp service.
+    // Create axum-lambda service.
     lambda_http::run(app).await.expect("An error occurred");
 }

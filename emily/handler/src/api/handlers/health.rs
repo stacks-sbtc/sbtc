@@ -1,6 +1,6 @@
 //! Handlers for Health endpoint endpoints.
 
-use axum::extract::State;
+use axum::extract::Extension;
 use axum::http::StatusCode;
 
 use crate::common::error::Error;
@@ -21,7 +21,7 @@ use crate::{api::models::health::responses::HealthData, context::EmilyContext};
     ),
 )]
 pub async fn get_health(
-    State(context): State<EmilyContext>,
+    Extension(context): Extension<EmilyContext>,
 ) -> Result<(StatusCode, HealthData), Error> {
     // Handle and respond.
     let health_data = HealthData {
