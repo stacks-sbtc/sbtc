@@ -1,18 +1,14 @@
 //! Emily Warp Service Binary.
 
 use axum::http::HeaderName;
-use axum::http::header::CONTENT_TYPE;
+use axum::http::Method;
 use axum::http::Request;
+use axum::http::header::CONTENT_TYPE;
 use clap::Args;
 use clap::Parser;
 use emily_handler::context::EmilyContext;
-use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
-use tower_http::trace::TraceLayer;
 use tower_http::cors::CorsLayer;
-use axum::http::Method;
-use tracing::Span;
+use tower_http::trace::TraceLayer;
 use tracing::info;
 
 use emily_handler::api;
@@ -100,10 +96,6 @@ async fn main() {
     info!("Server will run locally on {}", addr_str);
     let addr: std::net::SocketAddr = addr_str.parse().expect("Failed to parse address");
 
-    // Create warp service as a local service and listen at the address.
-    // warp::serve(routes).run(addr).await;
-    let request_id = Arc::new(AtomicU64::new(0));
-
     let app = api::routes::routes_axum()
         .layer(
             TraceLayer::new_for_http()
@@ -113,10 +105,6 @@ async fn main() {
                         method = %request.method(),
                         id = tracing::field::Empty,
                     )
-                })
-                .on_request(move |_: &Request<_>, span: &Span| {
-                    span.record("id", request_id.fetch_add(1, Ordering::SeqCst));
-                    tracing::trace!("processing request");
                 })
                 .on_response(api::routes::axum_log_response),
         )

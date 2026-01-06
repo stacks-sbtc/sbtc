@@ -2,10 +2,9 @@
 
 use std::collections::HashMap;
 
-use axum::{
-    Json,
-    response::{IntoResponse, Response},
-};
+use axum::Json;
+use axum::response::IntoResponse;
+use axum::response::Response;
 use serde::{Deserialize, Serialize};
 use utoipa::{ToResponse, ToSchema};
 

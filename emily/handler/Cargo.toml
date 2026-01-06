@@ -30,6 +30,7 @@ clap.workspace = true
 clarity.workspace = true
 config.workspace = true
 hex.workspace = true
+lambda_http.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_dynamo.workspace = true

@@ -607,10 +607,26 @@ dependencies = [
  "chrono",
  "http 0.2.12",
  "http-body 0.4.6",
- "http-serde",
- "query_map",
+ "http-serde 1.1.3",
+ "query_map 0.5.0",
  "serde",
  "serde_derive",
+ "serde_json",
+]
+
+[[package]]
+name = "aws_lambda_events"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe7c3469ff817a37ebb9327d24a13f949758d803f3c8bf5d8f6b88e865a946bc"
+dependencies = [
+ "base64 0.22.1",
+ "bytes",
+ "http 1.1.0",
+ "http-body 1.0.0",
+ "http-serde 2.1.1",
+ "query_map 0.7.0",
+ "serde",
  "serde_json",
 ]
 
@@ -1744,6 +1760,7 @@ dependencies = [
  "clarity",
  "config",
  "hex",
+ "lambda_http 1.0.2",
  "reqwest 0.11.27",
  "reqwest 0.12.4",
  "sbtc",
@@ -2569,6 +2586,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "http-serde"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f056c8559e3757392c8d091e796416e4649d8e49e88b8d76df6c002f05027fd"
+dependencies = [
+ "http 1.1.0",
+ "serde",
+]
+
+[[package]]
 name = "httparse"
 version = "1.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3167,16 +3194,41 @@ version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b5c60a2d2d3f8e88dda6e3d999137ea42d685551af04aa0c5910c6478640335"
 dependencies = [
- "aws_lambda_events",
+ "aws_lambda_events 0.6.3",
  "base64 0.13.1",
  "bytes",
  "http 0.2.12",
  "http-body 0.4.6",
- "lambda_runtime",
- "query_map",
+ "lambda_runtime 0.5.1",
+ "query_map 0.5.0",
  "serde",
  "serde_json",
  "serde_urlencoded",
+]
+
+[[package]]
+name = "lambda_http"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0b02fac5bd704497e93f0acacfa3c7942866b58b370d3aefaefb75a0f0eb7b2"
+dependencies = [
+ "aws_lambda_events 1.0.2",
+ "bytes",
+ "encoding_rs",
+ "futures-util",
+ "http 1.1.0",
+ "http-body 1.0.0",
+ "http-body-util",
+ "hyper 1.5.1",
+ "lambda_runtime 1.0.2",
+ "mime",
+ "percent-encoding",
+ "pin-project-lite",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "tokio-stream",
+ "url",
 ]
 
 [[package]]
@@ -3189,12 +3241,37 @@ dependencies = [
  "bytes",
  "http 0.2.12",
  "hyper 0.14.28",
- "lambda_runtime_api_client",
+ "lambda_runtime_api_client 0.5.0",
  "serde",
  "serde_json",
  "tokio",
  "tokio-stream",
  "tower 0.4.13",
+ "tracing",
+]
+
+[[package]]
+name = "lambda_runtime"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc0b4409eea054e4c06f0101fed547b2cf208e8eca9dc6d41dead4114577852b"
+dependencies = [
+ "async-stream",
+ "base64 0.22.1",
+ "bytes",
+ "futures",
+ "http 1.1.0",
+ "http-body-util",
+ "http-serde 2.1.1",
+ "hyper 1.5.1",
+ "lambda_runtime_api_client 1.0.1",
+ "pin-project",
+ "serde",
+ "serde_json",
+ "serde_path_to_error",
+ "tokio",
+ "tokio-stream",
+ "tower 0.5.2",
  "tracing",
 ]
 
@@ -3208,6 +3285,25 @@ dependencies = [
  "hyper 0.14.28",
  "tokio",
  "tower-service",
+]
+
+[[package]]
+name = "lambda_runtime_api_client"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c039f06329949692a81a993ede4cfaa6abab3ac8e72590cf7c5e6a64a9ec7b1"
+dependencies = [
+ "bytes",
+ "futures-channel",
+ "futures-util",
+ "http 1.1.0",
+ "http-body 1.0.0",
+ "http-body-util",
+ "hyper 1.5.1",
+ "hyper-util",
+ "tower 0.5.2",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -4962,7 +5058,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9120690fafc389a67ba3803df527d0ec9cbbc9cc45e4cc20b332996dfb672425"
 dependencies = [
  "anyhow",
- "itertools 0.12.1",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn 2.0.87",
@@ -5015,6 +5111,17 @@ name = "query_map"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fe3212d819cbdcce67f786cdaf3fe0c2e9d09a6dcd9c9367a1bd344135b8c809"
+dependencies = [
+ "form_urlencoded",
+ "serde",
+ "serde_derive",
+]
+
+[[package]]
+name = "query_map"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5eab6b8b1074ef3359a863758dae650c7c0c6027927a085b7af911c8e0bf3a15"
 dependencies = [
  "form_urlencoded",
  "serde",
@@ -5547,7 +5654,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7566,7 +7673,7 @@ version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d8401db5ba744d8591ec7468d6014778c505ac6b3a7225130edfc274a7e1534"
 dependencies = [
- "lambda_http",
+ "lambda_http 0.5.2",
  "mime",
  "once_cell",
  "thiserror 1.0.69",

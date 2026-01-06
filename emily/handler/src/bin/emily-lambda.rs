@@ -1,11 +1,16 @@
 //! Emily API entrypoint.
 
+use axum::http::HeaderName;
+use axum::http::Method;
+use axum::http::Request;
+use axum::http::header::CONTENT_TYPE;
 use emily_handler::context::EmilyContext;
+use tower_http::cors::CorsLayer;
+use tower_http::trace::TraceLayer;
 use tracing::info;
 
 use emily_handler::api;
 use emily_handler::logging;
-use warp::Filter as _;
 
 #[tokio::main]
 async fn main() {
@@ -21,22 +26,32 @@ async fn main() {
     info!(lambdaContext = ?context);
 
     // Create CORS configuration
-    let cors = warp::cors()
-        .allow_any_origin()
-        .allow_methods(vec!["GET", "POST", "OPTIONS"])
-        .allow_headers(vec!["content-type", "x-api-key"])
-        .build();
+    let cors = CorsLayer::new()
+        .allow_origin(tower_http::cors::Any)
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_headers([CONTENT_TYPE, HeaderName::from_static("x-api-key")]);
 
     // Setup service filters.
-    let service_filter = api::routes::routes_with_stage_prefix(context)
-        .recover(api::handlers::handle_rejection)
-        .with(warp::log("api"))
-        .with(cors);
+    // let service_filter = api::routes::routes_with_stage_prefix(context)
+    //     .recover(api::handlers::handle_rejection)
+    //     .with(warp::log("api"))
+    //     .with(cors);
+
+    let app = api::routes::routes_axum()
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(|request: &Request<_>| {
+                    tracing::info_span!("api-request",
+                        uri = %request.uri(),
+                        method = %request.method(),
+                        id = tracing::field::Empty,
+                    )
+                })
+                .on_response(api::routes::axum_log_response),
+        )
+        .layer(cors)
+        .with_state(context);
 
     // Create warp service.
-    // TODO(276): Remove warp_lambda in Emily API and use different library.
-    let warp_service = warp::service(service_filter);
-    warp_lambda::run(warp_service)
-        .await
-        .expect("An error occurred");
+    lambda_http::run(app).await.expect("An error occurred");
 }

@@ -120,7 +120,14 @@ pub fn routes_axum() -> Router<EmilyContext> {
         post(new_block2::new_block).layer(DefaultBodyLimit::max(EVENT_OBSERVER_BODY_LIMIT));
     let put_withdrawals_sidecar = put(withdrawal2::update_withdrawals_sidecar);
 
-    let mut router = Router::new()
+    let mut router = Router::new();
+
+    #[cfg(feature = "testing")]
+    {
+        router = router.route("/testing/wipe", post(testing2::wipe_databases));
+    }
+
+    router
         .route("/health", get(health2::get_health))
         .route("/chainstate", get(chainstate2::get_chain_tip))
         .route("/chainstate/{height}", get_chainstate_at_height)
@@ -143,14 +150,7 @@ pub fn routes_axum() -> Router<EmilyContext> {
         .route("/limits", post(limits2::set_limits))
         .route("/limits/{account}", get(limits2::get_limits_for_account))
         .route("/limits/{account}", post(limits2::set_limits_for_account))
-        .route("/new_block", new_block);
-
-    #[cfg(feature = "testing")]
-    {
-        router = router.route("/testing/wipe", post(testing2::wipe_databases));
-    }
-
-    router
+        .route("/new_block", new_block)
 }
 
 /// This function sets the Warp filters for handling all requests.
