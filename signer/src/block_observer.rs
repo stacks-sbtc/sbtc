@@ -550,7 +550,7 @@ impl<C: Context, B> BlockObserver<C, B> {
         tracing::info!("updating the signer state with the current signer set");
         self.set_signer_set_info().await?;
 
-        tracing::info!("updating the signer state with the current bitcoin chain tip");
+        tracing::info!("updating the signer state with the current stacks chain tip");
         self.set_stacks_chain_tip(chain_tip).await?;
 
         tracing::info!("updating the signer state with the current bitcoin chain tip");

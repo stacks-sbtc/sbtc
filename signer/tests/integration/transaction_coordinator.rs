@@ -72,6 +72,7 @@ use signer::stacks::api::StacksInteract;
 use signer::stacks::wallet::SignerWallet;
 use signer::storage::model::BitcoinBlockHeight;
 use signer::storage::model::KeyRotationEvent;
+use signer::storage::model::StacksBlockRef;
 use signer::storage::model::WithdrawalTxOutput;
 use signer::testing::btc::build_emily_request;
 use signer::testing::btc::get_canonical_chain_tip;
@@ -495,6 +496,14 @@ async fn process_complete_deposit() {
 
     // Yield to get signers ready
     Sleep::for_millis(100).await;
+
+    let stacks_chain_tip = db
+        .get_stacks_chain_tip(&bitcoin_chain_tip.block_hash)
+        .await
+        .unwrap()
+        .unwrap()
+        .into();
+    context.state().set_stacks_chain_tip(stacks_chain_tip);
 
     // Wake coordinator up
     context
@@ -1012,7 +1021,14 @@ async fn run_dkg_from_scratch() {
         .await
         .unwrap()
         .unwrap();
+    let stacks_chain_tip: StacksBlockRef = first_db
+        .get_stacks_chain_tip(&chain_tip.block_hash)
+        .await
+        .unwrap()
+        .unwrap()
+        .into();
     signers.iter().for_each(|(ctx, _, _, _)| {
+        ctx.state().set_stacks_chain_tip(stacks_chain_tip.clone());
         ctx.get_signal_sender()
             .send(RequestDeciderEvent::NewRequestsHandled(chain_tip).into())
             .unwrap();
@@ -1432,7 +1448,14 @@ async fn run_subsequent_dkg() {
         .await
         .unwrap()
         .unwrap();
+    let stacks_chain_tip: StacksBlockRef = first_db
+        .get_stacks_chain_tip(&chain_tip.block_hash)
+        .await
+        .unwrap()
+        .unwrap()
+        .into();
     signers.iter().for_each(|(ctx, _, _, _)| {
+        ctx.state().set_stacks_chain_tip(stacks_chain_tip.clone());
         ctx.get_signal_sender()
             .send(RequestDeciderEvent::NewRequestsHandled(chain_tip).into())
             .unwrap();
@@ -5206,6 +5229,10 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
         bitcoin_anchor: bitcoin_chain_tip.into(),
     };
     db.write_stacks_blocks([&genesis_block]).await;
+
+    context
+        .state()
+        .set_stacks_chain_tip(genesis_block.clone().into());
 
     let (aggregate_key, _) = run_dkg(&context, &mut rng, &mut testing_signer_set).await;
 

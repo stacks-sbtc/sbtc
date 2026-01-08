@@ -53,7 +53,6 @@ use signer::storage::model::TxPrevout;
 use signer::storage::model::TxPrevoutType;
 use signer::storage::postgres::PgStore;
 use signer::testing::btc::get_canonical_chain_tip;
-use signer::testing::stacks::DUMMY_SORTITION_INFO;
 use signer::testing::stacks::DUMMY_TENURE_INFO;
 use testing_emily_client::apis::testing_api;
 
@@ -126,6 +125,8 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
     // We need to set up the stacks client as well. We use it to fetch
     // information about the Stacks blockchain, so we need to prep it, even
     // though it isn't necessary for our test.
+
+    let anchor = get_canonical_chain_tip(rpc);
     ctx.with_stacks_client(|client| {
         client
             .expect_get_tenure_info()
@@ -139,19 +140,17 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
             Box::pin(std::future::ready(response))
         });
 
+        let tenure_headers = TenureBlockHeaders::from_anchor(&anchor);
+
         client
             .expect_get_tenure_headers()
-            .returning(|_| Box::pin(std::future::ready(TenureBlockHeaders::nearly_empty())));
+            .returning(move |_| Box::pin(std::future::ready(Ok(tenure_headers.clone()))));
 
         client.expect_get_epoch_status().returning(|| {
             Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
                 nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
             })))
         });
-
-        client
-            .expect_get_sortition_info()
-            .returning(move |_| Box::pin(std::future::ready(Ok(DUMMY_SORTITION_INFO.clone()))));
 
         client.expect_get_contract_source().returning(|_, _| {
             Box::pin(async {
@@ -866,7 +865,7 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
     // We start with the typical setup with a fresh database and context
     // with a real bitcoin core client and a real connection to our
     // database.
-    let (_, faucet) = regtest::initialize_blockchain();
+    let (rpc, faucet) = regtest::initialize_blockchain();
     let db = testing::storage::new_test_database().await;
     let ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -878,6 +877,7 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
     // We need to set up the stacks client as well. We use it to fetch
     // information about the Stacks blockchain, so we need to prep it, even
     // though it isn't necessary for our test.
+    let chain_tip = get_canonical_chain_tip(rpc);
     let db2 = db.clone();
     ctx.with_stacks_client(|client| {
         client
@@ -890,17 +890,18 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
             });
             Box::pin(std::future::ready(response))
         });
+
+        let tenure_headers = TenureBlockHeaders::from_anchor(&chain_tip);
+
         client
             .expect_get_tenure_headers()
-            .returning(|_| Box::pin(std::future::ready(TenureBlockHeaders::nearly_empty())));
+            .returning(move |_| Box::pin(std::future::ready(Ok(tenure_headers.clone()))));
+
         client.expect_get_epoch_status().returning(|| {
             Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
                 nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
             })))
         });
-        client
-            .expect_get_sortition_info()
-            .returning(move |_| Box::pin(std::future::ready(Ok(DUMMY_SORTITION_INFO.clone()))));
 
         // The coordinator broadcasts a rotate keys transaction if it is
         // not up-to-date with their view of the current aggregate key. The
@@ -1187,7 +1188,7 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
     // We start with the typical setup with a fresh database and context
     // with a real bitcoin core client and a real connection to our
     // database.
-    let (_, faucet) = regtest::initialize_blockchain();
+    let (rpc, faucet) = regtest::initialize_blockchain();
     let db = testing::storage::new_test_database().await;
     let ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -1200,6 +1201,7 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
     // information about the Stacks blockchain, so we need to prep it, even
     // though it isn't necessary for our test.
     let db2 = db.clone();
+    let chain_tip = get_canonical_chain_tip(rpc);
     ctx.with_stacks_client(|client| {
         client
             .expect_get_tenure_info()
@@ -1211,17 +1213,17 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
             });
             Box::pin(std::future::ready(response))
         });
+        let tenure_headers = TenureBlockHeaders::from_anchor(&chain_tip);
+
         client
             .expect_get_tenure_headers()
-            .returning(|_| Box::pin(std::future::ready(TenureBlockHeaders::nearly_empty())));
+            .returning(move |_| Box::pin(std::future::ready(Ok(tenure_headers.clone()))));
+
         client.expect_get_epoch_status().returning(|| {
             Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
                 nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
             })))
         });
-        client
-            .expect_get_sortition_info()
-            .returning(|_| Box::pin(std::future::ready(Ok(DUMMY_SORTITION_INFO.clone()))));
 
         client
             .expect_get_sbtc_total_supply()
@@ -1389,6 +1391,8 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
     // We need to set up the stacks client as well. We use it to fetch
     // information about the Stacks blockchain, so we need to prep it, even
     // though it isn't necessary for our test.
+    let chain_tip = get_canonical_chain_tip(rpc);
+
     ctx.with_stacks_client(|client| {
         client
             .expect_get_tenure_info()
@@ -1400,17 +1404,17 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
             });
             Box::pin(std::future::ready(response))
         });
+        let tenure_headers = TenureBlockHeaders::from_anchor(&chain_tip);
+
         client
             .expect_get_tenure_headers()
-            .returning(|_| Box::pin(std::future::ready(TenureBlockHeaders::nearly_empty())));
+            .returning(move |_| Box::pin(std::future::ready(Ok(tenure_headers.clone()))));
+
         client.expect_get_epoch_status().returning(|| {
             Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
                 nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
             })))
         });
-        client
-            .expect_get_sortition_info()
-            .returning(|_| Box::pin(std::future::ready(Ok(DUMMY_SORTITION_INFO.clone()))));
 
         client.expect_get_contract_source().returning(|_, _| {
             Box::pin(async {
