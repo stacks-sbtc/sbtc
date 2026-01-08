@@ -414,7 +414,11 @@ async fn process_complete_deposit() {
     assert_eq!(
         context
             .get_storage()
-            .get_swept_deposit_requests(&bitcoin_chain_tip.block_hash, context_window)
+            .get_swept_deposit_requests(
+                &bitcoin_chain_tip.block_hash,
+                &stacks_block.block_hash,
+                context_window
+            )
             .await
             .expect("failed to get swept deposits")
             .len(),
@@ -5566,8 +5570,14 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
 
     prevent_dkg_on_changed_signer_set_info(&ctx, aggregate_key);
 
-    let (bitcoin_chain_tip, _) = db.get_chain_tips().await;
+    let (bitcoin_chain_tip, stacks_chain_tip) = db.get_chain_tips().await;
+    let stacks_block = db
+        .get_stacks_block(&stacks_chain_tip)
+        .await
+        .unwrap()
+        .unwrap();
     ctx.state().set_bitcoin_chain_tip(bitcoin_chain_tip);
+    ctx.state().set_stacks_chain_tip(stacks_block.into());
     // If we try to sign a complete deposit, we will ask the bitcoin node to
     // asses the fees, so we need to mock this.
     let sweep_tx_info = setup.sweep_tx_info.unwrap().tx_info;

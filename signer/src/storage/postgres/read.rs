@@ -16,7 +16,7 @@ use crate::{
     keys::{PublicKey, PublicKeyXOnly},
     storage::{
         DbRead,
-        model::{self, BitcoinBlockHeight, StacksBlockHash, StacksBlockHeight},
+        model::{self, BitcoinBlockHash, BitcoinBlockHeight, StacksBlockHash, StacksBlockHeight},
     },
 };
 
@@ -1241,7 +1241,8 @@ impl PgRead {
 
     async fn get_pending_withdrawal_requests<'e, E>(
         executor: &'e mut E,
-        chain_tip: &model::BitcoinBlockHash,
+        bitcoin_chain_tip: &BitcoinBlockHash,
+        stacks_chain_tip: &StacksBlockHash,
         context_window: u16,
         signer_public_key: &PublicKey,
     ) -> Result<Vec<model::WithdrawalRequest>, Error>
@@ -1249,9 +1250,6 @@ impl PgRead {
         E: 'static,
         for<'c> &'c mut E: sqlx::PgExecutor<'c>,
     {
-        let Some(stacks_chain_tip) = Self::get_stacks_chain_tip(executor, chain_tip).await? else {
-            return Ok(Vec::new());
-        };
         sqlx::query_as::<_, model::WithdrawalRequest>(
             r#"
             WITH RECURSIVE extended_context_window AS (
@@ -1310,8 +1308,8 @@ impl PgRead {
             WHERE ws.request_id IS NULL
             "#,
         )
-        .bind(chain_tip)
-        .bind(stacks_chain_tip.block_hash)
+        .bind(bitcoin_chain_tip)
+        .bind(stacks_chain_tip)
         .bind(i32::from(context_window))
         .bind(signer_public_key)
         .fetch_all(executor)
@@ -1899,7 +1897,7 @@ impl PgRead {
 
     async fn key_rotation_exists<'e, E>(
         executor: &'e mut E,
-        chain_tip: &model::BitcoinBlockHash,
+        stacks_chain_tip: &model::StacksBlockHash,
         signer_set: &BTreeSet<PublicKey>,
         aggregate_key: &PublicKey,
         signatures_required: u16,
@@ -1908,10 +1906,6 @@ impl PgRead {
         E: 'static,
         for<'c> &'c mut E: sqlx::PgExecutor<'c>,
     {
-        let Some(stacks_chain_tip) = Self::get_stacks_chain_tip(executor, chain_tip).await? else {
-            return Err(Error::NoStacksChainTip);
-        };
-
         sqlx::query_scalar::<_, bool>(
             r#"
             WITH RECURSIVE stacks_blocks AS (
@@ -1944,7 +1938,7 @@ impl PgRead {
             )
             "#,
         )
-        .bind(stacks_chain_tip.block_hash)
+        .bind(stacks_chain_tip)
         .bind(signer_set.iter().collect::<Vec<_>>())
         .bind(aggregate_key)
         .bind(i32::from(signatures_required))
@@ -2244,7 +2238,8 @@ impl PgRead {
 
     async fn get_swept_deposit_requests<'e, E>(
         executor: &'e mut E,
-        chain_tip: &model::BitcoinBlockHash,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+        stacks_chain_tip: &model::StacksBlockHash,
         context_window: u16,
     ) -> Result<Vec<model::SweptDepositRequest>, Error>
     where
@@ -2260,10 +2255,6 @@ impl PgRead {
         // Note that this query may return completed requests if the stacks
         // event is anchored to a bitcoin block that is outside the context
         // window, while the sweep is still inside it.
-
-        let Some(stacks_chain_tip) = Self::get_stacks_chain_tip(executor, chain_tip).await? else {
-            return Ok(Vec::new());
-        };
 
         sqlx::query_as::<_, model::SweptDepositRequest>(
             "
@@ -2327,9 +2318,9 @@ impl PgRead {
                 COUNT(sb.block_hash) = 0
         ",
         )
-        .bind(chain_tip)
+        .bind(bitcoin_chain_tip)
         .bind(i32::from(context_window))
-        .bind(stacks_chain_tip.block_hash)
+        .bind(stacks_chain_tip)
         .fetch_all(executor)
         .await
         .map_err(Error::SqlxQuery)
@@ -2337,7 +2328,8 @@ impl PgRead {
 
     async fn get_swept_withdrawal_requests<'e, E>(
         executor: &'e mut E,
-        chain_tip: &model::BitcoinBlockHash,
+        bitcoin_chain_tip: &BitcoinBlockHash,
+        stacks_chain_tip: &StacksBlockHash,
         context_window: u16,
     ) -> Result<Vec<model::SweptWithdrawalRequest>, Error>
     where
@@ -2353,10 +2345,6 @@ impl PgRead {
         // Note that this query may return completed requests if the stacks
         // event is anchored to a bitcoin block that is outside the context
         // window, while the sweep is still inside it.
-
-        let Some(stacks_chain_tip) = Self::get_stacks_chain_tip(executor, chain_tip).await? else {
-            return Ok(Vec::new());
-        };
 
         sqlx::query_as::<_, model::SweptWithdrawalRequest>(
             r#"
@@ -2442,9 +2430,9 @@ impl PgRead {
                 WHERE cw.request_id IS NULL
         "#,
         )
-        .bind(chain_tip)
+        .bind(bitcoin_chain_tip)
         .bind(i32::from(context_window))
-        .bind(stacks_chain_tip.block_hash)
+        .bind(stacks_chain_tip)
         .fetch_all(executor)
         .await
         .map_err(Error::SqlxQuery)
@@ -2758,13 +2746,15 @@ impl DbRead for PgStore {
 
     async fn get_pending_withdrawal_requests(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
+        bitcoin_chain_tip: &BitcoinBlockHash,
+        stacks_chain_tip: &StacksBlockHash,
         context_window: u16,
         signer_public_key: &PublicKey,
     ) -> Result<Vec<model::WithdrawalRequest>, Error> {
         PgRead::get_pending_withdrawal_requests(
             self.get_connection().await?.as_mut(),
-            chain_tip,
+            bitcoin_chain_tip,
+            stacks_chain_tip,
             context_window,
             signer_public_key,
         )
@@ -2885,14 +2875,14 @@ impl DbRead for PgStore {
 
     async fn key_rotation_exists(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
+        stacks_chain_tip: &model::StacksBlockHash,
         signer_set: &BTreeSet<PublicKey>,
         aggregate_key: &PublicKey,
         signatures_required: u16,
     ) -> Result<bool, Error> {
         PgRead::key_rotation_exists(
             self.get_connection().await?.as_mut(),
-            chain_tip,
+            stacks_chain_tip,
             signer_set,
             aggregate_key,
             signatures_required,
@@ -2961,12 +2951,14 @@ impl DbRead for PgStore {
 
     async fn get_swept_deposit_requests(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
+        bitcoin_chain_tip: &BitcoinBlockHash,
+        stacks_chain_tip: &StacksBlockHash,
         context_window: u16,
     ) -> Result<Vec<model::SweptDepositRequest>, Error> {
         PgRead::get_swept_deposit_requests(
             self.get_connection().await?.as_mut(),
-            chain_tip,
+            bitcoin_chain_tip,
+            stacks_chain_tip,
             context_window,
         )
         .await
@@ -2974,12 +2966,14 @@ impl DbRead for PgStore {
 
     async fn get_swept_withdrawal_requests(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
+        bitcoin_chain_tip: &BitcoinBlockHash,
+        stacks_chain_tip: &StacksBlockHash,
         context_window: u16,
     ) -> Result<Vec<model::SweptWithdrawalRequest>, Error> {
         PgRead::get_swept_withdrawal_requests(
             self.get_connection().await?.as_mut(),
-            chain_tip,
+            bitcoin_chain_tip,
+            stacks_chain_tip,
             context_window,
         )
         .await
@@ -3192,13 +3186,15 @@ impl DbRead for PgTransaction<'_> {
 
     async fn get_pending_withdrawal_requests(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
+        bitcoin_chain_tip: &BitcoinBlockHash,
+        stacks_chain_tip: &StacksBlockHash,
         context_window: u16,
         signer_public_key: &crate::keys::PublicKey,
     ) -> Result<Vec<model::WithdrawalRequest>, Error> {
         PgRead::get_pending_withdrawal_requests(
             self.tx.lock().await.as_mut(),
-            chain_tip,
+            bitcoin_chain_tip,
+            stacks_chain_tip,
             context_window,
             signer_public_key,
         )
@@ -3322,14 +3318,14 @@ impl DbRead for PgTransaction<'_> {
 
     async fn key_rotation_exists(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
+        stacks_chain_tip: &model::StacksBlockHash,
         signer_set: &std::collections::BTreeSet<crate::keys::PublicKey>,
         aggregate_key: &crate::keys::PublicKey,
         signatures_required: u16,
     ) -> Result<bool, Error> {
         PgRead::key_rotation_exists(
             self.tx.lock().await.as_mut(),
-            chain_tip,
+            stacks_chain_tip,
             signer_set,
             aggregate_key,
             signatures_required,
@@ -3424,21 +3420,29 @@ impl DbRead for PgTransaction<'_> {
 
     async fn get_swept_deposit_requests(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
+        bitcoin_chain_tip: &BitcoinBlockHash,
+        stacks_chain_tip: &StacksBlockHash,
         context_window: u16,
     ) -> Result<Vec<model::SweptDepositRequest>, Error> {
-        PgRead::get_swept_deposit_requests(self.tx.lock().await.as_mut(), chain_tip, context_window)
-            .await
+        PgRead::get_swept_deposit_requests(
+            self.tx.lock().await.as_mut(),
+            bitcoin_chain_tip,
+            stacks_chain_tip,
+            context_window,
+        )
+        .await
     }
 
     async fn get_swept_withdrawal_requests(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
+        bitcoin_chain_tip: &BitcoinBlockHash,
+        stacks_chain_tip: &StacksBlockHash,
         context_window: u16,
     ) -> Result<Vec<model::SweptWithdrawalRequest>, Error> {
         PgRead::get_swept_withdrawal_requests(
             self.tx.lock().await.as_mut(),
-            chain_tip,
+            bitcoin_chain_tip,
+            stacks_chain_tip,
             context_window,
         )
         .await

@@ -468,12 +468,19 @@ async fn get_pending_withdrawal_requests_only_pending() {
     let setup = TestSweepSetup2::new_setup(signers, faucet, &[amounts]);
 
     backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
-    let chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
+    setup.store_stacks_genesis_block(&db).await;
 
+    let chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
+    let stacks_chain_tip = db
+        .get_stacks_chain_tip(&chain_tip)
+        .await
+        .unwrap()
+        .unwrap()
+        .block_hash;
     // There aren't any withdrawal requests in the database.
     let signer_public_key = setup.signers.signer_keys()[0];
     let pending_requests = db
-        .get_pending_withdrawal_requests(&chain_tip, 1000, &signer_public_key)
+        .get_pending_withdrawal_requests(&chain_tip, &stacks_chain_tip, 1000, &signer_public_key)
         .await
         .unwrap();
 
@@ -482,9 +489,16 @@ async fn get_pending_withdrawal_requests_only_pending() {
     // Now let's store a withdrawal request with no votes.
     // `get_pending_withdrawal_requests` should return it now.
     setup.store_withdrawal_requests(&db).await;
+    // The above method adds stacks blocks, so the chain tip has changed.
+    let stacks_chain_tip = db
+        .get_stacks_chain_tip(&chain_tip)
+        .await
+        .unwrap()
+        .unwrap()
+        .block_hash;
 
     let pending_requests = db
-        .get_pending_withdrawal_requests(&chain_tip, 1000, &signer_public_key)
+        .get_pending_withdrawal_requests(&chain_tip, &stacks_chain_tip, 1000, &signer_public_key)
         .await
         .unwrap();
 
@@ -495,7 +509,7 @@ async fn get_pending_withdrawal_requests_only_pending() {
     setup.store_withdrawal_decisions(&db).await;
 
     let pending_requests = db
-        .get_pending_withdrawal_requests(&chain_tip, 1000, &signer_public_key)
+        .get_pending_withdrawal_requests(&chain_tip, &stacks_chain_tip, 1000, &signer_public_key)
         .await
         .unwrap();
 
@@ -536,6 +550,12 @@ async fn should_return_the_same_pending_withdraw_requests_as_in_memory_store() {
         .expect("failed to get canonical chain tip")
         .expect("no chain tip");
 
+    let stacks_chain_tip = in_memory_store
+        .get_stacks_chain_tip(&chain_tip)
+        .await
+        .unwrap()
+        .unwrap()
+        .block_hash;
     assert_eq!(
         pg_store
             .get_bitcoin_canonical_chain_tip()
@@ -560,7 +580,12 @@ async fn should_return_the_same_pending_withdraw_requests_as_in_memory_store() {
 
     for signer_public_key in signer_set.iter() {
         let mut pending_withdraw_requests = in_memory_store
-            .get_pending_withdrawal_requests(&chain_tip, context_window, signer_public_key)
+            .get_pending_withdrawal_requests(
+                &chain_tip,
+                &stacks_chain_tip,
+                context_window,
+                signer_public_key,
+            )
             .await
             .expect("failed to get pending deposit requests");
 
@@ -569,7 +594,12 @@ async fn should_return_the_same_pending_withdraw_requests_as_in_memory_store() {
         assert!(!pending_withdraw_requests.is_empty());
 
         let mut pg_pending_withdraw_requests = pg_store
-            .get_pending_withdrawal_requests(&chain_tip, context_window, signer_public_key)
+            .get_pending_withdrawal_requests(
+                &chain_tip,
+                &stacks_chain_tip,
+                context_window,
+                signer_public_key,
+            )
             .await
             .expect("failed to get pending deposit requests");
 
@@ -2257,10 +2287,11 @@ async fn get_swept_deposit_requests_returns_swept_deposit_requests() {
     setup.store_sweep_tx(&db).await;
 
     let chain_tip = setup.sweep_block_hash.into();
+    let stacks_tip = setup.stacks_genesis_block.block_hash;
     let context_window = 20;
 
     let mut requests = db
-        .get_swept_deposit_requests(&chain_tip, context_window)
+        .get_swept_deposit_requests(&chain_tip, &stacks_tip, context_window)
         .await
         .unwrap();
 
@@ -2371,7 +2402,11 @@ async fn get_swept_withdrawal_requests_returns_swept_withdrawal_requests(
     // There should no withdrawal request in the empty database
     let context_window = 20;
     let requests = db
-        .get_swept_withdrawal_requests(&bitcoin_block.block_hash, context_window)
+        .get_swept_withdrawal_requests(
+            &bitcoin_block.block_hash,
+            &stacks_block.block_hash,
+            context_window,
+        )
         .await
         .unwrap();
     assert!(requests.is_empty());
@@ -2422,7 +2457,11 @@ async fn get_swept_withdrawal_requests_returns_swept_withdrawal_requests(
     // There should only be one request in the database and it has a sweep
     // transaction so the length should be 1.
     let mut requests = db
-        .get_swept_withdrawal_requests(&bitcoin_block.block_hash, context_window)
+        .get_swept_withdrawal_requests(
+            &bitcoin_block.block_hash,
+            &stacks_block.block_hash,
+            context_window,
+        )
         .await
         .unwrap();
     assert_eq!(requests.len(), 1);
@@ -2524,7 +2563,11 @@ async fn get_swept_withdrawal_requests_does_not_return_unswept_withdrawal_reques
     // There should be no requests because db do not contain sweep transaction
     let context_window = 20;
     let requests = db
-        .get_swept_withdrawal_requests(&bitcoin_block.block_hash, context_window)
+        .get_swept_withdrawal_requests(
+            &bitcoin_block.block_hash,
+            &stacks_block.block_hash,
+            context_window,
+        )
         .await
         .unwrap();
     assert!(requests.is_empty());
@@ -2566,8 +2609,9 @@ async fn get_swept_deposit_requests_does_not_return_unswept_deposit_requests() {
     let chain_tip = setup.sweep_block_hash.into();
     let context_window = 20;
 
+    let stacks_chain_tip = setup.stacks_genesis_block.block_hash;
     let requests = db
-        .get_swept_deposit_requests(&chain_tip, context_window)
+        .get_swept_deposit_requests(&chain_tip, &stacks_chain_tip, context_window)
         .await
         .unwrap();
 
@@ -2650,8 +2694,14 @@ async fn get_swept_deposit_requests_does_not_return_deposit_requests_with_respon
         .unwrap();
 
     // First, let's check we get both deposits
+    let stacks_chain_tip = db
+        .get_stacks_chain_tip(&chain_tip)
+        .await
+        .unwrap()
+        .unwrap()
+        .block_hash;
     let requests = db
-        .get_swept_deposit_requests(&chain_tip, context_window)
+        .get_swept_deposit_requests(&chain_tip, &stacks_chain_tip, context_window)
         .await
         .unwrap();
 
@@ -2683,7 +2733,7 @@ async fn get_swept_deposit_requests_does_not_return_deposit_requests_with_respon
     db.write_completed_deposit_event(&event).await.unwrap();
 
     let requests = db
-        .get_swept_deposit_requests(&chain_tip, context_window)
+        .get_swept_deposit_requests(&chain_tip, &stacks_chain_tip, context_window)
         .await
         .unwrap();
 
@@ -2714,8 +2764,16 @@ async fn get_swept_deposit_requests_does_not_return_deposit_requests_with_respon
     };
     db.write_completed_deposit_event(&event).await.unwrap();
 
+    // We've written more stacks blocks to the database, so let's get the
+    // chain tip again.
+    let stacks_chain_tip = db
+        .get_stacks_chain_tip(&chain_tip)
+        .await
+        .unwrap()
+        .unwrap()
+        .block_hash;
     let requests = db
-        .get_swept_deposit_requests(&chain_tip, context_window)
+        .get_swept_deposit_requests(&chain_tip, &stacks_chain_tip, context_window)
         .await
         .unwrap();
 
@@ -2847,7 +2905,11 @@ async fn get_swept_withdrawal_requests_does_not_return_withdrawal_requests_with_
     // Before we write corresponding withdrawal accept event query should return 1 request
     let context_window = 20;
     let requests = db
-        .get_swept_withdrawal_requests(&bitcoin_block.block_hash, context_window)
+        .get_swept_withdrawal_requests(
+            &bitcoin_block.block_hash,
+            &stacks_block.block_hash,
+            context_window,
+        )
         .await
         .unwrap();
     assert_eq!(requests.len(), 1);
@@ -2856,7 +2918,11 @@ async fn get_swept_withdrawal_requests_does_not_return_withdrawal_requests_with_
 
     // Since we have corresponding withdrawal accept event query should return nothing
     let requests = db
-        .get_swept_withdrawal_requests(&bitcoin_block.block_hash, context_window)
+        .get_swept_withdrawal_requests(
+            &bitcoin_block.block_hash,
+            &stacks_block.block_hash,
+            context_window,
+        )
         .await
         .unwrap();
     assert!(requests.is_empty());
@@ -2872,7 +2938,11 @@ async fn get_swept_withdrawal_requests_does_not_return_withdrawal_requests_with_
         .unwrap();
 
     let requests = db
-        .get_swept_withdrawal_requests(&bitcoin_block.block_hash, context_window)
+        .get_swept_withdrawal_requests(
+            &bitcoin_block.block_hash,
+            &stacks_block.block_hash,
+            context_window,
+        )
         .await
         .unwrap();
     assert!(requests.is_empty());
@@ -2986,7 +3056,7 @@ async fn get_swept_deposit_requests_response_tx_reorged() {
 
     // First, let's check we get the deposit
     let requests = db
-        .get_swept_deposit_requests(&chain_tip, context_window)
+        .get_swept_deposit_requests(&chain_tip, &stacks_tip.block_hash, context_window)
         .await
         .unwrap();
     assert_eq!(requests.len(), 1);
@@ -3013,7 +3083,7 @@ async fn get_swept_deposit_requests_response_tx_reorged() {
 
     // The deposit should be confirmed now
     let requests = db
-        .get_swept_deposit_requests(&chain_tip, context_window)
+        .get_swept_deposit_requests(&chain_tip, &original_event_block.block_hash, context_window)
         .await
         .unwrap();
 
@@ -3023,7 +3093,11 @@ async fn get_swept_deposit_requests_response_tx_reorged() {
     // and the complete deposit event is no longer in the canonical chain.
     // The deposit should no longer be confirmed.
     let requests = db
-        .get_swept_deposit_requests(&setup.sweep_block_hash.into(), context_window)
+        .get_swept_deposit_requests(
+            &setup.sweep_block_hash.into(),
+            &stacks_tip.block_hash,
+            context_window,
+        )
         .await
         .unwrap();
 
@@ -3093,17 +3167,17 @@ async fn get_swept_deposit_requests_boundary() {
 
     // The event is anchored to the deposit block, that is before the sweep
     // block
-    let event_block = StacksBlock {
+    let stacks_tip = StacksBlock {
         block_hash: fake::Faker.fake_with_rng(&mut rng),
         block_height: stacks_tip.block_height + 1,
         parent_hash: stacks_tip.block_hash,
         bitcoin_anchor: setup.deposit_block_hash.into(),
     };
-    db.write_stacks_block(&event_block).await.unwrap();
+    db.write_stacks_block(&stacks_tip).await.unwrap();
 
     // First, let's check we get the deposit
     let requests = db
-        .get_swept_deposit_requests(&chain_tip, context_window)
+        .get_swept_deposit_requests(&chain_tip, &stacks_tip.block_hash, context_window)
         .await
         .unwrap();
 
@@ -3112,7 +3186,7 @@ async fn get_swept_deposit_requests_boundary() {
     // Store the complete deposit event
     let event = CompletedDepositEvent {
         txid: fake::Faker.fake_with_rng::<StacksTxId, _>(&mut rng),
-        block_id: event_block.block_hash,
+        block_id: stacks_tip.block_hash,
         amount: setup.deposit_request.amount,
         outpoint: setup.deposit_request.outpoint,
         sweep_block_hash: setup.sweep_block_hash.into(),
@@ -3123,7 +3197,7 @@ async fn get_swept_deposit_requests_boundary() {
 
     // And now the request is no longer swept (and pending confirmation)
     let requests = db
-        .get_swept_deposit_requests(&chain_tip, context_window)
+        .get_swept_deposit_requests(&chain_tip, &stacks_tip.block_hash, context_window)
         .await
         .unwrap();
 
@@ -3136,7 +3210,7 @@ async fn get_swept_deposit_requests_boundary() {
         let chain_tip = fetch_canonical_bitcoin_blockchain(&db, rpc).await;
 
         let requests = db
-            .get_swept_deposit_requests(&chain_tip, context_window)
+            .get_swept_deposit_requests(&chain_tip, &stacks_tip.block_hash, context_window)
             .await
             .unwrap();
 
@@ -3149,7 +3223,7 @@ async fn get_swept_deposit_requests_boundary() {
     let chain_tip = fetch_canonical_bitcoin_blockchain(&db, rpc).await;
 
     let requests = db
-        .get_swept_deposit_requests(&chain_tip, context_window)
+        .get_swept_deposit_requests(&chain_tip, &stacks_tip.block_hash, context_window)
         .await
         .unwrap();
 
@@ -3303,7 +3377,11 @@ async fn get_swept_withdrawal_requests_response_tx_reorged(setup_tables: SetupTa
     // since this withdrawal was accepted get_swept_withdrawal_requests should return nothing
     let context_window = 20;
     let requests = db
-        .get_swept_withdrawal_requests(&new_block.block_hash, context_window)
+        .get_swept_withdrawal_requests(
+            &new_block.block_hash,
+            &original_event_block.block_hash,
+            context_window,
+        )
         .await
         .unwrap();
     assert!(requests.is_empty());
@@ -3312,7 +3390,11 @@ async fn get_swept_withdrawal_requests_response_tx_reorged(setup_tables: SetupTa
     // and the accept withdrawal event is no longer in the canonical chain.
     // The withdrawal should no longer be confirmed.
     let requests = db
-        .get_swept_withdrawal_requests(&bitcoin_block.block_hash, context_window)
+        .get_swept_withdrawal_requests(
+            &bitcoin_block.block_hash,
+            &stacks_block.block_hash,
+            context_window,
+        )
         .await
         .unwrap();
 
@@ -6896,6 +6978,7 @@ mod get_pending_accepted_withdrawal_requests {
         let bitcoin_block = BitcoinBlock::new_genesis();
         // Stacks blocks:
         let stacks_block = StacksBlock::new_genesis().anchored_to(&bitcoin_block);
+        let stacks_chain_tip = stacks_block.block_hash;
 
         // Write our blocks.
         db.write_blocks([&bitcoin_block], [&stacks_block]).await;
@@ -6905,7 +6988,12 @@ mod get_pending_accepted_withdrawal_requests {
 
         // Ensure that the request is considered "pending".
         let requests = db
-            .get_pending_withdrawal_requests(&bitcoin_block.block_hash, 1_000, &Faker.fake())
+            .get_pending_withdrawal_requests(
+                &bitcoin_block.block_hash,
+                &stacks_chain_tip,
+                1_000,
+                &Faker.fake(),
+            )
             .await
             .expect("failed to query db");
         assert_eq!(requests.len(), 1);

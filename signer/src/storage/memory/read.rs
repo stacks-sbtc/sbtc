@@ -224,12 +224,13 @@ impl DbRead for SharedStore {
 
     async fn get_pending_withdrawal_requests(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+        _: &model::StacksBlockHash,
         context_window: u16,
         signer_public_key: &PublicKey,
     ) -> Result<Vec<model::WithdrawalRequest>, Error> {
         let store = self.lock().await;
-        let withdrawal_requests = store.get_withdrawal_requests(chain_tip, context_window);
+        let withdrawal_requests = store.get_withdrawal_requests(bitcoin_chain_tip, context_window);
 
         // These are the withdrawal requests that this signer has voted on.
         let voted: HashSet<(u64, model::StacksBlockHash)> = store
@@ -385,7 +386,7 @@ impl DbRead for SharedStore {
 
     async fn key_rotation_exists(
         &self,
-        _chain_tip: &model::BitcoinBlockHash,
+        _stacks_chain_tip: &model::StacksBlockHash,
         _signer_set: &BTreeSet<PublicKey>,
         _aggregate_key: &PublicKey,
         _signatures_required: u16,
@@ -640,7 +641,8 @@ impl DbRead for SharedStore {
 
     async fn get_swept_deposit_requests(
         &self,
-        _chain_tip: &model::BitcoinBlockHash,
+        _bitcoin_chain_tip: &model::BitcoinBlockHash,
+        _stacks_chain_tip: &model::StacksBlockHash,
         _context_window: u16,
     ) -> Result<Vec<model::SweptDepositRequest>, Error> {
         unimplemented!("can only be tested using integration tests for now.");
@@ -648,7 +650,8 @@ impl DbRead for SharedStore {
 
     async fn get_swept_withdrawal_requests(
         &self,
-        _chain_tip: &model::BitcoinBlockHash,
+        _bitcoin_chain_tip: &model::BitcoinBlockHash,
+        _stacks_chain_tip: &model::StacksBlockHash,
         _context_window: u16,
     ) -> Result<Vec<model::SweptWithdrawalRequest>, Error> {
         unimplemented!("can only be tested using integration tests for now.");
@@ -915,12 +918,18 @@ impl DbRead for InMemoryTransaction {
 
     async fn get_pending_withdrawal_requests(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+        stacks_chain_tip: &model::StacksBlockHash,
         context_window: u16,
         signer_public_key: &PublicKey,
     ) -> Result<Vec<model::WithdrawalRequest>, Error> {
         self.store
-            .get_pending_withdrawal_requests(chain_tip, context_window, signer_public_key)
+            .get_pending_withdrawal_requests(
+                bitcoin_chain_tip,
+                stacks_chain_tip,
+                context_window,
+                signer_public_key,
+            )
             .await
     }
 
@@ -1030,13 +1039,18 @@ impl DbRead for InMemoryTransaction {
 
     async fn key_rotation_exists(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
+        stacks_chain_tip: &model::StacksBlockHash,
         signer_set: &BTreeSet<PublicKey>,
         aggregate_key: &PublicKey,
         signatures_required: u16,
     ) -> Result<bool, Error> {
         self.store
-            .key_rotation_exists(chain_tip, signer_set, aggregate_key, signatures_required)
+            .key_rotation_exists(
+                stacks_chain_tip,
+                signer_set,
+                aggregate_key,
+                signatures_required,
+            )
             .await
     }
 
@@ -1116,21 +1130,23 @@ impl DbRead for InMemoryTransaction {
 
     async fn get_swept_deposit_requests(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+        stacks_chain_tip: &model::StacksBlockHash,
         context_window: u16,
     ) -> Result<Vec<model::SweptDepositRequest>, Error> {
         self.store
-            .get_swept_deposit_requests(chain_tip, context_window)
+            .get_swept_deposit_requests(bitcoin_chain_tip, stacks_chain_tip, context_window)
             .await
     }
 
     async fn get_swept_withdrawal_requests(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+        stacks_chain_tip: &model::StacksBlockHash,
         context_window: u16,
     ) -> Result<Vec<model::SweptWithdrawalRequest>, Error> {
         self.store
-            .get_swept_withdrawal_requests(chain_tip, context_window)
+            .get_swept_withdrawal_requests(bitcoin_chain_tip, stacks_chain_tip, context_window)
             .await
     }
 

@@ -143,7 +143,7 @@ pub struct TestSweepSetup {
     /// the signatures required on stacks.
     pub signatures_required: u16,
     /// The hash of the first stacks block.
-    pub stacks_genesis_block: model::StacksBlockHash,
+    pub stacks_genesis_block: model::StacksBlock,
 }
 
 impl TestSweepSetup {
@@ -260,7 +260,12 @@ impl TestSweepSetup {
             withdrawal_request: requests.withdrawals.pop().unwrap(),
             withdrawal_sender: PrincipalData::from(StacksAddress::burn_address(false)),
             signatures_required: 2,
-            stacks_genesis_block: Faker.fake_with_rng(rng),
+            stacks_genesis_block: model::StacksBlock {
+                block_hash: Faker.fake_with_rng(rng),
+                block_height: 0u64.into(),
+                parent_hash: StacksBlockId::first_mined().into(),
+                bitcoin_anchor: sweep_block_hash.into(),
+            },
         }
     }
 
@@ -277,13 +282,9 @@ impl TestSweepSetup {
     /// Store a stacks genesis block that is on the canonical Stacks
     /// blockchain identified by the sweep chain tip.
     pub async fn store_stacks_genesis_block(&self, db: &PgStore) {
-        let block = model::StacksBlock {
-            block_hash: self.stacks_genesis_block,
-            block_height: 0u64.into(),
-            parent_hash: StacksBlockId::first_mined().into(),
-            bitcoin_anchor: self.sweep_block_hash.into(),
-        };
-        db.write_stacks_block(&block).await.unwrap();
+        db.write_stacks_block(&self.stacks_genesis_block)
+            .await
+            .unwrap();
     }
 
     /// Store the deposit transaction into the database
@@ -420,7 +421,7 @@ impl TestSweepSetup {
 
         let event = KeyRotationEvent {
             txid: fake::Faker.fake(),
-            block_hash: self.stacks_genesis_block,
+            block_hash: self.stacks_genesis_block.block_hash,
             aggregate_key: self.aggregated_signer.keypair.public_key().into(),
             signer_set,
             signatures_required: self.signatures_required,

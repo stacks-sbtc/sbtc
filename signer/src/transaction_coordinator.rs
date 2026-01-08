@@ -788,8 +788,14 @@ where
         // on the blockchain identified by the chain tip, where an input is
         // the deposit UTXO.
 
+        let stacks_chain_tip = self
+            .context
+            .state()
+            .stacks_chain_tip()
+            .ok_or(Error::NoStacksChainTip)?
+            .block_hash;
         let swept_deposits = db
-            .get_swept_deposit_requests(chain_tip.as_ref(), self.context_window)
+            .get_swept_deposit_requests(chain_tip.as_ref(), &stacks_chain_tip, self.context_window)
             .await?;
 
         if swept_deposits.is_empty() {
@@ -874,11 +880,21 @@ where
         bitcoin_aggregate_key: &PublicKey,
     ) -> Result<(), Error> {
         let db = self.context.get_storage();
+        let stacks_chain_tip = self
+            .context
+            .state()
+            .stacks_chain_tip()
+            .ok_or(Error::NoStacksChainTip)?
+            .block_hash;
 
         // Fetch withdrawal requests from the database where there has been
         // a confirmed bitcoin transaction associated with the request.
         let swept_withdrawals = db
-            .get_swept_withdrawal_requests(&chain_tip.block_hash, self.context_window)
+            .get_swept_withdrawal_requests(
+                &chain_tip.block_hash,
+                &stacks_chain_tip,
+                self.context_window,
+            )
             .await
             .inspect_err(|error| tracing::error!(%error, "could not fetch swept withdrawals"))
             .unwrap_or_default();
