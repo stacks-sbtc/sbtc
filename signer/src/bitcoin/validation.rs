@@ -20,7 +20,7 @@ use crate::context::SbtcLimits;
 use crate::error::Error;
 use crate::keys::PublicKey;
 use crate::message::BitcoinPreSignRequest;
-use crate::storage::DbRead;
+use crate::storage::DbRead as _;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::BitcoinTxId;
