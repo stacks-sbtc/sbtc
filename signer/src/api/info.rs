@@ -185,7 +185,7 @@ impl InfoResponse {
                         });
                     }
                     None => {
-                        tracing::debug!("no local stacks tip found in the database.");
+                        tracing::debug!("no local stacks tip found in the signer's state");
                     }
                 }
             }
