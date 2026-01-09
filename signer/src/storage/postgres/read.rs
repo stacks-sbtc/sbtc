@@ -1466,20 +1466,15 @@ impl PgRead {
 
     async fn get_pending_rejected_withdrawal_requests<'e, E>(
         executor: &'e mut E,
-        chain_tip: &model::BitcoinBlockRef,
+        bitcoin_chain_tip: &model::BitcoinBlockRef,
+        stacks_chain_tip: &model::StacksBlockHash,
         context_window: u16,
     ) -> Result<Vec<model::WithdrawalRequest>, Error>
     where
         E: 'static,
         for<'c> &'c mut E: sqlx::PgExecutor<'c>,
     {
-        let Some(stacks_chain_tip) =
-            Self::get_stacks_chain_tip(executor, &chain_tip.block_hash).await?
-        else {
-            return Ok(Vec::new());
-        };
-
-        let expiration_height = chain_tip
+        let expiration_height = bitcoin_chain_tip
             .block_height
             .saturating_sub(WITHDRAWAL_BLOCKS_EXPIRY);
 
@@ -1568,9 +1563,9 @@ impl PgRead {
             AND COUNT(sc2.block_hash) = 0
             "#,
         )
-        .bind(chain_tip.block_hash)
+        .bind(bitcoin_chain_tip.block_hash)
         .bind(i32::from(context_window))
-        .bind(stacks_chain_tip.block_hash)
+        .bind(stacks_chain_tip)
         .bind(i64::try_from(expiration_height).map_err(Error::ConversionDatabaseInt)?)
         .fetch_all(executor)
         .await
@@ -2780,12 +2775,14 @@ impl DbRead for PgStore {
 
     async fn get_pending_rejected_withdrawal_requests(
         &self,
-        chain_tip: &model::BitcoinBlockRef,
+        bitcoin_chain_tip: &model::BitcoinBlockRef,
+        stacks_chain_tip: &model::StacksBlockHash,
         context_window: u16,
     ) -> Result<Vec<model::WithdrawalRequest>, Error> {
         PgRead::get_pending_rejected_withdrawal_requests(
             self.get_connection().await?.as_mut(),
-            chain_tip,
+            bitcoin_chain_tip,
+            stacks_chain_tip,
             context_window,
         )
         .await
@@ -3220,12 +3217,14 @@ impl DbRead for PgTransaction<'_> {
 
     async fn get_pending_rejected_withdrawal_requests(
         &self,
-        chain_tip: &model::BitcoinBlockRef,
+        bitcoin_chain_tip: &model::BitcoinBlockRef,
+        stacks_chain_tip: &model::StacksBlockHash,
         context_window: u16,
     ) -> Result<Vec<model::WithdrawalRequest>, Error> {
         PgRead::get_pending_rejected_withdrawal_requests(
             self.tx.lock().await.as_mut(),
-            chain_tip,
+            bitcoin_chain_tip,
+            stacks_chain_tip,
             context_window,
         )
         .await

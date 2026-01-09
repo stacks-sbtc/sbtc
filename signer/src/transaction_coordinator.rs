@@ -902,7 +902,11 @@ where
         // Fetch withdrawal requests that have not been swept for quite
         // some time.
         let rejected_withdrawals = db
-            .get_pending_rejected_withdrawal_requests(chain_tip, self.context_window)
+            .get_pending_rejected_withdrawal_requests(
+                chain_tip,
+                &stacks_chain_tip,
+                self.context_window,
+            )
             .await
             .inspect_err(|error| tracing::error!(%error, "could not fetch rejected withdrawals"))
             .unwrap_or_default();

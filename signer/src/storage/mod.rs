@@ -243,7 +243,8 @@ pub trait DbRead {
     /// rejected yet
     fn get_pending_rejected_withdrawal_requests(
         &self,
-        chain_tip: &model::BitcoinBlockRef,
+        bitcoin_chain_tip: &model::BitcoinBlockRef,
+        stacks_chain_tip: &model::StacksBlockHash,
         context_window: u16,
     ) -> impl Future<Output = Result<Vec<model::WithdrawalRequest>, Error>> + Send;
 

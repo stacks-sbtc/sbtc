@@ -5284,7 +5284,11 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
     assert!(
         context
             .get_storage()
-            .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, context_window)
+            .get_pending_rejected_withdrawal_requests(
+                &bitcoin_chain_tip,
+                &stacks_chain_tip,
+                context_window
+            )
             .await
             .unwrap()
             .is_empty()
@@ -5304,7 +5308,11 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
     assert_eq!(
         context
             .get_storage()
-            .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, context_window)
+            .get_pending_rejected_withdrawal_requests(
+                &bitcoin_chain_tip,
+                &stacks_chain_tip,
+                context_window
+            )
             .await
             .unwrap()
             .single(),

@@ -264,7 +264,8 @@ impl DbRead for SharedStore {
 
     async fn get_pending_rejected_withdrawal_requests(
         &self,
-        _chain_tip: &model::BitcoinBlockRef,
+        _bitcoin_chain_tip: &model::BitcoinBlockRef,
+        _stacks_chain_tip: &model::StacksBlockHash,
         _context_window: u16,
     ) -> Result<Vec<model::WithdrawalRequest>, Error> {
         unimplemented!()
@@ -952,11 +953,16 @@ impl DbRead for InMemoryTransaction {
 
     async fn get_pending_rejected_withdrawal_requests(
         &self,
-        chain_tip: &model::BitcoinBlockRef,
+        bitcoin_chain_tip: &model::BitcoinBlockRef,
+        stacks_chain_tip: &model::StacksBlockHash,
         context_window: u16,
     ) -> Result<Vec<model::WithdrawalRequest>, Error> {
         self.store
-            .get_pending_rejected_withdrawal_requests(chain_tip, context_window)
+            .get_pending_rejected_withdrawal_requests(
+                bitcoin_chain_tip,
+                stacks_chain_tip,
+                context_window,
+            )
             .await
     }
 

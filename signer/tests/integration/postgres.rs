@@ -5409,17 +5409,21 @@ async fn pending_rejected_withdrawal_no_events() {
         bitcoin_chain_tip = new_block.into();
     }
 
-    let pending_rejected = db
-        .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, context_window)
-        .await
-        .expect("failed to get pending rejected withdrawals");
-    assert!(!pending_rejected.is_empty());
-
     let stacks_chain_tip = db
         .get_stacks_chain_tip(&bitcoin_chain_tip.block_hash)
         .await
         .expect("failed to get stacks chain tip")
-        .expect("no chain tip");
+        .expect("no chain tip")
+        .block_hash;
+    let pending_rejected = db
+        .get_pending_rejected_withdrawal_requests(
+            &bitcoin_chain_tip,
+            &stacks_chain_tip,
+            context_window,
+        )
+        .await
+        .expect("failed to get pending rejected withdrawals");
+    assert!(!pending_rejected.is_empty());
 
     let mut non_expired = 0;
     for withdrawal in test_data.withdraw_requests {
@@ -5438,7 +5442,7 @@ async fn pending_rejected_withdrawal_no_events() {
 
         let in_canonical_stacks = db
             .in_canonical_stacks_blockchain(
-                &stacks_chain_tip.block_hash,
+                &stacks_chain_tip,
                 &stacks_block.block_hash,
                 stacks_block.block_height,
             )
@@ -5507,11 +5511,7 @@ async fn pending_rejected_withdrawal_expiration() {
     // Append new blocks up to WITHDRAWAL_BLOCKS_EXPIRY, checking that the
     // request is not considered expired
     for _ in request_confirmations..WITHDRAWAL_BLOCKS_EXPIRY as usize {
-        let bitcoin_chain_tip = db
-            .get_bitcoin_canonical_chain_tip_ref()
-            .await
-            .expect("failed to get canonical chain tip")
-            .expect("no chain tip");
+        let (bitcoin_chain_tip, stacks_chain_tip) = db.get_chain_tips().await;
 
         let new_block = BitcoinBlock {
             block_hash: fake::Faker.fake_with_rng(&mut rng),
@@ -5527,7 +5527,7 @@ async fn pending_rejected_withdrawal_expiration() {
 
         // Check that now we do get it as rejected
         let pending_rejected = db
-            .get_pending_rejected_withdrawal_requests(&new_block.into(), 1000)
+            .get_pending_rejected_withdrawal_requests(&new_block.into(), &stacks_chain_tip, 1000)
             .await
             .expect("failed to get pending rejected withdrawals");
 
@@ -5535,11 +5535,7 @@ async fn pending_rejected_withdrawal_expiration() {
     }
 
     // Append one last block, reaching WITHDRAWAL_BLOCKS_EXPIRY
-    let bitcoin_chain_tip = db
-        .get_bitcoin_canonical_chain_tip_ref()
-        .await
-        .expect("failed to get canonical chain tip")
-        .expect("no chain tip");
+    let (bitcoin_chain_tip, stacks_chain_tip) = db.get_chain_tips().await;
 
     let new_block = BitcoinBlock {
         block_hash: fake::Faker.fake_with_rng(&mut rng),
@@ -5555,7 +5551,7 @@ async fn pending_rejected_withdrawal_expiration() {
 
     // Check that now we do get it as rejected
     let pending_rejected = db
-        .get_pending_rejected_withdrawal_requests(&new_block.into(), 1000)
+        .get_pending_rejected_withdrawal_requests(&new_block.into(), &stacks_chain_tip, 1000)
         .await
         .expect("failed to get pending rejected withdrawals");
 
@@ -5606,14 +5602,9 @@ async fn pending_rejected_withdrawal_rejected_already_rejected() {
     db.write_withdrawal_request(&request).await.unwrap();
 
     // First, check that the request is pending rejected
-    let bitcoin_chain_tip = db
-        .get_bitcoin_canonical_chain_tip_ref()
-        .await
-        .expect("failed to get canonical chain tip")
-        .expect("no chain tip");
-
+    let (bitcoin_chain_tip, stacks_chain_tip) = db.get_chain_tips().await;
     let pending_rejected = db
-        .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, 1000)
+        .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, &stacks_chain_tip, 1000)
         .await
         .expect("failed to get pending rejected withdrawals");
 
@@ -5647,10 +5638,11 @@ async fn pending_rejected_withdrawal_rejected_already_rejected() {
         .get_stacks_chain_tip(&bitcoin_chain_tip.block_hash)
         .await
         .unwrap()
-        .unwrap();
+        .unwrap()
+        .block_hash;
     assert!(
         db.in_canonical_stacks_blockchain(
-            &stacks_chain_tip.block_hash,
+            &stacks_chain_tip,
             &fork_base.block_hash,
             fork_base.block_height
         )
@@ -5659,7 +5651,7 @@ async fn pending_rejected_withdrawal_rejected_already_rejected() {
     );
     assert!(
         !db.in_canonical_stacks_blockchain(
-            &stacks_chain_tip.block_hash,
+            &stacks_chain_tip,
             &forked_stacks_block.block_hash,
             forked_stacks_block.block_height
         )
@@ -5676,7 +5668,7 @@ async fn pending_rejected_withdrawal_rejected_already_rejected() {
 
     // With a forked rejection event, the request is still pending rejected
     let pending_rejected = db
-        .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, 1000)
+        .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, &stacks_chain_tip, 1000)
         .await
         .expect("failed to get pending rejected withdrawals");
 
@@ -5693,7 +5685,7 @@ async fn pending_rejected_withdrawal_rejected_already_rejected() {
 
     // With a confirmed rejection event, we should no longer get the request
     let pending_rejected = db
-        .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, 1000)
+        .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, &stacks_chain_tip, 1000)
         .await
         .expect("failed to get pending rejected withdrawals");
 
@@ -5750,9 +5742,14 @@ async fn pending_rejected_withdrawal_already_accepted(setup_tables: SetupTables)
         .await
         .expect("failed to get canonical chain tip")
         .expect("no chain tip");
-
+    let stacks_chain_tip = db
+        .get_stacks_chain_tip(&bitcoin_chain_tip.block_hash)
+        .await
+        .expect("failed to get stacks chain tip")
+        .expect("no chain tip")
+        .block_hash;
     let pending_rejected = db
-        .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, 1000)
+        .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, &stacks_chain_tip, 1000)
         .await
         .expect("failed to get pending rejected withdrawals");
 
@@ -5833,9 +5830,16 @@ async fn pending_rejected_withdrawal_already_accepted(setup_tables: SetupTables)
             .unwrap()
     );
 
+    // The bitcoin chain tip has changed so we have a new stacks chain tip
+    let stacks_chain_tip = db
+        .get_stacks_chain_tip(&bitcoin_chain_tip.block_hash)
+        .await
+        .expect("failed to get stacks chain tip")
+        .expect("no chain tip")
+        .block_hash;
     // With a forked withdrawal output, the request is still pending rejected
     let pending_rejected = db
-        .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, 1000)
+        .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, &stacks_chain_tip, 1000)
         .await
         .expect("failed to get pending rejected withdrawals");
     assert_eq!(&pending_rejected.single(), &request);
@@ -5852,7 +5856,7 @@ async fn pending_rejected_withdrawal_already_accepted(setup_tables: SetupTables)
 
     // The output is not confirmed yet, so it shouldn't affect the request
     let pending_rejected = db
-        .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, 1000)
+        .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, &stacks_chain_tip, 1000)
         .await
         .expect("failed to get pending rejected withdrawals");
     assert_eq!(&pending_rejected.single(), &request);
@@ -5867,7 +5871,7 @@ async fn pending_rejected_withdrawal_already_accepted(setup_tables: SetupTables)
 
     // With a confirmed withdrawal output, we should no longer get the request
     let pending_rejected = db
-        .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, 1000)
+        .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, &stacks_chain_tip, 1000)
         .await
         .expect("failed to get pending rejected withdrawals");
     assert!(pending_rejected.is_empty());
