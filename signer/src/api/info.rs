@@ -428,6 +428,9 @@ mod tests {
             ..Faker.fake()
         };
         storage.write_stacks_block(&stacks_block).await.unwrap();
+        context
+            .state()
+            .set_stacks_chain_tip(stacks_block.clone().into());
 
         let state = State(ApiState { ctx: context.clone() });
         let result = info_handler(state).await;
