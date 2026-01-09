@@ -16,7 +16,10 @@ use crate::{
     keys::{PublicKey, PublicKeyXOnly},
     storage::{
         DbRead,
-        model::{self, BitcoinBlockHash, BitcoinBlockHeight, StacksBlockHash, StacksBlockHeight},
+        model::{
+            self, BitcoinBlockHash, BitcoinBlockHeight, BitcoinBlockRef, StacksBlockHash,
+            StacksBlockHeight,
+        },
     },
 };
 
@@ -1319,8 +1322,8 @@ impl PgRead {
 
     async fn get_pending_accepted_withdrawal_requests<'e, E>(
         executor: &'e mut E,
-        bitcoin_chain_tip: &model::BitcoinBlockHash,
-        stacks_chain_tip: &model::StacksBlockHash,
+        bitcoin_chain_tip: &BitcoinBlockHash,
+        stacks_chain_tip: &StacksBlockHash,
         min_bitcoin_height: BitcoinBlockHeight,
         signature_threshold: u16,
     ) -> Result<Vec<model::WithdrawalRequest>, Error>
@@ -1466,8 +1469,8 @@ impl PgRead {
 
     async fn get_pending_rejected_withdrawal_requests<'e, E>(
         executor: &'e mut E,
-        bitcoin_chain_tip: &model::BitcoinBlockRef,
-        stacks_chain_tip: &model::StacksBlockHash,
+        bitcoin_chain_tip: &BitcoinBlockRef,
+        stacks_chain_tip: &StacksBlockHash,
         context_window: u16,
     ) -> Result<Vec<model::WithdrawalRequest>, Error>
     where
@@ -2233,8 +2236,8 @@ impl PgRead {
 
     async fn get_swept_deposit_requests<'e, E>(
         executor: &'e mut E,
-        bitcoin_chain_tip: &model::BitcoinBlockHash,
-        stacks_chain_tip: &model::StacksBlockHash,
+        bitcoin_chain_tip: &BitcoinBlockHash,
+        stacks_chain_tip: &StacksBlockHash,
         context_window: u16,
     ) -> Result<Vec<model::SweptDepositRequest>, Error>
     where
@@ -2758,8 +2761,8 @@ impl DbRead for PgStore {
 
     async fn get_pending_accepted_withdrawal_requests(
         &self,
-        bitcoin_chain_tip: &model::BitcoinBlockHash,
-        stacks_chain_tip: &model::StacksBlockHash,
+        bitcoin_chain_tip: &BitcoinBlockHash,
+        stacks_chain_tip: &StacksBlockHash,
         min_bitcoin_height: BitcoinBlockHeight,
         signature_threshold: u16,
     ) -> Result<Vec<model::WithdrawalRequest>, Error> {
@@ -2775,8 +2778,8 @@ impl DbRead for PgStore {
 
     async fn get_pending_rejected_withdrawal_requests(
         &self,
-        bitcoin_chain_tip: &model::BitcoinBlockRef,
-        stacks_chain_tip: &model::StacksBlockHash,
+        bitcoin_chain_tip: &BitcoinBlockRef,
+        stacks_chain_tip: &StacksBlockHash,
         context_window: u16,
     ) -> Result<Vec<model::WithdrawalRequest>, Error> {
         PgRead::get_pending_rejected_withdrawal_requests(
@@ -2790,8 +2793,8 @@ impl DbRead for PgStore {
 
     async fn get_withdrawal_request_report(
         &self,
-        bitcoin_chain_tip: &model::BitcoinBlockHash,
-        stacks_chain_tip: &model::StacksBlockHash,
+        bitcoin_chain_tip: &BitcoinBlockHash,
+        stacks_chain_tip: &StacksBlockHash,
         id: &model::QualifiedRequestId,
         signer_public_key: &PublicKey,
     ) -> Result<Option<WithdrawalRequestReport>, Error> {
@@ -2872,7 +2875,7 @@ impl DbRead for PgStore {
 
     async fn key_rotation_exists(
         &self,
-        stacks_chain_tip: &model::StacksBlockHash,
+        stacks_chain_tip: &StacksBlockHash,
         signer_set: &BTreeSet<PublicKey>,
         aggregate_key: &PublicKey,
         signatures_required: u16,
@@ -3200,9 +3203,9 @@ impl DbRead for PgTransaction<'_> {
 
     async fn get_pending_accepted_withdrawal_requests(
         &self,
-        bitcoin_chain_tip: &model::BitcoinBlockHash,
-        stacks_chain_tip: &model::StacksBlockHash,
-        min_bitcoin_height: model::BitcoinBlockHeight,
+        bitcoin_chain_tip: &BitcoinBlockHash,
+        stacks_chain_tip: &StacksBlockHash,
+        min_bitcoin_height: BitcoinBlockHeight,
         signature_threshold: u16,
     ) -> Result<Vec<model::WithdrawalRequest>, Error> {
         PgRead::get_pending_accepted_withdrawal_requests(
@@ -3217,8 +3220,8 @@ impl DbRead for PgTransaction<'_> {
 
     async fn get_pending_rejected_withdrawal_requests(
         &self,
-        bitcoin_chain_tip: &model::BitcoinBlockRef,
-        stacks_chain_tip: &model::StacksBlockHash,
+        bitcoin_chain_tip: &BitcoinBlockRef,
+        stacks_chain_tip: &StacksBlockHash,
         context_window: u16,
     ) -> Result<Vec<model::WithdrawalRequest>, Error> {
         PgRead::get_pending_rejected_withdrawal_requests(
