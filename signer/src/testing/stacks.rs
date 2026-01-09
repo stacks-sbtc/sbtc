@@ -60,6 +60,13 @@ impl TenureBlockHeaders {
     }
 
     /// Create TenureBlockHeaders with a given anchor block.
+    ///
+    /// # Notes
+    ///
+    /// We do not set the bitcoin block height in any of these testing
+    /// functions, because our tests often need the stacks anchor height to
+    /// be before the nakamoto start height. This is because our Stacks
+    /// block update logic stops at the nakamoto start height.
     pub fn from_anchor<T>(anchor: T) -> Self
     where
         T: Into<BitcoinBlockRef>,
@@ -69,7 +76,6 @@ impl TenureBlockHeaders {
         let anchor = anchor.into();
         let mut sortition_info = DUMMY_SORTITION_INFO.clone();
         sortition_info.burn_block_hash = anchor.block_hash.into();
-        sortition_info.burn_block_height = *anchor.block_height;
 
         Self::try_new(vec![header], sortition_info).unwrap()
     }
