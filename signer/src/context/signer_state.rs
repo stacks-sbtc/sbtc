@@ -30,8 +30,9 @@ pub struct SignerState {
     // The current bitcoin chain tip. This gets updated at the end of the
     // block observer's duties when it observes a new bitcoin block.
     bitcoin_chain_tip: RwLock<Option<BitcoinBlockRef>>,
-    // The current stacks chain tip. This gets updated at the end of the
-    // block observer's duties when it observes a new stacks block.
+    // The current stacks chain tip that is anchored to the current bitcoin
+    // chain tip. This gets updated at the end of the block observer's
+    // duties when it observes a new bitcoin block.
     stacks_chain_tip: RwLock<Option<StacksBlockRef>>,
 }
 
