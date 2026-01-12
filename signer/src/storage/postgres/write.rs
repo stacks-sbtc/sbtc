@@ -1053,7 +1053,7 @@ impl PgWrite {
         .map(|maybe_height| maybe_height.unwrap_or(0))
     }
 
-    async fn update_bitcoin_blocks_canonical_status<'e, E>(
+    async fn set_canonical_bitcoin_blockchain<'e, E>(
         executor: &'e mut E,
         chain_tip: &model::BitcoinBlockRef,
     ) -> Result<(), Error>
@@ -1071,7 +1071,7 @@ impl PgWrite {
         // Build canonical chain and mark those blocks as canonical.
         sqlx::query(
             r#"
-            -- update_bitcoin_blocks_canonical_status
+            -- set_canonical_bitcoin_blockchain
             WITH RECURSIVE canonical_chain AS (
                 -- Start from the chain tip
                 SELECT
@@ -1270,15 +1270,12 @@ impl DbWrite for PgStore {
         .await
     }
 
-    async fn update_bitcoin_blocks_canonical_status(
+    async fn set_canonical_bitcoin_blockchain(
         &self,
         chain_tip: &model::BitcoinBlockRef,
     ) -> Result<(), Error> {
-        PgWrite::update_bitcoin_blocks_canonical_status(
-            self.get_connection().await?.as_mut(),
-            chain_tip,
-        )
-        .await
+        PgWrite::set_canonical_bitcoin_blockchain(self.get_connection().await?.as_mut(), chain_tip)
+            .await
     }
 }
 
@@ -1452,11 +1449,11 @@ impl DbWrite for PgTransaction<'_> {
         PgWrite::update_peer_connection(tx.as_mut(), pub_key, peer_id, address).await
     }
 
-    async fn update_bitcoin_blocks_canonical_status(
+    async fn set_canonical_bitcoin_blockchain(
         &self,
         chain_tip: &model::BitcoinBlockRef,
     ) -> Result<(), Error> {
         let mut tx = self.tx.lock().await;
-        PgWrite::update_bitcoin_blocks_canonical_status(tx.as_mut(), chain_tip).await
+        PgWrite::set_canonical_bitcoin_blockchain(tx.as_mut(), chain_tip).await
     }
 }

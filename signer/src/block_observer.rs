@@ -379,8 +379,7 @@ impl<C: Context, B> BlockObserver<C, B> {
             tracing::info!("updating block canonical status");
 
             let db = self.context.get_storage_mut();
-            db.update_bitcoin_blocks_canonical_status(&chain_tip)
-                .await?;
+            db.set_canonical_bitcoin_blockchain(&chain_tip).await?;
         }
 
         Ok(())

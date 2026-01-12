@@ -386,7 +386,7 @@ impl DbWrite for SharedStore {
         Ok(())
     }
 
-    async fn update_bitcoin_blocks_canonical_status(
+    async fn set_canonical_bitcoin_blockchain(
         &self,
         chain_tip: &model::BitcoinBlockRef,
     ) -> Result<(), Error> {
@@ -576,12 +576,10 @@ impl DbWrite for InMemoryTransaction {
             .await
     }
 
-    async fn update_bitcoin_blocks_canonical_status(
+    async fn set_canonical_bitcoin_blockchain(
         &self,
         chain_tip: &model::BitcoinBlockRef,
     ) -> Result<(), Error> {
-        self.store
-            .update_bitcoin_blocks_canonical_status(chain_tip)
-            .await
+        self.store.set_canonical_bitcoin_blockchain(chain_tip).await
     }
 }
