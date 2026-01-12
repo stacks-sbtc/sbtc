@@ -294,7 +294,8 @@ impl<C: Context, B> BlockObserver<C, B> {
     }
 
     /// Find the parent blocks from the given block that are also missing
-    /// from our database.
+    /// from our database. The results are returned from blocks with the
+    /// least height to the greatest height.
     ///
     /// # Notes
     ///
@@ -363,11 +364,23 @@ impl<C: Context, B> BlockObserver<C, B> {
     /// This means that if we stop processing blocks midway though,
     /// subsequent calls to this function will properly pick up from where
     /// we left off and update the database.
+    #[tracing::instrument(skip_all, fields(%block_hash))]
     async fn process_bitcoin_blocks_until(&self, block_hash: BlockHash) -> Result<(), Error> {
         let block_headers = self.next_headers_to_process(block_hash).await?;
 
+        // This should be the header for the above block hash.
+        let chain_tip = block_headers.last().cloned();
+
         for block_header in block_headers {
             self.process_bitcoin_block(block_header).await?;
+        }
+
+        if let Some(chain_tip) = chain_tip.map(BitcoinBlockRef::from) {
+            tracing::info!("updating block canonical status");
+
+            let db = self.context.get_storage_mut();
+            db.update_bitcoin_blocks_canonical_status(&chain_tip)
+                .await?;
         }
 
         Ok(())

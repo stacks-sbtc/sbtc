@@ -25,6 +25,7 @@ use url::Url;
 use crate::bitcoin::BitcoinInteract;
 use crate::error::Error;
 use crate::storage::model::BitcoinBlockHeight;
+use crate::storage::model::BitcoinBlockRef;
 
 use super::GetTransactionFeeResult;
 use super::TransactionLookupHint;
@@ -316,6 +317,14 @@ pub struct BitcoinBlockHeader {
     pub previous_block_hash: BlockHash,
 }
 
+impl From<BitcoinBlockHeader> for BitcoinBlockRef {
+    fn from(header: BitcoinBlockHeader) -> Self {
+        BitcoinBlockRef {
+            block_hash: header.hash.into(),
+            block_height: header.height,
+        }
+    }
+}
 /// A struct representing the recommended fee, in sats per vbyte, from a
 /// particular source.
 #[derive(Debug, Clone, Copy, PartialEq)]
