@@ -1284,7 +1284,7 @@ impl TestSweepSetup2 {
     }
 }
 
-/// Setup a new set of dynamodb tables for Emily
+/// Set up a new set of DynamoDB tables in Emily
 pub async fn new_emily_setup() -> (EmilyApiConfiguration, EmilyTables) {
     let tables = EmilyTables::new().await;
 
