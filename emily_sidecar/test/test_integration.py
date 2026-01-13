@@ -72,6 +72,7 @@ class IntegrationTests(unittest.TestCase):
     def setUp(self):
         # Wipe the state before each test
         requests.post(WIPE_URL, headers=headers)
+        # Show full diff between A and B if self.assertEqual(A, B) fails
         self.maxDiff = None
         self.app = client
         self.app.testing = True
