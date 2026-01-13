@@ -72,7 +72,6 @@ use signer::transaction_coordinator::should_run_dkg;
 use signer::transaction_signer::assert_allow_dkg_begin;
 use url::Url;
 
-use crate::bitcoin_forks::GenerateBlockJson;
 use crate::setup::IntoEmilyTestingConfig as _;
 use crate::setup::TestSweepSetup;
 use crate::setup::fetch_canonical_bitcoin_blockchain;
@@ -1866,6 +1865,11 @@ fn make_coinbase_deposit_request(
         lock_time: bitcoin::relative::LockTime::Blocks((reclaim_inputs.lock_time() as u16).into()),
     };
     (deposit_tx, req, info)
+}
+
+#[derive(serde::Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct GenerateBlockJson {
+    pub hash: bitcoin::BlockHash,
 }
 
 /// This test checks that the block observer marks the canonical status of
