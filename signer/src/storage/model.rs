@@ -196,13 +196,14 @@ impl StacksBlock {
     }
 }
 
-/// Stacks block ref
+/// A struct that references a specific stacks block is identifier and its
+/// position in the blockchain.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
 pub struct StacksBlockRef {
-    /// Block hash.
+    /// The stacks block ID. It uniquely identifies the stacks block.
     pub block_hash: StacksBlockHash,
-    /// Block height.
+    /// The height of the block in the stacks blockchain.
     pub block_height: StacksBlockHeight,
 }
 
