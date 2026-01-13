@@ -533,7 +533,7 @@ struct GetTenureHeadersApiResponse {
     /// The height of the bitcoin block that anchors the stacks blocks in the `stacks_blocks` field.
     #[serde(rename = "burn_block_height")]
     pub bitcoin_block_height: BitcoinBlockHeight,
-    /// The block hash of the bitcoin block that anchors the stacks blocks in the `stacks_blocks` field.```
+    /// The block hash of the bitcoin block that anchors the stacks blocks in the `stacks_blocks` field.
     #[serde(rename = "burn_block_hash")]
     pub bitcoin_block_hash: BitcoinBlockHash,
     /// List of stacks blocks, anchored to a bitcoin block.
