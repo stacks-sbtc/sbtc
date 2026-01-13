@@ -4,6 +4,7 @@ use std::ops::Deref as _;
 use bitcoin::hashes::Hash as _;
 use rand::rngs::OsRng;
 use rand::seq::SliceRandom as _;
+use signer::bitcoin::rpc::BitcoinCoreClient;
 use test_case::test_case;
 
 use sbtc::WITHDRAWAL_MIN_CONFIRMATIONS;
@@ -112,7 +113,8 @@ async fn one_tx_per_request_set() {
         is_deposit: true,
     }];
 
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
+    let mut setup =
+        TestSweepSetup2::new_setup(signers, BitcoinCoreClient::new_regtest(), faucet, &amounts);
     setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
     backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
 
@@ -217,7 +219,8 @@ async fn one_invalid_deposit_invalidates_tx() {
 
     // When making assertions below, we need to make sure that we're
     // comparing the right deposits transaction outputs, so we sort.
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
+    let mut setup =
+        TestSweepSetup2::new_setup(signers, BitcoinCoreClient::new_regtest(), faucet, &amounts);
     setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
     backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
 
@@ -369,7 +372,8 @@ async fn withdrawals_and_deposits_can_pass_validation(amounts: Vec<SweepAmounts>
 
     // When making assertions below, we need to make sure that we're
     // comparing the right deposits transaction outputs, so we sort.
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
+    let mut setup =
+        TestSweepSetup2::new_setup(signers, BitcoinCoreClient::new_regtest(), faucet, &amounts);
     setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
     backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
 
@@ -469,7 +473,8 @@ async fn swept_withdrawals_fail_validation() {
 
     // When making assertions below, we need to make sure that we're
     // comparing the right deposits transaction outputs, so we sort.
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
+    let mut setup =
+        TestSweepSetup2::new_setup(signers, BitcoinCoreClient::new_regtest(), faucet, &amounts);
     setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
     backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
 
@@ -484,7 +489,7 @@ async fn swept_withdrawals_fail_validation() {
     setup.store_withdrawal_decisions(&db).await;
 
     // Let's confirm a sweep transaction
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.submit_sweep_tx(faucet);
     setup.store_bitcoin_withdrawals_outputs(&db).await;
     setup.store_sweep_tx(&db).await;
 
@@ -585,7 +590,8 @@ async fn cannot_sign_deposit_is_ok() {
 
     // When making assertions below, we need to make sure that we're
     // comparing the right deposits transaction outputs, so we sort.
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
+    let mut setup =
+        TestSweepSetup2::new_setup(signers, BitcoinCoreClient::new_regtest(), faucet, &amounts);
     setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
     // Let's suppose that signer 0 cannot sign for the deposit, but that
     // they still accept the deposit. That means the bitmap at signer 0
@@ -749,7 +755,8 @@ async fn sighashes_match_from_sbtc_requests_object() {
         },
     ];
 
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
+    let mut setup =
+        TestSweepSetup2::new_setup(signers, BitcoinCoreClient::new_regtest(), faucet, &amounts);
     setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
     backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
 
@@ -893,7 +900,8 @@ async fn outcome_is_independent_of_input_order() {
         },
     ];
 
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
+    let mut setup =
+        TestSweepSetup2::new_setup(signers, BitcoinCoreClient::new_regtest(), faucet, &amounts);
     setup.deposits.sort_by_key(|(x, _, _)| x.outpoint);
     backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
 

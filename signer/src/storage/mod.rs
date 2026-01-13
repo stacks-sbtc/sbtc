@@ -25,6 +25,7 @@ use crate::bitcoin::validation::WithdrawalRequestReport;
 use crate::error::Error;
 use crate::keys::PublicKey;
 use crate::keys::PublicKeyXOnly;
+use crate::stacks::api::TenureBlockHeaders;
 use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::CompletedDepositEvent;
 use crate::storage::model::StacksBlockHash;
@@ -475,6 +476,7 @@ pub trait DbWrite {
     ) -> impl Future<Output = Result<(), Error>> + Send;
 
     /// Write a stacks block.
+    #[cfg(any(test, feature = "testing"))]
     fn write_stacks_block(
         &self,
         block: &model::StacksBlock,
@@ -525,7 +527,7 @@ pub trait DbWrite {
     /// Write the stacks block ids and their parent block ids.
     fn write_stacks_block_headers(
         &self,
-        headers: Vec<model::StacksBlock>,
+        headers: &TenureBlockHeaders,
     ) -> impl Future<Output = Result<(), Error>> + Send;
 
     /// Write encrypted DKG shares

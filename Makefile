@@ -26,7 +26,7 @@ install-pnpm:
 install: install-py install-pnpm
 
 build: blocklist-client-codegen emily-client-codegen contracts
-	cargo $(CARGO_FLAGS) build --all-targets $(CARGO_EXCLUDES) ${CARGO_BUILD_ARGS}
+	cargo $(CARGO_FLAGS) build --bins --lib $(CARGO_EXCLUDES) ${CARGO_BUILD_ARGS}
 
 test-py:
 	uv run --directory emily_cron python -m unittest discover
@@ -37,7 +37,7 @@ test:
 	make test-py
 	pnpm --recursive test
 
-test-build:
+test-build: emily-cdk-synth
 	cargo $(CARGO_FLAGS) test build --features "testing"  $(CARGO_EXCLUDES) --no-run --locked ${CARGO_BUILD_ARGS}
 
 CARGO_FMT = cargo $(CARGO_FLAGS) fmt --all
@@ -48,7 +48,7 @@ CARGO_CLIPPY_BASE = cargo $(CARGO_FLAGS) clippy --workspace --all-targets --all-
     --exclude testing-emily-client
 CLIPPY_FLAGS = -D warnings
 
-lint:
+lint: emily-cdk-synth
 	$(CARGO_FMT) -- --check
 	$(CARGO_CLIPPY_BASE) -- $(CLIPPY_FLAGS)
 	pnpm --recursive run lint
@@ -81,14 +81,14 @@ NEXTEST_ARCHIVE_FILE := target/nextest/nextest-archive.tar.zst
 NEXTEST_SERIAL_ARCHIVE_FILE := target/nextest/nextest-archive-serial.tar.zst
 
 # Creates nextest archives
-nextest-archive:
-	cargo $(CARGO_FLAGS) nextest archive --features "testing" $(CARGO_EXCLUDES) --lib --archive-file $(NEXTEST_ARCHIVE_FILE) ${CARGO_BUILD_ARGS}
-	cargo $(CARGO_FLAGS) nextest archive --features "testing" $(CARGO_EXCLUDES) --archive-file $(NEXTEST_SERIAL_ARCHIVE_FILE) --test integration ${CARGO_BUILD_ARGS}
+nextest-archive: emily-cdk-synth
+	cargo $(CARGO_FLAGS) nextest --config-file nextest.toml archive --features "testing" $(CARGO_EXCLUDES) --lib --archive-file $(NEXTEST_ARCHIVE_FILE) ${CARGO_BUILD_ARGS}
+	cargo $(CARGO_FLAGS) nextest --config-file nextest.toml archive --features "testing" $(CARGO_EXCLUDES) --archive-file $(NEXTEST_SERIAL_ARCHIVE_FILE) --test integration ${CARGO_BUILD_ARGS}
 
 # Runs nextest archives
 nextest-archive-run:
-	cargo $(CARGO_FLAGS) nextest run --no-fail-fast --retries 2 --archive-file $(NEXTEST_ARCHIVE_FILE)
-	cargo $(CARGO_FLAGS) nextest run --no-fail-fast --test-threads 1 --retries 2 --archive-file $(NEXTEST_SERIAL_ARCHIVE_FILE)
+	cargo $(CARGO_FLAGS) nextest --config-file nextest.toml run --no-fail-fast --retries 2 --archive-file $(NEXTEST_ARCHIVE_FILE)
+	cargo $(CARGO_FLAGS) nextest --config-file nextest.toml run --no-fail-fast --retries 2 --archive-file $(NEXTEST_SERIAL_ARCHIVE_FILE)
 
 nextest-archive-clean:
 	rm -f $(NEXTEST_ARCHIVE_FILE) $(NEXTEST_SERIAL_ARCHIVE_FILE)
@@ -103,7 +103,7 @@ integration-env-up: emily-cdk-synth
 	docker compose --file docker/docker-compose.test.yml up -d
 
 integration-test:
-	cargo $(CARGO_FLAGS) nextest run --features "testing" $(CARGO_EXCLUDES) --test integration --no-fail-fast --test-threads 1
+	cargo $(CARGO_FLAGS) nextest --config-file nextest.toml run --features "testing" $(CARGO_EXCLUDES) --test integration --no-fail-fast
 	uv run --directory emily_sidecar python -m unittest test/test_integration.py
 
 integration-test-build:

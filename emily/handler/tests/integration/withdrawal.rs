@@ -14,9 +14,10 @@ use testing_emily_client::models::{
 };
 
 use crate::common::batch_set_chainstates;
-use crate::common::clean_setup;
+use crate::common::clean_test_setup;
 use crate::common::handler_withdrawal_status;
 use crate::common::new_test_chainstate;
+use crate::common::new_test_setup;
 
 const RECIPIENT: &str = "TEST_RECIPIENT";
 const SENDER: &str = "TEST_SENDER";
@@ -66,7 +67,7 @@ async fn batch_create_withdrawals(
 
 #[tokio::test]
 async fn create_and_get_withdrawal_happy_path() {
-    let configuration = clean_setup().await;
+    let (configuration, tables) = new_test_setup().await;
 
     // Arrange.
     // --------
@@ -119,11 +120,13 @@ async fn create_and_get_withdrawal_happy_path() {
     // -------
     assert_eq!(expected, created);
     assert_eq!(expected, gotten);
+
+    clean_test_setup(tables).await;
 }
 
 #[tokio::test]
 async fn get_withdrawals() {
-    let configuration = clean_setup().await;
+    let (configuration, tables) = new_test_setup().await;
 
     // Arrange.
     // --------
@@ -210,11 +213,13 @@ async fn get_withdrawals() {
     expected_withdrawal_infos.sort_by(arbitrary_withdrawal_info_partial_cmp);
     gotten_withdrawal_infos.sort_by(arbitrary_withdrawal_info_partial_cmp);
     assert_eq!(expected_withdrawal_infos, gotten_withdrawal_infos);
+
+    clean_test_setup(tables).await;
 }
 
 #[tokio::test]
 async fn get_withdrawals_by_recipient() {
-    let configuration = clean_setup().await;
+    let (configuration, tables) = new_test_setup().await;
 
     // Arrange.
     // --------
@@ -309,11 +314,13 @@ async fn get_withdrawals_by_recipient() {
         // Assert that the expected and actual withdrawal infos are the same.
         assert_eq!(expected_withdrawal_infos, actual_withdrawal_infos);
     }
+
+    clean_test_setup(tables).await;
 }
 
 #[tokio::test]
 async fn get_withdrawals_by_sender() {
-    let configuration = clean_setup().await;
+    let (configuration, tables) = new_test_setup().await;
 
     // Arrange.
     // --------
@@ -411,11 +418,13 @@ async fn get_withdrawals_by_sender() {
         // Assert that the expected and actual withdrawal infos are the same.
         assert_eq!(expected_withdrawal_infos, actual_withdrawal_infos);
     }
+
+    clean_test_setup(tables).await;
 }
 
 #[tokio::test]
 async fn update_withdrawals() {
-    let configuration = clean_setup().await;
+    let (configuration, tables) = new_test_setup().await;
 
     // Arrange.
     // --------
@@ -523,6 +532,8 @@ async fn update_withdrawals() {
     updated_withdrawals.sort_by(arbitrary_withdrawal_partial_cmp);
     expected_withdrawals.sort_by(arbitrary_withdrawal_partial_cmp);
     assert_eq!(expected_withdrawals, updated_withdrawals);
+
+    clean_test_setup(tables).await;
 }
 
 #[test_case(WithdrawalStatus::Pending, WithdrawalStatus::Pending, true; "pending_to_pending")]
@@ -542,7 +553,7 @@ async fn update_withdrawals_is_forbidden_for_signer(
     is_forbidden: bool,
 ) {
     // the testing configuration has privileged access to all endpoints.
-    let testing_configuration = clean_setup().await;
+    let (testing_configuration, tables) = new_test_setup().await;
 
     // the user configuration access depends on the api_key.
     let user_configuration = testing_configuration.clone();
@@ -671,6 +682,8 @@ async fn update_withdrawals_is_forbidden_for_signer(
         assert_eq!(withdrawal.request_id, request_id);
         assert_eq!(withdrawal.status, new_status);
     }
+
+    clean_test_setup(tables).await;
 }
 
 #[test_case(WithdrawalStatus::Pending, WithdrawalStatus::Accepted; "pending_to_accepted")]
@@ -684,7 +697,7 @@ async fn update_withdrawals_is_not_forbidden_for_sidecar(
     new_status: WithdrawalStatus,
 ) {
     // the testing configuration has privileged access to all endpoints.
-    let testing_configuration = clean_setup().await;
+    let (testing_configuration, tables) = new_test_setup().await;
 
     // the user configuration access depends on the api_key.
     let user_configuration = testing_configuration.clone();
@@ -795,12 +808,14 @@ async fn update_withdrawals_is_not_forbidden_for_sidecar(
         .unwrap();
     assert_eq!(withdrawal.request_id, request_id);
     assert_eq!(withdrawal.status, new_status);
+
+    clean_test_setup(tables).await;
 }
 
 #[tokio::test]
 async fn emily_process_withdrawal_updates_when_some_of_them_already_accepted() {
     // the testing configuration has privileged access to all endpoints.
-    let testing_configuration = clean_setup().await;
+    let (testing_configuration, tables) = new_test_setup().await;
 
     // Create two withdrawals
     let chainstate = Chainstate {
@@ -967,12 +982,14 @@ async fn emily_process_withdrawal_updates_when_some_of_them_already_accepted() {
     .await
     .expect("Received an error after making a valid get withdrawals api call.");
     assert_eq!(withdrawals.withdrawals.len(), 2);
+
+    clean_test_setup(tables).await;
 }
 
 #[tokio::test]
 async fn emily_process_withdrawal_updates_when_some_of_them_are_unknown() {
     // the testing configuration has privileged access to all endpoints.
-    let testing_configuration = clean_setup().await;
+    let (testing_configuration, tables) = new_test_setup().await;
 
     // Create two withdrawals
     let chainstate = Chainstate {
@@ -1102,6 +1119,8 @@ async fn emily_process_withdrawal_updates_when_some_of_them_are_unknown() {
     .await
     .expect("Received an error after making a valid get withdrawals api call.");
     assert_eq!(withdrawals.withdrawals.len(), 1);
+
+    clean_test_setup(tables).await;
 }
 
 #[tokio::test]
@@ -1114,7 +1133,7 @@ async fn emily_handles_withdrawal_requests_on_forks() {
     const POST_REORG_END: u64 = 1020;
     const FINAL_REORG_END: u64 = 1025;
 
-    let configuration = clean_setup().await;
+    let (configuration, tables) = new_test_setup().await;
 
     // During this test request ID should be similar for all withdrawals.
     let request_id = 1;
@@ -1229,6 +1248,8 @@ async fn emily_handles_withdrawal_requests_on_forks() {
         withdrawal.stacks_block_hash,
         old_chaintip.stacks_block_hash.clone()
     );
+
+    clean_test_setup(tables).await;
 }
 
 #[test_case(WithdrawalStatus::Accepted, true; "accepted_sidecar")]
@@ -1242,7 +1263,7 @@ async fn only_confirmed_withdrawals_can_have_fulfillment(
     is_sidecar: bool,
 ) {
     // the testing configuration has privileged access to all endpoints.
-    let testing_configuration = clean_setup().await;
+    let (testing_configuration, tables) = new_test_setup().await;
 
     // the user configuration access depends on the api_key.
     let user_configuration = testing_configuration.clone();
@@ -1339,6 +1360,8 @@ async fn only_confirmed_withdrawals_can_have_fulfillment(
         assert!(matches!(response.status, WithdrawalStatus::Pending));
         assert!(response.fulfillment.is_none());
     }
+
+    clean_test_setup(tables).await;
 }
 
 #[tokio::test]

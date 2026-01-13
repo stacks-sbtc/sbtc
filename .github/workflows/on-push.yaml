@@ -122,11 +122,19 @@ jobs:
         id: checkout_Repository
         uses: stacks-sbtc/actions/checkout@181f8c67da2707c66b5e31f24e7418c47adefdd1
 
+      - name: Setup Pnpm
+        id: setup_pnpm
+        uses: stacks-sbtc/actions/setup-pnpm@181f8c67da2707c66b5e31f24e7418c47adefdd1
+
       - name: Setup Rust
         id: setup_rust
         uses: stacks-sbtc/actions/setup-rust-toolchain@181f8c67da2707c66b5e31f24e7418c47adefdd1
         with:
           cache-key: "rust-tests"
+
+      - name: Install Package Dependencies
+        id: install_dependencies
+        run: make install-pnpm
 
       - name: Install Action
         id: install_action
@@ -305,7 +313,7 @@ jobs:
 
       - name: Run Integration Tests (Rust)
         id: run_rust_tests
-        run: cargo-nextest nextest --color always run --no-fail-fast --test-threads 1 --partition hash:${{ matrix.partition }}/2 --archive-file nextest-archive-serial.tar.zst
+        run: cargo-nextest nextest --config-file nextest.toml --color always run --no-fail-fast --partition hash:${{ matrix.partition }}/2 --archive-file nextest-archive-serial.tar.zst --workspace-remap .
 
       - name: Run Integration Tests (Python)
         id: run_python_tests

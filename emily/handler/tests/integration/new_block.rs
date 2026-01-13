@@ -12,7 +12,8 @@ use testing_emily_client::models::{
     WithdrawalStatus,
 };
 
-use crate::common::clean_setup;
+use crate::common::clean_test_setup;
+use crate::common::new_test_setup;
 
 const CREATE_DEPOSIT_VALID: &str = include_str!("../fixtures/create-deposit-valid-testnet.json");
 
@@ -44,7 +45,7 @@ where
         block_id: new_block_event.index_block_hash,
     };
     let deposit_event = deposit_event.contract_event.as_ref().unwrap();
-    let registry_event = RegistryEvent::try_new(deposit_event.value.clone(), tx_info)
+    let registry_event = RegistryEvent::try_new(deposit_event.raw_value.clone(), tx_info)
         .expect("Failed to parse RegistryEvent");
 
     // Check if registry_event matches the expected variant
@@ -58,7 +59,7 @@ where
 /// The handler should update the chain state in Emily and mark the deposit as confirmed.
 #[tokio::test]
 async fn test_new_blocks_sends_update_deposits_to_emily() {
-    let configuration = clean_setup().await;
+    let (configuration, tables) = new_test_setup().await;
 
     let body = COMPLETED_VALID_DEPOSIT_WEBHOOK.to_string();
     let deposit_completed_event = get_registry_event_from_webhook(&body, |event| match event {
@@ -97,6 +98,8 @@ async fn test_new_blocks_sends_update_deposits_to_emily() {
     assert_eq!(resp.bitcoin_txid, bitcoin_txid);
     assert_eq!(resp.status, DepositStatus::Confirmed);
     assert!(resp.fulfillment.is_some());
+
+    clean_test_setup(tables).await;
 }
 
 /// Test that the handler can handle a new block event with a valid payload
@@ -104,7 +107,8 @@ async fn test_new_blocks_sends_update_deposits_to_emily() {
 /// The handler should update the chain state in Emily and mark the withdrawal as pending.
 #[tokio::test]
 async fn test_new_blocks_sends_create_withdrawal_request() {
-    let configuration = clean_setup().await;
+    let (configuration, tables) = new_test_setup().await;
+
     let body = WITHDRAWAL_CREATE_WEBHOOK.to_string();
     let withdrawal_event = get_registry_event_from_webhook(&body, |event| match event {
         RegistryEvent::WithdrawalCreate(event) => Some(event),
@@ -139,6 +143,8 @@ async fn test_new_blocks_sends_create_withdrawal_request() {
     );
     assert_eq!(withdrawal.stacks_block_height, 253);
     assert_eq!(withdrawal.status, WithdrawalStatus::Pending);
+
+    clean_test_setup(tables).await;
 }
 
 /// Test that the handler can handle a new block event with a valid payload
@@ -146,7 +152,7 @@ async fn test_new_blocks_sends_create_withdrawal_request() {
 /// The handler should update the chain state in Emily and mark the withdrawal as confirmed.
 #[tokio::test]
 async fn test_new_blocks_sends_withdrawal_accept_update() {
-    let configuration = clean_setup().await;
+    let (configuration, tables) = new_test_setup().await;
 
     let body = WITHDRAWAL_ACCEPT_WEBHOOK.to_string();
     let new_block_event = serde_json::from_str::<NewBlockEvent>(&body).unwrap();
@@ -182,6 +188,8 @@ async fn test_new_blocks_sends_withdrawal_accept_update() {
     let withdrawal = resp.unwrap();
     assert_eq!(withdrawal.status, WithdrawalStatus::Confirmed);
     assert!(withdrawal.fulfillment.is_some());
+
+    clean_test_setup(tables).await;
 }
 
 /// Test that the handler can handle a new block event with a valid payload
@@ -189,7 +197,7 @@ async fn test_new_blocks_sends_withdrawal_accept_update() {
 /// The handler should update the chain state in Emily and mark the withdrawal as failed.
 #[tokio::test]
 async fn test_new_blocks_sends_withdrawal_reject_update() {
-    let configuration = clean_setup().await;
+    let (configuration, tables) = new_test_setup().await;
 
     let body = WITHDRAWAL_REJECT_WEBHOOK.to_string();
     let new_block_event = serde_json::from_str::<NewBlockEvent>(&body).unwrap();
@@ -225,4 +233,6 @@ async fn test_new_blocks_sends_withdrawal_reject_update() {
     let withdrawal = resp.unwrap();
     assert_eq!(withdrawal.status, WithdrawalStatus::Failed);
     assert!(withdrawal.fulfillment.is_none());
+
+    clean_test_setup(tables).await;
 }

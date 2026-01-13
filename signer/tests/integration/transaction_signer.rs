@@ -9,6 +9,7 @@ use fake::Faker;
 use lru::LruCache;
 use rand::rngs::OsRng;
 use signer::bitcoin::MockBitcoinInteract;
+use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::emily_client::MockEmilyInteract;
 use signer::message::Payload;
 use signer::network::in_memory2::SignerNetworkInstance;
@@ -98,7 +99,8 @@ async fn signing_set_validation_check_for_stacks_transactions() {
 
     // This confirms a deposit transaction, and has a nice helper function
     // for storing a real deposit.
-    let mut setup = TestSweepSetup::new_setup(rpc, faucet, 10000, &mut rng);
+    let mut setup =
+        TestSweepSetup::new_setup(BitcoinCoreClient::new_regtest(), faucet, 10000, &mut rng);
 
     // Let's get the blockchain data into the database.
     let chain_tip = BitcoinBlockRef {
@@ -187,7 +189,8 @@ async fn signing_set_validation_ignores_aggregate_key_in_request() {
 
     // This confirms a deposit transaction, and has a nice helper function
     // for storing a real deposit.
-    let mut setup = TestSweepSetup::new_setup(rpc, faucet, 10000, &mut rng);
+    let mut setup =
+        TestSweepSetup::new_setup(BitcoinCoreClient::new_regtest(), faucet, 10000, &mut rng);
 
     // Let's get the blockchain data into the database.
     let chain_tip = BitcoinBlockRef {
@@ -283,7 +286,8 @@ async fn signer_rejects_stacks_txns_with_too_high_a_fee(
 
     // This confirms a deposit transaction, and has a nice helper function
     // for storing a real deposit.
-    let mut setup = TestSweepSetup::new_setup(rpc, faucet, 10000, &mut rng);
+    let mut setup =
+        TestSweepSetup::new_setup(BitcoinCoreClient::new_regtest(), faucet, 10000, &mut rng);
 
     // Let's get the blockchain data into the database.
     let chain_tip = BitcoinBlockRef {
@@ -369,7 +373,8 @@ async fn signer_rejects_multiple_attempts_in_tenure() {
 
     // This confirms a deposit transaction, and has a nice helper function
     // for storing a real deposit.
-    let mut setup = TestSweepSetup::new_setup(rpc, faucet, 10000, &mut rng);
+    let mut setup =
+        TestSweepSetup::new_setup(BitcoinCoreClient::new_regtest(), faucet, 10000, &mut rng);
 
     // Let's get the blockchain data into the database.
     let chain_tip = BitcoinBlockRef {
@@ -493,7 +498,8 @@ async fn assert_should_be_able_to_handle_sbtc_requests() {
     let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
 
     // Create a test setup with a confirmed deposit transaction
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 10000, &mut rng);
+    let setup =
+        TestSweepSetup::new_setup(BitcoinCoreClient::new_regtest(), faucet, 10000, &mut rng);
     // Backfill the blockchain data into the database
     let chain_tip = BitcoinBlockRef {
         block_hash: setup.sweep_block_hash.into(),
@@ -637,7 +643,12 @@ async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is_ok:
         max_fee: 10000,
         is_deposit: true,
     };
-    let setup = TestSweepSetup2::new_setup(signers, faucet, &[amounts]);
+    let setup = TestSweepSetup2::new_setup(
+        signers,
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        &[amounts],
+    );
 
     let block_header = rpc
         .get_block_header_info(&setup.deposit_block_hash)
@@ -733,7 +744,12 @@ pub async fn presign_request_ignore_request_if_already_processed_this_block() {
         max_fee: 10000,
         is_deposit: true,
     };
-    let setup = TestSweepSetup2::new_setup(signers, faucet, &[amounts]);
+    let setup = TestSweepSetup2::new_setup(
+        signers,
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        &[amounts],
+    );
 
     let block_header = rpc
         .get_block_header_info(&setup.deposit_block_hash)
@@ -847,7 +863,7 @@ async fn new_state_machine_per_valid_sighash() {
     // Create a test setup object so that we can easily create proper DKG
     // shares in the database. Note that calling TestSweepSetup2::new_setup
     // creates two bitcoin blocks.
-    let setup = TestSweepSetup2::new_setup(signers, faucet, &[]);
+    let setup = TestSweepSetup2::new_setup(signers, BitcoinCoreClient::new_regtest(), faucet, &[]);
 
     setup.store_dkg_shares(&db).await;
 
@@ -972,7 +988,7 @@ async fn nonce_response_unique_nonces() {
     // Create a test setup object so that we can simply create proper DKG
     // shares in the database. Note that calling TestSweepSetup2::new_setup
     // creates two bitcoin blocks.
-    let setup = TestSweepSetup2::new_setup(signers, faucet, &[]);
+    let setup = TestSweepSetup2::new_setup(signers, BitcoinCoreClient::new_regtest(), faucet, &[]);
 
     setup.store_dkg_shares(&db).await;
 

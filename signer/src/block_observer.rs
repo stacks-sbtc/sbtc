@@ -36,7 +36,6 @@ use crate::metrics::BITCOIN_BLOCKCHAIN;
 use crate::metrics::Metrics;
 use crate::stacks::api::SignerSetInfo;
 use crate::stacks::api::StacksInteract as _;
-use crate::stacks::api::TenureBlockHeaders;
 use crate::stacks::contracts::SMART_CONTRACTS;
 use crate::storage::DbRead;
 use crate::storage::DbWrite;
@@ -426,19 +425,12 @@ impl<C: Context, B> BlockObserver<C, B> {
         let tenure_info = stacks_client.get_tenure_info().await?;
 
         tracing::debug!("fetching unknown ancestral blocks from stacks-core");
-        let stacks_block_headers = crate::stacks::api::fetch_unknown_ancestors(
+        crate::stacks::api::update_db_with_unknown_ancestors(
             &stacks_client,
             &db,
             &tenure_info.tip_block_id,
         )
         .await?;
-
-        let headers = stacks_block_headers
-            .into_iter()
-            .flat_map(TenureBlockHeaders::into_iter)
-            .collect::<Vec<_>>();
-
-        db.write_stacks_block_headers(headers).await?;
 
         tracing::debug!("finished processing stacks block");
         Ok(())
@@ -767,6 +759,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicU16;
+
     use bitcoin::Amount;
     use bitcoin::BlockHash;
     use bitcoin::TxOut;
@@ -813,11 +807,12 @@ mod tests {
         };
 
         let handle = tokio::spawn(block_observer.run());
+        let counter = AtomicU16::new(test_harness.bitcoin_blocks().len() as u16);
         ctx.wait_for_signal(Duration::from_secs(3), |signal| {
             matches!(
                 signal,
                 SignerSignal::Event(SignerEvent::BitcoinBlockObserved(_))
-            )
+            ) && counter.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) == 1
         })
         .await
         .expect("block observer failed to complete within timeout");
