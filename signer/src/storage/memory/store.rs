@@ -42,7 +42,7 @@ pub struct Store {
     /// Bitcoin blocks
     pub bitcoin_blocks: HashMap<model::BitcoinBlockHash, model::BitcoinBlock>,
 
-    /// Bitcoin blocks
+    /// Bitcoin blocks that are on the canonical bitcoin blockchain.
     pub canonical_bitcoin_blocks: HashMap<model::BitcoinBlockHash, model::BitcoinBlock>,
 
     /// Stacks blocks
