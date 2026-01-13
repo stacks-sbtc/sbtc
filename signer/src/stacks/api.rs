@@ -651,7 +651,7 @@ pub struct GetNodeInfoResponse {
     /// The block header hash of the tip of the canonical stacks
     /// blockchain. This is hashed with the consensus hash to create the
     /// block id.
-    stacks_tip: BlockHeaderHash,
+    pub stacks_tip: BlockHeaderHash,
     /// The consensus hash of the tip of the canonical stacks blockchain.
     pub stacks_tip_consensus_hash: ConsensusHash,
 }
