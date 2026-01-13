@@ -308,7 +308,6 @@ pub trait StacksInteract: Send + Sync {
     ///
     /// This function is analogous to the GET /v3/tenures/blocks/height/{}
     /// endpoint on stacks-core nodes. This function returns headers of all block in given tenure.
-    /// TODO: double-check that it is indeed _all_ blocks.
     fn get_tenure_headers(
         &self,
         bitcoin_block_height: BitcoinBlockHeight,
