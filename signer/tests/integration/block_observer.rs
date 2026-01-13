@@ -2019,6 +2019,8 @@ async fn block_observer_marks_bitcoin_blocks_as_canonical() {
     rpc.invalidate_block(&chain_tip_before_invalidation)
         .unwrap();
 
+    let _ = rpc.get_best_block_hash().unwrap();
+
     let [new_block_1, new_block_2] = (0..2)
         .map(|_| {
             rpc.call::<GenerateBlockJson>(
