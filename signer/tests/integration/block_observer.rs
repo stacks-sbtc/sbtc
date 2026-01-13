@@ -27,6 +27,7 @@ use sbtc::testing::regtest;
 use sbtc::testing::regtest::Faucet;
 use sbtc::testing::regtest::Recipient;
 use signer::bitcoin::poller::BitcoinChainTipPoller;
+use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::bitcoin::utxo::DepositRequest;
 use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
@@ -101,8 +102,10 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
     // We're going to create two confirmed deposits. This also generates
     // sweep transactions, but this information is not in our database, so
     // it doesn't matter for this test.
-    let setup0 = TestSweepSetup::new_setup(rpc, faucet, 100_000, &mut rng);
-    let setup1 = TestSweepSetup::new_setup(rpc, faucet, 200_000, &mut rng);
+    let setup0 =
+        TestSweepSetup::new_setup(BitcoinCoreClient::new_regtest(), faucet, 100_000, &mut rng);
+    let setup1 =
+        TestSweepSetup::new_setup(BitcoinCoreClient::new_regtest(), faucet, 200_000, &mut rng);
 
     // Let's prep Emily with information about these deposits.
     ctx.with_emily_client(|client| {

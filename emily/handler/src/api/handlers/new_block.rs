@@ -62,8 +62,8 @@ struct StacksBlock {
 )]
 #[instrument(skip_all, name = "new-block")]
 pub async fn new_block(
-    context: EmilyContext,
     new_block_event: NewBlockEventRaw,
+    context: EmilyContext,
 ) -> impl warp::reply::Reply {
     // Internal handler so `?` can be used correctly while still returning a reply.
     async fn handler(
@@ -109,12 +109,12 @@ pub async fn new_block(
         // Set the chainstate
         handle_internal_call(
             set_chainstate(
-                context.clone(),
                 Chainstate {
                     stacks_block_height: stacks_chaintip.block_height,
                     stacks_block_hash: stacks_chaintip.block_hash.clone(),
                     bitcoin_block_height: Some(new_block_event.burn_block_height as u64),
                 },
+                context.clone(),
             ),
             "failed to update chainstate in Emily",
         )
@@ -187,8 +187,8 @@ pub async fn new_block(
         if !completed_deposits.is_empty() {
             handle_internal_call(
                 update_deposits_sidecar(
-                    context.clone(),
                     UpdateDepositsRequestBody { deposits: completed_deposits },
+                    context.clone(),
                 ),
                 "failed to update deposits in Emily",
             )
@@ -200,7 +200,7 @@ pub async fn new_block(
         // to be updated.
         for withdrawal in created_withdrawals {
             handle_internal_call(
-                create_withdrawal(context.clone(), withdrawal),
+                create_withdrawal(withdrawal, context.clone()),
                 "failed to create withdrawal in Emily",
             )
             .await?;
@@ -209,10 +209,10 @@ pub async fn new_block(
         if !updated_withdrawals.is_empty() {
             handle_internal_call(
                 update_withdrawals_sidecar(
-                    context.clone(),
                     UpdateWithdrawalsRequestBody {
                         withdrawals: updated_withdrawals,
                     },
+                    context.clone(),
                 ),
                 "failed to update withdrawals in Emily",
             )

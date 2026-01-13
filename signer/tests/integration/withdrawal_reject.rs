@@ -3,6 +3,7 @@ use blockstack_lib::types::chainstate::StacksAddress;
 use rand::rngs::OsRng;
 use sbtc::testing::regtest;
 use sbtc::testing::regtest::Faucet;
+use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::error::Error;
 use signer::stacks::contracts::AsContractCall as _;
 use signer::stacks::contracts::RejectWithdrawalV1;
@@ -81,7 +82,12 @@ fn new_sweep_setup(signers: &TestSignerSet, faucet: &Faucet) -> TestSweepSetup2 
         is_deposit: false,
     };
 
-    TestSweepSetup2::new_setup(signers.clone(), faucet, &[withdraw_amounts])
+    TestSweepSetup2::new_setup(
+        signers.clone(),
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        &[withdraw_amounts],
+    )
 }
 
 /// For this test we check that the `RejectWithdrawalV1::validate` function
@@ -472,7 +478,7 @@ async fn reject_withdrawal_validation_request_being_fulfilled() {
     // to submit the transaction in order for
     // `TestSweepSetup2::store_bitcoin_withdrawals_outputs` to work as
     // expected.
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.submit_sweep_tx(faucet);
 
     let sweep = setup.sweep_tx_info.as_ref().unwrap();
 
@@ -559,7 +565,8 @@ async fn reject_withdrawal_validation_request_still_active() {
         },
     ];
 
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &amounts);
+    let mut setup =
+        TestSweepSetup2::new_setup(signers, BitcoinCoreClient::new_regtest(), faucet, &amounts);
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -608,7 +615,7 @@ async fn reject_withdrawal_validation_request_still_active() {
     // Different: We broadcast a sweep transaction into the mempool so that
     // the TestSweepSetup2 struct has the `broadcast_info` is set, which is
     // required for `TestSweepSetup2::store_bitcoin_withdrawals_outputs`.
-    setup.broadcast_sweep_tx(rpc);
+    setup.broadcast_sweep_tx();
 
     // Different: We're adding rows that let the signer know that someone
     // may have tried to fulfill the withdrawal request. If that
@@ -645,8 +652,8 @@ async fn reject_withdrawal_validation_request_still_active() {
     // that they do not get included in the sweep transaction.
     let withdrawals = setup.withdrawals.drain(..).collect::<Vec<_>>();
 
-    setup.broadcast_sweep_tx(rpc);
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.broadcast_sweep_tx();
+    setup.submit_sweep_tx(faucet);
     setup.store_sweep_tx(&db).await;
 
     // This confirms the sweep in the mempool. It is the first sweep after

@@ -325,7 +325,12 @@ async fn process_complete_deposit() {
     let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        1_000_000,
+        &mut rng,
+    );
 
     backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash).await;
     setup.store_deposit_tx(&db).await;
@@ -4286,6 +4291,7 @@ fn create_test_setup(
         }],
         withdrawal_sender: PrincipalData::from(StacksAddress::burn_address(false)),
         signatures_required,
+        client: bitcoin_client.clone(),
     }
 }
 
@@ -5510,10 +5516,15 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
         max_fee: 500_000,
         is_deposit: true,
     }];
-    let mut setup = TestSweepSetup2::new_setup(signers.clone(), faucet, &amounts);
+    let mut setup = TestSweepSetup2::new_setup(
+        signers.clone(),
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        &amounts,
+    );
 
     // Store everything we need for the deposit to be considered swept
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.submit_sweep_tx(faucet);
     fetch_canonical_bitcoin_blockchain(&db, rpc).await;
 
     setup.store_stacks_genesis_block(&db).await;

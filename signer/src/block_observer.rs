@@ -770,6 +770,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicU16;
+
     use bitcoin::Amount;
     use bitcoin::BlockHash;
     use bitcoin::TxOut;
@@ -816,11 +818,12 @@ mod tests {
         };
 
         let handle = tokio::spawn(block_observer.run());
+        let counter = AtomicU16::new(test_harness.bitcoin_blocks().len() as u16);
         ctx.wait_for_signal(Duration::from_secs(3), |signal| {
             matches!(
                 signal,
                 SignerSignal::Event(SignerEvent::BitcoinBlockObserved(_))
-            )
+            ) && counter.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) == 1
         })
         .await
         .expect("block observer failed to complete within timeout");

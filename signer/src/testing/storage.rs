@@ -52,10 +52,19 @@ pub async fn new_test_database() -> PgStore {
     let postgres_url = format!("{DATABASE_URL_BASE}/postgres");
     let pool = get_connection_pool(&postgres_url);
 
-    sqlx::query("CREATE SEQUENCE IF NOT EXISTS db_num_seq;")
-        .execute(&pool)
+    // Without an explicit lock the create sequence sometime fails with 23505:
+    // duplicate key value violates unique constraint "pg_class_relname_nsp_index"
+    // The lock number is just an arbitrary random one
+    let mut tx = pool.begin().await.expect("failed to start db transaction");
+    sqlx::query("SELECT pg_advisory_xact_lock(9558);")
+        .execute(&mut *tx)
         .await
         .unwrap();
+    sqlx::query("CREATE SEQUENCE IF NOT EXISTS db_num_seq;")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    tx.commit().await.expect("failed to commit db transaction");
 
     let db_num: i64 = sqlx::query_scalar("SELECT nextval('db_num_seq');")
         .fetch_one(&pool)
