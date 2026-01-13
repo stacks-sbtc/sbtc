@@ -7738,19 +7738,6 @@ mod canonical_bitcoin_blockchain {
     use super::*;
     use signer::testing::blocks::BitcoinChain;
 
-    // Returns the value of the is_canonical column for the given block
-    // hash is  true or false. If the given block hash is missing than this
-    // function panics.
-    async fn is_block_canonical(db: &PgStore, block_hash: &BitcoinBlockHash) -> Option<bool> {
-        sqlx::query_scalar(
-            "SELECT is_canonical FROM sbtc_signer.bitcoin_blocks WHERE block_hash = $1",
-        )
-        .bind(block_hash)
-        .fetch_one(db.pool())
-        .await
-        .unwrap()
-    }
-
     /// Set the is_canonical column to NULL for all bitcoin blocks.
     async fn clear_is_canonical_bitcoin_blocks(db: &PgStore) {
         sqlx::query("UPDATE sbtc_signer.bitcoin_blocks SET is_canonical = NULL")
@@ -7796,7 +7783,7 @@ mod canonical_bitcoin_blockchain {
 
         // Verify that all blocks in the canonical chain are marked as canonical
         for block in &canonical_chain {
-            let is_canonical = is_block_canonical(&db, &block.block_hash).await;
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
 
             assert_eq!(is_canonical, Some(true));
         }
@@ -7813,10 +7800,16 @@ mod canonical_bitcoin_blockchain {
         let fork_block_2 = fork_chain.nth_block(3u64.into());
 
         // Verify that fork blocks are marked as non-canonical
-        let fork_1_is_canonical = is_block_canonical(&db, &fork_block_1.block_hash).await;
+        let fork_1_is_canonical = db
+            .is_block_canonical(&fork_block_1.block_hash)
+            .await
+            .unwrap();
         assert_eq!(fork_1_is_canonical, None);
 
-        let fork_2_is_canonical = is_block_canonical(&db, &fork_block_2.block_hash).await;
+        let fork_2_is_canonical = db
+            .is_block_canonical(&fork_block_2.block_hash)
+            .await
+            .unwrap();
         assert_eq!(fork_2_is_canonical, None);
 
         // These new blocks aren't part of the canonical chain, so they
@@ -7829,17 +7822,25 @@ mod canonical_bitcoin_blockchain {
             .unwrap();
 
         // Verify that fork blocks are marked as non-canonical
-        let fork_1_is_canonical = is_block_canonical(&db, &fork_block_1.block_hash).await;
+        let fork_1_is_canonical = db
+            .is_block_canonical(&fork_block_1.block_hash)
+            .await
+            .unwrap();
         assert_eq!(fork_1_is_canonical, Some(false));
 
-        let fork_2_is_canonical = is_block_canonical(&db, &fork_block_2.block_hash).await;
+        let fork_2_is_canonical = db
+            .is_block_canonical(&fork_block_2.block_hash)
+            .await
+            .unwrap();
         assert_eq!(fork_2_is_canonical, Some(false));
 
         // Verify that all blocks at the same height as fork blocks but in the canonical chain
         // are marked as canonical
         let canonical_block_at_fork_height = canonical_chain.nth_block(fork_block_1.block_height);
-        let canonical_at_fork_height_is_canonical =
-            is_block_canonical(&db, &canonical_block_at_fork_height.block_hash).await;
+        let canonical_at_fork_height_is_canonical = db
+            .is_block_canonical(&canonical_block_at_fork_height.block_hash)
+            .await
+            .unwrap();
         assert_eq!(canonical_at_fork_height_is_canonical, Some(true));
 
         testing::storage::drop_db(db).await;
@@ -7875,18 +7876,18 @@ mod canonical_bitcoin_blockchain {
 
         // Verify that all blocks in the main chain are marked as canonical
         for block in &main_chain {
-            let is_canonical = is_block_canonical(&db, &block.block_hash).await;
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
             assert_eq!(is_canonical, Some(true));
         }
 
         // Check that fork chain blocks with height 0 to 2 are canonical,
         // since they are also part of the main chain
         for (_, block) in fork_chain.range(stable_block_heights.clone()) {
-            let is_canonical = is_block_canonical(&db, &block.block_hash).await;
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
             assert_eq!(is_canonical, Some(true));
         }
         for (_, block) in fork_chain.range(forked_block_heights.clone()) {
-            let is_canonical = is_block_canonical(&db, &block.block_hash).await;
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
             assert_eq!(is_canonical, Some(false));
         }
 
@@ -7898,20 +7899,20 @@ mod canonical_bitcoin_blockchain {
 
         // Check that all fork chain blocks are canonical
         for block in &fork_chain {
-            let is_canonical = is_block_canonical(&db, &block.block_hash).await;
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
             assert_eq!(is_canonical, Some(true));
         }
 
         // Check that original main chain blocks with height 0 to 2 are canonical
         for (_, block) in main_chain.range(stable_block_heights.clone()) {
-            let is_canonical = is_block_canonical(&db, &block.block_hash).await;
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
             assert_eq!(is_canonical, Some(true));
         }
 
         // Check that original main chain blocks with height 3 to 9 are
         // non-canonical
         for (_, block) in main_chain.range(forked_block_heights.clone()) {
-            let is_canonical = is_block_canonical(&db, &block.block_hash).await;
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
             assert_eq!(is_canonical, Some(false));
         }
 
@@ -7924,18 +7925,18 @@ mod canonical_bitcoin_blockchain {
         // Verify that all blocks in the main chain are marked as canonical
         // again.
         for block in &main_chain {
-            let is_canonical = is_block_canonical(&db, &block.block_hash).await;
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
             assert_eq!(is_canonical, Some(true));
         }
 
         // Check that fork chain blocks with height 0 to 2 are canonical,
         // since they are also part of the main chain
         for (_, block) in fork_chain.range(stable_block_heights.clone()) {
-            let is_canonical = is_block_canonical(&db, &block.block_hash).await;
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
             assert_eq!(is_canonical, Some(true));
         }
         for (_, block) in fork_chain.range(forked_block_heights.clone()) {
-            let is_canonical = is_block_canonical(&db, &block.block_hash).await;
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
             assert_eq!(is_canonical, Some(false));
         }
 
