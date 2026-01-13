@@ -177,6 +177,8 @@ where
                         && let Err(error) = self.process_stacks_blocks(block_ref.block_height).await
                     {
                         tracing::warn!(%error, "could not process stacks blocks");
+                    } else if let Err(error) = maybe_chain_tip {
+                        tracing::warn!(%error, "could not process bitcoin blocks");
                     }
 
                     if let Err(error) = self.check_pending_dkg_shares(block_hash).await {
