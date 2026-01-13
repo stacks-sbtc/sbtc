@@ -1997,13 +1997,6 @@ async fn block_observer_marks_bitcoin_blocks_as_canonical() {
     .await
     .unwrap();
 
-    // We need to generate a new bitcoin block to make sure that bitcoin
-    // core feels that the block that we want to invalidate has been
-    // accepted. Maybe bitcoin core needs some time to process everything
-    // when there is a fork so we wait for a bit.
-    faucet.generate_block();
-    tokio::time::sleep(Duration::from_secs(2)).await;
-
     // Verify the block is in the database
     let db_block = db
         .get_bitcoin_block(&chain_tip_before_invalidation)
