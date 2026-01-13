@@ -1323,6 +1323,8 @@ where
             tenure = tenure_headers;
         } else {
             tracing::error!(
+                %tenure.anchor_block_height,
+                %anchor_block_height,
                 ?newest_block_in_older_tenure,
                 ?oldest_block_in_newer_tenure,
                 "stacks node returned inconsecutive tenures, while they must be consecutive"
