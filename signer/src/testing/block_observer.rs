@@ -530,7 +530,6 @@ impl EmilyInteract for TestHarness {
     async fn accept_withdrawals<'a>(
         &'a self,
         _transaction: &'a utxo::UnsignedTransaction<'a>,
-        _expected_height: BitcoinBlockHeight,
     ) -> Result<emily_client::models::UpdateWithdrawalsResponse, Error> {
         unimplemented!()
     }

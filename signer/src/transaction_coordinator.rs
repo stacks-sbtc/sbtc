@@ -698,8 +698,6 @@ where
             self.sign_and_broadcast(bitcoin_chain_tip.as_ref(), &mut transaction)
                 .await?;
 
-            let expected_height = bitcoin_chain_tip.block_height + WITHDRAWAL_MIN_CONFIRMATIONS + 1;
-
             // TODO: if this (considering also fallback clients) fails, we will
             // need to handle the inconsistency of having the sweep tx confirmed
             // but emily deposit still marked as pending.
@@ -715,7 +713,7 @@ where
             let _ = self
                 .context
                 .get_emily_client()
-                .accept_withdrawals(&transaction, expected_height)
+                .accept_withdrawals(&transaction)
                 .await
                 .inspect_err(|error| {
                     tracing::warn!(%error, "could not accept withdrawals on Emily");

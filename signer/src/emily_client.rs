@@ -32,7 +32,6 @@ use crate::bitcoin::utxo::UnsignedTransaction;
 use crate::config::EmilyClientConfig;
 use crate::context::SbtcLimits;
 use crate::error::Error;
-use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::BitcoinTxId;
 use crate::util::ApiFallbackClient;
 
@@ -103,7 +102,6 @@ pub trait EmilyInteract: Sync + Send {
     fn accept_withdrawals<'a>(
         &'a self,
         transaction: &'a UnsignedTransaction<'a>,
-        expected_height: BitcoinBlockHeight,
     ) -> impl std::future::Future<Output = Result<UpdateWithdrawalsResponse, Error>> + Send;
 
     /// Update the status of deposits in Emily.
@@ -334,7 +332,6 @@ impl EmilyInteract for EmilyClient {
     async fn accept_withdrawals<'a>(
         &'a self,
         transaction: &'a UnsignedTransaction<'a>,
-        expected_height: BitcoinBlockHeight,
     ) -> Result<UpdateWithdrawalsResponse, Error> {
         let withdrawals = transaction
             .requests
@@ -349,7 +346,7 @@ impl EmilyInteract for EmilyClient {
                 fulfillment: None,
                 status: WithdrawalStatus::Accepted,
                 expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
-                    expected_height: Some(Some(*expected_height)),
+                    expected_height: None,
                     expected_txid: Some(Some(expected_txid.clone())),
                 }),
                 status_message: "".to_string(),
@@ -469,9 +466,8 @@ impl EmilyInteract for ApiFallbackClient<EmilyClient> {
     async fn accept_withdrawals<'a>(
         &'a self,
         transaction: &'a UnsignedTransaction<'a>,
-        expected_height: BitcoinBlockHeight,
     ) -> Result<UpdateWithdrawalsResponse, Error> {
-        self.exec(|client, _| client.accept_withdrawals(transaction, expected_height))
+        self.exec(|client, _| client.accept_withdrawals(transaction))
             .await
     }
 
