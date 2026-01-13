@@ -1367,7 +1367,7 @@ async fn only_confirmed_withdrawals_can_have_fulfillment(
 #[tokio::test]
 async fn expected_fulfillment_info_stored_correctly() {
     // the testing configuration has privileged access to all endpoints.
-    let testing_configuration = clean_setup().await;
+    let (testing_configuration, tables) = new_test_setup().await;
 
     // the user configuration access depends on the api_key.
     let user_configuration = testing_configuration.clone();
@@ -1474,4 +1474,6 @@ async fn expected_fulfillment_info_stored_correctly() {
 
     assert_eq!(7, received_expected_height);
     assert_eq!(expected_expected_txid, received_expected_txid);
+
+    clean_test_setup(tables).await;
 }
