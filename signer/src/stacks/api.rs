@@ -1144,7 +1144,7 @@ impl StacksClient {
 
         let headers = self
             .client
-            .get(url.clone())
+            .get(url)
             .timeout(REQUEST_TIMEOUT)
             .send()
             .await
