@@ -42,7 +42,6 @@ use crate::storage::DbWrite;
 use crate::storage::Transactable as _;
 use crate::storage::TransactionHandle as _;
 use crate::storage::model;
-use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::EncryptedDkgShares;
 use crate::util::FutureExt as _;
@@ -171,14 +170,11 @@ where
                     )
                     .increment(1);
 
-                    let maybe_chain_tip = self.process_bitcoin_blocks_until(block_hash).await;
-
-                    if let Ok(Some(block_ref)) = maybe_chain_tip.as_ref()
-                        && let Err(error) = self.process_stacks_blocks(block_ref.block_height).await
-                    {
-                        tracing::warn!(%error, "could not process stacks blocks");
-                    } else if let Err(error) = maybe_chain_tip {
+                    if let Err(error) = self.process_bitcoin_blocks_until(block_hash).await {
                         tracing::warn!(%error, "could not process bitcoin blocks");
+                    }
+                    if let Err(error) = self.process_stacks_blocks().await {
+                        tracing::warn!(%error, "could not process stacks blocks");
                     }
 
                     if let Err(error) = self.check_pending_dkg_shares(block_hash).await {
@@ -427,13 +423,12 @@ impl<C: Context, B> BlockObserver<C, B> {
 
     /// Process all recent stacks blocks.
     #[tracing::instrument(skip_all)]
-    async fn process_stacks_blocks(
-        &self,
-        bitcoin_block_height: BitcoinBlockHeight,
-    ) -> Result<(), Error> {
+    async fn process_stacks_blocks(&self) -> Result<(), Error> {
         tracing::info!("processing stacks block");
         let stacks_client = self.context.get_stacks_client();
         let db = self.context.get_storage_mut();
+
+        let bitcoin_block_height = stacks_client.get_node_info().await?.burn_block_height;
 
         tracing::debug!("fetching unknown ancestral blocks from stacks-core");
         crate::stacks::api::update_db_with_unknown_ancestors(
