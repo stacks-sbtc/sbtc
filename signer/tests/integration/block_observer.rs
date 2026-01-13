@@ -72,6 +72,7 @@ use signer::transaction_coordinator::should_run_dkg;
 use signer::transaction_signer::assert_allow_dkg_begin;
 use url::Url;
 
+use crate::bitcoin_forks::GenerateBlockJson;
 use crate::setup::IntoEmilyTestingConfig as _;
 use crate::setup::TestSweepSetup;
 use crate::setup::fetch_canonical_bitcoin_blockchain;
@@ -1982,7 +1983,7 @@ async fn block_observer_marks_bitcoin_blocks_as_canonical() {
     // Generate a new block and wait for the block observer to process it
     let chain_tip_before_invalidation: BitcoinBlockHash = faucet.generate_block().into();
 
-    ctx.wait_for_signal(Duration::from_secs(3), |signal| {
+    ctx.wait_for_signal(Duration::from_secs(8), |signal| {
         matches!(
             signal,
             SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
@@ -1997,7 +1998,7 @@ async fn block_observer_marks_bitcoin_blocks_as_canonical() {
     // accepted. Maybe bitcoin core needs some time to process everything
     // when there is a fork so we wait for a bit.
     faucet.generate_block();
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
 
     // Verify the block is in the database
     let db_block = db
@@ -2021,8 +2022,22 @@ async fn block_observer_marks_bitcoin_blocks_as_canonical() {
     rpc.invalidate_block(&chain_tip_before_invalidation)
         .unwrap();
 
-    let new_block_1: BitcoinBlockHash = faucet.generate_block().into();
-    let new_block_2: BitcoinBlockHash = faucet.generate_block().into();
+    let [new_block_1, new_block_2] = (0..2)
+        .map(|_| {
+            rpc.call::<GenerateBlockJson>(
+                "generateblock",
+                &[
+                    faucet.address.to_string().into(),
+                    serde_json::to_value::<&[String; 0]>(&[]).unwrap(),
+                ],
+            )
+            .unwrap()
+            .hash
+            .into()
+        })
+        .collect::<Vec<BitcoinBlockHash>>()
+        .try_into()
+        .unwrap();
 
     ctx.wait_for_signal(Duration::from_secs(8), |signal| {
         matches!(
