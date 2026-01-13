@@ -394,7 +394,7 @@ impl DbWrite for SharedStore {
         store.version += 1;
 
         // Then, recursively mark all blocks reachable from the chain tip as canonical
-        if let Some(block) = store.bitcoin_blocks.get(&chain_tip).cloned() {
+        if let Some(block) = store.bitcoin_blocks.get(chain_tip).cloned() {
             store.canonical_bitcoin_blocks.insert(*chain_tip, block);
         }
 

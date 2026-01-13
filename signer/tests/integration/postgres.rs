@@ -7882,7 +7882,7 @@ mod canonical_bitcoin_blockchain {
 
         // Check that fork chain blocks with height 0 to 2 are canonical,
         // since they are also part of the main chain
-        for (_, block) in fork_chain.range(stable_block_heights.clone()) {
+        for (_, block) in fork_chain.range(stable_block_heights) {
             let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
             assert_eq!(is_canonical, Some(true));
         }
@@ -7904,7 +7904,7 @@ mod canonical_bitcoin_blockchain {
         }
 
         // Check that original main chain blocks with height 0 to 2 are canonical
-        for (_, block) in main_chain.range(stable_block_heights.clone()) {
+        for (_, block) in main_chain.range(stable_block_heights) {
             let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
             assert_eq!(is_canonical, Some(true));
         }
@@ -7931,7 +7931,7 @@ mod canonical_bitcoin_blockchain {
 
         // Check that fork chain blocks with height 0 to 2 are canonical,
         // since they are also part of the main chain
-        for (_, block) in fork_chain.range(stable_block_heights.clone()) {
+        for (_, block) in fork_chain.range(stable_block_heights) {
             let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
             assert_eq!(is_canonical, Some(true));
         }
@@ -7942,7 +7942,7 @@ mod canonical_bitcoin_blockchain {
 
         // Now to make sure that things aren't messed up because the ranges
         // are empty iterators.
-        assert_eq!(fork_chain.range(stable_block_heights.clone()).count(), 3);
+        assert_eq!(fork_chain.range(stable_block_heights).count(), 3);
         assert_eq!(fork_chain.range(forked_block_heights.clone()).count(), 17);
 
         assert_eq!(main_chain.range(stable_block_heights).count(), 3);

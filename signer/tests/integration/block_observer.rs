@@ -2026,7 +2026,7 @@ async fn block_observer_marks_bitcoin_blocks_as_canonical() {
     assert_eq!(chain_tip_before_invalidation_status, Some(true));
 
     // Now invalidate the chain tip
-    rpc.invalidate_block(&*chain_tip_before_invalidation)
+    rpc.invalidate_block(&chain_tip_before_invalidation)
         .unwrap();
 
     let new_block_1: BitcoinBlockHash = faucet.generate_block().into();
