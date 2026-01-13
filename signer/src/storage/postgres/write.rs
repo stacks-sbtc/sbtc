@@ -1006,7 +1006,7 @@ impl PgWrite {
     /// This function finds the first block on the chain that is reachable
     /// from the given chain tip that is already marked as a canonical
     /// block in the database.
-    async fn find_canonical_root<'e, E>(
+    async fn find_bitcoin_canonical_root<'e, E>(
         executor: &'e mut E,
         chain_tip: &model::BitcoinBlockHash,
     ) -> Result<i64, Error>
@@ -1055,7 +1055,7 @@ impl PgWrite {
 
     async fn set_canonical_bitcoin_blockchain<'e, E>(
         executor: &'e mut E,
-        chain_tip: &model::BitcoinBlockRef,
+        chain_tip: &model::BitcoinBlockHash,
     ) -> Result<(), Error>
     where
         E: 'static,
@@ -1065,7 +1065,7 @@ impl PgWrite {
         // block where is_canonical = TRUE. This block height is the height
         // where we'll need to update the canonical status of bitcoin
         // blocks.
-        let min_height = Self::find_canonical_root(executor, &chain_tip.block_hash).await?;
+        let min_height = Self::find_bitcoin_canonical_root(executor, chain_tip).await?;
 
         // Next, update blocks with height greater than min_height
         // Build canonical chain and mark those blocks as canonical.
@@ -1097,12 +1097,11 @@ impl PgWrite {
             SET is_canonical = (block_hash IN (
                 SELECT block_hash FROM canonical_chain
             ))
-            WHERE block_height BETWEEN $2 AND $3
+            WHERE block_height >= $2
             "#,
         )
-        .bind(chain_tip.block_hash)
+        .bind(chain_tip)
         .bind(min_height)
-        .bind(chain_tip.block_height)
         .execute(executor)
         .await
         .map_err(Error::SqlxQuery)?;
@@ -1272,7 +1271,7 @@ impl DbWrite for PgStore {
 
     async fn set_canonical_bitcoin_blockchain(
         &self,
-        chain_tip: &model::BitcoinBlockRef,
+        chain_tip: &model::BitcoinBlockHash,
     ) -> Result<(), Error> {
         PgWrite::set_canonical_bitcoin_blockchain(self.get_connection().await?.as_mut(), chain_tip)
             .await
@@ -1451,7 +1450,7 @@ impl DbWrite for PgTransaction<'_> {
 
     async fn set_canonical_bitcoin_blockchain(
         &self,
-        chain_tip: &model::BitcoinBlockRef,
+        chain_tip: &model::BitcoinBlockHash,
     ) -> Result<(), Error> {
         let mut tx = self.tx.lock().await;
         PgWrite::set_canonical_bitcoin_blockchain(tx.as_mut(), chain_tip).await

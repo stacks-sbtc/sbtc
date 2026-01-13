@@ -388,19 +388,17 @@ impl DbWrite for SharedStore {
 
     async fn set_canonical_bitcoin_blockchain(
         &self,
-        chain_tip: &model::BitcoinBlockRef,
+        chain_tip: &model::BitcoinBlockHash,
     ) -> Result<(), Error> {
         let mut store = self.lock().await;
         store.version += 1;
 
         // Then, recursively mark all blocks reachable from the chain tip as canonical
-        if let Some(block) = store.bitcoin_blocks.get(&chain_tip.block_hash).cloned() {
-            store
-                .canonical_bitcoin_blocks
-                .insert(chain_tip.block_hash, block);
+        if let Some(block) = store.bitcoin_blocks.get(&chain_tip).cloned() {
+            store.canonical_bitcoin_blocks.insert(*chain_tip, block);
         }
 
-        let mut current_block_hash = chain_tip.block_hash;
+        let mut current_block_hash = *chain_tip;
         while let Some(block) = store
             .canonical_bitcoin_blocks
             .get(&current_block_hash)
@@ -578,7 +576,7 @@ impl DbWrite for InMemoryTransaction {
 
     async fn set_canonical_bitcoin_blockchain(
         &self,
-        chain_tip: &model::BitcoinBlockRef,
+        chain_tip: &model::BitcoinBlockHash,
     ) -> Result<(), Error> {
         self.store.set_canonical_bitcoin_blockchain(chain_tip).await
     }

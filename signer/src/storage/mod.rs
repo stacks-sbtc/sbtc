@@ -625,9 +625,10 @@ pub trait DbWrite {
     ///
     /// Marks blocks reachable from the given chain tip as canonical
     /// (is_canonical = TRUE) and marks all other blocks as non-canonical
-    /// (is_canonical = FALSE).
+    /// (is_canonical = FALSE). This includes blocks that may have a height
+    /// that is greater than the height of the given chain tip.
     fn set_canonical_bitcoin_blockchain(
         &self,
-        chain_tip: &model::BitcoinBlockRef,
+        chain_tip: &model::BitcoinBlockHash,
     ) -> impl Future<Output = Result<(), Error>> + Send;
 }
