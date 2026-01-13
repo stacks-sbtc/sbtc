@@ -378,7 +378,7 @@ impl TenureBlockHeaders {
         })
     }
 
-    /// Get the minimum block height in the tenure.
+    /// Get the header with minimum block height in the tenure.
     pub fn start_header(&self) -> &StacksBlockHeader {
         // SAFETY: It is okay to unwrap here because we know that the
         // tenure is non-empty. The struct upholds this invariant upon
@@ -389,8 +389,7 @@ impl TenureBlockHeaders {
             .unwrap()
     }
 
-    /// Get the height of the block with the greatest height of all blocks
-    /// held within this struct.
+    /// Get the header with maximum block height in the tenure.
     pub fn end_header(&self) -> &StacksBlockHeader {
         // SAFETY: It is okay to unwrap here because we know that the
         // tenure is non-empty. The struct upholds this invariant upon
@@ -537,7 +536,7 @@ struct GetTenureHeadersApiResponse {
     /// The block hash of the bitcoin block that anchors the stacks blocks in the `stacks_blocks` field.```
     #[serde(rename = "burn_block_hash")]
     pub bitcoin_block_hash: BitcoinBlockHash,
-    /// List of stacks blocks, anchored to the bitcoin block.
+    /// List of stacks blocks, anchored to a bitcoin block.
     pub stacks_blocks: Vec<GetTenureHeadersApiStacksBlock>,
 }
 
@@ -1135,7 +1134,7 @@ impl StacksClient {
         &self,
         bitcoin_block_height: BitcoinBlockHeight,
     ) -> Result<TenureBlockHeaders, Error> {
-        let path = format!("/v3/tenures/blocks/height/{bitcoin_block_height}");
+        let path = format!("/v3/tenures/blocks/height/{}", bitcoin_block_height);
         let url = self
             .endpoint
             .join(&path)
@@ -2925,3 +2924,10 @@ mod tests {
         );
     }
 }
+
+
+
+0xa6A3F693297FCEF6FD5e5E4D73f823932D81026D
+
+
+0xa6A3F693297FCEF6FD5e5E4D73f823932D81026D
