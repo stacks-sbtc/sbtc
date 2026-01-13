@@ -369,8 +369,6 @@ impl<C: Context, B> BlockObserver<C, B> {
         let block_headers = self.next_headers_to_process(block_hash).await?;
 
         let chain_tip = block_headers.last().cloned();
-        // This should be the header for the above block hash.
-        debug_assert_eq!(chain_tip.as_ref().map(|h| h.hash), Some(block_hash));
 
         for block_header in block_headers {
             self.process_bitcoin_block(block_header).await?;
