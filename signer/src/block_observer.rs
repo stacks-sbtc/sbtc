@@ -384,8 +384,6 @@ impl<C: Context, B> BlockObserver<C, B> {
 
     /// Write the bitcoin block and any transactions that spend to any of
     /// the signers `scriptPubKey`s to the database.
-    ///
-    /// Returns `BitcoinBlockRef` to processed block.
     #[tracing::instrument(skip_all, fields(block_hash = %block_header.hash))]
     async fn process_bitcoin_block(&self, block_header: &BitcoinBlockHeader) -> Result<(), Error> {
         let block = self
