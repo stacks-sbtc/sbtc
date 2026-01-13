@@ -1135,7 +1135,7 @@ impl StacksClient {
         &self,
         bitcoin_block_height: BitcoinBlockHeight,
     ) -> Result<TenureBlockHeaders, Error> {
-        let path = format!("/v3/tenures/blocks/height/{}", bitcoin_block_height);
+        let path = format!("/v3/tenures/blocks/height/{bitcoin_block_height}");
         let url = self
             .endpoint
             .join(&path)
