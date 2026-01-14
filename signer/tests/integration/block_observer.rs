@@ -1867,11 +1867,6 @@ fn make_coinbase_deposit_request(
     (deposit_tx, req, info)
 }
 
-#[derive(serde::Deserialize, Clone, PartialEq, Eq, Debug)]
-pub struct GenerateBlockJson {
-    pub hash: bitcoin::BlockHash,
-}
-
 /// This test checks that the block observer marks the canonical status of
 /// bitcoin blocks in the database whenever a new block is observed.
 #[tokio::test]
@@ -2018,22 +2013,15 @@ async fn block_observer_marks_bitcoin_blocks_as_canonical() {
     // Now invalidate the chain tip
     rpc.invalidate_block(&chain_tip_before_invalidation)
         .unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    rpc.invalidate_block(&chain_tip_before_invalidation)
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
 
-    let _ = rpc.get_best_block_hash().unwrap();
-
-    let [new_block_1, new_block_2] = (0..2)
-        .map(|_| {
-            rpc.call::<GenerateBlockJson>(
-                "generateblock",
-                &[
-                    faucet.address.to_string().into(),
-                    serde_json::to_value::<&[String; 0]>(&[]).unwrap(),
-                ],
-            )
-            .unwrap()
-            .hash
-            .into()
-        })
+    let [new_block_1, new_block_2] = faucet
+        .generate_blocks(2)
+        .into_iter()
+        .map(From::from)
         .collect::<Vec<BitcoinBlockHash>>()
         .try_into()
         .unwrap();
