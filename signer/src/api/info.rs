@@ -304,10 +304,7 @@ mod tests {
     use crate::{
         api::ApiState,
         error::Error,
-        storage::{
-            DbWrite as _,
-            model::{BitcoinBlock, BitcoinBlockRef, StacksBlock},
-        },
+        storage::model::{BitcoinBlock, BitcoinBlockRef, StacksBlock},
         testing::context::*,
     };
 
@@ -411,10 +408,7 @@ mod tests {
             })
             .await;
 
-        let storage = context.get_storage_mut();
-
         let bitcoin_block: BitcoinBlock = Faker.fake();
-        storage.write_bitcoin_block(&bitcoin_block).await.unwrap();
         context
             .state()
             .set_bitcoin_chain_tip(BitcoinBlockRef::from(&bitcoin_block));
@@ -423,7 +417,6 @@ mod tests {
             bitcoin_anchor: bitcoin_block.block_hash,
             ..Faker.fake()
         };
-        storage.write_stacks_block(&stacks_block).await.unwrap();
         context
             .state()
             .set_stacks_chain_tip(stacks_block.clone().into());
