@@ -1270,10 +1270,26 @@ where
     D: Transactable + Send + Sync,
 {
     let db = storage.begin_transaction().await?;
-    let mut tenure = stacks.get_tenure_headers(bitcoin_block_height).await?;
-    let end_height = tenure.end_header().block_height;
     let nakamoto_start_height = stacks.get_epoch_status().await?.nakamoto_start_height();
 
+    let mut height = bitcoin_block_height;
+    let mut tenure = loop {
+        match stacks.get_tenure_headers(height).await {
+            Ok(t) => break t,
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    "error during fetching tenure headers"
+                );
+                if height <= nakamoto_start_height {
+                    return Err(error);
+                }
+                height = height - 1;
+            }
+        }
+    };
+
+    let end_height = tenure.end_header().block_height;
     let mut anchor_block_height = tenure.anchor_block_height;
 
     loop {
