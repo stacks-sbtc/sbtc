@@ -2923,6 +2923,7 @@ mod tests {
         mock_poxinfo.assert();
     }
 
+    #[ignore = "This is an integration test that hasn't been setup for CI yet"]
     #[tokio::test]
     async fn get_tenure_headers_correctly_serializes_bitcoin_block_hash() {
         let url = Url::parse("https://api.mainnet.hiro.so/").unwrap();
