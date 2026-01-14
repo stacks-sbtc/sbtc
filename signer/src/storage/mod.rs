@@ -621,12 +621,17 @@ pub trait DbWrite {
         address: Multiaddr,
     ) -> impl Future<Output = Result<(), Error>> + Send;
 
-    /// Update the is_canonical status for all bitcoin blocks.
+    /// Ensure that each and only blocks along the chain identified by the
+    /// given chain tip have their is_canonical set to TRUE.
     ///
-    /// Marks blocks reachable from the given chain tip as canonical
-    /// (is_canonical = TRUE) and marks all other blocks as non-canonical
-    /// (is_canonical = FALSE). This includes blocks that may have a height
-    /// that is greater than the height of the given chain tip.
+    /// # Notes
+    /// 
+    /// This function should mark all blocks that are reachable from the
+    /// given chain tip as canonical (is_canonical = TRUE), and no other
+    /// block should have is_canonical set to TRUE. That means that the
+    /// DbWrite::set_canonical_bitcoin_blockchain() function need not set
+    /// the is_canonical column to FALSE if it is a non-canonical block --
+    /// it can just leave the value of that column as NULL.
     fn set_canonical_bitcoin_blockchain(
         &self,
         chain_tip: &model::BitcoinBlockHash,

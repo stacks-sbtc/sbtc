@@ -7746,6 +7746,13 @@ mod canonical_bitcoin_blockchain {
             .unwrap();
     }
 
+    /// In this test, we check that the
+    /// DbWrite::set_canonical_bitcoin_blockchain() function sets
+    /// is_canonical = TRUE in the bitcoin_blocks table for all blocks in
+    /// the chain along the chain tip. We also check that if forked blocks
+    /// are added to the database along with canonical blocks, that the
+    /// forked blocks are marked as non-canonical, assuming that neither
+    /// the canonical or non-canonical blocks have been marked at all.
     #[tokio::test]
     async fn test_set_canonical_bitcoin_blockchain() {
         let db = testing::storage::new_test_database().await;
@@ -7846,8 +7853,16 @@ mod canonical_bitcoin_blockchain {
         testing::storage::drop_db(db).await;
     }
 
+    /// Similar to the above test, we have two chains each with differing
+    /// lengths, both in the database. The "main" when
+    /// DbWrite::set_canonical_bitcoin_blockchain() is called is the longer
+    /// chain with the main chain tip as input, all of those blocks are
+    /// marked as canonical and all other blocks are marked as
+    /// non-canonical. If we chose the fork chain tip, the blocks that are
+    /// part of the fork are then marked as canonical while the main
+    /// chain's blocks are then marked as non-canonical.
     #[tokio::test]
-    async fn test_set_canonical_bitcoin_blockchain_with_fork() {
+    async fn test_set_canonical_bitcoin_blockchain_with_fork_known_immediately() {
         let db = testing::storage::new_test_database().await;
 
         // Create two blockchains, one of length 10 and another of length
@@ -7947,6 +7962,123 @@ mod canonical_bitcoin_blockchain {
 
         assert_eq!(main_chain.range(stable_block_heights).count(), 3);
         assert_eq!(main_chain.range(forked_block_heights).count(), 7);
+
+        testing::storage::drop_db(db).await;
+    }
+
+    /// In this test, we check that it is not important whether the forked
+    /// blocks are already stored in the database or not when
+    /// DbWrite::set_canonical_bitcoin_blockchain() is called for the first
+    /// time, it still correctly mark the blocks as canonical or
+    /// non-canonical if they are part of the chain identified by the given
+    /// chain tip.
+    #[tokio::test]
+    async fn test_set_canonical_bitcoin_blockchain_with_fork_known_later() {
+        let db = testing::storage::new_test_database().await;
+
+        // Create two blockchains, one of length 10 and another of length
+        // 20, where one forks the other at height 3 (the block with height
+        // 3 differs from one to the other but their earlier blocks are the
+        // same)
+        let main_chain = BitcoinChain::new_with_length(10);
+        let fork_chain = main_chain.fork_at_height(2u64, 15);
+        // These are the ranges for the block heights that didn't change,
+        // so blocks from both chains should always be canonical.
+        let stable_block_heights = ..BitcoinBlockHeight::from(2u64);
+        // These are the ranges for the block heights that changed, so
+        // blocks from one chain will always be non-canonical.
+        let forked_block_heights = BitcoinBlockHeight::from(2u64)..;
+
+        // Write main chains to the database
+        for block in &main_chain {
+            db.write_bitcoin_block(block).await.unwrap();
+        }
+
+        // Set the main chain as canonical
+        let main_chain_tip = main_chain.chain_tip().block_hash;
+        db.set_canonical_bitcoin_blockchain(&main_chain_tip)
+            .await
+            .unwrap();
+
+        // Verify that all blocks in the main chain are marked as canonical
+        for block in &main_chain {
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
+            assert_eq!(is_canonical, Some(true));
+        }
+
+        // Write fork chains to the database
+        for block in &fork_chain {
+            db.write_bitcoin_block(block).await.unwrap();
+        }
+
+        // These were already written to the database, they are part of the main chain.
+        for (_, block) in fork_chain.range(stable_block_heights) {
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
+            assert_eq!(is_canonical, Some(true));
+        }
+
+        // These are new blocks, not yet seen before.
+        for (_, block) in fork_chain.range(forked_block_heights.clone()) {
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
+            assert_eq!(is_canonical, None);
+        }
+
+        // Set the fork chain as canonical from its chain tip
+        let fork_chain_tip = fork_chain.chain_tip().block_hash;
+        db.set_canonical_bitcoin_blockchain(&fork_chain_tip)
+            .await
+            .unwrap();
+
+        // Check that all fork chain blocks are canonical
+        for block in &fork_chain {
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
+            assert_eq!(is_canonical, Some(true));
+        }
+
+        // Check that original main chain blocks with height 0 to 1 are canonical
+        for (_, block) in main_chain.range(stable_block_heights) {
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
+            assert_eq!(is_canonical, Some(true));
+        }
+
+        // Check that original main chain blocks with height 1 to 9 are
+        // non-canonical
+        for (_, block) in main_chain.range(forked_block_heights.clone()) {
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
+            assert_eq!(is_canonical, Some(false));
+        }
+
+        // Okay, now let's make the main chain canonical again, just to
+        // make sure that things switch back as expected.
+        db.set_canonical_bitcoin_blockchain(&main_chain_tip)
+            .await
+            .unwrap();
+
+        // Verify that all blocks in the main chain are marked as canonical
+        // again.
+        for block in &main_chain {
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
+            assert_eq!(is_canonical, Some(true));
+        }
+
+        // Check that fork chain blocks with height 0 to 1 are canonical,
+        // since they are also part of the main chain
+        for (_, block) in fork_chain.range(stable_block_heights) {
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
+            assert_eq!(is_canonical, Some(true));
+        }
+        for (_, block) in fork_chain.range(forked_block_heights.clone()) {
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
+            assert_eq!(is_canonical, Some(false));
+        }
+
+        // Now to make sure that things aren't messed up because the ranges
+        // are empty iterators.
+        assert_eq!(fork_chain.range(stable_block_heights).count(), 2);
+        assert_eq!(fork_chain.range(forked_block_heights.clone()).count(), 15);
+
+        assert_eq!(main_chain.range(stable_block_heights).count(), 2);
+        assert_eq!(main_chain.range(forked_block_heights).count(), 8);
 
         testing::storage::drop_db(db).await;
     }

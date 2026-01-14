@@ -1053,6 +1053,17 @@ impl PgWrite {
         .map(|maybe_height| maybe_height.unwrap_or(0))
     }
 
+    /// Update the is_canonical status for all blocks with height greater
+    /// than the current "canonical root height" (the block height
+    /// identified by the `find_bitcoin_canonical_root` function).
+    /// 
+    /// # Notes
+    /// 
+    /// If a forked block is added to the database and the next chain tip
+    /// builds off of a block where is_canonical is TRUE, and that block
+    /// has height greater than this forked block, then this function will
+    /// not set the is_canonical column for the forked block. This is okay,
+    /// since we just need to make sure that it is not set to TRUE.
     async fn set_canonical_bitcoin_blockchain<'e, E>(
         executor: &'e mut E,
         chain_tip: &model::BitcoinBlockHash,
