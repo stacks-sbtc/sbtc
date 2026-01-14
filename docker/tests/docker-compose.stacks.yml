@@ -1,0 +1,150 @@
+# Variables
+# ------------------------------------------------------------------------------
+x-common-vars:
+  - &MINER_SEED 9e446f6b0c6a96cf2190e54bcd5a8569c3e386f091605499464389b8d4e0bfc201 # stx: STEW4ZNT093ZHK4NEQKX8QJGM2Y7WWJ2FQQS5C19, btc: miEJtNKa3ASpA19v5ZhvbKTEieYjLpzCYT, pub_key: 035379aa40c02890d253cfa577964116eb5295570ae9f7287cbae5f2585f5b2c7c, wif: cStMQXkK5yTFGP3KbNXYQ3sJf2qwQiKrZwR9QJnksp32eKzef1za
+  - &BITCOIN_PEER_PORT 18444
+  - &BITCOIN_RPC_PORT 18443
+  - &BITCOIN_RPC_USER devnet
+  - &BITCOIN_RPC_PASS devnet
+  - &STACKS_20_HEIGHT ${STACKS_20_HEIGHT:-0}
+  - &STACKS_2_05_HEIGHT ${STACKS_2_05_HEIGHT:-203}
+  - &STACKS_21_HEIGHT ${STACKS_21_HEIGHT:-204}
+  - &STACKS_POX2_HEIGHT ${STACKS_POX2_HEIGHT:-205} # 104 is is stacks_block=1, 106 is stacks_block=3
+  - &STACKS_22_HEIGHT ${STACKS_22_HEIGHT:-206}
+  - &STACKS_23_HEIGHT ${STACKS_23_HEIGHT:-207}
+  - &STACKS_24_HEIGHT ${STACKS_24_HEIGHT:-208}
+  - &STACKS_25_HEIGHT ${STACKS_25_HEIGHT:-209}
+  - &STACKS_30_HEIGHT ${STACKS_30_HEIGHT:-232}
+  - &STACKS_31_HEIGHT ${STACKS_31_HEIGHT:-233}
+  - &STACKS_32_HEIGHT ${STACKS_32_HEIGHT:-234}
+  - &STACKS_33_HEIGHT ${STACKS_33_HEIGHT:-235}
+  - &POX_PREPARE_LENGTH ${POX_PREPARE_LENGTH:-5}
+  - &POX_REWARD_LENGTH ${POX_REWARD_LENGTH:-20}
+  - &REWARD_RECIPIENT ${REWARD_RECIPIENT:-STQM73RQC4EX0A07KWG1J5ECZJYBZS4SJ4ERC6WN} # priv: 6ad9cadb42d4edbfbe0c5bfb3b8a4125ddced021c4174f829b714ccbf527f02001
+  - &STACKS_BLOCKCHAIN blockstack/stacks-core:3.3.0.0.1@sha256:b7fd10e489c81da12d8e1b956dec5d35bf8fd98874a6d32127bdee19cad0a235
+
+# Services.
+# ------------------------------------------------------------------------------
+services:
+  bitcoin:
+    build:
+      dockerfile_inline: |
+        FROM bitcoin/bitcoin:25.2
+        COPY snapshot.tgz /tmp/snapshot.tgz
+        RUN tar -xzf /tmp/snapshot.tgz && \
+            mkdir -p /root/.bitcoin && \
+            mv snapshot/bitcoin /root/.bitcoin/regtest
+    stop_grace_period: 0s
+    ports:
+      - "18443"
+    volumes:
+      - ../bitcoin/bitcoin.conf:/root/.bitcoin/bitcoin.conf:ro
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        set -e
+        bitcoind
+    healthcheck:
+      test: [ "CMD-SHELL", "bitcoin-cli -rpcwait getblockcount" ]
+      start_period: 10s
+      start_interval: 200ms
+      interval: 10s
+      timeout: 200ms
+      retries: 20
+
+  bitcoin-new-block:
+    image: bitcoin/bitcoin:25.2
+    depends_on:
+      bitcoin:
+        condition: service_healthy
+    volumes:
+      - ../bitcoin/bitcoin.conf:/root/.bitcoin/bitcoin.conf:ro
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        set -e
+        bitcoin-cli -rpcconnect=bitcoin -rpcwallet=depositor generatetoaddress 1 "$(bitcoin-cli -rpcconnect=bitcoin -rpcwallet=depositor getnewaddress label="" bech32)"
+        sleep infinity
+
+  stacks-node:
+    build:
+      args:
+        STACKS_BLOCKCHAIN: *STACKS_BLOCKCHAIN
+      dockerfile_inline: |
+        ARG STACKS_BLOCKCHAIN
+        FROM $${STACKS_BLOCKCHAIN}
+        COPY snapshot.tgz /tmp/snapshot.tgz
+        RUN tar -xzf /tmp/snapshot.tgz && \
+            mkdir -p /data && \
+            mv snapshot/stacks-node /data/nakamoto-neon
+        RUN apt-get update && apt-get install -y curl
+    depends_on:
+      bitcoin:
+        condition: service_healthy
+    stop_grace_period: 0s
+    ports:
+      - "20443"
+    volumes:
+      - ../stacks/stacks-test-miner.toml:/data/config.toml.in:ro
+    environment:
+      # STACKS_LOG_TRACE: 1 # uncomment for trace logging
+      # STACKS_LOG_DEBUG: 1
+      # RUST_LOG: debug
+      BITCOIN_PEER_HOST: bitcoin
+      BITCOIN_PEER_PORT: *BITCOIN_PEER_PORT
+      BITCOIN_RPC_PORT: *BITCOIN_RPC_PORT
+      BITCOIN_RPC_USER: *BITCOIN_RPC_USER
+      BITCOIN_RPC_PASS: *BITCOIN_RPC_PASS
+      MINER_SEED: *MINER_SEED
+      STACKS_20_HEIGHT: *STACKS_20_HEIGHT
+      STACKS_2_05_HEIGHT: *STACKS_2_05_HEIGHT
+      STACKS_21_HEIGHT: *STACKS_21_HEIGHT
+      STACKS_POX2_HEIGHT: *STACKS_POX2_HEIGHT
+      STACKS_22_HEIGHT: *STACKS_22_HEIGHT
+      STACKS_23_HEIGHT: *STACKS_23_HEIGHT
+      STACKS_24_HEIGHT: *STACKS_24_HEIGHT
+      STACKS_25_HEIGHT: *STACKS_25_HEIGHT
+      STACKS_30_HEIGHT: *STACKS_30_HEIGHT
+      STACKS_31_HEIGHT: *STACKS_31_HEIGHT
+      STACKS_32_HEIGHT: *STACKS_32_HEIGHT
+      STACKS_33_HEIGHT: *STACKS_33_HEIGHT
+      POX_PREPARE_LENGTH: *POX_PREPARE_LENGTH
+      POX_REWARD_LENGTH: *POX_REWARD_LENGTH
+      REWARD_RECIPIENT: *REWARD_RECIPIENT
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        cd /data/
+        set -e
+        perl -pe 's/\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?/$$ENV{$1}/ge' < config.toml.in > config.toml
+        exec stacks-node start --config config.toml
+
+  stacks-signer:
+    build:
+      args:
+        STACKS_BLOCKCHAIN: *STACKS_BLOCKCHAIN
+      dockerfile_inline: |
+        ARG STACKS_BLOCKCHAIN
+        FROM $${STACKS_BLOCKCHAIN}
+        COPY snapshot.tgz /tmp/snapshot.tgz
+        RUN tar -xzf /tmp/snapshot.tgz && \
+           mkdir -p /data && \
+           mv snapshot/stacks-signer/* /data/
+    volumes:
+      - ../stacks/stacks-signer.toml:/tmp/config.toml.in:ro
+    environment:
+      STACKS_NODE_HOST: stacks-node:20443
+      STACKS_SIGNER_ENDPOINT: 0.0.0.0:30000
+      SIGNER_PRIVATE_KEY: 41634762d89dfa09133a4a8e9c1378d0161d29cd0a9433b51f1e3d32947a73dc01
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        mkdir -p /data
+        cd /data/
+        set -e
+        perl -pe 's/\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?/$$ENV{$1}/ge' < /tmp/config.toml.in > config.toml
+        exec stacks-signer run --config config.toml
