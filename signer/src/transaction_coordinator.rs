@@ -647,7 +647,7 @@ where
         aggregate_key: &PublicKey,
         signer_public_keys: &BTreeSet<PublicKey>,
     ) -> Result<(), Error> {
-        // Fetch the stacks chain tip from the database.
+        // Fetch the stacks chain tip from the signer state.
         let stacks_chain_tip = self
             .context
             .state()
