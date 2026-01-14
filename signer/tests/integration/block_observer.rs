@@ -1874,6 +1874,8 @@ async fn block_observer_marks_bitcoin_blocks_as_canonical() {
     let (rpc, faucet) = regtest::initialize_blockchain();
     let db = testing::storage::new_test_database().await;
 
+    let mut rng = get_rng();
+
     let emily_client = EmilyClient::try_new(
         &Url::parse("http://testApiKey@localhost:3031").unwrap(),
         Duration::from_secs(1),
@@ -2013,15 +2015,14 @@ async fn block_observer_marks_bitcoin_blocks_as_canonical() {
     // Now invalidate the chain tip
     rpc.invalidate_block(&chain_tip_before_invalidation)
         .unwrap();
-    tokio::time::sleep(Duration::from_secs(4)).await;
 
-    let [new_block_1, new_block_2] = faucet
-        .generate_blocks(2)
-        .into_iter()
-        .map(From::from)
-        .collect::<Vec<BitcoinBlockHash>>()
-        .try_into()
-        .unwrap();
+    // Sometimes bitcoin-core will generate an invalid block (maybe the
+    // same block?), after invalidating the chain tip. One wait to combat
+    // this is to generate new blocks to a new address, ensuring the new
+    // block is distinct from the previous ones.
+    let random_address = Recipient::new_with_rng(AddressType::P2wpkh, &mut rng).address;
+    let new_blocks = rpc.generate_to_address(2, &random_address).unwrap();
+    let [new_block_1, new_block_2] = <[_; 2]>::try_from(new_blocks).unwrap().map(From::from);
 
     ctx.wait_for_signal(Duration::from_secs(8), |signal| {
         matches!(
