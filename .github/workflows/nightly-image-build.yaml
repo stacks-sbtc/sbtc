@@ -14,7 +14,7 @@ permissions:
   packages: write
 
 env:
-  docker_platforms: "linux/amd64"
+  docker_platforms: "linux/amd64,linux/arm64"
 
 jobs:
   image:
@@ -45,6 +45,10 @@ jobs:
       - name: Checkout Repository
         id: checkout_repository
         uses: stacks-sbtc/actions/checkout@181f8c67da2707c66b5e31f24e7418c47adefdd1
+
+      - name: Setup Buildx
+        id: setup_buildx
+        uses: stacks-sbtc/actions/docker/setup-buildx-action@181f8c67da2707c66b5e31f24e7418c47adefdd1
 
       - name: Docker Metadata (${{ matrix.dist }})
         id: docker_metadata
