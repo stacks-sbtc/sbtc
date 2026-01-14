@@ -571,12 +571,12 @@ async fn get_deposit_request_works() {
     assert!(request.is_none());
 }
 
-#[test_case(3, 10, Some(2), 3; "handles paging")]
-#[test_case(3, 0, Some(2), 2; "handles timeout")]
+#[test_case(3, Duration::from_secs(10), Some(2), 3; "handles paging")]
+#[test_case(3, Duration::from_secs(0), Some(2), 2; "handles timeout")]
 #[tokio::test]
 async fn test_get_deposits_with_status_request_paging(
     num_deposits: usize,
-    timeout_secs: u64,
+    timeout: Duration,
     page_size: Option<u16>,
     expected_result: usize,
 ) {
@@ -585,7 +585,6 @@ async fn test_get_deposits_with_status_request_paging(
     let lock_time = 150;
 
     let url = url::Url::parse("http://testApiKey@localhost:3031").unwrap();
-    let timeout = Duration::from_secs(timeout_secs);
     let emily_client = EmilyClient::try_new(&url, timeout, page_size).unwrap();
 
     wipe_databases(&emily_client.config().as_testing())
