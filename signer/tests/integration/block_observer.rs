@@ -2013,10 +2013,7 @@ async fn block_observer_marks_bitcoin_blocks_as_canonical() {
     // Now invalidate the chain tip
     rpc.invalidate_block(&chain_tip_before_invalidation)
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    rpc.invalidate_block(&chain_tip_before_invalidation)
-        .unwrap();
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    tokio::time::sleep(Duration::from_secs(4)).await;
 
     let [new_block_1, new_block_2] = faucet
         .generate_blocks(2)
