@@ -625,7 +625,7 @@ pub trait DbWrite {
     /// given chain tip have their is_canonical set to TRUE.
     ///
     /// # Notes
-    /// 
+    ///
     /// This function should mark all blocks that are reachable from the
     /// given chain tip as canonical (is_canonical = TRUE), and no other
     /// block should have is_canonical set to TRUE. That means that the

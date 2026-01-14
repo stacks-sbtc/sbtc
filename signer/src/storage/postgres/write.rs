@@ -1003,23 +1003,32 @@ impl PgWrite {
         Ok(())
     }
 
-    /// This function finds the first block on the chain that is reachable
-    /// from the given chain tip that is already marked as a canonical
-    /// block in the database.
-    async fn find_bitcoin_canonical_root<'e, E>(
+    /// Update the is_canonical status for all blocks with height greater
+    /// than the current "canonical root height" (the first block on the chain
+    /// reachable from the chain tip that is already marked as canonical).
+    ///
+    /// # Notes
+    ///
+    /// If a forked block is added to the database and the next chain tip
+    /// builds off of a block where is_canonical is TRUE, and that block
+    /// has height greater than this forked block, then this function will
+    /// not set the is_canonical column for the forked block. This is okay,
+    /// since we just need to make sure that it is not set to TRUE.
+    async fn set_canonical_bitcoin_blockchain<'e, E>(
         executor: &'e mut E,
         chain_tip: &model::BitcoinBlockHash,
-    ) -> Result<i64, Error>
+    ) -> Result<(), Error>
     where
         E: 'static,
         for<'c> &'c mut E: sqlx::PgExecutor<'c>,
     {
-        // Walk backwards from chain tip to find the first block where
-        // is_canonical = TRUE
-        sqlx::query_scalar::<_, i64>(
+        // Walk backwards from chain tip to find the canonical root and
+        // build the canonical chain in a single recursive query, then
+        // update all blocks with height >= the minimum height found.
+        sqlx::query(
             r#"
-            -- find_canonical_root
-            WITH RECURSIVE chain_walk AS (
+            -- set_canonical_bitcoin_blockchain
+            WITH RECURSIVE canonical_chain AS (
                 -- Start from the chain tip
                 SELECT
                     block_hash
@@ -1038,81 +1047,22 @@ impl PgWrite {
                   , parent.parent_hash
                   , parent.is_canonical
                 FROM sbtc_signer.bitcoin_blocks AS parent
-                JOIN chain_walk AS child
-                  ON parent.block_hash = child.parent_hash
-                WHERE child.is_canonical IS NOT TRUE
-            )
-            SELECT MIN(block_height)
-            FROM chain_walk
-            "#,
-        )
-        .bind(chain_tip)
-        .fetch_optional(executor)
-        .await
-        .map_err(Error::SqlxQuery)
-        .map(|maybe_height| maybe_height.unwrap_or(0))
-    }
-
-    /// Update the is_canonical status for all blocks with height greater
-    /// than the current "canonical root height" (the block height
-    /// identified by the `find_bitcoin_canonical_root` function).
-    /// 
-    /// # Notes
-    /// 
-    /// If a forked block is added to the database and the next chain tip
-    /// builds off of a block where is_canonical is TRUE, and that block
-    /// has height greater than this forked block, then this function will
-    /// not set the is_canonical column for the forked block. This is okay,
-    /// since we just need to make sure that it is not set to TRUE.
-    async fn set_canonical_bitcoin_blockchain<'e, E>(
-        executor: &'e mut E,
-        chain_tip: &model::BitcoinBlockHash,
-    ) -> Result<(), Error>
-    where
-        E: 'static,
-        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
-    {
-        // First, walk backwards from chain tip to find the first
-        // block where is_canonical = TRUE. This block height is the height
-        // where we'll need to update the canonical status of bitcoin
-        // blocks.
-        let min_height = Self::find_bitcoin_canonical_root(executor, chain_tip).await?;
-
-        // Next, update blocks with height greater than min_height
-        // Build canonical chain and mark those blocks as canonical.
-        sqlx::query(
-            r#"
-            -- set_canonical_bitcoin_blockchain
-            WITH RECURSIVE canonical_chain AS (
-                -- Start from the chain tip
-                SELECT
-                    block_hash
-                  , block_height
-                  , parent_hash
-                FROM sbtc_signer.bitcoin_blocks
-                WHERE block_hash = $1
-
-                UNION ALL
-
-                -- Recursively get parent blocks
-                SELECT
-                    parent.block_hash
-                  , parent.block_height
-                  , parent.parent_hash
-                FROM sbtc_signer.bitcoin_blocks AS parent
                 JOIN canonical_chain AS child
                   ON parent.block_hash = child.parent_hash
-                WHERE parent.block_height >= $2
+                WHERE child.is_canonical IS NOT TRUE
+            ),
+            min_height AS (
+                SELECT COALESCE(MIN(block_height), 0) AS height
+                FROM canonical_chain
             )
             UPDATE sbtc_signer.bitcoin_blocks
             SET is_canonical = (block_hash IN (
                 SELECT block_hash FROM canonical_chain
             ))
-            WHERE block_height >= $2
+            WHERE block_height >= (SELECT height FROM min_height)
             "#,
         )
         .bind(chain_tip)
-        .bind(min_height)
         .execute(executor)
         .await
         .map_err(Error::SqlxQuery)?;
