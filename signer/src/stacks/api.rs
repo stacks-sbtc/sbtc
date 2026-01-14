@@ -1293,8 +1293,6 @@ where
     let mut anchor_block_height = tenure.anchor_block_height;
 
     loop {
-        tracing::debug!("loop iteration");
-        std::thread::sleep(std::time::Duration::from_secs(5));
         db.write_stacks_block_headers(&tenure).await?;
         // We won't get anymore Nakamoto blocks before this point, so
         // time to stop.
