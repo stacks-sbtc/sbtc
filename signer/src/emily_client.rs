@@ -197,6 +197,15 @@ impl EmilyClient {
     }
 }
 
+#[cfg(any(test, feature = "testing"))]
+impl EmilyClient {
+    /// Create a new Emily Client for use in our integration tests.
+    pub fn new_test_client() -> Result<Self, Error> {
+        let url = Url::parse("http://testApiKey@localhost:3031").map_err(Error::InvalidUrl)?;
+        EmilyClient::try_new(&url, Duration::from_secs(1), None)
+    }
+}
+
 impl EmilyInteract for EmilyClient {
     async fn get_deposit(
         &self,

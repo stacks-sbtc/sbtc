@@ -18,7 +18,6 @@ use signer::testing::storage::model::TestBitcoinTxInfo;
 use signer::util::Sleep;
 use test_case::test_case;
 use test_log::test;
-use url::Url;
 
 use blockstack_lib::net::api::getsortition::SortitionInfo;
 use clarity::types::chainstate::BurnchainHeaderHash;
@@ -140,12 +139,7 @@ async fn deposit_flow() {
     let network = network::in_memory::InMemoryNetwork::new();
     let signer_info = testing::wsts::generate_signer_info(&mut rng, num_signers);
 
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(1),
-        None,
-    )
-    .unwrap();
+    let emily_client = EmilyClient::new_test_client().unwrap();
     let stacks_client = WrappedMock::default();
 
     // Wipe the Emily database to start fresh
@@ -542,12 +536,7 @@ async fn get_deposit_request_works() {
     let amount_sats = 49_900_000;
     let lock_time = 150;
 
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(1),
-        None,
-    )
-    .unwrap();
+    let emily_client = EmilyClient::new_test_client().unwrap();
 
     wipe_databases(&emily_client.config().as_testing())
         .await
@@ -595,12 +584,9 @@ async fn test_get_deposits_with_status_request_paging(
     let amount_sats = 49_900_000;
     let lock_time = 150;
 
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(timeout_secs),
-        page_size,
-    )
-    .unwrap();
+    let url = url::Url::parse("http://testApiKey@localhost:3031").unwrap();
+    let timeout = Duration::from_secs(timeout_secs);
+    let emily_client = EmilyClient::try_new(&url, timeout, page_size).unwrap();
 
     wipe_databases(&emily_client.config().as_testing())
         .await
@@ -648,12 +634,7 @@ async fn test_get_deposits_returns_pending_and_accepted() {
     let num_deposits = 5;
     let num_accepted = 2;
 
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(10),
-        None,
-    )
-    .unwrap();
+    let emily_client = EmilyClient::new_test_client().unwrap();
 
     wipe_databases(&emily_client.config().as_testing())
         .await

@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering;
-use std::time::Duration;
 
 use bitcoin::consensus::encode::serialize_hex;
 use fake::Fake as _;
@@ -9,7 +8,6 @@ use fake::Faker;
 use mockito::Server;
 use serde_json::json;
 use signer::bitcoin::rpc::BitcoinCoreClient;
-use url::Url;
 
 use emily_client::apis::deposit_api;
 use emily_client::models::CreateDepositRequestBody;
@@ -317,12 +315,7 @@ async fn persist_received_deposit_decision_fetches_missing_deposit_requests() {
 
     let mut rng = get_rng();
 
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(1),
-        None,
-    )
-    .unwrap();
+    let emily_client = EmilyClient::new_test_client().unwrap();
 
     testing_api::wipe_databases(&emily_client.config().as_testing())
         .await

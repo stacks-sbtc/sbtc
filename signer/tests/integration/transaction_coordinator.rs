@@ -661,12 +661,7 @@ async fn deploy_smart_contracts_coordinator() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     // We need to populate our databases, so let's fetch the data.
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(1),
-        None,
-    )
-    .unwrap();
+    let emily_client = EmilyClient::new_test_client().unwrap();
 
     testing_api::wipe_databases(&emily_client.config().as_testing())
         .await
@@ -1545,12 +1540,7 @@ async fn pseudo_random_dkg() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     // We need to populate our databases, so let's fetch the data.
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(1),
-        None,
-    )
-    .unwrap();
+    let emily_client = EmilyClient::new_test_client().unwrap();
 
     testing_api::wipe_databases(&emily_client.config().as_testing())
         .await
@@ -1975,12 +1965,7 @@ async fn sign_bitcoin_transaction() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     // We need to populate our databases, so let's fetch the data.
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(1),
-        None,
-    )
-    .unwrap();
+    let emily_client = EmilyClient::new_test_client().unwrap();
 
     testing_api::wipe_databases(&emily_client.config().as_testing())
         .await
@@ -2303,12 +2288,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     // We need to populate our databases, so let's fetch the data.
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(1),
-        None,
-    )
-    .unwrap();
+    let emily_client = EmilyClient::new_test_client().unwrap();
 
     testing_api::wipe_databases(&emily_client.config().as_testing())
         .await
@@ -2827,12 +2807,7 @@ async fn wsts_ids_set_during_dkg_and_signing_rounds() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     // We need to populate our databases, so let's fetch the data.
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(1),
-        None,
-    )
-    .unwrap();
+    let emily_client = EmilyClient::new_test_client().unwrap();
 
     testing_api::wipe_databases(&emily_client.config().as_testing())
         .await
@@ -3182,12 +3157,7 @@ async fn skip_signer_activites_after_key_rotation() {
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     // We need to populate our databases, so let's fetch the data.
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(1),
-        None,
-    )
-    .unwrap();
+    let emily_client = EmilyClient::new_test_client().unwrap();
 
     testing_api::wipe_databases(&emily_client.config().as_testing())
         .await
@@ -3663,12 +3633,7 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
 
     let mut rng = get_rng();
     // We need to populate our databases, so let's fetch the data.
-    let emily_client: EmilyClient = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(1),
-        None,
-    )
-    .unwrap();
+    let emily_client = EmilyClient::new_test_client().unwrap();
 
     testing_api::wipe_databases(&emily_client.config().as_testing())
         .await
@@ -4704,12 +4669,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
 
     let mut rng = get_rng();
     // We need to populate our databases, so let's fetch the data.
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(1),
-        None,
-    )
-    .unwrap();
+    let emily_client = EmilyClient::new_test_client().unwrap();
 
     let emily_config = emily_client.config().as_testing();
 
