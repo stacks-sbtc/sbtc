@@ -698,9 +698,7 @@ impl WithdrawalUpdatePackage {
         // keep old data for expected_fulfillment details if None was provided.
         let latest_event_expected_fulfillment = &entry.latest_event()?.expected_fulfillment_info;
         let update_expected_fulfillment = &update.event.expected_fulfillment_info;
-        let expected_height = update_expected_fulfillment
-            .expected_height
-            .or(latest_event_expected_fulfillment.expected_height);
+        let expected_height = latest_event_expected_fulfillment.expected_height;
         let expected_txid = update_expected_fulfillment
             .expected_txid
             .clone()
