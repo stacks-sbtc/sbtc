@@ -3,12 +3,16 @@
 
 use blockstack_lib::chainstate::nakamoto::NakamotoBlockHeader;
 use blockstack_lib::net::api::getsortition::SortitionInfo;
+use stacks_common::types::chainstate::BlockHeaderHash;
 use stacks_common::types::chainstate::BurnchainHeaderHash;
 use stacks_common::types::chainstate::SortitionId;
 
 use crate::error::Error;
+use crate::stacks::api::GetNodeInfoResponse;
 use crate::stacks::api::StacksBlockHeader;
 use crate::stacks::api::TenureBlockHeaders;
+use crate::storage::model::BitcoinBlockHeight;
+use crate::storage::model::StacksBlockHeight;
 
 /// Some dummy sortition info
 pub const DUMMY_SORTITION_INFO: SortitionInfo = SortitionInfo {
@@ -24,6 +28,15 @@ pub const DUMMY_SORTITION_INFO: SortitionInfo = SortitionInfo {
     last_sortition_ch: None,
     committed_block_hash: None,
     vrf_seed: None,
+};
+
+/// Some dummy node info
+pub const DUMMY_NODE_INFO: GetNodeInfoResponse = GetNodeInfoResponse {
+    burn_block_height: BitcoinBlockHeight::new(0),
+    server_version: String::new(),
+    stacks_tip_consensus_hash: crate::storage::model::ConsensusHash::new([0; 20]),
+    stacks_tip_height: StacksBlockHeight::new(0),
+    stacks_tip: BlockHeaderHash([0; 32]),
 };
 
 impl TenureBlockHeaders {

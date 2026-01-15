@@ -144,6 +144,7 @@ use signer::storage::model;
 use signer::storage::model::EncryptedDkgShares;
 use signer::testing;
 use signer::testing::context::*;
+use signer::testing::stacks::DUMMY_NODE_INFO;
 use signer::testing::storage::model::TestData;
 use signer::testing::transaction_signer::TxSignerEventLoopHarness;
 use signer::testing::wsts::SignerSet;
@@ -556,6 +557,9 @@ async fn mock_stacks_core<D, B, E>(
         });
 
         let chain_tip = model::BitcoinBlockHash::from(chain_tip_info.hash);
+        client
+            .expect_get_node_info()
+            .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
         client.expect_get_tenure_headers().returning(move |_| {
             let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
             tenure.anchor_block_hash = chain_tip;
@@ -3732,6 +3736,9 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
                 });
                 Box::pin(std::future::ready(response))
             });
+            client
+                .expect_get_node_info()
+                .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO))));
 
             let chain_tip = model::BitcoinBlockHash::from(chain_tip_info.hash);
             client.expect_get_tenure_headers().returning(move |_| {
@@ -4447,6 +4454,10 @@ async fn test_conservative_initial_sbtc_limits() {
                 });
                 Box::pin(std::future::ready(response))
             });
+
+            client
+                .expect_get_node_info()
+                .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO))));
 
             let chain_tip = model::BitcoinBlockHash::from(chain_tip_info.hash);
             client.expect_get_tenure_headers().returning(move |_| {
