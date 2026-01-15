@@ -1472,7 +1472,7 @@ async fn expected_fulfillment_info_stored_correctly() {
         .unwrap()
         .unwrap();
 
-    assert_eq!(7, received_expected_height);
+    assert_eq!(8, received_expected_height);
     assert_eq!(expected_expected_txid, received_expected_txid);
 
     clean_test_setup(tables).await;
