@@ -36,6 +36,10 @@ where
     tracing::debug!(
         event = "response",
         status = as_response.status().as_u16(),
+    );
+    tracing::trace!(
+        event = "response-body",
+        status = as_response.status().as_u16(),
         body = ?as_response.body(),
         headers = ?as_response.headers(),
     );
