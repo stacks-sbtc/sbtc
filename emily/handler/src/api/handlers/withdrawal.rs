@@ -270,7 +270,7 @@ pub async fn create_withdrawal(
             .map(|chainstate| chainstate.bitcoin_height)
             .ok()
             .flatten()
-            .map(|height| height + sbtc::WITHDRAWAL_MIN_CONFIRMATIONS);
+            .map(|height| height + sbtc::WITHDRAWAL_MIN_CONFIRMATIONS + 1);
 
         // Make table entry.
         let withdrawal_entry: WithdrawalEntry = WithdrawalEntry {
