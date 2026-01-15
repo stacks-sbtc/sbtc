@@ -1412,7 +1412,7 @@ async fn expected_fulfillment_info_stored_correctly() {
         .unwrap()
         .unwrap();
     assert!(withdrawal.expected_fulfillment_info.expected_txid.is_none());
-    assert_eq!(7, received_expected_height);
+    assert_eq!(8, received_expected_height);
 
     // Now signer updates withdrawal with expected txid
     let expected_expected_txid = "txid".to_string();
