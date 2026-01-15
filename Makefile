@@ -87,8 +87,8 @@ nextest-archive: emily-cdk-synth
 
 # Runs nextest archives
 nextest-archive-run:
-	cargo $(CARGO_FLAGS) nextest --config-file nextest.toml run --no-fail-fast --retries 2 --archive-file $(NEXTEST_ARCHIVE_FILE)
-	cargo $(CARGO_FLAGS) nextest --config-file nextest.toml run --no-fail-fast --retries 2 --archive-file $(NEXTEST_SERIAL_ARCHIVE_FILE)
+	cargo $(CARGO_FLAGS) nextest --config-file nextest.toml run --no-fail-fast --archive-file $(NEXTEST_ARCHIVE_FILE)
+	cargo $(CARGO_FLAGS) nextest --config-file nextest.toml run --no-fail-fast --archive-file $(NEXTEST_SERIAL_ARCHIVE_FILE)
 
 nextest-archive-clean:
 	rm -f $(NEXTEST_ARCHIVE_FILE) $(NEXTEST_SERIAL_ARCHIVE_FILE)
