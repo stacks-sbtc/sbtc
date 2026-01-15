@@ -170,7 +170,7 @@ where
                     )
                     .increment(1);
 
-                    if let Err(error) = self.process_bitcoin_blocks_until(block_hash).await {
+                    if let Err(error) = self.process_bitcoin_chain_tip(block_hash).await {
                         tracing::warn!(%error, %block_hash, "could not process bitcoin blocks");
                     }
 
@@ -348,6 +348,28 @@ impl<C: Context, B> BlockObserver<C, B> {
         Ok(headers.into())
     }
 
+    /// Process the bitcoin chain tip by fetching all unknown block headers
+    /// from the given chain tip back until the nakamoto start height. Then
+    /// mark all blocks reachable from the chain tip as canonical in the
+    /// database.
+    ///
+    /// # Notes
+    ///
+    /// This function must only be called with the bitcoin chain tip since
+    /// it updates all blocks that are reachable from the given block hash
+    /// as canonical and may update blocks not reachable as non-canonical.
+    #[tracing::instrument(skip_all, fields(%chain_tip))]
+    async fn process_bitcoin_chain_tip(&self, chain_tip: BlockHash) -> Result<(), Error> {
+        self.process_bitcoin_blocks_until(chain_tip).await?;
+
+        let db = self.context.get_storage_mut();
+
+        tracing::info!("updating canonical bitcoin blockchain to chain tip");
+        let chain_tip: model::BitcoinBlockHash = chain_tip.into();
+        db.set_canonical_bitcoin_blockchain(&chain_tip).await?;
+        Ok(())
+    }
+
     /// Process bitcoin blocks until we get caught up to the given
     /// `block_hash`.
     ///
@@ -364,21 +386,11 @@ impl<C: Context, B> BlockObserver<C, B> {
     /// This means that if we stop processing blocks midway though,
     /// subsequent calls to this function will properly pick up from where
     /// we left off and update the database.
-    #[tracing::instrument(skip_all, fields(%block_hash))]
     async fn process_bitcoin_blocks_until(&self, block_hash: BlockHash) -> Result<(), Error> {
         let block_headers = self.next_headers_to_process(block_hash).await?;
 
-        let chain_tip = block_headers.last().cloned();
-
         for block_header in block_headers {
             self.process_bitcoin_block(block_header).await?;
-        }
-
-        if let Some(chain_tip) = chain_tip.map(|h| h.hash.into()) {
-            tracing::info!("updating block canonical status");
-
-            let db = self.context.get_storage_mut();
-            db.set_canonical_bitcoin_blockchain(&chain_tip).await?;
         }
 
         Ok(())
