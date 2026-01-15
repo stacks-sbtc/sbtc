@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::ops::Deref as _;
 use std::str::FromStr as _;
+use std::time::Duration;
 
 use bitcoin::AddressType;
 use bitcoin::Amount;
@@ -39,6 +40,7 @@ use signer::codec::Encode as _;
 use signer::config::NetworkKind;
 use signer::context::Context as _;
 use signer::context::SbtcLimits;
+use signer::emily_client::EmilyClient;
 use signer::keys::PrivateKey;
 use signer::keys::PublicKey;
 use signer::keys::SignerScriptPubKey as _;
@@ -1284,8 +1286,8 @@ impl TestSweepSetup2 {
     }
 }
 
-/// Set up a new set of DynamoDB tables in Emily
-pub async fn new_emily_setup() -> (EmilyApiConfiguration, EmilyTables) {
+/// Set up a new set of DynamoDB tables in Emily and returns a client to use them
+pub async fn new_emily_setup() -> (EmilyClient, EmilyTables) {
     let tables = EmilyTables::new().await;
 
     let mut configuration = EmilyApiConfiguration {
@@ -1315,7 +1317,9 @@ pub async fn new_emily_setup() -> (EmilyApiConfiguration, EmilyTables) {
         .build()
         .unwrap();
 
-    (configuration, tables)
+    let emily_client = EmilyClient::new(configuration, Duration::from_secs(1), None);
+
+    (emily_client, tables)
 }
 
 /// Cleanup Emily dynamodb tables

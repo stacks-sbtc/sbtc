@@ -140,8 +140,7 @@ async fn deposit_flow() {
     let network = network::in_memory::InMemoryNetwork::new();
     let signer_info = testing::wsts::generate_signer_info(&mut rng, num_signers);
 
-    let (emily_config, emily_tables) = new_emily_setup().await;
-    let emily_client = EmilyClient::new(emily_config, Duration::from_secs(1), None);
+    let (emily_client, emily_tables) = new_emily_setup().await;
 
     let stacks_client = WrappedMock::default();
 
@@ -537,8 +536,7 @@ async fn get_deposit_request_works() {
     let amount_sats = 49_900_000;
     let lock_time = 150;
 
-    let (emily_config, emily_tables) = new_emily_setup().await;
-    let emily_client = EmilyClient::new(emily_config, Duration::from_secs(1), None);
+    let (emily_client, emily_tables) = new_emily_setup().await;
 
     let setup = sbtc::testing::deposits::tx_setup(lock_time, max_fee, &[amount_sats]);
     let deposit = setup.deposits.first().unwrap();
@@ -571,12 +569,12 @@ async fn get_deposit_request_works() {
     clean_emily_setup(emily_tables).await;
 }
 
-#[test_case(3, 10, Some(2), 3; "handles paging")]
-#[test_case(3, 0, Some(2), 2; "handles timeout")]
+#[test_case(3, Duration::from_secs(10), Some(2), 3; "handles paging")]
+#[test_case(3, Duration::from_secs(0), Some(2), 2; "handles timeout")]
 #[tokio::test]
 async fn test_get_deposits_with_status_request_paging(
     num_deposits: usize,
-    timeout_secs: u64,
+    timeout: Duration,
     page_size: Option<u16>,
     expected_result: usize,
 ) {
@@ -584,8 +582,8 @@ async fn test_get_deposits_with_status_request_paging(
     let amount_sats = 49_900_000;
     let lock_time = 150;
 
-    let (emily_config, emily_tables) = new_emily_setup().await;
-    let emily_client = EmilyClient::new(emily_config, Duration::from_secs(timeout_secs), page_size);
+    let (emily_client, emily_tables) = new_emily_setup().await;
+    let emily_client = EmilyClient::new(emily_client.config().clone(), timeout, page_size);
 
     let futures = (0..num_deposits).map(|_| {
         let setup = sbtc::testing::deposits::tx_setup(lock_time, max_fee, &[amount_sats]);
@@ -631,8 +629,7 @@ async fn test_get_deposits_returns_pending_and_accepted() {
     let num_deposits = 5;
     let num_accepted = 2;
 
-    let (emily_config, emily_tables) = new_emily_setup().await;
-    let emily_client = EmilyClient::new(emily_config, Duration::from_secs(10), None);
+    let (emily_client, emily_tables) = new_emily_setup().await;
 
     // Create deposits
     let tx_setups: Vec<sbtc::testing::deposits::TxSetup> = (0..num_deposits)
