@@ -365,20 +365,12 @@ impl StacksInteract for TestHarness {
             .find(|block| block.height == burnchain_block_height)
             .ok_or(Error::MissingBlock)?
             .block_hash;
-        let (stx_block_id, stx_block, btc_block_id) = self
-            .stacks_blocks
-            .iter()
-            .find(|(_, _, btc_hash)| &burnchain_hash == btc_hash)
-            .ok_or(Error::MissingBlock)?;
 
         let headers: Vec<StacksBlockHeader> = self
             .stacks_blocks
             .iter()
-            .skip_while(|(_, _, block_id)| block_id != btc_block_id)
-            .take_while(|(block_id, _, _)| block_id != stx_block_id)
-            .map(|(_, block, _)| block)
-            .chain(std::iter::once(stx_block))
-            .map(|block| block.header.clone().into())
+            .filter(|(_, _, block_hash)| block_hash == &burnchain_hash)
+            .map(|(_, nakamoto_block, _)| nakamoto_block.header.clone().into())
             .collect();
 
         TenureBlockHeaders::from_headers(headers)
