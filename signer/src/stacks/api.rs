@@ -2031,7 +2031,6 @@ mod tests {
 
     use assert_matches::assert_matches;
     use clarity::types::Address as _;
-    use clarity::vm::ClarityName;
     use clarity::vm::types::{
         BuffData, BufferLength, ListData, ListTypeData, SequenceData, SequenceSubtype,
         TypeSignature,
@@ -2430,12 +2429,15 @@ mod tests {
 
         let tuple_data = [
             (
-                ClarityName::from("current-signature-threshold"),
+                clarity::vm::ClarityName::from("current-signature-threshold"),
                 Value::UInt(list_size as u128),
             ),
-            (ClarityName::from("current-signer-set"), signer_set),
             (
-                ClarityName::from("current-aggregate-pubkey"),
+                clarity::vm::ClarityName::from("current-signer-set"),
+                signer_set,
+            ),
+            (
+                clarity::vm::ClarityName::from("current-aggregate-pubkey"),
                 aggregate_key_clarity,
             ),
         ]

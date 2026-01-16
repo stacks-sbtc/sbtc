@@ -116,6 +116,13 @@ async fn signing_set_validation_check_for_stacks_transactions() {
     // validation.
     setup.store_happy_path_data(&db).await;
 
+    let stacks_chain_tip = db
+        .get_stacks_chain_tip(&chain_tip.block_hash)
+        .await
+        .unwrap()
+        .unwrap();
+    ctx.state().set_stacks_chain_tip(stacks_chain_tip.into());
+
     let (mut req, _) = crate::complete_deposit::make_complete_deposit(&setup);
 
     req.deployer = ctx.config().signer.deployer.clone();
@@ -207,6 +214,13 @@ async fn signing_set_validation_ignores_aggregate_key_in_request() {
     // This is all normal things that need to happen in order to pass
     // validation.
     setup.store_happy_path_data(&db).await;
+
+    let stacks_chain_tip = db
+        .get_stacks_chain_tip(&chain_tip.block_hash)
+        .await
+        .unwrap()
+        .unwrap();
+    ctx.state().set_stacks_chain_tip(stacks_chain_tip.into());
 
     let (mut req, _) = crate::complete_deposit::make_complete_deposit(&setup);
 
@@ -307,6 +321,13 @@ async fn signer_rejects_stacks_txns_with_too_high_a_fee(
     // validation.
     setup.store_happy_path_data(&db).await;
 
+    let stacks_chain_tip = db
+        .get_stacks_chain_tip(&chain_tip.block_hash)
+        .await
+        .unwrap()
+        .unwrap();
+    ctx.state().set_stacks_chain_tip(stacks_chain_tip.into());
+
     let (mut req, _) = crate::complete_deposit::make_complete_deposit(&setup);
 
     req.deployer = ctx.config().signer.deployer.clone();
@@ -395,6 +416,13 @@ async fn signer_rejects_multiple_attempts_in_tenure() {
     // This is all normal things that need to happen in order to pass
     // validation.
     setup.store_happy_path_data(&db).await;
+
+    let stacks_chain_tip = db
+        .get_stacks_chain_tip(&chain_tip.block_hash)
+        .await
+        .unwrap()
+        .unwrap();
+    ctx.state().set_stacks_chain_tip(stacks_chain_tip.into());
 
     let (mut req, _) = crate::complete_deposit::make_complete_deposit(&setup);
 
@@ -534,10 +562,16 @@ async fn assert_should_be_able_to_handle_sbtc_requests() {
 
     let shares = db.get_latest_encrypted_dkg_shares().await.unwrap().unwrap();
     let signer_set_info = SignerSetInfo::from(shares);
+    let stacks_chain_tip = db
+        .get_stacks_chain_tip(&chain_tip.block_hash)
+        .await
+        .unwrap()
+        .unwrap();
 
     let state = ctx.state();
     state.update_current_signer_set(signer_set_info.signer_set.clone());
     state.update_registry_signer_set_info(signer_set_info);
+    state.set_stacks_chain_tip(stacks_chain_tip.into());
 
     // Initialize the transaction signer event loop
     let network = WanNetwork::default();
@@ -688,9 +722,15 @@ async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is_ok:
 
     let shares = db.get_latest_encrypted_dkg_shares().await.unwrap().unwrap();
     let signer_set_info = SignerSetInfo::from(shares);
+    let stacks_chain_tip = db
+        .get_stacks_chain_tip(&chain_tip.block_hash)
+        .await
+        .unwrap()
+        .unwrap();
 
     ctx.state().update_registry_signer_set_info(signer_set_info);
     ctx.state().update_current_limits(SbtcLimits::unlimited());
+    ctx.state().set_stacks_chain_tip(stacks_chain_tip.into());
 
     // Initialize the transaction signer event loop
     let network = WanNetwork::default();
@@ -788,9 +828,15 @@ pub async fn presign_request_ignore_request_if_already_processed_this_block() {
 
     let shares = db.get_latest_encrypted_dkg_shares().await.unwrap().unwrap();
     let signer_set_info = SignerSetInfo::from(shares);
+    let stacks_chain_tip = db
+        .get_stacks_chain_tip(&chain_tip.block_hash)
+        .await
+        .unwrap()
+        .unwrap();
 
     ctx.state().update_registry_signer_set_info(signer_set_info);
     ctx.state().update_current_limits(SbtcLimits::unlimited());
+    ctx.state().set_stacks_chain_tip(stacks_chain_tip.into());
 
     // Initialize the transaction signer event loop
     let network = WanNetwork::default();

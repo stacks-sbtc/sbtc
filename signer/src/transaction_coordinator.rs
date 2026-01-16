@@ -646,12 +646,11 @@ where
         aggregate_key: &PublicKey,
         signer_public_keys: &BTreeSet<PublicKey>,
     ) -> Result<(), Error> {
-        let storage = self.context.get_storage();
-
-        // Fetch the stacks chain tip from the database.
-        let stacks_chain_tip = storage
-            .get_stacks_chain_tip(&bitcoin_chain_tip.block_hash)
-            .await?
+        // Fetch the stacks chain tip from the signer state.
+        let stacks_chain_tip = self
+            .context
+            .state()
+            .stacks_chain_tip()
             .ok_or(Error::NoStacksChainTip)?;
 
         let span = tracing::Span::current();
@@ -788,8 +787,14 @@ where
         // on the blockchain identified by the chain tip, where an input is
         // the deposit UTXO.
 
+        let stacks_chain_tip = self
+            .context
+            .state()
+            .stacks_chain_tip()
+            .ok_or(Error::NoStacksChainTip)?
+            .block_hash;
         let swept_deposits = db
-            .get_swept_deposit_requests(chain_tip.as_ref(), self.context_window)
+            .get_swept_deposit_requests(chain_tip.as_ref(), &stacks_chain_tip, self.context_window)
             .await?;
 
         if swept_deposits.is_empty() {
@@ -874,11 +879,21 @@ where
         bitcoin_aggregate_key: &PublicKey,
     ) -> Result<(), Error> {
         let db = self.context.get_storage();
+        let stacks_chain_tip = self
+            .context
+            .state()
+            .stacks_chain_tip()
+            .ok_or(Error::NoStacksChainTip)?
+            .block_hash;
 
         // Fetch withdrawal requests from the database where there has been
         // a confirmed bitcoin transaction associated with the request.
         let swept_withdrawals = db
-            .get_swept_withdrawal_requests(&chain_tip.block_hash, self.context_window)
+            .get_swept_withdrawal_requests(
+                &chain_tip.block_hash,
+                &stacks_chain_tip,
+                self.context_window,
+            )
             .await
             .inspect_err(|error| tracing::error!(%error, "could not fetch swept withdrawals"))
             .unwrap_or_default();
@@ -886,7 +901,11 @@ where
         // Fetch withdrawal requests that have not been swept for quite
         // some time.
         let rejected_withdrawals = db
-            .get_pending_rejected_withdrawal_requests(chain_tip, self.context_window)
+            .get_pending_rejected_withdrawal_requests(
+                chain_tip,
+                &stacks_chain_tip,
+                self.context_window,
+            )
             .await
             .inspect_err(|error| tracing::error!(%error, "could not fetch rejected withdrawals"))
             .unwrap_or_default();

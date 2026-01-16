@@ -128,6 +128,9 @@ async fn one_tx_per_request_set() {
     let chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
     let chain_tip_block = db.get_bitcoin_block(&chain_tip).await.unwrap().unwrap();
 
+    let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
+    ctx.state().set_stacks_chain_tip(stacks_chain_tip.into());
+
     let aggregate_key = setup.signers.signer.keypair.public_key().into();
 
     let request = BitcoinPreSignRequest {
@@ -233,6 +236,9 @@ async fn one_invalid_deposit_invalidates_tx() {
 
     let chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
     let chain_tip_block = db.get_bitcoin_block(&chain_tip).await.unwrap().unwrap();
+
+    let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
+    ctx.state().set_stacks_chain_tip(stacks_chain_tip.into());
 
     let aggregate_key = setup.signers.signer.keypair.public_key().into();
 
@@ -401,6 +407,13 @@ async fn withdrawals_and_deposits_can_pass_validation(amounts: Vec<SweepAmounts>
     // Sanity check
     assert_eq!(chain_tip, chain_tip_ref.block_hash.into());
 
+    let stacks_chain_tip = db
+        .get_stacks_chain_tip(&chain_tip.into())
+        .await
+        .unwrap()
+        .unwrap();
+    ctx.state().set_stacks_chain_tip(stacks_chain_tip.into());
+
     let aggregate_key = setup.signers.signer.keypair.public_key().into();
 
     let request = BitcoinPreSignRequest {
@@ -508,6 +521,14 @@ async fn swept_withdrawals_fail_validation() {
         .await
         .unwrap()
         .unwrap();
+
+    let stacks_chain_tip = db
+        .get_stacks_chain_tip(&chain_tip.into())
+        .await
+        .unwrap()
+        .unwrap();
+    ctx.state().set_stacks_chain_tip(stacks_chain_tip.into());
+
     let aggregate_key = setup.signers.signer.keypair.public_key().into();
 
     let request = BitcoinPreSignRequest {
@@ -629,6 +650,9 @@ async fn cannot_sign_deposit_is_ok() {
 
     let chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
     let chain_tip_block = db.get_bitcoin_block(&chain_tip).await.unwrap().unwrap();
+
+    let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
+    ctx.state().set_stacks_chain_tip(stacks_chain_tip.into());
 
     // Now we construct the validation data, including the sighashes.
     let aggregate_key = setup.signers.signer.keypair.public_key().into();
@@ -769,6 +793,9 @@ async fn sighashes_match_from_sbtc_requests_object() {
 
     let chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
     let chain_tip_block = db.get_bitcoin_block(&chain_tip).await.unwrap().unwrap();
+
+    let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
+    ctx.state().set_stacks_chain_tip(stacks_chain_tip.into());
 
     let aggregate_key = setup.signers.signer.keypair.public_key().into();
 
@@ -914,6 +941,9 @@ async fn outcome_is_independent_of_input_order() {
 
     let chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
     let chain_tip_block = db.get_bitcoin_block(&chain_tip).await.unwrap().unwrap();
+
+    let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
+    ctx.state().set_stacks_chain_tip(stacks_chain_tip.into());
 
     let aggregate_key = setup.signers.signer.keypair.public_key().into();
 

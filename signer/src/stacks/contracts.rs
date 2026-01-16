@@ -1392,7 +1392,7 @@ impl AsContractCall for RotateKeysV1 {
         // 6. That there are no other rotate-keys contract calls with these same
         //    details already confirmed on the canonical Stacks blockchain.
         let key_rotation_exists_fut = db.key_rotation_exists(
-            &req_ctx.chain_tip.block_hash,
+            &req_ctx.stacks_chain_tip,
             &self.new_keys,
             &self.aggregate_key,
             self.signatures_required,
