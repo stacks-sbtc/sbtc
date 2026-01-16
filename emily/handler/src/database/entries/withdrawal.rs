@@ -6,7 +6,7 @@ use crate::{
     api::models::{
         chainstate::Chainstate,
         common::WithdrawalStatus,
-        withdrawal::{Withdrawal, WithdrawalInfo, WithdrawalParameters},
+        withdrawal::{ExpectedFulfillmentInfo, Withdrawal, WithdrawalInfo, WithdrawalParameters},
     },
     common::error::{Error, Inconsistency, ValidationError},
 };
@@ -141,6 +141,10 @@ impl WithdrawalEntry {
                 message: "Reprocessing withdrawal status after reorg.".to_string(),
                 stacks_block_height: chainstate.stacks_block_height,
                 stacks_block_hash: chainstate.stacks_block_hash.clone(),
+                expected_fulfillment_info: ExpectedFulfillmentInfo {
+                    expected_height: None,
+                    expected_txid: None,
+                },
             }]
         }
         // Synchronize self with the new history.
@@ -191,6 +195,7 @@ impl TryFrom<WithdrawalEntry> for Withdrawal {
             WithdrawalStatusEntry::Confirmed(fulfillment) => Some(fulfillment.clone()),
             _ => None,
         };
+        let expected_fulfillment_info = latest_event.expected_fulfillment_info.clone();
 
         // Create withdrawal from table entry.
         Ok(Withdrawal {
@@ -209,6 +214,7 @@ impl TryFrom<WithdrawalEntry> for Withdrawal {
             },
             txid: withdrawal_entry.txid,
             fulfillment,
+            expected_fulfillment_info,
         })
     }
 }
@@ -235,6 +241,8 @@ pub struct WithdrawalEvent {
     pub stacks_block_height: u64,
     /// Stacks block hash associated with the height of this update.
     pub stacks_block_hash: String,
+    /// Information about fulfillment process of the withdrawal request
+    pub expected_fulfillment_info: ExpectedFulfillmentInfo,
 }
 
 /// Implementation of withdrawal event.
@@ -686,11 +694,24 @@ impl WithdrawalUpdatePackage {
         entry
             .latest_event()?
             .ensure_following_event_is_valid(&update.event)?;
+
+        // keep old data for expected_fulfillment details if None was provided.
+        let latest_event_expected_fulfillment = &entry.latest_event()?.expected_fulfillment_info;
+        let update_expected_fulfillment = &update.event.expected_fulfillment_info;
+        let expected_height = latest_event_expected_fulfillment.expected_height;
+        let expected_txid = update_expected_fulfillment
+            .expected_txid
+            .clone()
+            .or(latest_event_expected_fulfillment.expected_txid.clone());
+        let mut new_event = update.event;
+        new_event.expected_fulfillment_info =
+            ExpectedFulfillmentInfo { expected_height, expected_txid };
+
         // Create the withdrawal update package.
         Ok(WithdrawalUpdatePackage {
             key,
             version: entry.version,
-            event: update.event,
+            event: new_event,
         })
     }
 }
@@ -699,6 +720,7 @@ impl WithdrawalUpdatePackage {
 mod tests {
     use crate::api::models::chainstate::Chainstate;
     use crate::api::models::common::Fulfillment;
+    use crate::api::models::withdrawal::ExpectedFulfillmentInfo;
     use crate::database::entries::WithdrawalStatusEntry;
     use crate::{
         api::models::common::WithdrawalStatus,
@@ -717,6 +739,10 @@ mod tests {
             message: "message".to_string(),
             stacks_block_height: 1,
             stacks_block_hash: "hash".to_string(),
+            expected_fulfillment_info: ExpectedFulfillmentInfo {
+                expected_height: None,
+                expected_txid: None,
+            },
         };
 
         let failed = WithdrawalEvent {
@@ -724,6 +750,10 @@ mod tests {
             message: "message".to_string(),
             stacks_block_height: 2,
             stacks_block_hash: "hash".to_string(),
+            expected_fulfillment_info: ExpectedFulfillmentInfo {
+                expected_height: None,
+                expected_txid: None,
+            },
         };
 
         let withdrawal_entry = WithdrawalEntry {
@@ -761,6 +791,10 @@ mod tests {
             message: "message".to_string(),
             stacks_block_height: 1,
             stacks_block_hash: "hash".to_string(),
+            expected_fulfillment_info: ExpectedFulfillmentInfo {
+                expected_height: None,
+                expected_txid: None,
+            },
         };
 
         let failed = WithdrawalEvent {
@@ -768,6 +802,10 @@ mod tests {
             message: "message".to_string(),
             stacks_block_height: 2,
             stacks_block_hash: "hash".to_string(),
+            expected_fulfillment_info: ExpectedFulfillmentInfo {
+                expected_height: None,
+                expected_txid: None,
+            },
         };
 
         let withdrawal_entry = WithdrawalEntry {
@@ -814,6 +852,10 @@ mod tests {
             message: "initial test pending".to_string(),
             stacks_block_height: 2,
             stacks_block_hash: "hash2".to_string(),
+            expected_fulfillment_info: ExpectedFulfillmentInfo {
+                expected_height: None,
+                expected_txid: None,
+            },
         };
 
         let accepted = WithdrawalEvent {
@@ -821,6 +863,10 @@ mod tests {
             message: "accepted".to_string(),
             stacks_block_height: 4,
             stacks_block_hash: "hash4".to_string(),
+            expected_fulfillment_info: ExpectedFulfillmentInfo {
+                expected_height: None,
+                expected_txid: None,
+            },
         };
 
         let fulfillment: Fulfillment = Default::default();
@@ -829,6 +875,10 @@ mod tests {
             message: "confirmed".to_string(),
             stacks_block_height: 6,
             stacks_block_hash: "hash6".to_string(),
+            expected_fulfillment_info: ExpectedFulfillmentInfo {
+                expected_height: None,
+                expected_txid: None,
+            },
         };
 
         let mut withdrawal_entry = WithdrawalEntry {

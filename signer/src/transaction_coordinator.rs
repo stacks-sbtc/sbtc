@@ -18,7 +18,6 @@ use sha2::Digest as _;
 use crate::WITHDRAWAL_BLOCKS_EXPIRY;
 use crate::WITHDRAWAL_DUST_LIMIT;
 use crate::WITHDRAWAL_EXPIRY_BUFFER;
-use crate::WITHDRAWAL_MIN_CONFIRMATIONS;
 use crate::bitcoin::BitcoinInteract as _;
 use crate::bitcoin::TransactionLookupHint;
 use crate::bitcoin::utxo;
@@ -73,6 +72,7 @@ use crate::storage::model::StacksTxId;
 use crate::wsts_state_machine::FireCoordinator;
 use crate::wsts_state_machine::FrostCoordinator;
 use crate::wsts_state_machine::WstsCoordinator;
+use sbtc::WITHDRAWAL_MIN_CONFIRMATIONS;
 
 use bitcoin::hashes::Hash as _;
 use wsts::net::SignatureType;
