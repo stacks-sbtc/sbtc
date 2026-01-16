@@ -20,8 +20,8 @@ use more_asserts::assert_le;
 use rand::Rng as _;
 use rand::seq::IteratorRandom as _;
 use rand::seq::SliceRandom as _;
+use sbtc::testing::containers::TestContainersBuilder;
 use signer::WITHDRAWAL_BLOCKS_EXPIRY;
-use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::bitcoin::validation::WithdrawalRequestStatus;
 use signer::bitcoin::validation::WithdrawalValidationResult;
 use signer::context::SbtcLimits;
@@ -85,6 +85,7 @@ use signer::testing::get_rng;
 use test_case::test_case;
 use test_log::test;
 
+use crate::containers::BitcoinContainerExt as _;
 use crate::setup::SweepAmounts;
 use crate::setup::TestSignerSet;
 use crate::setup::TestSweepSetup;
@@ -400,7 +401,10 @@ async fn should_return_the_same_pending_deposit_requests_as_in_memory_store() {
 async fn get_pending_deposit_requests_only_pending() {
     let db = testing::storage::new_test_database().await;
 
-    let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     let mut rng = get_rng();
 
@@ -410,12 +414,7 @@ async fn get_pending_deposit_requests_only_pending() {
         is_deposit: true,
     };
     let signers = TestSignerSet::new(&mut rng);
-    let setup = TestSweepSetup2::new_setup(
-        signers,
-        BitcoinCoreClient::new_regtest(),
-        faucet,
-        &[amounts],
-    );
+    let setup = TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &[amounts]);
 
     backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
     let chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
@@ -461,7 +460,10 @@ async fn get_pending_deposit_requests_only_pending() {
 async fn get_pending_withdrawal_requests_only_pending() {
     let db = testing::storage::new_test_database().await;
 
-    let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     let mut rng = get_rng();
 
@@ -471,12 +473,7 @@ async fn get_pending_withdrawal_requests_only_pending() {
         is_deposit: false,
     };
     let signers = TestSignerSet::new(&mut rng);
-    let setup = TestSweepSetup2::new_setup(
-        signers,
-        BitcoinCoreClient::new_regtest(),
-        faucet,
-        &[amounts],
-    );
+    let setup = TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &[amounts]);
 
     backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
     setup.store_stacks_genesis_block(&db).await;
@@ -698,13 +695,12 @@ async fn should_not_return_swept_deposits_as_pending_accepted() {
     // structure because it has helper functions for generating and storing
     // sweep transactions, and the [`TestSweepSetup`] structure correctly
     // sets up the database.
-    let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(
-        BitcoinCoreClient::new_regtest(),
-        faucet,
-        1_000_000,
-        &mut rng,
-    );
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+
+    let setup = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 1_000_000, &mut rng);
 
     let chain_tip = model::BitcoinBlockRef {
         block_hash: setup.sweep_block_hash.into(),
@@ -2281,13 +2277,12 @@ async fn get_swept_deposit_requests_returns_swept_deposit_requests() {
     // structure because it has helper functions for generating and storing
     // sweep transactions, and the [`TestSweepSetup`] structure correctly
     // sets up the database.
-    let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(
-        BitcoinCoreClient::new_regtest(),
-        faucet,
-        1_000_000,
-        &mut rng,
-    );
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+
+    let setup = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 1_000_000, &mut rng);
 
     // We need to manually update the database with new bitcoin block
     // headers.
@@ -2609,13 +2604,12 @@ async fn get_swept_deposit_requests_does_not_return_unswept_deposit_requests() {
     // structure because it has helper functions for generating and storing
     // sweep transactions, and the [`TestSweepSetup`] structure correctly
     // sets up the database.
-    let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(
-        BitcoinCoreClient::new_regtest(),
-        faucet,
-        1_000_000,
-        &mut rng,
-    );
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+
+    let setup = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 1_000_000, &mut rng);
 
     // We need to manually update the database with new bitcoin block
     // headers.
@@ -2665,19 +2659,15 @@ async fn get_swept_deposit_requests_does_not_return_deposit_requests_with_respon
     // structure because it has helper functions for generating and storing
     // sweep transactions, and the [`TestSweepSetup`] structure correctly
     // sets up the database.
-    let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
-    let mut setup_fork = TestSweepSetup::new_setup(
-        BitcoinCoreClient::new_regtest(),
-        faucet,
-        2_000_000,
-        &mut rng,
-    );
-    let mut setup_canonical = TestSweepSetup::new_setup(
-        BitcoinCoreClient::new_regtest(),
-        faucet,
-        1_000_000,
-        &mut rng,
-    );
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+
+    let mut setup_fork =
+        TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 2_000_000, &mut rng);
+    let mut setup_canonical =
+        TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 1_000_000, &mut rng);
 
     let context_window = 20;
 
@@ -3061,14 +3051,12 @@ async fn get_swept_deposit_requests_response_tx_reorged() {
     // structure because it has helper functions for generating and storing
     // sweep transactions, and the [`TestSweepSetup`] structure correctly
     // sets up the database.
-    let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
-    let setup = TestSweepSetup::new_setup(
-        BitcoinCoreClient::new_regtest(),
-        faucet,
-        1_000_000,
-        &mut rng,
-    );
+    let setup = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 1_000_000, &mut rng);
 
     let context_window = 20;
 
@@ -3167,13 +3155,12 @@ async fn get_swept_deposit_requests_boundary() {
     // structure because it has helper functions for generating and storing
     // sweep transactions, and the [`TestSweepSetup`] structure correctly
     // sets up the database.
-    let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(
-        BitcoinCoreClient::new_regtest(),
-        faucet,
-        1_000_000,
-        &mut rng,
-    );
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+
+    let setup = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 1_000_000, &mut rng);
 
     let context_window = 10;
 
@@ -5933,10 +5920,13 @@ async fn is_withdrawal_inflight_catches_withdrawals_with_rows_in_table() {
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
 
-    let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     let signers = TestSignerSet::new(&mut rng);
-    let setup = TestSweepSetup2::new_setup(signers, BitcoinCoreClient::new_regtest(), faucet, &[]);
+    let setup = TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &[]);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't
@@ -6005,12 +5995,16 @@ async fn is_withdrawal_inflight_catches_withdrawals_with_rows_in_table() {
 async fn is_withdrawal_inflight_catches_withdrawals_in_package() {
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
+
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     // We use TestSweepSetup2 to help set up the signers' UTXO, which needs
     // to be available for this test.
     let signers = TestSignerSet::new(&mut rng);
-    let setup = TestSweepSetup2::new_setup(signers, BitcoinCoreClient::new_regtest(), faucet, &[]);
+    let setup = TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &[]);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't
