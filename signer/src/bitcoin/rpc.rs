@@ -1,6 +1,7 @@
 //! Contains client wrappers for bitcoin core and electrum.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use bitcoin::Amount;
 use bitcoin::BlockHash;
@@ -9,7 +10,6 @@ use bitcoin::OutPoint;
 use bitcoin::ScriptBuf;
 use bitcoin::Transaction;
 use bitcoin::Txid;
-use bitcoincore_rpc::Auth;
 use bitcoincore_rpc::Error as BtcRpcError;
 use bitcoincore_rpc::RpcApi as _;
 use bitcoincore_rpc::json::EstimateMode;
@@ -19,6 +19,7 @@ use bitcoincore_rpc_json::GetBlockchainInfoResult;
 use bitcoincore_rpc_json::GetMempoolEntryResult;
 use bitcoincore_rpc_json::GetNetworkInfoResult;
 use bitcoincore_rpc_json::GetTxOutResult;
+use jsonrpc::simple_http;
 use serde::Deserialize;
 use url::Url;
 
@@ -357,11 +358,17 @@ impl BitcoinCoreClient {
     ///
     /// This function does not attempt to establish a connection to bitcoin-core.
     pub fn new(url: &str, username: String, password: String) -> Result<Self, Error> {
-        let auth = Auth::UserPass(username, password);
-        let client = bitcoincore_rpc::Client::new(url, auth)
-            .map(Arc::new)
-            .map_err(|err| Error::BitcoinCoreRpcClient(err, url.to_string()))?;
+        // TODO: make this configurable
+        let timeout = Duration::from_secs(10);
 
+        let transport = simple_http::Builder::new()
+            .url(url)
+            .map_err(|error| Error::BitcoinCoreRpcClient(error, url.to_string()))?
+            .auth(username, Some(password))
+            .timeout(timeout)
+            .build();
+
+        let client = Arc::new(bitcoincore_rpc::Client::from_jsonrpc(transport.into()));
         Ok(Self { inner: client })
     }
 

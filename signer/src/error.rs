@@ -164,7 +164,7 @@ pub enum Error {
 
     /// Error when creating an RPC client to bitcoin-core
     #[error("could not create RPC client to {1}: {0}")]
-    BitcoinCoreRpcClient(#[source] bitcoincore_rpc::Error, String),
+    BitcoinCoreRpcClient(#[source] jsonrpc::http::simple_http::Error, String),
 
     /// The bitcoin transaction was not found in the mempool or on the
     /// bitcoin blockchain. This is thrown when we expect the transaction
