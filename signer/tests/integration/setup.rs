@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::ops::Deref as _;
+use std::str::FromStr as _;
+use std::time::Duration;
 
 use bitcoin::AddressType;
 use bitcoin::Amount;
@@ -17,6 +19,7 @@ use fake::Faker;
 use rand::rngs::OsRng;
 use sbtc::deposits::CreateDepositRequest;
 use sbtc::deposits::DepositInfo;
+use sbtc::testing::emily::EmilyTables;
 use sbtc::testing::regtest;
 use sbtc::testing::regtest::Faucet;
 use sbtc::testing::regtest::Recipient;
@@ -37,6 +40,7 @@ use signer::codec::Encode as _;
 use signer::config::NetworkKind;
 use signer::context::Context as _;
 use signer::context::SbtcLimits;
+use signer::emily_client::EmilyClient;
 use signer::keys::PrivateKey;
 use signer::keys::PublicKey;
 use signer::keys::SignerScriptPubKey as _;
@@ -1281,4 +1285,45 @@ impl TestSweepSetup2 {
         };
         db.write_rotate_keys_transaction(&event).await.unwrap();
     }
+}
+
+/// Set up a new set of DynamoDB tables in Emily and returns a client to use them
+pub async fn new_emily_setup() -> (EmilyClient, EmilyTables) {
+    let tables = EmilyTables::new().await;
+
+    let mut configuration = EmilyApiConfiguration {
+        base_path: "http://127.0.0.1:3031".to_string(),
+        api_key: Some(emily_client::apis::configuration::ApiKey {
+            prefix: None,
+            key: "testApiKey".to_string(),
+        }),
+        ..Default::default()
+    };
+
+    let mut headers = reqwest_012::header::HeaderMap::new();
+    for (shortname, table_name) in [
+        ("deposit", &tables.deposit),
+        ("withdrawal", &tables.withdrawal),
+        ("chainstate", &tables.chainstate),
+        ("limit", &tables.limit),
+    ] {
+        headers.insert(
+            reqwest_012::header::HeaderName::from_str(&format!("x-context-{shortname}")).unwrap(),
+            reqwest_012::header::HeaderValue::from_str(table_name).unwrap(),
+        );
+    }
+
+    configuration.client = reqwest_012::ClientBuilder::new()
+        .default_headers(headers)
+        .build()
+        .unwrap();
+
+    let emily_client = EmilyClient::new(configuration, Duration::from_secs(1), None);
+
+    (emily_client, tables)
+}
+
+/// Cleanup Emily dynamodb tables
+pub async fn clean_emily_setup(tables: EmilyTables) {
+    tables.delete().await
 }
