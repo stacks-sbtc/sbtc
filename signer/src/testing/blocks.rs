@@ -1,6 +1,9 @@
 //! Various utilities for generating and manipulating chains of bitcoin and
 //! stacks blocks for testing purposes.
 
+use std::collections::BTreeMap;
+use std::collections::btree_map;
+
 use fake::Fake as _;
 use fake::Faker;
 
@@ -13,14 +16,15 @@ use crate::storage::model::StacksBlockHeight;
 
 /// Represents a naive, sequential chain of bitcoin blocks and provides basic
 /// functionality for manipulation. Does not handle forks/branches.
-pub struct BitcoinChain(Vec<BitcoinBlock>);
+#[derive(Debug, Clone)]
+pub struct BitcoinChain(BTreeMap<BitcoinBlockHeight, BitcoinBlock>);
 
 impl<'a> IntoIterator for &'a BitcoinChain {
     type Item = &'a BitcoinBlock;
-    type IntoIter = std::slice::Iter<'a, BitcoinBlock>;
+    type IntoIter = std::collections::btree_map::Values<'a, BitcoinBlockHeight, BitcoinBlock>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.0.iter()
+        self.0.values()
     }
 }
 
@@ -40,7 +44,7 @@ impl BitcoinChain {
     /// block will have a height one greater than the previous block and a
     /// parent hash equal to the hash of the previous block.
     pub fn new() -> Self {
-        Self(vec![BitcoinBlock::new_genesis()])
+        Self(BTreeMap::from([(0u64.into(), BitcoinBlock::new_genesis())]))
     }
 
     /// Generate a new chain of bitcoin blocks with a length equal to `length`.
@@ -63,31 +67,66 @@ impl BitcoinChain {
     pub fn generate_blocks(&mut self, length: usize) -> Vec<&BitcoinBlock> {
         for _ in 0..length {
             let new_block = self.chain_tip().new_child();
-            self.0.push(new_block);
+            self.0.insert(new_block.block_height, new_block);
         }
 
-        self.0[(self.0.len() - length)..].iter().collect()
+        let start: BitcoinBlockHeight = ((self.0.len() - length) as u64).into();
+        self.0.range(start..).map(|(_, block)| block).collect()
     }
 
     /// Gets the first block in the chain.
     pub fn first_block(&self) -> &BitcoinBlock {
-        self.0.first().unwrap()
+        self.0.first_key_value().unwrap().1
     }
 
     /// Gets the last block in the chain.
     pub fn chain_tip(&self) -> &BitcoinBlock {
-        self.0.last().unwrap()
+        self.0.last_key_value().unwrap().1
     }
 
     /// Gets the nth block in the chain, if it exists.
     pub fn nth_block_checked(&self, height: BitcoinBlockHeight) -> Option<&BitcoinBlock> {
-        self.0.get(*height as usize)
+        self.0.get(&height)
     }
 
     /// Gets the nth block in the chain, panicking if it does not exist.
     pub fn nth_block(&self, height: BitcoinBlockHeight) -> &BitcoinBlock {
         self.nth_block_checked(height)
             .expect("no nth bitcoin block (index out of range)")
+    }
+
+    /// Create a new fork of the chain at the given height.
+    ///
+    /// The fork will contain the blocks up to, but not including, the
+    /// given height. It will then generate `num_blocks` new blocks, and
+    /// add them to the chain starting at the given height, returning the
+    /// resulting chain.
+    pub fn fork_at_height<H>(&self, height: H, num_blocks: usize) -> Self
+    where
+        H: Into<BitcoinBlockHeight>,
+    {
+        let fork: BTreeMap<BitcoinBlockHeight, BitcoinBlock> = self
+            .0
+            .range(..height.into())
+            .map(|(height, block)| (*height, block.clone()))
+            .collect();
+
+        let mut fork_chain = Self(fork);
+
+        for _ in 0..num_blocks {
+            let new_block = fork_chain.chain_tip().new_child();
+            fork_chain.0.insert(new_block.block_height, new_block);
+        }
+
+        fork_chain
+    }
+
+    /// Get a range of blocks from the chain.
+    pub fn range<R>(&self, range: R) -> btree_map::Range<'_, BitcoinBlockHeight, BitcoinBlock>
+    where
+        R: std::ops::RangeBounds<BitcoinBlockHeight>,
+    {
+        self.0.range(range)
     }
 }
 
