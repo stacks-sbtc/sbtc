@@ -171,7 +171,7 @@ where
                     .increment(1);
 
                     if let Err(error) = self.process_bitcoin_blocks_until(block_hash).await {
-                        tracing::warn!(%error, "could not process bitcoin blocks");
+                        tracing::warn!(%error, %block_hash, "could not process bitcoin blocks");
                     }
                     if let Err(error) = self.process_stacks_blocks().await {
                         tracing::warn!(%error, "could not process stacks blocks");
