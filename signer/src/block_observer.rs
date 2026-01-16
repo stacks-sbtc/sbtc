@@ -362,20 +362,12 @@ impl<C: Context, B> BlockObserver<C, B> {
     /// This means that if we stop processing blocks midway though,
     /// subsequent calls to this function will properly pick up from where
     /// we left off and update the database.
-    ///
-    /// Returns `BitcoinBlockRef` to latest processed block
-    async fn process_bitcoin_blocks_until(
-        &self,
-        block_hash: BlockHash,
-    ) -> Result<Option<BitcoinBlockRef>, Error> {
+    async fn process_bitcoin_blocks_until(&self, block_hash: BlockHash) -> Result<(), Error> {
         let block_headers = self.next_headers_to_process(block_hash).await?;
         for block_header in &block_headers {
             self.process_bitcoin_block(block_header).await?;
         }
-        Ok(block_headers.last().map(|header| BitcoinBlockRef {
-            block_height: header.height,
-            block_hash: header.hash.into(),
-        }))
+        Ok(())
     }
 
     /// Write the bitcoin block and any transactions that spend to any of
