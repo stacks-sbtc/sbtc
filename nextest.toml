@@ -8,7 +8,6 @@ filter = """\
 binary(integration) and test(/::serial::/)
 
 or test(/^bitcoin_validation::/)
-or test(/^block_observer::/)
 or test(/^complete_deposit::/)
 or test(/^postgres::/)
 or test(/^request_decider::/)
