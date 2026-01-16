@@ -54,8 +54,8 @@ use signer::storage::model::TxPrevout;
 use signer::storage::model::TxPrevoutType;
 use signer::storage::postgres::PgStore;
 use signer::testing::btc::get_canonical_chain_tip;
+use signer::testing::stacks::DUMMY_NODE_INFO;
 use signer::testing::stacks::DUMMY_SORTITION_INFO;
-use signer::testing::stacks::DUMMY_TENURE_INFO;
 use testing_emily_client::apis::testing_api;
 
 use signer::block_observer::BlockObserver;
@@ -130,10 +130,6 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
     // information about the Stacks blockchain, so we need to prep it, even
     // though it isn't necessary for our test.
     ctx.with_stacks_client(|client| {
-        client
-            .expect_get_tenure_info()
-            .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
-
         client.expect_get_block().returning(|_| {
             let response = Ok(NakamotoBlock {
                 header: NakamotoBlockHeader::empty(),
@@ -141,6 +137,10 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
             });
             Box::pin(std::future::ready(response))
         });
+
+        client
+            .expect_get_node_info()
+            .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
 
         client
             .expect_get_tenure_headers()
@@ -413,16 +413,16 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     // up-to-date information. We don't have stacks-core running so we mock
     // these calls.
     ctx.with_stacks_client(|client| {
-        client
-            .expect_get_tenure_info()
-            .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
-
         let chain_tip = BitcoinBlockHash::from(chain_tip_info.hash);
         client.expect_get_tenure_headers().returning(move |_| {
             let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
             tenure.anchor_block_hash = chain_tip;
             Box::pin(std::future::ready(Ok(tenure)))
         });
+
+        client
+            .expect_get_node_info()
+            .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
 
         client.expect_get_epoch_status().returning(|| {
             Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
@@ -883,9 +883,6 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
     // though it isn't necessary for our test.
     let db2 = db.clone();
     ctx.with_stacks_client(|client| {
-        client
-            .expect_get_tenure_info()
-            .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
         client.expect_get_block().returning(|_| {
             let response = Ok(NakamotoBlock {
                 header: NakamotoBlockHeader::empty(),
@@ -893,6 +890,9 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
             });
             Box::pin(std::future::ready(response))
         });
+        client
+            .expect_get_node_info()
+            .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
         client
             .expect_get_tenure_headers()
             .returning(|_| Box::pin(std::future::ready(TenureBlockHeaders::nearly_empty())));
@@ -1204,9 +1204,6 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
     // though it isn't necessary for our test.
     let db2 = db.clone();
     ctx.with_stacks_client(|client| {
-        client
-            .expect_get_tenure_info()
-            .returning(|| Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
         client.expect_get_block().returning(|_| {
             let response = Ok(NakamotoBlock {
                 header: NakamotoBlockHeader::empty(),
@@ -1214,6 +1211,9 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
             });
             Box::pin(std::future::ready(response))
         });
+        client
+            .expect_get_node_info()
+            .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
         client
             .expect_get_tenure_headers()
             .returning(|_| Box::pin(std::future::ready(TenureBlockHeaders::nearly_empty())));
@@ -1393,9 +1393,6 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
     // information about the Stacks blockchain, so we need to prep it, even
     // though it isn't necessary for our test.
     ctx.with_stacks_client(|client| {
-        client
-            .expect_get_tenure_info()
-            .returning(|| Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
         client.expect_get_block().returning(|_| {
             let response = Ok(NakamotoBlock {
                 header: NakamotoBlockHeader::empty(),
@@ -1403,6 +1400,9 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
             });
             Box::pin(std::future::ready(response))
         });
+        client
+            .expect_get_node_info()
+            .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
         client
             .expect_get_tenure_headers()
             .returning(|_| Box::pin(std::future::ready(TenureBlockHeaders::nearly_empty())));
@@ -1635,16 +1635,16 @@ async fn block_observer_ignores_coinbase() {
     // up-to-date information. We don't have stacks-core running so we mock
     // these calls.
     ctx.with_stacks_client(|client| {
-        client
-            .expect_get_tenure_info()
-            .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
-
         let chain_tip = BitcoinBlockHash::from(chain_tip_info.hash);
         client.expect_get_tenure_headers().returning(move |_| {
             let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
             tenure.anchor_block_hash = chain_tip;
             Box::pin(std::future::ready(Ok(tenure)))
         });
+
+        client
+            .expect_get_node_info()
+            .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
 
         client.expect_get_epoch_status().returning(|| {
             Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {

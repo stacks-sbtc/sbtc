@@ -13,7 +13,6 @@ use bitcoin::OutPoint;
 use blockstack_lib::burnchains::Txid;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlockHeader;
-use blockstack_lib::chainstate::stacks::StacksBlock as PreNakamotoBlock;
 use blockstack_lib::chainstate::stacks::StacksTransaction;
 use blockstack_lib::chainstate::stacks::TokenTransferMemo;
 use blockstack_lib::chainstate::stacks::TransactionPayload;
@@ -253,31 +252,6 @@ pub trait StacksInteract: Send + Sync {
         block_id: &StacksBlockHash,
     ) -> impl Future<Output = Result<NakamotoBlock, Error>> + Send;
 
-    /// Returns `Ok` if the given block ID is a pre-Nakamoto block, otherwise
-    /// (the block doesn't exist or is a Nakamoto one) `Err` is returned.
-    fn check_pre_nakamoto_block(
-        &self,
-        block_id: &StacksBlockHash,
-    ) -> impl Future<Output = Result<(), Error>> + Send;
-
-    /// Fetch all Nakamoto ancestor blocks within the same tenure as the
-    /// given block ID from a Stacks node.
-    ///
-    /// The response includes the Nakamoto block for the given block id.
-    ///
-    /// This function is analogous to the GET /v3/tenures/<block-id>
-    /// endpoint on stacks-core nodes, but responses from that endpoint are
-    /// capped at ~16 MB. This function returns all blocks, regardless of
-    /// the size of the blocks within the tenure.
-    fn get_tenure_headers(
-        &self,
-        block_id: &StacksBlockHash,
-    ) -> impl Future<Output = Result<TenureBlockHeaders, Error>> + Send;
-    /// Get information about the current tenure.
-    ///
-    /// This function is analogous to the GET /v3/tenures/info stacks node
-    /// endpoint for retrieving tenure information.
-    fn get_tenure_info(&self) -> impl Future<Output = Result<GetTenureInfoResponse, Error>> + Send;
     /// Get information about the sortition associated to a consensus hash
     fn get_sortition_info(
         &self,
@@ -328,6 +302,16 @@ pub trait StacksInteract: Send + Sync {
         &self,
         sender: &StacksAddress,
     ) -> impl Future<Output = Result<Amount, Error>> + Send;
+
+    /// Fetch all Nakamoto blocks headers within the tenure anchored to a Bitcoin block
+    /// with given height.
+    ///
+    /// This function is analogous to the GET /v3/tenures/blocks/height/{}
+    /// endpoint on stacks-core nodes. This function returns headers of all block in given tenure.
+    fn get_tenure_headers(
+        &self,
+        bitcoin_block_height: BitcoinBlockHeight,
+    ) -> impl Future<Output = Result<TenureBlockHeaders, Error>> + Send;
 }
 
 /// A slimmed down [`NakamotoBlockHeader`]
@@ -342,8 +326,6 @@ pub struct StacksBlockHeader {
     /// The index block hash of the immediate parent of this block. This is
     /// the hash of the parent block's hash and consensus hash.
     pub parent_block_id: StacksBlockHash,
-    /// The consensus hash of the block.
-    pub consensus_hash: ConsensusHash,
 }
 
 impl From<NakamotoBlockHeader> for StacksBlockHeader {
@@ -352,7 +334,6 @@ impl From<NakamotoBlockHeader> for StacksBlockHeader {
             block_height: value.chain_length.into(),
             block_id: value.block_id().into(),
             parent_block_id: value.parent_block_id.into(),
-            consensus_hash: value.consensus_hash.into(),
         }
     }
 }
@@ -396,21 +377,26 @@ impl TenureBlockHeaders {
         })
     }
 
-    /// Get the minimum block height in the tenure.
-    pub fn start_height(&self) -> StacksBlockHeight {
+    /// Get the header with minimum block height in the tenure.
+    pub fn start_header(&self) -> &StacksBlockHeader {
         // SAFETY: It is okay to unwrap here because we know that the
         // tenure is non-empty. The struct upholds this invariant upon
         // creation.
-        self.headers.iter().map(|h| h.block_height).min().unwrap()
+        self.headers
+            .iter()
+            .min_by_key(|header| header.block_height)
+            .unwrap()
     }
 
-    /// Get the height of the block with the greatest height of all blocks
-    /// held within this struct.
-    pub fn end_height(&self) -> StacksBlockHeight {
+    /// Get the header with maximum block height in the tenure.
+    pub fn end_header(&self) -> &StacksBlockHeader {
         // SAFETY: It is okay to unwrap here because we know that the
         // tenure is non-empty. The struct upholds this invariant upon
         // creation.
-        self.headers.iter().map(|h| h.block_height).max().unwrap()
+        self.headers
+            .iter()
+            .max_by_key(|header| header.block_height)
+            .unwrap()
     }
 }
 
@@ -536,6 +522,36 @@ impl std::fmt::Display for TxRejection {
 
 impl std::error::Error for TxRejection {}
 
+/// A struct, representing the response from a GET /v3/tenures/blocks/height/{}
+/// request to a Stacks node.
+///
+/// The schema of the response can be found here:
+/// https://github.com/stacks-network/stacks-core/blob/e6c240e0c0dc763b1cff8fd5fca7b4c237da8bdb/docs/rpc/components/schemas/tenure-blocks.schema.yaml
+#[derive(Debug, Deserialize)]
+struct GetTenureHeadersApiResponse {
+    /// The height of the bitcoin block that anchors the stacks blocks in the `stacks_blocks` field.
+    #[serde(rename = "burn_block_height")]
+    pub bitcoin_block_height: BitcoinBlockHeight,
+    /// The block hash of the bitcoin block that anchors the stacks blocks in the `stacks_blocks` field.
+    #[serde(rename = "burn_block_hash")]
+    pub bitcoin_block_hash: BitcoinBlockHash,
+    /// List of stacks blocks, anchored to a bitcoin block.
+    pub stacks_blocks: Vec<GetTenureHeadersApiStacksBlock>,
+}
+
+/// A struct, representing a trimmed down stacks block header that is part
+/// of the response from a GET /v3/tenures/blocks/height/{} request to stacks-core.
+/// The full response is represented by [`GetTenureHeadersApiResponse`]
+#[derive(Debug, Deserialize)]
+struct GetTenureHeadersApiStacksBlock {
+    /// Hash of stacks block
+    pub block_id: StacksBlockHash,
+    /// Hash of parent stacks block.
+    pub parent_block_id: StacksBlockHash,
+    /// Height of stacks block.
+    pub height: StacksBlockHeight,
+}
+
 /// The response from a POST /v2/transactions request
 ///
 /// The stacks node returns three types of responses, either:
@@ -634,7 +650,7 @@ pub struct GetNodeInfoResponse {
     /// The block header hash of the tip of the canonical stacks
     /// blockchain. This is hashed with the consensus hash to create the
     /// block id.
-    stacks_tip: BlockHeaderHash,
+    pub stacks_tip: BlockHeaderHash,
     /// The consensus hash of the tip of the canonical stacks blockchain.
     pub stacks_tip_consensus_hash: ConsensusHash,
 }
@@ -647,27 +663,6 @@ impl GetNodeInfoResponse {
         let sortition_consensus_hash = blockstack_lib::chainstate::burn::ConsensusHash(bytes);
         StacksBlockId::new(&sortition_consensus_hash, &self.stacks_tip).into()
     }
-}
-
-/// The response from a GET /v3/tenures/info request to stacks-core.
-///
-/// This type contains the view of this node's current tenure.
-#[derive(Debug, PartialEq, Clone, serde::Deserialize)]
-pub struct GetTenureInfoResponse {
-    /// The highest known consensus hash (identifies the current tenure)
-    pub consensus_hash: ConsensusHash,
-    /// The tenure-start block ID of the current tenure
-    pub tenure_start_block_id: StacksBlockHash,
-    /// The consensus hash of the parent tenure
-    pub parent_consensus_hash: ConsensusHash,
-    /// The block hash of the parent tenure's start block
-    pub parent_tenure_start_block_id: StacksBlockHash,
-    /// The highest Stacks block ID in the current tenure
-    pub tip_block_id: StacksBlockHash,
-    /// The height of this tip
-    pub tip_height: StacksBlockHeight,
-    /// Which reward cycle we're in
-    pub reward_cycle: u64,
 }
 
 /// Minimal model type representing an epoch entry in a `/v2/pox` response,
@@ -1133,186 +1128,32 @@ impl StacksClient {
             .map_err(|err| Error::DecodeNakamotoBlock(err, *block_id))
     }
 
-    /// Returns `Ok` if the given block ID is a pre-Nakamoto block, otherwise
-    /// (the block doesn't exist or is a Nakamoto one) `Err` is returned.
-    #[tracing::instrument(skip(self))]
-    async fn check_pre_nakamoto_block(&self, block_id: &StacksBlockHash) -> Result<(), Error> {
-        let path = format!("/v2/blocks/{}", block_id.to_hex());
-        let url = self
-            .endpoint
-            .join(&path)
-            .map_err(|err| Error::PathJoin(err, self.endpoint.clone(), Cow::Owned(path)))?;
-
-        tracing::debug!("making request to the stacks node for the raw pre-nakamoto block");
-
-        let response = self
-            .client
-            .get(url)
-            .timeout(REQUEST_TIMEOUT)
-            .send()
-            .await
-            .map_err(Error::StacksNodeRequest)?;
-
-        let resp = response
-            .error_for_status()
-            .map_err(Error::StacksNodeResponse)?
-            .bytes()
-            .await
-            .map_err(Error::UnexpectedStacksResponse)?;
-
-        // Ensure we got a pre nakamoto block, just in case they change the v2
-        // API to be forward compatible
-        let _ = PreNakamotoBlock::consensus_deserialize(&mut &*resp).map_err(Error::StacksCodec)?;
-
-        Ok(())
-    }
-
-    /// Fetch all Nakamoto ancestor block headers within the same tenure as
-    /// the given block ID from a Stacks node.
-    ///
-    /// The response includes the Nakamoto block for the given block id.
-    ///
-    /// # Note
-    ///
-    /// If the given block ID does not exist or is an ID for a non-Nakamoto
-    /// block then a Result::Err is returned.
     #[tracing::instrument(skip(self))]
     async fn get_tenure_headers(
         &self,
-        block_id: &StacksBlockHash,
+        bitcoin_block_height: BitcoinBlockHeight,
     ) -> Result<TenureBlockHeaders, Error> {
-        tracing::debug!("making initial request for nakamoto blocks within the tenure");
-        let mut tenure_headers = self.get_tenure_headers_raw(block_id).await?;
-        let mut prev_last_block_id = *block_id;
-
-        // Given the response size limit of GET /v3/tenures/<block-id>
-        // requests, there could be more blocks that we need to fetch.
-        while let Some(last_block_id) = tenure_headers.last().map(|h| h.block_id) {
-            // To determine whether all blocks within a tenure have been
-            // retrieved, we check if we've seen the last block in the
-            // previous GET /v3/tenures/<block-id> response. Note that the
-            // response always starts with the block corresponding to
-            // <block-id> and is followed by its ancestors from the same
-            // tenure.
-            if last_block_id == prev_last_block_id {
-                break;
-            }
-
-            tracing::debug!(%last_block_id, "fetching more nakamoto blocks within the tenure");
-            let headers = self.get_tenure_headers_raw(&last_block_id).await?;
-
-            // The first block in the GET /v3/tenures/<block-id> response
-            // is always the block related to the given <block-id>. But we
-            // already have that block, so we can skip adding it again.
-
-            match headers.first().map(|b| b.block_id) {
-                Some(received_id) if received_id == last_block_id => {}
-                Some(received_id) => {
-                    return Err(Error::GetTenureRawMismatch(received_id, last_block_id));
-                }
-                None => return Err(Error::EmptyStacksTenure),
-            }
-
-            tenure_headers.extend(headers.into_iter().skip(1));
-
-            prev_last_block_id = last_block_id;
-        }
-
-        // If Self::get_tenure_headers_raw returns with Ok(_) then the Vec will
-        // include at least 1 Nakamoto block. Since we bail if there is an
-        // error, this vector has at least one element.
-        let Some(header) = tenure_headers.last() else {
-            return Err(Error::EmptyStacksTenure);
-        };
-
-        let info = self.get_sortition_info(&header.consensus_hash).await?;
-
-        TenureBlockHeaders::try_new(tenure_headers, info)
-    }
-
-    /// Make a GET /v3/tenures/<block-id> request for Nakamoto ancestor
-    /// blocks with the same tenure as the given block ID from a Stacks
-    /// node, and return the relevant parts of the headers of those blocks.
-    ///
-    /// # Notes
-    ///
-    /// * The GET /v3/tenures/<block-id> response is capped at ~16 MB, so a
-    ///   single request may not return all Nakamoto blocks.
-    /// * The response includes the Nakamoto block for the given block id.
-    /// * If the given block ID does not exist or is an ID for a
-    ///   non-Nakamoto block then a Result::Err is returned.
-    #[tracing::instrument(skip(self))]
-    async fn get_tenure_headers_raw(
-        &self,
-        block_id: &StacksBlockHash,
-    ) -> Result<Vec<StacksBlockHeader>, Error> {
-        let path = format!("/v3/tenures/{}", block_id.to_hex());
+        let path = format!("/v3/tenures/blocks/height/{}", bitcoin_block_height);
         let url = self
             .endpoint
             .join(&path)
             .map_err(|err| Error::PathJoin(err, self.endpoint.clone(), Cow::Owned(path)))?;
 
-        tracing::debug!("making request to the stacks node for the raw nakamoto block");
+        tracing::debug!("making request to the stacks node for the tenure headers");
 
-        let response = self
+        let headers = self
             .client
             .get(url)
             .timeout(REQUEST_TIMEOUT)
             .send()
             .await
-            .map_err(Error::StacksNodeRequest)?;
-
-        // The response here does not detail the number of blocks in the
-        // response. So we essentially take the same implementation given
-        // in [`StacksHttpResponse::decode_nakamoto_tenure`], which just
-        // keeps decoding until there are no more bytes.
-        let resp = response
+            .map_err(Error::StacksNodeRequest)?
             .error_for_status()
             .map_err(Error::StacksNodeResponse)?
-            .bytes()
-            .await
-            .map_err(Error::UnexpectedStacksResponse)?;
-
-        let bytes: &mut &[u8] = &mut resp.as_ref();
-        let mut headers = Vec::new();
-
-        while !bytes.is_empty() {
-            let block = NakamotoBlock::consensus_deserialize(bytes)
-                .map_err(|err| Error::DecodeNakamotoTenure(err, *block_id))?;
-
-            headers.push(block.header.into());
-        }
-
+            .json::<GetTenureHeadersApiResponse>()
+            .await?
+            .into();
         Ok(headers)
-    }
-
-    /// Get information about the current tenure.
-    ///
-    /// Uses the GET /v3/tenures/info stacks node endpoint for retrieving
-    /// tenure information.
-    #[tracing::instrument(skip(self))]
-    pub async fn get_tenure_info(&self) -> Result<GetTenureInfoResponse, Error> {
-        let path = "/v3/tenures/info";
-        let url = self
-            .endpoint
-            .join(path)
-            .map_err(|err| Error::PathJoin(err, self.endpoint.clone(), Cow::Borrowed(path)))?;
-
-        tracing::debug!("making request to the stacks node for the current tenure info");
-        let response = self
-            .client
-            .get(url.clone())
-            .timeout(REQUEST_TIMEOUT)
-            .send()
-            .await
-            .map_err(Error::StacksNodeRequest)?;
-
-        response
-            .error_for_status()
-            .map_err(Error::StacksNodeResponse)?
-            .json()
-            .await
-            .map_err(Error::UnexpectedStacksResponse)
     }
 
     /// Get information about the sortition related to a consensus hash.
@@ -1422,22 +1263,40 @@ impl StacksClient {
 pub async fn update_db_with_unknown_ancestors<S, D>(
     stacks: &S,
     storage: &D,
-    block_id: &StacksBlockHash,
+    bitcoin_block_height: BitcoinBlockHeight,
 ) -> Result<RangeInclusive<StacksBlockHeight>, Error>
 where
     S: StacksInteract,
     D: Transactable + Send + Sync,
 {
     let db = storage.begin_transaction().await?;
-    let mut tenure = stacks.get_tenure_headers(block_id).await?;
-    let end_height = tenure.end_height();
     let nakamoto_start_height = stacks.get_epoch_status().await?.nakamoto_start_height();
+
+    let mut height = bitcoin_block_height;
+    let mut tenure = loop {
+        match stacks.get_tenure_headers(height).await {
+            Ok(t) => break t,
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    "error during fetching tenure headers"
+                );
+                if height <= nakamoto_start_height {
+                    return Err(error);
+                }
+                height = height - 1;
+            }
+        }
+    };
+
+    let end_height = tenure.end_header().block_height;
+    let mut anchor_block_height = tenure.anchor_block_height;
 
     loop {
         db.write_stacks_block_headers(&tenure).await?;
         // We won't get anymore Nakamoto blocks before this point, so
         // time to stop.
-        if tenure.anchor_block_height <= nakamoto_start_height {
+        if anchor_block_height <= nakamoto_start_height {
             tracing::debug!(
                 %nakamoto_start_height,
                 last_chain_length = %tenure.anchor_block_height,
@@ -1458,31 +1317,36 @@ where
         // There are more blocks to fetch, so let's get them. This assumes
         // optimistically that the parent is still a Nakamoto block (and so has
         // a tenure); if that's not the case, we get an `Err` here.
-        let tenure_headers_result = stacks.get_tenure_headers(&header.parent_block_id).await;
+        let tenure_headers_result = stacks.get_tenure_headers(anchor_block_height - 1).await;
+        anchor_block_height = anchor_block_height - 1;
         let tenure_headers = match tenure_headers_result {
             Ok(tenure_headers) => tenure_headers,
             Err(error) => {
-                // A 404 could mean that we reached the Nakamoto start height
-                // and we tried fetching a tenure for a pre-Nakamoto block
-                if stacks
-                    .check_pre_nakamoto_block(&header.parent_block_id)
-                    .await
-                    .is_ok()
-                {
-                    tracing::debug!(
-                        %nakamoto_start_height,
-                        last_chain_length = %tenure.anchor_block_height,
-                        "all Nakamoto blocks fetched; stopping"
-                    );
-                    break;
-                }
-                return Err(error);
+                tracing::warn!(
+                    %error,
+                    "error during fetching tenure headers"
+                );
+                continue;
             }
         };
-        tenure = tenure_headers;
+        let newest_block_in_older_tenure = tenure_headers.end_header();
+        let oldest_block_in_newer_tenure = tenure.start_header();
+
+        if oldest_block_in_newer_tenure.parent_block_id == newest_block_in_older_tenure.block_id {
+            tenure = tenure_headers;
+        } else {
+            tracing::error!(
+                %tenure.anchor_block_height,
+                %anchor_block_height,
+                ?newest_block_in_older_tenure,
+                ?oldest_block_in_newer_tenure,
+                "stacks node returned inconsecutive tenures, while they must be consecutive"
+            );
+            return Err(Error::MissingBlock);
+        }
     }
 
-    let start_height = tenure.start_height();
+    let start_height = tenure.start_header().block_height;
 
     db.commit().await?;
 
@@ -1571,6 +1435,24 @@ fn extract_signatures_required(value: Value) -> Result<Option<u16>, Error> {
         _ => Err(Error::InvalidStacksResponse(
             "expected a uint but got something else",
         )),
+    }
+}
+
+impl From<GetTenureHeadersApiResponse> for TenureBlockHeaders {
+    fn from(value: GetTenureHeadersApiResponse) -> Self {
+        TenureBlockHeaders {
+            headers: value
+                .stacks_blocks
+                .iter()
+                .map(|header| StacksBlockHeader {
+                    block_height: header.height,
+                    block_id: header.block_id,
+                    parent_block_id: header.parent_block_id,
+                })
+                .collect::<Vec<StacksBlockHeader>>(),
+            anchor_block_hash: value.bitcoin_block_hash,
+            anchor_block_height: value.bitcoin_block_height,
+        }
     }
 }
 
@@ -1706,19 +1588,12 @@ impl StacksInteract for StacksClient {
         self.get_block(block_id).await
     }
 
-    async fn check_pre_nakamoto_block(&self, block_id: &StacksBlockHash) -> Result<(), Error> {
-        self.check_pre_nakamoto_block(block_id).await
-    }
-
+    #[tracing::instrument(skip(self))]
     async fn get_tenure_headers(
         &self,
-        block_id: &StacksBlockHash,
+        bitcoin_block_height: BitcoinBlockHeight,
     ) -> Result<TenureBlockHeaders, Error> {
-        self.get_tenure_headers(block_id).await
-    }
-
-    async fn get_tenure_info(&self) -> Result<GetTenureInfoResponse, Error> {
-        self.get_tenure_info().await
+        self.get_tenure_headers(bitcoin_block_height).await
     }
 
     async fn get_sortition_info(
@@ -1939,21 +1814,12 @@ impl StacksInteract for ApiFallbackClient<StacksClient> {
         self.exec(|client, _| client.get_block(block_id)).await
     }
 
-    async fn check_pre_nakamoto_block(&self, block_id: &StacksBlockHash) -> Result<(), Error> {
-        self.exec(|client, _| client.check_pre_nakamoto_block(block_id))
-            .await
-    }
-
     async fn get_tenure_headers(
         &self,
-        block_id: &StacksBlockHash,
+        block_height: BitcoinBlockHeight,
     ) -> Result<TenureBlockHeaders, Error> {
-        self.exec(|client, _| client.get_tenure_headers(block_id))
+        self.exec(|client, _| client.get_tenure_headers(block_height))
             .await
-    }
-
-    async fn get_tenure_info(&self) -> Result<GetTenureInfoResponse, Error> {
-        self.exec(|client, _| client.get_tenure_info()).await
     }
 
     async fn get_sortition_info(
@@ -2042,7 +1908,6 @@ mod tests {
     use test_log::test;
 
     use super::*;
-    use std::io::Read as _;
 
     fn generate_wallet(num_keys: u16, signatures_required: u16) -> SignerWallet {
         let network_kind = NetworkKind::Regtest;
@@ -2065,8 +1930,9 @@ mod tests {
         // a list of endpoints, so we use the fallback client.
         let client: ApiFallbackClient<StacksClient> = TryFrom::try_from(&settings).unwrap();
 
-        let info = client.get_tenure_info().await.unwrap();
-        let tenures = update_db_with_unknown_ancestors(&client, &db, &info.tip_block_id).await;
+        let info = client.get_node_info().await.unwrap();
+
+        let tenures = update_db_with_unknown_ancestors(&client, &db, info.burn_block_height).await;
 
         assert!(tenures.is_ok());
 
@@ -2076,7 +1942,7 @@ mod tests {
     #[ignore = "This is an integration test that uses the real testnet"]
     #[test_case(|url| StacksClient::new(url).unwrap(); "stacks-client")]
     #[test_case(|url| ApiFallbackClient::new(vec![StacksClient::new(url).unwrap()]).unwrap(); "fallback-client")]
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn fetch_unknown_ancestors_works_in_testnet<F, C>(client: F)
     where
         C: StacksInteract,
@@ -2091,40 +1957,14 @@ mod tests {
         // BTC 1865 <- Stacks 319
         // BTC 1900 -- nakamoto_start_height
         // BTC 1901 <- Stacks 320, ..., 744
-        // BTC 1998 <- Stacks 745, ..., 750, ...
+        // BTC 1998 <- Stacks 745, ..., 750, ... 791
 
-        // This is the block id for block 319 (pre-Nakamoto) on testnet
-        let pre_nakamoto_block_id = StacksBlockId::from_hex(
-            "0d7cb8c66040d87fc17f39e1b5c36bc7fb5c4d97cc611a168e2cca186848be1e",
-        )
-        .unwrap()
-        .into();
-        assert!(
-            client
-                .check_pre_nakamoto_block(&pre_nakamoto_block_id)
-                .await
-                .is_ok()
-        );
-
-        // This is the block id for block 750 on testnet
-        let nakamoto_block_id = StacksBlockId::from_hex(
-            "ad133146e79ff5eccf9eecc51d9eea35947031c5d91d61afc3a1df63d6c198e7",
-        )
-        .unwrap()
-        .into();
-        assert!(
-            client
-                .check_pre_nakamoto_block(&nakamoto_block_id)
-                .await
-                .is_err()
-        );
-
-        let tenures = update_db_with_unknown_ancestors(&client, &db, &nakamoto_block_id).await;
+        let tenures = update_db_with_unknown_ancestors(&client, &db, 1998u64.into()).await;
 
         let block_height_range = tenures.unwrap();
 
         let expected =
-            RangeInclusive::new(StacksBlockHeight::new(320), StacksBlockHeight::new(750));
+            RangeInclusive::new(StacksBlockHeight::new(320), StacksBlockHeight::new(791));
         assert_eq!(block_height_range, expected);
 
         let (min_block_height, max_block_height, count) = sqlx::query_as::<_, (i64, i64, i64)>(
@@ -2181,95 +2021,29 @@ mod tests {
         C: StacksInteract,
         F: Fn(Url) -> C,
     {
-        // Here we test that out code will handle the response from a
-        // stacks node in the expected way.
-        const TENURE_START_BLOCK_ID: &str =
-            "5addaf4477a60a9bab28608aa2ec9ea9eb7d68aa038274ecac7a41fdca58e650";
-        const TENURE_END_BLOCK_ID: &str =
-            "e5fdeb1a51ba6eb297797a1c473e715c27dc81a58ba82c698f6a32eeccee9a5b";
-
         // Okay we need to set up the server to returned what a stacks node
         // would return. We load up a file that contains a response from an
         // actual stacks node in regtest mode.
-        let path = format!("tests/fixtures/tenure-blocks-0-{TENURE_END_BLOCK_ID}.bin");
-        let mut file = std::fs::File::open(path).unwrap();
-        let mut buf1 = Vec::new();
-        file.read_to_end(&mut buf1).unwrap();
+        let path = "tests/fixtures/stacksapi-v3-tenures-blocks.json".to_string();
 
         let mut stacks_node_server = mockito::Server::new_async().await;
-        let endpoint_path_tenure_end = format!("/v3/tenures/{TENURE_END_BLOCK_ID}");
+        let endpoint_tenure_headers = "/v3/tenures/blocks/height/900000".to_string();
         let first_mock = stacks_node_server
-            .mock("GET", endpoint_path_tenure_end.as_str())
+            .mock("GET", endpoint_tenure_headers.as_str())
             .with_status(200)
-            .with_header("content-type", "application/octet-stream")
-            .with_header("transfer-encoding", "chunked")
-            .with_chunked_body(move |w| w.write_all(&buf1))
-            .expect(1)
-            .create();
-
-        let path = "tests/fixtures/stacksapi-v3-sortitions.json";
-        let mut file = std::fs::File::open(path).unwrap();
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf).unwrap();
-
-        let called_endpoint = "/v3/sortitions/consensus/f9fff2c4c5e5f55788bbd62f6b41aeba99d982fd";
-        stacks_node_server
-            .mock("GET", called_endpoint)
-            .with_status(200)
-            .with_header("content-type", "application/octet-stream")
-            .with_header("transfer-encoding", "chunked")
-            .with_chunked_body(move |w| w.write_all(&buf))
-            .expect(1)
-            .create();
-
-        // The StacksClient::get_blocks call should make at least two
-        // requests to the stacks node if there are two or more Nakamoto
-        // blocks within the same tenure. Our test setup has 23 blocks
-        // within the tenure, so we need to tell the mock server what to
-        // return in the second request.
-        //
-        // Also, worth noting is that the total size of the blocks within a
-        // GET /v3/tenures/<block-id> is ~16 MB (via the MAX_MESSAGE_LEN
-        // constant in stacks-core). The size of the blocks for this test
-        // is well under 1 MB, so we get all the data during the first
-        // request, which just don't know that until the second request.
-        let path = format!("tests/fixtures/tenure-blocks-1-{TENURE_START_BLOCK_ID}.bin");
-        let mut file = std::fs::File::open(path).unwrap();
-        let mut buf2 = Vec::new();
-        file.read_to_end(&mut buf2).unwrap();
-
-        let endpoint_path_tenure_start = format!("/v3/tenures/{TENURE_START_BLOCK_ID}");
-        let second_mock = stacks_node_server
-            .mock("GET", endpoint_path_tenure_start.as_str())
-            .with_status(200)
-            .with_header("content-type", "application/octet-stream")
-            .with_header("transfer-encoding", "chunked")
-            .with_chunked_body(move |w| w.write_all(&buf2))
+            .with_body_from_file(path)
             .expect(1)
             .create();
 
         let client = client(url::Url::parse(stacks_node_server.url().as_str()).unwrap());
 
-        let block_id = StacksBlockHash::from_hex(TENURE_END_BLOCK_ID).unwrap();
         // The moment of truth, do the requests succeed?
-        let headers = client.get_tenure_headers(&block_id).await.unwrap().headers;
-        assert!(headers.len() > 1);
-
-        // We know that the blocks are ordered as a chain, and we know the
-        // first and last block IDs, let's check that.
-        let last_block_id = StacksBlockHash::from_hex(TENURE_START_BLOCK_ID).unwrap();
-        let n = headers.len() - 1;
-        assert_eq!(headers[0].block_id, block_id);
-        assert_eq!(headers[n].block_id, last_block_id);
-
-        // Let's check that the returned blocks are distinct.
-        let mut ans: Vec<StacksBlockHash> = headers.iter().map(|block| block.block_id).collect();
-        ans.sort();
-        ans.dedup();
-        assert_eq!(headers.len(), ans.len());
+        let headers = client.get_tenure_headers(900_000u64.into()).await.unwrap();
+        assert_eq!(headers.headers.len(), 39);
+        assert_eq!(headers.start_header().block_height, 1507195u64.into());
+        assert_eq!(headers.end_header().block_height, 1507233u64.into());
 
         first_mock.assert();
-        second_mock.assert();
     }
 
     #[tokio::test]
@@ -2298,41 +2072,6 @@ mod tests {
 
         assert_eq!(result, Amount::from_sat(1337));
         mock.assert();
-    }
-
-    #[test_case(|url| StacksClient::new(url).unwrap(); "stacks-client")]
-    #[test_case(|url| ApiFallbackClient::new(vec![StacksClient::new(url).unwrap()]).unwrap(); "fallback-client")]
-    #[tokio::test]
-    async fn get_tenure_info_works<F, C>(client: F)
-    where
-        C: StacksInteract,
-        F: Fn(Url) -> C,
-    {
-        let raw_json_response = r#"{
-            "consensus_hash": "e42b3a9ffce62376e1f36cf76c33cc23d9305de1",
-            "tenure_start_block_id": "e08c740242092eb0b5f74756ce203db048a5156e444df531a7c29e2d952cf628",
-            "parent_consensus_hash": "d9693fbdf0a9bab9ee5ffd3c4f52fef6e1da1899",
-            "parent_tenure_start_block_id": "8ff4eb1ed4a2f83faada29f6012b7f86f476eafed9921dff8d2c14cdfa30da94",
-            "tip_block_id": "8f61dc41560560e8122609e82966740075929ed663543d9ad6733f8fc32876c5",
-            "tip_height": 2037,
-            "reward_cycle": 11
-        }"#;
-
-        let mut stacks_node_server = mockito::Server::new_async().await;
-        let first_mock = stacks_node_server
-            .mock("GET", "/v3/tenures/info")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(raw_json_response)
-            .expect(1)
-            .create();
-
-        let client = client(url::Url::parse(stacks_node_server.url().as_str()).unwrap());
-        let resp = client.get_tenure_info().await.unwrap();
-        let expected: GetTenureInfoResponse = serde_json::from_str(raw_json_response).unwrap();
-
-        assert_eq!(resp, expected);
-        first_mock.assert();
     }
 
     /// Helper method for generating a list of public keys.
@@ -2984,8 +2723,9 @@ mod tests {
         let client: ApiFallbackClient<StacksClient> = TryFrom::try_from(&settings).unwrap();
         let storage = Store::new_shared();
 
-        let info = client.get_tenure_info().await.unwrap();
-        update_db_with_unknown_ancestors(&client, &storage, &info.tenure_start_block_id)
+        let info = client.get_node_info().await.unwrap();
+
+        update_db_with_unknown_ancestors(&client, &storage, info.burn_block_height)
             .await
             .unwrap();
     }
@@ -3018,5 +2758,185 @@ mod tests {
         let address = StacksAddress::burn_address(false);
         let account = client.get_account(&address).await.unwrap();
         assert_eq!(account.nonce, 0);
+    }
+
+    /// This test checks that update_db_with_unknown_ancestors works well if there are
+    /// gaps in stacks blockchain (some bitcoin blocks does not have stacks blocks anchored to them)
+    /// The setup of the test:
+    /// - bitcoin block 234 have anchored to it stacks block 744
+    /// - bitcoin block 233 have no stacks blocks anchored (a gap)
+    /// - bitcoin block 232 have anchored to it stacks block 743
+    /// - bitcoin block 231 is not a Nakamoto block
+    #[tokio::test]
+    async fn get_tenure_headers_update_db_with_unknown_ancestors_processes_gaps() {
+        // 232 - Nakamoto start
+        let raw_json_response_234 = r#"{
+            "consensus_hash": "2cd83cba6930e50fe81d265c6f14d248c93f3de3",
+            "burn_block_height": 234,
+            "burn_block_hash": "5cb8fc024a7c7f40c8890c92f15803dfb4fe3406d047db9e2a8492727127f00c",
+            "stacks_blocks": [
+            {
+                "block_id": "3d79a705ebbc16222b3d4515e68bb8e4791c0def1401bc66c036b4ca9bf3c8e2",
+                "header_type": "nakamoto",
+                "block_hash": "9bc75a898db459856f60fb1c6c2dbfad0bc48c4c25ec9d0c72da88b272fc63fa",
+                "parent_block_id": "5433e2d28129b2449700e1fd8b9b348bb302eb4e9b62f19d85ef47690048e3a2",
+                "height": 744
+            }
+            ]
+        }"#;
+
+        let raw_json_response_233 = r#"No blocks in tenure with burnchain block height 1903"#;
+
+        let raw_json_response_232 = r#"{
+            "consensus_hash": "5b44c8c88a1439d6684b648436215ea65d3cd8d6",
+            "burn_block_height": 232,
+            "burn_block_hash": "41a0e279472f5b195df3abc606c4fccaf15a9e1032f828e280b52617a439013e",
+            "stacks_blocks": [
+            {
+                "block_id": "5433e2d28129b2449700e1fd8b9b348bb302eb4e9b62f19d85ef47690048e3a2",
+                "header_type": "nakamoto",
+                "block_hash": "7175e838ff1fce838d5cf35af13898eb741e361e083002190276b69712fc4ae8",
+                "parent_block_id": "4ff6afcd8c2d8ddba076a04c2ff9f032be0f95b3cb6e41edc723e5a919d98f16",
+                "height": 743
+            }
+            ]
+        }"#;
+
+        let raw_json_response_poxinfo =
+            include_str!("../../tests/fixtures/stacksapi-get-pox-info-test-data.json");
+
+        let mut stacks_node_server = mockito::Server::new_async().await;
+        let mock_234 = stacks_node_server
+            .mock("GET", "/v3/tenures/blocks/height/234")
+            .with_status(200)
+            .with_body(raw_json_response_234)
+            .expect(1)
+            .create();
+        let mock_233 = stacks_node_server
+            .mock("GET", "/v3/tenures/blocks/height/233")
+            .with_status(404)
+            .with_body(raw_json_response_233)
+            .expect(1)
+            .create();
+        let mock_232 = stacks_node_server
+            .mock("GET", "/v3/tenures/blocks/height/232")
+            .with_status(200)
+            .with_body(raw_json_response_232)
+            .expect(1)
+            .create();
+
+        let mock_poxinfo = stacks_node_server
+            .mock("GET", "/v2/pox")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(raw_json_response_poxinfo)
+            .expect(1)
+            .create();
+
+        let client = StacksClient::new(stacks_node_server.url().parse().unwrap()).unwrap();
+        let storage = Store::new_shared();
+
+        let result = update_db_with_unknown_ancestors(&client, &storage, 234u64.into())
+            .await
+            .unwrap();
+
+        let start_height = result.start();
+        let end_height = result.end();
+
+        assert_eq!(**start_height, 743);
+        assert_eq!(**end_height, 744);
+
+        mock_234.assert();
+        mock_233.assert();
+        mock_232.assert();
+        mock_poxinfo.assert();
+    }
+
+    #[tokio::test]
+    async fn get_tenure_headers_update_db_with_unknown_ancestors_bails_on_inconsecutive_tenures_blocks()
+     {
+        let raw_json_response_1000 = r#"{
+            "consensus_hash": "2cd83cba6930e50fe81d265c6f14d248c93f3de3",
+            "burn_block_height": 1000,
+            "burn_block_hash": "5cb8fc024a7c7f40c8890c92f15803dfb4fe3406d047db9e2a8492727127f00c",
+            "stacks_blocks": [
+            {
+                "block_id": "3d79a705ebbc16222b3d4515e68bb8e4791c0def1401bc66c036b4ca9bf3c8e2",
+                "header_type": "nakamoto",
+                "block_hash": "9bc75a898db459856f60fb1c6c2dbfad0bc48c4c25ec9d0c72da88b272fc63fa",
+                "parent_block_id": "ef7be9b052643210b8a115f1c4c7037a40cd562c5b8ae5f3d99751d8e2de4e78",
+                "height": 744
+            }
+            ]
+        }"#;
+
+        let raw_json_response_999 = r#"{
+            "consensus_hash": "2cd83cba6930e50fe81d265c6f14d248c93f3de3",
+            "burn_block_height": 999,
+            "burn_block_hash": "5cb8fc024a7c7f40c8890c92f15803dfb4fe3406d047db9e2a8492727127f00c",
+            "stacks_blocks": [
+            {
+                "block_id": "3d79a705ebbc16222b3d4515e68bb8e4791c0def1401bc66c036b4ca9bf3c8e2",
+                "header_type": "nakamoto",
+                "block_hash": "9bc75a898db459856f60fb1c6c2dbfad0bc48c4c25ec9d0c72da88b272fc63fa",
+                "parent_block_id": "ef7be9b052643210b8a115f1c4c7037a40cd562c5b8ae5f3d99751d8e2de4e78",
+                "height": 744
+            }
+            ]
+        }"#;
+
+        let raw_json_response_poxinfo =
+            include_str!("../../tests/fixtures/stacksapi-get-pox-info-test-data.json");
+
+        let mut stacks_node_server = mockito::Server::new_async().await;
+        let mock_1000 = stacks_node_server
+            .mock("GET", "/v3/tenures/blocks/height/1000")
+            .with_status(200)
+            .with_body(raw_json_response_1000)
+            .expect(1)
+            .create();
+        let mock_999 = stacks_node_server
+            .mock("GET", "/v3/tenures/blocks/height/999")
+            .with_status(200)
+            .with_body(raw_json_response_999)
+            .expect(1)
+            .create();
+        let mock_poxinfo = stacks_node_server
+            .mock("GET", "/v2/pox")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(raw_json_response_poxinfo)
+            .expect(1)
+            .create();
+
+        let client = StacksClient::new(stacks_node_server.url().parse().unwrap()).unwrap();
+        let storage = Store::new_shared();
+
+        let err = update_db_with_unknown_ancestors(&client, &storage, 1000u64.into()).await;
+
+        assert!(matches!(err, Err(Error::MissingBlock)));
+
+        mock_1000.assert();
+        mock_999.assert();
+        mock_poxinfo.assert();
+    }
+
+    #[ignore = "This is an integration test that hasn't been setup for CI yet"]
+    #[tokio::test]
+    async fn get_tenure_headers_correctly_serializes_bitcoin_block_hash() {
+        let url = Url::parse("https://api.mainnet.hiro.so/").unwrap();
+        let client = StacksClient::new(url).unwrap();
+
+        let height = 900_000u64;
+
+        let headers = client.get_tenure_headers(height.into()).await.unwrap();
+        let block_hash = headers.anchor_block_hash;
+
+        // This hash is indeed hash of block 900_000
+        // https://mempool.space/block/000000000000000000010538edbfd2d5b809a33dd83f284aeea41c6d0d96968a
+        assert_eq!(
+            &format!("{}", block_hash),
+            "000000000000000000010538edbfd2d5b809a33dd83f284aeea41c6d0d96968a"
+        );
     }
 }

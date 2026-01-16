@@ -37,7 +37,6 @@ use crate::keys::PublicKey;
 use crate::stacks::api::AccountInfo;
 use crate::stacks::api::FeePriority;
 use crate::stacks::api::GetNodeInfoResponse;
-use crate::stacks::api::GetTenureInfoResponse;
 use crate::stacks::api::SignerSetInfo;
 use crate::stacks::api::StacksBlockHeader;
 use crate::stacks::api::StacksEpochStatus;
@@ -355,52 +354,26 @@ impl StacksInteract for TestHarness {
             .cloned()
             .ok_or(Error::MissingBlock)
     }
-    async fn check_pre_nakamoto_block(&self, _: &StacksBlockHash) -> Result<(), Error> {
-        unimplemented!()
-    }
+
     async fn get_tenure_headers(
         &self,
-        block_id: &StacksBlockHash,
+        burnchain_block_height: BitcoinBlockHeight,
     ) -> Result<TenureBlockHeaders, Error> {
-        let (stx_block_id, stx_block, btc_block_id) = self
-            .stacks_blocks
+        let burnchain_hash = self
+            .bitcoin_blocks
             .iter()
-            .find(|(id, _, _)| id == &block_id.into())
-            .ok_or(Error::MissingBlock)?;
+            .find(|block| block.height == burnchain_block_height)
+            .ok_or(Error::MissingBlock)?
+            .block_hash;
 
         let headers: Vec<StacksBlockHeader> = self
             .stacks_blocks
             .iter()
-            .skip_while(|(_, _, block_id)| block_id != btc_block_id)
-            .take_while(|(block_id, _, _)| block_id != stx_block_id)
-            .map(|(_, block, _)| block)
-            .chain(std::iter::once(stx_block))
-            .map(|block| block.header.clone().into())
+            .filter(|(_, _, block_hash)| block_hash == &burnchain_hash)
+            .map(|(_, nakamoto_block, _)| nakamoto_block.header.clone().into())
             .collect();
 
         TenureBlockHeaders::from_headers(headers)
-    }
-    async fn get_tenure_info(&self) -> Result<GetTenureInfoResponse, Error> {
-        let (_, _, btc_block_id) = self.stacks_blocks.last().unwrap();
-
-        Ok(GetTenureInfoResponse {
-            consensus_hash: ConsensusHash::new([0; 20]),
-            tenure_start_block_id: self
-                .stacks_blocks
-                .iter()
-                .find(|(_, _, block_id)| block_id == btc_block_id)
-                .map(|(stx_block_id, _, _)| stx_block_id.clone().into())
-                .unwrap(),
-            parent_consensus_hash: ConsensusHash::new([0; 20]),
-            parent_tenure_start_block_id: StacksBlockId::first_mined().into(),
-            tip_block_id: self
-                .stacks_blocks
-                .last()
-                .map(|(block_id, _, _)| block_id.clone().into())
-                .unwrap(),
-            tip_height: (self.stacks_blocks.len() as u64).into(),
-            reward_cycle: 0,
-        })
     }
 
     async fn get_sortition_info(
