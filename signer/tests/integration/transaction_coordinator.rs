@@ -51,7 +51,7 @@ use sbtc::testing::regtest::Recipient;
 use sbtc::testing::regtest::p2wpkh_sign_transaction;
 use secp256k1::Keypair;
 use secp256k1::SECP256K1;
-use signer::bitcoin::BitcoinInteract as _;
+use signer::bitcoin::BitcoinInteract;
 use signer::bitcoin::poller::BitcoinChainTipPoller;
 use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::bitcoin::utxo::BitcoinInputsOutputs as _;
@@ -6536,4 +6536,20 @@ async fn reuse_nonce_attack() {
         testing::storage::drop_db(db).await;
     }
     clean_emily_setup(emily_tables).await;
+}
+
+#[tokio::test]
+async fn generate_fee_data_works() {
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let faucet = &bitcoin.get_faucet();
+    let client = bitcoin.get_client();
+
+    let fee_rate = BitcoinInteract::estimate_fee_rate(&client).await;
+    assert!(fee_rate.is_err());
+
+    faucet.generate_fee_data();
+
+    let fee_rate = BitcoinInteract::estimate_fee_rate(&client).await;
+    assert!(fee_rate.is_ok());
 }
