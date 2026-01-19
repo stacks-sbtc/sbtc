@@ -196,6 +196,26 @@ impl StacksBlock {
     }
 }
 
+/// A struct that references a specific stacks block by its block ID and
+/// its position in the blockchain.
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "testing", derive(fake::Dummy))]
+pub struct StacksBlockRef {
+    /// The stacks block ID. It uniquely identifies the stacks block.
+    pub block_hash: StacksBlockHash,
+    /// The height of the block in the stacks blockchain.
+    pub block_height: StacksBlockHeight,
+}
+
+impl From<StacksBlock> for StacksBlockRef {
+    fn from(block: StacksBlock) -> Self {
+        Self {
+            block_hash: block.block_hash,
+            block_height: block.block_height,
+        }
+    }
+}
+
 /// Deposit request.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]

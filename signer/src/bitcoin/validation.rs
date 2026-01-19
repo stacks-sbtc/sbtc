@@ -20,7 +20,7 @@ use crate::context::SbtcLimits;
 use crate::error::Error;
 use crate::keys::PublicKey;
 use crate::message::BitcoinPreSignRequest;
-use crate::storage::DbRead;
+use crate::storage::DbRead as _;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::BitcoinTxId;
@@ -153,18 +153,19 @@ impl BitcoinPreSignRequest {
         Ok(())
     }
 
-    async fn fetch_all_reports<D>(
+    async fn fetch_all_reports<C>(
         &self,
-        db: &D,
+        ctx: &C,
         btc_ctx: &BitcoinTxContext,
     ) -> Result<ValidationCache<'_>, Error>
     where
-        D: DbRead,
+        C: Context + Send + Sync,
     {
+        let db = ctx.get_storage();
         let mut cache = ValidationCache::default();
-
         let bitcoin_chain_tip = &btc_ctx.chain_tip;
-        let maybe_stacks_chain_tip = db.get_stacks_chain_tip(bitcoin_chain_tip).await?;
+
+        let maybe_stacks_chain_tip = ctx.state().stacks_chain_tip();
         let Some(stacks_chain_tip) = maybe_stacks_chain_tip.map(|b| b.block_hash) else {
             return Err(Error::NoStacksChainTip);
         };
@@ -278,7 +279,7 @@ impl BitcoinPreSignRequest {
         // Let's do basic validation of the request object itself.
         self.pre_validation()?;
         let db = ctx.get_storage();
-        let cache = self.fetch_all_reports(&db, btc_ctx).await?;
+        let cache = self.fetch_all_reports(ctx, btc_ctx).await?;
 
         // We now check that the withdrawal amounts adhere to the rolling
         // limits. We check the individual withdrawal caps later.
