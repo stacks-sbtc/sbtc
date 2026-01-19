@@ -184,6 +184,20 @@ impl EmilyClient {
         })
     }
 
+    /// Create a new client from a config
+    #[cfg(any(test, feature = "testing"))]
+    pub fn new(
+        config: EmilyApiConfig,
+        pagination_timeout: Duration,
+        page_size: Option<u16>,
+    ) -> Self {
+        Self {
+            config,
+            pagination_timeout,
+            page_size: page_size.map(|size| size as u32),
+        }
+    }
+
     fn parse_deposit(deposit: &DepositInfo) -> Result<CreateDepositRequest, Error> {
         Ok(CreateDepositRequest {
             outpoint: OutPoint {

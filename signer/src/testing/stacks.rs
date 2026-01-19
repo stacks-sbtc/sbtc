@@ -10,6 +10,7 @@ use crate::error::Error;
 use crate::stacks::api::GetTenureInfoResponse;
 use crate::stacks::api::StacksBlockHeader;
 use crate::stacks::api::TenureBlockHeaders;
+use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::ConsensusHash;
 use crate::storage::model::StacksBlockHash;
 use crate::storage::model::StacksBlockHeight;
@@ -56,5 +57,35 @@ impl TenureBlockHeaders {
     /// Create TenureBlockHeaders with some dummy sortition info.
     pub fn from_headers(headers: Vec<StacksBlockHeader>) -> Result<Self, Error> {
         Self::try_new(headers, DUMMY_SORTITION_INFO)
+    }
+
+    /// Create TenureBlockHeaders with a given anchor block.
+    ///
+    /// # Notes
+    ///
+    /// We do not set the bitcoin block height in any of these testing
+    /// functions, because our tests often need the stacks anchor height to
+    /// be before the nakamoto start height. This is because our Stacks
+    /// block update logic stops at the nakamoto start height.
+    pub fn from_anchor<T>(anchor: T) -> Self
+    where
+        T: Into<BitcoinBlockRef>,
+    {
+        let header = NakamotoBlockHeader::empty().into();
+
+        let anchor = anchor.into();
+        let mut sortition_info = DUMMY_SORTITION_INFO.clone();
+        sortition_info.burn_block_hash = anchor.block_hash.into();
+
+        Self::try_new(vec![header], sortition_info).unwrap()
+    }
+}
+
+impl From<&bitcoincore_rpc_json::GetChainTipsResultTip> for BitcoinBlockRef {
+    fn from(value: &bitcoincore_rpc_json::GetChainTipsResultTip) -> Self {
+        Self {
+            block_hash: value.hash.into(),
+            block_height: value.height.into(),
+        }
     }
 }

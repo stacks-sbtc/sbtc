@@ -117,18 +117,18 @@ jobs:
     steps:
       - name: Checkout Repository
         id: checkout_repository
-        uses: stacks-sbtc/actions/checkout@a1754bb138bf66f595c6c42068fbc2e09a447e73
+        uses: stacks-sbtc/actions/checkout@505c42b153ba2ac261c276e96bc5dc7b68d61039
 
       - name: Configure AWS Credentials via OIDC
         id: configure_aws
-        uses: stacks-sbtc/actions/aws/configure-aws-credentials@a1754bb138bf66f595c6c42068fbc2e09a447e73
+        uses: stacks-sbtc/actions/aws/configure-aws-credentials@505c42b153ba2ac261c276e96bc5dc7b68d61039
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Rust
         id: setup_rust
-        uses: stacks-sbtc/actions/setup-rust-toolchain@a1754bb138bf66f595c6c42068fbc2e09a447e73
+        uses: stacks-sbtc/actions/setup-rust-toolchain@505c42b153ba2ac261c276e96bc5dc7b68d61039
 
       - name: Install Cargo Lambda
         id: install_cargo_lambda
@@ -137,7 +137,7 @@ jobs:
 
       - name: Setup Node
         id: setup_node
-        uses: stacks-sbtc/actions/setup-node@a1754bb138bf66f595c6c42068fbc2e09a447e73
+        uses: stacks-sbtc/actions/setup-node@505c42b153ba2ac261c276e96bc5dc7b68d61039
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -207,18 +207,18 @@ jobs:
     steps:
       - name: Checkout Repository
         id: checkout_repository
-        uses: stacks-sbtc/actions/checkout@a1754bb138bf66f595c6c42068fbc2e09a447e73
+        uses: stacks-sbtc/actions/checkout@505c42b153ba2ac261c276e96bc5dc7b68d61039
 
       - name: Configure AWS Credentials via OIDC
         id: configure_aws
-        uses: stacks-sbtc/actions/aws/configure-aws-credentials@a1754bb138bf66f595c6c42068fbc2e09a447e73
+        uses: stacks-sbtc/actions/aws/configure-aws-credentials@505c42b153ba2ac261c276e96bc5dc7b68d61039
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Rust
         id: setup_rust
-        uses: stacks-sbtc/actions/setup-rust-toolchain@a1754bb138bf66f595c6c42068fbc2e09a447e73
+        uses: stacks-sbtc/actions/setup-rust-toolchain@505c42b153ba2ac261c276e96bc5dc7b68d61039
 
       - name: Install Cargo Lambda
         id: install_cargo_lambda
@@ -227,7 +227,7 @@ jobs:
 
       - name: Setup Node
         id: setup_node
-        uses: stacks-sbtc/actions/setup-node@a1754bb138bf66f595c6c42068fbc2e09a447e73
+        uses: stacks-sbtc/actions/setup-node@505c42b153ba2ac261c276e96bc5dc7b68d61039
         with:
           node-version: ${{ env.NODE_VERSION }}
 

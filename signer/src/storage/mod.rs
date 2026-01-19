@@ -199,7 +199,8 @@ pub trait DbRead {
     /// they will sweep out the withdrawal funds and sweep transaction.
     fn get_pending_withdrawal_requests(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+        stacks_chain_tip: &model::StacksBlockHash,
         context_window: u16,
         signer_public_key: &PublicKey,
     ) -> impl Future<Output = Result<Vec<model::WithdrawalRequest>, Error>> + Send;
@@ -242,7 +243,8 @@ pub trait DbRead {
     /// rejected yet
     fn get_pending_rejected_withdrawal_requests(
         &self,
-        chain_tip: &model::BitcoinBlockRef,
+        bitcoin_chain_tip: &model::BitcoinBlockRef,
+        stacks_chain_tip: &model::StacksBlockHash,
         context_window: u16,
     ) -> impl Future<Output = Result<Vec<model::WithdrawalRequest>, Error>> + Send;
 
@@ -330,7 +332,7 @@ pub trait DbRead {
     /// Checks if a key rotation exists on the canonical chain
     fn key_rotation_exists(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
+        stacks_chain_tip: &model::StacksBlockHash,
         signer_set: &BTreeSet<PublicKey>,
         aggregate_key: &PublicKey,
         signatures_required: u16,
@@ -434,7 +436,8 @@ pub trait DbRead {
     /// before they are considered fulfilled.
     fn get_swept_deposit_requests(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+        stacks_chain_tip: &model::StacksBlockHash,
         context_window: u16,
     ) -> impl Future<Output = Result<Vec<model::SweptDepositRequest>, Error>> + Send;
 
@@ -446,7 +449,8 @@ pub trait DbRead {
     /// call before they are considered fulfilled.
     fn get_swept_withdrawal_requests(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+        stacks_chain_tip: &model::StacksBlockHash,
         context_window: u16,
     ) -> impl Future<Output = Result<Vec<model::SweptWithdrawalRequest>, Error>> + Send;
 

@@ -519,6 +519,19 @@ impl<C: Context, B> BlockObserver<C, B> {
         Ok(chain_tip)
     }
 
+    /// Set the `SignerState` object with current stacks chain tip.
+    async fn set_stacks_chain_tip(&self, chain_tip: BlockHash) -> Result<(), Error> {
+        let db = self.context.get_storage();
+        let chain_tip = db
+            .get_stacks_chain_tip(&chain_tip.into())
+            .await?
+            .map(model::StacksBlockRef::from)
+            .ok_or_else(|| Error::NoStacksChainTip)?;
+
+        self.context.state().set_stacks_chain_tip(chain_tip);
+        Ok(())
+    }
+
     /// Update the `SignerState` object with data that is unlikely to
     /// change until the arrival of the next bitcoin block.
     ///
@@ -528,6 +541,7 @@ impl<C: Context, B> BlockObserver<C, B> {
     /// * sBTC limits from Emily.
     /// * The current signer set.
     /// * The current aggregate key.
+    /// * The current stacks chain tip.
     /// * The current bitcoin chain tip.
     async fn update_signer_state(&self, chain_tip: BlockHash) -> Result<BitcoinBlockRef, Error> {
         tracing::info!("loading sbtc limits from Emily");
@@ -535,6 +549,9 @@ impl<C: Context, B> BlockObserver<C, B> {
 
         tracing::info!("updating the signer state with the current signer set");
         self.set_signer_set_info().await?;
+
+        tracing::info!("updating the signer state with the current stacks chain tip");
+        self.set_stacks_chain_tip(chain_tip).await?;
 
         tracing::info!("updating the signer state with the current bitcoin chain tip");
         self.set_bitcoin_chain_tip(chain_tip).await
@@ -759,8 +776,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::AtomicU16;
-
     use bitcoin::Amount;
     use bitcoin::BlockHash;
     use bitcoin::TxOut;
@@ -769,13 +784,13 @@ mod tests {
     use fake::Fake as _;
     use model::BitcoinTxId;
     use model::ScriptPubKey;
-    use test_log::test;
 
     use crate::bitcoin::rpc::GetTxResponse;
     use crate::context::SignerSignal;
     use crate::keys::PublicKey;
     use crate::keys::SignerScriptPubKey as _;
     use crate::storage;
+    use crate::storage::model::BitcoinBlockHash;
     use crate::storage::model::DkgSharesStatus;
     use crate::testing::block_observer::TestHarness;
     use crate::testing::context::*;
@@ -783,7 +798,7 @@ mod tests {
 
     use super::*;
 
-    #[test(tokio::test)]
+    #[test_log::test(tokio::test)]
     async fn should_be_able_to_extract_bitcoin_blocks_given_a_block_header_stream() {
         let mut rng = get_rng();
         let storage = storage::memory::Store::new_shared();
@@ -806,13 +821,31 @@ mod tests {
             bitcoin_block_source: test_harness.clone(),
         };
 
+        // Let's get the bitcoin chain tip so that we know when to stop
+        // waiting for the block observers signal.
+        let chain_tip: BitcoinBlockHash = test_harness
+            .bitcoin_blocks()
+            .iter()
+            .max_by_key(|block| block.height)
+            .unwrap()
+            .block_hash
+            .into();
+
         let handle = tokio::spawn(block_observer.run());
-        let counter = AtomicU16::new(test_harness.bitcoin_blocks().len() as u16);
+        // Because of how the test is setup, the first few observed bitcoin
+        // blocks end with the block observer failing to signal because we
+        // cannot get the stacks chain tip. This isn't a bug because the
+        // response from get_tenure_headers is always anchored to the chain
+        // tip, while the block stream send blocks in ascending order
+        // making the stacks blocks appear to not be part of the canonical
+        // chain, when in reality they are all just anchored to a block
+        // that is ahead of the bitcoin block being processed.
         ctx.wait_for_signal(Duration::from_secs(3), |signal| {
             matches!(
                 signal,
-                SignerSignal::Event(SignerEvent::BitcoinBlockObserved(_))
-            ) && counter.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) == 1
+                SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
+                    if block_ref.block_hash == chain_tip
+            )
         })
         .await
         .expect("block observer failed to complete within timeout");
