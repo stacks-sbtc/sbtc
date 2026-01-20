@@ -73,6 +73,13 @@ impl<T> CollectionExt for Vec<T> {
 /// plus two retries).
 const DEFAULT_MINIMUM_RETRY_COUNT: usize = 2;
 
+/// Trait describing an error produced by inner clients in the fallback client.
+pub trait InnerFallbackError: std::error::Error + Send + Sync {}
+
+// TODO: remove this once trait aliaces became non-nightly
+// https://github.com/rust-lang/rust/issues/41517
+impl<T> InnerFallbackError for T where T: std::error::Error + Send + Sync {}
+
 /// Error variants for the fallback client.
 #[derive(Debug, Error)]
 pub enum FallbackClientError {
@@ -80,7 +87,7 @@ pub enum FallbackClientError {
     #[error(
         "all fallback clients failed to execute the request within the allotted number of retries"
     )]
-    AllClientsFailed,
+    AllClientsFailed(Vec<Box<dyn InnerFallbackError>>),
 
     /// No endpoints were provided
     #[error("no endpoints were provided")]
@@ -208,11 +215,13 @@ impl<T> InnerApiFallbackClient<T> {
         f: impl Fn(&'a T, RetryContext) -> F,
     ) -> Result<R, Error>
     where
-        E: std::error::Error + std::fmt::Debug,
+        E: std::error::Error + std::fmt::Debug + Send + Sync + 'static,
+        E: InnerFallbackError,
         E: Into<Error>,
         F: Future<Output = Result<R, E>> + 'a,
     {
         let retry_count = self.retry_count.load(Ordering::Relaxed);
+        let mut errors: Vec<Box<dyn InnerFallbackError>> = Vec::new();
         for i in 0..=retry_count {
             let retry_ctx = RetryContext::new(retry_count, i);
             let client_index = self.last_client_index.load(Ordering::Relaxed);
@@ -221,8 +230,10 @@ impl<T> InnerApiFallbackClient<T> {
             if let Err(error) = result {
                 tracing::warn!(%error, retry_num=i, max_retries=retry_count, "failover client call failed");
 
+                errors.push(Box::new(error) as Box<dyn InnerFallbackError>);
+
                 if retry_ctx.is_aborted() {
-                    return Err(error.into());
+                    break;
                 }
 
                 self.last_client_index.store(
@@ -235,8 +246,9 @@ impl<T> InnerApiFallbackClient<T> {
 
             return result.map_err(Into::into);
         }
+        let error = FallbackClientError::AllClientsFailed(errors);
 
-        Err(FallbackClientError::AllClientsFailed.into())
+        Err(Error::FallbackClient(error))
     }
 }
 
@@ -441,7 +453,7 @@ mod tests {
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
-            Error::FallbackClient(FallbackClientError::AllClientsFailed)
+            Error::FallbackClient(FallbackClientError::AllClientsFailed(_))
         ));
     }
 
