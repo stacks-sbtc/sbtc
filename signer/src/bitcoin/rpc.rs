@@ -332,12 +332,22 @@ pub struct BitcoinCoreClient {
     inner: Arc<bitcoincore_rpc::Client>,
 }
 
+/// A helper struct containing data, necessary to create a new BitcoinCoreClient.
+pub struct BitcoinCoreClientParams {
+    /// Url to bitcoin node.
+    pub url: Url,
+    /// Timeout for requests to bitcoin node.
+    pub timeout: Duration,
+}
+
 /// Implement TryFrom for Url to allow for easy conversion from a URL to a
 /// BitcoinCoreClient.
-impl TryFrom<&Url> for BitcoinCoreClient {
+impl TryFrom<&BitcoinCoreClientParams> for BitcoinCoreClient {
     type Error = Error;
 
-    fn try_from(url: &Url) -> Result<Self, Self::Error> {
+    fn try_from(params: &BitcoinCoreClientParams) -> Result<Self, Self::Error> {
+        let timeout = params.timeout;
+        let url = &params.url;
         let username = url.username().to_string();
         let password = url.password().unwrap_or_default().to_string();
         let host = url
@@ -347,7 +357,7 @@ impl TryFrom<&Url> for BitcoinCoreClient {
 
         let endpoint = format!("{}://{host}:{port}", url.scheme());
 
-        Self::new(&endpoint, username, password)
+        Self::new(&endpoint, username, password, timeout)
     }
 }
 
@@ -357,10 +367,12 @@ impl BitcoinCoreClient {
     /// # Notes
     ///
     /// This function does not attempt to establish a connection to bitcoin-core.
-    pub fn new(url: &str, username: String, password: String) -> Result<Self, Error> {
-        // TODO: make this configurable
-        let timeout = Duration::from_secs(10);
-
+    pub fn new(
+        url: &str,
+        username: String,
+        password: String,
+        timeout: Duration,
+    ) -> Result<Self, Error> {
         let transport = simple_http::Builder::new()
             .url(url)
             .map_err(|error| Error::BitcoinCoreRpcClient(error, url.to_string()))?

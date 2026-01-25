@@ -4037,6 +4037,7 @@ async fn test_get_btc_state_with_available_sweep_transactions_and_rbf() {
         regtest::BITCOIN_CORE_RPC_ENDPOINT,
         regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
         regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
+        Duration::from_secs(10),
     )
     .unwrap();
 

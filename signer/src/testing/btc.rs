@@ -94,6 +94,7 @@ impl BitcoinCoreClient {
             BITCOIN_CORE_RPC_ENDPOINT,
             BITCOIN_CORE_RPC_USERNAME.to_string(),
             BITCOIN_CORE_RPC_PASSWORD.to_string(),
+            Duration::from_secs(10),
         )
         .expect("Failed to create BitcoinCoreClient for regtest")
     }

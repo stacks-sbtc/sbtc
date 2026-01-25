@@ -1,4 +1,6 @@
 mod serial {
+    use std::time::Duration;
+
     use bitcoin::absolute::LockTime;
     use bitcoin::hashes::Hash as _;
     use bitcoin::transaction::Version;
@@ -8,7 +10,7 @@ mod serial {
         self, AsUtxo as _, BITCOIN_CORE_RPC_ENDPOINT, BITCOIN_CORE_RPC_PASSWORD,
         BITCOIN_CORE_RPC_USERNAME, Recipient, p2wpkh_sign_transaction,
     };
-    use signer::bitcoin::rpc::BitcoinCoreClient;
+    use signer::bitcoin::rpc::{BitcoinCoreClient, BitcoinCoreClientParams};
     use signer::bitcoin::{BitcoinInteract as _, TransactionLookupHint};
     use signer::util::ApiFallbackClient;
     use url::Url;
@@ -22,7 +24,12 @@ mod serial {
         .parse()
         .unwrap();
 
-        let client = BitcoinCoreClient::try_from(&url).unwrap();
+        let bitcoin_client_params = BitcoinCoreClientParams {
+            url,
+            timeout: Duration::from_secs(10),
+        };
+
+        let client = BitcoinCoreClient::try_from(&bitcoin_client_params).unwrap();
         let result = client.inner_client().get_block(&BlockHash::all_zeros());
 
         // This will return: JsonRpc(Rpc(RpcError { code: -5, message: "Block not found", data: None }))
@@ -47,8 +54,13 @@ mod serial {
         .parse()
         .unwrap();
 
+        let bitcoin_client_params = BitcoinCoreClientParams {
+            url,
+            timeout: Duration::from_secs(10),
+        };
+
         let client = ApiFallbackClient::<BitcoinCoreClient>::new(vec![
-            BitcoinCoreClient::try_from(&url).unwrap(),
+            BitcoinCoreClient::try_from(&bitcoin_client_params).unwrap(),
         ])
         .unwrap();
 
@@ -73,6 +85,7 @@ mod serial {
             regtest::BITCOIN_CORE_RPC_ENDPOINT,
             regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
             regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
+            Duration::from_secs(10),
         )
         .unwrap();
 
@@ -142,6 +155,7 @@ mod serial {
             regtest::BITCOIN_CORE_RPC_ENDPOINT,
             regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
             regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
+            Duration::from_secs(10),
         )
         .unwrap();
 

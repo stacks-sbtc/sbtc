@@ -17,7 +17,6 @@
 use bitcoin::BlockHash;
 use bitcoin::Txid;
 use bitcoincore_rpc_json::GetTxOutResult;
-use url::Url;
 
 use crate::{error::Error, util::ApiFallbackClient};
 
@@ -26,14 +25,15 @@ use super::TransactionLookupHint;
 use super::rpc::BitcoinBlockHeader;
 use super::rpc::BitcoinBlockInfo;
 use super::rpc::BitcoinCoreClient;
+use super::rpc::BitcoinCoreClientParams;
 use super::rpc::BitcoinTxInfo;
 use super::rpc::GetTxResponse;
 
-/// Implement the [`TryFrom`] trait for a slice of [`Url`]s to allow for a
+/// Implement the [`TryFrom`] trait for a Vec of [`BitcoinCoreClientParams`]s to allow for a
 /// [`ApiFallbackClient`] to be implicitly created from a list of URLs.
-impl TryFrom<&[Url]> for ApiFallbackClient<BitcoinCoreClient> {
+impl TryFrom<Vec<BitcoinCoreClientParams>> for ApiFallbackClient<BitcoinCoreClient> {
     type Error = Error;
-    fn try_from(urls: &[Url]) -> Result<Self, Self::Error> {
+    fn try_from(urls: Vec<BitcoinCoreClientParams>) -> Result<Self, Self::Error> {
         let clients = urls
             .iter()
             .map(BitcoinCoreClient::try_from)
