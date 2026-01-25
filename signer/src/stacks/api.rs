@@ -2130,11 +2130,13 @@ mod tests {
             .collect()
     }
 
-    #[test_case(|url| StacksClient::new(url).unwrap(); "stacks-client")]
-    #[test_case(|url| ApiFallbackClient::new(vec![StacksClient::new(url).unwrap()]).unwrap(); "fallback-client")]
+    #[test_case(|url| StacksClient::new(url).unwrap(), false; "stacks-client")]
+    #[test_case(|url| ApiFallbackClient::new(vec![StacksClient::new(url).unwrap()]).unwrap(), true; "fallback-client")]
     #[tokio::test]
-    async fn get_current_signer_set_fails_when_value_not_a_sequence<F, C>(client: F)
-    where
+    async fn get_current_signer_set_fails_when_value_not_a_sequence<F, C>(
+        client: F,
+        is_fallback_client: bool,
+    ) where
         C: StacksInteract,
         F: Fn(Url) -> C,
     {
@@ -2163,7 +2165,21 @@ mod tests {
             .await;
 
         let err = resp.unwrap_err();
-        assert!(matches!(err, Error::InvalidStacksResponse(_)));
+        if is_fallback_client {
+            let Error::FallbackClient(FallbackClientError::AllClientsFailed(inner_vec)) = err
+            else {
+                panic!("wrong error type")
+            };
+            assert_eq!(inner_vec.len(), 1);
+            let err = &inner_vec[0];
+            let Some(err) = (&**err as &dyn std::error::Error).downcast_ref::<Error>() else {
+                panic!("wrong error type")
+            };
+            assert!(matches!(err, Error::InvalidStacksResponse(_)));
+        } else {
+            assert!(matches!(err, Error::InvalidStacksResponse(_)));
+        };
+
         mock.assert();
     }
 

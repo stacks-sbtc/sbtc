@@ -480,10 +480,29 @@ mod tests {
 
         assert_eq!(call_count.load(Ordering::Relaxed), 2);
 
-        assert!(result.is_err());
+        let error = result.unwrap_err();
 
         // Assert that the error is the error that the mock client returns
         // (which was just randomly chosen, it has no significance)
-        assert!(matches!(result.unwrap_err(), Error::Dummy));
+        let Error::FallbackClient(FallbackClientError::AllClientsFailed(inner_vector)) = error
+        else {
+            panic!("wrong error type")
+        };
+        assert_eq!(inner_vector.len(), 2);
+        let first_error = &inner_vector[0];
+        let second_error = &inner_vector[1];
+
+        let Some(first_error) = (&**first_error as &dyn std::error::Error).downcast_ref::<Error>()
+        else {
+            panic!("wrong error type")
+        };
+        let Some(second_error) =
+            (&**second_error as &dyn std::error::Error).downcast_ref::<Error>()
+        else {
+            panic!("wrong error type")
+        };
+
+        assert!(matches!(first_error, Error::Dummy));
+        assert!(matches!(second_error, Error::Dummy));
     }
 }
