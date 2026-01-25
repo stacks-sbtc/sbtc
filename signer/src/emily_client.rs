@@ -23,6 +23,7 @@ use emily_client::models::UpdateWithdrawalsRequestBody;
 use emily_client::models::UpdateWithdrawalsResponse;
 use emily_client::models::WithdrawalUpdate;
 use emily_client::models::{DepositStatus, WithdrawalStatus};
+use reqwest_012;
 use sbtc::deposits::CreateDepositRequest;
 use url::Url;
 
@@ -140,6 +141,7 @@ impl EmilyClient {
     pub fn try_new(
         url: &Url,
         pagination_timeout: Duration,
+        timeout: Duration,
         page_size: Option<u16>,
     ) -> Result<Self, Error> {
         let mut url = url.clone();
@@ -172,6 +174,13 @@ impl EmilyClient {
         // causing the api calls to have two leading slashes in the path (getting a 404)
         config.base_path = url.to_string().trim_end_matches("/").to_string();
         config.api_key = api_key;
+
+        let c = reqwest_012::Client::builder()
+            .timeout(timeout)
+            .build()
+            .map_err(Error::ReqwestClientCreation)?;
+
+        config.client = c;
 
         Ok(Self {
             config,
@@ -498,7 +507,7 @@ impl TryFrom<&EmilyClientConfig> for ApiFallbackClient<EmilyClient> {
         let clients = config
             .endpoints
             .iter()
-            .map(|url| EmilyClient::try_new(url, config.pagination_timeout, None))
+            .map(|url| EmilyClient::try_new(url, config.pagination_timeout, config.timeout, None))
             .collect::<Result<Vec<_>, _>>()?;
 
         Self::new(clients).map_err(Into::into)
@@ -514,7 +523,9 @@ mod tests {
         // Arrange.
         let url = Url::parse("http://test_key@localhost:8080").unwrap();
         // Act.
-        let client = EmilyClient::try_new(&url, Duration::from_secs(1), None).unwrap();
+        let client =
+            EmilyClient::try_new(&url, Duration::from_secs(1), Duration::from_secs(1), None)
+                .unwrap();
         // Assert.
         assert_eq!(client.config.base_path, "http://localhost:8080");
         assert_eq!(client.config.api_key.unwrap().key, "test_key");
@@ -525,7 +536,9 @@ mod tests {
         // Arrange.
         let url = Url::parse("http://localhost:8080").unwrap();
         // Act.
-        let client = EmilyClient::try_new(&url, Duration::from_secs(1), None).unwrap();
+        let client =
+            EmilyClient::try_new(&url, Duration::from_secs(1), Duration::from_secs(1), None)
+                .unwrap();
         // Assert.
         assert_eq!(client.config.base_path, "http://localhost:8080");
         assert!(client.config.api_key.is_none());

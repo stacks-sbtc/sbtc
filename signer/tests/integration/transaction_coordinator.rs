@@ -677,6 +677,7 @@ async fn deploy_smart_contracts_coordinator() {
     let emily_client = EmilyClient::try_new(
         &Url::parse("http://testApiKey@localhost:3031").unwrap(),
         Duration::from_secs(1),
+        Duration::from_secs(1),
         None,
     )
     .unwrap();
@@ -1570,6 +1571,7 @@ async fn pseudo_random_dkg() {
     let emily_client = EmilyClient::try_new(
         &Url::parse("http://testApiKey@localhost:3031").unwrap(),
         Duration::from_secs(1),
+        Duration::from_secs(1),
         None,
     )
     .unwrap();
@@ -1998,6 +2000,7 @@ async fn sign_bitcoin_transaction() {
     let emily_client = EmilyClient::try_new(
         &Url::parse("http://testApiKey@localhost:3031").unwrap(),
         Duration::from_secs(1),
+        Duration::from_secs(1),
         None,
     )
     .unwrap();
@@ -2323,6 +2326,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     // We need to populate our databases, so let's fetch the data.
     let emily_client = EmilyClient::try_new(
         &Url::parse("http://testApiKey@localhost:3031").unwrap(),
+        Duration::from_secs(1),
         Duration::from_secs(1),
         None,
     )
@@ -2846,6 +2850,7 @@ async fn wsts_ids_set_during_dkg_and_signing_rounds() {
     let emily_client = EmilyClient::try_new(
         &Url::parse("http://testApiKey@localhost:3031").unwrap(),
         Duration::from_secs(1),
+        Duration::from_secs(1),
         None,
     )
     .unwrap();
@@ -3198,6 +3203,7 @@ async fn skip_signer_activites_after_key_rotation() {
     // We need to populate our databases, so let's fetch the data.
     let emily_client = EmilyClient::try_new(
         &Url::parse("http://testApiKey@localhost:3031").unwrap(),
+        Duration::from_secs(1),
         Duration::from_secs(1),
         None,
     )
@@ -3677,6 +3683,7 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
     // We need to populate our databases, so let's fetch the data.
     let emily_client: EmilyClient = EmilyClient::try_new(
         &Url::parse("http://testApiKey@localhost:3031").unwrap(),
+        Duration::from_secs(1),
         Duration::from_secs(1),
         None,
     )
@@ -4712,6 +4719,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
     // We need to populate our databases, so let's fetch the data.
     let emily_client = EmilyClient::try_new(
         &Url::parse("http://testApiKey@localhost:3031").unwrap(),
+        Duration::from_secs(1),
         Duration::from_secs(1),
         None,
     )
@@ -6245,6 +6253,7 @@ async fn reuse_nonce_attack() {
     let (rpc, faucet) = regtest::initialize_blockchain_devenv();
     let emily_client = EmilyClient::try_new(
         &Url::parse("http://testApiKey@127.0.0.1:3031").unwrap(),
+        Duration::from_secs(1),
         Duration::from_secs(1),
         None,
     )

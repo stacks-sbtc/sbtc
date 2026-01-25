@@ -710,6 +710,10 @@ pub enum Error {
     #[error("could not parse hex txid: {0}")]
     DecodeHexTxid(#[source] bitcoin::hex::HexToArrayError),
 
+    /// Could not create reqwest client
+    #[error("could not create reqwest client {0}")]
+    ReqwestClientCreation(#[source] reqwest_012::Error),
+
     /// This happens during the validation of a stacks transaction when the
     /// current signer is not a member of the signer set indicated by the
     /// aggregate key.

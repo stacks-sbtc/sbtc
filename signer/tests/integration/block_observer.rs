@@ -378,6 +378,7 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     let emily_client = EmilyClient::try_new(
         &Url::parse("http://testApiKey@localhost:3031").unwrap(),
         Duration::from_secs(1),
+        Duration::from_secs(1),
         None,
     )
     .unwrap();
@@ -1602,6 +1603,7 @@ async fn block_observer_ignores_coinbase() {
 
     let emily_client = EmilyClient::try_new(
         &Url::parse("http://testApiKey@localhost:3031").unwrap(),
+        Duration::from_secs(1),
         Duration::from_secs(1),
         None,
     )

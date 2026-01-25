@@ -320,6 +320,7 @@ async fn persist_received_deposit_decision_fetches_missing_deposit_requests() {
     let emily_client = EmilyClient::try_new(
         &Url::parse("http://testApiKey@localhost:3031").unwrap(),
         Duration::from_secs(1),
+        Duration::from_secs(1),
         None,
     )
     .unwrap();
