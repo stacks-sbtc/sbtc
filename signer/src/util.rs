@@ -73,13 +73,6 @@ impl<T> CollectionExt for Vec<T> {
 /// plus two retries).
 const DEFAULT_MINIMUM_RETRY_COUNT: usize = 2;
 
-/// Trait describing an error produced by inner clients in the fallback client.
-pub trait InnerFallbackError: std::error::Error + Send + Sync {}
-
-// TODO: remove this once trait aliaces became non-nightly
-// https://github.com/rust-lang/rust/issues/41517
-impl<T> InnerFallbackError for T where T: std::error::Error + Send + Sync {}
-
 /// Error variants for the fallback client.
 #[derive(Debug, Error)]
 pub enum FallbackClientError {
@@ -87,7 +80,7 @@ pub enum FallbackClientError {
     #[error(
         "all fallback clients failed to execute the request within the allotted number of retries"
     )]
-    AllClientsFailed(Vec<Box<dyn InnerFallbackError>>),
+    AllClientsFailed(Vec<Error>),
 
     /// No endpoints were provided
     #[error("no endpoints were provided")]
@@ -210,18 +203,12 @@ impl<T> InnerApiFallbackClient<T> {
     /// if the closure returns an error.
     ///
     /// For more information on the number of attempts made, see [`Self::set_retry_count`].
-    pub async fn exec<'a, R, E, F>(
-        &'a self,
-        f: impl Fn(&'a T, RetryContext) -> F,
-    ) -> Result<R, Error>
+    pub async fn exec<'a, R, F>(&'a self, f: impl Fn(&'a T, RetryContext) -> F) -> Result<R, Error>
     where
-        E: std::error::Error + std::fmt::Debug + Send + Sync + 'static,
-        E: InnerFallbackError,
-        E: Into<Error>,
-        F: Future<Output = Result<R, E>> + 'a,
+        F: Future<Output = Result<R, Error>> + 'a,
     {
         let retry_count = self.retry_count.load(Ordering::Relaxed);
-        let mut errors: Vec<Box<dyn InnerFallbackError>> = Vec::new();
+        let mut errors: Vec<Error> = Vec::new();
         for i in 0..=retry_count {
             let retry_ctx = RetryContext::new(retry_count, i);
             let client_index = self.last_client_index.load(Ordering::Relaxed);
@@ -230,7 +217,7 @@ impl<T> InnerApiFallbackClient<T> {
             if let Err(error) = result {
                 tracing::warn!(%error, retry_num=i, max_retries=retry_count, "failover client call failed");
 
-                errors.push(Box::new(error) as Box<dyn InnerFallbackError>);
+                errors.push(error);
 
                 if retry_ctx.is_aborted() {
                     break;
@@ -244,7 +231,7 @@ impl<T> InnerApiFallbackClient<T> {
                 continue;
             }
 
-            return result.map_err(Into::into);
+            return result;
         }
         let error = FallbackClientError::AllClientsFailed(errors);
 
@@ -491,16 +478,6 @@ mod tests {
         assert_eq!(inner_vector.len(), 2);
         let first_error = &inner_vector[0];
         let second_error = &inner_vector[1];
-
-        let Some(first_error) = (&**first_error as &dyn std::error::Error).downcast_ref::<Error>()
-        else {
-            panic!("wrong error type")
-        };
-        let Some(second_error) =
-            (&**second_error as &dyn std::error::Error).downcast_ref::<Error>()
-        else {
-            panic!("wrong error type")
-        };
 
         assert!(matches!(first_error, Error::Dummy));
         assert!(matches!(second_error, Error::Dummy));

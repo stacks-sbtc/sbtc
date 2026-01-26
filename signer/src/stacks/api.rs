@@ -1907,11 +1907,7 @@ fn are_all_inners_not_404(error: &Error) -> bool {
         return false;
     };
 
-    inners.iter().all(|inner| {
-        let Some(err) = (&**inner as &dyn std::error::Error).downcast_ref::<Error>() else {
-            return false;
-        };
-
+    inners.iter().all(|err| {
         let Error::StacksNodeResponse(resp) = err else {
             return false;
         };
@@ -2172,9 +2168,6 @@ mod tests {
             };
             assert_eq!(inner_vec.len(), 1);
             let err = &inner_vec[0];
-            let Some(err) = (&**err as &dyn std::error::Error).downcast_ref::<Error>() else {
-                panic!("wrong error type")
-            };
             assert!(matches!(err, Error::InvalidStacksResponse(_)));
         } else {
             assert!(matches!(err, Error::InvalidStacksResponse(_)));
