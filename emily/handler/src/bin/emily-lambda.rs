@@ -10,11 +10,9 @@ use warp::Filter as _;
 #[tokio::main]
 async fn main() {
     // Setup logging.
-    // TODO(TBD): Make the logging configurable.
     logging::setup_logging("info,emily_handler=debug", false);
 
     // Setup context.
-    // TODO(389 + 358): Handle config pickup in a way that will only fail for the relevant call.
     let context: EmilyContext = EmilyContext::from_env()
         .await
         .unwrap_or_else(|e| panic!("{e}"));
@@ -41,7 +39,6 @@ async fn main() {
         .with(cors);
 
     // Create warp service.
-    // TODO(276): Remove warp_lambda in Emily API and use different library.
     let warp_service = warp::service(service_filter);
     warp_lambda::run(warp_service)
         .await
