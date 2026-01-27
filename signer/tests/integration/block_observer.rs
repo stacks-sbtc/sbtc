@@ -1899,6 +1899,7 @@ async fn block_observer_marks_bitcoin_blocks_as_canonical() {
         .build();
 
     // Set up the stacks client
+    let anchor = get_canonical_chain_tip(rpc);
     ctx.with_stacks_client(|client| {
         client
             .expect_get_tenure_info()
@@ -1910,9 +1911,12 @@ async fn block_observer_marks_bitcoin_blocks_as_canonical() {
             });
             Box::pin(std::future::ready(response))
         });
+
+        let tenure_headers = TenureBlockHeaders::from_anchor(&anchor);
+
         client
             .expect_get_tenure_headers()
-            .returning(|_| Box::pin(std::future::ready(TenureBlockHeaders::nearly_empty())));
+            .returning(move |_| Box::pin(std::future::ready(Ok(tenure_headers.clone()))));
         client.expect_get_epoch_status().returning(|| {
             Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
                 nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
