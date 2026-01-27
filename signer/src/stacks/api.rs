@@ -56,7 +56,6 @@ use crate::storage::model::StacksBlockHeight;
 use crate::storage::model::StacksTxId;
 use crate::storage::model::ToLittleEndianOrder as _;
 use crate::util::ApiFallbackClient;
-use crate::util::FallbackClientError;
 
 use super::contracts::AsTxPayload;
 use super::contracts::SmartContract;
