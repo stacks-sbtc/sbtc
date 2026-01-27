@@ -19,6 +19,7 @@ use crate::storage::model::SigHash;
 use crate::storage::model::StacksBlockHash;
 use crate::storage::model::StacksTxId;
 use crate::transaction_signer::StacksSignRequestId;
+use crate::util::FallbackClientError;
 use crate::wsts_state_machine::StateMachineId;
 
 /// Top-level signer error
@@ -798,4 +799,35 @@ impl Error {
     pub fn wsts_coordinator(err: wsts::state_machine::coordinator::Error) -> Self {
         Error::WstsCoordinator(Box::new(err))
     }
+
+    /// Checks if given error represents a 404 response from Stacks node
+    /// (directly or via FallbackClient).
+    /// In case of fallback client, this function treats an error as 404 only
+    /// if all Stacks nodes in fallback client returned 404.
+    pub fn is_stacks_node_response_404(&self) -> bool {
+        is_stacks_node_response_fallback_client_error_404(self)
+            || is_stacks_node_response_simple_client_error_404(self)
+    }
+}
+
+/// Checks if given error is a 404 error response from Stacks node
+/// with fallback client (all nodes returned 404)
+fn is_stacks_node_response_fallback_client_error_404(error: &Error) -> bool {
+    if let Error::FallbackClient(FallbackClientError::AllClientsFailed(inners)) = error {
+        return inners
+            .iter()
+            .all(is_stacks_node_response_simple_client_error_404);
+    }
+    false
+}
+
+/// Checks if given error is a 404 error response from Stacks node
+fn is_stacks_node_response_simple_client_error_404(error: &Error) -> bool {
+    if let Error::StacksNodeResponse(resp) = error
+        && let Some(status) = resp.status()
+        && status == reqwest::StatusCode::NOT_FOUND
+    {
+        return true;
+    }
+    false
 }
