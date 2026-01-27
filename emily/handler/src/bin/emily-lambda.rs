@@ -39,6 +39,8 @@ async fn main() {
         .with(warp::log("api"))
         .with(cors);
 
+    // REMOVE ME
+
     // Create warp service.
     let warp_service = warp::service(service_filter);
     warp_lambda::run(warp_service)
