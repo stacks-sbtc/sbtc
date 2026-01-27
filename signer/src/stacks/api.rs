@@ -1144,7 +1144,6 @@ impl StacksClient {
         let headers = self
             .client
             .get(url)
-            .timeout(REQUEST_TIMEOUT)
             .send()
             .await
             .map_err(Error::StacksNodeRequest)?
@@ -1901,6 +1900,7 @@ mod tests {
     use crate::keys::{PrivateKey, PublicKey};
     use crate::stacks::wallet::get_full_tx_size;
     use crate::storage::memory::Store;
+    use crate::util::FallbackClientError;
 
     use assert_matches::assert_matches;
     use clarity::types::Address as _;
@@ -2963,21 +2963,45 @@ mod tests {
     }
 
     #[ignore = "This is an integration test that hasn't been setup for CI yet"]
-    #[tokio::test]
-    async fn fallback_client_error_handling_real_api() {
-        let url = Url::parse("https://api.mainnet.hiro.so/").unwrap();
-        let client = StacksClient::new(url).unwrap();
-        let client = ApiFallbackClient::new(vec![client]).unwrap();
+    #[test_case(StacksClient::new(Url::parse("https://api.mainnet.hiro.so/").unwrap()).unwrap(), false; "direct_404")]
+    #[test_case(ApiFallbackClient::new(vec![StacksClient::new(Url::parse("https://api.mainnet.hiro.so/").unwrap()).unwrap()]).unwrap(), false; "fallback_404")]
+    #[test_case(
+        StacksClient
+        {
+            endpoint: Url::parse("https://api.mainnet.hiro.so/").unwrap(),
+            client: reqwest::Client::builder()
+            .timeout(Duration::from_nanos(1))
+            .build()
+            .unwrap(),
 
-        // For 932937u64 all errors _should_ be 404
+        }, true; "direct_timeout")]
+    #[test_case(
+            ApiFallbackClient::new(vec![
+            StacksClient
+            {
+                endpoint: Url::parse("https://api.mainnet.hiro.so/").unwrap(),
+                client: reqwest::Client::builder()
+                .timeout(Duration::from_nanos(1))
+                .build()
+                .unwrap(),
+            }]).unwrap(), true; "fallback_timeout")]
+    #[tokio::test]
+    async fn fallback_client_error_handling_real_api(
+        client: impl StacksInteract,
+        is_timeout: bool,
+    ) {
+        // For 932937u64 all errors should be 404 (if it is not timeout)
         let height = 932937u64;
         let headers = client.get_tenure_headers(height.into()).await;
         println!("{:#?}", headers);
-        assert!(!are_all_inners_not_404(&headers.unwrap_err()));
+        let error = headers.unwrap_err();
+        assert_eq!(error.is_stacks_node_response_404(), !is_timeout);
 
-        // For 933078u64 there should not be an error at all
-        let height = 933078u64;
-        let headers = client.get_tenure_headers(height.into()).await;
-        let _ = headers.unwrap();
+        if !is_timeout {
+            // For 933078u64 there should not be an error at all
+            let height = 933078u64;
+            let headers = client.get_tenure_headers(height.into()).await;
+            let _ = headers.unwrap();
+        }
     }
 }
