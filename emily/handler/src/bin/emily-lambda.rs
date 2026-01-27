@@ -29,7 +29,8 @@ async fn main() {
     let service_filter = api::routes::routes_with_stage_prefix(context)
         .recover(api::handlers::handle_rejection)
         .with(warp::trace(|info| {
-            let request_id = info.request_headers()
+            let request_id = info
+                .request_headers()
                 .get("x-amz-request-id")
                 .and_then(|val| val.to_str().ok())
                 .unwrap_or("unknown");
