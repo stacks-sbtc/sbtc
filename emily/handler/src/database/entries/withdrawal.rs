@@ -695,7 +695,9 @@ impl WithdrawalUpdatePackage {
             .latest_event()?
             .ensure_following_event_is_valid(&update.event)?;
 
-        // keep old data for expected_fulfillment details if None was provided.
+        // Keeping the old data for expected_fulfillment txid if None was provided.
+        // For the expected_height we intentionally ignore updates for now, relying on
+        // the value computed by Emily.
         let latest_event_expected_fulfillment = &entry.latest_event()?.expected_fulfillment_info;
         let update_expected_fulfillment = &update.event.expected_fulfillment_info;
         let expected_height = latest_event_expected_fulfillment.expected_height;
