@@ -76,10 +76,10 @@ async fn test_stacks() {
             .submit_tx(&tx)
             .await
             .expect("failed to send stacks transaction");
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        tokio::time::sleep(Duration::from_secs(3)).await;
 
         faucet.generate_block();
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        tokio::time::sleep(Duration::from_secs(3)).await;
 
         let stacks_status = stacks_client
             .get_node_info()
