@@ -18,7 +18,6 @@ use signer::testing::storage::model::TestBitcoinTxInfo;
 use signer::util::Sleep;
 use test_case::test_case;
 use test_log::test;
-use url::Url;
 
 use blockstack_lib::net::api::getsortition::SortitionInfo;
 use clarity::types::chainstate::BurnchainHeaderHash;
@@ -50,6 +49,7 @@ use signer::testing;
 use signer::testing::context::BuildContext as _;
 use signer::testing::context::ConfigureBitcoinClient as _;
 use signer::testing::context::ConfigureEmilyClient as _;
+use signer::testing::context::ConfigureSettings as _;
 use signer::testing::context::ConfigureStacksClient as _;
 use signer::testing::context::ConfigureStorage as _;
 use signer::testing::context::TestContext;
@@ -61,9 +61,9 @@ use signer::testing::storage::model::TestData;
 use signer::testing::transaction_coordinator::select_coordinator;
 use signer::testing::wsts::SignerSet;
 use signer::transaction_coordinator;
-use testing_emily_client::apis::testing_api::wipe_databases;
 
-use crate::setup::IntoEmilyTestingConfig as _;
+use crate::setup::clean_emily_setup;
+use crate::setup::new_emily_setup;
 use crate::utxo_construction::make_deposit_request;
 
 async fn run_dkg<Rng, C>(
@@ -132,7 +132,7 @@ where
 #[test(tokio::test)]
 async fn deposit_flow() {
     let num_signers = 7;
-    let signing_threshold = 5;
+    let signing_threshold: u32 = 5;
     let context_window = 10;
 
     let db = testing::storage::new_test_database().await;
@@ -140,24 +140,18 @@ async fn deposit_flow() {
     let network = network::in_memory::InMemoryNetwork::new();
     let signer_info = testing::wsts::generate_signer_info(&mut rng, num_signers);
 
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(1),
-        None,
-    )
-    .unwrap();
-    let stacks_client = WrappedMock::default();
+    let (emily_client, emily_tables) = new_emily_setup().await;
 
-    // Wipe the Emily database to start fresh
-    wipe_databases(&emily_client.config().as_testing())
-        .await
-        .expect("Wiping Emily database in test setup failed.");
+    let stacks_client = WrappedMock::default();
 
     let context = TestContext::builder()
         .with_storage(db.clone())
         .with_mocked_bitcoin_client()
         .with_stacks_client(stacks_client.clone())
         .with_emily_client(emily_client.clone())
+        .modify_settings(|settings| {
+            settings.signer.bootstrap_signatures_required = signing_threshold as u16;
+        })
         .build();
 
     let mut testing_signer_set =
@@ -386,7 +380,6 @@ async fn deposit_flow() {
         network: network.connect(),
         private_key,
         context_window,
-        threshold: signing_threshold as u16,
         signing_round_max_duration: Duration::from_secs(10),
         dkg_max_duration: Duration::from_secs(10),
         bitcoin_presign_request_max_duration: Duration::from_secs(10),
@@ -534,6 +527,7 @@ async fn deposit_flow() {
     assert_eq!(fetched_deposit.last_update_height, *stacks_tip.block_height);
 
     testing::storage::drop_db(db).await;
+    clean_emily_setup(emily_tables).await;
 }
 
 #[tokio::test]
@@ -542,16 +536,7 @@ async fn get_deposit_request_works() {
     let amount_sats = 49_900_000;
     let lock_time = 150;
 
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(1),
-        None,
-    )
-    .unwrap();
-
-    wipe_databases(&emily_client.config().as_testing())
-        .await
-        .expect("Wiping Emily database in test setup failed.");
+    let (emily_client, emily_tables) = new_emily_setup().await;
 
     let setup = sbtc::testing::deposits::tx_setup(lock_time, max_fee, &[amount_sats]);
     let deposit = setup.deposits.first().unwrap();
@@ -580,14 +565,16 @@ async fn get_deposit_request_works() {
     // This one doesn't exist
     let request = emily_client.get_deposit(&txid, 50).await.unwrap();
     assert!(request.is_none());
+
+    clean_emily_setup(emily_tables).await;
 }
 
-#[test_case(3, 10, Some(2), 3; "handles paging")]
-#[test_case(3, 0, Some(2), 2; "handles timeout")]
+#[test_case(3, Duration::from_secs(10), Some(2), 3; "handles paging")]
+#[test_case(3, Duration::from_secs(0), Some(2), 2; "handles timeout")]
 #[tokio::test]
 async fn test_get_deposits_with_status_request_paging(
     num_deposits: usize,
-    timeout_secs: u64,
+    timeout: Duration,
     page_size: Option<u16>,
     expected_result: usize,
 ) {
@@ -595,16 +582,8 @@ async fn test_get_deposits_with_status_request_paging(
     let amount_sats = 49_900_000;
     let lock_time = 150;
 
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(timeout_secs),
-        page_size,
-    )
-    .unwrap();
-
-    wipe_databases(&emily_client.config().as_testing())
-        .await
-        .expect("Wiping Emily database in test setup failed.");
+    let (emily_client, emily_tables) = new_emily_setup().await;
+    let emily_client = EmilyClient::new(emily_client.config().clone(), timeout, page_size);
 
     let futures = (0..num_deposits).map(|_| {
         let setup = sbtc::testing::deposits::tx_setup(lock_time, max_fee, &[amount_sats]);
@@ -638,6 +617,8 @@ async fn test_get_deposits_with_status_request_paging(
         .await
         .unwrap();
     assert_eq!(deposits.len(), expected_result);
+
+    clean_emily_setup(emily_tables).await;
 }
 
 #[tokio::test]
@@ -648,16 +629,7 @@ async fn test_get_deposits_returns_pending_and_accepted() {
     let num_deposits = 5;
     let num_accepted = 2;
 
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(10),
-        None,
-    )
-    .unwrap();
-
-    wipe_databases(&emily_client.config().as_testing())
-        .await
-        .expect("Wiping Emily database in test setup failed.");
+    let (emily_client, emily_tables) = new_emily_setup().await;
 
     // Create deposits
     let tx_setups: Vec<sbtc::testing::deposits::TxSetup> = (0..num_deposits)
@@ -723,4 +695,6 @@ async fn test_get_deposits_returns_pending_and_accepted() {
     assert_eq!(deposits.len(), num_deposits);
     assert_eq!(accepted_deposits.len(), num_accepted);
     assert_eq!(pending_deposits.len(), num_deposits - num_accepted);
+
+    clean_emily_setup(emily_tables).await;
 }

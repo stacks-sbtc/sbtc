@@ -21,6 +21,7 @@ use rand::Rng as _;
 use rand::seq::IteratorRandom as _;
 use rand::seq::SliceRandom as _;
 use signer::WITHDRAWAL_BLOCKS_EXPIRY;
+use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::bitcoin::validation::WithdrawalRequestStatus;
 use signer::bitcoin::validation::WithdrawalValidationResult;
 use signer::context::SbtcLimits;
@@ -409,7 +410,12 @@ async fn get_pending_deposit_requests_only_pending() {
         is_deposit: true,
     };
     let signers = TestSignerSet::new(&mut rng);
-    let setup = TestSweepSetup2::new_setup(signers, faucet, &[amounts]);
+    let setup = TestSweepSetup2::new_setup(
+        signers,
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        &[amounts],
+    );
 
     backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
     let chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
@@ -465,15 +471,27 @@ async fn get_pending_withdrawal_requests_only_pending() {
         is_deposit: false,
     };
     let signers = TestSignerSet::new(&mut rng);
-    let setup = TestSweepSetup2::new_setup(signers, faucet, &[amounts]);
+    let setup = TestSweepSetup2::new_setup(
+        signers,
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        &[amounts],
+    );
 
     backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
-    let chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
+    setup.store_stacks_genesis_block(&db).await;
 
+    let chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
+    let stacks_chain_tip = db
+        .get_stacks_chain_tip(&chain_tip)
+        .await
+        .unwrap()
+        .unwrap()
+        .block_hash;
     // There aren't any withdrawal requests in the database.
     let signer_public_key = setup.signers.signer_keys()[0];
     let pending_requests = db
-        .get_pending_withdrawal_requests(&chain_tip, 1000, &signer_public_key)
+        .get_pending_withdrawal_requests(&chain_tip, &stacks_chain_tip, 1000, &signer_public_key)
         .await
         .unwrap();
 
@@ -482,9 +500,16 @@ async fn get_pending_withdrawal_requests_only_pending() {
     // Now let's store a withdrawal request with no votes.
     // `get_pending_withdrawal_requests` should return it now.
     setup.store_withdrawal_requests(&db).await;
+    // The above method adds stacks blocks, so the chain tip has changed.
+    let stacks_chain_tip = db
+        .get_stacks_chain_tip(&chain_tip)
+        .await
+        .unwrap()
+        .unwrap()
+        .block_hash;
 
     let pending_requests = db
-        .get_pending_withdrawal_requests(&chain_tip, 1000, &signer_public_key)
+        .get_pending_withdrawal_requests(&chain_tip, &stacks_chain_tip, 1000, &signer_public_key)
         .await
         .unwrap();
 
@@ -495,7 +520,7 @@ async fn get_pending_withdrawal_requests_only_pending() {
     setup.store_withdrawal_decisions(&db).await;
 
     let pending_requests = db
-        .get_pending_withdrawal_requests(&chain_tip, 1000, &signer_public_key)
+        .get_pending_withdrawal_requests(&chain_tip, &stacks_chain_tip, 1000, &signer_public_key)
         .await
         .unwrap();
 
@@ -536,6 +561,12 @@ async fn should_return_the_same_pending_withdraw_requests_as_in_memory_store() {
         .expect("failed to get canonical chain tip")
         .expect("no chain tip");
 
+    let stacks_chain_tip = in_memory_store
+        .get_stacks_chain_tip(&chain_tip)
+        .await
+        .unwrap()
+        .unwrap()
+        .block_hash;
     assert_eq!(
         pg_store
             .get_bitcoin_canonical_chain_tip()
@@ -560,7 +591,12 @@ async fn should_return_the_same_pending_withdraw_requests_as_in_memory_store() {
 
     for signer_public_key in signer_set.iter() {
         let mut pending_withdraw_requests = in_memory_store
-            .get_pending_withdrawal_requests(&chain_tip, context_window, signer_public_key)
+            .get_pending_withdrawal_requests(
+                &chain_tip,
+                &stacks_chain_tip,
+                context_window,
+                signer_public_key,
+            )
             .await
             .expect("failed to get pending deposit requests");
 
@@ -569,7 +605,12 @@ async fn should_return_the_same_pending_withdraw_requests_as_in_memory_store() {
         assert!(!pending_withdraw_requests.is_empty());
 
         let mut pg_pending_withdraw_requests = pg_store
-            .get_pending_withdrawal_requests(&chain_tip, context_window, signer_public_key)
+            .get_pending_withdrawal_requests(
+                &chain_tip,
+                &stacks_chain_tip,
+                context_window,
+                signer_public_key,
+            )
             .await
             .expect("failed to get pending deposit requests");
 
@@ -658,7 +699,12 @@ async fn should_not_return_swept_deposits_as_pending_accepted() {
     // sweep transactions, and the [`TestSweepSetup`] structure correctly
     // sets up the database.
     let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        1_000_000,
+        &mut rng,
+    );
 
     let chain_tip = model::BitcoinBlockRef {
         block_hash: setup.sweep_block_hash.into(),
@@ -2236,7 +2282,12 @@ async fn get_swept_deposit_requests_returns_swept_deposit_requests() {
     // sweep transactions, and the [`TestSweepSetup`] structure correctly
     // sets up the database.
     let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        1_000_000,
+        &mut rng,
+    );
 
     // We need to manually update the database with new bitcoin block
     // headers.
@@ -2257,10 +2308,11 @@ async fn get_swept_deposit_requests_returns_swept_deposit_requests() {
     setup.store_sweep_tx(&db).await;
 
     let chain_tip = setup.sweep_block_hash.into();
+    let stacks_tip = setup.stacks_genesis_block.block_hash;
     let context_window = 20;
 
     let mut requests = db
-        .get_swept_deposit_requests(&chain_tip, context_window)
+        .get_swept_deposit_requests(&chain_tip, &stacks_tip, context_window)
         .await
         .unwrap();
 
@@ -2371,7 +2423,11 @@ async fn get_swept_withdrawal_requests_returns_swept_withdrawal_requests(
     // There should no withdrawal request in the empty database
     let context_window = 20;
     let requests = db
-        .get_swept_withdrawal_requests(&bitcoin_block.block_hash, context_window)
+        .get_swept_withdrawal_requests(
+            &bitcoin_block.block_hash,
+            &stacks_block.block_hash,
+            context_window,
+        )
         .await
         .unwrap();
     assert!(requests.is_empty());
@@ -2422,7 +2478,11 @@ async fn get_swept_withdrawal_requests_returns_swept_withdrawal_requests(
     // There should only be one request in the database and it has a sweep
     // transaction so the length should be 1.
     let mut requests = db
-        .get_swept_withdrawal_requests(&bitcoin_block.block_hash, context_window)
+        .get_swept_withdrawal_requests(
+            &bitcoin_block.block_hash,
+            &stacks_block.block_hash,
+            context_window,
+        )
         .await
         .unwrap();
     assert_eq!(requests.len(), 1);
@@ -2524,7 +2584,11 @@ async fn get_swept_withdrawal_requests_does_not_return_unswept_withdrawal_reques
     // There should be no requests because db do not contain sweep transaction
     let context_window = 20;
     let requests = db
-        .get_swept_withdrawal_requests(&bitcoin_block.block_hash, context_window)
+        .get_swept_withdrawal_requests(
+            &bitcoin_block.block_hash,
+            &stacks_block.block_hash,
+            context_window,
+        )
         .await
         .unwrap();
     assert!(requests.is_empty());
@@ -2546,7 +2610,12 @@ async fn get_swept_deposit_requests_does_not_return_unswept_deposit_requests() {
     // sweep transactions, and the [`TestSweepSetup`] structure correctly
     // sets up the database.
     let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        1_000_000,
+        &mut rng,
+    );
 
     // We need to manually update the database with new bitcoin block
     // headers.
@@ -2566,8 +2635,9 @@ async fn get_swept_deposit_requests_does_not_return_unswept_deposit_requests() {
     let chain_tip = setup.sweep_block_hash.into();
     let context_window = 20;
 
+    let stacks_chain_tip = setup.stacks_genesis_block.block_hash;
     let requests = db
-        .get_swept_deposit_requests(&chain_tip, context_window)
+        .get_swept_deposit_requests(&chain_tip, &stacks_chain_tip, context_window)
         .await
         .unwrap();
 
@@ -2596,8 +2666,18 @@ async fn get_swept_deposit_requests_does_not_return_deposit_requests_with_respon
     // sweep transactions, and the [`TestSweepSetup`] structure correctly
     // sets up the database.
     let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
-    let mut setup_fork = TestSweepSetup::new_setup(rpc, faucet, 2_000_000, &mut rng);
-    let mut setup_canonical = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
+    let mut setup_fork = TestSweepSetup::new_setup(
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        2_000_000,
+        &mut rng,
+    );
+    let mut setup_canonical = TestSweepSetup::new_setup(
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        1_000_000,
+        &mut rng,
+    );
 
     let context_window = 20;
 
@@ -2650,8 +2730,14 @@ async fn get_swept_deposit_requests_does_not_return_deposit_requests_with_respon
         .unwrap();
 
     // First, let's check we get both deposits
+    let stacks_chain_tip = db
+        .get_stacks_chain_tip(&chain_tip)
+        .await
+        .unwrap()
+        .unwrap()
+        .block_hash;
     let requests = db
-        .get_swept_deposit_requests(&chain_tip, context_window)
+        .get_swept_deposit_requests(&chain_tip, &stacks_chain_tip, context_window)
         .await
         .unwrap();
 
@@ -2683,7 +2769,7 @@ async fn get_swept_deposit_requests_does_not_return_deposit_requests_with_respon
     db.write_completed_deposit_event(&event).await.unwrap();
 
     let requests = db
-        .get_swept_deposit_requests(&chain_tip, context_window)
+        .get_swept_deposit_requests(&chain_tip, &stacks_chain_tip, context_window)
         .await
         .unwrap();
 
@@ -2714,8 +2800,16 @@ async fn get_swept_deposit_requests_does_not_return_deposit_requests_with_respon
     };
     db.write_completed_deposit_event(&event).await.unwrap();
 
+    // We've written more stacks blocks to the database, so let's get the
+    // chain tip again.
+    let stacks_chain_tip = db
+        .get_stacks_chain_tip(&chain_tip)
+        .await
+        .unwrap()
+        .unwrap()
+        .block_hash;
     let requests = db
-        .get_swept_deposit_requests(&chain_tip, context_window)
+        .get_swept_deposit_requests(&chain_tip, &stacks_chain_tip, context_window)
         .await
         .unwrap();
 
@@ -2847,7 +2941,11 @@ async fn get_swept_withdrawal_requests_does_not_return_withdrawal_requests_with_
     // Before we write corresponding withdrawal accept event query should return 1 request
     let context_window = 20;
     let requests = db
-        .get_swept_withdrawal_requests(&bitcoin_block.block_hash, context_window)
+        .get_swept_withdrawal_requests(
+            &bitcoin_block.block_hash,
+            &stacks_block.block_hash,
+            context_window,
+        )
         .await
         .unwrap();
     assert_eq!(requests.len(), 1);
@@ -2856,7 +2954,11 @@ async fn get_swept_withdrawal_requests_does_not_return_withdrawal_requests_with_
 
     // Since we have corresponding withdrawal accept event query should return nothing
     let requests = db
-        .get_swept_withdrawal_requests(&bitcoin_block.block_hash, context_window)
+        .get_swept_withdrawal_requests(
+            &bitcoin_block.block_hash,
+            &stacks_block.block_hash,
+            context_window,
+        )
         .await
         .unwrap();
     assert!(requests.is_empty());
@@ -2872,7 +2974,11 @@ async fn get_swept_withdrawal_requests_does_not_return_withdrawal_requests_with_
         .unwrap();
 
     let requests = db
-        .get_swept_withdrawal_requests(&bitcoin_block.block_hash, context_window)
+        .get_swept_withdrawal_requests(
+            &bitcoin_block.block_hash,
+            &stacks_block.block_hash,
+            context_window,
+        )
         .await
         .unwrap();
     assert!(requests.is_empty());
@@ -2957,7 +3063,12 @@ async fn get_swept_deposit_requests_response_tx_reorged() {
     // sets up the database.
     let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
 
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        1_000_000,
+        &mut rng,
+    );
 
     let context_window = 20;
 
@@ -2986,7 +3097,7 @@ async fn get_swept_deposit_requests_response_tx_reorged() {
 
     // First, let's check we get the deposit
     let requests = db
-        .get_swept_deposit_requests(&chain_tip, context_window)
+        .get_swept_deposit_requests(&chain_tip, &stacks_tip.block_hash, context_window)
         .await
         .unwrap();
     assert_eq!(requests.len(), 1);
@@ -3013,7 +3124,7 @@ async fn get_swept_deposit_requests_response_tx_reorged() {
 
     // The deposit should be confirmed now
     let requests = db
-        .get_swept_deposit_requests(&chain_tip, context_window)
+        .get_swept_deposit_requests(&chain_tip, &original_event_block.block_hash, context_window)
         .await
         .unwrap();
 
@@ -3023,7 +3134,11 @@ async fn get_swept_deposit_requests_response_tx_reorged() {
     // and the complete deposit event is no longer in the canonical chain.
     // The deposit should no longer be confirmed.
     let requests = db
-        .get_swept_deposit_requests(&setup.sweep_block_hash.into(), context_window)
+        .get_swept_deposit_requests(
+            &setup.sweep_block_hash.into(),
+            &stacks_tip.block_hash,
+            context_window,
+        )
         .await
         .unwrap();
 
@@ -3053,7 +3168,12 @@ async fn get_swept_deposit_requests_boundary() {
     // sweep transactions, and the [`TestSweepSetup`] structure correctly
     // sets up the database.
     let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        1_000_000,
+        &mut rng,
+    );
 
     let context_window = 10;
 
@@ -3093,17 +3213,17 @@ async fn get_swept_deposit_requests_boundary() {
 
     // The event is anchored to the deposit block, that is before the sweep
     // block
-    let event_block = StacksBlock {
+    let stacks_tip = StacksBlock {
         block_hash: fake::Faker.fake_with_rng(&mut rng),
         block_height: stacks_tip.block_height + 1,
         parent_hash: stacks_tip.block_hash,
         bitcoin_anchor: setup.deposit_block_hash.into(),
     };
-    db.write_stacks_block(&event_block).await.unwrap();
+    db.write_stacks_block(&stacks_tip).await.unwrap();
 
     // First, let's check we get the deposit
     let requests = db
-        .get_swept_deposit_requests(&chain_tip, context_window)
+        .get_swept_deposit_requests(&chain_tip, &stacks_tip.block_hash, context_window)
         .await
         .unwrap();
 
@@ -3112,7 +3232,7 @@ async fn get_swept_deposit_requests_boundary() {
     // Store the complete deposit event
     let event = CompletedDepositEvent {
         txid: fake::Faker.fake_with_rng::<StacksTxId, _>(&mut rng),
-        block_id: event_block.block_hash,
+        block_id: stacks_tip.block_hash,
         amount: setup.deposit_request.amount,
         outpoint: setup.deposit_request.outpoint,
         sweep_block_hash: setup.sweep_block_hash.into(),
@@ -3123,7 +3243,7 @@ async fn get_swept_deposit_requests_boundary() {
 
     // And now the request is no longer swept (and pending confirmation)
     let requests = db
-        .get_swept_deposit_requests(&chain_tip, context_window)
+        .get_swept_deposit_requests(&chain_tip, &stacks_tip.block_hash, context_window)
         .await
         .unwrap();
 
@@ -3136,7 +3256,7 @@ async fn get_swept_deposit_requests_boundary() {
         let chain_tip = fetch_canonical_bitcoin_blockchain(&db, rpc).await;
 
         let requests = db
-            .get_swept_deposit_requests(&chain_tip, context_window)
+            .get_swept_deposit_requests(&chain_tip, &stacks_tip.block_hash, context_window)
             .await
             .unwrap();
 
@@ -3149,7 +3269,7 @@ async fn get_swept_deposit_requests_boundary() {
     let chain_tip = fetch_canonical_bitcoin_blockchain(&db, rpc).await;
 
     let requests = db
-        .get_swept_deposit_requests(&chain_tip, context_window)
+        .get_swept_deposit_requests(&chain_tip, &stacks_tip.block_hash, context_window)
         .await
         .unwrap();
 
@@ -3303,7 +3423,11 @@ async fn get_swept_withdrawal_requests_response_tx_reorged(setup_tables: SetupTa
     // since this withdrawal was accepted get_swept_withdrawal_requests should return nothing
     let context_window = 20;
     let requests = db
-        .get_swept_withdrawal_requests(&new_block.block_hash, context_window)
+        .get_swept_withdrawal_requests(
+            &new_block.block_hash,
+            &original_event_block.block_hash,
+            context_window,
+        )
         .await
         .unwrap();
     assert!(requests.is_empty());
@@ -3312,7 +3436,11 @@ async fn get_swept_withdrawal_requests_response_tx_reorged(setup_tables: SetupTa
     // and the accept withdrawal event is no longer in the canonical chain.
     // The withdrawal should no longer be confirmed.
     let requests = db
-        .get_swept_withdrawal_requests(&bitcoin_block.block_hash, context_window)
+        .get_swept_withdrawal_requests(
+            &bitcoin_block.block_hash,
+            &stacks_block.block_hash,
+            context_window,
+        )
         .await
         .unwrap();
 
@@ -5327,17 +5455,21 @@ async fn pending_rejected_withdrawal_no_events() {
         bitcoin_chain_tip = new_block.into();
     }
 
-    let pending_rejected = db
-        .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, context_window)
-        .await
-        .expect("failed to get pending rejected withdrawals");
-    assert!(!pending_rejected.is_empty());
-
     let stacks_chain_tip = db
         .get_stacks_chain_tip(&bitcoin_chain_tip.block_hash)
         .await
         .expect("failed to get stacks chain tip")
-        .expect("no chain tip");
+        .expect("no chain tip")
+        .block_hash;
+    let pending_rejected = db
+        .get_pending_rejected_withdrawal_requests(
+            &bitcoin_chain_tip,
+            &stacks_chain_tip,
+            context_window,
+        )
+        .await
+        .expect("failed to get pending rejected withdrawals");
+    assert!(!pending_rejected.is_empty());
 
     let mut non_expired = 0;
     for withdrawal in test_data.withdraw_requests {
@@ -5356,7 +5488,7 @@ async fn pending_rejected_withdrawal_no_events() {
 
         let in_canonical_stacks = db
             .in_canonical_stacks_blockchain(
-                &stacks_chain_tip.block_hash,
+                &stacks_chain_tip,
                 &stacks_block.block_hash,
                 stacks_block.block_height,
             )
@@ -5425,11 +5557,7 @@ async fn pending_rejected_withdrawal_expiration() {
     // Append new blocks up to WITHDRAWAL_BLOCKS_EXPIRY, checking that the
     // request is not considered expired
     for _ in request_confirmations..WITHDRAWAL_BLOCKS_EXPIRY as usize {
-        let bitcoin_chain_tip = db
-            .get_bitcoin_canonical_chain_tip_ref()
-            .await
-            .expect("failed to get canonical chain tip")
-            .expect("no chain tip");
+        let (bitcoin_chain_tip, stacks_chain_tip) = db.get_chain_tips().await;
 
         let new_block = BitcoinBlock {
             block_hash: fake::Faker.fake_with_rng(&mut rng),
@@ -5445,7 +5573,7 @@ async fn pending_rejected_withdrawal_expiration() {
 
         // Check that now we do get it as rejected
         let pending_rejected = db
-            .get_pending_rejected_withdrawal_requests(&new_block.into(), 1000)
+            .get_pending_rejected_withdrawal_requests(&new_block.into(), &stacks_chain_tip, 1000)
             .await
             .expect("failed to get pending rejected withdrawals");
 
@@ -5453,11 +5581,7 @@ async fn pending_rejected_withdrawal_expiration() {
     }
 
     // Append one last block, reaching WITHDRAWAL_BLOCKS_EXPIRY
-    let bitcoin_chain_tip = db
-        .get_bitcoin_canonical_chain_tip_ref()
-        .await
-        .expect("failed to get canonical chain tip")
-        .expect("no chain tip");
+    let (bitcoin_chain_tip, stacks_chain_tip) = db.get_chain_tips().await;
 
     let new_block = BitcoinBlock {
         block_hash: fake::Faker.fake_with_rng(&mut rng),
@@ -5473,7 +5597,7 @@ async fn pending_rejected_withdrawal_expiration() {
 
     // Check that now we do get it as rejected
     let pending_rejected = db
-        .get_pending_rejected_withdrawal_requests(&new_block.into(), 1000)
+        .get_pending_rejected_withdrawal_requests(&new_block.into(), &stacks_chain_tip, 1000)
         .await
         .expect("failed to get pending rejected withdrawals");
 
@@ -5524,14 +5648,9 @@ async fn pending_rejected_withdrawal_rejected_already_rejected() {
     db.write_withdrawal_request(&request).await.unwrap();
 
     // First, check that the request is pending rejected
-    let bitcoin_chain_tip = db
-        .get_bitcoin_canonical_chain_tip_ref()
-        .await
-        .expect("failed to get canonical chain tip")
-        .expect("no chain tip");
-
+    let (bitcoin_chain_tip, stacks_chain_tip) = db.get_chain_tips().await;
     let pending_rejected = db
-        .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, 1000)
+        .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, &stacks_chain_tip, 1000)
         .await
         .expect("failed to get pending rejected withdrawals");
 
@@ -5565,10 +5684,11 @@ async fn pending_rejected_withdrawal_rejected_already_rejected() {
         .get_stacks_chain_tip(&bitcoin_chain_tip.block_hash)
         .await
         .unwrap()
-        .unwrap();
+        .unwrap()
+        .block_hash;
     assert!(
         db.in_canonical_stacks_blockchain(
-            &stacks_chain_tip.block_hash,
+            &stacks_chain_tip,
             &fork_base.block_hash,
             fork_base.block_height
         )
@@ -5577,7 +5697,7 @@ async fn pending_rejected_withdrawal_rejected_already_rejected() {
     );
     assert!(
         !db.in_canonical_stacks_blockchain(
-            &stacks_chain_tip.block_hash,
+            &stacks_chain_tip,
             &forked_stacks_block.block_hash,
             forked_stacks_block.block_height
         )
@@ -5594,7 +5714,7 @@ async fn pending_rejected_withdrawal_rejected_already_rejected() {
 
     // With a forked rejection event, the request is still pending rejected
     let pending_rejected = db
-        .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, 1000)
+        .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, &stacks_chain_tip, 1000)
         .await
         .expect("failed to get pending rejected withdrawals");
 
@@ -5611,7 +5731,7 @@ async fn pending_rejected_withdrawal_rejected_already_rejected() {
 
     // With a confirmed rejection event, we should no longer get the request
     let pending_rejected = db
-        .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, 1000)
+        .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, &stacks_chain_tip, 1000)
         .await
         .expect("failed to get pending rejected withdrawals");
 
@@ -5668,9 +5788,14 @@ async fn pending_rejected_withdrawal_already_accepted(setup_tables: SetupTables)
         .await
         .expect("failed to get canonical chain tip")
         .expect("no chain tip");
-
+    let stacks_chain_tip = db
+        .get_stacks_chain_tip(&bitcoin_chain_tip.block_hash)
+        .await
+        .expect("failed to get stacks chain tip")
+        .expect("no chain tip")
+        .block_hash;
     let pending_rejected = db
-        .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, 1000)
+        .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, &stacks_chain_tip, 1000)
         .await
         .expect("failed to get pending rejected withdrawals");
 
@@ -5751,9 +5876,16 @@ async fn pending_rejected_withdrawal_already_accepted(setup_tables: SetupTables)
             .unwrap()
     );
 
+    // The bitcoin chain tip has changed so we have a new stacks chain tip
+    let stacks_chain_tip = db
+        .get_stacks_chain_tip(&bitcoin_chain_tip.block_hash)
+        .await
+        .expect("failed to get stacks chain tip")
+        .expect("no chain tip")
+        .block_hash;
     // With a forked withdrawal output, the request is still pending rejected
     let pending_rejected = db
-        .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, 1000)
+        .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, &stacks_chain_tip, 1000)
         .await
         .expect("failed to get pending rejected withdrawals");
     assert_eq!(&pending_rejected.single(), &request);
@@ -5770,7 +5902,7 @@ async fn pending_rejected_withdrawal_already_accepted(setup_tables: SetupTables)
 
     // The output is not confirmed yet, so it shouldn't affect the request
     let pending_rejected = db
-        .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, 1000)
+        .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, &stacks_chain_tip, 1000)
         .await
         .expect("failed to get pending rejected withdrawals");
     assert_eq!(&pending_rejected.single(), &request);
@@ -5785,7 +5917,7 @@ async fn pending_rejected_withdrawal_already_accepted(setup_tables: SetupTables)
 
     // With a confirmed withdrawal output, we should no longer get the request
     let pending_rejected = db
-        .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, 1000)
+        .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, &stacks_chain_tip, 1000)
         .await
         .expect("failed to get pending rejected withdrawals");
     assert!(pending_rejected.is_empty());
@@ -5804,7 +5936,7 @@ async fn is_withdrawal_inflight_catches_withdrawals_with_rows_in_table() {
     let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
-    let setup = TestSweepSetup2::new_setup(signers, faucet, &[]);
+    let setup = TestSweepSetup2::new_setup(signers, BitcoinCoreClient::new_regtest(), faucet, &[]);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't
@@ -5878,7 +6010,7 @@ async fn is_withdrawal_inflight_catches_withdrawals_in_package() {
     // We use TestSweepSetup2 to help set up the signers' UTXO, which needs
     // to be available for this test.
     let signers = TestSignerSet::new(&mut rng);
-    let setup = TestSweepSetup2::new_setup(signers, faucet, &[]);
+    let setup = TestSweepSetup2::new_setup(signers, BitcoinCoreClient::new_regtest(), faucet, &[]);
 
     // Normal: the signer follows the bitcoin blockchain and event observer
     // should be getting new block events from bitcoin-core. We haven't
@@ -6896,6 +7028,7 @@ mod get_pending_accepted_withdrawal_requests {
         let bitcoin_block = BitcoinBlock::new_genesis();
         // Stacks blocks:
         let stacks_block = StacksBlock::new_genesis().anchored_to(&bitcoin_block);
+        let stacks_chain_tip = stacks_block.block_hash;
 
         // Write our blocks.
         db.write_blocks([&bitcoin_block], [&stacks_block]).await;
@@ -6905,7 +7038,12 @@ mod get_pending_accepted_withdrawal_requests {
 
         // Ensure that the request is considered "pending".
         let requests = db
-            .get_pending_withdrawal_requests(&bitcoin_block.block_hash, 1_000, &Faker.fake())
+            .get_pending_withdrawal_requests(
+                &bitcoin_block.block_hash,
+                &stacks_chain_tip,
+                1_000,
+                &Faker.fake(),
+            )
             .await
             .expect("failed to query db");
         assert_eq!(requests.len(), 1);

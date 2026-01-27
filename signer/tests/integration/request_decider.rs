@@ -8,6 +8,7 @@ use fake::Fake as _;
 use fake::Faker;
 use mockito::Server;
 use serde_json::json;
+use signer::bitcoin::rpc::BitcoinCoreClient;
 use url::Url;
 
 use emily_client::apis::deposit_api;
@@ -150,7 +151,8 @@ async fn handle_pending_deposit_request_address_script_pub_key() {
 
     // This confirms a deposit transaction, and has a nice helper function
     // for storing a real deposit.
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 10000, &mut rng);
+    let setup =
+        TestSweepSetup::new_setup(BitcoinCoreClient::new_regtest(), faucet, 10000, &mut rng);
 
     // Let's get the blockchain data into the database.
     let chain_tip: BitcoinBlockHash = setup.sweep_block_hash.into();
@@ -236,7 +238,8 @@ async fn handle_pending_deposit_request_not_in_signing_set() {
 
     // This confirms a deposit transaction, and has a nice helper function
     // for storing a real deposit.
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 10000, &mut rng);
+    let setup =
+        TestSweepSetup::new_setup(BitcoinCoreClient::new_regtest(), faucet, 10000, &mut rng);
 
     // Let's get the blockchain data into the database.
     let chain_tip: BitcoinBlockHash = setup.sweep_block_hash.into();
@@ -341,7 +344,8 @@ async fn persist_received_deposit_decision_fetches_missing_deposit_requests() {
 
     // This confirms a deposit transaction, and has a nice helper function
     // for storing a real deposit.
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 10000, &mut rng);
+    let setup =
+        TestSweepSetup::new_setup(BitcoinCoreClient::new_regtest(), faucet, 10000, &mut rng);
 
     // Let's get the blockchain data into the database.
     let chain_tip: BitcoinBlockHash = setup.sweep_block_hash.into();
@@ -446,7 +450,8 @@ async fn blocklist_client_retry(num_failures: u8, failing_iters: u8) {
 
     // This confirms a deposit transaction, and has a nice helper function
     // for storing a real deposit.
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 10000, &mut rng);
+    let setup =
+        TestSweepSetup::new_setup(BitcoinCoreClient::new_regtest(), faucet, 10000, &mut rng);
 
     // Let's get the blockchain data into the database.
     let chain_tip: BitcoinBlockHash = setup.sweep_block_hash.into();
@@ -457,7 +462,10 @@ async fn blocklist_client_retry(num_failures: u8, failing_iters: u8) {
         .await
         .unwrap()
         .unwrap();
+
+    let stacks_chain_tip = setup.stacks_genesis_block.clone().into();
     ctx.state().set_bitcoin_chain_tip(chain_tip_ref);
+    ctx.state().set_stacks_chain_tip(stacks_chain_tip);
 
     // We need to store the deposit request because of the foreign key
     // constraint on the deposit_signers table.
@@ -584,7 +592,8 @@ async fn do_not_procceed_with_blocked_addresses(is_withdrawal: bool, is_blocked:
     let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
 
     // Creating test setup which will help store transactions and requests
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 10000, &mut rng);
+    let setup =
+        TestSweepSetup::new_setup(BitcoinCoreClient::new_regtest(), faucet, 10000, &mut rng);
 
     // Let's get the blockchain data into the database.
     let chain_tip: BitcoinBlockHash = setup.sweep_block_hash.into();
@@ -596,6 +605,10 @@ async fn do_not_procceed_with_blocked_addresses(is_withdrawal: bool, is_blocked:
         .unwrap()
         .unwrap();
     ctx.state().set_bitcoin_chain_tip(chain_tip_ref);
+
+    // If is_withdrawal is false, we need a stacks block in the database so
+    // that we have a stacks chain tip.
+    setup.store_stacks_genesis_block(&db).await;
 
     if is_withdrawal {
         // For withdrawals we can store only request and dkg shares
@@ -612,6 +625,10 @@ async fn do_not_procceed_with_blocked_addresses(is_withdrawal: bool, is_blocked:
     // need a row in the dkg_shares table.
     setup.store_dkg_shares(&db).await;
 
+    let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
+    ctx.state()
+        .set_stacks_chain_tip(stacks_chain_tip.clone().into());
+
     let signer_public_key = setup.aggregated_signer.keypair.public_key().into();
 
     let deposit_requests = db
@@ -619,7 +636,12 @@ async fn do_not_procceed_with_blocked_addresses(is_withdrawal: bool, is_blocked:
         .await
         .unwrap();
     let withdrawal_requests = db
-        .get_pending_withdrawal_requests(&chain_tip, 100, &signer_public_key)
+        .get_pending_withdrawal_requests(
+            &chain_tip,
+            &stacks_chain_tip.block_hash,
+            100,
+            &signer_public_key,
+        )
         .await
         .unwrap();
     // There should only be the one deposit request that we just fetched.

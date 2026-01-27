@@ -1,0 +1,20 @@
+[test-groups]
+serial-integration = { max-threads = 1 }
+
+[[profile.default.overrides]]
+# All integration tests within a `serial` module
+# TODO: remove the file-specific filters once all the tests have been updated
+filter = """\
+binary(integration) and test(/::serial::/)
+
+or test(/^bitcoin_validation::/)
+or test(/^block_observer::/)
+or test(/^complete_deposit::/)
+or test(/^postgres::/)
+or test(/^request_decider::/)
+or test(/^transaction_coordinator::/)
+or test(/^transaction_signer::/)
+or test(/^withdrawal_accept::/)
+or test(/^withdrawal_reject::/)
+"""
+test-group = "serial-integration"

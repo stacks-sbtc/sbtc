@@ -72,6 +72,7 @@ use signer::stacks::api::StacksInteract;
 use signer::stacks::wallet::SignerWallet;
 use signer::storage::model::BitcoinBlockHeight;
 use signer::storage::model::KeyRotationEvent;
+use signer::storage::model::StacksBlockRef;
 use signer::storage::model::WithdrawalTxOutput;
 use signer::testing::btc::build_emily_request;
 use signer::testing::btc::get_canonical_chain_tip;
@@ -326,7 +327,12 @@ async fn process_complete_deposit() {
     let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
-    let setup = TestSweepSetup::new_setup(rpc, faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        1_000_000,
+        &mut rng,
+    );
 
     backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash).await;
     setup.store_deposit_tx(&db).await;
@@ -344,11 +350,18 @@ async fn process_complete_deposit() {
     };
     db.write_stacks_block(&stacks_block).await.unwrap();
 
+    let num_signers = 7;
+    let signing_threshold: u32 = 5;
+    let context_window: u16 = 10;
+
     let mut context = TestContext::builder()
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
+        .modify_settings(|settings| {
+            settings.signer.bootstrap_signatures_required = signing_threshold as u16;
+        })
         .build();
 
     let nonce = 12;
@@ -378,10 +391,6 @@ async fn process_complete_deposit() {
                 .returning(move |_, _| Box::pin(async move { Ok(false) }));
         })
         .await;
-
-    let num_signers = 7;
-    let signing_threshold = 5;
-    let context_window = 10;
 
     let network = network::in_memory::InMemoryNetwork::new();
     let signer_info = testing::wsts::generate_signer_info(&mut rng, num_signers);
@@ -413,7 +422,11 @@ async fn process_complete_deposit() {
     assert_eq!(
         context
             .get_storage()
-            .get_swept_deposit_requests(&bitcoin_chain_tip.block_hash, context_window)
+            .get_swept_deposit_requests(
+                &bitcoin_chain_tip.block_hash,
+                &stacks_block.block_hash,
+                context_window
+            )
             .await
             .expect("failed to get swept deposits")
             .len(),
@@ -457,7 +470,6 @@ async fn process_complete_deposit() {
         .first()
         .map(|signer| signer.signer_public_keys.clone())
         .unwrap();
-    config.signer.bootstrap_signatures_required = signing_threshold as u16;
 
     prevent_dkg_on_changed_signer_set_info(&context, aggregate_key);
 
@@ -468,7 +480,6 @@ async fn process_complete_deposit() {
         network: network.connect(),
         private_key,
         context_window,
-        threshold: signing_threshold as u16,
         signing_round_max_duration: Duration::from_secs(10),
         bitcoin_presign_request_max_duration: Duration::from_secs(10),
         dkg_max_duration: Duration::from_secs(10),
@@ -486,7 +497,6 @@ async fn process_complete_deposit() {
                 network.connect(),
                 context_window,
                 signer_info.signer_private_key,
-                signing_threshold,
             );
 
             event_loop_harness.start()
@@ -495,6 +505,14 @@ async fn process_complete_deposit() {
 
     // Yield to get signers ready
     Sleep::for_millis(100).await;
+
+    let stacks_chain_tip = db
+        .get_stacks_chain_tip(&bitcoin_chain_tip.block_hash)
+        .await
+        .unwrap()
+        .unwrap()
+        .into();
+    context.state().set_stacks_chain_tip(stacks_chain_tip);
 
     // Wake coordinator up
     context
@@ -734,7 +752,6 @@ async fn deploy_smart_contracts_coordinator() {
             private_key: kp.secret_key().into(),
             signing_round_max_duration: Duration::from_secs(10),
             bitcoin_presign_request_max_duration: Duration::from_secs(10),
-            threshold: ctx.config().signer.bootstrap_signatures_required,
             dkg_max_duration: Duration::from_secs(10),
             is_epoch3: true,
         };
@@ -746,7 +763,6 @@ async fn deploy_smart_contracts_coordinator() {
 
         let ev = TxSignerEventLoop {
             network: network.spawn(),
-            threshold: ctx.config().signer.bootstrap_signatures_required as u32,
             context: ctx.clone(),
             context_window: 10000,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
@@ -968,7 +984,6 @@ async fn run_dkg_from_scratch() {
             private_key: kp.secret_key().into(),
             signing_round_max_duration: Duration::from_secs(10),
             bitcoin_presign_request_max_duration: Duration::from_secs(10),
-            threshold: ctx.config().signer.bootstrap_signatures_required,
             dkg_max_duration: Duration::from_secs(10),
             is_epoch3: true,
         }
@@ -1012,7 +1027,14 @@ async fn run_dkg_from_scratch() {
         .await
         .unwrap()
         .unwrap();
+    let stacks_chain_tip: StacksBlockRef = first_db
+        .get_stacks_chain_tip(&chain_tip.block_hash)
+        .await
+        .unwrap()
+        .unwrap()
+        .into();
     signers.iter().for_each(|(ctx, _, _, _)| {
+        ctx.state().set_stacks_chain_tip(stacks_chain_tip.clone());
         ctx.get_signal_sender()
             .send(RequestDeciderEvent::NewRequestsHandled(chain_tip).into())
             .unwrap();
@@ -1378,7 +1400,6 @@ async fn run_subsequent_dkg() {
             private_key: kp.secret_key().into(),
             signing_round_max_duration: Duration::from_secs(10),
             bitcoin_presign_request_max_duration: Duration::from_secs(10),
-            threshold: ctx.config().signer.bootstrap_signatures_required,
             dkg_max_duration: Duration::from_secs(10),
             is_epoch3: true,
         }
@@ -1388,7 +1409,6 @@ async fn run_subsequent_dkg() {
         .iter()
         .map(|(context, _, kp, net)| TxSignerEventLoop {
             network: net.spawn(),
-            threshold: context.config().signer.bootstrap_signatures_required as u32,
             context: context.clone(),
             context_window: 10000,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
@@ -1432,7 +1452,14 @@ async fn run_subsequent_dkg() {
         .await
         .unwrap()
         .unwrap();
+    let stacks_chain_tip: StacksBlockRef = first_db
+        .get_stacks_chain_tip(&chain_tip.block_hash)
+        .await
+        .unwrap()
+        .unwrap()
+        .into();
     signers.iter().for_each(|(ctx, _, _, _)| {
+        ctx.state().set_stacks_chain_tip(stacks_chain_tip.clone());
         ctx.get_signal_sender()
             .send(RequestDeciderEvent::NewRequestsHandled(chain_tip).into())
             .unwrap();
@@ -1625,7 +1652,6 @@ async fn pseudo_random_dkg() {
             private_key: kp.secret_key().into(),
             signing_round_max_duration: Duration::from_secs(10),
             bitcoin_presign_request_max_duration: Duration::from_secs(10),
-            threshold: ctx.config().signer.bootstrap_signatures_required,
             dkg_max_duration: Duration::from_secs(10),
             is_epoch3: true,
         };
@@ -1637,7 +1663,6 @@ async fn pseudo_random_dkg() {
 
         let ev = TxSignerEventLoop {
             network: network.spawn(),
-            threshold: ctx.config().signer.bootstrap_signatures_required as u32,
             context: ctx.clone(),
             context_window: 10000,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
@@ -2050,7 +2075,6 @@ async fn sign_bitcoin_transaction() {
             private_key: kp.secret_key().into(),
             signing_round_max_duration: Duration::from_secs(10),
             bitcoin_presign_request_max_duration: Duration::from_secs(10),
-            threshold: ctx.config().signer.bootstrap_signatures_required,
             dkg_max_duration: Duration::from_secs(10),
             is_epoch3: true,
         };
@@ -2062,7 +2086,6 @@ async fn sign_bitcoin_transaction() {
 
         let ev = TxSignerEventLoop {
             network: network.spawn(),
-            threshold: ctx.config().signer.bootstrap_signatures_required as u32,
             context: ctx.clone(),
             context_window: 10000,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
@@ -2387,7 +2410,6 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
             private_key: kp.secret_key().into(),
             signing_round_max_duration: Duration::from_secs(10),
             bitcoin_presign_request_max_duration: Duration::from_secs(10),
-            threshold: ctx.config().signer.bootstrap_signatures_required,
             dkg_max_duration: Duration::from_secs(10),
             is_epoch3: true,
         };
@@ -2399,7 +2421,6 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
 
         let ev = TxSignerEventLoop {
             network: network.spawn(),
-            threshold: ctx.config().signer.bootstrap_signatures_required as u32,
             context: ctx.clone(),
             context_window: 10000,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
@@ -2901,7 +2922,6 @@ async fn wsts_ids_set_during_dkg_and_signing_rounds() {
             private_key: kp.secret_key().into(),
             signing_round_max_duration: Duration::from_secs(10),
             bitcoin_presign_request_max_duration: Duration::from_secs(10),
-            threshold: ctx.config().signer.bootstrap_signatures_required,
             dkg_max_duration: Duration::from_secs(10),
             is_epoch3: true,
         };
@@ -2913,7 +2933,6 @@ async fn wsts_ids_set_during_dkg_and_signing_rounds() {
 
         let ev = TxSignerEventLoop {
             network: network.spawn(),
-            threshold: ctx.config().signer.bootstrap_signatures_required as u32,
             context: ctx.clone(),
             context_window: 10000,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
@@ -3266,7 +3285,6 @@ async fn skip_signer_activites_after_key_rotation() {
             private_key: kp.secret_key().into(),
             signing_round_max_duration: Duration::from_secs(10),
             bitcoin_presign_request_max_duration: Duration::from_secs(10),
-            threshold: ctx.config().signer.bootstrap_signatures_required,
             dkg_max_duration: Duration::from_secs(10),
             is_epoch3: true,
         };
@@ -3278,7 +3296,6 @@ async fn skip_signer_activites_after_key_rotation() {
 
         let ev = TxSignerEventLoop {
             network: network.spawn(),
-            threshold: ctx.config().signer.bootstrap_signatures_required as u32,
             context: ctx.clone(),
             context_window: 10000,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
@@ -3820,7 +3837,6 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
             private_key: kp.secret_key().into(),
             signing_round_max_duration: Duration::from_secs(10),
             bitcoin_presign_request_max_duration: Duration::from_secs(10),
-            threshold: ctx.config().signer.bootstrap_signatures_required,
             dkg_max_duration: Duration::from_secs(10),
             is_epoch3: true,
         };
@@ -3832,7 +3848,6 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
 
         let ev = TxSignerEventLoop {
             network: network.spawn(),
-            threshold: ctx.config().signer.bootstrap_signatures_required as u32,
             context: ctx.clone(),
             context_window: 10000,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
@@ -3942,7 +3957,6 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
         context,
         private_key: PrivateKey::new(&mut rng),
         network: network.spawn(),
-        threshold: 5,
         context_window: 5,
         signing_round_max_duration: std::time::Duration::from_secs(5),
         bitcoin_presign_request_max_duration: Duration::from_secs(5),
@@ -4065,7 +4079,6 @@ async fn test_get_btc_state_with_available_sweep_transactions_and_rbf() {
         context,
         private_key: PrivateKey::new(&mut rng),
         network: network.spawn(),
-        threshold: 5,
         context_window: 5,
         signing_round_max_duration: std::time::Duration::from_secs(5),
         bitcoin_presign_request_max_duration: Duration::from_secs(5),
@@ -4295,6 +4308,7 @@ fn create_test_setup(
         }],
         withdrawal_sender: PrincipalData::from(StacksAddress::burn_address(false)),
         signatures_required,
+        client: bitcoin_client.clone(),
     }
 }
 
@@ -4556,7 +4570,6 @@ async fn test_conservative_initial_sbtc_limits() {
             private_key: kp.secret_key().into(),
             signing_round_max_duration: Duration::from_secs(2),
             bitcoin_presign_request_max_duration: Duration::from_secs(2),
-            threshold: signatures_required,
             dkg_max_duration: Duration::from_secs(10),
             is_epoch3: true,
         };
@@ -4568,7 +4581,6 @@ async fn test_conservative_initial_sbtc_limits() {
 
         let ev = TxSignerEventLoop {
             network: network.spawn(),
-            threshold: signatures_required as u32,
             context: ctx.clone(),
             context_window: 10000,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
@@ -4778,7 +4790,6 @@ async fn sign_bitcoin_transaction_withdrawals() {
             private_key: kp.secret_key().into(),
             signing_round_max_duration: Duration::from_secs(10),
             bitcoin_presign_request_max_duration: Duration::from_secs(10),
-            threshold: ctx.config().signer.bootstrap_signatures_required,
             dkg_max_duration: Duration::from_secs(10),
             is_epoch3: true,
         };
@@ -4790,7 +4801,6 @@ async fn sign_bitcoin_transaction_withdrawals() {
 
         let ev = TxSignerEventLoop {
             network: network.spawn(),
-            threshold: ctx.config().signer.bootstrap_signatures_required as u32,
             context: ctx.clone(),
             context_window: 10000,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
@@ -5207,6 +5217,10 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
     };
     db.write_stacks_blocks([&genesis_block]).await;
 
+    context
+        .state()
+        .set_stacks_chain_tip(genesis_block.clone().into());
+
     let (aggregate_key, _) = run_dkg(&context, &mut rng, &mut testing_signer_set).await;
 
     // We need to set the signer's UTXO since that is necessary to know if
@@ -5253,7 +5267,11 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
     assert!(
         context
             .get_storage()
-            .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, context_window)
+            .get_pending_rejected_withdrawal_requests(
+                &bitcoin_chain_tip,
+                &stacks_chain_tip,
+                context_window
+            )
             .await
             .unwrap()
             .is_empty()
@@ -5273,7 +5291,11 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
     assert_eq!(
         context
             .get_storage()
-            .get_pending_rejected_withdrawal_requests(&bitcoin_chain_tip, context_window)
+            .get_pending_rejected_withdrawal_requests(
+                &bitcoin_chain_tip,
+                &stacks_chain_tip,
+                context_window
+            )
             .await
             .unwrap()
             .single(),
@@ -5372,7 +5394,6 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
         network: network.connect(),
         private_key,
         context_window,
-        threshold: signing_threshold as u16,
         signing_round_max_duration: Duration::from_secs(5),
         bitcoin_presign_request_max_duration: Duration::from_secs(5),
         dkg_max_duration: Duration::from_secs(5),
@@ -5390,7 +5411,6 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
                 network.connect(),
                 context_window,
                 signer_info.signer_private_key,
-                signing_threshold,
             );
 
             event_loop_harness.start()
@@ -5523,10 +5543,15 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
         max_fee: 500_000,
         is_deposit: true,
     }];
-    let mut setup = TestSweepSetup2::new_setup(signers.clone(), faucet, &amounts);
+    let mut setup = TestSweepSetup2::new_setup(
+        signers.clone(),
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        &amounts,
+    );
 
     // Store everything we need for the deposit to be considered swept
-    setup.submit_sweep_tx(rpc, faucet);
+    setup.submit_sweep_tx(faucet);
     fetch_canonical_bitcoin_blockchain(&db, rpc).await;
 
     setup.store_stacks_genesis_block(&db).await;
@@ -5539,8 +5564,14 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
 
     prevent_dkg_on_changed_signer_set_info(&ctx, aggregate_key);
 
-    let (bitcoin_chain_tip, _) = db.get_chain_tips().await;
+    let (bitcoin_chain_tip, stacks_chain_tip) = db.get_chain_tips().await;
+    let stacks_block = db
+        .get_stacks_block(&stacks_chain_tip)
+        .await
+        .unwrap()
+        .unwrap();
     ctx.state().set_bitcoin_chain_tip(bitcoin_chain_tip);
+    ctx.state().set_stacks_chain_tip(stacks_block.into());
     // If we try to sign a complete deposit, we will ask the bitcoin node to
     // asses the fees, so we need to mock this.
     let sweep_tx_info = setup.sweep_tx_info.unwrap().tx_info;
@@ -5564,7 +5595,6 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
         private_key: signers.private_key(),
         signing_round_max_duration,
         bitcoin_presign_request_max_duration: Duration::from_secs(1),
-        threshold: ctx.config().signer.bootstrap_signatures_required,
         dkg_max_duration: Duration::from_secs(1),
         is_epoch3: true,
     };
@@ -6010,7 +6040,6 @@ async fn should_handle_dkg_coordination_failure() {
         context: context.clone(),
         network: network.spawn(),
         private_key: context.config().signer.private_key,
-        threshold: 1,
         context_window: 5,
         signing_round_max_duration: std::time::Duration::from_secs(5),
         bitcoin_presign_request_max_duration: std::time::Duration::from_secs(5),
@@ -6319,7 +6348,6 @@ async fn reuse_nonce_attack() {
             private_key: kp.secret_key().into(),
             signing_round_max_duration: Duration::from_secs(10),
             bitcoin_presign_request_max_duration: Duration::from_secs(10),
-            threshold: ctx.config().signer.bootstrap_signatures_required,
             dkg_max_duration: Duration::from_secs(10),
             is_epoch3: true,
         };
@@ -6331,7 +6359,6 @@ async fn reuse_nonce_attack() {
 
         let ev = TxSignerEventLoop {
             network: network.spawn(),
-            threshold: ctx.config().signer.bootstrap_signatures_required as u32,
             context: ctx.clone(),
             context_window: 10000,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),

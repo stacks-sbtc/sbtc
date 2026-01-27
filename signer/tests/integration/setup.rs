@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::ops::Deref as _;
+use std::str::FromStr as _;
+use std::time::Duration;
 
 use bitcoin::AddressType;
 use bitcoin::Amount;
@@ -17,6 +19,7 @@ use fake::Faker;
 use rand::rngs::OsRng;
 use sbtc::deposits::CreateDepositRequest;
 use sbtc::deposits::DepositInfo;
+use sbtc::testing::emily::EmilyTables;
 use sbtc::testing::regtest;
 use sbtc::testing::regtest::Faucet;
 use sbtc::testing::regtest::Recipient;
@@ -35,9 +38,9 @@ use signer::block_observer;
 use signer::block_observer::Deposit;
 use signer::codec::Encode as _;
 use signer::config::NetworkKind;
-use signer::config::Settings;
 use signer::context::Context as _;
 use signer::context::SbtcLimits;
+use signer::emily_client::EmilyClient;
 use signer::keys::PrivateKey;
 use signer::keys::PublicKey;
 use signer::keys::SignerScriptPubKey as _;
@@ -143,7 +146,7 @@ pub struct TestSweepSetup {
     /// the signatures required on stacks.
     pub signatures_required: u16,
     /// The hash of the first stacks block.
-    pub stacks_genesis_block: model::StacksBlockHash,
+    pub stacks_genesis_block: model::StacksBlock,
 }
 
 impl TestSweepSetup {
@@ -163,10 +166,16 @@ impl TestSweepSetup {
     /// 5. Generate a set of "signer keys" that kinda represent the
     ///    signers. Transactions can be signed using only the private keys
     ///    of the "signer" from (1).
-    pub fn new_setup<R>(rpc: &Client, faucet: &Faucet, amount: u64, rng: &mut R) -> Self
+    pub fn new_setup<R>(
+        client: BitcoinCoreClient,
+        faucet: &Faucet,
+        amount: u64,
+        rng: &mut R,
+    ) -> Self
     where
         R: rand::Rng,
     {
+        let rpc = faucet.rpc;
         let signer = Recipient::new(AddressType::P2tr);
         let depositor = Recipient::new(AddressType::P2tr);
         let signers_public_key = signer.keypair.x_only_public_key().0;
@@ -234,8 +243,6 @@ impl TestSweepSetup {
         let sweep_block_height =
             rpc.get_block_header_info(&sweep_block_hash).unwrap().height as u64;
 
-        let settings = Settings::new_from_default_config().unwrap();
-        let client = BitcoinCoreClient::try_from(&settings.bitcoin.rpc_endpoints[0]).unwrap();
         let sweep_tx_info = client
             .get_tx_info(&txid, &sweep_block_hash)
             .unwrap()
@@ -260,7 +267,12 @@ impl TestSweepSetup {
             withdrawal_request: requests.withdrawals.pop().unwrap(),
             withdrawal_sender: PrincipalData::from(StacksAddress::burn_address(false)),
             signatures_required: 2,
-            stacks_genesis_block: Faker.fake_with_rng(rng),
+            stacks_genesis_block: model::StacksBlock {
+                block_hash: Faker.fake_with_rng(rng),
+                block_height: 0u64.into(),
+                parent_hash: StacksBlockId::first_mined().into(),
+                bitcoin_anchor: sweep_block_hash.into(),
+            },
         }
     }
 
@@ -277,13 +289,9 @@ impl TestSweepSetup {
     /// Store a stacks genesis block that is on the canonical Stacks
     /// blockchain identified by the sweep chain tip.
     pub async fn store_stacks_genesis_block(&self, db: &PgStore) {
-        let block = model::StacksBlock {
-            block_hash: self.stacks_genesis_block,
-            block_height: 0u64.into(),
-            parent_hash: StacksBlockId::first_mined().into(),
-            bitcoin_anchor: self.sweep_block_hash.into(),
-        };
-        db.write_stacks_block(&block).await.unwrap();
+        db.write_stacks_block(&self.stacks_genesis_block)
+            .await
+            .unwrap();
     }
 
     /// Store the deposit transaction into the database
@@ -420,7 +428,7 @@ impl TestSweepSetup {
 
         let event = KeyRotationEvent {
             txid: fake::Faker.fake(),
-            block_hash: self.stacks_genesis_block,
+            block_hash: self.stacks_genesis_block.block_hash,
             aggregate_key: self.aggregated_signer.keypair.public_key().into(),
             signer_set,
             signatures_required: self.signatures_required,
@@ -729,6 +737,8 @@ pub struct TestSweepSetup2 {
     /// threshold is the bitcoin signature threshold, which for v1 matches
     /// the signatures required on stacks.
     pub signatures_required: u16,
+    /// The bitcoin client to use when needed
+    pub client: BitcoinCoreClient,
 }
 
 impl TestSweepSetup2 {
@@ -745,7 +755,12 @@ impl TestSweepSetup2 {
     /// 4. Generate a set of "signer keys" that kinda represent the
     ///    signers. Transactions can be signed using only the private keys
     ///    of the "signer" from (1).
-    pub fn new_setup(signers: TestSignerSet, faucet: &Faucet, amounts: &[SweepAmounts]) -> Self {
+    pub fn new_setup(
+        signers: TestSignerSet,
+        client: BitcoinCoreClient,
+        faucet: &Faucet,
+        amounts: &[SweepAmounts],
+    ) -> Self {
         let signer = &signers.signer;
         let rpc = faucet.rpc;
         let signers_public_key = signer.keypair.x_only_public_key().0;
@@ -820,8 +835,6 @@ impl TestSweepSetup2 {
             .chain(stacks_blocks)
             .collect();
 
-        let settings = Settings::new_from_default_config().unwrap();
-        let client = BitcoinCoreClient::try_from(&settings.bitcoin.rpc_endpoints[0]).unwrap();
         let deposits: Vec<(DepositInfo, utxo::DepositRequest, BitcoinTxInfo)> = deposits
             .into_iter()
             .map(|(tx, request, info)| {
@@ -845,6 +858,7 @@ impl TestSweepSetup2 {
             withdrawals,
             withdrawal_sender: PrincipalData::from(StacksAddress::burn_address(false)),
             signatures_required: 2,
+            client,
         }
     }
 
@@ -881,7 +895,7 @@ impl TestSweepSetup2 {
     pub async fn store_donation(&self, db: &PgStore) {
         let context = TestContext::builder()
             .with_storage(db.clone())
-            .with_first_bitcoin_core_client()
+            .with_bitcoin_client(self.client.clone())
             .with_mocked_stacks_client()
             .with_mocked_emily_client()
             .build();
@@ -911,23 +925,19 @@ impl TestSweepSetup2 {
     /// deposited funds and sweeps out the withdrawal funds in a proper
     /// sweep transaction, it broadcasts this transaction to the bitcoin
     /// network.
-    pub fn broadcast_sweep_tx(&mut self, rpc: &Client) {
+    pub fn broadcast_sweep_tx(&mut self) {
+        let rpc = self.client.inner_client();
         // Okay now we try to peg-in the deposit by making a transaction.
         // Let's start by getting the signer's sole UTXO.
         let aggregated_signer = &self.signers.signer;
         let signer_utxo = aggregated_signer.get_utxos(rpc, None).pop().unwrap();
 
-        // Well we want a BitcoinCoreClient, so we create one using the
-        // settings. Not, the best thing to do, sorry. TODO: pass in a
-        // bitcoin core client object.
-        let settings = Settings::new_from_default_config().unwrap();
-        let btc = BitcoinCoreClient::try_from(&settings.bitcoin.rpc_endpoints[0]).unwrap();
         let outpoint = OutPoint::new(signer_utxo.txid, signer_utxo.vout);
-        let txids = btc.get_tx_spending_prevout(&outpoint).unwrap();
+        let txids = self.client.get_tx_spending_prevout(&outpoint).unwrap();
 
         let last_fees = txids
             .iter()
-            .filter_map(|txid| btc.get_mempool_entry(txid).unwrap())
+            .filter_map(|txid| self.client.get_mempool_entry(txid).unwrap())
             .map(|entry| Fees {
                 total: entry.fees.base.to_sat(),
                 rate: entry.fees.base.to_sat() as f64 / entry.vsize as f64,
@@ -989,19 +999,25 @@ impl TestSweepSetup2 {
     /// This function generates a sweep transaction that sweeps in the
     /// deposited funds and sweeps out the withdrawal funds in a proper
     /// sweep transaction, that is also confirmed on bitcoin.
-    pub fn submit_sweep_tx(&mut self, rpc: &Client, faucet: &Faucet) {
+    pub fn submit_sweep_tx(&mut self, faucet: &Faucet) {
         if self.broadcast_info.is_none() {
-            self.broadcast_sweep_tx(rpc);
+            self.broadcast_sweep_tx();
         }
         let txid = self.broadcast_info.as_ref().unwrap().txid;
 
         // Let's confirm the sweep transaction
         let block_hash = faucet.generate_blocks(1).pop().unwrap();
-        let block_header = rpc.get_block_header_info(&block_hash).unwrap();
+        let block_header = self
+            .client
+            .inner_client()
+            .get_block_header_info(&block_hash)
+            .unwrap();
 
-        let settings = Settings::new_from_default_config().unwrap();
-        let client = BitcoinCoreClient::try_from(&settings.bitcoin.rpc_endpoints[0]).unwrap();
-        let tx_info = client.get_tx_info(&txid, &block_hash).unwrap().unwrap();
+        let tx_info = self
+            .client
+            .get_tx_info(&txid, &block_hash)
+            .unwrap()
+            .unwrap();
 
         self.sweep_tx_info = Some(SweepTxInfo {
             block_hash: block_hash.into(),
@@ -1269,4 +1285,45 @@ impl TestSweepSetup2 {
         };
         db.write_rotate_keys_transaction(&event).await.unwrap();
     }
+}
+
+/// Set up a new set of DynamoDB tables in Emily and returns a client to use them
+pub async fn new_emily_setup() -> (EmilyClient, EmilyTables) {
+    let tables = EmilyTables::new().await;
+
+    let mut configuration = EmilyApiConfiguration {
+        base_path: "http://127.0.0.1:3031".to_string(),
+        api_key: Some(emily_client::apis::configuration::ApiKey {
+            prefix: None,
+            key: "testApiKey".to_string(),
+        }),
+        ..Default::default()
+    };
+
+    let mut headers = reqwest_012::header::HeaderMap::new();
+    for (shortname, table_name) in [
+        ("deposit", &tables.deposit),
+        ("withdrawal", &tables.withdrawal),
+        ("chainstate", &tables.chainstate),
+        ("limit", &tables.limit),
+    ] {
+        headers.insert(
+            reqwest_012::header::HeaderName::from_str(&format!("x-context-{shortname}")).unwrap(),
+            reqwest_012::header::HeaderValue::from_str(table_name).unwrap(),
+        );
+    }
+
+    configuration.client = reqwest_012::ClientBuilder::new()
+        .default_headers(headers)
+        .build()
+        .unwrap();
+
+    let emily_client = EmilyClient::new(configuration, Duration::from_secs(1), None);
+
+    (emily_client, tables)
+}
+
+/// Cleanup Emily dynamodb tables
+pub async fn clean_emily_setup(tables: EmilyTables) {
+    tables.delete().await
 }
