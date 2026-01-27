@@ -1402,7 +1402,7 @@ async fn expected_fulfillment_info_stored_correctly() {
         .await
         .expect("Received an error after making a valid create withdrawal request api call.");
 
-    // Right after creation txid should be none and height should be chainstate.bitcoin_block_height + 6
+    // Right after creation txid should be none and height should be chainstate.bitcoin_block_height + 6 + 1
     let withdrawal = apis::withdrawal_api::get_withdrawal(&user_configuration, request_id)
         .await
         .unwrap();
