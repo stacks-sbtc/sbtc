@@ -1414,10 +1414,10 @@ async fn expected_fulfillment_info_stored_correctly() {
     assert!(withdrawal.expected_fulfillment_info.expected_txid.is_none());
     assert_eq!(8, received_expected_height);
 
-    // Now signer updates withdrawal with expected txid
+    // Now signer updates withdrawal with expected txid and height
     let expected_expected_txid = "txid".to_string();
     let expected_fulfillment_info = ExpectedFulfillmentInfo {
-        expected_height: None,
+        expected_height: Some(Some(300)),
         expected_txid: Some(Some(expected_expected_txid.clone())),
     };
 
