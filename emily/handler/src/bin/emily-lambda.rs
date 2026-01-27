@@ -30,16 +30,11 @@ async fn main() {
     // Setup service filters.
     let service_filter = api::routes::routes_with_stage_prefix(context)
         .recover(api::handlers::handle_rejection)
-        // INJECT REQUEST ID HERE
         .with(warp::trace(|info| {
-            // We use the header because warp::trace::Info does not access Request Extensions
             let request_id = info.request_headers()
                 .get("x-amz-request-id")
                 .and_then(|val| val.to_str().ok())
                 .unwrap_or("unknown");
-
-            // Create the span. All logs inside the request will inherit this.
-            // We use 'request_id' as the key as it is the standard convention.
             info_span!("aws-request", request_id = %request_id)
         }))
         .with(warp::log("api"))
