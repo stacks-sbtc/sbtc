@@ -140,7 +140,9 @@ pub struct BitcoinConfig {
     #[serde(deserialize_with = "duration_seconds_deserializer")]
     pub chain_tip_polling_interval: std::time::Duration,
 
-    /// The timeout used to fetch information from bitcoin core.
+    /// The maximum amount of time that the signer will wait for a response
+    /// for any RPC requests to the nodes configured in the `rpc_endpoints`
+    /// field.
     #[serde(deserialize_with = "duration_seconds_deserializer")]
     pub timeout: std::time::Duration,
 }
