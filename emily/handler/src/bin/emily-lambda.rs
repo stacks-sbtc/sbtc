@@ -29,12 +29,20 @@ async fn main() {
     let service_filter = api::routes::routes_with_stage_prefix(context)
         .recover(api::handlers::handle_rejection)
         .with(warp::trace(|info| {
-            let request_id = info
-                .request_headers()
-                .get("x-amz-request-id")
-                .and_then(|val| val.to_str().ok())
-                .unwrap_or("unknown");
-            info_span!("aws-request", request_id = %request_id)
+            let headers = info.request_headers();
+            // Iterate over every header and format it into a string
+            let all_headers_dump = headers
+                .iter()
+                .map(|(k, v)| {
+                    // Handle potential non-string values safely
+                    let val = v.to_str().unwrap_or("<binary>");
+                    format!("{}: {}", k, val)
+                })
+                .collect::<Vec<_>>()
+                .join(" | "); // Separator for readability in logs
+
+            // Create span. The 'all_headers' field will contain the full dump.
+            info_span!("request", all_headers = %all_headers_dump)
         }))
         .with(warp::log("api"))
         .with(cors);
