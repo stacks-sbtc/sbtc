@@ -14,6 +14,5 @@ or test(/^request_decider::/)
 or test(/^transaction_coordinator::/)
 or test(/^transaction_signer::/)
 or test(/^withdrawal_accept::/)
-or test(/^withdrawal_reject::/)
 """
 test-group = "serial-integration"
