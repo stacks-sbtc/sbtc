@@ -472,6 +472,11 @@ impl Validatable for SignerConfig {
                 SignerConfigError::ZeroDurationForbidden("dkg_max_duration").to_string(),
             ));
         }
+        if cfg.bitcoin.timeout == zero {
+            return Err(ConfigError::Message(
+                SignerConfigError::ZeroDurationForbidden("bitcoin_timeout").to_string(),
+            ));
+        }
         if cfg.signer.bitcoin_presign_request_max_duration == zero {
             return Err(ConfigError::Message(
                 SignerConfigError::ZeroDurationForbidden("bitcoin_presign_request_max_duration")
