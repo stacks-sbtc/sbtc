@@ -332,7 +332,7 @@ pub struct BitcoinCoreClient {
     inner: Arc<bitcoincore_rpc::Client>,
 }
 
-/// A helper struct containing data, necessary to create a new BitcoinCoreClient.
+/// A struct containing the data needed to create a [`BitcoinCoreClient`].
 pub struct BitcoinCoreClientParams {
     /// The URL of a bitcoin-core node.
     pub url: Url,
