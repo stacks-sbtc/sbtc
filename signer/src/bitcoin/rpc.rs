@@ -336,7 +336,7 @@ pub struct BitcoinCoreClient {
 pub struct BitcoinCoreClientParams {
     /// Url to bitcoin node.
     pub url: Url,
-    /// Timeout for requests to bitcoin node.
+    /// The max wait time for responses from RPC requests to bitcoin-core.
     pub timeout: Duration,
 }
 
