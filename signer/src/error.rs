@@ -711,8 +711,8 @@ pub enum Error {
     DecodeHexTxid(#[source] bitcoin::hex::HexToArrayError),
 
     /// Could not create reqwest client
-    #[error("could not create reqwest client {0}")]
-    ReqwestClientCreation(#[source] reqwest_012::Error),
+    #[error("we received an error when creating the Emily's reqwest client: {0}")]
+    EmilyReqwestClientCreation(#[source] reqwest_012::Error),
 
     /// This happens during the validation of a stacks transaction when the
     /// current signer is not a member of the signer set indicated by the

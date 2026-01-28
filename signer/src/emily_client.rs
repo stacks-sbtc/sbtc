@@ -175,12 +175,12 @@ impl EmilyClient {
         config.base_path = url.to_string().trim_end_matches("/").to_string();
         config.api_key = api_key;
 
-        let c = reqwest_012::Client::builder()
+        let client = reqwest_012::Client::builder()
             .timeout(timeout)
             .build()
-            .map_err(Error::ReqwestClientCreation)?;
+            .map_err(Error::EmilyReqwestClientCreation)?;
 
-        config.client = c;
+        config.client = client;
 
         Ok(Self {
             config,
