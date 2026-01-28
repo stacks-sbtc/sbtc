@@ -61,7 +61,8 @@ rpc_endpoints = [
     "http://devnet:devnet@127.0.0.1:18443",
 ]
 
-# The timeout, in seconds, used to fetch information from the bitcoin node.
+# The maximum amount of time, in seconds, that the signer will wait for
+# responses for RPC requests to the nodes configured in `bitcoin.rpc_endpoints`.
 # Required: false
 # Environment: SIGNER_BITCOIN__TIMEOUT
 # timeout = 10
