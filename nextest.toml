@@ -9,7 +9,6 @@ binary(integration) and test(/::serial::/)
 
 or test(/^block_observer::/)
 or test(/^complete_deposit::/)
-or test(/^postgres::/)
 or test(/^request_decider::/)
 or test(/^transaction_coordinator::/)
 or test(/^transaction_signer::/)
