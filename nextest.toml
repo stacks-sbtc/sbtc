@@ -7,13 +7,10 @@ serial-integration = { max-threads = 1 }
 filter = """\
 binary(integration) and test(/::serial::/)
 
-or test(/^bitcoin_validation::/)
 or test(/^complete_deposit::/)
-or test(/^postgres::/)
 or test(/^request_decider::/)
 or test(/^transaction_coordinator::/)
 or test(/^transaction_signer::/)
 or test(/^withdrawal_accept::/)
-or test(/^withdrawal_reject::/)
 """
 test-group = "serial-integration"
