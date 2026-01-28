@@ -157,6 +157,14 @@ impl Validatable for BitcoinConfig {
             ));
         }
 
+        // All durations should be non-zero
+        let zero = std::time::Duration::ZERO;
+        if self.timeout == zero {
+            return Err(ConfigError::Message(
+                SignerConfigError::ZeroDurationForbidden("bitcoin_timeout").to_string(),
+            ));
+        }
+
         // Validate each endpoint configuration.
         for endpoint in &self.rpc_endpoints {
             if !["http", "https"].contains(&endpoint.scheme()) {
@@ -470,11 +478,6 @@ impl Validatable for SignerConfig {
         if cfg.signer.dkg_max_duration == zero {
             return Err(ConfigError::Message(
                 SignerConfigError::ZeroDurationForbidden("dkg_max_duration").to_string(),
-            ));
-        }
-        if cfg.bitcoin.timeout == zero {
-            return Err(ConfigError::Message(
-                SignerConfigError::ZeroDurationForbidden("bitcoin_timeout").to_string(),
             ));
         }
         if cfg.signer.bitcoin_presign_request_max_duration == zero {
