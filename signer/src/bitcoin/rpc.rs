@@ -334,7 +334,7 @@ pub struct BitcoinCoreClient {
 
 /// A helper struct containing data, necessary to create a new BitcoinCoreClient.
 pub struct BitcoinCoreClientParams {
-    /// Url to bitcoin node.
+    /// The URL of a bitcoin-core node.
     pub url: Url,
     /// The max wait time for responses from RPC requests to bitcoin-core.
     pub timeout: Duration,
