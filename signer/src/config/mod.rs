@@ -286,7 +286,7 @@ pub struct EmilyClientConfig {
     /// Pagination timeout in seconds.
     #[serde(deserialize_with = "duration_seconds_deserializer")]
     pub pagination_timeout: std::time::Duration,
-    /// Timeout in seconds.
+    /// The max time waiting for an HTTP response from Emily.
     #[serde(deserialize_with = "duration_seconds_deserializer")]
     pub timeout: std::time::Duration,
 }
