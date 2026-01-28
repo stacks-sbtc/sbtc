@@ -83,11 +83,13 @@ pub struct Withdrawal {
 #[serde(rename_all = "camelCase")]
 pub struct ExpectedFulfillmentInfo {
     /// Expected bitcoin block height into which sweep transaction will be included into the block.
+    /// Calculated by Emily once, no ajustments are made if something goes wrong.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub expected_height: Option<u64>,
-    /// Expected txid of the sweep transaction.
+    pub bitcoin_block_height: Option<u64>,
+    /// Expected txid of the sweep transaction. This field is populated once, and will not be changed if there
+    /// is and rbf (and will show incorrect expectation)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub expected_txid: Option<String>,
+    pub bitcoin_txid: Option<String>,
 }
 
 /// Withdrawal parameters.

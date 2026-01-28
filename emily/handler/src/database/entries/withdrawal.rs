@@ -142,8 +142,8 @@ impl WithdrawalEntry {
                 stacks_block_height: chainstate.stacks_block_height,
                 stacks_block_hash: chainstate.stacks_block_hash.clone(),
                 expected_fulfillment_info: ExpectedFulfillmentInfo {
-                    expected_height: None,
-                    expected_txid: None,
+                    bitcoin_block_height: None,
+                    bitcoin_txid: None,
                 },
             }]
         }
@@ -696,18 +696,20 @@ impl WithdrawalUpdatePackage {
             .ensure_following_event_is_valid(&update.event)?;
 
         // Keeping the old data for expected_fulfillment txid if None was provided.
-        // For the expected_height we intentionally ignore updates for now, relying on
+        // For the bitcoin_block_height we intentionally ignore updates for now, relying on
         // the value computed by Emily.
         let latest_event_expected_fulfillment = &entry.latest_event()?.expected_fulfillment_info;
         let update_expected_fulfillment = &update.event.expected_fulfillment_info;
-        let expected_height = latest_event_expected_fulfillment.expected_height;
-        let expected_txid = update_expected_fulfillment
-            .expected_txid
+        let bitcoin_block_height = latest_event_expected_fulfillment.bitcoin_block_height;
+        let bitcoin_txid = update_expected_fulfillment
+            .bitcoin_txid
             .clone()
-            .or(latest_event_expected_fulfillment.expected_txid.clone());
+            .or(latest_event_expected_fulfillment.bitcoin_txid.clone());
         let mut new_event = update.event;
-        new_event.expected_fulfillment_info =
-            ExpectedFulfillmentInfo { expected_height, expected_txid };
+        new_event.expected_fulfillment_info = ExpectedFulfillmentInfo {
+            bitcoin_block_height,
+            bitcoin_txid,
+        };
 
         // Create the withdrawal update package.
         Ok(WithdrawalUpdatePackage {
@@ -742,8 +744,8 @@ mod tests {
             stacks_block_height: 1,
             stacks_block_hash: "hash".to_string(),
             expected_fulfillment_info: ExpectedFulfillmentInfo {
-                expected_height: None,
-                expected_txid: None,
+                bitcoin_block_height: None,
+                bitcoin_txid: None,
             },
         };
 
@@ -753,8 +755,8 @@ mod tests {
             stacks_block_height: 2,
             stacks_block_hash: "hash".to_string(),
             expected_fulfillment_info: ExpectedFulfillmentInfo {
-                expected_height: None,
-                expected_txid: None,
+                bitcoin_block_height: None,
+                bitcoin_txid: None,
             },
         };
 
@@ -794,8 +796,8 @@ mod tests {
             stacks_block_height: 1,
             stacks_block_hash: "hash".to_string(),
             expected_fulfillment_info: ExpectedFulfillmentInfo {
-                expected_height: None,
-                expected_txid: None,
+                bitcoin_block_height: None,
+                bitcoin_txid: None,
             },
         };
 
@@ -805,8 +807,8 @@ mod tests {
             stacks_block_height: 2,
             stacks_block_hash: "hash".to_string(),
             expected_fulfillment_info: ExpectedFulfillmentInfo {
-                expected_height: None,
-                expected_txid: None,
+                bitcoin_block_height: None,
+                bitcoin_txid: None,
             },
         };
 
@@ -855,8 +857,8 @@ mod tests {
             stacks_block_height: 2,
             stacks_block_hash: "hash2".to_string(),
             expected_fulfillment_info: ExpectedFulfillmentInfo {
-                expected_height: None,
-                expected_txid: None,
+                bitcoin_block_height: None,
+                bitcoin_txid: None,
             },
         };
 
@@ -866,8 +868,8 @@ mod tests {
             stacks_block_height: 4,
             stacks_block_hash: "hash4".to_string(),
             expected_fulfillment_info: ExpectedFulfillmentInfo {
-                expected_height: None,
-                expected_txid: None,
+                bitcoin_block_height: None,
+                bitcoin_txid: None,
             },
         };
 
@@ -878,8 +880,8 @@ mod tests {
             stacks_block_height: 6,
             stacks_block_hash: "hash6".to_string(),
             expected_fulfillment_info: ExpectedFulfillmentInfo {
-                expected_height: None,
-                expected_txid: None,
+                bitcoin_block_height: None,
+                bitcoin_txid: None,
             },
         };
 

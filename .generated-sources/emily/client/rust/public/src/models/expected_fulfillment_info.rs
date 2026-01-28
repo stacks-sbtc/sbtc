@@ -14,30 +14,30 @@ use serde::{Deserialize, Serialize};
 /// ExpectedFulfillmentInfo : Expected information about future fulfillment of the withdrawal. This struct represents _estimate_ of how fulfillment for the withdrawal will look like. This estimation is for reference only, and does not provide any guarantees.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ExpectedFulfillmentInfo {
-    /// Expected bitcoin block height into which sweep transaction will be included into the block.
+    /// Expected bitcoin block height into which sweep transaction will be included into the block. Calculated by Emily once, no ajustments are made if something goes wrong.
     #[serde(
-        rename = "expectedHeight",
+        rename = "bitcoinBlockHeight",
         default,
         with = "::serde_with::rust::double_option",
         skip_serializing_if = "Option::is_none"
     )]
-    pub expected_height: Option<Option<u64>>,
-    /// Expected txid of the sweep transaction.
+    pub bitcoin_block_height: Option<Option<u64>>,
+    /// Expected txid of the sweep transaction. This field is populated once, and will not be changed if there is and rbf (and will show incorrect expectation)
     #[serde(
-        rename = "expectedTxid",
+        rename = "bitcoinTxid",
         default,
         with = "::serde_with::rust::double_option",
         skip_serializing_if = "Option::is_none"
     )]
-    pub expected_txid: Option<Option<String>>,
+    pub bitcoin_txid: Option<Option<String>>,
 }
 
 impl ExpectedFulfillmentInfo {
     /// Expected information about future fulfillment of the withdrawal. This struct represents _estimate_ of how fulfillment for the withdrawal will look like. This estimation is for reference only, and does not provide any guarantees.
     pub fn new() -> ExpectedFulfillmentInfo {
         ExpectedFulfillmentInfo {
-            expected_height: None,
-            expected_txid: None,
+            bitcoin_block_height: None,
+            bitcoin_txid: None,
         }
     }
 }

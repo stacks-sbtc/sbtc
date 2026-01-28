@@ -266,7 +266,7 @@ pub async fn create_withdrawal(
         let chainstate =
             accessors::get_chainstate_entry_at_height(&context, &stacks_block_height).await;
 
-        let expected_height = chainstate
+        let bitcoin_block_height = chainstate
             .map(|chainstate| chainstate.bitcoin_height)
             .ok()
             .flatten()
@@ -289,8 +289,8 @@ pub async fn create_withdrawal(
                 stacks_block_hash: stacks_block_hash.clone(),
                 stacks_block_height,
                 expected_fulfillment_info: ExpectedFulfillmentInfo {
-                    expected_height,
-                    expected_txid: None,
+                    bitcoin_block_height,
+                    bitcoin_txid: None,
                 },
             }],
             status,

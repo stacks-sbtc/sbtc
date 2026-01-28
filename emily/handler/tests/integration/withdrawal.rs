@@ -90,8 +90,8 @@ async fn create_and_get_withdrawal_happy_path() {
         amount,
         fulfillment: None,
         expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
-            expected_height: None,
-            expected_txid: None,
+            bitcoin_block_height: None,
+            bitcoin_txid: None,
         }),
         last_update_block_hash: BLOCK_HASH.into(),
         last_update_height: BLOCK_HEIGHT,
@@ -473,8 +473,8 @@ async fn update_withdrawals() {
             request_id,
             fulfillment: Some(Some(Box::new(update_fulfillment.clone()))),
             expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
-                expected_height: None,
-                expected_txid: None,
+                bitcoin_block_height: None,
+                bitcoin_txid: None,
             }),
             status: update_status,
             status_message: update_status_message.into(),
@@ -485,8 +485,8 @@ async fn update_withdrawals() {
             amount,
             fulfillment: Some(Some(Box::new(update_fulfillment.clone()))),
             expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
-                expected_height: None,
-                expected_txid: None,
+                bitcoin_block_height: None,
+                bitcoin_txid: None,
             }),
             last_update_block_hash: update_chainstate.stacks_block_hash.clone(),
             last_update_height: update_chainstate.stacks_block_height,
@@ -610,8 +610,8 @@ async fn update_withdrawals_is_forbidden_for_signer(
                     request_id,
                     fulfillment,
                     expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
-                        expected_height: None,
-                        expected_txid: None,
+                        bitcoin_block_height: None,
+                        bitcoin_txid: None,
                     }),
                     status: previous_status,
                     status_message: "foo".into(),
@@ -641,8 +641,8 @@ async fn update_withdrawals_is_forbidden_for_signer(
             withdrawals: vec![WithdrawalUpdate {
                 request_id,
                 expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
-                    expected_height: None,
-                    expected_txid: None,
+                    bitcoin_block_height: None,
+                    bitcoin_txid: None,
                 }),
                 fulfillment,
                 status: new_status,
@@ -753,8 +753,8 @@ async fn update_withdrawals_is_not_forbidden_for_sidecar(
                 withdrawals: vec![WithdrawalUpdate {
                     request_id,
                     expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
-                        expected_height: None,
-                        expected_txid: None,
+                        bitcoin_block_height: None,
+                        bitcoin_txid: None,
                     }),
                     fulfillment,
                     status: previous_status,
@@ -785,8 +785,8 @@ async fn update_withdrawals_is_not_forbidden_for_sidecar(
             withdrawals: vec![WithdrawalUpdate {
                 request_id,
                 expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
-                    expected_height: None,
-                    expected_txid: None,
+                    bitcoin_block_height: None,
+                    bitcoin_txid: None,
                 }),
                 fulfillment,
                 status: new_status,
@@ -890,8 +890,8 @@ async fn emily_process_withdrawal_updates_when_some_of_them_already_accepted() {
             request_id: create_withdrawal_body1.request_id,
             fulfillment: None,
             expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
-                expected_height: None,
-                expected_txid: None,
+                bitcoin_block_height: None,
+                bitcoin_txid: None,
             }),
             status: WithdrawalStatus::Accepted,
             status_message: "First update".into(),
@@ -939,8 +939,8 @@ async fn emily_process_withdrawal_updates_when_some_of_them_already_accepted() {
                 request_id: create_withdrawal_body1.request_id,
                 fulfillment: None,
                 expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
-                    expected_height: None,
-                    expected_txid: None,
+                    bitcoin_block_height: None,
+                    bitcoin_txid: None,
                 }),
                 status: WithdrawalStatus::Accepted,
                 status_message: "Second update".into(),
@@ -949,8 +949,8 @@ async fn emily_process_withdrawal_updates_when_some_of_them_already_accepted() {
                 request_id: create_withdrawal_body2.request_id,
                 fulfillment: None,
                 expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
-                    expected_height: None,
-                    expected_txid: None,
+                    bitcoin_block_height: None,
+                    bitcoin_txid: None,
                 }),
                 status: WithdrawalStatus::Accepted,
                 status_message: "Second update".into(),
@@ -1060,8 +1060,8 @@ async fn emily_process_withdrawal_updates_when_some_of_them_are_unknown() {
                 request_id: create_withdrawal_body1.request_id,
                 fulfillment: None,
                 expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
-                    expected_height: None,
-                    expected_txid: None,
+                    bitcoin_block_height: None,
+                    bitcoin_txid: None,
                 }),
                 status: WithdrawalStatus::Accepted,
                 status_message: "Second update".into(),
@@ -1070,8 +1070,8 @@ async fn emily_process_withdrawal_updates_when_some_of_them_are_unknown() {
                 request_id: create_withdrawal_body2.request_id,
                 fulfillment: None,
                 expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
-                    expected_height: None,
-                    expected_txid: None,
+                    bitcoin_block_height: None,
+                    bitcoin_txid: None,
                 }),
                 status: WithdrawalStatus::Accepted,
                 status_message: "Second update".into(),
@@ -1312,8 +1312,8 @@ async fn only_confirmed_withdrawals_can_have_fulfillment(
             request_id,
             fulfillment: fulfillment.clone(),
             expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
-                expected_height: None,
-                expected_txid: None,
+                bitcoin_block_height: None,
+                bitcoin_txid: None,
             }),
             status,
             status_message: "foo".into(),
@@ -1408,17 +1408,17 @@ async fn expected_fulfillment_info_stored_correctly() {
         .unwrap();
     let received_expected_height = withdrawal
         .expected_fulfillment_info
-        .expected_height
+        .bitcoin_block_height
         .unwrap()
         .unwrap();
-    assert!(withdrawal.expected_fulfillment_info.expected_txid.is_none());
+    assert!(withdrawal.expected_fulfillment_info.bitcoin_txid.is_none());
     assert_eq!(8, received_expected_height);
 
     // Now signer updates withdrawal with expected txid and height
     let expected_expected_txid = "txid".to_string();
     let expected_fulfillment_info = ExpectedFulfillmentInfo {
-        expected_height: Some(Some(300)),
-        expected_txid: Some(Some(expected_expected_txid.clone())),
+        bitcoin_block_height: Some(Some(300)),
+        bitcoin_txid: Some(Some(expected_expected_txid.clone())),
     };
 
     let request = UpdateWithdrawalsRequestBody {
@@ -1447,11 +1447,11 @@ async fn expected_fulfillment_info_stored_correctly() {
         .unwrap()
         .expected_fulfillment_info;
     let received_expected_height = received_expected_fulfillment_info
-        .expected_height
+        .bitcoin_block_height
         .unwrap()
         .unwrap();
     let received_expected_txid = received_expected_fulfillment_info
-        .expected_txid
+        .bitcoin_txid
         .unwrap()
         .unwrap();
 
@@ -1464,11 +1464,11 @@ async fn expected_fulfillment_info_stored_correctly() {
 
     let received_expected_fulfillment_info = withdrawal.expected_fulfillment_info;
     let received_expected_height = received_expected_fulfillment_info
-        .expected_height
+        .bitcoin_block_height
         .unwrap()
         .unwrap();
     let received_expected_txid = received_expected_fulfillment_info
-        .expected_txid
+        .bitcoin_txid
         .unwrap()
         .unwrap();
 

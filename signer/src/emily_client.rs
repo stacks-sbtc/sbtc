@@ -352,7 +352,7 @@ impl EmilyInteract for EmilyClient {
             .iter()
             .filter_map(RequestRef::as_withdrawal);
 
-        let expected_txid = transaction.tx.compute_txid().to_string();
+        let bitcoin_txid = transaction.tx.compute_txid().to_string();
 
         let update_request: Vec<_> = withdrawals
             .map(|withdrawal| WithdrawalUpdate {
@@ -360,8 +360,8 @@ impl EmilyInteract for EmilyClient {
                 fulfillment: None,
                 status: WithdrawalStatus::Accepted,
                 expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
-                    expected_height: None,
-                    expected_txid: Some(Some(expected_txid.clone())),
+                    bitcoin_block_height: None,
+                    bitcoin_txid: Some(Some(bitcoin_txid.clone())),
                 }),
                 status_message: "".to_string(),
             })

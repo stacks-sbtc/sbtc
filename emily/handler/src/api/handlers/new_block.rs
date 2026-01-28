@@ -307,8 +307,8 @@ fn handle_withdrawal_accept(event: WithdrawalAcceptEvent) -> WithdrawalUpdate {
             stacks_txid: hex::encode(event.txid.0),
         }),
         expected_fulfillment_info: ExpectedFulfillmentInfo {
-            expected_height: None,
-            expected_txid: None,
+            bitcoin_block_height: None,
+            bitcoin_txid: None,
         },
         status_message: format!("Included in block {}", event.block_id.to_hex()),
     }
@@ -364,8 +364,8 @@ fn handle_withdrawal_reject(event: WithdrawalRejectEvent) -> WithdrawalUpdate {
         status: WithdrawalStatus::Failed,
         status_message: "Rejected".to_string(),
         expected_fulfillment_info: ExpectedFulfillmentInfo {
-            expected_height: None,
-            expected_txid: None,
+            bitcoin_block_height: None,
+            bitcoin_txid: None,
         },
     }
 }
@@ -433,8 +433,8 @@ mod test {
             fulfillment: None,
             status_message: "Rejected".to_string(),
             expected_fulfillment_info: ExpectedFulfillmentInfo {
-                expected_height: None,
-                expected_txid: None,
+                bitcoin_block_height: None,
+                bitcoin_txid: None,
             },
         };
 
@@ -471,8 +471,8 @@ mod test {
             }),
             status_message: format!("Included in block {}", event.block_id.to_hex()),
             expected_fulfillment_info: ExpectedFulfillmentInfo {
-                expected_height: None,
-                expected_txid: None,
+                bitcoin_block_height: None,
+                bitcoin_txid: None,
             },
         };
 
