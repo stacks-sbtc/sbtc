@@ -43,7 +43,7 @@ endpoints = [
 # Environment: SIGNER_EMILY__PAGINATION_TIMEOUT
 # pagination_timeout = 10
 
-# The timeout, in seconds, used to fetch deposits requests from Emily.
+# The timeout, in seconds, used to fetch requests from Emily.
 # Required: false
 # Environment: SIGNER_EMILY__TIMEOUT
 # timeout = 10
