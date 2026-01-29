@@ -6239,17 +6239,7 @@ where
 async fn reuse_nonce_attack() {
     let stacks = StacksClient::new(Url::parse("http://127.0.0.1:20443").unwrap()).unwrap();
     let (rpc, faucet) = regtest::initialize_blockchain_devenv();
-<<<<<<< HEAD
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@127.0.0.1:3031").unwrap(),
-        Duration::from_secs(1),
-        Duration::from_secs(1),
-        None,
-    )
-    .unwrap();
-=======
     let (emily_client, emily_tables) = new_emily_setup().await;
->>>>>>> main
 
     let mut rng = get_rng();
 
