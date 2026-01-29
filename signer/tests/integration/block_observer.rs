@@ -1897,20 +1897,18 @@ fn make_coinbase_deposit_request(
 #[test_case::test_case(1; "fork generating one block")]
 #[tokio::test]
 async fn block_observer_marks_bitcoin_blocks_as_canonical(fork_generating_blocks: u64) {
-    let (rpc, faucet) = regtest::initialize_blockchain();
-    let db = testing::storage::new_test_database().await;
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+    let (emily_client, emily_tables) = new_emily_setup().await;
 
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(1),
-        None,
-    )
-    .unwrap();
+    let db = testing::storage::new_test_database().await;
 
     let ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
-        .with_emily_client(emily_client.clone())
+        .with_bitcoin_client(bitcoin.get_client())
+        .with_emily_client(emily_client)
         .with_mocked_stacks_client()
         .build();
 
@@ -1920,13 +1918,6 @@ async fn block_observer_marks_bitcoin_blocks_as_canonical(fork_generating_blocks
         client
             .expect_get_tenure_info()
             .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
-        client.expect_get_block().returning(|_| {
-            let response = Ok(NakamotoBlock {
-                header: NakamotoBlockHeader::empty(),
-                txs: Vec::new(),
-            });
-            Box::pin(std::future::ready(response))
-        });
 
         let tenure_headers = TenureBlockHeaders::from_anchor(&anchor);
 
@@ -1990,10 +1981,9 @@ async fn block_observer_marks_bitcoin_blocks_as_canonical(fork_generating_blocks
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
-    let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
     let block_observer = BlockObserver {
         context: ctx.clone(),
-        bitcoin_block_source,
+        bitcoin_block_source: bitcoin.start_chain_tip_poller().await,
     };
 
     // We need at least one receiver
@@ -2092,4 +2082,5 @@ async fn block_observer_marks_bitcoin_blocks_as_canonical(fork_generating_blocks
     }
 
     testing::storage::drop_db(db).await;
+    clean_emily_setup(emily_tables).await;
 }
