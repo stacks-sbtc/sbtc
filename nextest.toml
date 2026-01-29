@@ -7,7 +7,6 @@ serial-integration = { max-threads = 1 }
 filter = """\
 binary(integration) and test(/::serial::/)
 
-or test(/^block_observer::/)
 or test(/^complete_deposit::/)
 or test(/^request_decider::/)
 or test(/^withdrawal_accept::/)
