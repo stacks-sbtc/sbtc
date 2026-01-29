@@ -366,8 +366,7 @@ impl<C: Context, B> BlockObserver<C, B> {
 
         tracing::info!("updating canonical bitcoin blockchain to chain tip");
         let chain_tip: model::BitcoinBlockHash = chain_tip.into();
-        db.set_canonical_bitcoin_blockchain(&chain_tip).await?;
-        Ok(())
+        db.set_canonical_bitcoin_blockchain(&chain_tip).await
     }
 
     /// Process bitcoin blocks until we get caught up to the given
