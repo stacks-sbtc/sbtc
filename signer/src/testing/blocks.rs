@@ -113,10 +113,7 @@ impl BitcoinChain {
 
         let mut fork_chain = Self(fork);
 
-        for _ in 0..num_blocks {
-            let new_block = fork_chain.chain_tip().new_child();
-            fork_chain.0.insert(new_block.block_height, new_block);
-        }
+        fork_chain.generate_blocks(num_blocks);
 
         fork_chain
     }
