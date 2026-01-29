@@ -8233,4 +8233,94 @@ mod canonical_bitcoin_blockchain {
 
         testing::storage::drop_db(db).await;
     }
+
+    /// Like the test_set_canonical_bitcoin_blockchain test above, this
+    /// test checks that the DbWrite::set_canonical_bitcoin_blockchain()
+    /// function sets is_canonical = TRUE in the bitcoin_blocks table for
+    /// all blocks in the chain along the chain tip. It also check that if
+    /// forked blocks are added to the database along with canonical
+    /// blocks, that the forked blocks are marked as non-canonical.
+    ///
+    /// The difference with this test is that it uses the TestData struct
+    /// to generate many random blockchains and insert them all into the
+    /// database.
+    #[tokio::test]
+    async fn test_set_canonical_bitcoin_blockchain_v2() {
+        let db = testing::storage::new_test_database().await;
+
+        let mut rng = get_rng();
+        let signer_keys = testing::wsts::generate_signer_set_public_keys(&mut rng, 7);
+
+        // Create many random blockchains and insert them all into the database
+        let params = testing::storage::model::Params {
+            num_bitcoin_blocks: 100,
+            num_stacks_blocks_per_bitcoin_block: 0,
+            num_deposit_requests_per_block: 0,
+            num_withdraw_requests_per_block: 0,
+            num_signers_per_request: 0,
+            consecutive_blocks: false,
+        };
+        let blockchains = TestData::generate(&mut rng, &signer_keys, &params);
+
+        // Insert all blocks from into the database
+        for block in blockchains.bitcoin_blocks.iter() {
+            db.write_bitcoin_block(block).await.unwrap();
+        }
+
+        // Get the chain tip of the canonical chain
+        let chain_tip = db
+            .get_bitcoin_canonical_chain_tip_ref()
+            .await
+            .unwrap()
+            .unwrap();
+
+        // Initially, all blocks should have is_canonical = NULL
+        // Verify that no blocks have is_canonical IS NOT NULL
+        let has_non_null_canonical: bool = sqlx::query_scalar(
+            "SELECT EXISTS(
+                SELECT 1 
+                FROM sbtc_signer.bitcoin_blocks 
+                WHERE is_canonical IS NOT NULL
+            )",
+        )
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+
+        assert!(!has_non_null_canonical);
+
+        // Call set_canonical_bitcoin_blockchain with the chain tip
+        db.set_canonical_bitcoin_blockchain(&chain_tip.block_hash)
+            .await
+            .unwrap();
+
+        // To make sure that not everything is marked as non-canonical, we
+        // have a flag that at least one block is canonical.
+        let mut some_canonical_block_exists = false;
+
+        // Verify that only blocks in the canonical chain are marked as canonical
+        for block in blockchains.bitcoin_blocks.iter() {
+            // This function checks whether the given block is on the
+            // canonical chain by recursing backwards from the chain tip to
+            // the given block.
+            let on_canonical_chain = db
+                .in_canonical_bitcoin_blockchain(&chain_tip, &block.into())
+                .await
+                .unwrap();
+            // This function checks the is_canonical column for the given
+            // block hash.
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
+
+            // Every block should have their is_canonical column set to
+            // some value, and it should match what the
+            // in_canonical_bitcoin_blockchain function returns.
+            assert_eq!(Some(on_canonical_chain), is_canonical);
+
+            if on_canonical_chain {
+                some_canonical_block_exists = true;
+            }
+        }
+        assert!(some_canonical_block_exists);
+        testing::storage::drop_db(db).await;
+    }
 }
