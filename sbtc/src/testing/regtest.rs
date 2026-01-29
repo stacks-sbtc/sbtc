@@ -384,6 +384,17 @@ impl<'a> Faucet<'a> {
         self.rpc.send_raw_transaction(&tx).unwrap();
         OutPoint::new(tx.compute_txid(), 0)
     }
+
+    /// Generate some transactions to ensure bitcoincore has enough data to
+    /// estimate fees
+    pub fn generate_fee_data(&self) {
+        for _ in 0..10 {
+            self.send_to(1000, &self.address);
+            self.send_to(1001, &self.address);
+            self.send_to(1002, &self.address);
+            self.generate_block();
+        }
+    }
 }
 
 /// Extract the relevant aspects of a UTXO
