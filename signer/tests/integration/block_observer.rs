@@ -1877,8 +1877,11 @@ fn make_coinbase_deposit_request(
 
 /// This test checks that the block observer marks the canonical status of
 /// bitcoin blocks in the database whenever a new block is observed.
+#[test_case::test_case(3; "fork generating three blocks")]
+#[test_case::test_case(2; "fork generating two blocks")]
+#[test_case::test_case(1; "fork generating one block")]
 #[tokio::test]
-async fn block_observer_marks_bitcoin_blocks_as_canonical() {
+async fn block_observer_marks_bitcoin_blocks_as_canonical(fork_generating_blocks: u64) {
     let (rpc, faucet) = regtest::initialize_blockchain();
     let db = testing::storage::new_test_database().await;
 
@@ -2031,35 +2034,31 @@ async fn block_observer_marks_bitcoin_blocks_as_canonical() {
     // this is to create a new transaction to ensure that the new block is
     // distinct from the previous ones.
     faucet.send_to(1001, &faucet.address);
-    let new_blocks = faucet.generate_blocks(2);
-    let [new_block_1, new_block_2] = <[_; 2]>::try_from(new_blocks).unwrap().map(From::from);
+    let new_blocks = faucet
+        .generate_blocks(fork_generating_blocks)
+        .into_iter()
+        .map(BitcoinBlockHash::from)
+        .collect::<Vec<_>>();
+    let last_new_block = new_blocks.last().cloned().unwrap();
 
     ctx.wait_for_signal(Duration::from_secs(8), |signal| {
         matches!(
             signal,
             SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
-                if block_ref.block_hash == new_block_2
+                if block_ref.block_hash == last_new_block
         )
     })
     .await
     .unwrap();
 
     // Verify the new blocks are in the database
-    let db_new_block_1 = db.get_bitcoin_block(&new_block_1).await.unwrap();
-    assert!(db_new_block_1.is_some());
-    let db_new_block_2 = db.get_bitcoin_block(&new_block_2).await.unwrap();
-    assert!(db_new_block_2.is_some());
+    for new_block in new_blocks {
+        let db_new_block = db.get_bitcoin_block(&new_block).await.unwrap();
+        assert!(db_new_block.is_some());
+        assert_eq!(db.is_block_canonical(&new_block).await.unwrap(), Some(true));
+    }
 
     // Check that the new blocks have is_canonical = true
-    assert_eq!(
-        db.is_block_canonical(&new_block_1).await.unwrap(),
-        Some(true)
-    );
-    assert_eq!(
-        db.is_block_canonical(&new_block_2).await.unwrap(),
-        Some(true)
-    );
-
     // Check that the old chain tip has is_canonical = false
     let invalidated_chain_tip_status = db
         .is_block_canonical(&chain_tip_before_invalidation)
@@ -2068,7 +2067,7 @@ async fn block_observer_marks_bitcoin_blocks_as_canonical() {
     assert_eq!(invalidated_chain_tip_status, Some(false));
 
     // Verify all blocks on the new chain are canonical
-    let new_chain_blocks = get_chain_blocks(&db, &new_block_2).await;
+    let new_chain_blocks = get_chain_blocks(&db, &last_new_block).await;
     for (block_hash, is_canonical) in new_chain_blocks {
         // The old chain tip should not be in the new chain
         if block_hash == chain_tip_before_invalidation {
