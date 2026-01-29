@@ -304,12 +304,12 @@ impl Validatable for EmilyClientConfig {
         let zero = std::time::Duration::ZERO;
         if self.timeout == zero {
             return Err(ConfigError::Message(
-                SignerConfigError::ZeroDurationForbidden("emily_timeout").to_string(),
+                SignerConfigError::ZeroDurationForbidden("emily::timeout").to_string(),
             ));
         }
         if self.pagination_timeout == zero {
             return Err(ConfigError::Message(
-                SignerConfigError::ZeroDurationForbidden("emily_pagination_timeout").to_string(),
+                SignerConfigError::ZeroDurationForbidden("emily::pagination_timeout").to_string(),
             ));
         }
 
