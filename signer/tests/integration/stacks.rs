@@ -14,6 +14,7 @@ use clarity::consts::CHAIN_ID_TESTNET;
 use clarity::types::chainstate::StacksAddress;
 use clarity::util::secp256k1::MessageSignature;
 use clarity::vm::types::PrincipalData;
+use clarity::vm::types::QualifiedContractIdentifier;
 use signer::signature::RecoverableEcdsaSignature as _;
 use signer::stacks::api::StacksClient;
 use signer::stacks::contracts::AsTxPayload as _;
@@ -24,6 +25,14 @@ use stacks_common::address::C32_ADDRESS_VERSION_TESTNET_SINGLESIG;
 // for tests.
 // Address: ST1YEHRRYJ4GF9CYBFFN0ZVCXX1APSBEEQ5KEDN7M
 const FAUCET_PRIVATE_KEY: &str = "e26e611fc92fe535c5e2e58a6a446375bb5e3b471440af21bbe327384befb50a";
+
+pub fn principal_to_address(principal: &PrincipalData) -> StacksAddress {
+    let principal = match principal {
+        PrincipalData::Standard(addr) => addr.clone(),
+        PrincipalData::Contract(QualifiedContractIdentifier { issuer, .. }) => issuer.clone(),
+    };
+    StacksAddress::from(principal)
+}
 
 pub async fn fund_stx(
     stacks_client: &StacksClient,

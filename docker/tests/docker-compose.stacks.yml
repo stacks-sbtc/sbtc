@@ -55,6 +55,8 @@ services:
 
   # If the snapshot is older than 2 hours the stacks node will complain. To 
   # prevent it, we generate a bitcoin block on startup.
+  # To prevent compose running with `--wait` (like when used in tests) from
+  # failing on service exit, the container sleep indefinitely at the end.
   bitcoin-new-block:
     image: bitcoin/bitcoin:25.2
     depends_on:

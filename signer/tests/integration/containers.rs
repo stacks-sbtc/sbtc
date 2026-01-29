@@ -3,7 +3,6 @@ use std::time::Duration;
 
 use bitcoincore_rpc::RpcApi as _;
 use clarity::vm::types::PrincipalData;
-use more_asserts::assert_gt;
 use sbtc::testing::containers::BitcoinContainer;
 use sbtc::testing::containers::StacksContainer;
 use sbtc::testing::containers::TestContainersBuilder;
@@ -12,6 +11,7 @@ use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::stacks::api::StacksClient;
 
 use crate::stacks::fund_stx;
+use crate::stacks::principal_to_address;
 
 pub trait BitcoinContainerExt {
     /// Get the Bitcoin client
@@ -67,11 +67,24 @@ async fn test_stacks() {
     let stacks_client = stacks.get_client();
 
     let recipient = PrincipalData::parse("SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS").unwrap();
+
+    // First let's ensure zero balance
+    let balance = stacks_client
+        .get_account(&principal_to_address(&recipient))
+        .await
+        .expect("cannot get account info")
+        .balance;
+    assert_eq!(balance, 0);
+
+    // Now let's try to send some STX
+    let ustx = 1_000_000;
+    let iters = 3;
+
     let mut bitcoin_blocks = HashSet::new();
     let mut stacks_blocks = HashSet::new();
 
-    for _ in 0..2 {
-        let tx = fund_stx(&stacks_client, &recipient, 1_000_000).await;
+    for _ in 0..iters {
+        let tx = fund_stx(&stacks_client, &recipient, ustx).await;
         stacks_client
             .submit_tx(&tx)
             .await
@@ -89,7 +102,15 @@ async fn test_stacks() {
         bitcoin_blocks.insert(*stacks_status.burn_block_height);
         stacks_blocks.insert(*stacks_status.stacks_tip_height);
     }
+    // Now let's see if we saw different blocks for each iter
+    assert_eq!(bitcoin_blocks.len(), iters);
+    assert_eq!(stacks_blocks.len(), iters);
 
-    assert_gt!(bitcoin_blocks.len(), 1);
-    assert_gt!(stacks_blocks.len(), 1);
+    // And finally let's check the balance
+    let balance = stacks_client
+        .get_account(&principal_to_address(&recipient))
+        .await
+        .expect("cannot get account info")
+        .balance;
+    assert_eq!(balance, iters as u128 * ustx as u128)
 }
