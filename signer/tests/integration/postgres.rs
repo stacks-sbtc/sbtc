@@ -7944,7 +7944,7 @@ mod canonical_bitcoin_blockchain {
         let fork_block_1 = fork_chain.nth_block(2u64.into());
         let fork_block_2 = fork_chain.nth_block(3u64.into());
 
-        // Verify that fork blocks are not marked as canonical
+        // Verify that forked blocks are not marked as canonical
         let fork_1_is_canonical = db
             .is_block_canonical(&fork_block_1.block_hash)
             .await
