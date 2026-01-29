@@ -492,14 +492,26 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     let donation_amount = 100_000;
     let donation_outpoint = faucet.send_to(donation_amount, &address);
 
-    faucet.generate_blocks(1);
+    let chain_tip = faucet.generate_block().into();
 
     // Let's wait for the block observer to signal that it has finished
-    // processing everything.
-    let signal = signal_receiver.recv();
-    let Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(_))) = signal.await else {
-        panic!("Not the right signal")
-    };
+    // processing everything. Since this is the first time we wait for a signal
+    // we check it's the right one instead of expecting it like we do in the
+    // checks below.
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            match signal_receiver.try_recv() {
+                Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref)))
+                    if block_ref.block_hash == chain_tip =>
+                {
+                    break;
+                }
+                _ => tokio::time::sleep(Duration::from_millis(10)).await,
+            }
+        }
+    })
+    .await
+    .expect("block observer failed to complete within timeout");
 
     // Okay now we check whether the we have a donation. The details should
     // match what we expect. All other input and output types should not be
