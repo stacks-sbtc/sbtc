@@ -7962,7 +7962,9 @@ mod canonical_bitcoin_blockchain {
         // guarantees of the set_canonical_bitcoin_blockchaion function is
         // that non-canonical blocks are not marked as canonical, not that
         // they are definitively marked as non-canonical.
-        db.set_canonical_bitcoin_blockchain(&chain_tip).await.unwrap();
+        db.set_canonical_bitcoin_blockchain(&chain_tip)
+            .await
+            .unwrap();
         let fork_1_is_canonical = db
             .is_block_canonical(&fork_block_1.block_hash)
             .await
