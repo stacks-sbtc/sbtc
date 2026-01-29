@@ -395,7 +395,6 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
         .build();
 
     ctx.state().set_sbtc_contracts_deployed();
-    let mut signal_receiver = ctx.get_signal_receiver();
 
     // The block observer reaches out to the stacks node to get the most
     // up-to-date information. We don't have stacks-core running so we mock
@@ -495,23 +494,16 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     let chain_tip = faucet.generate_block().into();
 
     // Let's wait for the block observer to signal that it has finished
-    // processing everything. Since this is the first time we wait for a signal
-    // we check it's the right one instead of expecting it like we do in the
-    // checks below.
-    tokio::time::timeout(Duration::from_secs(3), async {
-        loop {
-            match signal_receiver.try_recv() {
-                Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref)))
-                    if block_ref.block_hash == chain_tip =>
-                {
-                    break;
-                }
-                _ => tokio::time::sleep(Duration::from_millis(10)).await,
-            }
-        }
+    // processing everything.
+    ctx.wait_for_signal(Duration::from_secs(3), |signal| {
+        matches!(
+            signal,
+            SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
+                if block_ref.block_hash == chain_tip
+        )
     })
     .await
-    .expect("block observer failed to complete within timeout");
+    .unwrap();
 
     // Okay now we check whether the we have a donation. The details should
     // match what we expect. All other input and output types should not be
@@ -553,13 +545,15 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     faucet.send_to(50_000_000, &depositor.address);
 
     let chain_tip: BitcoinBlockHash = faucet.generate_block().into();
-
-    let signal = signal_receiver.recv();
-    match signal.await {
-        Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref)))
-            if block_ref.block_hash == chain_tip => {}
-        _ => panic!("Not the right signal"),
-    }
+    ctx.wait_for_signal(Duration::from_secs(3), |signal| {
+        matches!(
+            signal,
+            SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
+                if block_ref.block_hash == chain_tip
+        )
+    })
+    .await
+    .unwrap();
 
     // Now lets make a deposit transaction and submit it. First we get some
     // sats.
@@ -625,12 +619,15 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
 
     // Okay now there is a deposit, and it has been confirmed. We should
     // pick it up automatically.
-    let signal = signal_receiver.recv();
-    match signal.await {
-        Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref)))
-            if block_ref.block_hash == chain_tip => {}
-        _ => panic!("Not the right signal"),
-    }
+    ctx.wait_for_signal(Duration::from_secs(3), |signal| {
+        matches!(
+            signal,
+            SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
+                if block_ref.block_hash == chain_tip
+        )
+    })
+    .await
+    .unwrap();
 
     // Okay now we should see the signers output with the expected values.
     let TxOutput { txid, output_index, amount, .. } =
