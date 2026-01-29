@@ -7957,10 +7957,27 @@ mod canonical_bitcoin_blockchain {
             .unwrap();
         assert_eq!(fork_2_is_canonical, None);
 
-        // These new blocks aren't part of the canonical chain, so they
-        // should be marked as non-canonical. In order to make sure that
-        // they get marked as such, we need to clear the is_canonical
-        // column from some of the blocks in the table.
+        // Let's set the canonical chain again and verity that the new
+        // blocks are still not marked as canonical. Note that the
+        // guarantees of the set_canonical_bitcoin_blockchaion function is
+        // that non-canonical blocks are not marked as canonical, not that
+        // they are definitively marked as non-canonical.
+        db.set_canonical_bitcoin_blockchain(&chain_tip).await.unwrap();
+        let fork_1_is_canonical = db
+            .is_block_canonical(&fork_block_1.block_hash)
+            .await
+            .unwrap();
+        assert_ne!(fork_1_is_canonical, Some(true));
+
+        let fork_2_is_canonical = db
+            .is_block_canonical(&fork_block_2.block_hash)
+            .await
+            .unwrap();
+        assert_ne!(fork_2_is_canonical, Some(true));
+
+        // In order to make sure that non-canonical blocks get marked as
+        // such, we need to clear the is_canonical column from some of the
+        // blocks in the table.
         clear_is_canonical_bitcoin_blocks(&db).await;
         db.set_canonical_bitcoin_blockchain(&chain_tip)
             .await
