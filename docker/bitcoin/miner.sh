@@ -8,8 +8,10 @@ bitcoin-cli -rpcconnect=bitcoin -named createwallet wallet_name=main descriptors
 bitcoin-cli -rpcconnect=bitcoin -named createwallet wallet_name=depositor descriptors=true load_on_startup=true || true
 bitcoin-cli -rpcwallet=main -rpcconnect=bitcoin importaddress "${BTC_ADDR}" "" false
 bitcoin-cli -rpcwallet=main -rpcconnect=bitcoin generatetoaddress "${INIT_BLOCKS}" "${BTC_ADDR}"
-ADDR=$(bitcoin-cli -rpcwallet=depositor -rpcconnect=bitcoin getnewaddress label="" bech32)
-bitcoin-cli -rpcwallet=depositor -rpcconnect=bitcoin generatetoaddress 101 "${ADDR}"
+# We may require to hijack the dummy address to use it as faucet, if not we use
+# a random address
+DUMMY_ADDR=${DUMMY_ADDR:-$(bitcoin-cli -rpcwallet=depositor -rpcconnect=bitcoin getnewaddress label="" bech32)}
+bitcoin-cli -rpcwallet=depositor -rpcconnect=bitcoin generatetoaddress 101 "${DUMMY_ADDR}"
 DEFAULT_TIMEOUT=$(($(date +%s) + 30))
 while true; do
     # Attempt to get the latest transaction, defaulting to an empty string on failure.

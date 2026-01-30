@@ -76,17 +76,53 @@ pub fn make_deposit_request<U>(
 where
     U: AsUtxo,
 {
+    make_deposit_request_to(
+        depositor,
+        amount,
+        utxo,
+        max_fee,
+        signers_public_key,
+        PrincipalData::from(StacksAddress::burn_address(false)),
+    )
+}
+
+pub fn make_deposit_request_to<U>(
+    depositor: &Recipient,
+    amount: u64,
+    utxo: U,
+    max_fee: u64,
+    signers_public_key: XOnlyPublicKey,
+    recipient_address: PrincipalData,
+) -> (Transaction, DepositRequest, DepositInfo)
+where
+    U: AsUtxo,
+{
     let fee = regtest::BITCOIN_CORE_FALLBACK_FEE.to_sat();
     let deposit_inputs = DepositScriptInputs {
         signers_public_key,
         max_fee,
-        recipient: PrincipalData::from(StacksAddress::burn_address(false)),
+        recipient: recipient_address,
     };
     let reclaim_inputs = ReclaimScriptInputs::try_new(50, ScriptBuf::new()).unwrap();
 
     let deposit_script = deposit_inputs.deposit_script();
     let reclaim_script = reclaim_inputs.reclaim_script();
 
+    let mut tx_outs = vec![TxOut {
+        value: Amount::from_sat(amount),
+        script_pubkey: sbtc::deposits::to_script_pubkey(
+            deposit_script.clone(),
+            reclaim_script.clone(),
+        ),
+    }];
+
+    let change = utxo.amount() - Amount::from_sat(amount + fee);
+    if change.to_sat() > 546 {
+        tx_outs.push(TxOut {
+            value: change,
+            script_pubkey: depositor.address.script_pubkey(),
+        });
+    }
     let mut deposit_tx = Transaction {
         version: Version::ONE,
         lock_time: LockTime::ZERO,
@@ -96,19 +132,7 @@ where
             script_sig: ScriptBuf::new(),
             witness: Witness::new(),
         }],
-        output: vec![
-            TxOut {
-                value: Amount::from_sat(amount),
-                script_pubkey: sbtc::deposits::to_script_pubkey(
-                    deposit_script.clone(),
-                    reclaim_script.clone(),
-                ),
-            },
-            TxOut {
-                value: utxo.amount() - Amount::from_sat(amount + fee),
-                script_pubkey: depositor.address.script_pubkey(),
-            },
-        ],
+        output: tx_outs,
     };
 
     regtest::p2tr_sign_transaction(&mut deposit_tx, 0, &[utxo], &depositor.keypair);
@@ -130,7 +154,6 @@ where
         reclaim_script_hash: TaprootScriptHash::from(&dep.reclaim_script),
         signers_public_key: dep.signers_public_key,
     };
-
     (deposit_tx, req, dep)
 }
 

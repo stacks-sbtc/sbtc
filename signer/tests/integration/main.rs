@@ -12,6 +12,7 @@ mod communication;
 mod complete_deposit;
 mod containers;
 mod contracts;
+mod e2e;
 mod emily;
 mod postgres;
 mod rbf;

@@ -1,7 +1,7 @@
 //! Integration testing helper functions for compose stack
 //!
 
-use std::mem::ManuallyDrop;
+use std::{mem::ManuallyDrop, time::Duration};
 
 use bitcoin::{AddressType, Amount};
 use bitcoincore_rpc::RpcApi as _;
@@ -29,9 +29,6 @@ pub const SERVICE_BITCOIN_RPC_PORT: u16 = 18443;
 pub const SERVICE_STACKS: &str = "stacks-node";
 /// Bitcoin service exposed port in the compose stack
 pub const SERVICE_STACKS_RPC_PORT: u16 = 20443;
-
-const STACKS_MINER_PRIVATE_KEY: &str =
-    "9e446f6b0c6a96cf2190e54bcd5a8569c3e386f091605499464389b8d4e0bfc2";
 
 fn compose_path(file_name: &str) -> String {
     // Evaluate `CARGO_MANIFEST_DIR` at runtime for nextest relocation
@@ -249,16 +246,10 @@ impl BitcoinContainer {
         if amount < Amount::from_int_btc(1) {
             if stacks_running {
                 // If we are running the stacks compose we can't generate too
-                // many blocks to avoid messing with the stacks node
-                let miner_faucet =
-                    Faucet::new(STACKS_MINER_PRIVATE_KEY, AddressType::P2pkh, &rpc_client);
-                miner_faucet.track_address(None);
-                let amount = Amount::from_int_btc(49);
-                // Prepare multiple UTXOs for the faucet just in case
-                for _ in 0..5 {
-                    miner_faucet.send_to(amount.to_sat(), &faucet.address);
-                }
-                faucet.generate_block();
+                // many blocks to avoid messing with the stacks node.
+                // But we should never reach this, as we do fund the faucet in
+                // the miner script.
+                unreachable!();
             } else {
                 faucet.generate_blocks(MIN_BLOCKCHAIN_HEIGHT);
             }
@@ -295,6 +286,15 @@ impl StacksContainer {
             .get_stacks_url()
             .await
             .expect("cannot get stacks url");
+
+        // We generate a bitcoin block to ensure there are no pending
+        // transactions that may disrupt our STX faucet (as that account is also
+        // used to progress the chain in the build script). This should only be
+        // relevant in the first ~2 hours after the snapshot is created, as
+        // after that the block should be considered stale.
+        containers.bitcoin().await.get_faucet().generate_block();
+        // We also sleep a bit to ensure no flash blocks
+        tokio::time::sleep(Duration::from_secs(3)).await;
 
         StacksContainer { url }
     }
