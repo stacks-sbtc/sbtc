@@ -3021,13 +3021,13 @@
           "bitcoinBlockHeight": {
             "type": "integer",
             "format": "int64",
-            "description": "Expected bitcoin block height into which sweep transaction will be included into the block.\nCalculated by Emily once, no ajustments are made if something goes wrong.",
+            "description": "The estimated bitcoin block height for the bitcoin block confirming\nthe transaction fulling the withdrawal request. This value is\nestimated by Emily once when the withdrawal request is initially\nreceived.",
             "nullable": true,
             "minimum": 0
           },
           "bitcoinTxid": {
             "type": "string",
-            "description": "Expected txid of the sweep transaction. This field is populated once, and will not be changed if there\nis and rbf (and will show incorrect expectation)",
+            "description": "The expected txid of the sweep transaction fulfilling the withdrawal\nrequest. This field is populated once, it is not updated if there is\nan RBF transaction that also fulfills the request.",
             "nullable": true
           }
         }
