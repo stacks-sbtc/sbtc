@@ -82,8 +82,10 @@ pub struct Withdrawal {
 )]
 #[serde(rename_all = "camelCase")]
 pub struct ExpectedFulfillmentInfo {
-    /// Expected bitcoin block height into which sweep transaction will be included into the block.
-    /// Calculated by Emily once, no ajustments are made if something goes wrong.
+    /// The estimated bitcoin block height for the bitcoin block confirming
+    /// the transaction fulling the withdrawal request. This value is
+    /// estimated by Emily once when the withdrawal request is initially
+    /// received.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bitcoin_block_height: Option<u64>,
     /// The expected txid of the sweep transaction fulfilling the withdrawal
