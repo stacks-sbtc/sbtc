@@ -86,8 +86,9 @@ pub struct ExpectedFulfillmentInfo {
     /// Calculated by Emily once, no ajustments are made if something goes wrong.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bitcoin_block_height: Option<u64>,
-    /// Expected txid of the sweep transaction. This field is populated once, and will not be changed if there
-    /// is and rbf (and will show incorrect expectation)
+    /// The expected txid of the sweep transaction fulfilling the withdrawal
+    /// request. This field is populated once, it is not updated if there is
+    /// an RBF transaction that also fulfills the request.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bitcoin_txid: Option<String>,
 }
