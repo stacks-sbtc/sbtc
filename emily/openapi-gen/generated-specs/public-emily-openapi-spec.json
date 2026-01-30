@@ -2180,6 +2180,24 @@
           }
         }
       },
+      "ExpectedFulfillmentInfo": {
+        "type": "object",
+        "description": "Expected information about future fulfillment of the withdrawal.\nThis struct represents _estimate_ of how fulfillment for the\nwithdrawal will look like. This estimation is for reference only,\nand does not provide any guarantees.",
+        "properties": {
+          "bitcoinBlockHeight": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The estimated bitcoin block height for the bitcoin block confirming\nthe transaction fulling the withdrawal request. This value is\nestimated by Emily once when the withdrawal request is initially\nreceived.",
+            "nullable": true,
+            "minimum": 0
+          },
+          "bitcoinTxid": {
+            "type": "string",
+            "description": "The expected txid of the sweep transaction fulfilling the withdrawal\nrequest. This field is populated once, it is not updated if there is\nan RBF transaction that also fulfills the request.",
+            "nullable": true
+          }
+        }
+      },
       "Fulfillment": {
         "type": "object",
         "description": "Data about the fulfillment of an sBTC Operation.",
@@ -2444,6 +2462,7 @@
           "status",
           "statusMessage",
           "parameters",
+          "expectedFulfillmentInfo",
           "txid"
         ],
         "properties": {
@@ -2452,6 +2471,9 @@
             "format": "int64",
             "description": "Amount of BTC being withdrawn in satoshis.",
             "minimum": 0
+          },
+          "expectedFulfillmentInfo": {
+            "$ref": "#/components/schemas/ExpectedFulfillmentInfo"
           },
           "fulfillment": {
             "allOf": [
@@ -2607,9 +2629,13 @@
         "required": [
           "requestId",
           "status",
-          "statusMessage"
+          "statusMessage",
+          "expectedFulfillmentInfo"
         ],
         "properties": {
+          "expectedFulfillmentInfo": {
+            "$ref": "#/components/schemas/ExpectedFulfillmentInfo"
+          },
           "fulfillment": {
             "allOf": [
               {

@@ -5,7 +5,7 @@ use warp::reply::{Reply, json, with_status};
 use crate::api::models::common::WithdrawalStatus;
 use crate::api::models::common::requests::BasicPaginationQuery;
 use crate::api::models::withdrawal::responses::WithdrawalWithStatus;
-use crate::api::models::withdrawal::{Withdrawal, WithdrawalInfo};
+use crate::api::models::withdrawal::{ExpectedFulfillmentInfo, Withdrawal, WithdrawalInfo};
 use crate::api::models::withdrawal::{
     requests::{CreateWithdrawalRequestBody, GetWithdrawalsQuery, UpdateWithdrawalsRequestBody},
     responses::{GetWithdrawalsResponse, UpdateWithdrawalsResponse},
@@ -263,6 +263,15 @@ pub async fn create_withdrawal(
 
         let status = WithdrawalStatus::Pending;
 
+        let chainstate =
+            accessors::get_chainstate_entry_at_height(&context, &stacks_block_height).await;
+
+        let bitcoin_block_height = chainstate
+            .map(|chainstate| chainstate.bitcoin_height)
+            .ok()
+            .flatten()
+            .map(|height| height + sbtc::WITHDRAWAL_MIN_CONFIRMATIONS + 1);
+
         // Make table entry.
         let withdrawal_entry: WithdrawalEntry = WithdrawalEntry {
             key: WithdrawalEntryKey {
@@ -279,6 +288,10 @@ pub async fn create_withdrawal(
                 message: "Just received withdrawal".to_string(),
                 stacks_block_hash: stacks_block_hash.clone(),
                 stacks_block_height,
+                expected_fulfillment_info: ExpectedFulfillmentInfo {
+                    bitcoin_block_height,
+                    bitcoin_txid: None,
+                },
             }],
             status,
             last_update_block_hash: stacks_block_hash,

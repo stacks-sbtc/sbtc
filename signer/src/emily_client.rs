@@ -17,6 +17,7 @@ use emily_client::apis::limits_api;
 use emily_client::apis::withdrawal_api;
 use emily_client::models::DepositInfo;
 use emily_client::models::DepositUpdate;
+use emily_client::models::ExpectedFulfillmentInfo;
 use emily_client::models::UpdateDepositsRequestBody;
 use emily_client::models::UpdateDepositsResponse;
 use emily_client::models::UpdateWithdrawalsRequestBody;
@@ -351,11 +352,17 @@ impl EmilyInteract for EmilyClient {
             .iter()
             .filter_map(RequestRef::as_withdrawal);
 
+        let bitcoin_txid = transaction.tx.compute_txid().to_string();
+
         let update_request: Vec<_> = withdrawals
             .map(|withdrawal| WithdrawalUpdate {
                 request_id: withdrawal.request_id,
                 fulfillment: None,
                 status: WithdrawalStatus::Accepted,
+                expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
+                    bitcoin_block_height: None,
+                    bitcoin_txid: Some(Some(bitcoin_txid.clone())),
+                }),
                 status_message: "".to_string(),
             })
             .collect();
