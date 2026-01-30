@@ -140,8 +140,8 @@ impl EmilyClient {
     /// Initialize a new Emily client and validate the url.
     pub fn try_new(
         url: &Url,
-        pagination_timeout: Duration,
         timeout: Duration,
+        pagination_timeout: Duration,
         page_size: Option<u16>,
     ) -> Result<Self, Error> {
         let mut url = url.clone();
