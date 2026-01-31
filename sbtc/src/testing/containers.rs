@@ -259,7 +259,7 @@ impl BitcoinContainer {
                 // many blocks to avoid messing with the stacks node.
                 // But we should never reach this, as we do fund the faucet in
                 // the miner script.
-                unreachable!();
+                panic!("the chainstates snapshot didn't fund the faucet");
             } else {
                 faucet.generate_blocks(MIN_BLOCKCHAIN_HEIGHT);
             }

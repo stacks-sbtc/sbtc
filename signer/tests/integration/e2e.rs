@@ -296,6 +296,12 @@ async fn deposit() {
 
     let recipient = depositor.stacks_address().to_account_principal();
 
+    // Check that recipient doesn't hold any sBTC yet
+    let sbtc_balance = get_sbtc_balance(&stacks_client, &deployer, &recipient)
+        .await
+        .expect("cannot get sbtc balance");
+    assert_eq!(sbtc_balance, Amount::ZERO);
+
     let depositor_utxo = Utxo {
         txid: depositor_fund_outpoint.txid,
         vout: depositor_fund_outpoint.vout,
@@ -310,7 +316,7 @@ async fn deposit() {
         depositor_utxo.clone(),
         max_fee,
         aggregate_key.into(),
-        recipient,
+        recipient.clone(),
     );
     rpc.send_raw_transaction(&deposit_tx)
         .expect("cannot submit deposit tx");
@@ -337,13 +343,9 @@ async fn deposit() {
     wait_for_new_nonce(&stacks_client, &deployer, old_nonce).await;
     // Now we should have sBTC minted
 
-    let sbtc_balance = get_sbtc_balance(
-        &stacks_client,
-        &deployer,
-        &depositor.stacks_address().to_account_principal(),
-    )
-    .await
-    .expect("cannot get sbtc balance");
+    let sbtc_balance = get_sbtc_balance(&stacks_client, &deployer, &recipient)
+        .await
+        .expect("cannot get sbtc balance");
 
     assert_ge!(sbtc_balance.to_sat(), deposit_amount - max_fee);
     assert_le!(sbtc_balance.to_sat(), deposit_amount);
