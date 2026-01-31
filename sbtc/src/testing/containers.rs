@@ -186,6 +186,16 @@ impl TestContainers {
         self.down_on_drop = false;
         self
     }
+
+    /// Use to bring down the stack after the test finishes (default behaviour)
+    /// Can be used when debugging: putting it at the end of a test that is
+    /// using `keep_up` enables removing the stack if the tests passed, and
+    /// keeping it up in case of errors.
+    #[allow(unused)]
+    pub fn dont_keep_up(mut self) -> Self {
+        self.down_on_drop = true;
+        self
+    }
 }
 
 /// By default the compose stack is downed on "normal" test exit (success or
@@ -287,14 +297,13 @@ impl StacksContainer {
             .await
             .expect("cannot get stacks url");
 
-        // We generate a bitcoin block to ensure there are no pending
+        // We generate some bitcoin blocks to ensure there are no pending
         // transactions that may disrupt our STX faucet (as that account is also
-        // used to progress the chain in the build script). This should only be
-        // relevant in the first ~2 hours after the snapshot is created, as
-        // after that the block should be considered stale.
+        // used to progress the chain in the build script). We also sleep a bit
+        // to ensure no flash blocks that may mess with the node awakening.
         containers.bitcoin().await.get_faucet().generate_block();
-        // We also sleep a bit to ensure no flash blocks
         tokio::time::sleep(Duration::from_secs(3)).await;
+        containers.bitcoin().await.get_faucet().generate_block();
 
         StacksContainer { url }
     }

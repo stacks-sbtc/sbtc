@@ -1,9 +1,7 @@
-use std::collections::HashSet;
 use std::time::Duration;
 
 use bitcoincore_rpc::RpcApi as _;
 use clarity::vm::types::PrincipalData;
-use more_asserts::assert_gt;
 use sbtc::testing::containers::BitcoinContainer;
 use sbtc::testing::containers::StacksContainer;
 use sbtc::testing::containers::TestContainersBuilder;
@@ -13,6 +11,7 @@ use signer::stacks::api::StacksClient;
 
 use crate::stacks::fund_stx;
 use crate::stacks::principal_to_address;
+use crate::stacks::wait_for_stx_balance;
 
 pub trait BitcoinContainerExt {
     /// Get the Bitcoin client
@@ -60,14 +59,12 @@ async fn test_bitcoin() {
 #[tokio::test]
 async fn test_stacks() {
     let stack = TestContainersBuilder::start_stacks().await;
-    let bitcoin = stack.bitcoin().await;
     let stacks = stack.stacks().await;
-
-    let faucet = bitcoin.get_faucet();
 
     let stacks_client = stacks.get_client();
 
     let recipient = PrincipalData::parse("SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS").unwrap();
+    let recipient_address = &principal_to_address(&recipient);
 
     // First let's ensure zero balance
     let balance = stacks_client
@@ -79,40 +76,25 @@ async fn test_stacks() {
 
     // Now let's try to send some STX
     let ustx = 1_000_000;
-    let iters = 3;
+    let iters: usize = 3;
 
-    let mut bitcoin_blocks = HashSet::new();
-    let mut stacks_blocks = HashSet::new();
-
-    for _ in 0..iters {
+    for i in 0..iters {
         let tx = fund_stx(&stacks_client, &recipient, ustx).await;
         stacks_client
             .submit_tx(&tx)
             .await
             .expect("failed to send stacks transaction");
-        tokio::time::sleep(Duration::from_secs(3)).await;
 
-        faucet.generate_block();
-        tokio::time::sleep(Duration::from_secs(3)).await;
-
-        let stacks_status = stacks_client
-            .get_node_info()
-            .await
-            .expect("failed to get stacks node info");
-
-        bitcoin_blocks.insert(*stacks_status.burn_block_height);
-        stacks_blocks.insert(*stacks_status.stacks_tip_height);
+        wait_for_stx_balance(&stacks_client, recipient_address, |b| {
+            b == (i + 1) as u128 * ustx as u128
+        })
+        .await;
     }
-    // Now let's see if we saw different blocks for each iter
-    assert_eq!(bitcoin_blocks.len(), iters);
-    assert_eq!(stacks_blocks.len(), iters);
-
-    // And finally let's check the balance
+    // Let's check the final balance (again)
     let balance = stacks_client
         .get_account(&principal_to_address(&recipient))
         .await
         .expect("cannot get account info")
         .balance;
-    // Ideally it should be iters * ustx, but sometimes a tx gets lost
-    assert_gt!(balance, ustx as u128)
+    assert_eq!(balance, iters as u128 * ustx as u128)
 }

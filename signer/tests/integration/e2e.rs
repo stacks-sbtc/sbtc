@@ -20,11 +20,11 @@ use clarity::{
 use emily_client::{apis::deposit_api, models::CreateDepositRequestBody};
 use futures::stream::StreamExt as _;
 use lru::LruCache;
-use more_asserts::{assert_ge, assert_gt, assert_le};
+use more_asserts::{assert_ge, assert_le};
 use rand::rngs::OsRng;
 use sbtc::testing::{
     containers::TestContainersBuilder,
-    regtest::{BITCOIN_CORE_FALLBACK_FEE, Faucet, Recipient},
+    regtest::{BITCOIN_CORE_FALLBACK_FEE, Recipient},
 };
 use secp256k1::Keypair;
 use signer::{
@@ -54,22 +54,19 @@ use signer::{
 use crate::{
     containers::{BitcoinContainerExt as _, StacksContainerExt as _},
     setup::{clean_emily_setup, new_emily_setup},
-    stacks::fund_stx,
+    stacks::{fund_stx, wait_for_new_nonce, wait_for_stx_balance},
     transaction_coordinator::{IntegrationTestContext, wait_for_signers},
     utxo_construction::make_deposit_request_to,
 };
 
-#[allow(clippy::too_many_arguments)]
 async fn start_signers(
     bitcoin_client: &BitcoinCoreClient,
     bitcoin_chain_tip_poller: &BitcoinChainTipPoller,
-    bitcoin_faucet: &Faucet<'_>,
     stacks_client: &StacksClient,
     emily_client: &EmilyClient,
     network: &WanNetwork,
     num_signers: usize,
     signatures_required: u16,
-    modify_settings: impl Fn(&mut signer::config::Settings),
 ) -> Vec<(
     IntegrationTestContext<StacksClient>,
     PgStore,
@@ -83,7 +80,6 @@ async fn start_signers(
     let public_keys: Vec<PublicKey> = keypairs.iter().map(|kp| kp.public_key().into()).collect();
     let wallet =
         SignerWallet::new(&public_keys, signatures_required, NetworkKind::Testnet, 0).unwrap();
-    dbg!(wallet.address().to_string());
 
     let tx = fund_stx(
         stacks_client,
@@ -96,26 +92,14 @@ async fn start_signers(
         .await
         .expect("failed to send stacks transaction");
 
-    // We need a new bitcoin block to nudge the Stacks miner
-    Sleep::for_secs(3).await;
-    bitcoin_faucet.generate_block();
-    Sleep::for_secs(3).await;
-
-    assert_gt!(
-        stacks_client
-            .get_account(wallet.address())
-            .await
-            .unwrap()
-            .balance,
-        0
-    );
+    wait_for_stx_balance(stacks_client, wallet.address(), |ustx| ustx > 0).await;
 
     // Ensure we don't process an old tenure; we fetch twice so that the poller
     // sets last seen block to current chain tip and will not notify the signers
     // yet.
     let mut stream = bitcoin_chain_tip_poller.get_block_hash_stream();
-    let _ = stream.next().with_timeout(Duration::from_millis(100)).await;
-    let _ = stream.next().with_timeout(Duration::from_millis(100)).await;
+    let _ = stream.next().with_timeout(Duration::from_millis(500)).await;
+    let _ = stream.next().with_timeout(Duration::from_millis(500)).await;
 
     let mut signers = Vec::new();
     for kp in keypairs.iter() {
@@ -128,10 +112,9 @@ async fn start_signers(
             .modify_settings(|settings| {
                 settings.signer.bootstrap_signing_set = public_keys.iter().cloned().collect();
                 settings.signer.bootstrap_signatures_required = signatures_required;
-                settings.signer.bitcoin_processing_delay = Duration::from_secs(1);
+                settings.signer.bitcoin_processing_delay = Duration::from_millis(500);
                 settings.signer.deployer = wallet.address().clone();
                 settings.signer.stacks_fees_max_ustx = NonZero::new(1_000_000).unwrap();
-                modify_settings(settings);
             })
             .build();
 
@@ -262,39 +245,39 @@ async fn deposit() {
 
     let num_signers = 3;
     let signatures_required = 2;
-    let modify_settings = |_: &mut signer::config::Settings| {};
 
     let poller = bitcoin.start_chain_tip_poller().await;
 
     let signers = start_signers(
         &bitcoin.get_client(),
         &poller,
-        faucet,
         &stacks_client,
         &emily_client,
         &network,
         num_signers,
         signatures_required,
-        modify_settings,
     )
     .await;
 
+    let deployer = signers[0].0.config().signer.deployer.clone();
+
+    let old_nonce = stacks_client.get_account(&deployer).await.unwrap().nonce;
     faucet.generate_block();
     wait_for_signers(&signers).await;
+    wait_for_new_nonce(&stacks_client, &deployer, old_nonce).await;
     // Now we should have contracts deployed
 
+    let old_nonce = stacks_client.get_account(&deployer).await.unwrap().nonce;
     faucet.generate_block();
     wait_for_signers(&signers).await;
-    // Now we should have a key rotation submitted from which we can get the
-    // aggregated key
+    wait_for_new_nonce(&stacks_client, &deployer, old_nonce).await;
+    // Now we should have a key rotation
 
-    let deployer = signers[0].0.config().signer.deployer.clone();
     let aggregate_key = stacks_client
         .get_current_signers_aggregate_key(&deployer)
         .await
         .unwrap()
         .expect("no aggregate key in contract");
-    dbg!(aggregate_key.x_only_public_key().0);
 
     // Signers require a donation
     faucet.send_to_script(10_000, aggregate_key.signers_script_pubkey());
@@ -348,11 +331,12 @@ async fn deposit() {
     wait_for_signers(&signers).await;
     // Now we should have a sweep transaction submitted
 
+    let old_nonce = stacks_client.get_account(&deployer).await.unwrap().nonce;
     faucet.generate_block();
     wait_for_signers(&signers).await;
+    wait_for_new_nonce(&stacks_client, &deployer, old_nonce).await;
     // Now we should have sBTC minted
 
-    Sleep::for_secs(3).await;
     let sbtc_balance = get_sbtc_balance(
         &stacks_client,
         &deployer,
