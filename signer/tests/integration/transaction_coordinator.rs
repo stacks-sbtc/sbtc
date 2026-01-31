@@ -174,7 +174,8 @@ use crate::setup::set_deposit_incomplete;
 use crate::utxo_construction::generate_withdrawal;
 use crate::utxo_construction::make_deposit_request;
 
-type IntegrationTestContext<Stacks> = TestContext<PgStore, BitcoinCoreClient, Stacks, EmilyClient>;
+pub type IntegrationTestContext<Stacks> =
+    TestContext<PgStore, BitcoinCoreClient, Stacks, EmilyClient>;
 
 async fn run_dkg<Rng, C>(
     ctx: &C,
@@ -274,9 +275,8 @@ where
 /// Wait for all signers to finish their coordinator duties and do this
 /// concurrently so that we don't miss anything (not sure if we need to do
 /// it concurrently).
-async fn wait_for_signers<S>(
-    signers: &[(IntegrationTestContext<S>, PgStore, &Keypair, SignerNetwork)],
-) where
+pub async fn wait_for_signers<S, A, B, C>(signers: &[(IntegrationTestContext<S>, A, B, C)])
+where
     S: StacksInteract + Clone + Send + Sync + 'static,
 {
     let wait_duration = Duration::from_secs(15);
@@ -6549,6 +6549,24 @@ async fn generate_fee_data_works() {
     assert!(fee_rate.is_err());
 
     faucet.generate_fee_data();
+
+    let fee_rate = BitcoinInteract::estimate_fee_rate(&client).await;
+    assert!(fee_rate.is_ok());
+}
+
+#[tokio::test]
+async fn generate_fee_data_timed_works() {
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let faucet = &bitcoin.get_faucet();
+    let client = bitcoin.get_client();
+
+    let fee_rate = BitcoinInteract::estimate_fee_rate(&client).await;
+    assert!(fee_rate.is_err());
+
+    faucet
+        .generate_fee_data_timed(Duration::from_millis(10))
+        .await;
 
     let fee_rate = BitcoinInteract::estimate_fee_rate(&client).await;
     assert!(fee_rate.is_ok());
