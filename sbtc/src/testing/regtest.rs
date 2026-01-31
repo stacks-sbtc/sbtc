@@ -396,7 +396,6 @@ impl<'a> Faucet<'a> {
         match self.address.address_type().unwrap() {
             AddressType::P2wpkh => p2wpkh_sign_transaction(&mut tx, input_index, &utxo, keypair),
             AddressType::P2tr => p2tr_sign_transaction(&mut tx, input_index, &[utxo], keypair),
-            AddressType::P2pkh => p2pkh_sign_transaction(&mut tx, input_index, &[utxo], keypair),
             _ => unimplemented!(),
         };
         self.rpc.send_raw_transaction(&tx).unwrap();
@@ -529,40 +528,4 @@ pub fn p2tr_sign_transaction<U>(
     let signature = bitcoin::taproot::Signature { signature, sighash_type };
 
     tx.input[input_index].witness = Witness::p2tr_key_spend(&signature);
-}
-
-/// Provide a signature to the input P2PKH UTXO
-pub fn p2pkh_sign_transaction<U>(
-    tx: &mut Transaction,
-    input_index: usize,
-    utxos: &[U],
-    keypair: &secp256k1::Keypair,
-) where
-    U: AsUtxo,
-{
-    let prev_tx_out = utxos[input_index].to_tx_out();
-    let sighash_type = EcdsaSighashType::All;
-
-    let sighash = SighashCache::new(&*tx)
-        .legacy_signature_hash(
-            input_index,
-            &prev_tx_out.script_pubkey,
-            sighash_type.to_u32(),
-        )
-        .expect("failed to create legacy sighash");
-
-    let msg = secp256k1::Message::from_digest_slice(sighash.as_ref())
-        .expect("sighash should be 32 bytes");
-
-    let signature = SECP256K1.sign_ecdsa(&msg, &keypair.secret_key());
-    let signature = bitcoin::ecdsa::Signature { signature, sighash_type };
-
-    let public_key = PublicKey::new(keypair.public_key());
-    let script_sig = bitcoin::script::Builder::new()
-        .push_slice(signature.serialize())
-        .push_key(&public_key)
-        .into_script();
-
-    tx.input[input_index].script_sig = script_sig;
-    tx.input[input_index].witness = Witness::default();
 }

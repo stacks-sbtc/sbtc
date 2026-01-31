@@ -154,6 +154,7 @@ where
         reclaim_script_hash: TaprootScriptHash::from(&dep.reclaim_script),
         signers_public_key: dep.signers_public_key,
     };
+
     (deposit_tx, req, dep)
 }
 
