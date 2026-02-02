@@ -450,7 +450,7 @@ impl CompleteDepositV1 {
             return Err(DepositErrorMsg::AmountBelowDustLimit.into_error(req_ctx, self));
         }
         // 7. That the fee matches the expected assessed fee for the outpoint.
-        if fee.to_sat() + self.amount != deposit_request.amount {
+        if Some(self.amount) != deposit_request.amount.checked_sub(fee.to_sat()) {
             return Err(DepositErrorMsg::IncorrectFee.into_error(req_ctx, self));
         }
         // 8. Check that the fee is less than the specified max-fee.
