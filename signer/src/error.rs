@@ -20,7 +20,6 @@ use crate::storage::model::SigHash;
 use crate::storage::model::StacksBlockHash;
 use crate::storage::model::StacksTxId;
 use crate::transaction_signer::StacksSignRequestId;
-use crate::util::FallbackClientError;
 use crate::wsts_state_machine::StateMachineId;
 
 /// Top-level signer error
