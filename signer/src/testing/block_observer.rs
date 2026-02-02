@@ -45,7 +45,6 @@ use crate::stacks::api::SubmitTxResponse;
 use crate::stacks::api::TenureBlockHeaders;
 use crate::stacks::wallet::SignerWallet;
 use crate::storage::model;
-use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::ConsensusHash;
 use crate::storage::model::StacksBlockHash;
@@ -359,24 +358,19 @@ impl StacksInteract for TestHarness {
 
     async fn get_tenure_headers(
         &self,
-        burnchain_block_height: BitcoinBlockHeight,
+        consensus_hash: &ConsensusHash,
     ) -> Result<TenureBlockHeaders, Error> {
-        let burnchain_hash = self
-            .bitcoin_blocks
-            .iter()
-            .find(|block| block.height == burnchain_block_height)
-            .ok_or(Error::MissingBlock)?
-            .block_hash;
-
         let headers: Vec<StacksBlockHeader> = self
             .stacks_blocks
             .iter()
-            .filter(|(_, _, block_hash)| block_hash == &burnchain_hash)
+            .filter(|(_, nakamoto_block, _)| {
+                &ConsensusHash::from(nakamoto_block.header.consensus_hash.clone()) == consensus_hash
+            })
             .map(|(_, nakamoto_block, _)| nakamoto_block.header.clone().into())
             .collect();
 
-        let mut sortition_info = DUMMY_SORTITION_INFO.clone();
-        sortition_info.burn_block_hash = BitcoinBlockHash::from(burnchain_hash).into();
+        let sortition_info = DUMMY_SORTITION_INFO.clone();
+        // TODO: do we need to set bitcoin hash/height for info???
         TenureBlockHeaders::try_new(headers, sortition_info)
     }
 

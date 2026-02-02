@@ -15,6 +15,7 @@ use crate::stacks::contracts::RotateKeysValidationError;
 use crate::stacks::contracts::WithdrawalAcceptValidationError;
 use crate::stacks::contracts::WithdrawalRejectValidationError;
 use crate::storage::model::BitcoinBlockHash;
+use crate::storage::model::ConsensusHash;
 use crate::storage::model::SigHash;
 use crate::storage::model::StacksBlockHash;
 use crate::storage::model::StacksTxId;
@@ -33,6 +34,16 @@ pub enum Error {
         /// The maximum allowed size of the OP_RETURN output in bytes.
         max_size: usize,
     },
+
+    /// Sortition info returned by stacks node does not contain parent consensus hash for given consensus hash
+    /// This usually happens when given consensus hash is not in canonical chain
+    /// TODO: is it true???
+    #[error("No parent consensus hash for consensus hash {0}")]
+    NoParentConsensusHash(ConsensusHash),
+
+    /// Given consensus hash is related to pre nakamoto tenure, while expected to be a nakamoto tenure
+    #[error("No parent consensus hash for consensus hash {0}")]
+    PreNakamotoTenure(ConsensusHash),
 
     /// An error occurred while attempting to perform withdrawal ID segmentation.
     #[error("idpack segmenter error: {0}")]

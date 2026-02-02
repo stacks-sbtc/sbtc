@@ -310,7 +310,7 @@ pub trait StacksInteract: Send + Sync {
     /// endpoint on stacks-core nodes. This function returns headers of all block in given tenure.
     fn get_tenure_headers(
         &self,
-        bitcoin_block_height: BitcoinBlockHeight,
+        consensus_hash: &ConsensusHash,
     ) -> impl Future<Output = Result<TenureBlockHeaders, Error>> + Send;
 }
 
@@ -522,7 +522,8 @@ impl std::fmt::Display for TxRejection {
 
 impl std::error::Error for TxRejection {}
 
-/// A struct, representing the response from a GET /v3/tenures/blocks/height/{}
+/// TODO: update comment
+/// A struct, representing the response from a GET /v3/tenures/blocks/{}
 /// request to a Stacks node.
 ///
 /// The schema of the response can be found here:
@@ -1131,9 +1132,9 @@ impl StacksClient {
     #[tracing::instrument(skip(self))]
     async fn get_tenure_headers(
         &self,
-        bitcoin_block_height: BitcoinBlockHeight,
+        consensus_hash: &ConsensusHash,
     ) -> Result<TenureBlockHeaders, Error> {
-        let path = format!("/v3/tenures/blocks/height/{}", bitcoin_block_height);
+        let path = format!("/v3/tenures/blocks/{}", consensus_hash);
         let url = self
             .endpoint
             .join(&path)
@@ -1262,7 +1263,7 @@ impl StacksClient {
 pub async fn update_db_with_unknown_ancestors<S, D>(
     stacks: &S,
     storage: &D,
-    bitcoin_block_height: BitcoinBlockHeight,
+    consensus_hash: ConsensusHash,
 ) -> Result<RangeInclusive<StacksBlockHeight>, Error>
 where
     S: StacksInteract,
@@ -1271,40 +1272,14 @@ where
     let db = storage.begin_transaction().await?;
     let nakamoto_start_height = stacks.get_epoch_status().await?.nakamoto_start_height();
 
-    let mut height = bitcoin_block_height;
-    let mut tenure = loop {
-        match stacks.get_tenure_headers(height).await {
-            Ok(t) => break t,
-            Err(error) => {
-                tracing::warn!(
-                    %error,
-                    "error during fetching tenure headers"
-                );
-                // 404 error usually means no stacks blocks for given bitcoin block
-                // so we should keep fetching headers. Any other error means that something went wrong.
-                if !error.is_stacks_node_response_404() || height <= nakamoto_start_height {
-                    return Err(error);
-                }
-                height = height - 1;
-            }
-        }
-    };
-
+    let mut consensus_hash = consensus_hash;
+    let mut tenure = stacks.get_tenure_headers(&consensus_hash).await?;
+    if tenure.anchor_block_height <= nakamoto_start_height {
+        return Err(Error::PreNakamotoTenure(consensus_hash));
+    }
     let end_height = tenure.end_header().block_height;
-    let mut anchor_block_height = tenure.anchor_block_height;
-
     loop {
         db.write_stacks_block_headers(&tenure).await?;
-        // We won't get anymore Nakamoto blocks before this point, so
-        // time to stop.
-        if anchor_block_height <= nakamoto_start_height {
-            tracing::debug!(
-                %nakamoto_start_height,
-                last_chain_length = %tenure.anchor_block_height,
-                "all Nakamoto blocks fetched; stopping"
-            );
-            break;
-        }
         // Tenure blocks are always non-empty, and this invariant is upheld
         // by the type. So no need to worry about the early break.
         let Some(header) = tenure.headers().last() else {
@@ -1318,38 +1293,21 @@ where
         // There are more blocks to fetch, so let's get them. This assumes
         // optimistically that the parent is still a Nakamoto block (and so has
         // a tenure); if that's not the case, we get an `Err` here.
-        let tenure_headers_result = stacks.get_tenure_headers(anchor_block_height - 1).await;
-        anchor_block_height = anchor_block_height - 1;
-        let tenure_headers = match tenure_headers_result {
-            Ok(tenure_headers) => tenure_headers,
-            Err(error) => {
-                tracing::warn!(
-                    %error,
-                    "error during fetching tenure headers"
-                );
-                // 404 error usually means no stacks blocks for given bitcoin block
-                // so we should keep fetching headers. Any other error means that something went wrong.
-                if !error.is_stacks_node_response_404() {
-                    return Err(error);
-                }
-                continue;
-            }
+        let sortition_info = stacks.get_sortition_info(&consensus_hash).await?;
+        let Some(parent_consensus_hash) = sortition_info.stacks_parent_ch else {
+            return Err(Error::NoParentConsensusHash(consensus_hash));
         };
-        let newest_block_in_older_tenure = tenure_headers.end_header();
-        let oldest_block_in_newer_tenure = tenure.start_header();
-
-        if oldest_block_in_newer_tenure.parent_block_id == newest_block_in_older_tenure.block_id {
-            tenure = tenure_headers;
-        } else {
-            tracing::error!(
-                %tenure.anchor_block_height,
-                %anchor_block_height,
-                ?newest_block_in_older_tenure,
-                ?oldest_block_in_newer_tenure,
-                "stacks node returned inconsecutive tenures, while they must be consecutive"
+        consensus_hash = parent_consensus_hash.into();
+        let new_tenure = stacks.get_tenure_headers(&consensus_hash).await?;
+        if new_tenure.anchor_block_height <= nakamoto_start_height {
+            tracing::debug!(
+                %nakamoto_start_height,
+                last_chain_length = %tenure.anchor_block_height,
+                "all Nakamoto blocks fetched; stopping"
             );
-            return Err(Error::MissingBlock);
+            break;
         }
+        tenure = new_tenure
     }
 
     let start_height = tenure.start_header().block_height;
@@ -1597,9 +1555,9 @@ impl StacksInteract for StacksClient {
     #[tracing::instrument(skip(self))]
     async fn get_tenure_headers(
         &self,
-        bitcoin_block_height: BitcoinBlockHeight,
+        consensus_hash: &ConsensusHash,
     ) -> Result<TenureBlockHeaders, Error> {
-        self.get_tenure_headers(bitcoin_block_height).await
+        self.get_tenure_headers(consensus_hash).await
     }
 
     async fn get_sortition_info(
@@ -1822,9 +1780,9 @@ impl StacksInteract for ApiFallbackClient<StacksClient> {
 
     async fn get_tenure_headers(
         &self,
-        block_height: BitcoinBlockHeight,
+        consensus_hash: &ConsensusHash,
     ) -> Result<TenureBlockHeaders, Error> {
-        self.exec(|client, _| client.get_tenure_headers(block_height))
+        self.exec(|client, _| client.get_tenure_headers(consensus_hash))
             .await
     }
 
@@ -1915,6 +1873,11 @@ mod tests {
 
     use super::*;
 
+    /// Consensus hash for mainnet bitcoin block with height 900'000
+    fn consensus_hash_900k() -> ConsensusHash {
+        ConsensusHash::from_hex("d9f1486525e738d818fee87c4739b87e03bf35e4").unwrap()
+    }
+
     fn generate_wallet(num_keys: u16, signatures_required: u16) -> SignerWallet {
         let network_kind = NetworkKind::Regtest;
 
@@ -1938,7 +1901,8 @@ mod tests {
 
         let info = client.get_node_info().await.unwrap();
 
-        let tenures = update_db_with_unknown_ancestors(&client, &db, info.burn_block_height).await;
+        let tenures =
+            update_db_with_unknown_ancestors(&client, &db, info.stacks_tip_consensus_hash).await;
 
         assert!(tenures.is_ok());
 
@@ -1965,7 +1929,10 @@ mod tests {
         // BTC 1901 <- Stacks 320, ..., 744
         // BTC 1998 <- Stacks 745, ..., 750, ... 791
 
-        let tenures = update_db_with_unknown_ancestors(&client, &db, 1998u64.into()).await;
+        // Consensus hash of testnet btc block 1998
+        let ch = ConsensusHash::from_hex("5b44c8c88a1439d6684b648436215ea65d3cd8d6").unwrap();
+
+        let tenures = update_db_with_unknown_ancestors(&client, &db, ch).await;
 
         let block_height_range = tenures.unwrap();
 
@@ -2033,7 +2000,8 @@ mod tests {
         let path = "tests/fixtures/stacksapi-v3-tenures-blocks.json".to_string();
 
         let mut stacks_node_server = mockito::Server::new_async().await;
-        let endpoint_tenure_headers = "/v3/tenures/blocks/height/900000".to_string();
+        let endpoint_tenure_headers =
+            "/v3/tenures/blocks/d9f1486525e738d818fee87c4739b87e03bf35e4".to_string();
         let first_mock = stacks_node_server
             .mock("GET", endpoint_tenure_headers.as_str())
             .with_status(200)
@@ -2042,9 +2010,10 @@ mod tests {
             .create();
 
         let client = client(url::Url::parse(stacks_node_server.url().as_str()).unwrap());
+        let ch = consensus_hash_900k();
 
         // The moment of truth, do the requests succeed?
-        let headers = client.get_tenure_headers(900_000u64.into()).await.unwrap();
+        let headers = client.get_tenure_headers(&ch).await.unwrap();
         assert_eq!(headers.headers.len(), 39);
         assert_eq!(headers.start_header().block_height, 1507195u64.into());
         assert_eq!(headers.end_header().block_height, 1507233u64.into());
@@ -2747,7 +2716,7 @@ mod tests {
 
         let info = client.get_node_info().await.unwrap();
 
-        update_db_with_unknown_ancestors(&client, &storage, info.burn_block_height)
+        update_db_with_unknown_ancestors(&client, &storage, info.stacks_tip_consensus_hash)
             .await
             .unwrap();
     }
@@ -2782,176 +2751,15 @@ mod tests {
         assert_eq!(account.nonce, 0);
     }
 
-    /// This test checks that update_db_with_unknown_ancestors works well if there are
-    /// gaps in stacks blockchain (some bitcoin blocks does not have stacks blocks anchored to them)
-    /// The setup of the test:
-    /// - bitcoin block 234 have anchored to it stacks block 744
-    /// - bitcoin block 233 have no stacks blocks anchored (a gap)
-    /// - bitcoin block 232 have anchored to it stacks block 743
-    /// - bitcoin block 231 is not a Nakamoto block
-    #[tokio::test]
-    async fn get_tenure_headers_update_db_with_unknown_ancestors_processes_gaps() {
-        // 232 - Nakamoto start
-        let raw_json_response_234 = r#"{
-            "consensus_hash": "2cd83cba6930e50fe81d265c6f14d248c93f3de3",
-            "burn_block_height": 234,
-            "burn_block_hash": "5cb8fc024a7c7f40c8890c92f15803dfb4fe3406d047db9e2a8492727127f00c",
-            "stacks_blocks": [
-            {
-                "block_id": "3d79a705ebbc16222b3d4515e68bb8e4791c0def1401bc66c036b4ca9bf3c8e2",
-                "header_type": "nakamoto",
-                "block_hash": "9bc75a898db459856f60fb1c6c2dbfad0bc48c4c25ec9d0c72da88b272fc63fa",
-                "parent_block_id": "5433e2d28129b2449700e1fd8b9b348bb302eb4e9b62f19d85ef47690048e3a2",
-                "height": 744
-            }
-            ]
-        }"#;
-
-        let raw_json_response_233 = r#"No blocks in tenure with burnchain block height 1903"#;
-
-        let raw_json_response_232 = r#"{
-            "consensus_hash": "5b44c8c88a1439d6684b648436215ea65d3cd8d6",
-            "burn_block_height": 232,
-            "burn_block_hash": "41a0e279472f5b195df3abc606c4fccaf15a9e1032f828e280b52617a439013e",
-            "stacks_blocks": [
-            {
-                "block_id": "5433e2d28129b2449700e1fd8b9b348bb302eb4e9b62f19d85ef47690048e3a2",
-                "header_type": "nakamoto",
-                "block_hash": "7175e838ff1fce838d5cf35af13898eb741e361e083002190276b69712fc4ae8",
-                "parent_block_id": "4ff6afcd8c2d8ddba076a04c2ff9f032be0f95b3cb6e41edc723e5a919d98f16",
-                "height": 743
-            }
-            ]
-        }"#;
-
-        let raw_json_response_poxinfo =
-            include_str!("../../tests/fixtures/stacksapi-get-pox-info-test-data.json");
-
-        let mut stacks_node_server = mockito::Server::new_async().await;
-        let mock_234 = stacks_node_server
-            .mock("GET", "/v3/tenures/blocks/height/234")
-            .with_status(200)
-            .with_body(raw_json_response_234)
-            .expect(1)
-            .create();
-        let mock_233 = stacks_node_server
-            .mock("GET", "/v3/tenures/blocks/height/233")
-            .with_status(404)
-            .with_body(raw_json_response_233)
-            .expect(1)
-            .create();
-        let mock_232 = stacks_node_server
-            .mock("GET", "/v3/tenures/blocks/height/232")
-            .with_status(200)
-            .with_body(raw_json_response_232)
-            .expect(1)
-            .create();
-
-        let mock_poxinfo = stacks_node_server
-            .mock("GET", "/v2/pox")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(raw_json_response_poxinfo)
-            .expect(1)
-            .create();
-
-        let client = StacksClient::new(stacks_node_server.url().parse().unwrap()).unwrap();
-        let storage = Store::new_shared();
-
-        let result = update_db_with_unknown_ancestors(&client, &storage, 234u64.into())
-            .await
-            .unwrap();
-
-        let start_height = result.start();
-        let end_height = result.end();
-
-        assert_eq!(**start_height, 743);
-        assert_eq!(**end_height, 744);
-
-        mock_234.assert();
-        mock_233.assert();
-        mock_232.assert();
-        mock_poxinfo.assert();
-    }
-
-    #[tokio::test]
-    async fn get_tenure_headers_update_db_with_unknown_ancestors_bails_on_inconsecutive_tenures_blocks()
-     {
-        let raw_json_response_1000 = r#"{
-            "consensus_hash": "2cd83cba6930e50fe81d265c6f14d248c93f3de3",
-            "burn_block_height": 1000,
-            "burn_block_hash": "5cb8fc024a7c7f40c8890c92f15803dfb4fe3406d047db9e2a8492727127f00c",
-            "stacks_blocks": [
-            {
-                "block_id": "3d79a705ebbc16222b3d4515e68bb8e4791c0def1401bc66c036b4ca9bf3c8e2",
-                "header_type": "nakamoto",
-                "block_hash": "9bc75a898db459856f60fb1c6c2dbfad0bc48c4c25ec9d0c72da88b272fc63fa",
-                "parent_block_id": "ef7be9b052643210b8a115f1c4c7037a40cd562c5b8ae5f3d99751d8e2de4e78",
-                "height": 744
-            }
-            ]
-        }"#;
-
-        let raw_json_response_999 = r#"{
-            "consensus_hash": "2cd83cba6930e50fe81d265c6f14d248c93f3de3",
-            "burn_block_height": 999,
-            "burn_block_hash": "5cb8fc024a7c7f40c8890c92f15803dfb4fe3406d047db9e2a8492727127f00c",
-            "stacks_blocks": [
-            {
-                "block_id": "3d79a705ebbc16222b3d4515e68bb8e4791c0def1401bc66c036b4ca9bf3c8e2",
-                "header_type": "nakamoto",
-                "block_hash": "9bc75a898db459856f60fb1c6c2dbfad0bc48c4c25ec9d0c72da88b272fc63fa",
-                "parent_block_id": "ef7be9b052643210b8a115f1c4c7037a40cd562c5b8ae5f3d99751d8e2de4e78",
-                "height": 744
-            }
-            ]
-        }"#;
-
-        let raw_json_response_poxinfo =
-            include_str!("../../tests/fixtures/stacksapi-get-pox-info-test-data.json");
-
-        let mut stacks_node_server = mockito::Server::new_async().await;
-        let mock_1000 = stacks_node_server
-            .mock("GET", "/v3/tenures/blocks/height/1000")
-            .with_status(200)
-            .with_body(raw_json_response_1000)
-            .expect(1)
-            .create();
-        let mock_999 = stacks_node_server
-            .mock("GET", "/v3/tenures/blocks/height/999")
-            .with_status(200)
-            .with_body(raw_json_response_999)
-            .expect(1)
-            .create();
-        let mock_poxinfo = stacks_node_server
-            .mock("GET", "/v2/pox")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(raw_json_response_poxinfo)
-            .expect(1)
-            .create();
-
-        let client = StacksClient::new(stacks_node_server.url().parse().unwrap()).unwrap();
-        let storage = Store::new_shared();
-
-        let err = update_db_with_unknown_ancestors(&client, &storage, 1000u64.into()).await;
-
-        assert!(matches!(err, Err(Error::MissingBlock)));
-
-        mock_1000.assert();
-        mock_999.assert();
-        mock_poxinfo.assert();
-    }
-
     #[ignore = "This is an integration test that hasn't been setup for CI yet"]
     #[tokio::test]
     async fn get_tenure_headers_correctly_serializes_bitcoin_block_hash() {
         let url = Url::parse("https://api.mainnet.hiro.so/").unwrap();
         let client = StacksClient::new(url).unwrap();
 
-        let height = 900_000u64;
+        let ch = consensus_hash_900k();
 
-        let headers = client.get_tenure_headers(height.into()).await.unwrap();
+        let headers = client.get_tenure_headers(&ch).await.unwrap();
         let block_hash = headers.anchor_block_hash;
 
         // This hash is indeed hash of block 900_000
@@ -2960,48 +2768,5 @@ mod tests {
             &format!("{}", block_hash),
             "000000000000000000010538edbfd2d5b809a33dd83f284aeea41c6d0d96968a"
         );
-    }
-
-    #[ignore = "This is an integration test that hasn't been setup for CI yet"]
-    #[test_case(StacksClient::new(Url::parse("https://api.mainnet.hiro.so/").unwrap()).unwrap(), false; "direct_404")]
-    #[test_case(ApiFallbackClient::new(vec![StacksClient::new(Url::parse("https://api.mainnet.hiro.so/").unwrap()).unwrap()]).unwrap(), false; "fallback_404")]
-    #[test_case(
-        StacksClient
-        {
-            endpoint: Url::parse("https://api.mainnet.hiro.so/").unwrap(),
-            client: reqwest::Client::builder()
-            .timeout(Duration::from_nanos(1))
-            .build()
-            .unwrap(),
-
-        }, true; "direct_timeout")]
-    #[test_case(
-            ApiFallbackClient::new(vec![
-            StacksClient
-            {
-                endpoint: Url::parse("https://api.mainnet.hiro.so/").unwrap(),
-                client: reqwest::Client::builder()
-                .timeout(Duration::from_nanos(1))
-                .build()
-                .unwrap(),
-            }]).unwrap(), true; "fallback_timeout")]
-    #[tokio::test]
-    async fn fallback_client_error_handling_real_api(
-        client: impl StacksInteract,
-        is_timeout: bool,
-    ) {
-        // For 932937u64 all errors should be 404 (if it is not timeout)
-        let height = 932937u64;
-        let headers = client.get_tenure_headers(height.into()).await;
-        println!("{:#?}", headers);
-        let error = headers.unwrap_err();
-        assert_eq!(error.is_stacks_node_response_404(), !is_timeout);
-
-        if !is_timeout {
-            // For 933078u64 there should not be an error at all
-            let height = 933078u64;
-            let headers = client.get_tenure_headers(height.into()).await;
-            let _ = headers.unwrap();
-        }
     }
 }

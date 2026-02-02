@@ -420,15 +420,14 @@ impl<C: Context, B> BlockObserver<C, B> {
         let stacks_client = self.context.get_stacks_client();
         let db = self.context.get_storage_mut();
 
-        let bitcoin_block_height = stacks_client.get_node_info().await?.burn_block_height;
+        let consensus_hash = stacks_client
+            .get_node_info()
+            .await?
+            .stacks_tip_consensus_hash;
 
         tracing::debug!("fetching unknown ancestral blocks from stacks-core");
-        crate::stacks::api::update_db_with_unknown_ancestors(
-            &stacks_client,
-            &db,
-            bitcoin_block_height,
-        )
-        .await?;
+        crate::stacks::api::update_db_with_unknown_ancestors(&stacks_client, &db, consensus_hash)
+            .await?;
 
         tracing::debug!("finished processing stacks block");
         Ok(())
