@@ -94,12 +94,15 @@ async fn start_signers(
 
     wait_for_stx_balance(stacks_client, wallet.address(), |ustx| ustx > 0).await;
 
-    // Ensure we don't process an old tenure; we fetch twice so that the poller
-    // sets last seen block to current chain tip and will not notify the signers
-    // yet.
+    // We fetch for a period longer than the poller interval so it sets the last
+    // seen block to current chain tip and will not notify the signers yet.
     let mut stream = bitcoin_chain_tip_poller.get_block_hash_stream();
-    let _ = stream.next().with_timeout(Duration::from_millis(500)).await;
-    let _ = stream.next().with_timeout(Duration::from_millis(500)).await;
+    let polling_fut = async {
+        loop {
+            let _ = stream.next().with_timeout(Duration::from_millis(100)).await;
+        }
+    };
+    let _ = polling_fut.with_timeout(Duration::from_millis(500)).await;
 
     let mut signers = Vec::new();
     for kp in keypairs.iter() {
@@ -223,8 +226,8 @@ async fn get_sbtc_balance(
 }
 
 /// End to end test for deposits: after the sBTC bootstrap a deposit is created
-/// on Emily, the signers do their magic (with a controller chain progression)
-/// and we get sBTC minted
+/// on Emily, the signers do their magic (with a controlled chain progression)
+/// and we get sBTC minted.
 #[test_log::test(tokio::test)]
 async fn deposit() {
     let stack = TestContainersBuilder::start_stacks().await;
@@ -246,11 +249,11 @@ async fn deposit() {
     let num_signers = 3;
     let signatures_required = 2;
 
-    let poller = bitcoin.start_chain_tip_poller().await;
+    let bitcoin_chain_tip_poller = bitcoin.start_chain_tip_poller().await;
 
     let signers = start_signers(
         &bitcoin.get_client(),
-        &poller,
+        &bitcoin_chain_tip_poller,
         &stacks_client,
         &emily_client,
         &network,

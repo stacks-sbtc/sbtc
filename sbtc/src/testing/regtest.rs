@@ -231,7 +231,7 @@ impl Recipient {
         }
     }
 
-    /// Get the stacks address associated to the private key of this recipient
+    /// Get the Stacks address associated to the private key of this recipient
     pub fn stacks_address(&self) -> StacksAddress {
         let pubkey = stacks_common::util::secp256k1::Secp256k1PublicKey::from_slice(
             &self.keypair.public_key().serialize(),
@@ -363,7 +363,7 @@ impl<'a> Faucet<'a> {
         self.send_to_script(amount, address.script_pubkey())
     }
 
-    /// Send the specified amount to the specific address.
+    /// Send the specified amount to the specific script pubkey.
     ///
     /// Note: only P2TR and P2WPKH addresses are supported.
     pub fn send_to_script(&self, amount: u64, script_pubkey: ScriptBuf) -> OutPoint {

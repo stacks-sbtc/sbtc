@@ -24,6 +24,8 @@ while true; do
     sleep 1s & wait || exit 0
 done
 
+# We first stop producing new txs, then stop everything else gracefully; this
+# may or may not be required, it's just cleaner.
 $DOCKER_COMPOSE stop tx-broadcaster bitcoin-miner
 $DOCKER_COMPOSE down -v
 

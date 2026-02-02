@@ -256,7 +256,7 @@ impl BitcoinContainer {
         if amount < Amount::from_int_btc(1) {
             if stacks_running {
                 // If we are running the stacks compose we can't generate too
-                // many blocks to avoid messing with the stacks node.
+                // many blocks or risk messing with the stacks node.
                 // But we should never reach this, as we do fund the faucet in
                 // the miner script.
                 panic!("the chainstates snapshot didn't fund the faucet");
@@ -308,7 +308,7 @@ impl StacksContainer {
         StacksContainer { url }
     }
 
-    /// Get the Bitcoin RPC address
+    /// Get the Stacks RPC address
     pub fn url(&self) -> &Url {
         &self.url
     }
