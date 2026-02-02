@@ -417,7 +417,7 @@ impl CompleteDepositV1 {
     /// 5. That the recipients in the transaction matches that of the
     ///    deposit request.
     /// 6. That the amount to mint is above the dust amount.
-    /// 7. That the mint amount matches the expected mint amount.
+    /// 7. That the proposed mint amount matches our expected mint amount.
     /// 8. That the fee is less than the specified max-fee.
     ///
     /// The `fee` input variable is our calculation of the assessed fee for
@@ -449,7 +449,8 @@ impl CompleteDepositV1 {
         if self.amount < DEPOSIT_DUST_LIMIT {
             return Err(DepositErrorMsg::AmountBelowDustLimit.into_error(req_ctx, self));
         }
-        // 7. That the mint amount matches the expected mint amount.
+        // 7. That the proposed mint amount matches our expected mint
+        //    amount.
         if Some(self.amount) != deposit_request.amount.checked_sub(fee.to_sat()) {
             return Err(DepositErrorMsg::IncorrectMintAmount.into_error(req_ctx, self));
         }
