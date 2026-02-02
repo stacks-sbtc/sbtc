@@ -244,7 +244,7 @@ async fn deposit() {
     let network = WanNetwork::default();
 
     // Ensure we can estimate fees
-    faucet.generate_fee_data_timed(Duration::from_secs(1)).await;
+    faucet.generate_fee_data();
 
     let num_signers = 3;
     let signatures_required = 2;

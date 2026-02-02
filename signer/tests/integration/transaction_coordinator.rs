@@ -6553,21 +6553,3 @@ async fn generate_fee_data_works() {
     let fee_rate = BitcoinInteract::estimate_fee_rate(&client).await;
     assert!(fee_rate.is_ok());
 }
-
-#[tokio::test]
-async fn generate_fee_data_timed_works() {
-    let stack = TestContainersBuilder::start_bitcoin().await;
-    let bitcoin = stack.bitcoin().await;
-    let faucet = &bitcoin.get_faucet();
-    let client = bitcoin.get_client();
-
-    let fee_rate = BitcoinInteract::estimate_fee_rate(&client).await;
-    assert!(fee_rate.is_err());
-
-    faucet
-        .generate_fee_data_timed(Duration::from_millis(10))
-        .await;
-
-    let fee_rate = BitcoinInteract::estimate_fee_rate(&client).await;
-    assert!(fee_rate.is_ok());
-}

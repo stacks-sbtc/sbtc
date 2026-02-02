@@ -39,7 +39,6 @@ use bitcoincore_rpc::jsonrpc::error::RpcError;
 use clarity::types::chainstate::StacksAddress;
 use secp256k1::SECP256K1;
 use std::sync::OnceLock;
-use std::time::Duration;
 
 /// These must match the username and password in bitcoin.conf
 /// The username for RPC calls in bitcoin-core
@@ -410,18 +409,6 @@ impl<'a> Faucet<'a> {
             self.send_to(1001, &self.address);
             self.send_to(1002, &self.address);
             self.generate_block();
-        }
-    }
-
-    /// Generate some transactions to ensure bitcoincore has enough data to
-    /// estimate fees, with a delay between blocks
-    pub async fn generate_fee_data_timed(&self, block_delay: Duration) {
-        for _ in 0..10 {
-            self.send_to(1000, &self.address);
-            self.send_to(1001, &self.address);
-            self.send_to(1002, &self.address);
-            self.generate_block();
-            tokio::time::sleep(block_delay).await
         }
     }
 }
