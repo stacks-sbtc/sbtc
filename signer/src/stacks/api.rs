@@ -1274,7 +1274,7 @@ where
 
     let mut consensus_hash = consensus_hash;
     let mut tenure = stacks.get_tenure_headers(&consensus_hash).await?;
-    if tenure.anchor_block_height <= nakamoto_start_height {
+    if tenure.anchor_block_height < nakamoto_start_height {
         return Err(Error::PreNakamotoTenure(consensus_hash));
     }
     let end_height = tenure.end_header().block_height;

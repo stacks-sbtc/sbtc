@@ -18,6 +18,7 @@ use blockstack_lib::types::chainstate::StacksBlockId;
 use clarity::types::chainstate::BurnchainHeaderHash;
 use clarity::types::chainstate::SortitionId;
 use emily_client::models::DepositStatus;
+use fake::Fake as _;
 use rand::seq::IteratorRandom as _;
 use sbtc::deposits::CreateDepositRequest;
 
@@ -48,6 +49,7 @@ use crate::storage::model;
 use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::ConsensusHash;
 use crate::storage::model::StacksBlockHash;
+use crate::testing::block_observer::model::BitcoinBlockHash;
 use crate::testing::dummy;
 use crate::testing::stacks::DUMMY_SORTITION_INFO;
 use crate::util::ApiFallbackClient;
@@ -130,6 +132,7 @@ impl TestHarness {
         // mainnet doesn't have this issue because the block height was not
         // originally included anywhere until much later.
         let height = Some(BitcoinBlockHeight::from(17u64));
+
         let mut bitcoin_blocks: Vec<_> = std::iter::successors(height, |&height| Some(height + 1))
             .map(|height| BitcoinBlockInfo::random_with_height(height, rng))
             .take(num_bitcoin_blocks)
@@ -137,6 +140,12 @@ impl TestHarness {
 
         for idx in 1..bitcoin_blocks.len() {
             bitcoin_blocks[idx].previous_block_hash = bitcoin_blocks[idx - 1].block_hash;
+        }
+        let mut bh2ch: HashMap<BlockHash, clarity::types::chainstate::ConsensusHash> =
+            Default::default();
+        for block in &bitcoin_blocks {
+            let fake_ch: ConsensusHash = fake::Faker.fake_with_rng(rng);
+            bh2ch.insert(block.block_hash, fake_ch.into());
         }
 
         let first_header = NakamotoBlockHeader::empty();
@@ -154,6 +163,7 @@ impl TestHarness {
                         .scan(initial_state, |last_stx_block_header, mut stx_block| {
                             stx_block.header.parent_block_id = last_stx_block_header.block_id();
                             stx_block.header.chain_length = last_stx_block_header.chain_length + 1;
+                            stx_block.header.consensus_hash = bh2ch[&btc_block.block_hash].clone();
                             *last_stx_block_header = stx_block.header.clone();
                             Some((stx_block.block_id(), stx_block, btc_block.block_hash))
                         })
@@ -369,16 +379,40 @@ impl StacksInteract for TestHarness {
             .map(|(_, nakamoto_block, _)| nakamoto_block.header.clone().into())
             .collect();
 
-        let sortition_info = DUMMY_SORTITION_INFO.clone();
-        // TODO: do we need to set bitcoin hash/height for info???
+        // Unwrap here is ok because if it panic it means incorrect test harness
+        // implementation, and not actual error
+        let (_, _, btc_block_id) = self
+            .stacks_blocks
+            .iter()
+            .find(|(_, nakamoto_block, _)| {
+                &ConsensusHash::from(nakamoto_block.header.consensus_hash.clone()) == consensus_hash
+            })
+            .unwrap();
+
+        let mut sortition_info = DUMMY_SORTITION_INFO.clone();
+        sortition_info.burn_block_hash = BitcoinBlockHash::from(*btc_block_id).into();
+        sortition_info.burn_block_height = *self
+            .bitcoin_blocks
+            .iter()
+            .find(|block| block.block_hash == *btc_block_id)
+            .unwrap()
+            .height;
         TenureBlockHeaders::try_new(headers, sortition_info)
     }
 
     async fn get_sortition_info(
         &self,
-        _consensus_hash: &ConsensusHash,
+        consensus_hash: &ConsensusHash,
     ) -> Result<SortitionInfo, Error> {
+        // Unwrap here is ok because if it panic it means incorrect test harness
+        // implementation, and not actual error
         let bitcoin_block = self.bitcoin_blocks.last().unwrap();
+        let (_, previous_tenure_block, _) = self
+            .stacks_blocks
+            .iter()
+            .find(|(_, _, bitcoin_hash)| bitcoin_hash == &bitcoin_block.previous_block_hash)
+            .unwrap();
+
         Ok(SortitionInfo {
             burn_block_hash: BurnchainHeaderHash::from_bytes_be(
                 bitcoin_block.block_hash.as_byte_array(),
@@ -388,10 +422,10 @@ impl StacksInteract for TestHarness {
             burn_header_timestamp: 0,
             sortition_id: SortitionId([0; 32]),
             parent_sortition_id: SortitionId([0; 32]),
-            consensus_hash: ConsensusHash::new([0; 20]).into(),
+            consensus_hash: (*consensus_hash).into(),
             was_sortition: true,
             miner_pk_hash160: None,
-            stacks_parent_ch: None,
+            stacks_parent_ch: Some(previous_tenure_block.header.consensus_hash.clone()),
             last_sortition_ch: None,
             committed_block_hash: None,
             vrf_seed: None,
@@ -434,6 +468,17 @@ impl StacksInteract for TestHarness {
 
         data.burn_block_height = (self.bitcoin_blocks.len() as u64).into();
         data.stacks_tip_height = (self.stacks_blocks.len() as u64).into();
+        // Unwrap here is ok because if it panic it means incorrect test harness
+        // implementation, and not actual error
+        data.stacks_tip_consensus_hash = self
+            .stacks_blocks
+            .last()
+            .unwrap()
+            .1
+            .header
+            .consensus_hash
+            .clone()
+            .into();
 
         Ok(data)
     }

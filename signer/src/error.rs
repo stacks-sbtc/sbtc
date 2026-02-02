@@ -41,7 +41,7 @@ pub enum Error {
     NoParentConsensusHash(ConsensusHash),
 
     /// Given consensus hash is related to pre nakamoto tenure, while expected to be a nakamoto tenure
-    #[error("No parent consensus hash for consensus hash {0}")]
+    #[error("Tenure with consensus hash {0} is pre Nakamoto")]
     PreNakamotoTenure(ConsensusHash),
 
     /// An error occurred while attempting to perform withdrawal ID segmentation.
