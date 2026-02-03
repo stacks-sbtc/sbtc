@@ -1269,12 +1269,21 @@ where
     S: StacksInteract,
     D: Transactable + Send + Sync,
 {
+    tracing::debug!(
+        %consensus_hash,
+        "starting updating db with unknown ancestors"
+    );
     let db = storage.begin_transaction().await?;
     let nakamoto_start_height = stacks.get_epoch_status().await?.nakamoto_start_height();
 
     let mut consensus_hash = consensus_hash;
     let mut tenure = stacks.get_tenure_headers(&consensus_hash).await?;
     if tenure.anchor_block_height < nakamoto_start_height {
+        tracing::warn!(
+            tenure_height = %tenure.anchor_block_height,
+            %nakamoto_start_height,
+            "update_db_with_unknown_ancestors called for pre nakamoto block"
+        );
         return Err(Error::PreNakamotoTenure(consensus_hash));
     }
     let end_height = tenure.end_header().block_height;
@@ -1297,6 +1306,12 @@ where
         let Some(parent_consensus_hash) = sortition_info.stacks_parent_ch else {
             return Err(Error::NoParentConsensusHash(consensus_hash));
         };
+
+        tracing::debug!(
+            %consensus_hash,
+            %parent_consensus_hash,
+            "fetched new stacks tenure headers"
+        );
         consensus_hash = parent_consensus_hash.into();
         let new_tenure = stacks.get_tenure_headers(&consensus_hash).await?;
         if new_tenure.anchor_block_height <= nakamoto_start_height {

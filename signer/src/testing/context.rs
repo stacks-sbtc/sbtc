@@ -845,7 +845,8 @@ where
     fn with_mocked_stacks_client(
         self,
     ) -> ContextBuilder<Storage, Bitcoin, WrappedMockStacksInteract, Emily> {
-        self.with_stacks_client(WrappedMock::default())
+        let mock = WrappedMock::default();
+        self.with_stacks_client(mock)
     }
 }
 

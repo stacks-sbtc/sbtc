@@ -565,8 +565,12 @@ async fn mock_stacks_core<D, B, E>(
 ) {
     ctx.with_stacks_client(|client| {
         client.expect_get_block().returning(|_| {
+            // We need provide non-zero consensus hash, because usually in tests
+            // zero consensus hash is a non-Nakamoto block.
+            let mut nakamoto_block_header = NakamotoBlockHeader::empty();
+            nakamoto_block_header.consensus_hash = ConsensusHash([1u8; 20]);
             let response = Ok(NakamotoBlock {
-                header: NakamotoBlockHeader::empty(),
+                header: nakamoto_block_header,
                 txs: vec![],
             });
             Box::pin(std::future::ready(response))
@@ -611,10 +615,10 @@ async fn mock_stacks_core<D, B, E>(
                 burn_header_timestamp: 0,
                 sortition_id: SortitionId([0; 32]),
                 parent_sortition_id: SortitionId([0; 32]),
-                consensus_hash: ConsensusHash([0; 20]),
+                consensus_hash: ConsensusHash([1; 20]),
                 was_sortition: true,
                 miner_pk_hash160: None,
-                stacks_parent_ch: None,
+                stacks_parent_ch: Some(ConsensusHash([2;20])),
                 last_sortition_ch: None,
                 committed_block_hash: None,
                 vrf_seed: None,

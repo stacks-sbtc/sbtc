@@ -25,7 +25,7 @@ pub const DUMMY_SORTITION_INFO: SortitionInfo = SortitionInfo {
     consensus_hash: blockstack_lib::chainstate::burn::ConsensusHash([0; 20]),
     was_sortition: false,
     miner_pk_hash160: None,
-    stacks_parent_ch: None,
+    stacks_parent_ch: Some(blockstack_lib::chainstate::burn::ConsensusHash([2; 20])),
     last_sortition_ch: None,
     committed_block_hash: None,
     vrf_seed: None,
@@ -35,7 +35,7 @@ pub const DUMMY_SORTITION_INFO: SortitionInfo = SortitionInfo {
 pub const DUMMY_NODE_INFO: GetNodeInfoResponse = GetNodeInfoResponse {
     burn_block_height: BitcoinBlockHeight::new(0),
     server_version: String::new(),
-    stacks_tip_consensus_hash: crate::storage::model::ConsensusHash::new([0; 20]),
+    stacks_tip_consensus_hash: crate::storage::model::ConsensusHash::new([1; 20]),
     stacks_tip_height: StacksBlockHeight::new(0),
     stacks_tip: BlockHeaderHash([0; 32]),
 };
@@ -44,7 +44,9 @@ impl TenureBlockHeaders {
     /// Create a TenureBlockHeaders struct that is basically empty.
     pub fn nearly_empty() -> Result<Self, Error> {
         let header = NakamotoBlockHeader::empty().into();
-        Self::try_new(vec![header], DUMMY_SORTITION_INFO)
+        let mut sortition_info = DUMMY_SORTITION_INFO;
+        sortition_info.burn_block_height = 300;
+        Self::try_new(vec![header], sortition_info)
     }
 
     /// Create TenureBlockHeaders with some dummy sortition info.
