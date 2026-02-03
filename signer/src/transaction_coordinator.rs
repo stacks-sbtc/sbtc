@@ -1860,15 +1860,20 @@ where
     /// Determine if this signer is the signer set's coordinator for the
     /// specified bitcoin block hash.
     ///
-    /// The coordinator is decided using the hash of the bitcoin chain tip.
-    /// We don't use the chain tip directly because it typically starts
-    /// with a lot of leading zeros.
+    /// The coordinator is decided using the hash of the bitcoin chain tip
+    /// and signer set info from the registry if present. We don't use the
+    /// chain tip directly because it typically starts with a lot of
+    /// leading zeros.
     pub fn is_coordinator(&self, bitcoin_chain_tip: &model::BitcoinBlockHash) -> bool {
-        given_key_is_coordinator(
-            self.signer_public_key(),
-            bitcoin_chain_tip,
-            &self.context.config().signer.bootstrap_signing_set,
-        )
+        let default_signer_set = || self.context.config().signer.bootstrap_signing_set.clone();
+        let signer_public_keys = self
+            .context
+            .state()
+            .registry_signer_set_info()
+            .map_or_else(default_signer_set, |info| info.signer_set);
+
+        let signer_public_key = self.signer_public_key();
+        given_key_is_coordinator(signer_public_key, bitcoin_chain_tip, &signer_public_keys)
     }
 
     /// Constructs a new [`utxo::SignerBtcState`] based on the current market
