@@ -2863,6 +2863,66 @@ mod tests {
             .unwrap();
     }
 
+    /// Check that we is_coordinator uses the registry for figuring out who
+    /// the cooridnator is and falls back to the config if the registry has
+    /// no signer set info.
+    #[tokio::test]
+    async fn is_coordinator_uses_registry_for_coordinator() {
+        let mut rng = testing::get_rng();
+        let ctx = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .modify_settings(|settings| {
+                settings.signer.bootstrap_signatures_required = 1;
+                settings.signer.bootstrap_signing_set =
+                    std::iter::once(settings.signer.public_key()).collect();
+            })
+            .build();
+
+        let network = WanNetwork::default();
+        let net = network.connect(&ctx);
+
+        let ev = TxCoordinatorEventLoop {
+            network: net.spawn(),
+            context: ctx.clone(),
+            context_window: 10000,
+            private_key: ctx.config().signer.private_key,
+            signing_round_max_duration: Duration::from_secs(10),
+            bitcoin_presign_request_max_duration: Duration::from_secs(10),
+            dkg_max_duration: Duration::from_secs(10),
+            is_epoch3: true,
+        };
+
+        // We should always be the coordinator since the registry is unset
+        // and we're the only signer in the bootstrap signing set.
+        assert!(ev.context.state().registry_signer_set_info().is_none());
+
+        for _ in 0..100 {
+            let chain_tip1: BitcoinBlockRef = fake::Faker.fake_with_rng(&mut rng);
+            assert!(ev.is_coordinator(&chain_tip1.block_hash));
+        }
+
+        // Now let's set the signer set in the registry to some random
+        // signer set without our key. Now we should never be the
+        // coordinator.
+        let signer_set_info = crate::stacks::api::SignerSetInfo {
+            aggregate_key: Faker.fake_with_rng(&mut rng),
+            signer_set: std::iter::repeat_with(|| Faker.fake_with_rng(&mut rng))
+                .take(2)
+                .collect(),
+            signatures_required: 2,
+        };
+
+        ctx.state().update_registry_signer_set_info(signer_set_info);
+
+        // If we were part of the signing set, there is a 2^(-128) chance
+        // that this check would pass.
+        for _ in 0..128 {
+            let chain_tip1: BitcoinBlockRef = fake::Faker.fake_with_rng(&mut rng);
+            assert!(!ev.is_coordinator(&chain_tip1.block_hash));
+        }
+    }
+
     #[tokio::test]
     async fn should_get_signer_utxo_simple() {
         test_environment().assert_get_signer_utxo_simple().await;
