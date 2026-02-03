@@ -1274,12 +1274,19 @@ where
 
     let mut consensus_hash = consensus_hash;
     let mut tenure = stacks.get_tenure_headers(&consensus_hash).await?;
-    if tenure.anchor_block_height < nakamoto_start_height {
-        return Err(Error::PreNakamotoTenure(consensus_hash));
-    }
+
     let end_height = tenure.end_header().block_height;
     loop {
         db.write_stacks_block_headers(&tenure).await?;
+
+        if tenure.anchor_block_height <= nakamoto_start_height {
+            tracing::debug!(
+                %nakamoto_start_height,
+                last_chain_length = %tenure.anchor_block_height,
+                "all Nakamoto blocks fetched; stopping"
+            );
+            break;
+        }
         // Tenure blocks are always non-empty, and this invariant is upheld
         // by the type. So no need to worry about the early break.
         let Some(header) = tenure.headers().last() else {
@@ -1299,14 +1306,7 @@ where
         };
         consensus_hash = parent_consensus_hash.into();
         let new_tenure = stacks.get_tenure_headers(&consensus_hash).await?;
-        if new_tenure.anchor_block_height <= nakamoto_start_height {
-            tracing::debug!(
-                %nakamoto_start_height,
-                last_chain_length = %tenure.anchor_block_height,
-                "all Nakamoto blocks fetched; stopping"
-            );
-            break;
-        }
+
         tenure = new_tenure
     }
 
