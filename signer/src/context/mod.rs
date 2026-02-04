@@ -120,8 +120,8 @@ pub trait Context: Clone + Sync + Send {
     /// deciding who this signer can communicate with and for whether we
     /// need to run DKG. However, for choosing a coordinator, we prefer to
     /// rely on what is in the registry since all signers see that at the
-    /// same time. Therefore, the using the signer set in the registry
-    /// yields a more stable and predictable coordinator selection process.
+    /// same time yielding a more stable and predictable coordinator
+    /// selection process.
     fn coordinator_signer_set(&self) -> BTreeSet<PublicKey> {
         let default_signer_set = || self.config().signer.bootstrap_signing_set.clone();
 
