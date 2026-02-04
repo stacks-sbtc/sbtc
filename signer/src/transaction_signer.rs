@@ -2157,7 +2157,7 @@ mod tests {
         };
 
         // Set the chain tip in the context state
-        context.state().set_bitcoin_chain_tip(chain_tip_ref.clone());
+        context.state().set_bitcoin_chain_tip(chain_tip_ref);
 
         let network = InMemoryNetwork::new();
 
