@@ -5,6 +5,8 @@ mod signer_context;
 mod signer_state;
 mod termination;
 
+use std::collections::BTreeSet;
+
 use tokio::sync::broadcast::error::RecvError;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -13,6 +15,7 @@ use crate::bitcoin::BitcoinInteract;
 use crate::config::Settings;
 use crate::emily_client::EmilyInteract;
 use crate::error::Error;
+use crate::keys::PublicKey;
 use crate::stacks::api::StacksInteract;
 use crate::storage::DbRead;
 use crate::storage::DbWrite;
@@ -106,5 +109,24 @@ pub trait Context: Clone + Sync + Send {
             }
         });
         ReceiverStream::new(receiver)
+    }
+
+    /// Return the signer set that is used when determining who is the
+    /// coordinator.
+    ///
+    /// # Notes
+    ///
+    /// The signer set configured as the bootstrap signing set is used for
+    /// deciding who this signer can communicate with and for whether we
+    /// need to run DKG. However, for choosing a coordinator, we prefer to
+    /// rely on what is in the registry since all signers see that at the
+    /// same time. Therefore, the using the signer set in the registry
+    /// yields a more stable and predictable coordinator selection process.
+    fn coordinator_signer_set(&self) -> BTreeSet<PublicKey> {
+        let default_signer_set = || self.config().signer.bootstrap_signing_set.clone();
+
+        self.state()
+            .registry_signer_set_info()
+            .map_or_else(default_signer_set, |info| info.signer_set)
     }
 }

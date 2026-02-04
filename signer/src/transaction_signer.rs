@@ -395,11 +395,11 @@ where
             .is_some();
         let is_canonical = msg_bitcoin_chain_tip == &chain_tip.block_hash;
 
-        let signer_set = &self.context.config().signer.bootstrap_signing_set;
+        let signer_set = self.context.coordinator_signer_set();
         let sender_is_coordinator = crate::transaction_coordinator::given_key_is_coordinator(
             msg_sender,
             &chain_tip.block_hash,
-            signer_set,
+            &signer_set,
         );
 
         let chain_tip_status = match (is_known, is_canonical) {

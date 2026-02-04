@@ -65,8 +65,7 @@ impl SignerState {
         self.registry_signing_set_info
             .read()
             .expect("BUG: Failed to acquire read lock of signer set info")
-            .as_ref()
-            .cloned()
+            .to_owned()
     }
 
     /// Get the current bitcoin chain tip.
