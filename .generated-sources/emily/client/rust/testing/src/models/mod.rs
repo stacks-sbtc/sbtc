@@ -20,6 +20,8 @@ pub mod deposit_with_status;
 pub use self::deposit_with_status::DepositWithStatus;
 pub mod error_response;
 pub use self::error_response::ErrorResponse;
+pub mod expected_fulfillment_info;
+pub use self::expected_fulfillment_info::ExpectedFulfillmentInfo;
 pub mod fulfillment;
 pub use self::fulfillment::Fulfillment;
 pub mod get_deposits_for_transaction_response;

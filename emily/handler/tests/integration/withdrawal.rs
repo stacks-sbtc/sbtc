@@ -8,8 +8,9 @@ use testing_emily_client::apis::chainstate_api::get_chain_tip;
 use testing_emily_client::apis::chainstate_api::set_chainstate;
 use testing_emily_client::apis::configuration::Configuration;
 use testing_emily_client::models::{
-    Chainstate, CreateWithdrawalRequestBody, Fulfillment, UpdateWithdrawalsRequestBody, Withdrawal,
-    WithdrawalInfo, WithdrawalParameters, WithdrawalStatus, WithdrawalUpdate,
+    Chainstate, CreateWithdrawalRequestBody, ExpectedFulfillmentInfo, Fulfillment,
+    UpdateWithdrawalsRequestBody, Withdrawal, WithdrawalInfo, WithdrawalParameters,
+    WithdrawalStatus, WithdrawalUpdate,
 };
 
 use crate::common::batch_set_chainstates;
@@ -88,6 +89,10 @@ async fn create_and_get_withdrawal_happy_path() {
     let expected = Withdrawal {
         amount,
         fulfillment: None,
+        expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
+            bitcoin_block_height: None,
+            bitcoin_txid: None,
+        }),
         last_update_block_hash: BLOCK_HASH.into(),
         last_update_height: BLOCK_HEIGHT,
         parameters: Box::new(parameters.clone()),
@@ -467,6 +472,10 @@ async fn update_withdrawals() {
         let withdrawal_update = WithdrawalUpdate {
             request_id,
             fulfillment: Some(Some(Box::new(update_fulfillment.clone()))),
+            expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
+                bitcoin_block_height: None,
+                bitcoin_txid: None,
+            }),
             status: update_status,
             status_message: update_status_message.into(),
         };
@@ -475,6 +484,10 @@ async fn update_withdrawals() {
         let expected = Withdrawal {
             amount,
             fulfillment: Some(Some(Box::new(update_fulfillment.clone()))),
+            expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
+                bitcoin_block_height: None,
+                bitcoin_txid: None,
+            }),
             last_update_block_hash: update_chainstate.stacks_block_hash.clone(),
             last_update_height: update_chainstate.stacks_block_height,
             parameters: Box::new(parameters.clone()),
@@ -596,6 +609,10 @@ async fn update_withdrawals_is_forbidden_for_signer(
                 withdrawals: vec![WithdrawalUpdate {
                     request_id,
                     fulfillment,
+                    expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
+                        bitcoin_block_height: None,
+                        bitcoin_txid: None,
+                    }),
                     status: previous_status,
                     status_message: "foo".into(),
                 }],
@@ -623,6 +640,10 @@ async fn update_withdrawals_is_forbidden_for_signer(
         UpdateWithdrawalsRequestBody {
             withdrawals: vec![WithdrawalUpdate {
                 request_id,
+                expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
+                    bitcoin_block_height: None,
+                    bitcoin_txid: None,
+                }),
                 fulfillment,
                 status: new_status,
                 status_message: "foo".into(),
@@ -731,6 +752,10 @@ async fn update_withdrawals_is_not_forbidden_for_sidecar(
             UpdateWithdrawalsRequestBody {
                 withdrawals: vec![WithdrawalUpdate {
                     request_id,
+                    expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
+                        bitcoin_block_height: None,
+                        bitcoin_txid: None,
+                    }),
                     fulfillment,
                     status: previous_status,
                     status_message: "foo".into(),
@@ -759,6 +784,10 @@ async fn update_withdrawals_is_not_forbidden_for_sidecar(
         UpdateWithdrawalsRequestBody {
             withdrawals: vec![WithdrawalUpdate {
                 request_id,
+                expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
+                    bitcoin_block_height: None,
+                    bitcoin_txid: None,
+                }),
                 fulfillment,
                 status: new_status,
                 status_message: "foo".into(),
@@ -860,6 +889,10 @@ async fn emily_process_withdrawal_updates_when_some_of_them_already_accepted() {
         withdrawals: vec![WithdrawalUpdate {
             request_id: create_withdrawal_body1.request_id,
             fulfillment: None,
+            expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
+                bitcoin_block_height: None,
+                bitcoin_txid: None,
+            }),
             status: WithdrawalStatus::Accepted,
             status_message: "First update".into(),
         }],
@@ -905,12 +938,20 @@ async fn emily_process_withdrawal_updates_when_some_of_them_already_accepted() {
             WithdrawalUpdate {
                 request_id: create_withdrawal_body1.request_id,
                 fulfillment: None,
+                expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
+                    bitcoin_block_height: None,
+                    bitcoin_txid: None,
+                }),
                 status: WithdrawalStatus::Accepted,
                 status_message: "Second update".into(),
             },
             WithdrawalUpdate {
                 request_id: create_withdrawal_body2.request_id,
                 fulfillment: None,
+                expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
+                    bitcoin_block_height: None,
+                    bitcoin_txid: None,
+                }),
                 status: WithdrawalStatus::Accepted,
                 status_message: "Second update".into(),
             },
@@ -1018,12 +1059,20 @@ async fn emily_process_withdrawal_updates_when_some_of_them_are_unknown() {
             WithdrawalUpdate {
                 request_id: create_withdrawal_body1.request_id,
                 fulfillment: None,
+                expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
+                    bitcoin_block_height: None,
+                    bitcoin_txid: None,
+                }),
                 status: WithdrawalStatus::Accepted,
                 status_message: "Second update".into(),
             },
             WithdrawalUpdate {
                 request_id: create_withdrawal_body2.request_id,
                 fulfillment: None,
+                expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
+                    bitcoin_block_height: None,
+                    bitcoin_txid: None,
+                }),
                 status: WithdrawalStatus::Accepted,
                 status_message: "Second update".into(),
             },
@@ -1262,6 +1311,10 @@ async fn only_confirmed_withdrawals_can_have_fulfillment(
         withdrawals: vec![WithdrawalUpdate {
             request_id,
             fulfillment: fulfillment.clone(),
+            expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
+                bitcoin_block_height: None,
+                bitcoin_txid: None,
+            }),
             status,
             status_message: "foo".into(),
         }],
@@ -1307,6 +1360,120 @@ async fn only_confirmed_withdrawals_can_have_fulfillment(
         assert!(matches!(response.status, WithdrawalStatus::Pending));
         assert!(response.fulfillment.is_none());
     }
+
+    clean_test_setup(tables).await;
+}
+
+#[tokio::test]
+async fn expected_fulfillment_info_stored_correctly() {
+    // the testing configuration has privileged access to all endpoints.
+    let (testing_configuration, tables) = new_test_setup().await;
+
+    // the user configuration access depends on the api_key.
+    let user_configuration = testing_configuration.clone();
+    // Arrange.
+    // --------
+    let request_id = 1;
+
+    let chainstate = Chainstate {
+        stacks_block_hash: "test_block_hash".to_string(),
+        stacks_block_height: 1,
+        bitcoin_block_height: Some(Some(1)),
+    };
+
+    set_chainstate(&testing_configuration, chainstate.clone())
+        .await
+        .expect("Received an error after making a valid set chainstate api call.");
+
+    // Setup test withdrawal transaction.
+    let request = CreateWithdrawalRequestBody {
+        amount: 10000,
+        parameters: Box::new(WithdrawalParameters { max_fee: 100 }),
+        recipient: RECIPIENT.into(),
+        sender: SENDER.into(),
+        request_id,
+        stacks_block_hash: chainstate.stacks_block_hash.clone(),
+        stacks_block_height: chainstate.stacks_block_height,
+        txid: "test_txid".to_string(),
+    };
+
+    // Create the withdrawal with the privileged configuration.
+    apis::withdrawal_api::create_withdrawal(&testing_configuration, request.clone())
+        .await
+        .expect("Received an error after making a valid create withdrawal request api call.");
+
+    // Right after creation txid should be none and height should be chainstate.bitcoin_block_height + 6 + 1
+    let withdrawal = apis::withdrawal_api::get_withdrawal(&user_configuration, request_id)
+        .await
+        .unwrap();
+    let received_expected_height = withdrawal
+        .expected_fulfillment_info
+        .bitcoin_block_height
+        .unwrap()
+        .unwrap();
+    assert!(withdrawal.expected_fulfillment_info.bitcoin_txid.is_none());
+    assert_eq!(8, received_expected_height);
+
+    // Now signer updates withdrawal with expected txid and height
+    let expected_expected_txid = "txid".to_string();
+    let expected_fulfillment_info = ExpectedFulfillmentInfo {
+        bitcoin_block_height: Some(Some(300)),
+        bitcoin_txid: Some(Some(expected_expected_txid.clone())),
+    };
+
+    let request = UpdateWithdrawalsRequestBody {
+        withdrawals: vec![WithdrawalUpdate {
+            request_id,
+            fulfillment: None,
+            expected_fulfillment_info: Box::new(expected_fulfillment_info),
+            status: WithdrawalStatus::Accepted,
+            status_message: "foo".into(),
+        }],
+    };
+
+    let withdrawals = apis::withdrawal_api::update_withdrawals_signer(&user_configuration, request)
+        .await
+        .unwrap()
+        .withdrawals;
+
+    // After signer's update, txid should be same as signer provided while height should stay untouched
+
+    assert_eq!(withdrawals.len(), 1);
+    let withdrawal = withdrawals.first().unwrap().clone();
+
+    let received_expected_fulfillment_info = withdrawal
+        .withdrawal
+        .unwrap()
+        .unwrap()
+        .expected_fulfillment_info;
+    let received_expected_height = received_expected_fulfillment_info
+        .bitcoin_block_height
+        .unwrap()
+        .unwrap();
+    let received_expected_txid = received_expected_fulfillment_info
+        .bitcoin_txid
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(8, received_expected_height);
+    assert_eq!(expected_expected_txid, received_expected_txid);
+
+    let withdrawal = apis::withdrawal_api::get_withdrawal(&user_configuration, request_id)
+        .await
+        .unwrap();
+
+    let received_expected_fulfillment_info = withdrawal.expected_fulfillment_info;
+    let received_expected_height = received_expected_fulfillment_info
+        .bitcoin_block_height
+        .unwrap()
+        .unwrap();
+    let received_expected_txid = received_expected_fulfillment_info
+        .bitcoin_txid
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(8, received_expected_height);
+    assert_eq!(expected_expected_txid, received_expected_txid);
 
     clean_test_setup(tables).await;
 }

@@ -16,6 +16,7 @@ docs/DepositStatus.md
 docs/DepositUpdate.md
 docs/DepositWithStatus.md
 docs/ErrorResponse.md
+docs/ExpectedFulfillmentInfo.md
 docs/Fulfillment.md
 docs/GetDepositsForTransactionResponse.md
 docs/GetDepositsResponse.md
@@ -58,6 +59,7 @@ src/models/deposit_status.rs
 src/models/deposit_update.rs
 src/models/deposit_with_status.rs
 src/models/error_response.rs
+src/models/expected_fulfillment_info.rs
 src/models/fulfillment.rs
 src/models/get_deposits_for_transaction_response.rs
 src/models/get_deposits_response.rs
