@@ -465,9 +465,6 @@ pub async fn backfill_bitcoin_blocks(db: &PgStore, rpc: &Client, chain_tip: &bit
         db.write_bitcoin_block(&bitcoin_block).await.unwrap();
         block_header = rpc.get_block_header_info(&parent_header_hash).unwrap();
     }
-
-    let block_hash = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
-    assert_eq!(block_hash.deref(), chain_tip);
 }
 
 /// Fetch all block headers from bitcoin-core and store it in the database.
@@ -475,6 +472,9 @@ pub async fn fetch_canonical_bitcoin_blockchain(db: &PgStore, rpc: &Client) -> B
     let chain_tip_info = rpc.get_blockchain_info().unwrap();
 
     backfill_bitcoin_blocks(db, rpc, &chain_tip_info.best_block_hash).await;
+
+    let block_hash = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
+    assert_eq!(block_hash.deref(), &chain_tip_info.best_block_hash);
 
     chain_tip_info.best_block_hash.into()
 }
