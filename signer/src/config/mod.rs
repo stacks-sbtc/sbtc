@@ -991,6 +991,35 @@ mod tests {
     }
 
     #[test]
+    fn error_on_zero_emily_timeouts() {
+        clear_env();
+        set_var("SIGNER_EMILY__PAGINATION_TIMEOUT", "0");
+        set_var("SIGNER_EMILY__TIMEOUT", "300");
+        let err = Settings::new_from_default_config().unwrap_err();
+        if let ConfigError::Message(msg) = err {
+            assert_eq!(
+                msg,
+                "Duration for emily::pagination_timeout must be nonzero".to_string()
+            );
+        } else {
+            panic!("Wrong error variant");
+        }
+
+        clear_env();
+        set_var("SIGNER_EMILY__PAGINATION_TIMEOUT", "300");
+        set_var("SIGNER_EMILY__TIMEOUT", "0");
+        let err = Settings::new_from_default_config().unwrap_err();
+        if let ConfigError::Message(msg) = err {
+            assert_eq!(
+                msg,
+                "Duration for emily::timeout must be nonzero".to_string()
+            );
+        } else {
+            panic!("Wrong error variant");
+        }
+    }
+
+    #[test]
     fn prometheus_exporter_endpoint_with_environment() {
         clear_env();
 
