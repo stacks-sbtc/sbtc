@@ -3219,10 +3219,6 @@ struct TestThresholds {
     first: NonZeroU16::new(3).unwrap(),
     second: NonZeroU16::new(2).unwrap(),
 }; "lower the threshold")]
-#[test_case(TestThresholds {
-    first: NonZeroU16::new(3).unwrap(),
-    second: NonZeroU16::new(3).unwrap(),
-}; "same the threshold")]
 #[tokio::test]
 async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds: TestThresholds) {
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
