@@ -3,7 +3,6 @@ use std::num::NonZeroU16;
 use std::num::NonZeroUsize;
 use std::ops::Deref as _;
 use std::sync::Arc;
-use std::sync::RwLock;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering;
@@ -24,6 +23,7 @@ use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlockHeader;
 use blockstack_lib::chainstate::stacks::StacksTransaction;
 use blockstack_lib::chainstate::stacks::TokenTransferMemo;
+use blockstack_lib::chainstate::stacks::TransactionContractCall;
 use blockstack_lib::chainstate::stacks::TransactionPayload;
 use blockstack_lib::net::api::getcontractsrc::ContractSrcResponse;
 use blockstack_lib::net::api::getsortition::SortitionInfo;
@@ -269,23 +269,32 @@ fn assert_stacks_transaction_kind<T>(tx: &StacksTransaction)
 where
     T: AsContractCall,
 {
-    let TransactionPayload::ContractCall(contract_call) = &tx.payload else {
-        panic!("expected a contract call, got something else");
-    };
-
-    assert_eq!(contract_call.contract_name.as_str(), T::CONTRACT_NAME);
-    assert_eq!(contract_call.function_name.as_str(), T::FUNCTION_NAME);
+    check_transaction_kind::<T>(tx).unwrap();
 }
 
-fn is_stacks_transaction_kind<T>(tx: &StacksTransaction) -> bool
+/// Check that the input transaction matches the given contract call type
+fn check_transaction_kind<T>(tx: &StacksTransaction) -> Result<&TransactionContractCall, String>
 where
     T: AsContractCall,
 {
-    if let TransactionPayload::ContractCall(contract_call) = &tx.payload {
-        return contract_call.contract_name.as_str() == T::CONTRACT_NAME
-            && contract_call.function_name.as_str() == T::FUNCTION_NAME;
+    let TransactionPayload::ContractCall(contract_call) = &tx.payload else {
+        return Err("expected a contract call transaction, got something else".to_string());
     };
-    false
+    if contract_call.contract_name.as_str() != T::CONTRACT_NAME {
+        return Err(format!(
+            "contract name mismatch: expected {}, got {}",
+            T::CONTRACT_NAME,
+            contract_call.contract_name
+        ));
+    }
+    if contract_call.function_name.as_str() != T::FUNCTION_NAME {
+        return Err(format!(
+            "function name mismatch: expected {}, got {}",
+            T::FUNCTION_NAME,
+            contract_call.function_name
+        ));
+    }
+    Ok(contract_call)
 }
 
 /// Wait for all signers to finish their coordinator duties and do this
@@ -348,51 +357,6 @@ async fn wait_for_tenure_completed<S>(
     // It's not entirely clear why this sleep is helpful, but it appears to
     // be necessary in CI.
     Sleep::for_secs(1).await;
-}
-
-/// This function is used to watch for rotate keys transactions and update
-/// the signer set info variable.
-///
-/// We assume that every contract call gets confirmed immediately. In
-/// particular, key-rotation contract calls are confirmed and the smart
-/// contract is immediately updated. To mock this, we create a shared
-/// variable that we update when we receive a rotate keys transaction. This
-/// same variable is read when we call `get_current_signer_set_info`. Below
-/// we set up a task to watch for the submission of a rotate keys
-/// transaction and update the signer set info variable if so.
-fn watch_for_rotate_keys_transaction(
-    tx_broadcaster: &Sender<StacksTransaction>,
-    signer_set_data: Arc<RwLock<Option<SignerSetInfo>>>,
-) {
-    let mut tx_receiver = tx_broadcaster.subscribe();
-
-    tokio::spawn(async move {
-        while let Ok(tx) = tx_receiver.recv().await {
-            if is_stacks_transaction_kind::<RotateKeysV1>(&tx) {
-                let TransactionPayload::ContractCall(payload) = &tx.payload else {
-                    panic!("expected a contract call payload");
-                };
-                let signer_set = payload.function_args[0]
-                    .clone()
-                    .expect_list()
-                    .unwrap()
-                    .iter()
-                    .map(|buff| {
-                        PublicKey::from_slice(&buff.clone().expect_buff(33).unwrap()).unwrap()
-                    })
-                    .collect::<BTreeSet<_>>();
-
-                let aggregate_key_bytes = payload.function_args[1].clone().expect_buff(33).unwrap();
-                let signatures_required = payload.function_args[2].clone().expect_u128().unwrap();
-                let signer_set_info = SignerSetInfo {
-                    aggregate_key: PublicKey::from_slice(&aggregate_key_bytes).unwrap(),
-                    signer_set,
-                    signatures_required: signatures_required as u16,
-                };
-                signer_set_data.write().unwrap().replace(signer_set_info);
-            }
-        }
-    });
 }
 
 fn mock_deploy_all_contracts() -> Box<dyn FnOnce(&mut MockStacksInteract)> {
@@ -967,20 +931,15 @@ where
         .abort_handle(),
     );
 
-    // We wait to make sure that all spawned tasks have started.
-    while start_count.load(Ordering::SeqCst) < 4 {
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-
     let mut tx_receiver = tx_broadcaster.subscribe();
     let db = ctx.get_storage_mut();
 
+    let counter = start_count.clone();
     let join_handle = tokio::spawn(async move {
+        counter.fetch_add(1, Ordering::Relaxed);
+
         while let Ok(tx) = tx_receiver.recv().await {
-            if is_stacks_transaction_kind::<RotateKeysV1>(&tx) {
-                let TransactionPayload::ContractCall(payload) = &tx.payload else {
-                    panic!("expected a contract call payload");
-                };
+            if let Ok(payload) = check_transaction_kind::<RotateKeysV1>(&tx) {
                 let signer_set = payload.function_args[0]
                     .clone()
                     .expect_list()
@@ -1019,6 +978,11 @@ where
             }
         }
     });
+
+    // We wait to make sure that all spawned tasks have started.
+    while start_count.load(Ordering::SeqCst) < 5 {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
 
     handles.push(join_handle.abort_handle());
     handles
@@ -3275,8 +3239,6 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     // =========================================================================
     let (tx_broadcaster, rx) = tokio::sync::broadcast::channel(10);
     let stacks_tx_stream = BroadcastStream::new(rx);
-    let signer_set_data = Arc::new(RwLock::new(None));
-    watch_for_rotate_keys_transaction(&tx_broadcaster, signer_set_data.clone());
 
     for ctx in signers.iter_mut() {
         let tx_broadcaster = tx_broadcaster.clone();
