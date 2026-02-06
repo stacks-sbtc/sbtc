@@ -3351,6 +3351,12 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     for handle in handles {
         handle.abort();
     }
+    // Send a bitcoin block to make sure that the event loops hit an await
+    // point so that the above abort cancels the task.
+    faucet.generate_block();
+    // Let's create a new network for the signers, so that tasks do not
+    // interfere with one another.
+    let network = WanNetwork::default();
 
     let previous_contexts = std::mem::take(&mut signers);
 
@@ -3683,7 +3689,6 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
 #[tokio::test]
 async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds: TestThresholds) {
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
-    signer::logging::setup_logging("info,signer=debug", false);
 
     let stack = TestContainersBuilder::start_bitcoin().await;
     let bitcoin = stack.bitcoin().await;
@@ -3891,6 +3896,12 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     for handle in handles {
         handle.abort();
     }
+    // Send a bitcoin block to make sure that the event loops hit an await
+    // point so that the above abort cancels the task.
+    faucet.generate_block();
+    // Let's create a new network for the signers, so that tasks do not
+    // interfere with one another.
+    let network = WanNetwork::default();
 
     for (db, private_key) in previous_contexts {
         let mut ctx = TestContext::builder()
