@@ -171,6 +171,7 @@ use crate::setup::TestSweepSetup;
 use crate::setup::TestSweepSetup2;
 use crate::setup::WithdrawalTriple;
 use crate::setup::backfill_bitcoin_blocks;
+use crate::setup::backfill_bitcoin_blocks_unchecked;
 use crate::setup::clean_emily_setup;
 use crate::setup::fetch_canonical_bitcoin_blockchain;
 use crate::setup::new_emily_setup;
@@ -3262,7 +3263,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
             })
             .build();
 
-        backfill_bitcoin_blocks(&db, rpc, &chain_tip_info.hash).await;
+        backfill_bitcoin_blocks_unchecked(&db, rpc, &chain_tip_info.hash).await;
 
         signers.push(ctx);
     }
@@ -3444,7 +3445,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
             })
             .build();
 
-        backfill_bitcoin_blocks(&db, rpc, &chain_tip_info.hash).await;
+        backfill_bitcoin_blocks_unchecked(&db, rpc, &chain_tip_info.hash).await;
 
         ctx.state().set_sbtc_contracts_deployed();
         start_event_loops(&ctx, &network, &tx_broadcaster).await;
