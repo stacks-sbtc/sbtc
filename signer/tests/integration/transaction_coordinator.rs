@@ -3224,8 +3224,6 @@ struct TestThresholds {
 }; "same the threshold")]
 #[tokio::test]
 async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds: TestThresholds) {
-    signer::logging::setup_logging("info,signer=debug", false);
-
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
     let (rpc, faucet) = regtest::initialize_blockchain();
     let mut rng = get_rng();
