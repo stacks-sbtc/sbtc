@@ -3683,6 +3683,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
 #[tokio::test]
 async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds: TestThresholds) {
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
+    signer::logging::setup_logging("info,signer=debug", false);
 
     let stack = TestContainersBuilder::start_bitcoin().await;
     let bitcoin = stack.bitcoin().await;
