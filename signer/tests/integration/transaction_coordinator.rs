@@ -3381,15 +3381,6 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
         signers.push(ctx);
     }
 
-    // When we start the above event loops, the block observer will
-    // immediately observe a bitcoin block that is already known. This will
-    // trigger the usual flow of processing through the request decider and
-    // coordinator event loops. The actual coordinator will then sleep and
-    // see that there is nothing to do before exiting. We want this all to
-    // happen before we observe the next bitcoin block, so that things
-    // proceed naturally.
-    tokio::time::sleep(Duration::from_secs(2)).await;
-
     // =========================================================================
     // Step 9 - Wait for DKG again
     // -------------------------------------------------------------------------
@@ -3509,7 +3500,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     // - Does the last sweep transaction spend to the signers' new
     //   scriptPubKey.
     // =========================================================================
-    let sleep_fut = tokio::time::sleep(Duration::from_secs(5));
+    let sleep_fut = tokio::time::sleep(Duration::from_secs(1));
     let broadcast_stacks_txs: Vec<StacksTransaction> = stacks_tx_stream
         .take_until(sleep_fut)
         .collect::<Vec<_>>()
@@ -3522,12 +3513,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
 
     let mut complete_deposit_txs: Vec<StacksTransaction> = broadcast_stacks_txs
         .iter()
-        .filter(|tx| match &tx.payload {
-            TransactionPayload::ContractCall(cc) => {
-                cc.function_name.as_str() == CompleteDepositV1::FUNCTION_NAME
-            }
-            _ => false,
-        })
+        .filter(|tx| check_transaction_kind::<CompleteDepositV1>(tx).is_ok())
         .cloned()
         .collect();
 
@@ -3553,12 +3539,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     // need to filter out the duplicates.
     let mut rotate_keys_txs: Vec<StacksTransaction> = broadcast_stacks_txs
         .iter()
-        .filter(|tx| match &tx.payload {
-            TransactionPayload::ContractCall(cc) => {
-                cc.function_name.as_str() == RotateKeysV1::FUNCTION_NAME
-            }
-            _ => false,
-        })
+        .filter(|tx| check_transaction_kind::<RotateKeysV1>(tx).is_ok())
         .cloned()
         .collect();
     rotate_keys_txs.dedup_by_key(|tx| match &tx.payload {
@@ -3567,25 +3548,16 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
         _ => None,
     });
 
-    // These should all be rotate-keys contract calls.
-    for tx in rotate_keys_txs.iter() {
-        assert_stacks_transaction_kind::<RotateKeysV1>(tx);
-    }
     // We ran DKG twice, so two rotate-keys contract calls.
     assert_eq!(rotate_keys_txs.len(), 2);
 
-    // Check that these are all complete-deposit contract calls.
-    for tx in complete_deposit_txs.iter() {
-        assert_stacks_transaction_kind::<CompleteDepositV1>(tx);
-    }
     // There were three deposits, so three distinct complete-deposit
     // contract calls.
     assert_eq!(complete_deposit_txs.len(), 3);
 
     // Now lets check the bitcoin transaction, first we get it.
-    let ctx = signers.first().unwrap();
-    let tx_info1 = ctx
-        .bitcoin_client
+    let tx_info1 = bitcoin
+        .get_client()
         .get_tx_info(&sweep_txid1, &block_hash1)
         .unwrap()
         .unwrap();
@@ -3599,8 +3571,8 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     assert_eq!(signers_prevout_script_pubkey, &first_script_pubkey);
     assert_eq!(signer_new_script_pubkey, second_script_pubkey);
 
-    let tx_info2 = ctx
-        .bitcoin_client
+    let tx_info2 = bitcoin
+        .get_client()
         .get_tx_info(&sweep_txid2, &block_hash2)
         .unwrap()
         .unwrap();
@@ -3947,15 +3919,6 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
         signers.push(ctx);
     }
 
-    // When we start the above event loops, the block observer will
-    // immediately observe a bitcoin block that is already known. This will
-    // trigger the usual flow of processing through the request decider and
-    // coordinator event loops. The actual coordinator will then sleep and
-    // see that there is nothing to do before exiting. We want this all to
-    // happen before we observe the next bitcoin block, so that things
-    // proceed naturally.
-    tokio::time::sleep(Duration::from_secs(2)).await;
-
     // =========================================================================
     // Step 9 - Wait for DKG again
     // -------------------------------------------------------------------------
@@ -4104,12 +4067,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
 
     let mut complete_deposit_txs: Vec<StacksTransaction> = broadcast_stacks_txs
         .iter()
-        .filter(|tx| match &tx.payload {
-            TransactionPayload::ContractCall(cc) => {
-                cc.function_name.as_str() == CompleteDepositV1::FUNCTION_NAME
-            }
-            _ => false,
-        })
+        .filter(|tx| check_transaction_kind::<CompleteDepositV1>(tx).is_ok())
         .cloned()
         .collect();
 
@@ -4135,12 +4093,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     // need to filter out the duplicates.
     let mut rotate_keys_txs: Vec<StacksTransaction> = broadcast_stacks_txs
         .iter()
-        .filter(|tx| match &tx.payload {
-            TransactionPayload::ContractCall(cc) => {
-                cc.function_name.as_str() == RotateKeysV1::FUNCTION_NAME
-            }
-            _ => false,
-        })
+        .filter(|tx| check_transaction_kind::<RotateKeysV1>(tx).is_ok())
         .cloned()
         .collect();
     rotate_keys_txs.dedup_by_key(|tx| match &tx.payload {
@@ -4149,25 +4102,16 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
         _ => None,
     });
 
-    // These should all be rotate-keys contract calls.
-    for tx in rotate_keys_txs.iter() {
-        assert_stacks_transaction_kind::<RotateKeysV1>(tx);
-    }
     // We ran DKG twice, so two rotate-keys contract calls.
     assert_eq!(rotate_keys_txs.len(), 2);
 
-    // Check that these are all complete-deposit contract calls.
-    for tx in complete_deposit_txs.iter() {
-        assert_stacks_transaction_kind::<CompleteDepositV1>(tx);
-    }
     // There were three deposits, so three distinct complete-deposit
     // contract calls.
     assert_eq!(complete_deposit_txs.len(), 3);
 
     // Now lets check the bitcoin transaction, first we get it.
-    let ctx = signers.first().unwrap();
-    let tx_info1 = ctx
-        .bitcoin_client
+    let tx_info1 = bitcoin
+        .get_client()
         .get_tx_info(&sweep_txid1, &block_hash1)
         .unwrap()
         .unwrap();
@@ -4181,8 +4125,8 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     assert_eq!(signers_prevout_script_pubkey, &first_script_pubkey);
     assert_eq!(signer_new_script_pubkey, second_script_pubkey);
 
-    let tx_info2 = ctx
-        .bitcoin_client
+    let tx_info2 = bitcoin
+        .get_client()
         .get_tx_info(&sweep_txid2, &block_hash2)
         .unwrap()
         .unwrap();
