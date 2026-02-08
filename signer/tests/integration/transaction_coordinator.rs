@@ -3,6 +3,7 @@ use std::num::NonZeroU16;
 use std::num::NonZeroUsize;
 use std::ops::Deref as _;
 use std::sync::Arc;
+use std::sync::RwLock;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering;
@@ -735,7 +736,7 @@ async fn mock_stacks_core<D, B, E>(
 async fn mock_stacks_core2<D, B, E>(
     ctx: &mut TestContext<D, B, WrappedMock<MockStacksInteract>, E>,
     chain_tip_info: GetChainTipsResultTip,
-    db: PgStore,
+    signer_set_data: Arc<RwLock<Option<SignerSetInfo>>>,
     broadcast_stacks_tx: Sender<StacksTransaction>,
 ) {
     ctx.with_stacks_client(|client| {
@@ -806,11 +807,10 @@ async fn mock_stacks_core2<D, B, E>(
         client
             .expect_get_current_signer_set_info()
             .returning(move |_| {
-                let db = db.clone();
+                let signer_set_data = signer_set_data.clone();
                 Box::pin(async move {
-                    let chain_tip = db.get_bitcoin_canonical_chain_tip().await?.unwrap();
-                    let key_rotation = db.get_last_key_rotation(&chain_tip).await?;
-                    Ok(key_rotation.map(SignerSetInfo::from))
+                    let signer_set_info = signer_set_data.read().unwrap();
+                    Ok(signer_set_info.clone())
                 })
             });
 
@@ -850,7 +850,6 @@ async fn start_event_loops<C>(
     ctx: &C,
     network: &WanNetwork,
     bitcoin: &BitcoinContainer,
-    tx_broadcaster: &Sender<StacksTransaction>,
 ) -> Vec<AbortHandle>
 where
     C: Context + 'static,
@@ -933,13 +932,30 @@ where
         .abort_handle(),
     );
 
+    // We wait to make sure that all spawned tasks have started.
+    while start_count.load(Ordering::SeqCst) < 4 {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    handles
+}
+
+/// What for key rotation contract call transactions, extract the function
+/// arguments, and update the signer set data with the details.
+///
+/// # Notes
+///
+/// This function can be used to emulate how signer set info is propogated
+/// throughout the stacks network. This is necessary so that new signers
+/// have access to the signer set info that the their stacks node will know
+/// about.
+fn watch_for_key_rotation(
+    signer_set_data: Arc<RwLock<Option<SignerSetInfo>>>,
+    tx_broadcaster: &Sender<StacksTransaction>,
+) {
     let mut tx_receiver = tx_broadcaster.subscribe();
-    let db = ctx.get_storage_mut();
 
-    let counter = start_count.clone();
-    let join_handle = tokio::spawn(async move {
-        counter.fetch_add(1, Ordering::Relaxed);
-
+    tokio::spawn(async move {
         while let Ok(tx) = tx_receiver.recv().await {
             if let Ok(payload) = check_transaction_kind::<RotateKeysV1>(&tx) {
                 let signer_set = payload.function_args[0]
@@ -955,39 +971,15 @@ where
                 let aggregate_key_bytes = payload.function_args[1].clone().expect_buff(33).unwrap();
                 let signatures_required = payload.function_args[2].clone().expect_u128().unwrap();
 
-                let bitcoin_chain_tip =
-                    db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
-                let stacks_chain_tip = db
-                    .get_stacks_chain_tip(&bitcoin_chain_tip)
-                    .await
-                    .unwrap()
-                    .unwrap();
-                let key_rotation = KeyRotationEvent {
+                let signer_set_info = SignerSetInfo {
                     aggregate_key: PublicKey::from_slice(&aggregate_key_bytes).unwrap(),
-                    signer_set: signer_set.into_iter().collect(),
+                    signer_set,
                     signatures_required: signatures_required as u16,
-                    txid: tx.txid().into(),
-                    block_hash: stacks_chain_tip.block_hash,
-                    address: PrincipalData::from(StacksAddress::burn_address(false)).into(),
                 };
-
-                match db.write_rotate_keys_transaction(&key_rotation).await {
-                    Ok(_) => {}
-                    Err(error) => {
-                        panic!("failed to write key rotation: {error}");
-                    }
-                }
+                signer_set_data.write().unwrap().replace(signer_set_info);
             }
         }
     });
-
-    // We wait to make sure that all spawned tasks have started.
-    while start_count.load(Ordering::SeqCst) < 5 {
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-
-    handles.push(join_handle.abort_handle());
-    handles
 }
 
 /// Tests that the coordinator deploys the smart contracts in the correct
@@ -3225,12 +3217,17 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     let (tx_broadcaster, rx) = tokio::sync::broadcast::channel(10);
     let stacks_tx_stream = BroadcastStream::new(rx);
 
+    // We start a process that watches for key rotation contract calls and
+    // populates the signer set data variable below.
+    let signer_set_data = Arc::new(RwLock::new(None));
+    watch_for_key_rotation(signer_set_data.clone(), &tx_broadcaster);
+
     for ctx in signers.iter_mut() {
         let tx_broadcaster = tx_broadcaster.clone();
         let chain_tip_info = chain_tip_info.clone();
-        let db = ctx.inner_storage();
+        let signer_set_data = signer_set_data.clone();
 
-        mock_stacks_core2(ctx, chain_tip_info, db, tx_broadcaster).await;
+        mock_stacks_core2(ctx, chain_tip_info, signer_set_data, tx_broadcaster).await;
     }
 
     // =========================================================================
@@ -3245,7 +3242,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
 
     for ctx in signers.iter() {
         ctx.state().set_sbtc_contracts_deployed();
-        handles.extend(start_event_loops(ctx, &network, bitcoin, &tx_broadcaster).await);
+        handles.extend(start_event_loops(ctx, &network, bitcoin).await);
     }
 
     // =========================================================================
@@ -3377,12 +3374,13 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
         backfill_bitcoin_blocks_unchecked(&db, rpc, &chain_tip_info.hash).await;
 
         ctx.state().set_sbtc_contracts_deployed();
-        start_event_loops(&ctx, &network, bitcoin, &tx_broadcaster).await;
+        start_event_loops(&ctx, &network, bitcoin).await;
 
         let tx_broadcaster = tx_broadcaster.clone();
         let chain_tip_info = chain_tip_info.clone();
-        let db = ctx.inner_storage();
-        mock_stacks_core2(&mut ctx, chain_tip_info, db, tx_broadcaster).await;
+        let signer_set_data = signer_set_data.clone();
+
+        mock_stacks_core2(&mut ctx, chain_tip_info, signer_set_data, tx_broadcaster).await;
 
         signers.push(ctx);
     }
@@ -3750,12 +3748,18 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     let (tx_broadcaster, rx) = tokio::sync::broadcast::channel(10);
     let stacks_tx_stream = BroadcastStream::new(rx);
 
+    // We start a process that watches for key rotation contract calls and
+    // populates the signer set data variable below. We will need this when
+    // we start the new signer.
+    let signer_set_data = Arc::new(RwLock::new(None));
+    watch_for_key_rotation(signer_set_data.clone(), &tx_broadcaster);
+
     for ctx in signers.iter_mut() {
         let tx_broadcaster = tx_broadcaster.clone();
-        let db = ctx.inner_storage();
+        let signer_set_data = signer_set_data.clone();
         let chain_tip_info = chain_tip_info.clone();
 
-        mock_stacks_core2(ctx, chain_tip_info, db, tx_broadcaster).await;
+        mock_stacks_core2(ctx, chain_tip_info, signer_set_data, tx_broadcaster).await;
     }
 
     // =========================================================================
@@ -3770,7 +3774,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
 
     for ctx in signers.iter() {
         ctx.state().set_sbtc_contracts_deployed();
-        handles.extend(start_event_loops(ctx, &network, bitcoin, &tx_broadcaster).await);
+        handles.extend(start_event_loops(ctx, &network, bitcoin).await);
     }
 
     // =========================================================================
@@ -3921,12 +3925,12 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
         backfill_bitcoin_blocks_unchecked(&db, rpc, &chain_tip_info.hash).await;
 
         ctx.state().set_sbtc_contracts_deployed();
-        start_event_loops(&ctx, &network, bitcoin, &tx_broadcaster).await;
+        start_event_loops(&ctx, &network, bitcoin).await;
 
         let tx_broadcaster = tx_broadcaster.clone();
         let chain_tip_info = chain_tip_info.clone();
-        let db = db.clone();
-        mock_stacks_core2(&mut ctx, chain_tip_info, db, tx_broadcaster).await;
+        let signer_set_data = signer_set_data.clone();
+        mock_stacks_core2(&mut ctx, chain_tip_info, signer_set_data, tx_broadcaster).await;
 
         signers.push(ctx);
     }
@@ -4185,6 +4189,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
         assert!(db.is_signer_script_pub_key(&script_pubkey).await.unwrap());
         testing::storage::drop_db(db).await;
     }
+
     clean_emily_setup(emily_tables).await;
 }
 
