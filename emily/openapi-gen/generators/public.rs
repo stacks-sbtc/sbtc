@@ -73,9 +73,9 @@ use super::CorsSupport;
         api::models::limits::AccountLimits,
         // Errors.
         common::error::ErrorResponse,
-                // Slowdown models
-                api::models::slowdown::SlowdownKey,
-                api::models::slowdown::SlowdownReqwest,
+        // Slowdown models
+        api::models::slowdown::SlowdownKey,
+        api::models::slowdown::SlowdownReqwest,
     ))
 )]
 pub struct ApiDoc;

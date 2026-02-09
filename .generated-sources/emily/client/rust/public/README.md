@@ -37,7 +37,7 @@ Class | Method | HTTP request | Description
 *CorsApi* | [**limits_account_options**](docs/CorsApi.md#limits_account_options) | **OPTIONS** /limits/{account} | CORS support
 *CorsApi* | [**limits_options**](docs/CorsApi.md#limits_options) | **OPTIONS** /limits | CORS support
 *CorsApi* | [**slowdown_options**](docs/CorsApi.md#slowdown_options) | **OPTIONS** /slowdown | CORS support
-*CorsApi* | [**slowdown_start_options**](docs/CorsApi.md#slowdown_start_options) | **OPTIONS** /slowdown/start | CORS support
+*CorsApi* | [**start_slowdown_options**](docs/CorsApi.md#start_slowdown_options) | **OPTIONS** /start_slowdown | CORS support
 *CorsApi* | [**withdrawal_id_options**](docs/CorsApi.md#withdrawal_id_options) | **OPTIONS** /withdrawal/{id} | CORS support
 *CorsApi* | [**withdrawal_options**](docs/CorsApi.md#withdrawal_options) | **OPTIONS** /withdrawal | CORS support
 *CorsApi* | [**withdrawal_recipient_recipient_options**](docs/CorsApi.md#withdrawal_recipient_recipient_options) | **OPTIONS** /withdrawal/recipient/{recipient} | CORS support
@@ -55,7 +55,7 @@ Class | Method | HTTP request | Description
 *LimitsApi* | [**get_limits**](docs/LimitsApi.md#get_limits) | **GET** /limits | Get the global limits.
 *LimitsApi* | [**get_limits_for_account**](docs/LimitsApi.md#get_limits_for_account) | **GET** /limits/{account} | Get limits for account handler.
 *SlowdownApi* | [**get_slowdown_key**](docs/SlowdownApi.md#get_slowdown_key) | **GET** /slowdown | Get the slowdown key details.
-*SlowdownApi* | [**start_slowdown**](docs/SlowdownApi.md#start_slowdown) | **POST** /slowdown/start | Try to turn on slow mode
+*SlowdownApi* | [**start_slowdown**](docs/SlowdownApi.md#start_slowdown) | **POST** /start_slowdown | Try to turn on slow mode
 *WithdrawalApi* | [**get_withdrawal**](docs/WithdrawalApi.md#get_withdrawal) | **GET** /withdrawal/{id} | Get withdrawal handler.
 *WithdrawalApi* | [**get_withdrawals**](docs/WithdrawalApi.md#get_withdrawals) | **GET** /withdrawal | Get withdrawals handler.
 *WithdrawalApi* | [**get_withdrawals_for_recipient**](docs/WithdrawalApi.md#get_withdrawals_for_recipient) | **GET** /withdrawal/recipient/{recipient} | Get withdrawals by recipient handler.

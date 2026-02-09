@@ -1945,7 +1945,7 @@
         }
       }
     },
-    "/slowdown/start": {
+    "/start_slowdown": {
       "post": {
         "tags": [
           "slowdown"

@@ -15,7 +15,7 @@ Method | HTTP request | Description
 [**limits_account_options**](CorsApi.md#limits_account_options) | **OPTIONS** /limits/{account} | CORS support
 [**limits_options**](CorsApi.md#limits_options) | **OPTIONS** /limits | CORS support
 [**slowdown_options**](CorsApi.md#slowdown_options) | **OPTIONS** /slowdown | CORS support
-[**slowdown_start_options**](CorsApi.md#slowdown_start_options) | **OPTIONS** /slowdown/start | CORS support
+[**start_slowdown_options**](CorsApi.md#start_slowdown_options) | **OPTIONS** /start_slowdown | CORS support
 [**withdrawal_id_options**](CorsApi.md#withdrawal_id_options) | **OPTIONS** /withdrawal/{id} | CORS support
 [**withdrawal_options**](CorsApi.md#withdrawal_options) | **OPTIONS** /withdrawal | CORS support
 [**withdrawal_recipient_recipient_options**](CorsApi.md#withdrawal_recipient_recipient_options) | **OPTIONS** /withdrawal/recipient/{recipient} | CORS support
@@ -339,9 +339,9 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 
-## slowdown_start_options
+## start_slowdown_options
 
-> slowdown_start_options()
+> start_slowdown_options()
 CORS support
 
 Handles CORS preflight requests

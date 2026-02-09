@@ -21,6 +21,8 @@ mod health;
 mod limits;
 /// NewBlock routes.
 mod new_block;
+/// Slowdown routes.
+mod slowdown;
 /// Testing routes.
 #[cfg(feature = "testing")]
 mod testing;
@@ -62,6 +64,8 @@ pub fn routes(
         .boxed()
         .or(limits::routes(context.clone()))
         .boxed()
+        .or(slowdown::routes(context.clone()))
+        .boxed()
         .or(testing::routes(context))
         .boxed()
         .or(verbose_not_found_route())
@@ -87,7 +91,9 @@ pub fn routes(
         .boxed()
         .or(withdrawal::routes(context.clone()))
         .boxed()
-        .or(limits::routes(context))
+        .or(limits::routes(context.clone()))
+        .boxed()
+        .or(slowdown::routes(context))
         .boxed()
         // Convert reply to tuple to that more routes can be added to the returned filter.
         .map(|reply| (reply,))

@@ -165,7 +165,8 @@ impl EmilyContext {
             .build();
         let dynamodb_client = Client::new(&sdk_config);
 
-        let tables_to_find: Vec<&str> = vec!["Deposit", "Chainstate", "Withdrawal", "Limit"];
+        let tables_to_find: Vec<&str> =
+            vec!["Deposit", "Chainstate", "Withdrawal", "Limit", "Slowdown"];
         let mut table_name_map: HashMap<&str, String> = HashMap::new();
 
         if skip_tables {

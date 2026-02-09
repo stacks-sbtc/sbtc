@@ -65,7 +65,7 @@ pub async fn calculate_slow_mode_limits(context: &EmilyContext) -> Result<Limits
 #[utoipa::path(
     post,
     operation_id = "startSlowdown",
-    path = "/slowdown/start",
+    path = "/start_slowdown",
     tag = "slowdown",
     request_body = SlowdownReqwest,
     responses(

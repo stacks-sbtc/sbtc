@@ -14,5 +14,7 @@ pub mod health;
 pub mod limits;
 /// New block test module.
 pub mod new_block;
+/// Slowdown test modeule.
+pub mod slowdown;
 /// Withdrawal test module.
 pub mod withdrawal;

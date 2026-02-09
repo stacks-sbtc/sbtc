@@ -31,6 +31,8 @@ pub struct EmilyTables {
     pub chainstate: String,
     /// Limits table name
     pub limit: String,
+    /// Slowdown table name
+    pub slowdown: String,
 }
 
 impl EmilyTables {
@@ -42,12 +44,13 @@ impl EmilyTables {
     }
 
     /// Get the list of tables
-    pub fn tables(&self) -> [&str; 4] {
+    pub fn tables(&self) -> [&str; 5] {
         [
             &self.chainstate,
             &self.deposit,
             &self.limit,
             &self.withdrawal,
+            &self.slowdown,
         ]
     }
 
@@ -94,7 +97,7 @@ async fn create_tables(client: &Client, table_prefix: &str) -> EmilyTables {
 
     join_all(futs).await;
 
-    let tables_to_find = vec!["Deposit", "Chainstate", "Withdrawal", "Limit"];
+    let tables_to_find = vec!["Deposit", "Chainstate", "Withdrawal", "Limit", "Slowdown"];
     let mut table_name_map: HashMap<&str, String> = HashMap::new();
 
     for (resource, name) in tables {
@@ -111,6 +114,7 @@ async fn create_tables(client: &Client, table_prefix: &str) -> EmilyTables {
         withdrawal: table_name_map.remove("Withdrawal").unwrap().to_string(),
         chainstate: table_name_map.remove("Chainstate").unwrap().to_string(),
         limit: table_name_map.remove("Limit").unwrap().to_string(),
+        slowdown: table_name_map.remove("Slowdown").unwrap().to_string(),
     };
     if !table_name_map.is_empty() {
         panic!("some Emily tables are unknown");

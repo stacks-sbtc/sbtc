@@ -39,7 +39,7 @@ Class | Method | HTTP request | Description
 *CorsApi* | [**limits_options**](docs/CorsApi.md#limits_options) | **OPTIONS** /limits | CORS support
 *CorsApi* | [**new_block_options**](docs/CorsApi.md#new_block_options) | **OPTIONS** /new_block | CORS support
 *CorsApi* | [**slowdown_options**](docs/CorsApi.md#slowdown_options) | **OPTIONS** /slowdown | CORS support
-*CorsApi* | [**slowdown_start_options**](docs/CorsApi.md#slowdown_start_options) | **OPTIONS** /slowdown/start | CORS support
+*CorsApi* | [**start_slowdown_options**](docs/CorsApi.md#start_slowdown_options) | **OPTIONS** /start_slowdown | CORS support
 *CorsApi* | [**withdrawal_id_options**](docs/CorsApi.md#withdrawal_id_options) | **OPTIONS** /withdrawal/{id} | CORS support
 *CorsApi* | [**withdrawal_options**](docs/CorsApi.md#withdrawal_options) | **OPTIONS** /withdrawal | CORS support
 *CorsApi* | [**withdrawal_private_options**](docs/CorsApi.md#withdrawal_private_options) | **OPTIONS** /withdrawal_private | CORS support
@@ -63,7 +63,7 @@ Class | Method | HTTP request | Description
 *NewBlockApi* | [**new_block**](docs/NewBlockApi.md#new_block) | **POST** /new_block | Get limits handler.
 *SlowdownApi* | [**add_slowdown_key**](docs/SlowdownApi.md#add_slowdown_key) | **POST** /slowdown | Add slowdown key handler.
 *SlowdownApi* | [**get_slowdown_key**](docs/SlowdownApi.md#get_slowdown_key) | **GET** /slowdown | Get the slowdown key details.
-*SlowdownApi* | [**start_slowdown**](docs/SlowdownApi.md#start_slowdown) | **POST** /slowdown/start | Try to turn on slow mode
+*SlowdownApi* | [**start_slowdown**](docs/SlowdownApi.md#start_slowdown) | **POST** /start_slowdown | Try to turn on slow mode
 *WithdrawalApi* | [**create_withdrawal**](docs/WithdrawalApi.md#create_withdrawal) | **POST** /withdrawal | Create withdrawal handler.
 *WithdrawalApi* | [**get_withdrawal**](docs/WithdrawalApi.md#get_withdrawal) | **GET** /withdrawal/{id} | Get withdrawal handler.
 *WithdrawalApi* | [**get_withdrawals**](docs/WithdrawalApi.md#get_withdrawals) | **GET** /withdrawal | Get withdrawals handler.
