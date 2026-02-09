@@ -68,6 +68,9 @@ pub mod limits;
 /// Withdrawal table entries.
 pub mod withdrawal;
 
+/// Slowdown keys table entries.
+pub mod slowdown;
+
 // Event structure
 // -----------------------------------------------------------------------------
 

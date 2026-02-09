@@ -29,6 +29,8 @@ pub struct Settings {
     pub withdrawal_table_name: String,
     /// Chainstate table name.
     pub chainstate_table_name: String,
+    /// Slowdown table name.
+    pub slowdown_table_name: String,
     /// Limit table name.
     pub limit_table_name: String,
     /// The default global limits for the system.
@@ -93,6 +95,7 @@ impl Settings {
             withdrawal_table_name: env::var("WITHDRAWAL_TABLE_NAME")?,
             chainstate_table_name: env::var("CHAINSTATE_TABLE_NAME")?,
             limit_table_name: env::var("LIMIT_TABLE_NAME")?,
+            slowdown_table_name: env::var("SLOWDOWN_TABLE_NAME")?,
             default_limits: AccountLimits {
                 peg_cap: env::var("DEFAULT_PEG_CAP")
                     .ok()
@@ -211,6 +214,10 @@ impl EmilyContext {
                 limit_table_name: table_name_map
                     .get("Limit")
                     .expect("Couldn't find valid limit table table in existing table list.")
+                    .to_string(),
+                slowdown_table_name: table_name_map
+                    .get("Slowdown")
+                    .expect("Couldn't find valid slowdown table table in existing table list.")
                     .to_string(),
                 default_limits: AccountLimits::default(),
                 is_mainnet: false,

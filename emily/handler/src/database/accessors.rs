@@ -7,15 +7,12 @@ use aws_sdk_dynamodb::types::error::ConditionalCheckFailedException;
 use serde_dynamo::Item;
 use strum::IntoEnumIterator as _;
 
+use sha2::{Digest as _, Sha256};
+
 use tracing::{debug, warn};
 
 use crate::api::models::limits::{AccountLimits, Limits};
 use crate::common::error::{Error, Inconsistency};
-
-use crate::{
-    api::models::common::{DepositStatus, WithdrawalStatus},
-    context::EmilyContext,
-};
 
 use super::entries::deposit::{
     DepositInfoByRecipientEntry, DepositInfoByReclaimPubkeysEntry,
@@ -44,6 +41,13 @@ use super::entries::{
         WithdrawalEntry, WithdrawalInfoEntry, WithdrawalTablePrimaryIndex,
         WithdrawalTableSecondaryIndex, WithdrawalUpdatePackage,
     },
+};
+use crate::database::entries::slowdown::{
+    SlowdownKeyEntry, SlowdownKeyEntryKey, SlowdownTablePrimaryIndex,
+};
+use crate::{
+    api::models::common::{DepositStatus, WithdrawalStatus},
+    context::EmilyContext,
 };
 
 // TODO: have different Table structs for each of the table types instead of
@@ -944,6 +948,121 @@ pub async fn set_limit_for_account(
     limit: &LimitEntry,
 ) -> Result<(), Error> {
     put_entry::<LimitTablePrimaryIndex>(context, limit).await
+}
+
+// Slowdown keys ---------------------------------------------------------------
+
+/// Get list of all slowdown keys.
+pub async fn get_slowdown_keys_list(
+    _context: &EmilyContext,
+) -> Result<Vec<SlowdownKeyEntry>, Error> {
+    todo!()
+}
+
+/// Get slowdown key by key name.
+pub async fn get_slowdown_key(
+    context: &EmilyContext,
+    key_name: String,
+) -> Result<SlowdownKeyEntry, Error> {
+    let resp =
+        query_with_partition_key::<SlowdownTablePrimaryIndex>(context, &key_name, None, None)
+            .await?
+            .0;
+    if resp.len() > 1 {
+        return Err(Error::TooManySlowdownEntries(key_name));
+    }
+    if resp.is_empty() {
+        return Err(Error::NotFound);
+    }
+    Ok(resp[0].clone())
+}
+
+/// Add new slowdown key
+pub async fn add_slowdown_key(context: &EmilyContext, key: &SlowdownKeyEntry) -> Result<(), Error> {
+    // TODO: maybe we want to check that key.key.hash is a valid hex string.
+    put_entry::<SlowdownTablePrimaryIndex>(context, key).await
+}
+
+/// Activate slowdown key. Now it will be eligible to start slow mode.
+pub async fn activate_slowdown_key(context: &EmilyContext, name: String) -> Result<(), Error> {
+    // TODO: maybe we want to bail if key already active.
+    let table_name = context.settings.slowdown_table_name.clone();
+    let key_name = SlowdownKeyEntryKey::PARTITION_KEY_NAME;
+    context
+        .dynamodb_client
+        .update_item()
+        .table_name(table_name)
+        .key(key_name, aws_sdk_dynamodb::types::AttributeValue::S(name))
+        .update_expression("SET is_active = true")
+        .send()
+        .await?;
+    Ok(())
+}
+
+/// Deactivate slowdown key. Now it will be unable to activate slow mode.
+pub async fn deactivate_slowdown_key(context: &EmilyContext, name: String) -> Result<(), Error> {
+    // TODO: maybe we want to bail if key already deactivated.
+    let table_name = context.settings.slowdown_table_name.clone();
+    let key_name = SlowdownKeyEntryKey::PARTITION_KEY_NAME;
+    context
+        .dynamodb_client
+        .update_item()
+        .table_name(table_name)
+        .key(key_name, aws_sdk_dynamodb::types::AttributeValue::S(name))
+        .update_expression("SET is_active = false")
+        .send()
+        .await?;
+    Ok(())
+}
+
+/// Enum, representing if key is eligible to activate slow mode
+pub enum KeyVerificationResult {
+    /// This key is eligible to start slow mode
+    Eligible,
+    /// This key is known, but has been revoked.
+    Revoked,
+    /// Key is known and active, but secret verification was unseccessful
+    FailedSecretVerification,
+}
+
+impl KeyVerificationResult {
+    /// Returns true if the key is eligible to start slow mode, and false otherwise.
+    pub fn is_eligible(&self) -> bool {
+        matches!(self, KeyVerificationResult::Eligible)
+    }
+}
+
+/// Verify if given key_name + secret eligible to start slow mode
+pub async fn verify_slowdown_key(
+    context: &EmilyContext,
+    key_name: String,
+    secret: String,
+) -> Result<KeyVerificationResult, Error> {
+    let key = get_slowdown_key(context, key_name).await?;
+
+    if !key.is_active {
+        return Ok(KeyVerificationResult::Revoked);
+    }
+
+    let target_hash_bytes = match hex::decode(key.key.hash) {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return Err(Error::Deserialization(format!(
+                "Dynamo db contains invalid hex string as hash for key {}",
+                key.key.key_name
+            )));
+        } // Invalid hex string
+    };
+
+    let mut hasher = Sha256::new();
+    hasher.update(secret.as_bytes());
+    let result = hasher.finalize();
+
+    if result.as_slice() != target_hash_bytes.as_slice() {
+        return Ok(KeyVerificationResult::FailedSecretVerification);
+    }
+
+    Ok(KeyVerificationResult::Eligible)
 }
 
 // Testing ---------------------------------------------------------------------

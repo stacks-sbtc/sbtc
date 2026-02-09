@@ -183,6 +183,10 @@ pub enum Error {
     #[error("DynamoDB contained many entries for the given request ID: {0}")]
     TooManyWithdrawalEntries(u64),
 
+    /// DynamoDB should only contain one entry per key name.
+    #[error("DynamoDB contained many entries for the given key name: {0}")]
+    TooManySlowdownEntries(String),
+
     /// This happens when we fail to decode a base64 encoded string into a
     /// vector of bytes.
     #[error("Failed to base64 decode the string into bytes; {0}")]
@@ -285,6 +289,7 @@ impl Error {
             Error::AwsSdkDynamoDbQuery(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::AwsSdkDynamoDbScan(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::AwsSdkDynamoDbUpdateItem(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::TooManySlowdownEntries(_) => StatusCode::INTERNAL_SERVER_ERROR,
             #[cfg(feature = "testing")]
             Error::DynamoDbBuild(_) => StatusCode::INTERNAL_SERVER_ERROR,
             #[cfg(feature = "testing")]
