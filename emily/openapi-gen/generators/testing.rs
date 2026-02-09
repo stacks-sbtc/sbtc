@@ -44,6 +44,10 @@ use super::CorsSupport;
         api::handlers::limits::set_limits_for_account,
         /// New block endpoints.
         api::handlers::new_block::new_block,
+        // Slowdown endpoints
+        api::handlers::slowdown::add_slowdown_key,
+        api::handlers::slowdown::get_slowdown_key,
+        api::handlers::slowdown::start_slowdown,
     ),
     // Components to be included in the OpenAPI specification.
     components(schemas(
@@ -84,6 +88,9 @@ use super::CorsSupport;
         api::models::new_block::NewBlockEventRaw,
         // Errors.
         common::error::ErrorResponse,
+                // Slowdown models
+                api::models::slowdown::SlowdownKey,
+                api::models::slowdown::SlowdownReqwest,
     ))
 )]
 pub struct ApiDoc;

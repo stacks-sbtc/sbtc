@@ -39,6 +39,10 @@ use super::CorsSupport;
         api::handlers::limits::set_limits,
         api::handlers::limits::get_limits_for_account,
         api::handlers::limits::set_limits_for_account,
+        // Slowdown endpoints
+        api::handlers::slowdown::add_slowdown_key,
+        api::handlers::slowdown::get_slowdown_key,
+        api::handlers::slowdown::start_slowdown,
         // New block endpoints.
         api::handlers::new_block::new_block,
     ),
@@ -79,6 +83,9 @@ use super::CorsSupport;
         api::models::limits::AccountLimits,
         // New Block models.
         api::models::new_block::NewBlockEventRaw,
+        // Slowdown models
+        api::models::slowdown::SlowdownKey,
+        api::models::slowdown::SlowdownReqwest,
         // Errors.
         common::error::ErrorResponse,
     ))

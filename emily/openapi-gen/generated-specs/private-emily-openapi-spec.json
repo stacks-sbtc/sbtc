@@ -1689,6 +1689,255 @@
         }
       }
     },
+    "/slowdown": {
+      "get": {
+        "tags": [
+          "slowdown"
+        ],
+        "summary": "Get the slowdown key details.",
+        "operationId": "getSlowdownKey",
+        "requestBody": {
+          "content": {
+            "text/plain": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Slowdown key retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlowdownKey"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Slowdown key not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-amazon-apigateway-integration": {
+          "httpMethod": "POST",
+          "type": "aws_proxy",
+          "uri": {
+            "Fn::Sub": "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${OperationLambda}/invocations"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "slowdown"
+        ],
+        "summary": "Add slowdown key handler.",
+        "operationId": "addSlowdownKey",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SlowdownKey"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Slowdown key added successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlowdownKey"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Address not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiGatewayKey": []
+          }
+        ],
+        "x-amazon-apigateway-integration": {
+          "httpMethod": "POST",
+          "type": "aws_proxy",
+          "uri": {
+            "Fn::Sub": "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${OperationLambda}/invocations"
+          }
+        }
+      },
+      "options": {
+        "tags": [
+          "CORS"
+        ],
+        "summary": "CORS support",
+        "description": "Handles CORS preflight requests",
+        "parameters": [],
+        "responses": {},
+        "x-amazon-apigateway-integration": {
+          "httpMethod": "POST",
+          "type": "aws_proxy",
+          "uri": {
+            "Fn::Sub": "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${OperationLambda}/invocations"
+          }
+        }
+      }
+    },
+    "/slowdown/start": {
+      "post": {
+        "tags": [
+          "slowdown"
+        ],
+        "summary": "Try to turn on slow mode",
+        "operationId": "startSlowdown",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SlowdownReqwest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Slowdown key retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Limits"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Slowdown key not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-amazon-apigateway-integration": {
+          "httpMethod": "POST",
+          "type": "aws_proxy",
+          "uri": {
+            "Fn::Sub": "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${OperationLambda}/invocations"
+          }
+        }
+      },
+      "options": {
+        "tags": [
+          "CORS"
+        ],
+        "summary": "CORS support",
+        "description": "Handles CORS preflight requests",
+        "parameters": [],
+        "responses": {},
+        "x-amazon-apigateway-integration": {
+          "httpMethod": "POST",
+          "type": "aws_proxy",
+          "uri": {
+            "Fn::Sub": "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${OperationLambda}/invocations"
+          }
+        }
+      }
+    },
     "/withdrawal": {
       "get": {
         "tags": [
@@ -2857,6 +3106,42 @@
       "NewBlockEventRaw": {
         "type": "string",
         "description": "The raw payload of a new block event from a stacks node.\nThis is the raw JSON string that is sent to the webhook.\nIdeally, NewBlockEvent would be used directly, but because of the\nthe imported data types, we can't derive ToSchema for it to be used\nin the OpenAPI spec."
+      },
+      "SlowdownKey": {
+        "type": "object",
+        "description": "Represents the slowdown key",
+        "required": [
+          "name",
+          "hash"
+        ],
+        "properties": {
+          "hash": {
+            "type": "string",
+            "description": "The hash of the secret associated with this key."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name of the key."
+          }
+        }
+      },
+      "SlowdownReqwest": {
+        "type": "object",
+        "description": "Represents the slowdown reqwest",
+        "required": [
+          "name",
+          "secret"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The name of the key."
+          },
+          "secret": {
+            "type": "string",
+            "description": "The secret associated with this key."
+          }
+        }
       },
       "UpdateDepositsRequestBody": {
         "type": "object",

@@ -16,6 +16,8 @@ Method | HTTP request | Description
 [**limits_account_options**](CorsApi.md#limits_account_options) | **OPTIONS** /limits/{account} | CORS support
 [**limits_options**](CorsApi.md#limits_options) | **OPTIONS** /limits | CORS support
 [**new_block_options**](CorsApi.md#new_block_options) | **OPTIONS** /new_block | CORS support
+[**slowdown_options**](CorsApi.md#slowdown_options) | **OPTIONS** /slowdown | CORS support
+[**slowdown_start_options**](CorsApi.md#slowdown_start_options) | **OPTIONS** /slowdown/start | CORS support
 [**testing_wipe_options**](CorsApi.md#testing_wipe_options) | **OPTIONS** /testing/wipe | CORS support
 [**withdrawal_id_options**](CorsApi.md#withdrawal_id_options) | **OPTIONS** /withdrawal/{id} | CORS support
 [**withdrawal_options**](CorsApi.md#withdrawal_options) | **OPTIONS** /withdrawal | CORS support
@@ -344,6 +346,60 @@ No authorization required
 ## new_block_options
 
 > new_block_options()
+CORS support
+
+Handles CORS preflight requests
+
+### Parameters
+
+This endpoint does not need any parameter.
+
+### Return type
+
+ (empty response body)
+
+### Authorization
+
+No authorization required
+
+### HTTP request headers
+
+- **Content-Type**: Not defined
+- **Accept**: Not defined
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+
+## slowdown_options
+
+> slowdown_options()
+CORS support
+
+Handles CORS preflight requests
+
+### Parameters
+
+This endpoint does not need any parameter.
+
+### Return type
+
+ (empty response body)
+
+### Authorization
+
+No authorization required
+
+### HTTP request headers
+
+- **Content-Type**: Not defined
+- **Accept**: Not defined
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+
+## slowdown_start_options
+
+> slowdown_start_options()
 CORS support
 
 Handles CORS preflight requests

@@ -38,6 +38,8 @@ Class | Method | HTTP request | Description
 *CorsApi* | [**limits_account_options**](docs/CorsApi.md#limits_account_options) | **OPTIONS** /limits/{account} | CORS support
 *CorsApi* | [**limits_options**](docs/CorsApi.md#limits_options) | **OPTIONS** /limits | CORS support
 *CorsApi* | [**new_block_options**](docs/CorsApi.md#new_block_options) | **OPTIONS** /new_block | CORS support
+*CorsApi* | [**slowdown_options**](docs/CorsApi.md#slowdown_options) | **OPTIONS** /slowdown | CORS support
+*CorsApi* | [**slowdown_start_options**](docs/CorsApi.md#slowdown_start_options) | **OPTIONS** /slowdown/start | CORS support
 *CorsApi* | [**withdrawal_id_options**](docs/CorsApi.md#withdrawal_id_options) | **OPTIONS** /withdrawal/{id} | CORS support
 *CorsApi* | [**withdrawal_options**](docs/CorsApi.md#withdrawal_options) | **OPTIONS** /withdrawal | CORS support
 *CorsApi* | [**withdrawal_private_options**](docs/CorsApi.md#withdrawal_private_options) | **OPTIONS** /withdrawal_private | CORS support
@@ -59,6 +61,9 @@ Class | Method | HTTP request | Description
 *LimitsApi* | [**set_limits**](docs/LimitsApi.md#set_limits) | **POST** /limits | Set limits handler.
 *LimitsApi* | [**set_limits_for_account**](docs/LimitsApi.md#set_limits_for_account) | **POST** /limits/{account} | Set limits for account handler.
 *NewBlockApi* | [**new_block**](docs/NewBlockApi.md#new_block) | **POST** /new_block | Get limits handler.
+*SlowdownApi* | [**add_slowdown_key**](docs/SlowdownApi.md#add_slowdown_key) | **POST** /slowdown | Add slowdown key handler.
+*SlowdownApi* | [**get_slowdown_key**](docs/SlowdownApi.md#get_slowdown_key) | **GET** /slowdown | Get the slowdown key details.
+*SlowdownApi* | [**start_slowdown**](docs/SlowdownApi.md#start_slowdown) | **POST** /slowdown/start | Try to turn on slow mode
 *WithdrawalApi* | [**create_withdrawal**](docs/WithdrawalApi.md#create_withdrawal) | **POST** /withdrawal | Create withdrawal handler.
 *WithdrawalApi* | [**get_withdrawal**](docs/WithdrawalApi.md#get_withdrawal) | **GET** /withdrawal/{id} | Get withdrawal handler.
 *WithdrawalApi* | [**get_withdrawals**](docs/WithdrawalApi.md#get_withdrawals) | **GET** /withdrawal | Get withdrawals handler.
@@ -86,6 +91,8 @@ Class | Method | HTTP request | Description
  - [GetWithdrawalsResponse](docs/GetWithdrawalsResponse.md)
  - [HealthData](docs/HealthData.md)
  - [Limits](docs/Limits.md)
+ - [SlowdownKey](docs/SlowdownKey.md)
+ - [SlowdownReqwest](docs/SlowdownReqwest.md)
  - [UpdateDepositsRequestBody](docs/UpdateDepositsRequestBody.md)
  - [UpdateDepositsResponse](docs/UpdateDepositsResponse.md)
  - [UpdateWithdrawalsRequestBody](docs/UpdateWithdrawalsRequestBody.md)

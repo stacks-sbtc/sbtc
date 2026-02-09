@@ -962,14 +962,13 @@ pub async fn get_slowdown_keys_list(
 /// Get slowdown key by key name.
 pub async fn get_slowdown_key(
     context: &EmilyContext,
-    key_name: String,
+    key_name: &String,
 ) -> Result<SlowdownKeyEntry, Error> {
-    let resp =
-        query_with_partition_key::<SlowdownTablePrimaryIndex>(context, &key_name, None, None)
-            .await?
-            .0;
+    let resp = query_with_partition_key::<SlowdownTablePrimaryIndex>(context, key_name, None, None)
+        .await?
+        .0;
     if resp.len() > 1 {
-        return Err(Error::TooManySlowdownEntries(key_name));
+        return Err(Error::TooManySlowdownEntries(key_name.clone()));
     }
     if resp.is_empty() {
         return Err(Error::NotFound);
@@ -1035,8 +1034,8 @@ impl KeyVerificationResult {
 /// Verify if given key_name + secret eligible to start slow mode
 pub async fn verify_slowdown_key(
     context: &EmilyContext,
-    key_name: String,
-    secret: String,
+    key_name: &String,
+    secret: &String,
 ) -> Result<KeyVerificationResult, Error> {
     let key = get_slowdown_key(context, key_name).await?;
 
