@@ -733,6 +733,24 @@ async fn mock_stacks_core<D, B, E>(
     .await;
 }
 
+/// Mock stacks core for the given context, by making sure that the
+/// following happens:
+/// * the stacks interact client will return results for all calls that are
+///   made during the processing of a bitcoin block.
+/// * the stacks blocks returned from the client are anchored to the given
+///   chain tip
+/// * the stacks node returns the signer set info from the given signer set
+///   data.
+/// * the transactions broadcased via the submit_tx call are forwarded
+///   through the given `Sender<StacksTransaction>`.
+///
+/// # Notes
+///
+/// If you spawn a process that watches for key rotation contract calls,
+/// the `Sender<StacksTransaction>` can be used to populate the signer set
+/// data with the details of the key rotation contract call. In this way,
+/// the `RwLock<Option<SignerSetInfo>>` acts as data on the stacks network
+/// that persists and replicates between mocked stacks nodes.
 async fn mock_stacks_core2<D, B, E>(
     ctx: &mut TestContext<D, B, WrappedMock<MockStacksInteract>, E>,
     chain_tip_info: GetChainTipsResultTip,
@@ -845,7 +863,7 @@ async fn mock_stacks_core2<D, B, E>(
     .await;
 }
 
-/// Start the signers event loops and return the join handles.
+/// Start the signer's event loops, returning their abort handles.
 async fn start_event_loops<C>(
     ctx: &C,
     network: &WanNetwork,
@@ -854,12 +872,16 @@ async fn start_event_loops<C>(
 where
     C: Context + 'static,
 {
-    let start_count = Arc::new(AtomicU8::new(0));
     let mut handles: Vec<AbortHandle> = Vec::new();
 
     let private_key = ctx.config().signer.private_key;
     let net = network.connect(ctx);
     let signer_config = &ctx.config().signer;
+
+    // This is used to make sure that all event loops have started before
+    // proceeding. We have 4 event loops to wait for, so we use 5 since we
+    // need one to call from this thread.
+    let main_barrier = Arc::new(tokio::sync::Barrier::new(5));
 
     let ev = TxCoordinatorEventLoop {
         network: net.spawn(),
@@ -871,14 +893,13 @@ where
         dkg_max_duration: Duration::from_secs(10),
         is_epoch3: true,
     };
-    let counter = start_count.clone();
-    handles.push(
-        tokio::spawn(async move {
-            counter.fetch_add(1, Ordering::Relaxed);
-            ev.run().await
-        })
-        .abort_handle(),
-    );
+
+    let barrier = main_barrier.clone();
+    let tx_coordinator_handle = tokio::spawn(async move {
+        barrier.wait().await;
+        ev.run().await
+    });
+    handles.push(tx_coordinator_handle.abort_handle());
 
     let ev = TxSignerEventLoop {
         network: net.spawn(),
@@ -891,14 +912,12 @@ where
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
     };
-    let counter = start_count.clone();
-    handles.push(
-        tokio::spawn(async move {
-            counter.fetch_add(1, Ordering::Relaxed);
-            ev.run().await
-        })
-        .abort_handle(),
-    );
+    let barrier = main_barrier.clone();
+    let tx_signer_handle = tokio::spawn(async move {
+        barrier.wait().await;
+        ev.run().await
+    });
+    handles.push(tx_signer_handle.abort_handle());
 
     let ev = RequestDeciderEventLoop {
         network: net.spawn(),
@@ -909,33 +928,28 @@ where
         blocklist_checker: Some(()),
         signer_private_key: private_key,
     };
-    let counter = start_count.clone();
-    handles.push(
-        tokio::spawn(async move {
-            counter.fetch_add(1, Ordering::Relaxed);
-            ev.run().await
-        })
-        .abort_handle(),
-    );
+    let barrier = main_barrier.clone();
+    let request_decider_handle = tokio::spawn(async move {
+        barrier.wait().await;
+        ev.run().await
+    });
+    handles.push(request_decider_handle.abort_handle());
 
     let block_observer = BlockObserver {
         context: ctx.clone(),
         bitcoin_block_source: bitcoin.start_chain_tip_poller().await,
     };
-    let counter = start_count.clone();
     handles.push(block_observer.bitcoin_block_source.abort_handle());
-    handles.push(
-        tokio::spawn(async move {
-            counter.fetch_add(1, Ordering::Relaxed);
-            block_observer.run().await
-        })
-        .abort_handle(),
-    );
+
+    let barrier = main_barrier.clone();
+    let block_observer_handle = tokio::spawn(async move {
+        barrier.wait().await;
+        block_observer.run().await
+    });
+    handles.push(block_observer_handle.abort_handle());
 
     // We wait to make sure that all spawned tasks have started.
-    while start_count.load(Ordering::SeqCst) < 4 {
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    main_barrier.wait().await;
 
     handles
 }
