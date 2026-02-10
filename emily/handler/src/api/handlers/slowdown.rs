@@ -157,8 +157,9 @@ pub async fn add_slowdown_key(key: SlowdownKey, context: EmilyContext) -> impl w
         let entry = SlowdownKeyEntry {
             key: SlowdownKeyEntryKey {
                 key_name: key.name.clone(),
-                hash: key.hash.clone(),
+                zero: 0,
             },
+            hash: key.hash.clone(),
             is_active: true,
         };
         accessors::add_slowdown_key(&context, &entry).await?;

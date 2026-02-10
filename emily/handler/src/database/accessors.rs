@@ -1011,13 +1011,12 @@ pub async fn deactivate_slowdown_key(context: &EmilyContext, name: String) -> Re
     let table_name = context.settings.slowdown_table_name.clone();
     let partition_key_name = SlowdownKeyEntryKey::PARTITION_KEY_NAME;
     let sort_key_name = SlowdownKeyEntryKey::SORT_KEY_NAME;
-    let hash = get_slowdown_key(context, &name).await?.key.hash;
     context
         .dynamodb_client
         .update_item()
         .table_name(table_name)
         .key(partition_key_name, aws_sdk_dynamodb::types::AttributeValue::S(name.clone()))
-        .key(sort_key_name, aws_sdk_dynamodb::types::AttributeValue::S(hash))
+        .key(sort_key_name, aws_sdk_dynamodb::types::AttributeValue::N(0))
         .update_expression("SET IsActive = :f")
         .expression_attribute_values(
             ":f", 
@@ -1053,15 +1052,11 @@ pub async fn verify_slowdown_key(
 ) -> Result<KeyVerificationResult, Error> {
     let key = get_slowdown_key(context, key_name).await?;
 
-    warn!(
-        ?key,
-        "got key for verification");
-
     if !key.is_active {
         return Ok(KeyVerificationResult::Revoked);
     }
 
-    let target_hash_bytes = match hex::decode(key.key.hash) {
+    let target_hash_bytes = match hex::decode(key.hash) {
         Ok(bytes) => bytes,
         Err(_) => {
             return Err(Error::Deserialization(format!(

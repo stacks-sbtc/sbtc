@@ -391,8 +391,8 @@ export class EmilyStack extends cdk.Stack {
                 type: dynamodb.AttributeType.STRING,
             },
             sortKey: {
-                name: 'Hash',
-                type: dynamodb.AttributeType.STRING,
+                name: 'Zero',
+                type: dynamodb.AttributeType.NUMBER,
             },
             removalPolicy: removalPolicy,
             billingMode: dynamodb.BillingMode.PAY_PER_REQUEST, // On-demand provisioning
