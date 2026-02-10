@@ -1,5 +1,6 @@
 use sha2::{Digest as _, Sha256};
 use std::collections::HashMap;
+use test_case::test_case;
 
 use testing_emily_client::apis;
 use testing_emily_client::models::Chainstate;
@@ -10,6 +11,7 @@ use testing_emily_client::models::SlowdownReqwest;
 use crate::common::clean_test_setup;
 use crate::common::{batch_set_chainstates, new_test_chainstate, new_test_setup};
 
+// This test ensures core functionality, ignoring details (aka which exact error type returned, etc)
 #[tokio::test]
 async fn base_flow() {
     let (configuration, tables) = new_test_setup().await;
@@ -104,4 +106,139 @@ async fn base_flow() {
     assert_ne!(limits, retrieved_limits);
 
     clean_test_setup(tables).await;
+}
+
+// Slow mode should not overwrite limits which are tighter then slow mode limits.
+// Particularly, we want to ensure that on slow mode activation:
+// - per_withdrawal_cap can be decreased only
+// - rolling_withdrawal_blocks can be increased only
+// - rolling_withdrawal_cap can be decreased only
+#[tokio::test]
+#[test_case(true,  false, false; "per withdrawal cap")]
+#[test_case(false, true,  false; "window size")]
+#[test_case(false, false, true;  "window cap")]
+#[test_case(true,  true,  false; "per withdrawal and window size")]
+#[test_case(true,  false, true;  "per withdrawal and window cap")]
+#[test_case(false, true,  true;  "window size and cap")]
+#[test_case(true,  true,  true;  "all stricter")]
+#[test_case(false, false, false; "none stricter")]
+async fn slowdown_does_not_overwrite_stronger_limits(
+    is_per_withdrawal_stricter: bool,
+    is_rolling_window_size_stricter: bool,
+    is_rolling_window_cap_stricter: bool,
+) {
+    let (configuration, tables) = new_test_setup().await;
+
+    // Set limits first
+    let slow_mode_per_withdrawal_cap =
+        emily_handler::api::handlers::slowdown::SLOW_MODE_PER_WITHDRAWAL_CAP;
+    let slow_mode_rolling_window = emily_handler::api::handlers::slowdown::SLOW_MODE_ROLLING_WINDOW;
+    let slow_mode_rolling_cap = emily_handler::api::handlers::slowdown::SLOW_MODE_ROLLING_CAP;
+
+    let per_withdrawal_cap = if is_per_withdrawal_stricter {
+        Some(Some(slow_mode_per_withdrawal_cap - 1))
+    } else {
+        Some(Some(slow_mode_per_withdrawal_cap + 1))
+    };
+    let rolling_withdrawal_blocks = if is_rolling_window_size_stricter {
+        Some(Some(slow_mode_rolling_window + 1))
+    } else {
+        Some(Some(slow_mode_rolling_window - 1))
+    };
+    let rolling_withdrawal_cap = if is_rolling_window_cap_stricter {
+        Some(Some(slow_mode_rolling_cap - 1))
+    } else {
+        Some(Some(slow_mode_rolling_cap + 1))
+    };
+
+    let limits = Limits {
+        available_to_withdraw: Some(Some(10000)),
+        peg_cap: Some(None),
+        per_deposit_minimum: Some(None),
+        per_deposit_cap: Some(None),
+        per_withdrawal_cap,
+        rolling_withdrawal_blocks,
+        rolling_withdrawal_cap,
+        account_caps: HashMap::new(),
+    };
+    // Set some chainstates to make set_limits work
+    let chainstates: Vec<Chainstate> = (0..110)
+        .map(|height| new_test_chainstate(height, height, 0))
+        .collect();
+    let _ = batch_set_chainstates(&configuration, chainstates).await;
+    let _ = apis::limits_api::set_limits(&configuration, limits.clone())
+        .await
+        .unwrap();
+
+    let slowdown_reqwest = SlowdownReqwest {
+        name: "test_key".to_string(),
+        secret: "very secret string".to_string(),
+    };
+
+    // Now let's register our key.
+    let mut hasher = Sha256::new();
+    hasher.update(slowdown_reqwest.secret.as_bytes());
+    let result = hasher.finalize();
+    let hash_hex_string = hex::encode(result);
+    let slowdown_key = SlowdownKey {
+        name: slowdown_reqwest.name.clone(),
+        hash: hash_hex_string,
+    };
+    let _ = apis::slowdown_api::add_slowdown_key(&configuration, slowdown_key.clone())
+        .await
+        .unwrap();
+
+    // Now, let's trigger slow mode.
+    let _ = apis::slowdown_api::start_slowdown(&configuration, slowdown_reqwest.clone())
+        .await
+        .unwrap();
+
+    // Now check that only allowed fields was changed.
+    let new_limits = apis::limits_api::get_limits(&configuration).await.unwrap();
+
+    if is_per_withdrawal_stricter {
+        assert_eq!(new_limits.per_withdrawal_cap, limits.per_withdrawal_cap);
+    } else {
+        assert_eq!(
+            new_limits.per_withdrawal_cap.unwrap().unwrap(),
+            slow_mode_per_withdrawal_cap
+        );
+    }
+    if is_rolling_window_cap_stricter {
+        assert_eq!(
+            new_limits.rolling_withdrawal_cap,
+            limits.rolling_withdrawal_cap
+        );
+    } else {
+        assert_eq!(
+            new_limits.rolling_withdrawal_cap.unwrap().unwrap(),
+            slow_mode_rolling_cap
+        );
+    }
+    if is_rolling_window_size_stricter {
+        assert_eq!(
+            new_limits.rolling_withdrawal_blocks,
+            limits.rolling_withdrawal_blocks
+        );
+    } else {
+        assert_eq!(
+            new_limits.rolling_withdrawal_blocks.unwrap().unwrap(),
+            slow_mode_rolling_window
+        );
+    }
+
+    clean_test_setup(tables).await;
+}
+
+// We should pin behaviour on adding a key while key with such name already exists
+// (bail or overwrite)
+#[tokio::test]
+async fn confliction_key_names() {
+    todo!()
+}
+
+// We should ensure that start_slowdown returns proper error (no such key/wrong secret/deactivated)
+#[tokio::test]
+async fn start_slowdonwn_returns_proper_error() {
+    todo!()
 }

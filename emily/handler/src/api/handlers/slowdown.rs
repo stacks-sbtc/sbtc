@@ -55,9 +55,27 @@ pub const SLOW_MODE_PER_WITHDRAWAL_CAP: u64 = 150_000_000; // 1.5 BTC
 /// while overwriting some of them.
 pub async fn calculate_slow_mode_limits(context: &EmilyContext) -> Result<Limits, Error> {
     let mut limits = accessors::get_limits(context).await?;
-    limits.rolling_withdrawal_blocks = Some(SLOW_MODE_ROLLING_WINDOW);
-    limits.rolling_withdrawal_cap = Some(SLOW_MODE_ROLLING_CAP);
-    limits.per_withdrawal_cap = Some(SLOW_MODE_PER_WITHDRAWAL_CAP);
+    limits.per_withdrawal_cap = Some(
+        limits
+            .per_withdrawal_cap
+            .map_or(SLOW_MODE_PER_WITHDRAWAL_CAP, |curr| {
+                curr.min(SLOW_MODE_PER_WITHDRAWAL_CAP)
+            }),
+    );
+    limits.rolling_withdrawal_blocks = Some(
+        limits
+            .rolling_withdrawal_blocks
+            .map_or(SLOW_MODE_ROLLING_WINDOW, |curr| {
+                curr.max(SLOW_MODE_ROLLING_WINDOW)
+            }),
+    );
+    limits.rolling_withdrawal_cap = Some(
+        limits
+            .rolling_withdrawal_cap
+            .map_or(SLOW_MODE_ROLLING_CAP, |curr| {
+                curr.min(SLOW_MODE_ROLLING_CAP)
+            }),
+    );
     Ok(limits)
 }
 
