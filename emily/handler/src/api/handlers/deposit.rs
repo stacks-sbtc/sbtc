@@ -178,7 +178,22 @@ pub async fn get_deposits(
         )
         .await?;
         // Convert data into resource types.
-        let deposits: Vec<DepositInfo> = entries.into_iter().map(|entry| entry.into()).collect();
+        let deposits: Vec<DepositInfo> = entries
+            .into_iter()
+            .filter_map(|entry| {
+                // These deposits have all been validated, so we are okay
+                // with "bailing" here.
+                let info: DepositInfo = entry.into();
+                let deposit_script = ScriptBuf::from_hex(&info.deposit_script).ok()?;
+                let deposit_inputs =
+                    sbtc::deposits::DepositScriptInputs::parse(&deposit_script).ok()?;
+                if deposit_inputs.max_fee <= i64::MAX as u64 {
+                    Some(info)
+                } else {
+                    None
+                }
+            })
+            .collect();
         // Create response.
         let response = GetDepositsResponse { deposits, next_token };
         // Respond.
