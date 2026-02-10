@@ -804,7 +804,6 @@ impl From<DkgStatus> for proto::DkgStatus {
                 DkgFailure::BadPrivateShares(inner) => {
                     proto::dkg_status::Mode::BadPrivateShares(inner.into())
                 }
-                DkgFailure::Threshold => proto::dkg_status::Mode::Threshold(proto::Threshold {}),
             },
         };
         proto::DkgStatus { mode: Some(mode) }
@@ -829,7 +828,6 @@ impl TryFrom<proto::DkgStatus> for DkgStatus {
             proto::dkg_status::Mode::BadPrivateShares(inner) => {
                 DkgStatus::Failure(DkgFailure::BadPrivateShares(inner.try_into()?))
             }
-            proto::dkg_status::Mode::Threshold(_) => DkgStatus::Failure(DkgFailure::Threshold),
         })
     }
 }
