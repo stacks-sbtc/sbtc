@@ -1,8 +1,10 @@
+use reqwest_012::StatusCode;
 use sha2::{Digest as _, Sha256};
 use std::collections::HashMap;
 use test_case::test_case;
 
 use testing_emily_client::apis;
+use testing_emily_client::apis::Error;
 use testing_emily_client::models::Chainstate;
 use testing_emily_client::models::Limits;
 use testing_emily_client::models::SlowdownKey;
@@ -239,8 +241,85 @@ async fn confliction_key_names() {
 
 // We should ensure that start_slowdown returns proper error (no such key/wrong secret/deactivated)
 #[tokio::test]
-async fn start_slowdonwn_returns_proper_error() {
-    todo!()
+async fn start_slowdown_returns_proper_error() {
+    let (configuration, tables) = new_test_setup().await;
+
+    // Set some limits first (needed for calculate_slow_mode_limits to work)
+    let limits = Limits {
+        available_to_withdraw: Some(Some(10000)),
+        peg_cap: Some(None),
+        per_deposit_minimum: Some(None),
+        per_deposit_cap: Some(None),
+        per_withdrawal_cap: Some(Some(1000)),
+        rolling_withdrawal_blocks: Some(Some(100)),
+        rolling_withdrawal_cap: Some(Some(10_000)),
+        account_caps: HashMap::new(),
+    };
+    let chainstates: Vec<Chainstate> = (0..110)
+        .map(|height| new_test_chainstate(height, height, 0))
+        .collect();
+    let _ = batch_set_chainstates(&configuration, chainstates).await;
+    let _ = apis::limits_api::set_limits(&configuration, limits.clone())
+        .await
+        .unwrap();
+
+    // Test case 1: Key not found
+    let unknown_key_reqwest = SlowdownReqwest {
+        name: "unknown_key".to_string(),
+        secret: "any_secret".to_string(),
+    };
+    let err = apis::slowdown_api::start_slowdown(&configuration, unknown_key_reqwest)
+        .await
+        .unwrap_err();
+    let Error::ResponseError(err) = err else {
+        panic!("Wrong error type")
+    };
+    assert!(matches!(err.status, StatusCode::NOT_FOUND));
+
+    // Register a key for further tests
+    let key_name = "test_key".to_string();
+    let secret = "very secret string".to_string();
+    let mut hasher = Sha256::new();
+    hasher.update(secret.as_bytes());
+    let hash_hex_string = hex::encode(hasher.finalize());
+    let slowdown_key = SlowdownKey {
+        name: key_name.clone(),
+        hash: hash_hex_string,
+    };
+    apis::slowdown_api::add_slowdown_key(&configuration, slowdown_key)
+        .await
+        .unwrap();
+
+    // Test case 2: Failed secret verification
+    let wrong_secret_reqwest = SlowdownReqwest {
+        name: key_name.clone(),
+        secret: "wrong secret".to_string(),
+    };
+    let err = apis::slowdown_api::start_slowdown(&configuration, wrong_secret_reqwest)
+        .await
+        .unwrap_err();
+    let Error::ResponseError(err) = err else {
+        panic!("Wrong error type")
+    };
+    assert!(matches!(err.status, StatusCode::UNAUTHORIZED));
+
+    // Test case 3: Key is revoked (deactivated)
+    apis::slowdown_api::deactivate_slowdown_key(&configuration, &key_name)
+        .await
+        .unwrap();
+    let deactivated_key_reqwest = SlowdownReqwest {
+        name: key_name.clone(),
+        secret: secret.clone(),
+    };
+    let err = apis::slowdown_api::start_slowdown(&configuration, deactivated_key_reqwest)
+        .await
+        .unwrap_err();
+    let Error::ResponseError(err) = err else {
+        panic!("Wrong error type")
+    };
+    assert!(matches!(err.status, StatusCode::FORBIDDEN));
+
+    clean_test_setup(tables).await;
 }
 
 // We should check that if current limits have unlimited fields slow mode overwrites them successfully.

@@ -103,6 +103,10 @@ pub enum Error {
     #[error("Forbidden")]
     Forbidden,
 
+    /// Unathorized
+    #[error("Unauthorized")]
+    Unauthorized,
+
     /// This may be because you either requested a nonexistent endpoint
     /// or referenced a user that does not exist
     #[error("Resource not found")]
@@ -263,6 +267,7 @@ impl Error {
             Error::HttpRequest(code, _) => *code,
             Error::Network(_) => StatusCode::BAD_GATEWAY,
             Error::Forbidden => StatusCode::FORBIDDEN,
+            Error::Unauthorized => StatusCode::UNAUTHORIZED,
             Error::NotFound => StatusCode::NOT_FOUND,
             Error::InternalServer => StatusCode::INTERNAL_SERVER_ERROR,
             Error::TooManyInternalRetries => StatusCode::INTERNAL_SERVER_ERROR,
@@ -311,6 +316,7 @@ impl Error {
             Error::DepositOutputMismatch(_, _)
             | Error::Forbidden
             | Error::NotFound
+            | Error::Unauthorized
             | Error::TooManyInternalRetries
             | Error::InconsistentState(_)
             | Error::WithdrawalRequestIdMismatch(_, _)

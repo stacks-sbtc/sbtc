@@ -24,7 +24,6 @@ use warp::reply::{Reply, json, with_status};
     responses(
         (status = 200, description = "Slowdown key retrieved successfully", body = SlowdownKey),
         (status = 404, description = "Slowdown key not found", body = ErrorResponse),
-        (status = 405, description = "Method not allowed", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
     ),
 )]
@@ -87,9 +86,10 @@ pub async fn calculate_slow_mode_limits(context: &EmilyContext) -> Result<Limits
     tag = "slowdown",
     request_body = SlowdownReqwest,
     responses(
-        (status = 200, description = "Slowdown key retrieved successfully", body = Limits),
+        (status = 200, description = "Slowdown started successfully", body = Limits),
+        (status = 401, description = "Failed key verification", body = ErrorResponse),
+        (status = 403, description = "Key is revoked", body = ErrorResponse),
         (status = 404, description = "Slowdown key not found", body = ErrorResponse),
-        (status = 405, description = "Method not allowed", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
     ),
 )]
@@ -119,7 +119,7 @@ pub async fn start_slowdown(
                     key_name = %request.name,
                     "Attempt to start slow mode failed key verification",
                 );
-                Err(Error::Forbidden)
+                Err(Error::Unauthorized)
             }
             KeyVerificationResult::Eligible => {
                 // It is not actually an error, but we want to take maximum attention if it happens.
@@ -158,8 +158,6 @@ pub async fn start_slowdown(
     request_body = SlowdownKey,
     responses(
         (status = 200, description = "Slowdown key added successfully", body = SlowdownKey),
-        (status = 400, description = "Invalid request body", body = ErrorResponse),
-        (status = 404, description = "Address not found", body = ErrorResponse),
         (status = 405, description = "Method not allowed", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
     ),

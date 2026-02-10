@@ -28,8 +28,6 @@ pub enum ActivateSlowdownKeyError {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum AddSlowdownKeyError {
-    Status400(models::ErrorResponse),
-    Status404(models::ErrorResponse),
     Status405(models::ErrorResponse),
     Status500(models::ErrorResponse),
     UnknownValue(serde_json::Value),
@@ -51,7 +49,6 @@ pub enum DeactivateSlowdownKeyError {
 #[serde(untagged)]
 pub enum GetSlowdownKeyError {
     Status404(models::ErrorResponse),
-    Status405(models::ErrorResponse),
     Status500(models::ErrorResponse),
     UnknownValue(serde_json::Value),
 }
@@ -60,8 +57,9 @@ pub enum GetSlowdownKeyError {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum StartSlowdownError {
+    Status401(models::ErrorResponse),
+    Status403(models::ErrorResponse),
     Status404(models::ErrorResponse),
-    Status405(models::ErrorResponse),
     Status500(models::ErrorResponse),
     UnknownValue(serde_json::Value),
 }

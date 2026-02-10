@@ -1818,16 +1818,6 @@
               }
             }
           },
-          "405": {
-            "description": "Method not allowed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "500": {
             "description": "Internal server error",
             "content": {
@@ -1870,26 +1860,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SlowdownKey"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request body",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Address not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -2186,7 +2156,7 @@
         },
         "responses": {
           "200": {
-            "description": "Slowdown key retrieved successfully",
+            "description": "Slowdown started successfully",
             "content": {
               "application/json": {
                 "schema": {
@@ -2195,8 +2165,8 @@
               }
             }
           },
-          "404": {
-            "description": "Slowdown key not found",
+          "401": {
+            "description": "Failed key verification",
             "content": {
               "application/json": {
                 "schema": {
@@ -2205,8 +2175,18 @@
               }
             }
           },
-          "405": {
-            "description": "Method not allowed",
+          "403": {
+            "description": "Key is revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Slowdown key not found",
             "content": {
               "application/json": {
                 "schema": {
