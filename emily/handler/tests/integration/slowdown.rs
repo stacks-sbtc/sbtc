@@ -1,5 +1,8 @@
+use argon2::{
+    Argon2,
+    password_hash::{PasswordHasher as _, SaltString, rand_core::OsRng},
+};
 use reqwest_012::StatusCode;
-use sha2::{Digest as _, Sha256};
 use std::collections::HashMap;
 use test_case::test_case;
 
@@ -51,13 +54,15 @@ async fn base_flow() {
     assert_eq!(new_limits, limits);
 
     // Now let's register our key.
-    let mut hasher = Sha256::new();
-    hasher.update(slowdown_reqwest.secret.as_bytes());
-    let result = hasher.finalize();
-    let hash_hex_string = hex::encode(result);
+    let salt = SaltString::generate(&mut OsRng);
+    let argon2 = Argon2::default();
+    let password_hash = argon2
+        .hash_password(slowdown_reqwest.secret.as_bytes(), &salt)
+        .unwrap()
+        .to_string();
     let slowdown_key = SlowdownKey {
         name: slowdown_reqwest.name.clone(),
-        hash: hash_hex_string,
+        hash: password_hash,
     };
     let _ = apis::slowdown_api::add_slowdown_key(&configuration, slowdown_key.clone())
         .await
@@ -180,13 +185,15 @@ async fn slowdown_does_not_overwrite_stronger_limits(
     };
 
     // Now let's register our key.
-    let mut hasher = Sha256::new();
-    hasher.update(slowdown_reqwest.secret.as_bytes());
-    let result = hasher.finalize();
-    let hash_hex_string = hex::encode(result);
+    let salt = SaltString::generate(&mut OsRng);
+    let argon2 = Argon2::default();
+    let password_hash = argon2
+        .hash_password(slowdown_reqwest.secret.as_bytes(), &salt)
+        .unwrap()
+        .to_string();
     let slowdown_key = SlowdownKey {
         name: slowdown_reqwest.name.clone(),
-        hash: hash_hex_string,
+        hash: password_hash,
     };
     let _ = apis::slowdown_api::add_slowdown_key(&configuration, slowdown_key.clone())
         .await
@@ -246,24 +253,30 @@ async fn conflicting_key_names() {
     let secret2 = "very secret string 2".to_string();
 
     // Register the first key
-    let mut hasher1 = Sha256::new();
-    hasher1.update(secret1.as_bytes());
-    let hash_hex_string1 = hex::encode(hasher1.finalize());
+    let salt = SaltString::generate(&mut OsRng);
+    let argon2 = Argon2::default();
+    let password_hash = argon2
+        .hash_password(secret1.as_bytes(), &salt)
+        .unwrap()
+        .to_string();
     let slowdown_key1 = SlowdownKey {
         name: key_name.clone(),
-        hash: hash_hex_string1,
+        hash: password_hash,
     };
     apis::slowdown_api::add_slowdown_key(&configuration, slowdown_key1.clone())
         .await
         .unwrap();
 
     // Attempt to register a second key with the same name but different secret
-    let mut hasher2 = Sha256::new();
-    hasher2.update(secret2.as_bytes());
-    let hash_hex_string2 = hex::encode(hasher2.finalize());
+    let salt = SaltString::generate(&mut OsRng);
+    let argon2 = Argon2::default();
+    let password_hash = argon2
+        .hash_password(secret2.as_bytes(), &salt)
+        .unwrap()
+        .to_string();
     let slowdown_key2 = SlowdownKey {
         name: key_name.clone(),
-        hash: hash_hex_string2,
+        hash: password_hash,
     };
     let err = apis::slowdown_api::add_slowdown_key(&configuration, slowdown_key2)
         .await
@@ -319,12 +332,15 @@ async fn start_slowdown_returns_proper_error() {
     // Register a key for further tests
     let key_name = "test_key".to_string();
     let secret = "very secret string".to_string();
-    let mut hasher = Sha256::new();
-    hasher.update(secret.as_bytes());
-    let hash_hex_string = hex::encode(hasher.finalize());
+    let salt = SaltString::generate(&mut OsRng);
+    let argon2 = Argon2::default();
+    let password_hash = argon2
+        .hash_password(secret.as_bytes(), &salt)
+        .unwrap()
+        .to_string();
     let slowdown_key = SlowdownKey {
         name: key_name.clone(),
-        hash: hash_hex_string,
+        hash: password_hash,
     };
     apis::slowdown_api::add_slowdown_key(&configuration, slowdown_key)
         .await
@@ -394,13 +410,15 @@ async fn slow_mode_overwrites_unlimited_limits() {
     };
 
     // Now let's register our key.
-    let mut hasher = Sha256::new();
-    hasher.update(slowdown_reqwest.secret.as_bytes());
-    let result = hasher.finalize();
-    let hash_hex_string = hex::encode(result);
+    let salt = SaltString::generate(&mut OsRng);
+    let argon2 = Argon2::default();
+    let password_hash = argon2
+        .hash_password(slowdown_reqwest.secret.as_bytes(), &salt)
+        .unwrap()
+        .to_string();
     let slowdown_key = SlowdownKey {
         name: slowdown_reqwest.name.clone(),
-        hash: hash_hex_string,
+        hash: password_hash,
     };
     let _ = apis::slowdown_api::add_slowdown_key(&configuration, slowdown_key.clone())
         .await
@@ -449,12 +467,15 @@ async fn slow_mode_initiator_correctly_shown_at_limits() {
     // Register a slowdown key
     let key_name = "test_key".to_string();
     let secret = "very secret string".to_string();
-    let mut hasher = Sha256::new();
-    hasher.update(secret.as_bytes());
-    let hash_hex_string = hex::encode(hasher.finalize());
+    let salt = SaltString::generate(&mut OsRng);
+    let argon2 = Argon2::default();
+    let password_hash = argon2
+        .hash_password(secret.as_bytes(), &salt)
+        .unwrap()
+        .to_string();
     let slowdown_key = SlowdownKey {
         name: key_name.clone(),
-        hash: hash_hex_string,
+        hash: password_hash,
     };
     apis::slowdown_api::add_slowdown_key(&configuration, slowdown_key)
         .await

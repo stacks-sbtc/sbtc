@@ -1,13 +1,14 @@
 //! Accessors.
 
-use std::collections::HashMap;
-
+use argon2::{
+    Argon2,
+    password_hash::{PasswordHash, PasswordVerifier as _},
+};
 use aws_sdk_dynamodb::types::AttributeValue;
 use aws_sdk_dynamodb::types::error::ConditionalCheckFailedException;
 use serde_dynamo::Item;
+use std::collections::HashMap;
 use strum::IntoEnumIterator as _;
-
-use sha2::{Digest as _, Sha256};
 
 use tracing::{debug, warn};
 
@@ -1066,26 +1067,14 @@ pub async fn verify_slowdown_key(
     secret: &String,
 ) -> Result<KeyVerificationResult, Error> {
     let key = get_slowdown_key(context, key_name).await?;
-
     if !key.is_active {
         return Ok(KeyVerificationResult::Revoked);
     }
-
-    let target_hash_bytes = match hex::decode(key.hash) {
-        Ok(bytes) => bytes,
-        Err(_) => {
-            return Err(Error::Deserialization(format!(
-                "Dynamo db contains invalid hex string as hash for key {}",
-                key.key.key_name
-            )));
-        } // Invalid hex string
-    };
-
-    let mut hasher = Sha256::new();
-    hasher.update(secret.as_bytes());
-    let result = hasher.finalize();
-
-    if result.as_slice() != target_hash_bytes.as_slice() {
+    let parsed_hash = PasswordHash::new(&key.hash).expect("Invalid hash format");
+    let is_valid = Argon2::default()
+        .verify_password(secret.as_bytes(), &parsed_hash)
+        .is_ok();
+    if !is_valid {
         return Ok(KeyVerificationResult::FailedSecretVerification);
     }
 
