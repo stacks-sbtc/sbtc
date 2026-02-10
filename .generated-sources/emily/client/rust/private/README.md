@@ -38,6 +38,8 @@ Class | Method | HTTP request | Description
 *CorsApi* | [**limits_account_options**](docs/CorsApi.md#limits_account_options) | **OPTIONS** /limits/{account} | CORS support
 *CorsApi* | [**limits_options**](docs/CorsApi.md#limits_options) | **OPTIONS** /limits | CORS support
 *CorsApi* | [**new_block_options**](docs/CorsApi.md#new_block_options) | **OPTIONS** /new_block | CORS support
+*CorsApi* | [**slowdown_activate_name_options**](docs/CorsApi.md#slowdown_activate_name_options) | **OPTIONS** /slowdown/activate/{name} | CORS support
+*CorsApi* | [**slowdown_deactivate_name_options**](docs/CorsApi.md#slowdown_deactivate_name_options) | **OPTIONS** /slowdown/deactivate/{name} | CORS support
 *CorsApi* | [**slowdown_options**](docs/CorsApi.md#slowdown_options) | **OPTIONS** /slowdown | CORS support
 *CorsApi* | [**start_slowdown_options**](docs/CorsApi.md#start_slowdown_options) | **OPTIONS** /start_slowdown | CORS support
 *CorsApi* | [**withdrawal_id_options**](docs/CorsApi.md#withdrawal_id_options) | **OPTIONS** /withdrawal/{id} | CORS support
@@ -61,7 +63,9 @@ Class | Method | HTTP request | Description
 *LimitsApi* | [**set_limits**](docs/LimitsApi.md#set_limits) | **POST** /limits | Set limits handler.
 *LimitsApi* | [**set_limits_for_account**](docs/LimitsApi.md#set_limits_for_account) | **POST** /limits/{account} | Set limits for account handler.
 *NewBlockApi* | [**new_block**](docs/NewBlockApi.md#new_block) | **POST** /new_block | Get limits handler.
+*SlowdownApi* | [**activate_slowdown_key**](docs/SlowdownApi.md#activate_slowdown_key) | **PATCH** /slowdown/activate/{name} | Activate existing (previously deactivated) slowdown key
 *SlowdownApi* | [**add_slowdown_key**](docs/SlowdownApi.md#add_slowdown_key) | **POST** /slowdown | Add slowdown key handler.
+*SlowdownApi* | [**deactivate_slowdown_key**](docs/SlowdownApi.md#deactivate_slowdown_key) | **PATCH** /slowdown/deactivate/{name} | Deactivate existing slowdown key
 *SlowdownApi* | [**get_slowdown_key**](docs/SlowdownApi.md#get_slowdown_key) | **GET** /slowdown | Get the slowdown key details.
 *SlowdownApi* | [**start_slowdown**](docs/SlowdownApi.md#start_slowdown) | **POST** /start_slowdown | Try to turn on slow mode
 *WithdrawalApi* | [**create_withdrawal**](docs/WithdrawalApi.md#create_withdrawal) | **POST** /withdrawal | Create withdrawal handler.

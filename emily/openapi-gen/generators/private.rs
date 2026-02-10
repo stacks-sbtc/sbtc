@@ -43,6 +43,8 @@ use super::CorsSupport;
         api::handlers::slowdown::add_slowdown_key,
         api::handlers::slowdown::get_slowdown_key,
         api::handlers::slowdown::start_slowdown,
+        api::handlers::slowdown::activate_slowdown_key,
+        api::handlers::slowdown::deactivate_slowdown_key,
         // New block endpoints.
         api::handlers::new_block::new_block,
     ),

@@ -986,13 +986,20 @@ pub async fn add_slowdown_key(context: &EmilyContext, key: &SlowdownKeyEntry) ->
 pub async fn activate_slowdown_key(context: &EmilyContext, name: String) -> Result<(), Error> {
     // TODO: maybe we want to bail if key already active.
     let table_name = context.settings.slowdown_table_name.clone();
-    let key_name = SlowdownKeyEntryKey::PARTITION_KEY_NAME;
+    let partition_key_name = SlowdownKeyEntryKey::PARTITION_KEY_NAME;
+    let sort_key_name = SlowdownKeyEntryKey::SORT_KEY_NAME;
+    let hash = get_slowdown_key(context, &name).await?.key.hash;
     context
         .dynamodb_client
         .update_item()
         .table_name(table_name)
-        .key(key_name, aws_sdk_dynamodb::types::AttributeValue::S(name))
-        .update_expression("SET is_active = true")
+        .key(partition_key_name, aws_sdk_dynamodb::types::AttributeValue::S(name))
+        .key(sort_key_name, aws_sdk_dynamodb::types::AttributeValue::S(hash))
+        .update_expression("SET IsActive = :t")
+        .expression_attribute_values(
+            ":t", 
+            aws_sdk_dynamodb::types::AttributeValue::Bool(true)
+        )
         .send()
         .await?;
     Ok(())
@@ -1002,13 +1009,20 @@ pub async fn activate_slowdown_key(context: &EmilyContext, name: String) -> Resu
 pub async fn deactivate_slowdown_key(context: &EmilyContext, name: String) -> Result<(), Error> {
     // TODO: maybe we want to bail if key already deactivated.
     let table_name = context.settings.slowdown_table_name.clone();
-    let key_name = SlowdownKeyEntryKey::PARTITION_KEY_NAME;
+    let partition_key_name = SlowdownKeyEntryKey::PARTITION_KEY_NAME;
+    let sort_key_name = SlowdownKeyEntryKey::SORT_KEY_NAME;
+    let hash = get_slowdown_key(context, &name).await?.key.hash;
     context
         .dynamodb_client
         .update_item()
         .table_name(table_name)
-        .key(key_name, aws_sdk_dynamodb::types::AttributeValue::S(name))
-        .update_expression("SET is_active = false")
+        .key(partition_key_name, aws_sdk_dynamodb::types::AttributeValue::S(name.clone()))
+        .key(sort_key_name, aws_sdk_dynamodb::types::AttributeValue::S(hash))
+        .update_expression("SET IsActive = :f")
+        .expression_attribute_values(
+            ":f", 
+            aws_sdk_dynamodb::types::AttributeValue::Bool(false)
+        )
         .send()
         .await?;
     Ok(())
@@ -1038,6 +1052,10 @@ pub async fn verify_slowdown_key(
     secret: &String,
 ) -> Result<KeyVerificationResult, Error> {
     let key = get_slowdown_key(context, key_name).await?;
+
+    warn!(
+        ?key,
+        "got key for verification");
 
     if !key.is_active {
         return Ok(KeyVerificationResult::Revoked);

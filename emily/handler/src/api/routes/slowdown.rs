@@ -15,6 +15,8 @@ where
 {
     add_slowdown_key(context.clone())
         .or(get_slowdown_key(context.clone()))
+        .or(activate_slowdown_key(context.clone()))
+        .or(deactivate_slowdown_key(context.clone()))
         .or(start_slowdown(context))
 }
 
@@ -58,4 +60,30 @@ where
         .and(warp::body::json())
         .and(context)
         .then(handlers::slowdown::start_slowdown)
+}
+
+/// Endpoint to activate existing key.
+fn activate_slowdown_key<F>(
+    context: F,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
+where
+    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
+{
+    warp::path!("slowdown" / "activate" / String)
+        .and(warp::patch())
+        .and(context)
+        .then(handlers::slowdown::activate_slowdown_key)
+}
+
+/// Endpoint to deactivate existing key.
+fn deactivate_slowdown_key<F>(
+    context: F,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
+where
+    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
+{
+    warp::path!("slowdown" / "deactivate" / String)
+        .and(warp::patch())
+        .and(context)
+        .then(handlers::slowdown::deactivate_slowdown_key)
 }

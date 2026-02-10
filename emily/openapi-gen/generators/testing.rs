@@ -47,6 +47,8 @@ use super::CorsSupport;
         // Slowdown endpoints
         api::handlers::slowdown::add_slowdown_key,
         api::handlers::slowdown::get_slowdown_key,
+        api::handlers::slowdown::activate_slowdown_key,
+        api::handlers::slowdown::deactivate_slowdown_key,
         api::handlers::slowdown::start_slowdown,
     ),
     // Components to be included in the OpenAPI specification.

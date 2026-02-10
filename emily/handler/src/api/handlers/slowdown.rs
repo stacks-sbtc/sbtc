@@ -169,3 +169,79 @@ pub async fn add_slowdown_key(key: SlowdownKey, context: EmilyContext) -> impl w
         .await
         .map_or_else(Reply::into_response, Reply::into_response)
 }
+
+
+/// Deactivate existing slowdown key
+#[utoipa::path(
+    patch,
+    operation_id = "deactivateSlowdownKey",
+    path = "/slowdown/deactivate/{name}",
+    params(
+        ("name" = String, Path, description = "The name of the key to deactivate"),
+    ),
+    tag = "slowdown",
+    responses(
+        (status = 201, description = "Slowdown key deactivated successfully", body = ()),
+        (status = 400, description = "Invalid request body", body = ErrorResponse),
+        (status = 404, description = "Slowdown key not found", body = ErrorResponse),
+        (status = 405, description = "Method not allowed", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    security(("ApiGatewayKey" = []))
+)]
+#[instrument(skip(context))]
+pub async fn deactivate_slowdown_key(
+    name: String,
+    context: EmilyContext,
+) -> impl warp::reply::Reply {
+    // Internal handler so `?` can be used correctly while still returning a reply.
+    async fn handler(
+        context: EmilyContext,
+        name: String,
+    ) -> Result<impl warp::reply::Reply, Error> {
+        let _ = accessors::deactivate_slowdown_key(&context, name).await?;
+        Ok(with_status(json(&()), StatusCode::OK))
+    }
+    // Handle and respond.
+    handler(context, name)
+        .await
+        .map_or_else(Reply::into_response, Reply::into_response)
+}
+
+
+/// Activate existing (previously deactivated) slowdown key
+#[utoipa::path(
+    patch,
+    operation_id = "activateSlowdownKey",
+    path = "/slowdown/activate/{name}",
+    params(
+        ("name" = String, Path, description = "The name of the key to activate"),
+    ),
+    tag = "slowdown",
+    responses(
+        (status = 201, description = "Slowdown key activated successfully", body = ()),
+        (status = 400, description = "Invalid request body", body = ErrorResponse),
+        (status = 404, description = "Slowdown key not found", body = ErrorResponse),
+        (status = 405, description = "Method not allowed", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    security(("ApiGatewayKey" = []))
+)]
+#[instrument(skip(context))]
+pub async fn activate_slowdown_key(
+    name: String,
+    context: EmilyContext,
+) -> impl warp::reply::Reply {
+    // Internal handler so `?` can be used correctly while still returning a reply.
+    async fn handler(
+        context: EmilyContext,
+        name: String,
+    ) -> Result<impl warp::reply::Reply, Error> {
+        let _ = accessors::activate_slowdown_key(&context, name).await?;
+        Ok(with_status(json(&()), StatusCode::OK))
+    }
+    // Handle and respond.
+    handler(context, name)
+        .await
+        .map_or_else(Reply::into_response, Reply::into_response)
+}
