@@ -36,7 +36,6 @@ Class | Method | HTTP request | Description
 *CorsApi* | [**health_options**](docs/CorsApi.md#health_options) | **OPTIONS** /health | CORS support
 *CorsApi* | [**limits_account_options**](docs/CorsApi.md#limits_account_options) | **OPTIONS** /limits/{account} | CORS support
 *CorsApi* | [**limits_options**](docs/CorsApi.md#limits_options) | **OPTIONS** /limits | CORS support
-*CorsApi* | [**slowdown_options**](docs/CorsApi.md#slowdown_options) | **OPTIONS** /slowdown | CORS support
 *CorsApi* | [**start_slowdown_options**](docs/CorsApi.md#start_slowdown_options) | **OPTIONS** /start_slowdown | CORS support
 *CorsApi* | [**withdrawal_id_options**](docs/CorsApi.md#withdrawal_id_options) | **OPTIONS** /withdrawal/{id} | CORS support
 *CorsApi* | [**withdrawal_options**](docs/CorsApi.md#withdrawal_options) | **OPTIONS** /withdrawal | CORS support
@@ -54,7 +53,6 @@ Class | Method | HTTP request | Description
 *HealthApi* | [**check_health**](docs/HealthApi.md#check_health) | **GET** /health | Get health handler.
 *LimitsApi* | [**get_limits**](docs/LimitsApi.md#get_limits) | **GET** /limits | Get the global limits.
 *LimitsApi* | [**get_limits_for_account**](docs/LimitsApi.md#get_limits_for_account) | **GET** /limits/{account} | Get limits for account handler.
-*SlowdownApi* | [**get_slowdown_key**](docs/SlowdownApi.md#get_slowdown_key) | **GET** /slowdown | Get the slowdown key details.
 *SlowdownApi* | [**start_slowdown**](docs/SlowdownApi.md#start_slowdown) | **POST** /start_slowdown | Try to turn on slow mode
 *WithdrawalApi* | [**get_withdrawal**](docs/WithdrawalApi.md#get_withdrawal) | **GET** /withdrawal/{id} | Get withdrawal handler.
 *WithdrawalApi* | [**get_withdrawals**](docs/WithdrawalApi.md#get_withdrawals) | **GET** /withdrawal | Get withdrawals handler.

@@ -26,6 +26,7 @@ use warp::reply::{Reply, json, with_status};
         (status = 404, description = "Slowdown key not found", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
     ),
+    security(("ApiGatewayKey" = []))
 )]
 #[instrument(skip(context))]
 pub async fn get_slowdown_key(name: String, context: EmilyContext) -> impl warp::reply::Reply {

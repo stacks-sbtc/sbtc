@@ -34,7 +34,6 @@ use super::CorsSupport;
         api::handlers::limits::get_limits,
         api::handlers::limits::get_limits_for_account,
         // Slowdown endpoints
-        api::handlers::slowdown::get_slowdown_key,
         api::handlers::slowdown::start_slowdown,
     ),
     // Components to be included in the OpenAPI specification.
