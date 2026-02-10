@@ -11,12 +11,19 @@ pub fn routes<F>(
     context: F,
 ) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
 where
-    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
+    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
 {
     add_slowdown_key(context.clone())
         .or(get_slowdown_key(context.clone()))
+        .boxed()
         .or(activate_slowdown_key(context.clone()))
+        .boxed()
         .or(deactivate_slowdown_key(context.clone()))
+        .boxed()
         .or(start_slowdown(context))
 }
 
