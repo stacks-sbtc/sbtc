@@ -30,15 +30,18 @@ async fn base_flow() {
         .map(|height| new_test_chainstate(height, height, 0))
         .collect();
     let _ = batch_set_chainstates(&configuration, chainstates).await;
-    let _ = apis::limits_api::set_limits(&configuration, limits.clone()).await.unwrap();
+    let _ = apis::limits_api::set_limits(&configuration, limits.clone())
+        .await
+        .unwrap();
 
     // Check that we can't activate slow mode if we didn't register our key.
     let slowdown_reqwest = SlowdownReqwest {
         name: "test_key".to_string(),
         secret: "very secret string".to_string(),
     };
-    let _ =
-        apis::slowdown_api::start_slowdown(&configuration, slowdown_reqwest.clone()).await.unwrap_err();
+    let _ = apis::slowdown_api::start_slowdown(&configuration, slowdown_reqwest.clone())
+        .await
+        .unwrap_err();
     let new_limits = apis::limits_api::get_limits(&configuration).await.unwrap();
     assert_eq!(new_limits, limits);
 
@@ -60,31 +63,43 @@ async fn base_flow() {
         name: "test_key".to_string(),
         secret: "wrong secret string".to_string(),
     };
-    let _ =
-        apis::slowdown_api::start_slowdown(&configuration, bad_slowdown_reqwest.clone()).await.unwrap_err();
+    let _ = apis::slowdown_api::start_slowdown(&configuration, bad_slowdown_reqwest.clone())
+        .await
+        .unwrap_err();
     let new_limits = apis::limits_api::get_limits(&configuration).await.unwrap();
     assert_eq!(new_limits, limits);
 
     // Now, let's check that it is possible to start a slow mode with correct key.
-    let _ =
-        apis::slowdown_api::start_slowdown(&configuration, slowdown_reqwest.clone()).await.unwrap();
+    let _ = apis::slowdown_api::start_slowdown(&configuration, slowdown_reqwest.clone())
+        .await
+        .unwrap();
     let new_limits = apis::limits_api::get_limits(&configuration).await.unwrap();
     assert_ne!(new_limits, limits);
 
     // Now lets restore limits back to normal
-    let _ = apis::limits_api::set_limits(&configuration, limits.clone()).await.unwrap();
+    let _ = apis::limits_api::set_limits(&configuration, limits.clone())
+        .await
+        .unwrap();
     let retrieved_limits = apis::limits_api::get_limits(&configuration).await.unwrap();
     assert_eq!(limits, retrieved_limits);
 
     // Now lets deactivate key, and make sure that it is not allowed to start slow mode anymore.
-    let _ = apis::slowdown_api::deactivate_slowdown_key(&configuration, &(slowdown_key.name)).await.unwrap();
-    let _ = apis::slowdown_api::start_slowdown(&configuration, slowdown_reqwest.clone()).await.unwrap_err();
+    let _ = apis::slowdown_api::deactivate_slowdown_key(&configuration, &(slowdown_key.name))
+        .await
+        .unwrap();
+    let _ = apis::slowdown_api::start_slowdown(&configuration, slowdown_reqwest.clone())
+        .await
+        .unwrap_err();
     let retrieved_limits = apis::limits_api::get_limits(&configuration).await.unwrap();
     assert_eq!(limits, retrieved_limits);
 
     // Now lets activate key back, and make sure that it is again eligible to start slow mode.
-    let _ = apis::slowdown_api::activate_slowdown_key(&configuration, &(slowdown_key.name)).await.unwrap();
-    let _ = apis::slowdown_api::start_slowdown(&configuration, slowdown_reqwest.clone()).await.unwrap();
+    let _ = apis::slowdown_api::activate_slowdown_key(&configuration, &(slowdown_key.name))
+        .await
+        .unwrap();
+    let _ = apis::slowdown_api::start_slowdown(&configuration, slowdown_reqwest.clone())
+        .await
+        .unwrap();
     let retrieved_limits = apis::limits_api::get_limits(&configuration).await.unwrap();
     assert_ne!(limits, retrieved_limits);
 

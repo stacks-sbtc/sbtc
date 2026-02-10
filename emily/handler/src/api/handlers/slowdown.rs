@@ -171,7 +171,6 @@ pub async fn add_slowdown_key(key: SlowdownKey, context: EmilyContext) -> impl w
         .map_or_else(Reply::into_response, Reply::into_response)
 }
 
-
 /// Deactivate existing slowdown key
 #[utoipa::path(
     patch,
@@ -200,7 +199,7 @@ pub async fn deactivate_slowdown_key(
         context: EmilyContext,
         name: String,
     ) -> Result<impl warp::reply::Reply, Error> {
-        let _ = accessors::deactivate_slowdown_key(&context, name).await?;
+        accessors::deactivate_slowdown_key(&context, name).await?;
         Ok(with_status(json(&()), StatusCode::OK))
     }
     // Handle and respond.
@@ -208,7 +207,6 @@ pub async fn deactivate_slowdown_key(
         .await
         .map_or_else(Reply::into_response, Reply::into_response)
 }
-
 
 /// Activate existing (previously deactivated) slowdown key
 #[utoipa::path(
@@ -229,16 +227,13 @@ pub async fn deactivate_slowdown_key(
     security(("ApiGatewayKey" = []))
 )]
 #[instrument(skip(context))]
-pub async fn activate_slowdown_key(
-    name: String,
-    context: EmilyContext,
-) -> impl warp::reply::Reply {
+pub async fn activate_slowdown_key(name: String, context: EmilyContext) -> impl warp::reply::Reply {
     // Internal handler so `?` can be used correctly while still returning a reply.
     async fn handler(
         context: EmilyContext,
         name: String,
     ) -> Result<impl warp::reply::Reply, Error> {
-        let _ = accessors::activate_slowdown_key(&context, name).await?;
+        accessors::activate_slowdown_key(&context, name).await?;
         Ok(with_status(json(&()), StatusCode::OK))
     }
     // Handle and respond.
