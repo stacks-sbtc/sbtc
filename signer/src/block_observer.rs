@@ -107,11 +107,13 @@ impl DepositRequestValidator for CreateDepositRequest {
         // info struct.
         tx_info.validate()?;
 
-        Ok(Some(Deposit {
-            info: self.validate_tx(&tx_info.tx, is_mainnet)?,
-            tx_info,
-            block_hash,
-        }))
+        let info = self.validate_tx(&tx_info.tx, is_mainnet)?;
+
+        if info.max_fee > i64::MAX as u64 {
+            return Err(Error::InvalidMaxFee(info.outpoint, info.max_fee));
+        }
+
+        Ok(Some(Deposit { info, tx_info, block_hash }))
     }
 }
 
