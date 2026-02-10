@@ -242,3 +242,61 @@ async fn confliction_key_names() {
 async fn start_slowdonwn_returns_proper_error() {
     todo!()
 }
+
+// We should check that if current limits have unlimited fields slow mode overwrites them successfully.
+#[tokio::test]
+async fn slow_mode_overwrites_unlimited_limits() {
+    let (configuration, tables) = new_test_setup().await;
+
+    // Set limits to unlimited (None)
+    let limits = Limits {
+        available_to_withdraw: Some(None),
+        peg_cap: Some(None),
+        per_deposit_minimum: Some(None),
+        per_deposit_cap: Some(None),
+        per_withdrawal_cap: Some(None),
+        rolling_withdrawal_blocks: Some(None),
+        rolling_withdrawal_cap: Some(None),
+        account_caps: HashMap::new(),
+    };
+    // Set some chainstates to make set_limits work
+    let chainstates: Vec<Chainstate> = (0..110)
+        .map(|height| new_test_chainstate(height, height, 0))
+        .collect();
+    let _ = batch_set_chainstates(&configuration, chainstates).await;
+    let _ = apis::limits_api::set_limits(&configuration, limits.clone())
+        .await
+        .unwrap();
+
+    let slowdown_reqwest = SlowdownReqwest {
+        name: "test_key".to_string(),
+        secret: "very secret string".to_string(),
+    };
+
+    // Now let's register our key.
+    let mut hasher = Sha256::new();
+    hasher.update(slowdown_reqwest.secret.as_bytes());
+    let result = hasher.finalize();
+    let hash_hex_string = hex::encode(result);
+    let slowdown_key = SlowdownKey {
+        name: slowdown_reqwest.name.clone(),
+        hash: hash_hex_string,
+    };
+    let _ = apis::slowdown_api::add_slowdown_key(&configuration, slowdown_key.clone())
+        .await
+        .unwrap();
+
+    // Now, let's trigger slow mode.
+    let _ = apis::slowdown_api::start_slowdown(&configuration, slowdown_reqwest.clone())
+        .await
+        .unwrap();
+
+    // Now check that all relevant fields are set to slow mode limits.
+    let new_limits = apis::limits_api::get_limits(&configuration).await.unwrap();
+
+    assert!(new_limits.per_withdrawal_cap.is_some());
+    assert!(new_limits.rolling_withdrawal_blocks.is_some());
+    assert!(new_limits.rolling_withdrawal_cap.is_some());
+
+    clean_test_setup(tables).await;
+}
