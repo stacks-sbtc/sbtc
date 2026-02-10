@@ -7,12 +7,12 @@ use crate::{
     context::EmilyContext,
     database::{
         accessors,
-        entries::limits::{LimitEntry, GLOBAL_CAP_ACCOUNT},
+        entries::limits::{GLOBAL_CAP_ACCOUNT, LimitEntry},
     },
 };
 use tracing::instrument;
 use warp::http::StatusCode;
-use warp::reply::{json, with_status, Reply};
+use warp::reply::{Reply, json, with_status};
 
 /// Get the global limits.
 #[utoipa::path(
@@ -39,7 +39,9 @@ pub async fn get_limits(context: EmilyContext) -> impl warp::reply::Reply {
         .map_or_else(Reply::into_response, Reply::into_response)
 }
 
-/// Get limits handler.
+/// Set limits handler.
+/// Note, that `available_to_withdraw` is not settable, but is calculated based on the other fields.
+/// Value of `available_to_withdraw` passed to this endpoint will be ignored.
 #[utoipa::path(
     post,
     operation_id = "setLimits",
@@ -47,7 +49,6 @@ pub async fn get_limits(context: EmilyContext) -> impl warp::reply::Reply {
     tag = "limits",
     request_body = Limits,
     responses(
-        // TODO(271): Add success body.
         (status = 200, description = "Limits updated successfully", body = Limits),
         (status = 400, description = "Invalid request body", body = ErrorResponse),
         (status = 404, description = "Address not found", body = ErrorResponse),
@@ -57,12 +58,14 @@ pub async fn get_limits(context: EmilyContext) -> impl warp::reply::Reply {
     security(("ApiGatewayKey" = []))
 )]
 #[instrument(skip(context))]
-pub async fn set_limits(context: EmilyContext, limits: Limits) -> impl warp::reply::Reply {
+pub async fn set_limits(limits: Limits, context: EmilyContext) -> impl warp::reply::Reply {
     // Internal handler so `?` can be used correctly while still returning a reply.
     async fn handler(
         context: EmilyContext,
         limits: Limits,
     ) -> Result<impl warp::reply::Reply, Error> {
+        // Validate the withdrawal limit configuration.
+        limits.validate()?;
         // Set the global limits.
         accessors::set_limit_for_account(
             &context,
@@ -74,6 +77,8 @@ pub async fn set_limits(context: EmilyContext, limits: Limits) -> impl warp::rep
                     per_deposit_minimum: limits.per_deposit_minimum,
                     per_deposit_cap: limits.per_deposit_cap,
                     per_withdrawal_cap: limits.per_withdrawal_cap,
+                    rolling_withdrawal_blocks: limits.rolling_withdrawal_blocks,
+                    rolling_withdrawal_cap: limits.rolling_withdrawal_cap,
                 },
             ),
         )
@@ -111,7 +116,6 @@ pub async fn set_limits(context: EmilyContext, limits: Limits) -> impl warp::rep
     ),
     tag = "limits",
     responses(
-        // TODO(271): Add success body.
         (status = 201, description = "Account limits retrieved successfully", body = AccountLimits),
         (status = 400, description = "Invalid request body", body = ErrorResponse),
         (status = 404, description = "Address not found", body = ErrorResponse),
@@ -121,8 +125,8 @@ pub async fn set_limits(context: EmilyContext, limits: Limits) -> impl warp::rep
 )]
 #[instrument(skip(context))]
 pub async fn get_limits_for_account(
-    context: EmilyContext,
     account: String,
+    context: EmilyContext,
 ) -> impl warp::reply::Reply {
     // Internal handler so `?` can be used correctly while still returning a reply.
     async fn handler(
@@ -153,7 +157,6 @@ pub async fn get_limits_for_account(
     tag = "limits",
     request_body = AccountLimits,
     responses(
-        // TODO(271): Add success body.
         (status = 201, description = "Set account limits successfully", body = AccountLimits),
         (status = 400, description = "Invalid request body", body = ErrorResponse),
         (status = 404, description = "Address not found", body = ErrorResponse),
@@ -164,9 +167,9 @@ pub async fn get_limits_for_account(
 )]
 #[instrument(skip(context))]
 pub async fn set_limits_for_account(
-    context: EmilyContext,
     account: String,
     body: crate::api::models::limits::AccountLimits,
+    context: EmilyContext,
 ) -> impl warp::reply::Reply {
     // Internal handler so `?` can be used correctly while still returning a reply.
     async fn handler(

@@ -1,17 +1,16 @@
 //! This module sets up logging for the application using `tracing_subscriber`
 //! It provides functions to initialize logging in either JSON format or pretty format
 
-use tracing_subscriber::fmt::time::UtcTime;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::fmt::time::UtcTime;
+use tracing_subscriber::layer::SubscriberExt as _;
+use tracing_subscriber::util::SubscriberInitExt as _;
 
 /// Sets up logging based on the provided format preference
 ///
 /// # Arguments
 ///
-/// * `pretty` - A boolean that determines if the logging format should be pretty or JSON
-
+/// - `pretty` - A boolean that determines if the logging format should be pretty or JSON
 pub fn setup_logging(directives: &str, pretty: bool) {
     match pretty {
         true => setup_logging_pretty(directives),

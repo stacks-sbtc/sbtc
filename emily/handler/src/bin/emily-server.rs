@@ -4,7 +4,7 @@ use clap::Args;
 use clap::Parser;
 use emily_handler::context::EmilyContext;
 use tracing::info;
-use warp::Filter;
+use warp::Filter as _;
 
 use emily_handler::api;
 use emily_handler::logging;
@@ -38,6 +38,10 @@ pub struct GeneralArgs {
     /// DynamoDB endpoint.
     #[arg(long, default_value = "http://localhost:8000")]
     pub dynamodb_endpoint: String,
+    /// Whether to skip finding the dynamodb tables on startup. If true, table
+    /// names must be provided in each request via `x-context-*` headers.
+    #[arg(long, default_value = "false")]
+    pub skip_tables: bool,
 }
 
 /// Server related arguments.
@@ -62,6 +66,7 @@ async fn main() {
                 pretty_logs,
                 log_directives,
                 dynamodb_endpoint,
+                skip_tables,
             },
     } = Cli::parse();
 
@@ -70,9 +75,9 @@ async fn main() {
 
     // Setup context.
     // TODO(389 + 358): Handle config pickup in a way that will only fail for the relevant call.
-    let context: EmilyContext = EmilyContext::local_instance(&dynamodb_endpoint)
+    let context: EmilyContext = EmilyContext::local_instance(&dynamodb_endpoint, skip_tables)
         .await
-        .unwrap_or_else(|e| panic!("{e}"));
+        .unwrap();
     info!(lambdaContext = ?context);
 
     // Create CORS configuration

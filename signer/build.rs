@@ -1,3 +1,7 @@
+#![allow(clippy::expect_used)]
+#![allow(clippy::unwrap_used)]
+//! Build file for the sBTC signer.
+
 use std::env;
 
 fn main() {
@@ -5,6 +9,8 @@ fn main() {
     // compile_protos();
 }
 
+/// Prepares the build environment by setting up various
+/// environment variables that can be used in the code.
 pub fn set_up_build_info() {
     let output = std::process::Command::new("rustc")
         .arg("--version")
@@ -35,6 +41,7 @@ pub fn set_up_build_info() {
     println!("cargo:rustc-env=RUSTC_VERSION={}", version.trim());
 }
 
+/// Compiles the protocol buffers used in the signer.
 pub fn compile_protos() {
     let workingdir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -46,6 +53,7 @@ pub fn compile_protos() {
         "protobufs/crypto/wsts/state.proto",
         "protobufs/crypto/wsts/wsts.proto",
         "protobufs/stacks/common.proto",
+        "protobufs/stacks/signer/v1/common.proto",
         "protobufs/stacks/signer/v1/decisions.proto",
         "protobufs/stacks/signer/v1/requests.proto",
         "protobufs/stacks/signer/v1/messages.proto",
@@ -61,7 +69,6 @@ pub fn compile_protos() {
         .btree_map(["."])
         .out_dir(workingdir.join("signer/src/proto/generated/"))
         .include_file("mod.rs")
-        .type_attribute("crypto.Uint256", "#[derive(Copy)]")
-        .compile(&protos, &[workingdir.join("protobufs")])
+        .compile_protos(&protos, &[workingdir.join("protobufs")])
         .expect("Unable to compile protocol buffers");
 }

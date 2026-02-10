@@ -3,6 +3,7 @@
 ## Repo Structure
 
 The Emily API has two parts:
+
 1. The Handler - specified within the `handler` rust crate in this directory
 1. The Infrastructure - specified within the `cdk` via AWS' typescript CDK.
 
@@ -13,6 +14,7 @@ The emily handler is written in a rust crate that utilizes the `warp` and `utoip
 ### Compilation
 
 There are two binaries that this handler can create:
+
 1. `emily-server` - a warp server that expects to run on a host
 2. `emily-lambda` - a warp lambda that expects to run on an AWS lambda
 
@@ -28,7 +30,7 @@ This file is referenced within the cdk and deployed to the lambda.
 
 ### Lambda Configuration
 
-The emily lambda takes in config values via the environment it's deployed on. As of writing this there are 6 environment values that are passed to emily during deployment. This can be found within the cdk definition.
+The emily lambda takes in config values via the environment it's deployed on. As of writing this there are 8 environment values that are passed to emily during deployment. This can be found within the cdk definition.
 
 ```javascript
 environment: {
@@ -37,7 +39,8 @@ environment: {
     CHAINSTATE_TABLE_NAME: chainstateTableName,
     LIMIT_TABLE_NAME: limitTableName,
     IS_LOCAL: "true" | "false",
-    TRUSTED_REORG_API_KEY: trustedReorgApiKey,
+    IS_MAINNET: "true" | "false",
+    DEPLOYER_ADDRESS: "SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS"  // Substitute with the real address
 },
 ```
 
@@ -74,12 +77,11 @@ CUSTOM_ROOT_DOMAIN_NAME=<your-url.com>
 # purchasing your domain.
 HOSTED_ZONE_ID=Z00000000000000000000
 
-# The api key that you trust to indicate valid reorgs on the
-# api chainstate.
-TRUSTED_REORG_API_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-
 # Whether to deploy only the dynamodb tables - helpful for testing.
 TABLES_ONLY=false
+
+# The address of the deployer of the sBTC smart contracts
+DEPLOYER_ADDRESS=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
 > **Caution:** when deploying to a stage that's deemed to be for an active development stack (`dev`, `local`, `unit-test`) all persistent resources will be set to be deleted when the stack is redeployed or deleted. It's not recommended to use any of these environments for anything you want to be remotely persistent.

@@ -25,7 +25,7 @@
             "committed": true,
             "contract_event": {
                 "contract_identifier": "SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS.sbtc-registry",
-                "raw_value": "0x",
+                "raw_value": "0x010000000000000000000000000000002a",
                 "topic": "print",
                 "value": { "UInt": 42 }
             },

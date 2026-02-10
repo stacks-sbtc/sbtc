@@ -11,7 +11,7 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// DepositUpdate : A singlular Deposit update that contains only the fields pertinent to updating the status of a deposit. This includes the key related data in addition to status history related data.
+/// DepositUpdate : A singular Deposit update that contains only the fields pertinent to updating the status of a deposit. This includes the key related data in addition to status history related data.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DepositUpdate {
     /// Output index on the bitcoin transaction associated with this specific deposit.
@@ -27,35 +27,34 @@ pub struct DepositUpdate {
         skip_serializing_if = "Option::is_none"
     )]
     pub fulfillment: Option<Option<Box<models::Fulfillment>>>,
-    /// The most recent Stacks block hash the API was aware of when the deposit was last updated. If the most recent update is tied to an artifact on the Stacks blockchain then this hash is the Stacks block hash that contains that artifact.
-    #[serde(rename = "lastUpdateBlockHash")]
-    pub last_update_block_hash: String,
-    /// The most recent Stacks block height the API was aware of when the deposit was last updated. If the most recent update is tied to an artifact on the Stacks blockchain then this height is the Stacks block height that contains that artifact.
-    #[serde(rename = "lastUpdateHeight")]
-    pub last_update_height: u64,
+    /// Transaction ID of the transaction that replaced this one via RBF.
+    #[serde(
+        rename = "replacedByTx",
+        default,
+        with = "::serde_with::rust::double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub replaced_by_tx: Option<Option<String>>,
     #[serde(rename = "status")]
-    pub status: models::Status,
+    pub status: models::DepositStatus,
     /// The status message of the deposit.
     #[serde(rename = "statusMessage")]
     pub status_message: String,
 }
 
 impl DepositUpdate {
-    /// A singlular Deposit update that contains only the fields pertinent to updating the status of a deposit. This includes the key related data in addition to status history related data.
+    /// A singular Deposit update that contains only the fields pertinent to updating the status of a deposit. This includes the key related data in addition to status history related data.
     pub fn new(
         bitcoin_tx_output_index: u32,
         bitcoin_txid: String,
-        last_update_block_hash: String,
-        last_update_height: u64,
-        status: models::Status,
+        status: models::DepositStatus,
         status_message: String,
     ) -> DepositUpdate {
         DepositUpdate {
             bitcoin_tx_output_index,
             bitcoin_txid,
             fulfillment: None,
-            last_update_block_hash,
-            last_update_height,
+            replaced_by_tx: None,
             status,
             status_message,
         }

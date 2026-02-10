@@ -1,23 +1,46 @@
 //! Database models for the signer.
 
+use std::cmp::{PartialEq, PartialOrd};
 use std::collections::BTreeSet;
+use std::convert::From;
+use std::num::TryFromIntError;
 use std::ops::Deref;
+use std::ops::{Add, Sub};
 
 use bitcoin::hashes::Hash as _;
-use bitcoin::OutPoint;
+use bitcoin::hex::DisplayHex as _;
+use bitcoin::hex::FromHex as _;
+use bitcoin::{OutPoint, ScriptBuf};
 use bitvec::array::BitArray;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
 use clarity::vm::types::PrincipalData;
+use libp2p::{Multiaddr, PeerId};
+use serde::{Deserialize, Serialize};
 use stacks_common::types::chainstate::BurnchainHeaderHash;
 use stacks_common::types::chainstate::StacksBlockId;
 
 use crate::bitcoin::rpc::BitcoinBlockHeader;
+use crate::bitcoin::rpc::BitcoinBlockInfo;
 use crate::bitcoin::validation::InputValidationResult;
 use crate::bitcoin::validation::WithdrawalValidationResult;
 use crate::block_observer::Deposit;
 use crate::error::Error;
 use crate::keys::PublicKey;
 use crate::keys::PublicKeyXOnly;
+use crate::stacks::api::SignerSetInfo;
+
+/// A P2P peer which the signer has successfully connected to.
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
+pub struct P2PPeer {
+    /// The peer ID of the connected peer.
+    pub peer_id: DbPeerId,
+    /// The public key of the connected peer.
+    pub public_key: PublicKey,
+    /// The address of the connected peer.
+    pub address: DbMultiaddr,
+    /// The timestamp of the last successful dial to the peer.
+    pub last_dialed_at: Timestamp,
+}
 
 /// A bitcoin transaction output (TXO) relevant for the sBTC signers.
 ///
@@ -43,8 +66,24 @@ pub struct TxOutput {
     #[sqlx(try_from = "i64")]
     #[cfg_attr(feature = "testing", dummy(faker = "1_000_000..1_000_000_000"))]
     pub amount: u64,
-    /// The scriptPubKey locking the output.
+    /// The type of output.
     pub output_type: TxOutputType,
+}
+
+/// A bitcoin transaction output (TXO) related to a withdrawal.
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
+#[cfg_attr(feature = "testing", derive(fake::Dummy))]
+pub struct WithdrawalTxOutput {
+    /// The Bitcoin transaction id.
+    pub txid: BitcoinTxId,
+    /// The index of the output in the sBTC sweep transaction.
+    #[sqlx(try_from = "i32")]
+    #[cfg_attr(feature = "testing", dummy(faker = "0..i32::MAX as u32"))]
+    pub output_index: u32,
+    /// The withdrawal request id.
+    #[sqlx(try_from = "i64")]
+    #[cfg_attr(feature = "testing", dummy(faker = "0..i64::MAX as u64"))]
+    pub request_id: u64,
 }
 
 /// A bitcoin transaction output being spent as an input in a transaction.
@@ -81,11 +120,15 @@ pub struct BitcoinBlock {
     /// Block hash.
     pub block_hash: BitcoinBlockHash,
     /// Block height.
-    #[sqlx(try_from = "i64")]
-    #[cfg_attr(feature = "testing", dummy(faker = "0..i64::MAX as u64"))]
-    pub block_height: u64,
+    pub block_height: BitcoinBlockHeight,
     /// Hash of the parent block.
     pub parent_hash: BitcoinBlockHash,
+}
+
+impl AsRef<BitcoinBlockHash> for BitcoinBlock {
+    fn as_ref(&self) -> &BitcoinBlockHash {
+        &self.block_hash
+    }
 }
 
 impl From<&bitcoin::Block> for BitcoinBlock {
@@ -94,8 +137,19 @@ impl From<&bitcoin::Block> for BitcoinBlock {
             block_hash: block.block_hash().into(),
             block_height: block
                 .bip34_block_height()
-                .expect("Failed to get block height"),
+                .expect("Failed to get block height")
+                .into(),
             parent_hash: block.header.prev_blockhash.into(),
+        }
+    }
+}
+
+impl From<&BitcoinBlockInfo> for BitcoinBlock {
+    fn from(block: &BitcoinBlockInfo) -> Self {
+        BitcoinBlock {
+            block_hash: block.block_hash.into(),
+            block_height: block.height,
+            parent_hash: block.previous_block_hash.into(),
         }
     }
 }
@@ -123,9 +177,7 @@ pub struct StacksBlock {
     /// Block hash.
     pub block_hash: StacksBlockHash,
     /// Block height.
-    #[sqlx(try_from = "i64")]
-    #[cfg_attr(feature = "testing", dummy(faker = "0..u32::MAX as u64"))]
-    pub block_height: u64,
+    pub block_height: StacksBlockHeight,
     /// Hash of the parent block.
     pub parent_hash: StacksBlockHash,
     /// The bitcoin block this stacks block is build upon (matching consensus hash)
@@ -137,9 +189,29 @@ impl StacksBlock {
     pub fn from_nakamoto_block(block: &NakamotoBlock, bitcoin_anchor: &BitcoinBlockHash) -> Self {
         Self {
             block_hash: block.block_id().into(),
-            block_height: block.header.chain_length,
-            parent_hash: block.header.parent_block_id.into(),
+            block_height: block.header.chain_length.into(),
+            parent_hash: block.header.parent_block_id.clone().into(),
             bitcoin_anchor: *bitcoin_anchor,
+        }
+    }
+}
+
+/// A struct that references a specific stacks block by its block ID and
+/// its position in the blockchain.
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "testing", derive(fake::Dummy))]
+pub struct StacksBlockRef {
+    /// The stacks block ID. It uniquely identifies the stacks block.
+    pub block_hash: StacksBlockHash,
+    /// The height of the block in the stacks blockchain.
+    pub block_height: StacksBlockHeight,
+}
+
+impl From<StacksBlock> for StacksBlockRef {
+    fn from(block: StacksBlock) -> Self {
+        Self {
+            block_hash: block.block_hash,
+            block_height: block.block_height,
         }
     }
 }
@@ -156,8 +228,8 @@ pub struct DepositRequest {
     pub output_index: u32,
     /// Script spendable by the sBTC signers.
     pub spend_script: Bytes,
-    /// Script spendable by the depositor.
-    pub reclaim_script: Bytes,
+    /// SHA-256 hash of the reclaim script.
+    pub reclaim_script_hash: TaprootScriptHash,
     /// The address of which the sBTC should be minted,
     /// can be a smart contract address.
     pub recipient: StacksPrincipal,
@@ -191,14 +263,16 @@ impl From<Deposit> for DepositRequest {
         // It's most likely the case that each of the inputs "came" from
         // the same Address, so we filter out duplicates.
         let sender_script_pub_keys: BTreeSet<ScriptPubKey> = tx_input_iter
-            .map(|tx_in| tx_in.prevout.script_pub_key.script.into())
+            .filter_map(|tx_in| Some(tx_in.prevout?.script_pubkey.script.into()))
             .collect();
+
+        let reclaim_script_hash = TaprootScriptHash::from(&deposit.info.reclaim_script);
 
         Self {
             txid: deposit.info.outpoint.txid.into(),
             output_index: deposit.info.outpoint.vout,
             spend_script: deposit.info.deposit_script.to_bytes(),
-            reclaim_script: deposit.info.reclaim_script.to_bytes(),
+            reclaim_script_hash,
             recipient: deposit.info.recipient.into(),
             amount: deposit.info.amount,
             max_fee: deposit.info.max_fee,
@@ -238,7 +312,24 @@ pub struct DepositSigner {
     pub can_sign: bool,
 }
 
-/// Withdraw request.
+/// Withdrawal request.
+///
+/// # Notes
+///
+/// When we receive a record of a withdrawal request, we know that it has
+/// been confirmed. However, the block containing the transaction that
+/// generated this request may be reorganized, causing it to no longer be
+/// part of the canonical Stacks blockchain. In that scenario, the
+/// withdrawal request effectively ceases to exist. If the same transaction
+/// is "replayed" and confirmed in a new block, a "new" withdrawal request
+/// will be generated because the Stacks block hash has changed. This
+/// differs from deposit requests, where a reorganized deposit is
+/// considered the same across blocks.
+///
+/// So withdrawal requests are tied to the specific Stacks block containing
+/// the transaction that created them. If that transaction is reorganized
+/// to a new block, a new request is generated, and the old one must be
+/// ignored.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
 pub struct WithdrawalRequest {
@@ -247,6 +338,7 @@ pub struct WithdrawalRequest {
     /// affects a transaction that calls the initiate-withdrawal-request
     /// public function.
     #[sqlx(try_from = "i64")]
+    #[cfg_attr(feature = "testing", dummy(faker = "0..u32::MAX as u64"))]
     pub request_id: u64,
     /// The stacks transaction ID that lead to the creation of the
     /// withdrawal request.
@@ -267,6 +359,9 @@ pub struct WithdrawalRequest {
     pub max_fee: u64,
     /// The address that initiated the request.
     pub sender_address: StacksPrincipal,
+    /// The block height of the bitcoin blockchain when the stacks
+    /// transaction that emitted this event was executed.
+    pub bitcoin_block_height: BitcoinBlockHeight,
 }
 
 impl WithdrawalRequest {
@@ -310,44 +405,13 @@ impl WithdrawalSigner {
 }
 
 /// A connection between a bitcoin block and a bitcoin transaction.
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
+#[cfg_attr(feature = "testing", derive(fake::Dummy))]
 pub struct BitcoinTxRef {
     /// Transaction ID.
     pub txid: BitcoinTxId,
     /// The block in which the transaction exists.
     pub block_hash: BitcoinBlockHash,
-}
-
-/// A connection between a bitcoin block and a bitcoin transaction.
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct StacksTransaction {
-    /// Transaction ID.
-    pub txid: StacksTxId,
-    /// The block in which the transaction exists.
-    pub block_hash: StacksBlockHash,
-}
-
-/// For writing to the stacks_transactions or bitcoin_transactions table.
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct TransactionIds {
-    /// Transaction IDs.
-    pub tx_ids: Vec<[u8; 32]>,
-    /// The blocks in which the transactions exist.
-    pub block_hashes: Vec<[u8; 32]>,
-}
-
-/// A raw transaction on either Bitcoin or Stacks.
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
-#[cfg_attr(feature = "testing", derive(fake::Dummy))]
-pub struct Transaction {
-    /// Transaction ID.
-    pub txid: [u8; 32],
-    /// Encoded transaction.
-    pub tx: Bytes,
-    /// The type of the transaction.
-    pub tx_type: TransactionType,
-    /// The block id of the stacks block that includes this transaction
-    pub block_hash: [u8; 32],
 }
 
 /// A deposit request with a response bitcoin transaction that has been
@@ -362,8 +426,7 @@ pub struct SweptDepositRequest {
     /// transaction.
     pub sweep_block_hash: BitcoinBlockHash,
     /// The block height of the block referenced by the `sweep_block_hash`.
-    #[sqlx(try_from = "i64")]
-    pub sweep_block_height: u64,
+    pub sweep_block_height: BitcoinBlockHeight,
     /// Transaction ID of the deposit request transaction.
     pub txid: BitcoinTxId,
     /// Index of the deposit request UTXO.
@@ -394,10 +457,13 @@ impl SweptDepositRequest {
     }
 }
 
-/// Withdraw request.
+/// Withdrawal request.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
 pub struct SweptWithdrawalRequest {
+    /// Index of the output in the sBTC sweep transaction.
+    #[sqlx(try_from = "i32")]
+    pub output_index: u32,
     /// The transaction ID of the bitcoin transaction that swept out the
     /// funds to the intended recipient.
     pub sweep_txid: BitcoinTxId,
@@ -405,8 +471,7 @@ pub struct SweptWithdrawalRequest {
     /// transaction.
     pub sweep_block_hash: BitcoinBlockHash,
     /// The block height of the block that includes the sweep transaction.
-    #[sqlx(try_from = "i64")]
-    pub sweep_block_height: u64,
+    pub sweep_block_height: BitcoinBlockHeight,
     /// Request ID of the withdrawal request. These are supposed to be
     /// unique, but there can be duplicates if there is a reorg that
     /// affects a transaction that calls the `initiate-withdrawal-request`
@@ -433,6 +498,24 @@ pub struct SweptWithdrawalRequest {
     /// The stacks address that initiated the request. This is populated
     /// using `tx-sender`.
     pub sender_address: StacksPrincipal,
+}
+
+impl SweptWithdrawalRequest {
+    /// The qualified request ID for the withdrawal request.
+    pub fn withdrawal_outpoint(&self) -> bitcoin::OutPoint {
+        OutPoint {
+            txid: self.sweep_txid.into(),
+            vout: self.output_index,
+        }
+    }
+    /// Return the identifier for the withdrawal request.
+    pub fn qualified_id(&self) -> QualifiedRequestId {
+        QualifiedRequestId {
+            request_id: self.request_id,
+            txid: self.txid,
+            block_hash: self.block_hash,
+        }
+    }
 }
 
 /// Persisted DKG shares
@@ -462,26 +545,64 @@ pub struct EncryptedDkgShares {
     /// (shares) that are needed in order to construct a signature.
     #[sqlx(try_from = "i32")]
     pub signature_share_threshold: u16,
+    /// The current status of the DKG shares.
+    pub dkg_shares_status: DkgSharesStatus,
+    /// The block hash of the chain tip of the canonical bitcoin blockchain
+    /// when the DKG round associated with these shares started.
+    pub started_at_bitcoin_block_hash: BitcoinBlockHash,
+    /// The block height of the chain tip of the canonical bitcoin blockchain
+    /// when the DKG round associated with these shares started.
+    pub started_at_bitcoin_block_height: BitcoinBlockHeight,
+}
+
+impl EncryptedDkgShares {
+    /// Return the public keys of the signers that participated in the DKG
+    /// associated with these shares.
+    pub fn signer_set_public_keys(&self) -> BTreeSet<PublicKey> {
+        self.signer_set_public_keys.iter().copied().collect()
+    }
+}
+
+impl From<EncryptedDkgShares> for SignerSetInfo {
+    fn from(value: EncryptedDkgShares) -> Self {
+        SignerSetInfo {
+            aggregate_key: value.aggregate_key,
+            signer_set: value.signer_set_public_keys(),
+            signatures_required: value.signature_share_threshold,
+        }
+    }
 }
 
 /// Persisted public DKG shares from other signers
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
-pub struct RotateKeysTransaction {
+pub struct KeyRotationEvent {
     /// Transaction ID.
     pub txid: StacksTxId,
-    /// The address that deployed the contract.
+    /// The Stacks block ID of the block that includes the transaction
+    /// associated with this key rotation event.
+    pub block_hash: StacksBlockHash,
+    /// The principal that can make contract calls into the protected
+    /// public functions in the sbtc smart contracts.
     pub address: StacksPrincipal,
-    /// The aggregate key for these shares.
-    ///
-    /// TODO(511): maybe make the aggregate key private. Set it using the
-    /// `signer_set`, ensuring that it cannot drift from the given keys.
+    /// The aggregate key of the DKG run associated with this event.
     pub aggregate_key: PublicKey,
-    /// The public keys of the signers.
+    /// The public keys of the signers who participated in DKG round
+    /// associated with this event.
     pub signer_set: Vec<PublicKey>,
     /// The number of signatures required for the multi-sig wallet.
     #[sqlx(try_from = "i32")]
     pub signatures_required: u16,
+}
+
+impl From<KeyRotationEvent> for SignerSetInfo {
+    fn from(value: KeyRotationEvent) -> Self {
+        SignerSetInfo {
+            aggregate_key: value.aggregate_key,
+            signer_set: value.signer_set.into_iter().collect(),
+            signatures_required: value.signatures_required,
+        }
+    }
 }
 
 /// A struct containing how a signer voted for a deposit or withdrawal
@@ -542,28 +663,18 @@ impl From<SignerVotes> for BitArray<[u8; 16]> {
     }
 }
 
-/// The types of transactions the signer is interested in.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::Type, strum::Display)]
-#[sqlx(type_name = "transaction_type", rename_all = "snake_case")]
+/// The possible states for DKG shares.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::Type)]
+#[sqlx(type_name = "dkg_shares_status", rename_all = "snake_case")]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
-#[strum(serialize_all = "snake_case")]
-pub enum TransactionType {
-    /// An sBTC transaction on Bitcoin.
-    SbtcTransaction,
-    /// A deposit request transaction on Bitcoin.
-    DepositRequest,
-    /// A withdrawal request transaction on Stacks.
-    WithdrawRequest,
-    /// A deposit accept transaction on Stacks.
-    DepositAccept,
-    /// A withdrawal accept transaction on Stacks.
-    WithdrawAccept,
-    /// A withdraw reject transaction on Stacks.
-    WithdrawReject,
-    /// A rotate keys call on Stacks.
-    RotateKeys,
-    /// A donation to signers aggregated key on Bitcoin.
-    Donation,
+pub enum DkgSharesStatus {
+    /// The DKG shares have not passed or failed verification.
+    Unverified,
+    /// The DKG shares have passed verification.
+    Verified,
+    /// The DKG shares have failed verification or the shares have not
+    /// passed verification within our configured window.
+    Failed,
 }
 
 /// The types of Bitcoin transaction input or outputs that the signer may
@@ -572,7 +683,7 @@ pub enum TransactionType {
 #[sqlx(type_name = "output_type", rename_all = "snake_case")]
 #[derive(serde::Serialize, serde::Deserialize)]
 #[strum(serialize_all = "snake_case")]
-#[cfg_attr(feature = "testing", derive(fake::Dummy))]
+#[cfg_attr(feature = "testing", derive(fake::Dummy, strum::EnumIter))]
 pub enum TxOutputType {
     /// An output created by the signers as the TXO containing all of the
     /// swept funds.
@@ -612,7 +723,7 @@ pub enum TxPrevoutType {
 ///
 /// A request-id and a Stacks Block ID is enough to uniquely identify the
 /// request, but we add in the transaction ID for completeness.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct QualifiedRequestId {
     /// The ID that was generated in the clarity contract call for the
     /// withdrawal request.
@@ -622,6 +733,12 @@ pub struct QualifiedRequestId {
     /// The Stacks block ID that includes the transaction that generated
     /// the request.
     pub block_hash: StacksBlockHash,
+}
+
+impl std::fmt::Display for QualifiedRequestId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.request_id, self.block_hash)
+    }
 }
 
 /// This trait adds a function for converting a type into bytes to
@@ -646,29 +763,6 @@ pub struct QualifiedRequestId {
 pub trait ToLittleEndianOrder: Sized {
     /// Return the bytes in little-endian order.
     fn to_le_bytes(&self) -> [u8; 32];
-}
-
-/// A bitcoin transaction
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct BitcoinTx(bitcoin::Transaction);
-
-impl Deref for BitcoinTx {
-    type Target = bitcoin::Transaction;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl From<bitcoin::Transaction> for BitcoinTx {
-    fn from(value: bitcoin::Transaction) -> Self {
-        Self(value)
-    }
-}
-
-impl From<BitcoinTx> for bitcoin::Transaction {
-    fn from(value: BitcoinTx) -> Self {
-        value.0
-    }
 }
 
 /// The bitcoin transaction ID
@@ -728,7 +822,8 @@ impl std::fmt::Display for BitcoinTxId {
 }
 
 /// Bitcoin block hash
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(transparent)]
 pub struct BitcoinBlockHash(bitcoin::BlockHash);
 
 impl BitcoinBlockHash {
@@ -811,10 +906,11 @@ impl std::fmt::Display for BitcoinBlockHash {
 
 /// A struct that references a specific bitcoin block is identifier and its
 /// position in the blockchain.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, sqlx::FromRow)]
+#[cfg_attr(feature = "testing", derive(fake::Dummy))]
 pub struct BitcoinBlockRef {
     /// The height of the block in the bitcoin blockchain.
-    pub block_height: u64,
+    pub block_height: BitcoinBlockHeight,
     /// Bitcoin block hash. It uniquely identifies the bitcoin block.
     pub block_hash: BitcoinBlockHash,
 }
@@ -834,73 +930,271 @@ impl From<&BitcoinBlock> for BitcoinBlockRef {
     }
 }
 
-/// The Stacks block ID. This is different from the block header hash.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct StacksBlockHash(StacksBlockId);
+impl AsRef<BitcoinBlockHash> for BitcoinBlockRef {
+    fn as_ref(&self) -> &BitcoinBlockHash {
+        &self.block_hash
+    }
+}
 
-impl Deref for StacksBlockHash {
-    type Target = StacksBlockId;
-    fn deref(&self) -> &Self::Target {
+/// The Stacks block ID. This type mirrors the `StacksBlockId` type in
+/// stacks-core, not the `BlockHeaderHash` type.
+///
+/// This type is displayed as a lowercase hex string, and mirrors what
+/// stacks-core does for the
+/// `stacks_common::types::chainstate::StacksBlockId` type.
+///
+/// The stacks-core Display implementation can be found in [1-2].
+///
+/// [1]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stacks-common/src/util/macros.rs#L499-L511>
+/// [2]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stacks-common/src/types/chainstate.rs#L366-L370>
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct StacksBlockHash([u8; 32]);
+
+impl StacksBlockHash {
+    /// Return the inner bytes for the block hash.
+    pub fn into_bytes(self) -> [u8; 32] {
+        self.0
+    }
+
+    /// Return the inner bytes for the block hash.
+    pub fn to_bytes(&self) -> &[u8; 32] {
         &self.0
+    }
+
+    /// Return the block hash as a hex string.
+    pub fn to_hex(&self) -> String {
+        self.0.to_lower_hex_string()
+    }
+
+    /// Create a StacksBlockHash from a hex string.
+    pub fn from_hex(data: &str) -> Result<Self, Error> {
+        <[u8; 32]>::from_hex(data)
+            .map(Self)
+            .map_err(Error::DecodeHexTxid)
+    }
+
+    /// Create a StacksBlockHash from a byte array.
+    #[cfg(any(test, feature = "testing"))]
+    pub const fn new(bytes: [u8; 32]) -> Self {
+        Self(bytes)
     }
 }
 
 impl From<StacksBlockId> for StacksBlockHash {
     fn from(value: StacksBlockId) -> Self {
-        Self(value)
+        Self(value.0)
+    }
+}
+
+impl From<&StacksBlockId> for StacksBlockHash {
+    fn from(value: &StacksBlockId) -> Self {
+        Self(value.0)
     }
 }
 
 impl From<StacksBlockHash> for StacksBlockId {
     fn from(value: StacksBlockHash) -> Self {
-        value.0
+        StacksBlockId(value.0)
+    }
+}
+
+impl From<&StacksBlockHash> for StacksBlockId {
+    fn from(value: &StacksBlockHash) -> Self {
+        StacksBlockId(value.0)
     }
 }
 
 impl From<[u8; 32]> for StacksBlockHash {
     fn from(bytes: [u8; 32]) -> Self {
-        Self(StacksBlockId(bytes))
+        Self(bytes)
     }
 }
 
 impl std::fmt::Display for StacksBlockHash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
+        self.0.as_hex().fmt(f)
     }
 }
 
-/// Stacks transaction ID
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct StacksTxId(blockstack_lib::burnchains::Txid);
+impl std::fmt::Debug for StacksBlockHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.as_hex().fmt(f)
+    }
+}
+
+impl serde::Serialize for StacksBlockHash {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let inst = self.to_hex();
+        s.serialize_str(inst.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for StacksBlockHash {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<StacksBlockHash, D::Error> {
+        let inst_str = String::deserialize(d)?;
+        StacksBlockHash::from_hex(&inst_str).map_err(serde::de::Error::custom)
+    }
+}
+
+/// The Stacks consensus hash. This type mirrors the `ConsensusHash` type in
+/// stacks-core.
+///
+/// This type is displayed as a lowercase hex string, and mirrors what
+/// stacks-core does for the
+/// [`stacks_common::types::chainstate::ConsensusHash`] type.
+///
+/// The stacks-core Display implementation can be found in [1-2].
+///
+/// [1]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stacks-common/src/util/macros.rs#L499-L511>
+/// [2]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stacks-common/src/types/chainstate.rs#L382-L386>
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ConsensusHash([u8; 20]);
+
+impl ConsensusHash {
+    /// Return the inner bytes for the consensus hash.
+    pub fn into_bytes(self) -> [u8; 20] {
+        self.0
+    }
+
+    /// Return the block hash as a hex string.
+    pub fn to_hex(&self) -> String {
+        self.0.to_lower_hex_string()
+    }
+
+    /// Create a ConsensusHash from a hex string.
+    pub fn from_hex(data: &str) -> Result<Self, Error> {
+        <[u8; 20]>::from_hex(data)
+            .map(Self)
+            .map_err(Error::DecodeHexTxid)
+    }
+
+    /// Create a ConsensusHash from a byte array.
+    #[cfg(any(test, feature = "testing"))]
+    pub const fn new(bytes: [u8; 20]) -> Self {
+        Self(bytes)
+    }
+}
+
+impl From<stacks_common::types::chainstate::ConsensusHash> for ConsensusHash {
+    fn from(value: stacks_common::types::chainstate::ConsensusHash) -> Self {
+        Self(value.0)
+    }
+}
+
+impl From<ConsensusHash> for stacks_common::types::chainstate::ConsensusHash {
+    fn from(value: ConsensusHash) -> Self {
+        stacks_common::types::chainstate::ConsensusHash(value.0)
+    }
+}
+
+#[cfg(any(test, feature = "testing"))]
+impl From<[u8; 20]> for ConsensusHash {
+    fn from(bytes: [u8; 20]) -> Self {
+        Self(bytes)
+    }
+}
+
+impl std::fmt::Display for ConsensusHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.as_hex().fmt(f)
+    }
+}
+
+impl std::fmt::Debug for ConsensusHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.as_hex().fmt(f)
+    }
+}
+
+impl serde::Serialize for ConsensusHash {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let inst = self.to_hex();
+        s.serialize_str(&inst)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ConsensusHash {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<ConsensusHash, D::Error> {
+        let inst_str = String::deserialize(d)?;
+        ConsensusHash::from_hex(&inst_str).map_err(serde::de::Error::custom)
+    }
+}
+
+/// The ID for a Stacks transaction.
+///
+/// This type is serialized, deserialized, and displayed as a lowercase
+/// hex string, and mirrors what stacks-core does for the
+/// `blockstack_lib::burnchains::Txid` type.
+///
+/// The stacks-core Serialize and Deserialize implementations can be found
+/// in [1-2], and the Display implementation can be found in [2-3].
+///
+/// [1]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stacks-common/src/util/macros.rs#L623-L641>
+/// [2]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stackslib/src/burnchains/mod.rs#L54-L59>
+/// [3]: <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stacks-common/src/util/macros.rs#L499-L511>
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct StacksTxId([u8; 32]);
+
+impl StacksTxId {
+    /// Return the inner bytes for the txid.
+    pub fn into_bytes(self) -> [u8; 32] {
+        self.0
+    }
+
+    /// Return the inner bytes for the txid.
+    pub fn to_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+
+    /// Create a StacksTxId from a hex string.
+    pub fn from_hex(data: &str) -> Result<Self, Error> {
+        <[u8; 32]>::from_hex(data)
+            .map(Self)
+            .map_err(Error::DecodeHexTxid)
+    }
+}
+
+impl serde::Serialize for StacksTxId {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let inst = self.0.to_lower_hex_string();
+        s.serialize_str(inst.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for StacksTxId {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<StacksTxId, D::Error> {
+        let inst_str = String::deserialize(d)?;
+        StacksTxId::from_hex(&inst_str).map_err(serde::de::Error::custom)
+    }
+}
 
 impl std::fmt::Display for StacksTxId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        self.0.as_hex().fmt(f)
     }
 }
 
-impl Deref for StacksTxId {
-    type Target = blockstack_lib::burnchains::Txid;
-    fn deref(&self) -> &Self::Target {
-        &self.0
+impl std::fmt::Debug for StacksTxId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.as_hex().fmt(f)
     }
 }
 
 impl From<blockstack_lib::burnchains::Txid> for StacksTxId {
     fn from(value: blockstack_lib::burnchains::Txid) -> Self {
-        Self(value)
+        Self(value.0)
     }
 }
 
 impl From<StacksTxId> for blockstack_lib::burnchains::Txid {
     fn from(value: StacksTxId) -> Self {
-        value.0
+        blockstack_lib::burnchains::Txid(value.0)
     }
 }
 
 impl From<[u8; 32]> for StacksTxId {
     fn from(bytes: [u8; 32]) -> Self {
-        Self(blockstack_lib::burnchains::Txid(bytes))
+        Self(bytes)
     }
 }
 
@@ -916,10 +1210,17 @@ impl Deref for StacksPrincipal {
     }
 }
 
+impl std::fmt::Display for StacksPrincipal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 impl std::str::FromStr for StacksPrincipal {
     type Err = Error;
     fn from_str(literal: &str) -> Result<Self, Self::Err> {
-        let principal = PrincipalData::parse(literal).map_err(Error::ParsePrincipalData)?;
+        let principal = PrincipalData::parse(literal)
+            .map_err(|source| Error::ParsePrincipalData(Box::new(source)))?;
         Ok(Self(principal))
     }
 }
@@ -960,6 +1261,54 @@ impl PartialOrd for StacksPrincipal {
 /// A ScriptPubkey of a UTXO.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ScriptPubKey(bitcoin::ScriptBuf);
+
+/// A taproot script hash.
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TaprootScriptHash(bitcoin::TapNodeHash);
+
+impl Deref for TaprootScriptHash {
+    type Target = bitcoin::TapNodeHash;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<bitcoin::TapNodeHash> for TaprootScriptHash {
+    fn from(value: bitcoin::TapNodeHash) -> Self {
+        Self(value)
+    }
+}
+
+impl TaprootScriptHash {
+    /// Create a new taproot script hash with all zeroes
+    #[cfg(feature = "testing")]
+    pub fn zeros() -> Self {
+        Self::from([0; 32])
+    }
+    /// Return the inner bytes for the taproot script hash
+    pub fn to_byte_array(&self) -> [u8; 32] {
+        self.0.to_byte_array()
+    }
+}
+
+impl From<&ScriptBuf> for TaprootScriptHash {
+    fn from(script_buf: &ScriptBuf) -> Self {
+        bitcoin::TapNodeHash::from_script(script_buf, bitcoin::taproot::LeafVersion::TapScript)
+            .into()
+    }
+}
+
+impl From<&ScriptPubKey> for TaprootScriptHash {
+    fn from(script_pub_key: &ScriptPubKey) -> Self {
+        Self::from(&script_pub_key.0)
+    }
+}
+
+impl From<[u8; 32]> for TaprootScriptHash {
+    fn from(bytes: [u8; 32]) -> Self {
+        bitcoin::TapNodeHash::from_byte_array(bytes).into()
+    }
+}
 
 impl Deref for ScriptPubKey {
     type Target = bitcoin::ScriptBuf;
@@ -1051,7 +1400,7 @@ pub struct BitcoinTxSigHash {
 }
 
 /// An output that was created due to a withdrawal request.
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
 pub struct BitcoinWithdrawalOutput {
     /// The ID of the transaction that includes this withdrawal output.
@@ -1061,12 +1410,14 @@ pub struct BitcoinWithdrawalOutput {
     /// containing inputs
     pub bitcoin_chain_tip: BitcoinBlockHash,
     /// The index of the referenced output in the transaction's outputs.
+    #[sqlx(try_from = "i32")]
     #[cfg_attr(feature = "testing", dummy(faker = "0..i32::MAX as u32"))]
     pub output_index: u32,
     /// The request ID of the withdrawal request. These increment for each
     /// withdrawal, but there can be duplicates if there is a reorg that
     /// affects a transaction that calls the `initiate-withdrawal-request`
     /// public function.
+    #[sqlx(try_from = "i64")]
     #[cfg_attr(feature = "testing", dummy(faker = "0..i64::MAX as u64"))]
     pub request_id: u64,
     /// The stacks transaction ID that lead to the creation of the
@@ -1084,7 +1435,7 @@ pub struct BitcoinWithdrawalOutput {
 
 impl From<sbtc::events::StacksTxid> for StacksTxId {
     fn from(value: sbtc::events::StacksTxid) -> Self {
-        Self(blockstack_lib::burnchains::Txid(value.0))
+        Self(value.0)
     }
 }
 
@@ -1098,7 +1449,7 @@ impl From<sbtc::events::CompletedDepositEvent> for CompletedDepositEvent {
             amount: sbtc_event.amount,
             outpoint: sbtc_event.outpoint,
             sweep_block_hash: sweep_hash,
-            sweep_block_height: sbtc_event.sweep_block_height,
+            sweep_block_height: sbtc_event.sweep_block_height.into(),
             sweep_txid: sbtc_event.sweep_txid.into(),
         }
     }
@@ -1114,7 +1465,7 @@ impl From<sbtc::events::WithdrawalAcceptEvent> for WithdrawalAcceptEvent {
             outpoint: sbtc_event.outpoint,
             fee: sbtc_event.fee,
             sweep_block_hash: sbtc_event.sweep_block_hash.into(),
-            sweep_block_height: sbtc_event.sweep_block_height,
+            sweep_block_height: sbtc_event.sweep_block_height.into(),
             sweep_txid: sbtc_event.sweep_txid.into(),
         }
     }
@@ -1131,17 +1482,17 @@ impl From<sbtc::events::WithdrawalRejectEvent> for WithdrawalRejectEvent {
     }
 }
 
-impl From<sbtc::events::WithdrawalCreateEvent> for WithdrawalCreateEvent {
-    fn from(sbtc_event: sbtc::events::WithdrawalCreateEvent) -> WithdrawalCreateEvent {
-        WithdrawalCreateEvent {
-            txid: sbtc_event.txid.into(),
-            block_id: sbtc_event.block_id.into(),
+impl From<sbtc::events::WithdrawalCreateEvent> for WithdrawalRequest {
+    fn from(sbtc_event: sbtc::events::WithdrawalCreateEvent) -> WithdrawalRequest {
+        WithdrawalRequest {
             request_id: sbtc_event.request_id,
-            amount: sbtc_event.amount,
-            sender: sbtc_event.sender.into(),
+            txid: sbtc_event.txid.into(),
+            block_hash: sbtc_event.block_id.into(),
             recipient: sbtc_event.recipient.into(),
+            amount: sbtc_event.amount,
             max_fee: sbtc_event.max_fee,
-            block_height: sbtc_event.block_height,
+            sender_address: sbtc_event.sender.into(),
+            bitcoin_block_height: sbtc_event.block_height.into(),
         }
     }
 }
@@ -1149,31 +1500,14 @@ impl From<sbtc::events::WithdrawalCreateEvent> for WithdrawalCreateEvent {
 impl From<sbtc::events::KeyRotationEvent> for KeyRotationEvent {
     fn from(sbtc_event: sbtc::events::KeyRotationEvent) -> KeyRotationEvent {
         KeyRotationEvent {
-            new_keys: sbtc_event
-                .new_keys
-                .into_iter()
-                .map(|key| key.into())
-                .collect(),
-            new_address: sbtc_event.new_address.into(),
-            new_aggregate_pubkey: sbtc_event.new_aggregate_pubkey.into(),
-            new_signature_threshold: sbtc_event.new_signature_threshold,
+            txid: sbtc_event.txid.into(),
+            block_hash: sbtc_event.block_id.into(),
+            signer_set: sbtc_event.new_keys.into_iter().map(Into::into).collect(),
+            address: sbtc_event.new_address.into(),
+            aggregate_key: sbtc_event.new_aggregate_pubkey.into(),
+            signatures_required: sbtc_event.new_signature_threshold,
         }
     }
-}
-
-/// This is the event that is emitted from the `rotate-keys`
-/// public function in the sbtc-registry smart contract.
-#[derive(Debug, Clone)]
-pub struct KeyRotationEvent {
-    /// The new set of public keys for all known signers during this
-    /// PoX cycle.
-    pub new_keys: Vec<PublicKey>,
-    /// The address that deployed the contract.
-    pub new_address: StacksPrincipal,
-    /// The new aggregate key created by combining the above public keys.
-    pub new_aggregate_pubkey: PublicKey,
-    /// The number of signatures required for the multi-sig wallet.
-    pub new_signature_threshold: u16,
 }
 
 /// This is the event that is emitted from the `create-withdrawal-request`
@@ -1192,38 +1526,12 @@ pub struct CompletedDepositEvent {
     /// The bitcoin block hash where the sweep transaction was included.
     pub sweep_block_hash: BitcoinBlockHash,
     /// The bitcoin block height where the sweep transaction was included.
-    pub sweep_block_height: u64,
+    pub sweep_block_height: BitcoinBlockHeight,
     /// The transaction id of the bitcoin transaction that fulfilled the
     /// deposit.
     pub sweep_txid: BitcoinTxId,
 }
 
-/// This is the event that is emitted from the `create-withdrawal-request`
-/// public function in sbtc-registry smart contract.
-#[derive(Debug, Clone)]
-pub struct WithdrawalCreateEvent {
-    /// The transaction id of the stacks transaction that generated this
-    /// event.
-    pub txid: StacksTxId,
-    /// The block ID of the block for this event.
-    pub block_id: StacksBlockHash,
-    /// This is the unique identifier of the withdrawal request.
-    pub request_id: u64,
-    /// This is the amount of sBTC that is locked and requested to be
-    /// withdrawal as sBTC.
-    pub amount: u64,
-    /// This is the principal who has their sBTC locked up.
-    pub sender: StacksPrincipal,
-    /// This is the address to send the BTC to when fulfilling the
-    /// withdrawal request.
-    pub recipient: ScriptPubKey,
-    /// This is the maximum amount of BTC "spent" to the miners for the
-    /// transaction fee.
-    pub max_fee: u64,
-    /// The block height of the bitcoin blockchain when the stacks
-    /// transaction that emitted this event was executed.
-    pub block_height: u64,
-}
 /// This is the event that is emitted from the `complete-withdrawal-accept`
 /// public function in sbtc-registry smart contract.
 #[derive(Debug, Clone)]
@@ -1248,7 +1556,7 @@ pub struct WithdrawalAcceptEvent {
     /// The bitcoin block hash where the sweep transaction was included.
     pub sweep_block_hash: BitcoinBlockHash,
     /// The bitcoin block height where the sweep transaction was included.
-    pub sweep_block_height: u64,
+    pub sweep_block_height: BitcoinBlockHeight,
     /// The transaction id of the bitcoin transaction that fulfilled the
     /// withdrawal request.
     pub sweep_txid: BitcoinTxId,
@@ -1272,18 +1580,316 @@ pub struct WithdrawalRejectEvent {
     pub signer_bitmap: BitArray<[u8; 16]>,
 }
 
+impl From<u8> for BitcoinBlockHeight {
+    fn from(value: u8) -> Self {
+        Self(value as u64)
+    }
+}
+impl From<u16> for BitcoinBlockHeight {
+    fn from(value: u16) -> Self {
+        Self(value as u64)
+    }
+}
+impl From<u32> for BitcoinBlockHeight {
+    fn from(value: u32) -> Self {
+        Self(value as u64)
+    }
+}
+impl From<u64> for BitcoinBlockHeight {
+    fn from(value: u64) -> Self {
+        Self(value)
+    }
+}
+impl From<usize> for BitcoinBlockHeight {
+    fn from(value: usize) -> Self {
+        Self(value as u64)
+    }
+}
+
+// Conversion BitcoinBlockHeight => u64  is not implemented intentionally.
+// Use deref instead.
+// This was done for consistency across the codebase.
+
+impl From<BitcoinBlockHeight> for u128 {
+    fn from(value: BitcoinBlockHeight) -> Self {
+        *value as u128
+    }
+}
+
+impl std::fmt::Display for BitcoinBlockHeight {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+impl Deref for BitcoinBlockHeight {
+    type Target = u64;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl TryFrom<BitcoinBlockHeight> for i64 {
+    type Error = TryFromIntError;
+    fn try_from(value: BitcoinBlockHeight) -> Result<Self, Self::Error> {
+        i64::try_from(value.0)
+    }
+}
+
+impl TryFrom<i64> for BitcoinBlockHeight {
+    type Error = TryFromIntError;
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        u64::try_from(value).map(Self)
+    }
+}
+
+impl Add<u64> for BitcoinBlockHeight {
+    type Output = BitcoinBlockHeight;
+    fn add(self, other: u64) -> Self::Output {
+        Self(self.0.add(other))
+    }
+}
+impl Add<BitcoinBlockHeight> for u64 {
+    type Output = BitcoinBlockHeight;
+    fn add(self, other: BitcoinBlockHeight) -> Self::Output {
+        BitcoinBlockHeight((self).add(other.0))
+    }
+}
+impl Add for BitcoinBlockHeight {
+    type Output = BitcoinBlockHeight;
+    fn add(self, other: BitcoinBlockHeight) -> Self::Output {
+        Self(self.0.add(other.0))
+    }
+}
+
+impl Sub<u64> for BitcoinBlockHeight {
+    // Height - int is still height.
+    type Output = BitcoinBlockHeight;
+    fn sub(self, other: u64) -> Self::Output {
+        BitcoinBlockHeight((*self).sub(other))
+    }
+}
+impl Sub for BitcoinBlockHeight {
+    // Diff of two heights is int, not height.
+    type Output = u64;
+    fn sub(self, other: BitcoinBlockHeight) -> Self::Output {
+        self.0.sub(other.0)
+    }
+}
+
+impl BitcoinBlockHeight {
+    /// Behaves same as u64.saturating_add
+    pub fn saturating_add(self, rhs: impl Into<BitcoinBlockHeight>) -> Self {
+        let rhs: u64 = rhs.into().0;
+        Self(self.0.saturating_add(rhs))
+    }
+
+    /// Behaves same as u64.saturating_sub
+    pub fn saturating_sub(self, rhs: impl Into<BitcoinBlockHeight>) -> Self {
+        let rhs: u64 = rhs.into().0;
+        Self(self.0.saturating_sub(rhs))
+    }
+}
+
+impl From<u8> for StacksBlockHeight {
+    fn from(value: u8) -> Self {
+        Self(value as u64)
+    }
+}
+impl From<u16> for StacksBlockHeight {
+    fn from(value: u16) -> Self {
+        Self(value as u64)
+    }
+}
+impl From<u32> for StacksBlockHeight {
+    fn from(value: u32) -> Self {
+        Self(value as u64)
+    }
+}
+impl From<u64> for StacksBlockHeight {
+    fn from(value: u64) -> Self {
+        Self(value)
+    }
+}
+impl From<usize> for StacksBlockHeight {
+    fn from(value: usize) -> Self {
+        Self(value as u64)
+    }
+}
+
+// Conversion StacksBlockHeight => u64  is not implemented intentionally.
+// Use deref instead.
+// This was done for consistency across the codebase.
+
+impl From<StacksBlockHeight> for u128 {
+    fn from(value: StacksBlockHeight) -> Self {
+        *value as u128
+    }
+}
+
+impl std::fmt::Display for StacksBlockHeight {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+impl Deref for StacksBlockHeight {
+    type Target = u64;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl TryFrom<StacksBlockHeight> for i64 {
+    type Error = TryFromIntError;
+    fn try_from(value: StacksBlockHeight) -> Result<Self, Self::Error> {
+        i64::try_from(value.0)
+    }
+}
+
+impl TryFrom<i64> for StacksBlockHeight {
+    type Error = TryFromIntError;
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        u64::try_from(value).map(Self)
+    }
+}
+
+impl Add<u64> for StacksBlockHeight {
+    type Output = StacksBlockHeight;
+    fn add(self, other: u64) -> Self::Output {
+        Self(self.0.add(other))
+    }
+}
+impl Add<StacksBlockHeight> for u64 {
+    type Output = StacksBlockHeight;
+    fn add(self, other: StacksBlockHeight) -> Self::Output {
+        StacksBlockHeight((self).add(other.0))
+    }
+}
+impl Add for StacksBlockHeight {
+    type Output = StacksBlockHeight;
+    fn add(self, other: StacksBlockHeight) -> Self::Output {
+        Self(self.0.add(other.0))
+    }
+}
+
+impl Sub<u64> for StacksBlockHeight {
+    // Height - int is still height.
+    type Output = StacksBlockHeight;
+    fn sub(self, other: u64) -> Self::Output {
+        StacksBlockHeight((*self).sub(other))
+    }
+}
+impl Sub for StacksBlockHeight {
+    // Diff of two heights is int, not height.
+    type Output = u64;
+    fn sub(self, other: StacksBlockHeight) -> Self::Output {
+        self.0.sub(other.0)
+    }
+}
+impl StacksBlockHeight {
+    /// Behaves same as u64.saturating_add
+    pub fn saturating_add(self, rhs: impl Into<StacksBlockHeight>) -> Self {
+        let rhs: u64 = rhs.into().0;
+        Self(self.0.saturating_add(rhs))
+    }
+
+    /// Behaves same as u64.saturating_sub
+    pub fn saturating_sub(self, rhs: impl Into<StacksBlockHeight>) -> Self {
+        let rhs: u64 = rhs.into().0;
+        Self(self.0.saturating_sub(rhs))
+    }
+}
+
+/// Bitcoin block height
+#[derive(
+    Debug, Default, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+)]
+#[serde(transparent)]
+pub struct BitcoinBlockHeight(u64);
+/// Stacks block height
+#[derive(
+    Debug, Default, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+)]
+#[serde(transparent)]
+pub struct StacksBlockHeight(u64);
+
+impl StacksBlockHeight {
+    /// Create a StacksBlockHeight from a u64.
+    #[cfg(any(test, feature = "testing"))]
+    pub const fn new(height: u64) -> Self {
+        Self(height)
+    }
+}
+
+/// A newtype over [`time::OffsetDateTime`] which implements encode/decode for sqlx
+/// and integrates seamlessly with the Postgres `TIMESTAMPTZ` type.
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Timestamp(time::OffsetDateTime);
+
+impl Deref for Timestamp {
+    type Target = time::OffsetDateTime;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<time::OffsetDateTime> for Timestamp {
+    fn from(value: time::OffsetDateTime) -> Self {
+        Self(value)
+    }
+}
+
+/// A newtype over [`PeerId`] which implements encode/decode for sqlx.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct DbPeerId(PeerId);
+
+impl From<PeerId> for DbPeerId {
+    fn from(value: PeerId) -> Self {
+        Self(value)
+    }
+}
+
+impl Deref for DbPeerId {
+    type Target = PeerId;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A newtype over [`Multiaddr`] which implements encode/decode for sqlx.
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct DbMultiaddr(Multiaddr);
+
+impl From<Multiaddr> for DbMultiaddr {
+    fn from(value: Multiaddr) -> Self {
+        Self(value)
+    }
+}
+
+impl Deref for DbMultiaddr {
+    type Target = Multiaddr;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use fake::Fake;
-    use rand::SeedableRng;
+    use std::fmt::Debug;
+    use std::fmt::Display;
+    use std::marker::PhantomData;
 
-    use sbtc::events::FromLittleEndianOrder;
+    use fake::Fake as _;
+    use serde::Deserialize;
+    use serde::Serialize;
+    use test_case::test_case;
+
+    use sbtc::events::FromLittleEndianOrder as _;
+
+    use crate::testing::get_rng;
 
     use super::*;
 
     #[test]
     fn conversion_bitcoin_header_hashes() {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+        let mut rng = get_rng();
 
         let block_hash: BitcoinBlockHash = fake::Faker.fake_with_rng(&mut rng);
         let stacks_hash = BurnchainHeaderHash::from(block_hash);
@@ -1291,7 +1897,7 @@ mod tests {
         assert_eq!(block_hash, round_trip);
 
         let stacks_hash = BurnchainHeaderHash(fake::Faker.fake_with_rng(&mut rng));
-        let block_hash = BitcoinBlockHash::from(stacks_hash);
+        let block_hash = BitcoinBlockHash::from(stacks_hash.clone());
         let round_trip = BurnchainHeaderHash::from(block_hash);
         assert_eq!(stacks_hash, round_trip);
     }
@@ -1309,5 +1915,53 @@ mod tests {
         let round_trip = bitcoin::Txid::from_le_bytes(block_hash.to_le_bytes());
 
         assert_eq!(block_hash, round_trip);
+    }
+
+    #[test_case(PhantomData::<([u8; 32], StacksTxId, blockstack_lib::burnchains::Txid)>; "StacksTxId")]
+    #[test_case(PhantomData::<([u8; 32], StacksBlockHash, StacksBlockId)>; "StacksBlockHash")]
+    #[test_case(PhantomData::<([u8; 20], ConsensusHash, stacks_common::types::chainstate::ConsensusHash)>; "ConsensusHash")]
+    fn stacks_type_display_debug_impl<B, L, F>(_: PhantomData<(B, L, F)>)
+    where
+        L: From<B> + Display + Debug,
+        F: From<B> + Display + Debug,
+        B: fake::Dummy<fake::Faker> + Copy,
+    {
+        let mut rng = get_rng();
+        let txid_bytes: B = fake::Faker.fake_with_rng(&mut rng);
+        let local_type = L::from(txid_bytes);
+        let foreign_type = F::from(txid_bytes);
+        assert_eq!(foreign_type.to_string(), local_type.to_string());
+
+        let debug_local_type = format!("{:?}", local_type);
+        let debug_foreign_type = format!("{:?}", foreign_type);
+        assert_eq!(debug_local_type, debug_foreign_type);
+    }
+
+    #[test_case(PhantomData::<([u8; 32], StacksTxId, blockstack_lib::burnchains::Txid)>; "StacksTxId")]
+    #[test_case(PhantomData::<([u8; 32], StacksBlockHash, StacksBlockId)>; "StacksBlockHash")]
+    #[test_case(PhantomData::<([u8; 20], ConsensusHash, stacks_common::types::chainstate::ConsensusHash)>; "ConsensusHash")]
+    fn stacks_type_serde_impl<B, L, F>(_: PhantomData<(B, L, F)>)
+    where
+        L: From<B> + Display + Debug + Serialize + for<'de> Deserialize<'de> + PartialEq,
+        F: From<B> + Display + Debug + Serialize + for<'de> Deserialize<'de> + PartialEq,
+        B: fake::Dummy<fake::Faker> + Copy,
+    {
+        let mut rng = get_rng();
+        let txid_bytes: B = fake::Faker.fake_with_rng(&mut rng);
+        let local_type = L::from(txid_bytes);
+        let foreign_type = F::from(txid_bytes);
+
+        let json_local_type = serde_json::to_string(&local_type).unwrap();
+        let json_foreign_type = serde_json::to_string(&foreign_type).unwrap();
+        assert_eq!(json_local_type, json_foreign_type);
+
+        assert_eq!(json_local_type, format!("\"{local_type}\""));
+        assert_eq!(json_foreign_type, format!("\"{foreign_type}\""));
+
+        let local_type_des = serde_json::from_str::<L>(&json_foreign_type).unwrap();
+        let foreign_type_des = serde_json::from_str::<F>(&json_local_type).unwrap();
+        assert_eq!(foreign_type, foreign_type_des);
+        assert_eq!(local_type, local_type_des);
+        assert_eq!(foreign_type_des.to_string(), local_type_des.to_string());
     }
 }

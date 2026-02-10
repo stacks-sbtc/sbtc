@@ -1,8 +1,8 @@
-use std::{net::IpAddr, str::FromStr};
+use std::{net::IpAddr, str::FromStr as _};
 
 use clarity::{types::chainstate::StacksAddress, vm::types::PrincipalData};
 use libp2p::Multiaddr;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize as _, Deserializer};
 use url::Url;
 
 use crate::keys::PrivateKey;
@@ -42,6 +42,19 @@ where
     D: Deserializer<'de>,
 {
     Ok(std::time::Duration::from_secs(
+        u64::deserialize(deserializer).map_err(serde::de::Error::custom)?,
+    ))
+}
+
+/// A deserializer for the std::time::Duration type.
+/// Serde includes a default deserializer, but it expects a struct.
+pub fn duration_milliseconds_deserializer<'de, D>(
+    deserializer: D,
+) -> Result<std::time::Duration, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(std::time::Duration::from_millis(
         u64::deserialize(deserializer).map_err(serde::de::Error::custom)?,
     ))
 }
@@ -86,12 +99,12 @@ where
 
 pub fn try_parse_p2p_multiaddr(s: &str) -> Result<Multiaddr, SignerConfigError> {
     // Keeping these local here as this is the only place these should need to be used.
-    use libp2p::multiaddr::Protocol;
     use SignerConfigError::{
         InvalidP2PScheme, InvalidP2PUri, P2PHostRequired, P2PPasswordNotSupported,
         P2PPathsNotSupported, P2PPortRequired, P2PQueryStringsNotSupported,
         P2PUsernameNotSupported,
     };
+    use libp2p::multiaddr::Protocol;
 
     // We parse to a Url first to take advantage of its initial validation
     // and so that we can more easily work with the URI components below.
@@ -135,7 +148,7 @@ pub fn try_parse_p2p_multiaddr(s: &str) -> Result<Multiaddr, SignerConfigError> 
     let host_str = url
         .host_str()
         .ok_or(P2PHostRequired)?
-        .trim_matches(&['[', ']']); // `Url` includes brackets for IPv6 addresses
+        .trim_matches(['[', ']']); // `Url` includes brackets for IPv6 addresses
 
     let mut addr = if let Ok(addr) = IpAddr::from_str(host_str) {
         Multiaddr::empty().with(Protocol::from(addr))

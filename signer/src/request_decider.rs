@@ -5,6 +5,8 @@
 //!
 //! For more details, see the [`RequestDeciderEventLoop`] documentation.
 
+use std::time::Duration;
+
 use crate::block_observer::BlockObserver;
 use crate::blocklist_client::BlocklistChecker;
 use crate::context::Context;
@@ -15,7 +17,7 @@ use crate::context::SignerEvent;
 use crate::context::SignerSignal;
 use crate::ecdsa::SignEcdsa as _;
 use crate::ecdsa::Signed;
-use crate::emily_client::EmilyInteract;
+use crate::emily_client::EmilyInteract as _;
 use crate::error::Error;
 use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
@@ -24,15 +26,16 @@ use crate::message::SignerDepositDecision;
 use crate::message::SignerMessage;
 use crate::message::SignerWithdrawalDecision;
 use crate::network::MessageTransfer;
-use crate::storage::model;
-use crate::storage::model::BitcoinBlockHash;
-use crate::storage::model::DepositSigner;
-use crate::storage::model::WithdrawalSigner;
 use crate::storage::DbRead as _;
 use crate::storage::DbWrite as _;
+use crate::storage::model;
+use crate::storage::model::BitcoinBlockHash;
+use crate::storage::model::BitcoinBlockRef;
+use crate::storage::model::DepositSigner;
+use crate::storage::model::WithdrawalSigner;
 
-use futures::StreamExt;
-use futures::TryStreamExt;
+use futures::StreamExt as _;
+use futures::TryStreamExt as _;
 
 /// This struct is responsible for deciding whether to accept or reject
 /// requests and persisting requests from other signers.
@@ -48,6 +51,12 @@ pub struct RequestDeciderEventLoop<C, N, B> {
     pub signer_private_key: PrivateKey,
     /// How many bitcoin blocks back from the chain tip the signer will look for requests.
     pub context_window: u16,
+    /// How many bitcoin blocks back from the chain tip the signer will look for deposit
+    /// decisions to retry to propagate.
+    pub deposit_decisions_retry_window: u16,
+    /// How many bitcoin blocks back from the chain tip the signer will look for withdrawal
+    /// decisions to retry to propagate.
+    pub withdrawal_decisions_retry_window: u16,
 }
 
 /// This function defines which messages this event loop is interested
@@ -57,7 +66,7 @@ fn run_loop_message_filter(signal: &SignerSignal) -> bool {
         signal,
         SignerSignal::Command(SignerCommand::Shutdown)
             | SignerSignal::Event(SignerEvent::P2P(P2PEvent::MessageReceived(_)))
-            | SignerSignal::Event(SignerEvent::BitcoinBlockObserved)
+            | SignerSignal::Event(SignerEvent::BitcoinBlockObserved(_))
     )
 }
 
@@ -92,12 +101,12 @@ where
                             tracing::error!(%error, "error handling signer message");
                         }
                     }
-                    SignerEvent::BitcoinBlockObserved => {
-                        if let Err(error) = self.handle_new_requests().await {
+                    SignerEvent::BitcoinBlockObserved(chain_tip) => {
+                        if let Err(error) = self.handle_new_requests(chain_tip).await {
                             tracing::warn!(%error, "error handling new requests; skipping this round");
                         }
 
-                        let message = RequestDeciderEvent::NewRequestsHandled.into();
+                        let message = RequestDeciderEvent::NewRequestsHandled(chain_tip).into();
                         // If there is an error here then the application
                         // is on its way down since
                         // [`SignerContext::signal`] sends a shutdown
@@ -116,27 +125,56 @@ where
         Ok(())
     }
 
-    #[tracing::instrument(skip_all, fields(chain_tip = tracing::field::Empty))]
-    async fn handle_new_requests(&mut self) -> Result<(), Error> {
-        let db = self.context.get_storage();
-        let chain_tip = db
-            .get_bitcoin_canonical_chain_tip()
-            .await?
-            .ok_or(Error::NoChainTip)?;
+    /// Vote on pending deposit requests
+    #[tracing::instrument(skip_all, fields(
+        bitcoin_tip_hash = %block_ref.block_hash,
+        bitcoin_tip_height = %block_ref.block_height,
+    ))]
+    pub async fn handle_new_requests(&mut self, block_ref: BitcoinBlockRef) -> Result<(), Error> {
+        let requests_processing_delay = self.context.config().signer.requests_processing_delay;
+        if requests_processing_delay > Duration::ZERO {
+            tracing::debug!("sleeping before processing new requests");
+            tokio::time::sleep(requests_processing_delay).await;
+        }
 
+        let bitcoin_chain_tip = block_ref.block_hash;
+        let stacks_chain_tip = self
+            .context
+            .state()
+            .stacks_chain_tip()
+            .ok_or(Error::NoStacksChainTip)?
+            .block_hash;
         let signer_public_key = self.signer_public_key();
+        let db = self.context.get_storage();
+        // We retry the deposit decisions because some signers' bitcoin nodes might have
+        // been running behind and ignored the previous messages.
+        let deposit_decisions_to_retry = db
+            .get_deposit_signer_decisions(
+                &bitcoin_chain_tip,
+                self.deposit_decisions_retry_window,
+                &signer_public_key,
+            )
+            .await?;
 
-        let span = tracing::Span::current();
-        span.record("chain_tip", tracing::field::display(chain_tip));
+        let _ = self
+            .handle_deposit_decisions_to_retry(deposit_decisions_to_retry, &bitcoin_chain_tip)
+            .await
+            .inspect_err(
+                |error| tracing::warn!(%error, "error handling deposit decisions to retry"),
+            );
 
         let deposit_requests = db
-            .get_pending_deposit_requests(&chain_tip, self.context_window, &signer_public_key)
+            .get_pending_deposit_requests(
+                &bitcoin_chain_tip,
+                self.context_window,
+                &signer_public_key,
+            )
             .await?;
 
         for deposit_request in deposit_requests {
             let outpoint = deposit_request.outpoint();
             let _ = self
-                .handle_pending_deposit_request(deposit_request, &chain_tip)
+                .handle_pending_deposit_request(deposit_request, &bitcoin_chain_tip)
                 .await
                 .inspect_err(|error| {
                     tracing::warn!(
@@ -147,14 +185,34 @@ where
                 });
         }
 
+        let withdrawal_decisions_to_retry = db
+            .get_withdrawal_signer_decisions(
+                &bitcoin_chain_tip,
+                self.withdrawal_decisions_retry_window,
+                &signer_public_key,
+            )
+            .await?;
+
+        let _ = self
+            .handle_withdrawal_decisions_to_retry(withdrawal_decisions_to_retry, &bitcoin_chain_tip)
+            .await
+            .inspect_err(
+                |error| tracing::warn!(%error, "error handling withdrawal decisions to retry"),
+            );
+
         let withdraw_requests = db
-            .get_pending_withdrawal_requests(&chain_tip, self.context_window, &signer_public_key)
+            .get_pending_withdrawal_requests(
+                &bitcoin_chain_tip,
+                &stacks_chain_tip,
+                self.context_window,
+                &signer_public_key,
+            )
             .await?;
 
         for withdraw_request in withdraw_requests {
             let request_id = withdraw_request.request_id;
             let _ = self
-                .handle_pending_withdrawal_request(withdraw_request, &chain_tip)
+                .handle_pending_withdrawal_request(withdraw_request, &bitcoin_chain_tip)
                 .await
                 .inspect_err(|error| {
                     tracing::warn!(
@@ -248,6 +306,42 @@ where
         Ok(())
     }
 
+    /// Send the given withdrawal decisions to the other signers for redundancy.
+    #[tracing::instrument(skip_all)]
+    pub async fn handle_withdrawal_decisions_to_retry(
+        &mut self,
+        decisions: Vec<model::WithdrawalSigner>,
+        chain_tip: &BitcoinBlockHash,
+    ) -> Result<(), Error> {
+        for decision in decisions.into_iter().map(SignerWithdrawalDecision::from) {
+            let _ = self
+                .send_message(decision, chain_tip)
+                .await
+                .inspect_err(|error| {
+                    tracing::warn!(%error, "error sending withdrawal decision to retry, skipping");
+                });
+        }
+        Ok(())
+    }
+
+    /// Send the given deposit decisions to the other signers for redundancy.
+    #[tracing::instrument(skip_all)]
+    pub async fn handle_deposit_decisions_to_retry(
+        &mut self,
+        decisions: Vec<model::DepositSigner>,
+        chain_tip: &BitcoinBlockHash,
+    ) -> Result<(), Error> {
+        for decision in decisions.into_iter().map(SignerDepositDecision::from) {
+            let _ = self
+                .send_message(decision, chain_tip)
+                .await
+                .inspect_err(|error| {
+                    tracing::warn!(%error, "error sending deposit decision to retry, skipping");
+                });
+        }
+        Ok(())
+    }
+
     #[tracing::instrument(skip_all)]
     async fn handle_pending_withdrawal_request(
         &mut self,
@@ -262,7 +356,7 @@ where
 
         let msg = SignerWithdrawalDecision {
             request_id: withdrawal_request.request_id,
-            block_hash: withdrawal_request.block_hash.into_bytes(),
+            block_hash: withdrawal_request.block_hash,
             accepted: is_accepted,
             txid: withdrawal_request.txid,
         };
@@ -298,12 +392,18 @@ where
             return Ok(true);
         };
 
-        let result = client
-            .can_accept(&req.sender_address.to_string())
-            .await
-            .unwrap_or(false);
+        let network = bitcoin::Network::from(self.context.config().signer.network);
+        let receiver_address = bitcoin::Address::from_script(&req.recipient, network.params())
+            .map_err(|err| {
+                Error::WithdrawalBitcoinAddressFromScript(err, req.request_id, req.block_hash)
+            })?;
 
-        Ok(result)
+        let can_accept = client
+            .can_accept(&receiver_address.to_string())
+            .await
+            .inspect_err(|error| tracing::error!(%error, "blocklist client issue"))?;
+
+        Ok(can_accept)
     }
 
     async fn can_accept_deposit_request(&self, req: &model::DepositRequest) -> Result<bool, Error> {
@@ -322,17 +422,19 @@ where
             .iter()
             .map(|script_pubkey| bitcoin::Address::from_script(script_pubkey, params))
             .collect::<Result<Vec<bitcoin::Address>, _>>()
-            .map_err(|err| Error::BitcoinAddressFromScript(err, req.outpoint()))?;
+            .map_err(|err| Error::DepositBitcoinAddressFromScript(err, req.outpoint()))?;
 
         let responses = futures::stream::iter(&addresses)
             .then(|address| async { client.can_accept(&address.to_string()).await })
             .inspect_err(|error| tracing::error!(%error, "blocklist client issue"))
             .collect::<Vec<_>>()
-            .await;
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?;
 
         // If all of the inputs addresses are fine then we pass the deposit
         // request.
-        let can_accept = responses.into_iter().all(|res| res.unwrap_or(false));
+        let can_accept = responses.into_iter().all(|res| res);
         Ok(can_accept)
     }
 
@@ -366,7 +468,7 @@ where
             tracing::debug!("no record of the deposit request, fetching from emily");
             let processor = BlockObserver {
                 context: self.context.clone(),
-                bitcoin_blocks: (),
+                bitcoin_block_source: (),
             };
             let deposit_request = self
                 .context
@@ -406,7 +508,7 @@ where
     ) -> Result<(), Error> {
         let signer_decision = WithdrawalSigner {
             request_id: decision.request_id,
-            block_hash: decision.block_hash.into(),
+            block_hash: decision.block_hash,
             signer_pub_key,
             is_accepted: decision.accepted,
             txid: decision.txid,
@@ -452,10 +554,11 @@ mod tests {
     use crate::bitcoin::MockBitcoinInteract;
     use crate::emily_client::MockEmilyInteract;
     use crate::stacks::api::MockStacksInteract;
-    use crate::storage::in_memory::SharedStore;
+    use crate::storage::memory::SharedStore;
     use crate::testing;
     use crate::testing::context::*;
 
+    #[allow(clippy::type_complexity)]
     fn test_environment() -> testing::request_decider::TestEnvironment<
         TestContext<
             SharedStore,
@@ -470,6 +573,7 @@ mod tests {
             num_deposit_requests_per_block: 5,
             num_withdraw_requests_per_block: 5,
             num_signers_per_request: 0,
+            consecutive_blocks: false,
         };
 
         let context = TestContext::builder()
@@ -480,6 +584,8 @@ mod tests {
         testing::request_decider::TestEnvironment {
             context,
             context_window: 6,
+            deposit_decisions_retry_window: 1,
+            withdrawal_decisions_retry_window: 1,
             num_signers: 7,
             signing_threshold: 5,
             test_model_parameters,
@@ -494,6 +600,7 @@ mod tests {
     }
 
     #[tokio::test]
+    // TODO(#1466): This test is currently using a known-working fixed seed, but is flaky with other seeds.
     async fn should_store_decisions_for_pending_withdrawal_requests() {
         test_environment()
             .assert_should_store_decisions_for_pending_withdrawal_requests()

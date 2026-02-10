@@ -3,9 +3,9 @@
 use std::sync::LazyLock;
 
 use blockstack_lib::chainstate::stacks::TransactionPayload;
-use clarity::vm::types::TupleData;
 use clarity::vm::ClarityName;
 use clarity::vm::Value as ClarityValue;
+use clarity::vm::types::TupleData;
 use sbtc::testing::regtest::Recipient;
 use secp256k1::Keypair;
 use secp256k1::SECP256K1;
@@ -127,8 +127,8 @@ impl AsContractCall for InitiateWithdrawalRequest {
     const CONTRACT_NAME: &'static str = "sbtc-withdrawal";
     const FUNCTION_NAME: &'static str = "initiate-withdrawal-request";
     /// The stacks address that deployed the contract.
-    fn deployer_address(&self) -> StacksAddress {
-        self.deployer
+    fn deployer_address(&self) -> &StacksAddress {
+        &self.deployer
     }
     /// The arguments to the clarity function.
     fn as_contract_args(&self) -> Vec<ClarityValue> {

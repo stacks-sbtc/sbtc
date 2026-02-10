@@ -1,37 +1,40 @@
 x-common-vars:
   # Postgres
-  - &POSTGRES_PASSWORD ${POSTGRES_PASSWORD} # Required
+  - &POSTGRES_PASSWORD ${POSTGRES_PASSWORD:?} # Required
   - &POSTGRES_DB ${POSTGRES_DB:-signer}
   - &POSTGRES_USER ${POSTGRES_USER:-postgres}
   - &POSTGRES_HOST ${POSTGRES_HOST:-postgres}
   - &POSTGRES_PORT ${POSTGRES_PORT:-5432}
   # Bitcoin RPC
-  - &BITCOIN_RPC_USERNAME ${BITCOIN_RPC_USERNAME} # Required
-  - &BITCOIN_RPC_PASSWORD ${BITCOIN_RPC_PASSWORD} # Required
-  - &BITCOIN_RPC_HOST ${BITCOIN_RPC_HOST} # Required
+  - &BITCOIN_RPC_USERNAME ${BITCOIN_RPC_USERNAME:?} # Required
+  - &BITCOIN_RPC_PASSWORD ${BITCOIN_RPC_PASSWORD:?} # Required
+  - &BITCOIN_RPC_HOST ${BITCOIN_RPC_HOST:?} # Required
   - &BITCOIN_RPC_PORT ${BITCOIN_RPC_PORT:-8332}
-  # Bitcoin ZMQ endpoint
-  - &BITCOIN_ZMQ_HOST ${BITCOIN_ZMQ_HOST:-${BITCOIN_RPC_HOST}}
-  - &BITCOIN_ZMQ_PORT ${BITCOIN_ZMQ_PORT:-28332}
   # Stacks RPC
-  - &STACKS_RPC_HOST ${STACKS_RPC_HOST} # Required
+  - &STACKS_RPC_HOST ${STACKS_RPC_HOST:?} # Required
   - &STACKS_RPC_PORT ${STACKS_RPC_PORT:-20443}
   # Signer private key
-  - &SIGNER_SIGNER__PRIVATE_KEY ${SIGNER_SIGNER__PRIVATE_KEY} # Required
+  - &SIGNER_SIGNER__PRIVATE_KEY ${SIGNER_SIGNER__PRIVATE_KEY:?} # Required
   # Emily
-  - &EMILY_API_KEY ${EMILY_API_KEY} # Required
+  - &EMILY_API_KEY ${EMILY_API_KEY:?} # Required
   # Blocklist client
-  - &BLOCKLIST_CLIENT_RISK_ANALYSIS__API_KEY ${BLOCKLIST_CLIENT_RISK_ANALYSIS__API_KEY} # Required
+  - &BLOCKLIST_CLIENT_RISK_ANALYSIS__API_KEY ${BLOCKLIST_CLIENT_RISK_ANALYSIS__API_KEY:?} # Required
   # Vector, Cloudwatch log streaming
-  - &STREAM_NAME ${STREAM_NAME} # Required
-  - &AWS_ACCESS_KEY_ID ${AWS_ACCESS_KEY_ID} # Required
-  - &AWS_SECRET_ACCESS_KEY ${AWS_SECRET_ACCESS_KEY} # Required
+  - &STREAM_NAME ${STREAM_NAME:?} # Required
+  - &AWS_ACCESS_KEY_ID ${AWS_ACCESS_KEY_ID:?} # Required
+  - &AWS_SECRET_ACCESS_KEY ${AWS_SECRET_ACCESS_KEY:?} # Required
+  # Attestation
+  - &SIGNER_TAG ${SIGNER_TAG:?} # Required
+  - &BLOCKLIST_TAG ${BLOCKLIST_TAG:?} # Required
+  - &SIGNER_BUNDLE_PATH ${SIGNER_BUNDLE_PATH:?} # Required
+  - &BLOCKLIST_BUNDLE_PATH ${BLOCKLIST_BUNDLE_PATH:?} # Required
+  - &TRUSTED_ROOT_PATH ${TRUSTED_ROOT_PATH:?} # Required
 
 services:
   postgres:
     container_name: postgres
     restart: on-failure
-    image: postgres:16.3-alpine
+    image: postgres:16.6-bookworm@sha256:c965017e1d29eb03e18a11abc25f5e3cd78cb5ac799d495922264b8489d5a3a1
     stop_grace_period: 5s
     environment:
       POSTGRES_DB: *POSTGRES_DB
@@ -43,8 +46,10 @@ services:
   sbtc-signer:
     container_name: sbtc-signer
     restart: on-failure
-    image: blockstack/sbtc:signer-0.0.9-rc4
-    entrypoint:
+    # this version can be outdated, check the last image on: https://github.com/stacks-sbtc/sbtc/pkgs/container/sbtc
+    image: ghcr.io/stacks-sbtc/sbtc:signer-v1.0.2@sha256:60832405b3f56e8c8ae9ac9429866ce5173f86ff79652bad7f38481f220b2332
+    entrypoint: "/entrypoint.sh"
+    command:
       - /bin/bash
       - -c
       - |
@@ -59,9 +64,6 @@ services:
       BITCOIN_RPC_PASSWORD: *BITCOIN_RPC_PASSWORD
       BITCOIN_RPC_HOST: *BITCOIN_RPC_HOST
       BITCOIN_RPC_PORT: *BITCOIN_RPC_PORT
-      # Bitcoin ZMQ endpoint
-      BITCOIN_ZMQ_HOST: *BITCOIN_ZMQ_HOST
-      BITCOIN_ZMQ_PORT: *BITCOIN_ZMQ_PORT
       # Stacks RPC
       STACKS_RPC_HOST: *STACKS_RPC_HOST
       STACKS_RPC_PORT: *STACKS_RPC_PORT
@@ -75,29 +77,44 @@ services:
       POSTGRES_PASSWORD: *POSTGRES_PASSWORD
       POSTGRES_HOST: *POSTGRES_HOST
       POSTGRES_PORT: *POSTGRES_PORT
+      TAG: *SIGNER_TAG  
+      BUNDLE_PATH: signer_bundle.jsonl
+      TRUSTED_ROOT_PATH: trusted_root.jsonl
     volumes:
       - ./sbtc-signer/signer-config.toml.in:/signer-config.toml.in:ro
       - ./logs:/logs
+      - ${SIGNER_BUNDLE_PATH}:signer_bundle.jsonl:ro
+      - ${TRUSTED_ROOT_PATH}:trusted_root.jsonl:ro
+      - ./entrypoint.sh:/entrypoint.sh
     ports:
       - "4122:4122" # P2P communication between sBTC signers
-      - "8801:8801" # So that Stacks event-observer can reach the sBTC signer
       - "9184:9184" # Prometheus metrics
+      - "127.0.0.1:8801:8801" # this export is only exposed to the Docker host for security reasons. NEVER expose it to the internet!
 
   blocklist-client:
     restart: on-failure
     container_name: blocklist-client
-    image: blockstack/sbtc:blocklist-client-0.0.9-rc4
-    entrypoint: "/usr/local/bin/blocklist-client"
+    # this version can be outdated, check the last image on: https://github.com/stacks-sbtc/sbtc/pkgs/container/sbtc
+    image: ghcr.io/stacks-sbtc/sbtc:blocklist-client-v1.0.2@sha256:713a19fc6ad6f3538da7849d8c731f65b1bc0d9258f59947b487087c0c94d4be
+    entrypoint: "/entrypoint.sh"
+    command: "/usr/local/bin/blocklist-client"
     environment:
       BLOCKLIST_CLIENT_RISK_ANALYSIS__API_KEY: *BLOCKLIST_CLIENT_RISK_ANALYSIS__API_KEY
       BLOCKLIST_CLIENT_RISK_ANALYSIS__API_URL: https://public.chainalysis.com
       BLOCKLIST_CLIENT_ASSESSMENT__ASSESSMENT_METHOD: sanctions
       BLOCKLIST_CLIENT_SERVER__HOST: "0.0.0.0"
       BLOCKLIST_CLIENT_SERVER__PORT: "3032"
+      TAG: *BLOCKLIST_TAG  
+      BUNDLE_PATH: blocklist_bundle.jsonl
+      TRUSTED_ROOT_PATH: trusted_root.jsonl
+    volumes:
+      - ${BLOCKLIST_BUNDLE_PATH}:blocklist_bundle.jsonl:ro
+      - ${TRUSTED_ROOT_PATH}:trusted_root.jsonl:ro
+      - ./entrypoint.sh:/entrypoint.sh
 
   vector:
     container_name: vector
-    image: timberio/vector:0.42.0-debian
+    image: timberio/vector:0.44.0-debian@sha256:e285e1543366ac306f3957c25d3aca4d2f86855ae274fa4de3522676d72fa0df
     volumes:
       - ./logs:/logs
       - ./vector/vector.yaml:/etc/vector/vector.yaml:ro

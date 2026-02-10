@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use utoipa::{ToResponse, ToSchema};
 
-use crate::api::models::common::{Fulfillment, Status};
+use crate::api::models::common::{Fulfillment, WithdrawalStatus};
 
 /// Requests.
 pub mod requests;
@@ -33,8 +33,10 @@ pub struct Withdrawal {
     pub stacks_block_hash: String,
     /// The height of the Stacks block in which this request id was initiated.
     pub stacks_block_height: u64,
-    /// The recipient Bitcoin address.
+    /// The recipient's hex-encoded Bitcoin scriptPubKey.
     pub recipient: String,
+    /// The sender's hex-encoded Stacks principal.
+    pub sender: String,
     /// Amount of BTC being withdrawn in satoshis.
     pub amount: u64,
     /// The most recent Stacks block height the API was aware of when the withdrawal was last
@@ -46,7 +48,7 @@ pub struct Withdrawal {
     /// then this hash is the Stacks block hash that contains that artifact.
     pub last_update_block_hash: String,
     /// The status of the withdrawal.
-    pub status: Status,
+    pub status: WithdrawalStatus,
     /// The status message of the withdrawal.
     pub status_message: String,
     /// Withdrawal request parameters.
@@ -54,6 +56,43 @@ pub struct Withdrawal {
     /// Details about the on chain artifacts that fulfilled the withdrawal.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fulfillment: Option<Fulfillment>,
+    /// Details about expected fulfillment information.
+    pub expected_fulfillment_info: ExpectedFulfillmentInfo,
+    /// The hex encoded txid of the stacks transaction that generated this event.
+    pub txid: String,
+}
+
+/// Expected information about future fulfillment of the withdrawal.
+/// This struct represents _estimate_ of how fulfillment for the
+/// withdrawal will look like. This estimation is for reference only,
+/// and does not provide any guarantees.
+#[derive(
+    Clone,
+    Default,
+    Debug,
+    Eq,
+    PartialEq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    ToResponse,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct ExpectedFulfillmentInfo {
+    /// The estimated bitcoin block height for the bitcoin block confirming
+    /// the transaction fulling the withdrawal request. This value is
+    /// estimated by Emily once when the withdrawal request is initially
+    /// received.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bitcoin_block_height: Option<u64>,
+    /// The expected txid of the sweep transaction fulfilling the withdrawal
+    /// request. This field is populated once, it is not updated if there is
+    /// an RBF transaction that also fulfills the request.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bitcoin_txid: Option<String>,
 }
 
 /// Withdrawal parameters.
@@ -101,8 +140,10 @@ pub struct WithdrawalInfo {
     pub stacks_block_hash: String,
     /// The height of the Stacks block in which this request id was initiated.
     pub stacks_block_height: u64,
-    /// The recipient Bitcoin address.
+    /// The recipient's hex-encoded Bitcoin scriptPubKey.
     pub recipient: String,
+    /// The sender's hex-encoded Stacks principal.
+    pub sender: String,
     /// Amount of BTC being withdrawn in satoshis.
     pub amount: u64,
     /// The most recent Stacks block height the API was aware of when the withdrawal was last
@@ -114,7 +155,9 @@ pub struct WithdrawalInfo {
     /// then this hash is the Stacks block hash that contains that artifact.
     pub last_update_block_hash: String,
     /// The status of the withdrawal.
-    pub status: Status,
+    pub status: WithdrawalStatus,
+    /// The hex encoded txid of the stacks transaction that generated this event.
+    pub txid: String,
 }
 
 /// Create a WithdrawalInfo, which has a subset of the data within a Withdrawal, from a Withdrawal.
@@ -125,10 +168,12 @@ impl From<Withdrawal> for WithdrawalInfo {
             stacks_block_hash: withdrawal.stacks_block_hash,
             stacks_block_height: withdrawal.stacks_block_height,
             recipient: withdrawal.recipient,
+            sender: withdrawal.sender,
             amount: withdrawal.amount,
             last_update_height: withdrawal.last_update_height,
             last_update_block_hash: withdrawal.last_update_block_hash,
             status: withdrawal.status,
+            txid: withdrawal.txid,
         }
     }
 }

@@ -8,14 +8,14 @@ use blockstack_lib::chainstate::stacks::StacksTransaction;
 use blockstack_lib::chainstate::stacks::TransactionAuthFlags;
 use blockstack_lib::chainstate::stacks::TransactionSpendingCondition;
 use secp256k1::ecdsa::RecoverableSignature;
-use serde::Deserialize;
+use serde::Deserialize as _;
 
 use crate::error::Error;
 use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
 
 /// A BIP 340-341 Schnorr proof.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TaprootSignature(bitcoin::taproot::Signature);
 
 impl Deref for TaprootSignature {
@@ -183,7 +183,7 @@ pub mod serde_utils {
 
 #[cfg(test)]
 mod tests {
-    use fake::Fake;
+    use fake::Fake as _;
     use rand::rngs::OsRng;
 
     use super::*;

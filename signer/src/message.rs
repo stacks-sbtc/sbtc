@@ -7,7 +7,9 @@ use crate::bitcoin::validation::TxRequestIds;
 use crate::keys::PublicKey;
 use crate::stacks::contracts::ContractCall;
 use crate::stacks::contracts::StacksTx;
+use crate::storage::model;
 use crate::storage::model::BitcoinBlockHash;
+use crate::storage::model::StacksBlockHash;
 use crate::storage::model::StacksTxId;
 
 /// Messages exchanged between signers
@@ -139,6 +141,17 @@ pub struct SignerDepositDecision {
     pub can_sign: bool,
 }
 
+impl From<model::DepositSigner> for SignerDepositDecision {
+    fn from(signer: model::DepositSigner) -> Self {
+        Self {
+            txid: signer.txid.into(),
+            output_index: signer.output_index,
+            can_accept: signer.can_accept,
+            can_sign: signer.can_sign,
+        }
+    }
+}
+
 /// Represents a decision related to signer withdrawal.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
@@ -154,12 +167,24 @@ pub struct SignerWithdrawalDecision {
     pub accepted: bool,
 }
 
+impl From<model::WithdrawalSigner> for SignerWithdrawalDecision {
+    fn from(signer: model::WithdrawalSigner) -> Self {
+        Self {
+            request_id: signer.request_id,
+            block_hash: signer.block_hash,
+            txid: signer.txid,
+            accepted: signer.is_accepted,
+        }
+    }
+}
+
 /// Represents a request to sign a Stacks transaction.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StacksTransactionSignRequest {
-    /// This is the bitcoin aggregate key that was output from DKG. It is used
-    /// to identify the signing set for the transaction.
-    pub aggregate_key: PublicKey,
+    /// **Deprecated**. This is the aggregate key that was output from DKG.
+    /// It was used to identify the signing set for the transaction, but is
+    /// unnecessary now.
+    pub aggregate_key: Option<PublicKey>,
     /// The contract call transaction to sign.
     pub contract_tx: StacksTx,
     /// The nonce to use for the transaction.
@@ -167,7 +192,7 @@ pub struct StacksTransactionSignRequest {
     /// The transaction fee in microSTX.
     pub tx_fee: u64,
     /// The transaction ID of the associated contract call transaction.
-    pub txid: blockstack_lib::burnchains::Txid,
+    pub txid: StacksTxId,
 }
 
 impl StacksTransactionSignRequest {
@@ -188,7 +213,7 @@ impl StacksTransactionSignRequest {
 #[derive(Debug, Clone, PartialEq)]
 pub struct StacksTransactionSignature {
     /// Id of the signed transaction.
-    pub txid: blockstack_lib::burnchains::Txid,
+    pub txid: StacksTxId,
     /// A recoverable ECDSA signature over the transaction.
     pub signature: RecoverableSignature,
 }
@@ -208,33 +233,101 @@ pub struct BitcoinPreSignRequest {
     pub last_fees: Option<Fees>,
 }
 
+impl std::fmt::Display for BitcoinPreSignRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "BitcoinPreSignRequest(request_package=[")?;
+        for (i, value) in self.request_package.iter().enumerate() {
+            if i > 0 {
+                write!(f, ",")?;
+            }
+            write!(f, "{value}")?;
+        }
+        write!(
+            f,
+            "], fee_rate={}, last_fees={:?})",
+            self.fee_rate, self.last_fees
+        )
+    }
+}
+
 /// An acknowledgment of a [`BitcoinPreSignRequest`].
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BitcoinPreSignAck;
 
+/// The identifier for a WSTS message.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum WstsMessageId {
+    /// The WSTS message is related to a Bitcoin transaction signing round.
+    Sweep(bitcoin::Txid),
+    /// The WSTS message is related to a rotate key verification operation.
+    DkgVerification(PublicKey),
+    /// The WSTS message is related to a DKG round.
+    Dkg([u8; 32]),
+}
+
+impl From<bitcoin::Txid> for WstsMessageId {
+    fn from(txid: bitcoin::Txid) -> Self {
+        Self::Sweep(txid)
+    }
+}
+
+impl From<crate::storage::model::BitcoinTxId> for WstsMessageId {
+    fn from(txid: crate::storage::model::BitcoinTxId) -> Self {
+        Self::Sweep(txid.into())
+    }
+}
+
+impl std::fmt::Display for WstsMessageId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WstsMessageId::Sweep(txid) => write!(f, "sweep({txid})"),
+            WstsMessageId::DkgVerification(aggregate_key) => {
+                write!(f, "dkg-verification({aggregate_key})")
+            }
+            WstsMessageId::Dkg(id) => {
+                write!(f, "dkg({})", hex::encode(id))
+            }
+        }
+    }
+}
+
 /// A wsts message.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WstsMessage {
-    /// The transaction ID this message relates to,
-    /// will be a dummy ID for DKG messages
-    pub txid: bitcoin::Txid,
+    /// The id of the wsts message.
+    pub id: WstsMessageId,
     /// The wsts message
     pub inner: wsts::net::Message,
 }
 
-/// Convenient type aliases
-type StacksBlockHash = [u8; 32];
+impl WstsMessage {
+    /// Returns the type of the message as a &str.
+    pub fn type_id(&self) -> &'static str {
+        match self.inner {
+            wsts::net::Message::DkgBegin(_) => "dkg-begin",
+            wsts::net::Message::DkgEndBegin(_) => "dkg-end-begin",
+            wsts::net::Message::DkgEnd(_) => "dkg-end",
+            wsts::net::Message::DkgPrivateBegin(_) => "dkg-private-begin",
+            wsts::net::Message::DkgPrivateShares(_) => "dkg-private-shares",
+            wsts::net::Message::DkgPublicShares(_) => "dkg-public-shares",
+            wsts::net::Message::NonceRequest(_) => "nonce-request",
+            wsts::net::Message::NonceResponse(_) => "nonce-response",
+            wsts::net::Message::SignatureShareRequest(_) => "signature-share-request",
+            wsts::net::Message::SignatureShareResponse(_) => "signature-share-response",
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use std::marker::PhantomData;
 
     use super::*;
-    use crate::codec::{Decode, Encode};
-    use crate::ecdsa::{SignEcdsa, Signed};
+    use crate::codec::{Decode as _, Encode as _};
+    use crate::ecdsa::{SignEcdsa as _, Signed};
     use crate::keys::PrivateKey;
 
-    use rand::SeedableRng;
+    use rand::SeedableRng as _;
     use test_case::test_case;
 
     #[test_case(PhantomData::<SignerDepositDecision> ; "SignerDepositDecision")]

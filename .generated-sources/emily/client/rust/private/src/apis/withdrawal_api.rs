@@ -46,11 +46,23 @@ pub enum GetWithdrawalsError {
     UnknownValue(serde_json::Value),
 }
 
-/// struct for typed errors of method [`update_withdrawals`]
+/// struct for typed errors of method [`get_withdrawals_for_recipient`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum UpdateWithdrawalsError {
+pub enum GetWithdrawalsForRecipientError {
     Status400(models::ErrorResponse),
+    Status404(models::ErrorResponse),
+    Status405(models::ErrorResponse),
+    Status500(models::ErrorResponse),
+    UnknownValue(serde_json::Value),
+}
+
+/// struct for typed errors of method [`update_withdrawals_sidecar`]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum UpdateWithdrawalsSidecarError {
+    Status400(models::ErrorResponse),
+    Status403(models::ErrorResponse),
     Status404(models::ErrorResponse),
     Status405(models::ErrorResponse),
     Status500(models::ErrorResponse),
@@ -146,9 +158,9 @@ pub async fn get_withdrawal(
 
 pub async fn get_withdrawals(
     configuration: &configuration::Configuration,
-    status: models::Status,
+    status: models::WithdrawalStatus,
     next_token: Option<&str>,
-    page_size: Option<i32>,
+    page_size: Option<u32>,
 ) -> Result<models::GetWithdrawalsResponse, Error<GetWithdrawalsError>> {
     let local_var_configuration = configuration;
 
@@ -192,15 +204,66 @@ pub async fn get_withdrawals(
     }
 }
 
-pub async fn update_withdrawals(
+pub async fn get_withdrawals_for_recipient(
     configuration: &configuration::Configuration,
-    update_withdrawals_request_body: models::UpdateWithdrawalsRequestBody,
-) -> Result<models::UpdateWithdrawalsResponse, Error<UpdateWithdrawalsError>> {
+    recipient: &str,
+    next_token: Option<&str>,
+    page_size: Option<u32>,
+) -> Result<models::GetWithdrawalsResponse, Error<GetWithdrawalsForRecipientError>> {
     let local_var_configuration = configuration;
 
     let local_var_client = &local_var_configuration.client;
 
-    let local_var_uri_str = format!("{}/withdrawal", local_var_configuration.base_path);
+    let local_var_uri_str = format!(
+        "{}/withdrawal/recipient/{recipient}",
+        local_var_configuration.base_path,
+        recipient = crate::apis::urlencode(recipient)
+    );
+    let mut local_var_req_builder =
+        local_var_client.request(reqwest::Method::GET, local_var_uri_str.as_str());
+
+    if let Some(ref local_var_str) = next_token {
+        local_var_req_builder =
+            local_var_req_builder.query(&[("nextToken", &local_var_str.to_string())]);
+    }
+    if let Some(ref local_var_str) = page_size {
+        local_var_req_builder =
+            local_var_req_builder.query(&[("pageSize", &local_var_str.to_string())]);
+    }
+    if let Some(ref local_var_user_agent) = local_var_configuration.user_agent {
+        local_var_req_builder =
+            local_var_req_builder.header(reqwest::header::USER_AGENT, local_var_user_agent.clone());
+    }
+
+    let local_var_req = local_var_req_builder.build()?;
+    let local_var_resp = local_var_client.execute(local_var_req).await?;
+
+    let local_var_status = local_var_resp.status();
+    let local_var_content = local_var_resp.text().await?;
+
+    if !local_var_status.is_client_error() && !local_var_status.is_server_error() {
+        serde_json::from_str(&local_var_content).map_err(Error::from)
+    } else {
+        let local_var_entity: Option<GetWithdrawalsForRecipientError> =
+            serde_json::from_str(&local_var_content).ok();
+        let local_var_error = ResponseContent {
+            status: local_var_status,
+            content: local_var_content,
+            entity: local_var_entity,
+        };
+        Err(Error::ResponseError(local_var_error))
+    }
+}
+
+pub async fn update_withdrawals_sidecar(
+    configuration: &configuration::Configuration,
+    update_withdrawals_request_body: models::UpdateWithdrawalsRequestBody,
+) -> Result<models::UpdateWithdrawalsResponse, Error<UpdateWithdrawalsSidecarError>> {
+    let local_var_configuration = configuration;
+
+    let local_var_client = &local_var_configuration.client;
+
+    let local_var_uri_str = format!("{}/withdrawal_private", local_var_configuration.base_path);
     let mut local_var_req_builder =
         local_var_client.request(reqwest::Method::PUT, local_var_uri_str.as_str());
 
@@ -227,7 +290,7 @@ pub async fn update_withdrawals(
     if !local_var_status.is_client_error() && !local_var_status.is_server_error() {
         serde_json::from_str(&local_var_content).map_err(Error::from)
     } else {
-        let local_var_entity: Option<UpdateWithdrawalsError> =
+        let local_var_entity: Option<UpdateWithdrawalsSidecarError> =
             serde_json::from_str(&local_var_content).ok();
         let local_var_error = ResponseContent {
             status: local_var_status,

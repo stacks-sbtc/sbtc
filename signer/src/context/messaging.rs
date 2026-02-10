@@ -1,6 +1,8 @@
 //! This module contains types related to the application's internal
 //! messaging via the [`Context`].
 
+use crate::storage::model::BitcoinBlockRef;
+
 /// Signals that can be sent within the signer binary.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SignerSignal {
@@ -15,7 +17,7 @@ impl SignerSignal {
     /// task and None otherwise.
     pub fn tx_signer_generated(self) -> Option<crate::network::Msg> {
         match self {
-            Self::Event(SignerEvent::TxSigner(TxSignerEvent::MessageGenerated(msg))) => Some(msg),
+            Self::Event(SignerEvent::TxSigner(TxSignerEvent::MessageGenerated(msg))) => Some(*msg),
             _ => None,
         }
     }
@@ -25,7 +27,7 @@ impl SignerSignal {
 #[derive(Debug, Clone, PartialEq)]
 pub enum SignerCommand {
     /// Signals to the application to publish a message to the P2P network.
-    P2PPublish(crate::network::Msg),
+    P2PPublish(Box<crate::network::Msg>),
     /// Signal to shut down the application
     Shutdown,
 }
@@ -36,7 +38,7 @@ pub enum SignerEvent {
     /// Signals that a P2P event has occurred.
     P2P(P2PEvent),
     /// Signals that a block observer event has occurred.
-    BitcoinBlockObserved,
+    BitcoinBlockObserved(BitcoinBlockRef),
     /// A Request decider event has occurred.
     RequestDecider(RequestDeciderEvent),
     /// Transaction signer events
@@ -54,9 +56,11 @@ pub enum P2PEvent {
     /// was successful.
     PublishSuccess(crate::network::MsgId),
     /// Signals to the application that a message was received from the P2P network.
-    MessageReceived(crate::network::Msg),
+    MessageReceived(Box<crate::network::Msg>),
     /// Signals to the application that a new peer has connected to the P2P network.
     PeerConnected(libp2p::PeerId),
+    /// Event which occurs when the P2P network has started its event loop.
+    EventLoopStarted,
 }
 
 /// Events that can be triggered from the request decider.
@@ -72,7 +76,7 @@ pub enum RequestDeciderEvent {
     PendingDepositRequestRegistered,
     /// New pending requests have been handled. This is primarily used as a
     /// trigger for the transaction coordinator to process the new blocks.
-    NewRequestsHandled,
+    NewRequestsHandled(BitcoinBlockRef),
     /// Event which occurs when the transaction signer has started its event
     /// loop.
     EventLoopStarted,
@@ -83,7 +87,7 @@ pub enum RequestDeciderEvent {
 pub enum TxSignerEvent {
     /// Event which occurs when the transaction signer has sent a message to
     /// the P2P network.
-    MessageGenerated(crate::network::Msg),
+    MessageGenerated(Box<crate::network::Msg>),
     /// Event which occurs when the transaction signer has started its event
     /// loop.
     EventLoopStarted,
@@ -94,7 +98,7 @@ pub enum TxSignerEvent {
 pub enum TxCoordinatorEvent {
     /// Event which occurs when the transaction coordinator has sent a message
     /// to the P2P network.
-    MessageGenerated(crate::network::Msg),
+    MessageGenerated(Box<crate::network::Msg>),
     /// The coordinator is finished processing requests for the bitcoin
     /// block.
     TenureCompleted,

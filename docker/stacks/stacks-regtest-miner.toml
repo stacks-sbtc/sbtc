@@ -60,6 +60,7 @@ auth_token = "12345"
 [[events_observer]]
 endpoint = "stacks-api:3700"
 events_keys = ["*"]
+timeout_ms = 10_000
 
 # Add emily-sidecar as an event observer
 [[events_observer]]
@@ -67,6 +68,7 @@ endpoint = "host.docker.internal:20540"
 events_keys = [
     "SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS.sbtc-registry::print",
 ]
+timeout_ms = 10_000
 
 # Add sbtc-signer as an event observers
 [[events_observer]]
@@ -74,31 +76,37 @@ endpoint = "host.docker.internal:8801"
 events_keys = [
     "SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS.sbtc-registry::print",
 ]
+timeout_ms = 10_000
 
 [[events_observer]]
 endpoint = "host.docker.internal:8802"
 events_keys = [
     "SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS.sbtc-registry::print",
 ]
+timeout_ms = 10_000
 
 [[events_observer]]
 endpoint = "host.docker.internal:8803"
 events_keys = [
     "SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS.sbtc-registry::print",
 ]
+timeout_ms = 10_000
 
 # Add stacks-signer as an event observer
 [[events_observer]]
 endpoint = "stacks-signer-1:30000"
 events_keys = ["stackerdb", "block_proposal", "burn_blocks"]
+timeout_ms = 10_000
 
 [[events_observer]]
 endpoint = "stacks-signer-2:30000"
 events_keys = ["stackerdb", "block_proposal", "burn_blocks"]
+timeout_ms = 10_000
 
 [[events_observer]]
 endpoint = "stacks-signer-3:30000"
 events_keys = ["stackerdb", "block_proposal", "burn_blocks"]
+timeout_ms = 10_000
 
 [burnchain]
 chain = "bitcoin"
@@ -159,6 +167,14 @@ start_height = $STACKS_30_HEIGHT
 epoch_name = "3.1"
 start_height = $STACKS_31_HEIGHT
 
+[[burnchain.epochs]]
+epoch_name = "3.2"
+start_height = $STACKS_32_HEIGHT
+
+[[burnchain.epochs]]
+epoch_name = "3.3"
+start_height = $STACKS_33_HEIGHT
+
 [[ustx_balance]]
 address = "ST2SBXRBJJTH7GV5J93HJ62W2NRRQ46XYBK92Y039" # sBTC deployer
 amount = 10000000000000000
@@ -194,4 +210,8 @@ amount = 10000000000000000
 # `docker/sbtc/signer/README.md` file, and the resulting multi-sig address
 # below was created using the SignerWallet struct.
 address = "SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS"
+amount = 10000000000000000
+
+[[ustx_balance]]
+address = "ST3497E9JFQ7KB9VEHAZRWYKF3296WQZEXBPXG193" # Demo principal
 amount = 10000000000000000

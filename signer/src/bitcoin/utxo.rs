@@ -1,18 +1,8 @@
 //! Utxo management and transaction construction
 
 use std::collections::HashSet;
-use std::ops::Deref as _;
 use std::sync::LazyLock;
 
-use bitcoin::absolute::LockTime;
-use bitcoin::hashes::Hash as _;
-use bitcoin::sighash::Prevouts;
-use bitcoin::sighash::SighashCache;
-use bitcoin::taproot::LeafVersion;
-use bitcoin::taproot::NodeInfo;
-use bitcoin::taproot::Signature;
-use bitcoin::taproot::TaprootSpendInfo;
-use bitcoin::transaction::Version;
 use bitcoin::Amount;
 use bitcoin::OutPoint;
 use bitcoin::ScriptBuf;
@@ -26,33 +16,51 @@ use bitcoin::TxOut;
 use bitcoin::Txid;
 use bitcoin::Weight;
 use bitcoin::Witness;
+use bitcoin::absolute::LockTime;
+use bitcoin::consensus::Encodable as _;
+use bitcoin::opcodes::all::OP_RETURN;
+use bitcoin::script::Instruction;
+use bitcoin::script::PushBytesBuf;
+use bitcoin::sighash::Prevouts;
+use bitcoin::sighash::SighashCache;
+use bitcoin::taproot::LeafVersion;
+use bitcoin::taproot::NodeInfo;
+use bitcoin::taproot::Signature;
+use bitcoin::taproot::TaprootSpendInfo;
+use bitcoin::transaction::Version;
 use bitvec::array::BitArray;
-use bitvec::field::BitField;
-use secp256k1::XOnlyPublicKey;
+use bitvec::field::BitField as _;
+use sbtc::idpack::BitmapSegmenter;
+use sbtc::idpack::Decodable as _;
+use sbtc::idpack::Encodable as _;
+use sbtc::idpack::Segmenter as _;
+use sbtc::idpack::Segments;
 use secp256k1::SECP256K1;
+use secp256k1::XOnlyPublicKey;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::bitcoin::packaging::compute_optimal_packages;
+use crate::DEPOSIT_DUST_LIMIT;
+use crate::MAX_MEMPOOL_PACKAGE_TX_COUNT;
 use crate::bitcoin::packaging::Weighted;
+use crate::bitcoin::packaging::compute_optimal_packages;
 use crate::bitcoin::rpc::BitcoinTxInfo;
 use crate::context::SbtcLimits;
 use crate::error::Error;
 use crate::keys::SignerScriptPubKey as _;
 use crate::storage::model;
-use crate::storage::model::BitcoinTx;
 use crate::storage::model::BitcoinTxId;
 use crate::storage::model::QualifiedRequestId;
 use crate::storage::model::ScriptPubKey;
 use crate::storage::model::SignerVotes;
 use crate::storage::model::StacksBlockHash;
 use crate::storage::model::StacksTxId;
+use crate::storage::model::TaprootScriptHash;
 use crate::storage::model::TxOutput;
 use crate::storage::model::TxOutputType;
 use crate::storage::model::TxPrevout;
 use crate::storage::model::TxPrevoutType;
-use crate::DEPOSIT_DUST_LIMIT;
-use crate::MAX_MEMPOOL_PACKAGE_TX_COUNT;
+use crate::storage::model::WithdrawalTxOutput;
 
 /// The minimum incremental fee rate in sats per virtual byte for RBF
 /// transactions.
@@ -64,7 +72,7 @@ const DEFAULT_INCREMENTAL_RELAY_FEE_RATE: f64 =
 /// of the signers' input UTXO and a UTXO for a deposit request. The output
 /// is the signers' new UTXO. The deposit request is such that the sweep
 /// transaction has the largest size of solo deposit sweep transactions.
-const SOLO_DEPOSIT_TX_VSIZE: f64 = 267.0;
+const SOLO_DEPOSIT_TX_VSIZE: f64 = 249.0;
 
 /// This constant represents the virtual size (in vBytes) of a BTC
 /// transaction servicing only one withdrawal request, except the
@@ -75,7 +83,7 @@ const BASE_WITHDRAWAL_TX_VSIZE: f64 = MAX_BASE_TX_VSIZE as f64;
 
 /// This constant represents the maximum virtual size (in vBytes) of a BTC
 /// transaction excluding withdrawals outputs and deposit inputs.
-pub const MAX_BASE_TX_VSIZE: u64 = 164;
+pub const MAX_BASE_TX_VSIZE: u64 = 137;
 
 /// It appears that bitcoin-core tracks fee rates in sats per kilo-vbyte
 /// (or BTC per kilo-vbyte). Since we work in sats per vbyte, this constant
@@ -85,7 +93,16 @@ const SATS_PER_VBYTE_INCREMENT: f64 = 0.001;
 
 /// The OP_RETURN version byte for deposit or withdrawal sweep
 /// transactions.
-const OP_RETURN_VERSION: u8 = 0;
+const OP_RETURN_VERSION: u8 = 1;
+
+/// The OP_RETURN header size (magic bytes + version)
+const OP_RETURN_HEADER_SIZE: usize = 3;
+
+/// The maximum total size of an OP_RETURN output
+const OP_RETURN_MAX_SIZE: usize = 80;
+
+/// The available size for encoded withdrawal IDs in OP_RETURN
+pub(super) const OP_RETURN_AVAILABLE_SIZE: usize = OP_RETURN_MAX_SIZE - OP_RETURN_HEADER_SIZE;
 
 /// A dummy Schnorr signature.
 static DUMMY_SIGNATURE: LazyLock<Signature> = LazyLock::new(|| Signature {
@@ -114,31 +131,44 @@ pub trait GetFees {
     fn get_fees(&self) -> Result<Option<Fees>, Error>;
 }
 
-/// Filter out the deposit requests that do not meet the amount or fee requirements.
-pub struct SbtcRequestsFilter<'a> {
+/// Filter out the deposit and withdrawal requests that do not meet the
+/// amount or fee requirements.
+pub struct RequestPreprocessor<'a> {
+    /// The current sBTC limits on deposits and withdrawals.
     sbtc_limits: &'a SbtcLimits,
-    minimum_fee: u64,
+    /// The current market fee rate in sat/vByte.
+    fee_rate: f64,
+    /// The total fee amount and the fee rate for the last transaction that
+    /// used this UTXO as an input.
+    last_fees: Option<Fees>,
 }
 
-impl<'a> SbtcRequestsFilter<'a> {
+impl<'a> RequestPreprocessor<'a> {
     /// Create a new [`DepositFilter`] instance.
-    pub fn new(sbtc_limits: &'a SbtcLimits, minimum_fee: u64) -> Self {
-        Self { sbtc_limits, minimum_fee }
+    pub fn new(sbtc_limits: &'a SbtcLimits, fee_rate: f64, last_fees: Option<Fees>) -> Self {
+        Self {
+            sbtc_limits,
+            fee_rate,
+            last_fees,
+        }
     }
 
     /// Validate deposit requests based on four constraints:
     /// 1. The user's max fee must be >= our minimum required fee for deposits
-    ///     (based on fixed deposit tx size)
+    ///    (based on fixed deposit tx size)
     /// 2. The deposit amount must be greater than or equal to the per-deposit minimum
     /// 3. The deposit amount must be less than or equal to the per-deposit cap
-    /// 4. The total amount being minted must stay under the maximum allowed mintable amount
+    /// 4. The total amount being minted must stay under the peg cap
     fn validate_deposit_amount(
         &self,
         amount_to_mint: &mut Amount,
         req: &'a DepositRequest,
     ) -> Option<RequestRef<'a>> {
-        let is_fee_valid = req.max_fee.min(req.amount) >= self.minimum_fee;
-        let is_above_dust = req.amount.saturating_sub(self.minimum_fee) >= DEPOSIT_DUST_LIMIT;
+        let minimum_fee =
+            compute_transaction_fee(SOLO_DEPOSIT_TX_VSIZE, self.fee_rate, self.last_fees);
+
+        let is_fee_valid = req.max_fee.min(req.amount) >= minimum_fee;
+        let is_above_dust = req.amount.saturating_sub(minimum_fee) >= DEPOSIT_DUST_LIMIT;
         let req_amount = Amount::from_sat(req.amount);
         let is_above_per_deposit_minimum = req_amount >= self.sbtc_limits.per_deposit_minimum();
         let is_within_per_deposit_cap = req_amount <= self.sbtc_limits.per_deposit_cap();
@@ -162,12 +192,72 @@ impl<'a> SbtcRequestsFilter<'a> {
         }
     }
 
+    /// Validate withdrawal requests based on three constraints:
+    /// 1. The user's max fee must be >= our minimum required fee for
+    ///    withdrawals (based on the max transaction size for the allowed
+    ///    scriptPubKeys).
+    /// 2. The withdrawal amount must be less than or equal to the
+    ///    per-withdrawal cap.
+    /// 3. The total amount being withdrawn must stay under the rolling
+    ///    withdrawal limits.
+    fn validate_withdrawal_amounts(
+        &self,
+        withdrawal_amounts: &mut u64,
+        req: &'a WithdrawalRequest,
+    ) -> Option<RequestRef<'a>> {
+        let rolling_limits = self.sbtc_limits.rolling_withdrawal_limits();
+
+        let new_cumulative_total = withdrawal_amounts.saturating_add(req.amount);
+        let is_within_rolling_limits = new_cumulative_total <= rolling_limits.cap;
+
+        let is_within_cap = req.amount <= self.sbtc_limits.per_withdrawal_cap().to_sat();
+
+        // This shouldn't be necessary since the smart contract checks
+        // that the amount is above the max dust limit for standard
+        // outputs. But the smart contract can change and have a mistake,
+        // so we check here as well.
+        let is_above_minimum = req.script_pubkey.minimal_non_dust().to_sat() <= req.amount;
+
+        let tx_vsize = BASE_WITHDRAWAL_TX_VSIZE + req.vsize() as f64;
+        let is_fee_valid =
+            req.max_fee >= compute_transaction_fee(tx_vsize, self.fee_rate, self.last_fees);
+
+        if is_within_rolling_limits && is_fee_valid && is_within_cap && is_above_minimum {
+            *withdrawal_amounts = new_cumulative_total;
+            Some(RequestRef::Withdrawal(req))
+        } else {
+            None
+        }
+    }
+
     /// Filter sbtc deposits that don't meet the validation criteria.
     pub fn filter_deposits(&self, deposits: &'a [DepositRequest]) -> Vec<RequestRef<'a>> {
         deposits
             .iter()
             .scan(Amount::from_sat(0), |amount_to_mint, deposit| {
                 Some(self.validate_deposit_amount(amount_to_mint, deposit))
+            })
+            .flatten()
+            .collect()
+    }
+
+    /// Filter withdrawal requests that do not meet the amount validation
+    /// criteria.
+    ///
+    /// The returns vector of withdrawal requests that is sorted by request
+    /// ID.
+    pub fn preprocess_withdrawals(&self, requests: &'a [WithdrawalRequest]) -> Vec<RequestRef<'a>> {
+        let withdrawn_total = self.sbtc_limits.rolling_withdrawal_limits().withdrawn_total;
+
+        // Let's ensure that the withdrawal requests are sorted by their
+        // request ID.
+        let mut reqs: Vec<_> = requests.iter().map(RequestRef::Withdrawal).collect();
+        reqs.sort();
+
+        reqs.iter()
+            .filter_map(RequestRef::as_withdrawal)
+            .scan(withdrawn_total, |withdrawal_amounts, req| {
+                Some(self.validate_withdrawal_amounts(withdrawal_amounts, req))
             })
             .flatten()
             .collect()
@@ -223,31 +313,19 @@ impl SbtcRequests {
     ///
     /// This function can fail if the output amounts are greater than the
     /// input amounts.
-    pub fn construct_transactions(&self) -> Result<Vec<UnsignedTransaction>, Error> {
+    pub fn construct_transactions(&self) -> Result<Vec<UnsignedTransaction<'_>>, Error> {
         if self.deposits.is_empty() && self.withdrawals.is_empty() {
             tracing::info!("No deposits or withdrawals so no BTC transaction");
             return Ok(Vec::new());
         }
 
-        // Now we filter withdrawal requests where the user's max fee
-        // could be less than fee we may charge.
-        let withdrawals = self
-            .withdrawals
-            .iter()
-            .filter(|req| {
-                // This is the size for a BTC transaction servicing
-                // a single withdrawal.
-                let withdrawal_output = req.as_tx_output();
-                let tx_vsize = BASE_WITHDRAWAL_TX_VSIZE + withdrawal_output.size() as f64;
-                req.max_fee >= self.compute_minimum_fee(tx_vsize)
-            })
-            .map(RequestRef::Withdrawal);
-
-        let request_filter = SbtcRequestsFilter::new(
-            &self.sbtc_limits,
-            self.compute_minimum_fee(SOLO_DEPOSIT_TX_VSIZE),
-        );
-        let deposits = request_filter.filter_deposits(&self.deposits);
+        let request_preprocessor = RequestPreprocessor {
+            sbtc_limits: &self.sbtc_limits,
+            fee_rate: self.signer_state.fee_rate,
+            last_fees: self.signer_state.last_fees,
+        };
+        let deposits = request_preprocessor.filter_deposits(&self.deposits);
+        let withdrawals = request_preprocessor.preprocess_withdrawals(&self.withdrawals);
 
         // Create a list of requests where each request can be approved on its own.
         let items = deposits.into_iter().chain(withdrawals);
@@ -277,15 +355,6 @@ impl SbtcRequests {
 
     fn reject_capacity(&self) -> u32 {
         self.num_signers.saturating_sub(self.accept_threshold) as u32
-    }
-
-    /// Calculates the minimum fee threshold for servicing a user's
-    /// request based on the maximum transaction vsize the user is
-    /// required to pay for.
-    fn compute_minimum_fee(&self, tx_vsize: f64) -> u64 {
-        let fee_rate = self.signer_state.fee_rate;
-        let last_fees = self.signer_state.last_fees;
-        compute_transaction_fee(tx_vsize, fee_rate, last_fees)
     }
 }
 
@@ -349,8 +418,8 @@ pub struct DepositRequest {
     pub amount: u64,
     /// The deposit script used so that the signers' can spend funds.
     pub deposit_script: ScriptBuf,
-    /// The reclaim script for the deposit.
-    pub reclaim_script: ScriptBuf,
+    /// The hash of the reclaim script for the deposit.
+    pub reclaim_script_hash: TaprootScriptHash,
     /// The public key used in the deposit script.
     ///
     /// Note that taproot public keys for Schnorr signatures are slightly
@@ -428,7 +497,7 @@ impl DepositRequest {
     fn construct_taproot_info(&self, ver: LeafVersion) -> TaprootSpendInfo {
         // For such a simple tree, we construct it by hand.
         let leaf1 = NodeInfo::new_leaf_with_ver(self.deposit_script.clone(), ver);
-        let leaf2 = NodeInfo::new_leaf_with_ver(self.reclaim_script.clone(), ver);
+        let leaf2 = NodeInfo::new_hidden_node(*self.reclaim_script_hash.clone());
 
         // A Result::Err is returned by NodeInfo::combine if the depth of
         // our taproot tree exceeds the maximum depth of taproot trees,
@@ -449,7 +518,7 @@ impl DepositRequest {
             signer_bitmap: votes.into(),
             amount: request.amount,
             deposit_script: ScriptBuf::from_bytes(request.spend_script),
-            reclaim_script: ScriptBuf::from_bytes(request.reclaim_script),
+            reclaim_script_hash: request.reclaim_script_hash,
             signers_public_key: request.signers_public_key.into(),
         }
     }
@@ -469,7 +538,7 @@ impl Weighted for DepositRequest {
     }
 }
 
-/// An accepted or pending withdraw request.
+/// An accepted or pending withdrawal request.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct WithdrawalRequest {
     /// The request id generated by the smart contract when the
@@ -500,33 +569,6 @@ impl WithdrawalRequest {
             value: Amount::from_sat(self.amount),
             script_pubkey: self.script_pubkey.clone().into(),
         }
-    }
-
-    /// Return a byte array with enough data to uniquely identify this
-    /// withdrawal request on the Stacks blockchain.
-    ///
-    /// The data returned from this function is a concatenation of the
-    /// stacks block ID, the stacks transaction ID, and the request-id
-    /// associated with this withdrawal request. Thus, the layout of the
-    /// data is as follows:
-    ///
-    /// ```text
-    /// 0                 32                             64           72
-    /// |-----------------|------------------------------|------------|
-    ///   Stacks block ID   Txid of Stacks withdrawal tx   request-id
-    /// ```
-    ///
-    /// where the request-id is encoded as an 8 byte big endian unsigned
-    /// integer. We need all three because a transaction can be included in
-    /// more than one stacks block (because of reorgs), and a transaction
-    /// can generate more than one withdrawal request.
-    fn sbtc_data(&self) -> [u8; 72] {
-        let mut data = [0u8; 72];
-        data[..32].copy_from_slice(&self.block_hash.into_bytes());
-        data[32..64].copy_from_slice(&self.txid.into_bytes());
-        data[64..72].copy_from_slice(&self.request_id.to_be_bytes());
-
-        data
     }
 
     /// Try convert from a model::DepositRequest with some additional info.
@@ -561,6 +603,9 @@ impl Weighted for WithdrawalRequest {
     }
     fn vsize(&self) -> u64 {
         self.as_tx_output().weight().to_vbytes_ceil()
+    }
+    fn withdrawal_id(&self) -> Option<u64> {
+        Some(self.request_id)
     }
 }
 
@@ -599,7 +644,7 @@ impl<'a> RequestRef<'a> {
     }
 }
 
-impl<'a> Weighted for RequestRef<'a> {
+impl Weighted for RequestRef<'_> {
     fn needs_signature(&self) -> bool {
         match self {
             Self::Deposit(req) => req.needs_signature(),
@@ -617,6 +662,9 @@ impl<'a> Weighted for RequestRef<'a> {
             Self::Deposit(req) => req.vsize(),
             Self::Withdrawal(req) => req.vsize(),
         }
+    }
+    fn withdrawal_id(&self) -> Option<u64> {
+        self.as_withdrawal().map(|req| req.request_id)
     }
 }
 
@@ -712,6 +760,21 @@ impl SignerUtxo {
     }
 }
 
+/// A struct for constructing a mock transaction that can be signed. This is
+/// used as part of the verification process after a new DKG round has been
+/// completed.
+///
+/// The Bitcoin transaction has the following layout:
+/// 1. The first input is spending the signers' UTXO.
+/// 2. There is only one output which is an OP_RETURN and an amount equal to 0.
+#[derive(Debug)]
+pub struct UnsignedMockTransaction {
+    /// The Bitcoin transaction that needs to be signed.
+    tx: Transaction,
+    /// The signers' UTXO used as an input to this transaction.
+    utxo: SignerUtxo,
+}
+
 /// Given a set of requests, create a BTC transaction that can be signed.
 ///
 /// This BTC transaction in this struct has correct amounts but no witness
@@ -774,7 +837,7 @@ pub struct SignatureHash {
     pub aggregate_key: XOnlyPublicKey,
 }
 
-impl<'a> SignatureHashes<'a> {
+impl SignatureHashes<'_> {
     /// Get deposit sighashes
     pub fn deposit_sighashes(mut self) -> Vec<SignatureHash> {
         self.deposits.sort_by_key(|(x, _)| x.outpoint);
@@ -799,6 +862,94 @@ impl<'a> SignatureHashes<'a> {
             prevout_type: TxPrevoutType::SignersInput,
             aggregate_key: self.signers_aggregate_key,
         }
+    }
+}
+
+impl UnsignedMockTransaction {
+    const AMOUNT: u64 = 0;
+
+    /// Construct an unsigned mock transaction.
+    ///
+    /// This will use the provided `aggregate_key` to construct
+    /// a [`Transaction`] with a single input and output with value 0.
+    pub fn new(signer_public_key: XOnlyPublicKey) -> Self {
+        let utxo = SignerUtxo {
+            outpoint: OutPoint::null(),
+            amount: Self::AMOUNT,
+            public_key: signer_public_key,
+        };
+
+        let tx = Transaction {
+            version: Version::TWO,
+            lock_time: LockTime::ZERO,
+            input: vec![utxo.as_tx_input(&DUMMY_SIGNATURE)],
+            output: vec![TxOut {
+                value: Amount::from_sat(Self::AMOUNT),
+                script_pubkey: ScriptBuf::new_op_return([]),
+            }],
+        };
+
+        Self { tx, utxo }
+    }
+
+    /// Gets the sighash for the signers' input UTXO which needs to be signed
+    /// before the transaction can be broadcast.
+    pub fn compute_sighash(&self) -> Result<TapSighash, Error> {
+        let prevouts = [self.utxo.as_tx_output()];
+        let mut sighasher = SighashCache::new(&self.tx);
+
+        sighasher
+            .taproot_key_spend_signature_hash(0, &Prevouts::All(&prevouts), TapSighashType::All)
+            .map_err(Into::into)
+    }
+
+    /// Tests if the provided taproot [`Signature`] is valid for spending the
+    /// signers' UTXO. This function will return  [`Error::BitcoinConsensus`]
+    /// error if the signature fails verification, passing the underlying error
+    /// from [`bitcoinconsensus`].
+    pub fn verify_signature(&self, signature: &Signature) -> Result<(), Error> {
+        // Create a copy of the transaction so that we don't modify the
+        // transaction stored in the struct.
+        let mut tx = self.tx.clone();
+
+        // Set the witness data on the input from the provided signature.
+        tx.input[0].witness = Witness::p2tr_key_spend(signature);
+
+        // Encode the transaction to bytes (needed by the bitcoinconsensus
+        // library).
+        let mut tx_bytes: Vec<u8> = Vec::new();
+        tx.consensus_encode(&mut tx_bytes)
+            .map_err(Error::BitcoinIo)?;
+
+        // Get the prevout for the signers' UTXO.
+        let prevout = self.utxo.as_tx_output();
+        let prevout_script_bytes = prevout.script_pubkey.as_script().as_bytes();
+
+        // Create the bitcoinconsensus UTXO object.
+        let prevout_utxo = bitcoinconsensus::Utxo {
+            script_pubkey: prevout_script_bytes.as_ptr(),
+            script_pubkey_len: prevout_script_bytes.len() as u32,
+            value: Self::AMOUNT as i64,
+        };
+
+        // We specify the flags to include all pre-taproot and taproot
+        // verifications explicitly.
+        // https://github.com/rust-bitcoin/rust-bitcoinconsensus/blob/master/src/lib.rs
+        let flags = bitcoinconsensus::VERIFY_ALL_PRE_TAPROOT | bitcoinconsensus::VERIFY_TAPROOT;
+
+        // Verify that the transaction updated with the provided signature can
+        // successfully spend the signers' UTXO. Note that the amount is not
+        // used in the verification process for taproot spends, only the
+        // signature.
+        bitcoinconsensus::verify_with_flags(
+            prevout_script_bytes,
+            Self::AMOUNT,
+            &tx_bytes,
+            Some(&[prevout_utxo]),
+            0,
+            flags,
+        )
+        .map_err(Error::BitcoinConsensus)
     }
 }
 
@@ -880,7 +1031,7 @@ impl<'a> UnsignedTransaction<'a> {
     ///
     /// Other noteworthy assumptions is that the signers' UTXO is always a
     /// key-spend path only taproot UTXO.
-    pub fn construct_digests(&self) -> Result<SignatureHashes, Error> {
+    pub fn construct_digests(&self) -> Result<SignatureHashes<'_>, Error> {
         let deposit_requests = self.requests.iter().filter_map(RequestRef::as_deposit);
         let deposit_utxos = deposit_requests.clone().map(DepositRequest::as_tx_out);
         // All the transaction's inputs are used to construct the sighash
@@ -960,7 +1111,7 @@ impl<'a> UnsignedTransaction<'a> {
             lock_time: LockTime::ZERO,
             input: std::iter::once(signer_input).chain(reqs.tx_ins()).collect(),
             output: std::iter::once(signer_output)
-                .chain(Self::new_op_return_output(reqs, state))
+                .chain(Some(Self::new_op_return_output(reqs, state)?))
                 .chain(reqs.tx_outs())
                 .collect(),
         })
@@ -978,115 +1129,63 @@ impl<'a> UnsignedTransaction<'a> {
         }
     }
 
-    /// An OP_RETURN output with the bitmap for how the signers voted for
-    /// the package.
+    /// An OP_RETURN output with (conditionally) encoded withdrawal request IDs.
     ///
-    /// None is only returned if there are no requests in the input slice.
+    /// The `OP_RETURN` output has a generally-accepted 80 bytes available for
+    /// data (it is not constrained by the Bitcoin protocol itself but rather by
+    /// the miners' policy). We use this space to encode the withdrawal request
+    /// IDs.
     ///
-    /// The data layout for the OP_RETURN depends on whether there are
-    /// withdrawal requests in the input slice. If there are withdrawal
-    /// requests then the output data is:
-    ///
-    /// ```text
-    ///  0       2    3     5        21            41
-    ///  |-------|----|-----|--------|-------------|
-    ///    magic   op   N_d   bitmap   merkle root
-    /// ```
-    ///
-    /// A more full description of the merkle root can be found in the
-    /// comments for [`UnsignedTransaction::withdrawal_merkle_root`]. If
-    /// there are no withdrawal requests in the input slice then the layout
-    /// looks like:
+    /// ## Wire Format
+    /// The layout of the OP_RETURN output is as follows:
     ///
     /// ```text
-    ///  0       2    3     5        21
-    ///  |-------|----|-----|--------|
-    ///    magic   op   N_d   bitmap
+    ///  0       2    3                                           X<80
+    ///  |-------|----|--------------------------------------------|
+    ///    magic   op   [encoded withdrawal IDs (variable-length)]
     /// ```
     ///
-    /// In the above layout, magic is the UTF-8 encoded string "ST", op is
-    /// the version byte, and N_d is the of deposits in this transaction
-    /// encoded as a big-endian two byte unsigned integer.
+    /// In the above layout:
+    /// - magic: UTF-8 encoded string indicator (2 bytes)
+    /// - op: version byte (1 byte)
+    /// - encoded IDs: withdrawal request IDs encoded using idpack (variable
+    ///   length, if there are withdrawals serviced by the transaction)
     ///
-    /// `None` is only returned if there are no requests in the input slice.
-    fn new_op_return_output(reqs: &Requests, state: &SignerBtcState) -> Option<TxOut> {
-        let sbtc_data = Self::sbtc_data(reqs, state)?;
-        let script_pubkey = match Self::withdrawal_merkle_root(reqs) {
-            Some(merkle_root) => {
-                let mut data: [u8; 41] = [0; 41];
-                data[..21].copy_from_slice(&sbtc_data);
-                data[21..].copy_from_slice(&merkle_root);
+    /// ## Returns
+    /// - `Some(TxOut)`: the resulting OP_RETURN output
+    fn new_op_return_output(reqs: &Requests, state: &SignerBtcState) -> Result<TxOut, Error> {
+        // Create OP_RETURN data
+        let mut data = PushBytesBuf::with_capacity(OP_RETURN_MAX_SIZE);
+        data.extend_from_slice(&state.magic_bytes)?;
+        data.push(OP_RETURN_VERSION)?;
 
-                ScriptBuf::new_op_return(data)
-            }
-            None => ScriptBuf::new_op_return(sbtc_data),
+        // Extract all withdrawal request IDs
+        let withdrawal_ids: Vec<u64> = reqs.iter().filter_map(|req| req.withdrawal_id()).collect();
+
+        // If there are any withdrawal ID's, encode them and add them to the
+        // OP_RETURN data.
+        if !withdrawal_ids.is_empty() {
+            let encoded = BitmapSegmenter.package(&withdrawal_ids)?.encode();
+            data.extend_from_slice(&encoded)?;
+        }
+
+        // Return an error if the data we intend on putting in the OP_RETURN
+        // output exceeds the maximum size.
+        if data.len() > OP_RETURN_MAX_SIZE {
+            return Err(Error::OpReturnSizeLimitExceeded {
+                size: data.len(),
+                max_size: OP_RETURN_MAX_SIZE,
+            });
+        }
+
+        // Create OP_RETURN script and output
+        let script_pubkey = ScriptBuf::new_op_return(data);
+        let txout = TxOut {
+            value: Amount::ZERO,
+            script_pubkey,
         };
 
-        let value = Amount::ZERO;
-        Some(TxOut { value, script_pubkey })
-    }
-
-    /// Return the first part of the sbtc related data included in the
-    /// OP_RETURN output.
-    ///
-    /// BTC sweep transactions include an OP_RETURN output with data on how
-    /// the signers voted for the transaction. This function returns that
-    /// data, which is laid out as follows:
-    ///
-    /// ```text
-    ///  0       2    3     5                21
-    ///  |-------|----|-----|----------------|
-    ///    magic   op   N_d   signer  bitmap
-    /// ```
-    ///
-    /// In the above layout, magic is the UTF-8 encoded string "ST", op is
-    /// the version byte, and N_d is the of deposits in this transaction
-    /// encoded as a big-endian two byte unsigned integer.
-    ///
-    /// `None` is only returned if there are no requests in the input
-    /// slice.
-    fn sbtc_data(reqs: &Requests, state: &SignerBtcState) -> Option<[u8; 21]> {
-        let bitmap: BitArray<[u8; 16]> = reqs
-            .iter()
-            .map(RequestRef::signer_bitmap)
-            .reduce(|bm1, bm2| bm1 | bm2)?;
-        let num_deposits = reqs.iter().filter_map(RequestRef::as_deposit).count() as u16;
-
-        let mut data: [u8; 21] = [0; 21];
-        // The magic_bytes is exactly 2 bytes
-        data[0..2].copy_from_slice(&state.magic_bytes);
-        // Yeah, this is one byte.
-        data[2..3].copy_from_slice(&[OP_RETURN_VERSION]);
-        // The num_deposits variable is an u16, so 2 bytes.
-        data[3..5].copy_from_slice(&num_deposits.to_be_bytes());
-        // The bitmap is 16 bytes so this fits exactly.
-        data[5..].copy_from_slice(&bitmap.into_inner());
-
-        Some(data)
-    }
-
-    /// The OP_RETURN output includes a merkle tree of the Stacks
-    /// transactions that lead to the inclusion of the UTXOs in this
-    /// transaction.
-    ///
-    /// Create the OP_RETURN UTXO for the associated withdrawal request.
-    ///
-    /// The data returned from this function is a merkle tree constructed
-    /// from the HASH160 of each withdrawal request's sBTC data returned by
-    /// the [`WithdrawalRequest::sbtc_data`].
-    ///
-    /// For more on the rationale for this output, see this ticket:
-    /// <https://github.com/stacks-network/sbtc/issues/483>.
-    ///
-    /// `None` is returned if there are no withdrawal requests in the input
-    /// slice.
-    fn withdrawal_merkle_root(reqs: &Requests) -> Option<[u8; 20]> {
-        let hashes = reqs
-            .iter()
-            .filter_map(RequestRef::as_withdrawal)
-            .map(|req| Hash160::hash(&req.sbtc_data()));
-
-        bitcoin::merkle_tree::calculate_root(hashes).map(|hash| hash.to_byte_array())
+        Ok(txout)
     }
 
     /// Compute the final amount for the signers' UTXO given the current
@@ -1103,7 +1202,7 @@ impl<'a> UnsignedTransaction<'a> {
 
         // This should never happen
         if amount < 0 {
-            tracing::error!("Transaction deposits greater than the inputs!");
+            tracing::error!("withdrawal amounts were greater than the input amounts!");
             return Err(Error::InvalidAmount(amount));
         }
 
@@ -1257,15 +1356,9 @@ impl BitcoinInputsOutputs for Transaction {
     }
 }
 
-impl<'a> BitcoinInputsOutputs for UnsignedTransaction<'a> {
+impl BitcoinInputsOutputs for UnsignedTransaction<'_> {
     fn tx_ref(&self) -> &Transaction {
         &self.tx
-    }
-}
-
-impl BitcoinInputsOutputs for BitcoinTx {
-    fn tx_ref(&self) -> &Transaction {
-        self.deref()
     }
 }
 
@@ -1279,12 +1372,12 @@ impl BitcoinTxInfo {
     /// Assess how much of the bitcoin miner fee should be apportioned to
     /// the input associated with the given `outpoint`.
     pub fn assess_input_fee(&self, outpoint: &OutPoint) -> Option<Amount> {
-        FeeAssessment::assess_input_fee(self, outpoint, self.fee)
+        FeeAssessment::assess_input_fee(self, outpoint, self.fee?)
     }
     /// Assess how much of the bitcoin miner fee should be apportioned to
     /// the output at the given output index `vout`.
     pub fn assess_output_fee(&self, vout: usize) -> Option<Amount> {
-        FeeAssessment::assess_output_fee(self, vout, self.fee)
+        FeeAssessment::assess_output_fee(self, vout, self.fee?)
     }
 }
 
@@ -1309,7 +1402,7 @@ pub trait TxDeconstructor: BitcoinInputsOutputs {
     /// This function must return `Some(_)` for each `index` where
     /// `self.inputs().get(index)` returns `Some(_)`, and must be `None`
     /// otherwise.
-    fn prevout(&self, index: usize) -> Option<PrevoutRef>;
+    fn prevout(&self, index: usize) -> Option<PrevoutRef<'_>>;
 
     /// Return all inputs in this transaction if it is an sBTC transaction.
     ///
@@ -1335,20 +1428,24 @@ pub trait TxDeconstructor: BitcoinInputsOutputs {
             .collect()
     }
 
+    /// Return all outputs in this transaction that are related to the signers
+    /// and any relevant withdrawal output.
+    fn to_outputs(
+        &self,
+        signer_script_pubkeys: &HashSet<ScriptBuf>,
+    ) -> Result<(Vec<TxOutput>, Vec<WithdrawalTxOutput>), Error> {
+        let tx_outputs = self.to_tx_outputs(signer_script_pubkeys);
+        let withdrawal_outputs = self.to_withdrawal_outputs(&tx_outputs)?;
+        Ok((tx_outputs, withdrawal_outputs))
+    }
+
     /// Return all outputs in this transaction that are related to the
     /// signers.
     ///
     /// This function returns all outputs if the transaction is an
     /// sBTC transaction, and only outputs that the signers can sign for
     /// otherwise.
-    fn to_outputs(&self, signer_script_pubkeys: &HashSet<ScriptBuf>) -> Vec<TxOutput> {
-        // This transaction might not be related to the signers at all. If
-        // not then we can exit early.
-        let mut outputs = self.outputs().iter();
-        if !outputs.any(|tx_out| signer_script_pubkeys.contains(&tx_out.script_pubkey)) {
-            return Vec::new();
-        }
-
+    fn to_tx_outputs(&self, signer_script_pubkeys: &HashSet<ScriptBuf>) -> Vec<TxOutput> {
         // If the signers did not create this transaction, but the signers
         // control at least one output then the outputs that the signers
         // control are donations. So we scan the outputs and exit early.
@@ -1374,6 +1471,100 @@ pub trait TxDeconstructor: BitcoinInputsOutputs {
                 _ => self.vout_to_output(index, TxOutputType::Withdrawal),
             })
             .collect()
+    }
+
+    /// Return the withdrawal outputs, matching the tx outputs to the decoded
+    /// withdrawal IDs
+    fn to_withdrawal_outputs(
+        &self,
+        tx_outputs: &[TxOutput],
+    ) -> Result<Vec<WithdrawalTxOutput>, Error> {
+        // If the first output is not a SignersOutput, nothing to do
+        match tx_outputs.first() {
+            Some(output) if output.output_type == TxOutputType::SignersOutput => (),
+            _ => return Ok(Vec::new()),
+        }
+
+        // If the second output is not a SignersOpReturn, nothing to do
+        let op_return_output = match tx_outputs.get(1) {
+            Some(output) if output.output_type == TxOutputType::SignersOpReturn => output,
+            _ => return Ok(Vec::new()),
+        };
+
+        // If there are no withdrawals, nothing to do
+        if tx_outputs.len() == 2 {
+            return Ok(Vec::new());
+        }
+
+        // SAFETY: we checked that we have at least two outputs in the matches
+        let tx_withdrawals_outputs = &tx_outputs[2..];
+
+        // Sanity check: all the other outputs must be withdrawals
+        let is_all_withdrawals = tx_withdrawals_outputs
+            .iter()
+            .all(|out| out.output_type == TxOutputType::Withdrawal);
+        if !is_all_withdrawals {
+            return Err(Error::SbtcTxMalformed);
+        }
+
+        let op_return_instructions: Vec<_> = op_return_output
+            .script_pubkey
+            .as_script()
+            .instructions()
+            .collect();
+
+        // The op return script must be a OP_RETURN and a push bytes
+        let [
+            Ok(Instruction::Op(OP_RETURN)),
+            Ok(Instruction::PushBytes(push_bytes)),
+        ] = op_return_instructions[..]
+        else {
+            return Err(Error::SbtcTxOpReturnFormatError);
+        };
+
+        let raw_bytes = push_bytes.as_bytes();
+        if raw_bytes.len() < OP_RETURN_HEADER_SIZE {
+            return Err(Error::SbtcTxOpReturnFormatError);
+        }
+
+        // First two bytes are magic bytes, we don't care about them.
+        // The third one is the version byte.
+        // SAFETY: 2 < OP_RETURN_HEADER_SIZE (3)
+        let version = raw_bytes[2];
+
+        if version == 0 {
+            // In version 0 we didn't store withdrawal ids
+            return Ok(Vec::new());
+        } else if version != OP_RETURN_VERSION {
+            // Unknown version byte
+            return Err(Error::SbtcTxOpReturnFormatError);
+        }
+
+        // SAFETY: We've verified raw_bytes.len() >= OP_RETURN_HEADER_SIZE (3),
+        // so starting a slice at index 3 is safe due to slice behavior.
+        // If raw_bytes.len() is exactly 3, this produces an empty slice rather
+        // than panicking.
+        let encoded_withdrawal_ids = &raw_bytes[OP_RETURN_HEADER_SIZE..];
+        let withdrawal_ids: Vec<_> = Segments::decode(encoded_withdrawal_ids)
+            .map_err(Error::IdPackDecode)?
+            .values()
+            .collect();
+
+        // We checked that the first two outputs are signers output and op
+        // return, and that the rest of outputs are withdrawals.
+        if withdrawal_ids.len() != tx_outputs.len() - 2 {
+            return Err(Error::SbtcTxMalformed);
+        }
+
+        Ok(tx_withdrawals_outputs
+            .iter()
+            .zip(withdrawal_ids)
+            .map(|(out, request_id)| WithdrawalTxOutput {
+                txid: out.txid,
+                output_index: out.output_index,
+                request_id,
+            })
+            .collect())
     }
 
     /// Take an output index and the known output type and return the
@@ -1417,81 +1608,67 @@ pub trait TxDeconstructor: BitcoinInputsOutputs {
 }
 
 impl TxDeconstructor for BitcoinTxInfo {
-    fn prevout(&self, index: usize) -> Option<PrevoutRef> {
+    fn prevout(&self, index: usize) -> Option<PrevoutRef<'_>> {
         let vin = self.vin.get(index)?;
+        let prevout = vin.prevout.as_ref()?;
         Some(PrevoutRef {
-            amount: vin.prevout.value,
-            script_pubkey: &vin.prevout.script_pub_key.script,
-            txid: vin.details.txid.as_ref()?,
-            output_index: vin.details.vout?,
+            amount: prevout.value,
+            script_pubkey: &prevout.script_pubkey.script,
+            txid: vin.txid.as_ref()?,
+            output_index: vin.vout?,
         })
-    }
-}
-
-bitcoin::hashes::hash_newtype! {
-    /// For some reason, the rust-bitcoin folks do not implement both
-    /// [`bitcoin::consensus::Encodable`] and [`bitcoin::hashes::Hash`] for
-    /// their [`bitcoin::hashes::hash160::Hash`] type. So we create a
-    /// newtype that implements both of those traits so that we can use
-    /// [`bitcoin::merkle_tree::calculate_root`].
-    struct Hash160(pub bitcoin::hashes::hash160::Hash);
-}
-
-impl bitcoin::consensus::Encodable for Hash160 {
-    fn consensus_encode<W: bitcoin::io::Write + ?Sized>(
-        &self,
-        writer: &mut W,
-    ) -> Result<usize, bitcoin::io::Error> {
-        use bitcoin::consensus::WriteExt as _;
-        // All types that implement bitcoin::io::Write implement the
-        // extension type. And this implementation follows the
-        // implementation of their other types.
-        writer.emit_slice(&self.0[..])?;
-        Ok(Self::LEN)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
-    use std::str::FromStr;
+    use std::str::FromStr as _;
+    use std::sync::atomic::AtomicU64;
 
     use super::*;
-    use bitcoin::BlockHash;
     use bitcoin::CompressedPublicKey;
     use bitcoin::Txid;
+    use bitcoin::hashes::Hash as _;
+    use bitcoin::key::TapTweak as _;
+    use bitcoin::opcodes::all::OP_RETURN;
+    use bitcoin::script::Instruction;
     use clarity::vm::types::PrincipalData;
     use fake::Fake as _;
     use model::SignerVote;
-    use rand::distributions::Distribution;
+    use more_asserts::assert_ge;
+    use rand::distributions::Distribution as _;
     use rand::distributions::Uniform;
     use rand::rngs::OsRng;
-    use rand::Rng;
-    use rand::SeedableRng as _;
-    use ripemd::Ripemd160;
     use sbtc::deposits::DepositScriptInputs;
     use secp256k1::Keypair;
     use secp256k1::SecretKey;
-    use sha2::Digest as _;
-    use sha2::Sha256;
     use stacks_common::types::chainstate::StacksAddress;
     use test_case::test_case;
 
-    use crate::testing;
-    use crate::testing::btc::base_signer_transaction;
     use crate::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
     use crate::MAX_MEMPOOL_PACKAGE_TX_COUNT;
+    use crate::context::RollingWithdrawalLimits;
+    use crate::testing;
+    use crate::testing::btc::base_signer_transaction;
 
     /// The maximum virtual size of a transaction package in v-bytes.
     const MEMPOOL_MAX_PACKAGE_SIZE: u32 = 101000;
 
-    const X_ONLY_PUBLIC_KEY1: &'static str =
+    const X_ONLY_PUBLIC_KEY1: &str =
         "2e58afe51f9ed8ad3cc7897f634d881fdbe49a81564629ded8156bebd2ffd1af";
+
+    static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(0);
 
     fn generate_x_only_public_key() -> XOnlyPublicKey {
         let secret_key = SecretKey::new(&mut OsRng);
         secret_key.x_only_public_key(SECP256K1).0
     }
+
+    // The is the least non dust amount for withdrawal outputs locked by
+    // the generate_address() script, which generates P2WPKH outputs
+    static MINIMAL_NON_DUST_AMOUNT_P2WPKH: LazyLock<u64> =
+        LazyLock::new(|| generate_address().minimal_non_dust().to_sat());
 
     fn generate_address() -> ScriptPubKey {
         let secret_key = SecretKey::new(&mut OsRng);
@@ -1532,6 +1709,9 @@ mod tests {
             Some(Amount::from_sat(per_deposit_minimum)),
             Some(Amount::from_sat(per_deposit_cap)),
             None,
+            None,
+            None,
+            None,
             Some(Amount::from_sat(max_mintable_cap)),
         )
     }
@@ -1540,7 +1720,7 @@ mod tests {
     fn create_deposit(amount: u64, max_fee: u64, signer_bitmap: u128) -> DepositRequest {
         let signers_public_key = generate_x_only_public_key();
 
-        let contract_name = std::iter::repeat('a').take(128).collect::<String>();
+        let contract_name = std::iter::repeat_n('a', 128).collect::<String>();
         let principal_str = format!("{}.{contract_name}", StacksAddress::burn_address(false));
 
         let deposit_inputs = DepositScriptInputs {
@@ -1555,7 +1735,7 @@ mod tests {
             signer_bitmap: BitArray::new(signer_bitmap.to_le_bytes()),
             amount,
             deposit_script: deposit_inputs.deposit_script(),
-            reclaim_script: ScriptBuf::new(),
+            reclaim_script_hash: TaprootScriptHash::zeros(),
             signers_public_key,
         }
     }
@@ -1568,93 +1748,113 @@ mod tests {
             amount,
             script_pubkey: generate_address(),
             txid: fake::Faker.fake_with_rng(&mut OsRng),
-            request_id: (0..u32::MAX as u64).fake_with_rng(&mut OsRng),
+            request_id: NEXT_REQUEST_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             block_hash: fake::Faker.fake_with_rng(&mut OsRng),
         }
-    }
-
-    fn random_withdrawal<R: Rng>(rng: &mut R, votes_against: usize) -> WithdrawalRequest {
-        let mut signer_bitmap: BitArray<[u8; 16]> = BitArray::ZERO;
-        signer_bitmap[..votes_against].fill(true);
-
-        WithdrawalRequest {
-            max_fee: rng.next_u32() as u64,
-            signer_bitmap,
-            amount: rng.next_u32() as u64,
-            script_pubkey: generate_address(),
-            txid: fake::Faker.fake_with_rng(rng),
-            request_id: (0..u32::MAX as u64).fake_with_rng(rng),
-            block_hash: fake::Faker.fake_with_rng(rng),
-        }
-    }
-
-    /// This is a naive implementation of a function that computes a merkle root
-    fn calculate_merkle_root(reqs: &mut [WithdrawalRequest]) -> Option<[u8; 20]> {
-        // The withdrawals' are sorted before inclusion as a bitcoin
-        // transaction output.
-        reqs.sort();
-        let mut leafs = reqs
-            .iter()
-            .map(|req| {
-                // We use the Hash160 for the hash function, which is
-                // SHA256 followed by RIPEMD160.
-                let sha256_data = Sha256::digest(req.sbtc_data());
-                let rip160_data = Ripemd160::digest(sha256_data);
-                rip160_data.as_slice().try_into().unwrap()
-            })
-            .collect::<Vec<[u8; 20]>>();
-
-        while leafs.len() > 1 {
-            leafs = leafs
-                .chunks(2)
-                .map(|nodes| {
-                    let [leaf1, leaf2] = match nodes {
-                        [leaf1, leaf2] => [leaf1, leaf2],
-                        // If a leaf node does not have a partner, it gets paired with itself.
-                        [leaf] => [leaf, leaf],
-                        // Yeah chunks(2) return slices of size 1 or 2 here.
-                        _ => unreachable!(),
-                    };
-                    // Compute the hash160 of the two leafs
-                    let sha256_data = Sha256::default()
-                        .chain_update(leaf1)
-                        .chain_update(leaf2)
-                        .finalize();
-
-                    Ripemd160::digest(sha256_data)
-                        .as_slice()
-                        .try_into()
-                        .unwrap()
-                })
-                .collect();
-        }
-
-        // There are either 1 or 0 elements in the leafs vector, so lets get it
-        leafs.pop()
     }
 
     impl BitcoinTxInfo {
         fn from_tx(tx: Transaction, fee: Amount) -> BitcoinTxInfo {
             BitcoinTxInfo {
-                in_active_chain: true,
-                fee,
-                txid: tx.compute_txid(),
-                hash: tx.compute_wtxid(),
-                size: tx.base_size() as u64,
-                vsize: tx.vsize() as u64,
+                fee: Some(fee),
                 tx,
                 vin: Vec::new(),
-                vout: Vec::new(),
-                block_hash: BlockHash::from_byte_array([0; 32]),
-                confirmations: 1,
-                block_time: 0,
             }
         }
     }
 
-    #[ignore = "For generating the SOLO_(DEPOSIT|WITHDRAWAL)_SIZE constants"]
+    impl WithdrawalRequest {
+        /// Sets the withdrawal id for this request.
+        pub fn wid(mut self, id: u64) -> Self {
+            self.request_id = id;
+            self
+        }
+    }
+
+    /// This test verifies that our implementation of Bitcoin script
+    /// verification using [`bitcoinconsensus`] works as expected. This
+    /// functionality is used in the verification of WSTS signing after a new
+    /// DKG round has completed.
     #[test]
-    fn create_deposit_only_tx() {
+    fn mock_signer_utxo_signing_and_spending_verification() {
+        let secp = secp256k1::Secp256k1::new();
+
+        // Generate a key pair which will serve as the signers' aggregate key.
+        let secret_key = SecretKey::new(&mut OsRng);
+        let keypair = secp256k1::Keypair::from_secret_key(&secp, &secret_key);
+        let tweaked = keypair.tap_tweak(&secp, None);
+        let (aggregate_key, _) = keypair.x_only_public_key();
+
+        // Create a new transaction using the aggregate key.
+        let unsigned = UnsignedMockTransaction::new(aggregate_key);
+
+        let tapsig = unsigned
+            .compute_sighash()
+            .expect("failed to compute taproot sighash");
+
+        // Sign the taproot sighash.
+        let message = secp256k1::Message::from_digest_slice(tapsig.as_byte_array())
+            .expect("Failed to create message");
+
+        // [1] Verify the correct signature, which should succeed.
+        let schnorr_sig = secp.sign_schnorr(&message, &tweaked.to_inner());
+        let taproot_sig = bitcoin::taproot::Signature {
+            signature: schnorr_sig,
+            sighash_type: TapSighashType::All,
+        };
+        unsigned
+            .verify_signature(&taproot_sig)
+            .expect("signature verification failed");
+
+        // [2] Verify the correct signature, but with a different sighash type,
+        // which should fail.
+        let taproot_sig = bitcoin::taproot::Signature {
+            signature: schnorr_sig,
+            sighash_type: TapSighashType::None,
+        };
+        unsigned
+            .verify_signature(&taproot_sig)
+            .expect_err("signature verification should have failed");
+
+        // [3] Verify an incorrect signature with the correct sighash type,
+        // which should fail. In this case we've created the signature using
+        // the untweaked keypair.
+        let schnorr_sig = secp.sign_schnorr(&message, &keypair);
+        let taproot_sig = bitcoin::taproot::Signature {
+            signature: schnorr_sig,
+            sighash_type: TapSighashType::All,
+        };
+        unsigned
+            .verify_signature(&taproot_sig)
+            .expect_err("signature verification should have failed");
+
+        // [4] Verify an incorrect signature with the correct sighash type, which
+        // should fail. In this case we use a completely newly generated keypair.
+        let secret_key = SecretKey::new(&mut OsRng);
+        let keypair = secp256k1::Keypair::from_secret_key(&secp, &secret_key);
+        let schnorr_sig = secp.sign_schnorr(&message, &keypair);
+        let taproot_sig = bitcoin::taproot::Signature {
+            signature: schnorr_sig,
+            sighash_type: TapSighashType::All,
+        };
+        unsigned
+            .verify_signature(&taproot_sig)
+            .expect_err("signature verification should have failed");
+
+        // [5] Same as [4], but using its tweaked key.
+        let tweaked = keypair.tap_tweak(&secp, None);
+        let schnorr_sig = secp.sign_schnorr(&message, &tweaked.to_inner());
+        let taproot_sig = bitcoin::taproot::Signature {
+            signature: schnorr_sig,
+            sighash_type: TapSighashType::All,
+        };
+        unsigned
+            .verify_signature(&taproot_sig)
+            .expect_err("signature verification should have failed");
+    }
+
+    #[test]
+    fn calculate_solo_tx_sizes_for_consts() {
         // For solo deposits
         let mut requests = SbtcRequests {
             deposits: vec![create_deposit(123456, 30_000, 0)],
@@ -1683,11 +1883,17 @@ mod tests {
         let mut unsigned = transactions.pop().unwrap();
         testing::set_witness_data(&mut unsigned, keypair);
 
-        println!("Solo deposit vsize: {}", unsigned.tx.vsize());
+        assert_eq!(
+            SOLO_DEPOSIT_TX_VSIZE as usize,
+            unsigned.tx.vsize(),
+            "solo deposit vsize needs updating"
+        );
 
-        // For solo withdrawals
+        // For solo withdrawals. We set the withdrawal ID to be u64::MAX so
+        // that the withdrawal ID encoding takes up the maximum amount of
+        // space in the OP_RETURN output.
         requests.deposits = Vec::new();
-        requests.withdrawals = vec![create_withdrawal(154_321, 40_000, 0)];
+        requests.withdrawals = vec![create_withdrawal(154_321, 40_000, 0).wid(u64::MAX)];
 
         let mut transactions = requests.construct_transactions().unwrap();
         assert_eq!(transactions.len(), 1);
@@ -1701,7 +1907,11 @@ mod tests {
         unsigned.tx.output.pop();
         testing::set_witness_data(&mut unsigned, keypair);
 
-        println!("Solo withdrawal vsize: {}", unsigned.tx.vsize());
+        assert_eq!(
+            MAX_BASE_TX_VSIZE as usize,
+            unsigned.tx.vsize(),
+            "Base tx vsize needs updating"
+        );
     }
 
     #[ignore = "this is for generating the MIN_BITCOIN_INPUT_VSIZE constant"]
@@ -1733,7 +1943,7 @@ mod tests {
             signer_bitmap: bitmap,
             amount: 100_000,
             deposit_script: ScriptBuf::new(),
-            reclaim_script: ScriptBuf::new(),
+            reclaim_script_hash: TaprootScriptHash::zeros(),
             signers_public_key: XOnlyPublicKey::from_str(X_ONLY_PUBLIC_KEY1).unwrap(),
         };
 
@@ -1750,7 +1960,7 @@ mod tests {
             signer_bitmap: BitArray::ZERO,
             amount: 100_000,
             deposit_script: ScriptBuf::from_bytes(vec![1, 2, 3]),
-            reclaim_script: ScriptBuf::new(),
+            reclaim_script_hash: TaprootScriptHash::zeros(),
             signers_public_key: XOnlyPublicKey::from_str(X_ONLY_PUBLIC_KEY1).unwrap(),
         };
 
@@ -1853,194 +2063,119 @@ mod tests {
         assert!(sweep.is_err());
     }
 
-    /// We aggregate the bitmaps to form a single one at the end. Check
-    /// that it is aggregated correctly.
-    #[test]
-    fn the_bitmaps_merge_correctly() {
-        const OP_RETURN: u8 = bitcoin::opcodes::all::OP_RETURN.to_u8();
-        const OP_PUSHBYTES_41: u8 = bitcoin::opcodes::all::OP_PUSHBYTES_41.to_u8();
+    #[test_case(&[]; "no_withdrawal_ids")]
+    #[test_case(&[42]; "single_withdrawal_id")]
+    #[test_case(&[1, 2, 3, 4, 5]; "multiple_sequential_withdrawal_ids")]
+    #[test_case(&[1000, 2000, 3000]; "sparse_withdrawal_ids")]
+    #[test_case(&(1..100).map(|i| i * 23).collect::<Vec<u64>>(); "ids_causing_multiple_transactions")]
+    fn test_withdrawal_id_packaging(withdrawal_ids: &[u64]) {
+        // Setup test environment
+        let public_key = XOnlyPublicKey::from_str(X_ONLY_PUBLIC_KEY1).unwrap();
+        let withdrawals = withdrawal_ids
+            .iter()
+            .map(|&id| create_withdrawal(10000, 10000, 0).wid(id))
+            .collect::<Vec<_>>();
 
-        let mut requests = SbtcRequests {
-            deposits: vec![create_deposit(123456, 0, 0)],
-            withdrawals: vec![create_withdrawal(1000, 0, 0), create_withdrawal(2000, 0, 0)],
+        let requests = SbtcRequests {
+            deposits: vec![create_deposit(100_000, 5_000, 0)],
+            withdrawals,
             signer_state: SignerBtcState {
                 utxo: SignerUtxo {
-                    outpoint: generate_outpoint(5500, 0),
-                    amount: 5500,
-                    public_key: generate_x_only_public_key(),
+                    outpoint: generate_outpoint(500_000_000, 0),
+                    amount: 500_000_000,
+                    public_key,
                 },
-                fee_rate: 0.0,
-                public_key: generate_x_only_public_key(),
+                fee_rate: 1.0,
+                public_key,
                 last_fees: None,
-                magic_bytes: [b'T', b'3'],
+                magic_bytes: [b'S', b'T'],
             },
             num_signers: 10,
-            accept_threshold: 0,
+            accept_threshold: 8,
             sbtc_limits: SbtcLimits::unlimited(),
             max_deposits_per_bitcoin_tx: DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX,
         };
 
-        // We'll have the deposit get two vote against, and the withdrawals
-        // each have three votes against. We will have each them share one
-        // overlapping voter. The votes look like this:
-        //
-        // 1 1 0 0 0 0 0 0 0 0
-        // 0 1 1 1 0 0 0 0 0 0
-        // 0 1 0 0 1 1 0 0 0 0
-        //
-        // So the aggregated bit map should look like this
-        //
-        // 1 1 1 1 1 1 0 0 0 0
+        // Generate transactions
+        let transactions = requests
+            .construct_transactions()
+            .expect("failed to construct transactions");
 
-        // Okay, this one looks like
-        // 1 1 0 0 0 0 0 0 0 0
-        requests.deposits[0].signer_bitmap.set(0, true);
-        requests.deposits[0].signer_bitmap.set(1, true);
-        // This one looks like
-        // 0 1 1 1 0 0 0 0 0 0
-        requests.withdrawals[0].signer_bitmap.set(1, true);
-        requests.withdrawals[0].signer_bitmap.set(2, true);
-        requests.withdrawals[0].signer_bitmap.set(3, true);
-        // And this one looks like
-        // 0 1 0 0 1 1 0 0 0 0
-        requests.withdrawals[1].signer_bitmap.set(1, true);
-        requests.withdrawals[1].signer_bitmap.set(4, true);
-        requests.withdrawals[1].signer_bitmap.set(5, true);
-
-        // This should all be in one transaction given the threshold
-        let mut transactions = requests.construct_transactions().unwrap();
-        assert_eq!(transactions.len(), 1);
-
-        let unsigned_tx = transactions.pop().unwrap();
-        // We have one input for the signers' UTXO and another input for
-        // the deposit.
-        assert_eq!(unsigned_tx.tx.input.len(), 2);
-        // We have one output for the signers' UTXO and another for the
-        // OP_RETURN output, and two more for the withdrawals.
-        assert_eq!(unsigned_tx.tx.output.len(), 4);
-
-        let sbtc_data = match unsigned_tx.tx.output[1].script_pubkey.as_bytes() {
-            // The data layout is detailed in the documentation for the
-            // UnsignedTransaction::new_op_return_output function.
-            [OP_RETURN, OP_PUSHBYTES_41, b'T', b'3', OP_RETURN_VERSION, 0, 1, data @ ..] => data,
-            _ => panic!("Invalid OP_RETURN FORMAT"),
-        };
-        // Since there are withdrawal requests in this transaction, the
-        // merkle root is included at the end of the `data`, bringing its
-        // length from 16 to 36 bytes.
-        assert_eq!(sbtc_data.len(), 36);
-        // This is the aggregate bitmap for the votes, so it should start
-        // like this:
-        // 1 1 1 1 1 1 0 0 0 0
-        // Note that the first 16 bytes are the bitmap, and the merkle root
-        // follows this data.
-        let bitmap_data = *sbtc_data.first_chunk().unwrap();
-        let bitmap = BitArray::<[u8; 16]>::new(bitmap_data);
-
-        assert_eq!(bitmap.count_ones(), 6);
-        // And the first six bits are all ones followed by all zeros.
-        assert!(bitmap[..6].all());
-        assert!(!bitmap[6..].any());
-    }
-
-    #[test_case(Vec::new(), vec![create_deposit(123456, 0, 0)]; "no withdrawals, one deposits")]
-    #[test_case([create_withdrawal(1000, 0, 0)], Vec::new(); "one withdrawals")]
-    #[test_case({
-        let mut rng = rand::rngs::StdRng::seed_from_u64(3);
-        std::iter::repeat_with(move || random_withdrawal(&mut rng, 0)).take(2)
-    }, Vec::new(); "two withdrawals")]
-    #[test_case({
-        let mut rng = rand::rngs::StdRng::seed_from_u64(30);
-        std::iter::repeat_with(move || random_withdrawal(&mut rng, 0)).take(3)
-    }, Vec::new(); "three withdrawals")]
-    #[test_case({
-        let mut rng = rand::rngs::StdRng::seed_from_u64(300);
-        std::iter::repeat_with(move || random_withdrawal(&mut rng, 0)).take(5)
-    }, Vec::new(); "five withdrawals")]
-    #[test_case({
-        let mut rng = rand::rngs::StdRng::seed_from_u64(3000);
-        std::iter::repeat_with(move || random_withdrawal(&mut rng, 0)).take(20)
-    }, Vec::new(); "twenty withdrawals")]
-    fn merkle_root_in_op_return<I>(withdrawals: I, deposits: Vec<DepositRequest>)
-    where
-        I: IntoIterator<Item = WithdrawalRequest>,
-    {
-        const OP_RETURN: u8 = bitcoin::opcodes::all::OP_RETURN.to_u8();
-        const OP_PUSHBYTES_21: u8 = bitcoin::opcodes::all::OP_PUSHBYTES_21.to_u8();
-        const OP_PUSHBYTES_41: u8 = bitcoin::opcodes::all::OP_PUSHBYTES_41.to_u8();
-
-        let mut requests = SbtcRequests {
-            deposits,
-            withdrawals: withdrawals.into_iter().collect(),
-            signer_state: SignerBtcState {
-                utxo: SignerUtxo {
-                    outpoint: generate_outpoint(500_000_000_000, 0),
-                    amount: 500_000_000_000,
-                    public_key: generate_x_only_public_key(),
-                },
-                fee_rate: 0.0,
-                public_key: generate_x_only_public_key(),
-                last_fees: None,
-                magic_bytes: [b'T', b'3'],
-            },
-            num_signers: 10,
-            accept_threshold: 0,
-            sbtc_limits: SbtcLimits::unlimited(),
-            max_deposits_per_bitcoin_tx: DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX,
-        };
-
-        let mut transactions = requests.construct_transactions().unwrap();
-        assert_eq!(transactions.len(), 1);
-
-        let unsigned_tx = transactions.pop().unwrap();
-        // Okay, the let's look at the raw data in our OP_RETURN UTXO
-        let sbtc_data = match unsigned_tx.tx.output[1].script_pubkey.as_bytes() {
-            // The data layout is detailed in the documentation for the
-            // UnsignedTransaction::new_op_return_output function when
-            // there are withdrawal request UTXOs.
-            [OP_RETURN, OP_PUSHBYTES_41, b'T', b'3', OP_RETURN_VERSION, 0, nd, data @ ..]
-                if *nd == requests.deposits.len() as u8 =>
-            {
-                data
-            }
-            // The data layout is detailed in the documentation for the
-            // UnsignedTransaction::new_op_return_output function when
-            // there are no withdrawal request UTXOs.
-            [OP_RETURN, OP_PUSHBYTES_21, b'T', b'3', OP_RETURN_VERSION, 0, nd, data @ ..]
-                if *nd == requests.deposits.len() as u8 =>
-            {
-                data
-            }
-            data => panic!("Invalid OP_RETURN FORMAT {data:?}"),
-        };
-        // If there are no deposits or withdrawals then there is no bitmap
-        // and no merkle root.
-
-        // I apologize for the nested if statements :(.
-        if let Some((_bitmap, actual_merkle_root)) = sbtc_data.split_first_chunk::<16>() {
-            // if we have 16 bytes here then we know that we have at
-            // least one deposit or withdrawal request.
-            assert!(requests.deposits.is_empty() || requests.withdrawals.is_empty());
-
-            // If we do not have any withdrawal requests then there is no
-            // merkle root for the depositors to pay for.
-            if requests.withdrawals.is_empty() {
-                assert!(actual_merkle_root.is_empty());
-            } else {
-                // If we have a withdrawal then there is a merkle root, and
-                // it's constructed in a standard way.
-                let actual_merkle_root: [u8; 20] = actual_merkle_root.try_into().unwrap();
-                let expected_merkle_root =
-                    calculate_merkle_root(&mut requests.withdrawals).unwrap();
-
-                assert_eq!(actual_merkle_root, expected_merkle_root);
-            }
+        if BitmapSegmenter.estimate_size(withdrawal_ids).unwrap() > OP_RETURN_AVAILABLE_SIZE {
+            // Verify multiple transactions were created
+            more_asserts::assert_gt!(
+                transactions.len(),
+                1,
+                "should create multiple transactions for large withdrawal ID set"
+            );
         } else {
-            // If there isn't 16 bytes here then there is nothing. Note
-            // that this isn't hit in our test cases, it's only ever hit if
-            // there are no deposits and no withdrawals we do not create a
-            // transaction in that case.
-            assert!(sbtc_data.is_empty());
+            // Verify only one transaction was created
+            assert_eq!(
+                transactions.len(),
+                1,
+                "should create a single transaction for small withdrawal ID set"
+            );
+        }
+
+        // Extract all withdrawal IDs that were included across all transactions
+        let actual_ids: Vec<u64> = transactions
+            .iter()
+            .flat_map(|tx| tx.requests.iter().filter_map(|req| req.withdrawal_id()))
+            .collect();
+
+        // Sort both lists to compare
+        let mut expected_ids = withdrawal_ids.to_vec();
+        expected_ids.sort();
+
+        // Verify all withdrawal IDs are included exactly once
+        assert_eq!(
+            actual_ids, expected_ids,
+            "all withdrawal IDs should be included exactly once across transactions"
+        );
+
+        // Verify each transaction has an OP_RETURN output with correct format
+        for tx in &transactions {
+            let expected_ids = tx
+                .requests
+                .iter()
+                .filter_map(|req| req.withdrawal_id())
+                .collect::<Vec<u64>>();
+            let expected_segments = BitmapSegmenter.package(&expected_ids).unwrap();
+            let expected_data = expected_segments.encode();
+
+            let instructions = tx.tx.output[1]
+                .script_pubkey
+                .as_script()
+                .instructions()
+                .collect::<Result<Vec<_>, _>>()
+                .expect("failed to extract OP_RETURN data");
+
+            let [Instruction::Op(OP_RETURN), Instruction::PushBytes(data)] =
+                instructions.as_slice()
+            else {
+                panic!("second output should be OP_RETURN with data");
+            };
+
+            let data = data.as_bytes();
+
+            // Verify the data meets minimum size requirements
+            assert_ge!(
+                data.len(),
+                OP_RETURN_HEADER_SIZE,
+                "data should contain at least the header bytes"
+            );
+
+            assert_eq!(&data[0..2], b"ST", "magic bytes should be 'ST'");
+            assert_eq!(
+                data[2], OP_RETURN_VERSION,
+                "version should match OP_RETURN_VERSION"
+            );
+
+            assert_eq!(
+                &data[3..],
+                expected_data,
+                "decoded withdrawal IDs don't match expected values"
+            );
         }
     }
 
@@ -2194,13 +2329,13 @@ mod tests {
             deposits: vec![
                 create_deposit(1234, 0, 1 << 1),
                 create_deposit(5678, 0, 1 << 2),
-                create_deposit(9012, 0, 1 << 3 | 1 << 4),
+                create_deposit(9012, 0, (1 << 3) | (1 << 4)),
             ],
             withdrawals: vec![
                 create_withdrawal(1000, 0, 1 << 5),
                 create_withdrawal(2000, 0, 1 << 6),
                 create_withdrawal(3000, 0, 1 << 7),
-                create_withdrawal(4000, 0, 1 << 8 | 1 << 9),
+                create_withdrawal(4000, 0, (1 << 8) | (1 << 9)),
             ],
             signer_state: SignerBtcState {
                 utxo: SignerUtxo {
@@ -2249,7 +2384,7 @@ mod tests {
             deposits: vec![
                 create_deposit(1234, 0, 1 << 1),
                 create_deposit(5678, 0, 1 << 2),
-                create_deposit(9012, 0, 1 << 3 | 1 << 4),
+                create_deposit(9012, 0, (1 << 3) | (1 << 4)),
                 create_deposit(3456, 0, 1 << 5),
                 create_deposit(7890, 0, 0),
             ],
@@ -2257,7 +2392,7 @@ mod tests {
                 create_withdrawal(1000, 0, 1 << 6),
                 create_withdrawal(2000, 0, 1 << 7),
                 create_withdrawal(3000, 0, 1 << 8),
-                create_withdrawal(4000, 0, 1 << 9 | 1 << 10),
+                create_withdrawal(4000, 0, (1 << 9) | (1 << 10)),
                 create_withdrawal(5000, 0, 0),
                 create_withdrawal(6000, 0, 0),
                 create_withdrawal(7000, 0, 0),
@@ -2349,7 +2484,7 @@ mod tests {
             deposits: vec![
                 create_deposit(12340, 100_000, 1 << 1),
                 create_deposit(56780, 100_000, 1 << 2),
-                create_deposit(90120, 100_000, 1 << 3 | 1 << 4),
+                create_deposit(90120, 100_000, (1 << 3) | (1 << 4)),
                 create_deposit(34560, 100_000, 1 << 5),
                 create_deposit(78900, 100_000, 0),
             ],
@@ -2357,7 +2492,7 @@ mod tests {
                 create_withdrawal(10000, 100_000, 1 << 6),
                 create_withdrawal(20000, 100_000, 1 << 7),
                 create_withdrawal(30000, 100_000, 1 << 8),
-                create_withdrawal(40000, 100_000, 1 << 9 | 1 << 10),
+                create_withdrawal(40000, 100_000, (1 << 9) | (1 << 10)),
                 create_withdrawal(50000, 100_000, 0),
                 create_withdrawal(60000, 100_000, 0),
                 create_withdrawal(70000, 100_000, 0),
@@ -2425,8 +2560,8 @@ mod tests {
                 create_deposit(78900, 100_000, 0),
             ],
             withdrawals: vec![
-                create_withdrawal(10000, 100_000, 0),
-                create_withdrawal(20000, 100_000, 0),
+                create_withdrawal(10000, 100_000, 0).wid(1),
+                create_withdrawal(20000, 100_000, 0).wid(1000),
             ],
             signer_state: SignerBtcState {
                 utxo: SignerUtxo {
@@ -2445,8 +2580,12 @@ mod tests {
             max_deposits_per_bitcoin_tx: DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX,
         };
 
+        // In the below code, we need to make sure that we take the _first_
+        // transaction in each package as that is the one that will be RBF'd.
+
         let (old_fee_total, old_fee_rate) = {
-            let utx = requests.construct_transactions().unwrap().pop().unwrap();
+            let transactions = requests.construct_transactions().unwrap();
+            let utx = transactions.first().unwrap();
 
             let output_amounts: u64 = utx.output_amounts();
             let input_amounts: u64 = utx.input_amounts();
@@ -2462,7 +2601,8 @@ mod tests {
             rate: old_fee_rate,
         });
 
-        let utx = requests.construct_transactions().unwrap().pop().unwrap();
+        let transactions = requests.construct_transactions().unwrap();
+        let utx = transactions.first().unwrap();
 
         let output_amounts: u64 = utx.output_amounts();
         let input_amounts: u64 = utx.input_amounts();
@@ -2490,24 +2630,20 @@ mod tests {
         more_asserts::assert_le!(requests.signer_state.fee_rate, fee_rate);
     }
 
-    #[test_case(2; "Some deposits")]
-    #[test_case(0; "No deposits")]
-    fn unsigned_tx_digests(num_deposits: usize) {
+    #[test_case(2, false; "some deposits, single tx")]
+    #[test_case(2, true; "some deposits, multiple txs")]
+    #[test_case(0, false; "no deposits, single tx")]
+    fn unsigned_tx_digests(num_deposits: usize, multiple_txs: bool) {
         // Each deposit and withdrawal has a max fee greater than the current market fee rate
         let public_key = XOnlyPublicKey::from_str(X_ONLY_PUBLIC_KEY1).unwrap();
-        let requests = SbtcRequests {
+        let mut requests = SbtcRequests {
             deposits: std::iter::repeat_with(|| create_deposit(123456, 100_000, 0))
                 .take(num_deposits)
                 .collect(),
-            withdrawals: vec![
-                create_withdrawal(10000, 100_000, 0),
-                create_withdrawal(20000, 100_000, 0),
-                create_withdrawal(30000, 100_000, 0),
-                create_withdrawal(40000, 100_000, 0),
-                create_withdrawal(50000, 100_000, 0),
-                create_withdrawal(60000, 100_000, 0),
-                create_withdrawal(70000, 100_000, 0),
-            ],
+            withdrawals: (0..600)
+                .step_by(10)
+                .map(|id| create_withdrawal(10_000, 100_000, 0).wid(id))
+                .collect(),
             signer_state: SignerBtcState {
                 utxo: SignerUtxo {
                     outpoint: generate_outpoint(300_000, 0),
@@ -2524,10 +2660,18 @@ mod tests {
             sbtc_limits: SbtcLimits::unlimited(),
             max_deposits_per_bitcoin_tx: DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX,
         };
-        let mut transactions = requests.construct_transactions().unwrap();
-        assert_eq!(transactions.len(), 1);
+        // If multiple_txs is specified, we add a withdrawal that will
+        // cause the transaction to be split into two.
+        if multiple_txs {
+            requests
+                .withdrawals
+                .push(create_withdrawal(70000, 100_000, 0).wid(650));
+        }
+        let transactions = requests.construct_transactions().unwrap();
+        let expected_tx_count = if multiple_txs { 2 } else { 1 };
+        assert_eq!(transactions.len(), expected_tx_count);
 
-        let unsigned = transactions.pop().unwrap();
+        let unsigned = transactions.first().unwrap();
         let sighashes = unsigned.construct_digests().unwrap();
 
         assert_eq!(sighashes.deposits.len(), num_deposits)
@@ -2930,8 +3074,7 @@ mod tests {
             .requests
             .iter()
             .filter_map(RequestRef::as_deposit)
-            .find(|req| req.outpoint == outpoint)
-            .is_some();
+            .any(|req| req.outpoint == outpoint);
 
         assert_eq!(request_is_included, is_included);
     }
@@ -2947,7 +3090,7 @@ mod tests {
             .map(|shift| create_deposit(10_000, 10_000, 1 << shift))
             .collect();
         let withdrawals: Vec<WithdrawalRequest> = (0..30)
-            .map(|shift| create_withdrawal(10_000, 10_000, 1 << shift + 30))
+            .map(|shift| create_withdrawal(10_000, 10_000, 1 << (shift + 30)))
             .collect();
 
         let requests = SbtcRequests {
@@ -3003,7 +3146,7 @@ mod tests {
         // ensuring lots of votes against the set of request.
         const MAX_WITHDRAWALS: usize = 4000;
         let withdrawals: Vec<WithdrawalRequest> = (0..MAX_WITHDRAWALS)
-            .map(|shift| create_withdrawal(1000, 10_000, 1 << (shift % 14)))
+            .map(|id| create_withdrawal(1_000, 10_000, 1 << (id % 14)).wid(id as u64))
             .collect();
 
         let requests = SbtcRequests {
@@ -3065,31 +3208,31 @@ mod tests {
     }
 
     #[test_case(
-        &vec![create_deposit(
+        &[create_deposit(
             DEPOSIT_DUST_LIMIT + SOLO_DEPOSIT_TX_VSIZE as u64, 10_000, 0
         )],
         &create_limits_for_deposits_and_max_mintable(0, 20_000, 100_000),
-        SOLO_DEPOSIT_TX_VSIZE as u64,
+        1.0,
         1, DEPOSIT_DUST_LIMIT + SOLO_DEPOSIT_TX_VSIZE as u64; "deposit_amounts_over_the_dust_limit_accepted")]
     #[test_case(
-        &vec![create_deposit(
+        &[create_deposit(
             DEPOSIT_DUST_LIMIT + SOLO_DEPOSIT_TX_VSIZE as u64 - 1, 10_000, 0
         )],
         &create_limits_for_deposits_and_max_mintable(0, 20_000, 100_000),
-        SOLO_DEPOSIT_TX_VSIZE as u64,
+        1.0,
         0, 0; "should_reject_deposits_under_dust_limit")]
     #[test_case(
-        &vec![
+        &[
             create_deposit(10_000, 1_000, 0),
             create_deposit(11_000, 100, 0),
             create_deposit(12_000, 2_000, 0),
             create_deposit(13_000, 0, 0),
         ],
         &create_limits_for_deposits_and_max_mintable(0, 20_000, 100_000),
-        1_000,
+        1.0,
         2, 22_000; "should_accept_all_deposits_above_or_equal_min_fee")]
     #[test_case(
-        &vec![
+        &[
             create_deposit(10_000, 10_000, 0),
             create_deposit(10_000, 10_000, 0),
             create_deposit(10_000, 10_000, 0),
@@ -3097,54 +3240,54 @@ mod tests {
             create_deposit(10_000, 10_000, 0),
         ],
         &create_limits_for_deposits_and_max_mintable(0, 10_000, 30_000),
-        1_000,
+        1.0,
         3, 30_000; "should_accept_deposits_until_max_mintable_reached")]
     #[test_case(
-        &vec![
+        &[
             create_deposit(10_000, 10_000, 0),
             create_deposit(10_000, 10_000, 0),
         ],
         &create_limits_for_deposits_and_max_mintable(0, 10_000, 15_000),
-        1_000,
+        1.0,
         1, 10_000; "should_accept_all_deposits_when_under_max_mintable")]
     #[test_case(
-        &vec![create_deposit(10_000, 10_000, 0),],
+        &[create_deposit(10_000, 10_000, 0),],
         &create_limits_for_deposits_and_max_mintable(0, 0, 0),
-        1_000,
+        1.0,
         0, 0; "should_handle_empty_deposit_list")]
     #[test_case(
-        &vec![
+        &[
             create_deposit(10_000, 0, 0),
             create_deposit(11_000, 10_000, 0),
             create_deposit(9_000, 10_000, 0),
         ],
         &create_limits_for_deposits_and_max_mintable(0, 10_000, 10_000),
-        1_000,
+        1.0,
         1, 9_000; "should_skip_invalid_fee_and_accept_valid_deposits")]
     #[test_case(
-        &vec![
+        &[
             create_deposit(10_001, 10_000, 0),
         ],
         &create_limits_for_deposits_and_max_mintable(0, 10_001, 10_000),
-        1_000,
+        1.0,
         0, 0; "should_reject_single_deposit_exceeding_max_mintable")]
     #[test_case(
-        &vec![
+        &[
             create_deposit(10_000, 10_000, 0),
         ],
         &create_limits_for_deposits_and_max_mintable(0, 8_000, 10_000),
-        1_000,
+        1.0,
         0, 0; "should_reject_single_deposit_exceeding_per_deposit_cap")]
     #[test_case(
-        &vec![
+        &[
             create_deposit(5_000, 2_000, 0),
             create_deposit(15_000, 2_000, 0),
         ],
         &create_limits_for_deposits_and_max_mintable(10_000, 20_000, 30_000),
-        1_000,
+        1.0,
         1, 15_000; "should_reject_deposits_below_per_deposit_minimum")]
     #[test_case(
-        &vec![
+        &[
             create_deposit(10_000, 10_000, 0), // accepted
             create_deposit(DEPOSIT_DUST_LIMIT + 999, 10_000, 0), // rejected (1 below dust limit) min_fee is 1_000
             create_deposit(9_000, 10_000, 0),  // rejected (below per_deposit_minimum)
@@ -3154,17 +3297,16 @@ mod tests {
             create_deposit(5_000, 500, 0),     // rejected (below minimum_fee)
         ],
         &create_limits_for_deposits_and_max_mintable(10_000, 20_000, 40_000),
-        1_000,
+        1.0,
         2, 30_000; "should_respect_all_limits")]
-    #[tokio::test]
-    async fn test_deposit_filter_filters_deposits_over_limits(
-        deposits: &Vec<DepositRequest>,
+    fn test_deposit_filter_filters_deposits_over_limits(
+        deposits: &[DepositRequest],
         sbtc_limits: &SbtcLimits,
-        minimum_fee: u64,
+        fee_rate: f64,
         num_accepted_deposits: usize,
         accepted_amount: u64,
     ) {
-        let filter = SbtcRequestsFilter::new(sbtc_limits, minimum_fee);
+        let filter = RequestPreprocessor::new(sbtc_limits, fee_rate, None);
 
         let deposits = filter.filter_deposits(deposits);
         // Each deposit and withdrawal has a max fee greater than the current market fee rate
@@ -3176,5 +3318,314 @@ mod tests {
 
         assert_eq!(deposits.len(), num_accepted_deposits);
         assert_eq!(total_amount, accepted_amount);
+    }
+
+    struct WithdrawalLimitTestCase {
+        /// The withdrawal requests under consideration.
+        withdrawals: Vec<WithdrawalRequest>,
+        /// The maximum amount that can be withdrawn in a single withdrawal
+        /// request.
+        per_withdrawal_cap: u64,
+        /// The rolling withdrawal limits that are being applied to withdrawals.
+        rolling_limits: RollingWithdrawalLimits,
+        /// The prevailing fee-rate.
+        fee_rate: f64,
+        /// The expected number of non-filtered withdrawal requests.
+        num_accepted_withdrawals: usize,
+        /// The expected sum of the withdrawal amounts after filtering.
+        accepted_amount: u64,
+    }
+
+    #[test_case(WithdrawalLimitTestCase {
+        withdrawals: vec![
+            create_withdrawal(10_000, 10_000, 0), // accepted
+            create_withdrawal(20_001, 10_000, 0), // rejected (above per_withdrawal_cap)
+            create_withdrawal(20_000, 10_000, 0), // accepted
+            create_withdrawal(5_000, 500, 0),     // rejected (max-fee is too low)
+            create_withdrawal(8_000, 10_000, 0),  // accepted
+            create_withdrawal(10_000, 10_000, 0), // rejected (above rolling cap)
+            create_withdrawal(1_000, 10_000, 0),  // accepted
+        ],
+        per_withdrawal_cap: 20_000,
+        rolling_limits: RollingWithdrawalLimits { blocks: 0, cap: 40_000, withdrawn_total: 0 },
+        fee_rate: 10.0,
+        num_accepted_withdrawals: 4,
+        accepted_amount: 39_000,
+    }; "should respect all limits")]
+    #[test_case(WithdrawalLimitTestCase {
+        withdrawals: vec![create_withdrawal(10_000, 10_000, 0)],
+        per_withdrawal_cap: 10_000,
+        rolling_limits: RollingWithdrawalLimits { blocks: 0, cap: 10_000, withdrawn_total: 0 },
+        fee_rate: 10.0,
+        num_accepted_withdrawals: 1,
+        accepted_amount: 10_000,
+    }; "regular withdrawal within limits v1")]
+    #[test_case(WithdrawalLimitTestCase {
+        withdrawals: vec![create_withdrawal(9_999, 10_000, 0)],
+        per_withdrawal_cap: 10_000,
+        rolling_limits: RollingWithdrawalLimits { blocks: 0, cap: 10_000, withdrawn_total: 1 },
+        fee_rate: 10.0,
+        num_accepted_withdrawals: 1,
+        accepted_amount: 9_999,
+    }; "regular withdrawal within limits v2")]
+    #[test_case(WithdrawalLimitTestCase {
+        withdrawals: vec![create_withdrawal(10_000, 10_000, 0)],
+        per_withdrawal_cap: 10_000,
+        rolling_limits: RollingWithdrawalLimits { blocks: 0, cap: 10_000, withdrawn_total: 1 },
+        fee_rate: 10.0,
+        num_accepted_withdrawals: 0,
+        accepted_amount: 0,
+    }; "regular withdrawal just outside of limits")]
+    #[test_case(WithdrawalLimitTestCase {
+        withdrawals: vec![create_withdrawal(10_000, 10_000, 0)],
+        per_withdrawal_cap: 9_999,
+        rolling_limits: RollingWithdrawalLimits { blocks: 0, cap: 10_000, withdrawn_total: 0 },
+        fee_rate: 10.0,
+        num_accepted_withdrawals: 0,
+        accepted_amount: 0,
+    }; "over the per withdrawal cap gets filtered")]
+    #[test_case(WithdrawalLimitTestCase {
+        withdrawals: vec![
+            create_withdrawal(10_000, 10_000, 0), // rejected
+            create_withdrawal(20_001, 10_000, 0), // rejected
+            create_withdrawal(20_000, 10_000, 0), // rejected
+            create_withdrawal(5_000, 500, 0),     // rejected
+            create_withdrawal(8_000, 10_000, 0),  // rejected
+            create_withdrawal(10_000, 10_000, 0), // rejected
+            create_withdrawal(1_000, 10_000, 0),  // rejected
+        ],
+        per_withdrawal_cap: Amount::MAX_MONEY.to_sat(),
+        rolling_limits: RollingWithdrawalLimits::fully_constrained(0),
+        fee_rate: 1.0,
+        num_accepted_withdrawals: 0,
+        accepted_amount: 0,
+    }; "zero for rolling withdrawals filters everything")]
+    #[test_case(WithdrawalLimitTestCase {
+        withdrawals: vec![
+            create_withdrawal(10_000, 10_000, 0), // rejected
+            create_withdrawal(20_001, 10_000, 0), // rejected
+            create_withdrawal(20_000, 10_000, 0), // rejected
+            create_withdrawal(5_000, 10_000, 0),  // rejected
+            create_withdrawal(8_000, 10_000, 0),  // rejected
+            create_withdrawal(10_000, 10_000, 0), // rejected
+            create_withdrawal(1_000, 10_000, 0),  // rejected
+            create_withdrawal(*MINIMAL_NON_DUST_AMOUNT_P2WPKH, 10_000, 0), // rejected
+        ],
+        per_withdrawal_cap: 0,
+        rolling_limits: RollingWithdrawalLimits::unlimited(0),
+        fee_rate: 1.0,
+        num_accepted_withdrawals: 0,
+        accepted_amount: 0,
+    }; "zero per withdrawal cap rolling withdrawals filters everything")]
+    #[test_case(WithdrawalLimitTestCase {
+        withdrawals: vec![create_withdrawal(*MINIMAL_NON_DUST_AMOUNT_P2WPKH - 1, 10_000, 0)],
+        per_withdrawal_cap: u64::MAX,
+        rolling_limits: RollingWithdrawalLimits::unlimited(0),
+        fee_rate: 1.0,
+        num_accepted_withdrawals: 0,
+        accepted_amount: 0,
+    }; "amounts below the dust limit are filtered")]
+    #[test_case(WithdrawalLimitTestCase {
+        withdrawals: vec![
+            create_withdrawal(10_000, 10_000, 0), // accepted
+            create_withdrawal(20_001, 10_000, 0), // accepted
+            create_withdrawal(20_000, 10_000, 0), // accepted
+            create_withdrawal(5_000, 500, 0),     // rejected (max-fee is too low)
+            create_withdrawal(8_000, 10_000, 0),  // accepted
+            create_withdrawal(10_000, 10_000, 0), // accepted
+            create_withdrawal(1_000, 10_000, 0),  // accepted
+            create_withdrawal(*MINIMAL_NON_DUST_AMOUNT_P2WPKH, 10_000, 0), // accepted
+        ],
+        per_withdrawal_cap: u64::MAX,
+        rolling_limits: RollingWithdrawalLimits::unlimited(0),
+        fee_rate: 10.0,
+        num_accepted_withdrawals: 7,
+        accepted_amount: 69_001 + *MINIMAL_NON_DUST_AMOUNT_P2WPKH,
+    }; "unlimited withdrawal caps only applies max-fee filtering")]
+    fn test_withdrawal_request_filtering(case: WithdrawalLimitTestCase) {
+        let limits =
+            SbtcLimits::from_withdrawal_limits(case.per_withdrawal_cap, case.rolling_limits);
+        let preprocessor = RequestPreprocessor::new(&limits, case.fee_rate, None);
+
+        let withdrawals = preprocessor.preprocess_withdrawals(&case.withdrawals);
+        let total_amount: u64 = withdrawals
+            .iter()
+            .map(|req| req.as_withdrawal().unwrap().amount)
+            .sum();
+
+        assert_eq!(withdrawals.len(), case.num_accepted_withdrawals);
+        assert_eq!(total_amount, case.accepted_amount);
+        assert!(withdrawals.is_sorted())
+    }
+
+    #[derive(Default)]
+    struct TestTxOut {
+        pub tx_outputs: Vec<TxOutput>,
+    }
+
+    impl TestTxOut {
+        pub fn tx(&self) -> bitcoin::Transaction {
+            Transaction {
+                version: Version::TWO,
+                lock_time: LockTime::ZERO,
+                input: Vec::new(),
+                output: Vec::new(),
+            }
+        }
+
+        pub fn tx_info(&self) -> BitcoinTxInfo {
+            BitcoinTxInfo {
+                fee: Some(Amount::from_sat(1000)),
+                tx: Transaction {
+                    version: Version::TWO,
+                    lock_time: LockTime::ZERO,
+                    input: Vec::new(),
+                    output: Vec::new(),
+                },
+                vin: Vec::new(),
+            }
+        }
+        pub fn output(&mut self, output_type: TxOutputType) -> &mut Self {
+            let tx = self.tx();
+            self.tx_outputs.push(TxOutput {
+                txid: tx.compute_txid().into(),
+                output_index: self.tx_outputs.len() as u32,
+                script_pubkey: ScriptPubKey::from_bytes(vec![]),
+                amount: 0,
+                output_type,
+            });
+            self
+        }
+        pub fn op_return(&mut self, script: ScriptBuf) -> &mut Self {
+            let tx = self.tx();
+            self.tx_outputs.push(TxOutput {
+                txid: tx.compute_txid().into(),
+                output_index: self.tx_outputs.len() as u32,
+                script_pubkey: script.into(),
+                amount: 0,
+                output_type: TxOutputType::SignersOpReturn,
+            });
+            self
+        }
+    }
+
+    #[test_case(&TestTxOut::default(); "no outputs")]
+    #[test_case(&TestTxOut::default()
+        .output(TxOutputType::SignersOutput)
+    ; "one output")]
+    #[test_case(&TestTxOut::default()
+        .output(TxOutputType::SignersOutput)
+        .output(TxOutputType::SignersOpReturn)
+    ; "no withdrawals")]
+    #[test_case(&TestTxOut::default()
+        .output(TxOutputType::SignersOpReturn)
+        .output(TxOutputType::SignersOutput)
+        .output(TxOutputType::Withdrawal)
+    ; "swapped")]
+    #[test_case(&TestTxOut::default()
+        .output(TxOutputType::Donation)
+        .output(TxOutputType::SignersOpReturn)
+        .output(TxOutputType::Withdrawal)
+    ; "wrong first")]
+    #[test_case(&TestTxOut::default()
+        .output(TxOutputType::SignersOutput)
+        .output(TxOutputType::Donation)
+        .output(TxOutputType::Withdrawal)
+    ; "wrong second")]
+    #[test_case(&TestTxOut::default()
+        .output(TxOutputType::SignersOutput)
+        .op_return(ScriptBuf::new_op_return({
+            let mut pb = PushBytesBuf::new();
+            pb.extend_from_slice(&[0, 0, 0]).unwrap();
+            pb
+        }))
+        .output(TxOutputType::Withdrawal)
+    ; "version 0")]
+    fn test_to_withdrawal_outputs_no_outputs(tx: &TestTxOut) {
+        let tx_info = tx.tx_info();
+        let withdrawal_outs = tx_info.to_withdrawal_outputs(&tx.tx_outputs).unwrap();
+        assert!(withdrawal_outs.is_empty());
+    }
+
+    #[test_case(&TestTxOut::default()
+        .output(TxOutputType::SignersOutput)
+        .output(TxOutputType::SignersOpReturn)
+        .output(TxOutputType::Withdrawal)
+        .output(TxOutputType::Donation)
+    ; "not all withdrawals")]
+    #[test_case(&TestTxOut::default()
+        .output(TxOutputType::SignersOutput)
+        .op_return(ScriptBuf::new_op_return({
+            let mut pb = PushBytesBuf::new();
+            pb.extend_from_slice(&[0, 0, 1]).unwrap();
+            // no withdrawals encoded
+            pb
+        }))
+        .output(TxOutputType::Withdrawal)
+    ; "mismatched outputs")]
+    fn test_to_withdrawal_outputs_malformed_tx(tx: &TestTxOut) {
+        let tx_info = tx.tx_info();
+        let withdrawal_outs = tx_info.to_withdrawal_outputs(&tx.tx_outputs).unwrap_err();
+        assert!(matches!(withdrawal_outs, Error::SbtcTxMalformed));
+    }
+
+    #[test_case(&TestTxOut::default()
+        .output(TxOutputType::SignersOutput)
+        .op_return(ScriptBuf::new())
+        .output(TxOutputType::Withdrawal)
+    ; "wrong opreturn")]
+    #[test_case(&TestTxOut::default()
+        .output(TxOutputType::SignersOutput)
+        .op_return(ScriptBuf::new_op_return({
+            let mut pb = PushBytesBuf::new();
+            pb.extend_from_slice(&[0, 0]).unwrap();
+            pb
+        }))
+        .output(TxOutputType::Withdrawal)
+    ; "short pushbytes")]
+    #[test_case(&TestTxOut::default()
+        .output(TxOutputType::SignersOutput)
+        .op_return(ScriptBuf::new_op_return({
+            let mut pb = PushBytesBuf::new();
+            pb.extend_from_slice(&[0, 0, 42]).unwrap();
+            pb
+        }))
+        .output(TxOutputType::Withdrawal)
+    ; "wrong version")]
+    fn test_to_withdrawal_outputs_malformed_opreturn(tx: &TestTxOut) {
+        let tx_info = tx.tx_info();
+        let withdrawal_outs = tx_info.to_withdrawal_outputs(&tx.tx_outputs).unwrap_err();
+        assert!(matches!(withdrawal_outs, Error::SbtcTxOpReturnFormatError));
+    }
+
+    #[test]
+    fn test_to_withdrawal_outputs_happy_path() {
+        let mut pb = PushBytesBuf::new();
+        pb.extend_from_slice(&[0, 0, 1]).unwrap();
+        pb.extend_from_slice(&BitmapSegmenter.package(&[42, 51]).unwrap().encode())
+            .unwrap();
+
+        let mut tx = TestTxOut::default();
+        tx.output(TxOutputType::SignersOutput)
+            .op_return(ScriptBuf::new_op_return(pb))
+            .output(TxOutputType::Withdrawal)
+            .output(TxOutputType::Withdrawal);
+
+        let tx_info = tx.tx_info();
+        let withdrawal_outs = tx_info.to_withdrawal_outputs(&tx.tx_outputs).unwrap();
+
+        let expected = vec![
+            WithdrawalTxOutput {
+                txid: tx_info.compute_txid().into(),
+                output_index: 2,
+                request_id: 42,
+            },
+            WithdrawalTxOutput {
+                txid: tx_info.compute_txid().into(),
+                output_index: 3,
+                request_id: 51,
+            },
+        ];
+        assert_eq!(withdrawal_outs, expected);
     }
 }

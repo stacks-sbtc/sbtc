@@ -1,0 +1,19 @@
+services:
+  bitcoind:
+    image: bitcoin/bitcoin:${BITCOIN_CORE_VERSION:-25.2}
+    volumes:
+      - ../bitcoin/bitcoin.conf:/root/.bitcoin/bitcoin.conf:ro
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        set -e
+        bitcoind
+    stop_grace_period: 0s
+    ports:
+      - "18443"
+    healthcheck:
+      test: [ "CMD-SHELL", "bitcoin-cli -rpcwait getblockcount" ]
+      interval: 200ms
+      timeout: 200ms
+      retries: 20

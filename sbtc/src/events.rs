@@ -10,8 +10,6 @@
 
 use std::collections::BTreeMap;
 
-use bitcoin::hashes::Hash;
-use bitcoin::hex::DisplayHex;
 use bitcoin::BlockHash as BitcoinBlockHash;
 use bitcoin::OutPoint;
 use bitcoin::PubkeyHash;
@@ -20,12 +18,14 @@ use bitcoin::ScriptHash;
 use bitcoin::Txid as BitcoinTxid;
 use bitcoin::WitnessProgram;
 use bitcoin::WitnessVersion;
+use bitcoin::hashes::Hash as _;
+use bitcoin::hex::DisplayHex as _;
+use clarity::vm::ClarityName;
+use clarity::vm::Value as ClarityValue;
 use clarity::vm::types::CharType;
 use clarity::vm::types::PrincipalData;
 use clarity::vm::types::SequenceData;
 use clarity::vm::types::TupleData;
-use clarity::vm::ClarityName;
-use clarity::vm::Value as ClarityValue;
 use secp256k1::PublicKey;
 use stacks_common::types::chainstate::StacksBlockId;
 
@@ -109,7 +109,7 @@ pub enum EventError {
     ClarityUnexpectedEventTopic(String),
     /// This happens when we expect one clarity variant but got another.
     #[error("Got an unexpected clarity value: {0:?}; {1}")]
-    ClarityUnexpectedValue(ClarityValue, TxInfo),
+    ClarityUnexpectedValue(Box<ClarityValue>, TxInfo),
     /// This should never happen, since  our witness programs are under the
     /// maximum length.
     #[error("tried to create an invalid witness program {0}")]
@@ -139,7 +139,7 @@ pub enum RegistryEvent {
 }
 
 /// A type that points to a transaction in a stacks block.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub struct TxInfo {
     /// The transaction ID
     pub txid: StacksTxid,
@@ -175,7 +175,7 @@ impl RegistryEvent {
                     _ => Err(EventError::ClarityUnexpectedEventTopic(topic)),
                 }
             }
-            value => Err(EventError::ClarityUnexpectedValue(value, tx_info)),
+            value => Err(EventError::ClarityUnexpectedValue(value.into(), tx_info)),
         }
     }
 }
@@ -281,10 +281,16 @@ pub struct WithdrawalRejectEvent {
 /// public function in the sbtc-registry smart contract.
 #[derive(Debug, Clone)]
 pub struct KeyRotationEvent {
+    /// The transaction id of the stacks transaction that generated this
+    /// event.
+    pub txid: StacksTxid,
+    /// The block ID of the block for this event.
+    pub block_id: StacksBlockId,
     /// The new set of public keys for all known signers during this
     /// PoX cycle.
     pub new_keys: Vec<PublicKey>,
-    /// The address that deployed the contract.
+    /// The principal that can make contract calls into the protected
+    /// public functions in the sbtc smart contracts.
     pub new_address: PrincipalData,
     /// The new aggregate key created by combining the above public keys.
     pub new_aggregate_pubkey: PublicKey,
@@ -306,21 +312,21 @@ impl RawTupleData {
     fn remove_u128(&mut self, field: &'static str) -> Result<u128, EventError> {
         match self.data_map.remove(field) {
             Some(ClarityValue::UInt(val)) => Ok(val),
-            _ => Err(EventError::TupleEventField(field, self.tx_info)),
+            _ => Err(EventError::TupleEventField(field, self.tx_info.clone())),
         }
     }
     /// Extract the buff value from the given field
     fn remove_buff(&mut self, field: &'static str) -> Result<Vec<u8>, EventError> {
         match self.data_map.remove(field) {
             Some(ClarityValue::Sequence(SequenceData::Buffer(buf))) => Ok(buf.data),
-            _ => Err(EventError::TupleEventField(field, self.tx_info)),
+            _ => Err(EventError::TupleEventField(field, self.tx_info.clone())),
         }
     }
     /// Extract the principal value from the given field
     fn remove_principal(&mut self, field: &'static str) -> Result<PrincipalData, EventError> {
         match self.data_map.remove(field) {
             Some(ClarityValue::Principal(principal)) => Ok(principal),
-            _ => Err(EventError::TupleEventField(field, self.tx_info)),
+            _ => Err(EventError::TupleEventField(field, self.tx_info.clone())),
         }
     }
     /// Extract the string value from the given field
@@ -329,16 +335,16 @@ impl RawTupleData {
             Some(ClarityValue::Sequence(SequenceData::String(CharType::ASCII(ascii)))) => {
                 String::from_utf8(ascii.data).map_err(EventError::ClarityStringConversion)
             }
-            _ => Err(EventError::TupleEventField(field, self.tx_info)),
+            _ => Err(EventError::TupleEventField(field, self.tx_info.clone())),
         }
     }
     /// Extract the tuple value from the given field
     fn remove_tuple(&mut self, field: &'static str) -> Result<Self, EventError> {
         match self.data_map.remove(field) {
             Some(ClarityValue::Tuple(TupleData { data_map, .. })) => {
-                Ok(Self::new(data_map, self.tx_info))
+                Ok(Self::new(data_map, self.tx_info.clone()))
             }
-            _ => Err(EventError::TupleEventField(field, self.tx_info)),
+            _ => Err(EventError::TupleEventField(field, self.tx_info.clone())),
         }
     }
 
@@ -346,7 +352,7 @@ impl RawTupleData {
     fn remove_list(&mut self, field: &'static str) -> Result<Vec<ClarityValue>, EventError> {
         match self.data_map.remove(field) {
             Some(ClarityValue::Sequence(SequenceData::List(list))) => Ok(list.data),
-            _ => Err(EventError::TupleEventField(field, self.tx_info)),
+            _ => Err(EventError::TupleEventField(field, self.tx_info.clone())),
         }
     }
 
@@ -719,7 +725,10 @@ impl RawTupleData {
                 ClarityValue::Sequence(SequenceData::Buffer(buf)) => {
                     PublicKey::from_slice(&buf.data).map_err(EventError::ClarityPublicKeyConversion)
                 }
-                _ => Err(EventError::ClarityUnexpectedValue(val, self.tx_info)),
+                _ => Err(EventError::ClarityUnexpectedValue(
+                    val.into(),
+                    self.tx_info.clone(),
+                )),
             })
             .collect::<Result<Vec<PublicKey>, EventError>>()?;
 
@@ -728,6 +737,8 @@ impl RawTupleData {
         let new_signature_threshold = self.remove_u128("new-signature-threshold")?;
 
         Ok(RegistryEvent::KeyRotation(KeyRotationEvent {
+            txid: self.tx_info.txid,
+            block_id: self.tx_info.block_id,
             new_keys,
             new_address,
             new_aggregate_pubkey: PublicKey::from_slice(&new_aggregate_pubkey)
@@ -746,7 +757,7 @@ mod tests {
     use bitcoin::key::TweakedPublicKey;
     use clarity::vm::types::ListData;
     use clarity::vm::types::ListTypeData;
-    use clarity::vm::types::BUFF_33;
+    use clarity::vm::types::TypeSignature;
     use rand::rngs::OsRng;
     use secp256k1::SECP256K1;
 
@@ -865,7 +876,7 @@ mod tests {
                 assert_eq!(event.request_id, request_id as u64);
                 assert_eq!(event.block_height, block_height as u64);
                 assert_eq!(event.max_fee, max_fee as u64);
-                assert_eq!(event.sender, sender.into());
+                assert_eq!(event.sender, sender);
                 assert_eq!(event.recipient, recipient_address);
             }
             e => panic!("Got the wrong event variant: {e:?}"),
@@ -982,7 +993,7 @@ mod tests {
                         .iter()
                         .map(|key| ClarityValue::buff_from(key.serialize().into()).unwrap())
                         .collect(),
-                    type_signature: ListTypeData::new_list(BUFF_33.clone(), 128)
+                    type_signature: ListTypeData::new_list(TypeSignature::BUFFER_33.clone(), 128)
                         .expect("Expected list"),
                 })),
             ),

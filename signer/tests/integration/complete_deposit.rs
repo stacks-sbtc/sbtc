@@ -1,8 +1,8 @@
 use blockstack_lib::types::chainstate::StacksAddress;
 use rand::rngs::OsRng;
-use rand::SeedableRng;
 
 use sbtc::testing::regtest;
+use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::error::Error;
 use signer::stacks::contracts::AsContractCall as _;
 use signer::stacks::contracts::CompleteDepositV1;
@@ -13,14 +13,18 @@ use signer::storage::model::BitcoinTxId;
 use signer::storage::model::StacksPrincipal;
 use signer::testing;
 use signer::testing::context::*;
+use signer::testing::get_rng;
 
-use fake::Fake;
+use fake::Fake as _;
+use signer::DEPOSIT_DUST_LIMIT;
 
-use crate::setup::backfill_bitcoin_blocks;
-use crate::setup::DepositAmounts;
+use crate::setup::SweepAmounts;
 use crate::setup::TestSignerSet;
 use crate::setup::TestSweepSetup;
 use crate::setup::TestSweepSetup2;
+use crate::setup::backfill_bitcoin_blocks;
+use crate::setup::set_deposit_completed;
+use crate::setup::set_deposit_incomplete;
 
 /// Create a "proper" [`CompleteDepositV1`] object and context with the
 /// given information. If the information here is correct then the returned
@@ -45,7 +49,7 @@ pub fn make_complete_deposit(data: &TestSweepSetup) -> (CompleteDepositV1, ReqCo
         deployer: StacksAddress::burn_address(false),
         // The sweep transaction ID must point to a transaction on
         // the canonical bitcoin blockchain.
-        sweep_txid: data.sweep_tx_info.txid.into(),
+        sweep_txid: data.sweep_tx_info.compute_txid().into(),
         // The block hash of the block that includes the above sweep
         // transaction. It must be on the canonical bitcoin blockchain.
         sweep_block_hash: data.sweep_block_hash.into(),
@@ -59,6 +63,8 @@ pub fn make_complete_deposit(data: &TestSweepSetup) -> (CompleteDepositV1, ReqCo
             block_hash: data.sweep_block_hash.into(),
             block_height: data.sweep_block_height,
         },
+        // This is not used for deposit tests.
+        stacks_chain_tip: signer::storage::model::StacksBlockHash::from([0; 32]),
         // This value means that the signer will go back 10 blocks when
         // looking for pending and accepted deposit requests.
         context_window: 10,
@@ -105,7 +111,7 @@ pub fn make_complete_deposit2(data: &TestSweepSetup2) -> (CompleteDepositV1, Req
         deployer: StacksAddress::burn_address(false),
         // The sweep transaction ID must point to a transaction on
         // the canonical bitcoin blockchain.
-        sweep_txid: sweep_tx_info.tx_info.txid.into(),
+        sweep_txid: sweep_tx_info.tx_info.compute_txid().into(),
         // The block hash of the block that includes the above sweep
         // transaction. It must be on the canonical bitcoin blockchain.
         sweep_block_hash: sweep_tx_info.block_hash,
@@ -119,6 +125,8 @@ pub fn make_complete_deposit2(data: &TestSweepSetup2) -> (CompleteDepositV1, Req
             block_hash: sweep_tx_info.block_hash,
             block_height: sweep_tx_info.block_height,
         },
+        // This is not used for deposit tests.
+        stacks_chain_tip: signer::storage::model::StacksBlockHash::from([0; 32]),
         // This value means that the signer will go back 10 blocks when
         // looking for pending and accepted deposit requests.
         context_window: 10,
@@ -140,16 +148,20 @@ pub fn make_complete_deposit2(data: &TestSweepSetup2) -> (CompleteDepositV1, Req
     (complete_deposit_tx, req_ctx)
 }
 
-#[cfg_attr(not(feature = "integration-tests"), ignore)]
 #[tokio::test]
 async fn complete_deposit_validation_happy_path() {
     // Normal: this generates the blockchain as well as deposit request
     // transactions and a transaction sweeping in the deposited funds.
     // This is just setup and should be essentially the same between tests.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(&rpc, &faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        1_000_000,
+        &mut rng,
+    );
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -187,12 +199,15 @@ async fn complete_deposit_validation_happy_path() {
     // core. This will create a bitcoin core client that connects to the
     // bitcoin-core at the [bitcoin].endpoints[0] endpoint from the default
     // toml config file.
-    let ctx = TestContext::builder()
+    let mut ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
+
+    // Normal: the request is not completed in the smart contract.
+    set_deposit_incomplete(&mut ctx).await;
 
     // Check to see if validation passes.
     complete_deposit_tx.validate(&ctx, &req_ctx).await.unwrap();
@@ -201,17 +216,93 @@ async fn complete_deposit_validation_happy_path() {
 }
 
 /// For this test we check that the `CompleteDepositV1::validate` function
+/// correctly validates a complete deposit contract call when the signer
+/// was not part of the signing set, so no DKG shares, but has information
+/// about the sweep transaction nonetheless because it has been following
+/// the sweeps using the bootstrap aggregate key.
+#[tokio::test]
+async fn complete_deposit_validation_signer_no_dkg_shares() {
+    // Normal: this generates the blockchain as well as deposit request
+    // transactions and a transaction sweeping in the deposited funds.
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
+    let (rpc, faucet) = regtest::initialize_blockchain();
+    let setup = TestSweepSetup::new_setup(
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        1_000_000,
+        &mut rng,
+    );
+
+    // Normal: the signers' block observer should be getting new block
+    // events from bitcoin-core. We haven't hooked up our block observer,
+    // so we need to manually update the database with new bitcoin block
+    // headers and at least one stacks block.
+    backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash).await;
+    // Normal: This stores a genesis stacks block anchored to the bitcoin
+    // blockchain identified by setup.sweep_block_hash.
+    setup.store_stacks_genesis_block(&db).await;
+
+    // Normal: we take the deposit transaction as is from the test setup
+    // and store it in the database. This is necessary for when we fetch
+    // outstanding unfulfilled deposit requests.
+    setup.store_deposit_tx(&db).await;
+
+    // Normal: we take the sweep transaction as is from the test setup and
+    // store it in the database.
+    setup.store_sweep_tx(&db).await;
+
+    // Different: we normally add a row in the dkg_shares table so that we
+    // have a record of the scriptPubKey that the signers control. Here we
+    // exclude it, so it looks like the first UTXO in the transaction is
+    // not controlled by the signers.
+    //
+    // However, we assume that the signer has been picking up on the
+    // signers' sweep transactions, so there are rows in the
+    // bitcoin_tx_outputs table for the signers' outputs. This allows the
+    // signer to check for whether this is indeed a valid sweep.
+
+    // Normal: the request and how the signers voted needs to be added to
+    // the database. Here the bitmap in the deposit request object
+    // corresponds to how the signers voted.
+    setup.store_deposit_request(&db).await;
+    setup.store_deposit_decisions(&db).await;
+
+    // Normal: create a properly formed complete-deposit transaction object
+    // and the corresponding request context.
+    let (complete_deposit_tx, req_ctx) = make_complete_deposit(&setup);
+
+    let mut ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_first_bitcoin_core_client()
+        .with_mocked_stacks_client()
+        .with_mocked_emily_client()
+        .build();
+
+    // Normal: the request is not completed in the smart contract.
+    set_deposit_incomplete(&mut ctx).await;
+
+    complete_deposit_tx.validate(&ctx, &req_ctx).await.unwrap();
+
+    testing::storage::drop_db(db).await;
+}
+
+/// For this test we check that the `CompleteDepositV1::validate` function
 /// returns a deposit validation error with a DeployerMismatch message when
 /// the deployer doesn't match but everything else is okay.
-#[cfg_attr(not(feature = "integration-tests"), ignore)]
 #[tokio::test]
 async fn complete_deposit_validation_deployer_mismatch() {
     // Normal: this generates the blockchain as well as deposit request
     // transactions and a transaction sweeping in the deposited funds.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(&rpc, &faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        1_000_000,
+        &mut rng,
+    );
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -248,12 +339,15 @@ async fn complete_deposit_validation_deployer_mismatch() {
     complete_deposit_tx.deployer = StacksAddress::p2pkh(false, &setup.signer_keys[0].into());
     req_ctx.deployer = StacksAddress::p2pkh(false, &setup.signer_keys[1].into());
 
-    let ctx = TestContext::builder()
+    let mut ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
+
+    // Normal: the request is not completed in the smart contract.
+    set_deposit_incomplete(&mut ctx).await;
 
     let validate_future = complete_deposit_tx.validate(&ctx, &req_ctx);
     match validate_future.await.unwrap_err() {
@@ -270,15 +364,19 @@ async fn complete_deposit_validation_deployer_mismatch() {
 /// returns a deposit validation error with a DepositRequestMissing message
 /// when the signer does not have a record of the deposit request doesn't
 /// match but everything else is okay.
-#[cfg_attr(not(feature = "integration-tests"), ignore)]
 #[tokio::test]
 async fn complete_deposit_validation_missing_deposit_request() {
     // Normal: this generates the blockchain as well as deposit request
     // transactions and a transaction sweeping in the deposited funds.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(&rpc, &faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        1_000_000,
+        &mut rng,
+    );
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -309,12 +407,15 @@ async fn complete_deposit_validation_missing_deposit_request() {
     // and the corresponding request context.
     let (complete_deposit_tx, req_ctx) = make_complete_deposit(&setup);
 
-    let ctx = TestContext::builder()
+    let mut ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
+
+    // Normal: the request is not completed in the smart contract.
+    set_deposit_incomplete(&mut ctx).await;
 
     let validation_result = complete_deposit_tx.validate(&ctx, &req_ctx).await;
     match validation_result.unwrap_err() {
@@ -331,15 +432,19 @@ async fn complete_deposit_validation_missing_deposit_request() {
 /// returns a deposit validation error with a RecipientMismatch message
 /// when the recipient in the complete-deposit transaction does not match
 /// the recipient in our records.
-#[cfg_attr(not(feature = "integration-tests"), ignore)]
 #[tokio::test]
 async fn complete_deposit_validation_recipient_mismatch() {
     // Normal: this generates the blockchain as well as deposit request
     // transactions and a transaction sweeping in the deposited funds.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(&rpc, &faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        1_000_000,
+        &mut rng,
+    );
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -377,12 +482,15 @@ async fn complete_deposit_validation_recipient_mismatch() {
         .fake_with_rng::<StacksPrincipal, _>(&mut rng)
         .into();
 
-    let ctx = TestContext::builder()
+    let mut ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
+
+    // Normal: the request is not completed in the smart contract.
+    set_deposit_incomplete(&mut ctx).await;
 
     let validate_future = complete_deposit_tx.validate(&ctx, &req_ctx);
     match validate_future.await.unwrap_err() {
@@ -405,20 +513,19 @@ async fn complete_deposit_validation_recipient_mismatch() {
 /// that we need to take into consideration fees. The fee rate for these
 /// tests are 10 sats per vbyte, and this test constructs a sweep
 /// transaction that is 235 bytes. Adding more deposits, including
-/// withdrawals outputs, and changing the fee rate would change the
+/// deposits outputs, and changing the fee rate would change the
 /// calculation specified in this test, so that's why we use the magic
 /// deposit amount here.
 ///
 /// Moreover, our testing apparatus goes through code that filters deposits
 /// based off of the DUST amount, so we need custom code to trigger this
 /// error.
-#[cfg_attr(not(feature = "integration-tests"), ignore)]
 #[tokio::test]
 async fn complete_deposit_validation_fee_too_low() {
     // Normal: this generates the blockchain as well as deposit request
     // transactions and a transaction sweeping in the deposited funds.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
     let signers = TestSignerSet::new(&mut rng);
@@ -432,8 +539,17 @@ async fn complete_deposit_validation_fee_too_low() {
     // bitcoin core for some things and rely on the database for others.
     // Hopefully this test does not become an issue down the line due to a
     // refactor.
-    let amounts = DepositAmounts { amount: 50000, max_fee: 80_000 };
-    let mut setup = TestSweepSetup2::new_setup(signers, faucet, &[amounts]);
+    let amounts = SweepAmounts {
+        amount: 50000,
+        max_fee: 80_000,
+        is_deposit: true,
+    };
+    let mut setup = TestSweepSetup2::new_setup(
+        signers,
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        &[amounts],
+    );
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -451,7 +567,7 @@ async fn complete_deposit_validation_fee_too_low() {
 
     // Normal: we submit the transaction sweeping the funds. It gets
     // confirmed; this generates a new bitcoin block behind the scene.
-    setup.submit_sweep_tx(rpc, faucet, false);
+    setup.submit_sweep_tx(faucet);
 
     // Normal: When a new bitcoin block is generated, we need to update the
     // signer's database with blockchain data.
@@ -473,16 +589,30 @@ async fn complete_deposit_validation_fee_too_low() {
     // Different: We need to update the amount to be something that
     // validation would reject. To do that we update our database.
     //
-    // The fee rate in this test is fixed at 10.0 sats per vbyte and the tx
-    // size is 235 bytes, so we lose 2350 sats to fees. The amount here is
-    // chosen so that 2350 + 546 is greater than it.
-    let deposit_amount = 2895;
+    // We want to trigger the AmountBelowDustLimit error by calculating a deposit amount
+    // that results in a value just below the dust limit after fees are subtracted:
+    //
+    // 1. Get the actual fee from the sweep transaction (info.tx_info.fee)
+    // 2. Calculate: deposit_amount = actual_fee + DEPOSIT_DUST_LIMIT - 1
+    //
+    // This ensures when fee is subtracted from the deposit amount:
+    // deposit_amount - actual_fee = DEPOSIT_DUST_LIMIT - 1
+    //
+    // Which is exactly 1 satoshi below the dust limit, triggering the error regardless
+    // of the exact transaction size or fee rate used in tests.
+    let deposit_amount = setup
+        .sweep_tx_info
+        .as_ref()
+        .and_then(|info| Some(info.tx_info.fee?.to_sat() + DEPOSIT_DUST_LIMIT - 1))
+        .expect("sweep_tx_info not set");
+
     sqlx::query(
         r#"
         UPDATE deposit_requests AS dr
         SET amount = $1
-        WHERE dr.txid = $2
-          AND dr.output_index = $3;
+        WHERE
+            dr.txid = $2
+            AND dr.output_index = $3;
     "#,
     )
     .bind(deposit_amount as i32)
@@ -497,12 +627,15 @@ async fn complete_deposit_validation_fee_too_low() {
     // and the corresponding request context.
     let (complete_deposit_tx, req_ctx) = make_complete_deposit2(&setup);
 
-    let ctx = TestContext::builder()
+    let mut ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
+
+    // Normal: the request is not completed in the smart contract.
+    set_deposit_incomplete(&mut ctx).await;
 
     let validation_result = complete_deposit_tx.validate(&ctx, &req_ctx).await;
     match validation_result.unwrap_err() {
@@ -512,14 +645,15 @@ async fn complete_deposit_validation_fee_too_low() {
         err => panic!("unexpected error during validation {err}"),
     }
 
-    // Now a sanity check to see what happens if we are at the limit.
+    // Now a sanity check to see what happens if we are above the dust limit.
     let deposit_amount = deposit_amount + 1;
     sqlx::query(
         r#"
         UPDATE deposit_requests AS dr
         SET amount = $1
-        WHERE dr.txid = $2
-          AND dr.output_index = $3;
+        WHERE
+            dr.txid = $2
+            AND dr.output_index = $3;
     "#,
     )
     .bind(deposit_amount as i32)
@@ -542,15 +676,19 @@ async fn complete_deposit_validation_fee_too_low() {
 /// returns a deposit validation error with a FeeTooHigh message when the
 /// amount of sBTC to mint is less than the `amount - max-fee` from in the
 /// signer's deposit request record.
-#[cfg_attr(not(feature = "integration-tests"), ignore)]
 #[tokio::test]
 async fn complete_deposit_validation_fee_too_high() {
     // Normal: this generates the blockchain as well as deposit request
     // transactions and a transaction sweeping in the deposited funds.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
-    let mut setup = TestSweepSetup::new_setup(&rpc, &faucet, 1_000_000, &mut rng);
+    let mut setup = TestSweepSetup::new_setup(
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        1_000_000,
+        &mut rng,
+    );
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -592,12 +730,15 @@ async fn complete_deposit_validation_fee_too_high() {
     // and the corresponding request context.
     let (complete_deposit_tx, req_ctx) = make_complete_deposit(&setup);
 
-    let ctx = TestContext::builder()
+    let mut ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
+
+    // Normal: the request is not completed in the smart contract.
+    set_deposit_incomplete(&mut ctx).await;
 
     let validate_future = complete_deposit_tx.validate(&ctx, &req_ctx);
     match validate_future.await.unwrap_err() {
@@ -614,15 +755,19 @@ async fn complete_deposit_validation_fee_too_high() {
 /// returns a deposit validation error with a SweepTransactionMissing
 /// message when the signer does not have a record of the sweep
 /// transaction.
-#[cfg_attr(not(feature = "integration-tests"), ignore)]
 #[tokio::test]
 async fn complete_deposit_validation_sweep_tx_missing() {
     // Normal: this generates the blockchain as well as deposit request
     // transactions and a transaction sweeping in the deposited funds.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(&rpc, &faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        1_000_000,
+        &mut rng,
+    );
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -661,12 +806,15 @@ async fn complete_deposit_validation_sweep_tx_missing() {
     // exist.
     complete_deposit_tx.sweep_txid = fake::Faker.fake_with_rng(&mut rng);
 
-    let ctx = TestContext::builder()
+    let mut ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
+
+    // Normal: the request is not completed in the smart contract.
+    set_deposit_incomplete(&mut ctx).await;
 
     let validation_result = complete_deposit_tx.validate(&ctx, &req_ctx).await;
     match validation_result.unwrap_err() {
@@ -683,15 +831,19 @@ async fn complete_deposit_validation_sweep_tx_missing() {
 /// returns a deposit validation error with a SweepTransactionReorged
 /// message when the sweep transaction is in our records but is not on what
 /// the signer thinks is the canonical bitcoin blockchain.
-#[cfg_attr(not(feature = "integration-tests"), ignore)]
 #[tokio::test]
 async fn complete_deposit_validation_sweep_reorged() {
     // Normal: this generates the blockchain as well as deposit request
     // transactions and a transaction sweeping in the deposited funds.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(&rpc, &faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        1_000_000,
+        &mut rng,
+    );
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -736,15 +888,18 @@ async fn complete_deposit_validation_sweep_reorged() {
         // detail. All that should matter is that the block_hash does not
         // identify the bitcoin blockchain that includes the sweep
         // transaction.
-        block_height: 30000,
+        block_height: 30000u64.into(),
     };
 
-    let ctx = TestContext::builder()
+    let mut ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
+
+    // Normal: the request is not completed in the smart contract.
+    set_deposit_incomplete(&mut ctx).await;
 
     let validation_result = complete_deposit_tx.validate(&ctx, &req_ctx).await;
     match validation_result.unwrap_err() {
@@ -762,15 +917,19 @@ async fn complete_deposit_validation_sweep_reorged() {
 /// message when the sweep transaction is in our records, is on what the
 /// signer thinks is the canonical bitcoin blockchain, but it does not have
 /// an input that that matches the deposit request outpoint.
-#[cfg_attr(not(feature = "integration-tests"), ignore)]
 #[tokio::test]
 async fn complete_deposit_validation_deposit_not_in_sweep() {
     // Normal: this generates the blockchain as well as deposit request
     // transactions and a transaction sweeping in the deposited funds.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(&rpc, &faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        1_000_000,
+        &mut rng,
+    );
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -810,12 +969,15 @@ async fn complete_deposit_validation_deposit_not_in_sweep() {
     // of the prevout outpoints in the sweep transaction.
     complete_deposit_tx.outpoint.vout = 5000;
 
-    let ctx = TestContext::builder()
+    let mut ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
+
+    // Normal: the request is not completed in the smart contract.
+    set_deposit_incomplete(&mut ctx).await;
 
     let validation_result = complete_deposit_tx.validate(&ctx, &req_ctx).await;
     match validation_result.unwrap_err() {
@@ -829,19 +991,30 @@ async fn complete_deposit_validation_deposit_not_in_sweep() {
 }
 
 /// For this test we check that the `CompleteDepositV1::validate` function
-/// returns a deposit validation error with a IncorrectFee message when the
-/// sweep transaction is in our records, is on what the signer thinks is
-/// the canonical bitcoin blockchain, but the fee assessed differs from
-/// what we would expect.
-#[cfg_attr(not(feature = "integration-tests"), ignore)]
+/// returns a deposit validation error with a IncorrectMintAmount message
+/// when the sweep transaction is in our records, is on what the signer
+/// thinks is the canonical bitcoin blockchain, but the expected mint
+/// amount differs from what we would expect.
+#[test_case::test_case(|expected_amount| expected_amount - 1; "mint one too little")]
+#[test_case::test_case(|expected_amount| expected_amount + 1; "mint one too much")]
+#[test_case::test_case(|_| u64::MAX; "mint is u64 MAX")]
+#[test_case::test_case(|_| DEPOSIT_DUST_LIMIT; "mint is dust limit")]
 #[tokio::test]
-async fn complete_deposit_validation_deposit_incorrect_fee() {
+async fn complete_deposit_validation_incorrect_mint_amount<F>(amount_fn: F)
+where
+    F: Fn(u64) -> u64,
+{
     // Normal: this generates the blockchain as well as deposit request
     // transactions and a transaction sweeping in the deposited funds.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(&rpc, &faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        1_000_000,
+        &mut rng,
+    );
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -874,22 +1047,28 @@ async fn complete_deposit_validation_deposit_incorrect_fee() {
     // Normal: create a properly formed complete-deposit transaction object
     // and the corresponding request context.
     let (mut complete_deposit_tx, req_ctx) = make_complete_deposit(&setup);
-    // Different: the amount here is less than we would think that it
-    // should be, implying that the assessed fee is greater than what we
-    // would have thought.
-    complete_deposit_tx.amount -= 1;
 
-    let ctx = TestContext::builder()
+    // Different: the amount here is different from what we would think
+    // that it should be.
+    let new_amount = amount_fn(complete_deposit_tx.amount);
+    assert_ne!(new_amount, complete_deposit_tx.amount);
+
+    complete_deposit_tx.amount = new_amount;
+
+    let mut ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
 
+    // Normal: the request is not completed in the smart contract.
+    set_deposit_incomplete(&mut ctx).await;
+
     let validation_result = complete_deposit_tx.validate(&ctx, &req_ctx).await;
     match validation_result.unwrap_err() {
         Error::DepositValidation(ref err) => {
-            assert_eq!(err.error, DepositErrorMsg::IncorrectFee)
+            assert_eq!(err.error, DepositErrorMsg::IncorrectMintAmount)
         }
         err => panic!("unexpected error during validation {err}"),
     }
@@ -901,15 +1080,19 @@ async fn complete_deposit_validation_deposit_incorrect_fee() {
 /// returns a deposit validation error with a InvalidSweep message when the
 /// sweep transaction does not have a prevout with a scriptPubKey that the
 /// signers control.
-#[cfg_attr(not(feature = "integration-tests"), ignore)]
 #[tokio::test]
 async fn complete_deposit_validation_deposit_invalid_sweep() {
     // Normal: this generates the blockchain as well as deposit request
     // transactions and a transaction sweeping in the deposited funds.
     let db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
-    let setup = TestSweepSetup::new_setup(&rpc, &faucet, 1_000_000, &mut rng);
+    let setup = TestSweepSetup::new_setup(
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        1_000_000,
+        &mut rng,
+    );
 
     // Normal: the signers' block observer should be getting new block
     // events from bitcoin-core. We haven't hooked up our block observer,
@@ -931,8 +1114,15 @@ async fn complete_deposit_validation_deposit_invalid_sweep() {
 
     // Different: we normally add a row in the dkg_shares table so that we
     // have a record of the scriptPubKey that the signers control. Here we
-    // exclude it, so it looks like the first UTXO in the transaction is not
-    // controlled by the signers.
+    // exclude it, so it looks like the first UTXO in the transaction is
+    // not controlled by the signers.
+    //
+    // We also truncate the bitcoin_tx_outputs table because we use that
+    // table to identify the signers' scriptPubKeys.
+    sqlx::query("TRUNCATE TABLE sbtc_signer.bitcoin_tx_outputs CASCADE")
+        .execute(db.pool())
+        .await
+        .unwrap();
 
     // Normal: the request and how the signers voted needs to be added to
     // the database. Here the bitmap in the deposit request object
@@ -944,17 +1134,95 @@ async fn complete_deposit_validation_deposit_invalid_sweep() {
     // and the corresponding request context.
     let (complete_deposit_tx, req_ctx) = make_complete_deposit(&setup);
 
-    let ctx = TestContext::builder()
+    let mut ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
 
+    // Normal: the request is not completed in the smart contract.
+    set_deposit_incomplete(&mut ctx).await;
+
     let validation_result = complete_deposit_tx.validate(&ctx, &req_ctx).await;
     match validation_result.unwrap_err() {
         Error::DepositValidation(ref err) => {
             assert_eq!(err.error, DepositErrorMsg::InvalidSweep)
+        }
+        err => panic!("unexpected error during validation {err}"),
+    }
+
+    testing::storage::drop_db(db).await;
+}
+
+/// For this test we check that the `CompleteDepositV1::validate` function
+/// returns a deposit validation error with a DepositCompleted message when
+/// the stacks node thinks that the deposit has been completed already.
+#[tokio::test]
+async fn complete_deposit_validation_request_completed() {
+    // Normal: this generates the blockchain as well as deposit request
+    // transactions and a transaction sweeping in the deposited funds.
+    // This is just setup and should be essentially the same between tests.
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
+    let (rpc, faucet) = regtest::initialize_blockchain();
+    let setup = TestSweepSetup::new_setup(
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        1_000_000,
+        &mut rng,
+    );
+
+    // Normal: the signers' block observer should be getting new block
+    // events from bitcoin-core. We haven't hooked up our block observer,
+    // so we need to manually update the database with new bitcoin block
+    // headers and at least one stacks block.
+    backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash).await;
+    // Normal: This stores a genesis stacks block anchored to the bitcoin
+    // blockchain identified by setup.sweep_block_hash.
+    setup.store_stacks_genesis_block(&db).await;
+
+    // Normal: we take the deposit transaction as is from the test setup
+    // and store it in the database. This is necessary for when we fetch
+    // outstanding unfulfilled deposit requests.
+    setup.store_deposit_tx(&db).await;
+
+    // Normal: we take the sweep transaction as is from the test setup and
+    // store it in the database.
+    setup.store_sweep_tx(&db).await;
+
+    // Normal: we need to store a row in the dkg_shares table so that we
+    // have a record of the scriptPubKey that the signers control.
+    setup.store_dkg_shares(&db).await;
+
+    // Normal: the request and how the signers voted needs to be added to
+    // the database. Here the bitmap in the deposit request object
+    // corresponds to how the signers voted.
+    setup.store_deposit_request(&db).await;
+    setup.store_deposit_decisions(&db).await;
+
+    // Normal: create a properly formed complete-deposit transaction object
+    // and the corresponding request context.
+    let (complete_deposit_tx, req_ctx) = make_complete_deposit(&setup);
+
+    // Create a context object for reaching out to the database and bitcoin
+    // core. This will create a bitcoin core client that connects to the
+    // bitcoin-core at the [bitcoin].endpoints[0] endpoint from the default
+    // toml config file.
+    let mut ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_first_bitcoin_core_client()
+        .with_mocked_stacks_client()
+        .with_mocked_emily_client()
+        .build();
+
+    // Different: the request is marked as completed in the smart contract.
+    set_deposit_completed(&mut ctx).await;
+
+    let validation_result = complete_deposit_tx.validate(&ctx, &req_ctx).await;
+    match validation_result.unwrap_err() {
+        Error::DepositValidation(ref err) => {
+            assert_eq!(err.error, DepositErrorMsg::DepositCompleted)
         }
         err => panic!("unexpected error during validation {err}"),
     }

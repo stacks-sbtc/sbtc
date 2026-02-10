@@ -1,5 +1,3 @@
-#![deny(missing_docs)]
-
 //! # SBTC Common Library
 //!
 //! This library provides common functionality for the sBTC project, including logging setup
@@ -10,8 +8,10 @@ use bitcoin::XOnlyPublicKey;
 pub mod deposits;
 pub mod error;
 pub mod events;
+pub mod idpack;
+pub mod leb128;
 
-#[cfg(feature = "webhooks")]
+#[cfg(any(test, feature = "webhooks"))]
 pub mod webhooks;
 
 #[cfg(any(test, feature = "testing"))]
@@ -23,7 +23,7 @@ pub mod testing;
 ///
 /// This particular X-coordinate was discussed in the original taproot BIP
 /// on spending rules BIP-0341[1]. Specifically, the X-coordinate is formed
-/// by taking the hash of the standard uncompressed encoding of the 
+/// by taking the hash of the standard uncompressed encoding of the
 /// secp256k1 base point G as the X-coordinate. In that BIP the authors
 /// wrote the X-coordinate that is reproduced below.
 ///
@@ -47,3 +47,12 @@ pub const NUMS_X_COORDINATE: [u8; 32] = [
 /// have a known private key.
 pub static UNSPENDABLE_TAPROOT_KEY: LazyLock<XOnlyPublicKey> =
     LazyLock::new(|| XOnlyPublicKey::from_slice(&NUMS_X_COORDINATE).unwrap());
+
+/// This is the number of bitcoin blocks that the signers will wait before
+/// acting on a withdrawal request. We do this to ensure that the
+/// withdrawal request is deemed final on the Stacks blockchain.
+///
+/// The value here was taken from the last paragraph of the opening comment
+/// of https://github.com/stacks-network/sbtc/discussions/12 and in the
+/// comments of https://github.com/stacks-network/sbtc/issues/16.
+pub const WITHDRAWAL_MIN_CONFIRMATIONS: u64 = 6;

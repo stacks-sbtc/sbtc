@@ -1,0 +1,474 @@
+name: Push & PR
+on:
+  # We explicitly filter on `main` to avoid triggering on pushes to PR branches,
+  # which would otherwise be triggered by the `pull_request.synchronize` event
+  # and cause multiple runs of the same workflow for the same push.
+  # When the merge queue merges to main, it will trigger this workflow.
+  push:
+    branches:
+      - main
+  # This trigger will trigger on pushes to PR branches via the `synchronize`
+  # event type.
+  pull_request:
+    types: [opened, synchronize, reopened]
+  # This is required for the merge queue to work properly with the CI-required
+  # check. `checks_requested` is currently the only event type supported, but
+  # we're being explicit to avoid the potential addition of types like
+  # `checks_completed`, `queue_position`, etc. in the future from causing
+  # multiple CI runs for the same merge queue entry.
+  merge_group:
+    types: [checks_requested]
+
+permissions: read-all
+
+concurrency:
+  # Ensure that this workflow only runs once at a time for each PR or push,
+  # cancelling any in-progress runs for the same HEAD (PR) or branch (Push).
+  group: push-pr-${{ github.head_ref || github.ref_name || github.run_id}}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: 22.1.0
+  BUF_VERSION: 1.42.0
+  PYTHON_VERSION: 3.13
+  NEXTEST_VERSION: 0.9.88
+  CARGO_VET_VERSION: 0.10.0
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_STRIP: "debuginfo"
+
+jobs:
+  # Runs various lints and checks for the project, including Rustfmt, Clippy,
+  # Protobuf lints, and pnpm lints.
+  lint:
+    name: Run Lints
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Setup Mold
+        id: setup_mold
+        uses: stacks-sbtc/actions/setup-mold@505c42b153ba2ac261c276e96bc5dc7b68d61039
+        with:
+          make-default: true
+
+      - name: Checkout Repository
+        id: checkout_Repository
+        uses: stacks-sbtc/actions/checkout@505c42b153ba2ac261c276e96bc5dc7b68d61039
+
+      - name: Setup Pnpm
+        id: setup_pnpm
+        uses: stacks-sbtc/actions/setup-pnpm@505c42b153ba2ac261c276e96bc5dc7b68d61039
+
+      - name: Setup Node
+        id: setup_node
+        uses: stacks-sbtc/actions/setup-node@505c42b153ba2ac261c276e96bc5dc7b68d61039
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "pnpm"
+
+      - name: Setup Buf
+        id: setup_buf
+        uses: stacks-sbtc/actions/setup-buf@505c42b153ba2ac261c276e96bc5dc7b68d61039
+        with:
+          version: ${{ env.BUF_VERSION }}
+          setup_only: true
+
+      - name: Setup Rust
+        id: setup_rust
+        uses: stacks-sbtc/actions/setup-rust-toolchain@505c42b153ba2ac261c276e96bc5dc7b68d61039
+        with:
+          components: clippy, rustfmt
+          cache-key: "rust-tests"
+
+      - name: Install Machete
+        id: install_machete
+        run: cargo install --git https://github.com/bnjbvr/cargo-machete --rev 7959c845782fed02ee69303126d4a12d64f1db18 cargo-machete
+
+      - name: Install Package Dependencies
+        id: install_dependencies
+        run: make install-pnpm
+
+      - name: Check Unused Dependencies
+        id: check_unused_dependencies
+        run: cargo machete
+
+      - name: Lint (Rust & Pnpm)
+        id: lint_rust_and_pnpm
+        run: make lint
+
+      - name: Lint (Protobuf)
+        id: lint_protobuf
+        run: |
+          buf format --diff --exit-code
+          buf lint
+        working-directory: ./protobufs
+
+      - name: Typecheck (pnpm)
+        id: typecheck_pnpm
+        run: pnpm --recursive typecheck
+
+  # Builds the Rust test artifacts for the project, packages them as Nextest
+  # archives and uploads them as artifacts. This job is used as a dependency for
+  # the `unit-tests` and `integration-tests` jobs.
+  build-tests:
+    name: Build Test Artifacts
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Setup Mold
+        id: setup_mold
+        uses: stacks-sbtc/actions/setup-mold@505c42b153ba2ac261c276e96bc5dc7b68d61039
+        with:
+          make-default: true
+
+      - name: Checkout Repository
+        id: checkout_Repository
+        uses: stacks-sbtc/actions/checkout@505c42b153ba2ac261c276e96bc5dc7b68d61039
+
+      - name: Setup Pnpm
+        id: setup_pnpm
+        uses: stacks-sbtc/actions/setup-pnpm@505c42b153ba2ac261c276e96bc5dc7b68d61039
+
+      - name: Setup Rust
+        id: setup_rust
+        uses: stacks-sbtc/actions/setup-rust-toolchain@505c42b153ba2ac261c276e96bc5dc7b68d61039
+        with:
+          cache-key: "rust-tests"
+
+      - name: Install Package Dependencies
+        id: install_dependencies
+        run: make install-pnpm
+
+      - name: Install Action
+        id: install_action
+        uses: stacks-sbtc/actions/install-action@505c42b153ba2ac261c276e96bc5dc7b68d61039
+        with:
+          tool: nextest@${{ env.NEXTEST_VERSION }}
+
+      - name: Build Tests
+        id: build_tests
+        run: make test-build
+
+      - name: Create Nextest Archives
+        id: create_nextest_archives
+        run: make nextest-archive
+
+      - name: Upload Nextest Archives
+        id: upload_nextest_archives
+        uses: stacks-sbtc/actions/upload-artifact@505c42b153ba2ac261c276e96bc5dc7b68d61039
+        with:
+          name: nextest-archives
+          path: ./target/nextest/*.tar.zst
+
+  # Runs the unit tests for the project (Rust + pnpm). It depends on the
+  # `build-tests` job to build the Nextest test archives and upload them as
+  # artifacts. Note that since we are using nextest archives, we do not need
+  # Rust to be installed in this job.
+  unit-tests:
+    name: Run Unit Tests
+    runs-on: ubuntu-24.04
+    needs: build-tests
+    steps:
+      - name: Checkout Repository
+        id: checkout_Repository
+        uses: stacks-sbtc/actions/checkout@505c42b153ba2ac261c276e96bc5dc7b68d61039
+
+      - name: Setup Pnpm
+        id: setup_pnpm
+        uses: stacks-sbtc/actions/setup-pnpm@505c42b153ba2ac261c276e96bc5dc7b68d61039
+
+      - name: Setup Node
+        id: setup_node
+        uses: stacks-sbtc/actions/setup-node@505c42b153ba2ac261c276e96bc5dc7b68d61039
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "pnpm"
+
+      - name: Install Action
+        id: install_action
+        uses: stacks-sbtc/actions/install-action@505c42b153ba2ac261c276e96bc5dc7b68d61039
+        with:
+          tool: nextest@${{ env.NEXTEST_VERSION }}
+
+      - name: Install uv
+        id: install_uv
+        uses: stacks-sbtc/actions/setup-uv@505c42b153ba2ac261c276e96bc5dc7b68d61039
+        with:
+          version: "0.6.5"
+
+      - name: Install node packages and python dependencies
+        id: install_dependencies
+        run: make install
+
+      - name: Download Nextest Archives
+        id: download_nextest_archives
+        uses: stacks-sbtc/actions/download-artifact@505c42b153ba2ac261c276e96bc5dc7b68d61039
+        with:
+          name: nextest-archives
+          path: .
+
+      - name: Run Unit Tests (Node)
+        id: run_node_tests
+        run: pnpm --recursive test
+
+      - name: Run Unit Tests (Rust)
+        id: run_rust_tests
+        run: cargo-nextest nextest --color always run --no-fail-fast --archive-file nextest-archive.tar.zst
+
+      - name: Run Unit Tests (Python)
+        id: run_python_tests
+        run: make test-py
+
+  # Runs the Rust integration tests for the project. It depends on the
+  # `build-tests` job to build the nextest test archives and upload them as
+  # artifacts, however we do not define an explicit dependency with `needs`.
+  # This is because in this job, we also need to get the integration environment
+  # running, which generally takes around a minute. So, we start this job
+  # immediately and once the environment is running we use the `wait-other-jobs`
+  # action to wait until the `build-tests` job is complete and the artifacts are
+  # available. This lets us start the environment while the tests are building,
+  # and then run the tests as soon as the artifacts are available.
+  integration-tests:
+    name: Run Integration Tests
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        partition: [1, 2]
+    steps:
+      - name: Checkout Repository
+        id: checkout_Repository
+        uses: stacks-sbtc/actions/checkout@505c42b153ba2ac261c276e96bc5dc7b68d61039
+
+      - name: Setup Rust
+        id: setup_rust
+        uses: stacks-sbtc/actions/setup-rust-toolchain@505c42b153ba2ac261c276e96bc5dc7b68d61039
+        with:
+          cache-key: "rust-tests"
+
+      - name: Setup Pnpm
+        id: setup_pnpm
+        uses: stacks-sbtc/actions/setup-pnpm@505c42b153ba2ac261c276e96bc5dc7b68d61039
+
+      - name: Setup Node
+        id: setup_node
+        uses: stacks-sbtc/actions/setup-node@505c42b153ba2ac261c276e96bc5dc7b68d61039
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "pnpm"
+
+      - name: Setup Python
+        id: setup_python
+        uses: stacks-sbtc/actions/setup-python@505c42b153ba2ac261c276e96bc5dc7b68d61039
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install AWS SDK
+        id: install_aws_sdk
+        run: pip install boto3
+
+      - name: Install Action
+        id: install_action
+        uses: stacks-sbtc/actions/install-action@505c42b153ba2ac261c276e96bc5dc7b68d61039
+        with:
+          tool: nextest@${{ env.NEXTEST_VERSION }}
+
+      - name: Install uv
+        id: install_uv
+        uses: stacks-sbtc/actions/setup-uv@505c42b153ba2ac261c276e96bc5dc7b68d61039
+        with:
+          version: "0.6.5"
+
+      - name: Install node packages and python dependencies
+        id: install_dependencies
+        run: make install
+
+      - name: Start Integration Test Environment
+        id: start_test_environment
+        run: make integration-env-up-ci
+
+      - name: Wait for Test Artifacts
+        id: wait_test_artifacts
+        uses: stacks-sbtc/actions/wait-other-jobs@505c42b153ba2ac261c276e96bc5dc7b68d61039
+        timeout-minutes: 5
+        with:
+          retry-method: "equal_intervals"
+          wait-seconds-before-first-polling: 1
+          min-interval-seconds: 5
+          wait-list: |
+            [
+              {
+                "workflowFile": "on-push.yaml",
+                "jobName": "Build Test Artifacts",
+                "eventName": "${{ github.event_name }}",
+                "optional": false,
+                "startupGracePeriod": {
+                  "minutes": 5
+                }
+              }
+            ]
+
+      - name: Download Nextest Archives
+        id: download_nextest_archives
+        uses: stacks-sbtc/actions/download-artifact@505c42b153ba2ac261c276e96bc5dc7b68d61039
+        with:
+          name: nextest-archives
+          path: .
+
+      - name: Run Integration Tests (Rust)
+        id: run_rust_tests
+        run: cargo-nextest nextest --config-file nextest.toml --color always run --no-fail-fast --partition hash:${{ matrix.partition }}/2 --archive-file nextest-archive-serial.tar.zst --workspace-remap .
+
+      - name: Run Integration Tests (Python)
+        id: run_python_tests
+        if: matrix.partition == 1 # Only run the python tests on the first partition
+        run: uv run --directory emily_sidecar python -m unittest test/test_integration.py
+
+  # Runs checks on the generated code in the project for contracts, the
+  # blocklist client and the emily clients. This job is used to ensure that the
+  # generated code is up-to-date with the latest changes in the project. It does
+  # this by re-generating the code and then checking if the git status is clean
+  # (the generated code should exactly match the committed code). If the git
+  # status is dirty for any of the components, it fails the job and prints an
+  # error message.
+  check-generated-code:
+    name: Run Generated Code Checks
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Repository
+        id: checkout_Repository
+        uses: stacks-sbtc/actions/checkout@505c42b153ba2ac261c276e96bc5dc7b68d61039
+
+      - name: Setup Rust
+        id: setup_rust
+        uses: stacks-sbtc/actions/setup-rust-toolchain@505c42b153ba2ac261c276e96bc5dc7b68d61039
+        with:
+          cache-key: "rust-tests"
+
+      - name: Setup Pnpm
+        id: setup_pnpm
+        uses: stacks-sbtc/actions/setup-pnpm@505c42b153ba2ac261c276e96bc5dc7b68d61039
+
+      - name: Setup Node
+        id: setup_node
+        uses: stacks-sbtc/actions/setup-node@505c42b153ba2ac261c276e96bc5dc7b68d61039
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "pnpm"
+
+      - name: Install Package Dependencies
+        id: install_dependencies
+        run: pnpm --recursive install
+
+      - name: Generate Contract Docs and Types
+        id: generate_docs
+        run: make contracts
+
+      - name: Ensure Git is Clean (Contracts)
+        id: git_status_contracts
+        run: git diff --no-ext-diff --exit-code
+        continue-on-error: true
+
+      - name: Git is Dirty (Contracts)
+        id: git_is_dirty
+        if: steps.git_status_contracts.outcome == 'failure'
+        run: |
+          echo "::error title=Contracts are dirty:: Make sure you ran 'make contracts' before pushing."
+          exit 1
+
+      - name: Generate Blocklist Client
+        id: generate_blocklist_client
+        run: make blocklist-client-codegen
+
+      - name: Ensure Git is Clean (Blocklist Client)
+        id: git_status_blocklist_client
+        run: git diff --no-ext-diff --exit-code
+        continue-on-error: true
+
+      - name: Git is Dirty (Blocklist Client)
+        id: git_is_dirty_blocklist
+        if: steps.git_status_blocklist_client.outcome == 'failure'
+        run: |
+          echo "::error title=Blocklist client is dirty:: Make sure you ran 'make blocklist-client-codegen' before pushing."
+          exit 1
+
+      - name: Generate Emily Clients
+        id: generate_emily_clients
+        run: make emily-client-codegen
+
+      - name: Ensure Git is Clean (Emily Clients)
+        id: git_status_emily_clients
+        run: git diff --no-ext-diff --exit-code
+        continue-on-error: true
+
+      - name: Git is Dirty (Emily Clients)
+        id: git_is_dirty_emily
+        if: steps.git_status_emily_clients.outcome == 'failure'
+        run: |
+          echo "::error title=Emily clients are dirty:: Make sure you ran 'make emily-client-codegen' before pushing."
+          exit 1
+
+  # Verifies supply chain security by ensuring all Rust dependencies are properly vetted.
+  # This job runs cargo-vet to check that dependencies match our security requirements,
+  # as defined in supply-chain.toml. If unvetted dependencies are found, it provides
+  # detailed reports and suggestions for adding the necessary audits or exemptions.
+  # Dependencies failing verification will cause the workflow to fail with explicit
+  # error annotations, and an audit report is uploaded as an artifact.
+  cargo-vet:
+    name: Vet Dependencies
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Repository
+        id: checkout_Repository
+        uses: stacks-sbtc/actions/checkout@505c42b153ba2ac261c276e96bc5dc7b68d61039
+
+      - name: Cargo Vet Cache
+        id: cargo_vet_cache
+        uses: stacks-sbtc/actions/cache@505c42b153ba2ac261c276e96bc5dc7b68d61039
+        with:
+          path: ${{ runner.tool_cache }}/cargo-vet
+          key: cargo-vet-bin-${{ env.CARGO_VET_VERSION }}
+
+      - name: Add the tool cache directory to the search path
+        id: add_tool_dir_to_path
+        run: echo "${{ runner.tool_cache }}/cargo-vet/bin" >> $GITHUB_PATH
+
+      - name: Ensure that the tool cache is populated with the cargo-vet binary
+        id: ensure_tool_cache_is_populated
+        if: steps.cargo_vet_cache.outputs.cache_hit != 'true'
+        run: cargo install --root ${{ runner.tool_cache }}/cargo-vet --version ${{ env.CARGO_VET_VERSION }} --locked cargo-vet
+
+      - name: Run Cargo Vet
+        id: cargo_vet
+        run: |
+          echo "=============================="
+          echo "Running Dependency Vetting"
+          echo "=============================="
+          cargo vet --locked || {
+            echo "=============================="
+            echo "Unvetted dependencies detected!"
+            echo "Generating suggestions and detailed report..."
+            echo "=============================="
+            cargo vet suggest > audit-suggestions.txt
+            exit 1
+          }
+
+      - name: Annotate Unvetted Dependencies
+        id: annotate_unvetted_dependencies
+        if: failure()
+        run: |
+          echo "Annotating unvetted dependencies..."
+          cat audit-suggestions.txt | while read -r line; do
+            echo "::error file=supply-chain.toml::$line"
+          done
+
+      - name: Summarize Unvetted Dependencies
+        id: summarize_unvetted_dependencies
+        if: failure()
+        run: |
+          echo "Dependencies needing review:"
+          awk '/Command/{print $2, $3, $4, $5}' audit-suggestions.txt || true
+
+      - name: Upload Audit Report
+        id: upload_audit_report
+        if: failure()
+        uses: stacks-sbtc/actions/upload-artifact@505c42b153ba2ac261c276e96bc5dc7b68d61039
+        with:
+          name: cargo-vet-audit-report
+          path: audit-suggestions.txt

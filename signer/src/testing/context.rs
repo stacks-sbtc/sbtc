@@ -5,27 +5,31 @@ use std::{ops::Deref, sync::Arc};
 
 use bitcoin::{Amount, Txid};
 use bitcoincore_rpc_json::GetTxOutResult;
-use blockstack_lib::chainstate::burn::ConsensusHash;
 use blockstack_lib::{
     chainstate::{nakamoto::NakamotoBlock, stacks::StacksTransaction},
-    net::api::{
-        getcontractsrc::ContractSrcResponse, getinfo::RPCPeerInfoData, getpoxinfo::RPCPoxInfoData,
-        getsortition::SortitionInfo, gettenureinfo::RPCGetTenureInfo,
-    },
+    net::api::{getcontractsrc::ContractSrcResponse, getsortition::SortitionInfo},
 };
-use clarity::types::chainstate::{StacksAddress, StacksBlockId};
-use tokio::sync::{broadcast, Mutex};
+use clarity::types::chainstate::StacksAddress;
+use emily_client::models::DepositStatus;
+use tokio::sync::{Mutex, broadcast};
 use tokio::time::error::Elapsed;
 
-use crate::bitcoin::rpc::BitcoinBlockHeader;
 use crate::bitcoin::GetTransactionFeeResult;
+use crate::bitcoin::rpc::{BitcoinBlockHeader, BitcoinBlockInfo};
 use crate::context::SbtcLimits;
-use crate::stacks::api::TenureBlocks;
+use crate::keys::PrivateKey;
+use crate::stacks::api::GetNodeInfoResponse;
+use crate::stacks::api::GetTenureInfoResponse;
+use crate::stacks::api::SignerSetInfo;
+use crate::stacks::api::StacksEpochStatus;
+use crate::stacks::api::TenureBlockHeaders;
 use crate::stacks::wallet::SignerWallet;
-use crate::storage::model::BitcoinTxId;
+use crate::storage::Transactable;
+use crate::storage::model::ConsensusHash;
+use crate::storage::model::{BitcoinTxId, StacksBlockHash};
 use crate::{
     bitcoin::{
-        rpc::GetTxResponse, utxo::UnsignedTransaction, BitcoinInteract, MockBitcoinInteract,
+        BitcoinInteract, MockBitcoinInteract, rpc::GetTxResponse, utxo::UnsignedTransaction,
     },
     config::Settings,
     context::{Context, SignerContext, SignerSignal, SignerState, TerminationHandle},
@@ -37,11 +41,17 @@ use crate::{
         contracts::AsTxPayload,
     },
     storage::{
-        in_memory::{SharedStore, Store},
-        model::StacksBlock,
         DbRead, DbWrite,
+        memory::{SharedStore, Store},
     },
 };
+
+/// Type alias for a wrapped mock Bitcoin client.
+pub type WrappedMockStacksInteract = WrappedMock<MockStacksInteract>;
+/// Type alias for a wrapped mock Stacks client.
+pub type WrappedMockBitcoinInteract = WrappedMock<MockBitcoinInteract>;
+/// Type alias for a wrapped mock Emily client.
+pub type WrappedMockEmilyInteract = WrappedMock<MockEmilyInteract>;
 
 /// A [`Context`] which can be used for testing.
 ///
@@ -71,7 +81,7 @@ pub struct TestContext<Storage, Bitcoin, Stacks, Emily> {
 
 impl<Storage, Bitcoin, Stacks, Emily> TestContext<Storage, Bitcoin, Stacks, Emily>
 where
-    Storage: DbRead + DbWrite + Clone + Sync + Send + 'static,
+    Storage: DbRead + DbWrite + Transactable + Clone + Sync + Send + 'static,
     Bitcoin: BitcoinInteract + Clone + Send + Sync + 'static,
     Stacks: StacksInteract + Clone + Send + Sync + 'static,
     Emily: EmilyInteract + Clone + Send + Sync + 'static,
@@ -138,6 +148,11 @@ where
         })
         .await
     }
+
+    /// Get a mutable reference to the inner config.
+    pub fn config_mut(&mut self) -> &mut Settings {
+        self.inner.config_mut()
+    }
 }
 
 impl TestContext<(), (), (), ()> {
@@ -152,9 +167,9 @@ impl TestContext<(), (), (), ()> {
     /// `with_in_memory_storage()` and `with_mocked_clients()`.
     pub fn default_mocked() -> TestContext<
         SharedStore,
-        WrappedMock<MockBitcoinInteract>,
-        WrappedMock<MockStacksInteract>,
-        WrappedMock<MockEmilyInteract>,
+        WrappedMockBitcoinInteract,
+        WrappedMockStacksInteract,
+        WrappedMockEmilyInteract,
     > {
         Self::builder()
             .with_in_memory_storage()
@@ -163,11 +178,19 @@ impl TestContext<(), (), (), ()> {
     }
 }
 
+impl<Storage, Bitcoin, Stacks, Emily> Deref for TestContext<Storage, Bitcoin, Stacks, Emily> {
+    type Target = SignerContext<Storage, Bitcoin, Stacks, Emily>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
 /// Provide extra methods for when using a mocked bitcoin client.
-impl<Storage, Stacks, Emily> TestContext<Storage, WrappedMock<MockBitcoinInteract>, Stacks, Emily> {
+impl<Storage, Stacks, Emily> TestContext<Storage, WrappedMockBitcoinInteract, Stacks, Emily> {
     /// Execute a closure with a mutable reference to the inner mocked
     /// bitcoin client.
-    pub async fn with_bitcoin_client<F>(&mut self, f: F)
+    pub async fn with_bitcoin_client<F>(&self, f: F)
     where
         F: FnOnce(&mut MockBitcoinInteract),
     {
@@ -177,12 +200,10 @@ impl<Storage, Stacks, Emily> TestContext<Storage, WrappedMock<MockBitcoinInterac
 }
 
 /// Provide extra methods for when using a mocked stacks client.
-impl<Storage, Bitcoin, Emily>
-    TestContext<Storage, Bitcoin, WrappedMock<MockStacksInteract>, Emily>
-{
+impl<Storage, Bitcoin, Emily> TestContext<Storage, Bitcoin, WrappedMockStacksInteract, Emily> {
     /// Execute a closure with a mutable reference to the inner mocked
     /// stacks client.
-    pub async fn with_stacks_client<F>(&mut self, f: F)
+    pub async fn with_stacks_client<F>(&self, f: F)
     where
         F: FnOnce(&mut MockStacksInteract),
     {
@@ -192,12 +213,10 @@ impl<Storage, Bitcoin, Emily>
 }
 
 /// Provide extra methods for when using a mocked emily client.
-impl<Storage, Bitcoin, Stacks>
-    TestContext<Storage, Bitcoin, Stacks, WrappedMock<MockEmilyInteract>>
-{
+impl<Storage, Bitcoin, Stacks> TestContext<Storage, Bitcoin, Stacks, WrappedMockEmilyInteract> {
     /// Execute a closure with a mutable reference to the inner mocked
     /// emily client.
-    pub async fn with_emily_client<F>(&mut self, f: F)
+    pub async fn with_emily_client<F>(&self, f: F)
     where
         F: FnOnce(&mut MockEmilyInteract),
     {
@@ -206,9 +225,34 @@ impl<Storage, Bitcoin, Stacks>
     }
 }
 
+/// DKG can be triggered if the signer set info in the registry differs
+/// from the one in config. However, we don't want to test this
+/// functionality in some of our tests, so this function makes sure that
+/// DKG won't be triggered because of changes in this parameter.
+pub fn prevent_dkg_on_changed_signer_set_info<Storage, Bitcoin, Stacks, Emily>(
+    context: &TestContext<Storage, Bitcoin, Stacks, Emily>,
+    aggregate_key: PublicKey,
+) where
+    Storage: DbRead + DbWrite + Transactable + Clone + Sync + Send + 'static,
+    Bitcoin: BitcoinInteract + Clone + Send + Sync + 'static,
+    Stacks: StacksInteract + Clone + Send + Sync + 'static,
+    Emily: EmilyInteract + Clone + Send + Sync + 'static,
+{
+    let config = context.config();
+    let signer_set_info = SignerSetInfo {
+        aggregate_key,
+        signatures_required: config.signer.bootstrap_signatures_required,
+        signer_set: config.signer.bootstrap_signing_set.clone(),
+    };
+
+    context
+        .state()
+        .update_registry_signer_set_info(signer_set_info);
+}
+
 impl<Storage, Bitcoin, Stacks, Emily> Context for TestContext<Storage, Bitcoin, Stacks, Emily>
 where
-    Storage: DbRead + DbWrite + Clone + Sync + Send + 'static,
+    Storage: DbRead + DbWrite + Transactable + Clone + Sync + Send + 'static,
     Bitcoin: BitcoinInteract + Clone + Send + Sync + 'static,
     Stacks: StacksInteract + Clone + Send + Sync + 'static,
     Emily: EmilyInteract + Clone + Send + Sync + 'static,
@@ -243,7 +287,7 @@ where
 
     fn get_storage_mut(
         &self,
-    ) -> impl crate::storage::DbRead + DbWrite + Clone + Sync + Send + 'static {
+    ) -> impl crate::storage::DbRead + DbWrite + Transactable + Clone + Sync + Send + 'static {
         self.inner.get_storage_mut()
     }
 
@@ -297,11 +341,11 @@ where
     }
 }
 
-impl BitcoinInteract for WrappedMock<MockBitcoinInteract> {
+impl BitcoinInteract for WrappedMockBitcoinInteract {
     async fn get_block(
         &self,
         block_hash: &bitcoin::BlockHash,
-    ) -> Result<Option<bitcoin::Block>, Error> {
+    ) -> Result<Option<BitcoinBlockInfo>, Error> {
         self.inner.lock().await.get_block(block_hash).await
     }
 
@@ -367,17 +411,31 @@ impl BitcoinInteract for WrappedMock<MockBitcoinInteract> {
     ) -> Result<Option<bitcoincore_rpc_json::GetMempoolEntryResult>, Error> {
         unimplemented!()
     }
+
+    async fn get_blockchain_info(
+        &self,
+    ) -> Result<bitcoincore_rpc_json::GetBlockchainInfoResult, Error> {
+        self.inner.lock().await.get_blockchain_info().await
+    }
+
+    async fn get_network_info(&self) -> Result<bitcoincore_rpc_json::GetNetworkInfoResult, Error> {
+        self.inner.lock().await.get_network_info().await
+    }
+
+    async fn get_best_block_hash(&self) -> Result<bitcoin::BlockHash, Error> {
+        self.inner.lock().await.get_best_block_hash().await
+    }
 }
 
-impl StacksInteract for WrappedMock<MockStacksInteract> {
-    async fn get_current_signer_set(
+impl StacksInteract for WrappedMockStacksInteract {
+    async fn get_current_signer_set_info(
         &self,
         contract_principal: &StacksAddress,
-    ) -> Result<Vec<PublicKey>, Error> {
+    ) -> Result<Option<SignerSetInfo>, Error> {
         self.inner
             .lock()
             .await
-            .get_current_signer_set(contract_principal)
+            .get_current_signer_set_info(contract_principal)
             .await
     }
 
@@ -392,6 +450,30 @@ impl StacksInteract for WrappedMock<MockStacksInteract> {
             .await
     }
 
+    async fn is_deposit_completed(
+        &self,
+        contract_principal: &StacksAddress,
+        outpoint: &bitcoin::OutPoint,
+    ) -> Result<bool, Error> {
+        self.inner
+            .lock()
+            .await
+            .is_deposit_completed(contract_principal, outpoint)
+            .await
+    }
+
+    async fn is_withdrawal_completed(
+        &self,
+        contract_principal: &StacksAddress,
+        request_id: u64,
+    ) -> Result<bool, Error> {
+        self.inner
+            .lock()
+            .await
+            .is_withdrawal_completed(contract_principal, request_id)
+            .await
+    }
+
     async fn get_account(&self, address: &StacksAddress) -> Result<AccountInfo, Error> {
         self.inner.lock().await.get_account(address).await
     }
@@ -400,15 +482,26 @@ impl StacksInteract for WrappedMock<MockStacksInteract> {
         self.inner.lock().await.submit_tx(tx).await
     }
 
-    async fn get_block(&self, block_id: StacksBlockId) -> Result<NakamotoBlock, Error> {
+    async fn get_block(&self, block_id: &StacksBlockHash) -> Result<NakamotoBlock, Error> {
         self.inner.lock().await.get_block(block_id).await
     }
 
-    async fn get_tenure(&self, block_id: StacksBlockId) -> Result<TenureBlocks, Error> {
-        self.inner.lock().await.get_tenure(block_id).await
+    async fn check_pre_nakamoto_block(&self, block_id: &StacksBlockHash) -> Result<(), Error> {
+        self.inner
+            .lock()
+            .await
+            .check_pre_nakamoto_block(block_id)
+            .await
     }
 
-    async fn get_tenure_info(&self) -> Result<RPCGetTenureInfo, Error> {
+    async fn get_tenure_headers(
+        &self,
+        block_id: &StacksBlockHash,
+    ) -> Result<TenureBlockHeaders, Error> {
+        self.inner.lock().await.get_tenure_headers(block_id).await
+    }
+
+    async fn get_tenure_info(&self) -> Result<GetTenureInfoResponse, Error> {
         self.inner.lock().await.get_tenure_info().await
     }
 
@@ -439,11 +532,11 @@ impl StacksInteract for WrappedMock<MockStacksInteract> {
             .await
     }
 
-    async fn get_pox_info(&self) -> Result<RPCPoxInfoData, Error> {
-        self.inner.lock().await.get_pox_info().await
+    async fn get_epoch_status(&self) -> Result<StacksEpochStatus, Error> {
+        self.inner.lock().await.get_epoch_status().await
     }
 
-    async fn get_node_info(&self) -> Result<RPCPeerInfoData, Error> {
+    async fn get_node_info(&self) -> Result<GetNodeInfoResponse, Error> {
         self.inner.lock().await.get_node_info().await
     }
 
@@ -464,7 +557,7 @@ impl StacksInteract for WrappedMock<MockStacksInteract> {
     }
 }
 
-impl EmilyInteract for WrappedMock<MockEmilyInteract> {
+impl EmilyInteract for WrappedMockEmilyInteract {
     async fn get_deposit(
         &self,
         txid: &BitcoinTxId,
@@ -476,8 +569,20 @@ impl EmilyInteract for WrappedMock<MockEmilyInteract> {
             .get_deposit(txid, output_index)
             .await
     }
+
     async fn get_deposits(&self) -> Result<Vec<sbtc::deposits::CreateDepositRequest>, Error> {
         self.inner.lock().await.get_deposits().await
+    }
+
+    async fn get_deposits_with_status(
+        &self,
+        status: DepositStatus,
+    ) -> Result<Vec<sbtc::deposits::CreateDepositRequest>, Error> {
+        self.inner
+            .lock()
+            .await
+            .get_deposits_with_status(status)
+            .await
     }
 
     async fn update_deposits(
@@ -494,23 +599,18 @@ impl EmilyInteract for WrappedMock<MockEmilyInteract> {
     async fn accept_deposits<'a>(
         &'a self,
         transaction: &'a UnsignedTransaction<'a>,
-        stacks_chain_tip: &'a StacksBlock,
     ) -> Result<emily_client::models::UpdateDepositsResponse, Error> {
-        self.inner
-            .lock()
-            .await
-            .accept_deposits(transaction, stacks_chain_tip)
-            .await
+        self.inner.lock().await.accept_deposits(transaction).await
     }
 
-    async fn create_withdrawals(
-        &self,
-        create_withdrawals: Vec<emily_client::models::CreateWithdrawalRequestBody>,
-    ) -> Vec<Result<emily_client::models::Withdrawal, Error>> {
+    async fn accept_withdrawals<'a>(
+        &'a self,
+        transaction: &'a UnsignedTransaction<'a>,
+    ) -> Result<emily_client::models::UpdateWithdrawalsResponse, Error> {
         self.inner
             .lock()
             .await
-            .create_withdrawals(create_withdrawals)
+            .accept_withdrawals(transaction)
             .await
     }
 
@@ -523,13 +623,6 @@ impl EmilyInteract for WrappedMock<MockEmilyInteract> {
             .await
             .update_withdrawals(update_withdrawals)
             .await
-    }
-
-    async fn set_chainstate(
-        &self,
-        chainstate: emily_client::models::Chainstate,
-    ) -> Result<emily_client::models::Chainstate, Error> {
-        self.inner.lock().await.set_chainstate(chainstate).await
     }
 
     async fn get_limits(&self) -> Result<SbtcLimits, Error> {
@@ -611,6 +704,17 @@ where
         let mut config = self.get_config();
         f(&mut config.settings);
         ContextBuilder { config }
+    }
+
+    /// Helper for configuring the context's settings with the specified signer
+    /// private key.
+    fn with_private_key(
+        self,
+        private_key: PrivateKey,
+    ) -> ContextBuilder<Storage, Bitcoin, Stacks, Emily> {
+        self.modify_settings(|settings| {
+            settings.signer.private_key = private_key;
+        })
     }
 }
 
@@ -711,7 +815,7 @@ where
     /// Configure the context with a mocked Bitcoin client.
     fn with_mocked_bitcoin_client(
         self,
-    ) -> ContextBuilder<Storage, WrappedMock<MockBitcoinInteract>, Stacks, Emily> {
+    ) -> ContextBuilder<Storage, WrappedMockBitcoinInteract, Stacks, Emily> {
         self.with_bitcoin_client(WrappedMock::default())
     }
 }
@@ -749,7 +853,7 @@ where
     /// Configure the context with a mocked stacks client.
     fn with_mocked_stacks_client(
         self,
-    ) -> ContextBuilder<Storage, Bitcoin, WrappedMock<MockStacksInteract>, Emily> {
+    ) -> ContextBuilder<Storage, Bitcoin, WrappedMockStacksInteract, Emily> {
         self.with_stacks_client(WrappedMock::default())
     }
 }
@@ -787,7 +891,7 @@ where
     /// Configure the context with a mocked Emily client.
     fn with_mocked_emily_client(
         self,
-    ) -> ContextBuilder<Storage, Bitcoin, Stacks, WrappedMock<MockEmilyInteract>> {
+    ) -> ContextBuilder<Storage, Bitcoin, Stacks, WrappedMockEmilyInteract> {
         self.with_emily_client(WrappedMock::default())
     }
 }
@@ -810,9 +914,9 @@ where
         self,
     ) -> ContextBuilder<
         Storage,
-        WrappedMock<MockBitcoinInteract>,
-        WrappedMock<MockStacksInteract>,
-        WrappedMock<MockEmilyInteract>,
+        WrappedMockBitcoinInteract,
+        WrappedMockStacksInteract,
+        WrappedMockEmilyInteract,
     > {
         let config = self.get_config();
         ContextBuilder {
@@ -849,7 +953,7 @@ impl<Storage, Bitcoin, Stacks, Emily> BuildContext<Storage, Bitcoin, Stacks, Emi
     for ContextBuilder<Storage, Bitcoin, Stacks, Emily>
 where
     Self: BuilderState<Storage, Bitcoin, Stacks, Emily>,
-    Storage: DbRead + DbWrite + Clone + Sync + Send + 'static,
+    Storage: DbRead + DbWrite + Transactable + Clone + Sync + Send + 'static,
     Bitcoin: BitcoinInteract + Clone + Send + Sync + 'static,
     Stacks: StacksInteract + Clone + Send + Sync + 'static,
     Emily: EmilyInteract + Clone + Send + Sync + 'static,
@@ -870,14 +974,15 @@ where
 mod tests {
     use std::{
         sync::{
-            atomic::{AtomicBool, AtomicU8, Ordering},
             Arc,
+            atomic::{AtomicBool, AtomicU8, Ordering},
         },
         time::Duration,
     };
 
     use tokio::sync::Notify;
 
+    use crate::storage::model;
     use crate::{
         context::{Context as _, SignerEvent, SignerSignal},
         testing::context::*,
@@ -906,9 +1011,9 @@ mod tests {
 
         let recv1 = tokio::spawn(async move {
             let signal = recv.recv().await.unwrap();
-            assert_eq!(
+            assert_matches::assert_matches!(
                 signal,
-                SignerSignal::Event(SignerEvent::BitcoinBlockObserved)
+                SignerSignal::Event(SignerEvent::BitcoinBlockObserved(_))
             );
             signal
         });
@@ -924,9 +1029,9 @@ mod tests {
             let mut cloned_receiver = context_clone.get_signal_receiver();
             recv_task_started_clone.store(true, Ordering::Relaxed);
             let signal = cloned_receiver.recv().await.unwrap();
-            assert_eq!(
+            assert_matches::assert_matches!(
                 signal,
-                SignerSignal::Event(SignerEvent::BitcoinBlockObserved)
+                SignerSignal::Event(SignerEvent::BitcoinBlockObserved(_))
             );
             recv_count_clone.fetch_add(1, Ordering::Relaxed);
             recv_signal_received_clone.store(true, Ordering::Relaxed);
@@ -937,8 +1042,9 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
 
+        let chain_tip_ref = model::BitcoinBlockRef::genesis();
         context
-            .signal(SignerEvent::BitcoinBlockObserved.into())
+            .signal(SignerEvent::BitcoinBlockObserved(chain_tip_ref).into())
             .unwrap();
 
         while !recv_signal_received.load(Ordering::Relaxed) {
@@ -973,7 +1079,7 @@ mod tests {
         let task1 = tokio::spawn(async move {
             task1_started_clone.notify_one();
 
-            while let Ok(_) = rx2.recv().await {
+            while rx2.recv().await.is_ok() {
                 count1.fetch_add(1, Ordering::Relaxed);
             }
         });
@@ -988,7 +1094,7 @@ mod tests {
         let task2 = tokio::spawn(async move {
             task2_started_clone.notify_one();
 
-            while let Ok(_) = rx1.recv().await {
+            while rx1.recv().await.is_ok() {
                 count2.fetch_add(1, Ordering::Relaxed);
             }
         });

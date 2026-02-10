@@ -17,6 +17,8 @@ pub struct Withdrawal {
     /// Amount of BTC being withdrawn in satoshis.
     #[serde(rename = "amount")]
     pub amount: u64,
+    #[serde(rename = "expectedFulfillmentInfo")]
+    pub expected_fulfillment_info: Box<models::ExpectedFulfillmentInfo>,
     #[serde(
         rename = "fulfillment",
         default,
@@ -32,12 +34,15 @@ pub struct Withdrawal {
     pub last_update_height: u64,
     #[serde(rename = "parameters")]
     pub parameters: Box<models::WithdrawalParameters>,
-    /// The recipient Bitcoin address.
+    /// The recipient's hex-encoded Bitcoin scriptPubKey.
     #[serde(rename = "recipient")]
     pub recipient: String,
     /// The id of the Stacks withdrawal request that initiated the sBTC operation.
     #[serde(rename = "requestId")]
     pub request_id: u64,
+    /// The sender's hex-encoded Stacks principal.
+    #[serde(rename = "sender")]
+    pub sender: String,
     /// The stacks block hash in which this request id was initiated.
     #[serde(rename = "stacksBlockHash")]
     pub stacks_block_hash: String,
@@ -45,38 +50,47 @@ pub struct Withdrawal {
     #[serde(rename = "stacksBlockHeight")]
     pub stacks_block_height: u64,
     #[serde(rename = "status")]
-    pub status: models::Status,
+    pub status: models::WithdrawalStatus,
     /// The status message of the withdrawal.
     #[serde(rename = "statusMessage")]
     pub status_message: String,
+    /// The hex encoded txid of the stacks transaction that generated this event.
+    #[serde(rename = "txid")]
+    pub txid: String,
 }
 
 impl Withdrawal {
     /// Withdrawal.
     pub fn new(
         amount: u64,
+        expected_fulfillment_info: models::ExpectedFulfillmentInfo,
         last_update_block_hash: String,
         last_update_height: u64,
         parameters: models::WithdrawalParameters,
         recipient: String,
         request_id: u64,
+        sender: String,
         stacks_block_hash: String,
         stacks_block_height: u64,
-        status: models::Status,
+        status: models::WithdrawalStatus,
         status_message: String,
+        txid: String,
     ) -> Withdrawal {
         Withdrawal {
             amount,
+            expected_fulfillment_info: Box::new(expected_fulfillment_info),
             fulfillment: None,
             last_update_block_hash,
             last_update_height,
             parameters: Box::new(parameters),
             recipient,
             request_id,
+            sender,
             stacks_block_hash,
             stacks_block_height,
             status,
             status_message,
+            txid,
         }
     }
 }

@@ -1,8 +1,9 @@
-use std::num::NonZeroUsize;
+//! The main entrypoint for the sBTC signer binary.
+
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use std::time::Duration;
 
 use axum::http::Request;
@@ -10,11 +11,10 @@ use axum::http::Response;
 use cfg_if::cfg_if;
 use clap::Parser;
 use clap::ValueEnum;
-use lru::LruCache;
 use signer::api;
 use signer::api::ApiState;
+use signer::bitcoin::poller::BitcoinChainTipPoller;
 use signer::bitcoin::rpc::BitcoinCoreClient;
-use signer::bitcoin::zmq::BitcoinCoreMessageStream;
 use signer::block_observer;
 use signer::blocklist_client::BlocklistClient;
 use signer::config::Settings;
@@ -22,18 +22,40 @@ use signer::context::Context;
 use signer::context::SignerContext;
 use signer::emily_client::EmilyClient;
 use signer::error::Error;
-use signer::network::libp2p::SignerSwarmBuilder;
+use signer::logging::SignerInfoLogger;
 use signer::network::P2PNetwork;
+use signer::network::libp2p::SignerSwarmBuilder;
 use signer::request_decider::RequestDeciderEventLoop;
 use signer::stacks::api::StacksClient;
+use signer::storage::DbRead as _;
 use signer::storage::postgres::PgStore;
 use signer::transaction_coordinator;
 use signer::transaction_signer;
 use signer::util::ApiFallbackClient;
+use time::OffsetDateTime;
 use tokio::signal;
 use tower_http::trace::TraceLayer;
-use tracing::Instrument;
+use tracing::Instrument as _;
 use tracing::Span;
+
+/// This is how many seconds the P2P swarm will wait before attempting to
+/// bootstrap (i.e. connect to other peers). Three seconds is a sane default
+/// value, giving the swarm a few seconds to start up and bind listener(s)
+/// before proceeding.
+const INITIAL_BOOTSTRAP_DELAY_SECS: u64 = 3;
+
+// Timeout after which signer info logger will print new log.
+// Currently chosen to be 1 hour.
+// TODO: make this interval a config parameter.
+const SIGNER_INFO_LOGGER_INTERVAL: Duration = Duration::from_secs(3600);
+
+/// The window of time in which we consider a peer to be known and valid for
+/// inclusion in bootstrapping.
+const KNOWN_PEER_WINDOW: Duration = Duration::from_secs(60 * 60 * 24 * 30); // 30 days
+
+/// The maximum number of known peers we will attempt to bootstrap from, in
+/// addition to the seed peers.
+const MAX_KNOWN_PEERS: usize = 6;
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum LogOutputFormat {
@@ -59,6 +81,10 @@ struct SignerArgs {
     output_format: Option<LogOutputFormat>,
 }
 
+// The allowed clippy lint is necessary because the expanded version of the
+// function, the one produced because of the #[tokio::main] procedural
+// macro, uses unwrap or expect.
+#[allow(clippy::unwrap_in_result)]
 #[tokio::main]
 #[tracing::instrument(name = "signer")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -78,15 +104,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Load the configuration file and/or environment variables.
-    let settings = Settings::new(args.config)?;
+    let settings = Settings::new(args.config).inspect_err(|error| {
+        tracing::error!(%error, "failed to construct the configuration");
+    })?;
+
+    let signer_public_key = settings.signer.public_key();
+    tracing::info!(%signer_public_key, "config loaded successfully");
+
     signer::metrics::setup_metrics(settings.signer.prometheus_exporter_endpoint);
 
     // Open a connection to the signer db.
-    let db = PgStore::connect(settings.signer.db_endpoint.as_str()).await?;
+    let db = PgStore::connect(settings.signer.db_endpoint.as_str())
+        .await
+        .inspect_err(|err| {
+            tracing::error!(%err, "failed to connect to the database");
+        })?;
 
     // Apply any pending migrations if automatic migrations are enabled.
     if args.migrate_db {
-        db.apply_migrations().await?;
+        db.apply_migrations().await.inspect_err(|err| {
+            tracing::error!(%err, "failed to apply database migrations");
+        })?;
     }
 
     // Initialize the signer context.
@@ -95,14 +133,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ApiFallbackClient<BitcoinCoreClient>,
         ApiFallbackClient<StacksClient>,
         ApiFallbackClient<EmilyClient>,
-    >::init(settings, db)?;
+    >::init(settings, db)
+    .inspect_err(|err| {
+        tracing::error!(%err, "failed to initialize the signer context");
+    })?;
 
     // TODO: We should first check "another source of truth" for the current
     // signing set, and only assume we are bootstrapping if that source is
     // empty.
     let settings = context.config();
-    for signer in settings.signer.bootstrap_signing_set() {
-        context.state().current_signer_set().add_signer(signer);
+    for signer in &settings.signer.bootstrap_signing_set {
+        context.state().current_signer_set().add_signer(*signer);
     }
 
     // Run the application components concurrently. We're `join!`ing them
@@ -127,6 +168,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         run_checked(run_request_decider, &context),
         run_checked(run_transaction_coordinator, &context),
         run_checked(run_transaction_signer, &context),
+        // Signer info logger intentionally runned in unchecked mode,
+        // since it is not necessary for signer to be operational.
+        run_signer_info_logger(context.clone()),
     );
 
     Ok(())
@@ -214,15 +258,83 @@ async fn run_shutdown_signal_watcher(ctx: impl Context) -> Result<(), Error> {
 async fn run_libp2p_swarm(ctx: impl Context) -> Result<(), Error> {
     tracing::info!("initializing the p2p network");
 
-    // Build the swarm.
     tracing::debug!("building the libp2p swarm");
     let config = ctx.config();
-    let mut swarm =
-        SignerSwarmBuilder::new(&config.signer.private_key, config.signer.p2p.enable_mdns)
-            .add_listen_endpoints(&ctx.config().signer.p2p.listen_on)
-            .add_seed_addrs(&ctx.config().signer.p2p.seeds)
-            .add_external_addresses(&ctx.config().signer.p2p.public_endpoints)
-            .build()?;
+
+    let enable_quic = config.signer.p2p.is_quic_used();
+
+    // Limit the number of signers to the maximum number of signer pubkeys we
+    // can support. Note that this value is used as a base value for swarm
+    // connection limit calculations.
+    let num_signers = ctx
+        .state()
+        .current_signer_set()
+        .num_signers()
+        .try_into()
+        .unwrap_or(signer::MAX_KEYS);
+
+    // Look for known peers in the database which will be included as part of
+    // the bootstrapping process. We will only include peers that have been
+    // dialed within the KNOWN_PEER_WINDOW, and we will limit the number of
+    // peers to MAX_KNOWN_PEERS. This filtering is done to give the signer a
+    // reasonable list of peers to connect to, increasing its likelihood of
+    // successfully bootstrapping and joining the network despite seed peer
+    // failures.
+    //
+    // NOTE: We specify seed and known peers separately as seed peers are part
+    // of the static configuration, are generally considered trusted/more stable
+    // and as such are dialed first. Known peers are gathered from the network
+    // and are dialed using their explicit known/verified peer ID for added
+    // security.
+    let known_peers = {
+        // Fetch known peers from the database.
+        let mut db_peers = ctx.get_storage()
+            .get_p2p_peers()
+            .await
+            .inspect_err(|error| {
+                tracing::warn!(%error, "failed to fetch known peers from the database; skipping known peers");
+            })
+            .unwrap_or_default();
+
+        // Sort the peers by last successful dialed time, duration-descending.
+        db_peers.sort_unstable_by(|a, b| b.last_dialed_at.cmp(&a.last_dialed_at));
+
+        // Create a list of known peers, filtering out those that have not been
+        // dialed within the KNOWN_PEER_WINDOW or are already included as seed
+        // addresses.
+        db_peers
+            .into_iter()
+            .filter_map(|peer| {
+                let time_since_last_dialed = OffsetDateTime::now_utc() - *peer.last_dialed_at;
+                let is_seed_addr = config.signer.p2p.seeds.contains(&*peer.address);
+                let is_allowed_peer = ctx
+                    .state()
+                    .current_signer_set()
+                    .is_allowed_peer(&peer.peer_id);
+
+                if time_since_last_dialed > KNOWN_PEER_WINDOW || is_seed_addr || !is_allowed_peer {
+                    None
+                } else {
+                    let peer_id = *peer.peer_id;
+                    let peer_address = (*peer.address).clone();
+                    Some((peer_id, peer_address))
+                }
+            })
+            .take(MAX_KNOWN_PEERS)
+            .collect::<Vec<_>>()
+    };
+
+    // Build the swarm.
+    let mut swarm = SignerSwarmBuilder::new(&config.signer.private_key)
+        .add_listen_endpoints(&ctx.config().signer.p2p.listen_on)
+        .add_seed_addrs(&ctx.config().signer.p2p.seeds)
+        .add_known_peers(&known_peers)
+        .add_external_addresses(&ctx.config().signer.p2p.public_endpoints)
+        .enable_mdns(config.signer.p2p.enable_mdns)
+        .enable_quic_transport(enable_quic)
+        .with_initial_bootstrap_delay(Duration::from_secs(INITIAL_BOOTSTRAP_DELAY_SECS))
+        .with_num_signers(num_signers)
+        .build()?;
 
     // Start the libp2p swarm. This will run until either the shutdown signal is
     // received, or an unrecoverable error has occurred.
@@ -291,49 +403,39 @@ async fn run_api(ctx: impl Context + 'static) -> Result<(), Error> {
 
 /// Run the block observer event-loop.
 async fn run_block_observer(ctx: impl Context) -> Result<(), Error> {
-    let config = ctx.config().clone();
+    let bitcoin_client = ctx.get_bitcoin_client();
+    let chain_tip_polling_interval = ctx.config().bitcoin.chain_tip_polling_interval;
 
-    // TODO: Need to handle multiple endpoints, so some sort of
-    // failover-stream-wrapper.
-    let stream = BitcoinCoreMessageStream::new_from_endpoint(
-        config.bitcoin.block_hash_stream_endpoints[0].as_str(),
-        &["hashblock"],
-    )
-    .await
-    .unwrap();
+    // Build and start the Bitcoin chain tip poller. This will block until it
+    // can successfully fetch the initial block hash. If ths timeout is exceeded
+    // while waiting for the initial block hash, an error will be returned.
+    let bitcoin_block_source =
+        BitcoinChainTipPoller::start_new(bitcoin_client, chain_tip_polling_interval).await;
 
-    // TODO: We should have a new() method that builds from the context
-    let block_observer = block_observer::BlockObserver {
-        context: ctx,
-        bitcoin_blocks: stream.to_block_hash_stream(),
-    };
+    let result = block_observer::BlockObserver::new(ctx, bitcoin_block_source.clone())
+        .run()
+        .await;
 
-    block_observer.run().await
+    // Once the block observer has finished running, we need to stop the
+    // Bitcoin chain tip poller before returning the result from the observer.
+    bitcoin_block_source.stop();
+    result
+}
+
+/// Run the signer info logger event loop.
+async fn run_signer_info_logger(ctx: impl Context) {
+    SignerInfoLogger::new(ctx, SIGNER_INFO_LOGGER_INTERVAL)
+        .run()
+        .await
 }
 
 /// Run the transaction signer event-loop.
 async fn run_transaction_signer(ctx: impl Context) -> Result<(), Error> {
-    let config = ctx.config().clone();
     let network = P2PNetwork::new(&ctx);
 
-    // The _ as usize cast is fine, since we know that
-    // MAX_SIGNER_STATE_MACHINES is less than u32::MAX, and we only support
-    // running this binary on 32 or 64-bit CPUs.
-    let max_state_machines = NonZeroUsize::new(signer::MAX_SIGNER_STATE_MACHINES as usize)
-        .ok_or(Error::TypeConversion)?;
-
-    let signer = transaction_signer::TxSignerEventLoop {
-        network,
-        context: ctx.clone(),
-        context_window: config.signer.context_window,
-        threshold: config.signer.bootstrap_signatures_required.into(),
-        rng: rand::thread_rng(),
-        signer_private_key: config.signer.private_key,
-        wsts_state_machines: LruCache::new(max_state_machines),
-        dkg_begin_pause: config.signer.dkg_begin_pause.map(Duration::from_secs),
-    };
-
-    signer.run().await
+    transaction_signer::TxSignerEventLoop::new(ctx, network)?
+        .run()
+        .await
 }
 
 /// Run the transaction coordinator event-loop.
@@ -349,7 +451,6 @@ async fn run_transaction_coordinator(ctx: impl Context) -> Result<(), Error> {
         private_key,
         signing_round_max_duration: config.signer.signer_round_max_duration,
         bitcoin_presign_request_max_duration: config.signer.bitcoin_presign_request_max_duration,
-        threshold: config.signer.bootstrap_signatures_required,
         dkg_max_duration: config.signer.dkg_max_duration,
         is_epoch3: false,
     };
@@ -366,7 +467,9 @@ async fn run_request_decider(ctx: impl Context) -> Result<(), Error> {
         network,
         context: ctx.clone(),
         context_window: config.signer.context_window,
-        blocklist_checker: BlocklistClient::new(&ctx),
+        deposit_decisions_retry_window: config.signer.deposit_decisions_retry_window,
+        withdrawal_decisions_retry_window: config.signer.withdrawal_decisions_retry_window,
+        blocklist_checker: config.blocklist_client.as_ref().map(BlocklistClient::new),
         signer_private_key: config.signer.private_key,
     };
 

@@ -1,41 +1,32 @@
-# Security Policy
+# sBTC Security Policy
+
+The [release process](./RELEASE.md) describes sBTC's approach to security
+(4-eyes, decentralization, no single point of failure, chain-of-trust from code
+to artifacts, attestations).
 
 ## Reporting a vulnerability
 
 **Please do not file a public issue or PR mentioning the vulnerability.**
 
-Please visit [https://stacks.org/security](https://stacks.org/security) for the
-most up-to-date information on our security policy.
+If you have identified a vulnerability, please report it on ImmuneFi (see below).
 
-You may also contact us with any questions or to report a vulnerability using
-the following key(s):
+### ImmuneFi
 
-| Name                | Fingerprint                                       |
-| ------------------- | ------------------------------------------------- |
-| security@stacks.org | ABA3 7FA3 6DBB A591 B0E5 5949 0E94 D065 B32E C7E6 |
+Stacks Labs has partnered with [ImmuneFi][1] to reward honest researchers who 
+find and responsibly disclose security vulnerabilities in our critical code. 
+Bounties are payable in the Stacks token ([STX][2]) for accepted,
+high-quality submissions.
 
-```
------BEGIN PGP PUBLIC KEY BLOCK-----
+Learn more here: [https://bounty.stacks.org][3].
 
-mDMEZrJ2wBYJKwYBBAHaRw8BAQdADVWSZGbVgc0SE8XmXkRonl85wXrPHkl9bN0B
-jKFBIRS0KXNlY3VyaXR5QHN0YWNrcy5vcmcgPHNlY3VyaXR5QHN0YWNrcy5vcmc+
-iJAEExYIADgWIQSro3+jbbulkbDlWUkOlNBlsy7H5gUCZrJ2wAIbAwULCQgHAgYV
-CgkICwIEFgIDAQIeAQIXgAAKCRAOlNBlsy7H5tznAQC6iKqtjCqn2RjtCkr2V6xe
-kCe92RfwWsG0415jVpVlDgEA350TCqIT1Jwyqz2aNT2TQ9F6fyKzAiNpLVRImOLH
-4Aq4OARmsnbAEgorBgEEAZdVAQUBAQdAvwusRitvUX9hSC8NKS48VTT3LVvZvn87
-JQXRc2CngAEDAQgHiHgEGBYIACAWIQSro3+jbbulkbDlWUkOlNBlsy7H5gUCZrJ2
-wAIbDAAKCRAOlNBlsy7H5oCNAQDae9VhB98HMOvZ99ZuSEyLqXxKjK7xT2P0y1Tm
-GuUnNAEAhI+1BjFvO/Hy50DcZTmHWvHJ6/dzibw5Ah+oE458IQo=
-=yhSO
------END PGP PUBLIC KEY BLOCK-----
-```
+## Stacks Security Policy
 
-## ImmuneFi
+Please visit [https://stacks.org/security][0] for the most up-to-date
+information on Stacks' security policy.
 
-The Stacks Foundation has partnered with [ImmuneFi](https://immunefi.com/) to
-reward honest researchers who find and responsibly disclose security
-vulnerabilities in our critical code. Bounties are payable in the Stacks token
-([STX](https://www.coingecko.com/en/coins/stacks)) for accepted, high-quality
-submissions.
+## References
 
-Learn more here: [https://bounty.stacks.org](https://bounty.stacks.org)
+[0]: https://stacks.org/security
+[1]: https://immunefi.com/
+[2]: https://www.coingecko.com/en/coins/stacks
+[3]: https://bounty.stacks.org

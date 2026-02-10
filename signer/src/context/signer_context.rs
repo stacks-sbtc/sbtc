@@ -1,16 +1,15 @@
 use std::sync::Arc;
-
 use tokio::sync::broadcast::Sender;
 use url::Url;
 
 use crate::{
+    SIGNER_CHANNEL_CAPACITY,
     bitcoin::BitcoinInteract,
     config::{EmilyClientConfig, Settings},
     emily_client::EmilyInteract,
     error::Error,
     stacks::api::StacksInteract,
-    storage::{DbRead, DbWrite},
-    SIGNER_CHANNEL_CAPACITY,
+    storage::{DbRead, DbWrite, Transactable},
 };
 
 use super::{Context, SignerSignal, SignerState, TerminationHandle};
@@ -106,7 +105,7 @@ where
 
 impl<S, BC, ST, EM> Context for SignerContext<S, BC, ST, EM>
 where
-    S: DbRead + DbWrite + Clone + Sync + Send + 'static,
+    S: DbRead + DbWrite + Transactable + Clone + Sync + Send + 'static,
     BC: BitcoinInteract + Clone + 'static,
     ST: StacksInteract + Clone + Sync + Send + 'static,
     EM: EmilyInteract + Clone + Sync + Send + 'static,
@@ -149,7 +148,9 @@ where
         self.storage.clone()
     }
 
-    fn get_storage_mut(&self) -> impl DbRead + DbWrite + Clone + Sync + Send + 'static {
+    fn get_storage_mut(
+        &self,
+    ) -> impl DbRead + DbWrite + Transactable + Clone + Sync + Send + 'static {
         self.storage.clone()
     }
 
@@ -166,15 +167,39 @@ where
     }
 }
 
+#[cfg(any(test, feature = "testing"))]
+impl<Storage, Bitcoin, Stacks, Emily> SignerContext<Storage, Bitcoin, Stacks, Emily> {
+    /// Get a mutable reference to the config.
+    pub fn config_mut(&mut self) -> &mut Settings {
+        &mut self.config
+    }
+
+    /// Resets the termination signal for this context.
+    ///
+    /// This sets the underlying termination state to `false`, allowing
+    /// new `TerminationHandle` instances or existing ones (that haven't
+    /// been dropped) to reflect a non-terminated state. This is primarily
+    /// useful in testing scenarios where a context is reused after a
+    /// simulated shutdown.
+    pub fn reset_termination_signal(&self) {
+        // Send `false` to the watch channel, indicating not terminated.
+        // The result of `send` is ignored here. If all receivers were dropped,
+        // there's no one to signal, but the internal state of the sender
+        // will be updated to `false`.
+        let _ = self.term_tx.send(false);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{
-        atomic::{AtomicU8, Ordering},
         Arc,
+        atomic::{AtomicU8, Ordering},
     };
 
     use tokio::sync::Notify;
 
+    use crate::storage::model::BitcoinBlockRef;
     use crate::{
         context::{Context as _, SignerEvent, SignerSignal},
         testing::context::*,
@@ -213,9 +238,9 @@ mod tests {
             task_started_clone.notify_one();
             let signal = cloned_receiver.recv().await.unwrap();
 
-            assert_eq!(
+            assert_matches::assert_matches!(
                 signal,
-                SignerSignal::Event(SignerEvent::BitcoinBlockObserved)
+                SignerSignal::Event(SignerEvent::BitcoinBlockObserved(_))
             );
 
             recv_count_clone.fetch_add(1, Ordering::Relaxed);
@@ -230,7 +255,7 @@ mod tests {
 
         // Signal the original context.
         context
-            .signal(SignerEvent::BitcoinBlockObserved.into())
+            .signal(SignerEvent::BitcoinBlockObserved(BitcoinBlockRef::genesis()).into())
             .unwrap();
 
         // This wait is needed to ensure that the below `abort()` doesn't

@@ -1,30 +1,33 @@
 use blockstack_lib::types::chainstate::StacksAddress;
 use rand::rngs::OsRng;
-use rand::SeedableRng;
 
 use sbtc::testing::regtest;
 use signer::error::Error;
 use signer::keys::PublicKey;
 use signer::keys::SignerScriptPubKey as _;
-use signer::stacks::contracts::AsContractCall;
+use signer::stacks::contracts::AsContractCall as _;
 use signer::stacks::contracts::ReqContext;
 use signer::stacks::contracts::RotateKeysErrorMsg;
 use signer::stacks::contracts::RotateKeysV1;
 use signer::stacks::wallet::SignerWallet;
-use signer::storage::model::BitcoinBlock;
-use signer::storage::model::EncryptedDkgShares;
-use signer::storage::model::RotateKeysTransaction;
-use signer::storage::model::StacksPrincipal;
-use signer::storage::model::Transaction;
-use signer::storage::model::TransactionType;
-use signer::storage::postgres::PgStore;
-use signer::storage::DbRead;
+use signer::storage::DbRead as _;
 use signer::storage::DbWrite as _;
+use signer::storage::model::BitcoinBlock;
+use signer::storage::model::DkgSharesStatus;
+use signer::storage::model::EncryptedDkgShares;
+use signer::storage::model::KeyRotationEvent;
+use signer::storage::model::StacksBlockHash;
+use signer::storage::model::StacksPrincipal;
+use signer::storage::model::StacksTxId;
+use signer::storage::postgres::PgStore;
 use signer::testing;
 use signer::testing::context::*;
+use signer::testing::get_rng;
 
-use fake::Fake;
+use fake::Fake as _;
 use signer::testing::storage::model::TestData;
+
+use crate::setup::set_verification_status;
 
 struct TestRotateKeySetup {
     /// The signer object. It's public key represents the group of signers'
@@ -36,13 +39,16 @@ struct TestRotateKeySetup {
     pub signer_keys: Vec<PublicKey>,
     /// This value affects whether a request is considered "accepted".
     pub signatures_required: u16,
-    /// Raw transaction
-    pub raw_tx: Transaction,
+    /// The transaction ID
+    pub txid: StacksTxId,
+    // The block hash of the block that confirmed the transaction.
+    pub block_hash: StacksBlockHash,
     /// Signers wallet
     pub wallet: SignerWallet,
     /// Bitcoin chain tip used when generating current setup
     pub chain_tip: BitcoinBlock,
 }
+
 impl TestRotateKeySetup {
     pub async fn new<R>(
         db: &PgStore,
@@ -82,18 +88,12 @@ impl TestRotateKeySetup {
             .expect("failed to get stacks chain tip")
             .expect("no stacks chain tip");
 
-        let raw_tx = Transaction {
-            txid: fake::Faker.fake_with_rng(rng),
-            tx: Vec::new(),
-            tx_type: TransactionType::RotateKeys,
-            block_hash: stacks_chain_tip.block_hash.into_bytes(),
-        };
-
         TestRotateKeySetup {
             aggregated_signer,
             signer_keys,
             signatures_required,
-            raw_tx,
+            txid: fake::Faker.fake_with_rng(rng),
+            block_hash: stacks_chain_tip.block_hash,
             wallet,
             chain_tip: bitcoin_chain_tip_block,
         }
@@ -107,6 +107,7 @@ impl TestRotateKeySetup {
     /// Store mocked shares in dkg_shares table.
     pub async fn store_dkg_shares(&self, db: &PgStore) {
         let aggregate_key: PublicKey = self.aggregate_key();
+
         let shares = EncryptedDkgShares {
             script_pubkey: aggregate_key.signers_script_pubkey().into(),
             tweaked_aggregate_key: aggregate_key.signers_tweaked_pubkey().unwrap(),
@@ -115,23 +116,23 @@ impl TestRotateKeySetup {
             aggregate_key,
             signer_set_public_keys: self.signer_keys.clone(),
             signature_share_threshold: self.signatures_required,
+            dkg_shares_status: DkgSharesStatus::Verified,
+            started_at_bitcoin_block_hash: self.chain_tip.block_hash,
+            started_at_bitcoin_block_height: self.chain_tip.block_height,
         };
         db.write_encrypted_dkg_shares(&shares).await.unwrap();
     }
 
     /// Store rotate key tx.
     pub async fn store_rotate_keys(&self, db: &PgStore) {
-        db.write_stacks_transactions(vec![self.raw_tx.clone()])
-            .await
-            .unwrap();
-
         let aggregate_key: PublicKey = self.aggregate_key();
         let address = StacksPrincipal::from(clarity::vm::types::PrincipalData::from(
             self.wallet.address().clone(),
         ));
-        let rotate_key_tx = RotateKeysTransaction {
-            address: address,
-            txid: self.raw_tx.txid.into(),
+        let rotate_key_tx = KeyRotationEvent {
+            address,
+            block_hash: self.block_hash,
+            txid: self.txid,
             aggregate_key,
             signer_set: self.signer_keys.clone(),
             signatures_required: self.signatures_required,
@@ -152,6 +153,8 @@ fn make_rotate_key(setup: &TestRotateKeySetup) -> (RotateKeysV1, ReqContext) {
     // This is what the current signer thinks is the state of things.
     let req_ctx = ReqContext {
         chain_tip: setup.chain_tip.clone().into(),
+        // This is not used for rotate-key tests.
+        stacks_chain_tip: setup.block_hash,
         context_window: 10,
         origin: fake::Faker.fake_with_rng(&mut OsRng),
         aggregate_key: setup.aggregate_key(),
@@ -162,12 +165,11 @@ fn make_rotate_key(setup: &TestRotateKeySetup) -> (RotateKeysV1, ReqContext) {
     (rotate_key, req_ctx)
 }
 
-#[cfg_attr(not(feature = "integration-tests"), ignore)]
 #[tokio::test]
 async fn rotate_key_validation_happy_path() {
     // Normal: preamble
-    let mut db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
 
     let test_model_params = testing::storage::model::Params {
         num_bitcoin_blocks: 20,
@@ -175,9 +177,10 @@ async fn rotate_key_validation_happy_path() {
         num_deposit_requests_per_block: 0,
         num_withdraw_requests_per_block: 0,
         num_signers_per_request: 0,
+        consecutive_blocks: false,
     };
     let test_data = TestData::generate(&mut rng, &[], &test_model_params);
-    test_data.write_to(&mut db).await;
+    test_data.write_to(&db).await;
 
     let ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -212,12 +215,11 @@ async fn rotate_key_validation_happy_path() {
     testing::storage::drop_db(db).await;
 }
 
-#[cfg_attr(not(feature = "integration-tests"), ignore)]
 #[tokio::test]
 async fn rotate_key_validation_no_dkg() {
     // Normal: preamble
-    let mut db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
 
     let test_model_params = testing::storage::model::Params {
         num_bitcoin_blocks: 20,
@@ -225,9 +227,10 @@ async fn rotate_key_validation_no_dkg() {
         num_deposit_requests_per_block: 0,
         num_withdraw_requests_per_block: 0,
         num_signers_per_request: 0,
+        consecutive_blocks: false,
     };
     let test_data = TestData::generate(&mut rng, &[], &test_model_params);
-    test_data.write_to(&mut db).await;
+    test_data.write_to(&db).await;
 
     let ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -250,12 +253,11 @@ async fn rotate_key_validation_no_dkg() {
     testing::storage::drop_db(db).await;
 }
 
-#[cfg_attr(not(feature = "integration-tests"), ignore)]
 #[tokio::test]
 async fn rotate_key_validation_wrong_deployer() {
     // Normal: preamble
-    let mut db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
 
     let test_model_params = testing::storage::model::Params {
         num_bitcoin_blocks: 20,
@@ -263,9 +265,10 @@ async fn rotate_key_validation_wrong_deployer() {
         num_deposit_requests_per_block: 0,
         num_withdraw_requests_per_block: 0,
         num_signers_per_request: 0,
+        consecutive_blocks: false,
     };
     let test_data = TestData::generate(&mut rng, &[], &test_model_params);
-    test_data.write_to(&mut db).await;
+    test_data.write_to(&db).await;
 
     let ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -294,12 +297,11 @@ async fn rotate_key_validation_wrong_deployer() {
     testing::storage::drop_db(db).await;
 }
 
-#[cfg_attr(not(feature = "integration-tests"), ignore)]
 #[tokio::test]
 async fn rotate_key_validation_wrong_signing_set() {
     // Normal: preamble
-    let mut db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
 
     let test_model_params = testing::storage::model::Params {
         num_bitcoin_blocks: 20,
@@ -307,9 +309,10 @@ async fn rotate_key_validation_wrong_signing_set() {
         num_deposit_requests_per_block: 0,
         num_withdraw_requests_per_block: 0,
         num_signers_per_request: 0,
+        consecutive_blocks: false,
     };
     let test_data = TestData::generate(&mut rng, &[], &test_model_params);
-    test_data.write_to(&mut db).await;
+    test_data.write_to(&db).await;
 
     let ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -329,7 +332,7 @@ async fn rotate_key_validation_wrong_signing_set() {
     let setup_other = TestRotateKeySetup::new(&db, 2, 3, &mut rng).await;
     let rotate_key_tx_other = RotateKeysV1::new(
         &setup_other.wallet,
-        rotate_key_tx.deployer_address(),
+        rotate_key_tx.deployer_address().clone(),
         &setup.aggregate_key(),
     );
 
@@ -344,12 +347,11 @@ async fn rotate_key_validation_wrong_signing_set() {
     testing::storage::drop_db(db).await;
 }
 
-#[cfg_attr(not(feature = "integration-tests"), ignore)]
 #[tokio::test]
 async fn rotate_key_validation_wrong_aggregate_key() {
     // Normal: preamble
-    let mut db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
 
     let test_model_params = testing::storage::model::Params {
         num_bitcoin_blocks: 20,
@@ -357,9 +359,10 @@ async fn rotate_key_validation_wrong_aggregate_key() {
         num_deposit_requests_per_block: 0,
         num_withdraw_requests_per_block: 0,
         num_signers_per_request: 0,
+        consecutive_blocks: false,
     };
     let test_data = TestData::generate(&mut rng, &[], &test_model_params);
-    test_data.write_to(&mut db).await;
+    test_data.write_to(&db).await;
 
     let ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -379,7 +382,7 @@ async fn rotate_key_validation_wrong_aggregate_key() {
     let setup_other = TestRotateKeySetup::new(&db, 2, 3, &mut rng).await;
     let rotate_key_tx_other = RotateKeysV1::new(
         &setup.wallet,
-        rotate_key_tx.deployer_address(),
+        rotate_key_tx.deployer_address().clone(),
         &setup_other.aggregate_key(),
     );
 
@@ -394,12 +397,11 @@ async fn rotate_key_validation_wrong_aggregate_key() {
     testing::storage::drop_db(db).await;
 }
 
-#[cfg_attr(not(feature = "integration-tests"), ignore)]
 #[tokio::test]
 async fn rotate_key_validation_wrong_signatures_required() {
     // Normal: preamble
-    let mut db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
 
     let test_model_params = testing::storage::model::Params {
         num_bitcoin_blocks: 20,
@@ -407,9 +409,10 @@ async fn rotate_key_validation_wrong_signatures_required() {
         num_deposit_requests_per_block: 0,
         num_withdraw_requests_per_block: 0,
         num_signers_per_request: 0,
+        consecutive_blocks: false,
     };
     let test_data = TestData::generate(&mut rng, &[], &test_model_params);
-    test_data.write_to(&mut db).await;
+    test_data.write_to(&db).await;
 
     let ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -434,7 +437,7 @@ async fn rotate_key_validation_wrong_signatures_required() {
     .unwrap();
     let rotate_key_tx_other = RotateKeysV1::new(
         &wallet_other,
-        rotate_key_tx.deployer_address(),
+        rotate_key_tx.deployer_address().clone(),
         &setup.aggregate_key(),
     );
 
@@ -449,12 +452,11 @@ async fn rotate_key_validation_wrong_signatures_required() {
     testing::storage::drop_db(db).await;
 }
 
-#[cfg_attr(not(feature = "integration-tests"), ignore)]
 #[tokio::test]
 async fn rotate_key_validation_replay() {
     // Normal: preamble
-    let mut db = testing::storage::new_test_database().await;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(51);
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
 
     let test_model_params = testing::storage::model::Params {
         num_bitcoin_blocks: 20,
@@ -462,9 +464,10 @@ async fn rotate_key_validation_replay() {
         num_deposit_requests_per_block: 0,
         num_withdraw_requests_per_block: 0,
         num_signers_per_request: 0,
+        consecutive_blocks: false,
     };
     let test_data = TestData::generate(&mut rng, &[], &test_model_params);
-    test_data.write_to(&mut db).await;
+    test_data.write_to(&db).await;
 
     let ctx = TestContext::builder()
         .with_storage(db.clone())
@@ -500,15 +503,77 @@ async fn rotate_key_validation_replay() {
         num_deposit_requests_per_block: 0,
         num_withdraw_requests_per_block: 0,
         num_signers_per_request: 0,
+        consecutive_blocks: false,
     };
     let test_data = TestData::generate(&mut rng, &[], &test_model_params);
-    test_data.write_to(&mut db).await;
+    test_data.write_to(&db).await;
 
-    let mut req_ctx_fork = req_ctx.clone();
+    let mut req_ctx_fork = req_ctx;
     req_ctx_fork.chain_tip.block_hash = test_data.bitcoin_blocks[0].block_hash;
     req_ctx_fork.chain_tip.block_height = test_data.bitcoin_blocks[0].block_height;
+    req_ctx_fork.stacks_chain_tip = test_data.stacks_blocks.last().unwrap().block_hash;
 
     rotate_key_tx.validate(&ctx, &req_ctx_fork).await.unwrap();
+
+    testing::storage::drop_db(db).await;
+}
+
+#[tokio::test]
+async fn rotate_key_validation_not_verfied() {
+    // Normal: preamble
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
+
+    let test_model_params = testing::storage::model::Params {
+        num_bitcoin_blocks: 20,
+        num_stacks_blocks_per_bitcoin_block: 3,
+        num_deposit_requests_per_block: 0,
+        num_withdraw_requests_per_block: 0,
+        num_signers_per_request: 0,
+        consecutive_blocks: false,
+    };
+    let test_data = TestData::generate(&mut rng, &[], &test_model_params);
+    test_data.write_to(&db).await;
+
+    let ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_mocked_clients()
+        .build();
+
+    let setup = TestRotateKeySetup::new(&db, 2, 3, &mut rng).await;
+
+    // Normal: we store setup dkg shares
+    setup.store_dkg_shares(&db).await;
+
+    // Different: mark the shares as failed.
+    set_verification_status(&db, setup.aggregate_key(), DkgSharesStatus::Failed).await;
+
+    // Normal: we get the rotate key from the setup
+    let (rotate_key_tx, req_ctx) = make_rotate_key(&setup);
+
+    let validate_future = rotate_key_tx.validate(&ctx, &req_ctx);
+    match validate_future.await.unwrap_err() {
+        Error::RotateKeysValidation(ref err) => {
+            assert_eq!(err.error, RotateKeysErrorMsg::DkgSharesNotVerified)
+        }
+        err => panic!("unexpected error during validation {err}"),
+    }
+
+    // Different: mark the shares as unverified.
+    set_verification_status(&db, setup.aggregate_key(), DkgSharesStatus::Unverified).await;
+
+    let validate_future = rotate_key_tx.validate(&ctx, &req_ctx);
+    match validate_future.await.unwrap_err() {
+        Error::RotateKeysValidation(ref err) => {
+            assert_eq!(err.error, RotateKeysErrorMsg::DkgSharesNotVerified)
+        }
+        err => panic!("unexpected error during validation {err}"),
+    }
+
+    // Well this is the regular happy path. Everything should validate now.
+    set_verification_status(&db, setup.aggregate_key(), DkgSharesStatus::Verified).await;
+
+    rotate_key_tx.validate(&ctx, &req_ctx).await.unwrap();
 
     testing::storage::drop_db(db).await;
 }

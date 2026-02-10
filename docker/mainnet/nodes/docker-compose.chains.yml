@@ -3,22 +3,18 @@ x-common-vars:
   - &BITCOIN_RPC_USERNAME ${BITCOIN_RPC_USERNAME} # Required
   - &BITCOIN_RPC_PASSWORD ${BITCOIN_RPC_PASSWORD} # Required
   - &BITCOIN_RPC_PORT ${BITCOIN_RPC_PORT:-8332}
-  - &BITCOIN_ZMQ_PORT ${BITCOIN_ZMQ_PORT:-28332}
   # Stacks RPC
   - &STACKS_RPC_PORT ${STACKS_RPC_PORT:-20443}
 
 services:
   bitcoin:
-    image: bitcoin/bitcoin:28.0
+    image: bitcoin/bitcoin:28.1@sha256:40c4d17f6cf0b560a61d33a1d97ccb8b6d407db29e614d2c598cb9b2483a4383
     container_name: bitcoin
     restart: on-failure:3
     ports:
       - name: bitcoin_rpc
         target: *BITCOIN_RPC_PORT
         published: *BITCOIN_RPC_PORT
-      - name: bitcoin_zmq
-        target: *BITCOIN_ZMQ_PORT
-        published: *BITCOIN_ZMQ_PORT
       - "8333:8333"  # I2P
       - "8334:8334"  # P2P
     volumes:
@@ -27,7 +23,6 @@ services:
       BITCOIN_RPC_USERNAME: *BITCOIN_RPC_USERNAME
       BITCOIN_RPC_PASSWORD: *BITCOIN_RPC_PASSWORD
       BITCOIN_RPC_PORT: *BITCOIN_RPC_PORT
-      BITCOIN_ZMQ_PORT: *BITCOIN_ZMQ_PORT
       BITCOIN_DATA: /bitcoin/data
     entrypoint:
       - /bin/bash
@@ -43,13 +38,12 @@ services:
           -rpcport=$${BITCOIN_RPC_PORT} \
           -rpcallowip=0.0.0.0/0 \
           -rpcallowip=::/0 \
-          -txindex \
-          -zmqpubhashblock="tcp://*:$${BITCOIN_ZMQ_PORT}" \
-          -zmqpubrawblock="tcp://*:$${BITCOIN_ZMQ_PORT}"
+          -txindex
 
-  stacks-blockchain:
-    image: blockstack/stacks-blockchain:3.1.0.0.2
-    container_name: stacks-blockchain
+  stacks-core:
+    # this version can be outdated, check the last image on: https://hub.docker.com/r/blockstack/stacks-core/tags
+    image: blockstack/stacks-core:3.3.0.0.1@sha256:b7fd10e489c81da12d8e1b956dec5d35bf8fd98874a6d32127bdee19cad0a235
+    container_name: stacks-core
     restart: on-failure:3
     ports:
       - name: stacks_rpc
@@ -61,9 +55,6 @@ services:
       - ./nodes/stacks/Config.toml.in:/stacks/Config.toml.in:ro
       - /mnt/stacks:/stacks
     environment:
-      BITCOIN_RPC_USERNAME: *BITCOIN_RPC_USERNAME
-      BITCOIN_RPC_PASSWORD: *BITCOIN_RPC_PASSWORD
-      BITCOIN_RPC_PORT: *BITCOIN_RPC_PORT
       STACKS_RPC_PORT: *STACKS_RPC_PORT
     entrypoint:
       - /bin/bash

@@ -47,21 +47,6 @@ rpc_endpoints = [
     "http://$BITCOIN_RPC_USERNAME:$BITCOIN_RPC_PASSWORD@$BITCOIN_RPC_HOST:$BITCOIN_RPC_PORT",
 ]
 
-# The URI(s) of the Bitcoin Core ZMQ block hash stream(s) to connect to.
-#
-# You may optionally specify multiple endpoints if you have them. They will be
-# tried in order until one succeeds, and it will attempt failover to the next
-# endpoint if the connection is lost.
-#
-# Format: ["tcp://<host>:<port>", ..]
-# Default: <none>
-# Required: true
-# Environment: SIGNER_BITCOIN__BLOCK_HASH_STREAM_ENDPOINTS
-# Environment Example: tcp://10.0.0.1:28332,tcp://10.0.0.2:28332
-block_hash_stream_endpoints = [
-    "tcp://$BITCOIN_ZMQ_HOST:$BITCOIN_ZMQ_PORT"
-]
-
 # !! ==============================================================================
 # !! Stacks Node Configuration
 # !! ==============================================================================
@@ -99,7 +84,7 @@ db_endpoint = "postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$PO
 private_key = "0000000000000000000000000000000000000000000000000000000000000001"
 
 # Specifies which network to use when constructing and sending transactions
-# on stacks and bitcoin. This cooresponds to the `chain` flag in the
+# on stacks and bitcoin. This corresponds to the `chain` flag in the
 # bitcoin.conf file of the connected bitcoin-core node, and the
 # `burnchain.mode` flag int he config.toml of the connected stacks-core
 # node.
@@ -133,8 +118,14 @@ bootstrap_signing_set = [
 bootstrap_signatures_required = 10
 
 # Seconds to wait before processing a new Bitcoin block.
-# Required: true Environment: SIGNER_SIGNER__BITCOIN_PROCESSING_DELAY
+# Required: true
+# Environment: SIGNER_SIGNER__BITCOIN_PROCESSING_DELAY
 bitcoin_processing_delay = 30
+
+# Seconds to wait before processing new SBTC requests.
+# Required: true
+# Environment: SIGNER_SIGNER__REQUESTS_PROCESSING_DELAY
+requests_processing_delay = 15
 
 # The number of blocks back the block observer should look for unprocessed
 # blocks before proceeding.
@@ -156,14 +147,6 @@ prometheus_exporter_endpoint = "0.0.0.0:9184"
 # Required: false
 # Environment: SIGNER_SIGNER__DKG_MIN_BITCOIN_BLOCK_HEIGHT
 dkg_min_bitcoin_block_height = 880088
-
-# When defined, the signer will attempt/allow multiple rounds of DKG until the
-# specified number of rounds have been completed. Please only use this parameter
-# when instructed to by the sBTC team.
-#
-# Required: false
-# Environment: SIGNER_SIGNER__DKG_TARGET_ROUNDS
-dkg_target_rounds = 2
 
 # !! ==============================================================================
 # !! Stacks Event Observer Configuration

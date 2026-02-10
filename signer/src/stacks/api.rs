@@ -1,34 +1,40 @@
 //! A module with structs that interact with the Stacks API.
 
 use std::borrow::Cow;
+use std::collections::BTreeSet;
 use std::future::Future;
+use std::ops::RangeInclusive;
+use std::sync::LazyLock;
 use std::time::Duration;
+use std::time::Instant;
 
 use bitcoin::Amount;
+use bitcoin::OutPoint;
 use blockstack_lib::burnchains::Txid;
-use blockstack_lib::chainstate::burn::ConsensusHash;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
-use blockstack_lib::chainstate::stacks::db::blocks::MINIMUM_TX_FEE_RATE_PER_BYTE;
+use blockstack_lib::chainstate::nakamoto::NakamotoBlockHeader;
+use blockstack_lib::chainstate::stacks::StacksBlock as PreNakamotoBlock;
 use blockstack_lib::chainstate::stacks::StacksTransaction;
 use blockstack_lib::chainstate::stacks::TokenTransferMemo;
 use blockstack_lib::chainstate::stacks::TransactionPayload;
+use blockstack_lib::chainstate::stacks::db::blocks::MINIMUM_TX_FEE_RATE_PER_BYTE;
 use blockstack_lib::clarity::vm::types::PrincipalData;
 use blockstack_lib::clarity::vm::types::StandardPrincipalData;
-use blockstack_lib::codec::StacksMessageCodec;
+use blockstack_lib::codec::StacksMessageCodec as _;
 use blockstack_lib::net::api::getaccount::AccountEntryResponse;
 use blockstack_lib::net::api::getcontractsrc::ContractSrcResponse;
-use blockstack_lib::net::api::getinfo::RPCPeerInfoData;
-use blockstack_lib::net::api::getpoxinfo::RPCPoxInfoData;
 use blockstack_lib::net::api::getsortition::SortitionInfo;
-use blockstack_lib::net::api::gettenureinfo::RPCGetTenureInfo;
 use blockstack_lib::net::api::postfeerate::FeeRateEstimateRequestBody;
 use blockstack_lib::net::api::postfeerate::RPCFeeEstimate;
 use blockstack_lib::net::api::postfeerate::RPCFeeEstimateResponse;
 use blockstack_lib::types::chainstate::StacksAddress;
 use blockstack_lib::types::chainstate::StacksBlockId;
-use clarity::types::StacksEpochId;
+use clarity::types::chainstate::BlockHeaderHash;
+use clarity::vm::Value;
+use clarity::vm::types::OptionalData;
+use clarity::vm::types::TupleData;
 use clarity::vm::types::{BuffData, ListData, SequenceData};
-use clarity::vm::{ClarityName, ContractName, Value};
+use reqwest::StatusCode;
 use reqwest::header::CONTENT_LENGTH;
 use reqwest::header::CONTENT_TYPE;
 use serde::{Deserialize, Deserializer};
@@ -37,9 +43,19 @@ use url::Url;
 use crate::config::Settings;
 use crate::error::Error;
 use crate::keys::PublicKey;
+use crate::metrics::Metrics;
+use crate::storage::DbRead as _;
+use crate::storage::DbWrite as _;
+use crate::storage::Transactable;
+use crate::storage::TransactionHandle as _;
 use crate::storage::model::BitcoinBlockHash;
+use crate::storage::model::BitcoinBlockHeight;
+use crate::storage::model::ConsensusHash;
 use crate::storage::model::StacksBlock;
-use crate::storage::DbRead;
+use crate::storage::model::StacksBlockHash;
+use crate::storage::model::StacksBlockHeight;
+use crate::storage::model::StacksTxId;
+use crate::storage::model::ToLittleEndianOrder as _;
 use crate::util::ApiFallbackClient;
 
 use super::contracts::AsTxPayload;
@@ -55,13 +71,48 @@ const TX_FEE_TX_SIZE_MULTIPLIER: u64 = 2 * MINIMUM_TX_FEE_RATE_PER_BYTE;
 /// case the stacks node returns wonky values. This is 10 STX.
 const MAX_TX_FEE: u64 = 10_000_000;
 
+const EPOCH_3_0_ID: &str = "Epoch30";
+
+/// This is the name of the MAP in the sbtc-registry smart contract that
+/// stores the status of a withdrawal request.
+const WITHDRAWAL_STATUS_MAP_NAME: &str = "withdrawal-status";
+
+/// This is the name of the read-only function in the sbtc-registry smart
+/// contract that returns the status of a deposit request.
+const GET_DEPOSIT_STATUS_FN_NAME: &str = "get-deposit-status";
+
+/// This is the name of the read-only function in the sbtc-registry smart
+/// contract that returns the current signer set data.
+const GET_SIGNER_SET_DATA_FN_NAME: &str = "get-current-signer-data";
+
+/// This is the name of the read-only function in the sbtc-token smart
+/// contract that returns the total supply of sBTC.
+const GET_TOTAL_SUPPLY_FN_NAME: &str = "get-total-supply";
+
+/// This is the name of the data variable in the sbtc-registry smart contract
+/// that stores the current aggregate public key of the signers.
+const CURRENT_AGGREGATE_PUBKEY_DATA_VAR_NAME: &str = "current-aggregate-pubkey";
+
 /// This is a dummy STX transfer payload used only for estimating STX
 /// transfer costs.
-const DUMMY_STX_TRANSFER_PAYLOAD: TransactionPayload = TransactionPayload::TokenTransfer(
-    PrincipalData::Standard(StandardPrincipalData(0, [0; 20])),
-    0,
-    TokenTransferMemo([0; 34]),
-);
+static DUMMY_STX_TRANSFER_PAYLOAD: LazyLock<TransactionPayload> = LazyLock::new(|| {
+    TransactionPayload::TokenTransfer(
+        PrincipalData::Standard(StandardPrincipalData::null_principal()),
+        0,
+        TokenTransferMemo([0; 34]),
+    )
+});
+
+/// The names of all the read-only functions, data variables, and map names
+/// used in the signers for any of the sbtc smart contracts.
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub struct ClarityName(pub &'static str);
+
+impl std::fmt::Display for ClarityName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 trait ExtractFee {
     fn extract_fee(&self, priority: FeePriority) -> Option<RPCFeeEstimate>;
@@ -120,17 +171,36 @@ pub enum FeePriority {
     High,
 }
 
+/// Structure describing the info about signer set currently stored in the
+/// sbtc-registry smart contract on Stacks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "testing", derive(fake::Dummy))]
+pub struct SignerSetInfo {
+    /// The aggregate key of the most recently confirmed key rotation
+    /// contract call on Stacks.
+    pub aggregate_key: PublicKey,
+    /// The set of sBTC signers public keys.
+    pub signer_set: BTreeSet<PublicKey>,
+    /// The number of signatures required to sign a transaction.
+    /// This is the number of signature shares necessary to successfully sign a
+    /// bitcoin transaction spending a UTXO locked with the above aggregate key,
+    /// and the number of signers necessary to sign a Stacks transaction under
+    /// the signers' principal.
+    pub signatures_required: u16,
+}
+
 /// A trait detailing the interface with the Stacks API and Stacks Nodes.
 #[cfg_attr(any(test, feature = "testing"), mockall::automock)]
 pub trait StacksInteract: Send + Sync {
-    /// Retrieve the current signer set from the `sbtc-registry` contract.
+    /// Retrieve the current signers set data from the `sbtc-registry`
+    /// smart contract.
     ///
-    /// This is done by making a `GET /v2/data_var/<contract-principal>/sbtc-registry/current-signer-set`
+    /// This is done by making a `POST /v2/contracts/call-read/<contract-principal>/sbtc-registry/get-current-signer-data`
     /// request.
-    fn get_current_signer_set(
+    fn get_current_signer_set_info(
         &self,
         contract_principal: &StacksAddress,
-    ) -> impl Future<Output = Result<Vec<PublicKey>, Error>> + Send;
+    ) -> impl Future<Output = Result<Option<SignerSetInfo>, Error>> + Send;
 
     /// Retrieve the current signers' aggregate key from the `sbtc-registry` contract.
     ///
@@ -140,6 +210,29 @@ pub trait StacksInteract: Send + Sync {
         &self,
         contract_principal: &StacksAddress,
     ) -> impl Future<Output = Result<Option<PublicKey>, Error>> + Send;
+
+    /// Retrieve a boolean value from the stacks node indicating whether
+    /// sBTC has been minted for the deposit request.
+    ///
+    /// The request is made to `POST
+    /// /v2/contracts/call-read/<contract-principal>/sbtc-registry/get-deposit-status`.
+    fn is_deposit_completed(
+        &self,
+        contract_principal: &StacksAddress,
+        outpoint: &OutPoint,
+    ) -> impl Future<Output = Result<bool, Error>> + Send;
+
+    /// Retrieve a boolean value from the stacks node indicating whether
+    /// the withdrawal request has a response transaction either accepting
+    /// or rejecting the request.
+    ///
+    /// The request is made to `POST
+    /// /v2/map_entry/<contract-principal>/<contract-name>/<map-name>`
+    fn is_withdrawal_completed(
+        &self,
+        contract_principal: &StacksAddress,
+        request_id: u64,
+    ) -> impl Future<Output = Result<bool, Error>> + Send;
 
     /// Get the latest account info for the given address.
     fn get_account(
@@ -157,8 +250,16 @@ pub trait StacksInteract: Send + Sync {
     /// Stacks block ID.
     fn get_block(
         &self,
-        block_id: StacksBlockId,
+        block_id: &StacksBlockHash,
     ) -> impl Future<Output = Result<NakamotoBlock, Error>> + Send;
+
+    /// Returns `Ok` if the given block ID is a pre-Nakamoto block, otherwise
+    /// (the block doesn't exist or is a Nakamoto one) `Err` is returned.
+    fn check_pre_nakamoto_block(
+        &self,
+        block_id: &StacksBlockHash,
+    ) -> impl Future<Output = Result<(), Error>> + Send;
+
     /// Fetch all Nakamoto ancestor blocks within the same tenure as the
     /// given block ID from a Stacks node.
     ///
@@ -168,15 +269,15 @@ pub trait StacksInteract: Send + Sync {
     /// endpoint on stacks-core nodes, but responses from that endpoint are
     /// capped at ~16 MB. This function returns all blocks, regardless of
     /// the size of the blocks within the tenure.
-    fn get_tenure(
+    fn get_tenure_headers(
         &self,
-        block_id: StacksBlockId,
-    ) -> impl Future<Output = Result<TenureBlocks, Error>> + Send;
+        block_id: &StacksBlockHash,
+    ) -> impl Future<Output = Result<TenureBlockHeaders, Error>> + Send;
     /// Get information about the current tenure.
     ///
     /// This function is analogous to the GET /v3/tenures/info stacks node
     /// endpoint for retrieving tenure information.
-    fn get_tenure_info(&self) -> impl Future<Output = Result<RPCGetTenureInfo, Error>> + Send;
+    fn get_tenure_info(&self) -> impl Future<Output = Result<GetTenureInfoResponse, Error>> + Send;
     /// Get information about the sortition associated to a consensus hash
     fn get_sortition_info(
         &self,
@@ -198,11 +299,16 @@ pub trait StacksInteract: Send + Sync {
     where
         T: AsTxPayload + Send + Sync;
 
-    /// Get information about the current PoX state.
-    fn get_pox_info(&self) -> impl Future<Output = Result<RPCPoxInfoData, Error>> + Send;
+    /// Attempt to get information from a Stacks node about whether or not it is
+    /// in a pre- or post-Nakamoto epoch (3.0).
+    ///
+    /// Returns a [`StacksEpochStatus`] variant if successful. If the Stacks node
+    /// does not report an entry for Epoch 3.0, then an
+    /// [`Error::MissingNakamotoStartHeight`] error is returned.
+    fn get_epoch_status(&self) -> impl Future<Output = Result<StacksEpochStatus, Error>> + Send;
 
     /// Get information about the current node.
-    fn get_node_info(&self) -> impl Future<Output = Result<RPCPeerInfoData, Error>> + Send;
+    fn get_node_info(&self) -> impl Future<Output = Result<GetNodeInfoResponse, Error>> + Send;
 
     /// Get the source of a deployed smart contract.
     ///
@@ -224,77 +330,120 @@ pub trait StacksInteract: Send + Sync {
     ) -> impl Future<Output = Result<Amount, Error>> + Send;
 }
 
-/// A trait for getting the start height of the first EPOCH 3.0 block on the
-/// Stacks blockchain.
-pub trait GetNakamotoStartHeight {
-    /// Get the start height of the first EPOCH 3.0 block on the Stacks
-    /// blockchain.
-    fn nakamoto_start_height(&self) -> Option<u64>;
+/// A slimmed down [`NakamotoBlockHeader`]
+#[derive(Debug, Clone, PartialEq)]
+pub struct StacksBlockHeader {
+    /// The total number of StacksBlocks and NakamotoBlocks preceding this
+    /// block in this block's history.
+    pub block_height: StacksBlockHeight,
+    /// The identifier for a block. It is the hash of the this block's
+    /// header hash and the block's consensus hash.
+    pub block_id: StacksBlockHash,
+    /// The index block hash of the immediate parent of this block. This is
+    /// the hash of the parent block's hash and consensus hash.
+    pub parent_block_id: StacksBlockHash,
+    /// The consensus hash of the block.
+    pub consensus_hash: ConsensusHash,
 }
 
-impl GetNakamotoStartHeight for RPCPoxInfoData {
-    fn nakamoto_start_height(&self) -> Option<u64> {
-        self.epochs.iter().find_map(|epoch| {
-            if epoch.epoch_id == StacksEpochId::Epoch30 {
-                Some(epoch.start_height)
-            } else {
-                None
-            }
-        })
+impl From<NakamotoBlockHeader> for StacksBlockHeader {
+    fn from(value: NakamotoBlockHeader) -> Self {
+        StacksBlockHeader {
+            block_height: value.chain_length.into(),
+            block_id: value.block_id().into(),
+            parent_block_id: value.parent_block_id.into(),
+            consensus_hash: value.consensus_hash.into(),
+        }
     }
 }
 
-/// This struct represents a non-empty subset of the Stacks blocks that
-/// were created during a tenure.
+/// This struct represents a non-empty subset of the Stacks block headers
+/// that were created during a tenure.
 #[derive(Debug)]
-pub struct TenureBlocks {
-    /// The subset of Stacks blocks that were created during a tenure. This
-    /// is always non-empty.
-    blocks: Vec<NakamotoBlock>,
+#[cfg_attr(any(test, feature = "testing"), derive(Clone))]
+pub struct TenureBlockHeaders {
+    /// The subset of Stacks block headers that of Nakamoto blocks that
+    /// were created during a tenure. This is always non-empty.
+    headers: Vec<StacksBlockHeader>,
     /// The bitcoin block that this tenure builds off of.
     pub anchor_block_hash: BitcoinBlockHash,
     /// The height of the bitcoin block associated with the above block
     /// hash.
-    pub anchor_block_height: u64,
+    pub anchor_block_height: BitcoinBlockHeight,
 }
 
-impl TenureBlocks {
+impl TenureBlockHeaders {
+    /// Get all the headers contained in this object.
+    ///
+    /// # Note
+    ///
+    /// * The returned slice is nonempty.
+    /// * The struct doesn't need to contain all the headers of stacks
+    ///   blocks in a tenure.
+    pub fn headers(&self) -> &[StacksBlockHeader] {
+        &self.headers
+    }
+
     /// Create a new one
-    pub fn try_new(blocks: Vec<NakamotoBlock>, info: SortitionInfo) -> Result<Self, Error> {
-        if blocks.is_empty() {
+    pub fn try_new(headers: Vec<StacksBlockHeader>, info: SortitionInfo) -> Result<Self, Error> {
+        if headers.is_empty() {
             return Err(Error::EmptyStacksTenure);
         }
         Ok(Self {
-            blocks,
+            headers,
             anchor_block_hash: info.burn_block_hash.into(),
-            anchor_block_height: info.burn_block_height,
+            anchor_block_height: info.burn_block_height.into(),
         })
     }
 
-    /// Get all the blocks contained in this object.
-    ///
-    /// # Note
-    ///
-    /// The struct doesn't need to contain all the blocks in a tenure.
-    pub fn blocks(&self) -> &[NakamotoBlock] {
-        &self.blocks
+    /// Get the minimum block height in the tenure.
+    pub fn start_height(&self) -> StacksBlockHeight {
+        // SAFETY: It is okay to unwrap here because we know that the
+        // tenure is non-empty. The struct upholds this invariant upon
+        // creation.
+        self.headers.iter().map(|h| h.block_height).min().unwrap()
     }
 
-    /// Return all the blocks contained in this object.
-    ///
-    /// # Note
-    ///
-    /// The struct doesn't need to contain all the blocks in a tenure.
-    pub fn into_blocks(self) -> Vec<NakamotoBlock> {
-        self.blocks
+    /// Get the height of the block with the greatest height of all blocks
+    /// held within this struct.
+    pub fn end_height(&self) -> StacksBlockHeight {
+        // SAFETY: It is okay to unwrap here because we know that the
+        // tenure is non-empty. The struct upholds this invariant upon
+        // creation.
+        self.headers.iter().map(|h| h.block_height).max().unwrap()
     }
+}
 
-    /// Return an iterator of Stacks blocks included in this object.
-    pub fn as_stacks_blocks(&self) -> impl Iterator<Item = StacksBlock> + '_ {
-        let bitcoin_anchor = &self.anchor_block_hash;
-        self.blocks
-            .iter()
-            .map(|block| StacksBlock::from_nakamoto_block(block, bitcoin_anchor))
+/// An iterator over [`StacksBlock`]s
+pub struct StacksBlockIter {
+    /// The underlying iterator
+    iter: std::vec::IntoIter<StacksBlockHeader>,
+    /// The bitcoin block that this tenure builds off of.
+    anchor_block_hash: BitcoinBlockHash,
+}
+
+impl Iterator for StacksBlockIter {
+    type Item = StacksBlock;
+    fn next(&mut self) -> Option<Self::Item> {
+        let header = self.iter.next()?;
+        Some(StacksBlock {
+            block_hash: header.block_id,
+            block_height: header.block_height,
+            parent_hash: header.parent_block_id,
+            bitcoin_anchor: self.anchor_block_hash,
+        })
+    }
+}
+
+impl std::iter::IntoIterator for TenureBlockHeaders {
+    type Item = StacksBlock;
+    type IntoIter = StacksBlockIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        StacksBlockIter {
+            iter: self.headers.into_iter(),
+            anchor_block_hash: self.anchor_block_hash,
+        }
     }
 }
 
@@ -403,7 +552,7 @@ impl std::error::Error for TxRejection {}
 #[serde(untagged)]
 pub enum SubmitTxResponse {
     /// The transaction ID for the submitted transaction.
-    Acceptance(Txid),
+    Acceptance(StacksTxId),
     /// The response when the transaction is rejected from the node.
     Rejection(TxRejection),
 }
@@ -417,7 +566,7 @@ pub struct AccountInfo {
     pub locked: u128,
     /// The height of the stacks block where the above locked micro-STX
     /// will be unlocked.
-    pub unlock_height: u64,
+    pub unlock_height: StacksBlockHeight,
     /// The next nonce for the account.
     pub nonce: u64,
 }
@@ -447,7 +596,7 @@ pub struct CallReadResponse {
     pub result: Value,
 }
 
-/// Helper function for converting a hexidecimal string into an integer.
+/// Helper function for converting a hexadecimal string into an integer.
 fn parse_hex_u128(hex: &str) -> Result<u128, Error> {
     let hex_str = hex.trim_start_matches("0x");
     u128::from_str_radix(hex_str, 16).map_err(Error::ParseHexInt)
@@ -461,8 +610,140 @@ impl TryFrom<AccountEntryResponse> for AccountInfo {
             balance: parse_hex_u128(&value.balance)?,
             locked: parse_hex_u128(&value.locked)?,
             nonce: value.nonce,
-            unlock_height: value.unlock_height,
+            unlock_height: value.unlock_height.into(),
         })
+    }
+}
+
+/// The response from a GET /v2/info request to stacks-core
+///
+/// This type contains only a subset of the full response from stacks-core,
+/// you can find the full response here:
+/// <https://github.com/stacks-network/stacks-core/blob/bd9ee6310516b31ef4ecce07e42e73ed0f774ada/stackslib/src/net/api/getinfo.rs#L53-L85>
+///
+/// Note that the stacks blockchain information here is the same
+/// corresponding fields returned from the `/v3/tenures/info` response.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct GetNodeInfoResponse {
+    /// The height of the tip of the canonical bitcoin blockchain.
+    pub burn_block_height: BitcoinBlockHeight,
+    /// The version of the stacks node that is connected to this signer.
+    pub server_version: String,
+    /// The height of the tip of the canonical stacks blockchain.
+    pub stacks_tip_height: StacksBlockHeight,
+    /// The block header hash of the tip of the canonical stacks
+    /// blockchain. This is hashed with the consensus hash to create the
+    /// block id.
+    stacks_tip: BlockHeaderHash,
+    /// The consensus hash of the tip of the canonical stacks blockchain.
+    pub stacks_tip_consensus_hash: ConsensusHash,
+}
+
+impl GetNodeInfoResponse {
+    /// Create a StacksBlockHash from the tip information of the canonical
+    /// stacks blockchain.
+    pub fn stacks_chain_tip(&self) -> StacksBlockHash {
+        let bytes = self.stacks_tip_consensus_hash.into_bytes();
+        let sortition_consensus_hash = blockstack_lib::chainstate::burn::ConsensusHash(bytes);
+        StacksBlockId::new(&sortition_consensus_hash, &self.stacks_tip).into()
+    }
+}
+
+/// The response from a GET /v3/tenures/info request to stacks-core.
+///
+/// This type contains the view of this node's current tenure.
+#[derive(Debug, PartialEq, Clone, serde::Deserialize)]
+pub struct GetTenureInfoResponse {
+    /// The highest known consensus hash (identifies the current tenure)
+    pub consensus_hash: ConsensusHash,
+    /// The tenure-start block ID of the current tenure
+    pub tenure_start_block_id: StacksBlockHash,
+    /// The consensus hash of the parent tenure
+    pub parent_consensus_hash: ConsensusHash,
+    /// The block hash of the parent tenure's start block
+    pub parent_tenure_start_block_id: StacksBlockHash,
+    /// The highest Stacks block ID in the current tenure
+    pub tip_block_id: StacksBlockHash,
+    /// The height of this tip
+    pub tip_height: StacksBlockHeight,
+    /// Which reward cycle we're in
+    pub reward_cycle: u64,
+}
+
+/// Minimal model type representing an epoch entry in a `/v2/pox` response,
+/// including only fields which we currently use.
+///
+/// Specifically, we do *not* use the `StacksEpochId` enum type from stacks-core
+/// as it would break if Stacks introduces new epochs prior to our dependencies
+/// being updated.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+struct PoxEpoch {
+    /// String representation of the epoch ID, e.g. `Epoch11`, `Epoch30`, `Epoch33`, etc.
+    epoch_id: String,
+    /// The Bitcoin block height at which this epoch activates.
+    start_height: BitcoinBlockHeight,
+}
+
+/// Minimal response type for the `/v2/pox` endpoint, including only fields
+/// which we currently use.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+struct PoxResponse {
+    /// The current Bitcoin block height, as known by the Stacks node based on
+    /// its current Stacks tenure. Note that if the Stacks node is behind, this
+    /// may be lower than the actual current Bitcoin block height.
+    current_burnchain_block_height: BitcoinBlockHeight,
+    /// The list of all known epochs, including their start heights. Used
+    /// primarily to determine the start height of Stacks epoch 3.0 (Nakamoto).
+    epochs: Vec<PoxEpoch>,
+}
+
+/// Information regarding whether or not we are in pre- or post-Nakamoto era.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StacksEpochStatus {
+    /// We are in the pre-Nakamoto era.
+    PreNakamoto {
+        /// The current Bitcoin block height, as known by the Stacks node based on
+        /// its current Stacks tenure. Note that if the Stacks node is behind, this
+        /// may be lower than the actual current Bitcoin block height.
+        reported_bitcoin_height: BitcoinBlockHeight,
+        /// The bitcoin block height at which the Nakamoto era (epoch 3.0+) starts.
+        nakamoto_start_height: BitcoinBlockHeight,
+    },
+    /// We are in the post-Nakamoto era.
+    PostNakamoto {
+        /// The bitcoin block height at which the Nakamoto era started.
+        nakamoto_start_height: BitcoinBlockHeight,
+    },
+}
+
+impl StacksEpochStatus {
+    /// Returns the bitcoin block height at which the Nakamoto era starts (epoch 3.0).
+    pub fn nakamoto_start_height(&self) -> BitcoinBlockHeight {
+        match self {
+            StacksEpochStatus::PreNakamoto { nakamoto_start_height, .. } => *nakamoto_start_height,
+            StacksEpochStatus::PostNakamoto { nakamoto_start_height } => *nakamoto_start_height,
+        }
+    }
+}
+
+impl TryFrom<PoxResponse> for StacksEpochStatus {
+    type Error = Error;
+    fn try_from(value: PoxResponse) -> Result<Self, Self::Error> {
+        let current = value.current_burnchain_block_height;
+        let maybe_start = value
+            .epochs
+            .into_iter()
+            .find(|e| e.epoch_id == EPOCH_3_0_ID)
+            .map(|e| e.start_height);
+
+        match maybe_start {
+            Some(start) if current < start => Ok(StacksEpochStatus::PreNakamoto {
+                reported_bitcoin_height: current,
+                nakamoto_start_height: start,
+            }),
+            Some(start) => Ok(StacksEpochStatus::PostNakamoto { nakamoto_start_height: start }),
+            None => Err(Error::MissingNakamotoStartHeight),
+        }
     }
 }
 
@@ -491,13 +772,13 @@ impl StacksClient {
     pub async fn call_read(
         &self,
         contract_principal: &StacksAddress,
-        contract_name: &ContractName,
-        fn_name: &ClarityName,
+        contract_name: SmartContract,
+        fn_name: ClarityName,
         sender: &StacksAddress,
+        arguments: &[Value],
     ) -> Result<Value, Error> {
         let path = format!(
-            "/v2/contracts/call-read/{}/{}/{}?tip=latest",
-            contract_principal, contract_name, fn_name
+            "/v2/contracts/call-read/{contract_principal}/{contract_name}/{fn_name}?tip=latest"
         );
 
         let url = self
@@ -505,9 +786,19 @@ impl StacksClient {
             .join(&path)
             .map_err(|err| Error::PathJoin(err, self.endpoint.clone(), Cow::Owned(path)))?;
 
+        // Turns out that serializing clarity values to hex can panic. One
+        // such case happens when the buff-data is too large, more than one
+        // MBs worth. For our uses this should never happen.
+        let arguments = arguments
+            .iter()
+            .map(|value| value.serialize_to_hex())
+            .collect::<Result<Vec<String>, _>>()
+            .map_err(Box::new)
+            .map_err(Error::ClarityValueSerialization)?;
+
         let body = CallReadRequest {
             sender: sender.to_string(),
-            arguments: vec![], // TODO: Add when needed
+            arguments,
         };
 
         tracing::debug!(
@@ -517,6 +808,7 @@ impl StacksClient {
             "Fetching contract data variable"
         );
 
+        let instant = Instant::now();
         let response = self
             .client
             .post(url)
@@ -525,6 +817,8 @@ impl StacksClient {
             .send()
             .await
             .map_err(Error::StacksNodeRequest)?;
+
+        Metrics::record_call_read(instant.elapsed(), contract_name, fn_name, &response);
 
         response
             .error_for_status()
@@ -545,13 +839,10 @@ impl StacksClient {
     pub async fn get_data_var(
         &self,
         contract_principal: &StacksAddress,
-        contract_name: &ContractName,
-        var_name: &ClarityName,
+        contract_name: SmartContract,
+        var_name: ClarityName,
     ) -> Result<Value, Error> {
-        let path = format!(
-            "/v2/data_var/{}/{}/{}?proof=0",
-            contract_principal, contract_name, var_name
-        );
+        let path = format!("/v2/data_var/{contract_principal}/{contract_name}/{var_name}?proof=0");
 
         let url = self
             .endpoint
@@ -565,6 +856,7 @@ impl StacksClient {
             "fetching contract data variable"
         );
 
+        let instant = Instant::now();
         let response = self
             .client
             .get(url)
@@ -572,6 +864,8 @@ impl StacksClient {
             .send()
             .await
             .map_err(Error::StacksNodeRequest)?;
+
+        Metrics::record_data_var(instant.elapsed(), contract_name, var_name, &response);
 
         response
             .error_for_status()
@@ -582,6 +876,69 @@ impl StacksClient {
             .map(|x| x.data)
     }
 
+    /// Retrieve the value of a map entry from the specified contract.
+    ///
+    /// This is done by making a `POST
+    /// /v2/map_entry/<contract-principal>/<contract-name>/<map-name>`
+    /// request. In the request we specify that the proof should not be
+    /// included in the response.
+    ///
+    /// See here for the source handler of this endpoint:
+    /// https://github.com/stacks-network/stacks-core/blob/c1a1f50fddcbc11054fae537103423e21221665a/stackslib/src/net/api/getmapentry.rs#L82-L97
+    #[tracing::instrument(skip_all)]
+    pub async fn get_map_entry(
+        &self,
+        contract_principal: &StacksAddress,
+        contract_name: SmartContract,
+        map_name: ClarityName,
+        map_entry: &Value,
+    ) -> Result<Option<Value>, Error> {
+        let path = format!("/v2/map_entry/{contract_principal}/{contract_name}/{map_name}?proof=0");
+
+        let url = self
+            .endpoint
+            .join(&path)
+            .map_err(|err| Error::PathJoin(err, self.endpoint.clone(), Cow::Owned(path)))?;
+
+        tracing::debug!(
+            %contract_principal,
+            %contract_name,
+            %map_name,
+            "fetching contract map entry"
+        );
+
+        let body = map_entry
+            .serialize_to_hex()
+            .map_err(Box::new)
+            .map_err(Error::ClarityValueSerialization)?;
+
+        let instant = Instant::now();
+        let response = self
+            .client
+            .post(url)
+            .timeout(REQUEST_TIMEOUT)
+            .json(&serde_json::Value::String(body))
+            .send()
+            .await
+            .map_err(Error::StacksNodeRequest)?;
+
+        Metrics::record_map_entry(instant.elapsed(), contract_name, map_name, &response);
+        // It looks like the stacks node returns a 404 if the data is not
+        // available, see
+        // https://github.com/stacks-network/stacks-core/blob/c1a1f50fddcbc11054fae537103423e21221665a/stackslib/src/net/api/getmapentry.rs#L223-L225C22
+        if response.status() == StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+
+        response
+            .error_for_status()
+            .map_err(Error::StacksNodeResponse)?
+            .json::<DataVarResponse>()
+            .await
+            .map_err(Error::UnexpectedStacksResponse)
+            .map(|x| Some(x.data))
+    }
+
     /// Get the latest account info for the given address.
     ///
     /// This is done by making a GET /v2/accounts/<principal> request. In
@@ -589,7 +946,7 @@ impl StacksClient {
     /// be included in the response.
     #[tracing::instrument(skip_all)]
     pub async fn get_account(&self, address: &StacksAddress) -> Result<AccountInfo, Error> {
-        let path = format!("/v2/accounts/{}?proof=0", address);
+        let path = format!("/v2/accounts/{address}?proof=0");
         let url = self
             .endpoint
             .join(&path)
@@ -629,7 +986,7 @@ impl StacksClient {
         address: &StacksAddress,
         contract_name: &str,
     ) -> Result<ContractSrcResponse, Error> {
-        let path = format!("/v2/contracts/source/{}/{}?proof=0", address, contract_name);
+        let path = format!("/v2/contracts/source/{address}/{contract_name}?proof=0");
         let url = self
             .endpoint
             .join(&path)
@@ -748,7 +1105,7 @@ impl StacksClient {
     /// If the given block ID does not exist or is an ID for a non-Nakamoto
     /// block then a Result::Err is returned.
     #[tracing::instrument(skip(self))]
-    async fn get_block(&self, block_id: StacksBlockId) -> Result<NakamotoBlock, Error> {
+    async fn get_block(&self, block_id: &StacksBlockHash) -> Result<NakamotoBlock, Error> {
         let path = format!("/v3/blocks/{}", block_id.to_hex());
         let url = self
             .endpoint
@@ -773,11 +1130,45 @@ impl StacksClient {
             .map_err(Error::UnexpectedStacksResponse)?;
 
         NakamotoBlock::consensus_deserialize(&mut &*resp)
-            .map_err(|err| Error::DecodeNakamotoBlock(err, block_id))
+            .map_err(|err| Error::DecodeNakamotoBlock(err, *block_id))
     }
 
-    /// Fetch all Nakamoto ancestor blocks within the same tenure as the
-    /// given block ID from a Stacks node.
+    /// Returns `Ok` if the given block ID is a pre-Nakamoto block, otherwise
+    /// (the block doesn't exist or is a Nakamoto one) `Err` is returned.
+    #[tracing::instrument(skip(self))]
+    async fn check_pre_nakamoto_block(&self, block_id: &StacksBlockHash) -> Result<(), Error> {
+        let path = format!("/v2/blocks/{}", block_id.to_hex());
+        let url = self
+            .endpoint
+            .join(&path)
+            .map_err(|err| Error::PathJoin(err, self.endpoint.clone(), Cow::Owned(path)))?;
+
+        tracing::debug!("making request to the stacks node for the raw pre-nakamoto block");
+
+        let response = self
+            .client
+            .get(url)
+            .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await
+            .map_err(Error::StacksNodeRequest)?;
+
+        let resp = response
+            .error_for_status()
+            .map_err(Error::StacksNodeResponse)?
+            .bytes()
+            .await
+            .map_err(Error::UnexpectedStacksResponse)?;
+
+        // Ensure we got a pre nakamoto block, just in case they change the v2
+        // API to be forward compatible
+        let _ = PreNakamotoBlock::consensus_deserialize(&mut &*resp).map_err(Error::StacksCodec)?;
+
+        Ok(())
+    }
+
+    /// Fetch all Nakamoto ancestor block headers within the same tenure as
+    /// the given block ID from a Stacks node.
     ///
     /// The response includes the Nakamoto block for the given block id.
     ///
@@ -786,14 +1177,17 @@ impl StacksClient {
     /// If the given block ID does not exist or is an ID for a non-Nakamoto
     /// block then a Result::Err is returned.
     #[tracing::instrument(skip(self))]
-    async fn get_tenure(&self, block_id: StacksBlockId) -> Result<TenureBlocks, Error> {
+    async fn get_tenure_headers(
+        &self,
+        block_id: &StacksBlockHash,
+    ) -> Result<TenureBlockHeaders, Error> {
         tracing::debug!("making initial request for nakamoto blocks within the tenure");
-        let mut tenure_blocks = self.get_tenure_raw(block_id).await?;
-        let mut prev_last_block_id = block_id;
+        let mut tenure_headers = self.get_tenure_headers_raw(block_id).await?;
+        let mut prev_last_block_id = *block_id;
 
         // Given the response size limit of GET /v3/tenures/<block-id>
         // requests, there could be more blocks that we need to fetch.
-        while let Some(last_block_id) = tenure_blocks.last().map(NakamotoBlock::block_id) {
+        while let Some(last_block_id) = tenure_headers.last().map(|h| h.block_id) {
             // To determine whether all blocks within a tenure have been
             // retrieved, we check if we've seen the last block in the
             // previous GET /v3/tenures/<block-id> response. Note that the
@@ -803,42 +1197,42 @@ impl StacksClient {
             if last_block_id == prev_last_block_id {
                 break;
             }
-            prev_last_block_id = last_block_id;
 
             tracing::debug!(%last_block_id, "fetching more nakamoto blocks within the tenure");
-            let blocks = self.get_tenure_raw(last_block_id).await?;
+            let headers = self.get_tenure_headers_raw(&last_block_id).await?;
+
             // The first block in the GET /v3/tenures/<block-id> response
             // is always the block related to the given <block-id>. But we
             // already have that block, so we can skip adding it again.
 
-            match blocks.first().map(|b| b.block_id()) {
+            match headers.first().map(|b| b.block_id) {
                 Some(received_id) if received_id == last_block_id => {}
                 Some(received_id) => {
-                    return Err(Error::GetTenureRawMismatch(received_id, last_block_id))
+                    return Err(Error::GetTenureRawMismatch(received_id, last_block_id));
                 }
                 None => return Err(Error::EmptyStacksTenure),
             }
 
-            tenure_blocks.extend(blocks.into_iter().skip(1))
+            tenure_headers.extend(headers.into_iter().skip(1));
+
+            prev_last_block_id = last_block_id;
         }
 
-        // If Self::get_tenure_raw returns with Ok(_) then the Vec will
+        // If Self::get_tenure_headers_raw returns with Ok(_) then the Vec will
         // include at least 1 Nakamoto block. Since we bail if there is an
         // error, this vector has at least one element.
-        let Some(block) = tenure_blocks.last() else {
+        let Some(header) = tenure_headers.last() else {
             return Err(Error::EmptyStacksTenure);
         };
 
-        let info = self
-            .get_sortition_info(&block.header.consensus_hash)
-            .await?;
+        let info = self.get_sortition_info(&header.consensus_hash).await?;
 
-        TenureBlocks::try_new(tenure_blocks, info)
+        TenureBlockHeaders::try_new(tenure_headers, info)
     }
 
     /// Make a GET /v3/tenures/<block-id> request for Nakamoto ancestor
     /// blocks with the same tenure as the given block ID from a Stacks
-    /// node.
+    /// node, and return the relevant parts of the headers of those blocks.
     ///
     /// # Notes
     ///
@@ -848,7 +1242,10 @@ impl StacksClient {
     /// * If the given block ID does not exist or is an ID for a
     ///   non-Nakamoto block then a Result::Err is returned.
     #[tracing::instrument(skip(self))]
-    async fn get_tenure_raw(&self, block_id: StacksBlockId) -> Result<Vec<NakamotoBlock>, Error> {
+    async fn get_tenure_headers_raw(
+        &self,
+        block_id: &StacksBlockHash,
+    ) -> Result<Vec<StacksBlockHeader>, Error> {
         let path = format!("/v3/tenures/{}", block_id.to_hex());
         let url = self
             .endpoint
@@ -877,16 +1274,16 @@ impl StacksClient {
             .map_err(Error::UnexpectedStacksResponse)?;
 
         let bytes: &mut &[u8] = &mut resp.as_ref();
-        let mut blocks = Vec::new();
+        let mut headers = Vec::new();
 
         while !bytes.is_empty() {
             let block = NakamotoBlock::consensus_deserialize(bytes)
-                .map_err(|err| Error::DecodeNakamotoTenure(err, block_id))?;
+                .map_err(|err| Error::DecodeNakamotoTenure(err, *block_id))?;
 
-            blocks.push(block);
+            headers.push(block.header.into());
         }
 
-        Ok(blocks)
+        Ok(headers)
     }
 
     /// Get information about the current tenure.
@@ -894,7 +1291,7 @@ impl StacksClient {
     /// Uses the GET /v3/tenures/info stacks node endpoint for retrieving
     /// tenure information.
     #[tracing::instrument(skip(self))]
-    pub async fn get_tenure_info(&self) -> Result<RPCGetTenureInfo, Error> {
+    pub async fn get_tenure_info(&self) -> Result<GetTenureInfoResponse, Error> {
         let path = "/v3/tenures/info";
         let url = self
             .endpoint
@@ -927,7 +1324,7 @@ impl StacksClient {
         &self,
         consensus_hash: &ConsensusHash,
     ) -> Result<SortitionInfo, Error> {
-        let path = format!("/v3/sortitions/consensus/{}", consensus_hash);
+        let path = format!("/v3/sortitions/consensus/{consensus_hash}");
         let url = self
             .endpoint
             .join(&path)
@@ -960,7 +1357,7 @@ impl StacksClient {
 
     /// Get PoX information from the Stacks node.
     #[tracing::instrument(skip(self))]
-    pub async fn get_pox_info(&self) -> Result<RPCPoxInfoData, Error> {
+    pub async fn get_pox_info(&self) -> Result<PoxResponse, Error> {
         let path = "/v2/pox";
         let url = self
             .endpoint
@@ -986,7 +1383,7 @@ impl StacksClient {
 
     /// Get information about the current node.
     #[tracing::instrument(skip(self))]
-    pub async fn get_node_info(&self) -> Result<RPCPeerInfoData, Error> {
+    pub async fn get_node_info(&self) -> Result<GetNodeInfoResponse, Error> {
         let path = "/v2/info";
         let url = self
             .endpoint
@@ -1011,24 +1408,33 @@ impl StacksClient {
     }
 }
 
-/// Fetch all Nakamoto blocks that are not already stored in the
-/// datastore.
-pub async fn fetch_unknown_ancestors<S, D>(
+/// Fetch all Nakamoto block headers that are not already stored in the
+/// datastore, starting at the given [`StacksBlockHash`] and store them in
+/// the database.
+///
+/// This function fetches all unknown nakamoto blocks that are on the
+/// canonical chain identified by the given StacksBlockHash chain tip that
+/// not already stored in the database. It fetches these blocks one tenure
+/// at a time, and then writes them to the `stacks_blocks` table in a
+/// transaction. After all such blocks have been fetched, the function
+/// commits the written blocks. Things are done this way to ensure that
+/// updates to the `stacks_blocks` table are done atomically.
+pub async fn update_db_with_unknown_ancestors<S, D>(
     stacks: &S,
-    db: &D,
-    block_id: StacksBlockId,
-) -> Result<Vec<TenureBlocks>, Error>
+    storage: &D,
+    block_id: &StacksBlockHash,
+) -> Result<RangeInclusive<StacksBlockHeight>, Error>
 where
     S: StacksInteract,
-    D: DbRead + Send + Sync,
+    D: Transactable + Send + Sync,
 {
-    let mut blocks = vec![stacks.get_tenure(block_id).await?];
-    let pox_info = stacks.get_pox_info().await?;
-    let nakamoto_start_height = pox_info
-        .nakamoto_start_height()
-        .ok_or(Error::MissingNakamotoStartHeight)?;
+    let db = storage.begin_transaction().await?;
+    let mut tenure = stacks.get_tenure_headers(block_id).await?;
+    let end_height = tenure.end_height();
+    let nakamoto_start_height = stacks.get_epoch_status().await?.nakamoto_start_height();
 
-    while let Some(tenure) = blocks.last() {
+    loop {
+        db.write_stacks_block_headers(&tenure).await?;
         // We won't get anymore Nakamoto blocks before this point, so
         // time to stop.
         if tenure.anchor_block_height <= nakamoto_start_height {
@@ -1041,20 +1447,47 @@ where
         }
         // Tenure blocks are always non-empty, and this invariant is upheld
         // by the type. So no need to worry about the early break.
-        let Some(block) = tenure.blocks().last() else {
+        let Some(header) = tenure.headers().last() else {
             break;
         };
         // We've seen this parent already, so time to stop.
-        if db.stacks_block_exists(block.header.parent_block_id).await? {
+        if db.stacks_block_exists(&header.parent_block_id).await? {
             tracing::debug!("parent block known in the database");
             break;
         }
-        // There are more blocks to fetch, so let's get them.
-        let tenure_blocks = stacks.get_tenure(block.header.parent_block_id).await?;
-        blocks.push(tenure_blocks);
+        // There are more blocks to fetch, so let's get them. This assumes
+        // optimistically that the parent is still a Nakamoto block (and so has
+        // a tenure); if that's not the case, we get an `Err` here.
+        let tenure_headers_result = stacks.get_tenure_headers(&header.parent_block_id).await;
+        let tenure_headers = match tenure_headers_result {
+            Ok(tenure_headers) => tenure_headers,
+            Err(error) => {
+                // A 404 could mean that we reached the Nakamoto start height
+                // and we tried fetching a tenure for a pre-Nakamoto block
+                if stacks
+                    .check_pre_nakamoto_block(&header.parent_block_id)
+                    .await
+                    .is_ok()
+                {
+                    tracing::debug!(
+                        %nakamoto_start_height,
+                        last_chain_length = %tenure.anchor_block_height,
+                        "all Nakamoto blocks fetched; stopping"
+                    );
+                    break;
+                }
+                return Err(error);
+            }
+        };
+        tenure = tenure_headers;
     }
 
-    Ok(blocks)
+    let start_height = tenure.start_height();
+
+    db.commit().await?;
+
+    tracing::debug!(%start_height, %end_height, "finished updating the stacks_blocks table");
+    Ok(RangeInclusive::new(start_height, end_height))
 }
 
 /// A deserializer for Clarity's [`Value`] type that deserializes a hex-encoded
@@ -1067,45 +1500,125 @@ where
         .map_err(serde::de::Error::custom)
 }
 
+/// Extract a set of public keys from a Clarity value.
+///
+/// The value is expected to be a sequence of 33 byte buffers, each of
+/// which represents a compressed public key.
+fn extract_signer_set(value: Value) -> Result<BTreeSet<PublicKey>, Error> {
+    match value {
+        // Iterate through each record in the list and convert it to a
+        // public key. If the record is not a buffer, then return an error.
+        Value::Sequence(SequenceData::List(ListData { data, .. })) => {
+            data.into_iter().map(extract_public_key).collect()
+        }
+        // We expected the top-level value to be a list of buffers,
+        // but we got something else.
+        _ => Err(Error::InvalidStacksResponse(
+            "expected a sequence but got something else",
+        )),
+    }
+}
+
+/// Extract a public key from a Clarity value.
+///
+/// In the sbtc-registry smart contract, public keys are compressed and
+/// stored as 33 byte buffers.
+fn extract_public_key(value: Value) -> Result<PublicKey, Error> {
+    match value {
+        Value::Sequence(SequenceData::Buffer(BuffData { data })) => PublicKey::from_slice(&data),
+        _ => Err(Error::InvalidStacksResponse(
+            "expected a buffer but got something else",
+        )),
+    }
+}
+
+/// Extract a aggregate key from a Clarity value.
+///
+/// In the sbtc-registry smart contract, the aggregate key is stored in the
+/// `current-aggregate-pubkey` data var and is initialized to the 0x00
+/// byte, allowing use to distinguish between the initial value and an
+/// actual public key in that case. Ok(None) is returned if the value is
+/// the initial value.
+fn extract_aggregate_key(value: Value) -> Result<Option<PublicKey>, Error> {
+    match value {
+        Value::Sequence(SequenceData::Buffer(BuffData { data })) => {
+            // The initial value of the data var is all zeros
+            if data.as_slice() == [0u8] {
+                Ok(None)
+            } else {
+                PublicKey::from_slice(&data).map(Some)
+            }
+        }
+        _ => Err(Error::InvalidStacksResponse(
+            "expected a buffer but got something else",
+        )),
+    }
+}
+
+/// Extract a signature threshold from a Clarity value.
+///
+/// In the sbtc-registry smart contract, the signature threshold is stored
+/// in the `current-signature-threshold` data var and is initialized to 0,
+/// allowing use to distinguish between the initial value and an actual
+/// signature threshold. Ok(None) is returned if the value is the initial
+/// value.
+fn extract_signatures_required(value: Value) -> Result<Option<u16>, Error> {
+    match value {
+        Value::UInt(0) => Ok(None),
+        Value::UInt(threshold) => Ok(Some(
+            threshold.try_into().map_err(|_| Error::TypeConversion)?,
+        )),
+        _ => Err(Error::InvalidStacksResponse(
+            "expected a uint but got something else",
+        )),
+    }
+}
+
 impl StacksInteract for StacksClient {
-    async fn get_current_signer_set(
+    async fn get_current_signer_set_info(
         &self,
         contract_principal: &StacksAddress,
-    ) -> Result<Vec<PublicKey>, Error> {
-        // Make a request to the sbtc-registry contract to get the current
-        // signer set.
+    ) -> Result<Option<SignerSetInfo>, Error> {
         let result = self
-            .get_data_var(
+            .call_read(
                 contract_principal,
-                &ContractName::from("sbtc-registry"),
-                &ClarityName::from("current-signer-set"),
+                SmartContract::SbtcRegistry,
+                ClarityName(GET_SIGNER_SET_DATA_FN_NAME),
+                contract_principal,
+                &[],
             )
             .await?;
 
-        // Check the result and return the signer set. We're expecting a
-        // list of buffers, where each buffer is a public key.
         match result {
-            Value::Sequence(SequenceData::List(ListData { data, .. })) => {
-                // Iterate through each record in the list and verify that it's a buffer.
-                // If it is a buffer, then convert it to a public key.
-                // Otherwise, return an error.
-                data.into_iter()
-                    .map(|item| match item {
-                        // If the item is a buffer, then convert it to a public key.
-                        Value::Sequence(SequenceData::Buffer(BuffData { data })) => {
-                            PublicKey::from_slice(&data)
-                        }
-                        // Otherwise, return an error.
-                        _ => Err(Error::InvalidStacksResponse(
-                            "expected a buffer but got something else",
-                        )),
-                    })
-                    .collect()
+            Value::Tuple(TupleData { mut data_map, .. }) => {
+                let maybe_aggregate_key = data_map
+                    .remove("current-aggregate-pubkey")
+                    .map(extract_aggregate_key);
+                let maybe_signer_set = data_map
+                    .remove("current-signer-set")
+                    .map(extract_signer_set);
+                let maybe_signatures_required = data_map
+                    .remove("current-signature-threshold")
+                    .map(extract_signatures_required);
+
+                let Some(Some(aggregate_key)) = maybe_aggregate_key.transpose()? else {
+                    return Ok(None);
+                };
+                let Some(signer_set) = maybe_signer_set.transpose()? else {
+                    return Ok(None);
+                };
+                let Some(Some(signatures_required)) = maybe_signatures_required.transpose()? else {
+                    return Ok(None);
+                };
+
+                Ok(Some(SignerSetInfo {
+                    aggregate_key,
+                    signatures_required,
+                    signer_set,
+                }))
             }
-            // We expected the top-level value to be a list of buffers,
-            // but we got something else.
             _ => Err(Error::InvalidStacksResponse(
-                "expected a sequence but got something else",
+                "expected a tuple but got something else",
             )),
         }
     }
@@ -1114,27 +1627,70 @@ impl StacksInteract for StacksClient {
         &self,
         contract_principal: &StacksAddress,
     ) -> Result<Option<PublicKey>, Error> {
-        let result = self
+        let value = self
             .get_data_var(
                 contract_principal,
-                &ContractName::from("sbtc-registry"),
-                &ClarityName::from("current-aggregate-pubkey"),
+                SmartContract::SbtcRegistry,
+                ClarityName(CURRENT_AGGREGATE_PUBKEY_DATA_VAR_NAME),
             )
             .await?;
 
-        // Check the result and return the aggregate key.
+        extract_aggregate_key(value)
+    }
+
+    async fn is_deposit_completed(
+        &self,
+        deployer: &StacksAddress,
+        outpoint: &OutPoint,
+    ) -> Result<bool, Error> {
+        let contract_name = SmartContract::SbtcRegistry;
+        let fn_name = ClarityName(GET_DEPOSIT_STATUS_FN_NAME);
+
+        // The transaction IDs are written in little endian format when
+        // making the contract call that sets the deposit status, so we
+        // need to do that here to make sure that it works as expected.
+        let txid_data = outpoint.txid.to_le_bytes().to_vec();
+        let txid = BuffData { data: txid_data };
+        let arguments = [
+            Value::Sequence(SequenceData::Buffer(txid)),
+            Value::UInt(outpoint.vout as u128),
+        ];
+        let result = self
+            .call_read(deployer, contract_name, fn_name, deployer, &arguments)
+            .await?;
+
+        // The `get-deposit-status` read-only function retrieves values
+        // from a map in the smart contract using the `map-get?` Clarity
+        // function. This map stores boolean values, setting them to `true`
+        // when a deposit is completed and not setting them otherwise.
+        // Therefore, a missing value implicitly means `false`.
         match result {
-            Value::Sequence(SequenceData::Buffer(BuffData { data })) => {
-                // The initial value of the data var is all zeros
-                if data.iter().all(|v| *v == 0) {
-                    Ok(None)
-                } else {
-                    PublicKey::from_slice(&data).map(Some)
-                }
-            }
-            _ => Err(Error::InvalidStacksResponse(
-                "expected a buffer but got something else",
-            )),
+            Value::Optional(OptionalData { data }) => Ok(data.is_some()),
+            _ => Err(Error::InvalidStacksResponse("did not get optional data")),
+        }
+    }
+
+    async fn is_withdrawal_completed(
+        &self,
+        deployer: &StacksAddress,
+        request_id: u64,
+    ) -> Result<bool, Error> {
+        let contract_name = SmartContract::SbtcRegistry;
+        let map_name = ClarityName(WITHDRAWAL_STATUS_MAP_NAME);
+
+        let map_entry = Value::UInt(request_id as u128);
+        let result = self
+            .get_map_entry(deployer, contract_name, map_name, &map_entry)
+            .await?;
+
+        // This map `withdrawal-status` in the smart contract stores
+        // boolean values, setting them to `true` when a withdrawal is
+        // accepted and `false` when rejected. Either value means the
+        // request has been completed, while a missing value implicitly
+        // means that the request has not been completed.
+        match result {
+            Some(Value::Optional(OptionalData { data })) => Ok(data.is_some()),
+            _ => Err(Error::InvalidStacksResponse("did not get optional data")),
         }
     }
 
@@ -1146,15 +1702,22 @@ impl StacksInteract for StacksClient {
         self.submit_tx(tx).await
     }
 
-    async fn get_block(&self, block_id: StacksBlockId) -> Result<NakamotoBlock, Error> {
+    async fn get_block(&self, block_id: &StacksBlockHash) -> Result<NakamotoBlock, Error> {
         self.get_block(block_id).await
     }
 
-    async fn get_tenure(&self, block_id: StacksBlockId) -> Result<TenureBlocks, Error> {
-        self.get_tenure(block_id).await
+    async fn check_pre_nakamoto_block(&self, block_id: &StacksBlockHash) -> Result<(), Error> {
+        self.check_pre_nakamoto_block(block_id).await
     }
 
-    async fn get_tenure_info(&self) -> Result<RPCGetTenureInfo, Error> {
+    async fn get_tenure_headers(
+        &self,
+        block_id: &StacksBlockHash,
+    ) -> Result<TenureBlockHeaders, Error> {
+        self.get_tenure_headers(block_id).await
+    }
+
+    async fn get_tenure_info(&self) -> Result<GetTenureInfoResponse, Error> {
         self.get_tenure_info().await
     }
 
@@ -1224,7 +1787,7 @@ impl StacksInteract for StacksClient {
         // doesn't depend on the recipient, amount, or memo. So a
         // dummy transfer payload will do.
         let stx_transfer_estimate_response = self
-            .get_fee_estimate(&DUMMY_STX_TRANSFER_PAYLOAD, None)
+            .get_fee_estimate(&*DUMMY_STX_TRANSFER_PAYLOAD, None)
             .await;
 
         // If we get a valid response, then we use the fee estimate we received,
@@ -1256,11 +1819,11 @@ impl StacksInteract for StacksClient {
         }
     }
 
-    async fn get_pox_info(&self) -> Result<RPCPoxInfoData, Error> {
-        self.get_pox_info().await
+    async fn get_epoch_status(&self) -> Result<StacksEpochStatus, Error> {
+        self.get_pox_info().await?.try_into()
     }
 
-    async fn get_node_info(&self) -> Result<RPCPeerInfoData, Error> {
+    async fn get_node_info(&self) -> Result<GetNodeInfoResponse, Error> {
         self.get_node_info().await
     }
 
@@ -1283,9 +1846,10 @@ impl StacksInteract for StacksClient {
         let result = self
             .call_read(
                 deployer,
-                &ContractName::from(SmartContract::SbtcToken.contract_name()),
-                &ClarityName::from("get-total-supply"),
+                SmartContract::SbtcToken,
+                ClarityName(GET_TOTAL_SUPPLY_FN_NAME),
                 deployer,
+                &[],
             )
             .await?;
 
@@ -1307,12 +1871,12 @@ impl StacksInteract for StacksClient {
 }
 
 impl StacksInteract for ApiFallbackClient<StacksClient> {
-    async fn get_current_signer_set(
+    async fn get_current_signer_set_info(
         &self,
         contract_principal: &StacksAddress,
-    ) -> Result<Vec<PublicKey>, Error> {
+    ) -> Result<Option<SignerSetInfo>, Error> {
         self.exec(|client, retry| async move {
-            let result = client.get_current_signer_set(contract_principal).await;
+            let result = client.get_current_signer_set_info(contract_principal).await;
             retry.abort_if(|| matches!(result, Err(Error::InvalidStacksResponse(_))));
             result
         })
@@ -1333,6 +1897,36 @@ impl StacksInteract for ApiFallbackClient<StacksClient> {
         .await
     }
 
+    async fn is_deposit_completed(
+        &self,
+        contract_principal: &StacksAddress,
+        outpoint: &OutPoint,
+    ) -> Result<bool, Error> {
+        self.exec(|client, retry| async move {
+            let result = client
+                .is_deposit_completed(contract_principal, outpoint)
+                .await;
+            retry.abort_if(|| matches!(result, Err(Error::InvalidStacksResponse(_))));
+            result
+        })
+        .await
+    }
+
+    async fn is_withdrawal_completed(
+        &self,
+        contract_principal: &StacksAddress,
+        request_id: u64,
+    ) -> Result<bool, Error> {
+        self.exec(|client, retry| async move {
+            let result = client
+                .is_withdrawal_completed(contract_principal, request_id)
+                .await;
+            retry.abort_if(|| matches!(result, Err(Error::InvalidStacksResponse(_))));
+            result
+        })
+        .await
+    }
+
     async fn get_account(&self, address: &StacksAddress) -> Result<AccountInfo, Error> {
         self.exec(|client, _| client.get_account(address)).await
     }
@@ -1341,15 +1935,24 @@ impl StacksInteract for ApiFallbackClient<StacksClient> {
         self.exec(|client, _| client.submit_tx(tx)).await
     }
 
-    async fn get_block(&self, block_id: StacksBlockId) -> Result<NakamotoBlock, Error> {
+    async fn get_block(&self, block_id: &StacksBlockHash) -> Result<NakamotoBlock, Error> {
         self.exec(|client, _| client.get_block(block_id)).await
     }
 
-    async fn get_tenure(&self, block_id: StacksBlockId) -> Result<TenureBlocks, Error> {
-        self.exec(|client, _| client.get_tenure(block_id)).await
+    async fn check_pre_nakamoto_block(&self, block_id: &StacksBlockHash) -> Result<(), Error> {
+        self.exec(|client, _| client.check_pre_nakamoto_block(block_id))
+            .await
     }
 
-    async fn get_tenure_info(&self) -> Result<RPCGetTenureInfo, Error> {
+    async fn get_tenure_headers(
+        &self,
+        block_id: &StacksBlockHash,
+    ) -> Result<TenureBlockHeaders, Error> {
+        self.exec(|client, _| client.get_tenure_headers(block_id))
+            .await
+    }
+
+    async fn get_tenure_info(&self) -> Result<GetTenureInfoResponse, Error> {
         self.exec(|client, _| client.get_tenure_info()).await
     }
 
@@ -1374,11 +1977,11 @@ impl StacksInteract for ApiFallbackClient<StacksClient> {
             .await
     }
 
-    async fn get_pox_info(&self) -> Result<RPCPoxInfoData, Error> {
-        self.exec(|client, _| client.get_pox_info()).await
+    async fn get_epoch_status(&self) -> Result<StacksEpochStatus, Error> {
+        self.exec(|client, _| client.get_epoch_status()).await
     }
 
-    async fn get_node_info(&self) -> Result<RPCPeerInfoData, Error> {
+    async fn get_node_info(&self) -> Result<GetNodeInfoResponse, Error> {
         self.exec(|client, _| client.get_node_info()).await
     }
 
@@ -1424,10 +2027,10 @@ mod tests {
     use crate::config::NetworkKind;
     use crate::keys::{PrivateKey, PublicKey};
     use crate::stacks::wallet::get_full_tx_size;
-    use crate::storage::in_memory::Store;
-    use crate::storage::DbWrite;
+    use crate::storage::memory::Store;
 
-    use clarity::types::Address;
+    use assert_matches::assert_matches;
+    use clarity::types::Address as _;
     use clarity::vm::types::{
         BuffData, BufferLength, ListData, ListTypeData, SequenceData, SequenceSubtype,
         TypeSignature,
@@ -1438,7 +2041,7 @@ mod tests {
     use test_log::test;
 
     use super::*;
-    use std::io::Read;
+    use std::io::Read as _;
 
     fn generate_wallet(num_keys: u16, signatures_required: u16) -> SignerWallet {
         let network_kind = NetworkKind::Regtest;
@@ -1462,14 +2065,81 @@ mod tests {
         let client: ApiFallbackClient<StacksClient> = TryFrom::try_from(&settings).unwrap();
 
         let info = client.get_tenure_info().await.unwrap();
-        let tenures = fetch_unknown_ancestors(&client, &db, info.tip_block_id).await;
+        let tenures = update_db_with_unknown_ancestors(&client, &db, &info.tip_block_id).await;
 
-        let blocks = tenures.unwrap();
-        let headers = blocks
-            .iter()
-            .flat_map(TenureBlocks::as_stacks_blocks)
-            .collect::<Vec<_>>();
-        db.write_stacks_block_headers(headers).await.unwrap();
+        assert!(tenures.is_ok());
+
+        crate::testing::storage::drop_db(db).await;
+    }
+
+    #[ignore = "This is an integration test that uses the real testnet"]
+    #[test_case(|url| StacksClient::new(url).unwrap(); "stacks-client")]
+    #[test_case(|url| ApiFallbackClient::new(vec![StacksClient::new(url).unwrap()]).unwrap(); "fallback-client")]
+    #[tokio::test]
+    async fn fetch_unknown_ancestors_works_in_testnet<F, C>(client: F)
+    where
+        C: StacksInteract,
+        F: Fn(Url) -> C,
+    {
+        let db = crate::testing::storage::new_test_database().await;
+
+        let client = client(Url::parse("https://api.testnet.hiro.so/").unwrap());
+
+        // Testnet currently has the following structure:
+        //
+        // BTC 1865 <- Stacks 319
+        // BTC 1900 -- nakamoto_start_height
+        // BTC 1901 <- Stacks 320, ..., 744
+        // BTC 1998 <- Stacks 745, ..., 750, ...
+
+        // This is the block id for block 319 (pre-Nakamoto) on testnet
+        let pre_nakamoto_block_id = StacksBlockId::from_hex(
+            "0d7cb8c66040d87fc17f39e1b5c36bc7fb5c4d97cc611a168e2cca186848be1e",
+        )
+        .unwrap()
+        .into();
+        assert!(
+            client
+                .check_pre_nakamoto_block(&pre_nakamoto_block_id)
+                .await
+                .is_ok()
+        );
+
+        // This is the block id for block 750 on testnet
+        let nakamoto_block_id = StacksBlockId::from_hex(
+            "ad133146e79ff5eccf9eecc51d9eea35947031c5d91d61afc3a1df63d6c198e7",
+        )
+        .unwrap()
+        .into();
+        assert!(
+            client
+                .check_pre_nakamoto_block(&nakamoto_block_id)
+                .await
+                .is_err()
+        );
+
+        let tenures = update_db_with_unknown_ancestors(&client, &db, &nakamoto_block_id).await;
+
+        let block_height_range = tenures.unwrap();
+
+        let expected =
+            RangeInclusive::new(StacksBlockHeight::new(320), StacksBlockHeight::new(750));
+        assert_eq!(block_height_range, expected);
+
+        let (min_block_height, max_block_height, count) = sqlx::query_as::<_, (i64, i64, i64)>(
+            r#"SELECT 
+                 MIN(block_height) as min_block_height
+               , MAX(block_height) as max_block_height
+               , COUNT(DISTINCT block_hash) as count
+             FROM sbtc_signer.stacks_blocks"#,
+        )
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+
+        assert_eq!(count, max_block_height - min_block_height + 1);
+        assert_eq!(min_block_height, **expected.start() as i64);
+        assert_eq!(max_block_height, **expected.end() as i64);
 
         crate::testing::storage::drop_db(db).await;
     }
@@ -1536,7 +2206,7 @@ mod tests {
             .expect(1)
             .create();
 
-        let path = format!("tests/fixtures/stacksapi-v3-sortitions.json");
+        let path = "tests/fixtures/stacksapi-v3-sortitions.json";
         let mut file = std::fs::File::open(path).unwrap();
         let mut buf = Vec::new();
         file.read_to_end(&mut buf).unwrap();
@@ -1579,23 +2249,23 @@ mod tests {
 
         let client = client(url::Url::parse(stacks_node_server.url().as_str()).unwrap());
 
-        let block_id = StacksBlockId::from_hex(TENURE_END_BLOCK_ID).unwrap();
+        let block_id = StacksBlockHash::from_hex(TENURE_END_BLOCK_ID).unwrap();
         // The moment of truth, do the requests succeed?
-        let blocks = client.get_tenure(block_id).await.unwrap().blocks;
-        assert!(blocks.len() > 1);
+        let headers = client.get_tenure_headers(&block_id).await.unwrap().headers;
+        assert!(headers.len() > 1);
 
         // We know that the blocks are ordered as a chain, and we know the
         // first and last block IDs, let's check that.
-        let last_block_id = StacksBlockId::from_hex(TENURE_START_BLOCK_ID).unwrap();
-        let n = blocks.len() - 1;
-        assert_eq!(blocks[0].block_id(), block_id);
-        assert_eq!(blocks[n].block_id(), last_block_id);
+        let last_block_id = StacksBlockHash::from_hex(TENURE_START_BLOCK_ID).unwrap();
+        let n = headers.len() - 1;
+        assert_eq!(headers[0].block_id, block_id);
+        assert_eq!(headers[n].block_id, last_block_id);
 
         // Let's check that the returned blocks are distinct.
-        let mut ans: Vec<StacksBlockId> = blocks.iter().map(|block| block.block_id()).collect();
+        let mut ans: Vec<StacksBlockHash> = headers.iter().map(|block| block.block_id).collect();
         ans.sort();
         ans.dedup();
-        assert_eq!(blocks.len(), ans.len());
+        assert_eq!(headers.len(), ans.len());
 
         first_mock.assert();
         second_mock.assert();
@@ -1658,7 +2328,7 @@ mod tests {
 
         let client = client(url::Url::parse(stacks_node_server.url().as_str()).unwrap());
         let resp = client.get_tenure_info().await.unwrap();
-        let expected: RPCGetTenureInfo = serde_json::from_str(raw_json_response).unwrap();
+        let expected: GetTenureInfoResponse = serde_json::from_str(raw_json_response).unwrap();
 
         assert_eq!(resp, expected);
         first_mock.assert();
@@ -1692,36 +2362,31 @@ mod tests {
         F: Fn(Url) -> C,
     {
         let clarity_value = Value::Int(1234);
-        let raw_json_response = format!(
-            r#"{{"data":"0x{}"}}"#,
-            Value::serialize_to_hex(&clarity_value).expect("failed to serialize value")
-        );
-
+        let json_response = serde_json::json!({
+            "okay": true,
+            "result": format!("0x{}", clarity_value.serialize_to_hex().unwrap()),
+        });
+        let raw_json_response = serde_json::to_string(&json_response).unwrap();
         // Setup our mock server
         let mut stacks_node_server = mockito::Server::new_async().await;
         let mock = stacks_node_server
-            .mock("GET", "/v2/data_var/ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM/sbtc-registry/current-signer-set?proof=0")
+            .mock("POST", "/v2/contracts/call-read/ST000000000000000000002AMW42H/sbtc-registry/get-current-signer-data?tip=latest")
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(&raw_json_response)
             .expect(1)
             .create();
 
+        // Setup our Stacks client
         let client = client(url::Url::parse(stacks_node_server.url().as_str()).unwrap());
 
         // Make the request to the mock server
         let resp = client
-            .get_current_signer_set(
-                &StacksAddress::from_string("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM")
-                    .expect("failed to parse stacks address"),
-            )
+            .get_current_signer_set_info(&StacksAddress::burn_address(false))
             .await;
 
         let err = resp.unwrap_err();
-        assert!(matches!(
-            err,
-            Error::InvalidStacksResponse(s) if s == "expected a sequence but got something else"
-        ));
+        assert!(matches!(err, Error::InvalidStacksResponse(_)));
         mock.assert();
     }
 
@@ -1730,7 +2395,7 @@ mod tests {
     #[test_case(0, |url| ApiFallbackClient::new(vec![StacksClient::new(url).unwrap()]).unwrap(); "fallback-client-empty-list")]
     #[test_case(128, |url| ApiFallbackClient::new(vec![StacksClient::new(url).unwrap()]).unwrap(); "fallback-client-list-128")]
     #[tokio::test]
-    async fn get_current_signer_set_works<F, C>(list_size: u16, client: F)
+    async fn get_current_signer_set_info_works<F, C>(list_size: u16, client: F)
     where
         C: StacksInteract,
         F: Fn(Url) -> C,
@@ -1752,16 +2417,44 @@ mod tests {
             )
             .expect("failed to create list type signature"),
         }));
+        let aggregate_key = generate_pubkeys(list_size.min(1)).pop();
+        let aggregate_key_clarity = Value::Sequence(SequenceData::Buffer(BuffData {
+            data: aggregate_key
+                .map(|pk| pk.serialize().to_vec())
+                // 0x00 is the initial value of the aggregate key in the
+                // sbtc-registry contract.
+                .unwrap_or(vec![0; 1]),
+        }));
         // The format of the response JSON is `{"data": "0x<serialized-value>"}` (excluding the proof).
-        let raw_json_response = format!(
-            r#"{{"data":"0x{}"}}"#,
-            Value::serialize_to_hex(&signer_set).expect("failed to serialize value")
-        );
+
+        let tuple_data = [
+            (
+                clarity::vm::ClarityName::from("current-signature-threshold"),
+                Value::UInt(list_size as u128),
+            ),
+            (
+                clarity::vm::ClarityName::from("current-signer-set"),
+                signer_set,
+            ),
+            (
+                clarity::vm::ClarityName::from("current-aggregate-pubkey"),
+                aggregate_key_clarity,
+            ),
+        ]
+        .to_vec();
+
+        let clarity_value = Value::Tuple(TupleData::from_data(tuple_data).unwrap());
+
+        let json_response = serde_json::json!({
+            "okay": true,
+            "result": format!("0x{}", clarity_value.serialize_to_hex().unwrap()),
+        });
+        let raw_json_response = serde_json::to_string(&json_response).unwrap();
 
         // Setup our mock server
         let mut stacks_node_server = mockito::Server::new_async().await;
         let mock = stacks_node_server
-            .mock("GET", "/v2/data_var/ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM/sbtc-registry/current-signer-set?proof=0")
+            .mock("POST", "/v2/contracts/call-read/ST000000000000000000002AMW42H/sbtc-registry/get-current-signer-data?tip=latest")
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(&raw_json_response)
@@ -1773,15 +2466,18 @@ mod tests {
 
         // Make the request to the mock server
         let resp = client
-            .get_current_signer_set(
-                &StacksAddress::from_string("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM")
-                    .expect("failed to parse stacks address"),
-            )
+            .get_current_signer_set_info(&StacksAddress::burn_address(false))
             .await
             .unwrap();
 
+        let expected = aggregate_key.map(|aggregate_key| SignerSetInfo {
+            aggregate_key,
+            signer_set: public_keys.into_iter().collect(),
+            signatures_required: list_size,
+        });
+
         // Assert that the response is what we expect
-        assert_eq!(&resp, &public_keys);
+        assert_eq!(resp, expected);
         mock.assert();
     }
 
@@ -1795,12 +2491,16 @@ mod tests {
         C: StacksInteract,
         F: Fn(Url) -> C,
     {
-        let aggregate_key = generate_pubkeys(1).into_iter().next().unwrap();
+        let aggregate_key = generate_pubkeys(1)[0];
 
         let data;
         let expected;
         if return_none {
-            data = [0; 33].to_vec();
+            // 0x00 is the initial value of the signers' aggregate key in
+            // the sbtc-registry contract, and
+            // get_current_signers_aggregate_key should return None when we
+            // receive it.
+            data = vec![0];
             expected = None;
         } else {
             data = aggregate_key.serialize().to_vec();
@@ -1887,8 +2587,8 @@ mod tests {
             .get_data_var(
                 &StacksAddress::from_string("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM")
                     .expect("failed to parse stacks address"),
-                &ContractName::from("sbtc-registry"),
-                &ClarityName::from("current-signer-set"),
+                SmartContract::SbtcRegistry,
+                ClarityName("current-signer-set"),
             )
             .await
             .unwrap();
@@ -1896,6 +2596,83 @@ mod tests {
         // Assert that the response is what we expect
         let expected: DataVarResponse = serde_json::from_str(&raw_json_response).unwrap();
         assert_eq!(&resp, &expected.data);
+        mock.assert();
+    }
+
+    #[test_case(Some(true); "complete-deposit")]
+    #[test_case(None; "incomplete-deposit")]
+    #[tokio::test]
+    async fn is_deposit_completed_works(expected_response: Option<bool>) {
+        // Create our simulated response JSON.
+        let data = expected_response.map(|x| Box::new(Value::Bool(x)));
+        let clarity_value = Value::Optional(OptionalData { data });
+        let json_response = serde_json::json!({
+            "okay": true,
+            "result": format!("0x{}", clarity_value.serialize_to_hex().unwrap()),
+        });
+        let raw_json_response = serde_json::to_string(&json_response).unwrap();
+
+        // Setup our mock server
+        // POST /v2/contracts/call-read/<contract-principal>/sbtc-registry/get-deposit-status
+        let mut stacks_node_server = mockito::Server::new_async().await;
+        let mock = stacks_node_server
+            .mock("POST", "/v2/contracts/call-read/ST000000000000000000002AMW42H/sbtc-registry/get-deposit-status?tip=latest")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(&raw_json_response)
+            .expect(1)
+            .create();
+
+        let client =
+            StacksClient::new(url::Url::parse(stacks_node_server.url().as_str()).unwrap()).unwrap();
+
+        // Make the request to the mock server
+        let response = client
+            .is_deposit_completed(
+                &StacksAddress::burn_address(false),
+                &bitcoin::OutPoint::null(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response, expected_response.unwrap_or(false));
+        mock.assert();
+    }
+
+    #[test_case(Some(true); "accepted-withdrawal")]
+    #[test_case(Some(false); "rejected-withdrawal")]
+    #[test_case(None; "incomplete-withdrawal")]
+    #[tokio::test]
+    async fn is_withdrawal_completed_works(expected_response: Option<bool>) {
+        // Create our simulated response JSON.
+        let data = expected_response.map(|x| Box::new(Value::Bool(x)));
+        let clarity_value = Value::Optional(OptionalData { data });
+        let json_response = serde_json::json!({
+            "data": format!("0x{}", clarity_value.serialize_to_hex().unwrap()),
+        });
+        let raw_json_response = serde_json::to_string(&json_response).unwrap();
+
+        // Setup our mock server
+        // POST /v2/map_entry/<contract-principal>/sbtc-registry/withdrawal-status
+        let mut stacks_node_server = mockito::Server::new_async().await;
+        let mock = stacks_node_server
+            .mock("POST", "/v2/map_entry/ST000000000000000000002AMW42H/sbtc-registry/withdrawal-status?proof=0")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(&raw_json_response)
+            .expect(1)
+            .create();
+
+        let client =
+            StacksClient::new(url::Url::parse(stacks_node_server.url().as_str()).unwrap()).unwrap();
+
+        // Make the request to the mock server
+        let response = client
+            .is_withdrawal_completed(&StacksAddress::burn_address(false), 1)
+            .await
+            .unwrap();
+
+        assert_eq!(response, expected_response.is_some());
         mock.assert();
     }
 
@@ -1921,11 +2698,11 @@ mod tests {
         let client =
             StacksClient::new(url::Url::parse(stacks_node_server.url().as_str()).unwrap()).unwrap();
 
-        let expected_fee = get_full_tx_size(&DUMMY_STX_TRANSFER_PAYLOAD, &wallet).unwrap()
+        let expected_fee = get_full_tx_size(&*DUMMY_STX_TRANSFER_PAYLOAD, &wallet).unwrap()
             * TX_FEE_TX_SIZE_MULTIPLIER;
 
         let resp = client
-            .estimate_fees(&wallet, &DUMMY_STX_TRANSFER_PAYLOAD, FeePriority::High)
+            .estimate_fees(&wallet, &*DUMMY_STX_TRANSFER_PAYLOAD, FeePriority::High)
             .await
             .unwrap();
 
@@ -1971,7 +2748,7 @@ mod tests {
         let client =
             StacksClient::new(url::Url::parse(stacks_node_server.url().as_str()).unwrap()).unwrap();
         let resp = client
-            .get_fee_estimate(&DUMMY_STX_TRANSFER_PAYLOAD, None)
+            .get_fee_estimate(&*DUMMY_STX_TRANSFER_PAYLOAD, None)
             .await
             .unwrap();
         let expected: RPCFeeEstimateResponse = serde_json::from_str(raw_json_response).unwrap();
@@ -1981,19 +2758,19 @@ mod tests {
         // Now lets check that the interface function returns the requested
         // priority fees.
         let fee = client
-            .estimate_fees(&wallet, &DUMMY_STX_TRANSFER_PAYLOAD, FeePriority::Low)
+            .estimate_fees(&wallet, &*DUMMY_STX_TRANSFER_PAYLOAD, FeePriority::Low)
             .await
             .unwrap();
         assert_eq!(fee, 7679);
 
         let fee = client
-            .estimate_fees(&wallet, &DUMMY_STX_TRANSFER_PAYLOAD, FeePriority::Medium)
+            .estimate_fees(&wallet, &*DUMMY_STX_TRANSFER_PAYLOAD, FeePriority::Medium)
             .await
             .unwrap();
         assert_eq!(fee, 7680);
 
         let fee = client
-            .estimate_fees(&wallet, &DUMMY_STX_TRANSFER_PAYLOAD, FeePriority::High)
+            .estimate_fees(&wallet, &*DUMMY_STX_TRANSFER_PAYLOAD, FeePriority::High)
             .await
             .unwrap();
         assert_eq!(fee, 25505);
@@ -2002,7 +2779,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_pox_info_and_get_nakamoto_start_height_works() {
+    async fn get_pox_info_works() {
         let raw_json_response =
             include_str!("../../tests/fixtures/stacksapi-get-pox-info-test-data.json");
 
@@ -2020,14 +2797,159 @@ mod tests {
         let client =
             StacksClient::new(url::Url::parse(stacks_node_server.url().as_str()).unwrap()).unwrap();
         let resp = client.get_pox_info().await.unwrap();
-        let expected: RPCPoxInfoData = serde_json::from_str(raw_json_response).unwrap();
+        let expected: PoxResponse = serde_json::from_str(raw_json_response).unwrap();
 
         assert_eq!(resp, expected);
         mock.assert();
+    }
 
-        let nakamoto_start_height = resp.nakamoto_start_height();
-        assert!(nakamoto_start_height.is_some());
-        assert_eq!(nakamoto_start_height.unwrap(), 232);
+    #[tokio::test]
+    async fn get_epoch_info_works_with_full_response_body() {
+        let raw_json_response =
+            include_str!("../../tests/fixtures/stacksapi-get-pox-info-test-data.json");
+
+        let mut stacks_node_server = mockito::Server::new_async().await;
+        let mock = stacks_node_server
+            .mock("GET", "/v2/pox")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(raw_json_response)
+            .expect(1)
+            .create();
+
+        let client =
+            StacksClient::new(url::Url::parse(stacks_node_server.url().as_str()).unwrap()).unwrap();
+        let resp = client.get_epoch_status().await.unwrap();
+
+        assert_matches!(resp, StacksEpochStatus::PostNakamoto { nakamoto_start_height }
+            if nakamoto_start_height == BitcoinBlockHeight::from(232u64)
+        );
+
+        mock.assert();
+    }
+
+    #[tokio::test]
+    async fn get_epoch_info_errors_when_epoch30_missing() {
+        let raw_json_response = r#"{
+            "current_burnchain_block_height": 1000,
+            "epochs": [
+                { "epoch_id": "Epoch10", "start_height": 0 },
+                { "epoch_id": "Epoch20", "start_height": 500 }
+            ]
+        }"#;
+
+        let mut stacks_node_server = mockito::Server::new_async().await;
+        let mock = stacks_node_server
+            .mock("GET", "/v2/pox")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(raw_json_response)
+            .expect(1)
+            .create();
+
+        let client = StacksClient::new(stacks_node_server.url().parse().unwrap()).unwrap();
+        let err = client.get_epoch_status().await.unwrap_err();
+        assert_matches!(err, Error::MissingNakamotoStartHeight);
+        mock.assert();
+    }
+
+    #[tokio::test]
+    async fn get_epoch_info_pre_nakamoto() {
+        // current < Epoch30 start -> PreNakamoto
+        let raw_json_response = r#"{
+            "current_burnchain_block_height": 1999,
+            "epochs": [
+                { "epoch_id": "Epoch10", "start_height": 0 },
+                { "epoch_id": "Epoch30", "start_height": 2000 }
+            ]
+        }"#;
+
+        let mut stacks_node_server = mockito::Server::new_async().await;
+        let mock = stacks_node_server
+            .mock("GET", "/v2/pox")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(raw_json_response)
+            .expect(1)
+            .create();
+
+        let client = StacksClient::new(stacks_node_server.url().parse().unwrap()).unwrap();
+        let resp = client.get_epoch_status().await.unwrap();
+
+        assert_matches!(resp, StacksEpochStatus::PreNakamoto { reported_bitcoin_height, nakamoto_start_height }
+            if reported_bitcoin_height == BitcoinBlockHeight::from(1999u64)
+            && nakamoto_start_height == BitcoinBlockHeight::from(2000u64)
+        );
+
+        mock.assert();
+    }
+
+    #[tokio::test]
+    async fn get_epoch_info_post_nakamoto() {
+        // current >= Epoch30 start -> PostNakamoto
+        let raw_json_response = r#"{
+            "current_burnchain_block_height": 2000,
+            "epochs": [
+                { "epoch_id": "Epoch10", "start_height": 0 },
+                { "epoch_id": "Epoch30", "start_height": 2000 }
+            ]
+        }"#;
+
+        let mut stacks_node_server = mockito::Server::new_async().await;
+        let mock = stacks_node_server
+            .mock("GET", "/v2/pox")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(raw_json_response)
+            .expect(1)
+            .create();
+
+        let client = StacksClient::new(stacks_node_server.url().parse().unwrap()).unwrap();
+        let resp = client.get_epoch_status().await.unwrap();
+
+        assert_matches!(
+            resp,
+            StacksEpochStatus::PostNakamoto { nakamoto_start_height }
+                if nakamoto_start_height == BitcoinBlockHeight::from(2000u64)
+        );
+
+        mock.assert();
+    }
+
+    #[tokio::test]
+    async fn get_epoch_info_ignores_unknown_epochs_after_epoch30() {
+        // Unknown epochs (strings) after Epoch30 should not break parsing.
+        let raw_json_response = r#"{
+            "current_burnchain_block_height": 2500,
+            "epochs": [
+                { "epoch_id": "Epoch10", "start_height": 0 },
+                { "epoch_id": "Epoch11", "start_height": 232 },
+                { "epoch_id": "Epoch12", "start_height": 1456 },
+                { "epoch_id": "Epoch30", "start_height": 2000 },
+                { "epoch_id": "Epoch9999", "start_height": 3000 },
+                { "epoch_id": "SomeFutureEpoch", "start_height": 4000 }
+            ]
+        }"#;
+
+        let mut stacks_node_server = mockito::Server::new_async().await;
+        let mock = stacks_node_server
+            .mock("GET", "/v2/pox")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(raw_json_response)
+            .expect(1)
+            .create();
+
+        let client = StacksClient::new(stacks_node_server.url().parse().unwrap()).unwrap();
+        let resp = client.get_epoch_status().await.unwrap();
+
+        assert_matches!(
+            resp,
+            StacksEpochStatus::PostNakamoto { nakamoto_start_height }
+                if nakamoto_start_height == BitcoinBlockHeight::from(2000u64)
+        );
+
+        mock.assert();
     }
 
     #[tokio::test]
@@ -2049,7 +2971,7 @@ mod tests {
         let client =
             StacksClient::new(url::Url::parse(stacks_node_server.url().as_str()).unwrap()).unwrap();
         let resp = client.get_node_info().await.unwrap();
-        let expected: RPCPeerInfoData = serde_json::from_str(raw_json_response).unwrap();
+        let expected: GetNodeInfoResponse = serde_json::from_str(raw_json_response).unwrap();
 
         assert_eq!(resp, expected);
         mock.assert();
@@ -2065,10 +2987,9 @@ mod tests {
         let storage = Store::new_shared();
 
         let info = client.get_tenure_info().await.unwrap();
-        let blocks = fetch_unknown_ancestors(&client, &storage, info.tenure_start_block_id)
+        update_db_with_unknown_ancestors(&client, &storage, &info.tenure_start_block_id)
             .await
             .unwrap();
-        assert!(!blocks.is_empty());
     }
 
     #[test_case("0x1A3B5C7D9E", 112665066910; "uppercase-112665066910")]

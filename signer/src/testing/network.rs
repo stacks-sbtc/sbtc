@@ -1,6 +1,26 @@
 //! Test utilities for the `network` module
 
+use libp2p::{Multiaddr, multiaddr::Protocol};
+use rand::RngCore;
+
+use crate::testing::get_rng;
 use crate::{keys::PrivateKey, network};
+
+/// Trait for generating random memory `Multiaddr`s for testing purposes.
+pub trait MultiaddrExt {
+    /// Generates a random [`Multiaddr`] with the
+    /// [`libp2p::core::transport::MemoryTransport`] transport.
+    fn random_memory<R: RngCore + ?Sized>(rng: &mut R) -> Multiaddr {
+        Protocol::Memory(rng.next_u64()).into()
+    }
+
+    /// Creates a [`Multiaddr`] with the provided in-memory ID.
+    fn memory(id: u64) -> Multiaddr {
+        Protocol::Memory(id).into()
+    }
+}
+
+impl MultiaddrExt for Multiaddr {}
 
 /// Test helper that spawns two concurrent tasks for the provided clients and have them
 /// broadcasting randomly generated messages.
@@ -14,8 +34,7 @@ pub async fn assert_clients_can_exchange_messages<C: network::MessageTransfer + 
     private_key_1: PrivateKey,
     private_key_2: PrivateKey,
 ) {
-    use rand::SeedableRng;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(1337);
+    let mut rng = get_rng();
     let number_of_messages = 32;
 
     let client_1_messages: Vec<_> = (0..number_of_messages)

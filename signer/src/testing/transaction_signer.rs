@@ -9,35 +9,36 @@ use crate::context::Context;
 use crate::context::SignerEvent;
 use crate::context::SignerSignal;
 use crate::context::TxSignerEvent;
+use crate::error::Error;
 use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
 use crate::network;
 use crate::network::MessageTransfer;
 use crate::storage;
-use crate::storage::model;
-use crate::storage::DbRead;
+use crate::storage::DbRead as _;
 use crate::storage::DbWrite;
+use crate::storage::model;
 use crate::testing;
+use crate::testing::get_rng;
 use crate::testing::storage::model::TestData;
 use crate::transaction_signer;
+use crate::transaction_signer::STACKS_SIGN_REQUEST_LRU_SIZE;
 
 use lru::LruCache;
-use rand::SeedableRng as _;
 use tokio::sync::broadcast;
 use tokio::time::error::Elapsed;
 
 use super::context::*;
 
 /// A test harness for the signer event loop.
-pub struct TxSignerEventLoopHarness<Context, M, Rng> {
+pub struct TxSignerEventLoopHarness<Context, M> {
     context: Context,
-    event_loop: EventLoop<Context, M, Rng>,
+    event_loop: EventLoop<Context, M>,
 }
 
-impl<Ctx, M, Rng> TxSignerEventLoopHarness<Ctx, M, Rng>
+impl<Ctx, M> TxSignerEventLoopHarness<Ctx, M>
 where
     Ctx: Context + 'static,
-    Rng: rand::RngCore + rand::CryptoRng + Send + Sync + 'static,
     M: MessageTransfer + Send + Sync + 'static,
 {
     /// Create the test harness.
@@ -46,8 +47,6 @@ where
         network: M,
         context_window: u16,
         signer_private_key: PrivateKey,
-        threshold: u32,
-        rng: Rng,
     ) -> Self {
         Self {
             event_loop: transaction_signer::TxSignerEventLoop {
@@ -56,9 +55,10 @@ where
                 signer_private_key,
                 context_window,
                 wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
-                threshold,
-                rng,
+                last_presign_block: None,
                 dkg_begin_pause: None,
+                dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
+                stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
             },
             context,
         }
@@ -113,14 +113,10 @@ where
     }
 }
 
-type EventLoop<Context, M, Rng> = transaction_signer::TxSignerEventLoop<Context, M, Rng>;
+type EventLoop<Context, M> = transaction_signer::TxSignerEventLoop<Context, M>;
 
 impl blocklist_client::BlocklistChecker for () {
-    async fn can_accept(
-        &self,
-        _address: &str,
-    ) -> Result<bool, blocklist_api::apis::Error<blocklist_api::apis::address_api::CheckAddressError>>
-    {
+    async fn can_accept(&self, _address: &str) -> Result<bool, Error> {
         Ok(true)
     }
 }
@@ -133,8 +129,6 @@ pub struct TestEnvironment<C> {
     pub context_window: u16,
     /// Num signers
     pub num_signers: usize,
-    /// Signing threshold
-    pub signing_threshold: u32,
     /// Test model parameters
     pub test_model_parameters: testing::storage::model::Params,
 }
@@ -143,10 +137,15 @@ impl<C> TestEnvironment<C>
 where
     C: Context + 'static,
 {
+    /// The signing threshold in the context
+    pub fn signing_threshold(&self) -> u32 {
+        self.context.config().signer.bootstrap_signatures_required as u32
+    }
+
     /// Assert that a group of transaction signers together can
     /// participate successfully in a DKG round
     pub async fn assert_should_be_able_to_participate_in_dkg(self) {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(46);
+        let mut rng = get_rng();
         let network = network::InMemoryNetwork::new();
         let signer_info = testing::wsts::generate_signer_info(&mut rng, self.num_signers);
         let coordinator_signer_info = signer_info.first().unwrap().clone();
@@ -162,8 +161,6 @@ where
                     network.connect(),
                     self.context_window,
                     signer_info.signer_private_key,
-                    self.signing_threshold,
-                    rng.clone(),
                 );
 
                 event_loop_harness.start()
@@ -201,7 +198,7 @@ where
         run_dkg_and_store_results_for_signers(
             &signer_info,
             &bitcoin_chain_tip,
-            self.signing_threshold,
+            self.signing_threshold(),
             event_loop_handles
                 .iter_mut()
                 .map(|handle| handle.context.get_storage_mut()),
@@ -214,18 +211,22 @@ where
         let mut coordinator = testing::wsts::Coordinator::new(
             network.connect(),
             coordinator_signer_info,
-            self.signing_threshold,
+            self.signing_threshold(),
         );
-        let aggregate_key = coordinator.run_dkg(bitcoin_chain_tip, dummy_txid).await;
+        let aggregate_key = coordinator
+            .run_dkg(bitcoin_chain_tip, dummy_txid.into())
+            .await;
 
         for handle in event_loop_handles.into_iter() {
-            assert!(handle
-                .context
-                .get_storage()
-                .get_encrypted_dkg_shares(&aggregate_key)
-                .await
-                .expect("storage error")
-                .is_some());
+            assert!(
+                handle
+                    .context
+                    .get_storage()
+                    .get_encrypted_dkg_shares(&aggregate_key)
+                    .await
+                    .expect("storage error")
+                    .is_some()
+            );
         }
     }
 
@@ -263,7 +264,11 @@ async fn run_dkg_and_store_results_for_signers<'s: 'r, 'r, S, Rng>(
     let dkg_txid = testing::dummy::txid(&fake::Faker, rng);
     let bitcoin_chain_tip = *chain_tip;
     let (_, all_dkg_shares) = testing_signer_set
-        .run_dkg(bitcoin_chain_tip, dkg_txid, rng)
+        .run_dkg(
+            bitcoin_chain_tip,
+            dkg_txid.into(),
+            model::DkgSharesStatus::Verified,
+        )
         .await;
 
     for (storage, encrypted_dkg_shares) in stores.into_iter().zip(all_dkg_shares) {
