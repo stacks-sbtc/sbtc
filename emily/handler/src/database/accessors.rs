@@ -981,6 +981,14 @@ pub async fn get_slowdown_key(
 /// Add new slowdown key
 pub async fn add_slowdown_key(context: &EmilyContext, key: &SlowdownKeyEntry) -> Result<(), Error> {
     // TODO: maybe we want to check that key.key.hash is a valid hex string.
+    let res = get_slowdown_key(context, &key.key.key_name).await;
+    if res.is_ok() {
+        tracing::warn!(
+            key = %key.key.key_name,
+            "Attempt to insert duplicate slowdown key",
+        );
+        return Err(Error::Conflict);
+    }
     put_entry::<SlowdownTablePrimaryIndex>(context, key).await
 }
 

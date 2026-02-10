@@ -236,9 +236,46 @@ async fn slowdown_does_not_overwrite_stronger_limits(
 
 // We should pin behaviour on adding a key while key with such name already exists
 // (bail or overwrite)
+// Current behavior is to bail.
 #[tokio::test]
-async fn confliction_key_names() {
-    todo!()
+async fn conflicting_key_names() {
+    let (configuration, tables) = new_test_setup().await;
+
+    let key_name = "test_key".to_string();
+    let secret1 = "very secret string 1".to_string();
+    let secret2 = "very secret string 2".to_string();
+
+    // Register the first key
+    let mut hasher1 = Sha256::new();
+    hasher1.update(secret1.as_bytes());
+    let hash_hex_string1 = hex::encode(hasher1.finalize());
+    let slowdown_key1 = SlowdownKey {
+        name: key_name.clone(),
+        hash: hash_hex_string1,
+    };
+    apis::slowdown_api::add_slowdown_key(&configuration, slowdown_key1.clone())
+        .await
+        .unwrap();
+
+    // Attempt to register a second key with the same name but different secret
+    let mut hasher2 = Sha256::new();
+    hasher2.update(secret2.as_bytes());
+    let hash_hex_string2 = hex::encode(hasher2.finalize());
+    let slowdown_key2 = SlowdownKey {
+        name: key_name.clone(),
+        hash: hash_hex_string2,
+    };
+    let err = apis::slowdown_api::add_slowdown_key(&configuration, slowdown_key2)
+        .await
+        .unwrap_err();
+
+    // Verify that it bails (returns a 409 Conflict error)
+    let Error::ResponseError(err) = err else {
+        panic!("Wrong error type: {:?}", err)
+    };
+    assert_eq!(err.status, StatusCode::CONFLICT);
+
+    clean_test_setup(tables).await;
 }
 
 // We should ensure that start_slowdown returns proper error (no such key/wrong secret/deactivated)
@@ -454,4 +491,11 @@ async fn slow_mode_initiator_correctly_shown_at_limits() {
     );
 
     clean_test_setup(tables).await;
+}
+
+// We should check that Emily verifies during slowdown key addition
+// that hash is a valid hash string, and returns proper error otherwise
+#[tokio::test]
+async fn slowdown_key_addition_verifies_hash_formatting() {
+    todo!()
 }

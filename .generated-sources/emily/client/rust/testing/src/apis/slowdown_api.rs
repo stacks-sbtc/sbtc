@@ -29,6 +29,7 @@ pub enum ActivateSlowdownKeyError {
 #[serde(untagged)]
 pub enum AddSlowdownKeyError {
     Status405(models::ErrorResponse),
+    Status409(models::ErrorResponse),
     Status500(models::ErrorResponse),
     UnknownValue(serde_json::Value),
 }

@@ -107,6 +107,10 @@ pub enum Error {
     #[error("Unauthorized")]
     Unauthorized,
 
+    /// Conflict.
+    #[error("Conflict")]
+    Conflict,
+
     /// This may be because you either requested a nonexistent endpoint
     /// or referenced a user that does not exist
     #[error("Resource not found")]
@@ -269,6 +273,7 @@ impl Error {
             Error::Forbidden => StatusCode::FORBIDDEN,
             Error::Unauthorized => StatusCode::UNAUTHORIZED,
             Error::NotFound => StatusCode::NOT_FOUND,
+            Error::Conflict => StatusCode::CONFLICT,
             Error::InternalServer => StatusCode::INTERNAL_SERVER_ERROR,
             Error::TooManyInternalRetries => StatusCode::INTERNAL_SERVER_ERROR,
             Error::InconsistentState(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -317,6 +322,7 @@ impl Error {
             | Error::Forbidden
             | Error::NotFound
             | Error::Unauthorized
+            | Error::Conflict
             | Error::TooManyInternalRetries
             | Error::InconsistentState(_)
             | Error::WithdrawalRequestIdMismatch(_, _)
