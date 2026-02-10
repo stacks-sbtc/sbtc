@@ -861,6 +861,7 @@ pub async fn get_limits(context: &EmilyContext) -> Result<Limits, Error> {
         per_withdrawal_cap: default_global_cap.per_withdrawal_cap,
         rolling_withdrawal_blocks: default_global_cap.rolling_withdrawal_blocks,
         rolling_withdrawal_cap: default_global_cap.rolling_withdrawal_cap,
+        slow_mode_initiator: default_global_cap.slow_mode_initiator,
     };
 
     // Aggregate all the latest entries by account.
@@ -918,6 +919,7 @@ pub async fn get_limits(context: &EmilyContext) -> Result<Limits, Error> {
         rolling_withdrawal_blocks: global_cap.rolling_withdrawal_blocks,
         rolling_withdrawal_cap: global_cap.rolling_withdrawal_cap,
         account_caps,
+        slow_mode_initiator: global_cap.slow_mode_initiator,
     })
 }
 

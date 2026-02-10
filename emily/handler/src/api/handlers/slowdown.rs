@@ -52,7 +52,10 @@ pub const SLOW_MODE_PER_WITHDRAWAL_CAP: u64 = 150_000_000; // 1.5 BTC
 
 /// Calculates slow mode limits. It keeps most limits as they are now,
 /// while overwriting some of them.
-pub async fn calculate_slow_mode_limits(context: &EmilyContext) -> Result<Limits, Error> {
+pub async fn calculate_slow_mode_limits(
+    context: &EmilyContext,
+    initiator: String,
+) -> Result<Limits, Error> {
     let mut limits = accessors::get_limits(context).await?;
     limits.per_withdrawal_cap = Some(
         limits
@@ -75,6 +78,7 @@ pub async fn calculate_slow_mode_limits(context: &EmilyContext) -> Result<Limits
                 curr.min(SLOW_MODE_ROLLING_CAP)
             }),
     );
+    limits.slow_mode_initiator = Some(initiator);
     Ok(limits)
 }
 
@@ -128,7 +132,7 @@ pub async fn start_slowdown(
                     key_name = %request.name,
                     "Successfull request to start slow mode. Starting slow mode.",
                 );
-                let new_limits = calculate_slow_mode_limits(&context).await?;
+                let new_limits = calculate_slow_mode_limits(&context, request.name).await?;
                 tracing::info!(?new_limits, "Calculated limits to use in slow mode",);
                 let res = crate::api::handlers::limits::set_limits(new_limits.clone(), context)
                     .await

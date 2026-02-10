@@ -25,6 +25,7 @@ async fn empty_default_is_as_expected() {
         per_withdrawal_cap: Some(None),
         rolling_withdrawal_blocks: Some(None),
         rolling_withdrawal_cap: Some(None),
+        slow_mode_initiator: Some(None),
         account_caps: HashMap::new(),
     };
 
@@ -53,6 +54,7 @@ async fn adding_and_then_updating_single_accout_limit_works() {
                 per_withdrawal_cap: Some(Some(100)),
                 rolling_withdrawal_blocks: Some(Some(100)),
                 rolling_withdrawal_cap: Some(Some(100)),
+                slow_mode_initiator: Some(None),
             },
         ),
         (
@@ -64,6 +66,7 @@ async fn adding_and_then_updating_single_accout_limit_works() {
                 per_withdrawal_cap: Some(Some(1200)),
                 rolling_withdrawal_blocks: Some(Some(1200)),
                 rolling_withdrawal_cap: Some(Some(1200)),
+                slow_mode_initiator: Some(None),
             },
         ),
         (
@@ -75,6 +78,7 @@ async fn adding_and_then_updating_single_accout_limit_works() {
                 per_withdrawal_cap: Some(Some(500)),
                 rolling_withdrawal_blocks: Some(Some(600)),
                 rolling_withdrawal_cap: Some(Some(700)),
+                slow_mode_initiator: Some(None),
             },
         ),
         (
@@ -86,6 +90,7 @@ async fn adding_and_then_updating_single_accout_limit_works() {
                 per_withdrawal_cap: Some(Some(200)),
                 rolling_withdrawal_blocks: Some(Some(200)),
                 rolling_withdrawal_cap: Some(Some(200)),
+                slow_mode_initiator: Some(None),
             },
         ),
         (
@@ -97,6 +102,7 @@ async fn adding_and_then_updating_single_accout_limit_works() {
                 per_withdrawal_cap: Some(Some(300)),
                 rolling_withdrawal_blocks: Some(Some(300)),
                 rolling_withdrawal_cap: Some(Some(300)),
+                slow_mode_initiator: Some(None),
             },
         ),
     ];
@@ -113,6 +119,7 @@ async fn adding_and_then_updating_single_accout_limit_works() {
                 per_withdrawal_cap: Some(Some(200)),
                 rolling_withdrawal_blocks: Some(Some(200)),
                 rolling_withdrawal_cap: Some(Some(200)),
+                slow_mode_initiator: Some(None),
             },
         ),
         (
@@ -124,6 +131,7 @@ async fn adding_and_then_updating_single_accout_limit_works() {
                 per_withdrawal_cap: Some(Some(300)),
                 rolling_withdrawal_blocks: Some(Some(300)),
                 rolling_withdrawal_cap: Some(Some(300)),
+                slow_mode_initiator: Some(None),
             },
         ),
     ]
@@ -141,6 +149,7 @@ async fn adding_and_then_updating_single_accout_limit_works() {
         rolling_withdrawal_blocks: Some(None),
         rolling_withdrawal_cap: Some(None),
         account_caps: expected_account_caps.clone(),
+        slow_mode_initiator: Some(None),
     };
 
     // Act.
@@ -196,6 +205,7 @@ async fn test_updating_account_limits_via_global_limit_works() {
                 per_withdrawal_cap: Some(Some(100)),
                 rolling_withdrawal_blocks: Some(Some(100)),
                 rolling_withdrawal_cap: Some(Some(100)),
+                slow_mode_initiator: Some(None),
             },
         ),
         (
@@ -207,6 +217,7 @@ async fn test_updating_account_limits_via_global_limit_works() {
                 per_withdrawal_cap: Some(Some(150)),
                 rolling_withdrawal_blocks: Some(Some(150)),
                 rolling_withdrawal_cap: Some(Some(150)),
+                slow_mode_initiator: Some(None),
             },
         ),
         (
@@ -218,6 +229,7 @@ async fn test_updating_account_limits_via_global_limit_works() {
                 per_withdrawal_cap: Some(Some(150)),
                 rolling_withdrawal_blocks: Some(Some(150)),
                 rolling_withdrawal_cap: Some(Some(150)),
+                slow_mode_initiator: Some(None),
             },
         ),
     ];
@@ -234,6 +246,7 @@ async fn test_updating_account_limits_via_global_limit_works() {
                 per_withdrawal_cap: Some(Some(200)),
                 rolling_withdrawal_blocks: Some(Some(200)),
                 rolling_withdrawal_cap: Some(Some(200)),
+                slow_mode_initiator: Some(None),
             },
         ),
         (
@@ -245,6 +258,7 @@ async fn test_updating_account_limits_via_global_limit_works() {
                 per_withdrawal_cap: Some(Some(300)),
                 rolling_withdrawal_blocks: Some(Some(300)),
                 rolling_withdrawal_cap: Some(Some(300)),
+                slow_mode_initiator: Some(None),
             },
         ),
         // Set all the values to none so this account should no longer show up
@@ -258,6 +272,7 @@ async fn test_updating_account_limits_via_global_limit_works() {
                 per_withdrawal_cap: Some(None),
                 rolling_withdrawal_blocks: Some(None),
                 rolling_withdrawal_cap: Some(None),
+                slow_mode_initiator: Some(None),
             },
         ),
     ]
@@ -272,6 +287,7 @@ async fn test_updating_account_limits_via_global_limit_works() {
         per_withdrawal_cap: Some(Some(789)),
         rolling_withdrawal_blocks: Some(Some(101)),
         rolling_withdrawal_cap: Some(Some(112)),
+        slow_mode_initiator: Some(None),
         account_caps: account_limits_to_set_globally.clone(),
     };
 
@@ -287,6 +303,7 @@ async fn test_updating_account_limits_via_global_limit_works() {
                 per_withdrawal_cap: Some(Some(100)),
                 rolling_withdrawal_blocks: Some(Some(100)),
                 rolling_withdrawal_cap: Some(Some(100)),
+                slow_mode_initiator: Some(None),
             },
         ),
         (
@@ -298,6 +315,7 @@ async fn test_updating_account_limits_via_global_limit_works() {
                 per_withdrawal_cap: Some(Some(200)),
                 rolling_withdrawal_blocks: Some(Some(200)),
                 rolling_withdrawal_cap: Some(Some(200)),
+                slow_mode_initiator: Some(None),
             },
         ),
         (
@@ -309,6 +327,7 @@ async fn test_updating_account_limits_via_global_limit_works() {
                 per_withdrawal_cap: Some(Some(300)),
                 rolling_withdrawal_blocks: Some(Some(300)),
                 rolling_withdrawal_cap: Some(Some(300)),
+                slow_mode_initiator: Some(None),
             },
         ),
     ]
@@ -323,6 +342,7 @@ async fn test_updating_account_limits_via_global_limit_works() {
         per_withdrawal_cap: Some(Some(789)),
         rolling_withdrawal_blocks: Some(Some(101)),
         rolling_withdrawal_cap: Some(Some(112)),
+        slow_mode_initiator: Some(None),
         account_caps: expected_global_account_limits.clone(),
     };
 
@@ -394,6 +414,7 @@ async fn test_incomplete_rolling_withdrawal_limit_config_returns_error(
         per_withdrawal_cap: Some(None),
         rolling_withdrawal_blocks: Some(rolling_withdrawal_blocks),
         rolling_withdrawal_cap: Some(rolling_withdrawal_cap),
+        slow_mode_initiator: Some(None),
         account_caps: HashMap::new(),
     };
 
@@ -426,6 +447,7 @@ async fn test_complete_rolling_withdrawal_limit_config_works(
         per_withdrawal_cap: Some(None),
         rolling_withdrawal_blocks: Some(rolling_withdrawal_blocks),
         rolling_withdrawal_cap: Some(rolling_withdrawal_cap),
+        slow_mode_initiator: Some(None),
         account_caps: HashMap::new(),
     };
     if let Some(window_size) = rolling_withdrawal_blocks {
@@ -461,6 +483,7 @@ async fn test_available_to_withdraw_no_chainstate_in_db_at_target_height() {
         per_withdrawal_cap: Some(None),
         rolling_withdrawal_blocks: Some(Some(100)),
         rolling_withdrawal_cap: Some(Some(10_000)),
+        slow_mode_initiator: Some(None),
         account_caps: HashMap::new(),
     };
     // Set some chainstates to make set_limits work
@@ -519,6 +542,7 @@ async fn test_available_to_withdraw_success() {
         per_withdrawal_cap: Some(None),
         rolling_withdrawal_blocks: Some(Some(10)),
         rolling_withdrawal_cap: Some(Some(10_000)),
+        slow_mode_initiator: Some(None),
         account_caps: HashMap::new(),
     };
     // Set some chainstates to make set_limits work

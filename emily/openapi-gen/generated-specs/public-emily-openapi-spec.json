@@ -2030,6 +2030,11 @@
             "description": "Maximum total sBTC that can be withdrawn within the rolling withdrawal window.",
             "nullable": true,
             "minimum": 0
+          },
+          "slowModeInitiator": {
+            "type": "string",
+            "description": "Slowdown key initiated slowdown",
+            "nullable": true
           }
         }
       },
@@ -2548,6 +2553,11 @@
             "description": "Maximum total sBTC that can be withdrawn within the rolling withdrawal window.",
             "nullable": true,
             "minimum": 0
+          },
+          "slowModeInitiator": {
+            "type": "string",
+            "description": "Name of key which triggered slow mode (if slow mode is active)",
+            "nullable": true
           }
         }
       },

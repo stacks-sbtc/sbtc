@@ -121,6 +121,7 @@ impl Settings {
                     .ok()
                     .map(|v| v.parse())
                     .transpose()?,
+                slow_mode_initiator: None,
             },
             is_mainnet: env::var("IS_MAINNET")?.to_lowercase() == "true",
             version: env::var("VERSION")?,

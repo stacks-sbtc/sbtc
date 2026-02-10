@@ -27,6 +27,7 @@ async fn base_flow() {
         per_withdrawal_cap: Some(Some(1000)),
         rolling_withdrawal_blocks: Some(Some(100)),
         rolling_withdrawal_cap: Some(Some(10_000)),
+        slow_mode_initiator: Some(None),
         account_caps: HashMap::new(),
     };
     // Set some chainstates to make set_limits work
@@ -162,6 +163,7 @@ async fn slowdown_does_not_overwrite_stronger_limits(
         rolling_withdrawal_blocks,
         rolling_withdrawal_cap,
         account_caps: HashMap::new(),
+        slow_mode_initiator: Some(None),
     };
     // Set some chainstates to make set_limits work
     let chainstates: Vec<Chainstate> = (0..110)
@@ -253,6 +255,7 @@ async fn start_slowdown_returns_proper_error() {
         per_withdrawal_cap: Some(Some(1000)),
         rolling_withdrawal_blocks: Some(Some(100)),
         rolling_withdrawal_cap: Some(Some(10_000)),
+        slow_mode_initiator: Some(None),
         account_caps: HashMap::new(),
     };
     let chainstates: Vec<Chainstate> = (0..110)
@@ -336,6 +339,7 @@ async fn slow_mode_overwrites_unlimited_limits() {
         per_withdrawal_cap: Some(None),
         rolling_withdrawal_blocks: Some(None),
         rolling_withdrawal_cap: Some(None),
+        slow_mode_initiator: Some(None),
         account_caps: HashMap::new(),
     };
     // Set some chainstates to make set_limits work
@@ -376,6 +380,78 @@ async fn slow_mode_overwrites_unlimited_limits() {
     assert!(new_limits.per_withdrawal_cap.is_some());
     assert!(new_limits.rolling_withdrawal_blocks.is_some());
     assert!(new_limits.rolling_withdrawal_cap.is_some());
+
+    clean_test_setup(tables).await;
+}
+
+#[tokio::test]
+async fn slow_mode_initiator_correctly_shown_at_limits() {
+    let (configuration, tables) = new_test_setup().await;
+
+    // Set some initial limits
+    let initial_limits = Limits {
+        available_to_withdraw: Some(Some(10000)),
+        peg_cap: Some(None),
+        per_deposit_minimum: Some(None),
+        per_deposit_cap: Some(None),
+        per_withdrawal_cap: Some(Some(1000)),
+        rolling_withdrawal_blocks: Some(Some(100)),
+        rolling_withdrawal_cap: Some(Some(10_000)),
+        slow_mode_initiator: Some(None),
+        account_caps: HashMap::new(),
+    };
+    // Set some chainstates to make set_limits work
+    let chainstates: Vec<Chainstate> = (0..110)
+        .map(|height| new_test_chainstate(height, height, 0))
+        .collect();
+    let _ = batch_set_chainstates(&configuration, chainstates).await;
+    apis::limits_api::set_limits(&configuration, initial_limits.clone())
+        .await
+        .unwrap();
+
+    // Register a slowdown key
+    let key_name = "test_key".to_string();
+    let secret = "very secret string".to_string();
+    let mut hasher = Sha256::new();
+    hasher.update(secret.as_bytes());
+    let hash_hex_string = hex::encode(hasher.finalize());
+    let slowdown_key = SlowdownKey {
+        name: key_name.clone(),
+        hash: hash_hex_string,
+    };
+    apis::slowdown_api::add_slowdown_key(&configuration, slowdown_key)
+        .await
+        .unwrap();
+
+    // Trigger slow mode
+    let slowdown_reqwest = SlowdownReqwest {
+        name: key_name.clone(),
+        secret: secret.clone(),
+    };
+    apis::slowdown_api::start_slowdown(&configuration, slowdown_reqwest.clone())
+        .await
+        .unwrap();
+
+    // Verify that the slow_mode_initiator field is set correctly
+    let new_limits = apis::limits_api::get_limits(&configuration).await.unwrap();
+    assert_eq!(new_limits.slow_mode_initiator, Some(Some(key_name.clone())));
+
+    // Now let's restore limits back to normal and check that slow_mode_initiator is None
+    let _ = apis::limits_api::set_limits(&configuration, initial_limits.clone())
+        .await
+        .unwrap();
+    let retrieved_limits = apis::limits_api::get_limits(&configuration).await.unwrap();
+    assert_eq!(retrieved_limits.slow_mode_initiator, Some(None));
+
+    // Trigger slow mode again to ensure the initiator is set again
+    let _ = apis::slowdown_api::start_slowdown(&configuration, slowdown_reqwest.clone())
+        .await
+        .unwrap();
+    let new_limits_after_retrigger = apis::limits_api::get_limits(&configuration).await.unwrap();
+    assert_eq!(
+        new_limits_after_retrigger.slow_mode_initiator,
+        Some(Some(key_name))
+    );
 
     clean_test_setup(tables).await;
 }
