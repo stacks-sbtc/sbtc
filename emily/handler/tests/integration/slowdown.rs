@@ -121,7 +121,6 @@ async fn base_flow() {
 // - per_withdrawal_cap can be decreased only
 // - rolling_withdrawal_blocks can be increased only
 // - rolling_withdrawal_cap can be decreased only
-#[tokio::test]
 #[test_case(true,  false, false; "per withdrawal cap")]
 #[test_case(false, true,  false; "window size")]
 #[test_case(false, false, true;  "window cap")]
@@ -130,6 +129,7 @@ async fn base_flow() {
 #[test_case(false, true,  true;  "window size and cap")]
 #[test_case(true,  true,  true;  "all stricter")]
 #[test_case(false, false, false; "none stricter")]
+#[tokio::test]
 async fn slowdown_does_not_overwrite_stronger_limits(
     is_per_withdrawal_stricter: bool,
     is_rolling_window_size_stricter: bool,

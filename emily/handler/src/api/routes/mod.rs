@@ -165,6 +165,9 @@ fn with_context(
         if let Some(h) = get_header("x-context-version") {
             context.settings.version = h;
         }
+        if let Some(h) = get_header("x-context-slowdown") {
+            context.settings.slowdown_table_name = h;
+        }
 
         context
     })

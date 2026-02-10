@@ -337,7 +337,7 @@ export class EmilyStack extends cdk.Stack {
         pointInTimeRecovery: undefined | boolean,
     ): dynamodb.Table {
         // Create DynamoDB table to store the messages. Encrypted by default.
-        const table =  new dynamodb.Table(this, tableId, {
+        const table = new dynamodb.Table(this, tableId, {
             tableName: tableName,
             partitionKey: {
                 name: 'Height',
@@ -445,7 +445,7 @@ export class EmilyStack extends cdk.Stack {
         withdrawalTableName: string,
         chainstateTableName: string,
         limitTableName: string,
-        slowdowntableName: string,
+        slowdownTableName: string,
         removalPolicy: cdk.RemovalPolicy,
         props: EmilyStackProps,
     ): lambda.Function {
@@ -469,7 +469,7 @@ export class EmilyStack extends cdk.Stack {
                 WITHDRAWAL_TABLE_NAME: withdrawalTableName,
                 CHAINSTATE_TABLE_NAME: chainstateTableName,
                 LIMIT_TABLE_NAME: limitTableName,
-                SLOWDOWN_TABLE_NAME: slowdowntableName,
+                SLOWDOWN_TABLE_NAME: slowdownTableName,
                 // Declare an environment variable that will be overwritten in local SAM
                 // deployments the AWS stack. SAM can only set environment variables that are
                 // already expected to be present in the lambda.

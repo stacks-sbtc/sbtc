@@ -68,6 +68,7 @@ impl fmt::Debug for EmilyContext {
                 &self.settings.chainstate_table_name,
             )
             .field("limit_table_name", &self.settings.limit_table_name)
+            .field("slowdown_table_name", &self.settings.slowdown_table_name)
             .field("default_limits", &self.settings.default_limits)
             .field("is_mainnet", &self.settings.is_mainnet)
             .field("version", &self.settings.version)

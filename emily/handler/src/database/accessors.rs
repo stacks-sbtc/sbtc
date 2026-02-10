@@ -1091,7 +1091,14 @@ pub async fn wipe_all_tables(context: &EmilyContext) -> Result<(), Error> {
     wipe_withdrawal_table(context).await?;
     wipe_chainstate_table(context).await?;
     wipe_limit_table(context).await?;
+    wipe_slowdown_table(context).await?;
     Ok(())
+}
+
+/// Wipes the slowdown table.
+#[cfg(feature = "testing")]
+async fn wipe_slowdown_table(context: &EmilyContext) -> Result<(), Error> {
+    wipe::<SlowdownTablePrimaryIndex>(context).await
 }
 
 /// Wipes the deposit table.
