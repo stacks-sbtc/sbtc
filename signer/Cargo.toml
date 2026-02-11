@@ -66,6 +66,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 url.workspace = true
 wsts.workspace = true
+reqwest_012.workspace = true
 
 # Only for testing
 fake = { workspace = true, optional = true }
