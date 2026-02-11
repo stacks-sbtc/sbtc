@@ -137,6 +137,7 @@ where
 mod serial {
     use super::*;
 
+    use signer::bitcoin::rpc::BitcoinCoreClientParams;
     use test_case::test_case;
 
     /// This test just checks that many of the methods on the Recipient struct
@@ -481,7 +482,11 @@ mod serial {
 
         // Let's check we correctly parse the withdrawal IDs
         let settings = Settings::new_from_default_config().unwrap();
-        let client = BitcoinCoreClient::try_from(&settings.bitcoin.rpc_endpoints[0]).unwrap();
+        let bitcoin_params = BitcoinCoreClientParams {
+            url: settings.bitcoin.rpc_endpoints[0].clone(),
+            timeout: settings.bitcoin.timeout,
+        };
+        let client = BitcoinCoreClient::try_from(&bitcoin_params).unwrap();
         let tx_info = client
             .get_tx_info(&unsigned.tx.compute_txid(), &sweep_block_hash)
             .unwrap()
