@@ -51,6 +51,7 @@ use super::CorsSupport;
         api::models::deposit::responses::UpdateDepositsResponse, // signers may update the state of deposits to Accepted.
         // Withdrawal Models.
         api::models::withdrawal::Withdrawal,
+        api::models::withdrawal::ExpectedFulfillmentInfo,
         api::models::withdrawal::responses::WithdrawalWithStatus,
         api::models::withdrawal::WithdrawalInfo,
         api::models::withdrawal::WithdrawalParameters,

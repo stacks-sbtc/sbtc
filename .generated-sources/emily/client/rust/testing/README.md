@@ -85,6 +85,7 @@ Class | Method | HTTP request | Description
  - [DepositUpdate](docs/DepositUpdate.md)
  - [DepositWithStatus](docs/DepositWithStatus.md)
  - [ErrorResponse](docs/ErrorResponse.md)
+ - [ExpectedFulfillmentInfo](docs/ExpectedFulfillmentInfo.md)
  - [Fulfillment](docs/Fulfillment.md)
  - [GetDepositsForTransactionResponse](docs/GetDepositsForTransactionResponse.md)
  - [GetDepositsResponse](docs/GetDepositsResponse.md)

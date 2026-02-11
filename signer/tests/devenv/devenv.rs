@@ -353,6 +353,7 @@ async fn orphaned_deposit() {
     let emily_client = EmilyClient::try_new(
         &Url::parse("http://testApiKey@127.0.0.1:3031").unwrap(),
         Duration::from_secs(1),
+        Duration::from_secs(1),
         None,
     )
     .unwrap();

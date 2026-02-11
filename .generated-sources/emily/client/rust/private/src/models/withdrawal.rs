@@ -17,6 +17,8 @@ pub struct Withdrawal {
     /// Amount of BTC being withdrawn in satoshis.
     #[serde(rename = "amount")]
     pub amount: u64,
+    #[serde(rename = "expectedFulfillmentInfo")]
+    pub expected_fulfillment_info: Box<models::ExpectedFulfillmentInfo>,
     #[serde(
         rename = "fulfillment",
         default,
@@ -61,6 +63,7 @@ impl Withdrawal {
     /// Withdrawal.
     pub fn new(
         amount: u64,
+        expected_fulfillment_info: models::ExpectedFulfillmentInfo,
         last_update_block_hash: String,
         last_update_height: u64,
         parameters: models::WithdrawalParameters,
@@ -75,6 +78,7 @@ impl Withdrawal {
     ) -> Withdrawal {
         Withdrawal {
             amount,
+            expected_fulfillment_info: Box::new(expected_fulfillment_info),
             fulfillment: None,
             last_update_block_hash,
             last_update_height,

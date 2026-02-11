@@ -6120,6 +6120,7 @@ dependencies = [
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "reqwest 0.11.27",
+ "reqwest 0.12.4",
  "ripemd",
  "sbtc",
  "secp256k1 0.29.0",

@@ -591,10 +591,7 @@ where
             return Err(Error::ValidationSignerSet(signer_set_info.aggregate_key));
         }
 
-        let stacks_chain_tip = db
-            .get_stacks_chain_tip(&chain_tip.block_hash)
-            .await?
-            .ok_or(Error::NoStacksChainTip)?;
+        let stacks_chain_tip = state.stacks_chain_tip().ok_or(Error::NoStacksChainTip)?;
 
         let req_ctx = ReqContext {
             chain_tip: *chain_tip,

@@ -46,10 +46,12 @@ use crate::stacks::api::SubmitTxResponse;
 use crate::stacks::api::TenureBlockHeaders;
 use crate::stacks::wallet::SignerWallet;
 use crate::storage::model;
+use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::ConsensusHash;
 use crate::storage::model::StacksBlockHash;
 use crate::testing::dummy;
+use crate::testing::stacks::DUMMY_SORTITION_INFO;
 use crate::util::ApiFallbackClient;
 
 /// A test harness for the block observer.
@@ -378,7 +380,9 @@ impl StacksInteract for TestHarness {
             .map(|block| block.header.clone().into())
             .collect();
 
-        TenureBlockHeaders::from_headers(headers)
+        let mut sortition_info = DUMMY_SORTITION_INFO.clone();
+        sortition_info.burn_block_hash = BitcoinBlockHash::from(*btc_block_id).into();
+        TenureBlockHeaders::try_new(headers, sortition_info)
     }
     async fn get_tenure_info(&self) -> Result<GetTenureInfoResponse, Error> {
         let (_, _, btc_block_id) = self.stacks_blocks.last().unwrap();
