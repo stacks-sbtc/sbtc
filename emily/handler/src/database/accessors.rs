@@ -981,7 +981,6 @@ pub async fn get_slowdown_key(
 
 /// Add new slowdown key
 pub async fn add_slowdown_key(context: &EmilyContext, key: &SlowdownKeyEntry) -> Result<(), Error> {
-    // TODO: maybe we want to check that key.key.hash is a valid hex string.
     let res = get_slowdown_key(context, &key.key.key_name).await;
     if res.is_ok() {
         tracing::warn!(
@@ -990,6 +989,11 @@ pub async fn add_slowdown_key(context: &EmilyContext, key: &SlowdownKeyEntry) ->
         );
         return Err(Error::Conflict);
     }
+    // Validate that the hash is a valid Argon2 hash string.
+    if PasswordHash::new(&key.hash).is_err() {
+        return Err(Error::Deserialization("Invalid Argon2 hash format".to_string()));
+    }
+    
     put_entry::<SlowdownTablePrimaryIndex>(context, key).await
 }
 

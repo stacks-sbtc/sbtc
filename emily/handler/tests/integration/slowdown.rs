@@ -518,5 +518,20 @@ async fn slow_mode_initiator_correctly_shown_at_limits() {
 // that hash is a valid hash string, and returns proper error otherwise
 #[tokio::test]
 async fn slowdown_key_addition_verifies_hash_formatting() {
-    todo!()
+    let (configuration, tables) = new_test_setup().await;
+
+    // Test case: Invalid hash format (random string)
+    let key_name = "test_key_invalid_hash".to_string();
+    let invalid_password_hash = "not_a_valid_hash_string".to_string();
+    let invalid_slowdown_key = SlowdownKey {
+        name: key_name.clone(),
+        hash: invalid_password_hash,
+    };
+    let err = apis::slowdown_api::add_slowdown_key(&configuration, invalid_slowdown_key)
+        .await
+        .unwrap_err();
+    let Error::ResponseError(err) = err else { panic!("Wrong error type: {:?}", err) };
+    assert_eq!(err.status, StatusCode::BAD_REQUEST, "Invalid hash format should return BAD_REQUEST"); // This is the expected behavior.
+
+    clean_test_setup(tables).await;
 }

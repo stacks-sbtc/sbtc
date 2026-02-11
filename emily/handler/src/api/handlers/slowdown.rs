@@ -163,6 +163,7 @@ pub async fn start_slowdown(
     request_body = SlowdownKey,
     responses(
         (status = 200, description = "Slowdown key added successfully", body = SlowdownKey),
+        (status = 400, description = "Invalid request body", body = ErrorResponse),
         (status = 405, description = "Method not allowed", body = ErrorResponse),
         (status = 409, description = "Key already exists", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
