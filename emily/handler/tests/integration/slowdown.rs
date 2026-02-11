@@ -23,13 +23,13 @@ async fn base_flow() {
 
     // Set some limits first
     let limits = Limits {
-        available_to_withdraw: Some(Some(10000)),
+        available_to_withdraw: Some(Some(10_000_000_000)),
         peg_cap: Some(None),
         per_deposit_minimum: Some(None),
         per_deposit_cap: Some(None),
-        per_withdrawal_cap: Some(Some(1000)),
-        rolling_withdrawal_blocks: Some(Some(100)),
-        rolling_withdrawal_cap: Some(Some(10_000)),
+        per_withdrawal_cap: Some(Some(1_000_000_000)),
+        rolling_withdrawal_blocks: Some(Some(1)),
+        rolling_withdrawal_cap: Some(Some(10_000_000_000)),
         slow_mode_initiator: Some(None),
         account_caps: HashMap::new(),
     };
@@ -83,8 +83,28 @@ async fn base_flow() {
     let _ = apis::slowdown_api::start_slowdown(&configuration, slowdown_reqwest.clone())
         .await
         .unwrap();
-    let new_limits = apis::limits_api::get_limits(&configuration).await.unwrap();
-    assert_ne!(new_limits, limits);
+    let new_limits_after_slowdown = apis::limits_api::get_limits(&configuration).await.unwrap();
+    assert_eq!(
+        new_limits_after_slowdown
+            .per_withdrawal_cap
+            .unwrap()
+            .unwrap(),
+        emily_handler::api::handlers::slowdown::SLOW_MODE_PER_WITHDRAWAL_CAP
+    );
+    assert_eq!(
+        new_limits_after_slowdown
+            .rolling_withdrawal_blocks
+            .unwrap()
+            .unwrap(),
+        emily_handler::api::handlers::slowdown::SLOW_MODE_ROLLING_WINDOW
+    );
+    assert_eq!(
+        new_limits_after_slowdown
+            .rolling_withdrawal_cap
+            .unwrap()
+            .unwrap(),
+        emily_handler::api::handlers::slowdown::SLOW_MODE_ROLLING_CAP
+    );
 
     // Now lets restore limits back to normal
     let _ = apis::limits_api::set_limits(&configuration, limits.clone())
@@ -111,7 +131,18 @@ async fn base_flow() {
         .await
         .unwrap();
     let retrieved_limits = apis::limits_api::get_limits(&configuration).await.unwrap();
-    assert_ne!(limits, retrieved_limits);
+    assert_eq!(
+        retrieved_limits.per_withdrawal_cap.unwrap().unwrap(),
+        emily_handler::api::handlers::slowdown::SLOW_MODE_PER_WITHDRAWAL_CAP
+    );
+    assert_eq!(
+        retrieved_limits.rolling_withdrawal_blocks.unwrap().unwrap(),
+        emily_handler::api::handlers::slowdown::SLOW_MODE_ROLLING_WINDOW
+    );
+    assert_eq!(
+        retrieved_limits.rolling_withdrawal_cap.unwrap().unwrap(),
+        emily_handler::api::handlers::slowdown::SLOW_MODE_ROLLING_CAP
+    );
 
     clean_test_setup(tables).await;
 }
