@@ -52,6 +52,7 @@ use signer::storage::model::TxPrevout;
 use signer::storage::model::TxPrevoutType;
 use signer::storage::postgres::PgStore;
 use signer::testing::btc::get_canonical_chain_tip;
+use signer::testing::stacks::DUMMY_SORTITION_INFO;
 use signer::testing::stacks::DUMMY_TENURE_INFO;
 
 use signer::block_observer::BlockObserver;
@@ -227,7 +228,6 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
 
     // Okay now lets check if we have these deposit requests in our
     // database. It should also have bitcoin blockchain data
-
     assert!(
         db2.get_bitcoin_canonical_chain_tip()
             .await
@@ -1897,4 +1897,199 @@ fn make_coinbase_deposit_request(
         lock_time: bitcoin::relative::LockTime::Blocks((reclaim_inputs.lock_time() as u16).into()),
     };
     (deposit_tx, req, info)
+}
+
+/// This test checks that the block observer marks the canonical status of
+/// bitcoin blocks in the database whenever a new block is observed.
+#[test_case::test_case(3; "fork generating three blocks")]
+#[test_case::test_case(2; "fork generating two blocks")]
+#[test_case::test_case(1; "fork generating one block")]
+#[tokio::test]
+async fn block_observer_marks_bitcoin_blocks_as_canonical(fork_generating_blocks: u64) {
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+    let (emily_client, emily_tables) = new_emily_setup().await;
+
+    let db = testing::storage::new_test_database().await;
+
+    let ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_bitcoin_client(bitcoin.get_client())
+        .with_emily_client(emily_client)
+        .with_mocked_stacks_client()
+        .build();
+
+    // Set up the stacks client
+    let anchor = get_canonical_chain_tip(rpc);
+    ctx.with_stacks_client(|client| {
+        client
+            .expect_get_tenure_info()
+            .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
+
+        let tenure_headers = TenureBlockHeaders::from_anchor(&anchor);
+
+        client
+            .expect_get_tenure_headers()
+            .returning(move |_| Box::pin(std::future::ready(Ok(tenure_headers.clone()))));
+        client.expect_get_epoch_status().returning(|| {
+            Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
+                nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
+            })))
+        });
+        client
+            .expect_get_sortition_info()
+            .returning(move |_| Box::pin(std::future::ready(Ok(DUMMY_SORTITION_INFO.clone()))));
+        client.expect_get_contract_source().returning(|_, _| {
+            Box::pin(async {
+                Err(Error::StacksNodeResponse(
+                    mock_reqwests_status_code_error(404).await,
+                ))
+            })
+        });
+    })
+    .await;
+
+    // Helper function to get all blocks in the chain from a given block hash
+    async fn get_chain_blocks(
+        db: &PgStore,
+        chain_tip: &BitcoinBlockHash,
+    ) -> Vec<(BitcoinBlockHash, Option<bool>)> {
+        sqlx::query_as::<_, (BitcoinBlockHash, Option<bool>)>(
+            r#"
+            WITH RECURSIVE chain_blocks AS (
+                SELECT
+                    block_hash,
+                    is_canonical,
+                    parent_hash
+                FROM sbtc_signer.bitcoin_blocks
+                WHERE block_hash = $1
+
+                UNION ALL
+
+                SELECT
+                    parent.block_hash,
+                    parent.is_canonical,
+                    parent.parent_hash
+                FROM sbtc_signer.bitcoin_blocks AS parent
+                JOIN chain_blocks AS child
+                  ON parent.block_hash = child.parent_hash
+            )
+            SELECT block_hash, is_canonical
+            FROM chain_blocks
+            "#,
+        )
+        .bind(chain_tip)
+        .fetch_all(db.pool())
+        .await
+        .unwrap()
+    }
+
+    // Start the block observer
+    let start_flag = Arc::new(AtomicBool::new(false));
+    let flag = start_flag.clone();
+
+    let block_observer = BlockObserver {
+        context: ctx.clone(),
+        bitcoin_block_source: bitcoin.start_chain_tip_poller().await,
+    };
+
+    // We need at least one receiver
+    let _signal = ctx.get_signal_receiver();
+
+    tokio::spawn(async move {
+        flag.store(true, Ordering::Relaxed);
+        block_observer.run().await
+    });
+
+    // Wait for the task to start
+    while !start_flag.load(Ordering::SeqCst) {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // Generate a new block and wait for the block observer to process it
+    let chain_tip_before_invalidation: BitcoinBlockHash = faucet.generate_block().into();
+
+    ctx.wait_for_signal(Duration::from_secs(8), |signal| {
+        matches!(
+            signal,
+            SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
+                if block_ref.block_hash == chain_tip_before_invalidation
+        )
+    })
+    .await
+    .unwrap();
+
+    // Verify the block is in the database
+    let db_block = db
+        .get_bitcoin_block(&chain_tip_before_invalidation)
+        .await
+        .unwrap();
+    assert!(db_block.is_some());
+
+    // Check that all blocks on the chain have is_canonical = true
+    let chain_blocks = get_chain_blocks(&db, &chain_tip_before_invalidation).await;
+    for (_, is_canonical) in chain_blocks {
+        assert_eq!(is_canonical, Some(true));
+    }
+    let chain_tip_before_invalidation_status = db
+        .is_block_canonical(&chain_tip_before_invalidation)
+        .await
+        .unwrap();
+    assert_eq!(chain_tip_before_invalidation_status, Some(true));
+
+    // Now invalidate the chain tip
+    rpc.invalidate_block(&chain_tip_before_invalidation)
+        .unwrap();
+
+    // Sometimes bitcoin-core will generate an invalid block (maybe the
+    // same block?), after invalidating the chain tip. One way to combat
+    // this is to create a new transaction to ensure that the new block is
+    // distinct from the previous ones.
+    faucet.send_to(1001, &faucet.address);
+    let new_blocks = faucet
+        .generate_blocks(fork_generating_blocks)
+        .into_iter()
+        .map(BitcoinBlockHash::from)
+        .collect::<Vec<_>>();
+    let last_new_block = new_blocks.last().cloned().unwrap();
+
+    ctx.wait_for_signal(Duration::from_secs(8), |signal| {
+        matches!(
+            signal,
+            SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
+                if block_ref.block_hash == last_new_block
+        )
+    })
+    .await
+    .unwrap();
+
+    // Verify the new blocks are in the database
+    for new_block in new_blocks {
+        let db_new_block = db.get_bitcoin_block(&new_block).await.unwrap();
+        assert!(db_new_block.is_some());
+        assert_eq!(db.is_block_canonical(&new_block).await.unwrap(), Some(true));
+    }
+
+    // Check that the new blocks have is_canonical = true
+    // Check that the old chain tip has is_canonical = false
+    let invalidated_chain_tip_status = db
+        .is_block_canonical(&chain_tip_before_invalidation)
+        .await
+        .unwrap();
+    assert_eq!(invalidated_chain_tip_status, Some(false));
+
+    // Verify all blocks on the new chain are canonical
+    let new_chain_blocks = get_chain_blocks(&db, &last_new_block).await;
+    for (block_hash, is_canonical) in new_chain_blocks {
+        // The old chain tip should not be in the new chain
+        if block_hash == chain_tip_before_invalidation {
+            panic!("The old chain tip was invalidated, and should not be on the new chain");
+        }
+        assert_eq!(is_canonical, Some(true));
+    }
+
+    testing::storage::drop_db(db).await;
+    clean_emily_setup(emily_tables).await;
 }
