@@ -530,8 +530,94 @@ async fn slowdown_key_addition_verifies_hash_formatting() {
     let err = apis::slowdown_api::add_slowdown_key(&configuration, invalid_slowdown_key)
         .await
         .unwrap_err();
-    let Error::ResponseError(err) = err else { panic!("Wrong error type: {:?}", err) };
-    assert_eq!(err.status, StatusCode::BAD_REQUEST, "Invalid hash format should return BAD_REQUEST"); // This is the expected behavior.
+    let Error::ResponseError(err) = err else {
+        panic!("Wrong error type: {:?}", err)
+    };
+    assert_eq!(
+        err.status,
+        StatusCode::BAD_REQUEST,
+        "Invalid hash format should return BAD_REQUEST"
+    ); // This is the expected behavior.
+
+    clean_test_setup(tables).await;
+}
+
+#[tokio::test]
+async fn slowdown_key_with_custom_argon2_parameters_works() {
+    let (configuration, tables) = new_test_setup().await;
+
+    // Set some limits first (needed for calculate_slow_mode_limits to work)
+    let limits = Limits {
+        available_to_withdraw: Some(Some(10000)),
+        peg_cap: Some(None),
+        per_deposit_minimum: Some(None),
+        per_deposit_cap: Some(None),
+        per_withdrawal_cap: Some(Some(1_000_000_000)),
+        rolling_withdrawal_blocks: Some(Some(10)),
+        rolling_withdrawal_cap: Some(Some(10_000_000_000)),
+        slow_mode_initiator: Some(None),
+        account_caps: HashMap::new(),
+    };
+    let chainstates: Vec<Chainstate> = (0..110)
+        .map(|height| new_test_chainstate(height, height, 0))
+        .collect();
+    let _ = batch_set_chainstates(&configuration, chainstates).await;
+    let _ = apis::limits_api::set_limits(&configuration, limits.clone())
+        .await
+        .unwrap();
+
+    let key_name = "custom_argon2_key".to_string();
+    let secret = "my_super_secret_password".to_string();
+
+    // Generate an Argon2 hash with custom parameters
+    let salt = SaltString::generate(&mut OsRng);
+    let argon2_custom = Argon2::new(
+        argon2::Algorithm::Argon2id,
+        argon2::Version::V0x13,
+        argon2::Params::new(1024, 2, 4, None).unwrap(), // Custom parameters
+    );
+    let password_hash = argon2_custom
+        .hash_password(secret.as_bytes(), &salt)
+        .unwrap()
+        .to_string();
+
+    let slowdown_key = SlowdownKey {
+        name: key_name.clone(),
+        hash: password_hash,
+    };
+
+    // Add the slowdown key with custom Argon2 hash
+    apis::slowdown_api::add_slowdown_key(&configuration, slowdown_key)
+        .await
+        .unwrap();
+
+    // Attempt to start slow mode with the registered key
+    let slowdown_reqwest = SlowdownReqwest {
+        name: key_name.clone(),
+        secret: secret.clone(),
+    };
+    let result = apis::slowdown_api::start_slowdown(&configuration, slowdown_reqwest).await;
+
+    assert!(
+        result.is_ok(),
+        "Failed to start slow mode with custom Argon2 parameters: {:?}",
+        result.unwrap_err()
+    );
+
+    // Verify that limits indeed changed to slow mode limits
+    let new_limits = apis::limits_api::get_limits(&configuration).await.unwrap();
+    assert_eq!(
+        new_limits.per_withdrawal_cap.unwrap().unwrap(),
+        emily_handler::api::handlers::slowdown::SLOW_MODE_PER_WITHDRAWAL_CAP
+    );
+    assert_eq!(
+        new_limits.rolling_withdrawal_blocks.unwrap().unwrap(),
+        emily_handler::api::handlers::slowdown::SLOW_MODE_ROLLING_WINDOW
+    );
+    assert_eq!(
+        new_limits.rolling_withdrawal_cap.unwrap().unwrap(),
+        emily_handler::api::handlers::slowdown::SLOW_MODE_ROLLING_CAP
+    );
 
     clean_test_setup(tables).await;
 }

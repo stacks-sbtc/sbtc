@@ -991,9 +991,11 @@ pub async fn add_slowdown_key(context: &EmilyContext, key: &SlowdownKeyEntry) ->
     }
     // Validate that the hash is a valid Argon2 hash string.
     if PasswordHash::new(&key.hash).is_err() {
-        return Err(Error::Deserialization("Invalid Argon2 hash format".to_string()));
+        return Err(Error::Deserialization(
+            "Invalid Argon2 hash format".to_string(),
+        ));
     }
-    
+
     put_entry::<SlowdownTablePrimaryIndex>(context, key).await
 }
 
