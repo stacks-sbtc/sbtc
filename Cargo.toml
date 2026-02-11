@@ -31,8 +31,7 @@ stackslib = { git = "https://github.com/stacks-network/stacks-core", rev = "1cba
 wsts = { git = "https://github.com/stacks-sbtc/wsts", rev = "11e2316aa0edf996f8e8f9ccbbbfd4bd2975ed1d" }
 
 # Crates.io
-# TODO: remove unnecessary features from argon2
-argon2 = { version = "0.5.3", default-features = false, features = ["alloc", "password-hash"] }
+argon2 = { version = "0.5.3", default-features = false, features = ["alloc"] }
 aquamarine = { version = "0.6.0", default-features = false }
 assert_matches = { version = "1.5.0", default-features = false }
 aws-config = { version = "1.5.15", default-features = false, features = ["rustls", "rt-tokio"] }
