@@ -286,6 +286,9 @@ pub struct EmilyClientConfig {
     /// Pagination timeout in seconds.
     #[serde(deserialize_with = "duration_seconds_deserializer")]
     pub pagination_timeout: std::time::Duration,
+    /// The max time waiting for an HTTP response from Emily.
+    #[serde(deserialize_with = "duration_seconds_deserializer")]
+    pub timeout: std::time::Duration,
 }
 
 impl Validatable for EmilyClientConfig {
@@ -296,6 +299,20 @@ impl Validatable for EmilyClientConfig {
                 "[emily_client] At least one Emily API endpoint must be provided".to_string(),
             ));
         }
+
+        // All durations should be non-zero
+        let zero = std::time::Duration::ZERO;
+        if self.timeout == zero {
+            return Err(ConfigError::Message(
+                SignerConfigError::ZeroDurationForbidden("emily::timeout").to_string(),
+            ));
+        }
+        if self.pagination_timeout == zero {
+            return Err(ConfigError::Message(
+                SignerConfigError::ZeroDurationForbidden("emily::pagination_timeout").to_string(),
+            ));
+        }
+
         // Validate each endpoint configuration.
         for endpoint in &self.endpoints {
             if !["http", "https"].contains(&endpoint.scheme()) {
@@ -554,6 +571,7 @@ impl Settings {
             DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX,
         )?;
         cfg_builder = cfg_builder.set_default("emily.pagination_timeout", 10)?;
+        cfg_builder = cfg_builder.set_default("emily.timeout", 10)?;
         cfg_builder = cfg_builder.set_default("signer.dkg_verification_window", 10)?;
         cfg_builder = cfg_builder.set_default("signer.stacks_fees_max_ustx", 1_500_000)?;
         cfg_builder = cfg_builder.set_default("bitcoin.chain_tip_polling_interval", 5)?;
@@ -707,6 +725,7 @@ mod tests {
         assert_eq!(settings.signer.dkg_verification_window, 10);
         assert_eq!(settings.signer.dkg_min_bitcoin_block_height, None);
         assert_eq!(settings.emily.pagination_timeout, Duration::from_secs(10));
+        assert_eq!(settings.emily.timeout, Duration::from_secs(10));
     }
 
     #[test]
@@ -957,6 +976,50 @@ mod tests {
     }
 
     #[test]
+    fn emily_with_environment() {
+        clear_env();
+
+        set_var("SIGNER_EMILY__PAGINATION_TIMEOUT", "12345");
+        set_var("SIGNER_EMILY__TIMEOUT", "300");
+
+        let settings = Settings::new_from_default_config().unwrap();
+        let timeout = settings.emily.timeout.as_secs();
+        let pagination_timeout = settings.emily.pagination_timeout.as_secs();
+
+        assert_eq!(timeout, 300);
+        assert_eq!(pagination_timeout, 12345);
+    }
+
+    #[test]
+    fn error_on_zero_emily_timeouts() {
+        clear_env();
+        set_var("SIGNER_EMILY__PAGINATION_TIMEOUT", "0");
+        set_var("SIGNER_EMILY__TIMEOUT", "300");
+        let err = Settings::new_from_default_config().unwrap_err();
+        if let ConfigError::Message(msg) = err {
+            assert_eq!(
+                msg,
+                "Duration for emily::pagination_timeout must be nonzero".to_string()
+            );
+        } else {
+            panic!("Wrong error variant");
+        }
+
+        clear_env();
+        set_var("SIGNER_EMILY__PAGINATION_TIMEOUT", "300");
+        set_var("SIGNER_EMILY__TIMEOUT", "0");
+        let err = Settings::new_from_default_config().unwrap_err();
+        if let ConfigError::Message(msg) = err {
+            assert_eq!(
+                msg,
+                "Duration for emily::timeout must be nonzero".to_string()
+            );
+        } else {
+            panic!("Wrong error variant");
+        }
+    }
+
+    #[test]
     fn prometheus_exporter_endpoint_with_environment() {
         clear_env();
 
@@ -1076,6 +1139,7 @@ mod tests {
         remove_parameter("signer", "max_deposits_per_bitcoin_tx");
 
         remove_parameter("emily", "pagination_timeout");
+        remove_parameter("emily", "timeout");
 
         let new_config = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
 
@@ -1097,6 +1161,7 @@ mod tests {
         assert_eq!(settings.signer.dkg_max_duration, Duration::from_secs(120));
 
         assert_eq!(settings.emily.pagination_timeout, Duration::from_secs(10));
+        assert_eq!(settings.emily.timeout, Duration::from_secs(10));
     }
 
     #[test]
