@@ -2497,7 +2497,7 @@
         "properties": {
           "hash": {
             "type": "string",
-            "description": "The name of the key."
+            "description": "The hash of the key."
           },
           "secret": {
             "type": "string",
