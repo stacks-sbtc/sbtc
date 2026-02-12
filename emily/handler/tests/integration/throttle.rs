@@ -1,7 +1,4 @@
-use argon2::{
-    Argon2,
-    password_hash::{PasswordHasher as _, SaltString},
-};
+use argon2::{Argon2, password_hash::PasswordHasher as _};
 use reqwest_012::StatusCode;
 use std::collections::HashMap;
 use test_case::test_case;
@@ -12,6 +9,8 @@ use testing_emily_client::models::Chainstate;
 use testing_emily_client::models::Limits;
 use testing_emily_client::models::ThrottleKey;
 use testing_emily_client::models::ThrottleRequest;
+
+use emily_handler::database::accessors::name_to_salt;
 
 use crate::common::clean_test_setup;
 use crate::common::{batch_set_chainstates, new_test_chainstate, new_test_setup};
@@ -43,7 +42,7 @@ async fn base_flow() {
         .unwrap();
 
     // Check that we can't activate throttle mode if we didn't register our key.
-    let key_name = "TW9yZSBkYXRhIGZvciB5b3VyIHRlc3Qcc".to_string();
+    let key_name = "aaaaaaaaaaaaaaaa".to_string();
     let secret = "very secret string".to_string();
     let throttle_key = ThrottleKey {
         name: key_name.clone(),
@@ -53,7 +52,7 @@ async fn base_flow() {
         name: key_name.clone(),
         secret: secret.clone(),
     };
-    let salt = SaltString::from_b64(&throttle_key.name).unwrap();
+    let salt = name_to_salt(&throttle_key.name).unwrap();
     let hash = Argon2::default()
         .hash_password(secret.as_bytes(), &salt)
         .unwrap()
@@ -223,7 +222,7 @@ async fn throttle_does_not_overwrite_stronger_limits(
         .await
         .unwrap();
 
-    let key_name = "TW9yZSBkYXRhIGZvciB5b3VyIHRlc3Qcc".to_string();
+    let key_name = "aaaaaaaaaaaaaaaa".to_string();
     let secret = "very secret string".to_string();
     let throttle_key = ThrottleKey {
         name: key_name.clone(),
@@ -289,7 +288,7 @@ async fn duplicate_key_hashes() {
     let (configuration, tables) = new_test_setup().await;
 
     // Register the first key
-    let key_name = "TW9yZSBkYXRhIGZvciB5b3VyIHRlc3Qcc".to_string();
+    let key_name = "aaaaaaaaaaaaaaaa".to_string();
     let secret = "very secret string".to_string();
     let throttle_key = ThrottleKey {
         name: key_name.clone(),
@@ -340,7 +339,7 @@ async fn start_throttle_returns_proper_error() {
         .unwrap();
 
     // Test case 1: Key not found
-    let key_name = "TW9yZSBkYXRhIGZvciB5b3VyIHRlc3Qcc".to_string();
+    let key_name = "aaaaaaaaaaaaaaaa".to_string();
     let secret = "very secret string".to_string();
     let throttle_reqwest = ThrottleRequest {
         name: key_name.clone(),
@@ -356,7 +355,7 @@ async fn start_throttle_returns_proper_error() {
     assert!(matches!(err.status, StatusCode::NOT_FOUND));
 
     // Register a key for further tests
-    let key_name = "TW9yZSBkYXRhIGZvciB5b3VyIHRlc3Qcc".to_string();
+    let key_name = "aaaaaaaaaaaaaaaa".to_string();
     let secret = "very secret string".to_string();
     let throttle_key = ThrottleKey {
         name: key_name.clone(),
@@ -370,7 +369,7 @@ async fn start_throttle_returns_proper_error() {
         .await
         .unwrap();
 
-    let salt = SaltString::from_b64(&throttle_key.name).unwrap();
+    let salt = name_to_salt(&throttle_key.name).unwrap();
     let hash = Argon2::default()
         .hash_password(secret.as_bytes(), &salt)
         .unwrap()
@@ -419,7 +418,7 @@ async fn throttle_mode_overwrites_unlimited_limits() {
         .unwrap();
 
     // Now let's register our key.
-    let key_name = "TW9yZSBkYXRhIGZvciB5b3VyIHRlc3Qcc".to_string();
+    let key_name = "aaaaaaaaaaaaaaaa".to_string();
     let secret = "very secret string".to_string();
     let throttle_key = ThrottleKey {
         name: key_name.clone(),
@@ -475,7 +474,7 @@ async fn throttle_mode_initiator_correctly_shown_at_limits() {
         .unwrap();
 
     // Register a throttle key
-    let key_name = "TW9yZSBkYXRhIGZvciB5b3VyIHRlc3Qcc".to_string();
+    let key_name = "aaaaaaaaaaaaaaaa".to_string();
     let secret = "very secret string".to_string();
     let throttle_key = ThrottleKey {
         name: key_name.clone(),
@@ -516,107 +515,6 @@ async fn throttle_mode_initiator_correctly_shown_at_limits() {
     assert_eq!(
         new_limits_after_retrigger.throttle_mode_initiator,
         Some(Some(key_name))
-    );
-
-    clean_test_setup(tables).await;
-}
-
-// We should check that name is allowed to be only a valid b64 string of size between 4 and 64
-#[tokio::test]
-async fn throttle_key_addition_verifies_hash_formatting() {
-    let (configuration, tables) = new_test_setup().await;
-
-    let b64_len_4 = "R2Vt".to_string();
-    let b64_len_5 = "bmk1M".to_string();
-    let b64_len_63 =
-        "U29tZXRpbWVzIGFsbCB5b3UgbmVlZCBpcyBhIGxpdHRsZSBiaXQgb2YgZGF0YS4uLg".to_string();
-    let b64_len_64 =
-        "V2l0aCA2NCBjaGFyYWN0ZXJzLCB5b3UgY2FuIGZpdCBhIGRlY2VudCBzZW50ZW5jZSE=".to_string();
-    let non_b64 = "Hello @ World! 100% #NoFilter".to_string();
-
-    // Test case: non b64
-    let throttle_key = ThrottleKey {
-        name: non_b64,
-        secret: "oaaoao".to_string(),
-    };
-    let err = apis::throttle_api::add_throttle_key(&configuration, throttle_key)
-        .await
-        .unwrap_err();
-    let Error::ResponseError(err) = err else {
-        panic!("Wrong error type: {:?}", err)
-    };
-    assert_eq!(
-        err.status,
-        StatusCode::BAD_REQUEST,
-        "Invalid hash format should return BAD_REQUEST"
-    );
-
-    // Test case: b64_len_4
-    let throttle_key = ThrottleKey {
-        name: b64_len_4,
-        secret: "oaaoao".to_string(),
-    };
-    let err = apis::throttle_api::add_throttle_key(&configuration, throttle_key)
-        .await
-        .unwrap_err();
-    let Error::ResponseError(err) = err else {
-        panic!("Wrong error type: {:?}", err)
-    };
-    assert_eq!(
-        err.status,
-        StatusCode::BAD_REQUEST,
-        "Invalid hash format should return BAD_REQUEST"
-    );
-
-    // Test case: b64_len_5
-    let throttle_key = ThrottleKey {
-        name: b64_len_5,
-        secret: "oaaoao".to_string(),
-    };
-    let err = apis::throttle_api::add_throttle_key(&configuration, throttle_key)
-        .await
-        .unwrap_err();
-    let Error::ResponseError(err) = err else {
-        panic!("Wrong error type: {:?}", err)
-    };
-    assert_eq!(
-        err.status,
-        StatusCode::BAD_REQUEST,
-        "Invalid hash format should return BAD_REQUEST"
-    );
-
-    // Test case: b64_len_63
-    let throttle_key = ThrottleKey {
-        name: b64_len_63,
-        secret: "oaaoao".to_string(),
-    };
-    let err = apis::throttle_api::add_throttle_key(&configuration, throttle_key)
-        .await
-        .unwrap_err();
-    let Error::ResponseError(err) = err else {
-        panic!("Wrong error type: {:?}", err)
-    };
-    assert_eq!(
-        err.status,
-        StatusCode::BAD_REQUEST,
-        "Invalid hash format should return BAD_REQUEST"
-    );
-
-    // Test case: b64_len_64
-    let throttle_key = ThrottleKey {
-        name: b64_len_64,
-        secret: "oaaoao".to_string(),
-    };
-    let err = apis::throttle_api::add_throttle_key(&configuration, throttle_key)
-        .await
-        .unwrap_err();
-    let Error::ResponseError(err) = err else {
-        panic!("Wrong error type: {:?}", err)
-    };
-    assert_eq!(
-        err.status,
-        StatusCode::BAD_REQUEST,
-        "Invalid hash format should return BAD_REQUEST"
     );
 
     clean_test_setup(tables).await;

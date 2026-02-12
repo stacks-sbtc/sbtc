@@ -10,10 +10,7 @@ use crate::{
         entries::throttle::{ThrottleKeyEntry, ThrottleKeyEntryKey},
     },
 };
-use argon2::{
-    Argon2,
-    password_hash::{PasswordHasher as _, SaltString},
-};
+use argon2::{Argon2, password_hash::PasswordHasher as _};
 use tracing::instrument;
 use warp::http::StatusCode;
 use warp::reply::{Reply, json, with_status};
@@ -178,18 +175,18 @@ pub async fn add_throttle_key(key: ThrottleKey, context: EmilyContext) -> impl w
         context: EmilyContext,
         key: ThrottleKey,
     ) -> Result<impl warp::reply::Reply, Error> {
-        let salt = &key.name;
         let argon2 = Argon2::default();
-        let salt = SaltString::from_b64(salt).map_err(|_| {
-            Error::Deserialization(format!(
-                "Name should be a valid b64 string with length between {} and {}",
-                argon2::MIN_SALT_LEN,
-                argon2::MAX_SALT_LEN
-            ))
-        })?;
+        let salt = accessors::name_to_salt(&key.name)?;
         let hash = argon2
             .hash_password(key.secret.as_bytes(), &salt)
-            .unwrap()
+            .inspect_err(|error| {
+                tracing::error!(
+                    ?error,
+                    name = %key.name,
+                    "Error hashing the secret. Usually happens due to failed conversion of name into salt",
+                );
+            })
+            .map_err(|_| Error::Deserialization("Error hashing the secret. Usually happens due to failed conversion of name into salt".to_string()))?
             .to_string();
         let entry = ThrottleKeyEntry {
             key: ThrottleKeyEntryKey {

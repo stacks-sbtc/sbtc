@@ -52,6 +52,19 @@ use crate::{
     context::EmilyContext,
 };
 
+use sha2::{Digest as _, Sha256};
+
+/// Converts a string to an argon2 salt.
+pub fn name_to_salt(name: &str) -> Result<SaltString, Error> {
+    let mut hasher = Sha256::new();
+    hasher.update(name);
+    let result = hasher.finalize();
+    let hash_string = format!("{:x}", result);
+    SaltString::from_b64(&hash_string)
+        .inspect_err(|error| tracing::error!(%error, "Failed to create salt string from name"))
+        .map_err(|_| Error::Deserialization("Failed to create salt string from name".to_string()))
+}
+
 // TODO: have different Table structs for each of the table types instead of
 // these individual wrappers.
 
@@ -1060,18 +1073,10 @@ pub async fn verify_throttle_key(
     name: &str,
     secret: &String,
 ) -> Result<KeyVerificationResult, Error> {
-    // We use name as salt. It is fine, because we have a strong gurantee that
-    // there can be exactly 0 or 1 entries with same name in our db.
-    let salt = name;
-
+    // We use name as salt. It is fine, because we choose names and
+    // we have a guarantee that they are unique, so we won't have a collision on the salt.
     let argon2 = Argon2::default();
-    let salt = SaltString::from_b64(salt).map_err(|_| {
-        Error::Deserialization(format!(
-            "Name should be a valid b64 string with length between {} and {}",
-            argon2::MIN_SALT_LEN,
-            argon2::MAX_SALT_LEN
-        ))
-    })?;
+    let salt = name_to_salt(name)?;
     let hash = argon2
         .hash_password(secret.as_bytes(), &salt)
         .unwrap()
