@@ -33,10 +33,7 @@ where
     T: warp::Reply,
 {
     let as_response = reply.into_response();
-    tracing::debug!(
-        event = "response",
-        status = as_response.status().as_u16(),
-    );
+    tracing::debug!(event = "response", status = as_response.status().as_u16());
     tracing::trace!(
         event = "response-body",
         status = as_response.status().as_u16(),
