@@ -10,14 +10,23 @@ pub fn routes<F>(
     context: F,
 ) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
 where
-    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
+    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
 {
     get_withdrawal(context.clone())
         .or(get_withdrawals(context.clone()))
+        .boxed()
         .or(get_withdrawals_for_recipient(context.clone()))
+        .boxed()
         .or(get_withdrawals_for_sender(context.clone()))
+        .boxed()
         .or(create_withdrawal(context.clone()))
+        .boxed()
         .or(update_withdrawals_sidecar(context.clone()))
+        .boxed()
         .or(update_withdrawals_signer(context))
 }
 

@@ -77,12 +77,22 @@ export class EmilyStack extends cdk.Stack {
             pointInTimeRecovery,
         );
 
+        const throttleTableId: string = 'ThrottleTable';
+        const throttleTableName: string = EmilyStackUtils.getResourceName(throttleTableId, props);
+        const throttleTable: dynamodb.Table = this.createOrUpdateThrottleTable(
+            throttleTableId,
+            throttleTableName,
+            persistentResourceRemovalPolicy,
+            pointInTimeRecovery,
+        );
+
         if (!EmilyStackUtils.isTablesOnly()) {
             const operationLambda: lambda.Function = this.createOrUpdateOperationLambda(
                 depositTableName,
                 withdrawalTableName,
                 chainstateTableName,
                 limitTableName,
+                throttleTableName,
                 persistentResourceRemovalPolicy,
                 props
             );
@@ -98,6 +108,7 @@ export class EmilyStack extends cdk.Stack {
             withdrawalTable.grantReadWriteData(operationLambda);
             chainstateTable.grantReadWriteData(operationLambda);
             limitTable.grantReadWriteData(operationLambda);
+            throttleTable.grantReadWriteData(operationLambda);
 
             const emilyApis: apig.SpecRestApi[] = this.createOrUpdateApi(
                 alias,
@@ -326,7 +337,7 @@ export class EmilyStack extends cdk.Stack {
         pointInTimeRecovery: undefined | boolean,
     ): dynamodb.Table {
         // Create DynamoDB table to store the messages. Encrypted by default.
-        const table =  new dynamodb.Table(this, tableId, {
+        const table = new dynamodb.Table(this, tableId, {
             tableName: tableName,
             partitionKey: {
                 name: 'Height',
@@ -355,6 +366,37 @@ export class EmilyStack extends cdk.Stack {
             nonKeyAttributes: [
                 "Hash",
             ]
+        });
+        return table;
+    }
+
+     /**
+     * Creates or updates a DynamoDB table for throttle keys.
+     * @param {string} tableId The id of the table AWS resource.
+     * @param {string} tableName The name of the DynamoDB table.
+     * @returns {dynamodb.Table} The created or updated DynamoDB table.
+     * @post A DynamoDB table is returned without additional configuration.
+     */
+     createOrUpdateThrottleTable(
+        tableId: string,
+        tableName: string,
+        removalPolicy: cdk.RemovalPolicy,
+        pointInTimeRecovery: undefined | boolean,
+    ): dynamodb.Table {
+        // Create DynamoDB table to store the messages. Encrypted by default.
+        const table =  new dynamodb.Table(this, tableId, {
+            tableName: tableName,
+            partitionKey: {
+                name: 'Hash',
+                type: dynamodb.AttributeType.STRING,
+            },
+            sortKey: {
+                name: 'CreatedAt',
+                type: dynamodb.AttributeType.NUMBER,
+            },
+            removalPolicy: removalPolicy,
+            billingMode: dynamodb.BillingMode.PAY_PER_REQUEST, // On-demand provisioning
+            pointInTimeRecovery: pointInTimeRecovery,
         });
         return table;
     }
@@ -403,6 +445,7 @@ export class EmilyStack extends cdk.Stack {
         withdrawalTableName: string,
         chainstateTableName: string,
         limitTableName: string,
+        throttleTableName: string,
         removalPolicy: cdk.RemovalPolicy,
         props: EmilyStackProps,
     ): lambda.Function {
@@ -426,6 +469,7 @@ export class EmilyStack extends cdk.Stack {
                 WITHDRAWAL_TABLE_NAME: withdrawalTableName,
                 CHAINSTATE_TABLE_NAME: chainstateTableName,
                 LIMIT_TABLE_NAME: limitTableName,
+                THROTTLEDOWN_TABLE_NAME: throttleTableName,
                 // Declare an environment variable that will be overwritten in local SAM
                 // deployments the AWS stack. SAM can only set environment variables that are
                 // already expected to be present in the lambda.

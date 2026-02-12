@@ -29,6 +29,8 @@ pub struct Settings {
     pub withdrawal_table_name: String,
     /// Chainstate table name.
     pub chainstate_table_name: String,
+    /// Throttle table name.
+    pub throttle_table_name: String,
     /// Limit table name.
     pub limit_table_name: String,
     /// The default global limits for the system.
@@ -66,6 +68,7 @@ impl fmt::Debug for EmilyContext {
                 &self.settings.chainstate_table_name,
             )
             .field("limit_table_name", &self.settings.limit_table_name)
+            .field("throttle_table_name", &self.settings.throttle_table_name)
             .field("default_limits", &self.settings.default_limits)
             .field("is_mainnet", &self.settings.is_mainnet)
             .field("version", &self.settings.version)
@@ -93,6 +96,7 @@ impl Settings {
             withdrawal_table_name: env::var("WITHDRAWAL_TABLE_NAME")?,
             chainstate_table_name: env::var("CHAINSTATE_TABLE_NAME")?,
             limit_table_name: env::var("LIMIT_TABLE_NAME")?,
+            throttle_table_name: env::var("THROTTLEDOWN_TABLE_NAME")?,
             default_limits: AccountLimits {
                 peg_cap: env::var("DEFAULT_PEG_CAP")
                     .ok()
@@ -118,6 +122,7 @@ impl Settings {
                     .ok()
                     .map(|v| v.parse())
                     .transpose()?,
+                throttle_mode_initiator: None,
             },
             is_mainnet: env::var("IS_MAINNET")?.to_lowercase() == "true",
             version: env::var("VERSION")?,
@@ -162,7 +167,8 @@ impl EmilyContext {
             .build();
         let dynamodb_client = Client::new(&sdk_config);
 
-        let tables_to_find: Vec<&str> = vec!["Deposit", "Chainstate", "Withdrawal", "Limit"];
+        let tables_to_find: Vec<&str> =
+            vec!["Deposit", "Chainstate", "Withdrawal", "Limit", "Throttle"];
         let mut table_name_map: HashMap<&str, String> = HashMap::new();
 
         if skip_tables {
@@ -211,6 +217,10 @@ impl EmilyContext {
                 limit_table_name: table_name_map
                     .get("Limit")
                     .expect("Couldn't find valid limit table table in existing table list.")
+                    .to_string(),
+                throttle_table_name: table_name_map
+                    .get("Throttle")
+                    .expect("Couldn't find valid throttle table table in existing table list.")
                     .to_string(),
                 default_limits: AccountLimits::default(),
                 is_mainnet: false,

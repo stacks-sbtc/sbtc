@@ -11,12 +11,19 @@ pub fn routes<F>(
     context: F,
 ) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
 where
-    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
+    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
 {
     get_limits(context.clone())
         .or(set_limits(context.clone()))
+        .boxed()
         .or(set_limits_for_account(context.clone()))
+        .boxed()
         .or(get_limits_for_account(context))
+        .boxed()
 }
 
 /// Get limits endpoint.
