@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use bitcoin::ScriptBuf;
 use bitcoin::consensus::encode::serialize_hex;
 use bitcoin::opcodes::all as opcodes;
+use sbtc::deposits::DepositScriptInputs;
 use stacks_common::codec::StacksMessageCodec as _;
 use stacks_common::types::chainstate::StacksAddress;
 use test_case::test_case;
@@ -444,6 +445,63 @@ async fn get_deposits() {
     expected_deposit_infos.sort_by(arbitrary_deposit_info_partial_cmp);
     gotten_deposit_infos.sort_by(arbitrary_deposit_info_partial_cmp);
     assert_eq!(expected_deposit_infos, gotten_deposit_infos);
+
+    clean_test_setup(tables).await;
+}
+
+/// Test that deposit requests where the max fee is greater than i64::MAX
+/// are not returned in get_deposits API calls. 
+#[tokio::test]
+async fn get_deposits_large_max_fee() {
+    let (configuration, tables) = new_test_setup().await;
+
+    // Arrange.
+    // --------
+    let max_fees: [u64; 3] = [1000, i64::MAX as u64 + 1, i64::MAX as u64];
+    // Setup test deposit transaction.
+    let deposit_txn_data =
+        max_fees.map(|max_fee| testing::deposits::tx_setup(16, max_fee, &[300_000]));
+
+    let create_requests = deposit_txn_data
+        .iter()
+        .map(|deposit_tx| CreateDepositRequestBody {
+            bitcoin_tx_output_index: 0,
+            bitcoin_txid: deposit_tx.tx.compute_txid().to_string(),
+            deposit_script: deposit_tx
+                .deposits
+                .first()
+                .unwrap()
+                .deposit_script()
+                .to_hex_string(),
+            reclaim_script: deposit_tx
+                .reclaims
+                .first()
+                .unwrap()
+                .reclaim_script()
+                .to_hex_string(),
+            transaction_hex: serialize_hex(&deposit_tx.tx),
+        })
+        .collect();
+
+    // Act.
+    // ----
+    batch_create_deposits(&configuration, create_requests).await;
+
+    let status = testing_emily_client::models::DepositStatus::Pending;
+    let response = apis::deposit_api::get_deposits(&configuration, status, None, None)
+        .await
+        .expect("Received an error after making a valid get deposits api call.");
+
+    // Assert.
+    // -------
+    // One of the deposits have a max fee that exceeds i64::MAX, so it
+    // should not be returned.
+    assert_eq!(response.deposits.len(), 2);
+    for deposit_info in response.deposits.iter() {
+        let deposit_script = ScriptBuf::from_hex(&deposit_info.deposit_script).unwrap();
+        let deposit_script_inputs = DepositScriptInputs::parse(&deposit_script).unwrap();
+        assert!(deposit_script_inputs.max_fee <= i64::MAX as u64);
+    }
 
     clean_test_setup(tables).await;
 }
