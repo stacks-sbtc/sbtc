@@ -62,7 +62,7 @@ pub fn name_to_salt(name: &str) -> Result<SaltString, Error> {
     let hash_string = format!("{:x}", result);
     SaltString::from_b64(&hash_string)
         .inspect_err(|error| tracing::error!(%error, "Failed to create salt string from name"))
-        .map_err(|_| Error::Deserialization("Failed to create salt string from name".to_string()))
+        .map_err(|_| Error::InternalServer)
 }
 
 // TODO: have different Table structs for each of the table types instead of
@@ -1079,7 +1079,14 @@ pub async fn verify_throttle_key(
     let salt = name_to_salt(name)?;
     let hash = argon2
         .hash_password(secret.as_bytes(), &salt)
-        .unwrap()
+        .inspect_err(|error| {
+            warn!(
+                %error,
+                name = name,
+                "Failed to hash the secret for throttle key verification",
+            );
+        })
+        .map_err(|_| Error::InternalServer)?
         .to_string();
 
     let key = get_throttle_key(context, &hash).await?;
