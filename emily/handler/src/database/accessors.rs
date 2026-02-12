@@ -1000,8 +1000,12 @@ pub async fn add_throttle_key(context: &EmilyContext, key: &ThrottleKeyEntry) ->
     put_entry::<ThrottleTablePrimaryIndex>(context, key).await
 }
 
-/// Activate throttle key. Now it will be eligible to start throttle mode.
-pub async fn activate_throttle_key(context: &EmilyContext, hash: String) -> Result<(), Error> {
+/// Set is_active parameter for throttle key
+async fn set_throttle_key_activity(
+    context: &EmilyContext,
+    hash: String,
+    is_active: bool,
+) -> Result<(), Error> {
     // TODO: maybe we want to bail if key already active.
     let timestamp = get_throttle_key(context, &hash).await?.key.created_at;
 
@@ -1021,37 +1025,23 @@ pub async fn activate_throttle_key(context: &EmilyContext, hash: String) -> Resu
             aws_sdk_dynamodb::types::AttributeValue::N(timestamp.to_string()),
         )
         .update_expression("SET IsActive = :t")
-        .expression_attribute_values(":t", aws_sdk_dynamodb::types::AttributeValue::Bool(true))
+        .expression_attribute_values(
+            ":t",
+            aws_sdk_dynamodb::types::AttributeValue::Bool(is_active),
+        )
         .send()
         .await?;
     Ok(())
 }
 
+/// Activate throttle key. Now it will be eligible to start throttle mode.
+pub async fn activate_throttle_key(context: &EmilyContext, hash: String) -> Result<(), Error> {
+    set_throttle_key_activity(context, hash, true).await
+}
+
 /// Deactivate throttle key. Now it will be unable to activate throttle mode.
 pub async fn deactivate_throttle_key(context: &EmilyContext, hash: String) -> Result<(), Error> {
-    // TODO: maybe we want to bail if key already deactivated.
-    let timestamp = get_throttle_key(context, &hash).await?.key.created_at;
-
-    let table_name = context.settings.throttle_table_name.clone();
-    let partition_key_name = ThrottleKeyEntryKey::PARTITION_KEY_NAME;
-    let sort_key_name = ThrottleKeyEntryKey::SORT_KEY_NAME;
-    context
-        .dynamodb_client
-        .update_item()
-        .table_name(table_name)
-        .key(
-            partition_key_name,
-            aws_sdk_dynamodb::types::AttributeValue::S(hash.clone()),
-        )
-        .key(
-            sort_key_name,
-            aws_sdk_dynamodb::types::AttributeValue::N(timestamp.to_string()),
-        )
-        .update_expression("SET IsActive = :f")
-        .expression_attribute_values(":f", aws_sdk_dynamodb::types::AttributeValue::Bool(false))
-        .send()
-        .await?;
-    Ok(())
+    set_throttle_key_activity(context, hash, false).await
 }
 
 /// Enum, representing if key is eligible to activate throttle mode
