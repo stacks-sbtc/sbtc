@@ -4,14 +4,14 @@ All URIs are relative to *http://localhost*
 
 Method | HTTP request | Description
 ------------- | ------------- | -------------
-[**start_throttle**](ThrottleApi.md#start_throttle) | **POST** /start_throttle | Try to turn on slow mode
+[**start_throttle**](ThrottleApi.md#start_throttle) | **POST** /start_throttle | Try to turn on throttle mode
 
 
 
 ## start_throttle
 
 > models::Limits start_throttle(throttle_reqwest)
-Try to turn on slow mode
+Try to turn on throttle mode
 
 ### Parameters
 

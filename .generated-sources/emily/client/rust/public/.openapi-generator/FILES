@@ -24,6 +24,8 @@ docs/HealthApi.md
 docs/HealthData.md
 docs/Limits.md
 docs/LimitsApi.md
+docs/ThrottleApi.md
+docs/ThrottleReqwest.md
 docs/UpdateDepositsRequestBody.md
 docs/UpdateDepositsResponse.md
 docs/UpdateWithdrawalsRequestBody.md
@@ -43,6 +45,7 @@ src/apis/deposit_api.rs
 src/apis/health_api.rs
 src/apis/limits_api.rs
 src/apis/mod.rs
+src/apis/throttle_api.rs
 src/apis/withdrawal_api.rs
 src/lib.rs
 src/models/account_limits.rs
@@ -63,6 +66,7 @@ src/models/get_withdrawals_response.rs
 src/models/health_data.rs
 src/models/limits.rs
 src/models/mod.rs
+src/models/throttle_reqwest.rs
 src/models/update_deposits_request_body.rs
 src/models/update_deposits_response.rs
 src/models/update_withdrawals_request_body.rs

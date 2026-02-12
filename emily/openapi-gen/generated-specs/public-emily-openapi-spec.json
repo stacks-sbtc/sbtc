@@ -1243,6 +1243,100 @@
         }
       }
     },
+    "/start_throttle": {
+      "post": {
+        "tags": [
+          "throttle"
+        ],
+        "summary": "Try to turn on throttle mode",
+        "operationId": "startThrottle",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ThrottleReqwest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Throttle started successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Limits"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failed key verification",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Key is revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Throttle key not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-amazon-apigateway-integration": {
+          "httpMethod": "POST",
+          "type": "aws_proxy",
+          "uri": {
+            "Fn::Sub": "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${OperationLambda}/invocations"
+          }
+        }
+      },
+      "options": {
+        "tags": [
+          "CORS"
+        ],
+        "summary": "CORS support",
+        "description": "Handles CORS preflight requests",
+        "parameters": [],
+        "responses": {},
+        "x-amazon-apigateway-integration": {
+          "httpMethod": "POST",
+          "type": "aws_proxy",
+          "uri": {
+            "Fn::Sub": "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${OperationLambda}/invocations"
+          }
+        }
+      }
+    },
     "/withdrawal": {
       "get": {
         "tags": [
@@ -2390,6 +2484,24 @@
             "type": "string",
             "description": "Name of key which triggered throttle mode (if throttle mode is active)",
             "nullable": true
+          }
+        }
+      },
+      "ThrottleReqwest": {
+        "type": "object",
+        "description": "Represents the throttle reqwest",
+        "required": [
+          "hash",
+          "secret"
+        ],
+        "properties": {
+          "hash": {
+            "type": "string",
+            "description": "The name of the key."
+          },
+          "secret": {
+            "type": "string",
+            "description": "The secret associated with this key."
           }
         }
       },
