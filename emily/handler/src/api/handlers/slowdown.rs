@@ -127,9 +127,8 @@ pub async fn start_slowdown(
                 Err(Error::Unauthorized)
             }
             KeyVerificationResult::Eligible => {
-                // It is not actually an error, but we want to take maximum attention if it happens.
                 // TODO: we need an alarm on this error.
-                tracing::error!(
+                tracing::info!(
                     key_name = %request.name,
                     "Successfull request to start slow mode. Starting slow mode.",
                 );
