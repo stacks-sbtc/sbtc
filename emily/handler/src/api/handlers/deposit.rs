@@ -190,6 +190,12 @@ pub async fn get_deposits(
                 if deposit_inputs.max_fee <= i64::MAX as u64 {
                     Some(info)
                 } else {
+                    tracing::warn!(
+                        max_fee = %deposit_inputs.max_fee,
+                        txid = %info.bitcoin_txid,
+                        output_index = %info.bitcoin_tx_output_index,
+                        "ignoring deposit with max fee that is too high"
+                    );
                     None
                 }
             })
