@@ -42,7 +42,7 @@ Name | Type | Description  | Required | Notes
 
 ## add_throttle_key
 
-> models::ThrottleKey add_throttle_key(throttle_key)
+> String add_throttle_key(throttle_key)
 Add throttle key handler.
 
 ### Parameters
@@ -54,7 +54,7 @@ Name | Type | Description  | Required | Notes
 
 ### Return type
 
-[**models::ThrottleKey**](ThrottleKey.md)
+**String**
 
 ### Authorization
 
@@ -63,7 +63,7 @@ Name | Type | Description  | Required | Notes
 ### HTTP request headers
 
 - **Content-Type**: application/json
-- **Accept**: application/json
+- **Accept**: text/plain, application/json
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 

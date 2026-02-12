@@ -1865,9 +1865,9 @@
           "200": {
             "description": "Throttle key added successfully",
             "content": {
-              "application/json": {
+              "text/plain": {
                 "schema": {
-                  "$ref": "#/components/schemas/ThrottleKey"
+                  "type": "string"
                 }
               }
             }

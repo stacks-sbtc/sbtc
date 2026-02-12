@@ -104,7 +104,10 @@ pub async fn calculate_throttle_mode_limits(
         (status = 500, description = "Internal server error", body = ErrorResponse)
     ),
 )]
-#[instrument(skip(context))]
+#[instrument(
+    skip(request, context), 
+    fields(request.name = %request.name)
+)]
 pub async fn start_throttle(
     request: ThrottleRequest,
     context: EmilyContext,
@@ -160,7 +163,7 @@ pub async fn start_throttle(
     tag = "throttle",
     request_body = ThrottleKey,
     responses(
-        (status = 200, description = "Throttle key added successfully", body = ThrottleKey),
+        (status = 200, description = "Throttle key added successfully", body = String),
         (status = 400, description = "Invalid request body", body = ErrorResponse),
         (status = 405, description = "Method not allowed", body = ErrorResponse),
         (status = 409, description = "Key already exists", body = ErrorResponse),
@@ -168,7 +171,10 @@ pub async fn start_throttle(
     ),
     security(("ApiGatewayKey" = []))
 )]
-#[instrument(skip(context))]
+#[instrument(
+    skip(key, context), 
+    fields(key.name = %key.name)
+)]
 pub async fn add_throttle_key(key: ThrottleKey, context: EmilyContext) -> impl warp::reply::Reply {
     // Internal handler so `?` can be used correctly while still returning a reply.
     async fn handler(
@@ -201,7 +207,7 @@ pub async fn add_throttle_key(key: ThrottleKey, context: EmilyContext) -> impl w
             is_active: true,
         };
         accessors::add_throttle_key(&context, &entry).await?;
-        Ok(with_status(json(&key), StatusCode::CREATED))
+        Ok(with_status(json(&key.name), StatusCode::CREATED))
     }
     // Handle and respond.
     handler(context, key)
