@@ -24,6 +24,7 @@ use warp::reply::{Reply, json, with_status};
     responses(
         (status = 200, description = "Slowdown key retrieved successfully", body = SlowdownKey),
         (status = 404, description = "Slowdown key not found", body = ErrorResponse),
+        (status = 405, description = "Method not allowed", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
     ),
     security(("ApiGatewayKey" = []))
@@ -36,6 +37,10 @@ pub async fn get_slowdown_key(hash: String, context: EmilyContext) -> impl warp:
         context: EmilyContext,
     ) -> Result<impl warp::reply::Reply, Error> {
         let key = accessors::get_slowdown_key(&context, &hash).await?;
+        let key = SlowdownKey {
+            name: key.name,
+            hash: key.key.hash,
+        };
         Ok(with_status(json(&key), StatusCode::OK))
     }
     // Handle and respond.
@@ -126,13 +131,13 @@ pub async fn start_slowdown(
                 );
                 Err(Error::Unauthorized)
             }
-            KeyVerificationResult::Eligible => {
+            KeyVerificationResult::Eligible(initiator) => {
                 // TODO: we need an alarm on this error.
                 tracing::info!(
                     key_hash = %request.hash,
                     "Successfull request to start slow mode. Starting slow mode.",
                 );
-                let new_limits = calculate_slow_mode_limits(&context, request.hash).await?;
+                let new_limits = calculate_slow_mode_limits(&context, initiator).await?;
                 tracing::info!(?new_limits, "Calculated limits to use in slow mode",);
                 let res = crate::api::handlers::limits::set_limits(new_limits.clone(), context)
                     .await
@@ -201,11 +206,9 @@ pub async fn add_slowdown_key(key: SlowdownKey, context: EmilyContext) -> impl w
 #[utoipa::path(
     patch,
     operation_id = "deactivateSlowdownKey",
-    path = "/slowdown/deactivate/{hash}",
-    params(
-        ("hash" = String, Path, description = "The hash of the key to deactivate"),
-    ),
+    path = "/slowdown/deactivate",
     tag = "slowdown",
+    request_body = String,
     responses(
         (status = 201, description = "Slowdown key deactivated successfully", body = ()),
         (status = 400, description = "Invalid request body", body = ErrorResponse),
@@ -238,11 +241,9 @@ pub async fn deactivate_slowdown_key(
 #[utoipa::path(
     patch,
     operation_id = "activateSlowdownKey",
-    path = "/slowdown/activate/{hash}",
-    params(
-        ("hash" = String, Path, description = "The hash of the key to activate"),
-    ),
+    path = "/slowdown/activate",
     tag = "slowdown",
+    request_body = String,
     responses(
         (status = 201, description = "Slowdown key activated successfully", body = ()),
         (status = 400, description = "Invalid request body", body = ErrorResponse),

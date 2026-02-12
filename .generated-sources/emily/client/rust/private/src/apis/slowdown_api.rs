@@ -51,6 +51,7 @@ pub enum DeactivateSlowdownKeyError {
 #[serde(untagged)]
 pub enum GetSlowdownKeyError {
     Status404(models::ErrorResponse),
+    Status405(models::ErrorResponse),
     Status500(models::ErrorResponse),
     UnknownValue(serde_json::Value),
 }
@@ -68,17 +69,13 @@ pub enum StartSlowdownError {
 
 pub async fn activate_slowdown_key(
     configuration: &configuration::Configuration,
-    hash: &str,
+    body: &str,
 ) -> Result<serde_json::Value, Error<ActivateSlowdownKeyError>> {
     let local_var_configuration = configuration;
 
     let local_var_client = &local_var_configuration.client;
 
-    let local_var_uri_str = format!(
-        "{}/slowdown/activate/{hash}",
-        local_var_configuration.base_path,
-        hash = crate::apis::urlencode(hash)
-    );
+    let local_var_uri_str = format!("{}/slowdown/activate", local_var_configuration.base_path);
     let mut local_var_req_builder =
         local_var_client.request(reqwest::Method::PATCH, local_var_uri_str.as_str());
 
@@ -94,6 +91,7 @@ pub async fn activate_slowdown_key(
         };
         local_var_req_builder = local_var_req_builder.header("x-api-key", local_var_value);
     };
+    local_var_req_builder = local_var_req_builder.json(&body);
 
     let local_var_req = local_var_req_builder.build()?;
     let local_var_resp = local_var_client.execute(local_var_req).await?;
@@ -163,17 +161,13 @@ pub async fn add_slowdown_key(
 
 pub async fn deactivate_slowdown_key(
     configuration: &configuration::Configuration,
-    hash: &str,
+    body: &str,
 ) -> Result<serde_json::Value, Error<DeactivateSlowdownKeyError>> {
     let local_var_configuration = configuration;
 
     let local_var_client = &local_var_configuration.client;
 
-    let local_var_uri_str = format!(
-        "{}/slowdown/deactivate/{hash}",
-        local_var_configuration.base_path,
-        hash = crate::apis::urlencode(hash)
-    );
+    let local_var_uri_str = format!("{}/slowdown/deactivate", local_var_configuration.base_path);
     let mut local_var_req_builder =
         local_var_client.request(reqwest::Method::PATCH, local_var_uri_str.as_str());
 
@@ -189,6 +183,7 @@ pub async fn deactivate_slowdown_key(
         };
         local_var_req_builder = local_var_req_builder.header("x-api-key", local_var_value);
     };
+    local_var_req_builder = local_var_req_builder.json(&body);
 
     let local_var_req = local_var_req_builder.build()?;
     let local_var_resp = local_var_client.execute(local_var_req).await?;

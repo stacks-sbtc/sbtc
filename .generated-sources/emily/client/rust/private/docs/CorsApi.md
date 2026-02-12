@@ -16,8 +16,8 @@ Method | HTTP request | Description
 [**limits_account_options**](CorsApi.md#limits_account_options) | **OPTIONS** /limits/{account} | CORS support
 [**limits_options**](CorsApi.md#limits_options) | **OPTIONS** /limits | CORS support
 [**new_block_options**](CorsApi.md#new_block_options) | **OPTIONS** /new_block | CORS support
-[**slowdown_activate_hash_options**](CorsApi.md#slowdown_activate_hash_options) | **OPTIONS** /slowdown/activate/{hash} | CORS support
-[**slowdown_deactivate_hash_options**](CorsApi.md#slowdown_deactivate_hash_options) | **OPTIONS** /slowdown/deactivate/{hash} | CORS support
+[**slowdown_activate_options**](CorsApi.md#slowdown_activate_options) | **OPTIONS** /slowdown/activate | CORS support
+[**slowdown_deactivate_options**](CorsApi.md#slowdown_deactivate_options) | **OPTIONS** /slowdown/deactivate | CORS support
 [**slowdown_options**](CorsApi.md#slowdown_options) | **OPTIONS** /slowdown | CORS support
 [**start_slowdown_options**](CorsApi.md#start_slowdown_options) | **OPTIONS** /start_slowdown | CORS support
 [**withdrawal_id_options**](CorsApi.md#withdrawal_id_options) | **OPTIONS** /withdrawal/{id} | CORS support
@@ -370,19 +370,16 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 
-## slowdown_activate_hash_options
+## slowdown_activate_options
 
-> slowdown_activate_hash_options(hash)
+> slowdown_activate_options()
 CORS support
 
 Handles CORS preflight requests
 
 ### Parameters
 
-
-Name | Type | Description  | Required | Notes
-------------- | ------------- | ------------- | ------------- | -------------
-**hash** | **String** | The hash of the key to activate | [required] |
+This endpoint does not need any parameter.
 
 ### Return type
 
@@ -400,19 +397,16 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 
-## slowdown_deactivate_hash_options
+## slowdown_deactivate_options
 
-> slowdown_deactivate_hash_options(hash)
+> slowdown_deactivate_options()
 CORS support
 
 Handles CORS preflight requests
 
 ### Parameters
 
-
-Name | Type | Description  | Required | Notes
-------------- | ------------- | ------------- | ------------- | -------------
-**hash** | **String** | The hash of the key to deactivate | [required] |
+This endpoint does not need any parameter.
 
 ### Return type
 

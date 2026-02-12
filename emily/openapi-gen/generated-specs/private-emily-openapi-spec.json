@@ -1727,6 +1727,16 @@
               }
             }
           },
+          "405": {
+            "description": "Method not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "500": {
             "description": "Internal server error",
             "content": {
@@ -1849,24 +1859,14 @@
         }
       }
     },
-    "/slowdown/activate/{hash}": {
+    "/slowdown/activate": {
       "options": {
         "tags": [
           "CORS"
         ],
         "summary": "CORS support",
         "description": "Handles CORS preflight requests",
-        "parameters": [
-          {
-            "name": "hash",
-            "in": "path",
-            "description": "The hash of the key to activate",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
+        "parameters": [],
         "responses": {},
         "x-amazon-apigateway-integration": {
           "httpMethod": "POST",
@@ -1882,17 +1882,16 @@
         ],
         "summary": "Activate existing (previously deactivated) slowdown key",
         "operationId": "activateSlowdownKey",
-        "parameters": [
-          {
-            "name": "hash",
-            "in": "path",
-            "description": "The hash of the key to activate",
-            "required": true,
-            "schema": {
-              "type": "string"
+        "requestBody": {
+          "content": {
+            "text/plain": {
+              "schema": {
+                "type": "string"
+              }
             }
-          }
-        ],
+          },
+          "required": true
+        },
         "responses": {
           "201": {
             "description": "Slowdown key activated successfully",
@@ -1960,24 +1959,14 @@
         }
       }
     },
-    "/slowdown/deactivate/{hash}": {
+    "/slowdown/deactivate": {
       "options": {
         "tags": [
           "CORS"
         ],
         "summary": "CORS support",
         "description": "Handles CORS preflight requests",
-        "parameters": [
-          {
-            "name": "hash",
-            "in": "path",
-            "description": "The hash of the key to deactivate",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
+        "parameters": [],
         "responses": {},
         "x-amazon-apigateway-integration": {
           "httpMethod": "POST",
@@ -1993,17 +1982,16 @@
         ],
         "summary": "Deactivate existing slowdown key",
         "operationId": "deactivateSlowdownKey",
-        "parameters": [
-          {
-            "name": "hash",
-            "in": "path",
-            "description": "The hash of the key to deactivate",
-            "required": true,
-            "schema": {
-              "type": "string"
+        "requestBody": {
+          "content": {
+            "text/plain": {
+              "schema": {
+                "type": "string"
+              }
             }
-          }
-        ],
+          },
+          "required": true
+        },
         "responses": {
           "201": {
             "description": "Slowdown key deactivated successfully",

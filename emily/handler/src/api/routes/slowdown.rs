@@ -76,8 +76,9 @@ fn activate_slowdown_key<F>(
 where
     F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
 {
-    warp::path!("slowdown" / "activate" / String)
+    warp::path!("slowdown" / "activate")
         .and(warp::patch())
+        .and(warp::body::json())
         .and(context)
         .then(handlers::slowdown::activate_slowdown_key)
 }
@@ -89,8 +90,9 @@ fn deactivate_slowdown_key<F>(
 where
     F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
 {
-    warp::path!("slowdown" / "deactivate" / String)
+    warp::path!("slowdown" / "deactivate")
         .and(warp::patch())
+        .and(warp::body::json())
         .and(context)
         .then(handlers::slowdown::deactivate_slowdown_key)
 }

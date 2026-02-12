@@ -266,16 +266,15 @@ async fn slowdown_does_not_overwrite_stronger_limits(
     clean_test_setup(tables).await;
 }
 
-// We should pin behaviour on adding a key while key with such name already exists
+// We should pin behaviour on adding a key while key with such hash already exists
 // (bail or overwrite)
 // Current behavior is to bail.
 #[tokio::test]
-async fn conflicting_key_names() {
+async fn duplicate_key_hashes() {
     let (configuration, tables) = new_test_setup().await;
 
     let key_name = "test_key".to_string();
     let secret1 = "very secret string 1".to_string();
-    let secret2 = "very secret string 2".to_string();
 
     // Register the first key
     let salt = SaltString::generate(&mut OsRng);
@@ -292,16 +291,10 @@ async fn conflicting_key_names() {
         .await
         .unwrap();
 
-    // Attempt to register a second key with the same name but different secret
-    let salt = SaltString::generate(&mut OsRng);
-    let argon2 = Argon2::default();
-    let password_hash = argon2
-        .hash_password(secret2.as_bytes(), &salt)
-        .unwrap()
-        .to_string();
+    // Attempt to register a second key with the same hash
     let slowdown_key2 = SlowdownKey {
-        name: key_name.clone(),
-        hash: password_hash,
+        name: "aoaoaao".to_string(),
+        hash: slowdown_key1.hash,
     };
     let err = apis::slowdown_api::add_slowdown_key(&configuration, slowdown_key2)
         .await
@@ -642,4 +635,47 @@ async fn slowdown_key_with_custom_argon2_parameters_works() {
     );
 
     clean_test_setup(tables).await;
+}
+
+
+#[tokio::test]
+async fn debug() {
+    let (configuration, tables) = new_test_setup().await;
+
+    let key_name = "custom_argon2_key".to_string();
+    let secret = "my_super_secret_password".to_string();
+
+    // Generate an Argon2 hash with custom parameters
+    let salt = SaltString::generate(&mut OsRng);
+    let argon2_custom = Argon2::new(
+        argon2::Algorithm::Argon2id,
+        argon2::Version::V0x13,
+        argon2::Params::new(1024, 2, 4, None).unwrap(), // Custom parameters
+    );
+    let hash = argon2_custom
+        .hash_password(secret.as_bytes(), &salt)
+        .unwrap()
+        .to_string();
+
+    let slowdown_key = SlowdownKey {
+        name: key_name.clone(),
+        hash: hash.clone(),
+    };
+
+    // Add the slowdown key with custom Argon2 hash
+    apis::slowdown_api::add_slowdown_key(&configuration, slowdown_key.clone())
+        .await
+        .unwrap();
+
+    // Attempt to start slow mode with the registered key
+    let result = apis::slowdown_api::get_slowdown_key(&configuration, &slowdown_key.hash).await;
+
+    println!("{:#?}", result);
+
+    let result2 = apis::slowdown_api::deactivate_slowdown_key(&configuration, &slowdown_key.hash).await;
+
+    println!("{:#?}", result2);
+
+    clean_test_setup(tables).await;
+
 }

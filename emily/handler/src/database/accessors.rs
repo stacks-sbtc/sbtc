@@ -1003,8 +1003,11 @@ pub async fn add_slowdown_key(context: &EmilyContext, key: &SlowdownKeyEntry) ->
 /// Activate slowdown key. Now it will be eligible to start slow mode.
 pub async fn activate_slowdown_key(context: &EmilyContext, hash: String) -> Result<(), Error> {
     // TODO: maybe we want to bail if key already active.
+    let timestamp = get_slowdown_key(context, &hash).await?.key.created_at;
+
     let table_name = context.settings.slowdown_table_name.clone();
     let partition_key_name = SlowdownKeyEntryKey::PARTITION_KEY_NAME;
+    let sort_key_name = SlowdownKeyEntryKey::SORT_KEY_NAME;
     context
         .dynamodb_client
         .update_item()
@@ -1012,6 +1015,10 @@ pub async fn activate_slowdown_key(context: &EmilyContext, hash: String) -> Resu
         .key(
             partition_key_name,
             aws_sdk_dynamodb::types::AttributeValue::S(hash),
+        )
+        .key(
+            sort_key_name,
+            aws_sdk_dynamodb::types::AttributeValue::N(timestamp.to_string()),
         )
         .update_expression("SET IsActive = :t")
         .expression_attribute_values(":t", aws_sdk_dynamodb::types::AttributeValue::Bool(true))
@@ -1023,8 +1030,11 @@ pub async fn activate_slowdown_key(context: &EmilyContext, hash: String) -> Resu
 /// Deactivate slowdown key. Now it will be unable to activate slow mode.
 pub async fn deactivate_slowdown_key(context: &EmilyContext, hash: String) -> Result<(), Error> {
     // TODO: maybe we want to bail if key already deactivated.
+    let timestamp = get_slowdown_key(context, &hash).await?.key.created_at;
+
     let table_name = context.settings.slowdown_table_name.clone();
     let partition_key_name = SlowdownKeyEntryKey::PARTITION_KEY_NAME;
+    let sort_key_name = SlowdownKeyEntryKey::SORT_KEY_NAME;
     context
         .dynamodb_client
         .update_item()
@@ -1032,6 +1042,10 @@ pub async fn deactivate_slowdown_key(context: &EmilyContext, hash: String) -> Re
         .key(
             partition_key_name,
             aws_sdk_dynamodb::types::AttributeValue::S(hash.clone()),
+        )
+        .key(
+            sort_key_name,
+            aws_sdk_dynamodb::types::AttributeValue::N(timestamp.to_string()),
         )
         .update_expression("SET IsActive = :f")
         .expression_attribute_values(":f", aws_sdk_dynamodb::types::AttributeValue::Bool(false))
@@ -1043,7 +1057,8 @@ pub async fn deactivate_slowdown_key(context: &EmilyContext, hash: String) -> Re
 /// Enum, representing if key is eligible to activate slow mode
 pub enum KeyVerificationResult {
     /// This key is eligible to start slow mode
-    Eligible,
+    /// Internally contains name of the key initiated slow mode
+    Eligible(String),
     /// This key is known, but has been revoked.
     Revoked,
     /// Key is known and active, but secret verification was unseccessful
@@ -1053,7 +1068,7 @@ pub enum KeyVerificationResult {
 impl KeyVerificationResult {
     /// Returns true if the key is eligible to start slow mode, and false otherwise.
     pub fn is_eligible(&self) -> bool {
-        matches!(self, KeyVerificationResult::Eligible)
+        matches!(self, KeyVerificationResult::Eligible(_))
     }
 }
 
@@ -1078,7 +1093,7 @@ pub async fn verify_slowdown_key(
         return Ok(KeyVerificationResult::FailedSecretVerification);
     }
 
-    Ok(KeyVerificationResult::Eligible)
+    Ok(KeyVerificationResult::Eligible(key.name))
 }
 
 // Testing ---------------------------------------------------------------------
