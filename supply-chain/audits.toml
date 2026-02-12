@@ -28,6 +28,16 @@ who = "djordon <dan.jordon@gmail.com>"
 criteria = "safe-to-deploy"
 version = "0.13.2"
 
+[[audits.argon2]]
+who = "viktar <mcviktor@tut.by"
+criteria = "safe-to-deploy"
+version = "0.5.3"
+
+[[audits.password-hash]]
+who = "viktar <mcviktor@tut.by"
+criteria = "safe-to-deploy"
+version = "0.5.0"
+
 [[audits.p256k1]]
 who = "cylewitruk <cyle.witruk@outlook.com>"
 criteria = "safe-to-deploy"
