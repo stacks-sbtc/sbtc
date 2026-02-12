@@ -436,7 +436,7 @@ jobs:
 
       - name: Print cargo vet CI version
         id: print_cargo_vet_version
-        run: cargo vet -- version
+        run: cargo vet --version
 
       - name: Run Cargo Vet
         id: cargo_vet
