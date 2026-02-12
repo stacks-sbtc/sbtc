@@ -1865,9 +1865,10 @@
           "200": {
             "description": "Throttle key added successfully",
             "content": {
-              "text/plain": {
+              "application/json": {
                 "schema": {
-                  "type": "string"
+                  "default": null,
+                  "nullable": true
                 }
               }
             }

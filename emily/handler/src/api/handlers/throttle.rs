@@ -163,7 +163,7 @@ pub async fn start_throttle(
     tag = "throttle",
     request_body = ThrottleKey,
     responses(
-        (status = 200, description = "Throttle key added successfully", body = String),
+        (status = 200, description = "Throttle key added successfully", body = ()),
         (status = 400, description = "Invalid request body", body = ErrorResponse),
         (status = 405, description = "Method not allowed", body = ErrorResponse),
         (status = 409, description = "Key already exists", body = ErrorResponse),
@@ -207,7 +207,7 @@ pub async fn add_throttle_key(key: ThrottleKey, context: EmilyContext) -> impl w
             is_active: true,
         };
         accessors::add_throttle_key(&context, &entry).await?;
-        Ok(with_status(json(&key.name), StatusCode::CREATED))
+        Ok(with_status(json(&()), StatusCode::CREATED))
     }
     // Handle and respond.
     handler(context, key)

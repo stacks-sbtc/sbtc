@@ -115,7 +115,7 @@ pub async fn activate_throttle_key(
 pub async fn add_throttle_key(
     configuration: &configuration::Configuration,
     throttle_key: models::ThrottleKey,
-) -> Result<String, Error<AddThrottleKeyError>> {
+) -> Result<serde_json::Value, Error<AddThrottleKeyError>> {
     let local_var_configuration = configuration;
 
     let local_var_client = &local_var_configuration.client;
