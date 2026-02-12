@@ -126,7 +126,7 @@ Name | Type | Description  | Required | Notes
 
 ## start_throttle
 
-> models::Limits start_throttle(throttle_reqwest)
+> models::Limits start_throttle(throttle_request)
 Try to turn on throttle mode
 
 ### Parameters
@@ -134,7 +134,7 @@ Try to turn on throttle mode
 
 Name | Type | Description  | Required | Notes
 ------------- | ------------- | ------------- | ------------- | -------------
-**throttle_reqwest** | [**ThrottleReqwest**](ThrottleReqwest.md) |  | [required] |
+**throttle_request** | [**ThrottleRequest**](ThrottleRequest.md) |  | [required] |
 
 ### Return type
 

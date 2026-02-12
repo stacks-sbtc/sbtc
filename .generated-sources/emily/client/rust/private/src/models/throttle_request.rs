@@ -11,9 +11,9 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// ThrottleReqwest : Represents the throttle reqwest
+/// ThrottleRequest : Represents the throttle reqwest
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ThrottleReqwest {
+pub struct ThrottleRequest {
     /// The hash of the key.
     #[serde(rename = "hash")]
     pub hash: String,
@@ -22,9 +22,9 @@ pub struct ThrottleReqwest {
     pub secret: String,
 }
 
-impl ThrottleReqwest {
+impl ThrottleRequest {
     /// Represents the throttle reqwest
-    pub fn new(hash: String, secret: String) -> ThrottleReqwest {
-        ThrottleReqwest { hash, secret }
+    pub fn new(hash: String, secret: String) -> ThrottleRequest {
+        ThrottleRequest { hash, secret }
     }
 }

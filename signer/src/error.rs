@@ -429,9 +429,9 @@ pub enum Error {
     #[error("could not decode the hex string into bytes: {0}")]
     DecodeHexBytes(#[source] hex::FromHexError),
 
-    /// Reqwest error
+    /// Request error
     #[error(transparent)]
-    Reqwest(#[from] reqwest::Error),
+    Request(#[from] reqwest::Error),
 
     /// Error when reading the signer config.toml
     #[error("failed to read the signers config file: {0}")]
@@ -505,7 +505,7 @@ pub enum Error {
     #[error("coordinator Stacks txn with fee too high: {0}. Highest acceptable fee: {1}")]
     StacksFeeLimitExceeded(u64, u64),
 
-    /// Reqwest error
+    /// Request error
     #[error("response from stacks node did not conform to the expected schema: {0}")]
     UnexpectedStacksResponse(#[source] reqwest::Error),
 
@@ -712,7 +712,7 @@ pub enum Error {
 
     /// Could not create reqwest client
     #[error("we received an error when creating the Emily's reqwest client: {0}")]
-    EmilyReqwestClientCreation(#[source] reqwest_012::Error),
+    EmilyRequestClientCreation(#[source] reqwest_012::Error),
 
     /// This happens during the validation of a stacks transaction when the
     /// current signer is not a member of the signer set indicated by the

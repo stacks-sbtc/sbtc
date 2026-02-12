@@ -253,7 +253,7 @@ pub async fn get_throttle_key(
 
 pub async fn start_throttle(
     configuration: &configuration::Configuration,
-    throttle_reqwest: models::ThrottleReqwest,
+    throttle_request: models::ThrottleRequest,
 ) -> Result<models::Limits, Error<StartThrottleError>> {
     let local_var_configuration = configuration;
 
@@ -267,7 +267,7 @@ pub async fn start_throttle(
         local_var_req_builder =
             local_var_req_builder.header(reqwest::header::USER_AGENT, local_var_user_agent.clone());
     }
-    local_var_req_builder = local_var_req_builder.json(&throttle_reqwest);
+    local_var_req_builder = local_var_req_builder.json(&throttle_request);
 
     let local_var_req = local_var_req_builder.build()?;
     let local_var_resp = local_var_client.execute(local_var_req).await?;

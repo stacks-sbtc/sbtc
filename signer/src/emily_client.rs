@@ -179,7 +179,7 @@ impl EmilyClient {
         let client = reqwest_012::Client::builder()
             .timeout(timeout)
             .build()
-            .map_err(Error::EmilyReqwestClientCreation)?;
+            .map_err(Error::EmilyRequestClientCreation)?;
 
         config.client = client;
 

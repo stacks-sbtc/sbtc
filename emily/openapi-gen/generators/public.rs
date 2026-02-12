@@ -71,7 +71,7 @@ use super::CorsSupport;
         api::models::limits::Limits,
         api::models::limits::AccountLimits,
         // Throttle models
-        api::models::throttle::ThrottleReqwest,
+        api::models::throttle::ThrottleRequest,
         // Errors.
         common::error::ErrorResponse,
     ))

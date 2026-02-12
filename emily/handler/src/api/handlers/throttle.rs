@@ -2,7 +2,7 @@
 
 use crate::{
     api::models::limits::Limits,
-    api::models::throttle::{ThrottleKey, ThrottleReqwest},
+    api::models::throttle::{ThrottleKey, ThrottleRequest},
     common::error::Error,
     context::EmilyContext,
     database::{
@@ -94,7 +94,7 @@ pub async fn calculate_throttle_mode_limits(
     operation_id = "startThrottle",
     path = "/start_throttle",
     tag = "throttle",
-    request_body = ThrottleReqwest,
+    request_body = ThrottleRequest,
     responses(
         (status = 200, description = "Throttle started successfully", body = Limits),
         (status = 401, description = "Failed key verification", body = ErrorResponse),
@@ -105,12 +105,12 @@ pub async fn calculate_throttle_mode_limits(
 )]
 #[instrument(skip(context))]
 pub async fn start_throttle(
-    request: ThrottleReqwest,
+    request: ThrottleRequest,
     context: EmilyContext,
 ) -> impl warp::reply::Reply {
     // Internal handler so `?` can be used correctly while still returning a reply.
     async fn handler(
-        request: ThrottleReqwest,
+        request: ThrottleRequest,
         context: EmilyContext,
     ) -> Result<impl warp::reply::Reply, Error> {
         let verification_result =

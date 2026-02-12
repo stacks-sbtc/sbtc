@@ -29,7 +29,7 @@ docs/NewBlockApi.md
 docs/TestingApi.md
 docs/ThrottleApi.md
 docs/ThrottleKey.md
-docs/ThrottleReqwest.md
+docs/ThrottleRequest.md
 docs/UpdateDepositsRequestBody.md
 docs/UpdateDepositsResponse.md
 docs/UpdateWithdrawalsRequestBody.md
@@ -74,7 +74,7 @@ src/models/health_data.rs
 src/models/limits.rs
 src/models/mod.rs
 src/models/throttle_key.rs
-src/models/throttle_reqwest.rs
+src/models/throttle_request.rs
 src/models/update_deposits_request_body.rs
 src/models/update_deposits_response.rs
 src/models/update_withdrawals_request_body.rs

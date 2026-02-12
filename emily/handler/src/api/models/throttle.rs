@@ -16,7 +16,7 @@ pub struct ThrottleKey {
 /// Represents the throttle reqwest
 #[derive(Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize, ToSchema, ToResponse)]
 #[serde(rename_all = "camelCase")]
-pub struct ThrottleReqwest {
+pub struct ThrottleRequest {
     /// The hash of the key.
     pub hash: String,
     /// The secret associated with this key.

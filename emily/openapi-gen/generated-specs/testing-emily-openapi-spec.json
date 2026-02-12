@@ -1791,7 +1791,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ThrottleReqwest"
+                "$ref": "#/components/schemas/ThrottleRequest"
               }
             }
           },
@@ -3713,7 +3713,7 @@
           }
         }
       },
-      "ThrottleReqwest": {
+      "ThrottleRequest": {
         "type": "object",
         "description": "Represents the throttle reqwest",
         "required": [

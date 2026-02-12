@@ -11,7 +11,7 @@ use testing_emily_client::apis::Error;
 use testing_emily_client::models::Chainstate;
 use testing_emily_client::models::Limits;
 use testing_emily_client::models::ThrottleKey;
-use testing_emily_client::models::ThrottleReqwest;
+use testing_emily_client::models::ThrottleRequest;
 
 use crate::common::clean_test_setup;
 use crate::common::{batch_set_chainstates, new_test_chainstate, new_test_setup};
@@ -52,7 +52,7 @@ async fn base_flow() {
         .to_string();
     let name = "test_key".to_string();
 
-    let throttle_reqwest = ThrottleReqwest { hash: hash.clone(), secret };
+    let throttle_reqwest = ThrottleRequest { hash: hash.clone(), secret };
     let throttle_key = ThrottleKey { hash, name };
 
     let _ = apis::throttle_api::start_throttle(&configuration, throttle_reqwest.clone())
@@ -67,7 +67,7 @@ async fn base_flow() {
         .unwrap();
 
     // Now let's check that it is impossible to start throttle mode with wrong secret.
-    let bad_throttle_reqwest = ThrottleReqwest {
+    let bad_throttle_reqwest = ThrottleRequest {
         hash: throttle_reqwest.hash.clone(),
         secret: "wrong secret string".to_string(),
     };
@@ -228,7 +228,7 @@ async fn throttle_does_not_overwrite_stronger_limits(
         .unwrap()
         .to_string();
     let throttle_key = ThrottleKey { hash: hash.clone(), name };
-    let throttle_reqwest = ThrottleReqwest { hash, secret };
+    let throttle_reqwest = ThrottleRequest { hash, secret };
 
     // Now let's register our key.
     let _ = apis::throttle_api::add_throttle_key(&configuration, throttle_key.clone())
@@ -353,7 +353,7 @@ async fn start_throttle_returns_proper_error() {
         .hash_password(unknown_secret.as_bytes(), &salt)
         .unwrap()
         .to_string();
-    let unknown_key_reqwest = ThrottleReqwest {
+    let unknown_key_reqwest = ThrottleRequest {
         hash: unknown_hash,
         secret: unknown_secret,
     };
@@ -383,7 +383,7 @@ async fn start_throttle_returns_proper_error() {
         .unwrap();
 
     // Test case 2: Failed secret verification
-    let wrong_secret_reqwest = ThrottleReqwest {
+    let wrong_secret_reqwest = ThrottleRequest {
         hash: hash.clone(),
         secret: "wrong secret".to_string(),
     };
@@ -399,7 +399,7 @@ async fn start_throttle_returns_proper_error() {
     apis::throttle_api::deactivate_throttle_key(&configuration, &hash)
         .await
         .unwrap();
-    let deactivated_key_reqwest = ThrottleReqwest {
+    let deactivated_key_reqwest = ThrottleRequest {
         hash: hash.clone(),
         secret: secret.clone(),
     };
@@ -450,7 +450,7 @@ async fn throttle_mode_overwrites_unlimited_limits() {
         .unwrap()
         .to_string();
     let throttle_key = ThrottleKey { name, hash: hash.clone() };
-    let throttle_reqwest = ThrottleReqwest { hash, secret };
+    let throttle_reqwest = ThrottleRequest { hash, secret };
 
     let _ = apis::throttle_api::add_throttle_key(&configuration, throttle_key.clone())
         .await
@@ -509,7 +509,7 @@ async fn throttle_mode_initiator_correctly_shown_at_limits() {
         name: key_name.clone(),
         hash: hash.clone(),
     };
-    let throttle_reqwest = ThrottleReqwest { hash, secret: secret.clone() };
+    let throttle_reqwest = ThrottleRequest { hash, secret: secret.clone() };
     apis::throttle_api::add_throttle_key(&configuration, throttle_key)
         .await
         .unwrap();
@@ -617,7 +617,7 @@ async fn throttle_key_with_custom_argon2_parameters_works() {
         name: key_name.clone(),
         hash: hash.clone(),
     };
-    let throttle_reqwest = ThrottleReqwest { hash, secret: secret.clone() };
+    let throttle_reqwest = ThrottleRequest { hash, secret: secret.clone() };
 
     // Add the throttle key with custom Argon2 hash
     apis::throttle_api::add_throttle_key(&configuration, throttle_key)

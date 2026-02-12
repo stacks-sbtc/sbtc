@@ -87,7 +87,7 @@ use super::CorsSupport;
         api::models::new_block::NewBlockEventRaw,
         // Throttle models
         api::models::throttle::ThrottleKey,
-        api::models::throttle::ThrottleReqwest,
+        api::models::throttle::ThrottleRequest,
         // Errors.
         common::error::ErrorResponse,
     ))

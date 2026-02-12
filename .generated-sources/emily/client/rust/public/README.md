@@ -80,7 +80,7 @@ Class | Method | HTTP request | Description
  - [GetWithdrawalsResponse](docs/GetWithdrawalsResponse.md)
  - [HealthData](docs/HealthData.md)
  - [Limits](docs/Limits.md)
- - [ThrottleReqwest](docs/ThrottleReqwest.md)
+ - [ThrottleRequest](docs/ThrottleRequest.md)
  - [UpdateDepositsRequestBody](docs/UpdateDepositsRequestBody.md)
  - [UpdateDepositsResponse](docs/UpdateDepositsResponse.md)
  - [UpdateWithdrawalsRequestBody](docs/UpdateWithdrawalsRequestBody.md)

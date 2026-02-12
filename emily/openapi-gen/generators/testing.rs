@@ -92,7 +92,7 @@ use super::CorsSupport;
         common::error::ErrorResponse,
         // Throttle models
         api::models::throttle::ThrottleKey,
-        api::models::throttle::ThrottleReqwest,
+        api::models::throttle::ThrottleRequest,
     ))
 )]
 pub struct ApiDoc;
