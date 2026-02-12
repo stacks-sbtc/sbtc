@@ -976,7 +976,7 @@ pub async fn get_throttle_keys_list(
     todo!()
 }
 
-/// Get throttle key by key name.
+/// Get throttle key by key hash.
 pub async fn get_throttle_key(
     context: &EmilyContext,
     hash: &String,
