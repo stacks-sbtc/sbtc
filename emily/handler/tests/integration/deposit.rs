@@ -450,7 +450,7 @@ async fn get_deposits() {
 }
 
 /// Test that deposit requests where the max fee is greater than i64::MAX
-/// are not returned in get_deposits API calls. 
+/// are not returned in get_deposits API calls.
 #[tokio::test]
 async fn get_deposits_large_max_fee() {
     let (configuration, tables) = new_test_setup().await;
