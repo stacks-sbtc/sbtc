@@ -387,11 +387,11 @@ export class EmilyStack extends cdk.Stack {
         const table =  new dynamodb.Table(this, tableId, {
             tableName: tableName,
             partitionKey: {
-                name: 'KeyName',
+                name: 'Hash',
                 type: dynamodb.AttributeType.STRING,
             },
             sortKey: {
-                name: 'Zero',
+                name: 'CreatedAt',
                 type: dynamodb.AttributeType.NUMBER,
             },
             removalPolicy: removalPolicy,

@@ -965,13 +965,13 @@ pub async fn get_slowdown_keys_list(
 /// Get slowdown key by key name.
 pub async fn get_slowdown_key(
     context: &EmilyContext,
-    key_name: &String,
+    hash: &String,
 ) -> Result<SlowdownKeyEntry, Error> {
-    let resp = query_with_partition_key::<SlowdownTablePrimaryIndex>(context, key_name, None, None)
+    let resp = query_with_partition_key::<SlowdownTablePrimaryIndex>(context, hash, None, None)
         .await?
         .0;
     if resp.len() > 1 {
-        return Err(Error::TooManySlowdownEntries(key_name.clone()));
+        return Err(Error::TooManySlowdownEntries(hash.clone()));
     }
     if resp.is_empty() {
         return Err(Error::NotFound);
@@ -981,16 +981,17 @@ pub async fn get_slowdown_key(
 
 /// Add new slowdown key
 pub async fn add_slowdown_key(context: &EmilyContext, key: &SlowdownKeyEntry) -> Result<(), Error> {
-    let res = get_slowdown_key(context, &key.key.key_name).await;
+    let res = get_slowdown_key(context, &key.key.hash).await;
     if res.is_ok() {
         tracing::warn!(
-            key = %key.key.key_name,
+            name = %key.name,
+            hash = %key.key.hash,
             "Attempt to insert duplicate slowdown key",
         );
         return Err(Error::Conflict);
     }
     // Validate that the hash is a valid Argon2 hash string.
-    if PasswordHash::new(&key.hash).is_err() {
+    if PasswordHash::new(&key.key.hash).is_err() {
         return Err(Error::Deserialization(
             "Invalid Argon2 hash format".to_string(),
         ));
@@ -1000,22 +1001,17 @@ pub async fn add_slowdown_key(context: &EmilyContext, key: &SlowdownKeyEntry) ->
 }
 
 /// Activate slowdown key. Now it will be eligible to start slow mode.
-pub async fn activate_slowdown_key(context: &EmilyContext, name: String) -> Result<(), Error> {
+pub async fn activate_slowdown_key(context: &EmilyContext, hash: String) -> Result<(), Error> {
     // TODO: maybe we want to bail if key already active.
     let table_name = context.settings.slowdown_table_name.clone();
     let partition_key_name = SlowdownKeyEntryKey::PARTITION_KEY_NAME;
-    let sort_key_name = SlowdownKeyEntryKey::SORT_KEY_NAME;
     context
         .dynamodb_client
         .update_item()
         .table_name(table_name)
         .key(
             partition_key_name,
-            aws_sdk_dynamodb::types::AttributeValue::S(name),
-        )
-        .key(
-            sort_key_name,
-            aws_sdk_dynamodb::types::AttributeValue::N("0".to_string()),
+            aws_sdk_dynamodb::types::AttributeValue::S(hash),
         )
         .update_expression("SET IsActive = :t")
         .expression_attribute_values(":t", aws_sdk_dynamodb::types::AttributeValue::Bool(true))
@@ -1025,22 +1021,17 @@ pub async fn activate_slowdown_key(context: &EmilyContext, name: String) -> Resu
 }
 
 /// Deactivate slowdown key. Now it will be unable to activate slow mode.
-pub async fn deactivate_slowdown_key(context: &EmilyContext, name: String) -> Result<(), Error> {
+pub async fn deactivate_slowdown_key(context: &EmilyContext, hash: String) -> Result<(), Error> {
     // TODO: maybe we want to bail if key already deactivated.
     let table_name = context.settings.slowdown_table_name.clone();
     let partition_key_name = SlowdownKeyEntryKey::PARTITION_KEY_NAME;
-    let sort_key_name = SlowdownKeyEntryKey::SORT_KEY_NAME;
     context
         .dynamodb_client
         .update_item()
         .table_name(table_name)
         .key(
             partition_key_name,
-            aws_sdk_dynamodb::types::AttributeValue::S(name.clone()),
-        )
-        .key(
-            sort_key_name,
-            aws_sdk_dynamodb::types::AttributeValue::N("0".to_string()),
+            aws_sdk_dynamodb::types::AttributeValue::S(hash.clone()),
         )
         .update_expression("SET IsActive = :f")
         .expression_attribute_values(":f", aws_sdk_dynamodb::types::AttributeValue::Bool(false))
@@ -1069,14 +1060,17 @@ impl KeyVerificationResult {
 /// Verify if given key_name + secret eligible to start slow mode
 pub async fn verify_slowdown_key(
     context: &EmilyContext,
-    key_name: &String,
+    hash: &String,
     secret: &String,
 ) -> Result<KeyVerificationResult, Error> {
-    let key = get_slowdown_key(context, key_name).await?;
+    let key = get_slowdown_key(context, hash).await?;
+    if &key.key.hash != hash {
+        return Err(Error::NotFound);
+    }
     if !key.is_active {
         return Ok(KeyVerificationResult::Revoked);
     }
-    let parsed_hash = PasswordHash::new(&key.hash).expect("Invalid hash format");
+    let parsed_hash = PasswordHash::new(&key.key.hash).expect("Invalid hash format");
     let is_valid = Argon2::default()
         .verify_password(secret.as_bytes(), &parsed_hash)
         .is_ok();

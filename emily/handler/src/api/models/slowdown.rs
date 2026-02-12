@@ -18,7 +18,7 @@ pub struct SlowdownKey {
 #[serde(rename_all = "camelCase")]
 pub struct SlowdownReqwest {
     /// The name of the key.
-    pub name: String,
+    pub hash: String,
     /// The secret associated with this key.
     pub secret: String,
 }

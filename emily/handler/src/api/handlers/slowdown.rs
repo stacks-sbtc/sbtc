@@ -29,17 +29,17 @@ use warp::reply::{Reply, json, with_status};
     security(("ApiGatewayKey" = []))
 )]
 #[instrument(skip(context))]
-pub async fn get_slowdown_key(name: String, context: EmilyContext) -> impl warp::reply::Reply {
+pub async fn get_slowdown_key(hash: String, context: EmilyContext) -> impl warp::reply::Reply {
     // Internal handler so `?` can be used correctly while still returning a reply.
     async fn handler(
-        name: String,
+        hash: String,
         context: EmilyContext,
     ) -> Result<impl warp::reply::Reply, Error> {
-        let key = accessors::get_slowdown_key(&context, &name).await?;
+        let key = accessors::get_slowdown_key(&context, &hash).await?;
         Ok(with_status(json(&key), StatusCode::OK))
     }
     // Handle and respond.
-    handler(name, context)
+    handler(hash, context)
         .await
         .map_or_else(Reply::into_response, Reply::into_response)
 }
@@ -109,19 +109,19 @@ pub async fn start_slowdown(
         context: EmilyContext,
     ) -> Result<impl warp::reply::Reply, Error> {
         let verification_result =
-            accessors::verify_slowdown_key(&context, &request.name, &request.secret).await?;
+            accessors::verify_slowdown_key(&context, &request.hash, &request.secret).await?;
 
         match verification_result {
             KeyVerificationResult::Revoked => {
                 tracing::warn!(
-                    key_name = %request.name,
+                    key_hash = %request.hash,
                     "Attempt to start slow mode with revoked key",
                 );
                 Err(Error::Forbidden)
             }
             KeyVerificationResult::FailedSecretVerification => {
                 tracing::warn!(
-                    key_name = %request.name,
+                    key_hash = %request.hash,
                     "Attempt to start slow mode failed key verification",
                 );
                 Err(Error::Unauthorized)
@@ -129,10 +129,10 @@ pub async fn start_slowdown(
             KeyVerificationResult::Eligible => {
                 // TODO: we need an alarm on this error.
                 tracing::info!(
-                    key_name = %request.name,
+                    key_hash = %request.hash,
                     "Successfull request to start slow mode. Starting slow mode.",
                 );
-                let new_limits = calculate_slow_mode_limits(&context, request.name).await?;
+                let new_limits = calculate_slow_mode_limits(&context, request.hash).await?;
                 tracing::info!(?new_limits, "Calculated limits to use in slow mode",);
                 let res = crate::api::handlers::limits::set_limits(new_limits.clone(), context)
                     .await
@@ -178,10 +178,14 @@ pub async fn add_slowdown_key(key: SlowdownKey, context: EmilyContext) -> impl w
     ) -> Result<impl warp::reply::Reply, Error> {
         let entry = SlowdownKeyEntry {
             key: SlowdownKeyEntryKey {
-                key_name: key.name.clone(),
-                zero: 0,
+                hash: key.hash.clone(),
+                created_at: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    // It's impossible for this to fail.
+                    .expect("Error making timestamp during limit entry creation.")
+                    .as_secs(),
             },
-            hash: key.hash.clone(),
+            name: key.name.clone(),
             is_active: true,
         };
         accessors::add_slowdown_key(&context, &entry).await?;
@@ -197,9 +201,9 @@ pub async fn add_slowdown_key(key: SlowdownKey, context: EmilyContext) -> impl w
 #[utoipa::path(
     patch,
     operation_id = "deactivateSlowdownKey",
-    path = "/slowdown/deactivate/{name}",
+    path = "/slowdown/deactivate/{hash}",
     params(
-        ("name" = String, Path, description = "The name of the key to deactivate"),
+        ("hash" = String, Path, description = "The hash of the key to deactivate"),
     ),
     tag = "slowdown",
     responses(
@@ -213,19 +217,19 @@ pub async fn add_slowdown_key(key: SlowdownKey, context: EmilyContext) -> impl w
 )]
 #[instrument(skip(context))]
 pub async fn deactivate_slowdown_key(
-    name: String,
+    hash: String,
     context: EmilyContext,
 ) -> impl warp::reply::Reply {
     // Internal handler so `?` can be used correctly while still returning a reply.
     async fn handler(
         context: EmilyContext,
-        name: String,
+        hash: String,
     ) -> Result<impl warp::reply::Reply, Error> {
-        accessors::deactivate_slowdown_key(&context, name).await?;
+        accessors::deactivate_slowdown_key(&context, hash).await?;
         Ok(with_status(json(&()), StatusCode::OK))
     }
     // Handle and respond.
-    handler(context, name)
+    handler(context, hash)
         .await
         .map_or_else(Reply::into_response, Reply::into_response)
 }
@@ -234,9 +238,9 @@ pub async fn deactivate_slowdown_key(
 #[utoipa::path(
     patch,
     operation_id = "activateSlowdownKey",
-    path = "/slowdown/activate/{name}",
+    path = "/slowdown/activate/{hash}",
     params(
-        ("name" = String, Path, description = "The name of the key to activate"),
+        ("hash" = String, Path, description = "The hash of the key to activate"),
     ),
     tag = "slowdown",
     responses(
@@ -249,17 +253,17 @@ pub async fn deactivate_slowdown_key(
     security(("ApiGatewayKey" = []))
 )]
 #[instrument(skip(context))]
-pub async fn activate_slowdown_key(name: String, context: EmilyContext) -> impl warp::reply::Reply {
+pub async fn activate_slowdown_key(hash: String, context: EmilyContext) -> impl warp::reply::Reply {
     // Internal handler so `?` can be used correctly while still returning a reply.
     async fn handler(
         context: EmilyContext,
-        name: String,
+        hash: String,
     ) -> Result<impl warp::reply::Reply, Error> {
-        accessors::activate_slowdown_key(&context, name).await?;
+        accessors::activate_slowdown_key(&context, hash).await?;
         Ok(with_status(json(&()), StatusCode::OK))
     }
     // Handle and respond.
-    handler(context, name)
+    handler(context, hash)
         .await
         .map_or_else(Reply::into_response, Reply::into_response)
 }

@@ -10,14 +10,10 @@ use super::{EntryTrait, KeyTrait, PrimaryIndex, PrimaryIndexTrait};
 #[derive(Clone, Default, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct SlowdownKeyEntryKey {
-    /// Name of the key
-    pub key_name: String,
-    /// We use 0 as dummy sort key to ensure that DynamoDB contains
-    /// no more than 1 entry with given key_name
-    // TODO: it is a hacky workaround, while the "Solution" is to use
-    // no-sorting key schema in DynamoDB. However it seems that to do so
-    // we need to change a lot of helper structs/traits/etc.
-    pub zero: u8,
+    /// Hash of the secret
+    pub hash: String,
+    /// The timestamp of key creation, in seconds from UNIX epoch
+    pub created_at: u64,
 }
 
 /// Limit table entry key. This is the primary index key.
@@ -29,8 +25,8 @@ pub struct SlowdownKeyEntry {
     pub key: SlowdownKeyEntryKey,
     /// If the key is eligible to start slow mode.
     pub is_active: bool,
-    /// Hash of the secret.
-    pub hash: String,
+    /// Name of the key.
+    pub name: String,
 }
 
 /// Implements the key trait for the deposit entry key.
@@ -40,9 +36,9 @@ impl KeyTrait for SlowdownKeyEntryKey {
     /// the type of the sort key.
     type SortKey = u64;
     /// The table field name of the partition key.
-    const PARTITION_KEY_NAME: &'static str = "KeyName";
+    const PARTITION_KEY_NAME: &'static str = "Hash";
     /// The table field name of the sort key.
-    const SORT_KEY_NAME: &'static str = "Zero";
+    const SORT_KEY_NAME: &'static str = "CreatedAt";
 }
 
 /// Implements the entry trait for the deposit entry.

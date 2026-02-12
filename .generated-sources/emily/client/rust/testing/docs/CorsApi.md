@@ -16,8 +16,8 @@ Method | HTTP request | Description
 [**limits_account_options**](CorsApi.md#limits_account_options) | **OPTIONS** /limits/{account} | CORS support
 [**limits_options**](CorsApi.md#limits_options) | **OPTIONS** /limits | CORS support
 [**new_block_options**](CorsApi.md#new_block_options) | **OPTIONS** /new_block | CORS support
-[**slowdown_activate_name_options**](CorsApi.md#slowdown_activate_name_options) | **OPTIONS** /slowdown/activate/{name} | CORS support
-[**slowdown_deactivate_name_options**](CorsApi.md#slowdown_deactivate_name_options) | **OPTIONS** /slowdown/deactivate/{name} | CORS support
+[**slowdown_activate_hash_options**](CorsApi.md#slowdown_activate_hash_options) | **OPTIONS** /slowdown/activate/{hash} | CORS support
+[**slowdown_deactivate_hash_options**](CorsApi.md#slowdown_deactivate_hash_options) | **OPTIONS** /slowdown/deactivate/{hash} | CORS support
 [**slowdown_options**](CorsApi.md#slowdown_options) | **OPTIONS** /slowdown | CORS support
 [**start_slowdown_options**](CorsApi.md#start_slowdown_options) | **OPTIONS** /start_slowdown | CORS support
 [**testing_wipe_options**](CorsApi.md#testing_wipe_options) | **OPTIONS** /testing/wipe | CORS support
@@ -372,9 +372,9 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 
-## slowdown_activate_name_options
+## slowdown_activate_hash_options
 
-> slowdown_activate_name_options(name)
+> slowdown_activate_hash_options(hash)
 CORS support
 
 Handles CORS preflight requests
@@ -384,7 +384,7 @@ Handles CORS preflight requests
 
 Name | Type | Description  | Required | Notes
 ------------- | ------------- | ------------- | ------------- | -------------
-**name** | **String** | The name of the key to activate | [required] |
+**hash** | **String** | The hash of the key to activate | [required] |
 
 ### Return type
 
@@ -402,9 +402,9 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 
-## slowdown_deactivate_name_options
+## slowdown_deactivate_hash_options
 
-> slowdown_deactivate_name_options(name)
+> slowdown_deactivate_hash_options(hash)
 CORS support
 
 Handles CORS preflight requests
@@ -414,7 +414,7 @@ Handles CORS preflight requests
 
 Name | Type | Description  | Required | Notes
 ------------- | ------------- | ------------- | ------------- | -------------
-**name** | **String** | The name of the key to deactivate | [required] |
+**hash** | **String** | The hash of the key to deactivate | [required] |
 
 ### Return type
 

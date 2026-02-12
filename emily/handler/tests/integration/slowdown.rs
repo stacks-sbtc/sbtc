@@ -43,10 +43,18 @@ async fn base_flow() {
         .unwrap();
 
     // Check that we can't activate slow mode if we didn't register our key.
-    let slowdown_reqwest = SlowdownReqwest {
-        name: "test_key".to_string(),
-        secret: "very secret string".to_string(),
-    };
+    let secret = "very secret string".to_string();
+    let salt = SaltString::generate(&mut OsRng);
+    let argon2 = Argon2::default();
+    let hash = argon2
+        .hash_password(secret.as_bytes(), &salt)
+        .unwrap()
+        .to_string();
+    let name = "test_key".to_string();
+
+    let slowdown_reqwest = SlowdownReqwest { hash: hash.clone(), secret };
+    let slowdown_key = SlowdownKey { hash, name };
+
     let _ = apis::slowdown_api::start_slowdown(&configuration, slowdown_reqwest.clone())
         .await
         .unwrap_err();
@@ -54,23 +62,13 @@ async fn base_flow() {
     assert_eq!(new_limits, limits);
 
     // Now let's register our key.
-    let salt = SaltString::generate(&mut OsRng);
-    let argon2 = Argon2::default();
-    let password_hash = argon2
-        .hash_password(slowdown_reqwest.secret.as_bytes(), &salt)
-        .unwrap()
-        .to_string();
-    let slowdown_key = SlowdownKey {
-        name: slowdown_reqwest.name.clone(),
-        hash: password_hash,
-    };
     let _ = apis::slowdown_api::add_slowdown_key(&configuration, slowdown_key.clone())
         .await
         .unwrap();
 
     // Now let's check that it is impossible to start slow mode with wrong secret.
     let bad_slowdown_reqwest = SlowdownReqwest {
-        name: "test_key".to_string(),
+        hash: slowdown_reqwest.hash.clone(),
         secret: "wrong secret string".to_string(),
     };
     let _ = apis::slowdown_api::start_slowdown(&configuration, bad_slowdown_reqwest.clone())
@@ -114,7 +112,7 @@ async fn base_flow() {
     assert_eq!(limits, retrieved_limits);
 
     // Now lets deactivate key, and make sure that it is not allowed to start slow mode anymore.
-    let _ = apis::slowdown_api::deactivate_slowdown_key(&configuration, &(slowdown_key.name))
+    let _ = apis::slowdown_api::deactivate_slowdown_key(&configuration, &(slowdown_key.hash))
         .await
         .unwrap();
     let _ = apis::slowdown_api::start_slowdown(&configuration, slowdown_reqwest.clone())
@@ -124,7 +122,7 @@ async fn base_flow() {
     assert_eq!(limits, retrieved_limits);
 
     // Now lets activate key back, and make sure that it is again eligible to start slow mode.
-    let _ = apis::slowdown_api::activate_slowdown_key(&configuration, &(slowdown_key.name))
+    let _ = apis::slowdown_api::activate_slowdown_key(&configuration, &(slowdown_key.hash))
         .await
         .unwrap();
     let _ = apis::slowdown_api::start_slowdown(&configuration, slowdown_reqwest.clone())
@@ -210,22 +208,18 @@ async fn slowdown_does_not_overwrite_stronger_limits(
         .await
         .unwrap();
 
-    let slowdown_reqwest = SlowdownReqwest {
-        name: "test_key".to_string(),
-        secret: "very secret string".to_string(),
-    };
-
-    // Now let's register our key.
+    let name = "test_key".to_string();
+    let secret = "very secret string".to_string();
     let salt = SaltString::generate(&mut OsRng);
     let argon2 = Argon2::default();
-    let password_hash = argon2
-        .hash_password(slowdown_reqwest.secret.as_bytes(), &salt)
+    let hash = argon2
+        .hash_password(secret.as_bytes(), &salt)
         .unwrap()
         .to_string();
-    let slowdown_key = SlowdownKey {
-        name: slowdown_reqwest.name.clone(),
-        hash: password_hash,
-    };
+    let slowdown_key = SlowdownKey { hash: hash.clone(), name };
+    let slowdown_reqwest = SlowdownReqwest { hash, secret };
+
+    // Now let's register our key.
     let _ = apis::slowdown_api::add_slowdown_key(&configuration, slowdown_key.clone())
         .await
         .unwrap();
@@ -348,9 +342,16 @@ async fn start_slowdown_returns_proper_error() {
         .unwrap();
 
     // Test case 1: Key not found
+    let unknown_secret = "misterious".to_string();
+    let salt = SaltString::generate(&mut OsRng);
+    let argon2 = Argon2::default();
+    let unknown_hash = argon2
+        .hash_password(unknown_secret.as_bytes(), &salt)
+        .unwrap()
+        .to_string();
     let unknown_key_reqwest = SlowdownReqwest {
-        name: "unknown_key".to_string(),
-        secret: "any_secret".to_string(),
+        hash: unknown_hash,
+        secret: unknown_secret,
     };
     let err = apis::slowdown_api::start_slowdown(&configuration, unknown_key_reqwest)
         .await
@@ -361,17 +362,17 @@ async fn start_slowdown_returns_proper_error() {
     assert!(matches!(err.status, StatusCode::NOT_FOUND));
 
     // Register a key for further tests
-    let key_name = "test_key".to_string();
+    let name = "test_key".to_string();
     let secret = "very secret string".to_string();
     let salt = SaltString::generate(&mut OsRng);
     let argon2 = Argon2::default();
-    let password_hash = argon2
+    let hash = argon2
         .hash_password(secret.as_bytes(), &salt)
         .unwrap()
         .to_string();
     let slowdown_key = SlowdownKey {
-        name: key_name.clone(),
-        hash: password_hash,
+        name: name.clone(),
+        hash: hash.clone(),
     };
     apis::slowdown_api::add_slowdown_key(&configuration, slowdown_key)
         .await
@@ -379,7 +380,7 @@ async fn start_slowdown_returns_proper_error() {
 
     // Test case 2: Failed secret verification
     let wrong_secret_reqwest = SlowdownReqwest {
-        name: key_name.clone(),
+        hash: hash.clone(),
         secret: "wrong secret".to_string(),
     };
     let err = apis::slowdown_api::start_slowdown(&configuration, wrong_secret_reqwest)
@@ -391,11 +392,11 @@ async fn start_slowdown_returns_proper_error() {
     assert!(matches!(err.status, StatusCode::UNAUTHORIZED));
 
     // Test case 3: Key is revoked (deactivated)
-    apis::slowdown_api::deactivate_slowdown_key(&configuration, &key_name)
+    apis::slowdown_api::deactivate_slowdown_key(&configuration, &hash)
         .await
         .unwrap();
     let deactivated_key_reqwest = SlowdownReqwest {
-        name: key_name.clone(),
+        hash: hash.clone(),
         secret: secret.clone(),
     };
     let err = apis::slowdown_api::start_slowdown(&configuration, deactivated_key_reqwest)
@@ -435,22 +436,18 @@ async fn slow_mode_overwrites_unlimited_limits() {
         .await
         .unwrap();
 
-    let slowdown_reqwest = SlowdownReqwest {
-        name: "test_key".to_string(),
-        secret: "very secret string".to_string(),
-    };
-
     // Now let's register our key.
+    let name = "test_key".to_string();
+    let secret = "very secret string".to_string();
     let salt = SaltString::generate(&mut OsRng);
     let argon2 = Argon2::default();
-    let password_hash = argon2
-        .hash_password(slowdown_reqwest.secret.as_bytes(), &salt)
+    let hash = argon2
+        .hash_password(secret.as_bytes(), &salt)
         .unwrap()
         .to_string();
-    let slowdown_key = SlowdownKey {
-        name: slowdown_reqwest.name.clone(),
-        hash: password_hash,
-    };
+    let slowdown_key = SlowdownKey { name, hash: hash.clone() };
+    let slowdown_reqwest = SlowdownReqwest { hash, secret };
+
     let _ = apis::slowdown_api::add_slowdown_key(&configuration, slowdown_key.clone())
         .await
         .unwrap();
@@ -500,23 +497,20 @@ async fn slow_mode_initiator_correctly_shown_at_limits() {
     let secret = "very secret string".to_string();
     let salt = SaltString::generate(&mut OsRng);
     let argon2 = Argon2::default();
-    let password_hash = argon2
+    let hash = argon2
         .hash_password(secret.as_bytes(), &salt)
         .unwrap()
         .to_string();
     let slowdown_key = SlowdownKey {
         name: key_name.clone(),
-        hash: password_hash,
+        hash: hash.clone(),
     };
+    let slowdown_reqwest = SlowdownReqwest { hash, secret: secret.clone() };
     apis::slowdown_api::add_slowdown_key(&configuration, slowdown_key)
         .await
         .unwrap();
 
     // Trigger slow mode
-    let slowdown_reqwest = SlowdownReqwest {
-        name: key_name.clone(),
-        secret: secret.clone(),
-    };
     apis::slowdown_api::start_slowdown(&configuration, slowdown_reqwest.clone())
         .await
         .unwrap();
@@ -607,15 +601,16 @@ async fn slowdown_key_with_custom_argon2_parameters_works() {
         argon2::Version::V0x13,
         argon2::Params::new(1024, 2, 4, None).unwrap(), // Custom parameters
     );
-    let password_hash = argon2_custom
+    let hash = argon2_custom
         .hash_password(secret.as_bytes(), &salt)
         .unwrap()
         .to_string();
 
     let slowdown_key = SlowdownKey {
         name: key_name.clone(),
-        hash: password_hash,
+        hash: hash.clone(),
     };
+    let slowdown_reqwest = SlowdownReqwest { hash, secret: secret.clone() };
 
     // Add the slowdown key with custom Argon2 hash
     apis::slowdown_api::add_slowdown_key(&configuration, slowdown_key)
@@ -623,10 +618,6 @@ async fn slowdown_key_with_custom_argon2_parameters_works() {
         .unwrap();
 
     // Attempt to start slow mode with the registered key
-    let slowdown_reqwest = SlowdownReqwest {
-        name: key_name.clone(),
-        secret: secret.clone(),
-    };
     let result = apis::slowdown_api::start_slowdown(&configuration, slowdown_reqwest).await;
 
     assert!(

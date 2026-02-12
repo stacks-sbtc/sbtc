@@ -4,9 +4,9 @@ All URIs are relative to *http://localhost*
 
 Method | HTTP request | Description
 ------------- | ------------- | -------------
-[**activate_slowdown_key**](SlowdownApi.md#activate_slowdown_key) | **PATCH** /slowdown/activate/{name} | Activate existing (previously deactivated) slowdown key
+[**activate_slowdown_key**](SlowdownApi.md#activate_slowdown_key) | **PATCH** /slowdown/activate/{hash} | Activate existing (previously deactivated) slowdown key
 [**add_slowdown_key**](SlowdownApi.md#add_slowdown_key) | **POST** /slowdown | Add slowdown key handler.
-[**deactivate_slowdown_key**](SlowdownApi.md#deactivate_slowdown_key) | **PATCH** /slowdown/deactivate/{name} | Deactivate existing slowdown key
+[**deactivate_slowdown_key**](SlowdownApi.md#deactivate_slowdown_key) | **PATCH** /slowdown/deactivate/{hash} | Deactivate existing slowdown key
 [**get_slowdown_key**](SlowdownApi.md#get_slowdown_key) | **GET** /slowdown | Get the slowdown key details.
 [**start_slowdown**](SlowdownApi.md#start_slowdown) | **POST** /start_slowdown | Try to turn on slow mode
 
@@ -14,7 +14,7 @@ Method | HTTP request | Description
 
 ## activate_slowdown_key
 
-> serde_json::Value activate_slowdown_key(name)
+> serde_json::Value activate_slowdown_key(hash)
 Activate existing (previously deactivated) slowdown key
 
 ### Parameters
@@ -22,7 +22,7 @@ Activate existing (previously deactivated) slowdown key
 
 Name | Type | Description  | Required | Notes
 ------------- | ------------- | ------------- | ------------- | -------------
-**name** | **String** | The name of the key to activate | [required] |
+**hash** | **String** | The hash of the key to activate | [required] |
 
 ### Return type
 
@@ -70,7 +70,7 @@ Name | Type | Description  | Required | Notes
 
 ## deactivate_slowdown_key
 
-> serde_json::Value deactivate_slowdown_key(name)
+> serde_json::Value deactivate_slowdown_key(hash)
 Deactivate existing slowdown key
 
 ### Parameters
@@ -78,7 +78,7 @@ Deactivate existing slowdown key
 
 Name | Type | Description  | Required | Notes
 ------------- | ------------- | ------------- | ------------- | -------------
-**name** | **String** | The name of the key to deactivate | [required] |
+**hash** | **String** | The hash of the key to deactivate | [required] |
 
 ### Return type
 

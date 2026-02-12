@@ -68,16 +68,16 @@ pub enum StartSlowdownError {
 
 pub async fn activate_slowdown_key(
     configuration: &configuration::Configuration,
-    name: &str,
+    hash: &str,
 ) -> Result<serde_json::Value, Error<ActivateSlowdownKeyError>> {
     let local_var_configuration = configuration;
 
     let local_var_client = &local_var_configuration.client;
 
     let local_var_uri_str = format!(
-        "{}/slowdown/activate/{name}",
+        "{}/slowdown/activate/{hash}",
         local_var_configuration.base_path,
-        name = crate::apis::urlencode(name)
+        hash = crate::apis::urlencode(hash)
     );
     let mut local_var_req_builder =
         local_var_client.request(reqwest::Method::PATCH, local_var_uri_str.as_str());
@@ -163,16 +163,16 @@ pub async fn add_slowdown_key(
 
 pub async fn deactivate_slowdown_key(
     configuration: &configuration::Configuration,
-    name: &str,
+    hash: &str,
 ) -> Result<serde_json::Value, Error<DeactivateSlowdownKeyError>> {
     let local_var_configuration = configuration;
 
     let local_var_client = &local_var_configuration.client;
 
     let local_var_uri_str = format!(
-        "{}/slowdown/deactivate/{name}",
+        "{}/slowdown/deactivate/{hash}",
         local_var_configuration.base_path,
-        name = crate::apis::urlencode(name)
+        hash = crate::apis::urlencode(hash)
     );
     let mut local_var_req_builder =
         local_var_client.request(reqwest::Method::PATCH, local_var_uri_str.as_str());

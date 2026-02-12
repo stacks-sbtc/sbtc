@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SlowdownReqwest {
     /// The name of the key.
-    #[serde(rename = "name")]
-    pub name: String,
+    #[serde(rename = "hash")]
+    pub hash: String,
     /// The secret associated with this key.
     #[serde(rename = "secret")]
     pub secret: String,
@@ -24,7 +24,7 @@ pub struct SlowdownReqwest {
 
 impl SlowdownReqwest {
     /// Represents the slowdown reqwest
-    pub fn new(name: String, secret: String) -> SlowdownReqwest {
-        SlowdownReqwest { name, secret }
+    pub fn new(hash: String, secret: String) -> SlowdownReqwest {
+        SlowdownReqwest { hash, secret }
     }
 }

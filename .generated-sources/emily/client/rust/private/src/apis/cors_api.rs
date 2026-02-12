@@ -97,17 +97,17 @@ pub enum NewBlockOptionsError {
     UnknownValue(serde_json::Value),
 }
 
-/// struct for typed errors of method [`slowdown_activate_name_options`]
+/// struct for typed errors of method [`slowdown_activate_hash_options`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum SlowdownActivateNameOptionsError {
+pub enum SlowdownActivateHashOptionsError {
     UnknownValue(serde_json::Value),
 }
 
-/// struct for typed errors of method [`slowdown_deactivate_name_options`]
+/// struct for typed errors of method [`slowdown_deactivate_hash_options`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum SlowdownDeactivateNameOptionsError {
+pub enum SlowdownDeactivateHashOptionsError {
     UnknownValue(serde_json::Value),
 }
 
@@ -630,18 +630,18 @@ pub async fn new_block_options(
 }
 
 /// Handles CORS preflight requests
-pub async fn slowdown_activate_name_options(
+pub async fn slowdown_activate_hash_options(
     configuration: &configuration::Configuration,
-    name: &str,
-) -> Result<(), Error<SlowdownActivateNameOptionsError>> {
+    hash: &str,
+) -> Result<(), Error<SlowdownActivateHashOptionsError>> {
     let local_var_configuration = configuration;
 
     let local_var_client = &local_var_configuration.client;
 
     let local_var_uri_str = format!(
-        "{}/slowdown/activate/{name}",
+        "{}/slowdown/activate/{hash}",
         local_var_configuration.base_path,
-        name = crate::apis::urlencode(name)
+        hash = crate::apis::urlencode(hash)
     );
     let mut local_var_req_builder =
         local_var_client.request(reqwest::Method::OPTIONS, local_var_uri_str.as_str());
@@ -660,7 +660,7 @@ pub async fn slowdown_activate_name_options(
     if !local_var_status.is_client_error() && !local_var_status.is_server_error() {
         Ok(())
     } else {
-        let local_var_entity: Option<SlowdownActivateNameOptionsError> =
+        let local_var_entity: Option<SlowdownActivateHashOptionsError> =
             serde_json::from_str(&local_var_content).ok();
         let local_var_error = ResponseContent {
             status: local_var_status,
@@ -672,18 +672,18 @@ pub async fn slowdown_activate_name_options(
 }
 
 /// Handles CORS preflight requests
-pub async fn slowdown_deactivate_name_options(
+pub async fn slowdown_deactivate_hash_options(
     configuration: &configuration::Configuration,
-    name: &str,
-) -> Result<(), Error<SlowdownDeactivateNameOptionsError>> {
+    hash: &str,
+) -> Result<(), Error<SlowdownDeactivateHashOptionsError>> {
     let local_var_configuration = configuration;
 
     let local_var_client = &local_var_configuration.client;
 
     let local_var_uri_str = format!(
-        "{}/slowdown/deactivate/{name}",
+        "{}/slowdown/deactivate/{hash}",
         local_var_configuration.base_path,
-        name = crate::apis::urlencode(name)
+        hash = crate::apis::urlencode(hash)
     );
     let mut local_var_req_builder =
         local_var_client.request(reqwest::Method::OPTIONS, local_var_uri_str.as_str());
@@ -702,7 +702,7 @@ pub async fn slowdown_deactivate_name_options(
     if !local_var_status.is_client_error() && !local_var_status.is_server_error() {
         Ok(())
     } else {
-        let local_var_entity: Option<SlowdownDeactivateNameOptionsError> =
+        let local_var_entity: Option<SlowdownDeactivateHashOptionsError> =
             serde_json::from_str(&local_var_content).ok();
         let local_var_error = ResponseContent {
             status: local_var_status,

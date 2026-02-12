@@ -1849,7 +1849,7 @@
         }
       }
     },
-    "/slowdown/activate/{name}": {
+    "/slowdown/activate/{hash}": {
       "options": {
         "tags": [
           "CORS"
@@ -1858,9 +1858,9 @@
         "description": "Handles CORS preflight requests",
         "parameters": [
           {
-            "name": "name",
+            "name": "hash",
             "in": "path",
-            "description": "The name of the key to activate",
+            "description": "The hash of the key to activate",
             "required": true,
             "schema": {
               "type": "string"
@@ -1884,9 +1884,9 @@
         "operationId": "activateSlowdownKey",
         "parameters": [
           {
-            "name": "name",
+            "name": "hash",
             "in": "path",
-            "description": "The name of the key to activate",
+            "description": "The hash of the key to activate",
             "required": true,
             "schema": {
               "type": "string"
@@ -1960,7 +1960,7 @@
         }
       }
     },
-    "/slowdown/deactivate/{name}": {
+    "/slowdown/deactivate/{hash}": {
       "options": {
         "tags": [
           "CORS"
@@ -1969,9 +1969,9 @@
         "description": "Handles CORS preflight requests",
         "parameters": [
           {
-            "name": "name",
+            "name": "hash",
             "in": "path",
-            "description": "The name of the key to deactivate",
+            "description": "The hash of the key to deactivate",
             "required": true,
             "schema": {
               "type": "string"
@@ -1995,9 +1995,9 @@
         "operationId": "deactivateSlowdownKey",
         "parameters": [
           {
-            "name": "name",
+            "name": "hash",
             "in": "path",
-            "description": "The name of the key to deactivate",
+            "description": "The hash of the key to deactivate",
             "required": true,
             "schema": {
               "type": "string"
@@ -3366,11 +3366,11 @@
         "type": "object",
         "description": "Represents the slowdown reqwest",
         "required": [
-          "name",
+          "hash",
           "secret"
         ],
         "properties": {
-          "name": {
+          "hash": {
             "type": "string",
             "description": "The name of the key."
           },
