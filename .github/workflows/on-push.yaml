@@ -425,10 +425,6 @@ jobs:
           path: ${{ runner.tool_cache }}/cargo-vet
           key: cargo-vet-bin-${{ env.CARGO_VET_VERSION }}
 
-      - name: Print cargo vet CI version
-        id: print_cargo_vet_version
-        run: echo "cargo-vet version: ${{ env.CARGO_VET_VERSION }}"
-
       - name: Add the tool cache directory to the search path
         id: add_tool_dir_to_path
         run: echo "${{ runner.tool_cache }}/cargo-vet/bin" >> $GITHUB_PATH
@@ -437,6 +433,10 @@ jobs:
         id: ensure_tool_cache_is_populated
         if: steps.cargo_vet_cache.outputs.cache_hit != 'true'
         run: cargo install --root ${{ runner.tool_cache }}/cargo-vet --version ${{ env.CARGO_VET_VERSION }} --locked cargo-vet
+
+      - name: Print cargo vet CI version
+        id: print_cargo_vet_version
+        run: cargo vet -- version
 
       - name: Run Cargo Vet
         id: cargo_vet
