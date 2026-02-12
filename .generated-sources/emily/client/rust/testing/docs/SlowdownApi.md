@@ -1,21 +1,21 @@
-# \SlowdownApi
+# \ThrottleApi
 
 All URIs are relative to *http://localhost*
 
 Method | HTTP request | Description
 ------------- | ------------- | -------------
-[**activate_slowdown_key**](SlowdownApi.md#activate_slowdown_key) | **PATCH** /slowdown/activate | Activate existing (previously deactivated) slowdown key
-[**add_slowdown_key**](SlowdownApi.md#add_slowdown_key) | **POST** /slowdown | Add slowdown key handler.
-[**deactivate_slowdown_key**](SlowdownApi.md#deactivate_slowdown_key) | **PATCH** /slowdown/deactivate | Deactivate existing slowdown key
-[**get_slowdown_key**](SlowdownApi.md#get_slowdown_key) | **GET** /slowdown | Get the slowdown key details.
-[**start_slowdown**](SlowdownApi.md#start_slowdown) | **POST** /start_slowdown | Try to turn on slow mode
+[**activate_throttle_key**](ThrottleApi.md#activate_throttle_key) | **PATCH** /throttle/activate | Activate existing (previously deactivated) throttle key
+[**add_throttle_key**](ThrottleApi.md#add_throttle_key) | **POST** /throttle | Add throttle key handler.
+[**deactivate_throttle_key**](ThrottleApi.md#deactivate_throttle_key) | **PATCH** /throttle/deactivate | Deactivate existing throttle key
+[**get_throttle_key**](ThrottleApi.md#get_throttle_key) | **GET** /throttle | Get the throttle key details.
+[**start_throttle**](ThrottleApi.md#start_throttle) | **POST** /start_throttle | Try to turn on slow mode
 
 
 
-## activate_slowdown_key
+## activate_throttle_key
 
-> serde_json::Value activate_slowdown_key(body)
-Activate existing (previously deactivated) slowdown key
+> serde_json::Value activate_throttle_key(body)
+Activate existing (previously deactivated) throttle key
 
 ### Parameters
 
@@ -40,21 +40,21 @@ Name | Type | Description  | Required | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 
-## add_slowdown_key
+## add_throttle_key
 
-> models::SlowdownKey add_slowdown_key(slowdown_key)
-Add slowdown key handler.
+> models::ThrottleKey add_throttle_key(throttle_key)
+Add throttle key handler.
 
 ### Parameters
 
 
 Name | Type | Description  | Required | Notes
 ------------- | ------------- | ------------- | ------------- | -------------
-**slowdown_key** | [**SlowdownKey**](SlowdownKey.md) |  | [required] |
+**throttle_key** | [**ThrottleKey**](ThrottleKey.md) |  | [required] |
 
 ### Return type
 
-[**models::SlowdownKey**](SlowdownKey.md)
+[**models::ThrottleKey**](ThrottleKey.md)
 
 ### Authorization
 
@@ -68,10 +68,10 @@ Name | Type | Description  | Required | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 
-## deactivate_slowdown_key
+## deactivate_throttle_key
 
-> serde_json::Value deactivate_slowdown_key(body)
-Deactivate existing slowdown key
+> serde_json::Value deactivate_throttle_key(body)
+Deactivate existing throttle key
 
 ### Parameters
 
@@ -96,10 +96,10 @@ Name | Type | Description  | Required | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 
-## get_slowdown_key
+## get_throttle_key
 
-> models::SlowdownKey get_slowdown_key(body)
-Get the slowdown key details.
+> models::ThrottleKey get_throttle_key(body)
+Get the throttle key details.
 
 ### Parameters
 
@@ -110,7 +110,7 @@ Name | Type | Description  | Required | Notes
 
 ### Return type
 
-[**models::SlowdownKey**](SlowdownKey.md)
+[**models::ThrottleKey**](ThrottleKey.md)
 
 ### Authorization
 
@@ -124,9 +124,9 @@ Name | Type | Description  | Required | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 
-## start_slowdown
+## start_throttle
 
-> models::Limits start_slowdown(slowdown_reqwest)
+> models::Limits start_throttle(throttle_reqwest)
 Try to turn on slow mode
 
 ### Parameters
@@ -134,7 +134,7 @@ Try to turn on slow mode
 
 Name | Type | Description  | Required | Notes
 ------------- | ------------- | ------------- | ------------- | -------------
-**slowdown_reqwest** | [**SlowdownReqwest**](SlowdownReqwest.md) |  | [required] |
+**throttle_reqwest** | [**ThrottleReqwest**](ThrottleReqwest.md) |  | [required] |
 
 ### Return type
 

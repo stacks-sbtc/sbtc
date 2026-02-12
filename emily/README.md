@@ -38,7 +38,7 @@ environment: {
     WITHDRAWAL_TABLE_NAME: withdrawalTableName,
     CHAINSTATE_TABLE_NAME: chainstateTableName,
     LIMIT_TABLE_NAME: limitTableName,
-    SLOWDOWN_TABLE_NAME: slowdownTableName,
+    THROTTLEDOWN_TABLE_NAME: throttleTableName,
     IS_LOCAL: "true" | "false",
     IS_MAINNET: "true" | "false",
     DEPLOYER_ADDRESS: "SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS"  // Substitute with the real address

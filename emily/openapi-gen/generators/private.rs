@@ -39,12 +39,12 @@ use super::CorsSupport;
         api::handlers::limits::set_limits,
         api::handlers::limits::get_limits_for_account,
         api::handlers::limits::set_limits_for_account,
-        // Slowdown endpoints
-        api::handlers::slowdown::add_slowdown_key,
-        api::handlers::slowdown::get_slowdown_key,
-        api::handlers::slowdown::start_slowdown,
-        api::handlers::slowdown::activate_slowdown_key,
-        api::handlers::slowdown::deactivate_slowdown_key,
+        // Throttle endpoints
+        api::handlers::throttle::add_throttle_key,
+        api::handlers::throttle::get_throttle_key,
+        api::handlers::throttle::start_throttle,
+        api::handlers::throttle::activate_throttle_key,
+        api::handlers::throttle::deactivate_throttle_key,
         // New block endpoints.
         api::handlers::new_block::new_block,
     ),
@@ -85,9 +85,9 @@ use super::CorsSupport;
         api::models::limits::AccountLimits,
         // New Block models.
         api::models::new_block::NewBlockEventRaw,
-        // Slowdown models
-        api::models::slowdown::SlowdownKey,
-        api::models::slowdown::SlowdownReqwest,
+        // Throttle models
+        api::models::throttle::ThrottleKey,
+        api::models::throttle::ThrottleReqwest,
         // Errors.
         common::error::ErrorResponse,
     ))

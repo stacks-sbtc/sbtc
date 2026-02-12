@@ -42,8 +42,8 @@ pub struct LimitEntry {
     pub rolling_withdrawal_blocks: Option<u64>,
     /// Maximum total sBTC that can be withdrawn within the rolling withdrawal window.
     pub rolling_withdrawal_cap: Option<u64>,
-    /// Slowdown key initiated slow mode
-    pub slow_mode_initiator: Option<String>,
+    /// Throttle key initiated throttle mode
+    pub throttle_mode_initiator: Option<String>,
 }
 
 /// Convert from entry to its corresponding limit.
@@ -56,7 +56,7 @@ impl From<LimitEntry> for AccountLimits {
             per_withdrawal_cap: limit_entry.per_withdrawal_cap,
             rolling_withdrawal_blocks: limit_entry.rolling_withdrawal_blocks,
             rolling_withdrawal_cap: limit_entry.rolling_withdrawal_cap,
-            slow_mode_initiator: limit_entry.slow_mode_initiator,
+            throttle_mode_initiator: limit_entry.throttle_mode_initiator,
         }
     }
 }
@@ -83,7 +83,7 @@ impl LimitEntry {
             per_withdrawal_cap: account_limit.per_withdrawal_cap,
             rolling_withdrawal_blocks: account_limit.rolling_withdrawal_blocks,
             rolling_withdrawal_cap: account_limit.rolling_withdrawal_cap,
-            slow_mode_initiator: account_limit.slow_mode_initiator.clone(),
+            throttle_mode_initiator: account_limit.throttle_mode_initiator.clone(),
         }
     }
     /// Returns true if the limit entry has no limits set.

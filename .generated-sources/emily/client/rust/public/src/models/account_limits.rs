@@ -62,14 +62,14 @@ pub struct AccountLimits {
         skip_serializing_if = "Option::is_none"
     )]
     pub rolling_withdrawal_cap: Option<Option<u64>>,
-    /// Slowdown key initiated slowdown
+    /// Throttle key initiated throttle
     #[serde(
-        rename = "slowModeInitiator",
+        rename = "throttleModeInitiator",
         default,
         with = "::serde_with::rust::double_option",
         skip_serializing_if = "Option::is_none"
     )]
-    pub slow_mode_initiator: Option<Option<String>>,
+    pub throttle_mode_initiator: Option<Option<String>>,
 }
 
 impl AccountLimits {
@@ -82,7 +82,7 @@ impl AccountLimits {
             per_withdrawal_cap: None,
             rolling_withdrawal_blocks: None,
             rolling_withdrawal_cap: None,
-            slow_mode_initiator: None,
+            throttle_mode_initiator: None,
         }
     }
 }

@@ -13,10 +13,10 @@ use crate::{apis::ResponseContent, models};
 use reqwest;
 use serde::{Deserialize, Serialize};
 
-/// struct for typed errors of method [`start_slowdown`]
+/// struct for typed errors of method [`start_throttle`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum StartSlowdownError {
+pub enum StartThrottleError {
     Status401(models::ErrorResponse),
     Status403(models::ErrorResponse),
     Status404(models::ErrorResponse),
@@ -24,15 +24,15 @@ pub enum StartSlowdownError {
     UnknownValue(serde_json::Value),
 }
 
-pub async fn start_slowdown(
+pub async fn start_throttle(
     configuration: &configuration::Configuration,
-    slowdown_reqwest: models::SlowdownReqwest,
-) -> Result<models::Limits, Error<StartSlowdownError>> {
+    throttle_reqwest: models::ThrottleReqwest,
+) -> Result<models::Limits, Error<StartThrottleError>> {
     let local_var_configuration = configuration;
 
     let local_var_client = &local_var_configuration.client;
 
-    let local_var_uri_str = format!("{}/start_slowdown", local_var_configuration.base_path);
+    let local_var_uri_str = format!("{}/start_throttle", local_var_configuration.base_path);
     let mut local_var_req_builder =
         local_var_client.request(reqwest::Method::POST, local_var_uri_str.as_str());
 
@@ -40,7 +40,7 @@ pub async fn start_slowdown(
         local_var_req_builder =
             local_var_req_builder.header(reqwest::header::USER_AGENT, local_var_user_agent.clone());
     }
-    local_var_req_builder = local_var_req_builder.json(&slowdown_reqwest);
+    local_var_req_builder = local_var_req_builder.json(&throttle_reqwest);
 
     let local_var_req = local_var_req_builder.build()?;
     let local_var_resp = local_var_client.execute(local_var_req).await?;
@@ -51,7 +51,7 @@ pub async fn start_slowdown(
     if !local_var_status.is_client_error() && !local_var_status.is_server_error() {
         serde_json::from_str(&local_var_content).map_err(Error::from)
     } else {
-        let local_var_entity: Option<StartSlowdownError> =
+        let local_var_entity: Option<StartThrottleError> =
             serde_json::from_str(&local_var_content).ok();
         let local_var_error = ResponseContent {
             status: local_var_status,

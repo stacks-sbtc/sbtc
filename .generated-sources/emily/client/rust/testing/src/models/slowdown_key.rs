@@ -11,9 +11,9 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// SlowdownKey : Represents the slowdown key
+/// ThrottleKey : Represents the throttle key
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
-pub struct SlowdownKey {
+pub struct ThrottleKey {
     /// The hash of the secret associated with this key.
     #[serde(rename = "hash")]
     pub hash: String,
@@ -22,9 +22,9 @@ pub struct SlowdownKey {
     pub name: String,
 }
 
-impl SlowdownKey {
-    /// Represents the slowdown key
-    pub fn new(hash: String, name: String) -> SlowdownKey {
-        SlowdownKey { hash, name }
+impl ThrottleKey {
+    /// Represents the throttle key
+    pub fn new(hash: String, name: String) -> ThrottleKey {
+        ThrottleKey { hash, name }
     }
 }

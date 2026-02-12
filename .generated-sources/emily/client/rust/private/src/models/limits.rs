@@ -73,14 +73,14 @@ pub struct Limits {
         skip_serializing_if = "Option::is_none"
     )]
     pub rolling_withdrawal_cap: Option<Option<u64>>,
-    /// Name of key which triggered slow mode (if slow mode is active)
+    /// Name of key which triggered throttle mode (if throttle mode is active)
     #[serde(
-        rename = "slowModeInitiator",
+        rename = "throttleModeInitiator",
         default,
         with = "::serde_with::rust::double_option",
         skip_serializing_if = "Option::is_none"
     )]
-    pub slow_mode_initiator: Option<Option<String>>,
+    pub throttle_mode_initiator: Option<Option<String>>,
 }
 
 impl Limits {
@@ -95,7 +95,7 @@ impl Limits {
             per_withdrawal_cap: None,
             rolling_withdrawal_blocks: None,
             rolling_withdrawal_cap: None,
-            slow_mode_initiator: None,
+            throttle_mode_initiator: None,
         }
     }
 }

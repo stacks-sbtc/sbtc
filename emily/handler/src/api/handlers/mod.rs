@@ -18,11 +18,11 @@ pub mod internal;
 pub mod limits;
 /// New block handlers.
 pub mod new_block;
-/// Slowdown handlers.
-pub mod slowdown;
 /// Testing handlers.
 #[cfg(feature = "testing")]
 pub mod testing;
+/// Throttle handlers.
+pub mod throttle;
 /// Withdrawal handlers.
 pub mod withdrawal;
 

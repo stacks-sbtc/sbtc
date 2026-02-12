@@ -97,31 +97,31 @@ pub enum NewBlockOptionsError {
     UnknownValue(serde_json::Value),
 }
 
-/// struct for typed errors of method [`slowdown_activate_options`]
+/// struct for typed errors of method [`start_throttle_options`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum SlowdownActivateOptionsError {
+pub enum StartThrottleOptionsError {
     UnknownValue(serde_json::Value),
 }
 
-/// struct for typed errors of method [`slowdown_deactivate_options`]
+/// struct for typed errors of method [`throttle_activate_options`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum SlowdownDeactivateOptionsError {
+pub enum ThrottleActivateOptionsError {
     UnknownValue(serde_json::Value),
 }
 
-/// struct for typed errors of method [`slowdown_options`]
+/// struct for typed errors of method [`throttle_deactivate_options`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum SlowdownOptionsError {
+pub enum ThrottleDeactivateOptionsError {
     UnknownValue(serde_json::Value),
 }
 
-/// struct for typed errors of method [`start_slowdown_options`]
+/// struct for typed errors of method [`throttle_options`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum StartSlowdownOptionsError {
+pub enum ThrottleOptionsError {
     UnknownValue(serde_json::Value),
 }
 
@@ -630,14 +630,14 @@ pub async fn new_block_options(
 }
 
 /// Handles CORS preflight requests
-pub async fn slowdown_activate_options(
+pub async fn start_throttle_options(
     configuration: &configuration::Configuration,
-) -> Result<(), Error<SlowdownActivateOptionsError>> {
+) -> Result<(), Error<StartThrottleOptionsError>> {
     let local_var_configuration = configuration;
 
     let local_var_client = &local_var_configuration.client;
 
-    let local_var_uri_str = format!("{}/slowdown/activate", local_var_configuration.base_path);
+    let local_var_uri_str = format!("{}/start_throttle", local_var_configuration.base_path);
     let mut local_var_req_builder =
         local_var_client.request(reqwest::Method::OPTIONS, local_var_uri_str.as_str());
 
@@ -655,7 +655,7 @@ pub async fn slowdown_activate_options(
     if !local_var_status.is_client_error() && !local_var_status.is_server_error() {
         Ok(())
     } else {
-        let local_var_entity: Option<SlowdownActivateOptionsError> =
+        let local_var_entity: Option<StartThrottleOptionsError> =
             serde_json::from_str(&local_var_content).ok();
         let local_var_error = ResponseContent {
             status: local_var_status,
@@ -667,14 +667,14 @@ pub async fn slowdown_activate_options(
 }
 
 /// Handles CORS preflight requests
-pub async fn slowdown_deactivate_options(
+pub async fn throttle_activate_options(
     configuration: &configuration::Configuration,
-) -> Result<(), Error<SlowdownDeactivateOptionsError>> {
+) -> Result<(), Error<ThrottleActivateOptionsError>> {
     let local_var_configuration = configuration;
 
     let local_var_client = &local_var_configuration.client;
 
-    let local_var_uri_str = format!("{}/slowdown/deactivate", local_var_configuration.base_path);
+    let local_var_uri_str = format!("{}/throttle/activate", local_var_configuration.base_path);
     let mut local_var_req_builder =
         local_var_client.request(reqwest::Method::OPTIONS, local_var_uri_str.as_str());
 
@@ -692,7 +692,7 @@ pub async fn slowdown_deactivate_options(
     if !local_var_status.is_client_error() && !local_var_status.is_server_error() {
         Ok(())
     } else {
-        let local_var_entity: Option<SlowdownDeactivateOptionsError> =
+        let local_var_entity: Option<ThrottleActivateOptionsError> =
             serde_json::from_str(&local_var_content).ok();
         let local_var_error = ResponseContent {
             status: local_var_status,
@@ -704,14 +704,14 @@ pub async fn slowdown_deactivate_options(
 }
 
 /// Handles CORS preflight requests
-pub async fn slowdown_options(
+pub async fn throttle_deactivate_options(
     configuration: &configuration::Configuration,
-) -> Result<(), Error<SlowdownOptionsError>> {
+) -> Result<(), Error<ThrottleDeactivateOptionsError>> {
     let local_var_configuration = configuration;
 
     let local_var_client = &local_var_configuration.client;
 
-    let local_var_uri_str = format!("{}/slowdown", local_var_configuration.base_path);
+    let local_var_uri_str = format!("{}/throttle/deactivate", local_var_configuration.base_path);
     let mut local_var_req_builder =
         local_var_client.request(reqwest::Method::OPTIONS, local_var_uri_str.as_str());
 
@@ -729,7 +729,7 @@ pub async fn slowdown_options(
     if !local_var_status.is_client_error() && !local_var_status.is_server_error() {
         Ok(())
     } else {
-        let local_var_entity: Option<SlowdownOptionsError> =
+        let local_var_entity: Option<ThrottleDeactivateOptionsError> =
             serde_json::from_str(&local_var_content).ok();
         let local_var_error = ResponseContent {
             status: local_var_status,
@@ -741,14 +741,14 @@ pub async fn slowdown_options(
 }
 
 /// Handles CORS preflight requests
-pub async fn start_slowdown_options(
+pub async fn throttle_options(
     configuration: &configuration::Configuration,
-) -> Result<(), Error<StartSlowdownOptionsError>> {
+) -> Result<(), Error<ThrottleOptionsError>> {
     let local_var_configuration = configuration;
 
     let local_var_client = &local_var_configuration.client;
 
-    let local_var_uri_str = format!("{}/start_slowdown", local_var_configuration.base_path);
+    let local_var_uri_str = format!("{}/throttle", local_var_configuration.base_path);
     let mut local_var_req_builder =
         local_var_client.request(reqwest::Method::OPTIONS, local_var_uri_str.as_str());
 
@@ -766,7 +766,7 @@ pub async fn start_slowdown_options(
     if !local_var_status.is_client_error() && !local_var_status.is_server_error() {
         Ok(())
     } else {
-        let local_var_entity: Option<StartSlowdownOptionsError> =
+        let local_var_entity: Option<ThrottleOptionsError> =
             serde_json::from_str(&local_var_content).ok();
         let local_var_error = ResponseContent {
             status: local_var_status,

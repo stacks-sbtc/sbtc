@@ -1,16 +1,16 @@
-# \SlowdownApi
+# \ThrottleApi
 
 All URIs are relative to *http://localhost*
 
 Method | HTTP request | Description
 ------------- | ------------- | -------------
-[**start_slowdown**](SlowdownApi.md#start_slowdown) | **POST** /start_slowdown | Try to turn on slow mode
+[**start_throttle**](ThrottleApi.md#start_throttle) | **POST** /start_throttle | Try to turn on slow mode
 
 
 
-## start_slowdown
+## start_throttle
 
-> models::Limits start_slowdown(slowdown_reqwest)
+> models::Limits start_throttle(throttle_reqwest)
 Try to turn on slow mode
 
 ### Parameters
@@ -18,7 +18,7 @@ Try to turn on slow mode
 
 Name | Type | Description  | Required | Notes
 ------------- | ------------- | ------------- | ------------- | -------------
-**slowdown_reqwest** | [**SlowdownReqwest**](SlowdownReqwest.md) |  | [required] |
+**throttle_reqwest** | [**ThrottleReqwest**](ThrottleReqwest.md) |  | [required] |
 
 ### Return type
 

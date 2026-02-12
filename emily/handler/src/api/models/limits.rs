@@ -28,8 +28,8 @@ pub struct Limits {
     pub available_to_withdraw: Option<u64>,
     /// Represents the individual limits for requests coming from different accounts.
     pub account_caps: HashMap<String, AccountLimits>,
-    /// Name of key which triggered slow mode (if slow mode is active)
-    pub slow_mode_initiator: Option<String>,
+    /// Name of key which triggered throttle mode (if throttle mode is active)
+    pub throttle_mode_initiator: Option<String>,
 }
 
 impl Limits {
@@ -85,6 +85,6 @@ pub struct AccountLimits {
     pub rolling_withdrawal_blocks: Option<u64>,
     /// Maximum total sBTC that can be withdrawn within the rolling withdrawal window.
     pub rolling_withdrawal_cap: Option<u64>,
-    /// Slowdown key initiated slowdown
-    pub slow_mode_initiator: Option<String>,
+    /// Throttle key initiated throttle
+    pub throttle_mode_initiator: Option<String>,
 }

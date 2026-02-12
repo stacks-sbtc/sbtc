@@ -21,11 +21,11 @@ mod health;
 mod limits;
 /// NewBlock routes.
 mod new_block;
-/// Slowdown routes.
-mod slowdown;
 /// Testing routes.
 #[cfg(feature = "testing")]
 mod testing;
+/// Throttle routes.
+mod throttle;
 /// Withdrawal routes.
 mod withdrawal;
 
@@ -64,7 +64,7 @@ pub fn routes(
         .boxed()
         .or(limits::routes(context.clone()))
         .boxed()
-        .or(slowdown::routes(context.clone()))
+        .or(throttle::routes(context.clone()))
         .boxed()
         .or(testing::routes(context))
         .boxed()
@@ -93,7 +93,7 @@ pub fn routes(
         .boxed()
         .or(limits::routes(context.clone()))
         .boxed()
-        .or(slowdown::routes(context))
+        .or(throttle::routes(context))
         .boxed()
         // Convert reply to tuple to that more routes can be added to the returned filter.
         .map(|reply| (reply,))
@@ -165,8 +165,8 @@ fn with_context(
         if let Some(h) = get_header("x-context-version") {
             context.settings.version = h;
         }
-        if let Some(h) = get_header("x-context-slowdown") {
-            context.settings.slowdown_table_name = h;
+        if let Some(h) = get_header("x-context-throttle") {
+            context.settings.throttle_table_name = h;
         }
 
         context

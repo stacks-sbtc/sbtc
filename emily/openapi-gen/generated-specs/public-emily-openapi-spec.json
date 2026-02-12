@@ -1243,100 +1243,6 @@
         }
       }
     },
-    "/start_slowdown": {
-      "post": {
-        "tags": [
-          "slowdown"
-        ],
-        "summary": "Try to turn on slow mode",
-        "operationId": "startSlowdown",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SlowdownReqwest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Slowdown started successfully",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Limits"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Failed key verification",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Key is revoked",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Slowdown key not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal server error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "x-amazon-apigateway-integration": {
-          "httpMethod": "POST",
-          "type": "aws_proxy",
-          "uri": {
-            "Fn::Sub": "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${OperationLambda}/invocations"
-          }
-        }
-      },
-      "options": {
-        "tags": [
-          "CORS"
-        ],
-        "summary": "CORS support",
-        "description": "Handles CORS preflight requests",
-        "parameters": [],
-        "responses": {},
-        "x-amazon-apigateway-integration": {
-          "httpMethod": "POST",
-          "type": "aws_proxy",
-          "uri": {
-            "Fn::Sub": "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${OperationLambda}/invocations"
-          }
-        }
-      }
-    },
     "/withdrawal": {
       "get": {
         "tags": [
@@ -1957,9 +1863,9 @@
             "nullable": true,
             "minimum": 0
           },
-          "slowModeInitiator": {
+          "throttleModeInitiator": {
             "type": "string",
-            "description": "Slowdown key initiated slowdown",
+            "description": "Throttle key initiated throttle",
             "nullable": true
           }
         }
@@ -2480,46 +2386,10 @@
             "nullable": true,
             "minimum": 0
           },
-          "slowModeInitiator": {
+          "throttleModeInitiator": {
             "type": "string",
-            "description": "Name of key which triggered slow mode (if slow mode is active)",
+            "description": "Name of key which triggered throttle mode (if throttle mode is active)",
             "nullable": true
-          }
-        }
-      },
-      "SlowdownKey": {
-        "type": "object",
-        "description": "Represents the slowdown key",
-        "required": [
-          "name",
-          "hash"
-        ],
-        "properties": {
-          "hash": {
-            "type": "string",
-            "description": "The hash of the secret associated with this key."
-          },
-          "name": {
-            "type": "string",
-            "description": "The name of the key."
-          }
-        }
-      },
-      "SlowdownReqwest": {
-        "type": "object",
-        "description": "Represents the slowdown reqwest",
-        "required": [
-          "hash",
-          "secret"
-        ],
-        "properties": {
-          "hash": {
-            "type": "string",
-            "description": "The name of the key."
-          },
-          "secret": {
-            "type": "string",
-            "description": "The secret associated with this key."
           }
         }
       },

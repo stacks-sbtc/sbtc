@@ -1,4 +1,4 @@
-# SlowdownReqwest
+# ThrottleReqwest
 
 ## Properties
 
