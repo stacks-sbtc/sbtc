@@ -1271,16 +1271,6 @@
               }
             }
           },
-          "401": {
-            "description": "Failed key verification",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Key is revoked",
             "content": {
@@ -2491,13 +2481,13 @@
         "type": "object",
         "description": "Represents the throttle reqwest",
         "required": [
-          "hash",
+          "name",
           "secret"
         ],
         "properties": {
-          "hash": {
+          "name": {
             "type": "string",
-            "description": "The hash of the key."
+            "description": "The name of the key."
           },
           "secret": {
             "type": "string",

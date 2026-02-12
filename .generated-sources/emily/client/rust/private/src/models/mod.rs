@@ -28,6 +28,8 @@ pub mod get_deposits_for_transaction_response;
 pub use self::get_deposits_for_transaction_response::GetDepositsForTransactionResponse;
 pub mod get_deposits_response;
 pub use self::get_deposits_response::GetDepositsResponse;
+pub mod get_throttle_key_response;
+pub use self::get_throttle_key_response::GetThrottleKeyResponse;
 pub mod get_withdrawals_response;
 pub use self::get_withdrawals_response::GetWithdrawalsResponse;
 pub mod health_data;

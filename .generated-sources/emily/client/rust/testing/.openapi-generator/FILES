@@ -20,6 +20,7 @@ docs/ExpectedFulfillmentInfo.md
 docs/Fulfillment.md
 docs/GetDepositsForTransactionResponse.md
 docs/GetDepositsResponse.md
+docs/GetThrottleKeyResponse.md
 docs/GetWithdrawalsResponse.md
 docs/HealthApi.md
 docs/HealthData.md
@@ -69,6 +70,7 @@ src/models/expected_fulfillment_info.rs
 src/models/fulfillment.rs
 src/models/get_deposits_for_transaction_response.rs
 src/models/get_deposits_response.rs
+src/models/get_throttle_key_response.rs
 src/models/get_withdrawals_response.rs
 src/models/health_data.rs
 src/models/limits.rs

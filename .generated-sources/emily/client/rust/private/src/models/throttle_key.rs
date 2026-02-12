@@ -14,17 +14,17 @@ use serde::{Deserialize, Serialize};
 /// ThrottleKey : Represents the throttle key
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ThrottleKey {
-    /// The hash of the secret associated with this key.
-    #[serde(rename = "hash")]
-    pub hash: String,
     /// The name of the key.
     #[serde(rename = "name")]
     pub name: String,
+    /// The secret of the secret associated with this key.
+    #[serde(rename = "secret")]
+    pub secret: String,
 }
 
 impl ThrottleKey {
     /// Represents the throttle key
-    pub fn new(hash: String, name: String) -> ThrottleKey {
-        ThrottleKey { hash, name }
+    pub fn new(name: String, secret: String) -> ThrottleKey {
+        ThrottleKey { name, secret }
     }
 }

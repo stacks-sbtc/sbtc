@@ -60,7 +60,6 @@ pub enum GetThrottleKeyError {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum StartThrottleError {
-    Status401(models::ErrorResponse),
     Status403(models::ErrorResponse),
     Status404(models::ErrorResponse),
     Status500(models::ErrorResponse),
@@ -208,7 +207,7 @@ pub async fn deactivate_throttle_key(
 pub async fn get_throttle_key(
     configuration: &configuration::Configuration,
     body: &str,
-) -> Result<models::ThrottleKey, Error<GetThrottleKeyError>> {
+) -> Result<models::GetThrottleKeyResponse, Error<GetThrottleKeyError>> {
     let local_var_configuration = configuration;
 
     let local_var_client = &local_var_configuration.client;

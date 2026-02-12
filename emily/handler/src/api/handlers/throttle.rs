@@ -2,13 +2,17 @@
 
 use crate::{
     api::models::limits::Limits,
-    api::models::throttle::{ThrottleKey, ThrottleRequest},
+    api::models::throttle::{GetThrottleKeyResponse, ThrottleKey, ThrottleRequest},
     common::error::Error,
     context::EmilyContext,
     database::{
         accessors::{self, KeyVerificationResult},
         entries::throttle::{ThrottleKeyEntry, ThrottleKeyEntryKey},
     },
+};
+use argon2::{
+    Argon2,
+    password_hash::{PasswordHasher as _, SaltString},
 };
 use tracing::instrument;
 use warp::http::StatusCode;
@@ -22,7 +26,7 @@ use warp::reply::{Reply, json, with_status};
     tag = "throttle",
     request_body = String,
     responses(
-        (status = 200, description = "Throttle key retrieved successfully", body = ThrottleKey),
+        (status = 200, description = "Throttle key retrieved successfully", body = GetThrottleKeyResponse),
         (status = 404, description = "Throttle key not found", body = ErrorResponse),
         (status = 405, description = "Method not allowed", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
@@ -37,9 +41,10 @@ pub async fn get_throttle_key(hash: String, context: EmilyContext) -> impl warp:
         context: EmilyContext,
     ) -> Result<impl warp::reply::Reply, Error> {
         let key = accessors::get_throttle_key(&context, &hash).await?;
-        let key = ThrottleKey {
+        let key = GetThrottleKeyResponse {
             name: key.name,
             hash: key.key.hash,
+            is_active: key.is_active,
         };
         Ok(with_status(json(&key), StatusCode::OK))
     }
@@ -97,7 +102,6 @@ pub async fn calculate_throttle_mode_limits(
     request_body = ThrottleRequest,
     responses(
         (status = 200, description = "Throttle started successfully", body = Limits),
-        (status = 401, description = "Failed key verification", body = ErrorResponse),
         (status = 403, description = "Key is revoked", body = ErrorResponse),
         (status = 404, description = "Throttle key not found", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
@@ -114,27 +118,20 @@ pub async fn start_throttle(
         context: EmilyContext,
     ) -> Result<impl warp::reply::Reply, Error> {
         let verification_result =
-            accessors::verify_throttle_key(&context, &request.hash, &request.secret).await?;
+            accessors::verify_throttle_key(&context, &request.name, &request.secret).await?;
 
         match verification_result {
             KeyVerificationResult::Revoked => {
                 tracing::warn!(
-                    key_hash = %request.hash,
+                    key_name = %request.name,
                     "Attempt to start throttle mode with revoked key",
                 );
                 Err(Error::Forbidden)
             }
-            KeyVerificationResult::FailedSecretVerification => {
-                tracing::warn!(
-                    key_hash = %request.hash,
-                    "Attempt to start throttle mode failed key verification",
-                );
-                Err(Error::Unauthorized)
-            }
             KeyVerificationResult::Eligible(initiator) => {
                 // TODO: we need an alarm on this error.
                 tracing::info!(
-                    key_hash = %request.hash,
+                    key_name = %request.name,
                     "Successfull request to start throttle mode. Starting throttle mode.",
                 );
                 let new_limits = calculate_throttle_mode_limits(&context, initiator).await?;
@@ -181,9 +178,22 @@ pub async fn add_throttle_key(key: ThrottleKey, context: EmilyContext) -> impl w
         context: EmilyContext,
         key: ThrottleKey,
     ) -> Result<impl warp::reply::Reply, Error> {
+        let salt = &key.name;
+        let argon2 = Argon2::default();
+        let salt = SaltString::from_b64(salt).map_err(|_| {
+            Error::Deserialization(format!(
+                "Name should be a valid b64 string with length between {} and {}",
+                argon2::MIN_SALT_LEN,
+                argon2::MAX_SALT_LEN
+            ))
+        })?;
+        let hash = argon2
+            .hash_password(key.secret.as_bytes(), &salt)
+            .unwrap()
+            .to_string();
         let entry = ThrottleKeyEntry {
             key: ThrottleKeyEntryKey {
-                hash: key.hash.clone(),
+                hash,
                 created_at: std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     // It's impossible for this to fail.

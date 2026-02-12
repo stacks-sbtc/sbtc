@@ -14,9 +14,9 @@ use serde::{Deserialize, Serialize};
 /// ThrottleRequest : Represents the throttle reqwest
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ThrottleRequest {
-    /// The hash of the key.
-    #[serde(rename = "hash")]
-    pub hash: String,
+    /// The name of the key.
+    #[serde(rename = "name")]
+    pub name: String,
     /// The secret associated with this key.
     #[serde(rename = "secret")]
     pub secret: String,
@@ -24,7 +24,7 @@ pub struct ThrottleRequest {
 
 impl ThrottleRequest {
     /// Represents the throttle reqwest
-    pub fn new(hash: String, secret: String) -> ThrottleRequest {
-        ThrottleRequest { hash, secret }
+    pub fn new(name: String, secret: String) -> ThrottleRequest {
+        ThrottleRequest { name, secret }
     }
 }

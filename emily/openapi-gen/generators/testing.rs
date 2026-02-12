@@ -93,6 +93,7 @@ use super::CorsSupport;
         // Throttle models
         api::models::throttle::ThrottleKey,
         api::models::throttle::ThrottleRequest,
+        api::models::throttle::GetThrottleKeyResponse,
     ))
 )]
 pub struct ApiDoc;

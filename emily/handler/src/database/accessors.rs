@@ -2,8 +2,9 @@
 
 use argon2::{
     Argon2,
-    password_hash::{PasswordHash, PasswordVerifier as _},
+    password_hash::{PasswordHasher as _, SaltString},
 };
+
 use aws_sdk_dynamodb::types::AttributeValue;
 use aws_sdk_dynamodb::types::error::ConditionalCheckFailedException;
 use serde_dynamo::Item;
@@ -990,13 +991,6 @@ pub async fn add_throttle_key(context: &EmilyContext, key: &ThrottleKeyEntry) ->
         );
         return Err(Error::Conflict);
     }
-    // Validate that the hash is a valid Argon2 hash string.
-    if PasswordHash::new(&key.key.hash).is_err() {
-        return Err(Error::Deserialization(
-            "Invalid Argon2 hash format".to_string(),
-        ));
-    }
-
     put_entry::<ThrottleTablePrimaryIndex>(context, key).await
 }
 
@@ -1051,8 +1045,6 @@ pub enum KeyVerificationResult {
     Eligible(String),
     /// This key is known, but has been revoked.
     Revoked,
-    /// Key is known and active, but secret verification was unseccessful
-    FailedSecretVerification,
 }
 
 impl KeyVerificationResult {
@@ -1065,34 +1057,30 @@ impl KeyVerificationResult {
 /// Verify if given key_name + secret eligible to start throttle mode
 pub async fn verify_throttle_key(
     context: &EmilyContext,
-    hash: &String,
+    name: &str,
     secret: &String,
 ) -> Result<KeyVerificationResult, Error> {
-    let key = get_throttle_key(context, hash).await?;
-    if &key.key.hash != hash {
-        return Err(Error::NotFound);
-    }
+    // We use name as salt. It is fine, because we have a strong gurantee that
+    // there can be exactly 0 or 1 entries with same name in our db.
+    let salt = name;
+
+    let argon2 = Argon2::default();
+    let salt = SaltString::from_b64(salt).map_err(|_| {
+        Error::Deserialization(format!(
+            "Name should be a valid b64 string with length between {} and {}",
+            argon2::MIN_SALT_LEN,
+            argon2::MAX_SALT_LEN
+        ))
+    })?;
+    let hash = argon2
+        .hash_password(secret.as_bytes(), &salt)
+        .unwrap()
+        .to_string();
+
+    let key = get_throttle_key(context, &hash).await?;
     if !key.is_active {
         return Ok(KeyVerificationResult::Revoked);
     }
-    let parsed_hash = PasswordHash::new(&key.key.hash)
-    .inspect_err(
-        |error| {
-            tracing::error!(
-                %error,
-                hash = %key.key.hash,
-                "Failed to convert hash string from our db to Argon2 hash. This should never happen."
-            )
-        }
-    )
-    .map_err(|_| Error::InternalServer)?;
-    let is_valid = Argon2::default()
-        .verify_password(secret.as_bytes(), &parsed_hash)
-        .is_ok();
-    if !is_valid {
-        return Ok(KeyVerificationResult::FailedSecretVerification);
-    }
-
     Ok(KeyVerificationResult::Eligible(key.name))
 }
 

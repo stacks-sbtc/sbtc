@@ -98,7 +98,7 @@ Name | Type | Description  | Required | Notes
 
 ## get_throttle_key
 
-> models::ThrottleKey get_throttle_key(body)
+> models::GetThrottleKeyResponse get_throttle_key(body)
 Get the throttle key details.
 
 ### Parameters
@@ -110,7 +110,7 @@ Name | Type | Description  | Required | Notes
 
 ### Return type
 
-[**models::ThrottleKey**](ThrottleKey.md)
+[**models::GetThrottleKeyResponse**](GetThrottleKeyResponse.md)
 
 ### Authorization
 

@@ -92,6 +92,7 @@ Class | Method | HTTP request | Description
  - [Fulfillment](docs/Fulfillment.md)
  - [GetDepositsForTransactionResponse](docs/GetDepositsForTransactionResponse.md)
  - [GetDepositsResponse](docs/GetDepositsResponse.md)
+ - [GetThrottleKeyResponse](docs/GetThrottleKeyResponse.md)
  - [GetWithdrawalsResponse](docs/GetWithdrawalsResponse.md)
  - [HealthData](docs/HealthData.md)
  - [Limits](docs/Limits.md)

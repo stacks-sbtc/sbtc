@@ -1717,16 +1717,6 @@
               }
             }
           },
-          "401": {
-            "description": "Failed key verification",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Key is revoked",
             "content": {
@@ -1806,7 +1796,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ThrottleKey"
+                  "$ref": "#/components/schemas/GetThrottleKeyResponse"
                 }
               }
             }
@@ -3224,6 +3214,29 @@
           }
         }
       },
+      "GetThrottleKeyResponse": {
+        "type": "object",
+        "description": "Response to get_throttle_key endpoint, with information about the key",
+        "required": [
+          "name",
+          "hash",
+          "isActive"
+        ],
+        "properties": {
+          "hash": {
+            "type": "string",
+            "description": "The hash of the key."
+          },
+          "isActive": {
+            "type": "boolean",
+            "description": "If this key is eligible to start throttle mode."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name of the key."
+          }
+        }
+      },
       "GetWithdrawalsResponse": {
         "type": "object",
         "description": "Response to get withdrawals request.",
@@ -3337,16 +3350,16 @@
         "description": "Represents the throttle key",
         "required": [
           "name",
-          "hash"
+          "secret"
         ],
         "properties": {
-          "hash": {
-            "type": "string",
-            "description": "The hash of the secret associated with this key."
-          },
           "name": {
             "type": "string",
             "description": "The name of the key."
+          },
+          "secret": {
+            "type": "string",
+            "description": "The secret of the secret associated with this key."
           }
         }
       },
@@ -3354,13 +3367,13 @@
         "type": "object",
         "description": "Represents the throttle reqwest",
         "required": [
-          "hash",
+          "name",
           "secret"
         ],
         "properties": {
-          "hash": {
+          "name": {
             "type": "string",
-            "description": "The hash of the key."
+            "description": "The name of the key."
           },
           "secret": {
             "type": "string",
