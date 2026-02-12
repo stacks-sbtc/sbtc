@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 /// ThrottleReqwest : Represents the throttle reqwest
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ThrottleReqwest {
-    /// The name of the key.
+    /// The hash of the key.
     #[serde(rename = "hash")]
     pub hash: String,
     /// The secret associated with this key.
