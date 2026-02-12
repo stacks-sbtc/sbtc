@@ -1,4 +1,4 @@
-//! Request structures for limits api calls.
+//! Request structures for throttle api calls.
 
 use serde::{Deserialize, Serialize};
 use utoipa::{ToResponse, ToSchema};
