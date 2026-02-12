@@ -103,6 +103,15 @@ async fn base_flow() {
             .unwrap(),
         emily_handler::api::handlers::throttle::THROTTLE_MODE_ROLLING_CAP
     );
+    assert_eq!(new_limits_after_throttle.peg_cap, limits.peg_cap,);
+    assert_eq!(
+        new_limits_after_throttle.per_deposit_minimum,
+        limits.per_deposit_minimum,
+    );
+    assert_eq!(
+        new_limits_after_throttle.per_deposit_cap,
+        limits.per_deposit_cap
+    );
 
     // Now lets restore limits back to normal
     let _ = apis::limits_api::set_limits(&configuration, limits.clone())
