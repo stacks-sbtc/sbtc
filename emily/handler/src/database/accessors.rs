@@ -1085,7 +1085,17 @@ pub async fn verify_throttle_key(
     if !key.is_active {
         return Ok(KeyVerificationResult::Revoked);
     }
-    let parsed_hash = PasswordHash::new(&key.key.hash).expect("Invalid hash format");
+    let parsed_hash = PasswordHash::new(&key.key.hash)
+    .inspect_err(
+        |error| {
+            tracing::error!(
+                %error,
+                hash = %key.key.hash,
+                "Failed to convert hash string from our db to Argon2 hash. This should never happen."
+            )
+        }
+    )
+    .map_err(|_| Error::InternalServer)?;
     let is_valid = Argon2::default()
         .verify_password(secret.as_bytes(), &parsed_hash)
         .is_ok();
