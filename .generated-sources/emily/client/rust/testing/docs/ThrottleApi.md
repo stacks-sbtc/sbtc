@@ -14,7 +14,7 @@ Method | HTTP request | Description
 
 ## activate_throttle_key
 
-> serde_json::Value activate_throttle_key(body)
+> activate_throttle_key(body)
 Activate existing (previously deactivated) throttle key
 
 ### Parameters
@@ -26,7 +26,7 @@ Name | Type | Description  | Required | Notes
 
 ### Return type
 
-[**serde_json::Value**](serde_json::Value.md)
+ (empty response body)
 
 ### Authorization
 
@@ -42,7 +42,7 @@ Name | Type | Description  | Required | Notes
 
 ## add_throttle_key
 
-> serde_json::Value add_throttle_key(throttle_key)
+> add_throttle_key(throttle_key)
 Add throttle key handler.
 
 ### Parameters
@@ -54,7 +54,7 @@ Name | Type | Description  | Required | Notes
 
 ### Return type
 
-[**serde_json::Value**](serde_json::Value.md)
+ (empty response body)
 
 ### Authorization
 
@@ -70,7 +70,7 @@ Name | Type | Description  | Required | Notes
 
 ## deactivate_throttle_key
 
-> serde_json::Value deactivate_throttle_key(body)
+> deactivate_throttle_key(body)
 Deactivate existing throttle key
 
 ### Parameters
@@ -82,7 +82,7 @@ Name | Type | Description  | Required | Notes
 
 ### Return type
 
-[**serde_json::Value**](serde_json::Value.md)
+ (empty response body)
 
 ### Authorization
 

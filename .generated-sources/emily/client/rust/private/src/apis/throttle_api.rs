@@ -69,7 +69,7 @@ pub enum StartThrottleError {
 pub async fn activate_throttle_key(
     configuration: &configuration::Configuration,
     body: &str,
-) -> Result<serde_json::Value, Error<ActivateThrottleKeyError>> {
+) -> Result<(), Error<ActivateThrottleKeyError>> {
     let local_var_configuration = configuration;
 
     let local_var_client = &local_var_configuration.client;
@@ -99,7 +99,7 @@ pub async fn activate_throttle_key(
     let local_var_content = local_var_resp.text().await?;
 
     if !local_var_status.is_client_error() && !local_var_status.is_server_error() {
-        serde_json::from_str(&local_var_content).map_err(Error::from)
+        Ok(())
     } else {
         let local_var_entity: Option<ActivateThrottleKeyError> =
             serde_json::from_str(&local_var_content).ok();
@@ -115,7 +115,7 @@ pub async fn activate_throttle_key(
 pub async fn add_throttle_key(
     configuration: &configuration::Configuration,
     throttle_key: models::ThrottleKey,
-) -> Result<serde_json::Value, Error<AddThrottleKeyError>> {
+) -> Result<(), Error<AddThrottleKeyError>> {
     let local_var_configuration = configuration;
 
     let local_var_client = &local_var_configuration.client;
@@ -145,7 +145,7 @@ pub async fn add_throttle_key(
     let local_var_content = local_var_resp.text().await?;
 
     if !local_var_status.is_client_error() && !local_var_status.is_server_error() {
-        serde_json::from_str(&local_var_content).map_err(Error::from)
+        Ok(())
     } else {
         let local_var_entity: Option<AddThrottleKeyError> =
             serde_json::from_str(&local_var_content).ok();
@@ -161,7 +161,7 @@ pub async fn add_throttle_key(
 pub async fn deactivate_throttle_key(
     configuration: &configuration::Configuration,
     body: &str,
-) -> Result<serde_json::Value, Error<DeactivateThrottleKeyError>> {
+) -> Result<(), Error<DeactivateThrottleKeyError>> {
     let local_var_configuration = configuration;
 
     let local_var_client = &local_var_configuration.client;
@@ -191,7 +191,7 @@ pub async fn deactivate_throttle_key(
     let local_var_content = local_var_resp.text().await?;
 
     if !local_var_status.is_client_error() && !local_var_status.is_server_error() {
-        serde_json::from_str(&local_var_content).map_err(Error::from)
+        Ok(())
     } else {
         let local_var_entity: Option<DeactivateThrottleKeyError> =
             serde_json::from_str(&local_var_content).ok();

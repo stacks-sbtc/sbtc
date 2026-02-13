@@ -1862,16 +1862,8 @@
           "required": true
         },
         "responses": {
-          "200": {
-            "description": "Throttle key added successfully",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "default": null,
-                  "nullable": true
-                }
-              }
-            }
+          "201": {
+            "description": "Throttle key added successfully"
           },
           "400": {
             "description": "Invalid request body",
@@ -1978,16 +1970,8 @@
           "required": true
         },
         "responses": {
-          "201": {
-            "description": "Throttle key activated successfully",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "default": null,
-                  "nullable": true
-                }
-              }
-            }
+          "204": {
+            "description": "Throttle key activated successfully"
           },
           "400": {
             "description": "Invalid request body",
@@ -2078,16 +2062,8 @@
           "required": true
         },
         "responses": {
-          "201": {
-            "description": "Throttle key deactivated successfully",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "default": null,
-                  "nullable": true
-                }
-              }
-            }
+          "204": {
+            "description": "Throttle key deactivated successfully"
           },
           "400": {
             "description": "Invalid request body",
