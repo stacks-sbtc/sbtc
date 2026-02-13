@@ -69,7 +69,7 @@ pub enum StartThrottleError {
 pub async fn activate_throttle_key(
     configuration: &configuration::Configuration,
     body: &str,
-) -> Result<serde_json::Value, Error<ActivateThrottleKeyError>> {
+) -> Result<String, Error<ActivateThrottleKeyError>> {
     let local_var_configuration = configuration;
 
     let local_var_client = &local_var_configuration.client;
@@ -115,7 +115,7 @@ pub async fn activate_throttle_key(
 pub async fn add_throttle_key(
     configuration: &configuration::Configuration,
     throttle_key: models::ThrottleKey,
-) -> Result<serde_json::Value, Error<AddThrottleKeyError>> {
+) -> Result<String, Error<AddThrottleKeyError>> {
     let local_var_configuration = configuration;
 
     let local_var_client = &local_var_configuration.client;
@@ -161,7 +161,7 @@ pub async fn add_throttle_key(
 pub async fn deactivate_throttle_key(
     configuration: &configuration::Configuration,
     body: &str,
-) -> Result<serde_json::Value, Error<DeactivateThrottleKeyError>> {
+) -> Result<String, Error<DeactivateThrottleKeyError>> {
     let local_var_configuration = configuration;
 
     let local_var_client = &local_var_configuration.client;
