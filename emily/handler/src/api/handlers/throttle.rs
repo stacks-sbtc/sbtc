@@ -207,7 +207,7 @@ pub async fn add_throttle_key(key: ThrottleKey, context: EmilyContext) -> impl w
             is_active: true,
         };
         accessors::add_throttle_key(&context, &entry).await?;
-        Ok(with_status(json(&()), StatusCode::CREATED))
+        Ok(with_status(warp::reply(), StatusCode::CREATED))
     }
     // Handle and respond.
     handler(context, key)
@@ -242,7 +242,7 @@ pub async fn deactivate_throttle_key(
         hash: String,
     ) -> Result<impl warp::reply::Reply, Error> {
         accessors::deactivate_throttle_key(&context, hash).await?;
-        Ok(with_status(json(&()), StatusCode::NO_CONTENT))
+        Ok(with_status(warp::reply(), StatusCode::NO_CONTENT))
     }
     // Handle and respond.
     handler(context, hash)
@@ -274,7 +274,7 @@ pub async fn activate_throttle_key(hash: String, context: EmilyContext) -> impl 
         hash: String,
     ) -> Result<impl warp::reply::Reply, Error> {
         accessors::activate_throttle_key(&context, hash).await?;
-        Ok(with_status(json(&()), StatusCode::NO_CONTENT))
+        Ok(with_status(warp::reply(), StatusCode::NO_CONTENT))
     }
     // Handle and respond.
     handler(context, hash)
