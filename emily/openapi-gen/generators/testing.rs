@@ -50,6 +50,7 @@ use super::CorsSupport;
         api::handlers::throttle::activate_throttle_key,
         api::handlers::throttle::deactivate_throttle_key,
         api::handlers::throttle::start_throttle,
+        api::handlers::throttle::stop_throttle,
     ),
     // Components to be included in the OpenAPI specification.
     components(schemas(

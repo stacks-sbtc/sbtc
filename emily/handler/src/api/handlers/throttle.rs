@@ -1,7 +1,6 @@
 //! Handlers for limits endpoints.
 
 use crate::{
-    api::models::limits::Limits,
     api::models::throttle::{GetThrottleKeyResponse, ThrottleKey, ThrottleRequest},
     common::error::Error,
     context::EmilyContext,
@@ -49,41 +48,6 @@ pub async fn get_throttle_key(hash: String, context: EmilyContext) -> impl warp:
     handler(hash, context)
         .await
         .map_or_else(Reply::into_response, Reply::into_response)
-}
-
-/// Rolling window size for throttle mode.
-pub const THROTTLE_MODE_ROLLING_WINDOW: u64 = 18;
-/// Rolling cap for throttle mode.
-pub const THROTTLE_MODE_ROLLING_CAP: u64 = 200_000_000; // 2 BTC.
-/// Per withdrawal cap for throttle mode.
-pub const THROTTLE_MODE_PER_WITHDRAWAL_CAP: u64 = 150_000_000; // 1.5 BTC
-
-/// Calculates throttle mode limits. It keeps most limits as they are now,
-/// while overwriting some of them.
-pub async fn calculate_throttle_mode_limits(context: &EmilyContext) -> Result<Limits, Error> {
-    let mut limits = accessors::get_limits(context).await?;
-    limits.per_withdrawal_cap = Some(
-        limits
-            .per_withdrawal_cap
-            .map_or(THROTTLE_MODE_PER_WITHDRAWAL_CAP, |curr| {
-                curr.min(THROTTLE_MODE_PER_WITHDRAWAL_CAP)
-            }),
-    );
-    limits.rolling_withdrawal_blocks = Some(
-        limits
-            .rolling_withdrawal_blocks
-            .map_or(THROTTLE_MODE_ROLLING_WINDOW, |curr| {
-                curr.max(THROTTLE_MODE_ROLLING_WINDOW)
-            }),
-    );
-    limits.rolling_withdrawal_cap = Some(
-        limits
-            .rolling_withdrawal_cap
-            .map_or(THROTTLE_MODE_ROLLING_CAP, |curr| {
-                curr.min(THROTTLE_MODE_ROLLING_CAP)
-            }),
-    );
-    Ok(limits)
 }
 
 /// Try to turn on throttle mode
@@ -274,6 +238,43 @@ pub async fn activate_throttle_key(hash: String, context: EmilyContext) -> impl 
     }
     // Handle and respond.
     handler(context, hash)
+        .await
+        .map_or_else(Reply::into_response, Reply::into_response)
+}
+
+/// Get the throttle key details.
+#[utoipa::path(
+    post,
+    operation_id = "stopThrottle",
+    path = "/throttle/stop",
+    tag = "throttle",
+    responses(
+        (status = 200, description = "Throttle mode turned off. Limits restored", body = ()),
+        (status = 405, description = "Method not allowed", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    security(("ApiGatewayKey" = []))
+)]
+#[instrument(skip(context))]
+pub async fn stop_throttle(context: EmilyContext) -> impl warp::reply::Reply {
+    // Internal handler so `?` can be used correctly while still returning a reply.
+    async fn handler(context: EmilyContext) -> Result<impl warp::reply::Reply, Error> {
+        let mut limits = accessors::get_limits(&context).await?;
+        limits.throttle_mode_initiator = None;
+        let is_success = crate::api::handlers::limits::set_limits(limits, context)
+            .await
+            .into_response()
+            .status()
+            .is_success();
+
+        if !is_success {
+            tracing::error!("Error restoring limits while stopping throttle mode");
+            return Err(Error::InternalServer);
+        }
+        Ok(with_status(json(&()), StatusCode::OK))
+    }
+    // Handle and respond.
+    handler(context)
         .await
         .map_or_else(Reply::into_response, Reply::into_response)
 }

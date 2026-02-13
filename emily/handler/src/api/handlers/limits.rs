@@ -31,11 +31,6 @@ pub async fn get_limits(context: EmilyContext) -> impl warp::reply::Reply {
     // Internal handler so `?` can be used correctly while still returning a reply.
     async fn handler(context: EmilyContext) -> Result<impl warp::reply::Reply, Error> {
         let global_limits = accessors::get_limits(&context).await?;
-        if global_limits.throttle_mode_initiator.is_some() {
-            let global_limits =
-                crate::api::handlers::throttle::calculate_throttle_mode_limits(&context).await?;
-            return Ok(with_status(json(&global_limits), StatusCode::OK));
-        }
         Ok(with_status(json(&global_limits), StatusCode::OK))
     }
     // Handle and respond.
