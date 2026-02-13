@@ -79,6 +79,7 @@ pub async fn set_limits(limits: Limits, context: EmilyContext) -> impl warp::rep
                     per_withdrawal_cap: limits.per_withdrawal_cap,
                     rolling_withdrawal_blocks: limits.rolling_withdrawal_blocks,
                     rolling_withdrawal_cap: limits.rolling_withdrawal_cap,
+                    throttle_mode_initiator: limits.throttle_mode_initiator,
                 },
             ),
         )

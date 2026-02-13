@@ -1780,6 +1780,90 @@
         }
       }
     },
+    "/start_throttle": {
+      "post": {
+        "tags": [
+          "throttle"
+        ],
+        "summary": "Try to turn on throttle mode",
+        "operationId": "startThrottle",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ThrottleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Throttle started successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Limits"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Key is revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Throttle key not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-amazon-apigateway-integration": {
+          "httpMethod": "POST",
+          "type": "aws_proxy",
+          "uri": {
+            "Fn::Sub": "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${OperationLambda}/invocations"
+          }
+        }
+      },
+      "options": {
+        "tags": [
+          "CORS"
+        ],
+        "summary": "CORS support",
+        "description": "Handles CORS preflight requests",
+        "parameters": [],
+        "responses": {},
+        "x-amazon-apigateway-integration": {
+          "httpMethod": "POST",
+          "type": "aws_proxy",
+          "uri": {
+            "Fn::Sub": "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${OperationLambda}/invocations"
+          }
+        }
+      }
+    },
     "/testing/wipe": {
       "post": {
         "tags": [
@@ -1825,6 +1909,377 @@
         "description": "Handles CORS preflight requests",
         "parameters": [],
         "responses": {},
+        "x-amazon-apigateway-integration": {
+          "httpMethod": "POST",
+          "type": "aws_proxy",
+          "uri": {
+            "Fn::Sub": "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${OperationLambda}/invocations"
+          }
+        }
+      }
+    },
+    "/throttle": {
+      "get": {
+        "tags": [
+          "throttle"
+        ],
+        "summary": "Get the throttle key details.",
+        "operationId": "getThrottleKey",
+        "requestBody": {
+          "content": {
+            "text/plain": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Throttle key retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetThrottleKeyResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Throttle key not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiGatewayKey": []
+          }
+        ],
+        "x-amazon-apigateway-integration": {
+          "httpMethod": "POST",
+          "type": "aws_proxy",
+          "uri": {
+            "Fn::Sub": "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${OperationLambda}/invocations"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "throttle"
+        ],
+        "summary": "Add throttle key handler.",
+        "operationId": "addThrottleKey",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ThrottleKey"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Throttle key added successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "default": null,
+                  "nullable": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Key already exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiGatewayKey": []
+          }
+        ],
+        "x-amazon-apigateway-integration": {
+          "httpMethod": "POST",
+          "type": "aws_proxy",
+          "uri": {
+            "Fn::Sub": "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${OperationLambda}/invocations"
+          }
+        }
+      },
+      "options": {
+        "tags": [
+          "CORS"
+        ],
+        "summary": "CORS support",
+        "description": "Handles CORS preflight requests",
+        "parameters": [],
+        "responses": {},
+        "x-amazon-apigateway-integration": {
+          "httpMethod": "POST",
+          "type": "aws_proxy",
+          "uri": {
+            "Fn::Sub": "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${OperationLambda}/invocations"
+          }
+        }
+      }
+    },
+    "/throttle/activate": {
+      "options": {
+        "tags": [
+          "CORS"
+        ],
+        "summary": "CORS support",
+        "description": "Handles CORS preflight requests",
+        "parameters": [],
+        "responses": {},
+        "x-amazon-apigateway-integration": {
+          "httpMethod": "POST",
+          "type": "aws_proxy",
+          "uri": {
+            "Fn::Sub": "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${OperationLambda}/invocations"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "throttle"
+        ],
+        "summary": "Activate existing (previously deactivated) throttle key",
+        "operationId": "activateThrottleKey",
+        "requestBody": {
+          "content": {
+            "text/plain": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Throttle key activated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "default": null,
+                  "nullable": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Throttle key not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiGatewayKey": []
+          }
+        ],
+        "x-amazon-apigateway-integration": {
+          "httpMethod": "POST",
+          "type": "aws_proxy",
+          "uri": {
+            "Fn::Sub": "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${OperationLambda}/invocations"
+          }
+        }
+      }
+    },
+    "/throttle/deactivate": {
+      "options": {
+        "tags": [
+          "CORS"
+        ],
+        "summary": "CORS support",
+        "description": "Handles CORS preflight requests",
+        "parameters": [],
+        "responses": {},
+        "x-amazon-apigateway-integration": {
+          "httpMethod": "POST",
+          "type": "aws_proxy",
+          "uri": {
+            "Fn::Sub": "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${OperationLambda}/invocations"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "throttle"
+        ],
+        "summary": "Deactivate existing throttle key",
+        "operationId": "deactivateThrottleKey",
+        "requestBody": {
+          "content": {
+            "text/plain": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Throttle key deactivated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "default": null,
+                  "nullable": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Throttle key not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiGatewayKey": []
+          }
+        ],
         "x-amazon-apigateway-integration": {
           "httpMethod": "POST",
           "type": "aws_proxy",
@@ -2643,6 +3098,11 @@
             "description": "Maximum total sBTC that can be withdrawn within the rolling withdrawal window.",
             "nullable": true,
             "minimum": 0
+          },
+          "throttleModeInitiator": {
+            "type": "string",
+            "description": "Throttle key initiated throttle",
+            "nullable": true
           }
         }
       },
@@ -3014,6 +3474,24 @@
           }
         }
       },
+      "ExpectedFulfillmentInfo": {
+        "type": "object",
+        "description": "Expected information about future fulfillment of the withdrawal.\nThis struct represents _estimate_ of how fulfillment for the\nwithdrawal will look like. This estimation is for reference only,\nand does not provide any guarantees.",
+        "properties": {
+          "bitcoinBlockHeight": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The estimated bitcoin block height for the bitcoin block confirming\nthe transaction fulling the withdrawal request. This value is\nestimated by Emily once when the withdrawal request is initially\nreceived.",
+            "nullable": true,
+            "minimum": 0
+          },
+          "bitcoinTxid": {
+            "type": "string",
+            "description": "The expected txid of the sweep transaction fulfilling the withdrawal\nrequest. This field is populated once, it is not updated if there is\nan RBF transaction that also fulfills the request.",
+            "nullable": true
+          }
+        }
+      },
       "Fulfillment": {
         "type": "object",
         "description": "Data about the fulfillment of an sBTC Operation.",
@@ -3097,6 +3575,29 @@
             "type": "string",
             "description": "Next token for the search.",
             "nullable": true
+          }
+        }
+      },
+      "GetThrottleKeyResponse": {
+        "type": "object",
+        "description": "Response to get_throttle_key endpoint, with information about the key",
+        "required": [
+          "name",
+          "hash",
+          "isActive"
+        ],
+        "properties": {
+          "hash": {
+            "type": "string",
+            "description": "The hash of the key."
+          },
+          "isActive": {
+            "type": "boolean",
+            "description": "If this key is eligible to start throttle mode."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name of the key."
           }
         }
       },
@@ -3196,12 +3697,53 @@
             "description": "Maximum total sBTC that can be withdrawn within the rolling withdrawal window.",
             "nullable": true,
             "minimum": 0
+          },
+          "throttleModeInitiator": {
+            "type": "string",
+            "description": "Name of key which triggered throttle mode (if throttle mode is active)",
+            "nullable": true
           }
         }
       },
       "NewBlockEventRaw": {
         "type": "string",
         "description": "The raw payload of a new block event from a stacks node.\nThis is the raw JSON string that is sent to the webhook.\nIdeally, NewBlockEvent would be used directly, but because of the\nthe imported data types, we can't derive ToSchema for it to be used\nin the OpenAPI spec."
+      },
+      "ThrottleKey": {
+        "type": "object",
+        "description": "Represents the throttle key",
+        "required": [
+          "name",
+          "secret"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The name of the key."
+          },
+          "secret": {
+            "type": "string",
+            "description": "The secret of the secret associated with this key."
+          }
+        }
+      },
+      "ThrottleRequest": {
+        "type": "object",
+        "description": "Represents the throttle reqwest",
+        "required": [
+          "name",
+          "secret"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The name of the key."
+          },
+          "secret": {
+            "type": "string",
+            "description": "The secret associated with this key."
+          }
+        }
       },
       "UpdateDepositsRequestBody": {
         "type": "object",
@@ -3282,6 +3824,7 @@
           "status",
           "statusMessage",
           "parameters",
+          "expectedFulfillmentInfo",
           "txid"
         ],
         "properties": {
@@ -3290,6 +3833,9 @@
             "format": "int64",
             "description": "Amount of BTC being withdrawn in satoshis.",
             "minimum": 0
+          },
+          "expectedFulfillmentInfo": {
+            "$ref": "#/components/schemas/ExpectedFulfillmentInfo"
           },
           "fulfillment": {
             "allOf": [
@@ -3445,9 +3991,13 @@
         "required": [
           "requestId",
           "status",
-          "statusMessage"
+          "statusMessage",
+          "expectedFulfillmentInfo"
         ],
         "properties": {
+          "expectedFulfillmentInfo": {
+            "$ref": "#/components/schemas/ExpectedFulfillmentInfo"
+          },
           "fulfillment": {
             "allOf": [
               {

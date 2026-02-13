@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 /// WithdrawalUpdate : A singular Withdrawal update that contains only the fields pertinent to updating the status of a withdrawal. This includes the key related data in addition to status history related data.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WithdrawalUpdate {
+    #[serde(rename = "expectedFulfillmentInfo")]
+    pub expected_fulfillment_info: Box<models::ExpectedFulfillmentInfo>,
     #[serde(
         rename = "fulfillment",
         default,
@@ -34,11 +36,13 @@ pub struct WithdrawalUpdate {
 impl WithdrawalUpdate {
     /// A singular Withdrawal update that contains only the fields pertinent to updating the status of a withdrawal. This includes the key related data in addition to status history related data.
     pub fn new(
+        expected_fulfillment_info: models::ExpectedFulfillmentInfo,
         request_id: u64,
         status: models::WithdrawalStatus,
         status_message: String,
     ) -> WithdrawalUpdate {
         WithdrawalUpdate {
+            expected_fulfillment_info: Box::new(expected_fulfillment_info),
             fulfillment: None,
             request_id,
             status,

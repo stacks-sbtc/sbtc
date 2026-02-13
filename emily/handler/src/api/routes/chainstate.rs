@@ -11,12 +11,19 @@ pub fn routes<F>(
     context: F,
 ) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
 where
-    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
+    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
 {
     get_chainstate_at_height(context.clone())
         .or(set_chainstate(context.clone()))
+        .boxed()
         .or(update_chainstate(context.clone()))
+        .boxed()
         .or(get_chain_tip(context))
+        .boxed()
 }
 
 /// Get chain tip endpoint.

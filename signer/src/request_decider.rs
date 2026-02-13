@@ -137,34 +137,44 @@ where
             tokio::time::sleep(requests_processing_delay).await;
         }
 
-        let chain_tip = block_ref.block_hash;
+        let bitcoin_chain_tip = block_ref.block_hash;
+        let stacks_chain_tip = self
+            .context
+            .state()
+            .stacks_chain_tip()
+            .ok_or(Error::NoStacksChainTip)?
+            .block_hash;
         let signer_public_key = self.signer_public_key();
         let db = self.context.get_storage();
         // We retry the deposit decisions because some signers' bitcoin nodes might have
         // been running behind and ignored the previous messages.
         let deposit_decisions_to_retry = db
             .get_deposit_signer_decisions(
-                &chain_tip,
+                &bitcoin_chain_tip,
                 self.deposit_decisions_retry_window,
                 &signer_public_key,
             )
             .await?;
 
         let _ = self
-            .handle_deposit_decisions_to_retry(deposit_decisions_to_retry, &chain_tip)
+            .handle_deposit_decisions_to_retry(deposit_decisions_to_retry, &bitcoin_chain_tip)
             .await
             .inspect_err(
                 |error| tracing::warn!(%error, "error handling deposit decisions to retry"),
             );
 
         let deposit_requests = db
-            .get_pending_deposit_requests(&chain_tip, self.context_window, &signer_public_key)
+            .get_pending_deposit_requests(
+                &bitcoin_chain_tip,
+                self.context_window,
+                &signer_public_key,
+            )
             .await?;
 
         for deposit_request in deposit_requests {
             let outpoint = deposit_request.outpoint();
             let _ = self
-                .handle_pending_deposit_request(deposit_request, &chain_tip)
+                .handle_pending_deposit_request(deposit_request, &bitcoin_chain_tip)
                 .await
                 .inspect_err(|error| {
                     tracing::warn!(
@@ -177,27 +187,32 @@ where
 
         let withdrawal_decisions_to_retry = db
             .get_withdrawal_signer_decisions(
-                &chain_tip,
+                &bitcoin_chain_tip,
                 self.withdrawal_decisions_retry_window,
                 &signer_public_key,
             )
             .await?;
 
         let _ = self
-            .handle_withdrawal_decisions_to_retry(withdrawal_decisions_to_retry, &chain_tip)
+            .handle_withdrawal_decisions_to_retry(withdrawal_decisions_to_retry, &bitcoin_chain_tip)
             .await
             .inspect_err(
                 |error| tracing::warn!(%error, "error handling withdrawal decisions to retry"),
             );
 
         let withdraw_requests = db
-            .get_pending_withdrawal_requests(&chain_tip, self.context_window, &signer_public_key)
+            .get_pending_withdrawal_requests(
+                &bitcoin_chain_tip,
+                &stacks_chain_tip,
+                self.context_window,
+                &signer_public_key,
+            )
             .await?;
 
         for withdraw_request in withdraw_requests {
             let request_id = withdraw_request.request_id;
             let _ = self
-                .handle_pending_withdrawal_request(withdraw_request, &chain_tip)
+                .handle_pending_withdrawal_request(withdraw_request, &bitcoin_chain_tip)
                 .await
                 .inspect_err(|error| {
                     tracing::warn!(

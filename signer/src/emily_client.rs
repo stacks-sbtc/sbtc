@@ -17,12 +17,14 @@ use emily_client::apis::limits_api;
 use emily_client::apis::withdrawal_api;
 use emily_client::models::DepositInfo;
 use emily_client::models::DepositUpdate;
+use emily_client::models::ExpectedFulfillmentInfo;
 use emily_client::models::UpdateDepositsRequestBody;
 use emily_client::models::UpdateDepositsResponse;
 use emily_client::models::UpdateWithdrawalsRequestBody;
 use emily_client::models::UpdateWithdrawalsResponse;
 use emily_client::models::WithdrawalUpdate;
 use emily_client::models::{DepositStatus, WithdrawalStatus};
+use reqwest_012;
 use sbtc::deposits::CreateDepositRequest;
 use url::Url;
 
@@ -139,6 +141,7 @@ impl EmilyClient {
     /// Initialize a new Emily client and validate the url.
     pub fn try_new(
         url: &Url,
+        timeout: Duration,
         pagination_timeout: Duration,
         page_size: Option<u16>,
     ) -> Result<Self, Error> {
@@ -173,6 +176,13 @@ impl EmilyClient {
         config.base_path = url.to_string().trim_end_matches("/").to_string();
         config.api_key = api_key;
 
+        let client = reqwest_012::Client::builder()
+            .timeout(timeout)
+            .build()
+            .map_err(Error::EmilyReqwestClientCreation)?;
+
+        config.client = client;
+
         Ok(Self {
             config,
             pagination_timeout,
@@ -181,6 +191,20 @@ impl EmilyClient {
             // to DynamoDB's as a i32.
             page_size: page_size.map(|size| size as u32),
         })
+    }
+
+    /// Create a new client from a config
+    #[cfg(any(test, feature = "testing"))]
+    pub fn new(
+        config: EmilyApiConfig,
+        pagination_timeout: Duration,
+        page_size: Option<u16>,
+    ) -> Self {
+        Self {
+            config,
+            pagination_timeout,
+            page_size: page_size.map(|size| size as u32),
+        }
     }
 
     fn parse_deposit(deposit: &DepositInfo) -> Result<CreateDepositRequest, Error> {
@@ -337,11 +361,17 @@ impl EmilyInteract for EmilyClient {
             .iter()
             .filter_map(RequestRef::as_withdrawal);
 
+        let bitcoin_txid = transaction.tx.compute_txid().to_string();
+
         let update_request: Vec<_> = withdrawals
             .map(|withdrawal| WithdrawalUpdate {
                 request_id: withdrawal.request_id,
                 fulfillment: None,
                 status: WithdrawalStatus::Accepted,
+                expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
+                    bitcoin_block_height: None,
+                    bitcoin_txid: Some(Some(bitcoin_txid.clone())),
+                }),
                 status_message: "".to_string(),
             })
             .collect();
@@ -484,7 +514,7 @@ impl TryFrom<&EmilyClientConfig> for ApiFallbackClient<EmilyClient> {
         let clients = config
             .endpoints
             .iter()
-            .map(|url| EmilyClient::try_new(url, config.pagination_timeout, None))
+            .map(|url| EmilyClient::try_new(url, config.timeout, config.pagination_timeout, None))
             .collect::<Result<Vec<_>, _>>()?;
 
         Self::new(clients).map_err(Into::into)
@@ -500,7 +530,9 @@ mod tests {
         // Arrange.
         let url = Url::parse("http://test_key@localhost:8080").unwrap();
         // Act.
-        let client = EmilyClient::try_new(&url, Duration::from_secs(1), None).unwrap();
+        let client =
+            EmilyClient::try_new(&url, Duration::from_secs(1), Duration::from_secs(1), None)
+                .unwrap();
         // Assert.
         assert_eq!(client.config.base_path, "http://localhost:8080");
         assert_eq!(client.config.api_key.unwrap().key, "test_key");
@@ -511,7 +543,9 @@ mod tests {
         // Arrange.
         let url = Url::parse("http://localhost:8080").unwrap();
         // Act.
-        let client = EmilyClient::try_new(&url, Duration::from_secs(1), None).unwrap();
+        let client =
+            EmilyClient::try_new(&url, Duration::from_secs(1), Duration::from_secs(1), None)
+                .unwrap();
         // Assert.
         assert_eq!(client.config.base_path, "http://localhost:8080");
         assert!(client.config.api_key.is_none());

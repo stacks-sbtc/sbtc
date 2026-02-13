@@ -14,6 +14,7 @@ use crate::keys::PublicKey;
 use crate::stacks::api::SignerSetInfo;
 use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::BitcoinBlockRef;
+use crate::storage::model::StacksBlockRef;
 
 /// A struct for holding internal signer state. This struct is served by
 /// the [`SignerContext`] and can be used to cache global state instead of
@@ -29,6 +30,10 @@ pub struct SignerState {
     // The current bitcoin chain tip. This gets updated at the end of the
     // block observer's duties when it observes a new bitcoin block.
     bitcoin_chain_tip: RwLock<Option<BitcoinBlockRef>>,
+    // The current stacks chain tip that is anchored to the current bitcoin
+    // chain tip. This gets updated at the end of the block observer's
+    // duties when it observes a new bitcoin block.
+    stacks_chain_tip: RwLock<Option<StacksBlockRef>>,
 }
 
 impl SignerState {
@@ -76,6 +81,23 @@ impl SignerState {
     /// Set the current bitcoin chain tip.
     pub fn set_bitcoin_chain_tip(&self, chain_tip: BitcoinBlockRef) {
         self.bitcoin_chain_tip
+            .write()
+            .expect("BUG: Failed to acquire write lock")
+            .replace(chain_tip);
+    }
+
+    /// Get the current stacks chain tip.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn stacks_chain_tip(&self) -> Option<StacksBlockRef> {
+        self.stacks_chain_tip
+            .read()
+            .expect("BUG: Failed to acquire read lock")
+            .to_owned()
+    }
+
+    /// Set the current stacks chain tip.
+    pub fn set_stacks_chain_tip(&self, chain_tip: StacksBlockRef) {
+        self.stacks_chain_tip
             .write()
             .expect("BUG: Failed to acquire write lock")
             .replace(chain_tip);
@@ -141,6 +163,7 @@ impl Default for SignerState {
             // The block hash here is often used as the parent block hash
             // of the genesis block on bitcoin.
             bitcoin_chain_tip: RwLock::new(None),
+            stacks_chain_tip: RwLock::new(None),
         }
     }
 }

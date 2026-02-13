@@ -23,18 +23,16 @@ use rand::seq::SliceRandom as _;
 use sbtc::deposits::CreateDepositRequest;
 use sbtc::deposits::DepositScriptInputs;
 use sbtc::deposits::ReclaimScriptInputs;
-use sbtc::testing::regtest;
+use sbtc::testing::containers::TestContainersBuilder;
 use sbtc::testing::regtest::Faucet;
 use sbtc::testing::regtest::Recipient;
 use signer::bitcoin::poller::BitcoinChainTipPoller;
-use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::bitcoin::utxo::DepositRequest;
 use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
 use signer::bitcoin::utxo::SignerUtxo;
 use signer::block_observer::get_signer_set_info;
 use signer::context::SbtcLimits;
-use signer::emily_client::EmilyClient;
 use signer::error::Error;
 use signer::keys::PublicKey;
 use signer::keys::SignerScriptPubKey as _;
@@ -54,9 +52,7 @@ use signer::storage::model::TxPrevout;
 use signer::storage::model::TxPrevoutType;
 use signer::storage::postgres::PgStore;
 use signer::testing::btc::get_canonical_chain_tip;
-use signer::testing::stacks::DUMMY_SORTITION_INFO;
 use signer::testing::stacks::DUMMY_TENURE_INFO;
-use testing_emily_client::apis::testing_api;
 
 use signer::block_observer::BlockObserver;
 use signer::context::Context as _;
@@ -73,9 +69,11 @@ use signer::transaction_coordinator::should_run_dkg;
 use signer::transaction_signer::assert_allow_dkg_begin;
 use url::Url;
 
-use crate::setup::IntoEmilyTestingConfig as _;
+use crate::containers::BitcoinContainerExt as _;
 use crate::setup::TestSweepSetup;
+use crate::setup::clean_emily_setup;
 use crate::setup::fetch_canonical_bitcoin_blockchain;
+use crate::setup::new_emily_setup;
 use crate::transaction_coordinator::mock_reqwests_status_code_error;
 use crate::utxo_construction::make_deposit_request;
 
@@ -90,11 +88,16 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
     // with a real bitcoin core client and a real connection to our
     // database.
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
+
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+
     let db = testing::storage::new_test_database().await;
     let ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_emily_client()
         .with_mocked_stacks_client()
         .build();
@@ -103,10 +106,8 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
     // We're going to create two confirmed deposits. This also generates
     // sweep transactions, but this information is not in our database, so
     // it doesn't matter for this test.
-    let setup0 =
-        TestSweepSetup::new_setup(BitcoinCoreClient::new_regtest(), faucet, 100_000, &mut rng);
-    let setup1 =
-        TestSweepSetup::new_setup(BitcoinCoreClient::new_regtest(), faucet, 200_000, &mut rng);
+    let setup0 = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 100_000, &mut rng);
+    let setup1 = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 200_000, &mut rng);
 
     // Let's prep Emily with information about these deposits.
     ctx.with_emily_client(|client| {
@@ -129,6 +130,8 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
     // We need to set up the stacks client as well. We use it to fetch
     // information about the Stacks blockchain, so we need to prep it, even
     // though it isn't necessary for our test.
+
+    let anchor = get_canonical_chain_tip(rpc);
     ctx.with_stacks_client(|client| {
         client
             .expect_get_tenure_info()
@@ -142,19 +145,17 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
             Box::pin(std::future::ready(response))
         });
 
+        let tenure_headers = TenureBlockHeaders::from_anchor(&anchor);
+
         client
             .expect_get_tenure_headers()
-            .returning(|_| Box::pin(std::future::ready(TenureBlockHeaders::nearly_empty())));
+            .returning(move |_| Box::pin(std::future::ready(Ok(tenure_headers.clone()))));
 
         client.expect_get_epoch_status().returning(|| {
             Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
                 nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
             })))
         });
-
-        client
-            .expect_get_sortition_info()
-            .returning(move |_| Box::pin(std::future::ready(Ok(DUMMY_SORTITION_INFO.clone()))));
 
         client.expect_get_contract_source().returning(|_, _| {
             Box::pin(async {
@@ -173,7 +174,7 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
-    let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
+    let bitcoin_block_source = bitcoin.start_chain_tip_poller().await;
     let block_observer = BlockObserver {
         context: ctx.clone(),
         bitcoin_block_source,
@@ -217,19 +218,12 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
     // We need to wait for the bitcoin-core to send us all the
     // notifications so that we are up to date with the expected chain tip.
     // For that we just wait until we know that we're up-to-date
-    let mut current_chain_tip = db2.get_bitcoin_canonical_chain_tip().await.unwrap();
-
-    let waiting_fut = async {
-        let db2 = db2.clone();
-        while current_chain_tip != Some(chain_tip) {
-            current_chain_tip = db2.get_bitcoin_canonical_chain_tip().await.unwrap();
-            tokio::time::sleep(Duration::from_millis(250)).await;
-        }
-    };
-
-    tokio::time::timeout(Duration::from_secs(3), waiting_fut)
-        .await
-        .unwrap();
+    ctx.wait_for_signal(Duration::from_secs(10), |signal| {
+        matches!(signal, SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
+                if block_ref.block_hash == chain_tip)
+    })
+    .await
+    .unwrap();
 
     // Okay now lets check if we have these deposit requests in our
     // database. It should also have bitcoin blockchain data
@@ -380,19 +374,13 @@ async fn fetch_input(db: &PgStore, output_type: TxPrevoutType) -> Vec<TxPrevout>
 #[tokio::test]
 async fn block_observer_stores_donation_and_sbtc_utxos() {
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
 
-    // We need to populate our databases, so let's fetch the data.
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(1),
-        None,
-    )
-    .unwrap();
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
-    testing_api::wipe_databases(&emily_client.config().as_testing())
-        .await
-        .unwrap();
+    let (emily_client, emily_tables) = new_emily_setup().await;
 
     let chain_tip_info = get_canonical_chain_tip(rpc);
 
@@ -401,13 +389,12 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     let db = testing::storage::new_test_database().await;
     let ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_emily_client(emily_client.clone())
         .with_mocked_stacks_client()
         .build();
 
     ctx.state().set_sbtc_contracts_deployed();
-    let mut signal_receiver = ctx.get_signal_receiver();
 
     // The block observer reaches out to the stacks node to get the most
     // up-to-date information. We don't have stacks-core running so we mock
@@ -446,7 +433,7 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
-    let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
+    let bitcoin_block_source = bitcoin.start_chain_tip_poller().await;
     let block_observer = BlockObserver {
         context: ctx.clone(),
         bitcoin_block_source,
@@ -504,14 +491,19 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     let donation_amount = 100_000;
     let donation_outpoint = faucet.send_to(donation_amount, &address);
 
-    faucet.generate_blocks(1);
+    let chain_tip = faucet.generate_block().into();
 
     // Let's wait for the block observer to signal that it has finished
     // processing everything.
-    let signal = signal_receiver.recv();
-    let Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(_))) = signal.await else {
-        panic!("Not the right signal")
-    };
+    ctx.wait_for_signal(Duration::from_secs(3), |signal| {
+        matches!(
+            signal,
+            SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
+                if block_ref.block_hash == chain_tip
+        )
+    })
+    .await
+    .unwrap();
 
     // Okay now we check whether the we have a donation. The details should
     // match what we expect. All other input and output types should not be
@@ -553,13 +545,15 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     faucet.send_to(50_000_000, &depositor.address);
 
     let chain_tip: BitcoinBlockHash = faucet.generate_block().into();
-
-    let signal = signal_receiver.recv();
-    match signal.await {
-        Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref)))
-            if block_ref.block_hash == chain_tip => {}
-        _ => panic!("Not the right signal"),
-    }
+    ctx.wait_for_signal(Duration::from_secs(3), |signal| {
+        matches!(
+            signal,
+            SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
+                if block_ref.block_hash == chain_tip
+        )
+    })
+    .await
+    .unwrap();
 
     // Now lets make a deposit transaction and submit it. First we get some
     // sats.
@@ -625,12 +619,15 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
 
     // Okay now there is a deposit, and it has been confirmed. We should
     // pick it up automatically.
-    let signal = signal_receiver.recv();
-    match signal.await {
-        Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref)))
-            if block_ref.block_hash == chain_tip => {}
-        _ => panic!("Not the right signal"),
-    }
+    ctx.wait_for_signal(Duration::from_secs(3), |signal| {
+        matches!(
+            signal,
+            SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
+                if block_ref.block_hash == chain_tip
+        )
+    })
+    .await
+    .unwrap();
 
     // Okay now we should see the signers output with the expected values.
     let TxOutput { txid, output_index, amount, .. } =
@@ -671,6 +668,7 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     assert_eq!(txid.deref(), &unsigned.tx.compute_txid());
 
     testing::storage::drop_db(db).await;
+    clean_emily_setup(emily_tables).await;
 }
 
 /// Generates a random deposit request transaction with the input amount
@@ -714,7 +712,11 @@ fn generate_deposit_request<R: rand::Rng>(
 /// that case is impossible.
 #[tokio::test]
 async fn block_observer_picks_up_chained_unordered_sweeps() {
-    let (rpc, faucet) = regtest::initialize_blockchain();
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
 
@@ -792,7 +794,7 @@ async fn block_observer_picks_up_chained_unordered_sweeps() {
 
     let ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_emily_client()
         .with_mocked_stacks_client()
         .build();
@@ -869,11 +871,15 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
     // We start with the typical setup with a fresh database and context
     // with a real bitcoin core client and a real connection to our
     // database.
-    let (_, faucet) = regtest::initialize_blockchain();
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+
     let db = testing::storage::new_test_database().await;
     let ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_emily_client()
         .with_mocked_stacks_client()
         .build();
@@ -881,6 +887,7 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
     // We need to set up the stacks client as well. We use it to fetch
     // information about the Stacks blockchain, so we need to prep it, even
     // though it isn't necessary for our test.
+    let chain_tip = get_canonical_chain_tip(rpc);
     let db2 = db.clone();
     ctx.with_stacks_client(|client| {
         client
@@ -893,17 +900,18 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
             });
             Box::pin(std::future::ready(response))
         });
+
+        let tenure_headers = TenureBlockHeaders::from_anchor(&chain_tip);
+
         client
             .expect_get_tenure_headers()
-            .returning(|_| Box::pin(std::future::ready(TenureBlockHeaders::nearly_empty())));
+            .returning(move |_| Box::pin(std::future::ready(Ok(tenure_headers.clone()))));
+
         client.expect_get_epoch_status().returning(|| {
             Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
                 nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
             })))
         });
-        client
-            .expect_get_sortition_info()
-            .returning(move |_| Box::pin(std::future::ready(Ok(DUMMY_SORTITION_INFO.clone()))));
 
         // The coordinator broadcasts a rotate keys transaction if it is
         // not up-to-date with their view of the current aggregate key. The
@@ -970,7 +978,7 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
-    let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
+    let bitcoin_block_source = bitcoin.start_chain_tip_poller().await;
     let block_observer = BlockObserver {
         context: ctx.clone(),
         bitcoin_block_source,
@@ -1023,7 +1031,10 @@ async fn next_headers_to_process_gets_all_headers() {
     // database.
     const START_HEIGHT: u64 = 103;
 
-    let (_, faucet) = regtest::initialize_blockchain();
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let faucet = &bitcoin.get_faucet();
+
     let db = testing::storage::new_test_database().await;
 
     let ctx = TestContext::builder()
@@ -1031,7 +1042,7 @@ async fn next_headers_to_process_gets_all_headers() {
         .modify_settings(|settings| {
             settings.signer.sbtc_bitcoin_start_height = Some(START_HEIGHT.into())
         })
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_emily_client()
         .with_mocked_stacks_client()
         .build();
@@ -1083,11 +1094,14 @@ async fn next_headers_to_process_ignores_known_headers() {
     // We start with the typical setup with a fresh database and context
     // with a real bitcoin core client and a real connection to our
     // database.
-    let (rpc, _) = regtest::initialize_blockchain();
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+
     let db = testing::storage::new_test_database().await;
     let context = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_emily_client()
         .with_mocked_stacks_client()
         .build();
@@ -1190,11 +1204,15 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
     // We start with the typical setup with a fresh database and context
     // with a real bitcoin core client and a real connection to our
     // database.
-    let (_, faucet) = regtest::initialize_blockchain();
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+
     let db = testing::storage::new_test_database().await;
     let ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_emily_client()
         .with_mocked_stacks_client()
         .build();
@@ -1203,6 +1221,7 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
     // information about the Stacks blockchain, so we need to prep it, even
     // though it isn't necessary for our test.
     let db2 = db.clone();
+    let chain_tip = get_canonical_chain_tip(rpc);
     ctx.with_stacks_client(|client| {
         client
             .expect_get_tenure_info()
@@ -1214,17 +1233,17 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
             });
             Box::pin(std::future::ready(response))
         });
+        let tenure_headers = TenureBlockHeaders::from_anchor(&chain_tip);
+
         client
             .expect_get_tenure_headers()
-            .returning(|_| Box::pin(std::future::ready(TenureBlockHeaders::nearly_empty())));
+            .returning(move |_| Box::pin(std::future::ready(Ok(tenure_headers.clone()))));
+
         client.expect_get_epoch_status().returning(|| {
             Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
                 nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
             })))
         });
-        client
-            .expect_get_sortition_info()
-            .returning(|_| Box::pin(std::future::ready(Ok(DUMMY_SORTITION_INFO.clone()))));
 
         client
             .expect_get_sbtc_total_supply()
@@ -1267,7 +1286,7 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
-    let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
+    let bitcoin_block_source = bitcoin.start_chain_tip_poller().await;
     let block_observer = BlockObserver {
         context: ctx.clone(),
         bitcoin_block_source,
@@ -1374,13 +1393,17 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
     // We start with the typical setup with a fresh database and context
     // with a real bitcoin core client and a real connection to our
     // database.
-    let (rpc, faucet) = regtest::initialize_blockchain();
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+
     let db = testing::storage::new_test_database().await;
     let verification_window = 5;
     let ctx = TestContext::builder()
         .modify_settings(|config| config.signer.dkg_verification_window = verification_window)
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_emily_client()
         .with_mocked_stacks_client()
         .build();
@@ -1392,6 +1415,8 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
     // We need to set up the stacks client as well. We use it to fetch
     // information about the Stacks blockchain, so we need to prep it, even
     // though it isn't necessary for our test.
+    let chain_tip = get_canonical_chain_tip(rpc);
+
     ctx.with_stacks_client(|client| {
         client
             .expect_get_tenure_info()
@@ -1403,17 +1428,17 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
             });
             Box::pin(std::future::ready(response))
         });
+        let tenure_headers = TenureBlockHeaders::from_anchor(&chain_tip);
+
         client
             .expect_get_tenure_headers()
-            .returning(|_| Box::pin(std::future::ready(TenureBlockHeaders::nearly_empty())));
+            .returning(move |_| Box::pin(std::future::ready(Ok(tenure_headers.clone()))));
+
         client.expect_get_epoch_status().returning(|| {
             Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
                 nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
             })))
         });
-        client
-            .expect_get_sortition_info()
-            .returning(|_| Box::pin(std::future::ready(Ok(DUMMY_SORTITION_INFO.clone()))));
 
         client.expect_get_contract_source().returning(|_, _| {
             Box::pin(async {
@@ -1441,7 +1466,7 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
-    let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
+    let bitcoin_block_source = bitcoin.start_chain_tip_poller().await;
     let block_observer = BlockObserver {
         context: ctx.clone(),
         bitcoin_block_source,
@@ -1601,18 +1626,13 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
 #[test_log::test(tokio::test)]
 async fn block_observer_ignores_coinbase() {
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
 
-    let emily_client = EmilyClient::try_new(
-        &Url::parse("http://testApiKey@localhost:3031").unwrap(),
-        Duration::from_secs(1),
-        None,
-    )
-    .unwrap();
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
-    testing_api::wipe_databases(&emily_client.config().as_testing())
-        .await
-        .unwrap();
+    let (emily_client, emily_tables) = new_emily_setup().await;
 
     // Generate a block to ensure we start with an empty mempool
     faucet.generate_block();
@@ -1624,7 +1644,7 @@ async fn block_observer_ignores_coinbase() {
     let db = testing::storage::new_test_database().await;
     let ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_emily_client(emily_client.clone())
         .with_mocked_stacks_client()
         .build();
@@ -1671,7 +1691,7 @@ async fn block_observer_ignores_coinbase() {
     let start_flag = Arc::new(AtomicBool::new(false));
     let flag = start_flag.clone();
 
-    let bitcoin_block_source = BitcoinChainTipPoller::start_for_regtest().await;
+    let bitcoin_block_source = bitcoin.start_chain_tip_poller().await;
     let block_observer = BlockObserver {
         context: ctx.clone(),
         bitcoin_block_source,
@@ -1820,6 +1840,7 @@ async fn block_observer_ignores_coinbase() {
     }
 
     testing::storage::drop_db(db).await;
+    clean_emily_setup(emily_tables).await;
 }
 
 fn make_coinbase_deposit_request(
