@@ -860,6 +860,7 @@ pub const THROTTLE_MODE_PER_WITHDRAWAL_CAP: u64 = 150_000_000; // 1.5 BTC
 /// Calculates throttle mode limits. It keeps most limits as they are now,
 /// while overwriting some of them.
 pub fn calculate_throttle_mode_limits(limit_entry: LimitEntry) -> LimitEntry {
+    tracing::info!(?limit_entry, "Calculating throttle mode limits");
     let mut limits = limit_entry;
     if limits.throttle_mode_initiator.is_none() {
         return limits;
@@ -894,7 +895,13 @@ pub fn calculate_throttle_mode_limits(limit_entry: LimitEntry) -> LimitEntry {
 /// data for this singular entry is spread across the entire table in a way that
 /// needs to be first gathered, then filtered. It does not neatly fit into a
 /// return type that is within the table as an entry.
-pub async fn get_limits(context: &EmilyContext) -> Result<Limits, Error> {
+///
+/// do_throttle_adjustment argument describes if the function will adjust limits according to
+/// throttle mode if throttle mode is on. Usually you want it be set to true.
+pub async fn get_limits(
+    context: &EmilyContext,
+    do_throttle_adjustment: bool,
+) -> Result<Limits, Error> {
     // Get all the entries of the limit table. This table shouldn't be too large.
     let all_entries =
         LimitTablePrimaryIndex::get_all_entries(&context.dynamodb_client, &context.settings)
@@ -949,7 +956,11 @@ pub async fn get_limits(context: &EmilyContext) -> Result<Limits, Error> {
         .collect();
 
     // Adjust for throttle mode if needed.
-    let global_cap = calculate_throttle_mode_limits(global_cap);
+    let global_cap = if do_throttle_adjustment {
+        calculate_throttle_mode_limits(global_cap)
+    } else {
+        global_cap
+    };
 
     // Calculate total withdrawn amount.
 

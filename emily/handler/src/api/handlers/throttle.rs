@@ -94,7 +94,7 @@ pub async fn start_throttle(
                     key_name = %request.name,
                     "Successfull request to start throttle mode. Starting throttle mode.",
                 );
-                let mut new_limits = accessors::get_limits(&context).await?;
+                let mut new_limits = accessors::get_limits(&context, true).await?;
                 new_limits.throttle_mode_initiator = Some(initiator.clone());
                 let res = crate::api::handlers::limits::set_limits(new_limits.clone(), context)
                     .await
@@ -259,7 +259,7 @@ pub async fn activate_throttle_key(hash: String, context: EmilyContext) -> impl 
 pub async fn stop_throttle(context: EmilyContext) -> impl warp::reply::Reply {
     // Internal handler so `?` can be used correctly while still returning a reply.
     async fn handler(context: EmilyContext) -> Result<impl warp::reply::Reply, Error> {
-        let mut limits = accessors::get_limits(&context).await?;
+        let mut limits = accessors::get_limits(&context, false).await?;
         limits.throttle_mode_initiator = None;
         let is_success = crate::api::handlers::limits::set_limits(limits, context)
             .await
