@@ -101,7 +101,7 @@ pub enum TxCoordinatorEvent {
     MessageGenerated(Box<crate::network::Msg>),
     /// The coordinator is finished processing requests for the bitcoin
     /// block.
-    TenureCompleted,
+    TenureCompleted(BitcoinBlockRef),
 }
 
 impl From<SignerCommand> for SignerSignal {
