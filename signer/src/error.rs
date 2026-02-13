@@ -15,6 +15,7 @@ use crate::stacks::contracts::RotateKeysValidationError;
 use crate::stacks::contracts::WithdrawalAcceptValidationError;
 use crate::stacks::contracts::WithdrawalRejectValidationError;
 use crate::storage::model::BitcoinBlockHash;
+use crate::storage::model::ConsensusHash;
 use crate::storage::model::SigHash;
 use crate::storage::model::StacksBlockHash;
 use crate::storage::model::StacksTxId;
@@ -32,6 +33,12 @@ pub enum Error {
         /// The maximum allowed size of the OP_RETURN output in bytes.
         max_size: usize,
     },
+
+    /// Sortition info returned by stacks node does not contain parent consensus hash for given consensus hash
+    /// This usually happens when given consensus hash is not in canonical chain
+    /// TODO: is it true???
+    #[error("No parent consensus hash for consensus hash {0}")]
+    NoParentConsensusHash(ConsensusHash),
 
     /// An error occurred while attempting to perform withdrawal ID segmentation.
     #[error("idpack segmenter error: {0}")]
@@ -225,13 +232,6 @@ pub enum Error {
     /// This should never happen
     #[error("observed a tenure identified by a StacksBlockId with with no blocks")]
     EmptyStacksTenure,
-
-    /// This happens when StacksClient::get_tenure_headers_raw returns an
-    /// array of blocks which starts with a block with id {0}, while we
-    /// expect it to return an array of blocks starting with a block with
-    /// id {1}
-    #[error("get_tenure_headers_raw returned unexpected response: {0}. Expected: {1}")]
-    GetTenureRawMismatch(StacksBlockHash, StacksBlockHash),
 
     /// Received an error in call to estimatesmartfee RPC call
     #[error("failed to get fee estimate from bitcoin-core for target {1}. {0}")]
