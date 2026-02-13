@@ -43,6 +43,7 @@ Class | Method | HTTP request | Description
 *CorsApi* | [**throttle_activate_options**](docs/CorsApi.md#throttle_activate_options) | **OPTIONS** /throttle/activate | CORS support
 *CorsApi* | [**throttle_deactivate_options**](docs/CorsApi.md#throttle_deactivate_options) | **OPTIONS** /throttle/deactivate | CORS support
 *CorsApi* | [**throttle_options**](docs/CorsApi.md#throttle_options) | **OPTIONS** /throttle | CORS support
+*CorsApi* | [**throttle_stop_options**](docs/CorsApi.md#throttle_stop_options) | **OPTIONS** /throttle/stop | CORS support
 *CorsApi* | [**withdrawal_id_options**](docs/CorsApi.md#withdrawal_id_options) | **OPTIONS** /withdrawal/{id} | CORS support
 *CorsApi* | [**withdrawal_options**](docs/CorsApi.md#withdrawal_options) | **OPTIONS** /withdrawal | CORS support
 *CorsApi* | [**withdrawal_private_options**](docs/CorsApi.md#withdrawal_private_options) | **OPTIONS** /withdrawal_private | CORS support
@@ -72,6 +73,7 @@ Class | Method | HTTP request | Description
 *ThrottleApi* | [**deactivate_throttle_key**](docs/ThrottleApi.md#deactivate_throttle_key) | **PATCH** /throttle/deactivate | Deactivate existing throttle key
 *ThrottleApi* | [**get_throttle_key**](docs/ThrottleApi.md#get_throttle_key) | **GET** /throttle | Get the throttle key details.
 *ThrottleApi* | [**start_throttle**](docs/ThrottleApi.md#start_throttle) | **POST** /start_throttle | Try to turn on throttle mode
+*ThrottleApi* | [**stop_throttle**](docs/ThrottleApi.md#stop_throttle) | **POST** /throttle/stop | Get the throttle key details.
 *WithdrawalApi* | [**create_withdrawal**](docs/WithdrawalApi.md#create_withdrawal) | **POST** /withdrawal | Create withdrawal handler.
 *WithdrawalApi* | [**get_withdrawal**](docs/WithdrawalApi.md#get_withdrawal) | **GET** /withdrawal/{id} | Get withdrawal handler.
 *WithdrawalApi* | [**get_withdrawals**](docs/WithdrawalApi.md#get_withdrawals) | **GET** /withdrawal | Get withdrawals handler.

@@ -90,21 +90,21 @@ async fn base_flow() {
             .per_withdrawal_cap
             .unwrap()
             .unwrap(),
-        emily_handler::api::handlers::throttle::THROTTLE_MODE_PER_WITHDRAWAL_CAP
+        emily_handler::database::accessors::THROTTLE_MODE_PER_WITHDRAWAL_CAP
     );
     assert_eq!(
         new_limits_after_throttle
             .rolling_withdrawal_blocks
             .unwrap()
             .unwrap(),
-        emily_handler::api::handlers::throttle::THROTTLE_MODE_ROLLING_WINDOW
+        emily_handler::database::accessors::THROTTLE_MODE_ROLLING_WINDOW
     );
     assert_eq!(
         new_limits_after_throttle
             .rolling_withdrawal_cap
             .unwrap()
             .unwrap(),
-        emily_handler::api::handlers::throttle::THROTTLE_MODE_ROLLING_CAP
+        emily_handler::database::accessors::THROTTLE_MODE_ROLLING_CAP
     );
     assert_eq!(new_limits_after_throttle.peg_cap, limits.peg_cap,);
     assert_eq!(
@@ -143,15 +143,15 @@ async fn base_flow() {
     let retrieved_limits = apis::limits_api::get_limits(&configuration).await.unwrap();
     assert_eq!(
         retrieved_limits.per_withdrawal_cap.unwrap().unwrap(),
-        emily_handler::api::handlers::throttle::THROTTLE_MODE_PER_WITHDRAWAL_CAP
+        emily_handler::database::accessors::THROTTLE_MODE_PER_WITHDRAWAL_CAP
     );
     assert_eq!(
         retrieved_limits.rolling_withdrawal_blocks.unwrap().unwrap(),
-        emily_handler::api::handlers::throttle::THROTTLE_MODE_ROLLING_WINDOW
+        emily_handler::database::accessors::THROTTLE_MODE_ROLLING_WINDOW
     );
     assert_eq!(
         retrieved_limits.rolling_withdrawal_cap.unwrap().unwrap(),
-        emily_handler::api::handlers::throttle::THROTTLE_MODE_ROLLING_CAP
+        emily_handler::database::accessors::THROTTLE_MODE_ROLLING_CAP
     );
 
     clean_test_setup(tables).await;
@@ -180,11 +180,10 @@ async fn throttle_does_not_overwrite_stronger_limits(
 
     // Set limits first
     let throttle_mode_per_withdrawal_cap =
-        emily_handler::api::handlers::throttle::THROTTLE_MODE_PER_WITHDRAWAL_CAP;
+        emily_handler::database::accessors::THROTTLE_MODE_PER_WITHDRAWAL_CAP;
     let throttle_mode_rolling_window =
-        emily_handler::api::handlers::throttle::THROTTLE_MODE_ROLLING_WINDOW;
-    let throttle_mode_rolling_cap =
-        emily_handler::api::handlers::throttle::THROTTLE_MODE_ROLLING_CAP;
+        emily_handler::database::accessors::THROTTLE_MODE_ROLLING_WINDOW;
+    let throttle_mode_rolling_cap = emily_handler::database::accessors::THROTTLE_MODE_ROLLING_CAP;
 
     let per_withdrawal_cap = if is_per_withdrawal_stricter {
         Some(Some(throttle_mode_per_withdrawal_cap - 1))
@@ -515,6 +514,177 @@ async fn throttle_mode_initiator_correctly_shown_at_limits() {
     assert_eq!(
         new_limits_after_retrigger.throttle_mode_initiator,
         Some(Some(key_name))
+    );
+
+    clean_test_setup(tables).await;
+}
+
+#[tokio::test]
+async fn stop_throttle_works() {
+    let (configuration, tables) = new_test_setup().await;
+
+    // Set some initial limits
+    let initial_limits = Limits {
+        available_to_withdraw: Some(Some(10000)),
+        peg_cap: Some(None),
+        per_deposit_minimum: Some(None),
+        per_deposit_cap: Some(None),
+        per_withdrawal_cap: Some(Some(1_000_000_000)),
+        rolling_withdrawal_blocks: Some(Some(100)),
+        rolling_withdrawal_cap: Some(Some(10_000)),
+        throttle_mode_initiator: Some(None),
+        account_caps: HashMap::new(),
+    };
+    // Set some chainstates to make set_limits work
+    let chainstates: Vec<Chainstate> = (0..110)
+        .map(|height| new_test_chainstate(height, height, 0))
+        .collect();
+    let _ = batch_set_chainstates(&configuration, chainstates).await;
+    apis::limits_api::set_limits(&configuration, initial_limits.clone())
+        .await
+        .unwrap();
+
+    // Register a throttle key
+    let key_name = "aaaaaaaaaaaaaaaa".to_string();
+    let secret = "very secret string".to_string();
+    let throttle_key = ThrottleKey {
+        name: key_name.clone(),
+        secret: secret.clone(),
+    };
+    let throttle_reqwest = ThrottleRequest {
+        name: key_name.clone(),
+        secret: secret.clone(),
+    };
+    apis::throttle_api::add_throttle_key(&configuration, throttle_key)
+        .await
+        .unwrap();
+
+    // Trigger throttle mode
+    apis::throttle_api::start_throttle(&configuration, throttle_reqwest.clone())
+        .await
+        .unwrap();
+
+    // Verify that the throttle_mode_initiator field is set correctly
+    let new_limits = apis::limits_api::get_limits(&configuration).await.unwrap();
+    assert_eq!(
+        new_limits.per_withdrawal_cap,
+        Some(Some(
+            emily_handler::database::accessors::THROTTLE_MODE_PER_WITHDRAWAL_CAP
+        ))
+    );
+
+    // Now let's restore limits back to normal and check that throttle_mode_initiator is None
+    let _ = apis::throttle_api::stop_throttle(&configuration)
+        .await
+        .unwrap();
+    let retrieved_limits = apis::limits_api::get_limits(&configuration).await.unwrap();
+    assert_eq!(
+        retrieved_limits.per_withdrawal_cap,
+        initial_limits.per_withdrawal_cap
+    );
+
+    clean_test_setup(tables).await;
+}
+
+#[tokio::test]
+async fn available_to_withdraw_calculated_correctly_in_throttle_mode() {
+    let (configuration, tables) = new_test_setup().await;
+
+    // Set some initial limits
+    let initial_limits = Limits {
+        available_to_withdraw: Some(Some(10000)),
+        peg_cap: Some(None),
+        per_deposit_minimum: Some(None),
+        per_deposit_cap: Some(None),
+        per_withdrawal_cap: Some(Some(1000)),
+        rolling_withdrawal_blocks: Some(Some(100)),
+        rolling_withdrawal_cap: Some(Some(10_000_000_000)),
+        throttle_mode_initiator: Some(None),
+        account_caps: HashMap::new(),
+    };
+    // Set some chainstates to make set_limits work
+    let chainstates: Vec<Chainstate> = (0..110)
+        .map(|height| new_test_chainstate(height, height, 0))
+        .collect();
+    let _ = batch_set_chainstates(&configuration, chainstates).await;
+    apis::limits_api::set_limits(&configuration, initial_limits.clone())
+        .await
+        .unwrap();
+
+    // Verify available_to_withdraw in normal mode
+    let retrieved_limits_normal = apis::limits_api::get_limits(&configuration).await.unwrap();
+    assert_eq!(
+        retrieved_limits_normal.available_to_withdraw,
+        initial_limits.rolling_withdrawal_cap
+    );
+
+    // Register a throttle key
+    let key_name = "aaaaaaaaaaaaaaaa".to_string();
+    let secret = "very secret string".to_string();
+    let throttle_key = ThrottleKey {
+        name: key_name.clone(),
+        secret: secret.clone(),
+    };
+    let throttle_reqwest = ThrottleRequest {
+        name: key_name.clone(),
+        secret: secret.clone(),
+    };
+    apis::throttle_api::add_throttle_key(&configuration, throttle_key)
+        .await
+        .unwrap();
+
+    // Trigger throttle mode
+    apis::throttle_api::start_throttle(&configuration, throttle_reqwest.clone())
+        .await
+        .unwrap();
+
+    // Verify available_to_withdraw in throttle mode
+    let retrieved_limits_throttle = apis::limits_api::get_limits(&configuration).await.unwrap();
+    assert_eq!(
+        retrieved_limits_throttle.available_to_withdraw,
+        Some(Some(
+            emily_handler::database::accessors::THROTTLE_MODE_ROLLING_CAP
+        ))
+    );
+
+    // Now let's set initial limits with a stricter rolling_withdrawal_cap
+    let stricter_initial_limits = Limits {
+        available_to_withdraw: Some(Some(10000)),
+        peg_cap: Some(None),
+        per_deposit_minimum: Some(None),
+        per_deposit_cap: Some(None),
+        per_withdrawal_cap: Some(Some(1000)),
+        rolling_withdrawal_blocks: Some(Some(100)),
+        rolling_withdrawal_cap: Some(Some(
+            emily_handler::database::accessors::THROTTLE_MODE_ROLLING_CAP - 100,
+        )),
+        throttle_mode_initiator: Some(None),
+        account_caps: HashMap::new(),
+    };
+    apis::limits_api::set_limits(&configuration, stricter_initial_limits.clone())
+        .await
+        .unwrap();
+
+    // Verify available_to_withdraw in normal mode with stricter cap
+    let retrieved_limits_stricter_normal =
+        apis::limits_api::get_limits(&configuration).await.unwrap();
+    assert_eq!(
+        retrieved_limits_stricter_normal.available_to_withdraw,
+        stricter_initial_limits.rolling_withdrawal_cap
+    );
+
+    // Trigger throttle mode again
+    apis::throttle_api::start_throttle(&configuration, throttle_reqwest)
+        .await
+        .unwrap();
+
+    // Verify available_to_withdraw in throttle mode with stricter cap
+    // It should still respect the stricter cap, as throttle mode only decreases rolling_withdrawal_cap
+    let retrieved_limits_stricter_throttle =
+        apis::limits_api::get_limits(&configuration).await.unwrap();
+    assert_eq!(
+        retrieved_limits_stricter_throttle.available_to_withdraw,
+        stricter_initial_limits.rolling_withdrawal_cap
     );
 
     clean_test_setup(tables).await;

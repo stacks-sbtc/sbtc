@@ -30,7 +30,7 @@ use warp::reply::{Reply, json, with_status};
 pub async fn get_limits(context: EmilyContext) -> impl warp::reply::Reply {
     // Internal handler so `?` can be used correctly while still returning a reply.
     async fn handler(context: EmilyContext) -> Result<impl warp::reply::Reply, Error> {
-        let global_limits = accessors::get_limits(&context).await?;
+        let global_limits = accessors::get_limits(&context, true).await?;
         Ok(with_status(json(&global_limits), StatusCode::OK))
     }
     // Handle and respond.
@@ -97,7 +97,7 @@ pub async fn set_limits(limits: Limits, context: EmilyContext) -> impl warp::rep
             accessors::set_limit_for_account(&context, &entry).await?;
         }
         // Get the limits from the database confirming that the updates were done.
-        let global_limits = accessors::get_limits(&context).await?;
+        let global_limits = accessors::get_limits(&context, true).await?;
         // Respond.
         Ok(with_status(json(&global_limits), StatusCode::CREATED))
     }
