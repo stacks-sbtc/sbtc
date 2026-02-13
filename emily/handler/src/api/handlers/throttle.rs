@@ -60,10 +60,7 @@ pub const THROTTLE_MODE_PER_WITHDRAWAL_CAP: u64 = 150_000_000; // 1.5 BTC
 
 /// Calculates throttle mode limits. It keeps most limits as they are now,
 /// while overwriting some of them.
-pub async fn calculate_throttle_mode_limits(
-    context: &EmilyContext,
-    initiator: String,
-) -> Result<Limits, Error> {
+pub async fn calculate_throttle_mode_limits(context: &EmilyContext) -> Result<Limits, Error> {
     let mut limits = accessors::get_limits(context).await?;
     limits.per_withdrawal_cap = Some(
         limits
@@ -86,7 +83,6 @@ pub async fn calculate_throttle_mode_limits(
                 curr.min(THROTTLE_MODE_ROLLING_CAP)
             }),
     );
-    limits.throttle_mode_initiator = Some(initiator);
     Ok(limits)
 }
 
@@ -134,8 +130,8 @@ pub async fn start_throttle(
                     key_name = %request.name,
                     "Successfull request to start throttle mode. Starting throttle mode.",
                 );
-                let new_limits = calculate_throttle_mode_limits(&context, initiator).await?;
-                tracing::info!(?new_limits, "Calculated limits to use in throttle mode",);
+                let mut new_limits = accessors::get_limits(&context).await?;
+                new_limits.throttle_mode_initiator = Some(initiator.clone());
                 let res = crate::api::handlers::limits::set_limits(new_limits.clone(), context)
                     .await
                     .into_response();
