@@ -35,11 +35,12 @@ where
     T: warp::Reply,
 {
     let as_response = reply.into_response();
-    tracing::debug!(
-        event = ?"response",
-        status = ?as_response.status().as_u16(),
-        body = ?format!("{:?}", as_response.body()),
-        headers = ?format!("{:?}", as_response.headers()),
+    tracing::debug!(event = "response", status = as_response.status().as_u16());
+    tracing::trace!(
+        event = "response-body",
+        status = as_response.status().as_u16(),
+        body = ?as_response.body(),
+        headers = ?as_response.headers(),
     );
     (as_response,)
 }
