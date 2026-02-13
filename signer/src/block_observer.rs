@@ -1014,8 +1014,10 @@ mod tests {
         let (deposit0, deposit3) = {
             let db = storage.lock().await;
             assert_eq!(db.deposit_requests.len(), 2);
-            let mut values = db.deposit_requests.values().cloned();
-            (values.next().unwrap(), values.next().unwrap())
+            let mut values = db.deposit_requests.values().cloned().collect::<Vec<_>>();
+            values.sort_by_key(|req| req.max_fee);
+            values.reverse();
+            (values.pop().unwrap(), values.pop().unwrap())
         };
 
         assert_eq!(deposit0.outpoint(), req0.outpoint);

@@ -48,8 +48,7 @@ struct DepositStatusSummary {
     amount: u64,
     /// The maximum amount to spend for the bitcoin miner fee when sweeping
     /// in the funds.
-    #[sqlx(try_from = "i64")]
-    max_fee: u64,
+    max_fee: [u8; 8],
     /// The deposit script used so that the signers' can spend funds.
     deposit_script: model::ScriptPubKey,
     /// The hash of reclaim script for the deposit.

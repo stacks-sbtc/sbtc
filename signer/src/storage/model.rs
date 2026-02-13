@@ -438,9 +438,7 @@ pub struct SweptDepositRequest {
     pub amount: u64,
     /// The maximum portion of the deposited amount that may
     /// be used to pay for transaction fees.
-    #[sqlx(try_from = "i64")]
-    #[cfg_attr(feature = "testing", dummy(faker = "100..100_000"))]
-    pub max_fee: u64,
+    pub max_fee: [u8; 8],
 }
 
 impl SweptDepositRequest {
@@ -450,6 +448,11 @@ impl SweptDepositRequest {
             txid: self.txid.into(),
             vout: self.output_index,
         }
+    }
+
+    /// Get the max fee for the deposit request.
+    pub fn max_fee(&self) -> u64 {
+        u64::from_be_bytes(self.max_fee)
     }
 }
 

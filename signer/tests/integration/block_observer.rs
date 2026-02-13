@@ -1980,7 +1980,7 @@ async fn block_observer_ignores_deposits_with_high_max_fee() {
     let amount_2 = 654_321;
     faucet.send_to(amount_2, &depositor_2.address);
 
-    let max_fee_2 = u64::MAX as u64;
+    let max_fee_2 = u64::MAX;
     let deposit_triplet_2 = generate_deposit_request(
         faucet,
         amount_2,

@@ -3624,7 +3624,7 @@ async fn deposit_report_with_only_deposit_request() {
 
     assert_eq!(report.amount, deposit_request.amount);
     assert_eq!(report_lock_time, deposit_request.lock_time);
-    assert_eq!(report.max_fee, deposit_request.max_fee);
+    assert_eq!(report.max_fee(), deposit_request.max_fee);
     assert!(report.can_accept.is_none());
     assert!(report.can_sign.is_none());
     // The transaction is not on the canonical bitcoin blockchain, so it
@@ -3700,7 +3700,7 @@ async fn deposit_report_with_deposit_request_reorged() {
 
     assert_eq!(report.amount, deposit_request.amount);
     assert_eq!(report_lock_time, deposit_request.lock_time);
-    assert_eq!(report.max_fee, deposit_request.max_fee);
+    assert_eq!(report.max_fee(), deposit_request.max_fee);
     assert_eq!(report.can_accept, Some(decision.can_accept));
     assert_eq!(report.can_sign, Some(decision.can_sign));
     assert_eq!(report.status, DepositConfirmationStatus::Unconfirmed);
@@ -3781,7 +3781,7 @@ async fn deposit_report_with_deposit_request_spent() {
 
     assert_eq!(report.amount, deposit_request.amount);
     assert_eq!(report_lock_time, deposit_request.lock_time);
-    assert_eq!(report.max_fee, deposit_request.max_fee);
+    assert_eq!(report.max_fee(), deposit_request.max_fee);
     assert_eq!(report.can_accept, Some(decision.can_accept));
     assert_eq!(report.can_sign, Some(decision.can_sign));
     assert_eq!(
@@ -3876,7 +3876,7 @@ async fn deposit_report_with_deposit_request_swept_but_swept_reorged() {
 
     assert_eq!(report.amount, deposit_request.amount);
     assert_eq!(report_lock_time, deposit_request.lock_time);
-    assert_eq!(report.max_fee, deposit_request.max_fee);
+    assert_eq!(report.max_fee(), deposit_request.max_fee);
     assert_eq!(report.can_accept, Some(decision.can_accept));
     assert_eq!(report.can_sign, Some(decision.can_sign));
 
@@ -3899,7 +3899,7 @@ async fn deposit_report_with_deposit_request_swept_but_swept_reorged() {
 
     assert_eq!(report.amount, deposit_request.amount);
     assert_eq!(report_lock_time, deposit_request.lock_time);
-    assert_eq!(report.max_fee, deposit_request.max_fee);
+    assert_eq!(report.max_fee(), deposit_request.max_fee);
     assert_eq!(report.can_accept, Some(decision.can_accept));
     assert_eq!(report.can_sign, Some(decision.can_sign));
 
@@ -3969,7 +3969,7 @@ async fn deposit_report_with_deposit_request_confirmed() {
     // status.
     assert_eq!(report.amount, deposit_request.amount);
     assert_eq!(report_lock_time, deposit_request.lock_time);
-    assert_eq!(report.max_fee, deposit_request.max_fee);
+    assert_eq!(report.max_fee(), deposit_request.max_fee);
     assert_eq!(report.can_accept, Some(decision.can_accept));
     assert_eq!(report.can_sign, Some(decision.can_sign));
 
