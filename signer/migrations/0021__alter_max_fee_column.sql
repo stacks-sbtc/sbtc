@@ -8,6 +8,10 @@ UPDATE sbtc_signer.deposit_requests
 SET max_fee_bytes = int8send(max_fee);
 
 ALTER TABLE sbtc_signer.deposit_requests
-    DROP COLUMN max_fee,
-    RENAME COLUMN max_fee_bytes TO max_fee,
-    ALTER COLUMN max_fee SET NOT NULL;
+    ALTER COLUMN max_fee_bytes SET NOT NULL;
+
+ALTER TABLE sbtc_signer.deposit_requests
+    DROP COLUMN max_fee;
+
+ALTER TABLE sbtc_signer.deposit_requests
+    RENAME COLUMN max_fee_bytes TO max_fee;
