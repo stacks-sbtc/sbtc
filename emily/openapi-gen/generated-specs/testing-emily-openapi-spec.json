@@ -2010,9 +2010,10 @@
           "200": {
             "description": "Throttle key added successfully",
             "content": {
-              "text/plain": {
+              "application/json": {
                 "schema": {
-                  "type": "string"
+                  "default": null,
+                  "nullable": true
                 }
               }
             }
@@ -2125,9 +2126,10 @@
           "201": {
             "description": "Throttle key activated successfully",
             "content": {
-              "text/plain": {
+              "application/json": {
                 "schema": {
-                  "type": "string"
+                  "default": null,
+                  "nullable": true
                 }
               }
             }
@@ -2224,9 +2226,10 @@
           "201": {
             "description": "Throttle key deactivated successfully",
             "content": {
-              "text/plain": {
+              "application/json": {
                 "schema": {
-                  "type": "string"
+                  "default": null,
+                  "nullable": true
                 }
               }
             }

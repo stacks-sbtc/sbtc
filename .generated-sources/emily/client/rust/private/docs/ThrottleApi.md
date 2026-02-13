@@ -14,7 +14,7 @@ Method | HTTP request | Description
 
 ## activate_throttle_key
 
-> String activate_throttle_key(body)
+> serde_json::Value activate_throttle_key(body)
 Activate existing (previously deactivated) throttle key
 
 ### Parameters
@@ -26,7 +26,7 @@ Name | Type | Description  | Required | Notes
 
 ### Return type
 
-**String**
+[**serde_json::Value**](serde_json::Value.md)
 
 ### Authorization
 
@@ -35,14 +35,14 @@ Name | Type | Description  | Required | Notes
 ### HTTP request headers
 
 - **Content-Type**: text/plain
-- **Accept**: text/plain, application/json
+- **Accept**: application/json
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 
 ## add_throttle_key
 
-> String add_throttle_key(throttle_key)
+> serde_json::Value add_throttle_key(throttle_key)
 Add throttle key handler.
 
 ### Parameters
@@ -54,7 +54,7 @@ Name | Type | Description  | Required | Notes
 
 ### Return type
 
-**String**
+[**serde_json::Value**](serde_json::Value.md)
 
 ### Authorization
 
@@ -63,14 +63,14 @@ Name | Type | Description  | Required | Notes
 ### HTTP request headers
 
 - **Content-Type**: application/json
-- **Accept**: text/plain, application/json
+- **Accept**: application/json
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 
 ## deactivate_throttle_key
 
-> String deactivate_throttle_key(body)
+> serde_json::Value deactivate_throttle_key(body)
 Deactivate existing throttle key
 
 ### Parameters
@@ -82,7 +82,7 @@ Name | Type | Description  | Required | Notes
 
 ### Return type
 
-**String**
+[**serde_json::Value**](serde_json::Value.md)
 
 ### Authorization
 
@@ -91,7 +91,7 @@ Name | Type | Description  | Required | Notes
 ### HTTP request headers
 
 - **Content-Type**: text/plain
-- **Accept**: text/plain, application/json
+- **Accept**: application/json
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 

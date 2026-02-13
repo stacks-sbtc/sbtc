@@ -163,7 +163,7 @@ pub async fn start_throttle(
     tag = "throttle",
     request_body = ThrottleKey,
     responses(
-        (status = 200, description = "Throttle key added successfully", body = String),
+        (status = 200, description = "Throttle key added successfully", body = ()),
         (status = 400, description = "Invalid request body", body = ErrorResponse),
         (status = 405, description = "Method not allowed", body = ErrorResponse),
         (status = 409, description = "Key already exists", body = ErrorResponse),
@@ -207,7 +207,7 @@ pub async fn add_throttle_key(key: ThrottleKey, context: EmilyContext) -> impl w
             is_active: true,
         };
         accessors::add_throttle_key(&context, &entry).await?;
-        Ok(with_status(json(&entry.name), StatusCode::CREATED))
+        Ok(with_status(json(&()), StatusCode::CREATED))
     }
     // Handle and respond.
     handler(context, key)
@@ -223,7 +223,7 @@ pub async fn add_throttle_key(key: ThrottleKey, context: EmilyContext) -> impl w
     tag = "throttle",
     request_body = String,
     responses(
-        (status = 201, description = "Throttle key deactivated successfully", body = String),
+        (status = 201, description = "Throttle key deactivated successfully", body = ()),
         (status = 400, description = "Invalid request body", body = ErrorResponse),
         (status = 404, description = "Throttle key not found", body = ErrorResponse),
         (status = 405, description = "Method not allowed", body = ErrorResponse),
@@ -241,8 +241,8 @@ pub async fn deactivate_throttle_key(
         context: EmilyContext,
         hash: String,
     ) -> Result<impl warp::reply::Reply, Error> {
-        accessors::deactivate_throttle_key(&context, hash.clone()).await?;
-        Ok(with_status(json(&hash), StatusCode::OK))
+        accessors::deactivate_throttle_key(&context, hash).await?;
+        Ok(with_status(json(&()), StatusCode::OK))
     }
     // Handle and respond.
     handler(context, hash)
@@ -258,7 +258,7 @@ pub async fn deactivate_throttle_key(
     tag = "throttle",
     request_body = String,
     responses(
-        (status = 201, description = "Throttle key activated successfully", body = String),
+        (status = 201, description = "Throttle key activated successfully", body = ()),
         (status = 400, description = "Invalid request body", body = ErrorResponse),
         (status = 404, description = "Throttle key not found", body = ErrorResponse),
         (status = 405, description = "Method not allowed", body = ErrorResponse),
@@ -273,8 +273,8 @@ pub async fn activate_throttle_key(hash: String, context: EmilyContext) -> impl 
         context: EmilyContext,
         hash: String,
     ) -> Result<impl warp::reply::Reply, Error> {
-        accessors::activate_throttle_key(&context, hash.clone()).await?;
-        Ok(with_status(json(&hash), StatusCode::OK))
+        accessors::activate_throttle_key(&context, hash).await?;
+        Ok(with_status(json(&()), StatusCode::OK))
     }
     // Handle and respond.
     handler(context, hash)
