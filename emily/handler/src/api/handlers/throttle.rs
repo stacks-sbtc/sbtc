@@ -251,7 +251,7 @@ pub async fn activate_throttle_key(hash: String, context: EmilyContext) -> impl 
         .map_or_else(Reply::into_response, Reply::into_response)
 }
 
-/// Get the throttle key details.
+/// Stop throttle.
 #[utoipa::path(
     post,
     operation_id = "stopThrottle",

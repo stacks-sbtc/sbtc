@@ -2149,7 +2149,7 @@
         "tags": [
           "throttle"
         ],
-        "summary": "Get the throttle key details.",
+        "summary": "Stop throttle.",
         "operationId": "stopThrottle",
         "responses": {
           "200": {
