@@ -28,8 +28,9 @@ impl PgWrite {
               ( block_hash
               , block_height
               , parent_hash
+              , is_canonical
               )
-            VALUES ($1, $2, $3)
+            VALUES ($1, $2, $3, NULL)
             ON CONFLICT DO NOTHING",
         )
         .bind(block.block_hash)
@@ -1001,6 +1002,73 @@ impl PgWrite {
 
         Ok(())
     }
+
+    /// Update the is_canonical status for all blocks with height greater
+    /// than the current "canonical root height" (the first block on the chain
+    /// reachable from the chain tip that is already marked as canonical).
+    ///
+    /// # Notes
+    ///
+    /// If a forked block is added to the database and the next chain tip
+    /// builds off of a block where is_canonical is TRUE, and that block
+    /// has height greater than this forked block, then this function will
+    /// not set the is_canonical column for the forked block. This is okay,
+    /// since we just need to make sure that it is not set to TRUE.
+    async fn set_canonical_bitcoin_blockchain<'e, E>(
+        executor: &'e mut E,
+        chain_tip: &model::BitcoinBlockHash,
+    ) -> Result<(), Error>
+    where
+        E: 'static,
+        for<'c> &'c mut E: sqlx::PgExecutor<'c>,
+    {
+        // Walk backwards from chain tip to find the canonical root and
+        // build the canonical chain in a single recursive query, then
+        // update all blocks with height >= the minimum height found.
+        sqlx::query(
+            r#"
+            -- set_canonical_bitcoin_blockchain
+            WITH RECURSIVE canonical_chain AS (
+                -- Start from the chain tip
+                SELECT
+                    block_hash
+                  , block_height
+                  , parent_hash
+                  , is_canonical
+                FROM sbtc_signer.bitcoin_blocks
+                WHERE block_hash = $1
+
+                UNION ALL
+
+                -- Recursively get parent blocks, stopping when we find a canonical block
+                SELECT
+                    parent.block_hash
+                  , parent.block_height
+                  , parent.parent_hash
+                  , parent.is_canonical
+                FROM sbtc_signer.bitcoin_blocks AS parent
+                JOIN canonical_chain AS child
+                  ON parent.block_hash = child.parent_hash
+                WHERE child.is_canonical IS NOT TRUE
+            ),
+            min_height AS (
+                SELECT COALESCE(MIN(block_height), 0) AS height
+                FROM canonical_chain
+            )
+            UPDATE sbtc_signer.bitcoin_blocks
+            SET is_canonical = (block_hash IN (
+                SELECT block_hash FROM canonical_chain
+            ))
+            WHERE block_height >= (SELECT height FROM min_height)
+            "#,
+        )
+        .bind(chain_tip)
+        .execute(executor)
+        .await
+        .map_err(Error::SqlxQuery)?;
+
+        Ok(())
+    }
 }
 
 impl DbWrite for PgStore {
@@ -1160,6 +1228,14 @@ impl DbWrite for PgStore {
             address,
         )
         .await
+    }
+
+    async fn set_canonical_bitcoin_blockchain(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+    ) -> Result<(), Error> {
+        PgWrite::set_canonical_bitcoin_blockchain(self.get_connection().await?.as_mut(), chain_tip)
+            .await
     }
 }
 
@@ -1331,5 +1407,13 @@ impl DbWrite for PgTransaction<'_> {
     ) -> Result<(), Error> {
         let mut tx = self.tx.lock().await;
         PgWrite::update_peer_connection(tx.as_mut(), pub_key, peer_id, address).await
+    }
+
+    async fn set_canonical_bitcoin_blockchain(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+    ) -> Result<(), Error> {
+        let mut tx = self.tx.lock().await;
+        PgWrite::set_canonical_bitcoin_blockchain(tx.as_mut(), chain_tip).await
     }
 }
