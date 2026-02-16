@@ -559,6 +559,14 @@ async fn stop_throttle_works() {
         .await
         .unwrap();
 
+    // Verify that before starting throttle limits equal to what we set.
+    let new_limits = apis::limits_api::get_limits(&configuration).await.unwrap();
+    assert_eq!(
+        new_limits.per_withdrawal_cap,
+        initial_limits.per_withdrawal_cap
+    );
+    assert_eq!(new_limits.throttle_mode_initiator, Some(None));
+
     // Trigger throttle mode
     apis::throttle_api::start_throttle(&configuration, throttle_reqwest.clone())
         .await
@@ -572,6 +580,10 @@ async fn stop_throttle_works() {
             emily_handler::database::accessors::THROTTLE_MODE_PER_WITHDRAWAL_CAP
         ))
     );
+    assert_eq!(
+        new_limits.throttle_mode_initiator,
+        Some(Some(key_name.clone()))
+    );
 
     // Now let's restore limits back to normal and check that throttle_mode_initiator is None
     let _ = apis::throttle_api::stop_throttle(&configuration)
@@ -582,6 +594,7 @@ async fn stop_throttle_works() {
         retrieved_limits.per_withdrawal_cap,
         initial_limits.per_withdrawal_cap
     );
+    assert_eq!(retrieved_limits.throttle_mode_initiator, Some(None));
 
     clean_test_setup(tables).await;
 }
