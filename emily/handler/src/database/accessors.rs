@@ -860,7 +860,6 @@ pub const THROTTLE_MODE_PER_WITHDRAWAL_CAP: u64 = 150_000_000; // 1.5 BTC
 /// Calculates throttle mode limits. It keeps most limits as they are now,
 /// while overwriting some of them.
 pub fn calculate_throttle_mode_limits(limit_entry: LimitEntry) -> LimitEntry {
-    tracing::info!(?limit_entry, "Calculating throttle mode limits");
     let mut limits = limit_entry;
     if limits.throttle_mode_initiator.is_none() {
         return limits;
