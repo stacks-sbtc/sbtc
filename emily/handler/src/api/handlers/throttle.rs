@@ -95,6 +95,15 @@ pub async fn start_throttle(
                     "Successfull request to start throttle mode. Starting throttle mode.",
                 );
                 let mut new_limits = accessors::get_limits(&context, true).await?;
+                if new_limits.throttle_mode_initiator.is_some() {
+                    tracing::info!(
+                        // Safety: unwrap() here is ok because of .is_some() check above.
+                        existing_initiator = %new_limits.throttle_mode_initiator.clone().unwrap(),
+                        new_initiator = %initiator,
+                        "Throttle mode is already on. Ignoring request to start throttle mode.",
+                    );
+                    return Ok(with_status(json(&new_limits), StatusCode::OK));
+                }
                 new_limits.throttle_mode_initiator = Some(initiator.clone());
                 let res = crate::api::handlers::limits::set_limits(new_limits.clone(), context)
                     .await
