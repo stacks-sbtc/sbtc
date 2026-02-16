@@ -9,7 +9,7 @@ Method | HTTP request | Description
 [**deactivate_throttle_key**](ThrottleApi.md#deactivate_throttle_key) | **PATCH** /throttle/deactivate | Deactivate existing throttle key
 [**get_throttle_key**](ThrottleApi.md#get_throttle_key) | **GET** /throttle | Get the throttle key details.
 [**start_throttle**](ThrottleApi.md#start_throttle) | **POST** /start_throttle | Try to turn on throttle mode
-[**stop_throttle**](ThrottleApi.md#stop_throttle) | **POST** /throttle/stop | Get the throttle key details.
+[**stop_throttle**](ThrottleApi.md#stop_throttle) | **POST** /throttle/stop | Stop throttle.
 
 
 
@@ -156,7 +156,7 @@ No authorization required
 ## stop_throttle
 
 > serde_json::Value stop_throttle()
-Get the throttle key details.
+Stop throttle.
 
 ### Parameters
 

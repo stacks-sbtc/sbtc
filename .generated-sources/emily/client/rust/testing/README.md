@@ -73,7 +73,7 @@ Class | Method | HTTP request | Description
 *ThrottleApi* | [**deactivate_throttle_key**](docs/ThrottleApi.md#deactivate_throttle_key) | **PATCH** /throttle/deactivate | Deactivate existing throttle key
 *ThrottleApi* | [**get_throttle_key**](docs/ThrottleApi.md#get_throttle_key) | **GET** /throttle | Get the throttle key details.
 *ThrottleApi* | [**start_throttle**](docs/ThrottleApi.md#start_throttle) | **POST** /start_throttle | Try to turn on throttle mode
-*ThrottleApi* | [**stop_throttle**](docs/ThrottleApi.md#stop_throttle) | **POST** /throttle/stop | Get the throttle key details.
+*ThrottleApi* | [**stop_throttle**](docs/ThrottleApi.md#stop_throttle) | **POST** /throttle/stop | Stop throttle.
 *WithdrawalApi* | [**create_withdrawal**](docs/WithdrawalApi.md#create_withdrawal) | **POST** /withdrawal | Create withdrawal handler.
 *WithdrawalApi* | [**get_withdrawal**](docs/WithdrawalApi.md#get_withdrawal) | **GET** /withdrawal/{id} | Get withdrawal handler.
 *WithdrawalApi* | [**get_withdrawals**](docs/WithdrawalApi.md#get_withdrawals) | **GET** /withdrawal | Get withdrawals handler.
