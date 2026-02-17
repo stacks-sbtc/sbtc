@@ -541,7 +541,8 @@ impl<'a> sqlx::FromRow<'a, PgRow> for DepositRequest {
     }
 }
 
-/// Helper function to convert the value from the database into another type.
+/// Helper function to convert the value from the database into another
+/// type, but return a sqlx error if the conversion fails.
 fn try_from_t<T, U>(value: T, name: &str) -> Result<U, sqlx::Error>
 where
     U: TryFrom<T>,
