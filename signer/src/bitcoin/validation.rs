@@ -797,7 +797,7 @@ pub struct DepositRequestReport {
     /// The deposit amount
     pub amount: u64,
     /// The max fee embedded in the deposit request.
-    pub max_fee: [u8; 8],
+    pub max_fee: u64,
     /// The lock_time in the reclaim script
     pub lock_time: LockTime,
     /// The deposit script used so that the signers' can spend funds.
@@ -873,7 +873,7 @@ impl DepositRequestReport {
             return InputValidationResult::Unknown;
         };
 
-        if assessed_fee.to_sat() > self.max_fee().min(self.amount) {
+        if assessed_fee.to_sat() > self.max_fee.min(self.amount) {
             return InputValidationResult::FeeTooHigh;
         }
 
@@ -920,18 +920,13 @@ impl DepositRequestReport {
     fn to_deposit_request(&self, votes: &SignerVotes) -> DepositRequest {
         DepositRequest {
             outpoint: self.outpoint,
-            max_fee: self.max_fee(),
+            max_fee: self.max_fee,
             amount: self.amount,
             deposit_script: self.deposit_script.clone(),
             reclaim_script_hash: self.reclaim_script_hash.clone(),
             signers_public_key: self.signers_public_key,
             signer_bitmap: votes.into(),
         }
-    }
-
-    /// Get the max fee for the deposit request.
-    pub fn max_fee(&self) -> u64 {
-        u64::from_be_bytes(self.max_fee)
     }
 }
 
@@ -1092,7 +1087,7 @@ mod tests {
             can_sign: Some(true),
             can_accept: Some(true),
             amount: 100_000_000,
-            max_fee: u64::MAX.to_be_bytes(),
+            max_fee: u64::MAX,
             lock_time: LockTime::from_height(u16::MAX),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
@@ -1110,7 +1105,7 @@ mod tests {
             can_sign: Some(true),
             can_accept: Some(true),
             amount: 100_000_000,
-            max_fee: u64::MAX.to_be_bytes(),
+            max_fee: u64::MAX,
             lock_time: LockTime::from_height(u16::MAX),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
@@ -1128,7 +1123,7 @@ mod tests {
             can_sign: None,
             can_accept: None,
             amount: 100_000_000,
-            max_fee: u64::MAX.to_be_bytes(),
+            max_fee: u64::MAX,
             lock_time: LockTime::from_height(u16::MAX),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
@@ -1146,7 +1141,7 @@ mod tests {
             can_sign: Some(false),
             can_accept: Some(true),
             amount: 100_000_000,
-            max_fee: u64::MAX.to_be_bytes(),
+            max_fee: u64::MAX,
             lock_time: LockTime::from_height(u16::MAX),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
@@ -1164,7 +1159,7 @@ mod tests {
             can_sign: Some(true),
             can_accept: Some(false),
             amount: 100_000_000,
-            max_fee: u64::MAX.to_be_bytes(),
+            max_fee: u64::MAX,
             lock_time: LockTime::from_height(u16::MAX),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
@@ -1182,7 +1177,7 @@ mod tests {
             can_sign: Some(true),
             can_accept: Some(true),
             amount: 100_000_000,
-            max_fee: u64::MAX.to_be_bytes(),
+            max_fee: u64::MAX,
             lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 1),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
@@ -1200,7 +1195,7 @@ mod tests {
             can_sign: Some(true),
             can_accept: Some(true),
             amount: 100_000_000,
-            max_fee: u64::MAX.to_be_bytes(),
+            max_fee: u64::MAX,
             lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 2),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
@@ -1218,7 +1213,7 @@ mod tests {
             can_sign: Some(true),
             can_accept: Some(true),
             amount: 100_000_000,
-            max_fee: u64::MAX.to_be_bytes(),
+            max_fee: u64::MAX,
             lock_time: LockTime::from_512_second_intervals(u16::MAX),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
@@ -1236,7 +1231,7 @@ mod tests {
             can_sign: Some(true),
             can_accept: Some(true),
             amount: 100_000_000,
-            max_fee: u64::MAX.to_be_bytes(),
+            max_fee: u64::MAX,
             lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 3),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
@@ -1254,7 +1249,7 @@ mod tests {
             can_sign: Some(true),
             can_accept: Some(true),
             amount: 100_000_000,
-            max_fee: TX_FEE.to_sat().to_be_bytes(),
+            max_fee: TX_FEE.to_sat(),
             lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 3),
             outpoint: OutPoint::new(bitcoin::Txid::from_byte_array([1; 32]), 0),
             deposit_script: ScriptBuf::new(),
@@ -1272,7 +1267,7 @@ mod tests {
             can_sign: Some(true),
             can_accept: Some(true),
             amount: 100_000_000,
-            max_fee: TX_FEE.to_sat().to_be_bytes(),
+            max_fee: TX_FEE.to_sat(),
             lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 3),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
@@ -1290,7 +1285,7 @@ mod tests {
             can_sign: Some(true),
             can_accept: Some(true),
             amount: TX_FEE.to_sat() - 1,
-            max_fee: TX_FEE.to_sat().to_be_bytes(),
+            max_fee: TX_FEE.to_sat(),
             lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 3),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
@@ -1308,7 +1303,7 @@ mod tests {
             can_sign: Some(true),
             can_accept: Some(true),
             amount: TX_FEE.to_sat() + DEPOSIT_DUST_LIMIT - 1,
-            max_fee: TX_FEE.to_sat().to_be_bytes(),
+            max_fee: TX_FEE.to_sat(),
             lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 3),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
@@ -1326,7 +1321,7 @@ mod tests {
             can_sign: Some(true),
             can_accept: Some(true),
             amount: TX_FEE.to_sat() + DEPOSIT_DUST_LIMIT,
-            max_fee: TX_FEE.to_sat().to_be_bytes(),
+            max_fee: TX_FEE.to_sat(),
             lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 3),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
@@ -1344,7 +1339,7 @@ mod tests {
             can_sign: Some(true),
             can_accept: Some(true),
             amount: 100_000_000,
-            max_fee: (TX_FEE.to_sat() - 1).to_be_bytes(),
+            max_fee: TX_FEE.to_sat() - 1,
             lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 3),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
@@ -1362,7 +1357,7 @@ mod tests {
             can_sign: Some(true),
             can_accept: Some(true),
             amount: 100_000_000,
-            max_fee: u64::MAX.to_be_bytes(),
+            max_fee: u64::MAX,
             lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 3),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
@@ -1380,7 +1375,7 @@ mod tests {
             can_sign: Some(true),
             can_accept: Some(true),
             amount: 99_999_999,
-            max_fee: u64::MAX.to_be_bytes(),
+            max_fee: u64::MAX,
             lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 3),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
@@ -1398,7 +1393,7 @@ mod tests {
             can_sign: Some(true),
             can_accept: Some(true),
             amount: 100_000_000,
-            max_fee: u64::MAX.to_be_bytes(),
+            max_fee: u64::MAX,
             lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 3),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
@@ -1416,7 +1411,7 @@ mod tests {
             can_sign: Some(true),
             can_accept: Some(true),
             amount: 100_000_000,
-            max_fee: u64::MAX.to_be_bytes(),
+            max_fee: u64::MAX,
             lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 3),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
@@ -1434,7 +1429,7 @@ mod tests {
             can_sign: Some(true),
             can_accept: Some(true),
             amount: 100_000_000,
-            max_fee: u64::MAX.to_be_bytes(),
+            max_fee: u64::MAX,
             lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 3),
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
@@ -2025,7 +2020,7 @@ mod tests {
                 can_sign: Some(true),
                 can_accept: Some(true),
                 amount,
-                max_fee: 1000u64.to_be_bytes(),
+                max_fee: 1000,
                 lock_time: LockTime::from_height(100),
                 deposit_script: ScriptBuf::new(),
                 reclaim_script_hash: TaprootScriptHash::zeros(),
