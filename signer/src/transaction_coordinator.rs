@@ -239,7 +239,7 @@ where
                     }
                     tracing::trace!("sending tenure completed signal");
                     self.context
-                        .signal(TxCoordinatorEvent::TenureCompleted.into())?;
+                        .signal(TxCoordinatorEvent::TenureCompleted(chain_tip).into())?;
                 }
                 SignerSignal::Event(_) => {}
             }

@@ -20,6 +20,8 @@ use bitcoin::BlockHash;
 use futures::stream::Stream;
 use futures::stream::StreamExt as _;
 use tokio::sync::broadcast;
+#[cfg(any(test, feature = "testing"))]
+use tokio::task::AbortHandle;
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
@@ -113,6 +115,12 @@ impl BitcoinChainTipPoller {
     /// Stops the background polling task.
     pub fn stop(self) {
         self.poller_task_handle.abort();
+    }
+
+    /// Returns an abort handle to the background polling task.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn abort_handle(&self) -> AbortHandle {
+        self.poller_task_handle.abort_handle()
     }
 }
 
