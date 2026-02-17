@@ -1,10 +1,9 @@
 use std::sync::Arc;
 use tokio::sync::broadcast::Sender;
-use url::Url;
 
 use crate::{
     SIGNER_CHANNEL_CAPACITY,
-    bitcoin::BitcoinInteract,
+    bitcoin::{BitcoinInteract, rpc::BitcoinCoreClientParams},
     config::{EmilyClientConfig, Settings},
     emily_client::EmilyInteract,
     error::Error,
@@ -47,17 +46,26 @@ pub struct SignerContext<S, BC, ST, EM> {
 impl<S, BC, ST, EM> SignerContext<S, BC, ST, EM>
 where
     S: DbRead + DbWrite + Clone + Sync + Send + 'static,
-    BC: for<'a> TryFrom<&'a [Url]> + BitcoinInteract + Clone + 'static,
+    BC: for<'a> TryFrom<Vec<BitcoinCoreClientParams>> + BitcoinInteract + Clone + 'static,
     ST: for<'a> TryFrom<&'a Settings> + StacksInteract + Clone + Sync + Send + 'static,
     EM: for<'a> TryFrom<&'a EmilyClientConfig> + EmilyInteract + Clone + Sync + Send + 'static,
-    Error: for<'a> From<<BC as TryFrom<&'a [Url]>>::Error>,
+    Error: for<'a> From<<BC as TryFrom<Vec<BitcoinCoreClientParams>>>::Error>,
     Error: for<'a> From<<ST as TryFrom<&'a Settings>>::Error>,
     Error: for<'a> From<<EM as TryFrom<&'a EmilyClientConfig>>::Error>,
 {
     /// Initializes a new [`SignerContext`], automatically creating clients
     /// based on the provided types.
     pub fn init(config: Settings, db: S) -> Result<Self, Error> {
-        let bc = BC::try_from(&config.bitcoin.rpc_endpoints)?;
+        let bitcoin_params = config
+            .bitcoin
+            .rpc_endpoints
+            .iter()
+            .map(|url| BitcoinCoreClientParams {
+                url: url.clone(),
+                timeout: config.bitcoin.timeout,
+            })
+            .collect();
+        let bc = BC::try_from(bitcoin_params)?;
         let st = ST::try_from(&config)?;
         let em = EM::try_from(&config.emily)?;
 
