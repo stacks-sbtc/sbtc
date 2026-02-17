@@ -2291,7 +2291,6 @@ impl PgRead {
               , deposit_req.output_index
               , deposit_req.recipient
               , deposit_req.amount
-              , deposit_req.max_fee
             FROM bitcoin_blockchain AS bc_blocks
             INNER JOIN bitcoin_transactions AS bc_trx USING (block_hash)
             INNER JOIN bitcoin_tx_inputs AS bti USING (txid)
