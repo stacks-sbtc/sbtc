@@ -1731,6 +1731,11 @@ where
         S: Stream<Item = Signed<SignerMessage>>,
         Coordinator: WstsCoordinator,
     {
+        // We only allow the coordinator to send us certain kinds of
+        // messages. So later, we need to check whether the sender is the
+        // coordinator, and for that we need to use the "coordinator signer
+        // set", which may differ from the set of signers sending us
+        // messages right now.
         let signer_set = self.context.coordinator_signer_set();
         tokio::pin!(signal_stream);
 
@@ -2858,7 +2863,7 @@ mod tests {
             .unwrap();
     }
 
-    /// Check that we is_coordinator uses the registry for figuring out who
+    /// Check that is_coordinator uses the registry for figuring out who
     /// the cooridnator is and falls back to the config if the registry has
     /// no signer set info.
     #[tokio::test]
