@@ -2036,7 +2036,8 @@ mod tests {
         // Create registry signer set: `overlap` keys from the bootstrap
         // key pairs, adding + (3 - overlap) new keys
         let num_new_keys = bootstrap_keypairs.len() - overlap;
-        let registry_keypairs = std::iter::repeat_n(Keypair::new_global(&mut rng), num_new_keys)
+        let registry_keypairs = std::iter::repeat_with(|| Keypair::new_global(&mut rng))
+            .take(num_new_keys)
             .chain(bootstrap_keypairs.iter().take(overlap).cloned())
             .collect::<Vec<Keypair>>();
 
