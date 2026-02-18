@@ -65,7 +65,7 @@ async fn base_flow() {
     assert_eq!(new_limits, limits);
 
     // Now let's register our key.
-    let _ = apis::throttle_api::add_throttle_key(&configuration, throttle_key.clone())
+    apis::throttle_api::add_throttle_key(&configuration, throttle_key.clone())
         .await
         .unwrap();
 
@@ -124,7 +124,7 @@ async fn base_flow() {
     assert_eq!(limits, retrieved_limits);
 
     // Now lets deactivate key, and make sure that it is not allowed to start throttle mode anymore.
-    let _ = apis::throttle_api::deactivate_throttle_key(&configuration, &hash)
+    apis::throttle_api::deactivate_throttle_key(&configuration, &hash)
         .await
         .unwrap();
     let _ = apis::throttle_api::start_throttle(&configuration, throttle_reqwest.clone())
@@ -134,7 +134,7 @@ async fn base_flow() {
     assert_eq!(limits, retrieved_limits);
 
     // Now lets activate key back, and make sure that it is again eligible to start throttle mode.
-    let _ = apis::throttle_api::activate_throttle_key(&configuration, &hash)
+    apis::throttle_api::activate_throttle_key(&configuration, &hash)
         .await
         .unwrap();
     let _ = apis::throttle_api::start_throttle(&configuration, throttle_reqwest.clone())
@@ -234,7 +234,7 @@ async fn throttle_does_not_overwrite_stronger_limits(
     };
 
     // Now let's register our key.
-    let _ = apis::throttle_api::add_throttle_key(&configuration, throttle_key.clone())
+    apis::throttle_api::add_throttle_key(&configuration, throttle_key.clone())
         .await
         .unwrap();
 
@@ -429,7 +429,7 @@ async fn throttle_mode_overwrites_unlimited_limits() {
         secret: secret.clone(),
     };
 
-    let _ = apis::throttle_api::add_throttle_key(&configuration, throttle_key.clone())
+    apis::throttle_api::add_throttle_key(&configuration, throttle_key.clone())
         .await
         .unwrap();
 
