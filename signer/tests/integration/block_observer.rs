@@ -1901,23 +1901,18 @@ fn make_coinbase_deposit_request(
     (deposit_tx, req, info)
 }
 
-/// This test checks that the block observer ignores deposits with a max
-/// fee that is too high.
+/// This test checks that the block observer writes deposits with a a high
+/// max–fee to the database.
 #[test_log::test(tokio::test)]
-async fn block_observer_ignores_deposits_with_invalid_max_fee() {
+async fn block_observer_ignores_deposits_with_high_max_fee() {
     let mut rng = get_rng();
 
     let stack = TestContainersBuilder::start_bitcoin().await;
     let bitcoin = stack.bitcoin().await;
-    let rpc = bitcoin.rpc();
     let faucet = &bitcoin.get_faucet();
 
-    let (emily_client, emily_tables) = new_emily_setup().await;
-
     // Generate a block to ensure we start with an empty mempool
-    faucet.generate_block();
-
-    let chain_tip_info = get_canonical_chain_tip(rpc);
+    let chain_tip = faucet.generate_block().into();
 
     // 1. Create a database, an associated context for the block observer.
 
@@ -1925,7 +1920,7 @@ async fn block_observer_ignores_deposits_with_invalid_max_fee() {
     let ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_bitcoin_client(bitcoin.get_client())
-        .with_emily_client(emily_client.clone())
+        .with_mocked_emily_client()
         .with_mocked_stacks_client()
         .build();
 
@@ -1937,7 +1932,6 @@ async fn block_observer_ignores_deposits_with_invalid_max_fee() {
             .expect_get_tenure_info()
             .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
 
-        let chain_tip = BitcoinBlockHash::from(chain_tip_info.hash);
         client.expect_get_tenure_headers().returning(move |_| {
             let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
             tenure.anchor_block_hash = chain_tip;
@@ -1961,36 +1955,6 @@ async fn block_observer_ignores_deposits_with_invalid_max_fee() {
     .await;
 
     // ** Step 2 **
-    //
-    // Start the BlockObserver
-    //
-    // We only proceed with the test after the process has started, and
-    // we use this counter to notify us when that happens.
-    let start_flag = Arc::new(AtomicBool::new(false));
-    let flag = start_flag.clone();
-
-    let bitcoin_block_source = bitcoin.start_chain_tip_poller().await;
-    let block_observer = BlockObserver {
-        context: ctx.clone(),
-        bitcoin_block_source,
-    };
-
-    tokio::spawn(async move {
-        flag.store(true, Ordering::Relaxed);
-        block_observer.run().await
-    });
-
-    while !start_flag.load(Ordering::SeqCst) {
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-
-    let deposits = db
-        .get_deposit_requests(&chain_tip_info.hash.into(), 100)
-        .await
-        .unwrap();
-    assert!(deposits.is_empty());
-
-    // ** Step 3 **
     //
     // Create two deposit requests, one with a max fee at the cutoff and
     // one above it.
@@ -2016,7 +1980,7 @@ async fn block_observer_ignores_deposits_with_invalid_max_fee() {
     let amount_2 = 654_321;
     faucet.send_to(amount_2, &depositor_2.address);
 
-    let max_fee_2 = i64::MAX as u64 + 1;
+    let max_fee_2 = u64::MAX;
     let deposit_triplet_2 = generate_deposit_request(
         faucet,
         amount_2,
@@ -2025,17 +1989,52 @@ async fn block_observer_ignores_deposits_with_invalid_max_fee() {
         &mut rng,
     );
 
-    for (tx, deposit_request, deposit_info) in [&deposit_triplet_1, &deposit_triplet_2] {
-        let body = CreateDepositRequestBody {
-            bitcoin_tx_output_index: deposit_request.outpoint.vout,
-            bitcoin_txid: deposit_request.outpoint.txid.to_string(),
-            deposit_script: deposit_request.deposit_script.to_hex_string(),
-            reclaim_script: deposit_info.reclaim_script.to_hex_string(),
-            transaction_hex: serialize_hex(tx),
-        };
-        deposit_api::create_deposit(emily_client.config(), body)
-            .await
-            .unwrap();
+    let deposit_requests = [&deposit_triplet_1, &deposit_triplet_2]
+        .iter()
+        .map(|(_, request, info)| sbtc::deposits::CreateDepositRequest {
+            outpoint: request.outpoint,
+            reclaim_script: info.reclaim_script.clone(),
+            deposit_script: info.deposit_script.clone(),
+        })
+        .collect::<Vec<_>>();
+
+    ctx.with_emily_client(move |client| {
+        client
+            .expect_get_deposits()
+            .returning(move || Box::pin(std::future::ready(Ok(deposit_requests.clone()))));
+
+        client
+            .expect_get_limits()
+            .once()
+            .returning(move || Box::pin(std::future::ready(Ok(SbtcLimits::unlimited()))));
+    })
+    .await;
+
+    let deposits = db.get_deposit_requests(&chain_tip, 100).await.unwrap();
+    assert!(deposits.is_empty());
+
+    // ** Step 3 **
+    //
+    // Start the BlockObserver
+    //
+    // We only proceed with the test after the process has started, and
+    // we use this counter to notify us when that happens.
+    let start_flag = Arc::new(AtomicBool::new(false));
+    let flag = start_flag.clone();
+
+    let bitcoin_block_source = bitcoin.start_chain_tip_poller().await;
+    let block_observer = BlockObserver {
+        context: ctx.clone(),
+        bitcoin_block_source,
+    };
+
+    tokio::spawn(async move {
+        flag.store(true, Ordering::Relaxed);
+        block_observer.run().await
+    });
+
+    while !start_flag.load(Ordering::SeqCst) {
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
     // ** Step 4 **
@@ -2052,14 +2051,21 @@ async fn block_observer_ignores_deposits_with_invalid_max_fee() {
     .await
     .unwrap();
 
-    // We should have two donations if we processed both blocks correctly
-    let deposits = db.get_deposit_requests(&chain_tip, 100).await.unwrap();
-    assert_eq!(deposits.len(), 1);
+    // We should have two deposits if we wrote both deposits to the
+    // database
+    let mut deposits = db.get_deposit_requests(&chain_tip, 100).await.unwrap();
+    assert_eq!(deposits.len(), 2);
+
+    deposits.sort_by_key(|deposit| deposit.max_fee);
 
     let deposit = &deposits[0];
     assert_eq!(deposit.amount, amount_1);
     assert_eq!(deposit.max_fee, max_fee_1);
     assert_eq!(deposit.signers_public_key, signers_public_key.into());
+
+    let deposit = &deposits[1];
+    assert_eq!(deposit.amount, amount_2);
+    assert_eq!(deposit.max_fee, max_fee_2);
 
     // Since the deposit check is buried in the logs, we also manually check
     // that the deposit request validation in the block observer failed as
@@ -2071,14 +2077,9 @@ async fn block_observer_ignores_deposits_with_invalid_max_fee() {
         deposit_script: deposit_info.deposit_script.clone(),
     };
     let bitcoin_client = ctx.get_bitcoin_client();
-    let validate_result =
-        signer::block_observer::DepositRequestValidator::validate(&request, &bitcoin_client, false);
-    match validate_result.await {
-        Err(Error::InvalidMaxFee(outpoint, max_fee))
-            if outpoint == deposit_request.outpoint && max_fee == max_fee_2 => {}
-        _ => panic!("Expected a err, got something else"),
-    }
+    signer::block_observer::DepositRequestValidator::validate(&request, &bitcoin_client, false)
+        .await
+        .unwrap();
 
     testing::storage::drop_db(db).await;
-    clean_emily_setup(emily_tables).await;
 }
