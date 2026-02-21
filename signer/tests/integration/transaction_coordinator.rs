@@ -174,7 +174,8 @@ use crate::setup::set_deposit_incomplete;
 use crate::utxo_construction::generate_withdrawal;
 use crate::utxo_construction::make_deposit_request;
 
-type IntegrationTestContext<Stacks> = TestContext<PgStore, BitcoinCoreClient, Stacks, EmilyClient>;
+pub type IntegrationTestContext<Stacks> =
+    TestContext<PgStore, BitcoinCoreClient, Stacks, EmilyClient>;
 
 async fn run_dkg<Rng, C>(
     ctx: &C,
@@ -274,9 +275,8 @@ where
 /// Wait for all signers to finish their coordinator duties and do this
 /// concurrently so that we don't miss anything (not sure if we need to do
 /// it concurrently).
-async fn wait_for_signers<S>(
-    signers: &[(IntegrationTestContext<S>, PgStore, &Keypair, SignerNetwork)],
-) where
+pub async fn wait_for_signers<S, A, B, C>(signers: &[(IntegrationTestContext<S>, A, B, C)])
+where
     S: StacksInteract + Clone + Send + Sync + 'static,
 {
     let wait_duration = Duration::from_secs(15);
