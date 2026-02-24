@@ -409,6 +409,14 @@ fn handle_gossipsub_event(
             // we should re-evaluate whether we should remove this check.
             if !current_signer_set.is_allowed_peer(&peer_id) {
                 tracing::warn!(%peer_id, "ignoring message from unknown peer");
+                let _ = swarm
+                    .behaviour_mut()
+                    .gossipsub
+                    .report_message_validation_result(
+                        &message_id,
+                        &peer_id,
+                        MessageAcceptance::Ignore,
+                    );
                 return;
             }
 
@@ -417,11 +425,27 @@ fn handle_gossipsub_event(
             // then we distrust the message and ignore it.
             let Some(origin_peer_id) = message.source else {
                 tracing::warn!(%peer_id, "origin peer id unknown, ignoring message");
+                let _ = swarm
+                    .behaviour_mut()
+                    .gossipsub
+                    .report_message_validation_result(
+                        &message_id,
+                        &peer_id,
+                        MessageAcceptance::Ignore,
+                    );
                 return;
             };
 
             if !current_signer_set.is_allowed_peer(&origin_peer_id) {
                 tracing::warn!(%origin_peer_id, "ignoring message from unknown origin peer");
+                let _ = swarm
+                    .behaviour_mut()
+                    .gossipsub
+                    .report_message_validation_result(
+                        &message_id,
+                        &peer_id,
+                        MessageAcceptance::Ignore,
+                    );
                 return;
             }
 
@@ -452,13 +476,38 @@ fn handle_gossipsub_event(
 
                     if origin_peer_id != msg.signer_public_key.into() {
                         tracing::error!(%origin_peer_id, "connected peer sent an invalid message");
+                        let _ = swarm
+                            .behaviour_mut()
+                            .gossipsub
+                            .report_message_validation_result(
+                                &message_id,
+                                &peer_id,
+                                MessageAcceptance::Reject,
+                            );
                         return Err(Error::InvalidSignature)
                     }
 
                     if let Err(error) = msg.verify_digest(digest) {
                         tracing::error!(%origin_peer_id, "connected peer sent an invalid signature");
+                        let _ = swarm
+                            .behaviour_mut()
+                            .gossipsub
+                            .report_message_validation_result(
+                                &message_id,
+                                &peer_id,
+                                MessageAcceptance::Reject,
+                            );
                         return Err(error)
                     }
+
+                    let _ = swarm
+                        .behaviour_mut()
+                        .gossipsub
+                        .report_message_validation_result(
+                            &message_id,
+                            &peer_id,
+                            MessageAcceptance::Accept,
+                        );
 
                     let _ = ctx.get_signal_sender()
                         .send(P2PEvent::MessageReceived(Box::new(msg)).into())
