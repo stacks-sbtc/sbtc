@@ -377,7 +377,7 @@ where
     /// Find out the status of the given chain tip
     #[tracing::instrument(skip_all)]
     async fn inspect_msg_chain_tip(
-        &mut self,
+        &self,
         msg_sender: PublicKey,
         msg_bitcoin_chain_tip: &model::BitcoinBlockHash,
     ) -> Result<MsgChainTipReport, Error> {
@@ -395,11 +395,11 @@ where
             .is_some();
         let is_canonical = msg_bitcoin_chain_tip == &chain_tip.block_hash;
 
-        let signer_set = &self.context.config().signer.bootstrap_signing_set;
+        let signer_set = self.context.coordinator_signer_set();
         let sender_is_coordinator = crate::transaction_coordinator::given_key_is_coordinator(
             msg_sender,
             &chain_tip.block_hash,
-            signer_set,
+            &signer_set,
         );
 
         let chain_tip_status = match (is_known, is_canonical) {
@@ -1623,21 +1623,27 @@ pub enum ChainTipStatus {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::num::NonZeroUsize;
+    use std::time::Duration;
 
     use bitcoin::Txid;
     use fake::{Fake as _, Faker};
     use network::InMemoryNetwork;
+    use secp256k1::Keypair;
     use test_case::test_case;
 
     use crate::bitcoin::MockBitcoinInteract;
     use crate::context::Context as _;
     use crate::emily_client::MockEmilyInteract;
+    use crate::keys::PublicKey;
     use crate::stacks::api::MockStacksInteract;
+    use crate::stacks::api::SignerSetInfo;
     use crate::storage::memory::SharedStore;
     use crate::storage::{DbWrite as _, model};
     use crate::testing::context::*;
     use crate::testing::{self, get_rng};
+    use crate::transaction_coordinator::TxCoordinatorEventLoop;
 
     use super::*;
 
@@ -2002,5 +2008,200 @@ mod tests {
             .handle_wsts_message(&msg, Faker.fake(), &chain_tip_report)
             .await
             .expect("expected success");
+    }
+
+    /// Verifies that the TxCoordinatorEventLoop::is_coordinator and
+    /// TxSignerEventLoop::inspect_msg_chain_tip functions are consistent
+    /// when the registry signer set is set and they have varying degrees
+    /// of overlap with the bootstrap signing set.
+    #[test_case(0; "no overlap")]
+    #[test_case(1; "one key overlaps")]
+    #[test_case(2; "two keys overlap")]
+    #[test_case(3; "all keys overlap")]
+    #[tokio::test]
+    async fn test_is_coordinator_consistency_with_chain_tip_report(overlap: usize) {
+        let mut rng = get_rng();
+
+        // Create bootstrap signing set with 3 signers
+        let bootstrap_keypairs = [
+            Keypair::new_global(&mut rng),
+            Keypair::new_global(&mut rng),
+            Keypair::new_global(&mut rng),
+        ];
+        let bootstrap_signer_set: BTreeSet<PublicKey> = bootstrap_keypairs
+            .iter()
+            .map(|kp| kp.public_key().into())
+            .collect();
+
+        // Create registry signer set: `overlap` keys from the bootstrap
+        // key pairs, adding + (3 - overlap) new keys
+        let num_new_keys = bootstrap_keypairs.len() - overlap;
+        let registry_keypairs = std::iter::repeat_with(|| Keypair::new_global(&mut rng))
+            .take(num_new_keys)
+            .chain(bootstrap_keypairs.iter().take(overlap).cloned())
+            .collect::<Vec<Keypair>>();
+
+        let registry_signer_set: BTreeSet<PublicKey> = registry_keypairs
+            .iter()
+            .map(|kp| kp.public_key().into())
+            .collect();
+
+        let context = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .modify_settings(|settings| {
+                settings.signer.bootstrap_signing_set = bootstrap_signer_set.clone();
+            })
+            .build();
+
+        let signer_set_info = SignerSetInfo {
+            signer_set: registry_signer_set.clone(),
+            aggregate_key: *registry_signer_set.first().unwrap(),
+            signatures_required: 2,
+        };
+        context
+            .state()
+            .update_registry_signer_set_info(signer_set_info);
+
+        let network = InMemoryNetwork::new();
+
+        for _ in 0..100 {
+            let bitcoin_chain_tip: model::BitcoinBlockHash = Faker.fake_with_rng(&mut rng);
+
+            let chain_tip_ref = model::BitcoinBlockRef {
+                block_hash: bitcoin_chain_tip,
+                block_height: 100u64.into(),
+            };
+
+            // Set the chain tip in the context state or else the message
+            // report function will return an Error.
+            context.state().set_bitcoin_chain_tip(chain_tip_ref);
+
+            for kp in &registry_keypairs {
+                let coordinator_public_key = kp.public_key().into();
+
+                // The private key for the tx-signer shouldn't matter
+                let tx_coordinator = TxCoordinatorEventLoop {
+                    network: network.connect(),
+                    context: context.clone(),
+                    context_window: 10000,
+                    private_key: kp.secret_key().into(),
+                    signing_round_max_duration: Duration::from_secs(10),
+                    bitcoin_presign_request_max_duration: Duration::from_secs(10),
+                    dkg_max_duration: Duration::from_secs(10),
+                    is_epoch3: true,
+                };
+
+                let tx_signer = TxSignerEventLoop {
+                    network: network.connect(),
+                    context: context.clone(),
+                    context_window: 10000,
+                    wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
+                    signer_private_key: kp.secret_key().into(),
+                    last_presign_block: None,
+                    dkg_begin_pause: None,
+                    dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
+                    stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+                };
+
+                // The is_coordinator function checks whether the
+                // tx_coordinator is the signer set's coordinator, and the
+                // `inspect_msg_chain_tip` does the same thing when given
+                // the coordinator's public key.
+                let is_coordinator_result = tx_coordinator.is_coordinator(&bitcoin_chain_tip);
+
+                let report = tx_signer
+                    .inspect_msg_chain_tip(coordinator_public_key, &bitcoin_chain_tip)
+                    .await
+                    .unwrap();
+
+                assert_eq!(is_coordinator_result, report.sender_is_coordinator);
+
+                // If the coordinator's public key is not in the registry
+                // then it should never be the coordinator.
+                if !registry_signer_set.contains(&coordinator_public_key) {
+                    assert!(!report.sender_is_coordinator);
+                }
+            }
+        }
+    }
+
+    /// Verifies that the TxCoordinatorEventLoop::is_coordinator and
+    /// TxSignerEventLoop::inspect_msg_chain_tip functions are consistent
+    /// when the registry signer set is not set.
+    #[tokio::test]
+    async fn test_is_coordinator_consistency_without_registry_signer_set() {
+        let mut rng = get_rng();
+
+        // Create test key pairs
+        let keypairs = [
+            Keypair::new_global(&mut rng),
+            Keypair::new_global(&mut rng),
+            Keypair::new_global(&mut rng),
+        ];
+        let signer_set = keypairs.iter().map(|kp| kp.public_key().into()).collect();
+
+        // Create a bitcoin chain tip
+        let bitcoin_chain_tip: model::BitcoinBlockHash = Faker.fake_with_rng(&mut rng);
+
+        let context = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .modify_settings(|settings| {
+                settings.signer.bootstrap_signing_set = signer_set;
+            })
+            .build();
+
+        let chain_tip_ref = model::BitcoinBlockRef {
+            block_hash: bitcoin_chain_tip,
+            block_height: 100u64.into(),
+        };
+
+        // Set the chain tip in the context state
+        context.state().set_bitcoin_chain_tip(chain_tip_ref);
+
+        let network = InMemoryNetwork::new();
+
+        // Test each signer key pair
+        for kp in keypairs {
+            let coordinator_public_key = kp.public_key().into();
+
+            // Create TxCoordinatorEventLoop
+            let tx_coordinator = TxCoordinatorEventLoop {
+                network: network.connect(),
+                context: context.clone(),
+                context_window: 10000,
+                private_key: kp.secret_key().into(),
+                signing_round_max_duration: Duration::from_secs(10),
+                bitcoin_presign_request_max_duration: Duration::from_secs(10),
+                dkg_max_duration: Duration::from_secs(10),
+                is_epoch3: true,
+            };
+
+            // Create TxSignerEventLoop - use a different signer for variety
+            let tx_signer = TxSignerEventLoop {
+                network: network.connect(),
+                context: context.clone(),
+                context_window: 10000,
+                wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
+                signer_private_key: kp.secret_key().into(),
+                last_presign_block: None,
+                dkg_begin_pause: None,
+                dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
+                stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+            };
+
+            // Check if the coordinator event loop says this signer is coordinator
+            let is_coordinator_result = tx_coordinator.is_coordinator(&bitcoin_chain_tip);
+
+            // Check what inspect_msg_chain_tip says about the coordinator's public key
+            let report = tx_signer
+                .inspect_msg_chain_tip(coordinator_public_key, &bitcoin_chain_tip)
+                .await
+                .unwrap();
+
+            // Verify consistency: is_coordinator should match sender_is_coordinator
+            assert_eq!(is_coordinator_result, report.sender_is_coordinator);
+        }
     }
 }
