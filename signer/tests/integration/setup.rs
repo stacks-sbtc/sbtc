@@ -450,7 +450,11 @@ impl TestSweepSetup {
 }
 
 /// Fetch all block headers from bitcoin-core and store it in the database.
-pub async fn backfill_bitcoin_blocks(db: &PgStore, rpc: &Client, chain_tip: &bitcoin::BlockHash) {
+pub async fn backfill_bitcoin_blocks_unchecked(
+    db: &PgStore,
+    rpc: &Client,
+    chain_tip: &bitcoin::BlockHash,
+) {
     let mut block_header = rpc.get_block_header_info(chain_tip).unwrap();
 
     // There are no non-coinbase transactions below this height.
@@ -465,6 +469,13 @@ pub async fn backfill_bitcoin_blocks(db: &PgStore, rpc: &Client, chain_tip: &bit
         db.write_bitcoin_block(&bitcoin_block).await.unwrap();
         block_header = rpc.get_block_header_info(&parent_header_hash).unwrap();
     }
+}
+
+/// Fetch all block headers from bitcoin-core and store it in the database.
+/// Then check that the canonical chain tip is the same as the one we
+/// started with.
+pub async fn backfill_bitcoin_blocks(db: &PgStore, rpc: &Client, chain_tip: &bitcoin::BlockHash) {
+    backfill_bitcoin_blocks_unchecked(db, rpc, chain_tip).await;
 
     let block_hash = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
     assert_eq!(block_hash.deref(), chain_tip);
