@@ -1,6 +1,7 @@
 //! Tests for how the signers communicate with one another.
 
 use std::collections::BTreeSet;
+use std::collections::HashSet;
 use std::time::Duration;
 
 use libp2p::Multiaddr;
@@ -15,6 +16,7 @@ use signer::network::libp2p::SignerSwarmBuilder;
 use signer::testing::IterTestExt as _;
 use signer::testing::context::TestContext;
 use signer::testing::context::*;
+use signer::testing::get_rng;
 use test_case::test_case;
 use tokio_stream::StreamExt as _;
 
@@ -306,4 +308,472 @@ async fn libp2p_limits_max_established_connections() -> Result<(), Box<dyn std::
     }
 
     Ok(())
+}
+
+use signer::network::MessageTransfer;
+use signer::network::Msg;
+
+#[test_log::test(tokio::test)]
+async fn libp2p_drops_messages_exceeding_rate_limit() {
+    let rate_limit = 100;
+    let mut rng = get_rng();
+
+    let key1 = PrivateKey::new(&mut rng);
+    let key2 = PrivateKey::new(&mut rng);
+    let pub1 = PublicKey::from_private_key(&key1);
+    let pub2 = PublicKey::from_private_key(&key2);
+
+    // Setup Sender (Context 1)
+    let context1 = TestContext::builder()
+        .with_in_memory_storage()
+        .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.private_key = key1;
+        })
+        .build();
+    context1
+        .state()
+        .current_signer_set()
+        .add_signer(pub2.clone());
+
+    // Setup Receiver (Context 2)
+    let context2 = TestContext::builder()
+        .with_in_memory_storage()
+        .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.private_key = key2;
+        })
+        .build();
+    context2
+        .state()
+        .current_signer_set()
+        .add_signer(pub1.clone());
+
+    let term1 = context1.get_termination_handle();
+    let term2 = context2.get_termination_handle();
+
+    // Use TCP on local loopback with port 0 (OS assigns a random open port)
+    let swarm1_addr: Multiaddr = "/ip4/127.0.0.1/tcp/0".parse().unwrap();
+    let swarm2_addr: Multiaddr = "/ip4/127.0.0.1/tcp/0".parse().unwrap();
+
+    let swarm1 = SignerSwarmBuilder::new(&key1)
+        .enable_mdns(false)
+        .enable_kademlia(false)
+        .enable_autonat(false)
+        .with_rate_limit(rate_limit)
+        .enable_quic_transport(true)
+        .add_listen_endpoint(swarm1_addr.clone())
+        .build()
+        .expect("Failed to build sender swarm");
+
+    let swarm2 = SignerSwarmBuilder::new(&key2)
+        .enable_mdns(false)
+        .enable_kademlia(false)
+        .enable_autonat(false)
+        .with_rate_limit(rate_limit)
+        .enable_quic_transport(true)
+        .add_listen_endpoint(swarm2_addr.clone())
+        .build()
+        .expect("Failed to build receiver swarm");
+
+    let mut network1 = P2PNetwork::new(&context1);
+    let mut network2 = P2PNetwork::new(&context2);
+
+    // Start swarms
+    let mut swarm1_clone = swarm1.clone();
+    let handle1 = tokio::spawn(async move {
+        swarm1_clone.start(&context1).await.unwrap();
+    });
+
+    let mut swarm2_clone = swarm2.clone();
+    let handle2 = tokio::spawn(async move {
+        swarm2_clone.start(&context2).await.unwrap();
+    });
+
+    // Wait for the swarms to start and bind to their ports
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    // Grab the actual addresses with the assigned ports!
+    let actual_swarm1_addr = swarm1.listen_addrs().await.single();
+    let actual_swarm2_addr = swarm2.listen_addrs().await.single();
+
+    // Connect them using the actual addresses
+    swarm1.dial(actual_swarm2_addr).await.unwrap();
+    swarm2.dial(actual_swarm1_addr).await.unwrap();
+
+    // Give gossipsub a moment to establish mesh connections
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Send messages
+    for _ in 0..(rate_limit * 5) {
+        let msg = Msg::random_with_private_key(&mut rng, &key1);
+        network1.broadcast(msg).await.expect("Failed to broadcast");
+    }
+
+    // 2. Collect messages on the Receiver end
+    let mut received_count = 0;
+
+    let _ = tokio::time::timeout(Duration::from_millis(900), async {
+        loop {
+            match network2.receive().await {
+                Ok(_msg) => {
+                    received_count += 1;
+                }
+                Err(e) => {
+                    panic!("Error receiving message: {}", e);
+                }
+            }
+        }
+    }).await;
+
+    assert_eq!(
+        received_count, rate_limit
+    );
+
+
+
+    term1.signal_shutdown();
+    term2.signal_shutdown();
+    handle1.abort();
+    handle2.abort();
+}
+
+#[test_log::test(tokio::test)]
+async fn rate_limit_is_individual_per_peer() {
+    let rate_limit = 50;
+    let mut rng = get_rng();
+
+    let key1 = PrivateKey::new(&mut rng);
+    let key2 = PrivateKey::new(&mut rng);
+    let key3 = PrivateKey::new(&mut rng);
+
+    let pub1 = PublicKey::from_private_key(&key1);
+    let pub2 = PublicKey::from_private_key(&key2);
+    let pub3 = PublicKey::from_private_key(&key3);
+
+    // Setup Sender (Context 1)
+    let context1 = TestContext::builder()
+        .with_in_memory_storage()
+        .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.private_key = key1;
+        })
+        .build();
+    context1
+        .state()
+        .current_signer_set()
+        .add_signer(pub2.clone());
+    context1
+        .state()
+        .current_signer_set()
+        .add_signer(pub3.clone());
+
+    // Setup Receiver (Context 2)
+    let context2 = TestContext::builder()
+        .with_in_memory_storage()
+        .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.private_key = key2;
+        })
+        .build();
+    context2
+        .state()
+        .current_signer_set()
+        .add_signer(pub1.clone());
+    context2
+        .state()
+        .current_signer_set()
+        .add_signer(pub3.clone());
+
+    let context3 = TestContext::builder()
+        .with_in_memory_storage()
+        .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.private_key = key3;
+        })
+        .build();
+    context3
+        .state()
+        .current_signer_set()
+        .add_signer(pub1.clone());
+    context3
+        .state()
+        .current_signer_set()
+        .add_signer(pub2.clone());
+
+    let term1 = context1.get_termination_handle();
+    let term2 = context2.get_termination_handle();
+    let term3 = context3.get_termination_handle();
+
+    // Use TCP on local loopback with port 0 (OS assigns a random open port)
+    let swarm1_addr: Multiaddr = "/ip4/127.0.0.1/tcp/0".parse().unwrap();
+    let swarm2_addr: Multiaddr = "/ip4/127.0.0.1/tcp/0".parse().unwrap();
+    let swarm3_addr: Multiaddr = "/ip4/127.0.0.1/tcp/0".parse().unwrap();
+
+    let swarm1 = SignerSwarmBuilder::new(&key1)
+        .enable_mdns(false)
+        .enable_kademlia(false)
+        .enable_autonat(false)
+        .with_rate_limit(rate_limit)
+        .enable_quic_transport(true)
+        .add_listen_endpoint(swarm1_addr.clone())
+        .build()
+        .expect("Failed to build sender swarm");
+
+    let swarm2 = SignerSwarmBuilder::new(&key2)
+        .enable_mdns(false)
+        .enable_kademlia(false)
+        .enable_autonat(false)
+        .with_rate_limit(rate_limit)
+        .enable_quic_transport(true)
+        .add_listen_endpoint(swarm2_addr.clone())
+        .build()
+        .expect("Failed to build receiver swarm");
+
+    let swarm3 = SignerSwarmBuilder::new(&key3)
+        .enable_mdns(false)
+        .enable_kademlia(false)
+        .enable_autonat(false)
+        .with_rate_limit(rate_limit)
+        .enable_quic_transport(true)
+        .add_listen_endpoint(swarm3_addr.clone())
+        .build()
+        .expect("Failed to build receiver swarm");
+
+    let mut network1 = P2PNetwork::new(&context1);
+    let mut network2 = P2PNetwork::new(&context2);
+    let mut network3 = P2PNetwork::new(&context3);
+
+    let mut swarm1_clone = swarm1.clone();
+    let handle1 = tokio::spawn(async move {
+        swarm1_clone.start(&context1).await.unwrap();
+    });
+
+    let mut swarm2_clone = swarm2.clone();
+    let handle2 = tokio::spawn(async move {
+        swarm2_clone.start(&context2).await.unwrap();
+    });
+
+    let mut swarm3_clone = swarm3.clone();
+    let handle3 = tokio::spawn(async move {
+        swarm3_clone.start(&context3).await.unwrap();
+    });
+
+    // Wait for the swarms to start and bind to their ports
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    // Grab the actual addresses with the assigned ports!
+    let actual_swarm1_addr = swarm1.listen_addrs().await.single();
+    let actual_swarm2_addr = swarm2.listen_addrs().await.single();
+    let actual_swarm3_addr = swarm3.listen_addrs().await.single();
+
+    // Swarm1 -- reciever
+    // Swarm2 -- sender
+    // Swarm3 -- sender
+
+    swarm1.dial(actual_swarm2_addr).await.unwrap();
+    swarm2.dial(actual_swarm1_addr.clone()).await.unwrap();
+
+    swarm1.dial(actual_swarm3_addr).await.unwrap();
+    swarm3.dial(actual_swarm1_addr).await.unwrap();
+
+    // Give gossipsub a moment to establish mesh connections
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Send messages
+    let mut msg_set_2 = HashSet::new();
+    let mut msg_vec_2: Vec<Msg> = Default::default();
+    for _ in 0..(rate_limit * 5) {
+        let msg = Msg::random_with_private_key(&mut rng, &key2);
+        msg_vec_2.push(msg.clone());
+        msg_set_2.insert(msg.signature.serialize_compact());
+    }
+
+    let mut msg_set_3 = HashSet::new();
+    let mut msg_vec_3: Vec<Msg> = Default::default();
+    for _ in 0..(rate_limit * 5) {
+        let msg = Msg::random_with_private_key(&mut rng, &key3);
+        msg_vec_3.push(msg.clone());
+        msg_set_3.insert(msg.signature.serialize_compact());
+    }
+
+    let handle_sender2 = tokio::spawn(async move {
+        for msg in msg_vec_2 {
+            network2.broadcast(msg).await.expect("Failed to broadcast");
+        }
+    });
+
+    let handle_sender3 = tokio::spawn(async move {
+        for msg in msg_vec_3 {
+            network3.broadcast(msg).await.expect("Failed to broadcast");
+        }
+    });
+
+    let mut received = Vec::default();
+
+    let _ = tokio::time::timeout(Duration::from_millis(900), async {
+        loop {
+            match network1.receive().await {
+                Ok(msg) => {
+                    received.push(msg);
+                }
+                Err(e) => {
+                    panic!("Error receiving message: {}", e);
+                }
+            }
+        }
+    }).await;
+
+    handle_sender2.abort();
+    handle_sender3.abort();
+
+    let received = received
+        .into_iter()
+        .map(|msg| msg.signature.serialize_compact())
+        .collect::<HashSet<_>>();
+
+    // Receiver should get all messages from the honest peer and rate_limit messages from the spammy peer.
+    let received_from_2 = received.intersection(&msg_set_2).count() as u32;
+    let received_from_3 = received.intersection(&msg_set_3).count() as u32;
+
+    assert_eq!(received_from_2, rate_limit);
+    assert_eq!(received_from_3, rate_limit);
+
+    term1.signal_shutdown();
+    term2.signal_shutdown();
+    term3.signal_shutdown();
+    handle1.abort();
+    handle2.abort();
+    handle3.abort();
+}
+
+#[test_log::test(tokio::test)]
+async fn rate_limit_regenerates_over_time() {
+    let rate_limit = 200;
+    let mut rng = get_rng();
+
+    let key1 = PrivateKey::new(&mut rng);
+    let key2 = PrivateKey::new(&mut rng);
+    let pub1 = PublicKey::from_private_key(&key1);
+    let pub2 = PublicKey::from_private_key(&key2);
+
+    // Setup Sender (Context 1)
+    let context1 = TestContext::builder()
+        .with_in_memory_storage()
+        .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.private_key = key1;
+        })
+        .build();
+    context1
+        .state()
+        .current_signer_set()
+        .add_signer(pub2.clone());
+
+    // Setup Receiver (Context 2)
+    let context2 = TestContext::builder()
+        .with_in_memory_storage()
+        .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.private_key = key2;
+        })
+        .build();
+    context2
+        .state()
+        .current_signer_set()
+        .add_signer(pub1.clone());
+
+    let term1 = context1.get_termination_handle();
+    let term2 = context2.get_termination_handle();
+
+    // Use TCP on local loopback with port 0 (OS assigns a random open port)
+    let swarm1_addr: Multiaddr = "/ip4/127.0.0.1/tcp/0".parse().unwrap();
+    let swarm2_addr: Multiaddr = "/ip4/127.0.0.1/tcp/0".parse().unwrap();
+
+    let swarm1 = SignerSwarmBuilder::new(&key1)
+        .enable_mdns(false)
+        .enable_kademlia(false)
+        .enable_autonat(false)
+        .with_rate_limit(rate_limit)
+        .enable_quic_transport(true)
+        .add_listen_endpoint(swarm1_addr.clone())
+        .build()
+        .expect("Failed to build sender swarm");
+
+    let swarm2 = SignerSwarmBuilder::new(&key2)
+        .enable_mdns(false)
+        .enable_kademlia(false)
+        .enable_autonat(false)
+        .with_rate_limit(rate_limit)
+        .enable_quic_transport(true)
+        .add_listen_endpoint(swarm2_addr.clone())
+        .build()
+        .expect("Failed to build receiver swarm");
+
+    let mut network1 = P2PNetwork::new(&context1);
+    let mut network2 = P2PNetwork::new(&context2);
+
+    // Start swarms
+    let mut swarm1_clone = swarm1.clone();
+    let handle1 = tokio::spawn(async move {
+        swarm1_clone.start(&context1).await.unwrap();
+    });
+
+    let mut swarm2_clone = swarm2.clone();
+    let handle2 = tokio::spawn(async move {
+        swarm2_clone.start(&context2).await.unwrap();
+    });
+
+    // Wait for the swarms to start and bind to their ports
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    // Grab the actual addresses with the assigned ports
+    let actual_swarm1_addr = swarm1.listen_addrs().await.single();
+    let actual_swarm2_addr = swarm2.listen_addrs().await.single();
+
+    // Connect them using the actual addresses
+    swarm1.dial(actual_swarm2_addr).await.unwrap();
+    swarm2.dial(actual_swarm1_addr).await.unwrap();
+
+    // Give gossipsub a moment to establish mesh connections
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // Pre generate messages so broadcasting them will be within 1 second
+    let mut msg_vec: Vec<signer::ecdsa::Signed<signer::message::SignerMessage>> = Default::default();
+    let mut msg_vec2: Vec<signer::ecdsa::Signed<signer::message::SignerMessage>> = Default::default();
+    for _ in 0..(rate_limit * 5) {
+        let msg = Msg::random_with_private_key(&mut rng, &key1);
+        msg_vec.push(msg);
+        let msg2 = Msg::random_with_private_key(&mut rng, &key1);
+        msg_vec2.push(msg2);
+    }
+    // Send messages
+    for msg in msg_vec {
+        network1.broadcast(msg).await.expect("Failed to broadcast");
+    }
+
+    // 2. Collect messages on the Receiver end
+    let mut received_count = 0;
+
+    let _ = tokio::time::timeout(Duration::from_millis(2900), async {
+        loop {
+            match network2.receive().await {
+                Ok(_msg) => {
+                    received_count += 1;
+                }
+                Err(e) => {
+                    panic!("Error receiving message: {}", e);
+                }
+            }
+        }
+    }).await;
+
+    assert_eq!(
+        received_count, rate_limit * 3
+    );
+
+    term1.signal_shutdown();
+    term2.signal_shutdown();
+    handle1.abort();
+    handle2.abort();
 }

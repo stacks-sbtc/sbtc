@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use futures::StreamExt as _;
 use libp2p::core::ConnectedPoint;
+use libp2p::gossipsub::MessageAcceptance;
 use libp2p::kad::RoutingUpdate;
 use libp2p::swarm::SwarmEvent;
 use libp2p::{Swarm, gossipsub, identify, kad, mdns};
@@ -19,7 +20,7 @@ use super::TOPIC;
 use super::swarm::{SignerBehavior, SignerBehaviorEvent};
 
 #[tracing::instrument(skip_all, name = "swarm")]
-pub async fn run(ctx: &impl Context, swarm: Arc<Mutex<Swarm<SignerBehavior>>>) {
+pub async fn run(ctx: &impl Context, swarm: Arc<Mutex<Swarm<SignerBehavior>>>, rate_limit: u32) {
     // Subscribe to the gossipsub topic.
     let topic = TOPIC.clone();
     swarm
@@ -85,7 +86,7 @@ pub async fn run(ctx: &impl Context, swarm: Arc<Mutex<Swarm<SignerBehavior>>>) {
                     }
                     // Gossipsub protocol events.
                     SwarmEvent::Behaviour(SignerBehaviorEvent::Gossipsub(event)) => {
-                        handle_gossipsub_event(&mut swarm, ctx, event)
+                        handle_gossipsub_event(&mut swarm, ctx, event, rate_limit)
                     }
                     SwarmEvent::NewListenAddr { address, .. } => {
                         tracing::info!(%address, "listener started");
@@ -389,6 +390,7 @@ fn handle_gossipsub_event(
     swarm: &mut Swarm<SignerBehavior>,
     ctx: &impl Context,
     event: gossipsub::Event,
+    rate_limit: u32,
 ) {
     use gossipsub::Event;
 
@@ -396,6 +398,7 @@ fn handle_gossipsub_event(
         Event::Message {
             propagation_source: peer_id,
             message,
+            message_id,
             ..
         } => {
             let current_signer_set = ctx.state().current_signer_set();
@@ -419,6 +422,21 @@ fn handle_gossipsub_event(
 
             if !current_signer_set.is_allowed_peer(&origin_peer_id) {
                 tracing::warn!(%origin_peer_id, "ignoring message from unknown origin peer");
+                return;
+            }
+
+            // Enforce the rate limit for the peer. It is important to do this enforcement before
+            // expencive operations such as signature validation.
+            if !current_signer_set.check_rate_limit(&peer_id, rate_limit) {
+                tracing::debug!(%peer_id, "peer exceeded messages per second limit; ignoring message");
+                let _ = swarm
+                    .behaviour_mut()
+                    .gossipsub
+                    .report_message_validation_result(
+                        &message_id,
+                        &peer_id,
+                        MessageAcceptance::Ignore,
+                    );
                 return;
             }
 

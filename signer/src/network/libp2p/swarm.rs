@@ -20,6 +20,7 @@ use rand::SeedableRng as _;
 use rand::rngs::StdRng;
 use tokio::sync::Mutex;
 
+use super::TOPIC;
 use super::errors::SignerSwarmError;
 use super::{bootstrap, event_loop};
 
@@ -41,6 +42,61 @@ const MAX_SUBSTREAMS_PER_CONNECTION: usize = 20;
 /// the connection will be closed and the dialing peer will be notified. This
 /// timeout is applied to both inbound and outbound connections.
 const NEGOTIATION_TIMEOUT_SECS: u64 = 10;
+
+use libp2p::gossipsub::{PeerScoreParams, PeerScoreThresholds, TopicHash, TopicScoreParams};
+
+/// The maximum number of messages a peer can send per second before being ignored.
+pub const MESSAGES_PER_SECOND: u32 = 100;
+
+/// How long a peer should remain graylisted (banned) after sending an invalid message.
+pub const BAN_FOR_INVALID_MESSAGE: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Calculates the exact decay factor needed to recover from an initial penalty
+/// to the graylist threshold over a specific duration.
+fn calculate_decay_factor(initial_penalty: f64, threshold: f64, duration: Duration) -> f64 {
+    let seconds = duration.as_secs_f64();
+    if seconds <= 0.0 {
+        return 0.0; // Instant decay
+    }
+    // Math: decay = (threshold / penalty) ^ (1 / seconds)
+    (threshold / initial_penalty).powf(1.0 / seconds)
+}
+
+/// Generates the scoring parameters based on our global constants.
+/// Generates the scoring parameters based on our global constants.
+fn build_score_params(topic_hash: TopicHash) -> (PeerScoreParams, PeerScoreThresholds) {
+    let initial_penalty = -1000.0;
+
+    // Libp2p requires: graylist_threshold <= publish_threshold <= gossip_threshold <= 0
+    let gossip_threshold = -10.0;
+    let publish_threshold = -50.0;
+    let graylist_threshold = -80.0;
+
+    // Calculate how fast the score should decay to lift the ban after exactly 24 hours.
+    // The penalty of -1000.0 will decay over 24 hours until it hits -80.0,
+    // at which point the peer is un-graylisted.
+    let decay =
+        calculate_decay_factor(initial_penalty, graylist_threshold, BAN_FOR_INVALID_MESSAGE);
+
+    let mut topic_params = TopicScoreParams::default();
+    topic_params.invalid_message_deliveries_weight = initial_penalty;
+    topic_params.invalid_message_deliveries_decay = decay;
+
+    let mut params = PeerScoreParams::default();
+    params.topics.insert(topic_hash, topic_params);
+
+    let thresholds = PeerScoreThresholds {
+        gossip_threshold,
+        publish_threshold,
+        graylist_threshold,
+        // These positive thresholds dictate when we do advanced routing with peers.
+        // We can safely set them to standard defaults.
+        accept_px_threshold: 10.0,
+        opportunistic_graft_threshold: 20.0,
+    };
+
+    (params, thresholds)
+}
 
 /// Define the behaviors of the [`SignerSwarm`] libp2p network.
 #[derive(NetworkBehaviour)]
@@ -180,11 +236,27 @@ impl SignerBehavior {
             .build()
             .map_err(|e| SignerSwarmError::LibP2P(Box::new(e)))?;
 
-        gossipsub::Behaviour::new(
+        let mut behaviour = gossipsub::Behaviour::new(
             gossipsub::MessageAuthenticity::Signed(keypair.clone()),
             gossipsub_config,
         )
-        .map_err(SignerSwarmError::LibP2PMessage)
+        .map_err(SignerSwarmError::LibP2PMessage)?;
+
+        // 1. Generate the scoring parameters and thresholds
+        let (score_params, score_thresholds) = build_score_params(TOPIC.hash());
+
+        // 2. Attach them to the behavior
+        behaviour
+            .with_peer_score(score_params, score_thresholds)
+            .map_err(|err| {
+                // TODO: return actual error here.
+                tracing::error!(%err, "failed to set gossipsub peer score");
+                println!("failed to set gossipsub peer score: {err}");
+                let err = crate::error::Error::MissingBlock;
+                SignerSwarmError::LibP2P(Box::new(err))
+            })?;
+
+        Ok(behaviour)
     }
 
     /// Create a new kademlia behavior.
@@ -212,6 +284,7 @@ pub struct SignerSwarmBuilder<'a> {
     enable_quic_transport: bool,
     enable_memory_transport: bool,
     initial_bootstrap_delay: Duration,
+    rate_limit: u32,
     num_signers: u16,
 }
 
@@ -229,6 +302,7 @@ impl<'a> SignerSwarmBuilder<'a> {
             enable_autonat: true,
             enable_quic_transport: false,
             enable_memory_transport: false,
+            rate_limit: MESSAGES_PER_SECOND,
             initial_bootstrap_delay: Duration::ZERO,
             num_signers: crate::MAX_KEYS,
         }
@@ -237,6 +311,14 @@ impl<'a> SignerSwarmBuilder<'a> {
     /// Sets whether or not this swarm should use mdns.
     pub fn enable_mdns(mut self, use_mdns: bool) -> Self {
         self.enable_mdns = use_mdns;
+        self
+    }
+
+    /// Sets the rate limit for incoming messages from a peer. If a peer exceeds
+    /// this rate, they will be graylisted (temporarily banned) for a period of time.
+    /// The default rate limit is defined by the `MESSAGES_PER_SECOND` constant.
+    pub fn with_rate_limit(mut self, rate_limit: u32) -> Self {
+        self.rate_limit = rate_limit;
         self
     }
 
@@ -426,6 +508,7 @@ impl<'a> SignerSwarmBuilder<'a> {
             swarm: Arc::new(Mutex::new(swarm)),
             listen_addrs: self.listen_on,
             external_addresses: self.external_addresses,
+            rate_limit: self.rate_limit,
         })
     }
 }
@@ -436,12 +519,18 @@ pub struct SignerSwarm {
     swarm: Arc<Mutex<Swarm<SignerBehavior>>>,
     listen_addrs: Vec<Multiaddr>,
     external_addresses: Vec<Multiaddr>,
+    rate_limit: u32,
 }
 
 impl SignerSwarm {
     /// Get the local peer ID of the signer.
     pub fn local_peer_id(&self) -> PeerId {
         PeerId::from_public_key(&self.keypair.public())
+    }
+
+    /// Get the rate limit
+    pub fn rate_limit(&self) -> u32 {
+        self.rate_limit
     }
 
     /// Get the current listen addresses of the swarm.
@@ -480,7 +569,7 @@ impl SignerSwarm {
         }
 
         // Run the event loop, blocking until its completion.
-        event_loop::run(ctx, Arc::clone(&self.swarm)).await;
+        event_loop::run(ctx, Arc::clone(&self.swarm), self.rate_limit).await;
 
         Ok(())
     }
