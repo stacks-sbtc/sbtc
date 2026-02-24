@@ -11,6 +11,8 @@ use signer::context::SignerEvent;
 use signer::context::SignerSignal;
 use signer::keys::PrivateKey;
 use signer::keys::PublicKey;
+use signer::network::MessageTransfer as _;
+use signer::network::Msg;
 use signer::network::P2PNetwork;
 use signer::network::libp2p::SignerSwarmBuilder;
 use signer::testing::IterTestExt as _;
@@ -310,9 +312,6 @@ async fn libp2p_limits_max_established_connections() -> Result<(), Box<dyn std::
     Ok(())
 }
 
-use signer::network::MessageTransfer;
-use signer::network::Msg;
-
 #[test_log::test(tokio::test)]
 async fn libp2p_drops_messages_exceeding_rate_limit() {
     let rate_limit = 100;
@@ -331,10 +330,7 @@ async fn libp2p_drops_messages_exceeding_rate_limit() {
             settings.signer.private_key = key1;
         })
         .build();
-    context1
-        .state()
-        .current_signer_set()
-        .add_signer(pub2.clone());
+    context1.state().current_signer_set().add_signer(pub2);
 
     // Setup Receiver (Context 2)
     let context2 = TestContext::builder()
@@ -344,10 +340,7 @@ async fn libp2p_drops_messages_exceeding_rate_limit() {
             settings.signer.private_key = key2;
         })
         .build();
-    context2
-        .state()
-        .current_signer_set()
-        .add_signer(pub1.clone());
+    context2.state().current_signer_set().add_signer(pub1);
 
     let term1 = context1.get_termination_handle();
     let term2 = context2.get_termination_handle();
@@ -424,13 +417,10 @@ async fn libp2p_drops_messages_exceeding_rate_limit() {
                 }
             }
         }
-    }).await;
+    })
+    .await;
 
-    assert_eq!(
-        received_count, rate_limit
-    );
-
-
+    assert_eq!(received_count, rate_limit);
 
     term1.signal_shutdown();
     term2.signal_shutdown();
@@ -459,14 +449,8 @@ async fn rate_limit_is_individual_per_peer() {
             settings.signer.private_key = key1;
         })
         .build();
-    context1
-        .state()
-        .current_signer_set()
-        .add_signer(pub2.clone());
-    context1
-        .state()
-        .current_signer_set()
-        .add_signer(pub3.clone());
+    context1.state().current_signer_set().add_signer(pub2);
+    context1.state().current_signer_set().add_signer(pub3);
 
     // Setup Receiver (Context 2)
     let context2 = TestContext::builder()
@@ -476,14 +460,8 @@ async fn rate_limit_is_individual_per_peer() {
             settings.signer.private_key = key2;
         })
         .build();
-    context2
-        .state()
-        .current_signer_set()
-        .add_signer(pub1.clone());
-    context2
-        .state()
-        .current_signer_set()
-        .add_signer(pub3.clone());
+    context2.state().current_signer_set().add_signer(pub1);
+    context2.state().current_signer_set().add_signer(pub3);
 
     let context3 = TestContext::builder()
         .with_in_memory_storage()
@@ -492,14 +470,8 @@ async fn rate_limit_is_individual_per_peer() {
             settings.signer.private_key = key3;
         })
         .build();
-    context3
-        .state()
-        .current_signer_set()
-        .add_signer(pub1.clone());
-    context3
-        .state()
-        .current_signer_set()
-        .add_signer(pub2.clone());
+    context3.state().current_signer_set().add_signer(pub1);
+    context3.state().current_signer_set().add_signer(pub2);
 
     let term1 = context1.get_termination_handle();
     let term2 = context2.get_termination_handle();
@@ -622,7 +594,8 @@ async fn rate_limit_is_individual_per_peer() {
                 }
             }
         }
-    }).await;
+    })
+    .await;
 
     handle_sender2.abort();
     handle_sender3.abort();
@@ -665,10 +638,7 @@ async fn rate_limit_regenerates_over_time() {
             settings.signer.private_key = key1;
         })
         .build();
-    context1
-        .state()
-        .current_signer_set()
-        .add_signer(pub2.clone());
+    context1.state().current_signer_set().add_signer(pub2);
 
     // Setup Receiver (Context 2)
     let context2 = TestContext::builder()
@@ -678,10 +648,7 @@ async fn rate_limit_regenerates_over_time() {
             settings.signer.private_key = key2;
         })
         .build();
-    context2
-        .state()
-        .current_signer_set()
-        .add_signer(pub1.clone());
+    context2.state().current_signer_set().add_signer(pub1);
 
     let term1 = context1.get_termination_handle();
     let term2 = context2.get_termination_handle();
@@ -739,8 +706,10 @@ async fn rate_limit_regenerates_over_time() {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     // Pre generate messages so broadcasting them will be within 1 second
-    let mut msg_vec: Vec<signer::ecdsa::Signed<signer::message::SignerMessage>> = Default::default();
-    let mut msg_vec2: Vec<signer::ecdsa::Signed<signer::message::SignerMessage>> = Default::default();
+    let mut msg_vec: Vec<signer::ecdsa::Signed<signer::message::SignerMessage>> =
+        Default::default();
+    let mut msg_vec2: Vec<signer::ecdsa::Signed<signer::message::SignerMessage>> =
+        Default::default();
     for _ in 0..(rate_limit * 5) {
         let msg = Msg::random_with_private_key(&mut rng, &key1);
         msg_vec.push(msg);
@@ -766,11 +735,10 @@ async fn rate_limit_regenerates_over_time() {
                 }
             }
         }
-    }).await;
+    })
+    .await;
 
-    assert_eq!(
-        received_count, rate_limit * 3
-    );
+    assert_eq!(received_count, rate_limit * 3);
 
     term1.signal_shutdown();
     term2.signal_shutdown();

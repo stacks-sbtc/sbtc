@@ -78,9 +78,11 @@ fn build_score_params(topic_hash: TopicHash) -> (PeerScoreParams, PeerScoreThres
     let decay =
         calculate_decay_factor(initial_penalty, graylist_threshold, BAN_FOR_INVALID_MESSAGE);
 
-    let mut topic_params = TopicScoreParams::default();
-    topic_params.invalid_message_deliveries_weight = initial_penalty;
-    topic_params.invalid_message_deliveries_decay = decay;
+    let topic_params = TopicScoreParams {
+        invalid_message_deliveries_decay: decay,
+        invalid_message_deliveries_weight: initial_penalty,
+        ..Default::default()
+    };
 
     let mut params = PeerScoreParams::default();
     params.topics.insert(topic_hash, topic_params);
