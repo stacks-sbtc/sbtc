@@ -45,6 +45,7 @@ use super::CorsSupport;
         api::handlers::throttle::start_throttle,
         api::handlers::throttle::activate_throttle_key,
         api::handlers::throttle::deactivate_throttle_key,
+        api::handlers::throttle::stop_throttle,
         // New block endpoints.
         api::handlers::new_block::new_block,
     ),

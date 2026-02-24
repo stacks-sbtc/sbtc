@@ -850,13 +850,57 @@ async fn calculate_sbtc_left_for_withdrawals(
     Ok(Some(rolling_withdrawal_cap.saturating_sub(total_withdrawn)))
 }
 
+/// Rolling window size for throttle mode.
+pub const THROTTLE_MODE_ROLLING_WINDOW: u64 = 18;
+/// Rolling cap for throttle mode.
+pub const THROTTLE_MODE_ROLLING_CAP: u64 = 200_000_000; // 2 BTC.
+/// Per withdrawal cap for throttle mode.
+pub const THROTTLE_MODE_PER_WITHDRAWAL_CAP: u64 = 150_000_000; // 1.5 BTC
+
+/// Calculates throttle mode limits. It keeps most limits as they are now,
+/// while overwriting some of them.
+pub fn calculate_throttle_mode_limits(limit_entry: LimitEntry) -> LimitEntry {
+    let mut limits = limit_entry;
+    if limits.throttle_mode_initiator.is_none() {
+        return limits;
+    }
+    limits.per_withdrawal_cap = Some(
+        limits
+            .per_withdrawal_cap
+            .map_or(THROTTLE_MODE_PER_WITHDRAWAL_CAP, |curr| {
+                curr.min(THROTTLE_MODE_PER_WITHDRAWAL_CAP)
+            }),
+    );
+    limits.rolling_withdrawal_blocks = Some(
+        limits
+            .rolling_withdrawal_blocks
+            .map_or(THROTTLE_MODE_ROLLING_WINDOW, |curr| {
+                curr.max(THROTTLE_MODE_ROLLING_WINDOW)
+            }),
+    );
+    limits.rolling_withdrawal_cap = Some(
+        limits
+            .rolling_withdrawal_cap
+            .map_or(THROTTLE_MODE_ROLLING_CAP, |curr| {
+                curr.min(THROTTLE_MODE_ROLLING_CAP)
+            }),
+    );
+    limits
+}
+
 /// Note, this function provides the direct output structure for the api call
 /// to get the limits for the full sbtc system, and therefore is breaching the
 /// typical contract for these accessor functions. We do this here because the
 /// data for this singular entry is spread across the entire table in a way that
 /// needs to be first gathered, then filtered. It does not neatly fit into a
 /// return type that is within the table as an entry.
-pub async fn get_limits(context: &EmilyContext) -> Result<Limits, Error> {
+///
+/// do_throttle_adjustment argument describes if the function will adjust limits according to
+/// throttle mode if throttle mode is on. Usually you want it be set to true.
+pub async fn get_limits(
+    context: &EmilyContext,
+    do_throttle_adjustment: bool,
+) -> Result<Limits, Error> {
     // Get all the entries of the limit table. This table shouldn't be too large.
     let all_entries =
         LimitTablePrimaryIndex::get_all_entries(&context.dynamodb_client, &context.settings)
@@ -909,6 +953,13 @@ pub async fn get_limits(context: &EmilyContext) -> Result<Limits, Error> {
         .filter(|(_, limit_entry)| !limit_entry.is_empty())
         .map(|(account, limit_entry)| (account, AccountLimits::from(limit_entry)))
         .collect();
+
+    // Adjust for throttle mode if needed.
+    let global_cap = if do_throttle_adjustment {
+        calculate_throttle_mode_limits(global_cap)
+    } else {
+        global_cap
+    };
 
     // Calculate total withdrawn amount.
 

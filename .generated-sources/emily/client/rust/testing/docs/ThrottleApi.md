@@ -9,6 +9,7 @@ Method | HTTP request | Description
 [**deactivate_throttle_key**](ThrottleApi.md#deactivate_throttle_key) | **PATCH** /throttle/deactivate | Deactivate existing throttle key
 [**get_throttle_key**](ThrottleApi.md#get_throttle_key) | **GET** /throttle | Get the throttle key details.
 [**start_throttle**](ThrottleApi.md#start_throttle) | **POST** /start_throttle | Try to turn on throttle mode
+[**stop_throttle**](ThrottleApi.md#stop_throttle) | **POST** /throttle/stop | Stop throttle.
 
 
 
@@ -147,6 +148,31 @@ No authorization required
 ### HTTP request headers
 
 - **Content-Type**: application/json
+- **Accept**: application/json
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+
+## stop_throttle
+
+> serde_json::Value stop_throttle()
+Stop throttle.
+
+### Parameters
+
+This endpoint does not need any parameter.
+
+### Return type
+
+[**serde_json::Value**](serde_json::Value.md)
+
+### Authorization
+
+[ApiGatewayKey](../README.md#ApiGatewayKey)
+
+### HTTP request headers
+
+- **Content-Type**: Not defined
 - **Accept**: application/json
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
