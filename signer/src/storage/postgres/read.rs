@@ -48,8 +48,7 @@ struct DepositStatusSummary {
     amount: u64,
     /// The maximum amount to spend for the bitcoin miner fee when sweeping
     /// in the funds.
-    #[sqlx(try_from = "i64")]
-    max_fee: u64,
+    max_fee: [u8; 8],
     /// The deposit script used so that the signers' can spend funds.
     deposit_script: model::ScriptPubKey,
     /// The hash of reclaim script for the deposit.
@@ -1120,7 +1119,7 @@ impl PgRead {
             can_sign: summary.can_sign,
             can_accept: summary.can_accept,
             amount: summary.amount,
-            max_fee: summary.max_fee,
+            max_fee: u64::from_be_bytes(summary.max_fee),
             lock_time: bitcoin::relative::LockTime::from_consensus(summary.lock_time)
                 .map_err(Error::DisabledLockTime)?,
             outpoint: bitcoin::OutPoint::new((*txid).into(), output_index),
@@ -2292,7 +2291,6 @@ impl PgRead {
               , deposit_req.output_index
               , deposit_req.recipient
               , deposit_req.amount
-              , deposit_req.max_fee
             FROM bitcoin_blockchain AS bc_blocks
             INNER JOIN bitcoin_transactions AS bc_trx USING (block_hash)
             INNER JOIN bitcoin_tx_inputs AS bti USING (txid)

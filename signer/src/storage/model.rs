@@ -217,14 +217,13 @@ impl From<StacksBlock> for StacksBlockRef {
 }
 
 /// Deposit request.
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
 pub struct DepositRequest {
     /// Transaction ID of the deposit request transaction.
     pub txid: BitcoinTxId,
     /// Index of the deposit request UTXO.
     #[cfg_attr(feature = "testing", dummy(faker = "0..100"))]
-    #[sqlx(try_from = "i32")]
     pub output_index: u32,
     /// Script spendable by the sBTC signers.
     pub spend_script: Bytes,
@@ -234,16 +233,13 @@ pub struct DepositRequest {
     /// can be a smart contract address.
     pub recipient: StacksPrincipal,
     /// The amount in the deposit UTXO.
-    #[sqlx(try_from = "i64")]
     #[cfg_attr(feature = "testing", dummy(faker = "1_000_000..1_000_000_000"))]
     pub amount: u64,
     /// The maximum portion of the deposited amount that may
     /// be used to pay for transaction fees.
-    #[sqlx(try_from = "i64")]
     #[cfg_attr(feature = "testing", dummy(faker = "100..100_000"))]
     pub max_fee: u64,
     /// The relative lock time in the reclaim script.
-    #[sqlx(try_from = "i64")]
     #[cfg_attr(feature = "testing", dummy(faker = "3..u16::MAX as u32"))]
     pub lock_time: u32,
     /// The public key used in the deposit script. The signers public key
@@ -440,11 +436,6 @@ pub struct SweptDepositRequest {
     #[sqlx(try_from = "i64")]
     #[cfg_attr(feature = "testing", dummy(faker = "1_000_000..1_000_000_000"))]
     pub amount: u64,
-    /// The maximum portion of the deposited amount that may
-    /// be used to pay for transaction fees.
-    #[sqlx(try_from = "i64")]
-    #[cfg_attr(feature = "testing", dummy(faker = "100..100_000"))]
-    pub max_fee: u64,
 }
 
 impl SweptDepositRequest {

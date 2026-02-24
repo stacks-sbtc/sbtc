@@ -107,13 +107,11 @@ impl DepositRequestValidator for CreateDepositRequest {
         // info struct.
         tx_info.validate()?;
 
-        let info = self.validate_tx(&tx_info.tx, is_mainnet)?;
-
-        if info.max_fee > i64::MAX as u64 {
-            return Err(Error::InvalidMaxFee(info.outpoint, info.max_fee));
-        }
-
-        Ok(Some(Deposit { info, tx_info, block_hash }))
+        Ok(Some(Deposit {
+            info: self.validate_tx(&tx_info.tx, is_mainnet)?,
+            tx_info,
+            block_hash,
+        }))
     }
 }
 
@@ -949,11 +947,11 @@ mod tests {
 
         // This deposit transaction is a fine deposit, it just hasn't been
         // confirmed yet.
-        let max_fee = i64::MAX as u64 + 1;
+        let max_fee = u64::MAX;
         let tx_setup3 = sbtc::testing::deposits::tx_setup(400, max_fee, &[amount]);
         let get_tx_resp3 = GetTxResponse {
             tx: tx_setup3.tx.clone(),
-            block_hash: None,
+            block_hash,
             confirmations: None,
             block_time: None,
         };
@@ -966,6 +964,7 @@ mod tests {
             deposit_script: tx_setup3.deposits.first().unwrap().deposit_script(),
             reclaim_script: tx_setup3.reclaims.first().unwrap().reclaim_script(),
         };
+        let req3 = deposit_request3.clone();
 
         // Let's add the "responses" to the field that feeds the
         // response to the `BitcoinClient::get_tx` call.
@@ -1008,18 +1007,23 @@ mod tests {
         }
 
         block_observer.load_latest_deposit_requests().await.unwrap();
-        // Only the transaction from tx_setup0 was valid. Note that, since
-        // we are not using a real block hash stored in the database. Our
-        // DbRead function won't actually find it. And in prod we won't
-        // actually store the deposit request transaction.
-        let deposit = {
+        // Only the transactions from tx_setup0 and tx_setup3 were valid.
+        // Note that, since we are not using a real block hash stored in
+        // the database. Our DbRead function won't actually find it. And in
+        // prod we won't actually store the deposit request transaction.
+        let (deposit0, deposit3) = {
             let db = storage.lock().await;
-            assert_eq!(db.deposit_requests.len(), 1);
-            db.deposit_requests.values().next().cloned().unwrap()
+            assert_eq!(db.deposit_requests.len(), 2);
+            let mut values = db.deposit_requests.values().cloned().collect::<Vec<_>>();
+            values.sort_by_key(|req| req.max_fee);
+            values.reverse();
+            (values.pop().unwrap(), values.pop().unwrap())
         };
 
-        assert_eq!(deposit.outpoint(), req0.outpoint);
-        assert_eq!(deposit.max_fee, i64::MAX as u64);
+        assert_eq!(deposit0.outpoint(), req0.outpoint);
+        assert_eq!(deposit0.max_fee, i64::MAX as u64);
+        assert_eq!(deposit3.outpoint(), req3.outpoint);
+        assert_eq!(deposit3.max_fee, u64::MAX);
     }
 
     /// Test that `BlockObserver::extract_deposit_requests` after

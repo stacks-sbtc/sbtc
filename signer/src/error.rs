@@ -270,11 +270,6 @@ pub enum Error {
     #[error("the change amounts for the transaction is negative: {0}")]
     InvalidAmount(i64),
 
-    /// We cannot store max fees that exceed i64::MAX, so we reject such
-    /// deposit requests.
-    #[error("the max fee for deposit {0} is greater than i64::MAX: {1}")]
-    InvalidMaxFee(bitcoin::OutPoint, u64),
-
     /// Old fee estimate
     #[error("got an old fee estimate")]
     OldFeeEstimate,
