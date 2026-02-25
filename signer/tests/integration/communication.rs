@@ -622,7 +622,7 @@ async fn rate_limit_is_individual_per_peer() {
 
 #[test_log::test(tokio::test)]
 async fn rate_limit_regenerates_over_time() {
-    let rate_limit = 200;
+    let rate_limit = 10;
     let mut rng = get_rng();
 
     let key1 = PrivateKey::new(&mut rng);
@@ -708,13 +708,9 @@ async fn rate_limit_regenerates_over_time() {
     // Pre generate messages so broadcasting them will be within 1 second
     let mut msg_vec: Vec<signer::ecdsa::Signed<signer::message::SignerMessage>> =
         Default::default();
-    let mut msg_vec2: Vec<signer::ecdsa::Signed<signer::message::SignerMessage>> =
-        Default::default();
     for _ in 0..(rate_limit * 5) {
         let msg = Msg::random_with_private_key(&mut rng, &key1);
         msg_vec.push(msg);
-        let msg2 = Msg::random_with_private_key(&mut rng, &key1);
-        msg_vec2.push(msg2);
     }
     // Send messages
     for msg in msg_vec {
@@ -724,7 +720,7 @@ async fn rate_limit_regenerates_over_time() {
     // 2. Collect messages on the Receiver end
     let mut received_count = 0;
 
-    let _ = tokio::time::timeout(Duration::from_millis(2900), async {
+    let _ = tokio::time::timeout(Duration::from_millis(900), async {
         loop {
             match network2.receive().await {
                 Ok(_msg) => {
@@ -738,7 +734,40 @@ async fn rate_limit_regenerates_over_time() {
     })
     .await;
 
-    assert_eq!(received_count, rate_limit * 3);
+    assert_eq!(received_count, rate_limit);
+
+    // Sleep for a full second to allow the rate limit to regenerate
+    tokio::time::sleep(Duration::from_millis(1001)).await;
+
+    let mut msg_vec: Vec<signer::ecdsa::Signed<signer::message::SignerMessage>> =
+        Default::default();
+    for _ in 0..(rate_limit * 5) {
+        let msg = Msg::random_with_private_key(&mut rng, &key1);
+        msg_vec.push(msg);
+    }
+
+    for msg in msg_vec {
+        network1.broadcast(msg).await.expect("Failed to broadcast");
+    }
+
+    // 2. Collect messages on the Receiver end
+    let mut received_count = 0;
+
+    let _ = tokio::time::timeout(Duration::from_millis(900), async {
+        loop {
+            match network2.receive().await {
+                Ok(_msg) => {
+                    received_count += 1;
+                }
+                Err(e) => {
+                    panic!("Error receiving message: {}", e);
+                }
+            }
+        }
+    })
+    .await;
+
+    assert_eq!(received_count, rate_limit);
 
     term1.signal_shutdown();
     term2.signal_shutdown();
