@@ -79,6 +79,7 @@ fn build_score_params(topic_hash: TopicHash) -> (PeerScoreParams, PeerScoreThres
         calculate_decay_factor(initial_penalty, graylist_threshold, BAN_FOR_INVALID_MESSAGE);
 
     let topic_params = TopicScoreParams {
+        topic_weight: 1.0,
         invalid_message_deliveries_decay: decay,
         invalid_message_deliveries_weight: initial_penalty,
         ..Default::default()
@@ -244,10 +245,8 @@ impl SignerBehavior {
         )
         .map_err(SignerSwarmError::LibP2PMessage)?;
 
-        // 1. Generate the scoring parameters and thresholds
         let (score_params, score_thresholds) = build_score_params(TOPIC.hash());
 
-        // 2. Attach them to the behavior
         behaviour
             .with_peer_score(score_params, score_thresholds)
             .map_err(|err| {
