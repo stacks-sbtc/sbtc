@@ -29,7 +29,8 @@ use crate::storage::model::ConsensusHash;
 use crate::storage::model::{BitcoinTxId, StacksBlockHash};
 use crate::{
     bitcoin::{
-        BitcoinInteract, MockBitcoinInteract, rpc::GetTxResponse, utxo::UnsignedTransaction,
+        BitcoinInteract, MockBitcoinInteract, rpc::BitcoinCoreClientParams, rpc::GetTxResponse,
+        utxo::UnsignedTransaction,
     },
     config::Settings,
     context::{Context, SignerContext, SignerSignal, SignerState, TerminationHandle},
@@ -800,7 +801,13 @@ where
     ) -> ContextBuilder<Storage, crate::bitcoin::rpc::BitcoinCoreClient, Stacks, Emily> {
         let config = self.get_config();
         let url = config.settings.bitcoin.rpc_endpoints.first().unwrap();
-        let bitcoin_client = crate::bitcoin::rpc::BitcoinCoreClient::try_from(url).unwrap();
+        let timeout = config.settings.bitcoin.timeout;
+        let bitcoin_client =
+            crate::bitcoin::rpc::BitcoinCoreClient::try_from(&BitcoinCoreClientParams {
+                url: url.clone(),
+                timeout,
+            })
+            .unwrap();
         ContextBuilder {
             config: ContextConfig {
                 settings: config.settings,

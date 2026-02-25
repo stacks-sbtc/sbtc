@@ -1,6 +1,7 @@
 //! Contains client wrappers for bitcoin core and electrum.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use bitcoin::Amount;
 use bitcoin::BlockHash;
@@ -9,7 +10,6 @@ use bitcoin::OutPoint;
 use bitcoin::ScriptBuf;
 use bitcoin::Transaction;
 use bitcoin::Txid;
-use bitcoincore_rpc::Auth;
 use bitcoincore_rpc::Error as BtcRpcError;
 use bitcoincore_rpc::RpcApi as _;
 use bitcoincore_rpc::json::EstimateMode;
@@ -19,6 +19,7 @@ use bitcoincore_rpc_json::GetBlockchainInfoResult;
 use bitcoincore_rpc_json::GetMempoolEntryResult;
 use bitcoincore_rpc_json::GetNetworkInfoResult;
 use bitcoincore_rpc_json::GetTxOutResult;
+use jsonrpc::simple_http;
 use serde::Deserialize;
 use url::Url;
 
@@ -331,12 +332,22 @@ pub struct BitcoinCoreClient {
     inner: Arc<bitcoincore_rpc::Client>,
 }
 
+/// A struct containing the data needed to create a [`BitcoinCoreClient`].
+pub struct BitcoinCoreClientParams {
+    /// The URL of a bitcoin-core node.
+    pub url: Url,
+    /// The max wait time for responses from RPC requests to bitcoin-core.
+    pub timeout: Duration,
+}
+
 /// Implement TryFrom for Url to allow for easy conversion from a URL to a
 /// BitcoinCoreClient.
-impl TryFrom<&Url> for BitcoinCoreClient {
+impl TryFrom<&BitcoinCoreClientParams> for BitcoinCoreClient {
     type Error = Error;
 
-    fn try_from(url: &Url) -> Result<Self, Self::Error> {
+    fn try_from(params: &BitcoinCoreClientParams) -> Result<Self, Self::Error> {
+        let timeout = params.timeout;
+        let url = &params.url;
         let username = url.username().to_string();
         let password = url.password().unwrap_or_default().to_string();
         let host = url
@@ -346,7 +357,7 @@ impl TryFrom<&Url> for BitcoinCoreClient {
 
         let endpoint = format!("{}://{host}:{port}", url.scheme());
 
-        Self::new(&endpoint, username, password)
+        Self::new(&endpoint, username, password, timeout)
     }
 }
 
@@ -356,12 +367,20 @@ impl BitcoinCoreClient {
     /// # Notes
     ///
     /// This function does not attempt to establish a connection to bitcoin-core.
-    pub fn new(url: &str, username: String, password: String) -> Result<Self, Error> {
-        let auth = Auth::UserPass(username, password);
-        let client = bitcoincore_rpc::Client::new(url, auth)
-            .map(Arc::new)
-            .map_err(|err| Error::BitcoinCoreRpcClient(err, url.to_string()))?;
+    pub fn new(
+        url: &str,
+        username: String,
+        password: String,
+        timeout: Duration,
+    ) -> Result<Self, Error> {
+        let transport = simple_http::Builder::new()
+            .url(url)
+            .map_err(|error| Error::BitcoinCoreRpcClient(error, url.to_string()))?
+            .auth(username, Some(password))
+            .timeout(timeout)
+            .build();
 
+        let client = Arc::new(bitcoincore_rpc::Client::from_jsonrpc(transport.into()));
         Ok(Self { inner: client })
     }
 

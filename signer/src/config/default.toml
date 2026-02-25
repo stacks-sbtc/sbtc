@@ -66,6 +66,12 @@ rpc_endpoints = [
     "http://devnet:devnet@127.0.0.1:18443",
 ]
 
+# The maximum amount of time, in seconds, that the signer will wait for
+# responses for RPC requests to the nodes configured in `bitcoin.rpc_endpoints`.
+# Required: false
+# Environment: SIGNER_BITCOIN__TIMEOUT
+# timeout = 10
+
 # The interval, in seconds, at which the signer will poll the Bitcoin Core RPC
 # for the latest block hash. This is used to determine the current chain tip.
 #

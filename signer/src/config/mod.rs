@@ -139,6 +139,12 @@ pub struct BitcoinConfig {
     /// hashes (`getbestblockhash`).
     #[serde(deserialize_with = "duration_seconds_deserializer")]
     pub chain_tip_polling_interval: std::time::Duration,
+
+    /// The maximum amount of time that the signer will wait for a response
+    /// for any RPC requests to the nodes configured in the `rpc_endpoints`
+    /// field.
+    #[serde(deserialize_with = "duration_seconds_deserializer")]
+    pub timeout: std::time::Duration,
 }
 
 impl Validatable for BitcoinConfig {
@@ -148,6 +154,14 @@ impl Validatable for BitcoinConfig {
             return Err(ConfigError::Message(
                 "[bitcoin.rpc_endpoints] At least one Bitcoin RPC endpoint must be provided"
                     .to_string(),
+            ));
+        }
+
+        // All durations should be non-zero
+        let zero = std::time::Duration::ZERO;
+        if self.timeout == zero {
+            return Err(ConfigError::Message(
+                SignerConfigError::ZeroDurationForbidden("bitcoin_timeout").to_string(),
             ));
         }
 
@@ -575,6 +589,7 @@ impl Settings {
         cfg_builder = cfg_builder.set_default("signer.dkg_verification_window", 10)?;
         cfg_builder = cfg_builder.set_default("signer.stacks_fees_max_ustx", 1_500_000)?;
         cfg_builder = cfg_builder.set_default("bitcoin.chain_tip_polling_interval", 5)?;
+        cfg_builder = cfg_builder.set_default("bitcoin.timeout", 10)?;
 
         if let Some(path) = config_path {
             cfg_builder = cfg_builder.add_source(File::from(path.as_ref()));
@@ -694,6 +709,7 @@ mod tests {
             settings.bitcoin.chain_tip_polling_interval,
             Duration::from_secs(5)
         );
+        assert_eq!(settings.bitcoin.timeout.as_secs(), 10);
         assert_eq!(
             settings.signer.event_observer.bind,
             "0.0.0.0:8801".parse::<SocketAddr>().unwrap()
@@ -976,6 +992,18 @@ mod tests {
     }
 
     #[test]
+    fn sbtc_bitcoin_timeout() {
+        clear_env();
+
+        set_var("SIGNER_BITCOIN__TIMEOUT", "12345");
+
+        let settings = Settings::new_from_default_config().unwrap();
+        let timeout = settings.bitcoin.timeout.as_secs();
+
+        assert_eq!(timeout, 12345);
+    }
+
+    #[test]
     fn emily_with_environment() {
         clear_env();
 
@@ -1138,6 +1166,8 @@ mod tests {
         remove_parameter("signer", "dkg_max_duration");
         remove_parameter("signer", "max_deposits_per_bitcoin_tx");
 
+        remove_parameter("bitcoin", "timeout");
+
         remove_parameter("emily", "pagination_timeout");
         remove_parameter("emily", "timeout");
 
@@ -1161,6 +1191,8 @@ mod tests {
         assert_eq!(settings.signer.dkg_max_duration, Duration::from_secs(120));
 
         assert_eq!(settings.emily.pagination_timeout, Duration::from_secs(10));
+
+        assert_eq!(settings.bitcoin.timeout.as_secs(), 10);
         assert_eq!(settings.emily.timeout, Duration::from_secs(10));
     }
 

@@ -1,6 +1,8 @@
 //! Test the RPC clients
 
 mod serial {
+    use std::time::Duration;
+
     use bitcoin::AddressType;
     use bitcoin::Amount;
     use bitcoin::OutPoint;
@@ -25,11 +27,45 @@ mod serial {
     use signer::storage::model::BitcoinTxId;
 
     #[test]
+    fn bitcoin_timeout_works() {
+        // With normal timeout bitcoin client works.
+        let client = BitcoinCoreClient::new(
+            regtest::BITCOIN_CORE_RPC_ENDPOINT,
+            regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
+            regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
+            Duration::from_secs(10),
+        )
+        .unwrap();
+        let _hash = client.get_best_block_hash().unwrap();
+        // With too small timeout bitcoin client fails.
+        let client = BitcoinCoreClient::new(
+            regtest::BITCOIN_CORE_RPC_ENDPOINT,
+            regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
+            regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
+            Duration::from_nanos(1),
+        )
+        .unwrap();
+        let error = client.get_best_block_hash().unwrap_err();
+
+        let signer::error::Error::BitcoinCoreRpc(bitcoincore_rpc::Error::JsonRpc(
+            jsonrpc::Error::Transport(transport_error),
+        )) = error
+        else {
+            panic!("wrong error format")
+        };
+        assert_eq!(
+            format!("{}", transport_error),
+            "Couldn't connect to host: connection timed out".to_string(),
+        )
+    }
+
+    #[test]
     fn btc_client_getstransaction() {
         let client = BitcoinCoreClient::new(
             regtest::BITCOIN_CORE_RPC_ENDPOINT,
             regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
             regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
+            Duration::from_secs(10),
         )
         .unwrap();
         let (rpc, faucet) = regtest::initialize_blockchain();
@@ -73,6 +109,7 @@ mod serial {
             regtest::BITCOIN_CORE_RPC_ENDPOINT,
             regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
             regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
+            Duration::from_secs(10),
         )
         .unwrap();
         let (rpc, _) = regtest::initialize_blockchain();
@@ -98,6 +135,7 @@ mod serial {
             regtest::BITCOIN_CORE_RPC_ENDPOINT,
             regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
             regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
+            Duration::from_secs(10),
         )
         .unwrap();
         let (rpc, faucet) = regtest::initialize_blockchain();
@@ -140,6 +178,7 @@ mod serial {
             regtest::BITCOIN_CORE_RPC_ENDPOINT,
             regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
             regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
+            Duration::from_secs(10),
         )
         .unwrap();
         let (rpc, faucet) = regtest::initialize_blockchain();
@@ -180,6 +219,7 @@ mod serial {
             regtest::BITCOIN_CORE_RPC_ENDPOINT,
             regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
             regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
+            Duration::from_secs(10),
         )
         .unwrap();
         let _ = regtest::initialize_blockchain();
@@ -201,6 +241,7 @@ mod serial {
             regtest::BITCOIN_CORE_RPC_ENDPOINT,
             regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
             regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
+            Duration::from_secs(10),
         )
         .unwrap();
         let resp = btc_client.estimate_fee_rate(1);
@@ -216,6 +257,7 @@ mod serial {
             regtest::BITCOIN_CORE_RPC_ENDPOINT,
             regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
             regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
+            Duration::from_secs(10),
         )
         .unwrap();
 
@@ -281,6 +323,7 @@ mod serial {
             regtest::BITCOIN_CORE_RPC_ENDPOINT,
             regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
             regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
+            Duration::from_secs(10),
         )
         .unwrap();
 
@@ -304,6 +347,7 @@ mod serial {
             regtest::BITCOIN_CORE_RPC_ENDPOINT,
             regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
             regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
+            Duration::from_secs(10),
         )
         .unwrap();
 
@@ -436,6 +480,7 @@ mod serial {
             regtest::BITCOIN_CORE_RPC_ENDPOINT,
             regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
             regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
+            Duration::from_secs(10),
         )
         .unwrap();
 
@@ -461,6 +506,7 @@ mod serial {
             regtest::BITCOIN_CORE_RPC_ENDPOINT,
             regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
             regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
+            Duration::from_secs(10),
         )
         .unwrap();
 
@@ -486,6 +532,7 @@ mod serial {
             regtest::BITCOIN_CORE_RPC_ENDPOINT,
             regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
             regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
+            Duration::from_secs(10),
         )
         .unwrap();
 
@@ -508,6 +555,7 @@ mod serial {
             regtest::BITCOIN_CORE_RPC_ENDPOINT,
             regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
             regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
+            Duration::from_secs(10),
         )
         .unwrap();
 
