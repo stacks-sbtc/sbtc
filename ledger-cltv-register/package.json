@@ -1,0 +1,18 @@
+{
+  "name": "ledger-cltv-register",
+  "version": "1.0.0",
+  "description": "Register a CLTV wallet policy on Ledger Nano S device",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "register": "node index.js"
+  },
+  "dependencies": {
+    "@ledgerhq/ledger-bitcoin": "0.3.0",
+    "@ledgerhq/hw-transport-node-hid": "6.30.0",
+    "bech32": "2.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

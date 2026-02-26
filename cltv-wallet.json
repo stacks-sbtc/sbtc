@@ -1,0 +1,8 @@
+{
+    "name": "cltv",
+    "alias": "cltv",
+    "network": "regtest",
+    "address_type": "wsh",
+    "descriptor": "wsh(and_v(v:after(360),pkh([a67a18cf/84h/1h/0h]tpubD6NzVbkrYhZ4XfVzpUpPyG8mbfw6VB49mqv8CBunhNZ7MzaaVQFjMszPFaJgETshF4A88ytrGrX4sMWFYvUERTT2kN4fg5eJbf4uxNmkyiw/0/*)))",
+    "change_descriptor": "wsh(and_v(v:after(360),pkh([a67a18cf/84h/1h/0h]tpubD6NzVbkrYhZ4XfVzpUpPyG8mbfw6VB49mqv8CBunhNZ7MzaaVQFjMszPFaJgETshF4A88ytrGrX4sMWFYvUERTT2kN4fg5eJbf4uxNmkyiw/1/*)))"
+}

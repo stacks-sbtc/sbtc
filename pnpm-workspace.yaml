@@ -4,3 +4,4 @@ packages:
   - 'blocklist-openapi-gen'
   - 'emily/openapi-gen'
   - 'devenv/local/docker-compose/stacking'
+  - 'ledger-cltv-register'
