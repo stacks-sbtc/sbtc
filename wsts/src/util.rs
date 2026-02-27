@@ -140,21 +140,21 @@ mod test {
         assert_eq!(msg.as_bytes(), &plain);
 
         let missing_nonce = &cipher[..AES_GCM_NONCE_SIZE - 1];
-        match decrypt(&yx, &missing_nonce) {
+        match decrypt(&yx, missing_nonce) {
             Err(EncryptionError::MissingNonce) => {}
             Err(e) => panic!("expected MissingNonce got Err({e})"),
             Ok(_) => panic!("expected MissingNonce got Ok()"),
         }
 
         let missing_data = &cipher[..AES_GCM_NONCE_SIZE];
-        match decrypt(&yx, &missing_data) {
+        match decrypt(&yx, missing_data) {
             Err(EncryptionError::MissingData) => (),
             Err(e) => panic!("expected MissingData got Err({e})"),
             Ok(_) => panic!("expected MissingData got Ok()"),
         }
 
         let small_data = &cipher[..AES_GCM_NONCE_SIZE + 1];
-        match decrypt(&yx, &small_data) {
+        match decrypt(&yx, small_data) {
             Err(EncryptionError::AesGcm(_)) => (),
             Err(e) => panic!("expected EncryptionError(AesGcm) got Err({e:?})"),
             Ok(_) => panic!("expected EncryptionError(AesGcm) got Ok()"),

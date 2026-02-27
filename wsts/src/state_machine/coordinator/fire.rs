@@ -1659,7 +1659,7 @@ pub mod test {
         let (outbound_messages, operation_results) = feedback_messages(
             &mut minimum_coordinators,
             &mut minimum_signers,
-            &[message.clone()],
+            std::slice::from_ref(&message),
         );
 
         assert!(outbound_messages.is_empty());
@@ -1730,7 +1730,7 @@ pub mod test {
         let (outbound_messages, operation_results) = feedback_messages(
             &mut minimum_coordinators,
             &mut minimum_signers,
-            &[message.clone()],
+            std::slice::from_ref(&message),
         );
 
         assert!(outbound_messages.is_empty());
@@ -1883,7 +1883,7 @@ pub mod test {
         let (outbound_messages, operation_results) = feedback_messages(
             &mut insufficient_coordinators,
             &mut insufficient_signers,
-            &[message.clone()],
+            std::slice::from_ref(&message),
         );
 
         // Failed to get an aggregate public key
@@ -3020,11 +3020,8 @@ pub mod test {
                     }
                 }
 
-                match failure_map.get(&0) {
-                    Some(failure) => {
-                        panic!("Coordinator should not have passed along incorrect failure {:?} from signer 0", failure);
-                    }
-                    None => {}
+                if let Some(failure) = failure_map.get(&0) {
+                    panic!("Coordinator should not have passed along incorrect failure {:?} from signer 0", failure);
                 }
             }
             result => panic!(
