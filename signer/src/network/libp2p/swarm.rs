@@ -20,7 +20,6 @@ use rand::SeedableRng as _;
 use rand::rngs::StdRng;
 use tokio::sync::Mutex;
 
-use super::TOPIC;
 use super::errors::SignerSwarmError;
 use super::{bootstrap, event_loop};
 
@@ -43,63 +42,8 @@ const MAX_SUBSTREAMS_PER_CONNECTION: usize = 20;
 /// timeout is applied to both inbound and outbound connections.
 const NEGOTIATION_TIMEOUT_SECS: u64 = 10;
 
-use libp2p::gossipsub::{PeerScoreParams, PeerScoreThresholds, TopicHash, TopicScoreParams};
-
 /// The maximum number of messages a peer can send per second before being ignored.
-pub const MESSAGES_PER_SECOND: u32 = 100;
-
-/// How long a peer should remain graylisted (banned) after sending an invalid message.
-pub const BAN_FOR_INVALID_MESSAGE: Duration = Duration::from_secs(24 * 60 * 60);
-
-/// Calculates the exact decay factor needed to recover from an initial penalty
-/// to the graylist threshold over a specific duration.
-fn calculate_decay_factor(initial_penalty: f64, threshold: f64, duration: Duration) -> f64 {
-    let seconds = duration.as_secs_f64();
-    if seconds <= 0.0 {
-        return 0.0; // Instant decay
-    }
-    // Math: decay = (threshold / penalty) ^ (1 / seconds)
-    (threshold / initial_penalty).powf(1.0 / seconds)
-}
-
-/// Generates the scoring parameters based on our global constants.
-/// Generates the scoring parameters based on our global constants.
-fn build_score_params(topic_hash: TopicHash) -> (PeerScoreParams, PeerScoreThresholds) {
-    let initial_penalty = -1000.0;
-
-    // Libp2p requires: graylist_threshold <= publish_threshold <= gossip_threshold <= 0
-    let gossip_threshold = -10.0;
-    let publish_threshold = -50.0;
-    let graylist_threshold = -80.0;
-
-    // Calculate how fast the score should decay to lift the ban after exactly 24 hours.
-    // The penalty of -1000.0 will decay over 24 hours until it hits -80.0,
-    // at which point the peer is un-graylisted.
-    let decay =
-        calculate_decay_factor(initial_penalty, graylist_threshold, BAN_FOR_INVALID_MESSAGE);
-
-    let topic_params = TopicScoreParams {
-        topic_weight: 1.0,
-        invalid_message_deliveries_decay: decay,
-        invalid_message_deliveries_weight: initial_penalty,
-        ..Default::default()
-    };
-
-    let mut params = PeerScoreParams::default();
-    params.topics.insert(topic_hash, topic_params);
-
-    let thresholds = PeerScoreThresholds {
-        gossip_threshold,
-        publish_threshold,
-        graylist_threshold,
-        // These positive thresholds dictate when we do advanced routing with peers.
-        // We can safely set them to standard defaults.
-        accept_px_threshold: 10.0,
-        opportunistic_graft_threshold: 20.0,
-    };
-
-    (params, thresholds)
-}
+pub const MESSAGES_PER_SECOND: u32 = 10;
 
 /// Define the behaviors of the [`SignerSwarm`] libp2p network.
 #[derive(NetworkBehaviour)]
@@ -239,23 +183,11 @@ impl SignerBehavior {
             .build()
             .map_err(|e| SignerSwarmError::LibP2P(Box::new(e)))?;
 
-        let mut behaviour = gossipsub::Behaviour::new(
+        let behaviour = gossipsub::Behaviour::new(
             gossipsub::MessageAuthenticity::Signed(keypair.clone()),
             gossipsub_config,
         )
         .map_err(SignerSwarmError::LibP2PMessage)?;
-
-        let (score_params, score_thresholds) = build_score_params(TOPIC.hash());
-
-        behaviour
-            .with_peer_score(score_params, score_thresholds)
-            .map_err(|err| {
-                // TODO: return actual error here.
-                tracing::error!(%err, "failed to set gossipsub peer score");
-                println!("failed to set gossipsub peer score: {err}");
-                let err = crate::error::Error::MissingBlock;
-                SignerSwarmError::LibP2P(Box::new(err))
-            })?;
 
         Ok(behaviour)
     }
