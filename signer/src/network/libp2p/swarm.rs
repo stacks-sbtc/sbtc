@@ -42,6 +42,9 @@ const MAX_SUBSTREAMS_PER_CONNECTION: usize = 20;
 /// timeout is applied to both inbound and outbound connections.
 const NEGOTIATION_TIMEOUT_SECS: u64 = 10;
 
+/// The maximum number of messages a peer can send per second before being ignored.
+pub const MESSAGES_PER_SECOND: u32 = 10;
+
 /// Define the behaviors of the [`SignerSwarm`] libp2p network.
 #[derive(NetworkBehaviour)]
 pub struct SignerBehavior {
@@ -180,11 +183,13 @@ impl SignerBehavior {
             .build()
             .map_err(|e| SignerSwarmError::LibP2P(Box::new(e)))?;
 
-        gossipsub::Behaviour::new(
+        let behaviour = gossipsub::Behaviour::new(
             gossipsub::MessageAuthenticity::Signed(keypair.clone()),
             gossipsub_config,
         )
-        .map_err(SignerSwarmError::LibP2PMessage)
+        .map_err(SignerSwarmError::LibP2PMessage)?;
+
+        Ok(behaviour)
     }
 
     /// Create a new kademlia behavior.
@@ -212,6 +217,7 @@ pub struct SignerSwarmBuilder<'a> {
     enable_quic_transport: bool,
     enable_memory_transport: bool,
     initial_bootstrap_delay: Duration,
+    rate_limit: u32,
     num_signers: u16,
 }
 
@@ -229,6 +235,7 @@ impl<'a> SignerSwarmBuilder<'a> {
             enable_autonat: true,
             enable_quic_transport: false,
             enable_memory_transport: false,
+            rate_limit: MESSAGES_PER_SECOND,
             initial_bootstrap_delay: Duration::ZERO,
             num_signers: crate::MAX_KEYS,
         }
@@ -237,6 +244,14 @@ impl<'a> SignerSwarmBuilder<'a> {
     /// Sets whether or not this swarm should use mdns.
     pub fn enable_mdns(mut self, use_mdns: bool) -> Self {
         self.enable_mdns = use_mdns;
+        self
+    }
+
+    /// Sets the rate limit for incoming messages from a peer. If a peer exceeds
+    /// this rate, they will be graylisted (temporarily banned) for a period of time.
+    /// The default rate limit is defined by the `MESSAGES_PER_SECOND` constant.
+    pub fn with_rate_limit(mut self, rate_limit: u32) -> Self {
+        self.rate_limit = rate_limit;
         self
     }
 
@@ -426,6 +441,7 @@ impl<'a> SignerSwarmBuilder<'a> {
             swarm: Arc::new(Mutex::new(swarm)),
             listen_addrs: self.listen_on,
             external_addresses: self.external_addresses,
+            rate_limit: self.rate_limit,
         })
     }
 }
@@ -436,12 +452,18 @@ pub struct SignerSwarm {
     swarm: Arc<Mutex<Swarm<SignerBehavior>>>,
     listen_addrs: Vec<Multiaddr>,
     external_addresses: Vec<Multiaddr>,
+    rate_limit: u32,
 }
 
 impl SignerSwarm {
     /// Get the local peer ID of the signer.
     pub fn local_peer_id(&self) -> PeerId {
         PeerId::from_public_key(&self.keypair.public())
+    }
+
+    /// Get the rate limit
+    pub fn rate_limit(&self) -> u32 {
+        self.rate_limit
     }
 
     /// Get the current listen addresses of the swarm.
@@ -480,7 +502,7 @@ impl SignerSwarm {
         }
 
         // Run the event loop, blocking until its completion.
-        event_loop::run(ctx, Arc::clone(&self.swarm)).await;
+        event_loop::run(ctx, Arc::clone(&self.swarm), self.rate_limit).await;
 
         Ok(())
     }
