@@ -392,9 +392,7 @@ impl<Aggregator: AggregatorTrait> Coordinator<Aggregator> {
             dkg_id = %self.current_dkg_id,
             "Starting Public Share Distribution"
         );
-        let dkg_begin = DkgBegin {
-            dkg_id: self.current_dkg_id,
-        };
+        let dkg_begin = DkgBegin { dkg_id: self.current_dkg_id };
         let dkg_begin_packet = Packet {
             sig: dkg_begin
                 .sign(&self.config.message_private_key)

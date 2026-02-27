@@ -166,19 +166,13 @@ impl Display for PublicNonce {
 
 impl From<Nonce> for PublicNonce {
     fn from(nonce: Nonce) -> Self {
-        Self {
-            D: nonce.d * G,
-            E: nonce.e * G,
-        }
+        Self { D: nonce.d * G, E: nonce.e * G }
     }
 }
 
 impl From<&Nonce> for PublicNonce {
     fn from(nonce: &Nonce) -> Self {
-        Self {
-            D: nonce.d * G,
-            E: nonce.e * G,
-        }
+        Self { D: nonce.d * G, E: nonce.e * G }
     }
 }
 
@@ -271,11 +265,7 @@ impl TupleProof {
         let R = r * G;
         let s = Self::challenge(A, B, K, &R);
 
-        Self {
-            R,
-            rB: r * B,
-            z: r + a * s,
-        }
+        Self { R, rB: r * B, z: r + a * s }
     }
 
     #[allow(non_snake_case)]

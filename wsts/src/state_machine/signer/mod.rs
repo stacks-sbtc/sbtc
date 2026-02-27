@@ -1005,10 +1005,7 @@ impl<SignerType: SignerTrait> Signer<SignerType> {
         let K = a * B;
         let tuple_proof = TupleProof::new(&a, &A, &B, &K, rng);
 
-        BadPrivateShare {
-            shared_key: K,
-            tuple_proof,
-        }
+        BadPrivateShare { shared_key: K, tuple_proof }
     }
 }
 
@@ -1239,11 +1236,7 @@ pub mod test {
             .iter()
             .map(|comm| (comm.id.id.get_u32(), comm.clone()))
             .collect();
-        let public_share = DkgPublicShares {
-            dkg_id: 0,
-            signer_id: 0,
-            comms,
-        };
+        let public_share = DkgPublicShares { dkg_id: 0, signer_id: 0, comms };
         signer.dkg_public_share(&public_share).unwrap();
         assert_eq!(1, signer.dkg_public_shares.len())
     }

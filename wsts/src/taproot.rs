@@ -21,10 +21,7 @@ pub struct SchnorrProof {
 impl SchnorrProof {
     /// Construct a BIP-340 schnorr proof from a FROST signature
     pub fn new(sig: &Signature) -> Self {
-        Self {
-            r: sig.R.x(),
-            s: sig.z,
-        }
+        Self { r: sig.R.x(), s: sig.z }
     }
 
     /// Verify a BIP-340 schnorr proof
