@@ -15,25 +15,23 @@ default = ["with_p256k1_bindgen"]
 with_p256k1_bindgen = ["p256k1/with_bindgen"]
 
 [dependencies]
-aes-gcm = "0.10"
-bs58 = "0.5"
-hashbrown = { version = "0.14", features = ["serde"] }
-hex = "0.4.3"
-num-traits = "0.2"
-polynomial = { version = "0.2.5", features = ["serde"] }
-primitive-types = "0.12"
-rand_core = "0.6"
-p256k1 = { version = "7.2", default-features = false }
-serde = { version = "1.0", features = ["derive"] }
-sha2 = "0.10"
-thiserror = "1.0"
-tracing = "0.1.37"
-tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
+aes-gcm.workspace = true
+bs58.workspace = true
+hashbrown.workspace = true
+hex.workspace = true
+num-traits.workspace = true
+p256k1.workspace = true
+polynomial.workspace = true
+rand_core.workspace = true
+serde.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
 
 [dev-dependencies]
-criterion = "0.5.1"
-rand = "0.8.5"
-rand_chacha = "0.3.1"
+rand.workspace = true
+rand_chacha.workspace = true
 
 [lib]
 path = "src/lib.rs"    # The source file of the target.
