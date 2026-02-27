@@ -368,10 +368,10 @@ impl EmilyInteract for EmilyClient {
                 request_id: withdrawal.request_id,
                 fulfillment: None,
                 status: WithdrawalStatus::Accepted,
-                expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
+                expected_fulfillment_info: Some(Some(Box::new(ExpectedFulfillmentInfo {
                     bitcoin_block_height: None,
                     bitcoin_txid: Some(Some(bitcoin_txid.clone())),
-                }),
+                }))),
                 status_message: "".to_string(),
             })
             .collect();
