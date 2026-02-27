@@ -2286,7 +2286,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
 dependencies = [
  "ahash",
- "allocator-api2",
  "serde",
 ]
 
@@ -8150,7 +8149,6 @@ dependencies = [
 [[package]]
 name = "wsts"
 version = "14.0.0"
-source = "git+https://github.com/stacks-sbtc/wsts?rev=11e2316aa0edf996f8e8f9ccbbbfd4bd2975ed1d#11e2316aa0edf996f8e8f9ccbbbfd4bd2975ed1d"
 dependencies = [
  "aes-gcm",
  "bs58 0.5.1",
@@ -8159,11 +8157,12 @@ dependencies = [
  "num-traits",
  "p256k1",
  "polynomial",
- "primitive-types",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
  "rand_core 0.6.4",
  "serde",
  "sha2 0.10.8",
- "thiserror 1.0.69",
+ "thiserror 2.0.11",
  "tracing",
  "tracing-subscriber",
 ]

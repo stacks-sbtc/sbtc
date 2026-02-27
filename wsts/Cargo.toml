@@ -1,0 +1,42 @@
+[package]
+name = "wsts"
+version = "14.0.0"
+edition = "2021"
+authors = ["Joey Yandle <xoloki@gmail.com>"]
+license = "Apache-2.0"
+description = "Weighted Schnorr Threshold Signatures, based on FROST"
+readme = "README.md"
+repository = "https://github.com/Trust-Machines/wsts/"
+keywords = ["cryptography", "crypto", "frost"]
+categories = ["cryptography"]
+
+[features]
+default = ["with_p256k1_bindgen"]
+with_p256k1_bindgen = ["p256k1/with_bindgen"]
+
+[dependencies]
+aes-gcm.workspace = true
+bs58.workspace = true
+hashbrown.workspace = true
+hex.workspace = true
+num-traits.workspace = true
+p256k1.workspace = true
+polynomial.workspace = true
+rand_core.workspace = true
+serde.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+rand.workspace = true
+rand_chacha.workspace = true
+
+[lib]
+path = "src/lib.rs"    # The source file of the target.
+crate-type = ["lib"]   # The crate types to generate.
+
+[[bin]]
+name = "wsts"
+path = "src/main.rs"
