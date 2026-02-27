@@ -173,6 +173,7 @@ mod tests {
 
         let mut swarm1 = SignerSwarmBuilder::new(&key1)
             .enable_memory_transport(true)
+            .with_rate_limit(100)
             .add_listen_endpoint(swarm1_addr.clone())
             .add_seed_addr(swarm2_addr.clone())
             .build()
@@ -180,6 +181,7 @@ mod tests {
 
         let mut swarm2 = SignerSwarmBuilder::new(&key2)
             .enable_memory_transport(true)
+            .with_rate_limit(100)
             .add_listen_endpoint(swarm2_addr)
             .add_seed_addr(swarm1_addr)
             .build()

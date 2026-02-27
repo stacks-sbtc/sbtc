@@ -73,6 +73,7 @@ async fn libp2p_clients_can_exchange_messages_given_real_network(addr1: &str, ad
 
     let swarm1 = SignerSwarmBuilder::new(&key1)
         .enable_mdns(false)
+        .with_rate_limit(100)
         .enable_kademlia(false)
         .enable_autonat(false)
         .enable_quic_transport(true)
@@ -83,6 +84,7 @@ async fn libp2p_clients_can_exchange_messages_given_real_network(addr1: &str, ad
     let swarm2 = SignerSwarmBuilder::new(&key2)
         .enable_mdns(false)
         .enable_kademlia(false)
+        .with_rate_limit(100)
         .enable_autonat(false)
         .enable_quic_transport(true)
         .add_listen_endpoint(swarm2_addr)
