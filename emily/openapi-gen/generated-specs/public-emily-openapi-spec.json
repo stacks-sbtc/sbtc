@@ -2741,12 +2741,16 @@
         "required": [
           "requestId",
           "status",
-          "statusMessage",
-          "expectedFulfillmentInfo"
+          "statusMessage"
         ],
         "properties": {
           "expectedFulfillmentInfo": {
-            "$ref": "#/components/schemas/ExpectedFulfillmentInfo"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ExpectedFulfillmentInfo"
+              }
+            ],
+            "nullable": true
           },
           "fulfillment": {
             "allOf": [
