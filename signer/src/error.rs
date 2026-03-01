@@ -3,6 +3,7 @@ use std::borrow::Cow;
 
 use bitcoin::script::PushBytesError;
 
+use crate::bitcoin::utxo::Fees;
 use crate::bitcoin::validation::WithdrawalCapContext;
 use crate::blocklist_client::BlocklistClientError;
 use crate::codec;
@@ -759,6 +760,19 @@ pub enum Error {
     /// that is less than or equal to zero.
     #[error("the fee rate in the BitcoinPreSignRequest object is not greater than zero: {0}")]
     PreSignInvalidFeeRate(f64),
+
+    /// Indicates that the BitcoinPreSignRequest object contains a
+    /// last_fees value that did not match the last fees in our mempool.
+    /// Although this is an error, it does not necessarily mean that the
+    /// sender was behaving maliciously, since it's possible that our
+    /// mempools differ.
+    #[error("last_fees mismatch in the BitcoinPreSignRequest; sender: {sender:?} , ours: {ours:?}")]
+    PreSignLastFeesMismatch {
+        /// The last fees sent by the sender.
+        sender: Option<Fees>,
+        /// The last fees in our mempool.
+        ours: Option<Fees>,
+    },
 
     /// Error when deposit requests would exceed sBTC supply cap
     #[error(

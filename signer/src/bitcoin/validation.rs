@@ -12,8 +12,11 @@ use bitcoin::relative::LockTime;
 use crate::DEPOSIT_DUST_LIMIT;
 use crate::DEPOSIT_LOCKTIME_BLOCK_BUFFER;
 use crate::WITHDRAWAL_BLOCKS_EXPIRY;
+use crate::bitcoin::BitcoinInteract as _;
+use crate::bitcoin::rpc::assess_mempool_sweep_transaction_fees;
 use crate::bitcoin::utxo::FeeAssessment;
 use crate::bitcoin::utxo::SignerBtcState;
+use crate::bitcoin::utxo::SignerUtxo;
 use crate::context::Context;
 use crate::context::SbtcLimits;
 use crate::error::Error;
@@ -147,6 +150,33 @@ impl BitcoinPreSignRequest {
         }
 
         if self.fee_rate <= 0.0 {
+            return Err(Error::PreSignInvalidFeeRate(self.fee_rate));
+        }
+
+        Ok(())
+    }
+
+    /// Validate the last fees value sent from the coordinator.
+    async fn fee_validation<C>(&self, ctx: &C, signer_utxo: &SignerUtxo) -> Result<(), Error>
+    where
+        C: Context + Send + Sync,
+    {
+        if self.fee_rate <= 0.0 {
+            return Err(Error::PreSignInvalidFeeRate(self.fee_rate));
+        }
+
+        let bitcoin_client = ctx.get_bitcoin_client();
+        let last_fees = assess_mempool_sweep_transaction_fees(&bitcoin_client, signer_utxo).await?;
+        if last_fees != self.last_fees {
+            return Err(Error::PreSignLastFeesMismatch {
+                sender: self.last_fees,
+                ours: last_fees,
+            });
+        }
+
+        let current_fee_rate = bitcoin_client.estimate_fee_rate().await?;
+
+        if self.fee_rate > current_fee_rate + 3.0 {
             return Err(Error::PreSignInvalidFeeRate(self.fee_rate));
         }
 
@@ -290,6 +320,8 @@ impl BitcoinPreSignRequest {
             .get_signer_utxo(&btc_ctx.chain_tip)
             .await?
             .ok_or(Error::MissingSignerUtxo)?;
+
+        self.fee_validation(ctx, &signer_utxo).await?;
 
         let mut signer_state = SignerBtcState {
             fee_rate: self.fee_rate,
