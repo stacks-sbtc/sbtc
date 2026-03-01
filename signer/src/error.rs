@@ -758,7 +758,7 @@ pub enum Error {
 
     /// Indicates that the BitcoinPreSignRequest object contains a fee rate
     /// that is less than or equal to zero.
-    #[error("the fee rate in the BitcoinPreSignRequest object is not greater than zero: {0}")]
+    #[error("the fee rate in the BitcoinPreSignRequest object is out of bounds: {0}")]
     PreSignInvalidFeeRate(f64),
 
     /// Indicates that the BitcoinPreSignRequest object contains a

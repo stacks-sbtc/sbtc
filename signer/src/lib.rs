@@ -69,6 +69,25 @@ pub const SIGNER_CHANNEL_CAPACITY: usize = 1024;
 /// for the signers UTXO.
 pub const MAX_REORG_BLOCK_COUNT: u64 = 10;
 
+/// The maximum fee rate, in sats per vbyte, for a bitcoin transaction.
+/// Transactions with a fee rate that exceeds this value will be rejected.
+///
+/// This value is about two times the max fee rate observed on bitcoin
+/// mainnet.
+pub const MAX_BITCOIN_FEE_RATE: f64 = 1000.0;
+
+/// The minimum fee rate, in sats per vbyte, for a bitcoin transaction.
+/// Transactions with a fee rate that exceeds this value will be rejected.
+///
+/// This value is the minimum fee rate that you can configure in bitcoin
+/// core for the minrelaytxfee setting, assuming 1 sat/kilo-vbyte is the
+/// minimum allowable value.
+pub const MIN_BITCOIN_FEE_RATE: f64 = 0.001;
+
+/// The range of valid fee rates for a bitcoin transaction.
+pub const BITCOIN_FEE_RATE_RANGE: std::ops::RangeInclusive<f64> =
+    MIN_BITCOIN_FEE_RATE..=MAX_BITCOIN_FEE_RATE;
+
 /// The maximum number of sweep transactions that the signers can confirm
 /// per block.
 ///
