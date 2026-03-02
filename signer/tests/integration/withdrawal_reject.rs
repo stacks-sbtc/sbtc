@@ -1,7 +1,7 @@
 use bitcoin::hashes::Hash as _;
 use blockstack_lib::types::chainstate::StacksAddress;
 use rand::rngs::OsRng;
-use sbtc::testing::regtest;
+use sbtc::testing::containers::TestContainersBuilder;
 use sbtc::testing::regtest::Faucet;
 use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::error::Error;
@@ -17,11 +17,12 @@ use signer::testing;
 use signer::testing::get_rng;
 
 use fake::Fake as _;
+use sbtc::WITHDRAWAL_MIN_CONFIRMATIONS;
 use signer::WITHDRAWAL_BLOCKS_EXPIRY;
-use signer::WITHDRAWAL_MIN_CONFIRMATIONS;
 use signer::testing::context::*;
 use signer::testing::storage::DbReadTestExt as _;
 
+use crate::containers::BitcoinContainerExt as _;
 use crate::setup::SweepAmounts;
 use crate::setup::TestSignerSet;
 use crate::setup::TestSweepSetup2;
@@ -74,7 +75,11 @@ async fn make_withdrawal_reject(
     (complete_withdrawal_tx, req_ctx)
 }
 
-fn new_sweep_setup(signers: &TestSignerSet, faucet: &Faucet) -> TestSweepSetup2 {
+fn new_sweep_setup(
+    signers: &TestSignerSet,
+    client: BitcoinCoreClient,
+    faucet: &Faucet,
+) -> TestSweepSetup2 {
     let amount = 1_000_000;
     let withdraw_amounts = SweepAmounts {
         amount,
@@ -82,12 +87,7 @@ fn new_sweep_setup(signers: &TestSignerSet, faucet: &Faucet) -> TestSweepSetup2 
         is_deposit: false,
     };
 
-    TestSweepSetup2::new_setup(
-        signers.clone(),
-        BitcoinCoreClient::new_regtest(),
-        faucet,
-        &[withdraw_amounts],
-    )
+    TestSweepSetup2::new_setup(signers.clone(), client, faucet, &[withdraw_amounts])
 }
 
 /// For this test we check that the `RejectWithdrawalV1::validate` function
@@ -99,14 +99,18 @@ async fn reject_withdrawal_validation_happy_path() {
     // and should be essentially the same between tests.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
+
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     let test_signer_set = TestSignerSet::new(&mut rng);
-    let setup = new_sweep_setup(&test_signer_set, faucet);
+    let setup = new_sweep_setup(&test_signer_set, bitcoin.get_client(), faucet);
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
@@ -158,14 +162,18 @@ async fn reject_withdrawal_validation_not_final() {
     // and should be essentially the same between tests.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
+
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     let test_signer_set = TestSignerSet::new(&mut rng);
-    let setup = new_sweep_setup(&test_signer_set, faucet);
+    let setup = new_sweep_setup(&test_signer_set, bitcoin.get_client(), faucet);
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
@@ -233,14 +241,18 @@ async fn reject_withdrawal_validation_deployer_mismatch() {
     // sweeping out the funds for a withdrawal request.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
+
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     let test_signer_set = TestSignerSet::new(&mut rng);
-    let setup = new_sweep_setup(&test_signer_set, faucet);
+    let setup = new_sweep_setup(&test_signer_set, bitcoin.get_client(), faucet);
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
@@ -302,14 +314,18 @@ async fn reject_withdrawal_validation_missing_withdrawal_request() {
     // sweeping out the funds for a withdrawal request.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
+
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     let test_signer_set = TestSignerSet::new(&mut rng);
-    let setup = new_sweep_setup(&test_signer_set, faucet);
+    let setup = new_sweep_setup(&test_signer_set, bitcoin.get_client(), faucet);
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
@@ -373,14 +389,18 @@ async fn reject_withdrawal_validation_request_completed() {
     // and should be essentially the same between tests.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
+
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     let test_signer_set = TestSignerSet::new(&mut rng);
-    let setup = new_sweep_setup(&test_signer_set, faucet);
+    let setup = new_sweep_setup(&test_signer_set, bitcoin.get_client(), faucet);
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
@@ -441,14 +461,18 @@ async fn reject_withdrawal_validation_request_being_fulfilled() {
     // and should be essentially the same between tests.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
+
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     let test_signer_set = TestSignerSet::new(&mut rng);
-    let mut setup = new_sweep_setup(&test_signer_set, faucet);
+    let mut setup = new_sweep_setup(&test_signer_set, bitcoin.get_client(), faucet);
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();
@@ -548,7 +572,11 @@ async fn reject_withdrawal_validation_request_still_active() {
     // and should be essentially the same between tests.
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
-    let (rpc, faucet) = regtest::initialize_blockchain();
+
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
 
     let amount = 1_000_000;
     let signers = TestSignerSet::new(&mut rng);
@@ -565,12 +593,11 @@ async fn reject_withdrawal_validation_request_still_active() {
         },
     ];
 
-    let mut setup =
-        TestSweepSetup2::new_setup(signers, BitcoinCoreClient::new_regtest(), faucet, &amounts);
+    let mut setup = TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &amounts);
 
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
-        .with_first_bitcoin_core_client()
+        .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
         .with_mocked_emily_client()
         .build();

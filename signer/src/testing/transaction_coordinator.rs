@@ -314,7 +314,7 @@ where
 
         let max_processable_height = bitcoin_chain_tip
             .block_height
-            .saturating_sub(crate::WITHDRAWAL_MIN_CONFIRMATIONS);
+            .saturating_sub(sbtc::WITHDRAWAL_MIN_CONFIRMATIONS);
         let min_processable_height = bitcoin_chain_tip
             .block_height
             .saturating_sub(crate::WITHDRAWAL_BLOCKS_EXPIRY)

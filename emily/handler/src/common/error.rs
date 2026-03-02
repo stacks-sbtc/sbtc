@@ -103,6 +103,14 @@ pub enum Error {
     #[error("Forbidden")]
     Forbidden,
 
+    /// Unathorized
+    #[error("Unauthorized")]
+    Unauthorized,
+
+    /// Conflict.
+    #[error("Conflict")]
+    Conflict,
+
     /// This may be because you either requested a nonexistent endpoint
     /// or referenced a user that does not exist
     #[error("Resource not found")]
@@ -183,6 +191,10 @@ pub enum Error {
     #[error("DynamoDB contained many entries for the given request ID: {0}")]
     TooManyWithdrawalEntries(u64),
 
+    /// DynamoDB should only contain one entry per key name.
+    #[error("DynamoDB contained many entries for the given key name: {0}")]
+    TooManyThrottleEntries(String),
+
     /// This happens when we fail to decode a base64 encoded string into a
     /// vector of bytes.
     #[error("Failed to base64 decode the string into bytes; {0}")]
@@ -259,7 +271,9 @@ impl Error {
             Error::HttpRequest(code, _) => *code,
             Error::Network(_) => StatusCode::BAD_GATEWAY,
             Error::Forbidden => StatusCode::FORBIDDEN,
+            Error::Unauthorized => StatusCode::UNAUTHORIZED,
             Error::NotFound => StatusCode::NOT_FOUND,
+            Error::Conflict => StatusCode::CONFLICT,
             Error::InternalServer => StatusCode::INTERNAL_SERVER_ERROR,
             Error::TooManyInternalRetries => StatusCode::INTERNAL_SERVER_ERROR,
             Error::InconsistentState(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -285,6 +299,7 @@ impl Error {
             Error::AwsSdkDynamoDbQuery(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::AwsSdkDynamoDbScan(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::AwsSdkDynamoDbUpdateItem(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::TooManyThrottleEntries(_) => StatusCode::INTERNAL_SERVER_ERROR,
             #[cfg(feature = "testing")]
             Error::DynamoDbBuild(_) => StatusCode::INTERNAL_SERVER_ERROR,
             #[cfg(feature = "testing")]
@@ -306,6 +321,8 @@ impl Error {
             Error::DepositOutputMismatch(_, _)
             | Error::Forbidden
             | Error::NotFound
+            | Error::Unauthorized
+            | Error::Conflict
             | Error::TooManyInternalRetries
             | Error::InconsistentState(_)
             | Error::WithdrawalRequestIdMismatch(_, _)
