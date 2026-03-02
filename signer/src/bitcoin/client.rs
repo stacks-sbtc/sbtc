@@ -30,7 +30,7 @@ use super::rpc::BitcoinTxInfo;
 use super::rpc::GetTxResponse;
 
 /// Implement the [`TryFrom`] trait for a Vec of [`BitcoinCoreClientParams`]s to allow for a
-/// [`ApiFallbackClient`] to be implicitly created from a list of URLs.
+/// [`ApiFallbackClient`] to be implicitly created from a vec of URLs.
 impl TryFrom<Vec<BitcoinCoreClientParams>> for ApiFallbackClient<BitcoinCoreClient> {
     type Error = Error;
     fn try_from(urls: Vec<BitcoinCoreClientParams>) -> Result<Self, Self::Error> {
