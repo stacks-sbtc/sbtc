@@ -56,8 +56,43 @@ pub struct Withdrawal {
     /// Details about the on chain artifacts that fulfilled the withdrawal.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fulfillment: Option<Fulfillment>,
+    /// Details about expected fulfillment information.
+    pub expected_fulfillment_info: ExpectedFulfillmentInfo,
     /// The hex encoded txid of the stacks transaction that generated this event.
     pub txid: String,
+}
+
+/// Expected information about future fulfillment of the withdrawal.
+/// This struct represents _estimate_ of how fulfillment for the
+/// withdrawal will look like. This estimation is for reference only,
+/// and does not provide any guarantees.
+#[derive(
+    Clone,
+    Default,
+    Debug,
+    Eq,
+    PartialEq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    ToResponse,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct ExpectedFulfillmentInfo {
+    /// The estimated bitcoin block height for the bitcoin block confirming
+    /// the transaction fulling the withdrawal request. This value is
+    /// estimated by Emily once when the withdrawal request is initially
+    /// received.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bitcoin_block_height: Option<u64>,
+    /// The expected txid of the sweep transaction fulfilling the withdrawal
+    /// request. This field is populated once, it is not updated if there is
+    /// an RBF transaction that also fulfills the request.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bitcoin_txid: Option<String>,
 }
 
 /// Withdrawal parameters.

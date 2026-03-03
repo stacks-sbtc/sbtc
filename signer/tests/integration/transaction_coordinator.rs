@@ -93,8 +93,8 @@ use testing_emily_client::apis::withdrawal_api;
 use testing_emily_client::models::Chainstate;
 use testing_emily_client::models::WithdrawalStatus as TestingEmilyWithdrawalStatus;
 
+use sbtc::WITHDRAWAL_MIN_CONFIRMATIONS;
 use signer::WITHDRAWAL_BLOCKS_EXPIRY;
-use signer::WITHDRAWAL_MIN_CONFIRMATIONS;
 use signer::context::SbtcLimits;
 use signer::context::TxCoordinatorEvent;
 use signer::keys::PrivateKey;
@@ -4050,6 +4050,7 @@ mod serial {
             regtest::BITCOIN_CORE_RPC_ENDPOINT,
             regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
             regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
+            Duration::from_secs(10),
         )
         .unwrap();
 

@@ -7,6 +7,7 @@ use sbtc::testing::containers::StacksContainer;
 use sbtc::testing::containers::TestContainersBuilder;
 use signer::bitcoin::poller::BitcoinChainTipPoller;
 use signer::bitcoin::rpc::BitcoinCoreClient;
+use signer::bitcoin::rpc::BitcoinCoreClientParams;
 use signer::stacks::api::StacksClient;
 
 use crate::stacks::fund_stx;
@@ -22,7 +23,11 @@ pub trait BitcoinContainerExt {
 
 impl BitcoinContainerExt for BitcoinContainer {
     fn get_client(&self) -> BitcoinCoreClient {
-        self.url().try_into().expect("cannot create bitcoin client")
+        let params = &BitcoinCoreClientParams {
+            url: self.url().clone(),
+            timeout: Duration::from_secs(10),
+        };
+        params.try_into().expect("cannot create bitcoin client")
     }
 
     async fn start_chain_tip_poller(&self) -> BitcoinChainTipPoller {
