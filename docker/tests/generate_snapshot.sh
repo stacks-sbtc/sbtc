@@ -30,5 +30,5 @@ $DOCKER_COMPOSE stop tx-broadcaster bitcoin-miner
 $DOCKER_COMPOSE down -v
 
 rm snapshot/bitcoin/mempool.dat || true
-tar -czf snapshot.tgz snapshot
+tar -cJf snapshot.tar.xz snapshot
 rm -rf snapshot

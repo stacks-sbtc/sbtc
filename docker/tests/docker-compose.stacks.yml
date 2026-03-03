@@ -30,8 +30,11 @@ services:
     build:
       dockerfile_inline: |
         FROM bitcoin/bitcoin:25.2
-        COPY snapshot.tgz /tmp/snapshot.tgz
-        RUN tar -xzf /tmp/snapshot.tgz && \
+        RUN apt-get update && \
+            apt-get install -y --no-install-recommends xz-utils && \
+            rm -rf /var/lib/apt/lists/*
+        COPY snapshot.tar.xz /tmp/snapshot.tar.xz
+        RUN tar -xJf /tmp/snapshot.tar.xz && \
             mkdir -p /root/.bitcoin && \
             mv snapshot/bitcoin /root/.bitcoin/regtest
     stop_grace_period: 0s
@@ -79,9 +82,11 @@ services:
       dockerfile_inline: |
         ARG STACKS_BLOCKCHAIN
         FROM $${STACKS_BLOCKCHAIN}
-        RUN apt-get update && apt-get install -y curl
-        COPY snapshot.tgz /tmp/snapshot.tgz
-        RUN tar -xzf /tmp/snapshot.tgz && \
+        RUN apt-get update && \
+            apt-get install -y --no-install-recommends xz-utils curl && \
+            rm -rf /var/lib/apt/lists/*
+        COPY snapshot.tar.xz /tmp/snapshot.tar.xz
+        RUN tar -xJf /tmp/snapshot.tar.xz && \
             mkdir -p /data && \
             mv snapshot/stacks-node /data/nakamoto-neon
     depends_on:

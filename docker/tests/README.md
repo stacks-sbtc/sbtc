@@ -7,6 +7,7 @@ The `docker-compose.stacks.yml` compose stack is used in such tests; it mounts c
 
 To regenerate a snapshot run:
 ```bash
+# It uses xz to compress the archive, ensure you have it installed to generate a new snapshot
 ./generate_snapshot.sh
 ```
 
