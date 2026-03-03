@@ -86,7 +86,7 @@ use crate::utxo_construction::make_deposit_request;
 /// it concurrently).
 async fn wait_for_block_observed<S, B, E>(
     ctx: &TestContext<PgStore, B, S, E>,
-    chain_tip: BitcoinBlockHash,
+    block_hash: BitcoinBlockHash,
 ) where
     B: BitcoinInteract + Clone + Send + Sync + 'static,
     S: StacksInteract + Clone + Send + Sync + 'static,
@@ -98,7 +98,7 @@ async fn wait_for_block_observed<S, B, E>(
         matches!(
             signal,
             SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
-                if block_ref.block_hash == chain_tip
+                if block_ref.block_hash == block_hash
         )
     };
 

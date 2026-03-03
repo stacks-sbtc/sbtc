@@ -276,7 +276,7 @@ where
 /// it concurrently).
 async fn wait_for_tenure_completed<S>(
     signers: &[(IntegrationTestContext<S>, PgStore, &Keypair, SignerNetwork)],
-    chain_tip: BitcoinBlockHash,
+    block_hash: BitcoinBlockHash,
 ) where
     S: StacksInteract + Clone + Send + Sync + 'static,
 {
@@ -286,7 +286,7 @@ async fn wait_for_tenure_completed<S>(
         matches!(
             signal,
             SignerSignal::Event(SignerEvent::TxCoordinator(TxCoordinatorEvent::TenureCompleted(block_ref)))
-                if block_ref.block_hash == chain_tip
+                if block_ref.block_hash == block_hash
         )
     };
 
