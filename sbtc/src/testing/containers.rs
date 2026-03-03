@@ -25,9 +25,9 @@ pub const SERVICE_BITCOIN: &str = "bitcoin";
 /// Bitcoin service exposed port in the compose stack
 pub const SERVICE_BITCOIN_RPC_PORT: u16 = 18443;
 
-/// Bitcoin service name in the compose stack
+/// Stacks service name in the compose stack
 pub const SERVICE_STACKS: &str = "stacks-node";
-/// Bitcoin service exposed port in the compose stack
+/// Stacks service exposed port in the compose stack
 pub const SERVICE_STACKS_RPC_PORT: u16 = 20443;
 
 fn compose_path(file_name: &str) -> String {
@@ -145,7 +145,7 @@ impl TestContainers {
         let port = self
             .get_service_port(SERVICE_BITCOIN, SERVICE_BITCOIN_RPC_PORT)
             .await?;
-        format!("http://{BITCOIN_CORE_RPC_USERNAME}:{BITCOIN_CORE_RPC_PASSWORD}@{host}:{port}",)
+        format!("http://{BITCOIN_CORE_RPC_USERNAME}:{BITCOIN_CORE_RPC_PASSWORD}@{host}:{port}")
             .parse()
             .map_err(Error::InvalidUrl)
     }
@@ -156,7 +156,7 @@ impl TestContainers {
         let port = self
             .get_service_port(SERVICE_STACKS, SERVICE_STACKS_RPC_PORT)
             .await?;
-        format!("http://{host}:{port}",)
+        format!("http://{host}:{port}")
             .parse()
             .map_err(Error::InvalidUrl)
     }

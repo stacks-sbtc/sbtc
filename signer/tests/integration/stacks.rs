@@ -84,15 +84,15 @@ pub async fn fund_stx(
 ) -> StacksTransaction {
     let payload =
         TransactionPayload::TokenTransfer(recipient.clone(), ustx, TokenTransferMemo([0u8; 34]));
-    create_stacks_tx(stacks_client, payload, FAUCET_PRIVATE_KEY.to_owned()).await
+    create_stacks_tx(stacks_client, payload, FAUCET_PRIVATE_KEY).await
 }
 
 async fn create_stacks_tx(
     stacks_client: &StacksClient,
     payload: TransactionPayload,
-    sender_sk: String,
+    sender_sk: &str,
 ) -> StacksTransaction {
-    let private_key = signer::keys::PrivateKey::from_str(&sender_sk).unwrap();
+    let private_key = signer::keys::PrivateKey::from_str(sender_sk).unwrap();
     let public_key = signer::keys::PublicKey::from_private_key(&private_key);
 
     let sender_addr = StacksAddress::from_public_keys(
