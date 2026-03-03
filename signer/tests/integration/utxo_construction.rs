@@ -44,6 +44,7 @@ use sbtc::testing::regtest;
 use sbtc::testing::regtest::AsUtxo;
 
 pub static REQUEST_IDS: AtomicU64 = AtomicU64::new(0);
+const MIN_CHANGE_OUTPUT: u64 = 546;
 
 pub fn generate_withdrawal() -> (WithdrawalRequest, Recipient) {
     let amount = OsRng.sample(Uniform::new(200_000, 250_000));
@@ -117,7 +118,7 @@ where
     }];
 
     let change = utxo.amount() - Amount::from_sat(amount + fee);
-    if change.to_sat() > 546 {
+    if change.to_sat() > MIN_CHANGE_OUTPUT {
         tx_outs.push(TxOut {
             value: change,
             script_pubkey: depositor.address.script_pubkey(),
