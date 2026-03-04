@@ -37,6 +37,12 @@ The following are the developer tools that you should install on your local mach
 - **[Docker](https://docs.docker.com/manuals/)** - [Installation Guide](https://docs.docker.com/desktop/) - This is used for running integration tests.
 - **[protoc](https://github.com/protocolbuffers/protobuf)** - [Installation Guide](https://grpc.io/docs/protoc-installation/) - Compiles protobuf files.
 - **[uv](https://docs.astral.sh/uv/)** - [Installation Guide](https://docs.astral.sh/uv/getting-started/installation/) - Manages python packages.
+- **[Cargo Nextest](https://nexte.st/)** - [Installation Guide](https://nexte.st/docs/installation/pre-built-binaries/) - This is used for running unit and integration tests.
+
+Additional optional tools for sBTC developers include
+- **[Cargo Vet](https://github.com/mozilla/cargo-vet)** - [Installation Guide](https://mozilla.github.io/cargo-vet/install.html) - Vetting Rust dependencies.
+- **[Cargo Machete](https://github.com/bnjbvr/cargo-machete)** - [Installation Guide](https://github.com/bnjbvr/cargo-machete?tab=readme-ov-file#installation) - For detecting unused dependencies
+
 
 #### Developer shell through `nix`
 
