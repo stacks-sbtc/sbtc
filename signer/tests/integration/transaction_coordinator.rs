@@ -1,5 +1,4 @@
 use std::collections::BTreeSet;
-use std::num::NonZeroU16;
 use std::num::NonZeroUsize;
 use std::ops::Deref as _;
 use std::sync::Arc;
@@ -954,15 +953,14 @@ where
     handles
 }
 
-/// What for key rotation contract call transactions, extract the function
+/// Wait for key rotation contract call transactions, extract the function
 /// arguments, and update the signer set data with the details.
 ///
 /// # Notes
 ///
-/// This function can be used to emulate how signer set info is propogated
+/// This function can be used to emulate how signer set info is propagated
 /// throughout the stacks network. This is necessary so that new signers
-/// have access to the signer set info that the their stacks node will know
-/// about.
+/// have access to the signer set info known to their stacks node.
 fn watch_for_key_rotation(
     signer_set_data: Arc<RwLock<Option<SignerSetInfo>>>,
     tx_broadcaster: &Sender<StacksTransaction>,
@@ -3132,9 +3130,9 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
 // one value to another.
 struct TestThresholds {
     /// The initial bootstrap signature threshold
-    first: NonZeroU16,
+    first: u16,
     /// The "new" bootstrap signature threshold for the signing set.
-    second: NonZeroU16,
+    second: u16,
 }
 
 /// Test that three signers can successfully re-run DKG after the signature
@@ -3162,12 +3160,12 @@ struct TestThresholds {
 ///
 /// then, once everything is up and running, run the test.
 #[test_case(TestThresholds {
-    first: NonZeroU16::new(2).unwrap(),
-    second: NonZeroU16::new(3).unwrap(),
+    first: 2,
+    second: 3,
 }; "increase the threshold")]
 #[test_case(TestThresholds {
-    first: NonZeroU16::new(3).unwrap(),
-    second: NonZeroU16::new(2).unwrap(),
+    first: 3,
+    second: 2,
 }; "lower the threshold")]
 #[tokio::test]
 async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) {
@@ -3209,7 +3207,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
             .modify_settings(|settings| {
                 settings.signer.private_key = kp.secret_key().into();
                 settings.signer.bootstrap_signing_set = bootstrap_signing_set.clone();
-                settings.signer.bootstrap_signatures_required = thresholds.first.get();
+                settings.signer.bootstrap_signatures_required = thresholds.first;
                 settings.signer.bitcoin_processing_delay = Duration::from_millis(200);
             })
             .build();
@@ -3380,7 +3378,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
             .with_mocked_stacks_client()
             .modify_settings(|settings| {
                 settings.signer.private_key = ctx_old.config().signer.private_key;
-                settings.signer.bootstrap_signatures_required = thresholds.second.get();
+                settings.signer.bootstrap_signatures_required = thresholds.second;
                 settings.signer.bitcoin_processing_delay = Duration::from_millis(200);
             })
             .build();
@@ -3687,16 +3685,16 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
 ///    the state machine for the coorsponding message, which appears to
 ///    relate to the first input because of (5).
 #[test_case(TestThresholds {
-    first: NonZeroU16::new(2).unwrap(),
-    second: NonZeroU16::new(3).unwrap(),
+    first: 2,
+    second: 3,
 }; "increase the threshold")]
 #[test_case(TestThresholds {
-    first: NonZeroU16::new(3).unwrap(),
-    second: NonZeroU16::new(2).unwrap(),
+    first: 3,
+    second: 2,
 }; "lower the threshold")]
 #[test_case(TestThresholds {
-    first: NonZeroU16::new(3).unwrap(),
-    second: NonZeroU16::new(3).unwrap(),
+    first: 3,
+    second: 3,
 }; "threshold stays the same")]
 #[tokio::test]
 async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds: TestThresholds) {
@@ -3740,7 +3738,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
             .modify_settings(|settings| {
                 settings.signer.private_key = kp.secret_key().into();
                 settings.signer.bootstrap_signing_set = bootstrap_signing_set.clone();
-                settings.signer.bootstrap_signatures_required = thresholds.first.get();
+                settings.signer.bootstrap_signatures_required = thresholds.first;
                 settings.signer.bitcoin_processing_delay = Duration::from_secs(1);
             })
             .build();
@@ -3930,7 +3928,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
             .modify_settings(|settings| {
                 settings.signer.private_key = private_key;
                 settings.signer.bootstrap_signing_set = bootstrap_signing_set.clone();
-                settings.signer.bootstrap_signatures_required = thresholds.second.get();
+                settings.signer.bootstrap_signatures_required = thresholds.second;
                 settings.signer.bootstrap_aggregate_key = Some(first_dkg_shares.aggregate_key);
                 settings.signer.bitcoin_processing_delay = Duration::from_secs(1);
             })
