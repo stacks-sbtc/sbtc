@@ -264,5 +264,5 @@ jobs:
           echo "Done bootstrapping CDK."
 
           echo "Deploying the stack..."
-          npx aws-cdk deploy
+          npx aws-cdk deploy --require-approval never
           echo "Deployed Emily Successfully!" >> $GITHUB_STEP_SUMMARY

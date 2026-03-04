@@ -32,6 +32,8 @@ pub mod health_data;
 pub use self::health_data::HealthData;
 pub mod limits;
 pub use self::limits::Limits;
+pub mod throttle_request;
+pub use self::throttle_request::ThrottleRequest;
 pub mod update_deposits_request_body;
 pub use self::update_deposits_request_body::UpdateDepositsRequestBody;
 pub mod update_deposits_response;

@@ -38,6 +38,10 @@ Class | Method | HTTP request | Description
 *CorsApi* | [**limits_account_options**](docs/CorsApi.md#limits_account_options) | **OPTIONS** /limits/{account} | CORS support
 *CorsApi* | [**limits_options**](docs/CorsApi.md#limits_options) | **OPTIONS** /limits | CORS support
 *CorsApi* | [**new_block_options**](docs/CorsApi.md#new_block_options) | **OPTIONS** /new_block | CORS support
+*CorsApi* | [**start_throttle_options**](docs/CorsApi.md#start_throttle_options) | **OPTIONS** /start_throttle | CORS support
+*CorsApi* | [**throttle_activate_options**](docs/CorsApi.md#throttle_activate_options) | **OPTIONS** /throttle/activate | CORS support
+*CorsApi* | [**throttle_deactivate_options**](docs/CorsApi.md#throttle_deactivate_options) | **OPTIONS** /throttle/deactivate | CORS support
+*CorsApi* | [**throttle_options**](docs/CorsApi.md#throttle_options) | **OPTIONS** /throttle | CORS support
 *CorsApi* | [**withdrawal_id_options**](docs/CorsApi.md#withdrawal_id_options) | **OPTIONS** /withdrawal/{id} | CORS support
 *CorsApi* | [**withdrawal_options**](docs/CorsApi.md#withdrawal_options) | **OPTIONS** /withdrawal | CORS support
 *CorsApi* | [**withdrawal_private_options**](docs/CorsApi.md#withdrawal_private_options) | **OPTIONS** /withdrawal_private | CORS support
@@ -59,6 +63,11 @@ Class | Method | HTTP request | Description
 *LimitsApi* | [**set_limits**](docs/LimitsApi.md#set_limits) | **POST** /limits | Set limits handler.
 *LimitsApi* | [**set_limits_for_account**](docs/LimitsApi.md#set_limits_for_account) | **POST** /limits/{account} | Set limits for account handler.
 *NewBlockApi* | [**new_block**](docs/NewBlockApi.md#new_block) | **POST** /new_block | Get limits handler.
+*ThrottleApi* | [**activate_throttle_key**](docs/ThrottleApi.md#activate_throttle_key) | **PATCH** /throttle/activate | Activate existing (previously deactivated) throttle key
+*ThrottleApi* | [**add_throttle_key**](docs/ThrottleApi.md#add_throttle_key) | **POST** /throttle | Add throttle key handler.
+*ThrottleApi* | [**deactivate_throttle_key**](docs/ThrottleApi.md#deactivate_throttle_key) | **PATCH** /throttle/deactivate | Deactivate existing throttle key
+*ThrottleApi* | [**get_throttle_key**](docs/ThrottleApi.md#get_throttle_key) | **GET** /throttle | Get the throttle key details.
+*ThrottleApi* | [**start_throttle**](docs/ThrottleApi.md#start_throttle) | **POST** /start_throttle | Try to turn on throttle mode
 *WithdrawalApi* | [**create_withdrawal**](docs/WithdrawalApi.md#create_withdrawal) | **POST** /withdrawal | Create withdrawal handler.
 *WithdrawalApi* | [**get_withdrawal**](docs/WithdrawalApi.md#get_withdrawal) | **GET** /withdrawal/{id} | Get withdrawal handler.
 *WithdrawalApi* | [**get_withdrawals**](docs/WithdrawalApi.md#get_withdrawals) | **GET** /withdrawal | Get withdrawals handler.
@@ -83,9 +92,12 @@ Class | Method | HTTP request | Description
  - [Fulfillment](docs/Fulfillment.md)
  - [GetDepositsForTransactionResponse](docs/GetDepositsForTransactionResponse.md)
  - [GetDepositsResponse](docs/GetDepositsResponse.md)
+ - [GetThrottleKeyResponse](docs/GetThrottleKeyResponse.md)
  - [GetWithdrawalsResponse](docs/GetWithdrawalsResponse.md)
  - [HealthData](docs/HealthData.md)
  - [Limits](docs/Limits.md)
+ - [ThrottleKey](docs/ThrottleKey.md)
+ - [ThrottleRequest](docs/ThrottleRequest.md)
  - [UpdateDepositsRequestBody](docs/UpdateDepositsRequestBody.md)
  - [UpdateDepositsResponse](docs/UpdateDepositsResponse.md)
  - [UpdateWithdrawalsRequestBody](docs/UpdateWithdrawalsRequestBody.md)

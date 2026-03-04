@@ -301,8 +301,9 @@ where
 /// Wait for all signers to finish their coordinator duties and do this
 /// concurrently so that we don't miss anything (not sure if we need to do
 /// it concurrently).
-async fn wait_for_signers<S>(
+async fn wait_for_tenure_completed<S>(
     signers: &[(IntegrationTestContext<S>, PgStore, &Keypair, SignerNetwork)],
+    block_hash: BitcoinBlockHash,
 ) where
     S: StacksInteract + Clone + Send + Sync + 'static,
 {
@@ -311,11 +312,11 @@ async fn wait_for_signers<S>(
     let match_fn = |signal: &SignerSignal| {
         matches!(
             signal,
-            SignerSignal::Event(SignerEvent::TxCoordinator(
-                TxCoordinatorEvent::TenureCompleted(_)
-            ))
+            SignerSignal::Event(SignerEvent::TxCoordinator(TxCoordinatorEvent::TenureCompleted(block_ref)))
+                if block_ref.block_hash == block_hash
         )
     };
+
     signers
         .iter()
         .map(|(ctx, _, _, _)| async {
@@ -326,13 +327,13 @@ async fn wait_for_signers<S>(
 
     // It's not entirely clear why this sleep is helpful, but it appears to
     // be necessary in CI.
-    Sleep::for_secs(2).await;
+    Sleep::for_secs(1).await;
 }
 
 /// Wait for all signers to finish their coordinator duties and do this
 /// concurrently so that we don't miss anything (not sure if we need to do
 /// it concurrently).
-async fn wait_for_tenure_completed<S>(
+async fn wait_for_tenure_completed2<S>(
     signers: &[IntegrationTestContext<S>],
     chain_tip: BitcoinBlockHash,
 ) where
@@ -1138,8 +1139,8 @@ async fn deploy_smart_contracts_coordinator() {
     // - After they have the same view of the canonical bitcoin blockchain,
     //   the signers should all participate in DKG.
     // =========================================================================
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
+    let chain_tip = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     for (_, db, _, _) in signers.iter() {
         let count = db.get_encrypted_dkg_shares_count().await.unwrap();
@@ -2037,7 +2038,7 @@ async fn pseudo_random_dkg() {
 
     // Now we wait for DKG to successfully complete by waiting for all
     // coordinator event loops to finish.
-    wait_for_signers(&signers).await;
+    wait_for_tenure_completed(&signers, chain_tip).await;
     let (_, db, _, _) = signers.first().unwrap();
     let original_shares = db.get_latest_encrypted_dkg_shares().await.unwrap().unwrap();
     let chain_tip_ref = db
@@ -2119,7 +2120,7 @@ async fn pseudo_random_dkg() {
         .try_for_each(|(ctx, _, _, _)| ctx.signal(event.clone().into()))
         .unwrap();
 
-    wait_for_signers(&signers).await;
+    wait_for_tenure_completed(&signers, chain_tip_ref.block_hash).await;
 
     // Okay, DKG should have run for a second time. The generated keys
     // should be identical to the keys generated the first time.
@@ -2209,12 +2210,12 @@ async fn pseudo_random_dkg() {
 
         assert_eq!(pg_result.rows_affected(), 1);
     }
-    faucet.generate_block();
+    let chain_tip = faucet.generate_block().into();
 
     // Now we wait for all signers to say that their tenure has completed,
     // which means that no more actions are going to take place for any of
     // the signers.
-    wait_for_signers(&signers).await;
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     for (_, db, keypair, _) in signers.iter() {
         let count = db.get_encrypted_dkg_shares_count().await.unwrap();
@@ -2454,11 +2455,11 @@ async fn sign_bitcoin_transaction() {
     // - After they have the same view of the canonical bitcoin blockchain,
     //   the signers should all participate in DKG.
     // =========================================================================
-    faucet.generate_block();
+    let chain_tip = faucet.generate_block().into();
 
     // We first need to wait for bitcoin-core to send us all the
     // notifications so that we are up-to-date with the chain tip and DKG.
-    wait_for_signers(&signers).await;
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     let (_, db, _, _) = signers.first().unwrap();
     let shares = db.get_latest_encrypted_dkg_shares().await.unwrap().unwrap();
@@ -2483,8 +2484,8 @@ async fn sign_bitcoin_transaction() {
     // Start off with some initial UTXOs to work with.
 
     faucet.send_to(50_000_000, &depositor.address);
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
+    let chain_tip = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     // =========================================================================
     // Step 6 - Make a proper deposit
@@ -2521,15 +2522,15 @@ async fn sign_bitcoin_transaction() {
     // - The coordinator should submit a sweep transaction. We check the
     //   mempool for its existence.
     // =========================================================================
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
+    let chain_tip = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     let (ctx, _, _, _) = signers.first().unwrap();
     let mut txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
     assert_eq!(txids.len(), 1);
 
-    let block_hash = faucet.generate_block();
-    wait_for_signers(&signers).await;
+    let block_hash = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, block_hash).await;
 
     // =========================================================================
     // Step 8 - Assertions
@@ -2804,8 +2805,8 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     // This should kick off DKG. We first need to wait for bitcoin-core to
     // send us all the notifications so that we are up-to-date with the
     // chain tip.
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
+    let chain_tip = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     let (_, db, _, _) = signers.first().unwrap();
     let shares1 = db.get_latest_verified_dkg_shares().await.unwrap().unwrap();
@@ -2859,15 +2860,15 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     // - The coordinator should submit a sweep transaction. We check the
     //   mempool for its existence.
     // =========================================================================
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
+    let chain_tip = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     let (ctx, _, _, _) = signers.first().unwrap();
     let mut txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
     assert_eq!(txids.len(), 1);
 
-    let block_hash = faucet.generate_block();
-    wait_for_signers(&signers).await;
+    let block_hash = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, block_hash).await;
 
     // Now lets check the bitcoin transaction, first we get it.
     let txid = txids.pop().unwrap();
@@ -2918,11 +2919,11 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
 
     // After the next bitcoin block, each of the signers will think that
     // DKG needs to be run. So we need to wait for it.
-    faucet.generate_block();
+    let chain_tip = faucet.generate_block().into();
 
     // We first need to wait for bitcoin-core to send us all the
     // notifications so that we are up-to-date with the chain tip.
-    wait_for_signers(&signers).await;
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     let (_, db, _, _) = signers.first().unwrap();
     let shares2 = db.get_latest_verified_dkg_shares().await.unwrap().unwrap();
@@ -2986,16 +2987,16 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     // - The coordinator should submit a sweep transaction. We check the
     //   mempool for its existence.
     // =========================================================================
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
+    let chain_tip = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     let (ctx, _, _, _) = signers.first().unwrap();
     let mut txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
 
     assert_eq!(txids.len(), 1);
 
-    let block_hash = faucet.generate_block();
-    wait_for_signers(&signers).await;
+    let block_hash = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, block_hash).await;
 
     // =========================================================================
     // Step 12 - Assertions
@@ -3266,7 +3267,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     //   the signers should all participate in DKG.
     // =========================================================================
     let chain_tip = faucet.generate_block().into();
-    wait_for_tenure_completed(&signers, chain_tip).await;
+    wait_for_tenure_completed2(&signers, chain_tip).await;
 
     let first_dkg_shares = {
         let ctx = signers.first().unwrap();
@@ -3295,7 +3296,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     faucet.send_to(50_000_000, &depositor.address);
 
     let chain_tip = faucet.generate_block().into();
-    wait_for_tenure_completed(&signers, chain_tip).await;
+    wait_for_tenure_completed2(&signers, chain_tip).await;
 
     // =========================================================================
     // Step 6 - Make a proper deposit
@@ -3335,7 +3336,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     tokio::time::sleep(Duration::from_secs(1)).await;
 
     let chain_tip = faucet.generate_block().into();
-    wait_for_tenure_completed(&signers, chain_tip).await;
+    wait_for_tenure_completed2(&signers, chain_tip).await;
 
     let _txids = {
         let txids = rpc.get_raw_mempool().unwrap();
@@ -3344,7 +3345,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     };
 
     let chain_tip = faucet.generate_block().into();
-    wait_for_tenure_completed(&signers, chain_tip).await;
+    wait_for_tenure_completed2(&signers, chain_tip).await;
 
     // =========================================================================
     // Step 8 - Now let's change the threshold for the signers
@@ -3406,7 +3407,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     //   the signers should all participate in DKG.
     // =========================================================================
     let chain_tip = faucet.generate_block().into();
-    wait_for_tenure_completed(&signers, chain_tip).await;
+    wait_for_tenure_completed2(&signers, chain_tip).await;
 
     // The signers should have ran DKG twice now
     for ctx in signers.iter() {
@@ -3452,7 +3453,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     //   immediately.
     // =========================================================================
     let chain_tip = faucet.generate_block().into();
-    wait_for_tenure_completed(&signers, chain_tip).await;
+    wait_for_tenure_completed2(&signers, chain_tip).await;
 
     // Okay, now that someone other than the new signer has been
     // coordinator, we should have successfully signed and submitted a
@@ -3467,7 +3468,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     // call gets constructed and submitted by the signers. Any should be
     // able to do this part.
     let block_hash1 = faucet.generate_block();
-    wait_for_tenure_completed(&signers, block_hash1.into()).await;
+    wait_for_tenure_completed2(&signers, block_hash1.into()).await;
 
     let utxo = depositor.get_utxos(rpc, None).pop().unwrap();
 
@@ -3489,7 +3490,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     // call gets constructed and submitted by the signers. Any should be
     // able to do this part.
     let chain_tip = faucet.generate_block().into();
-    wait_for_tenure_completed(&signers, chain_tip).await;
+    wait_for_tenure_completed2(&signers, chain_tip).await;
 
     // Okay, now that someone other than the new signer has been
     // coordinator, we should have successfully signed and submitted a
@@ -3503,7 +3504,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     // We confirm another block so that this complete-deposit contract
     // call gets constructed and submitted by the signers.
     let block_hash2 = faucet.generate_block();
-    wait_for_tenure_completed(&signers, block_hash2.into()).await;
+    wait_for_tenure_completed2(&signers, block_hash2.into()).await;
 
     // =========================================================================
     // Step 11 - Assertions
@@ -3798,7 +3799,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     //   the signers should all participate in DKG.
     // =========================================================================
     let chain_tip = faucet.generate_block().into();
-    wait_for_tenure_completed(&signers, chain_tip).await;
+    wait_for_tenure_completed2(&signers, chain_tip).await;
 
     let first_dkg_shares = {
         let ctx = signers.first().unwrap();
@@ -3827,7 +3828,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     faucet.send_to(50_000_000, &depositor.address);
     let chain_tip = faucet.generate_block().into();
 
-    wait_for_tenure_completed(&signers, chain_tip).await;
+    wait_for_tenure_completed2(&signers, chain_tip).await;
 
     // =========================================================================
     // Step 6 - Make a proper deposit
@@ -3867,7 +3868,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     tokio::time::sleep(Duration::from_secs(1)).await;
 
     let chain_tip = faucet.generate_block().into();
-    wait_for_tenure_completed(&signers, chain_tip).await;
+    wait_for_tenure_completed2(&signers, chain_tip).await;
 
     let _txids = {
         let txids = rpc.get_raw_mempool().unwrap();
@@ -3876,7 +3877,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     };
 
     let chain_tip = faucet.generate_block().into();
-    wait_for_tenure_completed(&signers, chain_tip).await;
+    wait_for_tenure_completed2(&signers, chain_tip).await;
 
     // =========================================================================
     // Step 8 - Now let's add a new signer to the signer set
@@ -3956,7 +3957,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     //   the signers should all participate in DKG.
     // =========================================================================
     let chain_tip = faucet.generate_block().into();
-    wait_for_tenure_completed(&signers, chain_tip).await;
+    wait_for_tenure_completed2(&signers, chain_tip).await;
 
     // The first three signers should have ran DKG twice now, while the 4th
     // signer should have run DKKG once.
@@ -4012,12 +4013,12 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     //   block until the new signer is not the coordinator.
     // =========================================================================
     let mut chain_tip: BitcoinBlockHash = faucet.generate_block().into();
-    wait_for_tenure_completed(&signers, chain_tip).await;
+    wait_for_tenure_completed2(&signers, chain_tip).await;
 
     let new_public_key = new_signer_keypair.public_key().into();
     while given_key_is_coordinator(new_public_key, &chain_tip, &bootstrap_signing_set) {
         chain_tip = faucet.generate_block().into();
-        wait_for_tenure_completed(&signers, chain_tip).await;
+        wait_for_tenure_completed2(&signers, chain_tip).await;
     }
 
     // Okay, now that someone other than the new signer has been
@@ -4033,7 +4034,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     // call gets constructed and submitted by the signers. Any should be
     // able to do this part.
     let block_hash1 = faucet.generate_block().into();
-    wait_for_tenure_completed(&signers, block_hash1).await;
+    wait_for_tenure_completed2(&signers, block_hash1).await;
 
     let utxo = depositor.get_utxos(rpc, None).pop().unwrap();
 
@@ -4055,7 +4056,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     // call gets constructed and submitted by the signers. Any should be
     // able to do this part.
     let chain_tip = faucet.generate_block().into();
-    wait_for_tenure_completed(&signers, chain_tip).await;
+    wait_for_tenure_completed2(&signers, chain_tip).await;
 
     // Okay, now that someone other than the new signer has been
     // coordinator, we should have successfully signed and submitted a
@@ -4069,7 +4070,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     // We confirm another block so that this complete-deposit contract
     // call gets constructed and submitted by the signers.
     let block_hash2 = faucet.generate_block().into();
-    wait_for_tenure_completed(&signers, block_hash2).await;
+    wait_for_tenure_completed2(&signers, block_hash2).await;
 
     // =========================================================================
     // Step 11 - Assertions
@@ -4379,8 +4380,8 @@ async fn wsts_ids_set_during_dkg_and_signing_rounds() {
     let (ctx, db, _, _) = signers.first().unwrap();
     let stream = BroadcastStream::new(ctx.get_signal_receiver());
 
-    let block_hash = faucet.generate_block();
-    wait_for_signers(&signers).await;
+    let block_hash = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, block_hash).await;
 
     let wsts_message_filter = |msg| {
         let Ok(SignerSignal::Event(SignerEvent::P2P(P2PEvent::MessageReceived(msg)))) = msg else {
@@ -4448,8 +4449,8 @@ async fn wsts_ids_set_during_dkg_and_signing_rounds() {
     // Start off with some initial UTXOs to work with.
 
     faucet.send_to(50_000_000, &depositor.address);
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
+    let chain_tip = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     // =========================================================================
     // Step 6 - Make a proper deposit
@@ -4488,7 +4489,7 @@ async fn wsts_ids_set_during_dkg_and_signing_rounds() {
     // =========================================================================
     let stream = BroadcastStream::new(ctx.get_signal_receiver());
     let block_hash: BitcoinBlockHash = faucet.generate_block().into();
-    wait_for_signers(&signers).await;
+    wait_for_tenure_completed(&signers, block_hash).await;
 
     let txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
     assert_eq!(txids.len(), 1);
@@ -4752,11 +4753,11 @@ async fn skip_signer_activites_after_key_rotation() {
     // =========================================================================
 
     // This should kick off DKG.
-    faucet.generate_block();
+    let chain_tip = faucet.generate_block().into();
 
     // We first need to wait for bitcoin-core to send us all the
     // notifications so that we are up-to-date with the chain tip.
-    wait_for_signers(&signers).await;
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     let (_, db, _, _) = signers.first().unwrap();
     let shares1 = db.get_latest_verified_dkg_shares().await.unwrap().unwrap();
@@ -4810,15 +4811,15 @@ async fn skip_signer_activites_after_key_rotation() {
     // - The coordinator should submit a sweep transaction. We check the
     //   mempool for its existence.
     // =========================================================================
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
+    let chain_tip = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     let (ctx, _, _, _) = signers.first().unwrap();
     let mut txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
     assert_eq!(txids.len(), 1);
 
-    let block_hash = faucet.generate_block();
-    wait_for_signers(&signers).await;
+    let block_hash = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, block_hash).await;
 
     // Now lets check the bitcoin transaction, first we get it.
     let txid = txids.pop().unwrap();
@@ -4895,8 +4896,8 @@ async fn skip_signer_activites_after_key_rotation() {
     // DKG needs to be run. They also have a deposit request to process,
     // but they should skip it because they would have successfully run
     // DKG and submitted a rotate-keys contract call.
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
+    let chain_tip = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     // We should not have any transactions in the mempool, because the
     // coordinator should bail after submitting a rotate-keys contract
@@ -4922,16 +4923,16 @@ async fn skip_signer_activites_after_key_rotation() {
     // - The coordinator should submit a sweep transaction. We check the
     //   mempool for its existence.
     // =========================================================================
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
+    let chain_tip = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     let (ctx, _, _, _) = signers.first().unwrap();
     let mut txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
 
     assert_eq!(txids.len(), 1);
 
-    let block_hash = faucet.generate_block();
-    wait_for_signers(&signers).await;
+    let block_hash = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, block_hash).await;
 
     // =========================================================================
     // Step 11 - Assertions
@@ -5285,8 +5286,8 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
     // - After they have the same view of the canonical bitcoin blockchain,
     //   the signers should all participate in DKG.
     // =========================================================================
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
+    let chain_tip = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     // =========================================================================
     // Step 5 - Wait some more, maybe the signers will do something
@@ -5294,8 +5295,8 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
     // - DKG has run, and they think the smart contracts are up-to-date, so
     //   they shouldn't do anything
     // =========================================================================
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
+    let chain_tip = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     // =========================================================================
     // Step 6 - Assertions
@@ -5454,6 +5455,7 @@ mod serial {
             regtest::BITCOIN_CORE_RPC_ENDPOINT,
             regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
             regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
+            Duration::from_secs(10),
         )
         .unwrap();
 
@@ -6254,7 +6256,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
 
     // We first need to wait for bitcoin-core to send us all the
     // notifications so that we are up-to-date with the chain tip.
-    wait_for_signers(&signers).await;
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     // DKG and DKG verification should have finished successfully. We
     // assume, for now, that the key rotation contract call was submitted.
@@ -6392,8 +6394,8 @@ async fn sign_bitcoin_transaction_withdrawals() {
     // =========================================================================
     let (ctx, _, _, _) = signers.first().unwrap();
     for _ in 0..WITHDRAWAL_MIN_CONFIRMATIONS - 1 {
-        faucet.generate_block();
-        wait_for_signers(&signers).await;
+        let chain_tip = faucet.generate_block().into();
+        wait_for_tenure_completed(&signers, chain_tip).await;
         // The mempool should be empty, since the signers do not act on the
         // withdrawal unless they've observed WITHDRAWAL_MIN_CONFIRMATIONS
         // from the chain tip of when the withdrawal request was created.
@@ -6401,14 +6403,14 @@ async fn sign_bitcoin_transaction_withdrawals() {
         assert!(txids.is_empty());
     }
 
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
+    let chain_tip = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     let mut txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
     assert_eq!(txids.len(), 1);
 
-    let block_hash = faucet.generate_block();
-    wait_for_signers(&signers).await;
+    let block_hash = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, block_hash).await;
 
     // =========================================================================
     // Step 8 - Assertions
@@ -7802,14 +7804,14 @@ async fn reuse_nonce_attack() {
     // =========================================================================
     // Wait for contract deployment
     // =========================================================================
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
+    let chain_tip = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     // =========================================================================
     // Wait for DKG + key rotation
     // =========================================================================
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
+    let chain_tip = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     let shares = db.get_latest_encrypted_dkg_shares().await.unwrap().unwrap();
     assert_eq!(shares.dkg_shares_status, DkgSharesStatus::Verified);
@@ -7836,8 +7838,8 @@ async fn reuse_nonce_attack() {
     let depositor = Recipient::new(AddressType::P2tr);
     faucet.send_to(50_000_000, &depositor.address);
 
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
+    let chain_tip = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     // =========================================================================
     // Create deposits
@@ -7864,8 +7866,8 @@ async fn reuse_nonce_attack() {
     }
 
     // Confirming the deposits, the signers should fulfill them
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
+    let chain_tip = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     // Check that we have the sweep tx in the mempool servicing all deposits
     let txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
@@ -7914,8 +7916,8 @@ async fn reuse_nonce_attack() {
     // Actual test: process the pending completion deposits with a concurrent tx
     // already in the mempool
     // =========================================================================
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
+    let chain_tip = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     wait_next_stacks_block(&stacks).await;
 

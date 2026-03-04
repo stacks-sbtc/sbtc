@@ -22,6 +22,9 @@ url = "https://raw.githubusercontent.com/mozilla/supply-chain/main/audits.toml"
 [imports.zcash]
 url = "https://raw.githubusercontent.com/zcash/rust-ecosystem/main/supply-chain/audits.toml"
 
+[policy.pox-locking]
+audit-as-crates-io = false
+
 [policy.stacks-common]
 audit-as-crates-io = true
 
@@ -673,10 +676,6 @@ version = "0.3.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.http]]
-version = "0.2.12"
-criteria = "safe-to-deploy"
-
-[[exemptions.http]]
 version = "1.1.0"
 criteria = "safe-to-deploy"
 
@@ -1250,14 +1249,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.proc-macro-error]]
 version = "1.0.4"
-criteria = "safe-to-deploy"
-
-[[exemptions.proc-macro-error-attr2]]
-version = "2.0.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.proc-macro-error2]]
-version = "2.0.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.proc-macro2]]
@@ -1876,16 +1867,8 @@ criteria = "safe-to-deploy"
 version = "3.1.4"
 criteria = "safe-to-deploy"
 
-[[exemptions.ureq-proto]]
-version = "0.5.3"
-criteria = "safe-to-deploy"
-
 [[exemptions.urlencoding]]
 version = "2.1.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.utf-8]]
-version = "0.7.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.utoipa]]

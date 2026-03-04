@@ -33,6 +33,8 @@ use super::CorsSupport;
         // Limits endpoints.
         api::handlers::limits::get_limits,
         api::handlers::limits::get_limits_for_account,
+        // Throttle endpoints.
+        api::handlers::throttle::start_throttle,
     ),
     // Components to be included in the OpenAPI specification.
     components(schemas(
@@ -68,6 +70,8 @@ use super::CorsSupport;
         // Limits models
         api::models::limits::Limits,
         api::models::limits::AccountLimits,
+        // Throttle models
+        api::models::throttle::ThrottleRequest,
         // Errors.
         common::error::ErrorResponse,
     ))
