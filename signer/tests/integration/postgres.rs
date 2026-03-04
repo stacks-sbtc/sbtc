@@ -5003,6 +5003,36 @@ async fn deposit_requests_max_fee_migration() {
     signer::testing::storage::drop_db(db).await;
 }
 
+/// Check that the max_fee column in deposit_requests stores bytes in
+/// big-endian order.
+#[tokio::test]
+async fn deposit_requests_max_fee_stored_as_big_endian() {
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
+
+    // Use a value whose big-endian and little-endian representations differ.
+    let max_fee: u64 = 0x0123_4567_89ab_cdef;
+    assert_ne!(max_fee.to_be_bytes(), max_fee.to_le_bytes());
+
+    let mut deposit_request: model::DepositRequest = fake::Faker.fake_with_rng(&mut rng);
+    deposit_request.max_fee = max_fee;
+
+    db.write_deposit_request(&deposit_request).await.unwrap();
+
+    let stored_max_fee = sqlx::query_scalar::<_, Vec<u8>>(
+        "SELECT max_fee FROM sbtc_signer.deposit_requests WHERE txid = $1 AND output_index = $2",
+    )
+    .bind(deposit_request.txid)
+    .bind(i32::try_from(deposit_request.output_index).unwrap())
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+
+    assert_eq!(stored_max_fee.as_slice(), max_fee.to_be_bytes());
+
+    signer::testing::storage::drop_db(db).await;
+}
+
 /// This struct is for testing different conditions when attempting to
 /// retrieve the signers' UTXO.
 struct ReorgDescription<const N: usize> {
