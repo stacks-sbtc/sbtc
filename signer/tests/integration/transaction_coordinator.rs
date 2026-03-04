@@ -302,7 +302,7 @@ where
 /// concurrently so that we don't miss anything (not sure if we need to do
 /// it concurrently).
 async fn wait_for_tenure_completed<S>(
-    signers: &[(IntegrationTestContext<S>, PgStore, &Keypair, SignerNetwork)],
+    signers: &[(IntegrationTestContext<S>, PgStore, Keypair, SignerNetwork)],
     block_hash: BitcoinBlockHash,
 ) where
     S: StacksInteract + Clone + Send + Sync + 'static,
@@ -320,37 +320,6 @@ async fn wait_for_tenure_completed<S>(
     signers
         .iter()
         .map(|(ctx, _, _, _)| async {
-            ctx.wait_for_signal(wait_duration, match_fn).await.unwrap();
-        })
-        .join_all()
-        .await;
-
-    // It's not entirely clear why this sleep is helpful, but it appears to
-    // be necessary in CI.
-    Sleep::for_secs(1).await;
-}
-
-/// Wait for all signers to finish their coordinator duties and do this
-/// concurrently so that we don't miss anything (not sure if we need to do
-/// it concurrently).
-async fn wait_for_tenure_completed2<S>(
-    signers: &[IntegrationTestContext<S>],
-    chain_tip: BitcoinBlockHash,
-) where
-    S: StacksInteract + Clone + Send + Sync + 'static,
-{
-    let wait_duration = Duration::from_secs(15);
-
-    let match_fn = |signal: &SignerSignal| {
-        matches!(
-            signal,
-            SignerSignal::Event(SignerEvent::TxCoordinator(TxCoordinatorEvent::TenureCompleted(block_ref)))
-                if block_ref.block_hash == chain_tip
-        )
-    };
-    signers
-        .iter()
-        .map(|ctx| async {
             ctx.wait_for_signal(wait_duration, match_fn).await.unwrap();
         })
         .join_all()
@@ -1033,7 +1002,7 @@ async fn deploy_smart_contracts_coordinator() {
 
         let network = network.connect(&ctx);
 
-        signers.push((ctx, db, kp, network));
+        signers.push((ctx, db, *kp, network));
     }
 
     // =========================================================================
@@ -1928,7 +1897,7 @@ async fn pseudo_random_dkg() {
 
         let network = network.connect(&ctx);
 
-        signers.push((ctx, db, kp, network));
+        signers.push((ctx, db, *kp, network));
     }
 
     // =========================================================================
@@ -2350,7 +2319,7 @@ async fn sign_bitcoin_transaction() {
 
         let network = network.connect(&ctx);
 
-        signers.push((ctx, db, kp, network));
+        signers.push((ctx, db, *kp, network));
     }
 
     // =========================================================================
@@ -2683,7 +2652,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
 
         let network = network.connect(&ctx);
 
-        signers.push((ctx, db, kp, network));
+        signers.push((ctx, db, *kp, network));
     }
 
     // =========================================================================
@@ -3215,7 +3184,8 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
 
         backfill_bitcoin_blocks_unchecked(&db, rpc, &chain_tip_info.hash).await;
 
-        signers.push(ctx);
+        let network = network.connect(&ctx);
+        signers.push((ctx, db, *kp, network));
     }
 
     // =========================================================================
@@ -3235,7 +3205,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     let signer_set_data = Arc::new(RwLock::new(None));
     watch_for_key_rotation(signer_set_data.clone(), &tx_broadcaster);
 
-    for ctx in signers.iter_mut() {
+    for (ctx, _, _, _) in signers.iter_mut() {
         let tx_broadcaster = tx_broadcaster.clone();
         let chain_tip_info = chain_tip_info.clone();
         let signer_set_data = signer_set_data.clone();
@@ -3253,7 +3223,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     // =========================================================================
     let mut handles = Vec::new();
 
-    for ctx in signers.iter() {
+    for (ctx, _, _, _) in signers.iter() {
         ctx.state().set_sbtc_contracts_deployed();
         handles.extend(start_event_loops(ctx, &network, bitcoin).await);
     }
@@ -3267,10 +3237,10 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     //   the signers should all participate in DKG.
     // =========================================================================
     let chain_tip = faucet.generate_block().into();
-    wait_for_tenure_completed2(&signers, chain_tip).await;
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     let first_dkg_shares = {
-        let ctx = signers.first().unwrap();
+        let (ctx, _, _, _) = signers.first().unwrap();
         let db = ctx.inner_storage();
         db.get_latest_verified_dkg_shares().await.unwrap().unwrap()
     };
@@ -3296,7 +3266,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     faucet.send_to(50_000_000, &depositor.address);
 
     let chain_tip = faucet.generate_block().into();
-    wait_for_tenure_completed2(&signers, chain_tip).await;
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     // =========================================================================
     // Step 6 - Make a proper deposit
@@ -3336,7 +3306,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     tokio::time::sleep(Duration::from_secs(1)).await;
 
     let chain_tip = faucet.generate_block().into();
-    wait_for_tenure_completed2(&signers, chain_tip).await;
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     let _txids = {
         let txids = rpc.get_raw_mempool().unwrap();
@@ -3345,7 +3315,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     };
 
     let chain_tip = faucet.generate_block().into();
-    wait_for_tenure_completed2(&signers, chain_tip).await;
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     // =========================================================================
     // Step 8 - Now let's change the threshold for the signers
@@ -3370,7 +3340,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
 
     let previous_contexts = std::mem::take(&mut signers);
 
-    for ctx_old in previous_contexts {
+    for (ctx_old, _, _, _) in previous_contexts {
         let db = ctx_old.inner_storage();
         let mut ctx = TestContext::builder()
             .with_storage(db.clone())
@@ -3395,7 +3365,9 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
 
         mock_stacks_core2(&mut ctx, chain_tip_info, signer_set_data, tx_broadcaster).await;
 
-        signers.push(ctx);
+        let network = network.connect(&ctx);
+        let kp = Keypair::from_secret_key(SECP256K1, &ctx.config().signer.private_key.into());
+        signers.push((ctx, db, kp, network));
     }
 
     // =========================================================================
@@ -3407,10 +3379,10 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     //   the signers should all participate in DKG.
     // =========================================================================
     let chain_tip = faucet.generate_block().into();
-    wait_for_tenure_completed2(&signers, chain_tip).await;
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     // The signers should have ran DKG twice now
-    for ctx in signers.iter() {
+    for (ctx, _, _, _) in signers.iter() {
         let db = ctx.inner_storage();
         let count = db.get_encrypted_dkg_shares_count().await.unwrap();
         assert_eq!(count, 2);
@@ -3425,7 +3397,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     // Now lets make another deposit transaction and submit it
 
     let second_dkg_shares = {
-        let ctx = signers.first().unwrap();
+        let (ctx, _, _, _) = signers.first().unwrap();
         let db = ctx.inner_storage();
         db.get_latest_encrypted_dkg_shares().await.unwrap().unwrap()
     };
@@ -3453,7 +3425,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     //   immediately.
     // =========================================================================
     let chain_tip = faucet.generate_block().into();
-    wait_for_tenure_completed2(&signers, chain_tip).await;
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     // Okay, now that someone other than the new signer has been
     // coordinator, we should have successfully signed and submitted a
@@ -3468,7 +3440,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     // call gets constructed and submitted by the signers. Any should be
     // able to do this part.
     let block_hash1 = faucet.generate_block();
-    wait_for_tenure_completed2(&signers, block_hash1.into()).await;
+    wait_for_tenure_completed(&signers, block_hash1.into()).await;
 
     let utxo = depositor.get_utxos(rpc, None).pop().unwrap();
 
@@ -3490,7 +3462,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     // call gets constructed and submitted by the signers. Any should be
     // able to do this part.
     let chain_tip = faucet.generate_block().into();
-    wait_for_tenure_completed2(&signers, chain_tip).await;
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     // Okay, now that someone other than the new signer has been
     // coordinator, we should have successfully signed and submitted a
@@ -3504,7 +3476,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     // We confirm another block so that this complete-deposit contract
     // call gets constructed and submitted by the signers.
     let block_hash2 = faucet.generate_block();
-    wait_for_tenure_completed2(&signers, block_hash2.into()).await;
+    wait_for_tenure_completed(&signers, block_hash2.into()).await;
 
     // =========================================================================
     // Step 11 - Assertions
@@ -3603,7 +3575,7 @@ async fn sign_bitcoin_transaction_threshold_changes(thresholds: TestThresholds) 
     assert_eq!(signer_new_script_pubkey, second_script_pubkey);
 
     // Lastly we check that out database has the sweep transaction
-    for ctx in signers {
+    for (ctx, _, _, _) in signers {
         let db = ctx.inner_storage();
         let script_pubkey = sqlx::query_scalar::<_, model::ScriptPubKey>(
             r#"
@@ -3746,7 +3718,8 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
 
         backfill_bitcoin_blocks_unchecked(&db, rpc, &chain_tip_info.hash).await;
 
-        signers.push(ctx);
+        let network = network.connect(&ctx);
+        signers.push((ctx, db, *kp, network));
     }
 
     // =========================================================================
@@ -3767,7 +3740,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     let signer_set_data = Arc::new(RwLock::new(None));
     watch_for_key_rotation(signer_set_data.clone(), &tx_broadcaster);
 
-    for ctx in signers.iter_mut() {
+    for (ctx, _, _, _) in signers.iter_mut() {
         let tx_broadcaster = tx_broadcaster.clone();
         let signer_set_data = signer_set_data.clone();
         let chain_tip_info = chain_tip_info.clone();
@@ -3785,7 +3758,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     // =========================================================================
     let mut handles = Vec::new();
 
-    for ctx in signers.iter() {
+    for (ctx, _, _, _) in signers.iter() {
         ctx.state().set_sbtc_contracts_deployed();
         handles.extend(start_event_loops(ctx, &network, bitcoin).await);
     }
@@ -3799,10 +3772,10 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     //   the signers should all participate in DKG.
     // =========================================================================
     let chain_tip = faucet.generate_block().into();
-    wait_for_tenure_completed2(&signers, chain_tip).await;
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     let first_dkg_shares = {
-        let ctx = signers.first().unwrap();
+        let (ctx, _, _, _) = signers.first().unwrap();
         let db = ctx.inner_storage();
         db.get_latest_verified_dkg_shares().await.unwrap().unwrap()
     };
@@ -3828,7 +3801,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     faucet.send_to(50_000_000, &depositor.address);
     let chain_tip = faucet.generate_block().into();
 
-    wait_for_tenure_completed2(&signers, chain_tip).await;
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     // =========================================================================
     // Step 6 - Make a proper deposit
@@ -3868,7 +3841,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     tokio::time::sleep(Duration::from_secs(1)).await;
 
     let chain_tip = faucet.generate_block().into();
-    wait_for_tenure_completed2(&signers, chain_tip).await;
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     let _txids = {
         let txids = rpc.get_raw_mempool().unwrap();
@@ -3877,7 +3850,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     };
 
     let chain_tip = faucet.generate_block().into();
-    wait_for_tenure_completed2(&signers, chain_tip).await;
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     // =========================================================================
     // Step 8 - Now let's add a new signer to the signer set
@@ -3904,7 +3877,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
 
     let previous_contexts = signers
         .drain(..)
-        .map(|ctx| (ctx.inner_storage(), ctx.config().signer.private_key))
+        .map(|(ctx, _, _, _)| (ctx.inner_storage(), ctx.config().signer.private_key))
         .chain([(new_db, new_signer_keypair.secret_key().into())])
         .collect::<Vec<_>>();
 
@@ -3945,7 +3918,9 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
         let signer_set_data = signer_set_data.clone();
         mock_stacks_core2(&mut ctx, chain_tip_info, signer_set_data, tx_broadcaster).await;
 
-        signers.push(ctx);
+        let network = network.connect(&ctx);
+        let kp = Keypair::from_secret_key(SECP256K1, &private_key.into());
+        signers.push((ctx, db, kp, network));
     }
 
     // =========================================================================
@@ -3957,17 +3932,17 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     //   the signers should all participate in DKG.
     // =========================================================================
     let chain_tip = faucet.generate_block().into();
-    wait_for_tenure_completed2(&signers, chain_tip).await;
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     // The first three signers should have ran DKG twice now, while the 4th
     // signer should have run DKKG once.
-    for ctx in signers.iter().take(3) {
+    for (ctx, _, _, _) in signers.iter().take(3) {
         let db = ctx.inner_storage();
         let count = db.get_encrypted_dkg_shares_count().await.unwrap();
         assert_eq!(count, 2);
     }
 
-    if let Some(ctx) = signers.last() {
+    if let Some((ctx, _, _, _)) = signers.last() {
         let db = ctx.inner_storage();
         let count = db.get_encrypted_dkg_shares_count().await.unwrap();
         assert_eq!(count, 1);
@@ -3982,7 +3957,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     // Now lets make another deposit transaction and submit it
 
     let second_dkg_shares = {
-        let ctx = signers.first().unwrap();
+        let (ctx, _, _, _) = signers.first().unwrap();
         let db = ctx.inner_storage();
         db.get_latest_encrypted_dkg_shares().await.unwrap().unwrap()
     };
@@ -4013,12 +3988,12 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     //   block until the new signer is not the coordinator.
     // =========================================================================
     let mut chain_tip: BitcoinBlockHash = faucet.generate_block().into();
-    wait_for_tenure_completed2(&signers, chain_tip).await;
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     let new_public_key = new_signer_keypair.public_key().into();
     while given_key_is_coordinator(new_public_key, &chain_tip, &bootstrap_signing_set) {
         chain_tip = faucet.generate_block().into();
-        wait_for_tenure_completed2(&signers, chain_tip).await;
+        wait_for_tenure_completed(&signers, chain_tip).await;
     }
 
     // Okay, now that someone other than the new signer has been
@@ -4034,7 +4009,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     // call gets constructed and submitted by the signers. Any should be
     // able to do this part.
     let block_hash1 = faucet.generate_block().into();
-    wait_for_tenure_completed2(&signers, block_hash1).await;
+    wait_for_tenure_completed(&signers, block_hash1).await;
 
     let utxo = depositor.get_utxos(rpc, None).pop().unwrap();
 
@@ -4056,7 +4031,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     // call gets constructed and submitted by the signers. Any should be
     // able to do this part.
     let chain_tip = faucet.generate_block().into();
-    wait_for_tenure_completed2(&signers, chain_tip).await;
+    wait_for_tenure_completed(&signers, chain_tip).await;
 
     // Okay, now that someone other than the new signer has been
     // coordinator, we should have successfully signed and submitted a
@@ -4070,7 +4045,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     // We confirm another block so that this complete-deposit contract
     // call gets constructed and submitted by the signers.
     let block_hash2 = faucet.generate_block().into();
-    wait_for_tenure_completed2(&signers, block_hash2).await;
+    wait_for_tenure_completed(&signers, block_hash2).await;
 
     // =========================================================================
     // Step 11 - Assertions
@@ -4169,7 +4144,7 @@ async fn sign_bitcoin_transaction_signer_set_grows_threshold_changes(thresholds:
     assert_eq!(signer_new_script_pubkey, second_script_pubkey);
 
     // Lastly we check that out database has the sweep transaction
-    for ctx in signers {
+    for (ctx, _, _, _) in signers {
         let db = ctx.inner_storage();
         let script_pubkey = sqlx::query_scalar::<_, model::ScriptPubKey>(
             r#"
@@ -4273,7 +4248,7 @@ async fn wsts_ids_set_during_dkg_and_signing_rounds() {
 
         let network = network.connect(&ctx);
 
-        signers.push((ctx, db, kp, network));
+        signers.push((ctx, db, *kp, network));
     }
 
     // =========================================================================
@@ -4633,7 +4608,7 @@ async fn skip_signer_activites_after_key_rotation() {
 
         let network = network.connect(&ctx);
 
-        signers.push((ctx, db, kp, network));
+        signers.push((ctx, db, *kp, network));
     }
 
     // =========================================================================
@@ -5099,7 +5074,7 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
 
         let network = network.connect(&ctx);
 
-        signers.push((ctx, db, kp, network));
+        signers.push((ctx, db, *kp, network));
     }
 
     // =========================================================================
@@ -6147,7 +6122,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
 
         let network = network.connect(&ctx);
 
-        signers.push((ctx, db, kp, network));
+        signers.push((ctx, db, *kp, network));
     }
 
     // =========================================================================
@@ -7721,7 +7696,7 @@ async fn reuse_nonce_attack() {
         }
         let network = network.connect(&ctx);
 
-        signers.push((ctx, db, kp, network));
+        signers.push((ctx, db, *kp, network));
     }
 
     // We need to inspect the signer status, so we pick the first one for it
