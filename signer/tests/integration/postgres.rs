@@ -4914,6 +4914,7 @@ async fn deposit_requests_max_fee_migration() {
               AND output_index = $2
             "#,
         )
+        .persistent(false)
         .bind(txid)
         .bind(i32::try_from(output_index).map_err(Error::ConversionDatabaseInt)?)
         .fetch_optional(db.pool())
