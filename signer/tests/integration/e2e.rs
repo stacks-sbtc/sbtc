@@ -55,7 +55,7 @@ use crate::{
     containers::{BitcoinContainerExt as _, StacksContainerExt as _},
     setup::{clean_emily_setup, new_emily_setup},
     stacks::{fund_stx, wait_for_new_nonce, wait_for_stx_balance},
-    transaction_coordinator::{IntegrationTestContext, wait_for_signers},
+    transaction_coordinator::{IntegrationTestContext, wait_for_tenure_completed},
     utxo_construction::make_deposit_request_to,
 };
 
@@ -265,14 +265,14 @@ async fn deposit() {
     let deployer = signers[0].0.config().signer.deployer.clone();
 
     let old_nonce = stacks_client.get_account(&deployer).await.unwrap().nonce;
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
+    let chain_tip = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, chain_tip).await;
     wait_for_new_nonce(&stacks_client, &deployer, old_nonce).await;
     // Now we should have contracts deployed
 
     let old_nonce = stacks_client.get_account(&deployer).await.unwrap().nonce;
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
+    let chain_tip = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, chain_tip).await;
     wait_for_new_nonce(&stacks_client, &deployer, old_nonce).await;
     // Now we should have a key rotation
 
@@ -293,8 +293,8 @@ async fn deposit() {
     let depositor_fund_amount = deposit_amount + tx_fee;
     let depositor_fund_outpoint = faucet.send_to(depositor_fund_amount, &depositor.address);
 
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
+    let chain_tip = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, chain_tip).await;
     // Now the funding txs should be confirmed, we can submit the deposit
 
     let recipient = depositor.stacks_address().to_account_principal();
@@ -336,13 +336,13 @@ async fn deposit() {
         .await
         .expect("cannot create emily deposit");
 
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
+    let chain_tip = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, chain_tip).await;
     // Now we should have a sweep transaction submitted
 
     let old_nonce = stacks_client.get_account(&deployer).await.unwrap().nonce;
-    faucet.generate_block();
-    wait_for_signers(&signers).await;
+    let chain_tip = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, chain_tip).await;
     wait_for_new_nonce(&stacks_client, &deployer, old_nonce).await;
     // Now we should have sBTC minted
 
