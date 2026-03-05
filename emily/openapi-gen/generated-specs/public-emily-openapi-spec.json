@@ -8,6 +8,16 @@
     },
     "version": "0.1.0"
   },
+  "servers": [
+    {
+      "url": "http://localhost:3031",
+      "description": "Local Emily server"
+    },
+    {
+      "url": "https://sbtc-emily.com",
+      "description": "Production Emily server"
+    }
+  ],
   "paths": {
     "/chainstate": {
       "get": {
