@@ -81,9 +81,9 @@ use crate::setup::new_emily_setup;
 use crate::transaction_coordinator::mock_reqwests_status_code_error;
 use crate::utxo_construction::make_deposit_request;
 
-/// Wait for all signers to finish their coordinator duties and do this
-/// concurrently so that we don't miss anything (not sure if we need to do
-/// it concurrently).
+/// Wait for the arrival of the BitcoinBlockObserved signal for the given
+/// block hash, returning when the signal is received and panicking if not
+/// received within 5 seconds.
 async fn wait_for_block_observed<S, B, E>(
     ctx: &TestContext<PgStore, B, S, E>,
     block_hash: BitcoinBlockHash,
@@ -1835,7 +1835,7 @@ fn make_coinbase_deposit_request(
 /// This test checks that the block observer writes deposits with a a high
 /// max–fee to the database.
 #[test_log::test(tokio::test)]
-async fn block_observer_ignores_deposits_with_high_max_fee() {
+async fn block_observer_handles_deposits_with_high_max_fee() {
     let mut rng = get_rng();
 
     let stack = TestContainersBuilder::start_bitcoin().await;
