@@ -20,6 +20,7 @@ Method | HTTP request | Description
 [**throttle_activate_options**](CorsApi.md#throttle_activate_options) | **OPTIONS** /throttle/activate | CORS support
 [**throttle_deactivate_options**](CorsApi.md#throttle_deactivate_options) | **OPTIONS** /throttle/deactivate | CORS support
 [**throttle_options**](CorsApi.md#throttle_options) | **OPTIONS** /throttle | CORS support
+[**throttle_stop_options**](CorsApi.md#throttle_stop_options) | **OPTIONS** /throttle/stop | CORS support
 [**withdrawal_id_options**](CorsApi.md#withdrawal_id_options) | **OPTIONS** /withdrawal/{id} | CORS support
 [**withdrawal_options**](CorsApi.md#withdrawal_options) | **OPTIONS** /withdrawal | CORS support
 [**withdrawal_private_options**](CorsApi.md#withdrawal_private_options) | **OPTIONS** /withdrawal_private | CORS support
@@ -454,6 +455,33 @@ No authorization required
 ## throttle_options
 
 > throttle_options()
+CORS support
+
+Handles CORS preflight requests
+
+### Parameters
+
+This endpoint does not need any parameter.
+
+### Return type
+
+ (empty response body)
+
+### Authorization
+
+No authorization required
+
+### HTTP request headers
+
+- **Content-Type**: Not defined
+- **Accept**: Not defined
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+
+## throttle_stop_options
+
+> throttle_stop_options()
 CORS support
 
 Handles CORS preflight requests
