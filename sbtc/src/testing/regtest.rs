@@ -36,6 +36,7 @@ use bitcoincore_rpc::json::Timestamp;
 use bitcoincore_rpc::json::Utxo;
 use bitcoincore_rpc::jsonrpc::error::Error as JsonRpcError;
 use bitcoincore_rpc::jsonrpc::error::RpcError;
+use clarity::types::chainstate::StacksAddress;
 use secp256k1::SECP256K1;
 use std::sync::OnceLock;
 
@@ -229,6 +230,15 @@ impl Recipient {
         }
     }
 
+    /// Get the Stacks address associated to the private key of this recipient
+    pub fn stacks_address(&self) -> StacksAddress {
+        let pubkey = stacks_common::util::secp256k1::Secp256k1PublicKey::from_slice(
+            &self.keypair.public_key().serialize(),
+        )
+        .unwrap();
+        StacksAddress::p2pkh(false, &pubkey)
+    }
+
     /// Return all UTXOs for this recipient where the amount is greater
     /// than or equal to the given amount. The address must be tracked by
     /// the bitcoin-core wallet.
@@ -349,6 +359,13 @@ impl<'a> Faucet<'a> {
     ///
     /// Note: only P2TR and P2WPKH addresses are supported.
     pub fn send_to(&self, amount: u64, address: &Address) -> OutPoint {
+        self.send_to_script(amount, address.script_pubkey())
+    }
+
+    /// Send the specified amount to the specific script pubkey.
+    ///
+    /// Note: only P2TR and P2WPKH addresses are supported.
+    pub fn send_to_script(&self, amount: u64, script_pubkey: ScriptBuf) -> OutPoint {
         let fee = BITCOIN_CORE_FALLBACK_FEE.to_sat();
         let utxo = self.get_utxos(Some(amount + fee)).pop().unwrap();
 
@@ -364,7 +381,7 @@ impl<'a> Faucet<'a> {
             output: vec![
                 TxOut {
                     value: Amount::from_sat(amount),
-                    script_pubkey: address.script_pubkey(),
+                    script_pubkey,
                 },
                 TxOut {
                     value: utxo.amount.unchecked_sub(Amount::from_sat(amount + fee)),
