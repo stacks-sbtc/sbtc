@@ -11,7 +11,6 @@ use hashbrown::HashSet;
 use libp2p::PeerId;
 
 use hashbrown::HashMap;
-use std::sync::Mutex;
 use std::time::Instant;
 
 use crate::keys::PublicKey;
@@ -442,7 +441,7 @@ pub struct SignerSet {
     signers: RwLock<HashSet<Signer>>,
     peer_ids: RwLock<HashSet<PeerId>>,
     // Tracks message rate limits per peer: (window_start, message_count)
-    rate_limits: Mutex<HashMap<PeerId, (Instant, u32)>>,
+    rate_limits: RwLock<HashMap<PeerId, (Instant, u32)>>,
 }
 
 /// NOTE: We should never fail to acquire a lock from the RwLock so that it panics.
@@ -487,15 +486,16 @@ impl SignerSet {
             .expect("BUG: Failed to acquire write lock");
 
         #[allow(clippy::expect_used)]
-        self.rate_limits
-            .lock()
-            .expect("BUG: Failed to acquire write lock")
-            .clear();
+        let mut rate_limits = self
+            .rate_limits
+            .write()
+            .expect("BUG:  Failed to acquire write lock");
 
         // Remove the old signer set
         for signer in inner_signer_set {
             inner_peer_ids.remove(signer.peer_id());
             inner_public_keys.remove(signer.public_key());
+            rate_limits.remove(signer.peer_id());
         }
 
         // Add the new signer set
@@ -524,7 +524,7 @@ impl SignerSet {
 
             #[allow(clippy::expect_used)]
             self.rate_limits
-                .lock()
+                .write()
                 .expect("BUG: Failed to acquire write lock")
                 .remove(&peer_id);
         }
@@ -589,7 +589,7 @@ impl SignerSet {
     pub fn check_rate_limit(&self, peer_id: &PeerId, max_per_second: u32) -> bool {
         let mut limits = self
             .rate_limits
-            .lock()
+            .write()
             .expect("BUG: Failed to acquire lock for rate limits");
 
         let now = Instant::now();
