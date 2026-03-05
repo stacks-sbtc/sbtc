@@ -585,7 +585,7 @@ impl SignerSet {
 
     /// Checks if a peer has exceeded the allowed messages per second limit.
     /// Increments their counter and returns `true` if they are allowed,
-    /// or `false` if they are spamming.
+    /// or `false` if they have exceeded the limit.
     pub fn check_rate_limit(&self, peer_id: &PeerId, max_per_second: u32) -> bool {
         let mut limits = self
             .rate_limits
