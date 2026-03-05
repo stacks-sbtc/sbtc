@@ -32,6 +32,7 @@ use signer::storage::model::DkgSharesStatus;
 use signer::storage::model::KeyRotationEvent;
 use signer::storage::model::SweptWithdrawalRequest;
 use signer::storage::model::WithdrawalRequest;
+use signer::storage::postgres::PGSQL_MIGRATIONS;
 use signer::testing::IterTestExt as _;
 use signer::testing::storage::DbReadTestExt as _;
 use strum::IntoEnumIterator as _;
@@ -4846,6 +4847,189 @@ async fn get_deposit_request_returns_returns_inserted_deposit_request() {
     // Assert that the fetched fees match the inserted fees
     assert_eq!(fetched_deposit1, Some(deposit_request1));
     assert_eq!(fetched_deposit2, Some(deposit_request2));
+
+    signer::testing::storage::drop_db(db).await;
+}
+
+/// This test checks that the max_fee column is migrated correctly in the
+/// 0021__alter_max_fee_column.sql migration. This is done by:
+/// 1. creating a table that is just like the old deposit_requests table,
+/// 2. inserting deposit requests into both the old table and the new table,
+/// 3. running the migration against the old version of the table.
+/// 4. fetching the deposit requests from both versions of the table and checking that they match.
+#[tokio::test]
+async fn deposit_requests_max_fee_migration() {
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
+
+    // Let's create some deposits requests and write them to the usual
+    // table in the database.
+    let deposit_request1: model::DepositRequest = fake::Faker.fake_with_rng(&mut rng);
+    let deposit_request2: model::DepositRequest = fake::Faker.fake_with_rng(&mut rng);
+
+    // Let's create a new deposit_requests2 table that is just like
+    // deposit_requests table before the max_fee migration.
+    sqlx::raw_sql(
+        r#"
+        create table sbtc_signer.deposit_requests2
+        (
+            txid                   bytea                                              not null,
+            output_index           integer                                            not null,
+            spend_script           bytea                                              not null,
+            recipient              text                                               not null,
+            amount                 bigint                                             not null,
+            lock_time              bigint                                             not null,
+            signers_public_key     bytea                                              not null,
+            sender_script_pub_keys bytea[]                                            not null,
+            created_at             timestamp with time zone default CURRENT_TIMESTAMP not null,
+            reclaim_script_hash    bytea                                              not null,
+            max_fee                bigint                                             not null,
+            primary key (txid, output_index)
+        );
+        "#,
+    )
+    .execute(db.pool())
+    .await
+    .unwrap();
+
+    async fn get_deposit_request2(
+        db: &PgStore,
+        txid: &model::BitcoinTxId,
+        output_index: u32,
+    ) -> Result<Option<model::DepositRequest>, Error> {
+        sqlx::query_as::<_, model::DepositRequest>(
+            r#"
+            SELECT txid
+                 , output_index
+                 , spend_script
+                 , reclaim_script_hash
+                 , recipient
+                 , amount
+                 , max_fee
+                 , lock_time
+                 , signers_public_key
+                 , sender_script_pub_keys
+            FROM sbtc_signer.deposit_requests2
+            WHERE txid = $1
+              AND output_index = $2
+            "#,
+        )
+        .persistent(false)
+        .bind(txid)
+        .bind(i32::try_from(output_index).map_err(Error::ConversionDatabaseInt)?)
+        .fetch_optional(db.pool())
+        .await
+        .map_err(Error::SqlxQuery)
+    }
+
+    // Let's insert these deposit requests into both versions of the
+    // deposit requests table.
+    for deposit in [&deposit_request1, &deposit_request2] {
+        db.write_deposit_request(deposit).await.unwrap();
+        sqlx::query(
+            "INSERT INTO sbtc_signer.deposit_requests2
+              ( txid
+              , output_index
+              , spend_script
+              , reclaim_script_hash
+              , recipient
+              , amount
+              , max_fee
+              , lock_time
+              , signers_public_key
+              , sender_script_pub_keys
+              )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            ON CONFLICT DO NOTHING",
+        )
+        .bind(deposit.txid)
+        .bind(i32::try_from(deposit.output_index).unwrap())
+        .bind(&deposit.spend_script)
+        .bind(&deposit.reclaim_script_hash)
+        .bind(&deposit.recipient)
+        .bind(i64::try_from(deposit.amount).unwrap())
+        .bind(i64::try_from(deposit.max_fee).unwrap())
+        .bind(i64::from(deposit.lock_time))
+        .bind(deposit.signers_public_key)
+        .bind(&deposit.sender_script_pub_keys)
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+        // Trying to get the deposit requests from the new table should
+        // fail until we run the migration.
+        let result = get_deposit_request2(&db, &deposit.txid, deposit.output_index).await;
+        assert!(result.is_err());
+    }
+
+    // Now we run the migration against the new table
+    let migration_file = PGSQL_MIGRATIONS
+        .files()
+        .find(|file| {
+            file.path()
+                .file_name()
+                .map(|f| f.to_string_lossy())
+                .unwrap()
+                == "0021__alter_max_fee_column.sql"
+        })
+        .unwrap();
+
+    let new_migration_file = migration_file
+        .contents_utf8()
+        .unwrap()
+        .replace("deposit_requests", "deposit_requests2");
+
+    sqlx::raw_sql(&new_migration_file)
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+    // Okay, and let's check that everything matches what they are supposed
+    // to match.
+    for deposit in [deposit_request1, deposit_request2] {
+        // Fetch deposit requests from the database
+        let fetched_deposit_v1 = db
+            .get_deposit_request(&deposit.txid, deposit.output_index)
+            .await
+            .unwrap()
+            .unwrap();
+        let fetched_deposit_v2 = get_deposit_request2(&db, &deposit.txid, deposit.output_index)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(fetched_deposit_v1, deposit);
+        assert_eq!(fetched_deposit_v2, deposit);
+    }
+
+    signer::testing::storage::drop_db(db).await;
+}
+
+/// Check that the max_fee column in deposit_requests stores bytes in
+/// big-endian order.
+#[tokio::test]
+async fn deposit_requests_max_fee_stored_as_big_endian() {
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
+
+    // Use a value whose big-endian and little-endian representations differ.
+    let max_fee: u64 = 0x0123_4567_89ab_cdef;
+    assert_ne!(max_fee.to_be_bytes(), max_fee.to_le_bytes());
+
+    let mut deposit_request: model::DepositRequest = fake::Faker.fake_with_rng(&mut rng);
+    deposit_request.max_fee = max_fee;
+
+    db.write_deposit_request(&deposit_request).await.unwrap();
+
+    let stored_max_fee = sqlx::query_scalar::<_, Vec<u8>>(
+        "SELECT max_fee FROM sbtc_signer.deposit_requests WHERE txid = $1 AND output_index = $2",
+    )
+    .bind(deposit_request.txid)
+    .bind(i32::try_from(deposit_request.output_index).unwrap())
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+
+    assert_eq!(stored_max_fee.as_slice(), max_fee.to_be_bytes());
 
     signer::testing::storage::drop_db(db).await;
 }
