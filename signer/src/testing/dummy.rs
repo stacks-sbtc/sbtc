@@ -75,6 +75,7 @@ use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::BitcoinTxId;
 use crate::storage::model::CompletedDepositEvent;
+use crate::storage::model::ConsensusHash;
 use crate::storage::model::DkgSharesStatus;
 use crate::storage::model::EncryptedDkgShares;
 use crate::storage::model::KeyRotationEvent;
@@ -138,6 +139,13 @@ impl Dummy<Faker> for BitcoinTxInfo {
         };
 
         tx.fake_with_rng(rng)
+    }
+}
+
+impl Dummy<Faker> for ConsensusHash {
+    fn dummy_with_rng<R: Rng + ?Sized>(config: &Faker, rng: &mut R) -> Self {
+        let bytes: [u8; 20] = config.fake_with_rng(rng);
+        Self::new(bytes)
     }
 }
 
