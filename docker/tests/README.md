@@ -1,9 +1,9 @@
 # Chainstate snapshot
 
 To test Stacks interactions in integration tests we use snapshotted chainstates (for both Stacks and Bitcoin)
-to make the chains up and running as soon as possible. 
+to get the chains up and running as soon as possible. 
 
-The `docker-compose.stacks.yml` compose stack is used in such tests; it mounts chainstates contained in `snapshot.tgz`.
+The `docker-compose.stacks.yml` compose stack is used in such tests; it mounts chainstates contained in `snapshot.tar.xz`.
 
 To regenerate a snapshot run:
 ```bash
