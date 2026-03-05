@@ -13,6 +13,7 @@ use super::CorsSupport;
     servers(
         (url = "http://localhost:3031", description = "Local Emily server"),
         (url = "https://sbtc-emily.com", description = "Production Emily server"),
+        (url = "https://temp.sbtc-emily-dev.com", description = "Testnet Emily server"),
     ),
     // Paths to be included in the OpenAPI specification.
     paths(
