@@ -256,7 +256,7 @@ impl WstsCoordinator for FireCoordinator {
             .collect();
 
         // The number of possible signers is capped at a number well below
-        // u32::MAX, so this conversion should always work.
+        // u32::MAX, so this conversion should always work
         let num_signers: u32 = signer_public_keys
             .len()
             .try_into()
