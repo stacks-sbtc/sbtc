@@ -10,6 +10,9 @@ use bitcoin::Amount;
 use hashbrown::HashSet;
 use libp2p::PeerId;
 
+use hashbrown::HashMap;
+use std::time::Instant;
+
 use crate::keys::PublicKey;
 use crate::stacks::api::SignerSetInfo;
 use crate::storage::model::BitcoinBlockHeight;
@@ -436,6 +439,8 @@ impl Signer {
 pub struct SignerSet {
     signers: RwLock<HashSet<Signer>>,
     peer_ids: RwLock<HashSet<PeerId>>,
+    // Tracks message rate limits per peer: (window_start, message_count)
+    rate_limits: RwLock<HashMap<PeerId, (Instant, u32)>>,
 }
 
 /// NOTE: We should never fail to acquire a lock from the RwLock so that it panics.
@@ -479,10 +484,17 @@ impl SignerSet {
             .write()
             .expect("BUG: Failed to acquire write lock");
 
+        #[allow(clippy::expect_used)]
+        let mut rate_limits = self
+            .rate_limits
+            .write()
+            .expect("BUG:  Failed to acquire write lock");
+
         // Remove the old signer set
         for signer in inner_signer_set {
             inner_peer_ids.remove(signer.peer_id());
             inner_public_keys.remove(signer.public_key());
+            rate_limits.remove(signer.peer_id());
         }
 
         // Add the new signer set
@@ -508,6 +520,12 @@ impl SignerSet {
                 .write()
                 .expect("BUG: Failed to acquire write lock")
                 .remove(signer);
+
+            #[allow(clippy::expect_used)]
+            self.rate_limits
+                .write()
+                .expect("BUG: Failed to acquire write lock")
+                .remove(&peer_id);
         }
     }
 
@@ -562,6 +580,33 @@ impl SignerSet {
             .iter()
             .find(|signer| signer.peer_id() == peer_id)
             .map(|signer| *signer.public_key())
+    }
+
+    /// Checks if a peer has exceeded the allowed messages per second limit.
+    /// Increments their counter and returns `true` if they are allowed,
+    /// or `false` if they have exceeded the limit.
+    pub fn check_rate_limit(&self, peer_id: &PeerId, max_per_second: u32) -> bool {
+        let mut limits = self
+            .rate_limits
+            .write()
+            .expect("BUG: Failed to acquire lock for rate limits");
+
+        let now = Instant::now();
+        let (window_start, count) = limits.entry(*peer_id).or_insert((now, 0));
+
+        // If a full second has passed, reset their window
+        if now.saturating_duration_since(*window_start).as_secs() >= 1 {
+            *window_start = now;
+            *count = 1;
+            true
+        } else if *count < max_per_second {
+            // They are still within the window and under the limit
+            *count += 1;
+            true
+        } else {
+            // Limit exceeded
+            false
+        }
     }
 }
 
