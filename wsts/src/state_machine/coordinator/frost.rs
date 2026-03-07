@@ -953,22 +953,12 @@ pub mod test {
         },
         traits::Aggregator as AggregatorTrait,
         util::create_rng,
-        v1, v2,
+        v2,
     };
-
-    #[test]
-    fn new_coordinator_v1() {
-        new_coordinator::<FrostCoordinator<v1::Aggregator>>();
-    }
 
     #[test]
     fn new_coordinator_v2() {
         new_coordinator::<FrostCoordinator<v2::Aggregator>>();
-    }
-
-    #[test]
-    fn equal_after_save_load_v1() {
-        equal_after_save_load::<FrostCoordinator<v1::Aggregator>, v1::Signer>(2, 2);
     }
 
     #[test]
@@ -977,28 +967,13 @@ pub mod test {
     }
 
     #[test]
-    fn coordinator_state_machine_v1() {
-        coordinator_state_machine::<FrostCoordinator<v1::Aggregator>>();
-    }
-
-    #[test]
     fn coordinator_state_machine_v2() {
         coordinator_state_machine::<FrostCoordinator<v2::Aggregator>>();
     }
 
     #[test]
-    fn start_dkg_round_v1() {
-        start_dkg_round::<FrostCoordinator<v1::Aggregator>>();
-    }
-
-    #[test]
     fn start_dkg_round_v2() {
         start_dkg_round::<FrostCoordinator<v2::Aggregator>>();
-    }
-
-    #[test]
-    fn start_public_shares_v1() {
-        start_public_shares::<v1::Aggregator>();
     }
 
     #[test]
@@ -1021,11 +996,6 @@ pub mod test {
     }
 
     #[test]
-    fn start_private_shares_v1() {
-        start_private_shares::<v1::Aggregator>();
-    }
-
-    #[test]
     fn start_private_shares_v2() {
         start_private_shares::<v2::Aggregator>();
     }
@@ -1044,41 +1014,8 @@ pub mod test {
     }
 
     #[test]
-    fn run_dkg_sign_v1() {
-        run_dkg_sign::<FrostCoordinator<v1::Aggregator>, v1::Signer>(5, 2);
-    }
-
-    #[test]
     fn run_dkg_sign_v2() {
         run_dkg_sign::<FrostCoordinator<v2::Aggregator>, v2::Signer>(5, 2);
-    }
-
-    #[test]
-    fn check_signature_shares_v1() {
-        check_signature_shares::<FrostCoordinator<v1::Aggregator>, v1::Signer>(
-            5,
-            1,
-            SignatureType::Frost,
-            vec![1],
-        );
-        check_signature_shares::<FrostCoordinator<v1::Aggregator>, v1::Signer>(
-            5,
-            1,
-            SignatureType::Schnorr,
-            vec![1],
-        );
-        check_signature_shares::<FrostCoordinator<v1::Aggregator>, v1::Signer>(
-            5,
-            1,
-            SignatureType::Taproot(None),
-            vec![1],
-        );
-        check_signature_shares::<FrostCoordinator<v1::Aggregator>, v1::Signer>(
-            5,
-            1,
-            SignatureType::Taproot(Some([23u8; 32])),
-            vec![1],
-        );
     }
 
     #[test]
@@ -1110,18 +1047,8 @@ pub mod test {
     }
 
     #[test]
-    fn bad_signature_share_request_v1() {
-        bad_signature_share_request::<FrostCoordinator<v1::Aggregator>, v1::Signer>(5, 2);
-    }
-
-    #[test]
     fn bad_signature_share_request_v2() {
         bad_signature_share_request::<FrostCoordinator<v2::Aggregator>, v2::Signer>(5, 2);
-    }
-
-    #[test]
-    fn invalid_nonce_v1() {
-        invalid_nonce::<FrostCoordinator<v1::Aggregator>, v1::Signer>(5, 2);
     }
 
     #[test]
@@ -1132,11 +1059,6 @@ pub mod test {
     #[test]
     fn process_inbound_messages_v2() {
         run_dkg_sign::<FrostCoordinator<v2::Aggregator>, v2::Signer>(5, 2);
-    }
-
-    #[test]
-    fn old_round_ids_are_ignored_v1() {
-        old_round_ids_are_ignored::<v1::Aggregator>();
     }
 
     #[test]
@@ -1214,18 +1136,8 @@ pub mod test {
     }
 
     #[test]
-    fn empty_public_shares_v1() {
-        empty_public_shares::<FrostCoordinator<v1::Aggregator>, v1::Signer>(5, 2);
-    }
-
-    #[test]
     fn empty_public_shares_v2() {
         empty_public_shares::<FrostCoordinator<v2::Aggregator>, v2::Signer>(5, 2);
-    }
-
-    #[test]
-    fn empty_private_shares_v1() {
-        empty_private_shares::<FrostCoordinator<v1::Aggregator>, v1::Signer>(5, 2);
     }
 
     #[test]

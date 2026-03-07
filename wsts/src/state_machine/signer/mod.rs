@@ -1055,19 +1055,14 @@ pub mod test {
         },
         traits::Signer as SignerTrait,
         util::create_rng,
-        v1, v2,
+        v2,
     };
 
     use hashbrown::HashSet;
 
     #[test]
-    fn bad_config_v1() {
-        bad_config::<v1::Signer>();
-    }
-
-    #[test]
     fn bad_config_v2() {
-        bad_config::<v1::Signer>();
+        bad_config::<v2::Signer>();
     }
 
     fn bad_config<SignerType: SignerTrait>() {
@@ -1205,11 +1200,6 @@ pub mod test {
     }
 
     #[test]
-    fn dkg_public_share_v1() {
-        dkg_public_share::<v1::Signer>();
-    }
-
-    #[test]
     fn dkg_public_share_v2() {
         dkg_public_share::<v2::Signer>();
     }
@@ -1239,11 +1229,6 @@ pub mod test {
         let public_share = DkgPublicShares { dkg_id: 0, signer_id: 0, comms };
         signer.dkg_public_share(&public_share).unwrap();
         assert_eq!(1, signer.dkg_public_shares.len())
-    }
-
-    #[test]
-    fn public_shares_done_v1() {
-        public_shares_done::<v1::Signer>();
     }
 
     #[test]
@@ -1280,11 +1265,6 @@ pub mod test {
 
         // public_shares_done should be true
         assert!(signer.public_shares_done());
-    }
-
-    #[test]
-    fn can_dkg_end_v1() {
-        can_dkg_end::<v1::Signer>();
     }
 
     #[test]
@@ -1341,11 +1321,6 @@ pub mod test {
 
         // can_dkg_end should be true
         assert!(signer.can_dkg_end());
-    }
-
-    #[test]
-    fn dkg_ended_v1() {
-        dkg_ended::<v1::Signer>();
     }
 
     #[test]

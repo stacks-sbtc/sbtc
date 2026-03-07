@@ -1373,24 +1373,14 @@ pub mod test {
         },
         traits::{Aggregator as AggregatorTrait, Signer as SignerTrait},
         util::create_rng,
-        v1, v2,
+        v2,
     };
     use hashbrown::HashMap;
     use std::{thread, time::Duration};
 
     #[test]
-    fn new_coordinator_v1() {
-        new_coordinator::<FireCoordinator<v1::Aggregator>>();
-    }
-
-    #[test]
     fn new_coordinator_v2() {
         new_coordinator::<FireCoordinator<v2::Aggregator>>();
-    }
-
-    #[test]
-    fn equal_after_save_load_v1() {
-        equal_after_save_load::<FireCoordinator<v1::Aggregator>, v1::Signer>(2, 2);
     }
 
     #[test]
@@ -1399,28 +1389,13 @@ pub mod test {
     }
 
     #[test]
-    fn coordinator_state_machine_v1() {
-        coordinator_state_machine::<FireCoordinator<v1::Aggregator>>();
-    }
-
-    #[test]
     fn coordinator_state_machine_v2() {
         coordinator_state_machine::<FireCoordinator<v2::Aggregator>>();
     }
 
     #[test]
-    fn start_dkg_round_v1() {
-        start_dkg_round::<FireCoordinator<v1::Aggregator>>();
-    }
-
-    #[test]
     fn start_dkg_round_v2() {
         start_dkg_round::<FireCoordinator<v2::Aggregator>>();
-    }
-
-    #[test]
-    fn start_public_shares_v1() {
-        start_public_shares::<v1::Aggregator>();
     }
 
     #[test]
@@ -1443,11 +1418,6 @@ pub mod test {
     }
 
     #[test]
-    fn start_private_shares_v1() {
-        start_private_shares::<v1::Aggregator>();
-    }
-
-    #[test]
     fn start_private_shares_v2() {
         start_private_shares::<v2::Aggregator>();
     }
@@ -1466,45 +1436,10 @@ pub mod test {
     }
 
     #[test]
-    fn run_dkg_sign_v1() {
-        for _ in 0..4 {
-            run_dkg_sign::<FireCoordinator<v1::Aggregator>, v1::Signer>(5, 2);
-        }
-    }
-
-    #[test]
     fn run_dkg_sign_v2() {
         for _ in 0..4 {
             run_dkg_sign::<FireCoordinator<v2::Aggregator>, v2::Signer>(5, 2);
         }
-    }
-
-    #[test]
-    fn check_signature_shares_v1() {
-        check_signature_shares::<FireCoordinator<v1::Aggregator>, v1::Signer>(
-            5,
-            2,
-            SignatureType::Frost,
-            vec![1, 2],
-        );
-        check_signature_shares::<FireCoordinator<v1::Aggregator>, v1::Signer>(
-            5,
-            2,
-            SignatureType::Schnorr,
-            vec![1, 2],
-        );
-        check_signature_shares::<FireCoordinator<v1::Aggregator>, v1::Signer>(
-            5,
-            2,
-            SignatureType::Taproot(None),
-            vec![1, 2],
-        );
-        check_signature_shares::<FireCoordinator<v1::Aggregator>, v1::Signer>(
-            5,
-            2,
-            SignatureType::Taproot(Some([23u8; 32])),
-            vec![1, 2],
-        );
     }
 
     #[test]
@@ -1533,11 +1468,6 @@ pub mod test {
             SignatureType::Taproot(Some([23u8; 32])),
             vec![0],
         );
-    }
-
-    #[test]
-    fn all_signers_dkg_v1() {
-        all_signers_dkg::<v1::Aggregator, v1::Signer>(5, 2);
     }
 
     #[test]
@@ -1601,11 +1531,6 @@ pub mod test {
             _ => panic!("Expected Dkg Operation result"),
         }
         (coordinators, signers)
-    }
-
-    #[test]
-    fn missing_public_keys_dkg_v1() {
-        missing_public_keys_dkg::<v1::Aggregator, v1::Signer>(10, 1);
     }
 
     #[test]
@@ -1682,11 +1607,6 @@ pub mod test {
             State::DkgPrivateGather,
         );
         (minimum_coordinators, minimum_signers)
-    }
-
-    #[test]
-    fn minimum_signers_dkg_v1() {
-        minimum_signers_dkg::<v1::Aggregator, v1::Signer>(10, 2);
     }
 
     #[test]
@@ -1840,11 +1760,6 @@ pub mod test {
     }
 
     #[test]
-    fn insufficient_signers_dkg_v1() {
-        insufficient_signers_dkg::<v1::Aggregator, v1::Signer>();
-    }
-
-    #[test]
     fn insufficient_signers_dkg_v2() {
         insufficient_signers_dkg::<v2::Aggregator, v2::Signer>();
     }
@@ -1984,11 +1899,6 @@ pub mod test {
     }
 
     #[test]
-    fn malicious_signers_dkg_v1() {
-        malicious_signers_dkg::<v1::Aggregator, v1::Signer>(5, 2);
-    }
-
-    #[test]
     fn malicious_signers_dkg_v2() {
         malicious_signers_dkg::<v2::Aggregator, v2::Signer>(5, 2);
     }
@@ -2106,11 +2016,6 @@ pub mod test {
     }
 
     #[test]
-    fn bad_poly_length_dkg_v1() {
-        bad_poly_length_dkg::<v1::Aggregator, v1::Signer>(5, 2);
-    }
-
-    #[test]
     fn bad_poly_length_dkg_v2() {
         bad_poly_length_dkg::<v2::Aggregator, v2::Signer>(5, 2);
     }
@@ -2223,11 +2128,6 @@ pub mod test {
     }
 
     #[test]
-    fn all_signers_sign_v1() {
-        all_signers_sign::<v1::Aggregator, v1::Signer>();
-    }
-
-    #[test]
     fn all_signers_sign_v2() {
         all_signers_sign::<v2::Aggregator, v2::Signer>();
     }
@@ -2286,11 +2186,6 @@ pub mod test {
             }
             _ => panic!("Expected Signature Operation result"),
         }
-    }
-
-    #[test]
-    fn minimum_signers_sign_v1() {
-        minimum_signers_sign::<v1::Aggregator, v1::Signer>();
     }
 
     #[test]
@@ -2373,11 +2268,6 @@ pub mod test {
     }
 
     #[test]
-    fn missing_public_keys_sign_v1() {
-        missing_public_keys_sign::<v1::Aggregator, v1::Signer>();
-    }
-
-    #[test]
     fn minimum_missing_public_keys_sign_v2() {
         missing_public_keys_sign::<v2::Aggregator, v2::Signer>();
     }
@@ -2457,11 +2347,6 @@ pub mod test {
         for coordinator in &coordinators {
             assert_eq!(coordinator.state, State::Idle);
         }
-    }
-
-    #[test]
-    fn insufficient_signers_sign_v1() {
-        insufficient_signers_sign::<v1::Aggregator, v1::Signer>();
     }
 
     #[test]
@@ -2718,11 +2603,6 @@ pub mod test {
     }
 
     #[test]
-    fn multiple_nonce_request_messages_sign_v1() {
-        multiple_nonce_request_messages::<v1::Aggregator, v1::Signer>();
-    }
-
-    #[test]
     fn multiple_nonce_request_messages_sign_v2() {
         multiple_nonce_request_messages::<v2::Aggregator, v2::Signer>();
     }
@@ -2816,11 +2696,6 @@ pub mod test {
     }
 
     #[test]
-    fn old_round_ids_are_ignored_v1() {
-        old_round_ids_are_ignored::<v1::Aggregator, v1::Signer>();
-    }
-
-    #[test]
     fn old_round_ids_are_ignored_v2() {
         old_round_ids_are_ignored::<v2::Aggregator, v2::Signer>();
     }
@@ -2895,18 +2770,8 @@ pub mod test {
     }
 
     #[test]
-    fn gen_nonces_v1() {
-        gen_nonces::<FireCoordinator<v1::Aggregator>, v1::Signer>(5, 1);
-    }
-
-    #[test]
     fn gen_nonces_v2() {
         gen_nonces::<FireCoordinator<v2::Aggregator>, v2::Signer>(5, 1);
-    }
-
-    #[test]
-    fn bad_signature_share_request_v1() {
-        bad_signature_share_request::<FireCoordinator<v1::Aggregator>, v1::Signer>(5, 2);
     }
 
     #[test]
@@ -2915,18 +2780,8 @@ pub mod test {
     }
 
     #[test]
-    fn invalid_nonce_v1() {
-        invalid_nonce::<FireCoordinator<v1::Aggregator>, v1::Signer>(5, 2);
-    }
-
-    #[test]
     fn invalid_nonce_v2() {
         invalid_nonce::<FireCoordinator<v2::Aggregator>, v2::Signer>(5, 2);
-    }
-
-    #[test]
-    fn one_signer_bad_threshold_v1() {
-        one_signer_bad_threshold::<v1::Aggregator, v1::Signer>();
     }
 
     #[test]
@@ -3032,11 +2887,6 @@ pub mod test {
     }
 
     #[test]
-    fn bad_dkg_threshold_v1() {
-        bad_dkg_threshold::<v1::Aggregator, v1::Signer>();
-    }
-
-    #[test]
     fn bad_dkg_threshold_v2() {
         bad_dkg_threshold::<v2::Aggregator, v2::Signer>();
     }
@@ -3111,18 +2961,8 @@ pub mod test {
     }
 
     #[test]
-    fn empty_public_shares_v1() {
-        empty_public_shares::<FireCoordinator<v1::Aggregator>, v1::Signer>(5, 2);
-    }
-
-    #[test]
     fn empty_public_shares_v2() {
         empty_public_shares::<FireCoordinator<v2::Aggregator>, v2::Signer>(5, 2);
-    }
-
-    #[test]
-    fn empty_private_shares_v1() {
-        empty_private_shares::<FireCoordinator<v1::Aggregator>, v1::Signer>(5, 2);
     }
 
     #[test]
