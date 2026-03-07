@@ -442,7 +442,7 @@ fn handle_gossipsub_event(
                         return Err(error)
                     }
 
-                    let _ = ctx.get_signal_sender()
+                    let _ = ctx.get_network_sender()
                         .send(P2PEvent::MessageReceived(Box::new(msg)).into())
                         .inspect_err(|error| {
                             tracing::debug!(%error, "Failed to send message to application; we are likely shutting down.");
