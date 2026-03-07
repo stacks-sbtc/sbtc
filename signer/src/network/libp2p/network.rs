@@ -18,6 +18,8 @@ use crate::network::Msg;
 pub struct P2PNetwork {
     signal_tx: Sender<SignerSignal>,
     signal_rx: Receiver<SignerSignal>,
+    network_tx: Sender<SignerSignal>,
+    network_rx: Receiver<SignerSignal>,
     term: TerminationHandle,
 }
 
@@ -26,6 +28,8 @@ impl Clone for P2PNetwork {
         Self {
             signal_tx: self.signal_tx.clone(),
             signal_rx: self.signal_tx.subscribe(),
+            network_tx: self.network_tx.clone(),
+            network_rx: self.network_tx.subscribe(),
             term: self.term.clone(),
         }
     }
@@ -37,7 +41,9 @@ impl P2PNetwork {
     pub fn new(ctx: &impl Context) -> Self {
         Self {
             signal_tx: ctx.get_signal_sender(),
-            signal_rx: ctx.get_signal_receiver(),
+            signal_rx: ctx.get_signal_receiver(),   
+            network_tx: ctx.get_network_sender(),
+            network_rx: ctx.get_network_receiver(),
             term: ctx.get_termination_handle(),
         }
     }
@@ -95,6 +101,17 @@ impl MessageTransfer for P2PNetwork {
                         },
                         // We're only interested in the above messages, so we ignore
                         // the rest.
+                        _ => continue,
+                    }
+                }
+                recv = self.network_rx.recv() => {
+                    match recv {
+                        Ok(SignerSignal::Event(SignerEvent::P2P(P2PEvent::MessageReceived(msg)))) => {
+                            return Ok(*msg);
+                        },
+                        Err(_) => {
+                            return Err(Error::SignerShutdown);
+                        },
                         _ => continue,
                     }
                 }
