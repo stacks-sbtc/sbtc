@@ -26,7 +26,7 @@ pub trait AsPublicKey {
     fn as_public_key(&self) -> PublicKey;
 }
 
-impl AsPublicKey for Signer<v2::Party> {
+impl AsPublicKey for Signer {
     fn as_public_key(&self) -> PublicKey {
         self.public_keys.signers[&self.signer_id].into()
     }
@@ -34,7 +34,7 @@ impl AsPublicKey for Signer<v2::Party> {
 
 pub struct TestSetup {
     pub state_machine: StateMachine,
-    signers: VecDeque<Signer<v2::Party>>,
+    signers: VecDeque<Signer>,
     #[allow(dead_code)]
     pub aggregate_key: XOnlyPublicKey,
 }
@@ -46,7 +46,7 @@ impl TestSetup {
         }
 
         let (coordinators, signers) =
-            wsts_test::run_dkg::<frost::Coordinator<v2::Aggregator>, v2::Party>(num_parties, 5);
+            wsts_test::run_dkg::<frost::Coordinator<v2::Aggregator>>(num_parties, 5);
 
         let signers = signers.into();
         let aggregate_key = pubkey_xonly();
@@ -61,7 +61,7 @@ impl TestSetup {
         }
     }
 
-    pub fn next_signer(&mut self) -> Signer<v2::Party> {
+    pub fn next_signer(&mut self) -> Signer {
         self.signers.pop_front().expect("no more signers")
     }
 }

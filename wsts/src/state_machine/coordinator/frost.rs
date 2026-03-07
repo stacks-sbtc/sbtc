@@ -963,7 +963,7 @@ pub mod test {
 
     #[test]
     fn equal_after_save_load_v2() {
-        equal_after_save_load::<FrostCoordinator<v2::Aggregator>, v2::Signer>(2, 2);
+        equal_after_save_load::<FrostCoordinator<v2::Aggregator>>(2, 2);
     }
 
     #[test]
@@ -1015,30 +1015,30 @@ pub mod test {
 
     #[test]
     fn run_dkg_sign_v2() {
-        run_dkg_sign::<FrostCoordinator<v2::Aggregator>, v2::Signer>(5, 2);
+        run_dkg_sign::<FrostCoordinator<v2::Aggregator>>(5, 2);
     }
 
     #[test]
     fn check_signature_shares_v2() {
-        check_signature_shares::<FrostCoordinator<v2::Aggregator>, v2::Signer>(
+        check_signature_shares::<FrostCoordinator<v2::Aggregator>>(
             5,
             2,
             SignatureType::Frost,
             vec![0],
         );
-        check_signature_shares::<FrostCoordinator<v2::Aggregator>, v2::Signer>(
+        check_signature_shares::<FrostCoordinator<v2::Aggregator>>(
             5,
             2,
             SignatureType::Schnorr,
             vec![0],
         );
-        check_signature_shares::<FrostCoordinator<v2::Aggregator>, v2::Signer>(
+        check_signature_shares::<FrostCoordinator<v2::Aggregator>>(
             5,
             2,
             SignatureType::Taproot(None),
             vec![0],
         );
-        check_signature_shares::<FrostCoordinator<v2::Aggregator>, v2::Signer>(
+        check_signature_shares::<FrostCoordinator<v2::Aggregator>>(
             5,
             2,
             SignatureType::Taproot(Some([23u8; 32])),
@@ -1048,17 +1048,17 @@ pub mod test {
 
     #[test]
     fn bad_signature_share_request_v2() {
-        bad_signature_share_request::<FrostCoordinator<v2::Aggregator>, v2::Signer>(5, 2);
+        bad_signature_share_request::<FrostCoordinator<v2::Aggregator>>(5, 2);
     }
 
     #[test]
     fn invalid_nonce_v2() {
-        invalid_nonce::<FrostCoordinator<v2::Aggregator>, v2::Signer>(5, 2);
+        invalid_nonce::<FrostCoordinator<v2::Aggregator>>(5, 2);
     }
 
     #[test]
     fn process_inbound_messages_v2() {
-        run_dkg_sign::<FrostCoordinator<v2::Aggregator>, v2::Signer>(5, 2);
+        run_dkg_sign::<FrostCoordinator<v2::Aggregator>>(5, 2);
     }
 
     #[test]
@@ -1137,11 +1137,11 @@ pub mod test {
 
     #[test]
     fn empty_public_shares_v2() {
-        empty_public_shares::<FrostCoordinator<v2::Aggregator>, v2::Signer>(5, 2);
+        empty_public_shares::<FrostCoordinator<v2::Aggregator>>(5, 2);
     }
 
     #[test]
     fn empty_private_shares_v2() {
-        empty_private_shares::<FrostCoordinator<v2::Aggregator>, v2::Signer>(5, 2);
+        empty_private_shares::<FrostCoordinator<v2::Aggregator>>(5, 2);
     }
 }

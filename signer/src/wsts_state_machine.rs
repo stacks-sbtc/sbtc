@@ -484,7 +484,7 @@ impl WstsCoordinator for FrostCoordinator {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SignerStateMachine {
     /// The inner WSTS state machine that this type wraps
-    inner: wsts::state_machine::signer::Signer<wsts::v2::Party>,
+    inner: wsts::state_machine::signer::Signer,
     /// The bitcoin block hash and height at the time that this state
     /// machine was created. This is used to seed the random number
     /// generator used to create the secret polynomial during DKG.
@@ -494,7 +494,7 @@ pub struct SignerStateMachine {
     private_key: PrivateKey,
 }
 
-type WstsSigner = wsts::state_machine::signer::Signer<wsts::v2::Party>;
+type WstsSigner = wsts::state_machine::signer::Signer;
 
 impl SignerStateMachine {
     /// Create a new state machine
