@@ -37,6 +37,14 @@ pub trait Context: Clone + Sync + Send {
     fn get_signal_receiver(&self) -> tokio::sync::broadcast::Receiver<SignerSignal>;
     /// Get an owned application signalling channel sender.
     fn get_signal_sender(&self) -> tokio::sync::broadcast::Sender<SignerSignal>;
+    /// Subscribe to the application's channel for messages received from
+    /// the network, returning a receiver which can be used to listen for
+    /// events.
+    fn get_network_receiver(&self) -> tokio::sync::broadcast::Receiver<SignerSignal>;
+    /// Get an owned application's channel for messages received from the
+    /// network, returning a sender which can be used to forward received
+    /// messages to an internal channel for network messages.
+    fn get_network_sender(&self) -> tokio::sync::broadcast::Sender<SignerSignal>;
     /// Send a signal to the application signalling channel.
     fn signal(&self, signal: SignerSignal) -> Result<(), Error>;
     /// Returns a handle to the application's termination signal.
@@ -73,6 +81,7 @@ pub trait Context: Clone + Sync + Send {
 
         let mut watch_receiver = self.get_termination_handle();
         let mut signal_stream = self.get_signal_receiver();
+        let mut network_stream = self.get_network_receiver();
 
         tokio::spawn(async move {
             loop {
@@ -101,6 +110,25 @@ pub trait Context: Clone + Sync + Send {
                             }
                             Err(error @ RecvError::Lagged(_)) => {
                                 tracing::warn!(%error, "internal signal stream lagging");
+                                continue
+                            }
+                        }
+                    }
+                    item = network_stream.recv() => {
+                        match item {
+                            Ok(signal) if predicate(&signal) => {
+                                // See comment above, we can bail.
+                                if sender.send(signal).await.is_err() {
+                                    break;
+                                }
+                            }
+                            Ok(_) => continue,
+                            Err(RecvError::Closed) => {
+                                tracing::warn!("network signal stream closed");
+                                break;
+                            }
+                            Err(error @ RecvError::Lagged(_)) => {
+                                tracing::warn!(%error, "network signal stream lagging");
                                 continue
                             }
                         }

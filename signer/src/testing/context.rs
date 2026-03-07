@@ -274,6 +274,14 @@ where
         self.inner.get_signal_sender()
     }
 
+    fn get_network_receiver(&self) -> broadcast::Receiver<SignerSignal> {
+        self.inner.get_network_receiver()
+    }
+
+    fn get_network_sender(&self) -> broadcast::Sender<SignerSignal> {
+        self.inner.get_network_sender()
+    }
+
     fn signal(&self, signal: SignerSignal) -> Result<(), Error> {
         self.inner.signal(signal)
     }

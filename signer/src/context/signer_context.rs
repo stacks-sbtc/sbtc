@@ -22,6 +22,9 @@ pub struct SignerContext<S, BC, ST, EM> {
     // for the duration of the program and is used both to send messages
     // and to hand out new receivers.
     signal_tx: Sender<SignerSignal>,
+    /// Handle to the application's channel for messages received from the
+    /// network.
+    network_tx: Sender<SignerSignal>,
     /// The internal state of the signer.
     state: Arc<SignerState>,
     /// Handle to the app termination channel. This keeps the channel alive
@@ -92,6 +95,7 @@ where
         // NOTE: Ideally consumers which require processing time should pull the relevent
         // messages into a local VecDequeue and process them in their own time.
         let (signal_tx, _) = tokio::sync::broadcast::channel(SIGNER_CHANNEL_CAPACITY);
+        let (network_tx, _) = tokio::sync::broadcast::channel(SIGNER_CHANNEL_CAPACITY);
         let (term_tx, _) = tokio::sync::watch::channel(false);
         let state = SignerState::default();
         if let Some(height) = config.signer.sbtc_bitcoin_start_height {
@@ -102,6 +106,7 @@ where
             config,
             state: Arc::new(state),
             signal_tx,
+            network_tx,
             term_tx,
             storage: db,
             bitcoin_client,
@@ -132,6 +137,14 @@ where
 
     fn get_signal_sender(&self) -> tokio::sync::broadcast::Sender<SignerSignal> {
         self.signal_tx.clone()
+    }
+
+    fn get_network_receiver(&self) -> tokio::sync::broadcast::Receiver<SignerSignal> {
+        self.network_tx.subscribe()
+    }
+
+    fn get_network_sender(&self) -> tokio::sync::broadcast::Sender<SignerSignal> {
+        self.network_tx.clone()
     }
 
     /// Send a signal to the application signalling channel.
