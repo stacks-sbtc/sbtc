@@ -87,7 +87,7 @@ pub fn generate_signer_info<Rng: rand::RngCore + rand::CryptoRng>(
 /// Test coordinator that can operate over an `in_memory` network
 pub struct Coordinator {
     network: network::in_memory::MpmcBroadcaster,
-    wsts_coordinator: fire::Coordinator<wsts::v2::Aggregator>,
+    wsts_coordinator: fire::Coordinator,
     private_key: PrivateKey,
 }
 

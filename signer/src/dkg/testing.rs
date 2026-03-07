@@ -46,7 +46,7 @@ impl TestSetup {
         }
 
         let (coordinators, signers) =
-            wsts_test::run_dkg::<frost::Coordinator<v2::Aggregator>>(num_parties, 5);
+            wsts_test::run_dkg::<frost::Coordinator>(num_parties, 5);
 
         let signers = signers.into();
         let aggregate_key = pubkey_xonly();

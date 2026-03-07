@@ -145,7 +145,7 @@ pub mod test_helpers {
 mod test {
     use super::{test_helpers, Point, Scalar, SchnorrProof, G};
 
-    use crate::{compute, traits::Aggregator, traits::Signer, util::create_rng, v2};
+    use crate::{compute, traits::Signer, util::create_rng, v2};
 
     #[test]
     #[allow(non_snake_case)]

@@ -267,6 +267,32 @@ pub struct Aggregator {
 }
 
 impl Aggregator {
+    /// Construct an Aggregator with the passed parameters
+    pub fn new(num_keys: u32, threshold: u32) -> Self {
+        Self {
+            num_keys,
+            threshold,
+            poly: Default::default(),
+        }
+    }
+
+    /// Initialize the Aggregator polynomial
+    pub fn init(&mut self, comms: &HashMap<u32, PolyCommitment>) -> Result<(), AggregatorError> {
+        let threshold: usize = self.threshold.try_into()?;
+        let mut poly = Vec::with_capacity(threshold);
+
+        for i in 0..poly.capacity() {
+            poly.push(Point::zero());
+            for (_, comm) in comms {
+                poly[i] += &comm.poly[i];
+            }
+        }
+
+        self.poly = poly;
+
+        Ok(())
+    }
+
     /// Aggregate the party signatures using a tweak.  The posible values for tweak are
     /// None    - standard FROST signature
     /// Some(0) - BIP-340 schnorr signature using 32-byte private key adjustments
@@ -394,37 +420,9 @@ impl Aggregator {
             AggregatorError::BadGroupSig
         }
     }
-}
-
-impl traits::Aggregator for Aggregator {
-    /// Construct an Aggregator with the passed parameters
-    fn new(num_keys: u32, threshold: u32) -> Self {
-        Self {
-            num_keys,
-            threshold,
-            poly: Default::default(),
-        }
-    }
-
-    /// Initialize the Aggregator polynomial
-    fn init(&mut self, comms: &HashMap<u32, PolyCommitment>) -> Result<(), AggregatorError> {
-        let threshold: usize = self.threshold.try_into()?;
-        let mut poly = Vec::with_capacity(threshold);
-
-        for i in 0..poly.capacity() {
-            poly.push(Point::zero());
-            for (_, comm) in comms {
-                poly[i] += &comm.poly[i];
-            }
-        }
-
-        self.poly = poly;
-
-        Ok(())
-    }
 
     /// Check and aggregate the party signatures
-    fn sign(
+    pub fn sign(
         &mut self,
         msg: &[u8],
         nonces: &[PublicNonce],
@@ -441,7 +439,7 @@ impl traits::Aggregator for Aggregator {
     }
 
     /// Check and aggregate the party signatures
-    fn sign_schnorr(
+    pub fn sign_schnorr(
         &mut self,
         msg: &[u8],
         nonces: &[PublicNonce],
@@ -460,7 +458,7 @@ impl traits::Aggregator for Aggregator {
     }
 
     /// Check and aggregate the party signatures
-    fn sign_taproot(
+    pub fn sign_taproot(
         &mut self,
         msg: &[u8],
         nonces: &[PublicNonce],
@@ -735,7 +733,7 @@ mod tests {
     use crate::util::create_rng;
     use crate::{
         traits::{
-            self, test_helpers::run_compute_secrets_missing_private_shares, Aggregator, Signer,
+            self, test_helpers::run_compute_secrets_missing_private_shares, Signer,
         },
         v2,
     };
