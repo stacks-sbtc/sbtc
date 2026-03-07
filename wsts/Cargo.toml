@@ -37,6 +37,3 @@ rand_chacha.workspace = true
 path = "src/lib.rs"    # The source file of the target.
 crate-type = ["lib"]   # The crate types to generate.
 
-[[bin]]
-name = "wsts"
-path = "src/main.rs"

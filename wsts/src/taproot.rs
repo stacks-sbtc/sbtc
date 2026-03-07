@@ -275,7 +275,6 @@ mod test {
         assert!(schnorr_proof.verify(&T.x(), msg.as_bytes()));
     }
 
-
     #[test]
     #[allow(non_snake_case)]
     fn taproot_sign_verify_v2_with_merkle_root() {
