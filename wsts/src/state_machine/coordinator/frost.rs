@@ -976,10 +976,6 @@ pub mod test {
     }
 
     #[test]
-    fn start_public_shares_v2() {
-        start_public_shares();
-    }
-
     fn start_public_shares() {
         let mut rng = create_rng();
         let config = Config::new(10, 40, 28, Scalar::random(&mut rng));
@@ -995,10 +991,6 @@ pub mod test {
     }
 
     #[test]
-    fn start_private_shares_v2() {
-        start_private_shares();
-    }
-
     fn start_private_shares() {
         let mut rng = create_rng();
         let config = Config::new(10, 40, 28, Scalar::random(&mut rng));
@@ -1061,10 +1053,6 @@ pub mod test {
     }
 
     #[test]
-    fn old_round_ids_are_ignored_v2() {
-        old_round_ids_are_ignored();
-    }
-
     fn old_round_ids_are_ignored() {
         let mut rng = create_rng();
         let config = Config::new(10, 40, 28, Scalar::random(&mut rng));

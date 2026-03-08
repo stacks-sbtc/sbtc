@@ -1399,10 +1399,6 @@ pub mod test {
     }
 
     #[test]
-    fn start_public_shares_v2() {
-        start_public_shares();
-    }
-
     fn start_public_shares() {
         let mut rng = create_rng();
         let config = Config::new(10, 40, 28, Scalar::random(&mut rng));
@@ -1418,10 +1414,6 @@ pub mod test {
     }
 
     #[test]
-    fn start_private_shares_v2() {
-        start_private_shares();
-    }
-
     fn start_private_shares() {
         let mut rng = create_rng();
         let config = Config::new(10, 40, 28, Scalar::random(&mut rng));
@@ -1758,10 +1750,6 @@ pub mod test {
     }
 
     #[test]
-    fn insufficient_signers_dkg_v2() {
-        insufficient_signers_dkg();
-    }
-
     fn insufficient_signers_dkg() {
         let timeout = Duration::from_millis(1024);
         let expire = Duration::from_millis(1280);
@@ -2126,10 +2114,6 @@ pub mod test {
     }
 
     #[test]
-    fn all_signers_sign_v2() {
-        all_signers_sign();
-    }
-
     fn all_signers_sign() {
         let (mut coordinators, mut signers) = all_signers_dkg(5, 2);
 
@@ -2187,10 +2171,6 @@ pub mod test {
     }
 
     #[test]
-    fn minimum_signers_sign_v2() {
-        minimum_signers_sign();
-    }
-
     fn minimum_signers_sign() {
         let num_signers = 10;
         let keys_per_signer = 2;
@@ -2266,10 +2246,6 @@ pub mod test {
     }
 
     #[test]
-    fn minimum_missing_public_keys_sign_v2() {
-        missing_public_keys_sign();
-    }
-
     fn missing_public_keys_sign() {
         let num_signers = 10;
         let keys_per_signer = 2;
@@ -2348,10 +2324,6 @@ pub mod test {
     }
 
     #[test]
-    fn insufficient_signers_sign_v2() {
-        insufficient_signers_sign();
-    }
-
     fn insufficient_signers_sign() {
         let num_signers = 5;
         let keys_per_signer = 2;
@@ -2600,10 +2572,6 @@ pub mod test {
     }
 
     #[test]
-    fn multiple_nonce_request_messages_sign_v2() {
-        multiple_nonce_request_messages();
-    }
-
     fn multiple_nonce_request_messages() {
         let num_signers = 12;
         let keys_per_signer = 1;
@@ -2693,10 +2661,6 @@ pub mod test {
     }
 
     #[test]
-    fn old_round_ids_are_ignored_v2() {
-        old_round_ids_are_ignored();
-    }
-
     fn old_round_ids_are_ignored() {
         let (mut coordinators, _) = setup::<FireCoordinator>(3, 10);
         for coordinator in &mut coordinators {
@@ -2782,10 +2746,6 @@ pub mod test {
     }
 
     #[test]
-    fn one_signer_bad_threshold_v2() {
-        one_signer_bad_threshold();
-    }
-
     fn one_signer_bad_threshold() {
         let mut rng = create_rng();
         let (mut coordinators, mut signers) = setup::<FireCoordinator>(10, 1);
@@ -2883,10 +2843,6 @@ pub mod test {
     }
 
     #[test]
-    fn bad_dkg_threshold_v2() {
-        bad_dkg_threshold();
-    }
-
     fn bad_dkg_threshold() {
         let (mut coordinators, mut signers) = setup::<FireCoordinator>(10, 1);
 
