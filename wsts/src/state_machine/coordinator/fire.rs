@@ -1014,8 +1014,8 @@ impl Coordinator {
                 .collect::<Vec<SignatureShare>>();
 
             debug!(
-                "aggregator.sign({}, {:?}, {:?}, {})",
-                bs58::encode(&self.message).into_string(),
+                "aggregator.sign({}, {}, {}, {})",
+                hex::encode(&self.message),
                 nonces.len(),
                 shares.len(),
                 self.party_polynomials.len(),
