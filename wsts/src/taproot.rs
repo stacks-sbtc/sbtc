@@ -75,8 +75,8 @@ pub mod test_helpers {
         traits,
     };
 
-    use hashbrown::HashMap;
     use rand_core::{CryptoRng, RngCore};
+    use std::collections::HashMap;
 
     /// Run a distributed key generation round
     #[allow(non_snake_case)]

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use hashbrown::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use thiserror::Error as ThisError;
 
 use crate::{

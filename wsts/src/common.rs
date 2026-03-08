@@ -2,11 +2,11 @@ use core::{
     fmt::{Debug, Display, Formatter, Result as FmtResult},
     ops::{Add, Mul},
 };
-use hashbrown::HashMap;
 use num_traits::{One, Zero};
 use rand_core::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 
 use crate::{
     compute::challenge,

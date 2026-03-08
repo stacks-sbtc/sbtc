@@ -1,6 +1,7 @@
 //! Test utilities for the transaction signer
 
 use std::collections::BTreeSet;
+use std::collections::HashSet;
 use std::time::Duration;
 
 use crate::context::Context;
@@ -25,7 +26,6 @@ use crate::testing;
 use crate::testing::get_rng;
 use crate::testing::storage::model::TestData;
 
-use hashbrown::HashSet;
 use rand::SeedableRng as _;
 use tokio::sync::broadcast;
 use tokio::time::error::Elapsed;

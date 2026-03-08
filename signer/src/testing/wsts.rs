@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::time::Duration;
 
 use clarity::util::secp256k1::Secp256k1PublicKey;
@@ -100,7 +101,7 @@ impl Coordinator {
     ) -> Self {
         let num_signers = signer_info.signer_public_keys.len().try_into().unwrap();
         let message_private_key = signer_info.signer_private_key;
-        let signer_public_keys: hashbrown::HashMap<u32, _> = signer_info
+        let signer_public_keys: HashMap<u32, _> = signer_info
             .signer_public_keys
             .into_iter()
             .enumerate()

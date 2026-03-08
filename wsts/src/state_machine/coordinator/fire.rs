@@ -1,4 +1,4 @@
-use hashbrown::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::{collections::BTreeMap, time::Instant};
 use tracing::{debug, error, info, warn};
 
@@ -703,7 +703,7 @@ impl Coordinator {
                 }
             }
             if dkg_failures.is_empty() {
-                warn!("no dkg failures");
+                info!("no dkg failures");
                 self.dkg_end_gathered()?;
             } else {
                 // TODO: see if we have sufficient non-malicious signers to continue
@@ -1374,7 +1374,7 @@ pub mod test {
         traits::Signer as _,
         util::create_rng,
     };
-    use hashbrown::HashMap;
+    use std::collections::HashMap;
     use std::{thread, time::Duration};
 
     #[test]

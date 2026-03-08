@@ -1,7 +1,7 @@
 use core::num::TryFromIntError;
-use hashbrown::{HashMap, HashSet};
 use rand_core::{CryptoRng, RngCore};
 use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{HashMap, HashSet};
 use tracing::{debug, info, trace, warn};
 
 use crate::{
@@ -1048,7 +1048,7 @@ pub mod test {
         util::create_rng,
     };
 
-    use hashbrown::HashSet;
+    use std::collections::HashSet;
 
     #[test]
     fn bad_config_v2() {
