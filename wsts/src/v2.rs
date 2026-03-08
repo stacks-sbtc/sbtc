@@ -283,7 +283,7 @@ impl Aggregator {
 
         for i in 0..poly.capacity() {
             poly.push(Point::zero());
-            for (_, comm) in comms {
+            for comm in comms.values() {
                 poly[i] += &comm.poly[i];
             }
         }

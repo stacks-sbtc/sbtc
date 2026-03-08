@@ -99,7 +99,7 @@ pub struct PublicKeys {
 impl PublicKeys {
     /// Check that all of the signer_ids and key_ids are valid
     pub fn validate(&self, num_signers: u32, num_keys: u32) -> Result<(), SignerError> {
-        for (signer_id, _key) in &self.signers {
+        for signer_id in self.signers.keys() {
             if !validate_signer_id(*signer_id, num_signers) {
                 return Err(SignerError::Config(ConfigError::InvalidSignerId(
                     *signer_id,
@@ -107,7 +107,7 @@ impl PublicKeys {
             }
         }
 
-        for (key_id, _key) in &self.key_ids {
+        for key_id in self.key_ids.keys() {
             if !validate_key_id(*key_id, num_keys) {
                 return Err(SignerError::Config(ConfigError::InvalidKeyId(*key_id)));
             }
