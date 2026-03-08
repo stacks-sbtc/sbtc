@@ -44,8 +44,7 @@ impl TestSetup {
             panic!("must have at least 1 parties");
         }
 
-        let (coordinators, signers) =
-            wsts_test::run_dkg::<frost::Coordinator>(num_parties, 5);
+        let (coordinators, signers) = wsts_test::run_dkg::<frost::Coordinator>(num_parties, 5);
 
         let signers = signers.into();
         let aggregate_key = pubkey_xonly();

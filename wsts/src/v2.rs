@@ -478,7 +478,6 @@ impl Aggregator {
     }
 }
 
-
 impl traits::Signer for Party {
     fn new<RNG: RngCore + CryptoRng>(
         party_id: u32,
@@ -730,9 +729,7 @@ mod tests {
 
     use crate::util::create_rng;
     use crate::{
-        traits::{
-            self, test_helpers::run_compute_secrets_missing_private_shares, Signer,
-        },
+        traits::{self, test_helpers::run_compute_secrets_missing_private_shares, Signer},
         v2,
     };
 

@@ -1010,24 +1010,9 @@ pub mod test {
 
     #[test]
     fn check_signature_shares_v2() {
-        check_signature_shares::<FrostCoordinator>(
-            5,
-            2,
-            SignatureType::Frost,
-            vec![0],
-        );
-        check_signature_shares::<FrostCoordinator>(
-            5,
-            2,
-            SignatureType::Schnorr,
-            vec![0],
-        );
-        check_signature_shares::<FrostCoordinator>(
-            5,
-            2,
-            SignatureType::Taproot(None),
-            vec![0],
-        );
+        check_signature_shares::<FrostCoordinator>(5, 2, SignatureType::Frost, vec![0]);
+        check_signature_shares::<FrostCoordinator>(5, 2, SignatureType::Schnorr, vec![0]);
+        check_signature_shares::<FrostCoordinator>(5, 2, SignatureType::Taproot(None), vec![0]);
         check_signature_shares::<FrostCoordinator>(
             5,
             2,

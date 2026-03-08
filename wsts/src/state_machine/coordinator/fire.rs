@@ -1435,24 +1435,9 @@ pub mod test {
 
     #[test]
     fn check_signature_shares_v2() {
-        check_signature_shares::<FireCoordinator>(
-            5,
-            2,
-            SignatureType::Frost,
-            vec![0],
-        );
-        check_signature_shares::<FireCoordinator>(
-            5,
-            2,
-            SignatureType::Schnorr,
-            vec![0],
-        );
-        check_signature_shares::<FireCoordinator>(
-            5,
-            2,
-            SignatureType::Taproot(None),
-            vec![0],
-        );
+        check_signature_shares::<FireCoordinator>(5, 2, SignatureType::Frost, vec![0]);
+        check_signature_shares::<FireCoordinator>(5, 2, SignatureType::Schnorr, vec![0]);
+        check_signature_shares::<FireCoordinator>(5, 2, SignatureType::Taproot(None), vec![0]);
         check_signature_shares::<FireCoordinator>(
             5,
             2,
@@ -2174,8 +2159,7 @@ pub mod test {
         let num_signers = 10;
         let keys_per_signer = 2;
 
-        let (mut coordinators, mut signers) =
-            minimum_signers_dkg(num_signers, keys_per_signer);
+        let (mut coordinators, mut signers) = minimum_signers_dkg(num_signers, keys_per_signer);
         let config = coordinators.first().unwrap().get_config();
 
         // Figure out how many signers we can remove and still be above the threshold
@@ -2249,8 +2233,7 @@ pub mod test {
         let num_signers = 10;
         let keys_per_signer = 2;
 
-        let (mut coordinators, mut signers) =
-            minimum_signers_dkg(num_signers, keys_per_signer);
+        let (mut coordinators, mut signers) = minimum_signers_dkg(num_signers, keys_per_signer);
 
         // Let us also remove that signers public key from the config including all of its key ids
         let mut removed_signer = signers.pop().expect("Failed to pop signer");
@@ -2574,8 +2557,7 @@ pub mod test {
     fn multiple_nonce_request_messages() {
         let num_signers = 12;
         let keys_per_signer = 1;
-        let (mut coordinators, mut signers) =
-            all_signers_dkg(num_signers, keys_per_signer);
+        let (mut coordinators, mut signers) = all_signers_dkg(num_signers, keys_per_signer);
 
         // Start a signing round
         let orig_msg = "It was many and many a year ago, in a kingdom by the sea"
