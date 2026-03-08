@@ -1373,7 +1373,6 @@ pub mod test {
         },
         traits::Signer as _,
         util::create_rng,
-        v2,
     };
     use hashbrown::HashMap;
     use std::{thread, time::Duration};

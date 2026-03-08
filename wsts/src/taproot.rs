@@ -306,10 +306,10 @@ mod test {
             [9, 10].to_vec(),
         ]
         .to_vec();
-        let mut signers: Vec<v2::Signer> = signer_ids
+        let mut signers: Vec<v2::Party> = signer_ids
             .iter()
             .enumerate()
-            .map(|(id, ids)| v2::Signer::new(id.try_into().unwrap(), ids, Np, Nk, T, &mut rng))
+            .map(|(id, ids)| v2::Party::new(id.try_into().unwrap(), ids, Np, Nk, T, &mut rng))
             .collect();
 
         let polys = match test_helpers::dkg(&mut signers, &mut rng) {

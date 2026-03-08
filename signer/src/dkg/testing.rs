@@ -10,7 +10,6 @@ use wsts::{
         coordinator::{frost, test as wsts_test},
         signer::Signer,
     },
-    v2,
 };
 
 use crate::{

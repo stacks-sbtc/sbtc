@@ -952,7 +952,6 @@ pub mod test {
             Config, Coordinator as CoordinatorTrait, State,
         },
         util::create_rng,
-        v2,
     };
 
     #[test]
