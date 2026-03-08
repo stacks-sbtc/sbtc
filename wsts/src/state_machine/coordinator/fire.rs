@@ -1966,10 +1966,10 @@ pub mod test {
                 // we mutated the private shares themselves, so we should see a BadPrivateShares from signer_id 0
                 match dkg_error {
                     DkgError::DkgEndFailure(failure_map) => {
-                        for (_signer_id, dkg_failure) in failure_map {
+                        for dkg_failure in failure_map.values() {
                             match dkg_failure {
                                 DkgFailure::BadPrivateShares(bad_share_map) => {
-                                    for (bad_signer_id, _bad_private_share) in bad_share_map {
+                                    for bad_signer_id in bad_share_map.keys() {
                                         assert_eq!(*bad_signer_id, 0u32);
                                     }
                                 }
@@ -2078,7 +2078,7 @@ pub mod test {
                 // we mutated the public shares themselves, so we should see a BadPublicShares from signer_ids 0 and 1
                 match dkg_error {
                     DkgError::DkgEndFailure(failure_map) => {
-                        for (_signer_id, dkg_failure) in failure_map {
+                        for dkg_failure in failure_map.values() {
                             match dkg_failure {
                                 DkgFailure::BadPublicShares(bad_shares) => {
                                     for bad_signer_id in bad_shares {
