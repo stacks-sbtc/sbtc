@@ -334,7 +334,7 @@ pub fn validate_key_id(key_id: u32, num_keys: u32) -> bool {
 
 /// Check that the PolyCommitment is properly signed and has the correct degree polynomial
 pub fn check_public_shares(poly_comm: &PolyCommitment, threshold: usize) -> bool {
-    poly_comm.verify() && poly_comm.poly().len() == threshold
+    poly_comm.poly().len() == threshold && poly_comm.verify()
 }
 
 /// Helper functions for tests
