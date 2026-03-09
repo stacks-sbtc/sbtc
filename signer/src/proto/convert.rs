@@ -1552,9 +1552,10 @@ impl TryFrom<proto::ProofIdentifier> for wsts::schnorr::ID {
 
 impl From<PolyCommitment> for proto::PolyCommitment {
     fn from(value: PolyCommitment) -> Self {
+        let (id, poly) = value.into_parts();
         proto::PolyCommitment {
-            id: Some(value.id.into()),
-            poly: value.poly.into_iter().map(|v| v.into()).collect(),
+            id: Some(id.into()),
+            poly: poly.into_iter().map(|v| v.into()).collect(),
         }
     }
 }
@@ -1562,14 +1563,13 @@ impl From<PolyCommitment> for proto::PolyCommitment {
 impl TryFrom<proto::PolyCommitment> for PolyCommitment {
     type Error = Error;
     fn try_from(value: proto::PolyCommitment) -> Result<Self, Self::Error> {
-        Ok(PolyCommitment {
-            id: value.id.required()?.try_into()?,
-            poly: value
-                .poly
-                .into_iter()
-                .map(|v| v.try_into())
-                .collect::<Result<Vec<_>, Error>>()?,
-        })
+        let poly = value
+            .poly
+            .into_iter()
+            .map(|v| v.try_into())
+            .collect::<Result<Vec<_>, Error>>()?;
+        let id = value.id.required()?.try_into()?;
+        Ok(PolyCommitment::new(id, poly)?)
     }
 }
 

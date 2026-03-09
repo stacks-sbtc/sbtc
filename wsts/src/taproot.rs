@@ -87,7 +87,7 @@ pub mod test_helpers {
         let polys: HashMap<u32, PolyCommitment> = signers
             .iter()
             .flat_map(|s| s.get_poly_commitments(rng))
-            .map(|comm| (comm.id.id.get_u32(), comm))
+            .map(|comm| (comm.id().id.get_u32(), comm))
             .collect();
 
         let mut private_shares = HashMap::new();

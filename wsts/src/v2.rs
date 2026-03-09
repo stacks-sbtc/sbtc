@@ -69,17 +69,12 @@ impl Party {
         &self,
         rng: &mut RNG,
     ) -> Option<PolyCommitment> {
-        if let Some(poly) = &self.f {
-            Some(PolyCommitment {
-                id: ID::new(&self.id(), &poly.data()[0], rng),
-                poly: (0..poly.data().len())
-                    .map(|i| &poly.data()[i] * G)
-                    .collect(),
-            })
-        } else {
-            warn!("get_poly_commitment called with no polynomial");
-            None
-        }
+        let poly = self.f.as_ref()?;
+        let data = poly.data();
+        let first = data.first()?;
+        let points: Vec<Point> = data.iter().map(|c| c * G).collect();
+        let id = ID::new(&self.id(), first, rng);
+        PolyCommitment::new(id, points).ok()
     }
 
     /// Get the shares of this party's private polynomial for all keys
@@ -115,7 +110,7 @@ impl Party {
             if !check_public_shares(comm, threshold) {
                 bad_ids.push(*i);
             } else {
-                self.group_key += comm.poly[0];
+                self.group_key += comm.constant_term();
             }
         }
         if !bad_ids.is_empty() {
@@ -146,7 +141,7 @@ impl Party {
             if let Some(shares) = private_shares.get(key_id) {
                 for (sender, s) in shares {
                     if let Some(comm) = public_shares.get(sender) {
-                        if s * G != compute::poly(&compute::id(*key_id), &comm.poly)? {
+                        if s * G != compute::poly(&compute::id(*key_id), comm.poly())? {
                             bad_shares.push(*sender);
                         }
                     } else {
@@ -281,11 +276,14 @@ impl Aggregator {
         let threshold: usize = self.threshold.try_into()?;
         let mut poly = Vec::with_capacity(threshold);
 
-        for i in 0..poly.capacity() {
-            poly.push(Point::zero());
+        for i in 0..threshold {
+            let mut pt = Point::zero();
             for comm in comms.values() {
-                poly[i] += &comm.poly[i];
+                if let Some(p) = comm.poly().get(i) {
+                    pt += p;
+                }
             }
+            poly.push(pt);
         }
 
         self.poly = poly;
@@ -314,7 +312,7 @@ impl Aggregator {
         let (_Rs, R) = compute::intermediate(msg, &party_ids, nonces);
         let mut z = Scalar::zero();
         let mut cx_sign = Scalar::one();
-        let aggregate_public_key = self.poly[0];
+        let aggregate_public_key = *self.poly.first().ok_or(AggregatorError::NotInitialized)?;
         let tweaked_public_key = if let Some(t) = tweak {
             if t != Scalar::zero() {
                 let key = compute::tweaked_public_key_from_tweak(&aggregate_public_key, t);
@@ -365,7 +363,10 @@ impl Aggregator {
         let (Rs, R) = compute::intermediate(msg, &party_ids, nonces);
         let mut bad_party_keys = Vec::new();
         let mut bad_party_sigs = Vec::new();
-        let aggregate_public_key = self.poly[0];
+        let aggregate_public_key = match self.poly.first() {
+            Some(p) => *p,
+            None => return AggregatorError::NotInitialized,
+        };
         let tweaked_public_key = if let Some(t) = tweak {
             if t != Scalar::zero() {
                 compute::tweaked_public_key_from_tweak(&aggregate_public_key, t)
@@ -391,16 +392,16 @@ impl Aggregator {
             }
         }
 
-        for i in 0..sig_shares.len() {
-            let z_i = sig_shares[i].z_i;
+        for (i, sig_share) in sig_shares.iter().enumerate() {
+            let z_i = sig_share.z_i;
             let mut cx = Point::zero();
 
-            for key_id in &sig_shares[i].key_ids {
+            for key_id in &sig_share.key_ids {
                 let kid = compute::id(*key_id);
                 let public_key = match compute::poly(&kid, &self.poly) {
                     Ok(p) => p,
                     Err(_) => {
-                        bad_party_keys.push(sig_shares[i].id);
+                        bad_party_keys.push(sig_share.id);
                         Point::zero()
                     }
                 };
@@ -408,8 +409,9 @@ impl Aggregator {
                 cx += compute::lambda(*key_id, key_ids) * c * public_key;
             }
 
-            if z_i * G != (r_sign * Rs[i] + cx_sign * cx) {
-                bad_party_sigs.push(sig_shares[i].id);
+            let rs_i = Rs.get(i).copied().unwrap_or_default();
+            if z_i * G != (r_sign * rs_i + cx_sign * cx) {
+                bad_party_sigs.push(sig_share.id);
             }
         }
         if !bad_party_keys.is_empty() {
@@ -466,7 +468,10 @@ impl Aggregator {
         key_ids: &[u32],
         merkle_root: Option<[u8; 32]>,
     ) -> Result<SchnorrProof, AggregatorError> {
-        let tweak = compute::tweak(&self.poly[0], merkle_root);
+        let tweak = compute::tweak(
+            self.poly.first().ok_or(AggregatorError::NotInitialized)?,
+            merkle_root,
+        );
         let (key, sig) = self.sign_with_tweak(msg, nonces, sig_shares, key_ids, Some(tweak))?;
         let proof = SchnorrProof::new(&sig);
 
@@ -492,9 +497,11 @@ impl traits::Signer for Party {
 
     fn load(state: &traits::SignerState) -> Self {
         // v2 signer contains single party
-        assert_eq!(state.parties.len(), 1);
-
-        let party_state = &state.parties[0].1;
+        let party_state = state
+            .parties
+            .first()
+            .map(|(_, ps)| ps)
+            .expect("v2 signer state must contain exactly one party");
 
         Self {
             party_id: state.id,

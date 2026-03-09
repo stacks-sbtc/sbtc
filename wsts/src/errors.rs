@@ -26,6 +26,9 @@ pub enum DkgError {
     #[error("integer conversion error")]
     /// An error during integer conversion operations
     TryFromInt,
+    #[error("PolyCommitment requires at least one point")]
+    /// An error when creating a PolyCommitment with an empty polynomial
+    EmptyPolynomial,
 }
 
 impl From<PointError> for DkgError {
@@ -43,6 +46,9 @@ impl From<TryFromIntError> for DkgError {
 #[derive(Error, Debug, Clone, Serialize, Deserialize, PartialEq)]
 /// Errors which can happen during signature aggregation
 pub enum AggregatorError {
+    #[error("aggregator polynomial not initialized")]
+    /// The aggregator has not been initialized with DKG commitments
+    NotInitialized,
     #[error("bad poly commitments {0:?}")]
     /// The polynomial commitments which failed verification or were the wrong size
     BadPolyCommitments(Vec<Scalar>),

@@ -6,7 +6,6 @@ use num_traits::{One, Zero};
 use rand_core::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
 
 use crate::{
     compute::challenge,
@@ -14,6 +13,7 @@ use crate::{
         point::{Point, G},
         scalar::Scalar,
     },
+    errors::DkgError,
     schnorr::ID,
     util::hash_to_scalar,
 };
@@ -21,26 +21,59 @@ use crate::{
 /// A merkle root is a 256 bit hash
 pub type MerkleRoot = [u8; 32];
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-/// A commitment to a polynonial, with a Schnorr proof of ownership bound to the ID
+#[derive(Clone, Debug, PartialEq)]
+/// A commitment to a polynonial, with a Schnorr proof of ownership bound
+/// to the ID. This struct maintains the invariant that the polynomial is
+/// valid, in the sense that its degree is non-negative.
 pub struct PolyCommitment {
     /// The party ID with a schnorr proof
-    pub id: ID,
-    /// The public polynomial which commits to the secret polynomial
-    pub poly: Vec<Point>,
+    id: ID,
+    /// The public polynomial which commits to the secret polynomial (never empty)
+    poly: Vec<Point>,
 }
 
 impl PolyCommitment {
+    /// Create a new `PolyCommitment` from an id and polynomial points.
+    /// Returns `Err(DkgError::EmptyPolynomial)` if `poly` is empty.
+    pub fn new(id: ID, poly: Vec<Point>) -> Result<Self, DkgError> {
+        if poly.is_empty() {
+            return Err(DkgError::EmptyPolynomial);
+        }
+        Ok(Self { id, poly })
+    }
+
+    /// The party ID with a Schnorr proof.
+    pub fn id(&self) -> &ID {
+        &self.id
+    }
+
+    /// The public polynomial (at least one point).
+    pub fn poly(&self) -> &[Point] {
+        &self.poly
+    }
+
+    /// The constant term of the polynomial (first point). Never panics.
+    pub fn constant_term(&self) -> &Point {
+        self.poly
+            .first()
+            .expect("PolyCommitment guarantees non-empty poly")
+    }
+
     /// Verify the wrapped schnorr ID
     pub fn verify(&self) -> bool {
-        self.id.verify(&self.poly[0])
+        self.id.verify(self.constant_term())
+    }
+
+    /// Deconstruct this struct into its ID and polynomial points.
+    pub fn into_parts(self) -> (ID, Vec<Point>) {
+        (self.id, self.poly)
     }
 }
 
 impl Display for PolyCommitment {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(f, "{}", self.id.id)?;
-        for p in &self.poly {
+        for p in self.poly() {
             write!(f, " {}", p)?;
         }
         Ok(())
@@ -301,7 +334,7 @@ pub fn validate_key_id(key_id: u32, num_keys: u32) -> bool {
 
 /// Check that the PolyCommitment is properly signed and has the correct degree polynomial
 pub fn check_public_shares(poly_comm: &PolyCommitment, threshold: usize) -> bool {
-    poly_comm.verify() && poly_comm.poly.len() == threshold
+    poly_comm.verify() && poly_comm.poly().len() == threshold
 }
 
 /// Helper functions for tests

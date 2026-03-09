@@ -780,7 +780,7 @@ impl Signer {
         };
 
         if let Some(poly) = self.signer.get_poly_commitment(rng) {
-            public_share.comms.push((poly.id.id.get_u32(), poly));
+            public_share.comms.push((poly.id().id.get_u32(), poly));
         }
 
         let public_share = Message::DkgPublicShares(public_share);
@@ -1038,7 +1038,7 @@ impl StateMachine<State, Error> for Signer {
 pub mod test {
     use crate::{
         common::PolyCommitment,
-        curve::{ecdsa, scalar::Scalar},
+        curve::{ecdsa, point::Point, scalar::Scalar},
         net::{DkgBegin, DkgEndBegin, DkgPrivateBegin, DkgPublicShares, DkgStatus, Message},
         schnorr::ID,
         state_machine::{
@@ -1210,7 +1210,7 @@ pub mod test {
         let mut signer =
             Signer::new(1, 1, 1, 1, 0, vec![1], private_key, public_keys, &mut rng).unwrap();
         let comms = if let Some(comm) = signer.signer.get_poly_commitment(&mut rng) {
-            vec![(comm.id.id.get_u32(), comm.clone())]
+            vec![(comm.id().id.get_u32(), comm.clone())]
         } else {
             vec![]
         };
@@ -1245,10 +1245,11 @@ pub mod test {
         signer.state = SignerState::DkgPublicGather;
         signer.commitments.insert(
             1,
-            PolyCommitment {
-                id: ID::new(&Scalar::new(), &Scalar::new(), &mut rng),
-                poly: vec![],
-            },
+            PolyCommitment::new(
+                ID::new(&Scalar::new(), &Scalar::new(), &mut rng),
+                vec![Point::new()],
+            )
+            .expect("test commitment has one point"),
         );
 
         // public_shares_done should be true

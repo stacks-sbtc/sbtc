@@ -1133,13 +1133,12 @@ impl Dummy<Unit> for wsts::schnorr::ID {
 
 impl Dummy<Unit> for PolyCommitment {
     fn dummy_with_rng<R: rand::Rng + ?Sized>(config: &Unit, rng: &mut R) -> Self {
-        PolyCommitment {
-            id: config.fake_with_rng(rng),
-            poly: fake::vec![(); 0..20]
-                .into_iter()
-                .map(|_| config.fake_with_rng(rng))
-                .collect(),
-        }
+        let id = config.fake_with_rng(rng);
+        let poly = fake::vec![(); 1..20]
+            .into_iter()
+            .map(|_| config.fake_with_rng(rng))
+            .collect();
+        PolyCommitment::new(id, poly).unwrap()
     }
 }
 

@@ -148,7 +148,7 @@ pub mod test_helpers {
         let public_shares: HashMap<u32, PolyCommitment> = signers
             .iter()
             .flat_map(|s| s.get_poly_commitments(rng))
-            .map(|comm| (comm.id.id.get_u32(), comm))
+            .map(|comm| (comm.id().id.get_u32(), comm))
             .collect();
         let mut private_shares = HashMap::new();
 
@@ -187,7 +187,7 @@ pub mod test_helpers {
         let polys: HashMap<u32, PolyCommitment> = signers
             .iter()
             .flat_map(|s| s.get_poly_commitments(rng))
-            .map(|comm| (comm.id.id.get_u32(), comm))
+            .map(|comm| (comm.id().id.get_u32(), comm))
             .collect();
         let mut private_shares = HashMap::new();
 
@@ -310,12 +310,15 @@ pub mod test_helpers {
             .iter()
             .flat_map(|s| s.get_poly_commitments(&mut rng))
             .map(|comm| {
-                let party_id = comm.id.id.get_u32();
+                let party_id = comm.id().id.get_u32();
                 if party_id == bad_party_id {
                     // alter the schnorr proof so it will fail verification
-                    let mut bad_comm = comm.clone();
-                    bad_comm.id.kca += Scalar::from(1);
-                    (party_id, bad_comm)
+                    let mut bad_id = comm.id().clone();
+                    bad_id.kca += Scalar::from(1);
+                    (
+                        party_id,
+                        PolyCommitment::new(bad_id, comm.poly().to_vec()).unwrap(),
+                    )
                 } else {
                     (party_id, comm)
                 }
