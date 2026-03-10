@@ -22,10 +22,8 @@ pub mod taproot;
 pub mod traits;
 /// Utilities for hashing and encryption
 pub mod util;
-/// Version 1 of WSTS, which encapsulates a number of parties using vanilla FROST
-#[allow(clippy::op_ref)]
-pub mod v1;
-/// Version 1 of WSTS, which encapsulates a number of parties using vanilla FROST
+/// Version 2 of WSTS, which encapsulates a parties controlling multiple
+/// keys
 #[allow(clippy::op_ref)]
 pub mod v2;
 /// Shamir secret sharing, using in distributed key generation

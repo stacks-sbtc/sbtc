@@ -267,6 +267,32 @@ pub struct Aggregator {
 }
 
 impl Aggregator {
+    /// Construct an Aggregator with the passed parameters
+    pub fn new(num_keys: u32, threshold: u32) -> Self {
+        Self {
+            num_keys,
+            threshold,
+            poly: Default::default(),
+        }
+    }
+
+    /// Initialize the Aggregator polynomial
+    pub fn init(&mut self, comms: &HashMap<u32, PolyCommitment>) -> Result<(), AggregatorError> {
+        let threshold: usize = self.threshold.try_into()?;
+        let mut poly = Vec::with_capacity(threshold);
+
+        for i in 0..poly.capacity() {
+            poly.push(Point::zero());
+            for (_, comm) in comms {
+                poly[i] += &comm.poly[i];
+            }
+        }
+
+        self.poly = poly;
+
+        Ok(())
+    }
+
     /// Aggregate the party signatures using a tweak.  The posible values for tweak are
     /// None    - standard FROST signature
     /// Some(0) - BIP-340 schnorr signature using 32-byte private key adjustments
@@ -394,37 +420,9 @@ impl Aggregator {
             AggregatorError::BadGroupSig
         }
     }
-}
-
-impl traits::Aggregator for Aggregator {
-    /// Construct an Aggregator with the passed parameters
-    fn new(num_keys: u32, threshold: u32) -> Self {
-        Self {
-            num_keys,
-            threshold,
-            poly: Default::default(),
-        }
-    }
-
-    /// Initialize the Aggregator polynomial
-    fn init(&mut self, comms: &HashMap<u32, PolyCommitment>) -> Result<(), AggregatorError> {
-        let threshold: usize = self.threshold.try_into()?;
-        let mut poly = Vec::with_capacity(threshold);
-
-        for i in 0..poly.capacity() {
-            poly.push(Point::zero());
-            for (_, comm) in comms {
-                poly[i] += &comm.poly[i];
-            }
-        }
-
-        self.poly = poly;
-
-        Ok(())
-    }
 
     /// Check and aggregate the party signatures
-    fn sign(
+    pub fn sign(
         &mut self,
         msg: &[u8],
         nonces: &[PublicNonce],
@@ -441,7 +439,7 @@ impl traits::Aggregator for Aggregator {
     }
 
     /// Check and aggregate the party signatures
-    fn sign_schnorr(
+    pub fn sign_schnorr(
         &mut self,
         msg: &[u8],
         nonces: &[PublicNonce],
@@ -460,7 +458,7 @@ impl traits::Aggregator for Aggregator {
     }
 
     /// Check and aggregate the party signatures
-    fn sign_taproot(
+    pub fn sign_taproot(
         &mut self,
         msg: &[u8],
         nonces: &[PublicNonce],
@@ -479,9 +477,6 @@ impl traits::Aggregator for Aggregator {
         }
     }
 }
-
-/// Typedef so we can use the same tokens for v1 and v2
-pub type Signer = Party;
 
 impl traits::Signer for Party {
     fn new<RNG: RngCore + CryptoRng>(
@@ -734,9 +729,7 @@ mod tests {
 
     use crate::util::create_rng;
     use crate::{
-        traits::{
-            self, test_helpers::run_compute_secrets_missing_private_shares, Aggregator, Signer,
-        },
+        traits::{self, test_helpers::run_compute_secrets_missing_private_shares, Signer},
         v2,
     };
 
@@ -819,7 +812,7 @@ mod tests {
     #[test]
     /// Run a distributed key generation round with not enough shares
     pub fn run_compute_secrets_missing_shares() {
-        run_compute_secrets_missing_private_shares::<v2::Signer>()
+        run_compute_secrets_missing_private_shares::<v2::Party>()
     }
 
     #[test]
@@ -827,14 +820,14 @@ mod tests {
     pub fn bad_polynomial_length() {
         let gt = |t| t + 1;
         let lt = |t| t - 1;
-        traits::test_helpers::bad_polynomial_length::<v2::Signer, _>(gt);
-        traits::test_helpers::bad_polynomial_length::<v2::Signer, _>(lt);
+        traits::test_helpers::bad_polynomial_length::<v2::Party, _>(gt);
+        traits::test_helpers::bad_polynomial_length::<v2::Party, _>(lt);
     }
 
     #[test]
     /// Run DKG and aggregator init with a bad polynomial commitment
     pub fn bad_polynomial_commitment() {
-        traits::test_helpers::bad_polynomial_commitment::<v2::Signer>();
+        traits::test_helpers::bad_polynomial_commitment::<v2::Party>();
     }
 
     #[test]
@@ -846,7 +839,7 @@ mod tests {
         key_ids.insert(1);
         signer_key_ids.insert(0, key_ids);
 
-        assert!(v2::Signer::validate_party_id(0, 0, &signer_key_ids));
-        assert!(!v2::Signer::validate_party_id(0, 1, &signer_key_ids));
+        assert!(v2::Party::validate_party_id(0, 0, &signer_key_ids));
+        assert!(!v2::Party::validate_party_id(0, 1, &signer_key_ids));
     }
 }

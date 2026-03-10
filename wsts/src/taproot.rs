@@ -145,7 +145,7 @@ pub mod test_helpers {
 mod test {
     use super::{test_helpers, Point, Scalar, SchnorrProof, G};
 
-    use crate::{compute, traits::Aggregator, traits::Signer, util::create_rng, v1, v2};
+    use crate::{compute, traits::Signer, util::create_rng, v2};
 
     #[test]
     #[allow(non_snake_case)]
@@ -277,78 +277,6 @@ mod test {
 
     #[test]
     #[allow(non_snake_case)]
-    fn taproot_sign_verify_v1_with_merkle_root() {
-        let script = "OP_1".as_bytes();
-        let merkle_root = compute::merkle_root(script);
-
-        taproot_sign_verify_v1(Some(merkle_root));
-    }
-
-    #[test]
-    #[allow(non_snake_case)]
-    fn taproot_sign_verify_v1_no_merkle_root() {
-        taproot_sign_verify_v1(None);
-    }
-
-    #[allow(non_snake_case)]
-    fn taproot_sign_verify_v1(merkle_root: Option<[u8; 32]>) {
-        let mut rng = create_rng();
-
-        // First create and verify a frost signature
-        let msg = "It was many and many a year ago".as_bytes();
-        let N: u32 = 10;
-        let T: u32 = 7;
-        let signer_ids: Vec<Vec<u32>> = [
-            [1, 2, 3].to_vec(),
-            [4, 5].to_vec(),
-            [6, 7, 8].to_vec(),
-            [9, 10].to_vec(),
-        ]
-        .to_vec();
-        let mut signers: Vec<v1::Signer> = signer_ids
-            .iter()
-            .enumerate()
-            .map(|(id, ids)| v1::Signer::new(id.try_into().unwrap(), ids, N, T, &mut rng))
-            .collect();
-
-        let polys = match test_helpers::dkg(&mut signers, &mut rng) {
-            Ok(polys) => polys,
-            Err(secret_errors) => {
-                panic!("Got secret errors from DKG: {:?}", secret_errors);
-            }
-        };
-
-        let mut S = [signers[0].clone(), signers[1].clone(), signers[3].clone()].to_vec();
-        let mut sig_agg = v1::Aggregator::new(N, T);
-        sig_agg.init(&polys).expect("aggregator init failed");
-        let aggregate_public_key = sig_agg.poly[0];
-        println!(
-            "sign_verify:  agg_pubkey    {}",
-            &hex::encode(sig_agg.poly[0].compress().as_bytes())
-        );
-        println!("sign_verify:  agg_pubkey.x  {}", &sig_agg.poly[0].x());
-        let tweaked_public_key = compute::tweaked_public_key(&aggregate_public_key, merkle_root);
-        println!(
-            "sign_verify: tweaked_key    {}",
-            &hex::encode(tweaked_public_key.compress().as_bytes())
-        );
-        println!("sign_verify: tweaked_key.x  {}", &tweaked_public_key.x());
-        let (nonces, sig_shares) = test_helpers::sign(msg, &mut S, &mut rng, merkle_root);
-        let proof = match sig_agg.sign_taproot(msg, &nonces, &sig_shares, &[], merkle_root) {
-            Err(e) => panic!("Aggregator sign failed: {:?}", e),
-            Ok(proof) => proof,
-        };
-
-        // now ser/de the proof
-        let proof_bytes = proof.to_bytes();
-        let proof_deser = SchnorrProof::from(proof_bytes);
-
-        assert_eq!(proof, proof_deser);
-        assert!(proof_deser.verify(&tweaked_public_key.x(), msg));
-    }
-
-    #[test]
-    #[allow(non_snake_case)]
     fn taproot_sign_verify_v2_with_merkle_root() {
         let script = "OP_1".as_bytes();
         let merkle_root = compute::merkle_root(script);
@@ -378,10 +306,10 @@ mod test {
             [9, 10].to_vec(),
         ]
         .to_vec();
-        let mut signers: Vec<v2::Signer> = signer_ids
+        let mut signers: Vec<v2::Party> = signer_ids
             .iter()
             .enumerate()
-            .map(|(id, ids)| v2::Signer::new(id.try_into().unwrap(), ids, Np, Nk, T, &mut rng))
+            .map(|(id, ids)| v2::Party::new(id.try_into().unwrap(), ids, Np, Nk, T, &mut rng))
             .collect();
 
         let polys = match test_helpers::dkg(&mut signers, &mut rng) {
