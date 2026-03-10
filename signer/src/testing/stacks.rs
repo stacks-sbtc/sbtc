@@ -25,8 +25,8 @@ pub const DUMMY_SORTITION_INFO: SortitionInfo = SortitionInfo {
     consensus_hash: blockstack_lib::chainstate::burn::ConsensusHash([0; 20]),
     was_sortition: false,
     miner_pk_hash160: None,
-    stacks_parent_ch: Some(blockstack_lib::chainstate::burn::ConsensusHash([2; 20])),
-    last_sortition_ch: None,
+    stacks_parent_ch: Some(blockstack_lib::chainstate::burn::ConsensusHash([1; 20])),
+    last_sortition_ch: Some(blockstack_lib::chainstate::burn::ConsensusHash([2; 20])),
     committed_block_hash: None,
     vrf_seed: None,
 };
