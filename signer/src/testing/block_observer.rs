@@ -397,6 +397,19 @@ impl StacksInteract for TestHarness {
             .find(|block| block.block_hash == *btc_block_id)
             .unwrap()
             .height;
+        sortition_info.consensus_hash = (*consensus_hash).into();
+        let previous_tenure_last_block_id = headers[0].parent_block_id;
+        let previous_ch = &self
+            .stacks_blocks
+            .iter()
+            .find(|(block_id, _, _)| {
+                StacksBlockHash::from(block_id) == previous_tenure_last_block_id
+            })
+            .ok_or(Error::NoParentConsensusHash(*consensus_hash))?
+            .1
+            .header
+            .consensus_hash;
+        sortition_info.last_sortition_ch = Some(previous_ch.clone());
         TenureBlockHeaders::try_new(headers, sortition_info)
     }
 

@@ -1,5 +1,6 @@
 {
     "consensus_hash": "d9f1486525e738d818fee87c4739b87e03bf35e4",
+    "last_sortition_ch": "3f30756abe6808071ecdf94f7485cee10624667d",
     "burn_block_height": 900000,
     "burn_block_hash": "000000000000000000010538edbfd2d5b809a33dd83f284aeea41c6d0d96968a",
     "stacks_blocks": [

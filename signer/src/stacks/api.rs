@@ -2034,6 +2034,10 @@ mod tests {
         assert_eq!(headers.headers.len(), 39);
         assert_eq!(headers.start_header().block_height, 1507195u64.into());
         assert_eq!(headers.end_header().block_height, 1507233u64.into());
+        assert_eq!(
+            headers.last_sortition_ch.to_hex(),
+            "3f30756abe6808071ecdf94f7485cee10624667d"
+        );
 
         first_mock.assert();
     }
