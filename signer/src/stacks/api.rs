@@ -351,6 +351,8 @@ pub struct TenureBlockHeaders {
     /// The height of the bitcoin block associated with the above block
     /// hash.
     pub anchor_block_height: BitcoinBlockHeight,
+    /// The consesnsus hash of previous non-empty sortition
+    pub last_sortition_ch: ConsensusHash,
 }
 
 impl TenureBlockHeaders {
@@ -370,10 +372,15 @@ impl TenureBlockHeaders {
         if headers.is_empty() {
             return Err(Error::EmptyStacksTenure);
         }
+        let last_sortition_ch = info
+            .last_sortition_ch
+            .ok_or(Error::NoParentConsensusHash(info.consensus_hash.into()))?
+            .into();
         Ok(Self {
             headers,
             anchor_block_hash: info.burn_block_hash.into(),
             anchor_block_height: info.burn_block_height.into(),
+            last_sortition_ch,
         })
     }
 
@@ -538,6 +545,8 @@ struct GetTenureHeadersApiResponse {
     pub bitcoin_block_hash: BitcoinBlockHash,
     /// List of stacks blocks, anchored to a bitcoin block.
     pub stacks_blocks: Vec<GetTenureHeadersApiStacksBlock>,
+    /// Consensus hash of last non-empty sortition before current one.
+    pub last_sortition_ch: ConsensusHash,
 }
 
 /// A struct, representing a trimmed down stacks block header that is part
@@ -1276,7 +1285,6 @@ where
     let db = storage.begin_transaction().await?;
     let nakamoto_start_height = stacks.get_epoch_status().await?.nakamoto_start_height();
 
-    let mut consensus_hash = consensus_hash;
     let mut tenure = stacks.get_tenure_headers(&consensus_hash).await?;
     if tenure.anchor_block_height < nakamoto_start_height {
         tracing::warn!(
@@ -1302,18 +1310,11 @@ where
         // There are more blocks to fetch, so let's get them. This assumes
         // optimistically that the parent is still a Nakamoto block (and so has
         // a tenure); if that's not the case, we get an `Err` here.
-        let sortition_info = stacks.get_sortition_info(&consensus_hash).await?;
-        let Some(parent_consensus_hash) = sortition_info.stacks_parent_ch else {
-            return Err(Error::NoParentConsensusHash(consensus_hash));
-        };
-
+        let new_tenure = stacks.get_tenure_headers(&tenure.last_sortition_ch).await?;
         tracing::debug!(
-            %consensus_hash,
-            %parent_consensus_hash,
+            consensus_hash = %&tenure.last_sortition_ch,
             "fetched new stacks tenure headers"
         );
-        consensus_hash = parent_consensus_hash.into();
-        let new_tenure = stacks.get_tenure_headers(&consensus_hash).await?;
         if new_tenure.anchor_block_height <= nakamoto_start_height {
             tracing::debug!(
                 %nakamoto_start_height,
@@ -1431,6 +1432,7 @@ impl From<GetTenureHeadersApiResponse> for TenureBlockHeaders {
                 .collect::<Vec<StacksBlockHeader>>(),
             anchor_block_hash: value.bitcoin_block_hash,
             anchor_block_height: value.bitcoin_block_height,
+            last_sortition_ch: value.last_sortition_ch,
         }
     }
 }
@@ -2775,6 +2777,7 @@ mod tests {
         let ch = consensus_hash_900k();
 
         let headers = client.get_tenure_headers(&ch).await.unwrap();
+        println!("{:#?}", headers.clone());
         let block_hash = headers.anchor_block_hash;
 
         // This hash is indeed hash of block 900_000
@@ -2785,3 +2788,6 @@ mod tests {
         );
     }
 }
+
+// TODO: remove it.
+// https://api.mainnet.hiro.so/v3/tenures/blocks/d9f1486525e738d818fee87c4739b87e03bf35e4

@@ -1859,10 +1859,6 @@ async fn block_observer_handles_deposits_with_high_max_fee() {
     // up-to-date information. We don't have stacks-core running so we mock
     // these calls.
     ctx.with_stacks_client(|client| {
-        client
-            .expect_get_tenure_info()
-            .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
-
         client.expect_get_tenure_headers().returning(move |_| {
             let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
             tenure.anchor_block_hash = chain_tip;

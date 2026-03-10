@@ -625,7 +625,7 @@ async fn mock_stacks_core<D, B, E>(
                 consensus_hash: ConsensusHash([1; 20]),
                 was_sortition: true,
                 miner_pk_hash160: None,
-                stacks_parent_ch: Some(ConsensusHash([2;20])),
+                stacks_parent_ch: Some(ConsensusHash([2; 20])),
                 last_sortition_ch: None,
                 committed_block_hash: None,
                 vrf_seed: None,
