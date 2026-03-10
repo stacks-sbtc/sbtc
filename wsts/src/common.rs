@@ -47,13 +47,15 @@ impl PolyCommitment {
         &self.id
     }
 
-    /// The public polynomial (at least one point).
+    /// The coeficients of the polynomial
     pub fn poly(&self) -> &[Point] {
         &self.poly
     }
 
-    /// The constant term of the polynomial (first point). Never panics.
+    /// Returns the constant term of the polynomial.
     pub fn constant_term(&self) -> &Point {
+        // SAFETY: PolyCommitment guarantees a non-empty poly vector when
+        // it is created, so this should never panic.
         self.poly
             .first()
             .expect("PolyCommitment guarantees non-empty poly")
@@ -64,7 +66,7 @@ impl PolyCommitment {
         self.id.verify(self.constant_term())
     }
 
-    /// Deconstruct this struct into its ID and polynomial points.
+    /// Deconstruct this struct into its ID and polynomial coeficients.
     pub fn into_parts(self) -> (ID, Vec<Point>) {
         (self.id, self.poly)
     }
