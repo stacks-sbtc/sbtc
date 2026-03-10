@@ -1,8 +1,8 @@
 use core::{cmp::PartialEq, fmt::Debug};
-use hashbrown::{HashMap, HashSet};
 use polynomial::Polynomial;
 use rand_core::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     common::{MerkleRoot, Nonce, PolyCommitment, PublicNonce, SignatureShare},
@@ -135,8 +135,8 @@ pub trait Signer: Clone + Debug + PartialEq {
 
 /// Helper functions for tests
 pub mod test_helpers {
-    use hashbrown::HashMap;
     use rand_core::{CryptoRng, RngCore};
+    use std::collections::HashMap;
 
     use crate::{common::PolyCommitment, errors::DkgError, traits::Scalar, util::create_rng};
 

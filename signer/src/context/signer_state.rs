@@ -1,13 +1,13 @@
 //! Module for signer state
 
 use std::collections::BTreeSet;
+use std::collections::HashSet;
 use std::sync::{
     RwLock,
     atomic::{AtomicBool, AtomicU64, Ordering},
 };
 
 use bitcoin::Amount;
-use hashbrown::HashSet;
 use libp2p::PeerId;
 
 use crate::keys::PublicKey;

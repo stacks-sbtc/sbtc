@@ -7,7 +7,7 @@ use crate::{
     taproot::SchnorrProof,
 };
 use core::{cmp::PartialEq, fmt::Debug};
-use hashbrown::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::{
     collections::BTreeMap,
     time::{Duration, Instant},
@@ -308,8 +308,8 @@ pub mod fire;
 
 #[allow(missing_docs)]
 pub mod test {
-    use hashbrown::{HashMap, HashSet};
     use rand_core::OsRng;
+    use std::collections::{HashMap, HashSet};
     use std::{sync::Once, time::Duration};
     use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 

@@ -1,6 +1,8 @@
 //! Utilities for constructing and loading WSTS state machines
 
 use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::future::Future;
 
 use crate::codec::Decode as _;
@@ -19,8 +21,6 @@ use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::DkgSharesStatus;
 use crate::storage::model::SigHash;
 
-use hashbrown::HashMap;
-use hashbrown::HashSet;
 use rand::SeedableRng as _;
 use rand::rngs::OsRng;
 use rand_chacha::ChaCha20Rng;
@@ -248,7 +248,7 @@ impl WstsCoordinator for FireCoordinator {
     where
         I: IntoIterator<Item = PublicKey>,
     {
-        let signer_public_keys: hashbrown::HashMap<u32, _> = signers
+        let signer_public_keys: HashMap<u32, _> = signers
             .into_iter()
             .enumerate()
             .map(|(idx, key)| (idx as u32, key.into()))
@@ -367,7 +367,7 @@ impl WstsCoordinator for FrostCoordinator {
     where
         I: IntoIterator<Item = PublicKey>,
     {
-        let signer_public_keys: hashbrown::HashMap<u32, _> = signers
+        let signer_public_keys: HashMap<u32, _> = signers
             .into_iter()
             .enumerate()
             .map(|(idx, key)| (idx as u32, key.into()))
@@ -509,7 +509,7 @@ impl SignerStateMachine {
         private_key: PrivateKey,
     ) -> Result<Self, Error> {
         let signer_pub_key = PublicKey::from_private_key(&private_key);
-        let signers: hashbrown::HashMap<u32, _> = signers
+        let signers: HashMap<u32, _> = signers
             .into_iter()
             .enumerate()
             .map(|(id, key)| (id as u32, p256k1::keys::PublicKey::from(&key)))

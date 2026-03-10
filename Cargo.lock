@@ -2286,7 +2286,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
 dependencies = [
  "ahash",
- "serde",
 ]
 
 [[package]]
@@ -6125,7 +6124,6 @@ dependencies = [
  "emily-client",
  "fake",
  "futures",
- "hashbrown 0.14.5",
  "hex",
  "include_dir",
  "jsonrpc",
@@ -8152,8 +8150,6 @@ name = "wsts"
 version = "14.0.0"
 dependencies = [
  "aes-gcm",
- "bs58 0.5.1",
- "hashbrown 0.14.5",
  "hex",
  "num-traits",
  "p256k1",
