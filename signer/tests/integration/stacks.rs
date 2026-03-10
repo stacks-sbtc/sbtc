@@ -29,7 +29,7 @@ use stacks_common::address::C32_ADDRESS_VERSION_TESTNET_SINGLESIG;
 const FAUCET_PRIVATE_KEY: &str = "e26e611fc92fe535c5e2e58a6a446375bb5e3b471440af21bbe327384befb50a";
 
 /// Timeout used when waiting for something to happen on Stacks
-const STACKS_NODE_TIMEOUT: Duration = Duration::from_secs(10);
+const STACKS_NODE_TIMEOUT: Duration = Duration::from_secs(15);
 /// Polling used when waiting for something to happen on Stacks
 const STACKS_NODE_POLLING: Duration = Duration::from_millis(200);
 
