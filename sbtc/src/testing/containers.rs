@@ -302,7 +302,7 @@ impl StacksContainer {
         // used to progress the chain in the build script). We also sleep a bit
         // to ensure no flash blocks that may mess with the node awakening.
         containers.bitcoin().await.get_faucet().generate_block();
-        tokio::time::sleep(Duration::from_secs(3)).await;
+        tokio::time::sleep(Duration::from_secs(5)).await;
         containers.bitcoin().await.get_faucet().generate_block();
 
         StacksContainer { url }
