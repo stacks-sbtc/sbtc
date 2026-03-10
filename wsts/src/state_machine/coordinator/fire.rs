@@ -185,7 +185,12 @@ impl Coordinator {
                             let num_malicious_keys: u32 = self
                                 .malicious_signer_ids
                                 .iter()
-                                .map(|signer_id| self.config.signer_key_ids[signer_id].len() as u32)
+                                .filter_map(|signer_id| {
+                                    self.config
+                                        .signer_key_ids
+                                        .get(signer_id)
+                                        .map(|set| set.len() as u32)
+                                })
                                 .sum();
 
                             if self.config.num_keys - num_malicious_keys < self.config.threshold {
@@ -589,7 +594,17 @@ impl Coordinator {
                             // bad_shares is a set of signer_ids
                             for bad_signer_id in bad_shares {
                                 // verify public shares are bad
-                                let dkg_public_shares = &self.dkg_public_shares[bad_signer_id];
+                                let Some(dkg_public_shares) =
+                                    self.dkg_public_shares.get(bad_signer_id)
+                                else {
+                                    warn!(
+                                        "Signer {} reported BadPublicShares from {} but no public shares found",
+                                        signer_id, bad_signer_id
+                                    );
+                                    // TODO: use a better error
+                                    return Err(Error::MissingAggregatePublicKey);
+                                };
+
                                 let mut bad_party_ids = Vec::new();
                                 for (party_id, comm) in &dkg_public_shares.comms {
                                     if !check_public_shares(comm, threshold) {
@@ -717,8 +732,14 @@ impl Coordinator {
     fn dkg_end_gathered(&mut self) -> Result<(), Error> {
         // Cache the polynomials used in DKG for the aggregator
         for signer_id in self.dkg_private_shares.keys() {
-            for (party_id, comm) in &self.dkg_public_shares[signer_id].comms {
-                self.party_polynomials.insert(*party_id, comm.clone());
+            if let Some(public_shares) = self.dkg_public_shares.get(signer_id) {
+                for (party_id, comm) in &public_shares.comms {
+                    self.party_polynomials.insert(*party_id, comm.clone());
+                }
+            } else {
+                warn!(%signer_id, "missing DKG public shares for signer");
+                // TODO: use a better error
+                return Err(Error::MissingAggregatePublicKey);
             }
         }
 
@@ -726,7 +747,8 @@ impl Coordinator {
         let key = self
             .dkg_end_messages
             .keys()
-            .flat_map(|signer_id| self.dkg_public_shares[signer_id].comms.clone())
+            .filter_map(|signer_id| self.dkg_public_shares.get(signer_id))
+            .flat_map(|shares| shares.comms.iter())
             .fold(Point::default(), |s, (_, comm)| s + comm.constant_term());
 
         info!("Aggregate public key: {}", key);
@@ -1010,7 +1032,12 @@ impl Coordinator {
             let shares = message_nonce
                 .public_nonces
                 .iter()
-                .flat_map(|(i, _)| self.signature_shares[i].clone())
+                .filter_map(|(i, _)| {
+                    self.signature_shares
+                        .get(i)
+                        .cloned()
+                })
+                .flatten()
                 .collect::<Vec<SignatureShare>>();
 
             debug!(
