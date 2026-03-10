@@ -12,7 +12,6 @@ use bitcoin::relative::LockTime;
 use crate::DEPOSIT_DUST_LIMIT;
 use crate::DEPOSIT_LOCKTIME_BLOCK_BUFFER;
 use crate::WITHDRAWAL_BLOCKS_EXPIRY;
-use crate::WITHDRAWAL_MIN_CONFIRMATIONS;
 use crate::bitcoin::utxo::FeeAssessment;
 use crate::bitcoin::utxo::SignerBtcState;
 use crate::context::Context;
@@ -31,6 +30,7 @@ use crate::storage::model::DkgSharesStatus;
 use crate::storage::model::QualifiedRequestId;
 use crate::storage::model::SignerVotes;
 use crate::storage::model::TaprootScriptHash;
+use sbtc::WITHDRAWAL_MIN_CONFIRMATIONS;
 
 use super::utxo::DepositRequest;
 use super::utxo::RequestRef;

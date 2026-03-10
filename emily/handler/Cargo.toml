@@ -21,6 +21,7 @@ testing = []
 sbtc = { workspace = true, features = ["webhooks"] }
 
 # External crates
+argon2.workspace = true
 aws-config.workspace = true
 aws-sdk-dynamodb.workspace = true
 base64.workspace = true

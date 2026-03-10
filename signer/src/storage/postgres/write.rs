@@ -100,7 +100,7 @@ impl PgWrite {
         .bind(&deposit_request.reclaim_script_hash)
         .bind(&deposit_request.recipient)
         .bind(i64::try_from(deposit_request.amount).map_err(Error::ConversionDatabaseInt)?)
-        .bind(i64::try_from(deposit_request.max_fee).map_err(Error::ConversionDatabaseInt)?)
+        .bind(deposit_request.max_fee.to_be_bytes())
         .bind(i64::from(deposit_request.lock_time))
         .bind(deposit_request.signers_public_key)
         .bind(&deposit_request.sender_script_pub_keys)
@@ -141,7 +141,7 @@ impl PgWrite {
             reclaim_script_hash.push(req.reclaim_script_hash);
             recipient.push(req.recipient);
             amount.push(i64::try_from(req.amount).map_err(Error::ConversionDatabaseInt)?);
-            max_fee.push(i64::try_from(req.max_fee).map_err(Error::ConversionDatabaseInt)?);
+            max_fee.push(req.max_fee.to_be_bytes());
             lock_time.push(i64::from(req.lock_time));
             signers_public_key.push(req.signers_public_key);
             // We need to join the addresses like this (and later split
@@ -165,7 +165,7 @@ impl PgWrite {
             , reclaim_script_hash AS (SELECT ROW_NUMBER() OVER (), reclaim_script_hash FROM UNNEST($4::BYTEA[]) AS reclaim_script_hash)
             , recipient           AS (SELECT ROW_NUMBER() OVER (), recipient FROM UNNEST($5::TEXT[]) AS recipient)
             , amount              AS (SELECT ROW_NUMBER() OVER (), amount FROM UNNEST($6::BIGINT[]) AS amount)
-            , max_fee             AS (SELECT ROW_NUMBER() OVER (), max_fee FROM UNNEST($7::BIGINT[]) AS max_fee)
+            , max_fee             AS (SELECT ROW_NUMBER() OVER (), max_fee FROM UNNEST($7::BYTEA[]) AS max_fee)
             , lock_time           AS (SELECT ROW_NUMBER() OVER (), lock_time FROM UNNEST($8::BIGINT[]) AS lock_time)
             , signer_pub_keys     AS (SELECT ROW_NUMBER() OVER (), signers_public_key FROM UNNEST($9::BYTEA[]) AS signers_public_key)
             , script_pub_keys     AS (SELECT ROW_NUMBER() OVER (), senders FROM UNNEST($10::VARCHAR[]) AS senders)

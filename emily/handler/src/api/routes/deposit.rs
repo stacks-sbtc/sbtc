@@ -10,16 +10,27 @@ pub fn routes<F>(
     context: F,
 ) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
 where
-    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
+    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
 {
     get_deposit(context.clone())
         .or(get_deposits_for_transaction(context.clone()))
+        .boxed()
         .or(get_deposits(context.clone()))
+        .boxed()
         .or(get_deposits_for_recipient(context.clone()))
+        .boxed()
         .or(get_deposits_for_reclaim_pubkeys(context.clone()))
+        .boxed()
         .or(create_deposit(context.clone()))
+        .boxed()
         .or(update_deposits_sidecar(context.clone()))
+        .boxed()
         .or(update_deposits_signer(context))
+        .boxed()
 }
 
 /// Get deposit endpoint.

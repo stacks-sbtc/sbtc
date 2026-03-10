@@ -106,6 +106,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "argon2"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c3610892ee6e0cbce8ae2700349fcf8f98adb0dbfbee85aec3c9179d29cc072"
+dependencies = [
+ "base64ct",
+ "blake2",
+ "cpufeatures",
+ "password-hash",
+]
+
+[[package]]
 name = "arrayref"
 version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1733,6 +1745,7 @@ dependencies = [
 name = "emily-handler"
 version = "0.1.0"
 dependencies = [
+ "argon2",
  "aws-config",
  "aws-sdk-dynamodb",
  "base64 0.22.1",
@@ -2273,7 +2286,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
 dependencies = [
  "ahash",
- "allocator-api2",
  "serde",
 ]
 
@@ -4559,6 +4571,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "password-hash"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "346f04948ba92c43e8469c1ee6736c7563d71012b17d40745260fe106aac2166"
+dependencies = [
+ "base64ct",
+ "rand_core 0.6.4",
+ "subtle",
+]
+
+[[package]]
 name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4958,7 +4981,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9120690fafc389a67ba3803df527d0ec9cbbc9cc45e4cc20b332996dfb672425"
 dependencies = [
  "anyhow",
- "itertools 0.12.1",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn 2.0.87",
@@ -5543,7 +5566,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6105,6 +6128,7 @@ dependencies = [
  "hashbrown 0.14.5",
  "hex",
  "include_dir",
+ "jsonrpc",
  "libp2p",
  "libp2p-identity",
  "lru",
@@ -8126,7 +8150,6 @@ dependencies = [
 [[package]]
 name = "wsts"
 version = "14.0.0"
-source = "git+https://github.com/stacks-sbtc/wsts?rev=11e2316aa0edf996f8e8f9ccbbbfd4bd2975ed1d#11e2316aa0edf996f8e8f9ccbbbfd4bd2975ed1d"
 dependencies = [
  "aes-gcm",
  "bs58 0.5.1",
@@ -8135,11 +8158,12 @@ dependencies = [
  "num-traits",
  "p256k1",
  "polynomial",
- "primitive-types",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
  "rand_core 0.6.4",
  "serde",
  "sha2 0.10.8",
- "thiserror 1.0.69",
+ "thiserror 2.0.11",
  "tracing",
  "tracing-subscriber",
 ]

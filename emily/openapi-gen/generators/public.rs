@@ -9,6 +9,12 @@ use super::CorsSupport;
 #[openapi(
     // Add API key security scheme.
     modifiers(&CorsSupport, &AwsApiKey, &AwsLambdaIntegration),
+    // Add the servers attribute to the OpenAPI specification.
+    servers(
+        (url = "http://localhost:3031", description = "Local Emily server"),
+        (url = "https://sbtc-emily.com", description = "Production Emily server"),
+        (url = "https://temp.sbtc-emily-dev.com", description = "Testnet Emily server"),
+    ),
     // Paths to be included in the OpenAPI specification.
     paths(
         // Health check endpoints.
@@ -33,6 +39,8 @@ use super::CorsSupport;
         // Limits endpoints.
         api::handlers::limits::get_limits,
         api::handlers::limits::get_limits_for_account,
+        // Throttle endpoints.
+        api::handlers::throttle::start_throttle,
     ),
     // Components to be included in the OpenAPI specification.
     components(schemas(
@@ -51,6 +59,7 @@ use super::CorsSupport;
         api::models::deposit::responses::UpdateDepositsResponse, // signers may update the state of deposits to Accepted.
         // Withdrawal Models.
         api::models::withdrawal::Withdrawal,
+        api::models::withdrawal::ExpectedFulfillmentInfo,
         api::models::withdrawal::responses::WithdrawalWithStatus,
         api::models::withdrawal::WithdrawalInfo,
         api::models::withdrawal::WithdrawalParameters,
@@ -67,6 +76,8 @@ use super::CorsSupport;
         // Limits models
         api::models::limits::Limits,
         api::models::limits::AccountLimits,
+        // Throttle models
+        api::models::throttle::ThrottleRequest,
         // Errors.
         common::error::ErrorResponse,
     ))

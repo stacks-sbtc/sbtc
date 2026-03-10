@@ -876,7 +876,7 @@ mod tests {
             .map(|block| block.block_hash);
 
         let lock_time = 150;
-        let max_fee = 32000;
+        let max_fee = i64::MAX as u64;
         let amount = 500_000;
 
         // We're going to create two deposit requests, the first one valid
@@ -942,17 +942,45 @@ mod tests {
             reclaim_script: tx_setup2.reclaims.first().unwrap().reclaim_script(),
         };
 
+        // This deposit transaction is a fine deposit, it just hasn't been
+        // confirmed yet.
+        let max_fee = u64::MAX;
+        let tx_setup3 = sbtc::testing::deposits::tx_setup(400, max_fee, &[amount]);
+        let get_tx_resp3 = GetTxResponse {
+            tx: tx_setup3.tx.clone(),
+            block_hash,
+            confirmations: None,
+            block_time: None,
+        };
+
+        let deposit_request3 = CreateDepositRequest {
+            outpoint: bitcoin::OutPoint {
+                txid: tx_setup3.tx.compute_txid(),
+                vout: 0,
+            },
+            deposit_script: tx_setup3.deposits.first().unwrap().deposit_script(),
+            reclaim_script: tx_setup3.reclaims.first().unwrap().reclaim_script(),
+        };
+        let req3 = deposit_request3.clone();
+
         // Let's add the "responses" to the field that feeds the
         // response to the `BitcoinClient::get_tx` call.
         test_harness.add_deposits(&[
             (get_tx_resp0.tx.compute_txid(), get_tx_resp0),
             (get_tx_resp1.tx.compute_txid(), get_tx_resp1),
             (get_tx_resp2.tx.compute_txid(), get_tx_resp2),
+            (get_tx_resp3.tx.compute_txid(), get_tx_resp3),
         ]);
 
         // Add the deposit requests to the pending deposits which
         // would be returned by Emily.
-        test_harness.add_pending_deposits(&[deposit_request0, deposit_request1, deposit_request2]);
+        let requests = [
+            deposit_request0,
+            deposit_request1,
+            deposit_request2,
+            deposit_request3,
+        ];
+        test_harness.add_pending_deposits(&requests);
         let min_height = test_harness.min_block_height();
 
         // Now we finish setting up the block observer.
@@ -976,17 +1004,23 @@ mod tests {
         }
 
         block_observer.load_latest_deposit_requests().await.unwrap();
-        // Only the transaction from tx_setup0 was valid. Note that, since
-        // we are not using a real block hash stored in the database. Our
-        // DbRead function won't actually find it. And in prod we won't
-        // actually store the deposit request transaction.
-        let deposit = {
+        // Only the transactions from tx_setup0 and tx_setup3 were valid.
+        // Note that, since we are not using a real block hash stored in
+        // the database. Our DbRead function won't actually find it. And in
+        // prod we won't actually store the deposit request transaction.
+        let (deposit0, deposit3) = {
             let db = storage.lock().await;
-            assert_eq!(db.deposit_requests.len(), 1);
-            db.deposit_requests.values().next().cloned().unwrap()
+            assert_eq!(db.deposit_requests.len(), 2);
+            let mut values = db.deposit_requests.values().cloned().collect::<Vec<_>>();
+            values.sort_by_key(|req| req.max_fee);
+            values.reverse();
+            (values.pop().unwrap(), values.pop().unwrap())
         };
 
-        assert_eq!(deposit.outpoint(), req0.outpoint);
+        assert_eq!(deposit0.outpoint(), req0.outpoint);
+        assert_eq!(deposit0.max_fee, i64::MAX as u64);
+        assert_eq!(deposit3.outpoint(), req3.outpoint);
+        assert_eq!(deposit3.max_fee, u64::MAX);
     }
 
     /// Test that `BlockObserver::extract_deposit_requests` after

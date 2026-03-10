@@ -12,5 +12,7 @@ pub mod health;
 pub mod limits;
 /// Api structures for new block events.
 pub mod new_block;
+/// Api structures for throttle keys.
+pub mod throttle;
 /// Api structures for withdrawals.
 pub mod withdrawal;
