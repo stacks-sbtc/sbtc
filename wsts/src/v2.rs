@@ -576,28 +576,8 @@ impl Party {
         }
     }
 
-    fn gen_nonces<RNG: RngCore + CryptoRng>(&mut self, rng: &mut RNG) -> Vec<PublicNonce> {
-        vec![self.gen_nonce(rng)]
-    }
-
-    fn compute_intermediate(
-        msg: &[u8],
-        signer_ids: &[u32],
-        _key_ids: &[u32],
-        nonces: &[PublicNonce],
-    ) -> (Vec<Point>, Point) {
-        compute::intermediate(msg, signer_ids, nonces)
-    }
-
-    fn validate_party_id(
-        signer_id: u32,
-        party_id: u32,
-        _signer_key_ids: &HashMap<u32, HashSet<u32>>,
-    ) -> bool {
-        signer_id == party_id
-    }
-
-    fn sign(
+    /// Sign a message using the Schnorr signature scheme.
+    pub fn sign_schnorr(
         &self,
         msg: &[u8],
         signer_ids: &[u32],

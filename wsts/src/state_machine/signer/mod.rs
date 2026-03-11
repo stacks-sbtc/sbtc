@@ -893,8 +893,7 @@ impl Signer {
         };
 
         for (party_id, _) in &dkg_public_shares.comms {
-            if !v2::Party::validate_party_id(signer_id, *party_id, &self.public_keys.signer_key_ids)
-            {
+            if signer_id != *party_id {
                 warn!(%signer_id, %party_id, "signer sent polynomial commitment for wrong party");
                 return Ok(Vec::new());
             }
@@ -921,11 +920,7 @@ impl Signer {
         };
 
         for (party_id, _shares) in &dkg_private_shares.shares {
-            if !v2::Party::validate_party_id(
-                src_signer_id,
-                *party_id,
-                &self.public_keys.signer_key_ids,
-            ) {
+            if src_signer_id != *party_id {
                 warn!(
                     "Signer {} sent a polynomial commitment for party {}",
                     src_signer_id, party_id
