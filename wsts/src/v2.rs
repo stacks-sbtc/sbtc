@@ -539,6 +539,7 @@ impl Party {
     }
 
     /// Get the shares for this party.
+    #[cfg(test)]
     pub fn get_shares_wrapped(&self) -> HashMap<u32, HashMap<u32, Scalar>> {
         let mut shares = HashMap::new();
 

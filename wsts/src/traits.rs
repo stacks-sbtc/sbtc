@@ -38,6 +38,7 @@ pub struct SignerState {
 }
 
 /// Helper functions for tests
+#[cfg(test)]
 pub mod test_helpers {
     use rand_core::{CryptoRng, RngCore};
     use std::collections::HashMap;
