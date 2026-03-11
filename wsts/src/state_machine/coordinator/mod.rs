@@ -72,6 +72,21 @@ pub enum Error {
     /// No schnorr proof set
     #[error("No schnorr proof set")]
     MissingSchnorrProof,
+    /// No public key set for the given signer ID
+    #[error("No public key set for signer ID {0}")]
+    NoPublicKeyForSignerId(u32),
+    /// No public key set for the given signer ID
+    #[error("No public key set for bad signer ID {0}")]
+    NoPublicKeyForSigner(u32),
+    /// No public shares set for the given signer ID
+    #[error("No public shares set for signer ID {0}")]
+    NoPublicShares(u32),
+    /// No key IDs set for the given signer ID
+    #[error("No key IDs set for signer ID {0}")]
+    NoKeyIdsForSigner(u32),
+    /// No shares set for the given key ID
+    #[error("No shares set for key ID {0}")]
+    NoSharesForKeyId(u32),
     /// No signature set
     #[error("No signature set")]
     MissingSignature,

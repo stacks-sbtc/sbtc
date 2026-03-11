@@ -36,8 +36,12 @@ pub struct Party {
 }
 
 impl Party {
-    /// Construct a random Party with the passed party ID, key IDs, and parameters
-    pub fn new<RNG: RngCore + CryptoRng>(
+    /// Construct a random Party with the passed party ID, key IDs, and
+    /// parameters.
+    ///
+    /// The threshold must be greater than zero. We ensure this is the case
+    /// when creating this type from this crate.
+    pub(crate) fn new<RNG: RngCore + CryptoRng>(
         party_id: u32,
         key_ids: &[u32],
         num_parties: u32,
