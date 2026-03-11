@@ -20,7 +20,7 @@ use crate::{
         Signable, SignatureShareRequest, SignatureShareResponse, SignatureType,
     },
     state_machine::{PublicKeys, StateMachine},
-    traits::{Signer as SignerTrait, SignerState as SignerSavedState},
+    traits::SignerState as SignerSavedState,
     util::{decrypt, encrypt, make_shared_secret},
     v2,
 };
@@ -635,7 +635,7 @@ impl Signer {
         let mut msgs = vec![];
         let signer_id = self.signer_id;
         let key_ids = self.signer.get_key_ids();
-        let nonces = self.signer.gen_nonces(rng);
+        let nonces = vec![self.signer.gen_nonce(rng)];
 
         let response = NonceResponse {
             dkg_id: nonce_request.dkg_id,
@@ -721,17 +721,20 @@ impl Signer {
                     self.signer
                         .sign_schnorr(msg, &signer_ids, &key_ids, &nonces)
                 }
-                SignatureType::Frost => vec![self.signer.sign(msg, &signer_ids, &key_ids, &nonces)],
+                SignatureType::Frost => {
+                    self.signer
+                        .sign_with_tweak(msg, &signer_ids, &key_ids, &nonces, None)
+                }
             };
 
-            self.signer.gen_nonces(rng);
+            self.signer.gen_nonce(rng);
 
             let response = SignatureShareResponse {
                 dkg_id: sign_request.dkg_id,
                 sign_id: sign_request.sign_id,
                 sign_iter_id: sign_request.sign_iter_id,
                 signer_id: self.signer_id,
-                signature_shares,
+                signature_shares: vec![signature_shares],
             };
             info!(
                 signer_id = %self.signer_id,

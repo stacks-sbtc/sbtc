@@ -37,7 +37,6 @@ use wsts::state_machine::coordinator::Coordinator as _;
 use wsts::state_machine::coordinator::State as WstsState;
 use wsts::state_machine::coordinator::fire;
 use wsts::state_machine::coordinator::frost;
-use wsts::traits::Signer as _;
 
 /// An identifier for signer state machines.
 ///
