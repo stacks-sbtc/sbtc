@@ -5,10 +5,13 @@ use std::collections::{HashMap, HashSet};
 use tracing::warn;
 
 use crate::{
-    common::{Nonce, PolyCommitment, PublicNonce, PublicPolynomial, Signature, SignatureShare, check_public_shares},
+    common::{
+        check_public_shares, Nonce, PolyCommitment, PublicNonce, PublicPolynomial, Signature,
+        SignatureShare,
+    },
     compute,
     curve::{
-        point::{G, Point},
+        point::{Point, G},
         scalar::Scalar,
     },
     errors::{AggregatorError, DkgError},
@@ -70,10 +73,8 @@ impl Party {
         rng: &mut RNG,
     ) -> Option<PolyCommitment> {
         let poly = self.f.as_ref()?;
-        let data = poly.data();
-        let first = data.first()?;
-        let points: Vec<Point> = data.iter().map(|c| c * G).collect();
-        let id = ID::new(&self.id(), first, rng);
+        let points: Vec<Point> = poly.data().iter().map(|c| c * G).collect();
+        let id = ID::new(&self.id(), poly.data().first()?, rng);
         PolyCommitment::new(id, points).ok()
     }
 
@@ -313,7 +314,11 @@ impl Aggregator {
         let (_Rs, R) = compute::intermediate(msg, &party_ids, nonces);
         let mut z = Scalar::zero();
         let mut cx_sign = Scalar::one();
-        let aggregate_public_key = self.poly.as_ref().map(|p| p.constant_term()).ok_or(AggregatorError::NotInitialized)?;
+        let aggregate_public_key = self
+            .poly
+            .as_ref()
+            .map(|p| p.constant_term())
+            .ok_or(AggregatorError::NotInitialized)?;
         let tweaked_public_key = if let Some(t) = tweak {
             if t != Scalar::zero() {
                 let key = compute::tweaked_public_key_from_tweak(aggregate_public_key, t);
@@ -477,10 +482,7 @@ impl Aggregator {
         let Some(poly) = self.poly.as_ref() else {
             return Err(AggregatorError::NotInitialized);
         };
-        let tweak = compute::tweak(
-            poly.constant_term(),
-            merkle_root,
-        );
+        let tweak = compute::tweak(poly.constant_term(), merkle_root);
         let (key, sig) = self.sign_with_tweak(msg, nonces, sig_shares, key_ids, Some(tweak))?;
         let proof = SchnorrProof::new(&sig);
 
