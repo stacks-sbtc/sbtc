@@ -174,14 +174,21 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
         client
             .expect_get_node_info()
             .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
-
+        let cloned_tenure_headers = tenure_headers.clone();
         client
             .expect_get_tenure_headers()
-            .returning(move |_| Box::pin(std::future::ready(Ok(tenure_headers.clone()))));
-
-        client.expect_get_epoch_status().returning(|| {
+            .once()
+            .returning(move |_| Box::pin(std::future::ready(Ok(cloned_tenure_headers.clone()))));
+        let cloned_tenure_headers = tenure_headers.clone();
+        client.expect_get_tenure_headers().returning(move |_| {
+            let mut headers = cloned_tenure_headers.clone();
+            headers.anchor_block_height = headers.anchor_block_height - 1;
+            Box::pin(std::future::ready(Ok(headers)))
+        });
+        let cloned_tenure_headers = tenure_headers.clone();
+        client.expect_get_epoch_status().returning(move || {
             Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
-                nakamoto_start_height: BitcoinBlockHeight::from(0_u32),
+                nakamoto_start_height: cloned_tenure_headers.anchor_block_height,
             })))
         });
 
