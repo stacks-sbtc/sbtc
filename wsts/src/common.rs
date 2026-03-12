@@ -68,7 +68,7 @@ pub struct PolyCommitment {
 
 impl PolyCommitment {
     /// Create a new `PolyCommitment` from an id and polynomial points.
-    /// Returns `Err(DkgError::EmptyPolynomial)` if `poly` is empty.
+    /// Returns `Err(CommonError::InvalidPolynomial)` if `poly` is empty.
     pub fn new(id: ID, poly: Vec<Point>) -> Result<Self, CommonError> {
         let poly = PublicPolynomial::new(poly)?;
         Ok(Self { id, poly })

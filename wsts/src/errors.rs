@@ -34,9 +34,6 @@ pub enum DkgError {
     #[error("integer conversion error")]
     /// An error during integer conversion operations
     TryFromInt,
-    #[error("PolyCommitment requires at least one point")]
-    /// An error when creating a PolyCommitment with an empty polynomial
-    EmptyPolynomial,
 }
 
 impl From<PointError> for DkgError {
