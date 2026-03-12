@@ -866,7 +866,7 @@ async fn block_observer_picks_up_chained_unordered_sweeps() {
 #[test_case::test_case(false, SbtcLimits::new(Some(bitcoin::Amount::from_sat(1_000)), None, None, None, None, None, None, None); "no contracts, total cap limit")]
 #[test_case::test_case(true, SbtcLimits::unlimited(); "deployed contracts, default limits")]
 #[test_case::test_case(true, SbtcLimits::new(Some(bitcoin::Amount::from_sat(1_000)), None, None, None, None, None, None, None); "deployed contracts, total cap limit")]
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcLimits) {
     // We start with the typical setup with a fresh database and context
     // with a real bitcoin core client and a real connection to our
@@ -903,13 +903,20 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
         client
             .expect_get_node_info()
             .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
+        let tenure_headers_cloned = tenure_headers.clone();
         client
             .expect_get_tenure_headers()
-            .returning(move |_| Box::pin(std::future::ready(Ok(tenure_headers.clone()))));
+            .once()
+            .returning(move |_| Box::pin(std::future::ready(Ok(tenure_headers_cloned.clone()))));
+        client.expect_get_tenure_headers().returning(move |_| {
+            let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
+            tenure.anchor_block_height = tenure_headers.anchor_block_height - 1;
+            Box::pin(std::future::ready(Ok(tenure)))
+        });
 
-        client.expect_get_epoch_status().returning(|| {
+        client.expect_get_epoch_status().returning(move || {
             Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
-                nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
+                nakamoto_start_height: tenure_headers.anchor_block_height,
             })))
         });
 

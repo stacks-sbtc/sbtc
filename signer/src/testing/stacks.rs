@@ -71,6 +71,7 @@ impl TenureBlockHeaders {
         let anchor = anchor.into();
         let mut sortition_info = DUMMY_SORTITION_INFO.clone();
         sortition_info.burn_block_hash = anchor.block_hash.into();
+        sortition_info.burn_block_height = *anchor.block_height;
 
         Self::try_new(vec![header], sortition_info).unwrap()
     }
