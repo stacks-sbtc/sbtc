@@ -3771,9 +3771,19 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
                 .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO))));
 
             let chain_tip = model::BitcoinBlockHash::from(chain_tip_info.hash);
+            client
+                .expect_get_tenure_headers()
+                .once()
+                .returning(move |_| {
+                    let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
+                    tenure.anchor_block_hash = chain_tip;
+                    tenure.anchor_block_height = 232u32.into();
+                    Box::pin(std::future::ready(Ok(tenure)))
+                });
+
             client.expect_get_tenure_headers().returning(move |_| {
                 let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
-                tenure.anchor_block_hash = chain_tip;
+                tenure.anchor_block_height = 231u32.into();
                 Box::pin(std::future::ready(Ok(tenure)))
             });
 
