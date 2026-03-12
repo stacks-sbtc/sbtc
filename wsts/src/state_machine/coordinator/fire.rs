@@ -1352,19 +1352,28 @@ impl CoordinatorTrait for Coordinator {
 /// Test module for coordinator functionality
 pub mod test {
     use crate::{
-        common::PolyCommitment, curve::{point::Point, scalar::Scalar}, net::{
+        common::PolyCommitment,
+        curve::{point::Point, scalar::Scalar},
+        net::{
             DkgBegin, DkgFailure, DkgPrivateShares, DkgPublicShares, Message, NonceRequest, Packet,
             SignatureType,
-        }, state_machine::{
-            DkgError, OperationResult, SignError, coordinator::{
-                Config, Coordinator as CoordinatorTrait, State, fire::Coordinator as FireCoordinator, test::{
+        },
+        state_machine::{
+            coordinator::{
+                fire::Coordinator as FireCoordinator,
+                test::{
                     bad_signature_share_request, check_signature_shares, coordinator_state_machine,
                     empty_private_shares, empty_public_shares, equal_after_save_load,
                     feedback_messages, feedback_mutated_messages, gen_nonces, invalid_nonce,
                     new_coordinator, run_dkg_sign, setup, setup_with_timeouts, start_dkg_round,
-                }
-            }, signer::Signer
-        }, traits::Signer as _, util::create_rng
+                },
+                Config, Coordinator as CoordinatorTrait, State,
+            },
+            signer::Signer,
+            DkgError, OperationResult, SignError,
+        },
+        traits::Signer as _,
+        util::create_rng,
     };
     use std::collections::HashMap;
     use std::{thread, time::Duration};
@@ -2010,13 +2019,15 @@ pub mod test {
                                     .map(|(id, comm)| {
                                         let mut c = comm.clone();
                                         if signer.signer_id == 0 {
-                                            let (id, mut poly) = c.into_parts(); 
+                                            let (id, mut poly) = c.into_parts();
                                             poly.push(Point::new());
-                                            c = PolyCommitment::new(id, poly).expect("polynomial should still be valid");
+                                            c = PolyCommitment::new(id, poly)
+                                                .expect("polynomial should still be valid");
                                         } else {
-                                            let (id, mut poly) = c.into_parts(); 
+                                            let (id, mut poly) = c.into_parts();
                                             poly.pop();
-                                            c = PolyCommitment::new(id, poly).expect("polynomial should still be valid");
+                                            c = PolyCommitment::new(id, poly)
+                                                .expect("polynomial should still be valid");
                                         }
                                         (*id, c)
                                     })

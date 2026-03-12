@@ -50,8 +50,8 @@ pub enum Error {
     UnexpectedStateMachineId(crate::wsts_state_machine::StateMachineId),
 
     /// Unexpected [`DkgError`] in the given context.
-    #[error("unexpected from WSTS during DKG: {0}")]
-    UnexpectedWstsDkgError(#[from] wsts::errors::DkgError),
+    #[error("unexpected from WSTS error: {0}")]
+    UnexpectedWstsError(#[from] wsts::errors::Error),
 
     /// An IO error was returned from the [`bitcoin`] library. This is usually an
     /// error that occurred during encoding/decoding of bitcoin types.

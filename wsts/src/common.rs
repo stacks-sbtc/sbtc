@@ -13,13 +13,47 @@ use crate::{
         point::{Point, G},
         scalar::Scalar,
     },
-    errors::DkgError,
+    errors::Error,
     schnorr::ID,
     util::hash_to_scalar,
 };
 
 /// A merkle root is a 256 bit hash
 pub type MerkleRoot = [u8; 32];
+
+/// A public polynomial. This struct maintains the invariant that the
+/// polynomial is valid, in the sense that its degree is non-negative.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PublicPolynomial {
+    /// The coefficients of the polynomial. This struct maintains the
+    /// invariant the coefficients are non-empty.
+    coefficients: Vec<Point>,
+}
+
+impl PublicPolynomial {
+    /// Create a new `PublicPolynomial` from a vector of coefficients.
+    /// Returns `Err(Error::InvalidPolynomial)` if `coefficients` is empty.
+    pub fn new(coefficients: Vec<Point>) -> Result<Self, Error> {
+        if coefficients.is_empty() {
+            return Err(Error::InvalidPolynomial);
+        }
+        Ok(Self { coefficients })
+    }
+
+    /// The public polynomial (at least one point).
+    pub fn coefficients(&self) -> &[Point] {
+        &self.coefficients
+    }
+
+    /// The constant term of the polynomial (first point).
+    pub fn constant_term(&self) -> &Point {
+        // SAFETY: We know the coefficients is a non-empty vector of
+        // points, so the first coefficient is guaranteed to be present.
+        self.coefficients
+            .first()
+            .expect("PolyCommitment guarantees non-empty poly")
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 /// A commitment to a polynonial, with a Schnorr proof of ownership bound
@@ -28,17 +62,15 @@ pub type MerkleRoot = [u8; 32];
 pub struct PolyCommitment {
     /// The party ID with a schnorr proof
     id: ID,
-    /// The public polynomial which commits to the secret polynomial (never empty)
-    poly: Vec<Point>,
+    /// The public polynomial which commits to the secret polynomial
+    poly: PublicPolynomial,
 }
 
 impl PolyCommitment {
     /// Create a new `PolyCommitment` from an id and polynomial points.
     /// Returns `Err(DkgError::EmptyPolynomial)` if `poly` is empty.
-    pub fn new(id: ID, poly: Vec<Point>) -> Result<Self, DkgError> {
-        if poly.is_empty() {
-            return Err(DkgError::EmptyPolynomial);
-        }
+    pub fn new(id: ID, poly: Vec<Point>) -> Result<Self, Error> {
+        let poly = PublicPolynomial::new(poly)?;
         Ok(Self { id, poly })
     }
 
@@ -49,14 +81,12 @@ impl PolyCommitment {
 
     /// The public polynomial (at least one point).
     pub fn poly(&self) -> &[Point] {
-        &self.poly
+        self.poly.coefficients()
     }
 
     /// The constant term of the polynomial (first point). Never panics.
     pub fn constant_term(&self) -> &Point {
-        self.poly
-            .first()
-            .expect("PolyCommitment guarantees non-empty poly")
+        self.poly.constant_term()
     }
 
     /// Verify the wrapped schnorr ID
@@ -66,7 +96,7 @@ impl PolyCommitment {
 
     /// Deconstruct this struct into its ID and polynomial points.
     pub fn into_parts(self) -> (ID, Vec<Point>) {
-        (self.id, self.poly)
+        (self.id, self.poly.coefficients)
     }
 }
 

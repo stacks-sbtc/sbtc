@@ -5,6 +5,14 @@ use thiserror::Error;
 
 use crate::curve::{point::Error as PointError, scalar::Scalar};
 
+#[derive(Error, Debug, Clone, PartialEq)]
+/// Errors which can happen during public polynomial operations
+pub enum Error {
+    #[error("polynomial is invalid, it has no coefficients")]
+    /// An error when the polynomial degree is negative
+    InvalidPolynomial,
+}
+
 #[derive(Error, Debug, Clone, Serialize, Deserialize, PartialEq)]
 /// Errors which can happen during distributed key generation
 pub enum DkgError {
