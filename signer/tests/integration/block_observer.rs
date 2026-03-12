@@ -1604,9 +1604,17 @@ async fn block_observer_ignores_coinbase() {
     // these calls.
     ctx.with_stacks_client(|client| {
         let chain_tip = BitcoinBlockHash::from(chain_tip_info.hash);
+        client
+            .expect_get_tenure_headers()
+            .once()
+            .returning(move |_| {
+                let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
+                tenure.anchor_block_hash = chain_tip;
+                Box::pin(std::future::ready(Ok(tenure)))
+            });
         client.expect_get_tenure_headers().returning(move |_| {
             let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
-            tenure.anchor_block_hash = chain_tip;
+            tenure.anchor_block_height = 231u32.into();
             Box::pin(std::future::ready(Ok(tenure)))
         });
 
