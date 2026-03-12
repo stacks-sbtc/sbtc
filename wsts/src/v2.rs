@@ -366,6 +366,7 @@ impl Aggregator {
 
         let party_ids: Vec<u32> = sig_shares.iter().map(|ss| ss.id).collect();
         let (Rs, R) = compute::intermediate(msg, &party_ids, nonces);
+
         let mut bad_party_keys = Vec::new();
         let mut bad_party_sigs = Vec::new();
         let aggregate_public_key = poly.constant_term();
@@ -394,7 +395,11 @@ impl Aggregator {
             }
         }
 
-        for (i, sig_share) in sig_shares.iter().enumerate() {
+        // compute::intermediate returns the Rs vector, and its length is
+        // always equal to the min length of party_ids and nonces. Given
+        // the first check above, we can follow the logic to see that Rs
+        // and sig_shares have the same length.
+        for (sig_share, rs_i) in sig_shares.iter().zip(Rs) {
             let z_i = sig_share.z_i;
             let mut cx = Point::zero();
 
@@ -411,7 +416,6 @@ impl Aggregator {
                 cx += compute::lambda(*key_id, key_ids) * c * public_key;
             }
 
-            let rs_i = Rs.get(i).copied().unwrap_or_default();
             if z_i * G != (r_sign * rs_i + cx_sign * cx) {
                 bad_party_sigs.push(sig_share.id);
             }
