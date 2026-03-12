@@ -431,9 +431,18 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     // these calls.
     ctx.with_stacks_client(|client| {
         let chain_tip = BitcoinBlockHash::from(chain_tip_info.hash);
+        client
+            .expect_get_tenure_headers()
+            .once()
+            .returning(move |_| {
+                let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
+                tenure.anchor_block_hash = chain_tip;
+                Box::pin(std::future::ready(Ok(tenure)))
+            });
+
         client.expect_get_tenure_headers().returning(move |_| {
             let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
-            tenure.anchor_block_hash = chain_tip;
+            tenure.anchor_block_height = 231u32.into();
             Box::pin(std::future::ready(Ok(tenure)))
         });
 
@@ -1374,7 +1383,7 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
 
 /// This test checks that the block observer correctly update the state of
 /// pending DKG shares once they exit the verification window
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
     let mut rng = get_rng();
     // We start with the typical setup with a fresh database and context
@@ -1417,13 +1426,23 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
         client
             .expect_get_node_info()
             .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
+        let cloned_headers = tenure_headers.clone();
         client
             .expect_get_tenure_headers()
-            .returning(move |_| Box::pin(std::future::ready(Ok(tenure_headers.clone()))));
+            .once()
+            .returning(move |_| Box::pin(std::future::ready(Ok(cloned_headers.clone()))));
 
-        client.expect_get_epoch_status().returning(|| {
+        let cloned_headers = tenure_headers.clone();
+        client.expect_get_tenure_headers().returning(move |_| {
+            let mut headers = cloned_headers.clone();
+            headers.anchor_block_height = headers.anchor_block_height - 1;
+            Box::pin(std::future::ready(Ok(headers)))
+        });
+
+        let cloned_headers = tenure_headers.clone();
+        client.expect_get_epoch_status().returning(move || {
             Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
-                nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
+                nakamoto_start_height: cloned_headers.anchor_block_height,
             })))
         });
 
@@ -1881,9 +1900,18 @@ async fn block_observer_handles_deposits_with_high_max_fee() {
     // up-to-date information. We don't have stacks-core running so we mock
     // these calls.
     ctx.with_stacks_client(|client| {
+        client
+            .expect_get_tenure_headers()
+            .once()
+            .returning(move |_| {
+                let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
+                tenure.anchor_block_hash = chain_tip;
+                Box::pin(std::future::ready(Ok(tenure)))
+            });
+
         client.expect_get_tenure_headers().returning(move |_| {
             let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
-            tenure.anchor_block_hash = chain_tip;
+            tenure.anchor_block_height = 231u32.into();
             Box::pin(std::future::ready(Ok(tenure)))
         });
 
@@ -1892,6 +1920,10 @@ async fn block_observer_handles_deposits_with_high_max_fee() {
                 nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
             })))
         });
+
+        client
+            .expect_get_node_info()
+            .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
 
         client.expect_get_contract_source().returning(|_, _| {
             Box::pin(async {
