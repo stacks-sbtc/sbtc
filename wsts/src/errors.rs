@@ -7,7 +7,7 @@ use crate::curve::{point::Error as PointError, scalar::Scalar};
 
 #[derive(Error, Debug, Clone, PartialEq)]
 /// Errors which can happen during public polynomial operations
-pub enum Error {
+pub enum CommonError {
     #[error("polynomial is invalid, it has no coefficients")]
     /// An error when the polynomial degree is negative
     InvalidPolynomial,
@@ -51,12 +51,15 @@ impl From<TryFromIntError> for DkgError {
     }
 }
 
-#[derive(Error, Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Error, Debug, Clone, PartialEq)]
 /// Errors which can happen during signature aggregation
 pub enum AggregatorError {
     #[error("aggregator polynomial not initialized")]
     /// The aggregator has not been initialized with DKG commitments
     NotInitialized,
+    #[error("could not initialize the aggregator: {0}")]
+    /// An error when the aggregator could not be initialized
+    InvalidPolynomial(#[from] CommonError),
     #[error("bad poly commitments {0:?}")]
     /// The polynomial commitments which failed verification or were the wrong size
     BadPolyCommitments(Vec<Scalar>),

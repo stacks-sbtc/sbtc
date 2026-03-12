@@ -5,10 +5,10 @@ use std::collections::{HashMap, HashSet};
 use tracing::warn;
 
 use crate::{
-    common::{check_public_shares, Nonce, PolyCommitment, PublicNonce, Signature, SignatureShare},
+    common::{Nonce, PolyCommitment, PublicNonce, PublicPolynomial, Signature, SignatureShare, check_public_shares},
     compute,
     curve::{
-        point::{Point, G},
+        point::{G, Point},
         scalar::Scalar,
     },
     errors::{AggregatorError, DkgError},
@@ -257,8 +257,9 @@ pub struct Aggregator {
     pub num_keys: u32,
     /// The threshold of signing keys needed to construct a valid signature
     pub threshold: u32,
-    /// The aggregate group polynomial; poly[0] is the group public key
-    pub poly: Vec<Point>,
+    /// The aggregate group polynomial; the constrant term of the
+    /// polynomial is the group public key.
+    pub poly: Option<PublicPolynomial>,
 }
 
 impl Aggregator {
@@ -267,14 +268,14 @@ impl Aggregator {
         Self {
             num_keys,
             threshold,
-            poly: Default::default(),
+            poly: None,
         }
     }
 
     /// Initialize the Aggregator polynomial
     pub fn init(&mut self, comms: &HashMap<u32, PolyCommitment>) -> Result<(), AggregatorError> {
         let threshold: usize = self.threshold.try_into()?;
-        let mut poly = Vec::with_capacity(threshold);
+        let mut coefficients = Vec::with_capacity(threshold);
 
         for i in 0..threshold {
             let mut pt = Point::zero();
@@ -283,10 +284,10 @@ impl Aggregator {
                     pt += p;
                 }
             }
-            poly.push(pt);
+            coefficients.push(pt);
         }
 
-        self.poly = poly;
+        self.poly = Some(PublicPolynomial::new(coefficients)?);
 
         Ok(())
     }
@@ -312,19 +313,19 @@ impl Aggregator {
         let (_Rs, R) = compute::intermediate(msg, &party_ids, nonces);
         let mut z = Scalar::zero();
         let mut cx_sign = Scalar::one();
-        let aggregate_public_key = *self.poly.first().ok_or(AggregatorError::NotInitialized)?;
+        let aggregate_public_key = self.poly.as_ref().map(|p| p.constant_term()).ok_or(AggregatorError::NotInitialized)?;
         let tweaked_public_key = if let Some(t) = tweak {
             if t != Scalar::zero() {
-                let key = compute::tweaked_public_key_from_tweak(&aggregate_public_key, t);
+                let key = compute::tweaked_public_key_from_tweak(aggregate_public_key, t);
                 if !key.has_even_y() {
                     cx_sign = -cx_sign;
                 }
                 key
             } else {
-                aggregate_public_key
+                *aggregate_public_key
             }
         } else {
-            aggregate_public_key
+            *aggregate_public_key
         };
         let c = compute::challenge(&tweaked_public_key, &R, msg);
         // optimistically try to create the aggregate signature without checking for bad keys or sig shares
@@ -359,22 +360,23 @@ impl Aggregator {
             return AggregatorError::BadNonceLen(nonces.len(), sig_shares.len());
         }
 
+        let Some(poly) = self.poly.as_ref() else {
+            return AggregatorError::NotInitialized;
+        };
+
         let party_ids: Vec<u32> = sig_shares.iter().map(|ss| ss.id).collect();
         let (Rs, R) = compute::intermediate(msg, &party_ids, nonces);
         let mut bad_party_keys = Vec::new();
         let mut bad_party_sigs = Vec::new();
-        let aggregate_public_key = match self.poly.first() {
-            Some(p) => *p,
-            None => return AggregatorError::NotInitialized,
-        };
+        let aggregate_public_key = poly.constant_term();
         let tweaked_public_key = if let Some(t) = tweak {
             if t != Scalar::zero() {
-                compute::tweaked_public_key_from_tweak(&aggregate_public_key, t)
+                compute::tweaked_public_key_from_tweak(aggregate_public_key, t)
             } else {
-                aggregate_public_key
+                *aggregate_public_key
             }
         } else {
-            aggregate_public_key
+            *aggregate_public_key
         };
         let c = compute::challenge(&tweaked_public_key, &R, msg);
         let mut r_sign = Scalar::one();
@@ -398,7 +400,7 @@ impl Aggregator {
 
             for key_id in &sig_share.key_ids {
                 let kid = compute::id(*key_id);
-                let public_key = match compute::poly(&kid, &self.poly) {
+                let public_key = match compute::poly(&kid, poly.coefficients()) {
                     Ok(p) => p,
                     Err(_) => {
                         bad_party_keys.push(sig_share.id);
@@ -468,8 +470,11 @@ impl Aggregator {
         key_ids: &[u32],
         merkle_root: Option<[u8; 32]>,
     ) -> Result<SchnorrProof, AggregatorError> {
+        let Some(poly) = self.poly.as_ref() else {
+            return Err(AggregatorError::NotInitialized);
+        };
         let tweak = compute::tweak(
-            self.poly.first().ok_or(AggregatorError::NotInitialized)?,
+            poly.constant_term(),
             merkle_root,
         );
         let (key, sig) = self.sign_with_tweak(msg, nonces, sig_shares, key_ids, Some(tweak))?;

@@ -51,7 +51,7 @@ pub enum Error {
 
     /// Unexpected [`DkgError`] in the given context.
     #[error("unexpected from WSTS error: {0}")]
-    UnexpectedWstsError(#[from] wsts::errors::Error),
+    UnexpectedWstsError(#[from] wsts::errors::CommonError),
 
     /// An IO error was returned from the [`bitcoin`] library. This is usually an
     /// error that occurred during encoding/decoding of bitcoin types.

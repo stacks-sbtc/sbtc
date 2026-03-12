@@ -13,7 +13,7 @@ use crate::{
         point::{Point, G},
         scalar::Scalar,
     },
-    errors::Error,
+    errors::CommonError,
     schnorr::ID,
     util::hash_to_scalar,
 };
@@ -33,9 +33,9 @@ pub struct PublicPolynomial {
 impl PublicPolynomial {
     /// Create a new `PublicPolynomial` from a vector of coefficients.
     /// Returns `Err(Error::InvalidPolynomial)` if `coefficients` is empty.
-    pub fn new(coefficients: Vec<Point>) -> Result<Self, Error> {
+    pub fn new(coefficients: Vec<Point>) -> Result<Self, CommonError> {
         if coefficients.is_empty() {
-            return Err(Error::InvalidPolynomial);
+            return Err(CommonError::InvalidPolynomial);
         }
         Ok(Self { coefficients })
     }
@@ -69,7 +69,7 @@ pub struct PolyCommitment {
 impl PolyCommitment {
     /// Create a new `PolyCommitment` from an id and polynomial points.
     /// Returns `Err(DkgError::EmptyPolynomial)` if `poly` is empty.
-    pub fn new(id: ID, poly: Vec<Point>) -> Result<Self, Error> {
+    pub fn new(id: ID, poly: Vec<Point>) -> Result<Self, CommonError> {
         let poly = PublicPolynomial::new(poly)?;
         Ok(Self { id, poly })
     }
