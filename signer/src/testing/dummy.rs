@@ -355,7 +355,7 @@ pub fn encrypted_dkg_shares<R: rand::RngCore + rand::CryptoRng>(
         num_parties: 1,
         threshold: 1,
         group_key: group_key.into(),
-        parties: vec![(0, party_state)],
+        party_state,
     };
 
     let encoded = signer_state.encode_to_vec();
@@ -1104,6 +1104,19 @@ impl Dummy<Unit> for (u32, PartyState) {
     }
 }
 
+impl Dummy<Unit> for PartyState {
+    fn dummy_with_rng<R: rand::Rng + ?Sized>(config: &Unit, rng: &mut R) -> Self {
+        PartyState {
+            polynomial: config.fake_with_rng(rng),
+            private_keys: fake::vec![(); 0..20]
+                .into_iter()
+                .map(|_| config.fake_with_rng(rng))
+                .collect(),
+            nonce: config.fake_with_rng(rng),
+        }
+    }
+}
+
 impl Dummy<Unit> for SignerState {
     fn dummy_with_rng<R: rand::Rng + ?Sized>(config: &Unit, rng: &mut R) -> Self {
         SignerState {
@@ -1113,10 +1126,7 @@ impl Dummy<Unit> for SignerState {
             num_parties: Faker.fake_with_rng(rng),
             threshold: Faker.fake_with_rng(rng),
             group_key: config.fake_with_rng(rng),
-            parties: fake::vec![(); 0..20]
-                .into_iter()
-                .map(|_| config.fake_with_rng(rng))
-                .collect(),
+            party_state: config.fake_with_rng(rng),
         }
     }
 }

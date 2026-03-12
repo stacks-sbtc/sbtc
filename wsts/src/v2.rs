@@ -501,12 +501,7 @@ impl traits::Signer for Party {
     }
 
     fn load(state: &traits::SignerState) -> Self {
-        // v2 signer contains single party
-        let party_state = state
-            .parties
-            .first()
-            .map(|(_, ps)| ps)
-            .expect("v2 signer state must contain exactly one party");
+        let party_state = &state.party_state;
 
         Self {
             party_id: state.id,
@@ -538,7 +533,7 @@ impl traits::Signer for Party {
             num_parties: self.num_parties,
             threshold: self.threshold,
             group_key: self.group_key,
-            parties: vec![(self.party_id, party_state)],
+            party_state,
         }
     }
 

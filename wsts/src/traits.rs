@@ -21,8 +21,8 @@ pub struct PartyState {
     pub nonce: Nonce,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-/// The saved state required to reconstruct a signer
+#[derive(Clone, Debug, PartialEq)]
+/// The saved state required to reconstruct a v2::Party
 pub struct SignerState {
     /// The signer ID
     pub id: u32,
@@ -36,8 +36,17 @@ pub struct SignerState {
     pub threshold: u32,
     /// The aggregate group public key
     pub group_key: Point,
-    /// The party IDs and associated state for this signer
-    pub parties: Vec<(u32, PartyState)>,
+    /// The party state for this signer.
+    pub party_state: PartyState,
+}
+
+impl SignerState {
+    /// Get the party state for this signer. This is used to make
+    /// transition from the older version of this code to the current
+    /// version smooth.
+    pub fn parties(&self) -> Vec<(u32, PartyState)> {
+        vec![(self.id, self.party_state.clone())]
+    }
 }
 
 /// A trait which provides a common `Signer` interface for `v1` and `v2`

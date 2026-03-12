@@ -1245,7 +1245,7 @@ impl TestSweepSetup2 {
             num_parties: num_signers,
             threshold: self.signatures_required as u32,
             group_key: aggregate_key.into(),
-            parties: vec![Unit.fake_with_rng(&mut OsRng)],
+            party_state: Unit.fake_with_rng(&mut OsRng),
         };
         let encoded = private_shares.encode_to_vec();
         let signer_private_key = self.signers.private_key().to_bytes();
