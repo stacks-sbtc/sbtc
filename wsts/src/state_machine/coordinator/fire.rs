@@ -1,4 +1,4 @@
-use hashbrown::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::{collections::BTreeMap, time::Instant};
 use tracing::{debug, error, info, warn};
 
@@ -21,13 +21,13 @@ use crate::{
         DkgError, OperationResult, SignError, StateMachine,
     },
     taproot::SchnorrProof,
-    traits::Aggregator as AggregatorTrait,
     util::{decrypt, make_shared_secret_from_key},
+    v2,
 };
 
 /// The coordinator for the FIRE algorithm
 #[derive(Clone, Debug, PartialEq)]
-pub struct Coordinator<Aggregator: AggregatorTrait> {
+pub struct Coordinator {
     /// common config fields
     config: Config,
     /// current DKG round ID
@@ -54,7 +54,7 @@ pub struct Coordinator<Aggregator: AggregatorTrait> {
     /// current state of the state machine
     pub state: State,
     /// Aggregator object
-    aggregator: Aggregator,
+    aggregator: v2::Aggregator,
     nonce_start: Option<Instant>,
     dkg_public_start: Option<Instant>,
     dkg_private_start: Option<Instant>,
@@ -64,7 +64,7 @@ pub struct Coordinator<Aggregator: AggregatorTrait> {
     malicious_dkg_signer_ids: HashSet<u32>,
 }
 
-impl<Aggregator: AggregatorTrait> Coordinator<Aggregator> {
+impl Coordinator {
     /// Process the message inside the passed packet
     pub fn process_timeout(&mut self) -> Result<(Option<Packet>, Option<OperationResult>), Error> {
         let now = Instant::now();
@@ -703,7 +703,7 @@ impl<Aggregator: AggregatorTrait> Coordinator<Aggregator> {
                 }
             }
             if dkg_failures.is_empty() {
-                warn!("no dkg failures");
+                info!("no dkg failures");
                 self.dkg_end_gathered()?;
             } else {
                 // TODO: see if we have sufficient non-malicious signers to continue
@@ -1014,8 +1014,8 @@ impl<Aggregator: AggregatorTrait> Coordinator<Aggregator> {
                 .collect::<Vec<SignatureShare>>();
 
             debug!(
-                "aggregator.sign({}, {:?}, {:?}, {})",
-                bs58::encode(&self.message).into_string(),
+                "aggregator.sign({}, {}, {}, {})",
+                hex::encode(&self.message),
                 nonces.len(),
                 shares.len(),
                 self.party_polynomials.len(),
@@ -1091,7 +1091,7 @@ impl<Aggregator: AggregatorTrait> Coordinator<Aggregator> {
     }
 }
 
-impl<Aggregator: AggregatorTrait> StateMachine<State, Error> for Coordinator<Aggregator> {
+impl StateMachine<State, Error> for Coordinator {
     fn move_to(&mut self, state: State) -> Result<(), Error> {
         self.can_move_to(&state)?;
         self.state = state;
@@ -1141,11 +1141,11 @@ impl<Aggregator: AggregatorTrait> StateMachine<State, Error> for Coordinator<Agg
     }
 }
 
-impl<Aggregator: AggregatorTrait> CoordinatorTrait for Coordinator<Aggregator> {
+impl CoordinatorTrait for Coordinator {
     /// Create a new coordinator
     fn new(config: Config) -> Self {
         Self {
-            aggregator: Aggregator::new(config.num_keys, config.threshold),
+            aggregator: v2::Aggregator::new(config.num_keys, config.threshold),
             config,
             current_dkg_id: 0,
             current_sign_id: 0,
@@ -1174,7 +1174,7 @@ impl<Aggregator: AggregatorTrait> CoordinatorTrait for Coordinator<Aggregator> {
 
     fn load(state: &SavedState) -> Self {
         Self {
-            aggregator: Aggregator::new(state.config.num_keys, state.config.threshold),
+            aggregator: v2::Aggregator::new(state.config.num_keys, state.config.threshold),
             config: state.config.clone(),
             current_dkg_id: state.current_dkg_id,
             current_sign_id: state.current_sign_id,
@@ -1371,67 +1371,37 @@ pub mod test {
             signer::Signer,
             DkgError, OperationResult, SignError,
         },
-        traits::{Aggregator as AggregatorTrait, Signer as SignerTrait},
+        traits::Signer as _,
         util::create_rng,
-        v1, v2,
     };
-    use hashbrown::HashMap;
+    use std::collections::HashMap;
     use std::{thread, time::Duration};
 
     #[test]
-    fn new_coordinator_v1() {
-        new_coordinator::<FireCoordinator<v1::Aggregator>>();
-    }
-
-    #[test]
     fn new_coordinator_v2() {
-        new_coordinator::<FireCoordinator<v2::Aggregator>>();
-    }
-
-    #[test]
-    fn equal_after_save_load_v1() {
-        equal_after_save_load::<FireCoordinator<v1::Aggregator>, v1::Signer>(2, 2);
+        new_coordinator::<FireCoordinator>();
     }
 
     #[test]
     fn equal_after_save_load_v2() {
-        equal_after_save_load::<FireCoordinator<v2::Aggregator>, v2::Signer>(2, 2);
-    }
-
-    #[test]
-    fn coordinator_state_machine_v1() {
-        coordinator_state_machine::<FireCoordinator<v1::Aggregator>>();
+        equal_after_save_load::<FireCoordinator>(2, 2);
     }
 
     #[test]
     fn coordinator_state_machine_v2() {
-        coordinator_state_machine::<FireCoordinator<v2::Aggregator>>();
-    }
-
-    #[test]
-    fn start_dkg_round_v1() {
-        start_dkg_round::<FireCoordinator<v1::Aggregator>>();
+        coordinator_state_machine::<FireCoordinator>();
     }
 
     #[test]
     fn start_dkg_round_v2() {
-        start_dkg_round::<FireCoordinator<v2::Aggregator>>();
+        start_dkg_round::<FireCoordinator>();
     }
 
     #[test]
-    fn start_public_shares_v1() {
-        start_public_shares::<v1::Aggregator>();
-    }
-
-    #[test]
-    fn start_public_shares_v2() {
-        start_public_shares::<v2::Aggregator>();
-    }
-
-    fn start_public_shares<Aggregator: AggregatorTrait>() {
+    fn start_public_shares() {
         let mut rng = create_rng();
         let config = Config::new(10, 40, 28, Scalar::random(&mut rng));
-        let mut coordinator = FireCoordinator::<Aggregator>::new(config);
+        let mut coordinator = FireCoordinator::new(config);
 
         coordinator.state = State::DkgPublicDistribute; // Must be in this state before calling start public shares
 
@@ -1443,19 +1413,10 @@ pub mod test {
     }
 
     #[test]
-    fn start_private_shares_v1() {
-        start_private_shares::<v1::Aggregator>();
-    }
-
-    #[test]
-    fn start_private_shares_v2() {
-        start_private_shares::<v2::Aggregator>();
-    }
-
-    fn start_private_shares<Aggregator: AggregatorTrait>() {
+    fn start_private_shares() {
         let mut rng = create_rng();
         let config = Config::new(10, 40, 28, Scalar::random(&mut rng));
-        let mut coordinator = FireCoordinator::<Aggregator>::new(config);
+        let mut coordinator = FireCoordinator::new(config);
 
         coordinator.state = State::DkgPrivateDistribute; // Must be in this state before calling start private shares
 
@@ -1466,68 +1427,18 @@ pub mod test {
     }
 
     #[test]
-    fn run_dkg_sign_v1() {
-        for _ in 0..4 {
-            run_dkg_sign::<FireCoordinator<v1::Aggregator>, v1::Signer>(5, 2);
-        }
-    }
-
-    #[test]
     fn run_dkg_sign_v2() {
         for _ in 0..4 {
-            run_dkg_sign::<FireCoordinator<v2::Aggregator>, v2::Signer>(5, 2);
+            run_dkg_sign::<FireCoordinator>(5, 2);
         }
-    }
-
-    #[test]
-    fn check_signature_shares_v1() {
-        check_signature_shares::<FireCoordinator<v1::Aggregator>, v1::Signer>(
-            5,
-            2,
-            SignatureType::Frost,
-            vec![1, 2],
-        );
-        check_signature_shares::<FireCoordinator<v1::Aggregator>, v1::Signer>(
-            5,
-            2,
-            SignatureType::Schnorr,
-            vec![1, 2],
-        );
-        check_signature_shares::<FireCoordinator<v1::Aggregator>, v1::Signer>(
-            5,
-            2,
-            SignatureType::Taproot(None),
-            vec![1, 2],
-        );
-        check_signature_shares::<FireCoordinator<v1::Aggregator>, v1::Signer>(
-            5,
-            2,
-            SignatureType::Taproot(Some([23u8; 32])),
-            vec![1, 2],
-        );
     }
 
     #[test]
     fn check_signature_shares_v2() {
-        check_signature_shares::<FireCoordinator<v2::Aggregator>, v2::Signer>(
-            5,
-            2,
-            SignatureType::Frost,
-            vec![0],
-        );
-        check_signature_shares::<FireCoordinator<v2::Aggregator>, v2::Signer>(
-            5,
-            2,
-            SignatureType::Schnorr,
-            vec![0],
-        );
-        check_signature_shares::<FireCoordinator<v2::Aggregator>, v2::Signer>(
-            5,
-            2,
-            SignatureType::Taproot(None),
-            vec![0],
-        );
-        check_signature_shares::<FireCoordinator<v2::Aggregator>, v2::Signer>(
+        check_signature_shares::<FireCoordinator>(5, 2, SignatureType::Frost, vec![0]);
+        check_signature_shares::<FireCoordinator>(5, 2, SignatureType::Schnorr, vec![0]);
+        check_signature_shares::<FireCoordinator>(5, 2, SignatureType::Taproot(None), vec![0]);
+        check_signature_shares::<FireCoordinator>(
             5,
             2,
             SignatureType::Taproot(Some([23u8; 32])),
@@ -1536,21 +1447,16 @@ pub mod test {
     }
 
     #[test]
-    fn all_signers_dkg_v1() {
-        all_signers_dkg::<v1::Aggregator, v1::Signer>(5, 2);
-    }
-
-    #[test]
     fn all_signers_dkg_v2() {
-        all_signers_dkg::<v2::Aggregator, v2::Signer>(5, 2);
+        all_signers_dkg(5, 2);
     }
 
-    fn all_signers_dkg<Aggregator: AggregatorTrait, SignerType: SignerTrait>(
+    fn all_signers_dkg(
         num_signers: u32,
         keys_per_signer: u32,
-    ) -> (Vec<FireCoordinator<Aggregator>>, Vec<Signer<SignerType>>) {
+    ) -> (Vec<FireCoordinator>, Vec<Signer>) {
         let (mut coordinators, mut signers) =
-            setup::<FireCoordinator<Aggregator>, SignerType>(num_signers, keys_per_signer);
+            setup::<FireCoordinator>(num_signers, keys_per_signer);
 
         // We have started a dkg round
         let message = coordinators.first_mut().unwrap().start_dkg_round().unwrap();
@@ -1604,31 +1510,25 @@ pub mod test {
     }
 
     #[test]
-    fn missing_public_keys_dkg_v1() {
-        missing_public_keys_dkg::<v1::Aggregator, v1::Signer>(10, 1);
-    }
-
-    #[test]
     fn missing_public_keys_dkg_v2() {
-        missing_public_keys_dkg::<v2::Aggregator, v2::Signer>(10, 1);
+        missing_public_keys_dkg(10, 1);
     }
 
-    fn missing_public_keys_dkg<Aggregator: AggregatorTrait, SignerType: SignerTrait>(
+    fn missing_public_keys_dkg(
         num_signers: u32,
         keys_per_signer: u32,
-    ) -> (Vec<FireCoordinator<Aggregator>>, Vec<Signer<SignerType>>) {
+    ) -> (Vec<FireCoordinator>, Vec<Signer>) {
         let timeout = Duration::from_millis(1024);
         let expire = Duration::from_millis(1280);
-        let (mut coordinators, signers) =
-            setup_with_timeouts::<FireCoordinator<Aggregator>, SignerType>(
-                num_signers,
-                keys_per_signer,
-                Some(timeout),
-                Some(timeout),
-                Some(timeout),
-                Some(timeout),
-                Some(timeout),
-            );
+        let (mut coordinators, signers) = setup_with_timeouts::<FireCoordinator>(
+            num_signers,
+            keys_per_signer,
+            Some(timeout),
+            Some(timeout),
+            Some(timeout),
+            Some(timeout),
+            Some(timeout),
+        );
 
         // Start a DKG round where we will not allow all signers to recv DkgBegin, so they will not respond with DkgPublicShares
         let message = coordinators.first_mut().unwrap().start_dkg_round().unwrap();
@@ -1685,31 +1585,25 @@ pub mod test {
     }
 
     #[test]
-    fn minimum_signers_dkg_v1() {
-        minimum_signers_dkg::<v1::Aggregator, v1::Signer>(10, 2);
-    }
-
-    #[test]
     fn minimum_signers_dkg_v2() {
-        minimum_signers_dkg::<v2::Aggregator, v2::Signer>(10, 2);
+        minimum_signers_dkg(10, 2);
     }
 
-    fn minimum_signers_dkg<Aggregator: AggregatorTrait, SignerType: SignerTrait>(
+    fn minimum_signers_dkg(
         num_signers: u32,
         keys_per_signer: u32,
-    ) -> (Vec<FireCoordinator<Aggregator>>, Vec<Signer<SignerType>>) {
+    ) -> (Vec<FireCoordinator>, Vec<Signer>) {
         let timeout = Duration::from_millis(1024);
         let expire = Duration::from_millis(1280);
-        let (mut coordinators, signers) =
-            setup_with_timeouts::<FireCoordinator<Aggregator>, SignerType>(
-                num_signers,
-                keys_per_signer,
-                Some(timeout),
-                Some(timeout),
-                Some(timeout),
-                Some(timeout),
-                Some(timeout),
-            );
+        let (mut coordinators, signers) = setup_with_timeouts::<FireCoordinator>(
+            num_signers,
+            keys_per_signer,
+            Some(timeout),
+            Some(timeout),
+            Some(timeout),
+            Some(timeout),
+            Some(timeout),
+        );
 
         // Start a DKG round where we will not allow all signers to recv DkgBegin, so they will not respond with DkgPublicShares
         let message = coordinators.first_mut().unwrap().start_dkg_round().unwrap();
@@ -1840,21 +1734,12 @@ pub mod test {
     }
 
     #[test]
-    fn insufficient_signers_dkg_v1() {
-        insufficient_signers_dkg::<v1::Aggregator, v1::Signer>();
-    }
-
-    #[test]
-    fn insufficient_signers_dkg_v2() {
-        insufficient_signers_dkg::<v2::Aggregator, v2::Signer>();
-    }
-
-    fn insufficient_signers_dkg<Aggregator: AggregatorTrait, Signer: SignerTrait>() {
+    fn insufficient_signers_dkg() {
         let timeout = Duration::from_millis(1024);
         let expire = Duration::from_millis(1280);
         let num_signers = 10;
         let keys_per_signer = 2;
-        let (mut coordinators, signers) = setup_with_timeouts::<FireCoordinator<Aggregator>, Signer>(
+        let (mut coordinators, signers) = setup_with_timeouts::<FireCoordinator>(
             num_signers,
             keys_per_signer,
             Some(timeout),
@@ -1984,21 +1869,16 @@ pub mod test {
     }
 
     #[test]
-    fn malicious_signers_dkg_v1() {
-        malicious_signers_dkg::<v1::Aggregator, v1::Signer>(5, 2);
-    }
-
-    #[test]
     fn malicious_signers_dkg_v2() {
-        malicious_signers_dkg::<v2::Aggregator, v2::Signer>(5, 2);
+        malicious_signers_dkg(5, 2);
     }
 
-    fn malicious_signers_dkg<Aggregator: AggregatorTrait, SignerType: SignerTrait>(
+    fn malicious_signers_dkg(
         num_signers: u32,
         keys_per_signer: u32,
-    ) -> (Vec<FireCoordinator<Aggregator>>, Vec<Signer<SignerType>>) {
+    ) -> (Vec<FireCoordinator>, Vec<Signer>) {
         let (mut coordinators, mut signers) =
-            setup::<FireCoordinator<Aggregator>, SignerType>(num_signers, keys_per_signer);
+            setup::<FireCoordinator>(num_signers, keys_per_signer);
 
         // We have started a dkg round
         let message = coordinators.first_mut().unwrap().start_dkg_round().unwrap();
@@ -2086,10 +1966,10 @@ pub mod test {
                 // we mutated the private shares themselves, so we should see a BadPrivateShares from signer_id 0
                 match dkg_error {
                     DkgError::DkgEndFailure(failure_map) => {
-                        for (_signer_id, dkg_failure) in failure_map {
+                        for dkg_failure in failure_map.values() {
                             match dkg_failure {
                                 DkgFailure::BadPrivateShares(bad_share_map) => {
-                                    for (bad_signer_id, _bad_private_share) in bad_share_map {
+                                    for bad_signer_id in bad_share_map.keys() {
                                         assert_eq!(*bad_signer_id, 0u32);
                                     }
                                 }
@@ -2106,21 +1986,16 @@ pub mod test {
     }
 
     #[test]
-    fn bad_poly_length_dkg_v1() {
-        bad_poly_length_dkg::<v1::Aggregator, v1::Signer>(5, 2);
-    }
-
-    #[test]
     fn bad_poly_length_dkg_v2() {
-        bad_poly_length_dkg::<v2::Aggregator, v2::Signer>(5, 2);
+        bad_poly_length_dkg(5, 2);
     }
 
-    fn bad_poly_length_dkg<Aggregator: AggregatorTrait, SignerType: SignerTrait>(
+    fn bad_poly_length_dkg(
         num_signers: u32,
         keys_per_signer: u32,
-    ) -> (Vec<FireCoordinator<Aggregator>>, Vec<Signer<SignerType>>) {
+    ) -> (Vec<FireCoordinator>, Vec<Signer>) {
         let (mut coordinators, mut signers) =
-            setup::<FireCoordinator<Aggregator>, SignerType>(num_signers, keys_per_signer);
+            setup::<FireCoordinator>(num_signers, keys_per_signer);
 
         // We have started a dkg round
         let message = coordinators.first_mut().unwrap().start_dkg_round().unwrap();
@@ -2203,7 +2078,7 @@ pub mod test {
                 // we mutated the public shares themselves, so we should see a BadPublicShares from signer_ids 0 and 1
                 match dkg_error {
                     DkgError::DkgEndFailure(failure_map) => {
-                        for (_signer_id, dkg_failure) in failure_map {
+                        for dkg_failure in failure_map.values() {
                             match dkg_failure {
                                 DkgFailure::BadPublicShares(bad_shares) => {
                                     for bad_signer_id in bad_shares {
@@ -2223,17 +2098,8 @@ pub mod test {
     }
 
     #[test]
-    fn all_signers_sign_v1() {
-        all_signers_sign::<v1::Aggregator, v1::Signer>();
-    }
-
-    #[test]
-    fn all_signers_sign_v2() {
-        all_signers_sign::<v2::Aggregator, v2::Signer>();
-    }
-
-    fn all_signers_sign<Aggregator: AggregatorTrait, Signer: SignerTrait>() {
-        let (mut coordinators, mut signers) = all_signers_dkg::<Aggregator, Signer>(5, 2);
+    fn all_signers_sign() {
+        let (mut coordinators, mut signers) = all_signers_dkg(5, 2);
 
         // We have started a signing round
         let msg = "It was many and many a year ago, in a kingdom by the sea"
@@ -2289,21 +2155,11 @@ pub mod test {
     }
 
     #[test]
-    fn minimum_signers_sign_v1() {
-        minimum_signers_sign::<v1::Aggregator, v1::Signer>();
-    }
-
-    #[test]
-    fn minimum_signers_sign_v2() {
-        minimum_signers_sign::<v2::Aggregator, v2::Signer>();
-    }
-
-    fn minimum_signers_sign<Aggregator: AggregatorTrait, Signer: SignerTrait>() {
+    fn minimum_signers_sign() {
         let num_signers = 10;
         let keys_per_signer = 2;
 
-        let (mut coordinators, mut signers) =
-            minimum_signers_dkg::<Aggregator, Signer>(num_signers, keys_per_signer);
+        let (mut coordinators, mut signers) = minimum_signers_dkg(num_signers, keys_per_signer);
         let config = coordinators.first().unwrap().get_config();
 
         // Figure out how many signers we can remove and still be above the threshold
@@ -2373,21 +2229,11 @@ pub mod test {
     }
 
     #[test]
-    fn missing_public_keys_sign_v1() {
-        missing_public_keys_sign::<v1::Aggregator, v1::Signer>();
-    }
-
-    #[test]
-    fn minimum_missing_public_keys_sign_v2() {
-        missing_public_keys_sign::<v2::Aggregator, v2::Signer>();
-    }
-
-    fn missing_public_keys_sign<Aggregator: AggregatorTrait, Signer: SignerTrait>() {
+    fn missing_public_keys_sign() {
         let num_signers = 10;
         let keys_per_signer = 2;
 
-        let (mut coordinators, mut signers) =
-            minimum_signers_dkg::<Aggregator, Signer>(num_signers, keys_per_signer);
+        let (mut coordinators, mut signers) = minimum_signers_dkg(num_signers, keys_per_signer);
 
         // Let us also remove that signers public key from the config including all of its key ids
         let mut removed_signer = signers.pop().expect("Failed to pop signer");
@@ -2460,28 +2306,18 @@ pub mod test {
     }
 
     #[test]
-    fn insufficient_signers_sign_v1() {
-        insufficient_signers_sign::<v1::Aggregator, v1::Signer>();
-    }
-
-    #[test]
-    fn insufficient_signers_sign_v2() {
-        insufficient_signers_sign::<v2::Aggregator, v2::Signer>();
-    }
-
-    fn insufficient_signers_sign<Aggregator: AggregatorTrait, Signer: SignerTrait>() {
+    fn insufficient_signers_sign() {
         let num_signers = 5;
         let keys_per_signer = 2;
-        let (mut coordinators, mut signers) =
-            setup_with_timeouts::<FireCoordinator<Aggregator>, Signer>(
-                num_signers,
-                keys_per_signer,
-                None,
-                None,
-                None,
-                Some(Duration::from_millis(128)),
-                Some(Duration::from_millis(128)),
-            );
+        let (mut coordinators, mut signers) = setup_with_timeouts::<FireCoordinator>(
+            num_signers,
+            keys_per_signer,
+            None,
+            None,
+            None,
+            Some(Duration::from_millis(128)),
+            Some(Duration::from_millis(128)),
+        );
         let config = coordinators.first().unwrap().get_config();
 
         // We have started a dkg round
@@ -2718,20 +2554,10 @@ pub mod test {
     }
 
     #[test]
-    fn multiple_nonce_request_messages_sign_v1() {
-        multiple_nonce_request_messages::<v1::Aggregator, v1::Signer>();
-    }
-
-    #[test]
-    fn multiple_nonce_request_messages_sign_v2() {
-        multiple_nonce_request_messages::<v2::Aggregator, v2::Signer>();
-    }
-
-    fn multiple_nonce_request_messages<Aggregator: AggregatorTrait, Signer: SignerTrait>() {
+    fn multiple_nonce_request_messages() {
         let num_signers = 12;
         let keys_per_signer = 1;
-        let (mut coordinators, mut signers) =
-            all_signers_dkg::<Aggregator, Signer>(num_signers, keys_per_signer);
+        let (mut coordinators, mut signers) = all_signers_dkg(num_signers, keys_per_signer);
 
         // Start a signing round
         let orig_msg = "It was many and many a year ago, in a kingdom by the sea"
@@ -2816,17 +2642,8 @@ pub mod test {
     }
 
     #[test]
-    fn old_round_ids_are_ignored_v1() {
-        old_round_ids_are_ignored::<v1::Aggregator, v1::Signer>();
-    }
-
-    #[test]
-    fn old_round_ids_are_ignored_v2() {
-        old_round_ids_are_ignored::<v2::Aggregator, v2::Signer>();
-    }
-
-    fn old_round_ids_are_ignored<Aggregator: AggregatorTrait, Signer: SignerTrait>() {
-        let (mut coordinators, _) = setup::<FireCoordinator<Aggregator>, Signer>(3, 10);
+    fn old_round_ids_are_ignored() {
+        let (mut coordinators, _) = setup::<FireCoordinator>(3, 10);
         for coordinator in &mut coordinators {
             let id: u64 = 10;
             let old_id = id.saturating_sub(1);
@@ -2895,49 +2712,24 @@ pub mod test {
     }
 
     #[test]
-    fn gen_nonces_v1() {
-        gen_nonces::<FireCoordinator<v1::Aggregator>, v1::Signer>(5, 1);
-    }
-
-    #[test]
     fn gen_nonces_v2() {
-        gen_nonces::<FireCoordinator<v2::Aggregator>, v2::Signer>(5, 1);
-    }
-
-    #[test]
-    fn bad_signature_share_request_v1() {
-        bad_signature_share_request::<FireCoordinator<v1::Aggregator>, v1::Signer>(5, 2);
+        gen_nonces::<FireCoordinator>(5, 1);
     }
 
     #[test]
     fn bad_signature_share_request_v2() {
-        bad_signature_share_request::<FireCoordinator<v2::Aggregator>, v2::Signer>(5, 2);
-    }
-
-    #[test]
-    fn invalid_nonce_v1() {
-        invalid_nonce::<FireCoordinator<v1::Aggregator>, v1::Signer>(5, 2);
+        bad_signature_share_request::<FireCoordinator>(5, 2);
     }
 
     #[test]
     fn invalid_nonce_v2() {
-        invalid_nonce::<FireCoordinator<v2::Aggregator>, v2::Signer>(5, 2);
+        invalid_nonce::<FireCoordinator>(5, 2);
     }
 
     #[test]
-    fn one_signer_bad_threshold_v1() {
-        one_signer_bad_threshold::<v1::Aggregator, v1::Signer>();
-    }
-
-    #[test]
-    fn one_signer_bad_threshold_v2() {
-        one_signer_bad_threshold::<v2::Aggregator, v2::Signer>();
-    }
-
-    fn one_signer_bad_threshold<Aggregator: AggregatorTrait, SignerType: SignerTrait>() {
+    fn one_signer_bad_threshold() {
         let mut rng = create_rng();
-        let (mut coordinators, mut signers) =
-            setup::<FireCoordinator<Aggregator>, SignerType>(10, 1);
+        let (mut coordinators, mut signers) = setup::<FireCoordinator>(10, 1);
 
         // persist one signer, change the threshold, reset polys
         let mut state = signers[0].save();
@@ -2945,7 +2737,7 @@ pub mod test {
         state.threshold -= 1;
         state.signer.threshold -= 1;
 
-        signers[0] = Signer::<SignerType>::load(&state);
+        signers[0] = Signer::load(&state);
 
         signers[0].signer.reset_polys(&mut rng);
 
@@ -3032,18 +2824,8 @@ pub mod test {
     }
 
     #[test]
-    fn bad_dkg_threshold_v1() {
-        bad_dkg_threshold::<v1::Aggregator, v1::Signer>();
-    }
-
-    #[test]
-    fn bad_dkg_threshold_v2() {
-        bad_dkg_threshold::<v2::Aggregator, v2::Signer>();
-    }
-
-    fn bad_dkg_threshold<Aggregator: AggregatorTrait, SignerType: SignerTrait>() {
-        let (mut coordinators, mut signers) =
-            setup::<FireCoordinator<Aggregator>, SignerType>(10, 1);
+    fn bad_dkg_threshold() {
+        let (mut coordinators, mut signers) = setup::<FireCoordinator>(10, 1);
 
         // We have started a dkg round
         let message = coordinators.first_mut().unwrap().start_dkg_round().unwrap();
@@ -3111,22 +2893,12 @@ pub mod test {
     }
 
     #[test]
-    fn empty_public_shares_v1() {
-        empty_public_shares::<FireCoordinator<v1::Aggregator>, v1::Signer>(5, 2);
-    }
-
-    #[test]
     fn empty_public_shares_v2() {
-        empty_public_shares::<FireCoordinator<v2::Aggregator>, v2::Signer>(5, 2);
-    }
-
-    #[test]
-    fn empty_private_shares_v1() {
-        empty_private_shares::<FireCoordinator<v1::Aggregator>, v1::Signer>(5, 2);
+        empty_public_shares::<FireCoordinator>(5, 2);
     }
 
     #[test]
     fn empty_private_shares_v2() {
-        empty_private_shares::<FireCoordinator<v2::Aggregator>, v2::Signer>(5, 2);
+        empty_private_shares::<FireCoordinator>(5, 2);
     }
 }

@@ -1,5 +1,5 @@
-use hashbrown::{HashMap, HashSet};
 use std::collections::BTreeMap;
+use std::collections::{HashMap, HashSet};
 use tracing::{debug, info, warn};
 
 use crate::{
@@ -18,12 +18,12 @@ use crate::{
         DkgError, OperationResult, SignError, StateMachine,
     },
     taproot::SchnorrProof,
-    traits::Aggregator as AggregatorTrait,
+    v2,
 };
 
 /// The coordinator for the FROST algorithm
 #[derive(Clone, Debug, PartialEq)]
-pub struct Coordinator<Aggregator: AggregatorTrait> {
+pub struct Coordinator {
     /// common config fields
     config: Config,
     /// current DKG round ID
@@ -49,10 +49,10 @@ pub struct Coordinator<Aggregator: AggregatorTrait> {
     /// current state of the state machine
     pub state: State,
     /// Aggregator object
-    aggregator: Aggregator,
+    aggregator: v2::Aggregator,
 }
 
-impl<Aggregator: AggregatorTrait> Coordinator<Aggregator> {
+impl Coordinator {
     /// Process the message inside the passed packet
     pub fn process_message(
         &mut self,
@@ -698,7 +698,7 @@ impl<Aggregator: AggregatorTrait> Coordinator<Aggregator> {
     }
 }
 
-impl<Aggregator: AggregatorTrait> StateMachine<State, Error> for Coordinator<Aggregator> {
+impl StateMachine<State, Error> for Coordinator {
     fn move_to(&mut self, state: State) -> Result<(), Error> {
         self.can_move_to(&state)?;
         self.state = state;
@@ -746,11 +746,11 @@ impl<Aggregator: AggregatorTrait> StateMachine<State, Error> for Coordinator<Agg
     }
 }
 
-impl<Aggregator: AggregatorTrait> CoordinatorTrait for Coordinator<Aggregator> {
+impl CoordinatorTrait for Coordinator {
     /// Create a new coordinator
     fn new(config: Config) -> Self {
         Self {
-            aggregator: Aggregator::new(config.num_keys, config.threshold),
+            aggregator: v2::Aggregator::new(config.num_keys, config.threshold),
             config,
             current_dkg_id: 0,
             current_sign_id: 0,
@@ -772,7 +772,7 @@ impl<Aggregator: AggregatorTrait> CoordinatorTrait for Coordinator<Aggregator> {
 
     fn load(state: &SavedState) -> Self {
         Self {
-            aggregator: Aggregator::new(state.config.num_keys, state.config.threshold),
+            aggregator: v2::Aggregator::new(state.config.num_keys, state.config.threshold),
             config: state.config.clone(),
             current_dkg_id: state.current_dkg_id,
             current_sign_id: state.current_sign_id,
@@ -951,65 +951,34 @@ pub mod test {
             },
             Config, Coordinator as CoordinatorTrait, State,
         },
-        traits::Aggregator as AggregatorTrait,
         util::create_rng,
-        v1, v2,
     };
 
     #[test]
-    fn new_coordinator_v1() {
-        new_coordinator::<FrostCoordinator<v1::Aggregator>>();
-    }
-
-    #[test]
     fn new_coordinator_v2() {
-        new_coordinator::<FrostCoordinator<v2::Aggregator>>();
-    }
-
-    #[test]
-    fn equal_after_save_load_v1() {
-        equal_after_save_load::<FrostCoordinator<v1::Aggregator>, v1::Signer>(2, 2);
+        new_coordinator::<FrostCoordinator>();
     }
 
     #[test]
     fn equal_after_save_load_v2() {
-        equal_after_save_load::<FrostCoordinator<v2::Aggregator>, v2::Signer>(2, 2);
-    }
-
-    #[test]
-    fn coordinator_state_machine_v1() {
-        coordinator_state_machine::<FrostCoordinator<v1::Aggregator>>();
+        equal_after_save_load::<FrostCoordinator>(2, 2);
     }
 
     #[test]
     fn coordinator_state_machine_v2() {
-        coordinator_state_machine::<FrostCoordinator<v2::Aggregator>>();
-    }
-
-    #[test]
-    fn start_dkg_round_v1() {
-        start_dkg_round::<FrostCoordinator<v1::Aggregator>>();
+        coordinator_state_machine::<FrostCoordinator>();
     }
 
     #[test]
     fn start_dkg_round_v2() {
-        start_dkg_round::<FrostCoordinator<v2::Aggregator>>();
+        start_dkg_round::<FrostCoordinator>();
     }
 
     #[test]
-    fn start_public_shares_v1() {
-        start_public_shares::<v1::Aggregator>();
-    }
-
-    #[test]
-    fn start_public_shares_v2() {
-        start_public_shares::<v2::Aggregator>();
-    }
-
-    fn start_public_shares<Aggregator: AggregatorTrait>() {
+    fn start_public_shares() {
         let mut rng = create_rng();
         let config = Config::new(10, 40, 28, Scalar::random(&mut rng));
-        let mut coordinator = FrostCoordinator::<Aggregator>::new(config);
+        let mut coordinator = FrostCoordinator::new(config);
 
         coordinator.state = State::DkgPublicDistribute; // Must be in this state before calling start public shares
 
@@ -1021,19 +990,10 @@ pub mod test {
     }
 
     #[test]
-    fn start_private_shares_v1() {
-        start_private_shares::<v1::Aggregator>();
-    }
-
-    #[test]
-    fn start_private_shares_v2() {
-        start_private_shares::<v2::Aggregator>();
-    }
-
-    fn start_private_shares<Aggregator: AggregatorTrait>() {
+    fn start_private_shares() {
         let mut rng = create_rng();
         let config = Config::new(10, 40, 28, Scalar::random(&mut rng));
-        let mut coordinator = FrostCoordinator::<Aggregator>::new(config);
+        let mut coordinator = FrostCoordinator::new(config);
 
         coordinator.state = State::DkgPrivateDistribute; // Must be in this state before calling start private shares
 
@@ -1044,64 +1004,16 @@ pub mod test {
     }
 
     #[test]
-    fn run_dkg_sign_v1() {
-        run_dkg_sign::<FrostCoordinator<v1::Aggregator>, v1::Signer>(5, 2);
-    }
-
-    #[test]
     fn run_dkg_sign_v2() {
-        run_dkg_sign::<FrostCoordinator<v2::Aggregator>, v2::Signer>(5, 2);
-    }
-
-    #[test]
-    fn check_signature_shares_v1() {
-        check_signature_shares::<FrostCoordinator<v1::Aggregator>, v1::Signer>(
-            5,
-            1,
-            SignatureType::Frost,
-            vec![1],
-        );
-        check_signature_shares::<FrostCoordinator<v1::Aggregator>, v1::Signer>(
-            5,
-            1,
-            SignatureType::Schnorr,
-            vec![1],
-        );
-        check_signature_shares::<FrostCoordinator<v1::Aggregator>, v1::Signer>(
-            5,
-            1,
-            SignatureType::Taproot(None),
-            vec![1],
-        );
-        check_signature_shares::<FrostCoordinator<v1::Aggregator>, v1::Signer>(
-            5,
-            1,
-            SignatureType::Taproot(Some([23u8; 32])),
-            vec![1],
-        );
+        run_dkg_sign::<FrostCoordinator>(5, 2);
     }
 
     #[test]
     fn check_signature_shares_v2() {
-        check_signature_shares::<FrostCoordinator<v2::Aggregator>, v2::Signer>(
-            5,
-            2,
-            SignatureType::Frost,
-            vec![0],
-        );
-        check_signature_shares::<FrostCoordinator<v2::Aggregator>, v2::Signer>(
-            5,
-            2,
-            SignatureType::Schnorr,
-            vec![0],
-        );
-        check_signature_shares::<FrostCoordinator<v2::Aggregator>, v2::Signer>(
-            5,
-            2,
-            SignatureType::Taproot(None),
-            vec![0],
-        );
-        check_signature_shares::<FrostCoordinator<v2::Aggregator>, v2::Signer>(
+        check_signature_shares::<FrostCoordinator>(5, 2, SignatureType::Frost, vec![0]);
+        check_signature_shares::<FrostCoordinator>(5, 2, SignatureType::Schnorr, vec![0]);
+        check_signature_shares::<FrostCoordinator>(5, 2, SignatureType::Taproot(None), vec![0]);
+        check_signature_shares::<FrostCoordinator>(
             5,
             2,
             SignatureType::Taproot(Some([23u8; 32])),
@@ -1110,44 +1022,25 @@ pub mod test {
     }
 
     #[test]
-    fn bad_signature_share_request_v1() {
-        bad_signature_share_request::<FrostCoordinator<v1::Aggregator>, v1::Signer>(5, 2);
-    }
-
-    #[test]
     fn bad_signature_share_request_v2() {
-        bad_signature_share_request::<FrostCoordinator<v2::Aggregator>, v2::Signer>(5, 2);
-    }
-
-    #[test]
-    fn invalid_nonce_v1() {
-        invalid_nonce::<FrostCoordinator<v1::Aggregator>, v1::Signer>(5, 2);
+        bad_signature_share_request::<FrostCoordinator>(5, 2);
     }
 
     #[test]
     fn invalid_nonce_v2() {
-        invalid_nonce::<FrostCoordinator<v2::Aggregator>, v2::Signer>(5, 2);
+        invalid_nonce::<FrostCoordinator>(5, 2);
     }
 
     #[test]
     fn process_inbound_messages_v2() {
-        run_dkg_sign::<FrostCoordinator<v2::Aggregator>, v2::Signer>(5, 2);
+        run_dkg_sign::<FrostCoordinator>(5, 2);
     }
 
     #[test]
-    fn old_round_ids_are_ignored_v1() {
-        old_round_ids_are_ignored::<v1::Aggregator>();
-    }
-
-    #[test]
-    fn old_round_ids_are_ignored_v2() {
-        old_round_ids_are_ignored::<v2::Aggregator>();
-    }
-
-    fn old_round_ids_are_ignored<Aggregator: AggregatorTrait>() {
+    fn old_round_ids_are_ignored() {
         let mut rng = create_rng();
         let config = Config::new(10, 40, 28, Scalar::random(&mut rng));
-        let mut coordinator = FrostCoordinator::<Aggregator>::new(config);
+        let mut coordinator = FrostCoordinator::new(config);
         let id: u64 = 10;
         let old_id = id.saturating_sub(1);
         coordinator.current_dkg_id = id;
@@ -1214,22 +1107,12 @@ pub mod test {
     }
 
     #[test]
-    fn empty_public_shares_v1() {
-        empty_public_shares::<FrostCoordinator<v1::Aggregator>, v1::Signer>(5, 2);
-    }
-
-    #[test]
     fn empty_public_shares_v2() {
-        empty_public_shares::<FrostCoordinator<v2::Aggregator>, v2::Signer>(5, 2);
-    }
-
-    #[test]
-    fn empty_private_shares_v1() {
-        empty_private_shares::<FrostCoordinator<v1::Aggregator>, v1::Signer>(5, 2);
+        empty_public_shares::<FrostCoordinator>(5, 2);
     }
 
     #[test]
     fn empty_private_shares_v2() {
-        empty_private_shares::<FrostCoordinator<v2::Aggregator>, v2::Signer>(5, 2);
+        empty_private_shares::<FrostCoordinator>(5, 2);
     }
 }

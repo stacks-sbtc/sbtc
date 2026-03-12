@@ -1,6 +1,8 @@
 //! Utilities for generating dummy values on external types
 
 use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::ops::Range;
 
 use bitcoin::Amount;
@@ -904,7 +906,7 @@ impl Dummy<Unit> for DkgPrivateBegin {
     }
 }
 
-impl Dummy<Unit> for Vec<(u32, hashbrown::HashMap<u32, Vec<u8>>)> {
+impl Dummy<Unit> for Vec<(u32, HashMap<u32, Vec<u8>>)> {
     fn dummy_with_rng<R: rand::Rng + ?Sized>(_: &Unit, _: &mut R) -> Self {
         fake::vec![u32; 0..16]
             .into_iter()
@@ -952,7 +954,7 @@ impl Dummy<Unit> for BadPrivateShare {
     }
 }
 
-impl Dummy<Unit> for hashbrown::HashMap<u32, BadPrivateShare> {
+impl Dummy<Unit> for HashMap<u32, BadPrivateShare> {
     fn dummy_with_rng<R: rand::Rng + ?Sized>(config: &Unit, rng: &mut R) -> Self {
         fake::vec![u32; 0..20]
             .into_iter()
@@ -961,7 +963,7 @@ impl Dummy<Unit> for hashbrown::HashMap<u32, BadPrivateShare> {
     }
 }
 
-impl Dummy<Unit> for hashbrown::HashSet<u32> {
+impl Dummy<Unit> for HashSet<u32> {
     fn dummy_with_rng<R: rand::Rng + ?Sized>(_: &Unit, _: &mut R) -> Self {
         fake::vec![u32; 0..20].into_iter().collect()
     }

@@ -1,14 +1,13 @@
 use core::{cmp::PartialEq, fmt::Debug};
-use hashbrown::{HashMap, HashSet};
 use polynomial::Polynomial;
 use rand_core::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 
 use crate::{
-    common::{MerkleRoot, Nonce, PolyCommitment, PublicNonce, Signature, SignatureShare},
+    common::{MerkleRoot, Nonce, PolyCommitment, PublicNonce, SignatureShare},
     curve::{point::Point, scalar::Scalar},
-    errors::{AggregatorError, DkgError},
-    taproot::SchnorrProof,
+    errors::DkgError,
 };
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -134,50 +133,10 @@ pub trait Signer: Clone + Debug + PartialEq {
     ) -> Vec<SignatureShare>;
 }
 
-/// A trait which provides a common `Aggregator` interface for `v1` and `v2`
-pub trait Aggregator: Clone + Debug + PartialEq {
-    /// Construct an Aggregator with the passed parameters
-    fn new(num_keys: u32, threshold: u32) -> Self;
-
-    /// Initialize an Aggregator with the passed polynomial commitments
-    fn init(&mut self, poly_comms: &HashMap<u32, PolyCommitment>) -> Result<(), AggregatorError>;
-
-    /// Check and aggregate the signature shares into a FROST `Signature`
-    fn sign(
-        &mut self,
-        msg: &[u8],
-        nonces: &[PublicNonce],
-        sig_shares: &[SignatureShare],
-        key_ids: &[u32],
-    ) -> Result<Signature, AggregatorError>;
-
-    /// Check and aggregate the signature shares into a BIP-340 `SchnorrProof`.
-    /// https://github.com/bitcoin/bips/blob/master/bip-0340.mediawiki
-    fn sign_schnorr(
-        &mut self,
-        msg: &[u8],
-        nonces: &[PublicNonce],
-        sig_shares: &[SignatureShare],
-        key_ids: &[u32],
-    ) -> Result<SchnorrProof, AggregatorError>;
-
-    /// Check and aggregate the signature shares into a BIP-340 `SchnorrProof` with BIP-341 key tweaks
-    /// https://github.com/bitcoin/bips/blob/master/bip-0340.mediawiki
-    /// https://github.com/bitcoin/bips/blob/master/bip-0341.mediawiki
-    fn sign_taproot(
-        &mut self,
-        msg: &[u8],
-        nonces: &[PublicNonce],
-        sig_shares: &[SignatureShare],
-        key_ids: &[u32],
-        merkle_root: Option<MerkleRoot>,
-    ) -> Result<SchnorrProof, AggregatorError>;
-}
-
 /// Helper functions for tests
 pub mod test_helpers {
-    use hashbrown::HashMap;
     use rand_core::{CryptoRng, RngCore};
+    use std::collections::HashMap;
 
     use crate::{common::PolyCommitment, errors::DkgError, traits::Scalar, util::create_rng};
 
