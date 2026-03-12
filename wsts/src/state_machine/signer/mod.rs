@@ -68,6 +68,9 @@ pub enum Error {
     /// The party ID was invalid
     #[error("InvalidPartyID")]
     InvalidPartyID,
+    /// Invalid public key
+    #[error("Invalid public key: {0}, for signer ID {1}")]
+    InvalidPublicKey(#[source] p256k1::point::Error, u32),
     /// A DKG public share was invalid
     #[error("InvalidDkgPublicShares")]
     InvalidDkgPublicShares,
@@ -89,6 +92,12 @@ pub enum Error {
     #[error("integer conversion error")]
     /// An error during integer conversion operations
     TryFromInt,
+    #[error("No public key set for signer ID {0}")]
+    /// No public key set for the given signer ID
+    UnknownSignerId(u32),
+    /// Failed to sign message
+    #[error("Failed to sign message")]
+    SigningFailed(#[from] p256k1::ecdsa::Error),
 }
 
 impl From<TryFromIntError> for Error {
@@ -355,9 +364,7 @@ impl Signer {
             let outbounds = self.process(&message.msg, rng)?;
             for out in outbounds {
                 let msg = Packet {
-                    sig: out
-                        .sign(&self.network_private_key)
-                        .expect("Failed to sign message"),
+                    sig: out.sign(&self.network_private_key)?,
                     msg: out,
                 };
                 responses.push(msg);
@@ -416,7 +423,9 @@ impl Signer {
         let mut missing_public_shares = HashSet::new();
         let mut missing_private_shares = HashSet::new();
         let mut bad_public_shares = HashSet::new();
-        let threshold: usize = self.threshold.try_into().unwrap();
+        // On 32- and 64-bit systems, usize is at least 32 bits, so we need
+        // to convert the threshold to a usize without issues.
+        let threshold: usize = self.threshold as usize;
 
         let Some(dkg_end_begin) = &self.dkg_end_begin_msg else {
             // no cached DkgEndBegin message
@@ -531,7 +540,7 @@ impl Signer {
                                 {
                                     bad_private_shares.insert(
                                         *party_signer_id,
-                                        self.make_bad_private_share(*party_signer_id, rng),
+                                        self.make_bad_private_share(*party_signer_id, rng)?,
                                     );
                                 } else {
                                     warn!("DkgError::BadPrivateShares from party_id {} but no (signer_id, shared_secret) cached", party_id);
@@ -579,7 +588,7 @@ impl Signer {
             self.commitments.len(),
         );
         self.state == State::DkgPublicGather
-            && self.commitments.len() == usize::try_from(self.signer.get_num_parties()).unwrap()
+            && self.commitments.len() == self.signer.get_num_parties() as usize
     }
 
     /// do we have all DkgPublicShares and DkgPrivateShares?
@@ -835,9 +844,14 @@ impl Signer {
         for (dst_key_id, private_share) in self.signer.get_shares() {
             if active_key_ids.contains(&dst_key_id) {
                 debug!("encrypting dkg private share for key_id {}", dst_key_id);
-                let compressed = Compressed::from(self.public_keys.key_ids[&dst_key_id].to_bytes());
+                let Some(dst_public_key) = self.public_keys.key_ids.get(&dst_key_id) else {
+                    warn!(%dst_key_id, "No public key configured");
+                    return Ok(Vec::new());
+                };
+                let compressed = Compressed::from(dst_public_key.to_bytes());
                 // this should not fail as long as the public key above was valid
-                let dst_public_key = Point::try_from(&compressed).unwrap();
+                let dst_public_key = Point::try_from(&compressed)
+                    .map_err(|err| Error::InvalidPublicKey(err, dst_key_id))?;
                 let shared_secret = make_shared_secret(&self.network_private_key, &dst_public_key);
                 let encrypted_share = encrypt(&shared_secret, &private_share.to_bytes(), rng)?;
 
@@ -936,9 +950,11 @@ impl Signer {
 
         // make a HashSet of our key_ids so we can quickly query them
         let key_ids: HashSet<u32> = self.signer.get_key_ids().into_iter().collect();
-        let compressed = Compressed::from(self.public_keys.signers[&src_signer_id].to_bytes());
+        let signer_public_key = self.get_public_key(src_signer_id)?;
+        let compressed = Compressed::from(signer_public_key.to_bytes());
         // this should not fail as long as the public key above was valid
-        let public_key = Point::try_from(&compressed).unwrap();
+        let public_key = Point::try_from(&compressed)
+            .map_err(|err| Error::InvalidPublicKey(err, src_signer_id))?;
         let shared_key = self.network_private_key * public_key;
         let shared_secret = make_shared_secret(&self.network_private_key, &public_key);
 
@@ -955,7 +971,7 @@ impl Signer {
                                 warn!("Failed to parse Scalar for dkg private share from src_id {} to dst_id {}: {:?}", src_id, dst_key_id, e);
                                 self.invalid_private_shares.insert(
                                     src_signer_id,
-                                    self.make_bad_private_share(src_signer_id, rng),
+                                    self.make_bad_private_share(src_signer_id, rng)?,
                                 );
                             }
                         },
@@ -963,7 +979,7 @@ impl Signer {
                             warn!("Failed to decrypt dkg private share from src_id {} to dst_id {}: {:?}", src_id, dst_key_id, e);
                             self.invalid_private_shares.insert(
                                 src_signer_id,
-                                self.make_bad_private_share(src_signer_id, rng),
+                                self.make_bad_private_share(src_signer_id, rng)?,
                             );
                         }
                     }
@@ -987,17 +1003,24 @@ impl Signer {
         &self,
         signer_id: u32,
         rng: &mut R,
-    ) -> BadPrivateShare {
+    ) -> Result<BadPrivateShare, Error> {
+        let signer_public_key = self.get_public_key(signer_id)?;
         let a = self.network_private_key;
         let A = a * G;
-        let B = Point::try_from(&Compressed::from(
-            self.public_keys.signers[&signer_id].to_bytes(),
-        ))
-        .unwrap();
+        let B = Point::try_from(&Compressed::from(signer_public_key.to_bytes()))
+            .map_err(|err| Error::InvalidPublicKey(err, signer_id))?;
         let K = a * B;
         let tuple_proof = TupleProof::new(&a, &A, &B, &K, rng);
 
-        BadPrivateShare { shared_key: K, tuple_proof }
+        Ok(BadPrivateShare { shared_key: K, tuple_proof })
+    }
+
+    /// Get the public key for the given signer ID
+    fn get_public_key(&self, signer_id: u32) -> Result<&p256k1::ecdsa::PublicKey, Error> {
+        self.public_keys
+            .signers
+            .get(&signer_id)
+            .ok_or_else(|| Error::UnknownSignerId(signer_id))
     }
 }
 

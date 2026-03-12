@@ -399,9 +399,7 @@ impl Coordinator {
         );
         let dkg_begin = DkgBegin { dkg_id: self.current_dkg_id };
         let dkg_begin_packet = Packet {
-            sig: dkg_begin
-                .sign(&self.config.message_private_key)
-                .expect("Failed to sign DkgBegin"),
+            sig: dkg_begin.sign(&self.config.message_private_key)?,
             msg: Message::DkgBegin(dkg_begin),
         };
 
@@ -429,9 +427,7 @@ impl Coordinator {
             key_ids: vec![],
         };
         let dkg_private_begin_msg = Packet {
-            sig: dkg_begin
-                .sign(&self.config.message_private_key)
-                .expect("Failed to sign DkgPrivateBegin"),
+            sig: dkg_begin.sign(&self.config.message_private_key)?,
             msg: Message::DkgPrivateBegin(dkg_begin),
         };
         self.move_to(State::DkgPrivateGather)?;
@@ -458,9 +454,7 @@ impl Coordinator {
             key_ids: vec![],
         };
         let dkg_end_begin_msg = Packet {
-            sig: dkg_end_begin
-                .sign(&self.config.message_private_key)
-                .expect("Failed to sign DkgPrivateBegin"),
+            sig: dkg_end_begin.sign(&self.config.message_private_key)?,
             msg: Message::DkgEndBegin(dkg_end_begin),
         };
         self.move_to(State::DkgEndGather)?;
@@ -671,7 +665,9 @@ impl Coordinator {
                                         .ok_or_else(|| Error::NoKeyIdsForSigner(*signer_id))?;
 
                                     for (src_party_id, key_shares) in &dkg_private_shares.shares {
-                                        let poly = &dkg_public_shares[src_party_id];
+                                        let poly = dkg_public_shares
+                                            .get(src_party_id)
+                                            .ok_or_else(|| Error::NoPublicShares(*src_party_id))?;
                                         for key_id in signer_key_ids {
                                             let bytes = key_shares
                                                 .get(key_id)
@@ -792,9 +788,7 @@ impl Coordinator {
             signature_type,
         };
         let nonce_request_msg = Packet {
-            sig: nonce_request
-                .sign(&self.config.message_private_key)
-                .expect("Failed to sign NonceRequest"),
+            sig: nonce_request.sign(&self.config.message_private_key)?,
             msg: Message::NonceRequest(nonce_request),
         };
         self.move_to(State::NonceGather(signature_type))?;
@@ -935,9 +929,7 @@ impl Coordinator {
             signature_type,
         };
         let sig_share_request_msg = Packet {
-            sig: sig_share_request
-                .sign(&self.config.message_private_key)
-                .expect("Failed to sign SignatureShareRequest"),
+            sig: sig_share_request.sign(&self.config.message_private_key)?,
             msg: Message::SignatureShareRequest(sig_share_request),
         };
         self.move_to(State::SigShareGather(signature_type))?;
@@ -1122,15 +1114,17 @@ impl Coordinator {
     fn compute_dkg_public_size(&self) -> u32 {
         self.dkg_public_shares
             .keys()
-            .map(|signer_id| self.config.signer_key_ids[signer_id].len() as u32)
-            .sum()
+            .filter_map(|signer_id| self.config.signer_key_ids.get(signer_id))
+            .map(|key_ids| key_ids.len() as u32)
+            .fold(0, u32::saturating_add)
     }
 
     fn compute_dkg_private_size(&self) -> u32 {
         self.dkg_private_shares
             .keys()
-            .map(|signer_id| self.config.signer_key_ids[signer_id].len() as u32)
-            .sum()
+            .filter_map(|signer_id| self.config.signer_key_ids.get(signer_id))
+            .map(|key_ids| key_ids.len() as u32)
+            .fold(0, u32::saturating_add)
     }
 }
 

@@ -224,9 +224,7 @@ impl Coordinator {
         let dkg_begin = DkgBegin { dkg_id: self.current_dkg_id };
 
         let dkg_begin_packet = Packet {
-            sig: dkg_begin
-                .sign(&self.config.message_private_key)
-                .expect("Failed to sign DkgBegin"),
+            sig: dkg_begin.sign(&self.config.message_private_key)?,
             msg: Message::DkgBegin(dkg_begin),
         };
         self.move_to(State::DkgPublicGather)?;
@@ -246,9 +244,7 @@ impl Coordinator {
             signer_ids: (0..self.config.num_signers).collect(),
         };
         let dkg_private_begin_msg = Packet {
-            sig: dkg_begin
-                .sign(&self.config.message_private_key)
-                .expect("Failed to sign DkgPrivateBegin"),
+            sig: dkg_begin.sign(&self.config.message_private_key)?,
             msg: Message::DkgPrivateBegin(dkg_begin),
         };
         self.move_to(State::DkgPrivateGather)?;
@@ -268,7 +264,7 @@ impl Coordinator {
             signer_ids: (0..self.config.num_signers).collect(),
         };
         let dkg_end_begin_msg = Packet {
-            sig: dkg_begin.sign(&self.config.message_private_key).expect(""),
+            sig: dkg_begin.sign(&self.config.message_private_key)?,
             msg: Message::DkgEndBegin(dkg_begin),
         };
         self.move_to(State::DkgEndGather)?;
@@ -428,9 +424,7 @@ impl Coordinator {
             signature_type,
         };
         let nonce_request_msg = Packet {
-            sig: nonce_request
-                .sign(&self.config.message_private_key)
-                .expect(""),
+            sig: nonce_request.sign(&self.config.message_private_key)?,
             msg: Message::NonceRequest(nonce_request),
         };
         self.ids_to_await = (0..self.config.num_signers).collect();
@@ -537,9 +531,7 @@ impl Coordinator {
             signature_type,
         };
         let sig_share_request_msg = Packet {
-            sig: sig_share_request
-                .sign(&self.config.message_private_key)
-                .expect(""),
+            sig: sig_share_request.sign(&self.config.message_private_key)?,
             msg: Message::SignatureShareRequest(sig_share_request),
         };
         self.ids_to_await = (0..self.config.num_signers).collect();
@@ -610,8 +602,11 @@ impl Coordinator {
         }
         if self.ids_to_await.is_empty() {
             // Calculate the aggregate signature
-            let nonce_responses = (0..self.config.num_signers)
-                .map(|i| self.public_nonces[&i].clone())
+            let nonce_responses = self
+                .public_nonces
+                .iter()
+                .filter(|(key, _)| **key < self.config.num_signers)
+                .map(|(_, nonce)| nonce.clone())
                 .collect::<Vec<NonceResponse>>();
 
             let nonces = nonce_responses
@@ -624,10 +619,11 @@ impl Coordinator {
                 .flat_map(|nr| nr.key_ids.clone())
                 .collect::<Vec<u32>>();
 
-            let shares = &self
-                .public_nonces
+            let shares = self
+                .signature_shares
                 .iter()
-                .flat_map(|(i, _)| self.signature_shares[i].clone())
+                .filter(|(key_id, _)| self.public_nonces.contains_key(key_id))
+                .flat_map(|(_, shares)| shares.clone())
                 .collect::<Vec<SignatureShare>>();
 
             debug!(
@@ -642,7 +638,7 @@ impl Coordinator {
                 let schnorr_proof = self.aggregator.sign_taproot(
                     &self.message,
                     &nonces,
-                    shares,
+                    &shares,
                     &key_ids,
                     merkle_root,
                 )?;
@@ -655,7 +651,7 @@ impl Coordinator {
             } else if let SignatureType::Schnorr = signature_type {
                 let schnorr_proof =
                     self.aggregator
-                        .sign_schnorr(&self.message, &nonces, shares, &key_ids)?;
+                        .sign_schnorr(&self.message, &nonces, &shares, &key_ids)?;
                 debug!(
                     r = %schnorr_proof.r,
                     s = %schnorr_proof.s,
@@ -665,7 +661,7 @@ impl Coordinator {
             } else {
                 let signature = self
                     .aggregator
-                    .sign(&self.message, &nonces, shares, &key_ids)?;
+                    .sign(&self.message, &nonces, &shares, &key_ids)?;
                 debug!(
                     R = %signature.R,
                     z = %signature.z,

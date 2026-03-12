@@ -13,6 +13,7 @@ categories = ["cryptography"]
 [features]
 default = ["with_p256k1_bindgen"]
 with_p256k1_bindgen = ["p256k1/with_bindgen"]
+testing = []
 
 [dependencies]
 aes-gcm.workspace = true

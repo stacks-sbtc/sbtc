@@ -104,6 +104,9 @@ pub enum Error {
     /// Supplied party polynomial contained duplicate party IDs
     #[error("Supplied party polynomials contained a duplicate party ID")]
     DuplicatePartyId,
+    /// Signing failed
+    #[error("Signing failed: {0}")]
+    SigningFailed(#[from] p256k1::ecdsa::Error),
 }
 
 impl From<AggregatorError> for Error {
@@ -322,6 +325,7 @@ pub mod frost;
 pub mod fire;
 
 #[allow(missing_docs)]
+#[cfg(any(test, feature = "testing"))]
 pub mod test {
     use rand_core::OsRng;
     use std::collections::{HashMap, HashSet};
