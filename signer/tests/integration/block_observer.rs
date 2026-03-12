@@ -1247,13 +1247,24 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
         client
             .expect_get_node_info()
             .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
+
+        let cloned_headers = tenure_headers.clone();
         client
             .expect_get_tenure_headers()
-            .returning(move |_| Box::pin(std::future::ready(Ok(tenure_headers.clone()))));
+            .once()
+            .returning(move |_| Box::pin(std::future::ready(Ok(cloned_headers.clone()))));
 
-        client.expect_get_epoch_status().returning(|| {
+        let cloned_headers = tenure_headers.clone();
+        client.expect_get_tenure_headers().returning(move |_| {
+            let mut headers = cloned_headers.clone();
+            headers.anchor_block_height = headers.anchor_block_height - 1;
+            Box::pin(std::future::ready(Ok(headers.clone())))
+        });
+
+        let cloned_headers = tenure_headers.clone();
+        client.expect_get_epoch_status().returning(move || {
             Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
-                nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
+                nakamoto_start_height: cloned_headers.anchor_block_height,
             })))
         });
 
