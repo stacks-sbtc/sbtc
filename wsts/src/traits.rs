@@ -52,7 +52,7 @@ pub mod test_helpers {
     ) -> Result<HashMap<u32, PolyCommitment>, HashMap<u32, DkgError>> {
         let public_shares: HashMap<u32, PolyCommitment> = signers
             .iter()
-            .flat_map(|s| s.get_poly_commitment(rng))
+            .filter_map(|s| s.get_poly_commitment(rng))
             .map(|comm| (comm.id.id.get_u32(), comm))
             .collect();
         let mut private_shares = HashMap::new();
@@ -91,7 +91,7 @@ pub mod test_helpers {
         );
         let polys: HashMap<u32, PolyCommitment> = signers
             .iter()
-            .flat_map(|s| s.get_poly_commitment(rng))
+            .filter_map(|s| s.get_poly_commitment(rng))
             .map(|comm| (comm.id.id.get_u32(), comm))
             .collect();
         let mut private_shares = HashMap::new();
@@ -213,7 +213,7 @@ pub mod test_helpers {
         let bad_party_id = 2u32;
         let public_shares: HashMap<u32, PolyCommitment> = signers
             .iter()
-            .flat_map(|s| s.get_poly_commitment(&mut rng))
+            .filter_map(|s| s.get_poly_commitment(&mut rng))
             .map(|comm| {
                 let party_id = comm.id.id.get_u32();
                 if party_id == bad_party_id {
