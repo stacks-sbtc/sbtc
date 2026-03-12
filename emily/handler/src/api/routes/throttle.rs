@@ -24,7 +24,23 @@ where
         .boxed()
         .or(deactivate_throttle_key(context.clone()))
         .boxed()
-        .or(start_throttle(context))
+        .or(start_throttle(context.clone()))
+        .boxed()
+        .or(stop_throttle(context))
+        .boxed()
+}
+
+/// Stop throttle endpoint.
+fn stop_throttle<F>(
+    context: F,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
+where
+    F: Filter<Extract = (EmilyContext,), Error = std::convert::Infallible> + Clone + Send,
+{
+    warp::path!("throttle" / "stop")
+        .and(warp::post())
+        .and(context)
+        .then(handlers::throttle::stop_throttle)
 }
 
 /// Get throttle key endpoint.
