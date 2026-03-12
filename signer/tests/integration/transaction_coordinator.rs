@@ -587,15 +587,20 @@ async fn mock_stacks_core<D, B, E>(
         client
             .expect_get_node_info()
             .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
-        client.expect_get_tenure_headers().returning(move |consensus_hash| {
-            let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
-            tenure.anchor_block_hash = chain_tip;
-            // We need to do this to ensure that last_sortition_ch is not consensus_hash, because it usually
-            // should be so.
-            let last_sortition_ch_bytes = (*consensus_hash).into_bytes().map(|byte| byte.overflowing_add(1).0);
-            tenure.last_sortition_ch = signer::storage::model::ConsensusHash::new(last_sortition_ch_bytes);
-            Box::pin(std::future::ready(Ok(tenure)))
-        });
+        client
+            .expect_get_tenure_headers()
+            .returning(move |consensus_hash| {
+                let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
+                tenure.anchor_block_hash = chain_tip;
+                // We need to do this to ensure that last_sortition_ch is not consensus_hash, because it usually
+                // should be so.
+                let last_sortition_ch_bytes = (*consensus_hash)
+                    .into_bytes()
+                    .map(|byte| byte.overflowing_add(1).0);
+                tenure.last_sortition_ch =
+                    signer::storage::model::ConsensusHash::new(last_sortition_ch_bytes);
+                Box::pin(std::future::ready(Ok(tenure)))
+            });
 
         client.expect_get_epoch_status().returning(|| {
             Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
