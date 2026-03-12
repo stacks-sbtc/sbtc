@@ -181,7 +181,7 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
 
         client.expect_get_epoch_status().returning(|| {
             Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
-                nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
+                nakamoto_start_height: BitcoinBlockHeight::from(0_u32),
             })))
         });
 
