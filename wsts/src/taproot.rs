@@ -68,11 +68,12 @@ impl From<[u8; 64]> for SchnorrProof {
 }
 
 /// Helper functions for tests
+#[cfg(test)]
 pub mod test_helpers {
     use crate::{
         common::{PolyCommitment, PublicNonce, SignatureShare},
         errors::DkgError,
-        traits,
+        v2,
     };
 
     use rand_core::{CryptoRng, RngCore};
@@ -80,19 +81,19 @@ pub mod test_helpers {
 
     /// Run a distributed key generation round
     #[allow(non_snake_case)]
-    pub fn dkg<RNG: RngCore + CryptoRng, Signer: traits::Signer>(
-        signers: &mut [Signer],
+    pub fn dkg<RNG: RngCore + CryptoRng>(
+        signers: &mut [v2::Party],
         rng: &mut RNG,
     ) -> Result<HashMap<u32, PolyCommitment>, HashMap<u32, DkgError>> {
         let polys: HashMap<u32, PolyCommitment> = signers
             .iter()
-            .flat_map(|s| s.get_poly_commitments(rng))
+            .filter_map(|s| s.get_poly_commitment(rng))
             .map(|comm| (comm.id().id.get_u32(), comm))
             .collect();
 
         let mut private_shares = HashMap::new();
         for signer in signers.iter() {
-            for (signer_id, signer_shares) in signer.get_shares() {
+            for (signer_id, signer_shares) in signer.get_shares_wrapped() {
                 private_shares.insert(signer_id, signer_shares);
             }
         }
@@ -112,29 +113,29 @@ pub mod test_helpers {
     }
 
     #[allow(non_snake_case)]
-    fn sign_params<RNG: RngCore + CryptoRng, Signer: traits::Signer>(
-        signers: &mut [Signer],
+    fn sign_params<RNG: RngCore + CryptoRng>(
+        signers: &mut [v2::Party],
         rng: &mut RNG,
     ) -> (Vec<u32>, Vec<u32>, Vec<PublicNonce>) {
         let signer_ids: Vec<u32> = signers.iter().map(|s| s.get_id()).collect();
         let key_ids: Vec<u32> = signers.iter().flat_map(|s| s.get_key_ids()).collect();
-        let nonces: Vec<PublicNonce> = signers.iter_mut().flat_map(|s| s.gen_nonces(rng)).collect();
+        let nonces: Vec<PublicNonce> = signers.iter_mut().map(|s| s.gen_nonce(rng)).collect();
 
         (signer_ids, key_ids, nonces)
     }
 
     /// Run a signing round for the passed `msg`
     #[allow(non_snake_case)]
-    pub fn sign<RNG: RngCore + CryptoRng, Signer: traits::Signer>(
+    pub fn sign<RNG: RngCore + CryptoRng>(
         msg: &[u8],
-        signers: &mut [Signer],
+        signers: &mut [v2::Party],
         rng: &mut RNG,
         merkle_root: Option<[u8; 32]>,
     ) -> (Vec<PublicNonce>, Vec<SignatureShare>) {
         let (signer_ids, key_ids, nonces) = sign_params(signers, rng);
         let shares = signers
             .iter()
-            .flat_map(|s| s.sign_taproot(msg, &signer_ids, &key_ids, &nonces, merkle_root))
+            .map(|s| s.sign_taproot(msg, &signer_ids, &key_ids, &nonces, merkle_root))
             .collect();
 
         (nonces, shares)
@@ -145,7 +146,7 @@ pub mod test_helpers {
 mod test {
     use super::{test_helpers, Point, Scalar, SchnorrProof, G};
 
-    use crate::{compute, traits::Signer, util::create_rng, v2};
+    use crate::{compute, util::create_rng, v2};
 
     #[test]
     #[allow(non_snake_case)]

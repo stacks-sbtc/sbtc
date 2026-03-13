@@ -281,7 +281,11 @@ jobs:
 
       - name: Start Integration Test Environment
         id: start_test_environment
-        run: make integration-env-up-ci
+        run: |
+          # Ensure test images are available
+          docker compose --file docker/tests/docker-compose.bitcoin.yml pull
+          docker compose --file docker/tests/docker-compose.stacks.yml pull
+          make integration-env-up-ci
 
       - name: Wait for Test Artifacts
         id: wait_test_artifacts
