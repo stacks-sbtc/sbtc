@@ -1528,6 +1528,11 @@ impl From<SignerState> for proto::SignerState {
 impl TryFrom<proto::SignerState> for SignerState {
     type Error = Error;
     fn try_from(value: proto::SignerState) -> Result<Self, Self::Error> {
+        // In previous versions of WSTS, the SignerState struct had a
+        // `parties` field of type Vec<(u32, PartyState)>. However, the
+        // v2::Party object, always populated the parties field with a
+        // vector of length 1. Since we only use the v2::Party object, this
+        // protobuf should only have a length of 1.
         let [party_state] = value
             .parties
             .try_into()
