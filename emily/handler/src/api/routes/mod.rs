@@ -24,6 +24,8 @@ mod new_block;
 /// Testing routes.
 #[cfg(feature = "testing")]
 mod testing;
+/// Throttle routes.
+mod throttle;
 /// Withdrawal routes.
 mod withdrawal;
 
@@ -33,11 +35,12 @@ where
     T: warp::Reply,
 {
     let as_response = reply.into_response();
-    tracing::debug!(
-        event = ?"response",
-        status = ?as_response.status().as_u16(),
-        body = ?format!("{:?}", as_response.body()),
-        headers = ?format!("{:?}", as_response.headers()),
+    tracing::debug!(event = "response", status = as_response.status().as_u16());
+    tracing::trace!(
+        event = "response-body",
+        status = as_response.status().as_u16(),
+        body = ?as_response.body(),
+        headers = ?as_response.headers(),
     );
     (as_response,)
 }
@@ -61,6 +64,8 @@ pub fn routes(
         .or(withdrawal::routes(context.clone()))
         .boxed()
         .or(limits::routes(context.clone()))
+        .boxed()
+        .or(throttle::routes(context.clone()))
         .boxed()
         .or(testing::routes(context))
         .boxed()
@@ -87,7 +92,9 @@ pub fn routes(
         .boxed()
         .or(withdrawal::routes(context.clone()))
         .boxed()
-        .or(limits::routes(context))
+        .or(limits::routes(context.clone()))
+        .boxed()
+        .or(throttle::routes(context))
         .boxed()
         // Convert reply to tuple to that more routes can be added to the returned filter.
         .map(|reply| (reply,))
@@ -158,6 +165,9 @@ fn with_context(
         }
         if let Some(h) = get_header("x-context-version") {
             context.settings.version = h;
+        }
+        if let Some(h) = get_header("x-context-throttle") {
+            context.settings.throttle_table_name = h;
         }
 
         context

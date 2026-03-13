@@ -99,6 +99,7 @@ pub mod health_api;
 pub mod limits_api;
 pub mod new_block_api;
 pub mod testing_api;
+pub mod throttle_api;
 pub mod withdrawal_api;
 
 pub mod configuration;

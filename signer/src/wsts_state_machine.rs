@@ -1,6 +1,8 @@
 //! Utilities for constructing and loading WSTS state machines
 
 use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::future::Future;
 
 use crate::codec::Decode as _;
@@ -19,8 +21,6 @@ use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::DkgSharesStatus;
 use crate::storage::model::SigHash;
 
-use hashbrown::HashMap;
-use hashbrown::HashSet;
 use rand::SeedableRng as _;
 use rand::rngs::OsRng;
 use rand_chacha::ChaCha20Rng;
@@ -37,8 +37,6 @@ use wsts::state_machine::coordinator::Coordinator as _;
 use wsts::state_machine::coordinator::State as WstsState;
 use wsts::state_machine::coordinator::fire;
 use wsts::state_machine::coordinator::frost;
-use wsts::traits::Signer as _;
-use wsts::v2::Aggregator;
 
 /// An identifier for signer state machines.
 ///
@@ -128,10 +126,10 @@ impl FromMessage for Packet {
 
 /// Wrapper for a WSTS FIRE coordinator state machine.
 #[derive(Debug, Clone, PartialEq)]
-pub struct FireCoordinator(fire::Coordinator<Aggregator>);
+pub struct FireCoordinator(fire::Coordinator);
 
 impl std::ops::Deref for FireCoordinator {
-    type Target = fire::Coordinator<Aggregator>;
+    type Target = fire::Coordinator;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -146,10 +144,10 @@ impl std::ops::DerefMut for FireCoordinator {
 
 /// Wrapper for a WSTS FROST coordinator state machine.
 #[derive(Debug, Clone, PartialEq)]
-pub struct FrostCoordinator(frost::Coordinator<Aggregator>);
+pub struct FrostCoordinator(frost::Coordinator);
 
 impl std::ops::Deref for FrostCoordinator {
-    type Target = frost::Coordinator<Aggregator>;
+    type Target = frost::Coordinator;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -162,8 +160,8 @@ impl std::ops::DerefMut for FrostCoordinator {
     }
 }
 
-impl From<frost::Coordinator<Aggregator>> for FrostCoordinator {
-    fn from(value: frost::Coordinator<Aggregator>) -> Self {
+impl From<frost::Coordinator> for FrostCoordinator {
+    fn from(value: frost::Coordinator) -> Self {
         Self(value)
     }
 }
@@ -249,7 +247,7 @@ impl WstsCoordinator for FireCoordinator {
     where
         I: IntoIterator<Item = PublicKey>,
     {
-        let signer_public_keys: hashbrown::HashMap<u32, _> = signers
+        let signer_public_keys: HashMap<u32, _> = signers
             .into_iter()
             .enumerate()
             .map(|(idx, key)| (idx as u32, key.into()))
@@ -289,7 +287,7 @@ impl WstsCoordinator for FireCoordinator {
     }
 
     fn from_config(config: Config) -> Self {
-        Self(fire::Coordinator::<Aggregator>::new(config))
+        Self(fire::Coordinator::new(config))
     }
 
     async fn load<S>(
@@ -368,7 +366,7 @@ impl WstsCoordinator for FrostCoordinator {
     where
         I: IntoIterator<Item = PublicKey>,
     {
-        let signer_public_keys: hashbrown::HashMap<u32, _> = signers
+        let signer_public_keys: HashMap<u32, _> = signers
             .into_iter()
             .enumerate()
             .map(|(idx, key)| (idx as u32, key.into()))
@@ -410,7 +408,7 @@ impl WstsCoordinator for FrostCoordinator {
     }
 
     fn from_config(config: Config) -> Self {
-        Self(frost::Coordinator::<Aggregator>::new(config))
+        Self(frost::Coordinator::new(config))
     }
 
     async fn load<S>(
@@ -484,7 +482,7 @@ impl WstsCoordinator for FrostCoordinator {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SignerStateMachine {
     /// The inner WSTS state machine that this type wraps
-    inner: wsts::state_machine::signer::Signer<wsts::v2::Party>,
+    inner: wsts::state_machine::signer::Signer,
     /// The bitcoin block hash and height at the time that this state
     /// machine was created. This is used to seed the random number
     /// generator used to create the secret polynomial during DKG.
@@ -494,7 +492,7 @@ pub struct SignerStateMachine {
     private_key: PrivateKey,
 }
 
-type WstsSigner = wsts::state_machine::signer::Signer<wsts::v2::Party>;
+type WstsSigner = wsts::state_machine::signer::Signer;
 
 impl SignerStateMachine {
     /// Create a new state machine
@@ -510,7 +508,7 @@ impl SignerStateMachine {
         private_key: PrivateKey,
     ) -> Result<Self, Error> {
         let signer_pub_key = PublicKey::from_private_key(&private_key);
-        let signers: hashbrown::HashMap<u32, _> = signers
+        let signers: HashMap<u32, _> = signers
             .into_iter()
             .enumerate()
             .map(|(id, key)| (id as u32, p256k1::keys::PublicKey::from(&key)))

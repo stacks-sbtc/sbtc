@@ -1306,6 +1306,7 @@ pub async fn new_emily_setup() -> (EmilyClient, EmilyTables) {
         ("withdrawal", &tables.withdrawal),
         ("chainstate", &tables.chainstate),
         ("limit", &tables.limit),
+        ("throttle", &tables.throttle),
     ] {
         headers.insert(
             reqwest_012::header::HeaderName::from_str(&format!("x-context-{shortname}")).unwrap(),

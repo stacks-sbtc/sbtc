@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::time::Duration;
 
 use clarity::util::secp256k1::Secp256k1PublicKey;
@@ -87,7 +88,7 @@ pub fn generate_signer_info<Rng: rand::RngCore + rand::CryptoRng>(
 /// Test coordinator that can operate over an `in_memory` network
 pub struct Coordinator {
     network: network::in_memory::MpmcBroadcaster,
-    wsts_coordinator: fire::Coordinator<wsts::v2::Aggregator>,
+    wsts_coordinator: fire::Coordinator,
     private_key: PrivateKey,
 }
 
@@ -100,7 +101,7 @@ impl Coordinator {
     ) -> Self {
         let num_signers = signer_info.signer_public_keys.len().try_into().unwrap();
         let message_private_key = signer_info.signer_private_key;
-        let signer_public_keys: hashbrown::HashMap<u32, _> = signer_info
+        let signer_public_keys: HashMap<u32, _> = signer_info
             .signer_public_keys
             .into_iter()
             .enumerate()

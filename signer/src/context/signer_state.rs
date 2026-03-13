@@ -1,13 +1,13 @@
 //! Module for signer state
 
 use std::collections::BTreeSet;
+use std::collections::HashSet;
 use std::sync::{
     RwLock,
     atomic::{AtomicBool, AtomicU64, Ordering},
 };
 
 use bitcoin::Amount;
-use hashbrown::HashSet;
 use libp2p::PeerId;
 
 use crate::keys::PublicKey;
@@ -65,8 +65,7 @@ impl SignerState {
         self.registry_signing_set_info
             .read()
             .expect("BUG: Failed to acquire read lock of signer set info")
-            .as_ref()
-            .cloned()
+            .to_owned()
     }
 
     /// Get the current bitcoin chain tip.

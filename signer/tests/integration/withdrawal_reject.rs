@@ -17,8 +17,8 @@ use signer::testing;
 use signer::testing::get_rng;
 
 use fake::Fake as _;
+use sbtc::WITHDRAWAL_MIN_CONFIRMATIONS;
 use signer::WITHDRAWAL_BLOCKS_EXPIRY;
-use signer::WITHDRAWAL_MIN_CONFIRMATIONS;
 use signer::testing::context::*;
 use signer::testing::storage::DbReadTestExt as _;
 

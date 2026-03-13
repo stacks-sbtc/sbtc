@@ -39,6 +39,12 @@ use super::CorsSupport;
         api::handlers::limits::set_limits,
         api::handlers::limits::get_limits_for_account,
         api::handlers::limits::set_limits_for_account,
+        // Throttle endpoints
+        api::handlers::throttle::add_throttle_key,
+        api::handlers::throttle::get_throttle_key,
+        api::handlers::throttle::start_throttle,
+        api::handlers::throttle::activate_throttle_key,
+        api::handlers::throttle::deactivate_throttle_key,
         // New block endpoints.
         api::handlers::new_block::new_block,
     ),
@@ -59,6 +65,7 @@ use super::CorsSupport;
         api::models::deposit::responses::UpdateDepositsResponse,
         // Withdrawal Models.
         api::models::withdrawal::Withdrawal,
+        api::models::withdrawal::ExpectedFulfillmentInfo,
         api::models::withdrawal::responses::WithdrawalWithStatus,
         api::models::withdrawal::WithdrawalInfo,
         api::models::withdrawal::WithdrawalParameters,
@@ -78,6 +85,10 @@ use super::CorsSupport;
         api::models::limits::AccountLimits,
         // New Block models.
         api::models::new_block::NewBlockEventRaw,
+        // Throttle models
+        api::models::throttle::ThrottleKey,
+        api::models::throttle::ThrottleRequest,
+        api::models::throttle::GetThrottleKeyResponse,
         // Errors.
         common::error::ErrorResponse,
     ))

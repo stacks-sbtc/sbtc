@@ -1,19 +1,19 @@
 name: Build Docker Image for Emily Sidecar
 
-on:
-  workflow_dispatch:
-    inputs:
-      environment:
-        description: "Environment name"
-        required: true
-        default: environment/sbtc-devnet
-        type: choice
-        options:
-          - environment/sbtc-devnet
-          - environment/sbtc-private-mainnet
-  pull_request:
-    branches:
-      - main
+# on:
+#   workflow_dispatch:
+#     inputs:
+#       environment:
+#         description: "Environment name"
+#         required: true
+#         default: environment/sbtc-devnet
+#         type: choice
+#         options:
+#           - environment/sbtc-devnet
+#           - environment/sbtc-private-mainnet
+#   pull_request:
+#     branches:
+#       - main
 
 concurrency:
   group: docker-build-emily-sidecar-${{ github.ref || github.run_id }}

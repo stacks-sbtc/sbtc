@@ -15,6 +15,13 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WithdrawalUpdate {
     #[serde(
+        rename = "expectedFulfillmentInfo",
+        default,
+        with = "::serde_with::rust::double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub expected_fulfillment_info: Option<Option<Box<models::ExpectedFulfillmentInfo>>>,
+    #[serde(
         rename = "fulfillment",
         default,
         with = "::serde_with::rust::double_option",
@@ -39,6 +46,7 @@ impl WithdrawalUpdate {
         status_message: String,
     ) -> WithdrawalUpdate {
         WithdrawalUpdate {
+            expected_fulfillment_info: None,
             fulfillment: None,
             request_id,
             status,

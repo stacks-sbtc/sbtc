@@ -11,6 +11,7 @@ use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc_json::Utxo;
 use fake::Fake as _;
 use futures::future::join_all;
+use signer::emily_client::EmilyClientError;
 use signer::stacks::api::StacksEpochStatus;
 use signer::storage::model::BitcoinBlockHeight;
 use signer::testing::btc::MockBitcoinBlockHashStreamProvider;
@@ -697,4 +698,39 @@ async fn test_get_deposits_returns_pending_and_accepted() {
     assert_eq!(pending_deposits.len(), num_deposits - num_accepted);
 
     clean_emily_setup(emily_tables).await;
+}
+
+mod serial {
+    use super::*;
+
+    #[tokio::test]
+    async fn emily_timeout_works() {
+        // Client with 1 sec timeout works normally
+        let client = EmilyClient::try_new(
+            &url::Url::parse("http://testApiKey@localhost:3031").unwrap(),
+            Duration::from_secs(1),
+            Duration::from_secs(1),
+            None,
+        )
+        .unwrap();
+        let limits = client.get_limits().await;
+        limits.unwrap();
+        // Client with 1 nanosec timeout should fail with timeout
+        let client = EmilyClient::try_new(
+            &url::Url::parse("http://testApiKey@localhost:3031").unwrap(),
+            Duration::from_nanos(1),
+            Duration::from_secs(1),
+            None,
+        )
+        .unwrap();
+        let limits = client.get_limits().await;
+        let limits_err = limits.unwrap_err();
+        let Error::EmilyApi(EmilyClientError::GetLimits(emily_client::apis::Error::Reqwest(
+            inner_error,
+        ))) = limits_err
+        else {
+            panic!("wrong error format")
+        };
+        assert!(inner_error.is_timeout())
+    }
 }
