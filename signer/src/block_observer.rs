@@ -173,7 +173,6 @@ where
                     if let Err(error) = self.process_bitcoin_blocks_until(block_hash).await {
                         tracing::warn!(%error, %block_hash, "could not process bitcoin blocks");
                     }
-
                     if let Err(error) = self.process_stacks_blocks().await {
                         tracing::warn!(%error, "could not process stacks blocks");
                     }
@@ -365,18 +364,16 @@ impl<C: Context, B> BlockObserver<C, B> {
     /// we left off and update the database.
     async fn process_bitcoin_blocks_until(&self, block_hash: BlockHash) -> Result<(), Error> {
         let block_headers = self.next_headers_to_process(block_hash).await?;
-
-        for block_header in block_headers {
+        for block_header in &block_headers {
             self.process_bitcoin_block(block_header).await?;
         }
-
         Ok(())
     }
 
     /// Write the bitcoin block and any transactions that spend to any of
     /// the signers `scriptPubKey`s to the database.
     #[tracing::instrument(skip_all, fields(block_hash = %block_header.hash))]
-    async fn process_bitcoin_block(&self, block_header: BitcoinBlockHeader) -> Result<(), Error> {
+    async fn process_bitcoin_block(&self, block_header: &BitcoinBlockHeader) -> Result<(), Error> {
         let block = self
             .context
             .get_bitcoin_client()
@@ -422,15 +419,15 @@ impl<C: Context, B> BlockObserver<C, B> {
         tracing::info!("processing stacks block");
         let stacks_client = self.context.get_stacks_client();
         let db = self.context.get_storage_mut();
-        let tenure_info = stacks_client.get_tenure_info().await?;
+
+        let consensus_hash = stacks_client
+            .get_node_info()
+            .await?
+            .stacks_tip_consensus_hash;
 
         tracing::debug!("fetching unknown ancestral blocks from stacks-core");
-        crate::stacks::api::update_db_with_unknown_ancestors(
-            &stacks_client,
-            &db,
-            &tenure_info.tip_block_id,
-        )
-        .await?;
+        crate::stacks::api::update_db_with_unknown_ancestors(&stacks_client, &db, consensus_hash)
+            .await?;
 
         tracing::debug!("finished processing stacks block");
         Ok(())
@@ -802,7 +799,7 @@ mod tests {
     async fn should_be_able_to_extract_bitcoin_blocks_given_a_block_header_stream() {
         let mut rng = get_rng();
         let storage = storage::memory::Store::new_shared();
-        let test_harness = TestHarness::generate(&mut rng, 20, 0..5);
+        let test_harness = TestHarness::generate(&mut rng, 20, 1..5);
         let min_height = test_harness.min_block_height();
         let ctx = TestContext::builder()
             .with_storage(storage.clone())
