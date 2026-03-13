@@ -1528,15 +1528,10 @@ impl From<SignerState> for proto::SignerState {
 impl TryFrom<proto::SignerState> for SignerState {
     type Error = Error;
     fn try_from(value: proto::SignerState) -> Result<Self, Self::Error> {
-        let mut parties = value
+        let [party_state] = value
             .parties
-            .into_iter()
-            .map(|v| v.try_into())
-            .collect::<Result<Vec<_>, Error>>()?;
-        let party_state = match parties.pop() {
-            Some(party) if parties.is_empty() => party,
-            _ => return Err(Error::TypeConversion),
-        };
+            .try_into()
+            .map_err(|_| Error::InvalidSignerState)?;
 
         Ok(SignerState {
             id: value.id,
@@ -1545,7 +1540,7 @@ impl TryFrom<proto::SignerState> for SignerState {
             num_parties: value.num_parties,
             threshold: value.threshold,
             group_key: value.group_key.required()?.try_into()?,
-            party_state,
+            party_state: party_state.try_into()?,
         })
     }
 }
