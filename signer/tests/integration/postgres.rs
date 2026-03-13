@@ -8217,7 +8217,7 @@ mod canonical_bitcoin_blockchain {
         };
         let blockchains = TestData::generate(&mut rng, &signer_keys, &params);
 
-        // Insert all blocks from into the database
+        // Insert all blocks into the database
         for block in blockchains.bitcoin_blocks.iter() {
             db.write_bitcoin_block(block).await.unwrap();
         }
@@ -8409,8 +8409,8 @@ mod canonical_bitcoin_blockchain {
         let db = testing::storage::new_test_database().await;
 
         // Create two blockchains, one of length 10 and another of length
-        // 20, where one forks the other at height 3 (the block with height
-        // 3 differs from one to the other but their earlier blocks are the
+        // 17, where one forks the other at height 2 (the block with height
+        // 2 differs from one to the other but their earlier blocks are the
         // same)
         let main_chain = BitcoinChain::new_with_length(10);
         let fork_chain = main_chain.fork_at_height(2u64, 15);

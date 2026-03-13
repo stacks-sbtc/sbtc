@@ -2176,14 +2176,13 @@ async fn block_observer_marks_bitcoin_blocks_as_canonical(fork_generating_blocks
     .await
     .unwrap();
 
-    // Verify the new blocks are in the database
+    // Verify the new blocks are in the database and are canonical
     for new_block in new_blocks {
         let db_new_block = db.get_bitcoin_block(&new_block).await.unwrap();
         assert!(db_new_block.is_some());
         assert_eq!(db.is_block_canonical(&new_block).await.unwrap(), Some(true));
     }
 
-    // Check that the new blocks have is_canonical = true
     // Check that the old chain tip has is_canonical = false
     let invalidated_chain_tip_status = db
         .is_block_canonical(&chain_tip_before_invalidation)
