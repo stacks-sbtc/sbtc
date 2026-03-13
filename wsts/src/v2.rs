@@ -484,7 +484,6 @@ impl Aggregator {
     }
 }
 
-
 impl Party {
     /// Load a Party from a SignerState
     pub fn load(state: &traits::SignerState) -> Self {
