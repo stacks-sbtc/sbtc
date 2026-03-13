@@ -9,7 +9,7 @@ use crate::curve::{point::Error as PointError, scalar::Scalar};
 /// Errors which can happen during public polynomial operations
 pub enum CommonError {
     #[error("polynomial is invalid, it has no coefficients")]
-    /// An error when the polynomial degree is negative
+    /// An error when trying to create a polynomial with no coefficients
     InvalidPolynomial,
 }
 
@@ -55,7 +55,8 @@ pub enum AggregatorError {
     /// The aggregator has not been initialized with DKG commitments
     NotInitialized,
     #[error("could not initialize the aggregator: {0}")]
-    /// An error when the aggregator could not be initialized
+    /// An error when attempting to initialize the aggregator with an
+    /// invalid polynomial.
     InvalidPolynomial(#[from] CommonError),
     #[error("bad poly commitments {0:?}")]
     /// The polynomial commitments which failed verification or were the wrong size

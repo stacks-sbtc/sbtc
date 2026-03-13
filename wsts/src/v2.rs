@@ -276,16 +276,15 @@ impl Aggregator {
     /// Initialize the Aggregator polynomial
     pub fn init(&mut self, comms: &HashMap<u32, PolyCommitment>) -> Result<(), AggregatorError> {
         let threshold: usize = self.threshold.try_into()?;
-        let mut coefficients = Vec::with_capacity(threshold);
+        let mut coefficients = vec![Point::zero(); threshold];
 
-        for i in 0..threshold {
-            let mut pt = Point::zero();
-            for comm in comms.values() {
-                if let Some(p) = comm.poly().get(i) {
-                    pt += p;
-                }
-            }
-            coefficients.push(pt);
+        for comm in comms.values() {
+            // TODO: check that the degree of the polynomial commitment is
+            // equal to the threshold.
+            coefficients
+                .iter_mut()
+                .zip(comm.poly())
+                .for_each(|(c, p)| *c += p);
         }
 
         self.poly = Some(PublicPolynomial::new(coefficients)?);
@@ -314,11 +313,10 @@ impl Aggregator {
         let (_Rs, R) = compute::intermediate(msg, &party_ids, nonces);
         let mut z = Scalar::zero();
         let mut cx_sign = Scalar::one();
-        let aggregate_public_key = self
-            .poly
-            .as_ref()
-            .map(|p| p.constant_term())
-            .ok_or(AggregatorError::NotInitialized)?;
+        let Some(poly) = self.poly.as_ref() else {
+            return Err(AggregatorError::NotInitialized);
+        };
+        let aggregate_public_key = poly.constant_term();
         let tweaked_public_key = if let Some(t) = tweak {
             if t != Scalar::zero() {
                 let key = compute::tweaked_public_key_from_tweak(aggregate_public_key, t);

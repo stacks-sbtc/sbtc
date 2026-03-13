@@ -1148,6 +1148,8 @@ impl Dummy<Unit> for PolyCommitment {
             .into_iter()
             .map(|_| config.fake_with_rng(rng))
             .collect();
+        // SAFETY: We know the poly is non-empty because we generated at
+        // least one point, so this will never fail
         PolyCommitment::new(id, poly).unwrap()
     }
 }

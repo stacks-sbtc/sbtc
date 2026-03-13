@@ -40,15 +40,6 @@ pub struct SignerState {
     pub party_state: PartyState,
 }
 
-impl SignerState {
-    /// Get the party state for this signer. This is used to make
-    /// transition from the older version of this code to the current
-    /// version smooth.
-    pub fn parties(&self) -> Vec<(u32, PartyState)> {
-        vec![(self.id, self.party_state.clone())]
-    }
-}
-
 /// A trait which provides a common `Signer` interface for `v1` and `v2`
 pub trait Signer: Clone + Debug + PartialEq {
     /// Create a new `Signer`

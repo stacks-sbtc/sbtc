@@ -68,7 +68,8 @@ pub struct PolyCommitment {
 
 impl PolyCommitment {
     /// Create a new `PolyCommitment` from an id and polynomial points.
-    /// Returns `Err(CommonError::InvalidPolynomial)` if `poly` is empty.
+    ///
+    /// Returns an error if the supplied coefficients is empty.
     pub fn new(id: ID, poly: Vec<Point>) -> Result<Self, CommonError> {
         let poly = PublicPolynomial::new(poly)?;
         Ok(Self { id, poly })
@@ -89,7 +90,8 @@ impl PolyCommitment {
         self.poly.constant_term()
     }
 
-    /// Verify the wrapped schnorr ID
+    /// Verify the wrapped schnorr ID against the constant term of the
+    /// committed polynomial in this struct.
     pub fn verify(&self) -> bool {
         self.id.verify(self.constant_term())
     }

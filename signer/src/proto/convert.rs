@@ -1513,7 +1513,6 @@ impl TryFrom<proto::PartyState> for PartyState {
 
 impl From<SignerState> for proto::SignerState {
     fn from(value: SignerState) -> Self {
-        let parties = value.parties().into_iter().map(|v| v.into()).collect();
         proto::SignerState {
             id: value.id,
             key_ids: value.key_ids,
@@ -1521,7 +1520,7 @@ impl From<SignerState> for proto::SignerState {
             num_parties: value.num_parties,
             threshold: value.threshold,
             group_key: Some(value.group_key.into()),
-            parties,
+            parties: vec![(value.id, value.party_state).into()],
         }
     }
 }
