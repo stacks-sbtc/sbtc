@@ -51,7 +51,7 @@ impl PublicPolynomial {
         // points, so the first coefficient is guaranteed to be present.
         self.coefficients
             .first()
-            .expect("PolyCommitment guarantees non-empty poly")
+            .expect("PublicPolynomial guarantees non-empty poly")
     }
 }
 
