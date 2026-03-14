@@ -49,7 +49,7 @@ pub enum Error {
     #[error("unexpected state machine id in the given context: {0:?}")]
     UnexpectedStateMachineId(crate::wsts_state_machine::StateMachineId),
 
-    /// Unexpected [`DkgError`] in the given context.
+    /// Unexpected [`wsts::errors::CommonError`] in the given context.
     #[error("unexpected from WSTS error: {0}")]
     UnexpectedWstsError(#[from] wsts::errors::CommonError),
 

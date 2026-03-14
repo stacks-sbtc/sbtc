@@ -250,7 +250,7 @@ pub struct Aggregator {
     pub num_keys: u32,
     /// The threshold of signing keys needed to construct a valid signature
     pub threshold: u32,
-    /// The aggregate group polynomial; the constrant term of the
+    /// The aggregate group polynomial; the constant term of the
     /// polynomial is the group public key.
     pub poly: Option<PublicPolynomial>,
 }

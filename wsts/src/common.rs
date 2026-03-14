@@ -56,7 +56,7 @@ impl PublicPolynomial {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-/// A commitment to a polynonial, with a Schnorr proof of ownership bound
+/// A commitment to a polynomial, with a Schnorr proof of ownership bound
 /// to the ID. This struct maintains the invariant that the polynomial is
 /// valid, in the sense that its degree is non-negative.
 pub struct PolyCommitment {
