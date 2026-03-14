@@ -80,7 +80,7 @@ pub enum DkgStatus {
     Failure(DkgFailure),
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 /// Encapsulation of all possible network message types
 pub enum Message {
     /// Tell signers to begin DKG by sending DKG public shares
@@ -136,7 +136,7 @@ impl Signable for DkgBegin {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 /// DKG public shares message from signer to all signers and coordinator
 pub struct DkgPublicShares {
     /// DKG round ID
@@ -154,7 +154,7 @@ impl Signable for DkgPublicShares {
         hasher.update(self.signer_id.to_be_bytes());
         for (party_id, comm) in &self.comms {
             hasher.update(party_id.to_be_bytes());
-            for a in &comm.poly {
+            for a in comm.poly() {
                 hasher.update(a.compress().as_bytes());
             }
         }
@@ -469,7 +469,7 @@ impl Signable for SignatureShareResponse {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 /// Network packets need to be signed so they can be verified
 pub struct Packet {
     /// The message to sign
@@ -727,10 +727,11 @@ mod test {
             signer_id: 0,
             comms: vec![(
                 0,
-                PolyCommitment {
-                    id: ID::new(&Scalar::new(), &Scalar::new(), &mut rng),
-                    poly: vec![],
-                },
+                PolyCommitment::new(
+                    ID::new(&Scalar::new(), &Scalar::new(), &mut rng),
+                    vec![Point::new()],
+                )
+                .expect("test commitment has one point"),
             )],
         };
         let msg = Message::DkgPublicShares(public_shares.clone());
