@@ -1496,21 +1496,6 @@ impl TryFrom<proto::PartyState> for (u32, PartyState) {
     }
 }
 
-impl TryFrom<proto::PartyState> for PartyState {
-    type Error = Error;
-    fn try_from(value: proto::PartyState) -> Result<Self, Self::Error> {
-        Ok(PartyState {
-            polynomial: value.polynomial.map(|v| v.try_into()).transpose()?,
-            private_keys: value
-                .private_keys
-                .into_iter()
-                .map(|v| v.try_into())
-                .collect::<Result<Vec<_>, Error>>()?,
-            nonce: value.nonce.required()?.try_into()?,
-        })
-    }
-}
-
 impl From<SignerState> for proto::SignerState {
     fn from(value: SignerState) -> Self {
         proto::SignerState {
@@ -1538,6 +1523,8 @@ impl TryFrom<proto::SignerState> for SignerState {
             .try_into()
             .map_err(|_| Error::InvalidSignerState)?;
 
+        let (_, party_state) = party_state.try_into()?;
+
         Ok(SignerState {
             id: value.id,
             key_ids: value.key_ids,
@@ -1545,7 +1532,7 @@ impl TryFrom<proto::SignerState> for SignerState {
             num_parties: value.num_parties,
             threshold: value.threshold,
             group_key: value.group_key.required()?.try_into()?,
-            party_state: party_state.try_into()?,
+            party_state,
         })
     }
 }
