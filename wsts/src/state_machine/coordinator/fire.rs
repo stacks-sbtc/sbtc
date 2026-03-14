@@ -2015,20 +2015,19 @@ pub mod test {
                                 let comms = shares
                                     .comms
                                     .iter()
-                                    .map(|(id, comm)| {
+                                    .map(|(party_id, comm)| {
                                         let mut c = comm.clone();
+                                        let (id, mut poly) = c.into_parts();
                                         if signer.signer_id == 0 {
-                                            let (id, mut poly) = c.into_parts();
                                             poly.push(Point::new());
                                             c = PolyCommitment::new(id, poly)
                                                 .expect("polynomial should still be valid");
                                         } else {
-                                            let (id, mut poly) = c.into_parts();
                                             poly.pop();
                                             c = PolyCommitment::new(id, poly)
                                                 .expect("polynomial should still be valid");
                                         }
-                                        (*id, c)
+                                        (*party_id, c)
                                     })
                                     .collect();
                                 Packet {
