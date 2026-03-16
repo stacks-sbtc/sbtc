@@ -4,3 +4,4 @@ docker
 .git
 .gitmodules
 .gitworktrees
+node_modules
