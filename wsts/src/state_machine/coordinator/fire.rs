@@ -2020,13 +2020,11 @@ pub mod test {
                                         let (id, mut poly) = c.into_parts();
                                         if signer.signer_id == 0 {
                                             poly.push(Point::new());
-                                            c = PolyCommitment::new(id, poly)
-                                                .expect("polynomial should still be valid");
                                         } else {
                                             poly.pop();
-                                            c = PolyCommitment::new(id, poly)
-                                                .expect("polynomial should still be valid");
                                         }
+                                        c = PolyCommitment::new(id, poly)
+                                            .expect("polynomial should still be valid");
                                         (*party_id, c)
                                     })
                                     .collect();
