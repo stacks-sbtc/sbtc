@@ -85,6 +85,12 @@ impl PolyCommitment {
         self.poly.coefficients()
     }
 
+    /// The number of coefficients in the polynomial. This should be one
+    /// more than the degree of the polynomial.
+    pub fn num_coefficients(&self) -> usize {
+        self.poly.coefficients().len()
+    }
+
     /// The constant term of the polynomial (first point). Never panics.
     pub fn constant_term(&self) -> &Point {
         self.poly.constant_term()

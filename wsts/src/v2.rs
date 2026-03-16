@@ -266,13 +266,23 @@ impl Aggregator {
     }
 
     /// Initialize the Aggregator polynomial
+    ///
+    /// This function is typically called after DKG has already
+    /// successfully completed and we want to sign something. So, the given
+    /// commitments should have already been validated, but we do so again
+    /// just in case.
     pub fn init(&mut self, comms: &HashMap<u32, PolyCommitment>) -> Result<(), AggregatorError> {
         let threshold: usize = self.threshold.try_into()?;
         let mut coefficients = vec![Point::zero(); threshold];
 
         for comm in comms.values() {
-            // TODO: check that the degree of the polynomial commitment is
-            // equal to the threshold.
+            if comm.num_coefficients() != threshold {
+                return Err(AggregatorError::BadPolynomialDegree {
+                    expected: threshold,
+                    received: comm.num_coefficients(),
+                });
+            }
+
             coefficients
                 .iter_mut()
                 .zip(comm.poly())
@@ -690,6 +700,8 @@ pub mod test_helpers {
 
 #[cfg(test)]
 mod tests {
+    use crate::common::PolyCommitment;
+    use crate::errors::AggregatorError;
     use crate::util::create_rng;
     use crate::{
         traits::{self, test_helpers::run_compute_secrets_missing_private_shares},
@@ -770,6 +782,70 @@ mod tests {
                 panic!("Aggregator sign failed: {:?}", e);
             }
         }
+    }
+
+    #[test]
+    fn aggregator_init_bad_degree() {
+        let mut rng = create_rng();
+
+        let n_k: u32 = 10;
+        let t: u32 = 7;
+        let party_key_ids: Vec<Vec<u32>> = [
+            [1, 2, 3].to_vec(),
+            [4, 5].to_vec(),
+            [6, 7, 8].to_vec(),
+            [9, 10].to_vec(),
+        ]
+        .to_vec();
+        let n_p = party_key_ids.len().try_into().unwrap();
+        let mut signers: Vec<v2::Party> = party_key_ids
+            .iter()
+            .enumerate()
+            .map(|(pid, pkids)| {
+                v2::Party::new(pid.try_into().unwrap(), pkids, n_p, n_k, t, &mut rng)
+            })
+            .collect();
+
+        let comms = match traits::test_helpers::dkg(&mut signers, &mut rng) {
+            Ok(comms) => comms,
+            Err(secret_errors) => {
+                panic!("Got secret errors from DKG: {:?}", secret_errors);
+            }
+        };
+
+        // Let's try the happy path first
+        let mut sig_agg = v2::Aggregator::new(n_k, t);
+        sig_agg.init(&comms).expect("aggregator init failed");
+
+        // Okay now let's try where one of the polynomial commitments has a
+        // greater than expected degree.
+        let mut sig_agg = v2::Aggregator::new(n_k, t);
+        let (id, mut coefficients) = comms.get(&0).cloned().unwrap().into_parts();
+        let scalar = p256k1::scalar::Scalar::random(&mut rng);
+        coefficients.push(scalar.into());
+        let comm = PolyCommitment::new(id, coefficients).unwrap();
+        let mut comms2 = comms.clone();
+        comms2.insert(0, comm);
+        let error = sig_agg.init(&comms2).unwrap_err();
+        assert!(
+            matches!(error, AggregatorError::BadPolynomialDegree { expected, received } 
+                    if expected == t as usize && received == t as usize + 1)
+        );
+
+        // And one more where the polynomial commitment has less than the
+        // expected degree.
+        let mut sig_agg = v2::Aggregator::new(n_k, t);
+        let (id, mut coefficients) = comms.get(&0).cloned().unwrap().into_parts();
+
+        coefficients.pop();
+        let comm = PolyCommitment::new(id, coefficients).unwrap();
+        let mut comms3 = comms.clone();
+        comms3.insert(0, comm);
+        let error = sig_agg.init(&comms3).unwrap_err();
+        assert!(
+            matches!(error, AggregatorError::BadPolynomialDegree { expected, received } 
+                    if expected == t as usize && received == t as usize - 1)
+        );
     }
 
     #[test]

@@ -61,6 +61,14 @@ pub enum AggregatorError {
     #[error("bad poly commitments {0:?}")]
     /// The polynomial commitments which failed verification or were the wrong size
     BadPolyCommitments(Vec<Scalar>),
+    #[error("bad polynomial degree, expected number of coefficients was {expected} but received {received}")]
+    /// The number of coefficients was incorrect
+    BadPolynomialDegree {
+        /// The expected number of coefficients for the polynomial
+        expected: usize,
+        /// The actual number of coefficients for the polynomial
+        received: usize,
+    },
     #[error("bad nonce length (expected {0} got {1}")]
     /// The nonce length was the wrong size
     BadNonceLen(usize, usize),
