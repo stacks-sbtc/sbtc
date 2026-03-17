@@ -1319,6 +1319,8 @@ where
         let new_tenure = stacks.get_tenure_headers(&tenure.last_sortition_ch).await?;
         tracing::debug!(
             consensus_hash = %&tenure.last_sortition_ch,
+            anchor_block_hash = %&new_tenure.anchor_block_hash,
+            anchor_block_height = %&new_tenure.anchor_block_height,
             "fetched new stacks tenure headers"
         );
         if new_tenure.anchor_block_height < nakamoto_start_height {
