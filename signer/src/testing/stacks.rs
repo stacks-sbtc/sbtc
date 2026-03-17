@@ -14,6 +14,7 @@ use crate::stacks::api::TenureBlockHeaders;
 use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::StacksBlockHeight;
+use crate::storage::postgres::PgStore;
 
 /// Some dummy sortition info
 pub const DUMMY_SORTITION_INFO: SortitionInfo = SortitionInfo {
@@ -84,4 +85,23 @@ impl From<&bitcoincore_rpc_json::GetChainTipsResultTip> for BitcoinBlockRef {
             block_height: value.height.into(),
         }
     }
+}
+
+/// Asserts that given [`storage`] contains stacks blocks with all heights in range [from;to]
+/// and no other stacks blocks
+pub async fn assert_db_contains_stacks_headers(storage: &PgStore, from: u64, to: u64) {
+    let (min_block_height, max_block_height, count) = sqlx::query_as::<_, (i64, i64, i64)>(
+        r#"SELECT 
+             MIN(block_height) as min_block_height
+           , MAX(block_height) as max_block_height
+           , COUNT(DISTINCT block_hash) as count
+         FROM sbtc_signer.stacks_blocks"#,
+    )
+    .fetch_one(storage.pool())
+    .await
+    .unwrap();
+
+    assert_eq!(min_block_height as u64, from);
+    assert_eq!(max_block_height as u64, to);
+    assert_eq!(count as u64, to - from + 1);
 }
