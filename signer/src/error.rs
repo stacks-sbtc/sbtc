@@ -40,12 +40,6 @@ pub enum Error {
     #[error("Inconsistent tenure headers range. Start: {0:?}; End: {1:?}")]
     InconsistentTenureHeadersRange(Option<StacksBlockHeight>, Option<StacksBlockHeight>),
 
-    /// Sortition info returned by stacks node does not contain parent consensus hash for given consensus hash
-    /// This usually happens when given consensus hash is not in canonical chain
-    /// TODO: is it true???
-    #[error("No parent consensus hash for consensus hash {0}")]
-    NoParentConsensusHash(ConsensusHash),
-
     /// Given consensus hash is related to pre nakamoto tenure, while expected to be a nakamoto tenure
     #[error("Tenure with consensus hash {0} is pre Nakamoto")]
     PreNakamotoTenure(ConsensusHash),

@@ -368,13 +368,17 @@ impl TenureBlockHeaders {
     }
 
     /// Create a new one
+    #[cfg(any(test, feature = "testing"))]
     pub fn try_new(headers: Vec<StacksBlockHeader>, info: SortitionInfo) -> Result<Self, Error> {
         if headers.is_empty() {
             return Err(Error::EmptyStacksTenure);
         }
         let last_sortition_ch = info
             .last_sortition_ch
-            .ok_or(Error::NoParentConsensusHash(info.consensus_hash.into()))?
+            // Stacks node always return some consensus hash for `last_sortition_ch`:
+            // https://github.com/stacks-network/stacks-core/blob/3.3.0.0.6/stackslib/src/net/api/getsortition.rs#L159-L247
+            // If we have None here, it means TestHarness have a bug in implementation, and we want to panic.
+            .unwrap()
             .into();
         Ok(Self {
             headers,

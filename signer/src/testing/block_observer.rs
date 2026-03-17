@@ -405,7 +405,10 @@ impl StacksInteract for TestHarness {
             .find(|(block_id, _, _)| {
                 StacksBlockHash::from(block_id) == previous_tenure_last_block_id
             })
-            .ok_or(Error::NoParentConsensusHash(*consensus_hash))?
+            // Stacks node always return some consensus hash for `last_sortition_ch`:
+            // https://github.com/stacks-network/stacks-core/blob/3.3.0.0.6/stackslib/src/net/api/getsortition.rs#L159-L247
+            // If we have None here, it means TestHarness have a bug in implementation, and we want to panic.
+            .unwrap()
             .1
             .header
             .consensus_hash;
