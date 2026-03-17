@@ -149,18 +149,18 @@ async fn update_db_with_unknown_ancestors_process_first_nakamoto_block() {
     // get_epoch_status actually calls get_pox_info under the hood.
     // Block 232 is first Nakamoto block.
     let raw_json_response_get_epoch_status =
-        include_str!("../../tests/fixtures/stacksapi-get-pox-info-test-data.json");
+        include_str!("../fixtures/stacksapi-get-pox-info-test-data.json");
 
     // Three tenure headers mocks was obtained by curling hiro api for mainnet consensus
     // hashes ch_1, ch_2 and ch_3 (which correspond to blocks 900_000, 899_999 and 899_998), and
     // tweaking anchor heights, such that ch_1 is second Nakamoto block, ch_2 is first Nakamoto
     // block and ch_3 is last non-Nakamoto block, according to stacksapi-get-pox-info-test-data.json
     let raw_json_response_get_tenure_headers_1 =
-        include_str!("../../tests/fixtures/stacksapi-v3-tenures-blocks-1.json");
+        include_str!("../fixtures/stacksapi-v3-tenures-blocks-1.json");
     let raw_json_response_get_tenure_headers_2 =
-        include_str!("../../tests/fixtures/stacksapi-v3-tenures-blocks-2.json");
+        include_str!("../fixtures/stacksapi-v3-tenures-blocks-2.json");
     let raw_json_response_get_tenure_headers_3 =
-        include_str!("../../tests/fixtures/stacksapi-v3-tenures-blocks-3.json");
+        include_str!("../fixtures/stacksapi-v3-tenures-blocks-3.json");
 
     let ch_1 = ConsensusHash::from_hex("d9f1486525e738d818fee87c4739b87e03bf35e4").unwrap();
     let ch_2 = ConsensusHash::from_hex("3f30756abe6808071ecdf94f7485cee10624667d").unwrap();
@@ -229,18 +229,18 @@ async fn update_db_with_unknown_ancestors_process_stops_when_fetches_seen_block(
     // get_epoch_status actually calls get_pox_info under the hood.
     // Block 232 is first Nakamoto block.
     let raw_json_response_get_epoch_status =
-        include_str!("../../tests/fixtures/stacksapi-get-pox-info-test-data.json");
+        include_str!("../fixtures/stacksapi-get-pox-info-test-data.json");
 
     // Three tenure headers mocks was obtained by curling hiro api for mainnet consensus
     // hashes ch_1, ch_2 and ch_3 (which correspond to blocks 900_000, 899_999 and 899_998), and
     // tweaking anchor heights, such that ch_1 is second Nakamoto block, ch_2 is first Nakamoto
     // block and ch_3 is last non-Nakamoto block, according to stacksapi-get-pox-info-test-data.json
     let raw_json_response_get_tenure_headers_1 =
-        include_str!("../../tests/fixtures/stacksapi-v3-tenures-blocks-1.json");
+        include_str!("../fixtures/stacksapi-v3-tenures-blocks-1.json");
     let raw_json_response_get_tenure_headers_2 =
-        include_str!("../../tests/fixtures/stacksapi-v3-tenures-blocks-2.json");
+        include_str!("../fixtures/stacksapi-v3-tenures-blocks-2.json");
     let raw_json_response_get_tenure_headers_3 =
-        include_str!("../../tests/fixtures/stacksapi-v3-tenures-blocks-3.json");
+        include_str!("../fixtures/stacksapi-v3-tenures-blocks-3.json");
 
     let ch_1 = ConsensusHash::from_hex("d9f1486525e738d818fee87c4739b87e03bf35e4").unwrap();
     let ch_2 = ConsensusHash::from_hex("3f30756abe6808071ecdf94f7485cee10624667d").unwrap();
@@ -334,7 +334,7 @@ async fn update_db_with_unknown_ancestors_works_with_empty_tenures() {
     // get_epoch_status actually calls get_pox_info under the hood.
     // Block 232 is first Nakamoto block.
     let raw_json_response_get_epoch_status =
-        include_str!("../../tests/fixtures/stacksapi-get-pox-info-test-data.json");
+        include_str!("../fixtures/stacksapi-get-pox-info-test-data.json");
 
     // We setting up the mocks as follows:
     // mock1 -- height 234, empty block
@@ -350,7 +350,7 @@ async fn update_db_with_unknown_ancestors_works_with_empty_tenures() {
             "stacks_blocks": []
         }"#;
     let raw_json_response_get_tenure_headers_2 =
-        include_str!("../../tests/fixtures/stacksapi-v3-tenures-blocks-1.json");
+        include_str!("../fixtures/stacksapi-v3-tenures-blocks-1.json");
     let raw_json_response_get_tenure_headers_3 = r#"{
                 "consensus_hash": "3f30756abe6808071ecdf94f7485cee10624667d",
                 "last_sortition_ch": "39fa0bf52fbe50fccd43ba9ffcacae39793231bc",
@@ -359,7 +359,7 @@ async fn update_db_with_unknown_ancestors_works_with_empty_tenures() {
                 "stacks_blocks": []
         }"#;
     let raw_json_response_get_tenure_headers_4 =
-        include_str!("../../tests/fixtures/stacksapi-v3-tenures-blocks-3.json");
+        include_str!("../fixtures/stacksapi-v3-tenures-blocks-3.json");
 
     let ch_1 = ConsensusHash::from_hex("1230756abe6808071ecdf94f7485cee10624667d").unwrap();
     let ch_2 = ConsensusHash::from_hex("d9f1486525e738d818fee87c4739b87e03bf35e4").unwrap();
