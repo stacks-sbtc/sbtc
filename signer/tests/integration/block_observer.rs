@@ -2122,15 +2122,7 @@ async fn block_observer_marks_bitcoin_blocks_as_canonical(fork_generating_blocks
     // Generate a new block and wait for the block observer to process it
     let chain_tip_before_invalidation: BitcoinBlockHash = faucet.generate_block().into();
 
-    ctx.wait_for_signal(Duration::from_secs(8), |signal| {
-        matches!(
-            signal,
-            SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
-                if block_ref.block_hash == chain_tip_before_invalidation
-        )
-    })
-    .await
-    .unwrap();
+    wait_for_block_observed(&ctx, chain_tip_before_invalidation).await;
 
     // Verify the block is in the database
     let db_block = db
@@ -2166,15 +2158,7 @@ async fn block_observer_marks_bitcoin_blocks_as_canonical(fork_generating_blocks
         .collect::<Vec<_>>();
     let last_new_block = new_blocks.last().cloned().unwrap();
 
-    ctx.wait_for_signal(Duration::from_secs(8), |signal| {
-        matches!(
-            signal,
-            SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
-                if block_ref.block_hash == last_new_block
-        )
-    })
-    .await
-    .unwrap();
+    wait_for_block_observed(&ctx, last_new_block).await;
 
     // Verify the new blocks are in the database and are canonical
     for new_block in new_blocks {
