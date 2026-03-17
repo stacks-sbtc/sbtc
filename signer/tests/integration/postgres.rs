@@ -8473,7 +8473,7 @@ mod canonical_bitcoin_blockchain {
             assert_eq!(is_canonical, Some(true));
         }
 
-        // Check that original main chain blocks with height 1 to 9 are
+        // Check that original main chain blocks with height 2 to 9 are
         // non-canonical
         for (_, block) in main_chain.range(forked_block_heights.clone()) {
             let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
