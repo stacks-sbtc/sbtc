@@ -1979,20 +1979,7 @@ mod tests {
             RangeInclusive::new(StacksBlockHeight::new(320), StacksBlockHeight::new(791));
         assert_eq!(block_height_range, Some(expected.clone()));
 
-        let (min_block_height, max_block_height, count) = sqlx::query_as::<_, (i64, i64, i64)>(
-            r#"SELECT 
-                 MIN(block_height) as min_block_height
-               , MAX(block_height) as max_block_height
-               , COUNT(DISTINCT block_hash) as count
-             FROM sbtc_signer.stacks_blocks"#,
-        )
-        .fetch_one(db.pool())
-        .await
-        .unwrap();
-
-        assert_eq!(count, max_block_height - min_block_height + 1);
-        assert_eq!(min_block_height, **expected.start() as i64);
-        assert_eq!(max_block_height, **expected.end() as i64);
+        assert_db_contains_stacks_headers(&db, **expected.start(), **expected.end()).await;
 
         crate::testing::storage::drop_db(db).await;
     }
@@ -2873,8 +2860,6 @@ mod tests {
             .expect(1)
             .create();
 
-        // Setup our Stacks client. We use a regular client here because we're
-        // testing the `get_node_info` method.
         let client =
             StacksClient::new(url::Url::parse(stacks_node_server.url().as_str()).unwrap()).unwrap();
 
@@ -2892,6 +2877,124 @@ mod tests {
         assert_eq!(**res.start(), actual_start_height);
         assert_eq!(**res.end(), actual_end_height);
 
+        assert_db_contains_stacks_headers(&storage, actual_start_height, actual_end_height).await;
+
+        mock_get_epoch_status.assert();
+        mock_get_tenure_headers_1.assert();
+        mock_get_tenure_headers_2.assert();
+        mock_get_tenure_headers_3.assert();
+
+        crate::testing::storage::drop_db(storage).await;
+    }
+
+    #[tokio::test]
+    async fn update_db_with_unknown_ancestors_process_stops_when_fetches_seen_block() {
+        // get_epoch_status actually calls get_pox_info under the hood.
+        // Block 232 is first Nakamoto block.
+        let raw_json_response_get_epoch_status =
+            include_str!("../../tests/fixtures/stacksapi-get-pox-info-test-data.json");
+
+        // Three tenure headers mocks was obtained by curling hiro api for mainnet consensus
+        // hashes ch_1, ch_2 and ch_3 (which correspond to blocks 900_000, 899_999 and 899_998), and
+        // tweaking anchor heights, such that ch_1 is second Nakamoto block, ch_2 is first Nakamoto
+        // block and ch_3 is last non-Nakamoto block, according to stacksapi-get-pox-info-test-data.json
+        let raw_json_response_get_tenure_headers_1 =
+            include_str!("../../tests/fixtures/stacksapi-v3-tenures-blocks-1.json");
+        let raw_json_response_get_tenure_headers_2 =
+            include_str!("../../tests/fixtures/stacksapi-v3-tenures-blocks-2.json");
+        let raw_json_response_get_tenure_headers_3 =
+            include_str!("../../tests/fixtures/stacksapi-v3-tenures-blocks-3.json");
+
+        let ch_1 = ConsensusHash::from_hex("d9f1486525e738d818fee87c4739b87e03bf35e4").unwrap();
+        let ch_2 = ConsensusHash::from_hex("3f30756abe6808071ecdf94f7485cee10624667d").unwrap();
+        let ch_3 = ConsensusHash::from_hex("39fa0bf52fbe50fccd43ba9ffcacae39793231bc").unwrap();
+
+        let mut stacks_node_server = mockito::Server::new_async().await;
+        let mock_get_epoch_status = stacks_node_server
+            .mock("GET", "/v2/pox")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(raw_json_response_get_epoch_status)
+            .expect(2)
+            .create();
+
+        let mock_get_tenure_headers_1 = stacks_node_server
+            .mock("GET", format!("/v3/tenures/blocks/{ch_1}").as_str())
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(raw_json_response_get_tenure_headers_1)
+            .expect(1)
+            .create();
+        let mock_get_tenure_headers_2 = stacks_node_server
+            .mock("GET", format!("/v3/tenures/blocks/{ch_2}").as_str())
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(raw_json_response_get_tenure_headers_2)
+            .expect(1)
+            .create();
+        let mock_get_tenure_headers_3 = stacks_node_server
+            .mock("GET", format!("/v3/tenures/blocks/{ch_3}").as_str())
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(raw_json_response_get_tenure_headers_3)
+            .expect(1)
+            .create();
+
+        let client =
+            StacksClient::new(url::Url::parse(stacks_node_server.url().as_str()).unwrap()).unwrap();
+
+        let storage = crate::testing::storage::new_test_database().await;
+
+        // First, call update ancestors for ch_2, such that blocks corresponding to ch_2 will be present in the db.
+        // This should trigger mock_get_epoch_status once, and mock_get_tenure_headers_2/3, but not
+        // mock_get_tenure_headers_1
+        let res = update_db_with_unknown_ancestors(&client, &storage, ch_2)
+            .await
+            .unwrap()
+            .unwrap();
+
+        // At this point we have only blocks corresponding to ch_2 in the db.
+
+        // This values equal smallest height in mock 2 and biggest in mock 1.
+        let actual_start_height_ch2 = 1507180;
+        let actual_end_height_ch2 = 1507194;
+
+        assert_eq!(**res.start(), actual_start_height_ch2);
+        assert_eq!(**res.end(), actual_end_height_ch2);
+
+        assert_db_contains_stacks_headers(&storage, actual_start_height_ch2, actual_end_height_ch2)
+            .await;
+
+        // Now, we call update_db_with_unknown_ancestors again for ch_1, and the mocks ensure that it calls
+        // mock_get_epoch_status once and mock_get_tenure_headers_1, avoiding calling mock_get_tenure_headers_2
+        let res = update_db_with_unknown_ancestors(&client, &storage, ch_1)
+            .await
+            .unwrap()
+            .unwrap();
+
+        // At this point we have blocks corresponding to both ch_1 and ch_2 in the db.
+
+        // This values equal smallest height in mock 2 and biggest in mock 1.
+        let actual_start_height_ch1 = 1507195;
+        let actual_end_height_ch1 = 1507233;
+
+        assert_eq!(**res.start(), actual_start_height_ch1);
+        assert_eq!(**res.end(), actual_end_height_ch1);
+
+        assert_db_contains_stacks_headers(&storage, actual_start_height_ch2, actual_end_height_ch1)
+            .await;
+
+        mock_get_epoch_status.assert();
+        mock_get_tenure_headers_1.assert();
+        mock_get_tenure_headers_2.assert();
+        mock_get_tenure_headers_3.assert();
+
+        crate::testing::storage::drop_db(storage).await;
+    }
+
+    use crate::storage::postgres::PgStore;
+
+    async fn assert_db_contains_stacks_headers(storage: &PgStore, from: u64, to: u64) {
         let (min_block_height, max_block_height, count) = sqlx::query_as::<_, (i64, i64, i64)>(
             r#"SELECT 
                  MIN(block_height) as min_block_height
@@ -2903,15 +3006,8 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(min_block_height as u64, actual_start_height);
-        assert_eq!(max_block_height as u64, actual_end_height);
-        assert_eq!(count as u64, actual_end_height - actual_start_height + 1);
-
-        mock_get_epoch_status.assert();
-        mock_get_tenure_headers_1.assert();
-        mock_get_tenure_headers_2.assert();
-        mock_get_tenure_headers_3.assert();
-
-        crate::testing::storage::drop_db(storage).await;
+        assert_eq!(min_block_height as u64, from);
+        assert_eq!(max_block_height as u64, to);
+        assert_eq!(count as u64, to - from + 1);
     }
 }
