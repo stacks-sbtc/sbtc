@@ -303,10 +303,9 @@ pub trait StacksInteract: Send + Sync {
         sender: &StacksAddress,
     ) -> impl Future<Output = Result<Amount, Error>> + Send;
 
-    /// Fetch all Nakamoto blocks headers within the tenure anchored to a Bitcoin block
-    /// with given height.
+    /// Fetch all Nakamoto blocks headers within the tenure with given consensus hash.
     ///
-    /// This function is analogous to the GET /v3/tenures/blocks/height/{}
+    /// This function is analogous to the GET /v3/tenures/blocks/blocks/{}
     /// endpoint on stacks-core nodes. This function returns headers of all block in given tenure.
     fn get_tenure_headers(
         &self,
@@ -377,7 +376,7 @@ impl TenureBlockHeaders {
             .last_sortition_ch
             // Stacks node always return some consensus hash for `last_sortition_ch`:
             // https://github.com/stacks-network/stacks-core/blob/3.3.0.0.6/stackslib/src/net/api/getsortition.rs#L159-L247
-            // If we have None here, it means TestHarness have a bug in implementation, and we want to panic.
+            // If we have None here, it means our test infrastructure have a bug in implementation, and we want to panic.
             .unwrap()
             .into();
         Ok(Self {
