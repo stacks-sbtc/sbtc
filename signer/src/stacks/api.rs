@@ -305,7 +305,7 @@ pub trait StacksInteract: Send + Sync {
 
     /// Fetch all Nakamoto blocks headers within the tenure with given consensus hash.
     ///
-    /// This function is analogous to the GET /v3/tenures/blocks/blocks/{}
+    /// This function is analogous to the GET /v3/tenures/blocks/{}
     /// endpoint on stacks-core nodes. This function returns headers of all block in given tenure.
     fn get_tenure_headers(
         &self,
