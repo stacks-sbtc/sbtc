@@ -14,8 +14,9 @@ use crate::storage::model::StacksBlock;
 use crate::storage::model::StacksBlockHash;
 use crate::storage::model::StacksBlockHeight;
 
-/// Represents a naive, sequential chain of bitcoin blocks and provides basic
-/// functionality for manipulation. Does not handle forks/branches.
+/// Represents a naive, sequential chain of bitcoin blocks and provides
+/// basic functionality for manipulation. Has limited functionality for
+/// creating forks.
 #[derive(Debug, Clone)]
 pub struct BitcoinChain(BTreeMap<BitcoinBlockHeight, BitcoinBlock>);
 

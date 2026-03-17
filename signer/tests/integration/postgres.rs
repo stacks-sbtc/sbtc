@@ -8135,9 +8135,9 @@ mod canonical_bitcoin_blockchain {
             .unwrap();
         assert_eq!(fork_2_is_canonical, None);
 
-        // Let's set the canonical chain again and verity that the new
+        // Let's set the canonical chain again and verify that the new
         // blocks are still not marked as canonical. Note that the
-        // guarantees of the set_canonical_bitcoin_blockchaion function is
+        // guarantees of the set_canonical_bitcoin_blockchain function is
         // that non-canonical blocks are not marked as canonical, not that
         // they are definitively marked as non-canonical.
         db.set_canonical_bitcoin_blockchain(&chain_tip)
