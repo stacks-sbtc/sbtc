@@ -338,20 +338,20 @@ impl From<NakamotoBlockHeader> for StacksBlockHeader {
     }
 }
 
-/// This struct represents a non-empty subset of the Stacks block headers
+/// This struct represents a subset of the Stacks block headers
 /// that were created during a tenure.
 #[derive(Debug)]
 #[cfg_attr(any(test, feature = "testing"), derive(Clone))]
 pub struct TenureBlockHeaders {
     /// The subset of Stacks block headers that of Nakamoto blocks that
-    /// were created during a tenure. This is always non-empty.
+    /// were created during a tenure.
     headers: Vec<StacksBlockHeader>,
     /// The bitcoin block that this tenure builds off of.
     pub anchor_block_hash: BitcoinBlockHash,
     /// The height of the bitcoin block associated with the above block
     /// hash.
     pub anchor_block_height: BitcoinBlockHeight,
-    /// The consesnsus hash of previous non-empty sortition
+    /// The consesnsus hash of previous sortition
     pub last_sortition_ch: ConsensusHash,
 }
 
@@ -385,25 +385,20 @@ impl TenureBlockHeaders {
     }
 
     /// Get the header with minimum block height in the tenure.
-    pub fn start_header(&self) -> &StacksBlockHeader {
-        // SAFETY: It is okay to unwrap here because we know that the
-        // tenure is non-empty. The struct upholds this invariant upon
-        // creation.
-        self.headers
-            .iter()
-            .min_by_key(|header| header.block_height)
-            .unwrap()
+    /// None if the tenure is empty.
+    pub fn start_header(&self) -> Option<&StacksBlockHeader> {
+        self.headers.iter().min_by_key(|header| header.block_height)
+    }
+
+    /// Check if this tenure is empty (contains no stacks blocks)
+    pub fn is_empty(&self) -> bool {
+        self.headers.is_empty()
     }
 
     /// Get the header with maximum block height in the tenure.
-    pub fn end_header(&self) -> &StacksBlockHeader {
-        // SAFETY: It is okay to unwrap here because we know that the
-        // tenure is non-empty. The struct upholds this invariant upon
-        // creation.
-        self.headers
-            .iter()
-            .max_by_key(|header| header.block_height)
-            .unwrap()
+    /// None if tenure is empty.
+    pub fn end_header(&self) -> Option<&StacksBlockHeader> {
+        self.headers.iter().max_by_key(|header| header.block_height)
     }
 }
 
@@ -1273,7 +1268,7 @@ pub async fn update_db_with_unknown_ancestors<S, D>(
     stacks: &S,
     storage: &D,
     consensus_hash: ConsensusHash,
-) -> Result<RangeInclusive<StacksBlockHeight>, Error>
+) -> Result<Option<RangeInclusive<StacksBlockHeight>>, Error>
 where
     S: StacksInteract,
     D: Transactable + Send + Sync,
@@ -1294,19 +1289,27 @@ where
         );
         return Err(Error::PreNakamotoTenure(consensus_hash));
     }
-    let end_height = tenure.end_header().block_height;
+    let mut end_height = tenure.end_header().map(|header| header.block_height);
+    let mut start_height = tenure.start_header().map(|header| header.block_height);
     loop {
-        db.write_stacks_block_headers(&tenure).await?;
-        // Tenure blocks are always non-empty, and this invariant is upheld
-        // by the type. So no need to worry about the early break.
-        let Some(header) = tenure.headers().last() else {
-            break;
-        };
-        // We've seen this parent already, so time to stop.
-        if db.stacks_block_exists(&header.parent_block_id).await? {
-            tracing::debug!("parent block known in the database");
-            break;
+        // Trying to populate end_height until we populate it with Some.
+        if end_height.is_none() {
+            end_height = tenure.end_header().map(|header| header.block_height);
         }
+        // Overwrite start_height for each non-empty tenure.
+        if tenure.start_header().is_some() {
+            start_height = tenure.start_header().map(|header| header.block_height);
+        }
+
+        db.write_stacks_block_headers(&tenure).await?;
+        if let Some(header) = tenure.headers().last() {
+            // We've seen this parent already, so time to stop.
+            if db.stacks_block_exists(&header.parent_block_id).await? {
+                tracing::debug!("parent block known in the database");
+                break;
+            }
+        };
+
         // There are more blocks to fetch, so let's get them. This assumes
         // optimistically that the parent is still a Nakamoto block (and so has
         // a tenure); if that's not the case, we get an `Err` here.
@@ -1326,12 +1329,26 @@ where
         tenure = new_tenure
     }
 
-    let start_height = tenure.start_header().block_height;
-
     db.commit().await?;
 
-    tracing::debug!(%start_height, %end_height, "finished updating the stacks_blocks table");
-    Ok(RangeInclusive::new(start_height, end_height))
+    if let (Some(start_height), Some(end_height)) = (start_height, end_height) {
+        tracing::debug!(%start_height, %end_height, "finished updating the stacks_blocks table");
+        return Ok(Some(RangeInclusive::new(start_height, end_height)));
+    } else if start_height.is_none() && end_height.is_none() {
+        // All headers we fetched was empty
+        return Ok(None);
+    }
+    // Once we fetch non-empty tenure, we populate both start and end heights with Some.
+    // We never overwrite Some => None in start_height and end_height. Thus, if we come here, we have a bug.
+    tracing::error!(
+        ?start_height,
+        ?end_height,
+        "BUG: inconsistent tenure headers range"
+    );
+    Err(Error::InconsistentTenureHeadersRange(
+        start_height,
+        end_height,
+    ))
 }
 
 /// A deserializer for Clarity's [`Value`] type that deserializes a hex-encoded
@@ -1955,7 +1972,7 @@ mod tests {
 
         let expected =
             RangeInclusive::new(StacksBlockHeight::new(320), StacksBlockHeight::new(791));
-        assert_eq!(block_height_range, expected);
+        assert_eq!(block_height_range, Some(expected.clone()));
 
         let (min_block_height, max_block_height, count) = sqlx::query_as::<_, (i64, i64, i64)>(
             r#"SELECT 
@@ -2032,8 +2049,14 @@ mod tests {
         // The moment of truth, do the requests succeed?
         let headers = client.get_tenure_headers(&ch).await.unwrap();
         assert_eq!(headers.headers.len(), 39);
-        assert_eq!(headers.start_header().block_height, 1507195u64.into());
-        assert_eq!(headers.end_header().block_height, 1507233u64.into());
+        assert_eq!(
+            headers.start_header().unwrap().block_height,
+            1507195u64.into()
+        );
+        assert_eq!(
+            headers.end_header().unwrap().block_height,
+            1507233u64.into()
+        );
         assert_eq!(
             headers.last_sortition_ch.to_hex(),
             "3f30756abe6808071ecdf94f7485cee10624667d"
