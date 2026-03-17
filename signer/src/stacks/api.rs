@@ -1897,6 +1897,7 @@ mod tests {
     use crate::keys::{PrivateKey, PublicKey};
     use crate::stacks::wallet::get_full_tx_size;
     use crate::storage::memory::Store;
+    use crate::storage::postgres::PgStore;
     use crate::util::FallbackClientError;
 
     use assert_matches::assert_matches;
@@ -1915,6 +1916,23 @@ mod tests {
     /// Consensus hash for mainnet bitcoin block with height 900'000
     fn consensus_hash_900k() -> ConsensusHash {
         ConsensusHash::from_hex("d9f1486525e738d818fee87c4739b87e03bf35e4").unwrap()
+    }
+
+    async fn assert_db_contains_stacks_headers(storage: &PgStore, from: u64, to: u64) {
+        let (min_block_height, max_block_height, count) = sqlx::query_as::<_, (i64, i64, i64)>(
+            r#"SELECT 
+                 MIN(block_height) as min_block_height
+               , MAX(block_height) as max_block_height
+               , COUNT(DISTINCT block_hash) as count
+             FROM sbtc_signer.stacks_blocks"#,
+        )
+        .fetch_one(storage.pool())
+        .await
+        .unwrap();
+
+        assert_eq!(min_block_height as u64, from);
+        assert_eq!(max_block_height as u64, to);
+        assert_eq!(count as u64, to - from + 1);
     }
 
     fn generate_wallet(num_keys: u16, signatures_required: u16) -> SignerWallet {
@@ -2992,22 +3010,108 @@ mod tests {
         crate::testing::storage::drop_db(storage).await;
     }
 
-    use crate::storage::postgres::PgStore;
+    #[tokio::test]
+    async fn update_db_with_unknown_ancestors_works_with_empty_tenures() {
+        // get_epoch_status actually calls get_pox_info under the hood.
+        // Block 232 is first Nakamoto block.
+        let raw_json_response_get_epoch_status =
+            include_str!("../../tests/fixtures/stacksapi-get-pox-info-test-data.json");
 
-    async fn assert_db_contains_stacks_headers(storage: &PgStore, from: u64, to: u64) {
-        let (min_block_height, max_block_height, count) = sqlx::query_as::<_, (i64, i64, i64)>(
-            r#"SELECT 
-                 MIN(block_height) as min_block_height
-               , MAX(block_height) as max_block_height
-               , COUNT(DISTINCT block_hash) as count
-             FROM sbtc_signer.stacks_blocks"#,
-        )
-        .fetch_one(storage.pool())
-        .await
-        .unwrap();
+        // We setting up the mocks as follows:
+        // mock1 -- height 234, empty block
+        // mock2 -- height 233, non empty block
+        // mock3 -- height 232, empty block
+        // --------------------------------
+        // mock4 - height 231, non empty block; non Nakamoto block.
+        let raw_json_response_get_tenure_headers_1 = r#"{
+            "consensus_hash": "1230756abe6808071ecdf94f7485cee10624667d",
+            "last_sortition_ch": "d9f1486525e738d818fee87c4739b87e03bf35e4",
+            "burn_block_height": 234,
+            "burn_block_hash": "0000000000000000000196400396be46d0816dc462df4c3450972f589f4d7d24",
+            "stacks_blocks": []
+        }"#;
+        let raw_json_response_get_tenure_headers_2 =
+            include_str!("../../tests/fixtures/stacksapi-v3-tenures-blocks-1.json");
+        let raw_json_response_get_tenure_headers_3 = r#"{
+                "consensus_hash": "3f30756abe6808071ecdf94f7485cee10624667d",
+                "last_sortition_ch": "39fa0bf52fbe50fccd43ba9ffcacae39793231bc",
+                "burn_block_height": 232,
+                "burn_block_hash": "0000000000000000000196400396be46d0816dc462df4c3450972f589f4d7d24",
+                "stacks_blocks": []
+        }"#;
+        let raw_json_response_get_tenure_headers_4 =
+            include_str!("../../tests/fixtures/stacksapi-v3-tenures-blocks-3.json");
 
-        assert_eq!(min_block_height as u64, from);
-        assert_eq!(max_block_height as u64, to);
-        assert_eq!(count as u64, to - from + 1);
+        let ch_1 = ConsensusHash::from_hex("1230756abe6808071ecdf94f7485cee10624667d").unwrap();
+        let ch_2 = ConsensusHash::from_hex("d9f1486525e738d818fee87c4739b87e03bf35e4").unwrap();
+        let ch_3 = ConsensusHash::from_hex("3f30756abe6808071ecdf94f7485cee10624667d").unwrap();
+        let ch_4 = ConsensusHash::from_hex("39fa0bf52fbe50fccd43ba9ffcacae39793231bc").unwrap();
+
+        let mut stacks_node_server = mockito::Server::new_async().await;
+        let mock_get_epoch_status = stacks_node_server
+            .mock("GET", "/v2/pox")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(raw_json_response_get_epoch_status)
+            .expect(1)
+            .create();
+
+        let mock_get_tenure_headers_1 = stacks_node_server
+            .mock("GET", format!("/v3/tenures/blocks/{ch_1}").as_str())
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(raw_json_response_get_tenure_headers_1)
+            .expect(1)
+            .create();
+        let mock_get_tenure_headers_2 = stacks_node_server
+            .mock("GET", format!("/v3/tenures/blocks/{ch_2}").as_str())
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(raw_json_response_get_tenure_headers_2)
+            .expect(1)
+            .create();
+        let mock_get_tenure_headers_3 = stacks_node_server
+            .mock("GET", format!("/v3/tenures/blocks/{ch_3}").as_str())
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(raw_json_response_get_tenure_headers_3)
+            .expect(1)
+            .create();
+
+        let mock_get_tenure_headers_4 = stacks_node_server
+            .mock("GET", format!("/v3/tenures/blocks/{ch_4}").as_str())
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(raw_json_response_get_tenure_headers_4)
+            .expect(1)
+            .create();
+
+        let client =
+            StacksClient::new(url::Url::parse(stacks_node_server.url().as_str()).unwrap()).unwrap();
+
+        let storage = crate::testing::storage::new_test_database().await;
+
+        // Now, lets call update_db_with_unknown_ancestors and ensure that it correctly fetched all blocks
+        // corresponding to ch2 but no other blocks
+        let res = update_db_with_unknown_ancestors(&client, &storage, ch_1)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let actual_start_height = 1507195;
+        let actual_end_height = 1507233;
+
+        assert_eq!(**res.start(), actual_start_height);
+        assert_eq!(**res.end(), actual_end_height);
+
+        assert_db_contains_stacks_headers(&storage, actual_start_height, actual_end_height).await;
+
+        mock_get_epoch_status.assert();
+        mock_get_tenure_headers_1.assert();
+        mock_get_tenure_headers_2.assert();
+        mock_get_tenure_headers_3.assert();
+        mock_get_tenure_headers_4.assert();
+
+        crate::testing::storage::drop_db(storage).await;
     }
 }
