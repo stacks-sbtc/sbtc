@@ -3,6 +3,7 @@
 use std::future::Future;
 
 use bitcoin::BlockHash;
+use bitcoin::OutPoint;
 use bitcoin::Txid;
 
 use bitcoincore_rpc_json::GetMempoolEntryResult;
@@ -12,6 +13,7 @@ use rpc::BitcoinBlockInfo;
 use rpc::BitcoinTxInfo;
 use rpc::GetTxResponse;
 
+use crate::bitcoin::rpc::OutPointSummary;
 use crate::error::Error;
 
 pub mod client;
@@ -64,6 +66,13 @@ pub trait BitcoinInteract: Sync + Send {
         &self,
         txid: &Txid,
     ) -> impl Future<Output = Result<Option<GetTxResponse>, Error>> + Send;
+
+    /// Get the confirmation summary of the UTXO identified by the given
+    /// outpoint.
+    fn get_utxo_summary(
+        &self,
+        outpoint: &OutPoint,
+    ) -> impl Future<Output = Result<Option<OutPointSummary>, Error>> + Send;
 
     /// Get a transaction with additional information about it.
     fn get_tx_info(

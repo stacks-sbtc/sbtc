@@ -57,6 +57,25 @@ pub struct GetTxResponse {
     pub block_time: Option<u64>,
 }
 
+/// A slimmed down type representing a response from bitcoin-core's
+/// getrawtransaction RPC.
+///
+/// The docs for the getrawtransaction RPC call can be found here:
+/// <https://bitcoincore.org/en/doc/25.0.0/rpc/rawtransactions/getrawtransaction/>.
+#[derive(Debug, Clone)]
+pub struct OutPointSummary {
+    /// The block hash of the Bitcoin block that confirms a transaction
+    /// that created the associated output.
+    pub block_hash: BlockHash,
+    /// Whether the transaction is a coinbase transaction.
+    ///
+    /// This is true for coinbase transactions, and false for other
+    /// transactions.
+    pub is_coinbase: bool,
+    /// The outpoint associated with this struct.
+    pub outpoint: OutPoint,
+}
+
 /// A struct containing the response from bitcoin-core for requests for
 /// detailed transactions. Specifically, this object can be used for:
 /// 1. The response object for `getrawtransaction` RPC where verbose is set
@@ -458,6 +477,62 @@ impl BitcoinCoreClient {
         }
     }
 
+    /// Fetch the summary of a UTXO identified by the given outpoint.
+    /// 
+    /// This function ends up making three calls to bitcoin-core:
+    /// 1. We use the `gettxout` RPC to get confirmation height relative to
+    ///    the chain tip.
+    /// 2. We use the `getblockhash` RPC to get the block hash of the chain
+    ///    tip returned in (1).
+    /// 3. We use the `getblockhash` RPC to get the block hash of the block
+    ///    confirming the transaction that created the UTXO.
+    /// 
+    /// # Notes
+    ///
+    /// - This function returns Ok(None) if:
+    /// * the associated outpoint is not confirmed in a block on the
+    ///   canonical bitcoin blockchain.
+    /// * the height of the associated block confirming the transaction
+    ///   that created the given outpoint is not found in bitcoin core
+    ///   using the `getblockhash` RPC.
+    /// 
+    /// The documentation of the `getblockhash` RPC can be found at:
+    /// <https://bitcoincore.org/en/doc/25.0.0/rpc/blockchain/getblockhash/>
+    pub fn get_utxo_summary(&self, outpoint: &OutPoint) -> Result<Option<OutPointSummary>, Error> {
+        // This will return Some(_) result if the transaction is confirmed
+        // in a canonical block.
+        let Some(out) = self.get_tx_out(outpoint, false)? else {
+            return Ok(None);
+        };
+
+        // This should always succeed, since we are just asking for the
+        // chain tip header.
+        let Some(chain_tip) = self.get_block_header(&out.bestblock)? else {
+            return Err(Error::BitcoinCoreUnknownChainTip(out.bestblock, *outpoint));
+        };
+
+        // Now that we know the height of the chain tip and how many
+        // confirmations the transaction has, we can get the height of the
+        // block confirming the transaction with simple arithmetic. Note
+        // that we need to add 1; a transaction that has 1 confirmation has
+        // actually been confirmed in the block at the chain tip, a block
+        // that has two confirmations is one from the chain tip and so on.
+        let confirmation_height = chain_tip
+            .height
+            .saturating_sub(out.confirmations as u64)
+            .saturating_add(1u64);
+
+        match self.inner.get_block_hash(*confirmation_height) {
+            Ok(block_hash) => Ok(Some(OutPointSummary {
+                block_hash,
+                is_coinbase: out.coinbase,
+                outpoint: *outpoint,
+            })),
+            Err(BtcRpcError::JsonRpc(JsonRpcError::Rpc(RpcError { code: -5, .. }))) => Ok(None),
+            Err(err) => Err(Error::BitcoinCoreGetBlockHash(err, *confirmation_height)),
+        }
+    }
+
     /// Fetch and decode raw transaction from bitcoin-core using the
     /// `getrawtransaction` RPC with a verbosity of 2.
     ///
@@ -684,6 +759,10 @@ impl BitcoinCoreClient {
 }
 
 impl BitcoinInteract for BitcoinCoreClient {
+    async fn get_utxo_summary(&self, outpoint: &OutPoint) -> Result<Option<OutPointSummary>, Error> {
+        self.get_utxo_summary(outpoint)
+    }
+
     async fn broadcast_transaction(&self, tx: &Transaction) -> Result<(), Error> {
         self.inner
             .send_raw_transaction(tx)

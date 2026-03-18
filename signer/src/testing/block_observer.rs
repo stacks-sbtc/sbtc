@@ -5,6 +5,7 @@ use std::ops::Deref as _;
 
 use bitcoin::Amount;
 use bitcoin::BlockHash;
+use bitcoin::OutPoint;
 use bitcoin::Txid;
 use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc_json::GetTxOutResult;
@@ -29,6 +30,7 @@ use crate::bitcoin::rpc::BitcoinBlockHeader;
 use crate::bitcoin::rpc::BitcoinBlockInfo;
 use crate::bitcoin::rpc::BitcoinTxInfo;
 use crate::bitcoin::rpc::GetTxResponse;
+use crate::bitcoin::rpc::OutPointSummary;
 use crate::bitcoin::utxo;
 use crate::context::SbtcLimits;
 use crate::emily_client::EmilyInteract;
@@ -218,6 +220,22 @@ impl TryFrom<TestHarness> for ApiFallbackClient<TestHarness> {
 }
 
 impl BitcoinInteract for TestHarness {
+    async fn get_utxo_summary(&self, outpoint: &OutPoint) -> Result<Option<OutPointSummary>, Error> {
+        let Some((tx_response, _)) = self.deposits.get(&outpoint.txid).cloned() else {
+            return Ok(None);
+        };
+
+        let Some(block_hash) = tx_response.block_hash else {
+            return Ok(None);
+        };
+
+        Ok(Some(OutPointSummary {
+            block_hash,
+            is_coinbase: tx_response.tx.is_coinbase(),
+            outpoint: *outpoint,
+        }))
+    }
+
     async fn get_tx(&self, txid: &bitcoin::Txid) -> Result<Option<GetTxResponse>, Error> {
         Ok(self.deposits.get(txid).cloned().map(|(resp, _)| resp))
     }

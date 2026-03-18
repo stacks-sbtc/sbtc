@@ -82,20 +82,15 @@ impl DepositRequestValidator for CreateDepositRequest {
         C: BitcoinInteract,
     {
         // Fetch the transaction from either a block or from the mempool
-        let Some(response) = client.get_tx(&self.outpoint.txid).await? else {
+        let Some(response) = client.get_utxo_summary(&self.outpoint).await? else {
             return Ok(None);
         };
 
-        // If the transaction has not been confirmed yet, then the block
-        // hash will be None. The transaction has not failed validation,
-        // let's try again when it gets confirmed.
-        let Some(block_hash) = response.block_hash else {
-            return Ok(None);
-        };
-
-        if response.tx.is_coinbase() {
+        if response.is_coinbase {
             return Err(Error::BitcoinTxCoinbase(self.outpoint.txid));
         }
+
+        let block_hash = response.block_hash;
 
         // The `get_tx_info` call here should not return None, we know that
         // it has been included in a block.

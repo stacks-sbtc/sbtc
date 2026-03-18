@@ -15,6 +15,7 @@
 //!   JsonRpc(Rpc(RpcError { code: -5, message: "Block not found", data: None }))
 
 use bitcoin::BlockHash;
+use bitcoin::OutPoint;
 use bitcoin::Txid;
 use bitcoincore_rpc_json::GetTxOutResult;
 
@@ -28,6 +29,7 @@ use super::rpc::BitcoinCoreClient;
 use super::rpc::BitcoinCoreClientParams;
 use super::rpc::BitcoinTxInfo;
 use super::rpc::GetTxResponse;
+use super::rpc::OutPointSummary;
 
 /// Implement the [`TryFrom`] trait for a Vec of [`BitcoinCoreClientParams`]s to allow for a
 /// [`ApiFallbackClient`] to be implicitly created from a vec of URLs.
@@ -62,6 +64,11 @@ impl BitcoinInteract for ApiFallbackClient<BitcoinCoreClient> {
 
     async fn get_tx(&self, txid: &Txid) -> Result<Option<GetTxResponse>, Error> {
         self.exec(|client, _| BitcoinInteract::get_tx(client, txid))
+            .await
+    }
+
+    async fn get_utxo_summary(&self, outpoint: &OutPoint) -> Result<Option<OutPointSummary>, Error> {
+        self.exec(|client, _| BitcoinInteract::get_utxo_summary(client, outpoint))
             .await
     }
 
