@@ -1,7 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tracing::warn;
 
@@ -45,7 +44,7 @@ pub trait Signable {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 /// A bad private share
 pub struct BadPrivateShare {
     /// the DH shared key between these participants
@@ -54,7 +53,7 @@ pub struct BadPrivateShare {
     pub tuple_proof: TupleProof,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 /// Final DKG status after receiving public and private shares
 pub enum DkgFailure {
     /// DKG threshold not met
@@ -71,7 +70,7 @@ pub enum DkgFailure {
     BadPrivateShares(HashMap<u32, BadPrivateShare>),
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 /// Final DKG status after receiving public and private shares
 pub enum DkgStatus {
     /// DKG completed successfully
@@ -80,7 +79,7 @@ pub enum DkgStatus {
     Failure(DkgFailure),
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 /// Encapsulation of all possible network message types
 pub enum Message {
     /// Tell signers to begin DKG by sending DKG public shares
@@ -122,7 +121,7 @@ impl Signable for Message {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 /// DKG begin message from coordinator to signers
 pub struct DkgBegin {
     /// DKG round ID
@@ -136,7 +135,7 @@ impl Signable for DkgBegin {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 /// DKG public shares message from signer to all signers and coordinator
 pub struct DkgPublicShares {
     /// DKG round ID
@@ -161,7 +160,7 @@ impl Signable for DkgPublicShares {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 /// DKG private begin message from signer to all signers and coordinator
 pub struct DkgPrivateBegin {
     /// DKG round ID
@@ -185,7 +184,7 @@ impl Signable for DkgPrivateBegin {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 /// DKG private shares message from signer to all signers and coordinator
 pub struct DkgPrivateShares {
     /// DKG round ID
@@ -221,7 +220,7 @@ impl Signable for DkgPrivateShares {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 /// DKG end begin message from signer to all signers and coordinator
 pub struct DkgEndBegin {
     /// DKG round ID
@@ -245,7 +244,7 @@ impl Signable for DkgEndBegin {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 /// DKG end message from signers to coordinator
 pub struct DkgEnd {
     /// DKG round ID
@@ -264,7 +263,7 @@ impl Signable for DkgEnd {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, PartialEq)]
 /// Nonce request message from coordinator to signers
 pub struct NonceRequest {
     /// DKG round ID
@@ -311,7 +310,7 @@ impl Signable for NonceRequest {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, PartialEq)]
 /// Nonce response message from signers to coordinator
 pub struct NonceResponse {
     /// DKG round ID
@@ -372,7 +371,7 @@ impl Signable for NonceResponse {
     }
 }
 
-#[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 /// Signature type
 pub enum SignatureType {
     /// FROST signature
@@ -383,7 +382,7 @@ pub enum SignatureType {
     Taproot(Option<MerkleRoot>),
 }
 
-#[derive(Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, PartialEq)]
 /// Signature share request message from coordinator to signers
 pub struct SignatureShareRequest {
     /// DKG round ID
@@ -437,7 +436,7 @@ impl Signable for SignatureShareRequest {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 /// Signature share response message from signers to coordinator
 pub struct SignatureShareResponse {
     /// DKG round ID
@@ -469,7 +468,7 @@ impl Signable for SignatureShareResponse {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 /// Network packets need to be signed so they can be verified
 pub struct Packet {
     /// The message to sign

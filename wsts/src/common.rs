@@ -2,9 +2,7 @@ use core::{
     fmt::{Debug, Display, Formatter, Result as FmtResult},
     ops::{Add, Mul},
 };
-use num_traits::{One, Zero};
 use rand_core::{CryptoRng, RngCore};
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 
@@ -22,7 +20,7 @@ use crate::{
 /// A merkle root is a 256 bit hash
 pub type MerkleRoot = [u8; 32];
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 /// A commitment to a polynonial, with a Schnorr proof of ownership bound to the ID
 pub struct PolyCommitment {
     /// The party ID with a schnorr proof
@@ -48,7 +46,7 @@ impl Display for PolyCommitment {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 /// A composite private nonce used as a random commitment in the protocol
 pub struct Nonce {
     /// The first committed value
@@ -220,7 +218,7 @@ impl Debug for SignatureShare {
 
 #[allow(non_snake_case)]
 /// An aggregated group signature
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Signature {
     /// The sum of the public nonces with commitments to the signed message
     pub R: Point,
@@ -241,7 +239,7 @@ impl Signature {
 
 #[allow(non_snake_case)]
 /// A Chaum-Pedersen proof that (G, A=a*G, B=b*G, K=(a*b)*G) is a DH tuple
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TupleProof {
     /// R = r*G for a random scalar r
     pub R: Point,
