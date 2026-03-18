@@ -366,6 +366,14 @@ impl<C: Context, B> BlockObserver<C, B> {
 
         tracing::info!("updating canonical bitcoin blockchain to chain tip");
         let chain_tip: model::BitcoinBlockHash = chain_tip.into();
+
+        // This is a safeguard to prevent us from updating the is_canonical
+        // column of all blocks in the database if the given chain tip has
+        // not been written to the database.
+        if !db.is_known_bitcoin_block_hash(&chain_tip).await? {
+            tracing::error!("chain tip not found in database, not setting is_canonical column");
+            return Err(Error::UnknownBitcoinChainTip(chain_tip));
+        }
         db.set_canonical_bitcoin_blockchain(&chain_tip).await
     }
 
