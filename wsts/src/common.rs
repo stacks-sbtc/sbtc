@@ -1,6 +1,5 @@
 use core::{
     fmt::{Debug, Display, Formatter, Result as FmtResult},
-    ops::{Add, Mul},
 };
 use rand_core::{CryptoRng, RngCore};
 use sha2::{Digest, Sha256};
@@ -82,64 +81,13 @@ impl Nonce {
 
     /// Check that the nonces are not zero since that can lead to attacks
     pub fn is_valid(&self) -> bool {
-        !self.is_zero() && !self.is_one()
+        let zero = Scalar::from(0);
+        let one = Scalar::from(1);
+        !(self.d == zero && self.e == zero) && !(self.d == one && self.e == one)
     }
 }
 
-impl Zero for Nonce {
-    fn zero() -> Self {
-        Self {
-            d: Scalar::zero(),
-            e: Scalar::zero(),
-        }
-    }
-
-    fn is_zero(&self) -> bool {
-        self.d == Scalar::zero() && self.e == Scalar::zero()
-    }
-}
-
-impl One for Nonce {
-    fn one() -> Self {
-        Self {
-            d: Scalar::one(),
-            e: Scalar::one(),
-        }
-    }
-
-    fn set_one(&mut self) {
-        self.d = Scalar::one();
-        self.e = Scalar::one();
-    }
-
-    fn is_one(&self) -> bool {
-        self.d == Scalar::one() && self.e == Scalar::one()
-    }
-}
-
-impl Add for Nonce {
-    type Output = Self;
-
-    fn add(self, other: Self) -> Self {
-        Self {
-            d: self.d + other.d,
-            e: self.e + other.e,
-        }
-    }
-}
-
-impl Mul for Nonce {
-    type Output = Self;
-
-    fn mul(self, other: Self) -> Self {
-        Self {
-            d: self.d * other.d,
-            e: self.e * other.e,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[allow(non_snake_case)]
 /// A commitment to the private nonce
 pub struct PublicNonce {
@@ -174,28 +122,7 @@ impl From<&Nonce> for PublicNonce {
     }
 }
 
-impl Add for PublicNonce {
-    type Output = Self;
-
-    fn add(self, other: Self) -> Self {
-        Self {
-            D: self.D + other.E,
-            E: self.E + other.E,
-        }
-    }
-}
-
-impl Zero for PublicNonce {
-    fn zero() -> Self {
-        Self::from(Nonce::zero())
-    }
-
-    fn is_zero(&self) -> bool {
-        self.D == Point::identity() && self.E == Point::identity()
-    }
-}
-
-#[derive(Clone, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, PartialEq)]
 /// A share of the party signature with related values
 pub struct SignatureShare {
     /// The ID of the party
@@ -336,7 +263,7 @@ impl CheckPrivateShares {
         let t: u32 = l.try_into().unwrap();
         let x = id;
         let mut powers = Vec::with_capacity(l);
-        let mut pow = Scalar::one();
+        let mut pow = Scalar::from(1);
 
         for _ in 0..t {
             powers.push(pow);
