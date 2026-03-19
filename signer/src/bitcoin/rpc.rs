@@ -482,20 +482,20 @@ impl BitcoinCoreClient {
     /// This function ends up making three calls to bitcoin-core:
     /// 1. We use the `gettxout` RPC to get confirmation height relative to
     ///    the chain tip.
-    /// 2. We use the `getblockhash` RPC to get the block hash of the chain
-    ///    tip returned in (1).
+    /// 2. We use the `getblockheader` RPC to get the block height of the
+    ///    chain tip returned in (1).
     /// 3. We use the `getblockhash` RPC to get the block hash of the block
     ///    confirming the transaction that created the UTXO.
     ///
     /// # Notes
     ///
-    /// - This function returns Ok(None) if:
+    /// This function returns Ok(None) if:
     /// * the associated output has been spent.
     /// * the associated output is not confirmed in a block on the
     ///   canonical bitcoin blockchain.
     /// * the height of the associated block confirming the transaction
     ///   that created the given output is not found in bitcoin core using
-    ///   the `getblockhash` RPC.
+    ///   the `getblockhash` RPC. This condition should never happen.
     ///
     /// The documentation of the `getblockhash` RPC can be found at:
     /// <https://bitcoincore.org/en/doc/25.0.0/rpc/blockchain/getblockhash/>
@@ -515,9 +515,10 @@ impl BitcoinCoreClient {
         // Now that we know the height of the chain tip and how many
         // confirmations the transaction has, we can get the height of the
         // block confirming the transaction with simple arithmetic. Note
-        // that we need to add 1; a transaction that has 1 confirmation has
-        // actually been confirmed in the block at the chain tip, a block
-        // that has two confirmations is one from the chain tip and so on.
+        // that we need to add 1; the confirmations value is one more than
+        // the "offset" value that we want. For example, a transaction that
+        // is confirmed at the chain tip has 1 confirmation, but the offset
+        // from the chain tip is 0.
         let confirmation_height = chain_tip
             .height
             .saturating_sub(out.confirmations as u64)
