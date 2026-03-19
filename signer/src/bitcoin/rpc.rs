@@ -89,7 +89,7 @@ pub struct OutPointSummary {
 ///   type, which is what the bitcoincore-rpc crate returns for the
 ///   `getrawtransaction` RPC with verbosity set to 1. That type is missing
 ///   some information that we want.
-/// * All optional fields are omited from bitcoin-core for coinbase
+/// * All optional fields are omitted from bitcoin-core for coinbase
 ///   transactions and whenever the "block undo data" is missing for a
 ///   block. The block undo data is always present for validated blocks,
 ///   and block validation is always done for blocks on the currently
