@@ -446,7 +446,7 @@ impl BitcoinCoreClient {
     }
 
     /// Fetch and decode raw transaction from bitcoin-core using the
-    /// getrawtransaction RPC with a verbosity of 1. None is returned if
+    /// getrawtransaction RPC with a verbosity of 1 [1]. None is returned if
     /// the node cannot find the transaction in a bitcoin block or the
     /// mempool.
     ///
@@ -455,11 +455,13 @@ impl BitcoinCoreClient {
     /// By default, this call only returns a transaction if it is in the
     /// mempool. If -txindex is enabled on bitcoin-core and no blockhash
     /// argument is passed, it will return the transaction if it is in the
-    /// mempool or any block. We require -txindex to be enabled (same with
-    /// stacks-core[^1]) so this should work with transactions in either
+    /// mempool or any block. We do not require -txindex to be enabled (same with
+    /// stacks-core[2]) so this should work with transactions in either
     /// the mempool and a bitcoin block.
     ///
-    /// [^1]: <https://docs.stacks.co/guides-and-tutorials/run-a-miner/mine-mainnet-stacks-tokens>
+    /// [1]: <https://bitcoincore.org/en/doc/25.0.0/rpc/rawtransactions/getrawtransaction/>
+    /// [2]: <https://docs.stacks.co/guides-and-tutorials/run-a-miner/mine-mainnet-stacks-tokens>
+    #[cfg(any(test, feature = "testing"))]
     pub fn get_tx(&self, txid: &Txid) -> Result<Option<GetTxResponse>, Error> {
         let args = [
             serde_json::to_value(txid).map_err(Error::JsonSerialize)?,
@@ -550,7 +552,7 @@ impl BitcoinCoreClient {
     ///
     /// - This method requires bitcoin-core v25 or later.
     /// - The implementation is based on the documentation at
-    ///   https://bitcoincore.org/en/doc/25.0.0/rpc/rawtransactions/getrawtransaction/
+    ///   <https://bitcoincore.org/en/doc/25.0.0/rpc/rawtransactions/getrawtransaction/>
     pub fn get_tx_info(
         &self,
         txid: &Txid,
