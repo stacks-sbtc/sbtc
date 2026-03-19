@@ -35,7 +35,10 @@ use signer::testing::request_decider::TestEnvironment;
 use testing_emily_client::apis::testing_api;
 
 use crate::setup::IntoEmilyTestingConfig as _;
+use crate::setup::SweepAmounts;
+use crate::setup::TestSignerSet;
 use crate::setup::TestSweepSetup;
+use crate::setup::TestSweepSetup2;
 use crate::setup::backfill_bitcoin_blocks;
 
 #[allow(clippy::type_complexity)]
@@ -345,12 +348,17 @@ async fn persist_received_deposit_decision_fetches_missing_deposit_requests() {
 
     // This confirms a deposit transaction, and has a nice helper function
     // for storing a real deposit.
+    let signers = TestSignerSet::new(&mut rng);
+    let amounts = [SweepAmounts {
+        amount: 10000,
+        max_fee: 10000,
+        is_deposit: true,
+    }];
     let setup =
-        TestSweepSetup::new_setup(BitcoinCoreClient::new_regtest(), faucet, 10000, &mut rng);
+        TestSweepSetup2::new_setup(signers, BitcoinCoreClient::new_regtest(), faucet, &amounts);
 
     // Let's get the blockchain data into the database.
-    let chain_tip: BitcoinBlockHash = setup.sweep_block_hash.into();
-    backfill_bitcoin_blocks(&db, rpc, &chain_tip).await;
+    backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
 
     let network = SignerNetwork::single(&ctx);
 
@@ -363,8 +371,8 @@ async fn persist_received_deposit_decision_fetches_missing_deposit_requests() {
         blocklist_checker: Some(()),
         signer_private_key: PrivateKey::new(&mut rng),
     };
-    let txid = setup.deposit_request.outpoint.txid.into();
-    let output_index = setup.deposit_request.outpoint.vout;
+    let txid = setup.deposits[0].0.outpoint.txid.into();
+    let output_index = setup.deposits[0].0.outpoint.vout;
 
     let votes = db.get_deposit_signers(&txid, output_index).await.unwrap();
     assert!(votes.is_empty());
@@ -389,11 +397,11 @@ async fn persist_received_deposit_decision_fetches_missing_deposit_requests() {
 
     // Now let's tell emily about the deposit request
     let body = CreateDepositRequestBody {
-        bitcoin_tx_output_index: setup.deposit_request.outpoint.vout,
-        bitcoin_txid: setup.deposit_request.outpoint.txid.to_string(),
-        deposit_script: setup.deposit_request.deposit_script.to_hex_string(),
-        reclaim_script: setup.deposit_info.reclaim_script.to_hex_string(),
-        transaction_hex: serialize_hex(&setup.deposit_tx_info.tx),
+        bitcoin_tx_output_index: setup.deposits[0].0.outpoint.vout,
+        bitcoin_txid: setup.deposits[0].0.outpoint.txid.to_string(),
+        deposit_script: setup.deposits[0].0.deposit_script.to_hex_string(),
+        reclaim_script: setup.deposits[0].0.reclaim_script.to_hex_string(),
+        transaction_hex: serialize_hex(&setup.deposits[0].2.tx),
     };
     let _ = deposit_api::create_deposit(emily_client.config(), body)
         .await

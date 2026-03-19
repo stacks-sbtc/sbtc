@@ -159,7 +159,7 @@ pub enum Error {
     BitcoinCoreGetBlockHash(#[source] bitcoincore_rpc::Error, u64),
 
     /// The given chain tip block hash could not be found in the database.
-    /// 
+    ///
     /// This is returned when trying to fetch the header of the given block
     /// hash. However, this error scenario should never happen, since the
     /// block hash included here is what bitcoin-core has told us is the

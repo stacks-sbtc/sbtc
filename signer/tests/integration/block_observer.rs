@@ -74,7 +74,9 @@ use signer::transaction_signer::assert_allow_dkg_begin;
 use url::Url;
 
 use crate::containers::BitcoinContainerExt as _;
-use crate::setup::TestSweepSetup;
+use crate::setup::SweepAmounts;
+use crate::setup::TestSignerSet;
+use crate::setup::TestSweepSetup2;
 use crate::setup::clean_emily_setup;
 use crate::setup::fetch_canonical_bitcoin_blockchain;
 use crate::setup::new_emily_setup;
@@ -107,17 +109,17 @@ async fn wait_for_block_observed<S, B, E>(
 
 /// The [`BlockObserver::load_latest_deposit_requests`] function is
 /// supposed to fetch all deposit requests from Emily and persist the ones
-/// that pass validation, regardless of when they were confirmed.
+/// that pass validation.
 #[test_case::test_case(1; "one block ago")]
 #[test_case::test_case(5; "five blocks ago")]
-#[test_log::test(tokio::test)]
+#[tokio::test]
 async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u64) {
     // We start with the typical setup with a fresh database and context
     // with a real bitcoin core client and a real connection to our
     // database.
     let mut rng = get_rng();
 
-    let stack = TestContainersBuilder::start_bitcoin().await;
+    let stack = TestContainersBuilder::start_bitcoin().await.keep_up();
     let bitcoin = stack.bitcoin().await;
     let rpc = bitcoin.rpc();
     let faucet = &bitcoin.get_faucet();
@@ -134,15 +136,24 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
     // We're going to create two confirmed deposits. This also generates
     // sweep transactions, but this information is not in our database, so
     // it doesn't matter for this test.
-    let setup0 = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 100_000, &mut rng);
-    let setup1 = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 200_000, &mut rng);
+    let signers = TestSignerSet::new(&mut rng);
+    let amounts = [
+        SweepAmounts {
+            amount: 100_000,
+            max_fee: 100_000,
+            is_deposit: true,
+        },
+        SweepAmounts {
+            amount: 200_000,
+            max_fee: 200_000,
+            is_deposit: true,
+        },
+    ];
+    let setup = TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &amounts);
 
     // Let's prep Emily with information about these deposits.
     ctx.with_emily_client(|client| {
-        let emily_client_response = vec![
-            setup0.emily_deposit_request(),
-            setup1.emily_deposit_request(),
-        ];
+        let emily_client_response = setup.emily_deposit_requests();
         client
             .expect_get_deposits()
             .times(1..)
@@ -181,7 +192,7 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
 
         client.expect_get_epoch_status().returning(|| {
             Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
-                nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
+                nakamoto_start_height: BitcoinBlockHeight::from(100_u32),
             })))
         });
 
@@ -263,8 +274,8 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
     let req_outpoints: HashSet<OutPoint> =
         deposit_requests.iter().map(|req| req.outpoint()).collect();
 
-    assert!(req_outpoints.contains(&setup0.deposit_info.outpoint));
-    assert!(req_outpoints.contains(&setup1.deposit_info.outpoint));
+    assert!(req_outpoints.contains(&setup.deposits[0].0.outpoint));
+    assert!(req_outpoints.contains(&setup.deposits[1].0.outpoint));
 
     testing::storage::drop_db(db).await;
 }
