@@ -33,7 +33,7 @@ impl std::fmt::Display for LimitEntryType {
 }
 
 /// Limit table entry key. This is the primary index key.
-#[derive(Clone, Default, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct LimitEntryKey {
     /// Type of the entry, representing if this entry is throttle mode entry or not.
@@ -42,8 +42,23 @@ pub struct LimitEntryKey {
     pub timestamp: u64,
 }
 
+
+
+
+impl Default for LimitEntryKey {
+    fn default() -> Self {
+        Self {
+            entry_type: LimitEntryType::Standard,
+            // The only requirements for this value is to be greater then zero and
+            // smaller then today.
+            // This magic number is timestamp of sBTC mainnet launch.
+            timestamp: 1_734_146_659,
+        }
+    }
+}
+
 /// Limit table entry key. This is the primary index key.
-#[derive(Clone, Default, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct LimitEntry {
     /// Limit entry key.

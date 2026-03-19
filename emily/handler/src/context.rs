@@ -18,7 +18,6 @@ use serde::Serialize;
 use crate::database::entries::limits::LimitEntry;
 
 use crate::common::error::Error;
-use crate::database::entries::limits::LimitEntryKey;
 
 /// Emily lambda settings.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -100,7 +99,7 @@ impl Settings {
             limit_table_name: env::var("LIMIT_TABLE_NAME")?,
             throttle_table_name: env::var("THROTTLEDOWN_TABLE_NAME")?,
             default_limits: LimitEntry {
-                key: LimitEntryKey::default(),
+                key: Default::default(),
                 peg_cap: env::var("DEFAULT_PEG_CAP")
                     .ok()
                     .map(|v| v.parse())
