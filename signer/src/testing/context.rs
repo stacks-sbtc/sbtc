@@ -363,8 +363,8 @@ impl BitcoinInteract for WrappedMockBitcoinInteract {
         self.inner.lock().await.get_tx(txid).await
     }
 
-    async fn get_utxo_summary(&self, outpoint: &OutPoint) -> Result<Option<OutPointSummary>, Error> {
-        self.inner.lock().await.get_utxo_summary(outpoint).await
+    async fn get_utxo_info(&self, outpoint: &OutPoint) -> Result<Option<OutPointSummary>, Error> {
+        self.inner.lock().await.get_utxo_info(outpoint).await
     }
 
     async fn get_tx_info(

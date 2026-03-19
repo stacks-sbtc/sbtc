@@ -67,8 +67,8 @@ impl BitcoinInteract for ApiFallbackClient<BitcoinCoreClient> {
             .await
     }
 
-    async fn get_utxo_summary(&self, outpoint: &OutPoint) -> Result<Option<OutPointSummary>, Error> {
-        self.exec(|client, _| BitcoinInteract::get_utxo_summary(client, outpoint))
+    async fn get_utxo_info(&self, outpoint: &OutPoint) -> Result<Option<OutPointSummary>, Error> {
+        self.exec(|client, _| BitcoinInteract::get_utxo_info(client, outpoint))
             .await
     }
 

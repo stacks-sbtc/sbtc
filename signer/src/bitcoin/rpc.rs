@@ -478,7 +478,7 @@ impl BitcoinCoreClient {
     }
 
     /// Fetch the summary of a UTXO identified by the given outpoint.
-    /// 
+    ///
     /// This function ends up making three calls to bitcoin-core:
     /// 1. We use the `gettxout` RPC to get confirmation height relative to
     ///    the chain tip.
@@ -486,19 +486,20 @@ impl BitcoinCoreClient {
     ///    tip returned in (1).
     /// 3. We use the `getblockhash` RPC to get the block hash of the block
     ///    confirming the transaction that created the UTXO.
-    /// 
+    ///
     /// # Notes
     ///
     /// - This function returns Ok(None) if:
-    /// * the associated outpoint is not confirmed in a block on the
+    /// * the associated output has been spent.
+    /// * the associated output is not confirmed in a block on the
     ///   canonical bitcoin blockchain.
     /// * the height of the associated block confirming the transaction
-    ///   that created the given outpoint is not found in bitcoin core
-    ///   using the `getblockhash` RPC.
-    /// 
+    ///   that created the given output is not found in bitcoin core using
+    ///   the `getblockhash` RPC.
+    ///
     /// The documentation of the `getblockhash` RPC can be found at:
     /// <https://bitcoincore.org/en/doc/25.0.0/rpc/blockchain/getblockhash/>
-    pub fn get_utxo_summary(&self, outpoint: &OutPoint) -> Result<Option<OutPointSummary>, Error> {
+    pub fn get_utxo_info(&self, outpoint: &OutPoint) -> Result<Option<OutPointSummary>, Error> {
         // This will return Some(_) result if the transaction is confirmed
         // in a canonical block.
         let Some(out) = self.get_tx_out(outpoint, false)? else {
@@ -759,8 +760,8 @@ impl BitcoinCoreClient {
 }
 
 impl BitcoinInteract for BitcoinCoreClient {
-    async fn get_utxo_summary(&self, outpoint: &OutPoint) -> Result<Option<OutPointSummary>, Error> {
-        self.get_utxo_summary(outpoint)
+    async fn get_utxo_info(&self, outpoint: &OutPoint) -> Result<Option<OutPointSummary>, Error> {
+        self.get_utxo_info(outpoint)
     }
 
     async fn broadcast_transaction(&self, tx: &Transaction) -> Result<(), Error> {

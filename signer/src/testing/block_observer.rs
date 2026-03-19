@@ -220,7 +220,7 @@ impl TryFrom<TestHarness> for ApiFallbackClient<TestHarness> {
 }
 
 impl BitcoinInteract for TestHarness {
-    async fn get_utxo_summary(&self, outpoint: &OutPoint) -> Result<Option<OutPointSummary>, Error> {
+    async fn get_utxo_info(&self, outpoint: &OutPoint) -> Result<Option<OutPointSummary>, Error> {
         let Some((tx_response, _)) = self.deposits.get(&outpoint.txid).cloned() else {
             return Ok(None);
         };

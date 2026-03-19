@@ -69,7 +69,12 @@ pub trait BitcoinInteract: Sync + Send {
 
     /// Get the confirmation summary of the UTXO identified by the given
     /// outpoint.
-    fn get_utxo_summary(
+    ///
+    /// # Notes
+    ///
+    /// This method works for only unspent outputs. If the output has been
+    /// spent then Ok(None) is returned.
+    fn get_utxo_info(
         &self,
         outpoint: &OutPoint,
     ) -> impl Future<Output = Result<Option<OutPointSummary>, Error>> + Send;
