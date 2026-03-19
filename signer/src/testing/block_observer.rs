@@ -24,7 +24,6 @@ use sbtc::deposits::CreateDepositRequest;
 use crate::bitcoin::BitcoinBlockHashStreamProvider;
 use crate::bitcoin::BitcoinInteract;
 use crate::bitcoin::GetTransactionFeeResult;
-use crate::bitcoin::TransactionLookupHint;
 use crate::bitcoin::rpc::BitcoinBlockHeader;
 use crate::bitcoin::rpc::BitcoinBlockInfo;
 use crate::bitcoin::rpc::BitcoinTxInfo;
@@ -287,7 +286,6 @@ impl BitcoinInteract for TestHarness {
     async fn get_transaction_fee(
         &self,
         _txid: &bitcoin::Txid,
-        _lookup_hint: Option<TransactionLookupHint>,
     ) -> Result<GetTransactionFeeResult, Error> {
         unimplemented!()
     }
