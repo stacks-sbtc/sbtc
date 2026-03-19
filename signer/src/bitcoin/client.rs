@@ -28,6 +28,7 @@ use super::rpc::BitcoinBlockInfo;
 use super::rpc::BitcoinCoreClient;
 use super::rpc::BitcoinCoreClientParams;
 use super::rpc::BitcoinTxInfo;
+#[cfg(any(test, feature = "testing"))]
 use super::rpc::GetTxResponse;
 use super::rpc::OutPointSummary;
 
@@ -62,6 +63,7 @@ impl BitcoinInteract for ApiFallbackClient<BitcoinCoreClient> {
             .await
     }
 
+    #[cfg(any(test, feature = "testing"))]
     async fn get_tx(&self, txid: &Txid) -> Result<Option<GetTxResponse>, Error> {
         self.exec(|client, _| BitcoinInteract::get_tx(client, txid))
             .await

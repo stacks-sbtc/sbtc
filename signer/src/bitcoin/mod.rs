@@ -11,6 +11,7 @@ use bitcoincore_rpc_json::GetTxOutResult;
 use rpc::BitcoinBlockHeader;
 use rpc::BitcoinBlockInfo;
 use rpc::BitcoinTxInfo;
+#[cfg(any(test, feature = "testing"))]
 use rpc::GetTxResponse;
 
 use crate::bitcoin::rpc::OutPointSummary;
@@ -62,6 +63,7 @@ pub trait BitcoinInteract: Sync + Send {
     ) -> impl Future<Output = Result<Option<BitcoinBlockHeader>, Error>> + Send;
 
     /// get tx
+    #[cfg(any(test, feature = "testing"))]
     fn get_tx(
         &self,
         txid: &Txid,

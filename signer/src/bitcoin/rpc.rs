@@ -782,6 +782,7 @@ impl BitcoinInteract for BitcoinCoreClient {
         self.get_block_header(block_hash)
     }
 
+    #[cfg(any(test, feature = "testing"))]
     async fn get_tx(&self, txid: &Txid) -> Result<Option<GetTxResponse>, Error> {
         self.get_tx(txid)
     }
