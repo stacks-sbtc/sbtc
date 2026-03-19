@@ -681,6 +681,11 @@ pub enum Error {
     #[error("the given block hash could not be found in the database: {0}")]
     UnknownBitcoinBlock(bitcoin::BlockHash),
 
+    /// The given block hash could not be found in the database before
+    /// doing a DbRead::set_canonical_bitcoin_blockchain call.
+    #[error("the given chain tip block hash could not be found in the database: {0}")]
+    UnknownBitcoinChainTip(BitcoinBlockHash),
+
     /// No stacks chain tip found.
     #[error("no stacks chain tip")]
     NoStacksChainTip,
