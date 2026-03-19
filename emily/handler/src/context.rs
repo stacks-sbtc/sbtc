@@ -15,8 +15,10 @@ use clarity::vm::types::StandardPrincipalData;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::api::models::limits::AccountLimits;
+use crate::database::entries::limits::LimitEntry;
+
 use crate::common::error::Error;
+use crate::database::entries::limits::LimitEntryKey;
 
 /// Emily lambda settings.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -34,7 +36,7 @@ pub struct Settings {
     /// Limit table name.
     pub limit_table_name: String,
     /// The default global limits for the system.
-    pub default_limits: AccountLimits,
+    pub default_limits: LimitEntry,
     /// Whether the lambda is expecting transactions on mainnet.
     pub is_mainnet: bool,
     /// The version of the lambda.
@@ -97,7 +99,8 @@ impl Settings {
             chainstate_table_name: env::var("CHAINSTATE_TABLE_NAME")?,
             limit_table_name: env::var("LIMIT_TABLE_NAME")?,
             throttle_table_name: env::var("THROTTLEDOWN_TABLE_NAME")?,
-            default_limits: AccountLimits {
+            default_limits: LimitEntry {
+                key: LimitEntryKey::default(),
                 peg_cap: env::var("DEFAULT_PEG_CAP")
                     .ok()
                     .map(|v| v.parse())
@@ -222,7 +225,7 @@ impl EmilyContext {
                     .get("Throttle")
                     .expect("Couldn't find valid throttle table table in existing table list.")
                     .to_string(),
-                default_limits: AccountLimits::default(),
+                default_limits: LimitEntry::default(),
                 is_mainnet: false,
                 version: "local-instance".to_string(),
                 deployer_address: PrincipalData::parse_standard_principal(

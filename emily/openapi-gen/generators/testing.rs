@@ -40,8 +40,6 @@ use super::CorsSupport;
         // Limits endpoints.
         api::handlers::limits::get_limits,
         api::handlers::limits::set_limits,
-        api::handlers::limits::get_limits_for_account,
-        api::handlers::limits::set_limits_for_account,
         /// New block endpoints.
         api::handlers::new_block::new_block,
         // Throttle endpoints
@@ -86,7 +84,6 @@ use super::CorsSupport;
         api::models::common::Fulfillment,
         // Limits models
         api::models::limits::Limits,
-        api::models::limits::AccountLimits,
         // New block models.
         api::models::new_block::NewBlockEventRaw,
         // Errors.

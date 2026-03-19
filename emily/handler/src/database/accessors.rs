@@ -8,22 +8,19 @@ use argon2::{
 use aws_sdk_dynamodb::types::AttributeValue;
 use aws_sdk_dynamodb::types::error::ConditionalCheckFailedException;
 use serde_dynamo::Item;
-use std::collections::HashMap;
 use strum::IntoEnumIterator as _;
 
 use tracing::{debug, warn};
 
-use crate::api::models::limits::{AccountLimits, Limits};
 use crate::common::error::{Error, Inconsistency};
+use crate::{api::models::limits::Limits, database::entries::limits::LimitEntryType};
 
 use super::entries::deposit::{
     DepositInfoByRecipientEntry, DepositInfoByReclaimPubkeysEntry,
     DepositTableByRecipientSecondaryIndex, DepositTableByReclaimPubkeysSecondaryIndex,
     ValidatedDepositUpdate,
 };
-use super::entries::limits::{
-    GLOBAL_CAP_ACCOUNT, LimitEntry, LimitEntryKey, LimitTablePrimaryIndex,
-};
+use super::entries::limits::{LimitEntry, LimitEntryKey, LimitTablePrimaryIndex};
 use super::entries::withdrawal::{
     ValidatedWithdrawalUpdate, WithdrawalInfoByRecipientEntry, WithdrawalInfoBySenderEntry,
     WithdrawalTableByRecipientSecondaryIndex, WithdrawalTableBySenderSecondaryIndex,
@@ -894,79 +891,14 @@ pub fn calculate_throttle_mode_limits(limit_entry: LimitEntry) -> LimitEntry {
 /// data for this singular entry is spread across the entire table in a way that
 /// needs to be first gathered, then filtered. It does not neatly fit into a
 /// return type that is within the table as an entry.
-///
-/// do_throttle_adjustment argument describes if the function will adjust limits according to
-/// throttle mode if throttle mode is on. Usually you want it be set to true.
-pub async fn get_limits(
-    context: &EmilyContext,
-    do_throttle_adjustment: bool,
-) -> Result<Limits, Error> {
-    // Get all the entries of the limit table. This table shouldn't be too large.
-    let all_entries =
-        LimitTablePrimaryIndex::get_all_entries(&context.dynamodb_client, &context.settings)
-            .await?;
-    // Create the default global cap.
-    let default_global_cap = context.settings.default_limits.clone();
-    let mut global_cap = LimitEntry {
-        key: LimitEntryKey {
-            account: GLOBAL_CAP_ACCOUNT.to_string(),
-            // Make the timestamp the smallest possible to any other timestamp
-            // will be greater than this.
-            timestamp: 0,
-        },
-        peg_cap: default_global_cap.peg_cap,
-        per_deposit_minimum: default_global_cap.per_deposit_minimum,
-        per_deposit_cap: default_global_cap.per_deposit_cap,
-        per_withdrawal_cap: default_global_cap.per_withdrawal_cap,
-        rolling_withdrawal_blocks: default_global_cap.rolling_withdrawal_blocks,
-        rolling_withdrawal_cap: default_global_cap.rolling_withdrawal_cap,
-        throttle_mode_initiator: default_global_cap.throttle_mode_initiator,
-    };
-
-    // Aggregate all the latest entries by account.
-    let mut limit_by_account: HashMap<String, LimitEntry> = HashMap::new();
-    for entry in all_entries.iter() {
-        let account = &entry.key.account;
-        if account == GLOBAL_CAP_ACCOUNT {
-            // If the account is the global cap account and either we haven't encountered
-            // the cap before or the cap we have encountered is older than the current one
-            // then set the global cap to the current entry.
-            if global_cap.key.timestamp < entry.key.timestamp {
-                global_cap = entry.clone();
-            }
-        } else if limit_by_account.contains_key(account) {
-            // If the account is already in the map then update the entry if the current
-            // entry is newer.
-            if let Some(existing_entry) = limit_by_account.get_mut(account)
-                && existing_entry.key.timestamp < entry.key.timestamp
-            {
-                *existing_entry = entry.clone();
-            }
-        } else {
-            // If the account isn't in the map then insert it.
-            limit_by_account.insert(entry.key.account.clone(), entry.clone());
-        }
-    }
-    // Turn the account limits into the correct structure.
-    let account_caps = limit_by_account
-        .into_iter()
-        .filter(|(_, limit_entry)| !limit_entry.is_empty())
-        .map(|(account, limit_entry)| (account, AccountLimits::from(limit_entry)))
-        .collect();
-
-    // Adjust for throttle mode if needed.
-    let global_cap = if do_throttle_adjustment {
-        calculate_throttle_mode_limits(global_cap)
-    } else {
-        global_cap
-    };
+pub async fn get_limits(context: &EmilyContext) -> Result<Limits, Error> {
+    let latest_limit_entry = get_latest_limits_entry(context).await?;
 
     // Calculate total withdrawn amount.
-
     let available_to_withdraw = calculate_sbtc_left_for_withdrawals(
         context,
-        global_cap.rolling_withdrawal_blocks,
-        global_cap.rolling_withdrawal_cap,
+        latest_limit_entry.rolling_withdrawal_blocks,
+        latest_limit_entry.rolling_withdrawal_cap,
     )
     .await
     .inspect_err(|error| {
@@ -978,43 +910,93 @@ pub async fn get_limits(
     // Get the global limit for the whole thing.
     Ok(Limits {
         available_to_withdraw,
-        peg_cap: global_cap.peg_cap,
-        per_deposit_minimum: global_cap.per_deposit_minimum,
-        per_deposit_cap: global_cap.per_deposit_cap,
-        per_withdrawal_cap: global_cap.per_withdrawal_cap,
-        rolling_withdrawal_blocks: global_cap.rolling_withdrawal_blocks,
-        rolling_withdrawal_cap: global_cap.rolling_withdrawal_cap,
-        account_caps,
-        throttle_mode_initiator: global_cap.throttle_mode_initiator,
+        peg_cap: latest_limit_entry.peg_cap,
+        per_deposit_minimum: latest_limit_entry.per_deposit_minimum,
+        per_deposit_cap: latest_limit_entry.per_deposit_cap,
+        per_withdrawal_cap: latest_limit_entry.per_withdrawal_cap,
+        rolling_withdrawal_blocks: latest_limit_entry.rolling_withdrawal_blocks,
+        rolling_withdrawal_cap: latest_limit_entry.rolling_withdrawal_cap,
+        throttle_mode_initiator: latest_limit_entry.throttle_mode_initiator,
     })
 }
 
-/// Get the limit for a specific account.
-pub async fn get_limit_for_account(
-    context: &EmilyContext,
-    account: &String,
-) -> Result<LimitEntry, Error> {
-    // Make the query.
-    let (mut entries, _) = query_with_partition_key::<LimitTablePrimaryIndex>(
-        context,
-        account,
-        None,
-        // Only get the most recent entry. The internals of this query uses
-        // scan_index_forward = false.
-        Some(1),
-    )
-    .await?;
-    // The limit is set to 1 so there should always only be one entry returned,
-    // but for the sake of redundancy also get the most recent entry.
-    entries.sort_by_key(|entry| entry.key.timestamp);
-    entries.pop().ok_or(Error::NotFound)
+async fn get_latest_limits_entry(context: &EmilyContext) -> Result<LimitEntry, Error> {
+    let table_name = context.settings.limit_table_name.clone();
+    let client = context.dynamodb_client.clone();
+
+    let resp = client
+        .query()
+        .table_name(table_name)
+        .scan_index_forward(false) // Newest first
+        .limit(1)
+        .send()
+        .await
+        .map_err(Box::new)
+        .map_err(Error::AwsSdkDynamoDbQuery)?
+        .items
+        .ok_or(Error::NotFound)?;
+
+    let entry: LimitEntry = match resp.len() {
+        1 => serde_dynamo::from_item(resp[1].to_owned())?,
+        0 => {
+            return Err(Error::NotFound);
+        }
+        _ => {
+            return Err(Error::TooManyEntriesFromLimitedQuery);
+        }
+    };
+
+    Ok(entry)
 }
 
-/// Set the limit for a specific account.
-pub async fn set_limit_for_account(
-    context: &EmilyContext,
-    limit: &LimitEntry,
-) -> Result<(), Error> {
+async fn get_latest_standard_entry(context: &EmilyContext) -> Result<LimitEntry, Error> {
+    let table_name = context.settings.limit_table_name.clone();
+    let client = context.dynamodb_client.clone();
+    let partition_key_name = LimitEntryKey::PARTITION_KEY_NAME;
+
+    let resp = client
+        .query()
+        .table_name(table_name)
+        .key_condition_expression(format!("{partition_key_name} = :mode"))
+        .expression_attribute_values(
+            ":mode",
+            AttributeValue::N(LimitEntryType::Standard.to_string()),
+        )
+        .scan_index_forward(false) // Newest first
+        .limit(1)
+        .send()
+        .await
+        .map_err(Box::new)
+        .map_err(Error::AwsSdkDynamoDbQuery)?
+        .items
+        .ok_or(Error::NotFound)?;
+
+    let entry: LimitEntry = match resp.len() {
+        1 => serde_dynamo::from_item(resp[1].to_owned())?,
+        0 => {
+            return Err(Error::NotFound);
+        }
+        _ => {
+            return Err(Error::TooManyEntriesFromLimitedQuery);
+        }
+    };
+
+    Ok(entry)
+}
+
+/// Restore limits from throttle mode.
+pub async fn restore_limits(context: &EmilyContext) -> Result<(), Error> {
+    let mut latest_non_throttle_limits = get_latest_standard_entry(context).await?;
+    latest_non_throttle_limits.key.timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("std::time::SystemTime::now() returned time before UNIX_EPOCH")
+        .as_secs();
+    set_limits(context, &latest_non_throttle_limits).await?;
+    Ok(())
+}
+
+/// Set the limits
+pub async fn set_limits(context: &EmilyContext, limit: &LimitEntry) -> Result<(), Error> {
     put_entry::<LimitTablePrimaryIndex>(context, limit).await
 }
 

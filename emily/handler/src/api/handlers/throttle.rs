@@ -89,13 +89,14 @@ pub async fn start_throttle(
                 Err(Error::Forbidden)
             }
             KeyVerificationResult::Eligible(initiator) => {
-                // TODO: we need an alarm on this error.
                 tracing::info!(
                     key_name = %request.name,
                     "Successfull request to start throttle mode. Starting throttle mode.",
                 );
-                let mut new_limits = accessors::get_limits(&context, true).await?;
+                let mut new_limits = accessors::get_limits(&context).await?;
                 if new_limits.throttle_mode_initiator.is_some() {
+                    // We don't want write this limits to the db, because it will allow
+                    // key holder to overpopulate our db for free.
                     tracing::info!(
                         // Safety: unwrap() here is ok because of .is_some() check above.
                         existing_initiator = %new_limits.throttle_mode_initiator.clone().unwrap(),
@@ -268,18 +269,7 @@ pub async fn activate_throttle_key(hash: String, context: EmilyContext) -> impl 
 pub async fn stop_throttle(context: EmilyContext) -> impl warp::reply::Reply {
     // Internal handler so `?` can be used correctly while still returning a reply.
     async fn handler(context: EmilyContext) -> Result<impl warp::reply::Reply, Error> {
-        let mut limits = accessors::get_limits(&context, false).await?;
-        limits.throttle_mode_initiator = None;
-        let is_success = crate::api::handlers::limits::set_limits(limits, context)
-            .await
-            .into_response()
-            .status()
-            .is_success();
-
-        if !is_success {
-            tracing::error!("Error restoring limits while stopping throttle mode");
-            return Err(Error::InternalServer);
-        }
+        accessors::restore_limits(&context).await?;
         Ok(with_status(json(&()), StatusCode::OK))
     }
     // Handle and respond.

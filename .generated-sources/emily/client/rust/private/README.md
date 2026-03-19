@@ -35,7 +35,6 @@ Class | Method | HTTP request | Description
 *CorsApi* | [**deposit_txid_index_options**](docs/CorsApi.md#deposit_txid_index_options) | **OPTIONS** /deposit/{txid}/{index} | CORS support
 *CorsApi* | [**deposit_txid_options**](docs/CorsApi.md#deposit_txid_options) | **OPTIONS** /deposit/{txid} | CORS support
 *CorsApi* | [**health_options**](docs/CorsApi.md#health_options) | **OPTIONS** /health | CORS support
-*CorsApi* | [**limits_account_options**](docs/CorsApi.md#limits_account_options) | **OPTIONS** /limits/{account} | CORS support
 *CorsApi* | [**limits_options**](docs/CorsApi.md#limits_options) | **OPTIONS** /limits | CORS support
 *CorsApi* | [**new_block_options**](docs/CorsApi.md#new_block_options) | **OPTIONS** /new_block | CORS support
 *CorsApi* | [**start_throttle_options**](docs/CorsApi.md#start_throttle_options) | **OPTIONS** /start_throttle | CORS support
@@ -60,9 +59,7 @@ Class | Method | HTTP request | Description
 *DepositApi* | [**update_deposits_sidecar**](docs/DepositApi.md#update_deposits_sidecar) | **PUT** /deposit_private | Update deposits handler.
 *HealthApi* | [**check_health**](docs/HealthApi.md#check_health) | **GET** /health | Get health handler.
 *LimitsApi* | [**get_limits**](docs/LimitsApi.md#get_limits) | **GET** /limits | Get the global limits.
-*LimitsApi* | [**get_limits_for_account**](docs/LimitsApi.md#get_limits_for_account) | **GET** /limits/{account} | Get limits for account handler.
 *LimitsApi* | [**set_limits**](docs/LimitsApi.md#set_limits) | **POST** /limits | Set limits handler.
-*LimitsApi* | [**set_limits_for_account**](docs/LimitsApi.md#set_limits_for_account) | **POST** /limits/{account} | Set limits for account handler.
 *NewBlockApi* | [**new_block**](docs/NewBlockApi.md#new_block) | **POST** /new_block | Get limits handler.
 *ThrottleApi* | [**activate_throttle_key**](docs/ThrottleApi.md#activate_throttle_key) | **PATCH** /throttle/activate | Activate existing (previously deactivated) throttle key
 *ThrottleApi* | [**add_throttle_key**](docs/ThrottleApi.md#add_throttle_key) | **POST** /throttle | Add throttle key handler.
@@ -79,7 +76,6 @@ Class | Method | HTTP request | Description
 
 ## Documentation For Models
 
- - [AccountLimits](docs/AccountLimits.md)
  - [Chainstate](docs/Chainstate.md)
  - [CreateDepositRequestBody](docs/CreateDepositRequestBody.md)
  - [CreateWithdrawalRequestBody](docs/CreateWithdrawalRequestBody.md)

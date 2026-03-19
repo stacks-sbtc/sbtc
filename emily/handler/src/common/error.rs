@@ -195,6 +195,12 @@ pub enum Error {
     #[error("DynamoDB contained many entries for the given key name: {0}")]
     TooManyThrottleEntries(String),
 
+    /// Dynamo db query with a limit on amount of return entries returned more
+    /// entries then limit. If this error occurs it means that we (likely) or
+    /// aws_sdk (unlikely) have a bug.
+    #[error("Dynamo db query with a limit on return entries returned too many entries")]
+    TooManyEntriesFromLimitedQuery,
+
     /// This happens when we fail to decode a base64 encoded string into a
     /// vector of bytes.
     #[error("Failed to base64 decode the string into bytes; {0}")]
@@ -300,6 +306,7 @@ impl Error {
             Error::AwsSdkDynamoDbScan(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::AwsSdkDynamoDbUpdateItem(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::TooManyThrottleEntries(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::TooManyEntriesFromLimitedQuery => StatusCode::INTERNAL_SERVER_ERROR,
             #[cfg(feature = "testing")]
             Error::DynamoDbBuild(_) => StatusCode::INTERNAL_SERVER_ERROR,
             #[cfg(feature = "testing")]

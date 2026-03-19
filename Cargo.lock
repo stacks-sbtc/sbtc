@@ -1760,6 +1760,7 @@ dependencies = [
  "serde",
  "serde_dynamo",
  "serde_json",
+ "serde_repr",
  "sha2 0.10.8",
  "stacks-common",
  "strum",

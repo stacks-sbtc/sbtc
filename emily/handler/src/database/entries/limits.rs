@@ -1,24 +1,43 @@
 //! Entries into the limit table.
 
-use std::{hash::Hash, time::SystemTime};
+use std::hash::Hash;
 
 use serde::{Deserialize, Serialize};
+use serde_repr::{Deserialize_repr, Serialize_repr};
 
-use crate::api::models::limits::AccountLimits;
+use crate::api::models::limits::Limits;
 
 use super::{EntryTrait, KeyTrait, PrimaryIndex, PrimaryIndexTrait};
 
 // Limit entry ---------------------------------------------------------------
 
-/// The special account name for the global cap.
-pub(crate) const GLOBAL_CAP_ACCOUNT: &str = "GLOBAL";
+/// Limit entry type, representing information about if entry is manually created
+/// or via throttle mode triggering
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Serialize_repr, Deserialize_repr)]
+#[repr(u64)]
+pub enum LimitEntryType {
+    /// Standard limits entry, manually setted.
+    #[default]
+    Standard = 0,
+    /// Throttle limits entry, setted via triggering throttle mode.
+    Throttled = 1,
+}
+
+impl std::fmt::Display for LimitEntryType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Standard => write!(f, "0"),
+            Self::Throttled => write!(f, "1"),
+        }
+    }
+}
 
 /// Limit table entry key. This is the primary index key.
 #[derive(Clone, Default, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct LimitEntryKey {
-    /// The account for the limit.
-    pub account: String,
+    /// Type of the entry, representing if this entry is throttle mode entry or not.
+    pub entry_type: LimitEntryType,
     /// The timestamp of the given update.
     pub timestamp: u64,
 }
@@ -46,46 +65,30 @@ pub struct LimitEntry {
     pub throttle_mode_initiator: Option<String>,
 }
 
-/// Convert from entry to its corresponding limit.
-impl From<LimitEntry> for AccountLimits {
-    fn from(limit_entry: LimitEntry) -> Self {
-        AccountLimits {
-            peg_cap: limit_entry.peg_cap,
-            per_deposit_minimum: limit_entry.per_deposit_minimum,
-            per_deposit_cap: limit_entry.per_deposit_cap,
-            per_withdrawal_cap: limit_entry.per_withdrawal_cap,
-            rolling_withdrawal_blocks: limit_entry.rolling_withdrawal_blocks,
-            rolling_withdrawal_cap: limit_entry.rolling_withdrawal_cap,
-            throttle_mode_initiator: limit_entry.throttle_mode_initiator,
+impl From<Limits> for LimitEntry {
+    fn from(limits: Limits) -> Self {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("SystemTime::now() returned time earlier then UNIX_EPOCH")
+            .as_secs();
+
+        Self {
+            key: LimitEntryKey {
+                entry_type: LimitEntryType::Standard,
+                timestamp,
+            },
+            peg_cap: limits.peg_cap,
+            per_deposit_minimum: limits.per_deposit_minimum,
+            per_deposit_cap: limits.per_deposit_cap,
+            per_withdrawal_cap: limits.per_withdrawal_cap,
+            rolling_withdrawal_blocks: limits.rolling_withdrawal_blocks,
+            rolling_withdrawal_cap: limits.rolling_withdrawal_cap,
+            throttle_mode_initiator: limits.throttle_mode_initiator,
         }
     }
 }
 
 impl LimitEntry {
-    /// Create a new limit entry from an account limit and the chosen time.
-    pub fn from_account_limit(
-        account: String,
-        now: SystemTime,
-        account_limit: &AccountLimits,
-    ) -> Self {
-        LimitEntry {
-            key: LimitEntryKey {
-                account,
-                timestamp: now
-                    .duration_since(std::time::UNIX_EPOCH)
-                    // It's impossible for this to fail.
-                    .expect("Error making timestamp during limit entry creation.")
-                    .as_secs(),
-            },
-            peg_cap: account_limit.peg_cap,
-            per_deposit_minimum: account_limit.per_deposit_minimum,
-            per_deposit_cap: account_limit.per_deposit_cap,
-            per_withdrawal_cap: account_limit.per_withdrawal_cap,
-            rolling_withdrawal_blocks: account_limit.rolling_withdrawal_blocks,
-            rolling_withdrawal_cap: account_limit.rolling_withdrawal_cap,
-            throttle_mode_initiator: account_limit.throttle_mode_initiator.clone(),
-        }
-    }
     /// Returns true if the limit entry has no limits set.
     pub fn is_empty(&self) -> bool {
         self.peg_cap.is_none()
@@ -97,11 +100,11 @@ impl LimitEntry {
 /// Implements the key trait for the deposit entry key.
 impl KeyTrait for LimitEntryKey {
     /// The type of the partition key.
-    type PartitionKey = String;
+    type PartitionKey = u64;
     /// the type of the sort key.
     type SortKey = u64;
     /// The table field name of the partition key.
-    const PARTITION_KEY_NAME: &'static str = "Account";
+    const PARTITION_KEY_NAME: &'static str = "EntryType";
     /// The table field name of the sort key.
     const SORT_KEY_NAME: &'static str = "Timestamp";
 }

@@ -2,7 +2,6 @@
 .travis.yml
 Cargo.toml
 README.md
-docs/AccountLimits.md
 docs/Chainstate.md
 docs/ChainstateApi.md
 docs/CorsApi.md
@@ -53,7 +52,6 @@ src/apis/new_block_api.rs
 src/apis/throttle_api.rs
 src/apis/withdrawal_api.rs
 src/lib.rs
-src/models/account_limits.rs
 src/models/chainstate.rs
 src/models/create_deposit_request_body.rs
 src/models/create_withdrawal_request_body.rs

@@ -1,6 +1,5 @@
 use argon2::{Argon2, password_hash::PasswordHasher as _};
 use reqwest_012::StatusCode;
-use std::collections::HashMap;
 use test_case::test_case;
 
 use testing_emily_client::apis;
@@ -30,7 +29,6 @@ async fn base_flow() {
         rolling_withdrawal_blocks: Some(Some(1)),
         rolling_withdrawal_cap: Some(Some(10_000_000_000)),
         throttle_mode_initiator: Some(None),
-        account_caps: HashMap::new(),
     };
     // Set some chainstates to make set_limits work
     let chainstates: Vec<Chainstate> = (0..110)
@@ -209,7 +207,6 @@ async fn throttle_does_not_overwrite_stronger_limits(
         per_withdrawal_cap,
         rolling_withdrawal_blocks,
         rolling_withdrawal_cap,
-        account_caps: HashMap::new(),
         throttle_mode_initiator: Some(None),
     };
     // Set some chainstates to make set_limits work
@@ -327,7 +324,6 @@ async fn start_throttle_returns_proper_error() {
         rolling_withdrawal_blocks: Some(Some(100)),
         rolling_withdrawal_cap: Some(Some(10_000)),
         throttle_mode_initiator: Some(None),
-        account_caps: HashMap::new(),
     };
     let chainstates: Vec<Chainstate> = (0..110)
         .map(|height| new_test_chainstate(height, height, 0))
@@ -405,7 +401,6 @@ async fn throttle_mode_overwrites_unlimited_limits() {
         rolling_withdrawal_blocks: Some(None),
         rolling_withdrawal_cap: Some(None),
         throttle_mode_initiator: Some(None),
-        account_caps: HashMap::new(),
     };
     // Set some chainstates to make set_limits work
     let chainstates: Vec<Chainstate> = (0..110)
@@ -461,7 +456,6 @@ async fn throttle_mode_initiator_correctly_shown_at_limits() {
         rolling_withdrawal_blocks: Some(Some(100)),
         rolling_withdrawal_cap: Some(Some(10_000)),
         throttle_mode_initiator: Some(None),
-        account_caps: HashMap::new(),
     };
     // Set some chainstates to make set_limits work
     let chainstates: Vec<Chainstate> = (0..110)
@@ -533,7 +527,6 @@ async fn stop_throttle_works() {
         rolling_withdrawal_blocks: Some(Some(100)),
         rolling_withdrawal_cap: Some(Some(10_000)),
         throttle_mode_initiator: Some(None),
-        account_caps: HashMap::new(),
     };
     // Set some chainstates to make set_limits work
     let chainstates: Vec<Chainstate> = (0..110)
@@ -613,7 +606,6 @@ async fn available_to_withdraw_calculated_correctly_in_throttle_mode() {
         rolling_withdrawal_blocks: Some(Some(100)),
         rolling_withdrawal_cap: Some(Some(10_000_000_000)),
         throttle_mode_initiator: Some(None),
-        account_caps: HashMap::new(),
     };
     // Set some chainstates to make set_limits work
     let chainstates: Vec<Chainstate> = (0..110)
@@ -672,7 +664,6 @@ async fn available_to_withdraw_calculated_correctly_in_throttle_mode() {
             emily_handler::database::accessors::THROTTLE_MODE_ROLLING_CAP - 100,
         )),
         throttle_mode_initiator: Some(None),
-        account_caps: HashMap::new(),
     };
     apis::limits_api::set_limits(&configuration, stricter_initial_limits.clone())
         .await
@@ -717,7 +708,6 @@ async fn multiple_stop_throttle_does_not_overwrite_initial_limits() {
         rolling_withdrawal_blocks: Some(Some(100)),
         rolling_withdrawal_cap: Some(Some(10_000)),
         throttle_mode_initiator: Some(None),
-        account_caps: HashMap::new(),
     };
     // Set some chainstates to make set_limits work
     let chainstates: Vec<Chainstate> = (0..110)
