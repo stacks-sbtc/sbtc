@@ -334,7 +334,7 @@ async fn new_block_handler(ctx: &IntegrationTestContext<StacksClient>, block: &B
                     new_block::handle_key_rotation(ctx, event.into()).await
                 }
                 Err(error) => {
-                    panic!("unkown event: {error}");
+                    panic!("unknown event: {error}");
                 }
             }
             .expect("failed to handle event");
@@ -346,7 +346,7 @@ async fn new_block_handler(ctx: &IntegrationTestContext<StacksClient>, block: &B
 ///  - the sBTC signers bootstrap
 ///  - a deposit is created on Emily
 ///  - the signers fulfill it (with a controlled chain progression) and mint sBTC
-///  - the receipient creates a withdrawal request
+///  - the recipient creates a withdrawal request
 ///  - the signers fulfill it (with a controlled chain progression) and pegout BTC
 #[test_log::test(tokio::test)]
 async fn deposit_and_withdrawal() {
