@@ -2,7 +2,7 @@
 //!
 
 mod info;
-mod new_block;
+pub mod new_block;
 mod router;
 mod status;
 
@@ -18,4 +18,4 @@ pub struct ApiState<C> {
 }
 
 /// The name of the sbtc registry smart contract.
-const SBTC_REGISTRY_CONTRACT_NAME: &str = "sbtc-registry";
+pub const SBTC_REGISTRY_CONTRACT_NAME: &str = "sbtc-registry";
