@@ -1901,7 +1901,6 @@ mod tests {
     use crate::stacks::wallet::get_full_tx_size;
     use crate::storage::memory::Store;
     use crate::testing::stacks::assert_db_contains_stacks_headers;
-    use crate::util::FallbackClientError;
 
     use assert_matches::assert_matches;
     use clarity::types::Address as _;
@@ -1955,7 +1954,7 @@ mod tests {
     #[ignore = "This is an integration test that uses the real testnet"]
     #[test_case(|url| StacksClient::new(url).unwrap(); "stacks-client")]
     #[test_case(|url| ApiFallbackClient::new(vec![StacksClient::new(url).unwrap()]).unwrap(); "fallback-client")]
-    #[test_log::test(tokio::test)]
+    #[tokio::test]
     async fn fetch_unknown_ancestors_works_in_testnet<F, C>(client: F)
     where
         C: StacksInteract,
@@ -2045,14 +2044,8 @@ mod tests {
         // The moment of truth, do the requests succeed?
         let headers = client.get_tenure_headers(&ch).await.unwrap();
         assert_eq!(headers.headers.len(), 39);
-        assert_eq!(
-            headers.start_header().unwrap().block_height,
-            1507195u64.into()
-        );
-        assert_eq!(
-            headers.end_header().unwrap().block_height,
-            1507233u64.into()
-        );
+        assert_eq!(headers.start_height().unwrap(), 1507195u64.into());
+        assert_eq!(headers.end_height().unwrap(), 1507233u64.into());
         assert_eq!(
             headers.last_sortition_ch.to_hex(),
             "3f30756abe6808071ecdf94f7485cee10624667d"
@@ -2089,6 +2082,41 @@ mod tests {
         mock.assert();
     }
 
+    #[test_case(|url| StacksClient::new(url).unwrap(); "stacks-client")]
+    #[test_case(|url| ApiFallbackClient::new(vec![StacksClient::new(url).unwrap()]).unwrap(); "fallback-client")]
+    #[tokio::test]
+    async fn get_tenure_info_works<F, C>(client: F)
+    where
+        C: StacksInteract,
+        F: Fn(Url) -> C,
+    {
+        let raw_json_response = r#"{
+            "consensus_hash": "e42b3a9ffce62376e1f36cf76c33cc23d9305de1",
+            "tenure_start_block_id": "e08c740242092eb0b5f74756ce203db048a5156e444df531a7c29e2d952cf628",
+            "parent_consensus_hash": "d9693fbdf0a9bab9ee5ffd3c4f52fef6e1da1899",
+            "parent_tenure_start_block_id": "8ff4eb1ed4a2f83faada29f6012b7f86f476eafed9921dff8d2c14cdfa30da94",
+            "tip_block_id": "8f61dc41560560e8122609e82966740075929ed663543d9ad6733f8fc32876c5",
+            "tip_height": 2037,
+            "reward_cycle": 11
+        }"#;
+
+        let mut stacks_node_server = mockito::Server::new_async().await;
+        let first_mock = stacks_node_server
+            .mock("GET", "/v3/tenures/info")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(raw_json_response)
+            .expect(1)
+            .create();
+
+        let client = client(url::Url::parse(stacks_node_server.url().as_str()).unwrap());
+        let resp = client.get_tenure_info().await.unwrap();
+        let expected: GetTenureInfoResponse = serde_json::from_str(raw_json_response).unwrap();
+
+        assert_eq!(resp, expected);
+        first_mock.assert();
+    }
+
     /// Helper method for generating a list of public keys.
     fn generate_pubkeys(count: u16) -> Vec<PublicKey> {
         (0..count)
@@ -2108,13 +2136,11 @@ mod tests {
             .collect()
     }
 
-    #[test_case(|url| StacksClient::new(url).unwrap(), false; "stacks-client")]
-    #[test_case(|url| ApiFallbackClient::new(vec![StacksClient::new(url).unwrap()]).unwrap(), true; "fallback-client")]
+    #[test_case(|url| StacksClient::new(url).unwrap(); "stacks-client")]
+    #[test_case(|url| ApiFallbackClient::new(vec![StacksClient::new(url).unwrap()]).unwrap(); "fallback-client")]
     #[tokio::test]
-    async fn get_current_signer_set_fails_when_value_not_a_sequence<F, C>(
-        client: F,
-        is_fallback_client: bool,
-    ) where
+    async fn get_current_signer_set_fails_when_value_not_a_sequence<F, C>(client: F)
+    where
         C: StacksInteract,
         F: Fn(Url) -> C,
     {
@@ -2143,18 +2169,7 @@ mod tests {
             .await;
 
         let err = resp.unwrap_err();
-        if is_fallback_client {
-            let Error::FallbackClient(FallbackClientError::AllClientsFailed(inner_vec)) = err
-            else {
-                panic!("wrong error type")
-            };
-            assert_eq!(inner_vec.len(), 1);
-            let err = &inner_vec[0];
-            assert!(matches!(err, Error::InvalidStacksResponse(_)));
-        } else {
-            assert!(matches!(err, Error::InvalidStacksResponse(_)));
-        };
-
+        assert!(matches!(err, Error::InvalidStacksResponse(_)));
         mock.assert();
     }
 

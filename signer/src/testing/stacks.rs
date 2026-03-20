@@ -52,9 +52,7 @@ impl TenureBlockHeaders {
     /// Create a TenureBlockHeaders struct that is basically empty.
     pub fn nearly_empty() -> Result<Self, Error> {
         let header = NakamotoBlockHeader::empty().into();
-        let mut sortition_info = DUMMY_SORTITION_INFO;
-        sortition_info.burn_block_height = 300;
-        Self::try_new(vec![header], sortition_info)
+        Self::try_new(vec![header], DUMMY_SORTITION_INFO)
     }
 
     /// Create TenureBlockHeaders with some dummy sortition info.
