@@ -80,7 +80,7 @@ pub enum FallbackClientError {
     #[error(
         "all fallback clients failed to execute the request within the allotted number of retries"
     )]
-    AllClientsFailed(Vec<Error>),
+    AllClientsFailed,
 
     /// No endpoints were provided
     #[error("no endpoints were provided")]
@@ -203,12 +203,16 @@ impl<T> InnerApiFallbackClient<T> {
     /// if the closure returns an error.
     ///
     /// For more information on the number of attempts made, see [`Self::set_retry_count`].
-    pub async fn exec<'a, R, F>(&'a self, f: impl Fn(&'a T, RetryContext) -> F) -> Result<R, Error>
+    pub async fn exec<'a, R, E, F>(
+        &'a self,
+        f: impl Fn(&'a T, RetryContext) -> F,
+    ) -> Result<R, Error>
     where
-        F: Future<Output = Result<R, Error>> + 'a,
+        E: std::error::Error + std::fmt::Debug,
+        E: Into<Error>,
+        F: Future<Output = Result<R, E>> + 'a,
     {
         let retry_count = self.retry_count.load(Ordering::Relaxed);
-        let mut errors: Vec<Error> = Vec::new();
         for i in 0..=retry_count {
             let retry_ctx = RetryContext::new(retry_count, i);
             let client_index = self.last_client_index.load(Ordering::Relaxed);
@@ -217,10 +221,8 @@ impl<T> InnerApiFallbackClient<T> {
             if let Err(error) = result {
                 tracing::warn!(%error, retry_num=i, max_retries=retry_count, "failover client call failed");
 
-                errors.push(error);
-
                 if retry_ctx.is_aborted() {
-                    break;
+                    return Err(error.into());
                 }
 
                 self.last_client_index.store(
@@ -231,11 +233,10 @@ impl<T> InnerApiFallbackClient<T> {
                 continue;
             }
 
-            return result;
+            return result.map_err(Into::into);
         }
-        let error = FallbackClientError::AllClientsFailed(errors);
 
-        Err(Error::FallbackClient(error))
+        Err(FallbackClientError::AllClientsFailed.into())
     }
 }
 
@@ -440,7 +441,7 @@ mod tests {
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
-            Error::FallbackClient(FallbackClientError::AllClientsFailed(_))
+            Error::FallbackClient(FallbackClientError::AllClientsFailed)
         ));
     }
 
@@ -467,19 +468,10 @@ mod tests {
 
         assert_eq!(call_count.load(Ordering::Relaxed), 2);
 
-        let error = result.unwrap_err();
+        assert!(result.is_err());
 
         // Assert that the error is the error that the mock client returns
         // (which was just randomly chosen, it has no significance)
-        let Error::FallbackClient(FallbackClientError::AllClientsFailed(inner_vector)) = error
-        else {
-            panic!("wrong error type")
-        };
-        assert_eq!(inner_vector.len(), 2);
-        let first_error = &inner_vector[0];
-        let second_error = &inner_vector[1];
-
-        assert!(matches!(first_error, Error::Dummy));
-        assert!(matches!(second_error, Error::Dummy));
+        assert!(matches!(result.unwrap_err(), Error::Dummy));
     }
 }
