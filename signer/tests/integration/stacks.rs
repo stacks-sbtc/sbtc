@@ -151,20 +151,18 @@ async fn update_db_with_unknown_ancestors_process_first_nakamoto_block() {
     let raw_json_response_get_epoch_status =
         include_str!("../fixtures/stacksapi-get-pox-info-test-data.json");
 
-    // Three tenure headers mocks was obtained by curling hiro api for mainnet consensus
-    // hashes ch_1, ch_2 and ch_3 (which correspond to blocks 900_000, 899_999 and 899_998), and
-    // tweaking anchor heights, such that ch_1 is second Nakamoto block, ch_2 is first Nakamoto
-    // block and ch_3 is last non-Nakamoto block, according to stacksapi-get-pox-info-test-data.json
+    // Three tenure headers mocks was obtained by curling hiro api for
+    // mainnet consensus hashes ch_1 and ch_2 (which correspond to blocks
+    // 900_000 and 899_999), and tweaking anchor heights, such that ch_1 is
+    // second Nakamoto block, ch_2 is first Nakamoto block, according to
+    // stacksapi-get-pox-info-test-data.json
     let raw_json_response_get_tenure_headers_1 =
         include_str!("../fixtures/stacksapi-v3-tenures-blocks-1.json");
     let raw_json_response_get_tenure_headers_2 =
         include_str!("../fixtures/stacksapi-v3-tenures-blocks-2.json");
-    let raw_json_response_get_tenure_headers_3 =
-        include_str!("../fixtures/stacksapi-v3-tenures-blocks-3.json");
 
     let ch_1 = ConsensusHash::from_hex("d9f1486525e738d818fee87c4739b87e03bf35e4").unwrap();
     let ch_2 = ConsensusHash::from_hex("3f30756abe6808071ecdf94f7485cee10624667d").unwrap();
-    let ch_3 = ConsensusHash::from_hex("39fa0bf52fbe50fccd43ba9ffcacae39793231bc").unwrap();
 
     let mut stacks_node_server = mockito::Server::new_async().await;
     let mock_get_epoch_status = stacks_node_server
@@ -187,13 +185,6 @@ async fn update_db_with_unknown_ancestors_process_first_nakamoto_block() {
         .with_status(200)
         .with_header("content-type", "application/json")
         .with_body(raw_json_response_get_tenure_headers_2)
-        .expect(1)
-        .create();
-    let mock_get_tenure_headers_3 = stacks_node_server
-        .mock("GET", format!("/v3/tenures/blocks/{ch_3}").as_str())
-        .with_status(200)
-        .with_header("content-type", "application/json")
-        .with_body(raw_json_response_get_tenure_headers_3)
         .expect(1)
         .create();
 
@@ -219,7 +210,6 @@ async fn update_db_with_unknown_ancestors_process_first_nakamoto_block() {
     mock_get_epoch_status.assert();
     mock_get_tenure_headers_1.assert();
     mock_get_tenure_headers_2.assert();
-    mock_get_tenure_headers_3.assert();
 
     signer::testing::storage::drop_db(storage).await;
 }
@@ -231,20 +221,18 @@ async fn update_db_with_unknown_ancestors_process_stops_when_fetches_seen_block(
     let raw_json_response_get_epoch_status =
         include_str!("../fixtures/stacksapi-get-pox-info-test-data.json");
 
-    // Three tenure headers mocks was obtained by curling hiro api for mainnet consensus
-    // hashes ch_1, ch_2 and ch_3 (which correspond to blocks 900_000, 899_999 and 899_998), and
-    // tweaking anchor heights, such that ch_1 is second Nakamoto block, ch_2 is first Nakamoto
-    // block and ch_3 is last non-Nakamoto block, according to stacksapi-get-pox-info-test-data.json
+    // Three tenure headers mocks was obtained by curling hiro api for
+    // mainnet consensus hashes ch_1 and ch_2 (which correspond to blocks
+    // 900_000 and 899_999), and tweaking anchor heights, such that ch_1 is
+    // second Nakamoto block, ch_2 is first Nakamoto block, according to
+    // stacksapi-get-pox-info-test-data.json
     let raw_json_response_get_tenure_headers_1 =
         include_str!("../fixtures/stacksapi-v3-tenures-blocks-1.json");
     let raw_json_response_get_tenure_headers_2 =
         include_str!("../fixtures/stacksapi-v3-tenures-blocks-2.json");
-    let raw_json_response_get_tenure_headers_3 =
-        include_str!("../fixtures/stacksapi-v3-tenures-blocks-3.json");
 
     let ch_1 = ConsensusHash::from_hex("d9f1486525e738d818fee87c4739b87e03bf35e4").unwrap();
     let ch_2 = ConsensusHash::from_hex("3f30756abe6808071ecdf94f7485cee10624667d").unwrap();
-    let ch_3 = ConsensusHash::from_hex("39fa0bf52fbe50fccd43ba9ffcacae39793231bc").unwrap();
 
     let mut stacks_node_server = mockito::Server::new_async().await;
     let mock_get_epoch_status = stacks_node_server
@@ -267,13 +255,6 @@ async fn update_db_with_unknown_ancestors_process_stops_when_fetches_seen_block(
         .with_status(200)
         .with_header("content-type", "application/json")
         .with_body(raw_json_response_get_tenure_headers_2)
-        .expect(1)
-        .create();
-    let mock_get_tenure_headers_3 = stacks_node_server
-        .mock("GET", format!("/v3/tenures/blocks/{ch_3}").as_str())
-        .with_status(200)
-        .with_header("content-type", "application/json")
-        .with_body(raw_json_response_get_tenure_headers_3)
         .expect(1)
         .create();
 
@@ -302,8 +283,10 @@ async fn update_db_with_unknown_ancestors_process_stops_when_fetches_seen_block(
     assert_db_contains_stacks_headers(&storage, actual_start_height_ch2, actual_end_height_ch2)
         .await;
 
-    // Now, we call update_db_with_unknown_ancestors again for ch_1, and the mocks ensure that it calls
-    // mock_get_epoch_status once and mock_get_tenure_headers_1, avoiding calling mock_get_tenure_headers_2
+    // Now, we call update_db_with_unknown_ancestors again for ch_1, and
+    // the mocks ensure that it calls mock_get_epoch_status once and
+    // mock_get_tenure_headers_1, avoiding calling
+    // mock_get_tenure_headers_2
     let res = update_db_with_unknown_ancestors(&client, &storage, ch_1)
         .await
         .unwrap()
@@ -324,7 +307,6 @@ async fn update_db_with_unknown_ancestors_process_stops_when_fetches_seen_block(
     mock_get_epoch_status.assert();
     mock_get_tenure_headers_1.assert();
     mock_get_tenure_headers_2.assert();
-    mock_get_tenure_headers_3.assert();
 
     signer::testing::storage::drop_db(storage).await;
 }
@@ -399,8 +381,9 @@ async fn update_db_with_unknown_ancestors_works_with_empty_tenures() {
 
     let storage = signer::testing::storage::new_test_database().await;
 
-    // Now, lets call update_db_with_unknown_ancestors and ensure that it correctly fetched all blocks
-    // corresponding to ch2 but no other blocks
+    // Now, lets call update_db_with_unknown_ancestors and ensure that it
+    // correctly fetched all blocks corresponding to ch2 but no other
+    // blocks
     update_db_with_unknown_ancestors(&client, &storage, ch_1)
         .await
         .unwrap();
