@@ -1296,7 +1296,7 @@ impl StacksClient {
 /// datastore, starting at the given [`ConsensusHash`] and store them in
 /// the database.
 ///
-/// This function fetches all unknown nakamoto blocks that are on the
+/// This function fetches all unknown Nakamoto blocks that are on the
 /// canonical chain identified by the given ConsensusHash that are not
 /// already stored in the database. It fetches these blocks one tenure at a
 /// time, and then writes them to the `stacks_blocks` table in a
@@ -1336,8 +1336,7 @@ where
         // If tenure.headers() is empty, then we know that we want to fetch
         // the previous tenure's headers.
         if let Some(header) = tenure.headers().last() {
-            // Maybe we've seen this parent already, if so then it's time
-            // to stop.
+            // Maybe we've seen this parent already; if so, it's time to stop.
             if db.stacks_block_exists(&header.parent_block_id).await? {
                 tracing::debug!("parent block known in the database");
                 break;
@@ -2797,7 +2796,7 @@ mod tests {
         println!("{:#?}", headers.clone());
         let block_hash = headers.anchor_block_hash;
 
-        // This hash is indeed hash of block 900_000
+        // This hash is indeed the hash of Bitcoin block 900_000
         // https://mempool.space/block/000000000000000000010538edbfd2d5b809a33dd83f284aeea41c6d0d96968a
         assert_eq!(
             &format!("{}", block_hash),
