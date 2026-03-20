@@ -53,8 +53,19 @@ pub struct Nonce {
 }
 
 impl Nonce {
-    /// Construct a random nonce
+    /// Create a new random nonce that is valid
     pub fn random<RNG: RngCore + CryptoRng>(rng: &mut RNG) -> Self {
+        let mut new_me = Self::new(rng);
+
+        while !new_me.is_valid() {
+            new_me = Self::new(rng);
+        }
+
+        new_me
+    }
+
+    /// Construct a random nonce
+    fn new<R: RngCore + CryptoRng>(rng: &mut R) -> Self {
         Self {
             d: Self::gen(rng),
             e: Self::gen(rng),
@@ -77,11 +88,12 @@ impl Nonce {
         hash_to_scalar(&mut hasher)
     }
 
-    /// Check that the nonces are not zero since that can lead to attacks
+    /// Check that the nonces are not zero since or one since that can lead
+    /// to attacks
     pub fn is_valid(&self) -> bool {
         let zero = Scalar::from(0);
         let one = Scalar::from(1);
-        !(self.d == zero && self.e == zero) && !(self.d == one && self.e == one)
+        self.d != zero && self.e != zero && self.d != one && self.e != one
     }
 }
 
