@@ -232,7 +232,6 @@ impl BitcoinInteract for TestHarness {
         Ok(Some(OutPointSummary {
             block_hash,
             is_coinbase: tx_response.tx.is_coinbase(),
-            outpoint: *outpoint,
         }))
     }
 

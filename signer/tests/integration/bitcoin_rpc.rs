@@ -615,7 +615,6 @@ async fn get_utxo_info_confirmed_unspent_mempool_only_and_spent() {
     let summary = client.get_utxo_info(&deposit_outpoint).unwrap().unwrap();
 
     assert_eq!(summary.block_hash, setup.deposit_block_hash);
-    assert_eq!(summary.outpoint, deposit_outpoint);
     assert!(!summary.is_coinbase);
 
     // After a transaction spending the deposit is in the mempool, the

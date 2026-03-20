@@ -74,8 +74,11 @@ pub trait BitcoinInteract: Sync + Send {
     ///
     /// # Notes
     ///
-    /// This method works for only unspent outputs. If the output has been
-    /// spent then Ok(None) is returned.
+    /// This method only works for unspent outputs that have been confirmed
+    /// in a block. If the output has been spent by a transaction that is
+    /// confirmed in a block then Ok(None) is returned. If the output has
+    /// been spent by a transaction that is in the mempool then Ok(Some(_))
+    /// is returned.
     fn get_utxo_info(
         &self,
         outpoint: &OutPoint,

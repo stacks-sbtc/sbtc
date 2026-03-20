@@ -57,11 +57,7 @@ pub struct GetTxResponse {
     pub block_time: Option<u64>,
 }
 
-/// A slimmed down type representing a response from bitcoin-core's
-/// getrawtransaction RPC.
-///
-/// The docs for the getrawtransaction RPC call can be found here:
-/// <https://bitcoincore.org/en/doc/25.0.0/rpc/rawtransactions/getrawtransaction/>.
+/// A type containing basic information about an unspent output
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "testing", derive(PartialEq))]
 pub struct OutPointSummary {
@@ -73,8 +69,6 @@ pub struct OutPointSummary {
     /// This is true for coinbase transactions, and false for other
     /// transactions.
     pub is_coinbase: bool,
-    /// The outpoint associated with this struct.
-    pub outpoint: OutPoint,
 }
 
 /// A struct containing the response from bitcoin-core for requests for
@@ -531,7 +525,6 @@ impl BitcoinCoreClient {
             Ok(block_hash) => Ok(Some(OutPointSummary {
                 block_hash,
                 is_coinbase: out.coinbase,
-                outpoint: *outpoint,
             })),
             Err(BtcRpcError::JsonRpc(JsonRpcError::Rpc(RpcError { code: -5, .. }))) => Ok(None),
             Err(err) => Err(Error::BitcoinCoreGetBlockHash(err, *confirmation_height)),
