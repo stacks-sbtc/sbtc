@@ -165,8 +165,7 @@ impl TestHarness {
                         .scan(initial_state, |last_stx_block_header, mut stx_block| {
                             stx_block.header.parent_block_id = last_stx_block_header.block_id();
                             stx_block.header.chain_length = last_stx_block_header.chain_length + 1;
-                            stx_block.header.consensus_hash =
-                                bh2ch[&btc_block.block_hash].clone().into();
+                            stx_block.header.consensus_hash = bh2ch[&btc_block.block_hash].into();
                             *last_stx_block_header = stx_block.header.clone();
                             Some((stx_block.block_id(), stx_block, btc_block.block_hash))
                         })
