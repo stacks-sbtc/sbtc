@@ -56,7 +56,7 @@ use signer::storage::model::TxPrevout;
 use signer::storage::model::TxPrevoutType;
 use signer::storage::postgres::PgStore;
 use signer::testing::btc::get_canonical_chain_tip;
-use signer::testing::stacks::DUMMY_NODE_INFO;
+use signer::testing::stacks::DUMMY_TENURE_INFO;
 
 use signer::block_observer::BlockObserver;
 use signer::context::Context as _;
@@ -161,6 +161,10 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
 
     let anchor = get_canonical_chain_tip(rpc);
     ctx.with_stacks_client(|client| {
+        client
+            .expect_get_tenure_info()
+            .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
+
         client.expect_get_block().returning(|_| {
             let response = Ok(NakamotoBlock {
                 header: NakamotoBlockHeader::empty(),
@@ -172,23 +176,12 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
         let tenure_headers = TenureBlockHeaders::from_anchor(&anchor);
 
         client
-            .expect_get_node_info()
-            .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
-        let cloned_tenure_headers = tenure_headers.clone();
-        client
             .expect_get_tenure_headers()
-            .once()
-            .returning(move |_| Box::pin(std::future::ready(Ok(cloned_tenure_headers.clone()))));
-        let cloned_tenure_headers = tenure_headers.clone();
-        client.expect_get_tenure_headers().returning(move |_| {
-            let mut headers = cloned_tenure_headers.clone();
-            headers.anchor_block_height = headers.anchor_block_height - 1;
-            Box::pin(std::future::ready(Ok(headers)))
-        });
-        let cloned_tenure_headers = tenure_headers.clone();
-        client.expect_get_epoch_status().returning(move || {
+            .returning(move |_| Box::pin(std::future::ready(Ok(tenure_headers.clone()))));
+
+        client.expect_get_epoch_status().returning(|| {
             Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
-                nakamoto_start_height: cloned_tenure_headers.anchor_block_height,
+                nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
             })))
         });
 
@@ -430,25 +423,16 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     // up-to-date information. We don't have stacks-core running so we mock
     // these calls.
     ctx.with_stacks_client(|client| {
-        let chain_tip = BitcoinBlockHash::from(chain_tip_info.hash);
         client
-            .expect_get_tenure_headers()
-            .once()
-            .returning(move |_| {
-                let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
-                tenure.anchor_block_hash = chain_tip;
-                Box::pin(std::future::ready(Ok(tenure)))
-            });
+            .expect_get_tenure_info()
+            .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
 
+        let chain_tip = BitcoinBlockHash::from(chain_tip_info.hash);
         client.expect_get_tenure_headers().returning(move |_| {
             let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
-            tenure.anchor_block_height = 231u32.into();
+            tenure.anchor_block_hash = chain_tip;
             Box::pin(std::future::ready(Ok(tenure)))
         });
-
-        client
-            .expect_get_node_info()
-            .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
 
         client.expect_get_epoch_status().returning(|| {
             Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
@@ -882,7 +866,7 @@ async fn block_observer_picks_up_chained_unordered_sweeps() {
 #[test_case::test_case(false, SbtcLimits::new(Some(bitcoin::Amount::from_sat(1_000)), None, None, None, None, None, None, None); "no contracts, total cap limit")]
 #[test_case::test_case(true, SbtcLimits::unlimited(); "deployed contracts, default limits")]
 #[test_case::test_case(true, SbtcLimits::new(Some(bitcoin::Amount::from_sat(1_000)), None, None, None, None, None, None, None); "deployed contracts, total cap limit")]
-#[test_log::test(tokio::test)]
+#[tokio::test]
 async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcLimits) {
     // We start with the typical setup with a fresh database and context
     // with a real bitcoin core client and a real connection to our
@@ -906,6 +890,9 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
     let chain_tip = get_canonical_chain_tip(rpc);
     let db2 = db.clone();
     ctx.with_stacks_client(|client| {
+        client
+            .expect_get_tenure_info()
+            .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
         client.expect_get_block().returning(|_| {
             let response = Ok(NakamotoBlock {
                 header: NakamotoBlockHeader::empty(),
@@ -917,22 +904,12 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
         let tenure_headers = TenureBlockHeaders::from_anchor(&chain_tip);
 
         client
-            .expect_get_node_info()
-            .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
-        let tenure_headers_cloned = tenure_headers.clone();
-        client
             .expect_get_tenure_headers()
-            .once()
-            .returning(move |_| Box::pin(std::future::ready(Ok(tenure_headers_cloned.clone()))));
-        client.expect_get_tenure_headers().returning(move |_| {
-            let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
-            tenure.anchor_block_height = tenure_headers.anchor_block_height - 1;
-            Box::pin(std::future::ready(Ok(tenure)))
-        });
+            .returning(move |_| Box::pin(std::future::ready(Ok(tenure_headers.clone()))));
 
-        client.expect_get_epoch_status().returning(move || {
+        client.expect_get_epoch_status().returning(|| {
             Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
-                nakamoto_start_height: tenure_headers.anchor_block_height,
+                nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
             })))
         });
 
@@ -1235,6 +1212,9 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
     let db2 = db.clone();
     let chain_tip = get_canonical_chain_tip(rpc);
     ctx.with_stacks_client(|client| {
+        client
+            .expect_get_tenure_info()
+            .returning(|| Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
         client.expect_get_block().returning(|_| {
             let response = Ok(NakamotoBlock {
                 header: NakamotoBlockHeader::empty(),
@@ -1245,26 +1225,12 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
         let tenure_headers = TenureBlockHeaders::from_anchor(&chain_tip);
 
         client
-            .expect_get_node_info()
-            .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
-
-        let cloned_headers = tenure_headers.clone();
-        client
             .expect_get_tenure_headers()
-            .once()
-            .returning(move |_| Box::pin(std::future::ready(Ok(cloned_headers.clone()))));
+            .returning(move |_| Box::pin(std::future::ready(Ok(tenure_headers.clone()))));
 
-        let cloned_headers = tenure_headers.clone();
-        client.expect_get_tenure_headers().returning(move |_| {
-            let mut headers = cloned_headers.clone();
-            headers.anchor_block_height = headers.anchor_block_height - 1;
-            Box::pin(std::future::ready(Ok(headers.clone())))
-        });
-
-        let cloned_headers = tenure_headers.clone();
-        client.expect_get_epoch_status().returning(move || {
+        client.expect_get_epoch_status().returning(|| {
             Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
-                nakamoto_start_height: cloned_headers.anchor_block_height,
+                nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
             })))
         });
 
@@ -1394,7 +1360,7 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
 
 /// This test checks that the block observer correctly update the state of
 /// pending DKG shares once they exit the verification window
-#[test_log::test(tokio::test)]
+#[tokio::test]
 async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
     let mut rng = get_rng();
     // We start with the typical setup with a fresh database and context
@@ -1425,6 +1391,9 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
     let chain_tip = get_canonical_chain_tip(rpc);
 
     ctx.with_stacks_client(|client| {
+        client
+            .expect_get_tenure_info()
+            .returning(|| Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
         client.expect_get_block().returning(|_| {
             let response = Ok(NakamotoBlock {
                 header: NakamotoBlockHeader::empty(),
@@ -1435,25 +1404,12 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
         let tenure_headers = TenureBlockHeaders::from_anchor(&chain_tip);
 
         client
-            .expect_get_node_info()
-            .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
-        let cloned_headers = tenure_headers.clone();
-        client
             .expect_get_tenure_headers()
-            .once()
-            .returning(move |_| Box::pin(std::future::ready(Ok(cloned_headers.clone()))));
+            .returning(move |_| Box::pin(std::future::ready(Ok(tenure_headers.clone()))));
 
-        let cloned_headers = tenure_headers.clone();
-        client.expect_get_tenure_headers().returning(move |_| {
-            let mut headers = cloned_headers.clone();
-            headers.anchor_block_height = headers.anchor_block_height - 1;
-            Box::pin(std::future::ready(Ok(headers)))
-        });
-
-        let cloned_headers = tenure_headers.clone();
-        client.expect_get_epoch_status().returning(move || {
+        client.expect_get_epoch_status().returning(|| {
             Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
-                nakamoto_start_height: cloned_headers.anchor_block_height,
+                nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
             })))
         });
 
@@ -1647,24 +1603,16 @@ async fn block_observer_ignores_coinbase() {
     // up-to-date information. We don't have stacks-core running so we mock
     // these calls.
     ctx.with_stacks_client(|client| {
-        let chain_tip = BitcoinBlockHash::from(chain_tip_info.hash);
         client
-            .expect_get_tenure_headers()
-            .once()
-            .returning(move |_| {
-                let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
-                tenure.anchor_block_hash = chain_tip;
-                Box::pin(std::future::ready(Ok(tenure)))
-            });
+            .expect_get_tenure_info()
+            .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
+
+        let chain_tip = BitcoinBlockHash::from(chain_tip_info.hash);
         client.expect_get_tenure_headers().returning(move |_| {
             let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
-            tenure.anchor_block_height = 231u32.into();
+            tenure.anchor_block_hash = chain_tip;
             Box::pin(std::future::ready(Ok(tenure)))
         });
-
-        client
-            .expect_get_node_info()
-            .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
 
         client.expect_get_epoch_status().returning(|| {
             Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
@@ -1912,17 +1860,12 @@ async fn block_observer_handles_deposits_with_high_max_fee() {
     // these calls.
     ctx.with_stacks_client(|client| {
         client
-            .expect_get_tenure_headers()
-            .once()
-            .returning(move |_| {
-                let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
-                tenure.anchor_block_hash = chain_tip;
-                Box::pin(std::future::ready(Ok(tenure)))
-            });
+            .expect_get_tenure_info()
+            .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
 
         client.expect_get_tenure_headers().returning(move |_| {
             let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
-            tenure.anchor_block_height = 231u32.into();
+            tenure.anchor_block_hash = chain_tip;
             Box::pin(std::future::ready(Ok(tenure)))
         });
 
@@ -1931,10 +1874,6 @@ async fn block_observer_handles_deposits_with_high_max_fee() {
                 nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
             })))
         });
-
-        client
-            .expect_get_node_info()
-            .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
 
         client.expect_get_contract_source().returning(|_, _| {
             Box::pin(async {

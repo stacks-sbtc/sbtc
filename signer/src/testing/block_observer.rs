@@ -38,6 +38,7 @@ use crate::keys::PublicKey;
 use crate::stacks::api::AccountInfo;
 use crate::stacks::api::FeePriority;
 use crate::stacks::api::GetNodeInfoResponse;
+use crate::stacks::api::GetTenureInfoResponse;
 use crate::stacks::api::SignerSetInfo;
 use crate::stacks::api::StacksBlockHeader;
 use crate::stacks::api::StacksEpochStatus;
@@ -414,6 +415,29 @@ impl StacksInteract for TestHarness {
             .consensus_hash;
         sortition_info.last_sortition_ch = Some(previous_ch.clone());
         TenureBlockHeaders::try_new(headers, sortition_info)
+    }
+
+    async fn get_tenure_info(&self) -> Result<GetTenureInfoResponse, Error> {
+        let (_, _, btc_block_id) = self.stacks_blocks.last().unwrap();
+
+        Ok(GetTenureInfoResponse {
+            consensus_hash: ConsensusHash::new([0; 20]),
+            tenure_start_block_id: self
+                .stacks_blocks
+                .iter()
+                .find(|(_, _, block_id)| block_id == btc_block_id)
+                .map(|(stx_block_id, _, _)| stx_block_id.clone().into())
+                .unwrap(),
+            parent_consensus_hash: ConsensusHash::new([0; 20]),
+            parent_tenure_start_block_id: StacksBlockId::first_mined().into(),
+            tip_block_id: self
+                .stacks_blocks
+                .last()
+                .map(|(block_id, _, _)| block_id.clone().into())
+                .unwrap(),
+            tip_height: (self.stacks_blocks.len() as u64).into(),
+            reward_cycle: 0,
+        })
     }
 
     async fn get_sortition_info(

@@ -115,6 +115,7 @@ use signer::storage::model::WithdrawalRequest;
 use signer::storage::postgres::PgStore;
 use signer::testing::IterTestExt as _;
 use signer::testing::stacks::DUMMY_SORTITION_INFO;
+use signer::testing::stacks::DUMMY_TENURE_INFO;
 use signer::testing::storage::DbReadTestExt as _;
 use signer::testing::storage::DbWriteTestExt as _;
 use signer::testing::transaction_coordinator::select_coordinator;
@@ -146,7 +147,6 @@ use signer::storage::model;
 use signer::storage::model::EncryptedDkgShares;
 use signer::testing;
 use signer::testing::context::*;
-use signer::testing::stacks::DUMMY_NODE_INFO;
 use signer::testing::storage::model::TestData;
 use signer::testing::transaction_signer::TxSignerEventLoopHarness;
 use signer::testing::wsts::SignerSet;
@@ -571,54 +571,24 @@ async fn mock_stacks_core<D, B, E>(
     broadcast_stacks_tx: Sender<StacksTransaction>,
 ) {
     ctx.with_stacks_client(|client| {
+        client
+            .expect_get_tenure_info()
+            .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
+
         client.expect_get_block().returning(|_| {
-            // We need provide non-zero consensus hash, because usually in tests
-            // zero consensus hash is a non-Nakamoto block.
-            let mut nakamoto_block_header = NakamotoBlockHeader::empty();
-            nakamoto_block_header.consensus_hash = ConsensusHash([1u8; 20]);
             let response = Ok(NakamotoBlock {
-                header: nakamoto_block_header,
+                header: NakamotoBlockHeader::empty(),
                 txs: vec![],
             });
             Box::pin(std::future::ready(response))
         });
 
         let chain_tip = model::BitcoinBlockHash::from(chain_tip_info.hash);
-        client
-            .expect_get_node_info()
-            .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO.clone()))));
-        client
-            .expect_get_tenure_headers()
-            .once()
-            .returning(move |consensus_hash| {
-                let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
-                tenure.anchor_block_hash = chain_tip;
-                // We need to do this to ensure that last_sortition_ch is not consensus_hash, because it usually
-                // should be so.
-                let last_sortition_ch_bytes = (*consensus_hash)
-                    .into_bytes()
-                    .map(|byte| byte.overflowing_add(1).0);
-                tenure.last_sortition_ch =
-                    signer::storage::model::ConsensusHash::new(last_sortition_ch_bytes);
-                Box::pin(std::future::ready(Ok(tenure)))
-            });
-
-        client
-            .expect_get_tenure_headers()
-            .returning(move |consensus_hash| {
-                let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
-                tenure.anchor_block_hash = chain_tip;
-                // We need to do this to ensure that last_sortition_ch is not consensus_hash, because it usually
-                // should be so.
-                let last_sortition_ch_bytes = (*consensus_hash)
-                    .into_bytes()
-                    .map(|byte| byte.overflowing_add(1).0);
-                tenure.last_sortition_ch =
-                    signer::storage::model::ConsensusHash::new(last_sortition_ch_bytes);
-                // We need this to eventually exit update_db_with_unknown_ancestors
-                tenure.anchor_block_height = 231u32.into();
-                Box::pin(std::future::ready(Ok(tenure)))
-            });
+        client.expect_get_tenure_headers().returning(move |_| {
+            let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
+            tenure.anchor_block_hash = chain_tip;
+            Box::pin(std::future::ready(Ok(tenure)))
+        });
 
         client.expect_get_epoch_status().returning(|| {
             Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
@@ -649,10 +619,10 @@ async fn mock_stacks_core<D, B, E>(
                 burn_header_timestamp: 0,
                 sortition_id: SortitionId([0; 32]),
                 parent_sortition_id: SortitionId([0; 32]),
-                consensus_hash: ConsensusHash([1; 20]),
+                consensus_hash: ConsensusHash([0; 20]),
                 was_sortition: true,
                 miner_pk_hash160: None,
-                stacks_parent_ch: Some(ConsensusHash([2; 20])),
+                stacks_parent_ch: None,
                 last_sortition_ch: None,
                 committed_block_hash: None,
                 vrf_seed: None,
@@ -708,7 +678,7 @@ async fn mock_stacks_core<D, B, E>(
 
 /// Tests that the coordinator deploys the smart contracts in the correct
 /// order if none are deployed.
-#[test_log::test(tokio::test)]
+#[tokio::test]
 async fn deploy_smart_contracts_coordinator() {
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
 
@@ -1772,9 +1742,8 @@ async fn pseudo_random_dkg() {
 
     // We create a tweak public key which is the generator of the secp256k1
     // elliptic curve. There is nothing special about the chosen tweak
-    // (TWEAKED_PK), we just need to make sure that it is not the adjusted
-    // aggregate key is neither equal to the original aggregate key nor its
-    // negation.
+    // (TWEAKED_PK), we just need to make sure that the adjusted aggregate
+    // key is neither equal to the original aggregate key nor its negation.
     let tweak_secret_key = secp256k1::SecretKey::from_slice(&secp256k1::constants::ONE).unwrap();
     let tweak_public_key = tweak_secret_key.public_key(SECP256K1);
     let adjusted_aggregate_key: PublicKey = original_shares
@@ -3759,6 +3728,10 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
 
         db.write_encrypted_dkg_shares(&shares).await.unwrap();
         ctx.with_stacks_client(|client| {
+            client
+                .expect_get_tenure_info()
+                .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
+
             client.expect_get_block().returning(|_| {
                 let response = Ok(NakamotoBlock {
                     header: NakamotoBlockHeader::empty(),
@@ -3766,24 +3739,11 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
                 });
                 Box::pin(std::future::ready(response))
             });
-            client
-                .expect_get_node_info()
-                .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO))));
 
             let chain_tip = model::BitcoinBlockHash::from(chain_tip_info.hash);
-            client
-                .expect_get_tenure_headers()
-                .once()
-                .returning(move |_| {
-                    let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
-                    tenure.anchor_block_hash = chain_tip;
-                    tenure.anchor_block_height = 232u32.into();
-                    Box::pin(std::future::ready(Ok(tenure)))
-                });
-
             client.expect_get_tenure_headers().returning(move |_| {
                 let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
-                tenure.anchor_block_height = 231u32.into();
+                tenure.anchor_block_hash = chain_tip;
                 Box::pin(std::future::ready(Ok(tenure)))
             });
 
@@ -4497,6 +4457,10 @@ async fn test_conservative_initial_sbtc_limits() {
     for (ctx, _, _, _) in signers.iter_mut() {
         let signer_set = signer_set_public_keys.clone();
         ctx.with_stacks_client(|client| {
+            client
+                .expect_get_tenure_info()
+                .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
+
             client.expect_get_block().returning(|_| {
                 let response = Ok(NakamotoBlock {
                     header: NakamotoBlockHeader::empty(),
@@ -4505,25 +4469,10 @@ async fn test_conservative_initial_sbtc_limits() {
                 Box::pin(std::future::ready(response))
             });
 
-            client
-                .expect_get_node_info()
-                .returning(|| Box::pin(std::future::ready(Ok(DUMMY_NODE_INFO))));
-
             let chain_tip = model::BitcoinBlockHash::from(chain_tip_info.hash);
-            client
-                .expect_get_tenure_headers()
-                .once()
-                .returning(move |_| {
-                    let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
-                    tenure.anchor_block_hash = chain_tip;
-                    tenure.anchor_block_height = 232u32.into();
-                    Box::pin(std::future::ready(Ok(tenure)))
-                });
-
             client.expect_get_tenure_headers().returning(move |_| {
                 let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
                 tenure.anchor_block_hash = chain_tip;
-                tenure.anchor_block_height = 231u32.into();
                 Box::pin(std::future::ready(Ok(tenure)))
             });
 

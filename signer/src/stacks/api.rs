@@ -262,7 +262,11 @@ pub trait StacksInteract: Send + Sync {
         &self,
         consensus_hash: &ConsensusHash,
     ) -> impl Future<Output = Result<TenureBlockHeaders, Error>> + Send;
-
+    /// Get information about the current tenure.
+    ///
+    /// This function is analogous to the GET /v3/tenures/info stacks node
+    /// endpoint for retrieving tenure information.
+    fn get_tenure_info(&self) -> impl Future<Output = Result<GetTenureInfoResponse, Error>> + Send;
     /// Get information about the sortition associated to a consensus hash
     fn get_sortition_info(
         &self,
@@ -639,7 +643,7 @@ pub struct GetNodeInfoResponse {
     /// The block header hash of the tip of the canonical stacks
     /// blockchain. This is hashed with the consensus hash to create the
     /// block id.
-    pub stacks_tip: BlockHeaderHash,
+    stacks_tip: BlockHeaderHash,
     /// The consensus hash of the tip of the canonical stacks blockchain.
     pub stacks_tip_consensus_hash: ConsensusHash,
 }
@@ -652,6 +656,27 @@ impl GetNodeInfoResponse {
         let sortition_consensus_hash = blockstack_lib::chainstate::burn::ConsensusHash(bytes);
         StacksBlockId::new(&sortition_consensus_hash, &self.stacks_tip).into()
     }
+}
+
+/// The response from a GET /v3/tenures/info request to stacks-core.
+///
+/// This type contains the view of this node's current tenure.
+#[derive(Debug, PartialEq, Clone, serde::Deserialize)]
+pub struct GetTenureInfoResponse {
+    /// The highest known consensus hash (identifies the current tenure)
+    pub consensus_hash: ConsensusHash,
+    /// The tenure-start block ID of the current tenure
+    pub tenure_start_block_id: StacksBlockHash,
+    /// The consensus hash of the parent tenure
+    pub parent_consensus_hash: ConsensusHash,
+    /// The block hash of the parent tenure's start block
+    pub parent_tenure_start_block_id: StacksBlockHash,
+    /// The highest Stacks block ID in the current tenure
+    pub tip_block_id: StacksBlockHash,
+    /// The height of this tip
+    pub tip_height: StacksBlockHeight,
+    /// Which reward cycle we're in
+    pub reward_cycle: u64,
 }
 
 /// Minimal model type representing an epoch entry in a `/v2/pox` response,
@@ -1146,6 +1171,35 @@ impl StacksClient {
             .map_err(Error::UnexpectedStacksResponse)
     }
 
+    /// Get information about the current tenure.
+    ///
+    /// Uses the GET /v3/tenures/info stacks node endpoint for retrieving
+    /// tenure information.
+    #[tracing::instrument(skip(self))]
+    pub async fn get_tenure_info(&self) -> Result<GetTenureInfoResponse, Error> {
+        let path = "/v3/tenures/info";
+        let url = self
+            .endpoint
+            .join(path)
+            .map_err(|err| Error::PathJoin(err, self.endpoint.clone(), Cow::Borrowed(path)))?;
+
+        tracing::debug!("making request to the stacks node for the current tenure info");
+        let response = self
+            .client
+            .get(url.clone())
+            .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await
+            .map_err(Error::StacksNodeRequest)?;
+
+        response
+            .error_for_status()
+            .map_err(Error::StacksNodeResponse)?
+            .json()
+            .await
+            .map_err(Error::UnexpectedStacksResponse)
+    }
+
     /// Get information about the sortition related to a consensus hash.
     ///
     /// Uses the GET /v3/sortitions stacks node endpoint for retrieving
@@ -1563,6 +1617,10 @@ impl StacksInteract for StacksClient {
         self.get_tenure_headers(consensus_hash).await
     }
 
+    async fn get_tenure_info(&self) -> Result<GetTenureInfoResponse, Error> {
+        self.get_tenure_info().await
+    }
+
     async fn get_sortition_info(
         &self,
         consensus_hash: &ConsensusHash,
@@ -1787,6 +1845,10 @@ impl StacksInteract for ApiFallbackClient<StacksClient> {
     ) -> Result<TenureBlockHeaders, Error> {
         self.exec(|client, _| client.get_tenure_headers(consensus_hash))
             .await
+    }
+
+    async fn get_tenure_info(&self) -> Result<GetTenureInfoResponse, Error> {
+        self.exec(|client, _| client.get_tenure_info()).await
     }
 
     async fn get_sortition_info(

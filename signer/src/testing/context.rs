@@ -19,6 +19,7 @@ use crate::bitcoin::rpc::{BitcoinBlockHeader, BitcoinBlockInfo};
 use crate::context::SbtcLimits;
 use crate::keys::PrivateKey;
 use crate::stacks::api::GetNodeInfoResponse;
+use crate::stacks::api::GetTenureInfoResponse;
 use crate::stacks::api::SignerSetInfo;
 use crate::stacks::api::StacksEpochStatus;
 use crate::stacks::api::TenureBlockHeaders;
@@ -439,17 +440,6 @@ impl StacksInteract for WrappedMockStacksInteract {
             .await
     }
 
-    async fn get_tenure_headers(
-        &self,
-        consensus_hash: &ConsensusHash,
-    ) -> Result<TenureBlockHeaders, Error> {
-        self.inner
-            .lock()
-            .await
-            .get_tenure_headers(consensus_hash)
-            .await
-    }
-
     async fn get_current_signers_aggregate_key(
         &self,
         contract_principal: &StacksAddress,
@@ -495,6 +485,21 @@ impl StacksInteract for WrappedMockStacksInteract {
 
     async fn get_block(&self, block_id: &StacksBlockHash) -> Result<NakamotoBlock, Error> {
         self.inner.lock().await.get_block(block_id).await
+    }
+
+    async fn get_tenure_headers(
+        &self,
+        consensus_hash: &ConsensusHash,
+    ) -> Result<TenureBlockHeaders, Error> {
+        self.inner
+            .lock()
+            .await
+            .get_tenure_headers(consensus_hash)
+            .await
+    }
+
+    async fn get_tenure_info(&self) -> Result<GetTenureInfoResponse, Error> {
+        self.inner.lock().await.get_tenure_info().await
     }
 
     async fn get_sortition_info(
@@ -852,8 +857,7 @@ where
     fn with_mocked_stacks_client(
         self,
     ) -> ContextBuilder<Storage, Bitcoin, WrappedMockStacksInteract, Emily> {
-        let mock = WrappedMock::default();
-        self.with_stacks_client(mock)
+        self.with_stacks_client(WrappedMock::default())
     }
 }
 
