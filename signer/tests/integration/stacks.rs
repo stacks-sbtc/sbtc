@@ -325,21 +325,23 @@ async fn update_db_with_unknown_ancestors_works_with_empty_tenures() {
     // --------------------------------
     // mock4 - height 231, non empty block; non Nakamoto block.
     let raw_json_response_get_tenure_headers_1 = r#"{
-            "consensus_hash": "1230756abe6808071ecdf94f7485cee10624667d",
-            "last_sortition_ch": "d9f1486525e738d818fee87c4739b87e03bf35e4",
-            "burn_block_height": 234,
-            "burn_block_hash": "0000000000000000000196400396be46d0816dc462df4c3450972f589f4d7d24",
-            "stacks_blocks": []
-        }"#;
+        "consensus_hash": "1230756abe6808071ecdf94f7485cee10624667d",
+        "last_sortition_ch": "d9f1486525e738d818fee87c4739b87e03bf35e4",
+        "burn_block_height": 234,
+        "burn_block_hash": "0000000000000000000196400396be46d0816dc462df4c3450972f589f4d7d24",
+        "stacks_blocks": []
+    }"#;
+
     let raw_json_response_get_tenure_headers_2 =
         include_str!("../fixtures/stacksapi-v3-tenures-blocks-1.json");
+
     let raw_json_response_get_tenure_headers_3 = r#"{
-                "consensus_hash": "3f30756abe6808071ecdf94f7485cee10624667d",
-                "last_sortition_ch": "39fa0bf52fbe50fccd43ba9ffcacae39793231bc",
-                "burn_block_height": 232,
-                "burn_block_hash": "0000000000000000000196400396be46d0816dc462df4c3450972f589f4d7d24",
-                "stacks_blocks": []
-        }"#;
+        "consensus_hash": "3f30756abe6808071ecdf94f7485cee10624667d",
+        "last_sortition_ch": "39fa0bf52fbe50fccd43ba9ffcacae39793231bc",
+        "burn_block_height": 232,
+        "burn_block_hash": "0000000000000000000196400396be46d0816dc462df4c3450972f589f4d7d24",
+        "stacks_blocks": []
+    }"#;
 
     let ch_1 = ConsensusHash::from_hex("1230756abe6808071ecdf94f7485cee10624667d").unwrap();
     let ch_2 = ConsensusHash::from_hex("d9f1486525e738d818fee87c4739b87e03bf35e4").unwrap();
