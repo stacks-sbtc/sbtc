@@ -55,17 +55,6 @@ pub struct Nonce {
 impl Nonce {
     /// Create a new random nonce that is valid
     pub fn random<RNG: RngCore + CryptoRng>(rng: &mut RNG) -> Self {
-        let mut new_me = Self::new(rng);
-
-        while !new_me.is_valid() {
-            new_me = Self::new(rng);
-        }
-
-        new_me
-    }
-
-    /// Construct a random nonce
-    fn new<R: RngCore + CryptoRng>(rng: &mut R) -> Self {
         Self {
             d: Self::gen(rng),
             e: Self::gen(rng),
