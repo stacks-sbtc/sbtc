@@ -338,6 +338,7 @@ pub struct StacksBlockHeader {
     pub parent_block_id: StacksBlockHash,
 }
 
+#[cfg(any(test, feature = "testing"))]
 impl From<NakamotoBlockHeader> for StacksBlockHeader {
     fn from(value: NakamotoBlockHeader) -> Self {
         StacksBlockHeader {
@@ -405,21 +406,17 @@ impl TenureBlockHeaders {
         })
     }
 
-    /// Get the header with minimum block height in the tenure.
-    /// None if the tenure is empty.
-    pub fn start_header(&self) -> Option<&StacksBlockHeader> {
-        self.headers.iter().min_by_key(|header| header.block_height)
+    /// Get the minimum block height in the tenure. None is returned if no
+    /// stacks blocks were produced for the tenure.
+    pub fn start_height(&self) -> Option<StacksBlockHeight> {
+        self.headers.iter().map(|header| header.block_height).min()
     }
 
-    /// Check if this tenure is empty (contains no stacks blocks)
-    pub fn is_empty(&self) -> bool {
-        self.headers.is_empty()
-    }
-
-    /// Get the header with maximum block height in the tenure.
-    /// None if tenure is empty.
-    pub fn end_header(&self) -> Option<&StacksBlockHeader> {
-        self.headers.iter().max_by_key(|header| header.block_height)
+    /// Get the height of the block with the greatest height of all blocks
+    /// held within this struct. None is returned if no stacks blocks were
+    /// produced for the tenure.
+    pub fn end_height(&self) -> Option<StacksBlockHeight> {
+        self.headers.iter().map(|header| header.block_height).max()
     }
 }
 
@@ -1318,30 +1315,25 @@ where
         "starting updating db with unknown ancestors"
     );
     let db = storage.begin_transaction().await?;
+    let mut tenure = stacks.get_tenure_headers(&consensus_hash).await?;
     let nakamoto_start_height = stacks.get_epoch_status().await?.nakamoto_start_height();
 
-    let mut tenure = stacks.get_tenure_headers(&consensus_hash).await?;
-    if tenure.anchor_block_height < nakamoto_start_height {
-        tracing::warn!(
-            tenure_height = %tenure.anchor_block_height,
-            %nakamoto_start_height,
-            "update_db_with_unknown_ancestors called for pre nakamoto block"
-        );
-        return Err(Error::PreNakamotoTenure(consensus_hash));
-    }
-    let mut end_height = tenure.end_header().map(|header| header.block_height);
-    let mut start_height = tenure.start_header().map(|header| header.block_height);
+    let end_height = tenure.end_height();
+    let mut start_height = tenure.start_height();
+
     loop {
-        // Trying to populate end_height until we populate it with Some.
-        if end_height.is_none() {
-            end_height = tenure.end_header().map(|header| header.block_height);
-        }
-        // Overwrite start_height for each non-empty tenure.
-        if tenure.start_header().is_some() {
-            start_height = tenure.start_header().map(|header| header.block_height);
+        db.write_stacks_block_headers(&tenure).await?;
+        // We won't get anymore Nakamoto blocks before this point, so
+        // time to stop.
+        if tenure.anchor_block_height <= nakamoto_start_height {
+            tracing::debug!(
+                %nakamoto_start_height,
+                last_chain_length = %tenure.anchor_block_height,
+                "all Nakamoto blocks fetched; stopping"
+            );
+            break;
         }
 
-        db.write_stacks_block_headers(&tenure).await?;
         if let Some(header) = tenure.headers().last() {
             // We've seen this parent already, so time to stop.
             if db.stacks_block_exists(&header.parent_block_id).await? {
@@ -1353,44 +1345,29 @@ where
         // There are more blocks to fetch, so let's get them. This assumes
         // optimistically that the parent is still a Nakamoto block (and so has
         // a tenure); if that's not the case, we get an `Err` here.
-        let new_tenure = stacks.get_tenure_headers(&tenure.last_sortition_ch).await?;
-        tracing::debug!(
-            consensus_hash = %&tenure.last_sortition_ch,
-            anchor_block_hash = %&new_tenure.anchor_block_hash,
-            anchor_block_height = %&new_tenure.anchor_block_height,
-            "fetched new stacks tenure headers"
-        );
-        if new_tenure.anchor_block_height < nakamoto_start_height {
-            tracing::debug!(
-                %nakamoto_start_height,
-                last_chain_length = %tenure.anchor_block_height,
-                "all Nakamoto blocks fetched; stopping"
-            );
-            break;
+        tenure = stacks.get_tenure_headers(&tenure.last_sortition_ch).await?;
+
+        if let Some(height) = tenure.start_height() {
+            start_height.replace(height);
         }
-        tenure = new_tenure
     }
 
     db.commit().await?;
 
-    if let (Some(start_height), Some(end_height)) = (start_height, end_height) {
-        tracing::debug!(%start_height, %end_height, "finished updating the stacks_blocks table");
-        return Ok(Some(RangeInclusive::new(start_height, end_height)));
-    } else if start_height.is_none() && end_height.is_none() {
-        // All headers we fetched was empty
-        return Ok(None);
+    match (start_height, end_height) {
+        (Some(start_height), Some(end_height)) => {
+            tracing::debug!(%start_height, %end_height, "finished updating the stacks_blocks table");
+            Ok(Some(RangeInclusive::new(start_height, end_height)))
+        }
+        (start_height, end_height) => {
+            tracing::warn!(
+                ?start_height,
+                ?end_height,
+                "missing start or end height when fetching stacks blocks"
+            );
+            Ok(None)
+        }
     }
-    // Once we fetch non-empty tenure, we populate both start and end heights with Some.
-    // We never overwrite Some => None in start_height and end_height. Thus, if we come here, we have a bug.
-    tracing::error!(
-        ?start_height,
-        ?end_height,
-        "BUG: inconsistent tenure headers range"
-    );
-    Err(Error::InconsistentTenureHeadersRange(
-        start_height,
-        end_height,
-    ))
 }
 
 /// A deserializer for Clarity's [`Value`] type that deserializes a hex-encoded
