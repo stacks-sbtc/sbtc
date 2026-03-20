@@ -15,10 +15,8 @@ use crate::stacks::contracts::RotateKeysValidationError;
 use crate::stacks::contracts::WithdrawalAcceptValidationError;
 use crate::stacks::contracts::WithdrawalRejectValidationError;
 use crate::storage::model::BitcoinBlockHash;
-use crate::storage::model::ConsensusHash;
 use crate::storage::model::SigHash;
 use crate::storage::model::StacksBlockHash;
-use crate::storage::model::StacksBlockHeight;
 use crate::storage::model::StacksTxId;
 use crate::transaction_signer::StacksSignRequestId;
 use crate::wsts_state_machine::StateMachineId;
@@ -34,15 +32,6 @@ pub enum Error {
         /// The maximum allowed size of the OP_RETURN output in bytes.
         max_size: usize,
     },
-
-    /// During updating db with Stacks blocks, exactly one of heights across start and end heights was None.
-    /// If this happens it means our code have a bug.
-    #[error("Inconsistent tenure headers range. Start: {0:?}; End: {1:?}")]
-    InconsistentTenureHeadersRange(Option<StacksBlockHeight>, Option<StacksBlockHeight>),
-
-    /// Given consensus hash is related to pre nakamoto tenure, while expected to be a nakamoto tenure
-    #[error("Tenure with consensus hash {0} is pre Nakamoto")]
-    PreNakamotoTenure(ConsensusHash),
 
     /// An error occurred while attempting to perform withdrawal ID segmentation.
     #[error("idpack segmenter error: {0}")]

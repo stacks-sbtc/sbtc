@@ -145,7 +145,7 @@ impl TestHarness {
         let mut bh2ch: HashMap<BlockHash, clarity::types::chainstate::ConsensusHash> =
             Default::default();
         for block in &bitcoin_blocks {
-            let fake_ch: ConsensusHash = fake::Faker.fake_with_rng(rng);
+            let fake_ch = ConsensusHash::new(fake::Faker.fake_with_rng(rng));
             bh2ch.insert(block.block_hash, fake_ch.into());
         }
 
