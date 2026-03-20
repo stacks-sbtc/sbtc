@@ -63,6 +63,7 @@ pub struct GetTxResponse {
 /// The docs for the getrawtransaction RPC call can be found here:
 /// <https://bitcoincore.org/en/doc/25.0.0/rpc/rawtransactions/getrawtransaction/>.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "testing", derive(PartialEq))]
 pub struct OutPointSummary {
     /// The block hash of the Bitcoin block that confirms a transaction
     /// that created the associated output.
