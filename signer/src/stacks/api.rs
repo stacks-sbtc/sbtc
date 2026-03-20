@@ -252,6 +252,17 @@ pub trait StacksInteract: Send + Sync {
         block_id: &StacksBlockHash,
     ) -> impl Future<Output = Result<NakamotoBlock, Error>> + Send;
 
+    /// Fetch all Nakamoto blocks headers within the tenure with given
+    /// consensus hash.
+    ///
+    /// This function is analogous to the GET /v3/tenures/blocks/{}
+    /// endpoint on stacks-core nodes. This function returns headers of all
+    /// block in given tenure.
+    fn get_tenure_headers(
+        &self,
+        consensus_hash: &ConsensusHash,
+    ) -> impl Future<Output = Result<TenureBlockHeaders, Error>> + Send;
+
     /// Get information about the sortition associated to a consensus hash
     fn get_sortition_info(
         &self,
@@ -302,22 +313,18 @@ pub trait StacksInteract: Send + Sync {
         &self,
         sender: &StacksAddress,
     ) -> impl Future<Output = Result<Amount, Error>> + Send;
-
-    /// Fetch all Nakamoto blocks headers within the tenure with given consensus hash.
-    ///
-    /// This function is analogous to the GET /v3/tenures/blocks/{}
-    /// endpoint on stacks-core nodes. This function returns headers of all block in given tenure.
-    fn get_tenure_headers(
-        &self,
-        consensus_hash: &ConsensusHash,
-    ) -> impl Future<Output = Result<TenureBlockHeaders, Error>> + Send;
 }
 
-/// A slimmed down [`NakamotoBlockHeader`]
-#[derive(Debug, Clone, PartialEq)]
+/// A slimmed down [`NakamotoBlockHeader`].
+///
+/// This struct is used to represent the Stacks block headers in the
+/// response of a GET /v3/tenures/blocks/<consensus-hash> request to a
+/// Stacks node.
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 pub struct StacksBlockHeader {
     /// The total number of StacksBlocks and NakamotoBlocks preceding this
     /// block in this block's history.
+    #[serde(rename = "height")]
     pub block_height: StacksBlockHeight,
     /// The identifier for a block. It is the hash of the this block's
     /// header hash and the block's consensus hash.
@@ -337,18 +344,25 @@ impl From<NakamotoBlockHeader> for StacksBlockHeader {
     }
 }
 
-/// This struct represents a subset of the Stacks block headers
-/// that were created during a tenure.
-#[derive(Debug)]
+/// This struct represents the Stacks block headers that were created
+/// during a tenure, and the response from a GET /v3/tenures/blocks/<consensus-hash>
+/// request to a Stacks node.
+///
+/// The schema of the response can be found here:
+/// https://github.com/stacks-network/stacks-core/blob/e6c240e0c0dc763b1cff8fd5fca7b4c237da8bdb/docs/rpc/components/schemas/tenure-blocks.schema.yaml
+#[derive(Debug, serde::Deserialize)]
 #[cfg_attr(any(test, feature = "testing"), derive(Clone))]
 pub struct TenureBlockHeaders {
     /// The subset of Stacks block headers that of Nakamoto blocks that
     /// were created during a tenure.
+    #[serde(rename = "stacks_blocks")]
     headers: Vec<StacksBlockHeader>,
     /// The bitcoin block that this tenure builds off of.
+    #[serde(rename = "burn_block_hash")]
     pub anchor_block_hash: BitcoinBlockHash,
     /// The height of the bitcoin block associated with the above block
     /// hash.
+    #[serde(rename = "burn_block_height")]
     pub anchor_block_height: BitcoinBlockHeight,
     /// The consesnsus hash of previous sortition
     pub last_sortition_ch: ConsensusHash,
@@ -526,39 +540,6 @@ impl std::fmt::Display for TxRejection {
 }
 
 impl std::error::Error for TxRejection {}
-
-/// TODO: update comment
-/// A struct, representing the response from a GET /v3/tenures/blocks/{}
-/// request to a Stacks node.
-///
-/// The schema of the response can be found here:
-/// https://github.com/stacks-network/stacks-core/blob/e6c240e0c0dc763b1cff8fd5fca7b4c237da8bdb/docs/rpc/components/schemas/tenure-blocks.schema.yaml
-#[derive(Debug, Deserialize)]
-struct GetTenureHeadersApiResponse {
-    /// The height of the bitcoin block that anchors the stacks blocks in the `stacks_blocks` field.
-    #[serde(rename = "burn_block_height")]
-    pub bitcoin_block_height: BitcoinBlockHeight,
-    /// The block hash of the bitcoin block that anchors the stacks blocks in the `stacks_blocks` field.
-    #[serde(rename = "burn_block_hash")]
-    pub bitcoin_block_hash: BitcoinBlockHash,
-    /// List of stacks blocks, anchored to a bitcoin block.
-    pub stacks_blocks: Vec<GetTenureHeadersApiStacksBlock>,
-    /// Consensus hash of last non-empty sortition before current one.
-    pub last_sortition_ch: ConsensusHash,
-}
-
-/// A struct, representing a trimmed down stacks block header that is part
-/// of the response from a GET /v3/tenures/blocks/height/{} request to stacks-core.
-/// The full response is represented by [`GetTenureHeadersApiResponse`]
-#[derive(Debug, Deserialize)]
-struct GetTenureHeadersApiStacksBlock {
-    /// Hash of stacks block
-    pub block_id: StacksBlockHash,
-    /// Hash of parent stacks block.
-    pub parent_block_id: StacksBlockHash,
-    /// Height of stacks block.
-    pub height: StacksBlockHeight,
-}
 
 /// The response from a POST /v2/transactions request
 ///
@@ -1141,7 +1122,7 @@ impl StacksClient {
         &self,
         consensus_hash: &ConsensusHash,
     ) -> Result<TenureBlockHeaders, Error> {
-        let path = format!("/v3/tenures/blocks/{}", consensus_hash);
+        let path = format!("/v3/tenures/blocks/{consensus_hash}");
         let url = self
             .endpoint
             .join(&path)
@@ -1149,18 +1130,20 @@ impl StacksClient {
 
         tracing::debug!("making request to the stacks node for the tenure headers");
 
-        let headers = self
+        let response = self
             .client
             .get(url)
+            .timeout(REQUEST_TIMEOUT)
             .send()
             .await
-            .map_err(Error::StacksNodeRequest)?
+            .map_err(Error::StacksNodeRequest)?;
+
+        response
             .error_for_status()
             .map_err(Error::StacksNodeResponse)?
-            .json::<GetTenureHeadersApiResponse>()
-            .await?
-            .into();
-        Ok(headers)
+            .json::<TenureBlockHeaders>()
+            .await
+            .map_err(Error::UnexpectedStacksResponse)
     }
 
     /// Get information about the sortition related to a consensus hash.
@@ -1437,25 +1420,6 @@ fn extract_signatures_required(value: Value) -> Result<Option<u16>, Error> {
         _ => Err(Error::InvalidStacksResponse(
             "expected a uint but got something else",
         )),
-    }
-}
-
-impl From<GetTenureHeadersApiResponse> for TenureBlockHeaders {
-    fn from(value: GetTenureHeadersApiResponse) -> Self {
-        TenureBlockHeaders {
-            headers: value
-                .stacks_blocks
-                .iter()
-                .map(|header| StacksBlockHeader {
-                    block_height: header.height,
-                    block_id: header.block_id,
-                    parent_block_id: header.parent_block_id,
-                })
-                .collect::<Vec<StacksBlockHeader>>(),
-            anchor_block_hash: value.bitcoin_block_hash,
-            anchor_block_height: value.bitcoin_block_height,
-            last_sortition_ch: value.last_sortition_ch,
-        }
     }
 }
 
