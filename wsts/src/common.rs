@@ -53,7 +53,7 @@ pub struct Nonce {
 }
 
 impl Nonce {
-    /// Create a new random nonce that is valid
+    /// Construct a random nonce
     pub fn random<RNG: RngCore + CryptoRng>(rng: &mut RNG) -> Self {
         Self {
             d: Self::gen(rng),
@@ -82,7 +82,7 @@ impl Nonce {
     pub fn is_valid(&self) -> bool {
         let zero = Scalar::from(0);
         let one = Scalar::from(1);
-        self.d != zero && self.e != zero && self.d != one && self.e != one
+        !(self.d == zero && self.e == zero || self.d == one && self.e == one)
     }
 }
 
