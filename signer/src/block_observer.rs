@@ -173,6 +173,7 @@ where
                     if let Err(error) = self.process_bitcoin_blocks_until(block_hash).await {
                         tracing::warn!(%error, %block_hash, "could not process bitcoin blocks");
                     }
+
                     if let Err(error) = self.process_stacks_blocks().await {
                         tracing::warn!(%error, "could not process stacks blocks");
                     }
@@ -799,7 +800,7 @@ mod tests {
     async fn should_be_able_to_extract_bitcoin_blocks_given_a_block_header_stream() {
         let mut rng = get_rng();
         let storage = storage::memory::Store::new_shared();
-        let test_harness = TestHarness::generate(&mut rng, 20, 1..5);
+        let test_harness = TestHarness::generate(&mut rng, 20, 0..5);
         let min_height = test_harness.min_block_height();
         let ctx = TestContext::builder()
             .with_storage(storage.clone())

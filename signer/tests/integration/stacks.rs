@@ -339,7 +339,7 @@ async fn update_db_with_unknown_ancestors_works_with_empty_tenures() {
     // We setting up the mocks as follows:
     // mock1 -- height 234, empty block
     // mock2 -- height 233, non empty block
-    // mock3 -- height 232, empty block
+    // mock3 -- height 232, empty block. Also, it's the nakamoto start height
     // --------------------------------
     // mock4 - height 231, non empty block; non Nakamoto block.
     let raw_json_response_get_tenure_headers_1 = r#"{
@@ -358,13 +358,10 @@ async fn update_db_with_unknown_ancestors_works_with_empty_tenures() {
                 "burn_block_hash": "0000000000000000000196400396be46d0816dc462df4c3450972f589f4d7d24",
                 "stacks_blocks": []
         }"#;
-    let raw_json_response_get_tenure_headers_4 =
-        include_str!("../fixtures/stacksapi-v3-tenures-blocks-3.json");
 
     let ch_1 = ConsensusHash::from_hex("1230756abe6808071ecdf94f7485cee10624667d").unwrap();
     let ch_2 = ConsensusHash::from_hex("d9f1486525e738d818fee87c4739b87e03bf35e4").unwrap();
     let ch_3 = ConsensusHash::from_hex("3f30756abe6808071ecdf94f7485cee10624667d").unwrap();
-    let ch_4 = ConsensusHash::from_hex("39fa0bf52fbe50fccd43ba9ffcacae39793231bc").unwrap();
 
     let mut stacks_node_server = mockito::Server::new_async().await;
     let mock_get_epoch_status = stacks_node_server
@@ -397,14 +394,6 @@ async fn update_db_with_unknown_ancestors_works_with_empty_tenures() {
         .expect(1)
         .create();
 
-    let mock_get_tenure_headers_4 = stacks_node_server
-        .mock("GET", format!("/v3/tenures/blocks/{ch_4}").as_str())
-        .with_status(200)
-        .with_header("content-type", "application/json")
-        .with_body(raw_json_response_get_tenure_headers_4)
-        .expect(1)
-        .create();
-
     let client =
         StacksClient::new(url::Url::parse(stacks_node_server.url().as_str()).unwrap()).unwrap();
 
@@ -412,16 +401,12 @@ async fn update_db_with_unknown_ancestors_works_with_empty_tenures() {
 
     // Now, lets call update_db_with_unknown_ancestors and ensure that it correctly fetched all blocks
     // corresponding to ch2 but no other blocks
-    let res = update_db_with_unknown_ancestors(&client, &storage, ch_1)
+    update_db_with_unknown_ancestors(&client, &storage, ch_1)
         .await
-        .unwrap()
         .unwrap();
 
     let actual_start_height = 1507195;
     let actual_end_height = 1507233;
-
-    assert_eq!(**res.start(), actual_start_height);
-    assert_eq!(**res.end(), actual_end_height);
 
     assert_db_contains_stacks_headers(&storage, actual_start_height, actual_end_height).await;
 
@@ -429,7 +414,6 @@ async fn update_db_with_unknown_ancestors_works_with_empty_tenures() {
     mock_get_tenure_headers_1.assert();
     mock_get_tenure_headers_2.assert();
     mock_get_tenure_headers_3.assert();
-    mock_get_tenure_headers_4.assert();
 
     signer::testing::storage::drop_db(storage).await;
 }

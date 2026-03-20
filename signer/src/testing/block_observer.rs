@@ -142,12 +142,13 @@ impl TestHarness {
         for idx in 1..bitcoin_blocks.len() {
             bitcoin_blocks[idx].previous_block_hash = bitcoin_blocks[idx - 1].block_hash;
         }
-        let mut bh2ch: HashMap<BlockHash, clarity::types::chainstate::ConsensusHash> =
-            Default::default();
-        for block in &bitcoin_blocks {
-            let fake_ch = ConsensusHash::new(fake::Faker.fake_with_rng(rng));
-            bh2ch.insert(block.block_hash, fake_ch.into());
-        }
+        let bh2ch: HashMap<BlockHash, ConsensusHash> = bitcoin_blocks
+            .iter()
+            .map(|block| {
+                let ch_bytes = fake::Faker.fake_with_rng(rng);
+                (block.block_hash, ConsensusHash::new(ch_bytes))
+            })
+            .collect();
 
         let first_header = NakamotoBlockHeader::empty();
         let stacks_blocks: Vec<(StacksBlockId, NakamotoBlock, BlockHash)> = bitcoin_blocks
@@ -164,7 +165,8 @@ impl TestHarness {
                         .scan(initial_state, |last_stx_block_header, mut stx_block| {
                             stx_block.header.parent_block_id = last_stx_block_header.block_id();
                             stx_block.header.chain_length = last_stx_block_header.chain_length + 1;
-                            stx_block.header.consensus_hash = bh2ch[&btc_block.block_hash].clone();
+                            stx_block.header.consensus_hash =
+                                bh2ch[&btc_block.block_hash].clone().into();
                             *last_stx_block_header = stx_block.header.clone();
                             Some((stx_block.block_id(), stx_block, btc_block.block_hash))
                         })
@@ -418,10 +420,10 @@ impl StacksInteract for TestHarness {
     }
 
     async fn get_tenure_info(&self) -> Result<GetTenureInfoResponse, Error> {
-        let (_, _, btc_block_id) = self.stacks_blocks.last().unwrap();
+        let (block_id, block, btc_block_id) = self.stacks_blocks.last().unwrap();
 
         Ok(GetTenureInfoResponse {
-            consensus_hash: ConsensusHash::new([0; 20]),
+            consensus_hash: block.header.consensus_hash.clone().into(),
             tenure_start_block_id: self
                 .stacks_blocks
                 .iter()
@@ -430,11 +432,7 @@ impl StacksInteract for TestHarness {
                 .unwrap(),
             parent_consensus_hash: ConsensusHash::new([0; 20]),
             parent_tenure_start_block_id: StacksBlockId::first_mined().into(),
-            tip_block_id: self
-                .stacks_blocks
-                .last()
-                .map(|(block_id, _, _)| block_id.clone().into())
-                .unwrap(),
+            tip_block_id: block_id.clone().into(),
             tip_height: (self.stacks_blocks.len() as u64).into(),
             reward_cycle: 0,
         })
