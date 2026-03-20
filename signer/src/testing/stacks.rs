@@ -92,8 +92,8 @@ impl From<&bitcoincore_rpc_json::GetChainTipsResultTip> for BitcoinBlockRef {
     }
 }
 
-/// Asserts that given [`storage`] contains stacks blocks with all heights in range [from;to]
-/// and no other stacks blocks
+/// Asserts that the given [`storage`] contains Stacks blocks with all
+/// heights in range [from;to] and no other Stacks blocks.
 pub async fn assert_db_contains_stacks_headers(storage: &PgStore, from: u64, to: u64) {
     let (min_block_height, max_block_height, count) = sqlx::query_as::<_, (i64, i64, i64)>(
         r#"SELECT 

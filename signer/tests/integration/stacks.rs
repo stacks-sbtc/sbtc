@@ -151,7 +151,7 @@ async fn update_db_with_unknown_ancestors_process_first_nakamoto_block() {
     let raw_json_response_get_epoch_status =
         include_str!("../fixtures/stacksapi-get-pox-info-test-data.json");
 
-    // Three tenure headers mocks was obtained by curling hiro api for
+    // Two tenure header mocks were obtained by curling the Hiro API for
     // mainnet consensus hashes ch_1 and ch_2 (which correspond to blocks
     // 900_000 and 899_999), and tweaking anchor heights, such that ch_1 is
     // second Nakamoto block, ch_2 is first Nakamoto block, according to
@@ -193,17 +193,13 @@ async fn update_db_with_unknown_ancestors_process_first_nakamoto_block() {
 
     let storage = signer::testing::storage::new_test_database().await;
 
-    let res = update_db_with_unknown_ancestors(&client, &storage, ch_1)
+    update_db_with_unknown_ancestors(&client, &storage, ch_1)
         .await
-        .unwrap()
         .unwrap();
 
     // This values equal smallest height in mock 2 and biggest in mock 1.
     let actual_start_height = 1507180;
     let actual_end_height = 1507233;
-
-    assert_eq!(**res.start(), actual_start_height);
-    assert_eq!(**res.end(), actual_end_height);
 
     assert_db_contains_stacks_headers(&storage, actual_start_height, actual_end_height).await;
 
@@ -221,7 +217,7 @@ async fn update_db_with_unknown_ancestors_process_stops_when_fetches_seen_block(
     let raw_json_response_get_epoch_status =
         include_str!("../fixtures/stacksapi-get-pox-info-test-data.json");
 
-    // Three tenure headers mocks was obtained by curling hiro api for
+    // Two tenure header mocks were obtained by curling the Hiro API for
     // mainnet consensus hashes ch_1 and ch_2 (which correspond to blocks
     // 900_000 and 899_999), and tweaking anchor heights, such that ch_1 is
     // second Nakamoto block, ch_2 is first Nakamoto block, according to
@@ -263,12 +259,12 @@ async fn update_db_with_unknown_ancestors_process_stops_when_fetches_seen_block(
 
     let storage = signer::testing::storage::new_test_database().await;
 
-    // First, call update ancestors for ch_2, such that blocks corresponding to ch_2 will be present in the db.
-    // This should trigger mock_get_epoch_status once, and mock_get_tenure_headers_2/3, but not
+    // First, call update ancestors for ch_2, such that blocks
+    // corresponding to ch_2 will be present in the db. This should trigger
+    // mock_get_epoch_status once, and mock_get_tenure_headers_2/3, but not
     // mock_get_tenure_headers_1
-    let res = update_db_with_unknown_ancestors(&client, &storage, ch_2)
+    update_db_with_unknown_ancestors(&client, &storage, ch_2)
         .await
-        .unwrap()
         .unwrap();
 
     // At this point we have only blocks corresponding to ch_2 in the db.
@@ -277,9 +273,6 @@ async fn update_db_with_unknown_ancestors_process_stops_when_fetches_seen_block(
     let actual_start_height_ch2 = 1507180;
     let actual_end_height_ch2 = 1507194;
 
-    assert_eq!(**res.start(), actual_start_height_ch2);
-    assert_eq!(**res.end(), actual_end_height_ch2);
-
     assert_db_contains_stacks_headers(&storage, actual_start_height_ch2, actual_end_height_ch2)
         .await;
 
@@ -287,19 +280,14 @@ async fn update_db_with_unknown_ancestors_process_stops_when_fetches_seen_block(
     // the mocks ensure that it calls mock_get_epoch_status once and
     // mock_get_tenure_headers_1, avoiding calling
     // mock_get_tenure_headers_2
-    let res = update_db_with_unknown_ancestors(&client, &storage, ch_1)
+    update_db_with_unknown_ancestors(&client, &storage, ch_1)
         .await
-        .unwrap()
         .unwrap();
 
-    // At this point we have blocks corresponding to both ch_1 and ch_2 in the db.
-
-    // This values equal smallest height in mock 2 and biggest in mock 1.
-    let actual_start_height_ch1 = 1507195;
+    // At this point we have blocks corresponding to both ch_1 and ch_2 in
+    // the db. The written block heights should equal the smallest height
+    // in mock 2 and the biggest in mock 1.
     let actual_end_height_ch1 = 1507233;
-
-    assert_eq!(**res.start(), actual_start_height_ch1);
-    assert_eq!(**res.end(), actual_end_height_ch1);
 
     assert_db_contains_stacks_headers(&storage, actual_start_height_ch2, actual_end_height_ch1)
         .await;
@@ -323,7 +311,6 @@ async fn update_db_with_unknown_ancestors_works_with_empty_tenures() {
     // mock2 -- height 233, non empty block
     // mock3 -- height 232, empty block. Also, it's the nakamoto start height
     // --------------------------------
-    // mock4 - height 231, non empty block; non Nakamoto block.
     let raw_json_response_get_tenure_headers_1 = r#"{
         "consensus_hash": "1230756abe6808071ecdf94f7485cee10624667d",
         "last_sortition_ch": "d9f1486525e738d818fee87c4739b87e03bf35e4",
@@ -383,7 +370,7 @@ async fn update_db_with_unknown_ancestors_works_with_empty_tenures() {
 
     let storage = signer::testing::storage::new_test_database().await;
 
-    // Now, lets call update_db_with_unknown_ancestors and ensure that it
+    // Now, let's call update_db_with_unknown_ancestors and ensure that it
     // correctly fetched all blocks corresponding to ch2 but no other
     // blocks
     update_db_with_unknown_ancestors(&client, &storage, ch_1)

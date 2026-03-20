@@ -3,7 +3,6 @@
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::future::Future;
-use std::ops::RangeInclusive;
 use std::sync::LazyLock;
 use std::time::Duration;
 use std::time::Instant;
@@ -252,12 +251,12 @@ pub trait StacksInteract: Send + Sync {
         block_id: &StacksBlockHash,
     ) -> impl Future<Output = Result<NakamotoBlock, Error>> + Send;
 
-    /// Fetch all Nakamoto blocks headers within the tenure with given
+    /// Fetch all Nakamoto block headers within the tenure with the given
     /// consensus hash.
     ///
     /// This function is analogous to the GET /v3/tenures/blocks/{}
     /// endpoint on stacks-core nodes. This function returns headers of all
-    /// block in given tenure.
+    /// blocks in the given tenure.
     fn get_tenure_headers(
         &self,
         consensus_hash: &ConsensusHash,
@@ -330,7 +329,7 @@ pub struct StacksBlockHeader {
     /// block in this block's history.
     #[serde(rename = "height")]
     pub block_height: StacksBlockHeight,
-    /// The identifier for a block. It is the hash of the this block's
+    /// The identifier for a block. It is the hash of this block's
     /// header hash and the block's consensus hash.
     pub block_id: StacksBlockHash,
     /// The index block hash of the immediate parent of this block. This is
@@ -358,8 +357,8 @@ impl From<NakamotoBlockHeader> for StacksBlockHeader {
 #[derive(Debug, serde::Deserialize)]
 #[cfg_attr(any(test, feature = "testing"), derive(Clone))]
 pub struct TenureBlockHeaders {
-    /// The subset of Stacks block headers that of Nakamoto blocks that
-    /// were created during a tenure.
+    /// The Stacks block headers for blocks that were created during a
+    /// tenure.
     #[serde(rename = "stacks_blocks")]
     headers: Vec<StacksBlockHeader>,
     /// The bitcoin block that this tenure builds off of.
@@ -369,7 +368,7 @@ pub struct TenureBlockHeaders {
     /// hash.
     #[serde(rename = "burn_block_height")]
     pub anchor_block_height: BitcoinBlockHeight,
-    /// The consesnsus hash of previous sortition
+    /// The consensus hash of the previous sortition
     pub last_sortition_ch: ConsensusHash,
 }
 
@@ -393,9 +392,12 @@ impl TenureBlockHeaders {
         }
         let last_sortition_ch = info
             .last_sortition_ch
-            // Stacks node always return some consensus hash for `last_sortition_ch`:
-            // https://github.com/stacks-network/stacks-core/blob/3.3.0.0.6/stackslib/src/net/api/getsortition.rs#L159-L247
-            // If we have None here, it means our test infrastructure have a bug in implementation, and we want to panic.
+            // The Stacks node always returns some consensus hash for
+            // `last_sortition_ch`, see [1]: If we have None here, it means
+            // our test infrastructure has a bug in its implementation, and
+            // we want to panic.
+            //
+            // [1]: <https://github.com/stacks-network/stacks-core/blob/3.3.0.0.6/stackslib/src/net/api/getsortition.rs#L159-L247>
             .unwrap()
             .into();
         Ok(Self {
@@ -1291,13 +1293,13 @@ impl StacksClient {
 }
 
 /// Fetch all Nakamoto block headers that are not already stored in the
-/// datastore, starting at the given [`StacksBlockHash`] and store them in
+/// datastore, starting at the given [`ConsensusHash`] and store them in
 /// the database.
 ///
 /// This function fetches all unknown nakamoto blocks that are on the
-/// canonical chain identified by the given StacksBlockHash chain tip that
-/// not already stored in the database. It fetches these blocks one tenure
-/// at a time, and then writes them to the `stacks_blocks` table in a
+/// canonical chain identified by the given ConsensusHash that are not
+/// already stored in the database. It fetches these blocks one tenure at a
+/// time, and then writes them to the `stacks_blocks` table in a
 /// transaction. After all such blocks have been fetched, the function
 /// commits the written blocks. Things are done this way to ensure that
 /// updates to the `stacks_blocks` table are done atomically.
@@ -1305,7 +1307,7 @@ pub async fn update_db_with_unknown_ancestors<S, D>(
     stacks: &S,
     storage: &D,
     consensus_hash: ConsensusHash,
-) -> Result<Option<RangeInclusive<StacksBlockHeight>>, Error>
+) -> Result<(), Error>
 where
     S: StacksInteract,
     D: Transactable + Send + Sync,
@@ -1318,12 +1320,9 @@ where
     let mut tenure = stacks.get_tenure_headers(&consensus_hash).await?;
     let nakamoto_start_height = stacks.get_epoch_status().await?.nakamoto_start_height();
 
-    let end_height = tenure.end_height();
-    let mut start_height = tenure.start_height();
-
     loop {
         db.write_stacks_block_headers(&tenure).await?;
-        // We won't get anymore Nakamoto blocks before this point, so
+        // We won't get any more Nakamoto blocks before this point, so
         // time to stop.
         if tenure.anchor_block_height <= nakamoto_start_height {
             tracing::debug!(
@@ -1334,40 +1333,24 @@ where
             break;
         }
 
+        // If tenure.headers() is empty, then we know that we want to fetch
+        // the previous tenure's headers.
         if let Some(header) = tenure.headers().last() {
-            // We've seen this parent already, so time to stop.
+            // Maybe we've seen this parent already, if so then it's time
+            // to stop.
             if db.stacks_block_exists(&header.parent_block_id).await? {
                 tracing::debug!("parent block known in the database");
                 break;
             }
         };
 
-        // There are more blocks to fetch, so let's get them. This assumes
-        // optimistically that the parent is still a Nakamoto block (and so has
-        // a tenure); if that's not the case, we get an `Err` here.
+        // There are more blocks to fetch, so let's get them.
         tenure = stacks.get_tenure_headers(&tenure.last_sortition_ch).await?;
-
-        if let Some(height) = tenure.start_height() {
-            start_height.replace(height);
-        }
     }
 
     db.commit().await?;
 
-    match (start_height, end_height) {
-        (Some(start_height), Some(end_height)) => {
-            tracing::debug!(%start_height, %end_height, "finished updating the stacks_blocks table");
-            Ok(Some(RangeInclusive::new(start_height, end_height)))
-        }
-        (start_height, end_height) => {
-            tracing::warn!(
-                ?start_height,
-                ?end_height,
-                "missing start or end height when fetching stacks blocks"
-            );
-            Ok(None)
-        }
-    }
+    Ok(())
 }
 
 /// A deserializer for Clarity's [`Value`] type that deserializes a hex-encoded
@@ -1974,15 +1957,11 @@ mod tests {
         // Consensus hash of testnet btc block 1998
         let ch = ConsensusHash::from_hex("5b44c8c88a1439d6684b648436215ea65d3cd8d6").unwrap();
 
-        let tenures = update_db_with_unknown_ancestors(&client, &db, ch).await;
+        update_db_with_unknown_ancestors(&client, &db, ch)
+            .await
+            .unwrap();
 
-        let block_height_range = tenures.unwrap();
-
-        let expected =
-            RangeInclusive::new(StacksBlockHeight::new(320), StacksBlockHeight::new(791));
-        assert_eq!(block_height_range, Some(expected.clone()));
-
-        assert_db_contains_stacks_headers(&db, **expected.start(), **expected.end()).await;
+        assert_db_contains_stacks_headers(&db, 320, 791).await;
 
         crate::testing::storage::drop_db(db).await;
     }

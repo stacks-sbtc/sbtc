@@ -381,8 +381,8 @@ impl StacksInteract for TestHarness {
             .map(|(_, nakamoto_block, _)| nakamoto_block.header.clone().into())
             .collect();
 
-        // Unwrap here is ok because if it panic it means incorrect test harness
-        // implementation, and not actual error
+        // Unwrapping here is ok because if it panics it means an incorrect
+        // test harness implementation, and not an actual error
         let (_, _, btc_block_id) = self
             .stacks_blocks
             .iter()
@@ -407,9 +407,11 @@ impl StacksInteract for TestHarness {
             .find(|(block_id, _, _)| {
                 StacksBlockHash::from(block_id) == previous_tenure_last_block_id
             })
-            // Stacks node always return some consensus hash for `last_sortition_ch`:
+            // The Stacks node always returns some consensus hash for
+            // `last_sortition_ch`:
             // https://github.com/stacks-network/stacks-core/blob/3.3.0.0.6/stackslib/src/net/api/getsortition.rs#L159-L247
-            // If we have None here, it means TestHarness have a bug in implementation, and we want to panic.
+            // If we have None here, it means TestHarness has a bug in its
+            // implementation, and we want to panic.
             .unwrap()
             .1
             .header
@@ -441,8 +443,8 @@ impl StacksInteract for TestHarness {
         &self,
         consensus_hash: &ConsensusHash,
     ) -> Result<SortitionInfo, Error> {
-        // Unwrap here is ok because if it panic it means incorrect test harness
-        // implementation, and not actual error
+        // Unwrapping here is ok because if it panics it means an incorrect
+        // test harness implementation, and not an actual error
         let bitcoin_block = self.bitcoin_blocks.last().unwrap();
         let (_, previous_tenure_block, _) = self
             .stacks_blocks
@@ -505,8 +507,8 @@ impl StacksInteract for TestHarness {
 
         data.burn_block_height = (self.bitcoin_blocks.len() as u64).into();
         data.stacks_tip_height = (self.stacks_blocks.len() as u64).into();
-        // Unwrap here is ok because if it panic it means incorrect test harness
-        // implementation, and not actual error
+        // Unwrapping here is ok because if it panics it means an incorrect
+        // test harness implementation, and not an actual error
         data.stacks_tip_consensus_hash = self
             .stacks_blocks
             .last()
