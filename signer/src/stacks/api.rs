@@ -352,8 +352,9 @@ impl From<NakamotoBlockHeader> for StacksBlockHeader {
 /// during a tenure, and the response from a GET /v3/tenures/blocks/<consensus-hash>
 /// request to a Stacks node.
 ///
-/// The schema of the response can be found here:
-/// https://github.com/stacks-network/stacks-core/blob/e6c240e0c0dc763b1cff8fd5fca7b4c237da8bdb/docs/rpc/components/schemas/tenure-blocks.schema.yaml
+/// The schema of the response can be found here, although it is out of
+/// date, and missing the `last_sortition_ch` field:
+/// <https://github.com/stacks-network/stacks-core/blob/e6c240e0c0dc763b1cff8fd5fca7b4c237da8bdb/docs/rpc/components/schemas/tenure-blocks.schema.yaml>
 #[derive(Debug, serde::Deserialize)]
 #[cfg_attr(any(test, feature = "testing"), derive(Clone))]
 pub struct TenureBlockHeaders {
@@ -1935,10 +1936,13 @@ mod tests {
         //
         // BTC 1865 <- Stacks 319
         // BTC 1900 -- nakamoto_start_height
-        // BTC 1901 <- Stacks 320, ..., 744
-        // BTC 1998 <- Stacks 745, ..., 791
+        // BTC 1901 <- Stacks 320, ..., 744 [1]
+        // BTC 1998 <- Stacks 745, ..., 791 [2]
+        // [1]: <https://explorer.hiro.so/btcblock/0x5cb8fc024a7c7f40c8890c92f15803dfb4fe3406d047db9e2a8492727127f00c?chain=testnet>
+        // [2]: <https://explorer.hiro.so/btcblock/0x41a0e279472f5b195df3abc606c4fccaf15a9e1032f828e280b52617a439013e?chain=testnet>
 
-        // Consensus hash of testnet btc block 1998
+        // Consensus hash of testnet btc block 1998, found with:
+        // curl https://api.testnet.hiro.so/v3/tenures/blocks/height/1998
         let ch = ConsensusHash::from_hex("5b44c8c88a1439d6684b648436215ea65d3cd8d6").unwrap();
 
         update_db_with_unknown_ancestors(&client, &db, ch)
