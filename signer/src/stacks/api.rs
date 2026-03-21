@@ -1299,10 +1299,7 @@ where
     S: StacksInteract,
     D: Transactable + Send + Sync,
 {
-    tracing::debug!(
-        %consensus_hash,
-        "starting updating db with unknown ancestors"
-    );
+    tracing::debug!(%consensus_hash, "fetching tenure headers");
     let db = storage.begin_transaction().await?;
     let mut tenure = stacks.get_tenure_headers(&consensus_hash).await?;
     let nakamoto_start_height = stacks.get_epoch_status().await?.nakamoto_start_height();
@@ -1314,7 +1311,7 @@ where
         if tenure.anchor_block_height <= nakamoto_start_height {
             tracing::debug!(
                 %nakamoto_start_height,
-                last_chain_length = %tenure.anchor_block_height,
+                last_anchor_block_height = %tenure.anchor_block_height,
                 "all Nakamoto blocks fetched; stopping"
             );
             break;
@@ -1336,6 +1333,7 @@ where
 
     db.commit().await?;
 
+    tracing::debug!("finished updating the stacks_blocks table");
     Ok(())
 }
 
@@ -1938,7 +1936,7 @@ mod tests {
         // BTC 1865 <- Stacks 319
         // BTC 1900 -- nakamoto_start_height
         // BTC 1901 <- Stacks 320, ..., 744
-        // BTC 1998 <- Stacks 745, ..., 750, ... 791
+        // BTC 1998 <- Stacks 745, ..., 791
 
         // Consensus hash of testnet btc block 1998
         let ch = ConsensusHash::from_hex("5b44c8c88a1439d6684b648436215ea65d3cd8d6").unwrap();
