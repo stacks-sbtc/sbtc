@@ -407,19 +407,6 @@ impl TenureBlockHeaders {
             last_sortition_ch,
         })
     }
-
-    /// Get the minimum block height in the tenure. None is returned if no
-    /// stacks blocks were produced for the tenure.
-    pub fn start_height(&self) -> Option<StacksBlockHeight> {
-        self.headers.iter().map(|header| header.block_height).min()
-    }
-
-    /// Get the height of the block with the greatest height of all blocks
-    /// held within this struct. None is returned if no stacks blocks were
-    /// produced for the tenure.
-    pub fn end_height(&self) -> Option<StacksBlockHeight> {
-        self.headers.iter().map(|header| header.block_height).max()
-    }
 }
 
 /// An iterator over [`StacksBlock`]s
@@ -2020,12 +2007,14 @@ mod tests {
         let ch = consensus_hash_900k();
 
         // The moment of truth, do the requests succeed?
-        let headers = client.get_tenure_headers(&ch).await.unwrap();
-        assert_eq!(headers.headers.len(), 39);
-        assert_eq!(headers.start_height().unwrap(), 1507195u64.into());
-        assert_eq!(headers.end_height().unwrap(), 1507233u64.into());
+        let tenure = client.get_tenure_headers(&ch).await.unwrap();
+        assert_eq!(tenure.headers.len(), 39);
+
+        let block_heights = tenure.headers.iter().map(|header| header.block_height);
+        assert_eq!(block_heights.clone().min(), Some(1507195u64.into()));
+        assert_eq!(block_heights.max(), Some(1507233u64.into()));
         assert_eq!(
-            headers.last_sortition_ch.to_hex(),
+            tenure.last_sortition_ch.to_hex(),
             "3f30756abe6808071ecdf94f7485cee10624667d"
         );
 
