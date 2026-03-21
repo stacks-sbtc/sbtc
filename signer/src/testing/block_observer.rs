@@ -381,15 +381,13 @@ impl StacksInteract for TestHarness {
             .map(|(_, nakamoto_block, _)| nakamoto_block.header.clone().into())
             .collect();
 
-        // Unwrapping here is ok because if it panics it means an incorrect
-        // test harness implementation, and not an actual error
         let (_, _, btc_block_id) = self
             .stacks_blocks
             .iter()
             .find(|(_, nakamoto_block, _)| {
                 &ConsensusHash::from(nakamoto_block.header.consensus_hash.clone()) == consensus_hash
             })
-            .unwrap();
+            .ok_or(Error::MissingBlock)?;
 
         let mut sortition_info = DUMMY_SORTITION_INFO.clone();
         sortition_info.burn_block_hash = BitcoinBlockHash::from(*btc_block_id).into();
@@ -400,22 +398,14 @@ impl StacksInteract for TestHarness {
             .unwrap()
             .height;
         sortition_info.consensus_hash = (*consensus_hash).into();
-        let previous_tenure_last_block_id = headers[0].parent_block_id;
+        let previous_tenure_last_block_id = headers[0].parent_block_id.into();
         let previous_ch = &self
             .stacks_blocks
             .iter()
-            .find(|(block_id, _, _)| {
-                StacksBlockHash::from(block_id) == previous_tenure_last_block_id
-            })
-            // The Stacks node always returns some consensus hash for
-            // `last_sortition_ch`:
-            // https://github.com/stacks-network/stacks-core/blob/3.3.0.0.6/stackslib/src/net/api/getsortition.rs#L159-L247
-            // If we have None here, it means TestHarness has a bug in its
-            // implementation, and we want to panic.
-            .unwrap()
-            .1
-            .header
-            .consensus_hash;
+            .find(|(block_id, _, _)| *block_id == previous_tenure_last_block_id)
+            .map(|(_, block, _)| block.header.consensus_hash.clone())
+            .unwrap_or_else(|| ConsensusHash::new([0; 20]).into());
+
         sortition_info.last_sortition_ch = Some(previous_ch.clone());
         TenureBlockHeaders::try_new(headers, sortition_info)
     }
@@ -443,14 +433,12 @@ impl StacksInteract for TestHarness {
         &self,
         consensus_hash: &ConsensusHash,
     ) -> Result<SortitionInfo, Error> {
-        // Unwrapping here is ok because if it panics it means an incorrect
-        // test harness implementation, and not an actual error
         let bitcoin_block = self.bitcoin_blocks.last().unwrap();
-        let (_, previous_tenure_block, _) = self
+        let stacks_parent_ch = self
             .stacks_blocks
             .iter()
             .find(|(_, _, bitcoin_hash)| bitcoin_hash == &bitcoin_block.previous_block_hash)
-            .unwrap();
+            .map(|(_, block, _)| block.header.consensus_hash.clone());
 
         Ok(SortitionInfo {
             burn_block_hash: BurnchainHeaderHash::from_bytes_be(
@@ -464,7 +452,7 @@ impl StacksInteract for TestHarness {
             consensus_hash: (*consensus_hash).into(),
             was_sortition: true,
             miner_pk_hash160: None,
-            stacks_parent_ch: Some(previous_tenure_block.header.consensus_hash.clone()),
+            stacks_parent_ch,
             last_sortition_ch: None,
             committed_block_hash: None,
             vrf_seed: None,
@@ -507,17 +495,10 @@ impl StacksInteract for TestHarness {
 
         data.burn_block_height = (self.bitcoin_blocks.len() as u64).into();
         data.stacks_tip_height = (self.stacks_blocks.len() as u64).into();
-        // Unwrapping here is ok because if it panics it means an incorrect
-        // test harness implementation, and not an actual error
-        data.stacks_tip_consensus_hash = self
-            .stacks_blocks
-            .last()
-            .unwrap()
-            .1
-            .header
-            .consensus_hash
-            .clone()
-            .into();
+
+        if let Some((_, block, _)) = self.stacks_blocks.last() {
+            data.stacks_tip_consensus_hash = block.header.consensus_hash.clone().into();
+        };
 
         Ok(data)
     }
