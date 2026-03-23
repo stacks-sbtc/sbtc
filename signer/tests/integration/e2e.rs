@@ -242,7 +242,7 @@ async fn simulate_event_observer(ctx: IntegrationTestContext<StacksClient>) {
                 .await
                 .expect("failed to replay block");
 
-            new_block_handler(&ctx, &block_replay).await;
+            new_block_handler(&ctx, block_replay).await;
         }
 
         last_block = current_block;
@@ -295,7 +295,7 @@ async fn get_sbtc_balance(
 
 /// Simulates `new_block_handler` in the sBTC signer API. We can't use that
 /// directly because we don't get exactly the same data from the block replay.
-async fn new_block_handler(ctx: &IntegrationTestContext<StacksClient>, block: &BlockReplay) {
+async fn new_block_handler(ctx: &IntegrationTestContext<StacksClient>, block: BlockReplay) {
     let PrincipalData::Standard(deployer) = ctx.config().signer.deployer.to_account_principal()
     else {
         panic!("unexpected deployer")
@@ -306,11 +306,11 @@ async fn new_block_handler(ctx: &IntegrationTestContext<StacksClient>, block: &B
         ContractName::from(SmartContract::SbtcRegistry.contract_name()),
     );
 
-    for BlockReplayTransaction { events } in &block.transactions {
+    for BlockReplayTransaction { events } in block.transactions {
         let events = events
-            .iter()
+            .into_iter()
             .filter(|x| x.committed)
-            .filter_map(|x| x.contract_event.clone().map(|ev| (ev, x.txid)))
+            .filter_map(|x| x.contract_event.map(|ev| (ev, x.txid)))
             .filter(|(ev, _)| ev.contract_identifier == registry_address && ev.topic == "print")
             .collect::<Vec<_>>();
 

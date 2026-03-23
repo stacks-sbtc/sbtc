@@ -122,7 +122,7 @@ pub struct NewBlockEvent {
 /// is defined in [^1].
 ///
 /// [^1]: <https://github.com/stacks-network/stacks-core/blob/09c4b066e25104be8b066e8f7530ff0c6df4ccd5/clarity/src/vm/events.rs#L45-L51>
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize)]
 pub struct TransactionEvent {
     /// The id of the transaction that generated the event.
     #[serde(deserialize_with = "deserialize_hex")]
@@ -138,7 +138,7 @@ pub struct TransactionEvent {
 /// such an event. The expected type is taken from stacks-core[^1].
 ///
 /// [^1]: <https://github.com/stacks-network/stacks-core/blob/09c4b066e25104be8b066e8f7530ff0c6df4ccd5/clarity/src/vm/events.rs#L358-L363>
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize)]
 pub struct SmartContractEvent {
     /// Identifies the smart contract that generated the event.
     #[serde(deserialize_with = "parse_contract_name")]
