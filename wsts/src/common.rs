@@ -18,7 +18,7 @@ use crate::{
 pub type MerkleRoot = [u8; 32];
 
 #[derive(Clone, Debug, PartialEq)]
-/// A commitment to a polynonial, with a Schnorr proof of ownership bound to the ID
+/// A commitment to a polynomial, with a Schnorr proof of ownership bound to the ID
 pub struct PolyCommitment {
     /// The party ID with a schnorr proof
     pub id: ID,
@@ -77,8 +77,8 @@ impl Nonce {
         hash_to_scalar(&mut hasher)
     }
 
-    /// Check that the nonces are not zero since or one since that can lead
-    /// to attacks
+    /// Check that the nonce is not all-zero or all-one, as these values
+    /// can lead to attacks.
     pub fn is_valid(&self) -> bool {
         let zero = Scalar::from(0);
         let one = Scalar::from(1);

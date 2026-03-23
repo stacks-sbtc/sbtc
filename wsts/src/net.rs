@@ -49,7 +49,7 @@ pub trait Signable {
 pub struct BadPrivateShare {
     /// the DH shared key between these participants
     pub shared_key: Point,
-    /// prooof that the shared key is a valid DH tuple as per chaum-pedersen
+    /// Proof that the shared key is a valid DH tuple as per Chaum-Pedersen.
     pub tuple_proof: TupleProof,
 }
 
