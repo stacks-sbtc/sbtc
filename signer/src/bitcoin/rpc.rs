@@ -28,7 +28,6 @@ use crate::error::Error;
 use crate::storage::model::BitcoinBlockHeight;
 
 use super::GetTransactionFeeResult;
-use super::TransactionLookupHint;
 
 /// A slimmed down type representing a response from bitcoin-core's
 /// getrawtransaction RPC.
@@ -224,19 +223,6 @@ pub struct OutputScriptPubKey {
     /// The scriptPubKey locking the UTXO.
     #[serde(rename = "hex")]
     pub script: ScriptBuf,
-}
-
-/// A slimmed down version of the `BitcoinTxInfo` struct which only contains the
-/// `fee`, `vsize`, and `confirmations` fields; used in fee-retrieval contexts.
-#[derive(Debug, Clone, Deserialize)]
-pub struct BitcoinTxFeeInfo {
-    /// The transaction fee paid to the bitcoin miners. If the transaction is
-    /// not confirmed, a number of RPC endpoints will not return this field.
-    #[serde(default, with = "bitcoin::amount::serde::as_btc::opt")]
-    pub fee: Option<Amount>,
-    /// The virtual transaction size (differs from size for witness
-    /// transactions).
-    pub vsize: u64,
 }
 
 /// A detailed version of a bitcoin block. It is a slimmed down version of
@@ -573,34 +559,6 @@ impl BitcoinCoreClient {
         }
     }
 
-    /// Fetch and decode raw transaction from bitcoin-core using the
-    /// `getrawtransaction` RPC with a verbosity of 2. This method returns a
-    /// highly slimmed-down version of the response, containing only the
-    /// `fee` and `vsize` fields for fees retrieval.
-    pub fn get_tx_fee_info(&self, txid: &Txid) -> Result<Option<BitcoinTxFeeInfo>, Error> {
-        let args = [
-            serde_json::to_value(txid).map_err(Error::JsonSerialize)?,
-            // This is the verbosity level. The acceptable values are 0, 1,
-            // and 2, and we want the 2 because it will include all the
-            // required fields of the type.
-            serde_json::Value::Number(serde_json::value::Number::from(2u32)),
-        ];
-
-        match self
-            .inner
-            .call::<BitcoinTxFeeInfo>("getrawtransaction", &args)
-        {
-            Ok(tx_info) => Ok(Some(tx_info)),
-            // If the `block_hash` is not found then the message is "Block
-            // hash not found", while if the transaction is not found in an
-            // actual block then the message is "No such transaction found
-            // in the provided block. Use `gettransaction` for wallet
-            // transactions." In both cases the code is the same.
-            Err(BtcRpcError::JsonRpc(JsonRpcError::Rpc(RpcError { code: -5, .. }))) => Ok(None),
-            Err(err) => Err(Error::BitcoinCoreGetTransaction(err, *txid)),
-        }
-    }
-
     /// Scan the Bitcoin node's mempool to find transactions spending the
     /// provided output. This method uses the `gettxspendingprevout` RPC
     /// endpoint.
@@ -819,68 +777,12 @@ impl BitcoinInteract for BitcoinCoreClient {
         self.get_tx_out(outpoint, include_mempool)
     }
 
-    async fn get_transaction_fee(
-        &self,
-        txid: &bitcoin::Txid,
-        lookup_hint: Option<TransactionLookupHint>,
-    ) -> Result<GetTransactionFeeResult, Error> {
-        let vsize: u64;
-        let fee: u64;
-
-        match lookup_hint {
-            None => {
-                // Since we don't know if the transaction is confirmed or in
-                // the mempool, we first try to get the fee info from the
-                // confirmed transactions. This will also return a value if
-                // the transaction exists in the mempool, but the fee will be
-                // empty.
-                let tx_fee_info = self
-                    .get_tx_fee_info(txid)?
-                    .ok_or(Error::BitcoinTxMissing(*txid, None))?;
-
-                vsize = tx_fee_info.vsize;
-
-                // If the fee is present, then the transaction was confirmed and
-                // we can can simply use that value.
-                if let Some(tx_fee) = tx_fee_info.fee {
-                    fee = tx_fee.to_sat();
-                } else {
-                    // Otherwise, we need to get the mempool entry which does
-                    // include the fee information.
-                    let mempool_entry = self
-                        .get_mempool_entry(txid)?
-                        .ok_or(Error::BitcoinTxMissing(*txid, None))?;
-
-                    fee = mempool_entry.fees.base.to_sat();
-                }
-            }
-            Some(TransactionLookupHint::Confirmed) => {
-                let tx_fee_info = self
-                    .get_tx_fee_info(txid)?
-                    .ok_or(Error::BitcoinTxMissing(*txid, None))?;
-
-                vsize = tx_fee_info.vsize;
-
-                // If the transaction is confirmed, the fee will be present.
-                // But if not, we will return an error since the hint explicitly
-                // indicates that the transaction is confirmed.
-                fee = tx_fee_info
-                    .fee
-                    .ok_or(Error::BitcoinTxMissing(*txid, None))?
-                    .to_sat();
-            }
-            Some(TransactionLookupHint::Mempool) => {
-                // If the hint indicates that the transaction is in the mempool
-                // then we can skip the confirmed transaction lookup and go
-                // straight to the mempool entry.
-                let mempool_entry = self
-                    .get_mempool_entry(txid)?
-                    .ok_or(Error::BitcoinTxMissing(*txid, None))?;
-
-                vsize = mempool_entry.vsize;
-                fee = mempool_entry.fees.base.to_sat();
-            }
-        }
+    async fn get_transaction_fee(&self, txid: &Txid) -> Result<GetTransactionFeeResult, Error> {
+        let mempool_entry = self
+            .get_mempool_entry(txid)?
+            .ok_or(Error::BitcoinTxMissing(*txid, None))?;
+        let vsize = mempool_entry.vsize;
+        let fee = mempool_entry.fees.base.to_sat();
 
         // This should never happen since we're pulling the vsize from an actual
         // bitcoin transaction, but we'll check just in case.

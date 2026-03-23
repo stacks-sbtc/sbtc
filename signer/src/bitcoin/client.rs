@@ -22,7 +22,6 @@ use bitcoincore_rpc_json::GetTxOutResult;
 use crate::{error::Error, util::ApiFallbackClient};
 
 use super::BitcoinInteract;
-use super::TransactionLookupHint;
 use super::rpc::BitcoinBlockHeader;
 use super::rpc::BitcoinBlockInfo;
 use super::rpc::BitcoinCoreClient;
@@ -119,9 +118,8 @@ impl BitcoinInteract for ApiFallbackClient<BitcoinCoreClient> {
     async fn get_transaction_fee(
         &self,
         txid: &bitcoin::Txid,
-        lookup_hint: Option<TransactionLookupHint>,
     ) -> Result<super::GetTransactionFeeResult, Error> {
-        self.exec(|client, _| client.get_transaction_fee(txid, lookup_hint))
+        self.exec(|client, _| client.get_transaction_fee(txid))
             .await
     }
 
