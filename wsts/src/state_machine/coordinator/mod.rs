@@ -995,14 +995,16 @@ pub mod test {
         assert_eq!(signers, loaded_signers);
     }
 
-    /// Test if a signer will generate a new nonce after a signing round as
+    /// Test that a signer will not sign twice with the same nonce. This is
     /// a defense against a malicious coordinator who requests multiple
     /// signing rounds with no nonce round in between to generate a new
     /// nonce.
     ///
-    /// We also test that the signers will not return a signature unless
-    /// they have received a nonce request first, and that they only return
-    /// a signature once.
+    /// So we test that:
+    /// * signers will not return a signature share unless they have
+    ///   received a nonce request first.
+    /// * signers will return at most one signature share after they have
+    ///   received a nonce request.
     pub fn gen_nonces<Coordinator: CoordinatorTrait>(num_signers: u32, keys_per_signer: u32) {
         let mut rng = OsRng;
 
