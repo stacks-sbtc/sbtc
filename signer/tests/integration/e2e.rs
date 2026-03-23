@@ -34,7 +34,7 @@ use sbtc::{
 };
 use secp256k1::Keypair;
 use signer::{
-    api::{SBTC_REGISTRY_CONTRACT_NAME, new_block},
+    api::new_block,
     bitcoin::{
         BitcoinBlockHashStreamProvider as _, poller::BitcoinChainTipPoller, rpc::BitcoinCoreClient,
     },
@@ -301,8 +301,10 @@ async fn new_block_handler(ctx: &IntegrationTestContext<StacksClient>, block: &B
         panic!("unexpected deployer")
     };
 
-    let registry_address =
-        QualifiedContractIdentifier::new(deployer, ContractName::from(SBTC_REGISTRY_CONTRACT_NAME));
+    let registry_address = QualifiedContractIdentifier::new(
+        deployer,
+        ContractName::from(SmartContract::SbtcRegistry.contract_name()),
+    );
 
     for BlockReplayTransaction { events } in &block.transactions {
         let events = events
@@ -585,6 +587,7 @@ async fn deposit_and_withdrawal() {
             withdrawal_id = withdrawal.request_id;
         }
     }
+    assert_ne!(withdrawal_id, 0);
 
     // Generate enough blocks to make the withdrawal valid; the minus one is
     // because we already generated one block above to check for signers votes

@@ -18,4 +18,4 @@ pub struct ApiState<C> {
 }
 
 /// The name of the sbtc registry smart contract.
-pub const SBTC_REGISTRY_CONTRACT_NAME: &str = "sbtc-registry";
+const SBTC_REGISTRY_CONTRACT_NAME: &str = "sbtc-registry";
