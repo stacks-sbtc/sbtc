@@ -1473,7 +1473,7 @@ impl From<(u32, PartyState)> for proto::PartyState {
             key_id,
             polynomial: value.polynomial.map(|v| v.into()),
             private_keys: value.private_keys.into_iter().map(|v| v.into()).collect(),
-            nonce: Some(value.nonce.into()),
+            nonce: None,
         }
     }
 }
@@ -1490,7 +1490,6 @@ impl TryFrom<proto::PartyState> for (u32, PartyState) {
                     .into_iter()
                     .map(|v| v.try_into())
                     .collect::<Result<Vec<_>, Error>>()?,
-                nonce: value.nonce.required()?.try_into()?,
             },
         ))
     }

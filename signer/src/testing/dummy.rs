@@ -345,7 +345,6 @@ pub fn encrypted_dkg_shares<R: rand::RngCore + rand::CryptoRng>(
     let party_state = wsts::traits::PartyState {
         polynomial: None,
         private_keys: vec![],
-        nonce: wsts::common::Nonce::random(rng),
     };
 
     let signer_state = wsts::traits::SignerState {
@@ -1098,7 +1097,6 @@ impl Dummy<Unit> for (u32, PartyState) {
                     .into_iter()
                     .map(|_| config.fake_with_rng(rng))
                     .collect(),
-                nonce: config.fake_with_rng(rng),
             },
         )
     }
