@@ -62,7 +62,7 @@ impl Nonce {
     ///
     /// # Notes
     ///
-    /// If the random number generate always produces the same "special"
+    /// If the random number generator always produces the same "special"
     /// but unknown values, then it is possible that this function will
     /// loop forever.
     pub fn random<RNG: RngCore + CryptoRng>(rng: &mut RNG) -> Self {
