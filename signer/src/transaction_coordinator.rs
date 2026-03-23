@@ -20,7 +20,6 @@ use crate::WITHDRAWAL_BLOCKS_EXPIRY;
 use crate::WITHDRAWAL_DUST_LIMIT;
 use crate::WITHDRAWAL_EXPIRY_BUFFER;
 use crate::bitcoin::BitcoinInteract as _;
-use crate::bitcoin::TransactionLookupHint;
 use crate::bitcoin::utxo;
 use crate::bitcoin::utxo::Fees;
 use crate::bitcoin::utxo::UnsignedMockTransaction;
@@ -2416,7 +2415,7 @@ where
             let bitcoin_client = bitcoin_client.clone();
             async move {
                 bitcoin_client
-                    .get_transaction_fee(txid, Some(TransactionLookupHint::Mempool))
+                    .get_transaction_fee(txid)
                     .await
                     .map(|fee| (txid, fee))
             }
@@ -2446,11 +2445,7 @@ where
         // descendants then this will just result in an empty list.
         let descendant_fees = try_join_all(descendant_txids.iter().map(|txid| {
             let bitcoin_client = bitcoin_client.clone();
-            async move {
-                bitcoin_client
-                    .get_transaction_fee(txid, Some(TransactionLookupHint::Mempool))
-                    .await
-            }
+            async move { bitcoin_client.get_transaction_fee(txid).await }
         }))
         .await?;
 
