@@ -61,8 +61,10 @@ pub enum AggregatorError {
     #[error("integer conversion error")]
     /// An error during integer conversion operations
     TryFromInt,
-    #[error("nonce has not been set yet missing")]
-    /// The nonce was missing
+    #[error("nonce has not been set yet")]
+    /// The nonce in v2::Party has not been set with a call to gen_nonce.
+    /// This means that the signer state machine has yet to receive a nonce
+    /// request before being asked to sign for a message.
     MissingNonce,
 }
 
