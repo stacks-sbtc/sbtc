@@ -66,8 +66,8 @@ impl Party {
         public_nonce
     }
 
-    /// Reset the nonce for a signing round
-    pub fn reset_nonce(&mut self) {
+    /// Remove any nonce, so that it is unset.
+    pub fn unset_nonce(&mut self) {
         self.nonce = None;
     }
 
