@@ -61,6 +61,9 @@ pub enum AggregatorError {
     #[error("integer conversion error")]
     /// An error during integer conversion operations
     TryFromInt,
+    #[error("nonce has not been set yet missing")]
+    /// The nonce was missing
+    MissingNonce,
 }
 
 impl From<TryFromIntError> for AggregatorError {
