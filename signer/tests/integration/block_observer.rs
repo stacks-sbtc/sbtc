@@ -119,7 +119,7 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
     // database.
     let mut rng = get_rng();
 
-    let stack = TestContainersBuilder::start_bitcoin().await.keep_up();
+    let stack = TestContainersBuilder::start_bitcoin().await;
     let bitcoin = stack.bitcoin().await;
     let rpc = bitcoin.rpc();
     let faucet = &bitcoin.get_faucet();
