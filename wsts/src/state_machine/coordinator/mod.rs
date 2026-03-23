@@ -1083,8 +1083,8 @@ pub mod test {
         });
 
         // For the signers that are part of the signing set, they should
-        // return a signature no problem. We check that the signature
-        // shares are distinct.
+        // successfully return a signature share. We check that the
+        // signature shares are distinct.
         let z_is = signers
             .iter_mut()
             .take(threshold)

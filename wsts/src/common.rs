@@ -58,8 +58,25 @@ pub struct Nonce {
 }
 
 impl Nonce {
-    /// Construct a random nonce
+    /// Construct a random nonce that is valid.
+    ///
+    /// # Notes
+    ///
+    /// If the random number generate always produces the same "special"
+    /// but unknown values, then it is possible that this function will
+    /// loop forever.
     pub fn random<RNG: RngCore + CryptoRng>(rng: &mut RNG) -> Self {
+        let mut nonce = Self::new(rng);
+
+        while !nonce.is_valid() {
+            nonce = Self::new(rng);
+        }
+
+        nonce
+    }
+
+    // Construct a random nonce.
+    fn new<R: RngCore + CryptoRng>(rng: &mut R) -> Self {
         Self {
             d: Self::gen(rng),
             e: Self::gen(rng),
