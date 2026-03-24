@@ -437,7 +437,7 @@ impl BitcoinCoreClient {
     /// mempool. If -txindex is enabled on bitcoin-core and no blockhash
     /// argument is passed, it will return the transaction if it is in the
     /// mempool or any block. We do not require -txindex to be enabled
-    /// (same with stacks-core[2]) so we only claim that this function
+    /// (same with stacks-core[2]), so we only claim that this function
     /// works with transactions in the mempool.
     ///
     /// [1]: <https://bitcoincore.org/en/doc/25.0.0/rpc/rawtransactions/getrawtransaction/>
@@ -484,8 +484,8 @@ impl BitcoinCoreClient {
     /// The documentation of the `getblockhash` RPC can be found at:
     /// <https://bitcoincore.org/en/doc/25.0.0/rpc/blockchain/getblockhash/>
     pub fn get_utxo_info(&self, outpoint: &OutPoint) -> Result<Option<OutPointSummary>, Error> {
-        // This will return Some(_) result if the transaction is confirmed
-        // in a canonical block and unspent.
+        // This returns Some(_) if the transaction is confirmed in a canonical
+        // block and unspent.
         let Some(out) = self.get_tx_out(outpoint, false)? else {
             return Ok(None);
         };
