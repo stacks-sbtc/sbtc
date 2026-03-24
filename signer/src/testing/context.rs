@@ -401,7 +401,6 @@ impl BitcoinInteract for WrappedMockBitcoinInteract {
     async fn get_transaction_fee(
         &self,
         _txid: &bitcoin::Txid,
-        _lookup_hint: Option<crate::bitcoin::TransactionLookupHint>,
     ) -> Result<GetTransactionFeeResult, Error> {
         unimplemented!()
     }
@@ -487,19 +486,15 @@ impl StacksInteract for WrappedMockStacksInteract {
         self.inner.lock().await.get_block(block_id).await
     }
 
-    async fn check_pre_nakamoto_block(&self, block_id: &StacksBlockHash) -> Result<(), Error> {
+    async fn get_tenure_headers(
+        &self,
+        consensus_hash: &ConsensusHash,
+    ) -> Result<TenureBlockHeaders, Error> {
         self.inner
             .lock()
             .await
-            .check_pre_nakamoto_block(block_id)
+            .get_tenure_headers(consensus_hash)
             .await
-    }
-
-    async fn get_tenure_headers(
-        &self,
-        block_id: &StacksBlockHash,
-    ) -> Result<TenureBlockHeaders, Error> {
-        self.inner.lock().await.get_tenure_headers(block_id).await
     }
 
     async fn get_tenure_info(&self) -> Result<GetTenureInfoResponse, Error> {

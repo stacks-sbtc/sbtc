@@ -1,13 +1,12 @@
 use core::{cmp::PartialEq, fmt::Debug};
 use polynomial::Polynomial;
-use serde::{Deserialize, Serialize};
 
 use crate::{
     common::Nonce,
     curve::{point::Point, scalar::Scalar},
 };
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 /// The saved state required to reconstruct a party
 pub struct PartyState {
     /// The party's private polynomial

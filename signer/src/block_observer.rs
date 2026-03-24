@@ -170,7 +170,7 @@ where
                     )
                     .increment(1);
 
-                    if let Err(error) = self.process_bitcoin_blocks_until(block_hash).await {
+                    if let Err(error) = self.process_bitcoin_chain_tip(block_hash).await {
                         tracing::warn!(%error, %block_hash, "could not process bitcoin blocks");
                     }
 
@@ -294,7 +294,8 @@ impl<C: Context, B> BlockObserver<C, B> {
     }
 
     /// Find the parent blocks from the given block that are also missing
-    /// from our database.
+    /// from our database. The results are returned from blocks with the
+    /// least height to the greatest height.
     ///
     /// # Notes
     ///
@@ -345,6 +346,35 @@ impl<C: Context, B> BlockObserver<C, B> {
         }
 
         Ok(headers.into())
+    }
+
+    /// Process the bitcoin chain tip by fetching all unknown block headers
+    /// from the given chain tip back until the nakamoto start height. Then
+    /// mark all blocks reachable from the chain tip as canonical in the
+    /// database.
+    ///
+    /// # Notes
+    ///
+    /// This function must only be called with the bitcoin chain tip since
+    /// it updates all blocks that are reachable from the given block hash
+    /// as canonical and may update blocks not reachable as non-canonical.
+    #[tracing::instrument(skip_all, fields(%chain_tip))]
+    async fn process_bitcoin_chain_tip(&self, chain_tip: BlockHash) -> Result<(), Error> {
+        self.process_bitcoin_blocks_until(chain_tip).await?;
+
+        let db = self.context.get_storage_mut();
+
+        tracing::info!("updating canonical bitcoin blockchain to chain tip");
+        let chain_tip: model::BitcoinBlockHash = chain_tip.into();
+
+        // This is a safeguard to prevent us from updating the is_canonical
+        // column of all blocks in the database if the given chain tip has
+        // not been written to the database.
+        if !db.is_known_bitcoin_block_hash(&chain_tip).await? {
+            tracing::error!("chain tip not found in database, not setting is_canonical column");
+            return Err(Error::UnknownBitcoinChainTip(chain_tip));
+        }
+        db.set_canonical_bitcoin_blockchain(&chain_tip).await
     }
 
     /// Process bitcoin blocks until we get caught up to the given
@@ -424,13 +454,11 @@ impl<C: Context, B> BlockObserver<C, B> {
         let db = self.context.get_storage_mut();
         let tenure_info = stacks_client.get_tenure_info().await?;
 
+        let consensus_hash = tenure_info.consensus_hash;
+
         tracing::debug!("fetching unknown ancestral blocks from stacks-core");
-        crate::stacks::api::update_db_with_unknown_ancestors(
-            &stacks_client,
-            &db,
-            &tenure_info.tip_block_id,
-        )
-        .await?;
+        crate::stacks::api::update_db_with_unknown_ancestors(&stacks_client, &db, consensus_hash)
+            .await?;
 
         tracing::debug!("finished processing stacks block");
         Ok(())
