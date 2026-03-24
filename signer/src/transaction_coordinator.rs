@@ -50,7 +50,6 @@ use crate::metrics::STACKS_BLOCKCHAIN;
 use crate::network;
 use crate::signature::TaprootSignature;
 use crate::stacks::api::FeePriority;
-use crate::stacks::api::RejectionReason;
 use crate::stacks::api::StacksEpochStatus;
 use crate::stacks::api::StacksInteract as _;
 use crate::stacks::api::SubmitTxResponse;
@@ -2645,10 +2644,11 @@ pub fn adjust_nonce(wallet: &SignerWallet, error: &Error) {
     match error {
         // For `ConflictingNonceInMempool` we don't want to decrement the nonce
         // to avoid failing also the following submissions
-        Error::StacksTxRejection(TxRejection {
-            reason: RejectionReason::ConflictingNonceInMempool,
-            ..
-        }) => (),
+        Error::StacksTxRejection(TxRejection { reason, .. })
+            if reason == "ConflictingNonceInMempool" =>
+        {
+            ()
+        }
         _ => wallet.set_nonce(wallet.get_nonce().saturating_sub(1)),
     }
 }
