@@ -1,6 +1,6 @@
 //! Handlers for testing endpoint endpoints.
 
-use reqwest::StatusCode;
+use warp::http::StatusCode;
 use tracing::instrument;
 use warp::reply::Reply;
 

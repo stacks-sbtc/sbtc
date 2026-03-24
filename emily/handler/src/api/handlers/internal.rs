@@ -1,6 +1,6 @@
 //! Handlers for internal endpoints.
 
-use reqwest::StatusCode;
+use warp::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 
