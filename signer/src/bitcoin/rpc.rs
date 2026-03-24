@@ -441,7 +441,7 @@ impl BitcoinCoreClient {
     /// the mempool and a bitcoin block.
     ///
     /// [1]: <https://bitcoincore.org/en/doc/25.0.0/rpc/rawtransactions/getrawtransaction/>
-    /// [2]: <https://docs.stacks.co/guides-and-tutorials/run-a-miner/mine-mainnet-stacks-tokens>
+    /// [2]: <https://docs.stacks.co/operate/run-a-node/run-a-pruned-bitcoin-node>
     #[cfg(any(test, feature = "testing"))]
     pub fn get_tx(&self, txid: &Txid) -> Result<Option<GetTxResponse>, Error> {
         let args = [
@@ -484,7 +484,7 @@ impl BitcoinCoreClient {
     /// <https://bitcoincore.org/en/doc/25.0.0/rpc/blockchain/getblockhash/>
     pub fn get_utxo_info(&self, outpoint: &OutPoint) -> Result<Option<OutPointSummary>, Error> {
         // This will return Some(_) result if the transaction is confirmed
-        // in a canonical block.
+        // in a canonical block and unspent.
         let Some(out) = self.get_tx_out(outpoint, false)? else {
             return Ok(None);
         };
