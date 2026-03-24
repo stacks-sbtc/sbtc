@@ -134,9 +134,9 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
         .build();
     ctx.state().update_current_limits(SbtcLimits::unlimited());
 
-    // We're going to create two confirmed deposits. These deposits
-    // outputshave not been spent, so the block observer should pick them
-    // up and store them in the database.
+    // We're going to create two confirmed deposits. These deposit outputs
+    // have not been spent, so the block observer should pick them up and
+    // store them in the database.
     let signers = TestSignerSet::new(&mut rng);
     let amounts = [
         SweepAmounts {

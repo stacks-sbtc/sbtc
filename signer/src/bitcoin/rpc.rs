@@ -438,7 +438,7 @@ impl BitcoinCoreClient {
     /// argument is passed, it will return the transaction if it is in the
     /// mempool or any block. We do not require -txindex to be enabled (same with
     /// stacks-core[2]) so this should work with transactions in either
-    /// the mempool and a bitcoin block.
+    /// the mempool or a bitcoin block.
     ///
     /// [1]: <https://bitcoincore.org/en/doc/25.0.0/rpc/rawtransactions/getrawtransaction/>
     /// [2]: <https://docs.stacks.co/operate/run-a-node/run-a-pruned-bitcoin-node>
