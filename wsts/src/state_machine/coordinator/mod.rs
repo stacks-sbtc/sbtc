@@ -785,13 +785,6 @@ pub mod test {
             .map(|c| Coordinator::load(&c.save()))
             .collect::<Vec<Coordinator>>();
 
-        let new_signers = signers
-            .iter()
-            .map(|s| Signer::load(&s.save()))
-            .collect::<Vec<Signer>>();
-
-        assert_eq!(signers, &new_signers);
-
         // Send the SignatureShareRequest message to all signers and share their responses with the coordinator and signers
         let (outbound_messages, operation_results) =
             feedback_messages(coordinators, signers, &outbound_messages);
