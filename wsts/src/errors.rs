@@ -1,11 +1,10 @@
 use aes_gcm::Error as AesGcmError;
 use core::num::TryFromIntError;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::curve::{point::Error as PointError, scalar::Scalar};
 
-#[derive(Error, Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Error, Debug, Clone, PartialEq)]
 /// Errors which can happen during distributed key generation
 pub enum DkgError {
     #[error("missing public shares from {0:?}")]
@@ -40,7 +39,7 @@ impl From<TryFromIntError> for DkgError {
     }
 }
 
-#[derive(Error, Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Error, Debug, Clone, PartialEq)]
 /// Errors which can happen during signature aggregation
 pub enum AggregatorError {
     #[error("bad poly commitments {0:?}")]

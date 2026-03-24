@@ -1,5 +1,4 @@
 use rand_core::{CryptoRng, RngCore};
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
@@ -11,7 +10,7 @@ use crate::{
 };
 
 #[allow(non_snake_case)]
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 /// ID type which encapsulates the ID and a schnorr proof of ownership of the polynomial
 pub struct ID {
     /// The ID

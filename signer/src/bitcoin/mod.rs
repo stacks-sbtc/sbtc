@@ -32,18 +32,6 @@ pub struct GetTransactionFeeResult {
     pub vsize: u64,
 }
 
-/// An enum representing the possible locations of a transaction, used to
-/// optimize certain lookups. It is assumed that an
-/// `Option<TransactionLookupHint>` is used to indicate that the caller is
-/// unsure of the location of the transaction.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TransactionLookupHint {
-    /// The transaction is in the mempool.
-    Mempool,
-    /// The transaction is in a (known) block.
-    Confirmed,
-}
-
 /// Represents the ability to interact with the bitcoin blockchain
 #[cfg_attr(any(test, feature = "testing"), mockall::automock())]
 pub trait BitcoinInteract: Sync + Send {
@@ -123,13 +111,12 @@ pub trait BitcoinInteract: Sync + Send {
         include_mempool: bool,
     ) -> impl Future<Output = Result<Option<GetTxOutResult>, Error>> + Send;
 
-    /// Gets the associated fees for the given transaction. It is expected that
-    /// the provided transaction is known to the Bitcoin core node, either
-    /// confirmed or in the mempool, otherwise an error will be returned.
+    /// Gets the associated fees for the given transaction. It is expected
+    /// that the provided transaction is known to the Bitcoin core node, in
+    /// the mempool, otherwise an error will be returned.
     fn get_transaction_fee(
         &self,
-        tx: &Txid,
-        lookup_hint: Option<TransactionLookupHint>,
+        txid: &Txid,
     ) -> impl Future<Output = Result<GetTransactionFeeResult, Error>> + Send;
 
     /// Attempts to get the mempool entry for the given transaction ID.
