@@ -747,7 +747,7 @@ pub mod test {
 
     pub fn run_sign<Coordinator: CoordinatorTrait>(
         coordinators: &mut [Coordinator],
-        signers: &mut Vec<Signer>,
+        signers: &mut [Signer],
         msg: &[u8],
         signature_type: SignatureType,
     ) -> OperationResult {
