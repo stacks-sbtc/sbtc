@@ -427,8 +427,8 @@ impl BitcoinCoreClient {
     }
 
     /// Fetch and decode raw transaction from bitcoin-core using the
-    /// getrawtransaction RPC with a verbosity of 1 [1]. None is returned if
-    /// the node cannot find the transaction in a bitcoin block or the
+    /// getrawtransaction RPC with a verbosity of 1 [1]. None is returned
+    /// if the node cannot find the transaction in a bitcoin block or the
     /// mempool.
     ///
     /// # Notes
@@ -436,9 +436,9 @@ impl BitcoinCoreClient {
     /// By default, this call only returns a transaction if it is in the
     /// mempool. If -txindex is enabled on bitcoin-core and no blockhash
     /// argument is passed, it will return the transaction if it is in the
-    /// mempool or any block. We do not require -txindex to be enabled (same with
-    /// stacks-core[2]) so this should work with transactions in either
-    /// the mempool or a bitcoin block.
+    /// mempool or any block. We do not require -txindex to be enabled
+    /// (same with stacks-core[2]) so we only claim that this function
+    /// works with transactions in the mempool.
     ///
     /// [1]: <https://bitcoincore.org/en/doc/25.0.0/rpc/rawtransactions/getrawtransaction/>
     /// [2]: <https://docs.stacks.co/operate/run-a-node/run-a-pruned-bitcoin-node>
