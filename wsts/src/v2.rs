@@ -627,6 +627,7 @@ impl Party {
 }
 
 /// Helper functions for tests
+#[cfg(test)]
 pub mod test_helpers {
     use crate::common::{PolyCommitment, PublicNonce};
     use crate::errors::DkgError;
