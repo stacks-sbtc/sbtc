@@ -1797,7 +1797,7 @@ async fn pseudo_random_dkg() {
     let event = RequestDeciderEvent::NewRequestsHandled(chain_tip_ref);
     signers
         .iter()
-        .try_for_each(|(ctx, _, _, _)| ctx.signal(event.clone().into()))
+        .try_for_each(|(ctx, _, _, _)| ctx.signal(event.clone().into()).map_err(Box::new))
         .unwrap();
 
     wait_for_tenure_completed(&signers, chain_tip_ref.block_hash).await;
