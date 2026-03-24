@@ -378,9 +378,8 @@ impl TenureBlockHeaders {
     ///
     /// # Note
     ///
-    /// * The returned slice is nonempty.
-    /// * The struct doesn't need to contain all the headers of stacks
-    ///   blocks in a tenure.
+    /// The struct should contain all the headers of Stacks blocks in a
+    /// tenure, and can be empty.
     pub fn headers(&self) -> &[StacksBlockHeader] {
         &self.headers
     }

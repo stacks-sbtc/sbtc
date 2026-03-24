@@ -61,13 +61,6 @@ impl TenureBlockHeaders {
     }
 
     /// Create TenureBlockHeaders with a given anchor block.
-    ///
-    /// # Notes
-    ///
-    /// We do not set the bitcoin block height in any of these testing
-    /// functions, because our tests often need the stacks anchor height to
-    /// be before the nakamoto start height. This is because our Stacks
-    /// block update logic stops at the nakamoto start height.
     pub fn from_anchor<T>(anchor: T) -> Self
     where
         T: Into<BitcoinBlockRef>,
@@ -99,7 +92,7 @@ pub async fn assert_db_contains_stacks_headers(storage: &PgStore, from: u64, to:
         r#"SELECT 
              MIN(block_height) as min_block_height
            , MAX(block_height) as max_block_height
-           , COUNT(DISTINCT block_hash) as count
+           , COUNT(*) as count
          FROM sbtc_signer.stacks_blocks"#,
     )
     .fetch_one(storage.pool())
