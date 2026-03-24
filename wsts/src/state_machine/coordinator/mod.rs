@@ -1003,12 +1003,11 @@ pub mod test {
 
         let (mut coordinators, mut signers) = run_dkg::<Coordinator>(num_signers, keys_per_signer);
 
-        let mut all_thresholds = coordinators
+        let all_thresholds = coordinators
             .iter()
             .map(|c| c.get_config().threshold)
-            .collect::<Vec<u32>>();
-        all_thresholds.dedup();
-        let threshold = all_thresholds[0] as usize;
+            .collect::<std::collections::BTreeSet<u32>>();
+        let threshold = *all_thresholds.first().unwrap() as usize;
 
         assert_eq!(threshold, 3);
         assert_eq!(all_thresholds.len(), 1);
