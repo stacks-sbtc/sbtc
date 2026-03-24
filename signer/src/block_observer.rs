@@ -90,6 +90,13 @@ impl DepositRequestValidator for CreateDepositRequest {
             return Err(Error::BitcoinTxCoinbase(self.outpoint.txid));
         }
 
+        // This is usually the block hash confirming the transaction
+        // associated with the outpoint. However, it can be incorrect if
+        // our bitcoin node detects a reorg in the middle of the above
+        // function call and the reorg affects the outpoint in question.
+        // The call below to get_tx_info will detect this and we will
+        // either return Ok(None) or an error, which is fine, it will get
+        // sorted out at the arrival of the next bitcoin block.
         let block_hash = response.block_hash;
 
         // The `get_tx_info` call here should not return None, we know that

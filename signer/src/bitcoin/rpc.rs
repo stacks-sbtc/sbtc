@@ -472,13 +472,14 @@ impl BitcoinCoreClient {
     ///
     /// # Notes
     ///
+    /// This function can return an incorrect response if our bitcoin node
+    /// detects a reorg in the middle of this function call and the reorg
+    /// affects the outpoint in question.
+    ///
     /// This function returns Ok(None) if:
     /// * the associated output has been spent.
     /// * the associated output is not confirmed in a block on the
     ///   canonical bitcoin blockchain.
-    /// * the height of the associated block confirming the transaction
-    ///   that created the given output is not found in bitcoin core using
-    ///   the `getblockhash` RPC. This condition should never happen.
     ///
     /// The documentation of the `getblockhash` RPC can be found at:
     /// <https://bitcoincore.org/en/doc/25.0.0/rpc/blockchain/getblockhash/>
@@ -512,7 +513,6 @@ impl BitcoinCoreClient {
                 block_hash,
                 is_coinbase: out.coinbase,
             })),
-            Err(BtcRpcError::JsonRpc(JsonRpcError::Rpc(RpcError { code: -5, .. }))) => Ok(None),
             Err(err) => Err(Error::BitcoinCoreGetBlockHash(err, *confirmation_height)),
         }
     }
