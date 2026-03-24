@@ -270,7 +270,7 @@ async fn update_db_with_unknown_ancestors_process_stops_when_fetches_seen_block(
     // At this point we have only blocks corresponding to ch_2 in the db.
 
     // These values equal the smallest height in mock 2 and the biggest in
-    // mock 1.
+    // mock 2.
     let actual_start_height_ch2 = 1507180;
     let actual_end_height_ch2 = 1507194;
 
