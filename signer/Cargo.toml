@@ -87,7 +87,6 @@ signer = { path = ".", features = ["testing"] }
 # External crates
 assert_matches.workspace = true
 bitcoincore-rpc.workspace = true
-reqwest.workspace = true
 mockito.workspace = true
 more-asserts.workspace = true
 ripemd.workspace = true
