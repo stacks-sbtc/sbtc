@@ -456,13 +456,11 @@ impl<C: Context, B> BlockObserver<C, B> {
         let db = self.context.get_storage_mut();
         let tenure_info = stacks_client.get_tenure_info().await?;
 
+        let consensus_hash = tenure_info.consensus_hash;
+
         tracing::debug!("fetching unknown ancestral blocks from stacks-core");
-        crate::stacks::api::update_db_with_unknown_ancestors(
-            &stacks_client,
-            &db,
-            &tenure_info.tip_block_id,
-        )
-        .await?;
+        crate::stacks::api::update_db_with_unknown_ancestors(&stacks_client, &db, consensus_hash)
+            .await?;
 
         tracing::debug!("finished processing stacks block");
         Ok(())
