@@ -50,6 +50,7 @@ quinn.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
 reqwest.workspace = true
+reqwest_012.workspace = true
 rustls-webpki.workspace = true
 secp256k1.workspace = true
 serde.workspace = true
