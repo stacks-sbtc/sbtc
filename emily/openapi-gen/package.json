@@ -1,9 +1,9 @@
 {
   "name": "emily-api",
   "scripts": {
-    "build-testing-api-rust": "JAVA_OPTS='-Dlog.level=error' openapi-generator-cli generate -i ./generated-specs/testing-emily-openapi-spec.json -g rust -o $EMILY_CLIENTS_DIR/testing/ --config ./api-config/testing.json",
-    "build-private-api-rust": "JAVA_OPTS='-Dlog.level=error' openapi-generator-cli generate -i ./generated-specs/private-emily-openapi-spec.json -g rust -o $EMILY_CLIENTS_DIR/private/ --config ./api-config/private.json",
-    "build-public-api-rust": "JAVA_OPTS='-Dlog.level=error' openapi-generator-cli generate -i ./generated-specs/public-emily-openapi-spec.json -g rust -o $EMILY_CLIENTS_DIR/public/ --config ./api-config/public.json",
+    "build-testing-api-rust": "JAVA_OPTS='-Dlog.level=error' openapi-generator-cli generate -i ./generated-specs/testing-emily-openapi-spec.json -g rust -o $EMILY_CLIENTS_DIR/testing/ --config ./api-config/testing.json --template-dir ./templates",
+    "build-private-api-rust": "JAVA_OPTS='-Dlog.level=error' openapi-generator-cli generate -i ./generated-specs/private-emily-openapi-spec.json -g rust -o $EMILY_CLIENTS_DIR/private/ --config ./api-config/private.json --template-dir ./templates",
+    "build-public-api-rust": "JAVA_OPTS='-Dlog.level=error' openapi-generator-cli generate -i ./generated-specs/public-emily-openapi-spec.json -g rust -o $EMILY_CLIENTS_DIR/public/ --config ./api-config/public.json --template-dir ./templates",
     "build": "pnpm build-testing-api-rust && pnpm build-public-api-rust && pnpm build-private-api-rust"
   },
   "devDependencies": {

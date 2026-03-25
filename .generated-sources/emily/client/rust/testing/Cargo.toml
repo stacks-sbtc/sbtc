@@ -15,6 +15,6 @@ url = "^2.5"
 reqwest = { version = "^0.13", default-features = false, features = ["json", "multipart", "query", "form"] }
 
 [features]
-default = ["native-tls"]
+default = ["rustls"]
 native-tls = ["reqwest/native-tls"]
 rustls = ["reqwest/rustls"]
