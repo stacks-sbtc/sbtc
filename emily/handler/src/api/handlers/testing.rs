@@ -1,7 +1,7 @@
 //! Handlers for testing endpoint endpoints.
 
-use warp::http::StatusCode;
 use tracing::instrument;
+use warp::http::StatusCode;
 use warp::reply::Reply;
 
 use crate::common::error::Error;

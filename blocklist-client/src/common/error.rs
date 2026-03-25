@@ -63,8 +63,9 @@ impl Error {
     /// Provides the status code that corresponds to the error.
     pub fn status_code(&self) -> StatusCode {
         match self {
-            Error::HttpRequest(code, _) => StatusCode::from_u16(code.as_u16())
-                .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+            Error::HttpRequest(code, _) => {
+                StatusCode::from_u16(code.as_u16()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
+            }
             Error::Network(_) => StatusCode::BAD_GATEWAY,
             Error::Serialization(_) => StatusCode::BAD_REQUEST,
             Error::InvalidApiResponse => StatusCode::BAD_REQUEST,
