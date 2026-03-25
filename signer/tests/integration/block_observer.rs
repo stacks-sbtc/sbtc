@@ -119,6 +119,7 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
     // with a real bitcoin core client and a real connection to our
     // database.
     let mut rng = get_rng();
+    signer::logging::setup_logging("info,signer=debug", false);
 
     let stack = TestContainersBuilder::start_bitcoin().await;
     let bitcoin = stack.bitcoin().await;
