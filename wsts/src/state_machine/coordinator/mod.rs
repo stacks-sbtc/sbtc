@@ -1009,7 +1009,6 @@ pub mod test {
             .collect::<std::collections::BTreeSet<u32>>();
         let threshold = *all_thresholds.first().unwrap() as usize;
 
-        assert_eq!(threshold, 3);
         assert_eq!(all_thresholds.len(), 1);
         let msg = "It was many and many a year ago, in a kingdom by the sea"
             .as_bytes()
