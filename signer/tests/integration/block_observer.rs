@@ -119,7 +119,6 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
     // with a real bitcoin core client and a real connection to our
     // database.
     let mut rng = get_rng();
-    signer::logging::setup_logging("info,signer=debug", false);
 
     let stack = TestContainersBuilder::start_bitcoin().await;
     let bitcoin = stack.bitcoin().await;
@@ -194,7 +193,7 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
 
         client.expect_get_epoch_status().returning(|| {
             Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
-                nakamoto_start_height: BitcoinBlockHeight::from(100_u32),
+                nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
             })))
         });
 
