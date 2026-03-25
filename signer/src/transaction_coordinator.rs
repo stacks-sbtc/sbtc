@@ -2645,10 +2645,7 @@ pub fn adjust_nonce(wallet: &SignerWallet, error: &Error) {
         // For `ConflictingNonceInMempool` we don't want to decrement the nonce
         // to avoid failing also the following submissions
         Error::StacksTxRejection(TxRejection { reason, .. })
-            if reason == "ConflictingNonceInMempool" =>
-        {
-            ()
-        }
+            if reason == "ConflictingNonceInMempool" => {}
         _ => wallet.set_nonce(wallet.get_nonce().saturating_sub(1)),
     }
 }
