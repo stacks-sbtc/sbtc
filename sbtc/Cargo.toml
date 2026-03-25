@@ -8,7 +8,18 @@ ignored = ["bitcoincore-rpc-json"]
 
 [features]
 default = []
-testing = ["dep:bitcoincore-rpc", "dep:bitcoincore-rpc-json", "dep:aws-config", "dep:aws-sdk-dynamodb", "dep:aws-smithy-runtime", "dep:hyper_014", "dep:tokio", "dep:futures", "dep:testcontainers", "dep:url"]
+testing = [
+    "dep:aws-smithy-http-client",
+    "dep:aws-config",
+    "dep:aws-sdk-dynamodb",
+    "dep:aws-smithy-runtime",
+    "dep:bitcoincore-rpc",
+    "dep:bitcoincore-rpc-json",
+    "dep:futures",
+    "dep:testcontainers",
+    "dep:tokio",
+    "dep:url",
+]
 webhooks = ["dep:hex"]
 
 [dependencies]
@@ -25,11 +36,11 @@ thiserror.workspace = true
 aws-config = { workspace = true, optional = true }
 aws-sdk-dynamodb = { workspace = true, optional = true }
 aws-smithy-runtime = { workspace = true, optional = true }
+aws-smithy-http-client = { workspace = true, optional = true }
 bitcoincore-rpc = { workspace = true, optional = true }
 bitcoincore-rpc-json = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 hex = { workspace = true, optional = true }
-hyper_014 = { workspace = true, optional = true }
 testcontainers = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 url = { workspace = true, optional = true }

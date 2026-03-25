@@ -32,7 +32,7 @@ cfg-if.workspace = true
 clap.workspace = true
 clarity.workspace = true
 config.workspace = true
-emily-client.workspace = true
+emily-client = { workspace = true, features = ["rustls"] }
 futures.workspace = true
 hex.workspace = true
 include_dir.workspace = true
@@ -47,7 +47,7 @@ prost.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
 reqwest.workspace = true
-reqwest_012.workspace = true
+rustls-webpki.workspace = true
 secp256k1.workspace = true
 serde.workspace = true
 serde_bytes.workspace = true
@@ -93,7 +93,7 @@ ripemd.workspace = true
 tempfile.workspace = true
 test-case.workspace = true
 test-log.workspace = true
-testing-emily-client.workspace = true
+testing-emily-client = { workspace = true, features = ["rustls"] }
 toml_edit.workspace = true
 tower.workspace = true
 
