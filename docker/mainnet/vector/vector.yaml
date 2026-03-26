@@ -17,6 +17,13 @@ transforms:
       - sbtc_signer_logs
     drop_on_error: true
     source: |-
+      .docker_container_created_at = del(.container_created_at)
+      .docker_container_id = del(.container_id)
+      .docker_container_name = del(.container_name)
+      .docker_host = del(.host)
+      .docker_image = del(.image)
+      .docker_label = del(.label)
+
       parsed, err = parse_json(.message)
       if err == null && is_object(parsed) {
         . = merge(., object!(parsed))
