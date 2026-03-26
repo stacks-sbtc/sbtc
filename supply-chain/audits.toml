@@ -17,6 +17,21 @@ Note that this library does use C bindings and thus FFI and unsafe. There are pa
 This library is provided by the rust-bitcoin GH organization which also maintains the bitcoin and secp256k1 crates which we use extensively.
 """
 
+[[audits.hashbrown]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.16.0 -> 0.16.1"
+
+[[audits.httparse]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.8.0 -> 1.10.1"
+
+[[audits.hyper]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.5.1 -> 1.8.1"
+
 [[audits.libp2p-identity]]
 who = "cylewitruk <cyle.witruk@outlook.com>"
 criteria = "safe-to-deploy"
@@ -27,6 +42,16 @@ notes = "This patch switches to k256 from libsecp256k1 for secp256k1 handling"
 who = "cylewitruk <cyle.witruk@outlook.com>"
 criteria = "safe-to-deploy"
 delta = "0.7.1 -> 0.7.2"
+
+[[audits.metrics-exporter-prometheus]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.16.1 -> 0.18.1"
+
+[[audits.metrics-util]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.19.0 -> 0.20.1"
 
 [[audits.p256]]
 who = "djordon <dan.jordon@gmail.com>"
@@ -48,6 +73,11 @@ version = "0.5.0"
 who = "djordon <dan.jordon@gmail.com>"
 criteria = "safe-to-deploy"
 version = "0.13.6"
+
+[[audits.rand_xoshiro]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.6.0 -> 0.7.0"
 
 [[audits.serdect]]
 who = "djordon <dan.jordon@gmail.com>"
@@ -90,9 +120,3 @@ version = "13.0.1"
 who = "xoloki <xoloki@gmail.com>"
 criteria = "safe-to-deploy"
 version = "14.0.0"
-
-[[audits.wsts]]
-who = "djordon <dan.jordon@gmail.com>"
-criteria = "safe-to-deploy"
-delta = "14.0.0 -> 14.0.0@git:11e2316aa0edf996f8e8f9ccbbbfd4bd2975ed1d"
-importable = false

@@ -595,10 +595,6 @@ criteria = "safe-to-deploy"
 version = "0.2.15"
 criteria = "safe-to-deploy"
 
-[[exemptions.getrandom]]
-version = "0.3.4"
-criteria = "safe-to-deploy"
-
 [[exemptions.ghash]]
 version = "0.5.1"
 criteria = "safe-to-deploy"
@@ -963,10 +959,6 @@ criteria = "safe-to-deploy"
 version = "0.4.12"
 criteria = "safe-to-deploy"
 
-[[exemptions.log]]
-version = "0.4.29"
-criteria = "safe-to-deploy"
-
 [[exemptions.loom]]
 version = "0.7.2"
 criteria = "safe-to-deploy"
@@ -1245,10 +1237,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.proc-macro-crate]]
 version = "3.1.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.proc-macro-error]]
-version = "1.0.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.proc-macro2]]
