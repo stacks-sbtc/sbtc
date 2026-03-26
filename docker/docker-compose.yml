@@ -48,7 +48,11 @@ x-sbtc-signer: &sbtc-signer
     context: ../
     dockerfile: docker/sbtc/Dockerfile
     target: signer
-  entrypoint: "/bin/bash -c '/usr/local/bin/signer -c /signer-config.toml --migrate-db --output-format json'"
+  entrypoint:
+    - "/usr/local/bin/signer"
+    - "--config"
+    - "/signer-config.toml"
+    - "--migrate-db"
   environment: &sbtc-signer-environment
     RUST_LOG: info,signer=debug
     SIGNER_SIGNER__P2P__LISTEN_ON: tcp://0.0.0.0:4122
