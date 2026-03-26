@@ -1,5 +1,6 @@
 //! This module sets up logging for the application using `tracing_subscriber`
 //! It provides functions to initialize logging in either JSON format or pretty format
+use std::io::IsTerminal as _;
 
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::time::UtcTime;
@@ -41,7 +42,9 @@ fn setup_logging_json(directives: &str) {
 }
 
 fn setup_logging_pretty(directives: &str) {
-    let main_layer = tracing_subscriber::fmt::layer().with_timer(UtcTime::rfc_3339());
+    let main_layer = tracing_subscriber::fmt::layer()
+        .with_ansi(std::io::stdout().is_terminal())
+        .with_timer(UtcTime::rfc_3339());
 
     tracing_subscriber::registry()
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(directives)))
