@@ -5797,7 +5797,6 @@ dependencies = [
  "aws-config",
  "aws-sdk-dynamodb",
  "aws-smithy-http-client",
- "aws-smithy-runtime",
  "bitcoin",
  "bitcoincore-rpc",
  "bitcoincore-rpc-json",

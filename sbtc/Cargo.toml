@@ -12,7 +12,6 @@ testing = [
     "dep:aws-smithy-http-client",
     "dep:aws-config",
     "dep:aws-sdk-dynamodb",
-    "dep:aws-smithy-runtime",
     "dep:bitcoincore-rpc",
     "dep:bitcoincore-rpc-json",
     "dep:futures",
@@ -35,7 +34,6 @@ thiserror.workspace = true
 # Optional Dependencies
 aws-config = { workspace = true, optional = true }
 aws-sdk-dynamodb = { workspace = true, optional = true }
-aws-smithy-runtime = { workspace = true, optional = true }
 aws-smithy-http-client = { workspace = true, optional = true }
 bitcoincore-rpc = { workspace = true, optional = true }
 bitcoincore-rpc-json = { workspace = true, optional = true }
