@@ -205,3 +205,141 @@ version = "14.0.0"
 who = "djordon <dan.jordon@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.13.3 -> 0.13.10"
+
+[[trusted.bytes]]
+criteria = "safe-to-deploy"
+user-id = 6741 # Alice Ryhl (Darksonn)
+start = "2021-01-11"
+end = "2027-03-26"
+
+[[trusted.cc]]
+criteria = "safe-to-deploy"
+user-id = 55123 # rust-lang-owner
+start = "2022-10-29"
+end = "2027-03-26"
+
+[[trusted.cmake]]
+criteria = "safe-to-deploy"
+user-id = 55123 # rust-lang-owner
+start = "2022-10-29"
+end = "2027-03-26"
+
+[[trusted.find-msvc-tools]]
+criteria = "safe-to-deploy"
+user-id = 539
+start = "2025-08-29"
+end = "2027-03-26"
+
+[[trusted.http-body-util]]
+criteria = "safe-to-deploy"
+user-id = 359 # Sean McArthur (seanmonstar)
+start = "2022-10-25"
+end = "2027-03-26"
+
+[[trusted.hyper-util]]
+criteria = "safe-to-deploy"
+user-id = 359 # Sean McArthur (seanmonstar)
+start = "2022-01-15"
+end = "2027-03-26"
+
+[[trusted.jobserver]]
+criteria = "safe-to-deploy"
+user-id = 55123 # rust-lang-owner
+start = "2024-07-23"
+end = "2027-03-26"
+
+[[trusted.js-sys]]
+criteria = "safe-to-deploy"
+user-id = 1 # Alex Crichton (alexcrichton)
+start = "2019-03-04"
+end = "2027-03-26"
+
+[[trusted.reqwest]]
+criteria = "safe-to-deploy"
+user-id = 359 # Sean McArthur (seanmonstar)
+start = "2019-03-04"
+end = "2027-03-26"
+
+[[trusted.tower-http]]
+criteria = "safe-to-deploy"
+user-id = 359 # Sean McArthur (seanmonstar)
+start = "2024-09-23"
+end = "2027-03-26"
+
+[[trusted.wasm-bindgen]]
+criteria = "safe-to-deploy"
+user-id = 1 # Alex Crichton (alexcrichton)
+start = "2019-03-04"
+end = "2027-03-26"
+
+[[trusted.wasm-bindgen-macro]]
+criteria = "safe-to-deploy"
+user-id = 1 # Alex Crichton (alexcrichton)
+start = "2019-03-04"
+end = "2027-03-26"
+
+[[trusted.wasm-bindgen-macro-support]]
+criteria = "safe-to-deploy"
+user-id = 1 # Alex Crichton (alexcrichton)
+start = "2019-03-04"
+end = "2027-03-26"
+
+[[trusted.wasm-bindgen-shared]]
+criteria = "safe-to-deploy"
+user-id = 1 # Alex Crichton (alexcrichton)
+start = "2019-03-04"
+end = "2027-03-26"
+
+[[trusted.windows-sys]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-11-15"
+end = "2027-03-26"
+
+[[trusted.windows-targets]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2022-09-09"
+end = "2027-03-26"
+
+[[trusted.windows_aarch64_gnullvm]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2022-09-01"
+end = "2027-03-26"
+
+[[trusted.windows_aarch64_msvc]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-11-05"
+end = "2027-03-26"
+
+[[trusted.windows_i686_gnu]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-10-28"
+end = "2027-03-26"
+
+[[trusted.windows_i686_msvc]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-10-27"
+end = "2027-03-26"
+
+[[trusted.windows_x86_64_gnu]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-10-28"
+end = "2027-03-26"
+
+[[trusted.windows_x86_64_gnullvm]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2022-09-01"
+end = "2027-03-26"
+
+[[trusted.windows_x86_64_msvc]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-10-27"
+end = "2027-03-26"

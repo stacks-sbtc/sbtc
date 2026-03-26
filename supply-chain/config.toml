@@ -271,10 +271,6 @@ criteria = "safe-to-deploy"
 version = "1.2.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.bytes]]
-version = "1.9.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.bytes-utils]]
 version = "0.1.4"
 criteria = "safe-to-deploy"
@@ -679,10 +675,6 @@ criteria = "safe-to-deploy"
 version = "0.4.6"
 criteria = "safe-to-deploy"
 
-[[exemptions.http-body-util]]
-version = "0.1.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.http-serde]]
 version = "1.1.3"
 criteria = "safe-to-deploy"
@@ -717,10 +709,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.hyper-tls]]
 version = "0.6.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.hyper-util]]
-version = "0.1.10"
 criteria = "safe-to-deploy"
 
 [[exemptions.hyperlocal]]
@@ -1359,14 +1347,6 @@ criteria = "safe-to-deploy"
 version = "0.8.3"
 criteria = "safe-to-deploy"
 
-[[exemptions.reqwest]]
-version = "0.11.27"
-criteria = "safe-to-deploy"
-
-[[exemptions.reqwest]]
-version = "0.12.4"
-criteria = "safe-to-deploy"
-
 [[exemptions.resolv-conf]]
 version = "0.7.0"
 criteria = "safe-to-deploy"
@@ -1795,10 +1775,6 @@ criteria = "safe-to-deploy"
 version = "0.5.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.tower-http]]
-version = "0.6.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.tower-layer]]
 version = "0.3.3"
 criteria = "safe-to-deploy"
@@ -1983,123 +1959,11 @@ criteria = "safe-to-deploy"
 version = "0.1.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.windows-sys]]
-version = "0.48.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows-sys]]
-version = "0.52.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows-sys]]
-version = "0.60.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows-sys]]
-version = "0.61.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows-targets]]
-version = "0.48.5"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows-targets]]
-version = "0.52.5"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows-targets]]
-version = "0.53.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows_aarch64_gnullvm]]
-version = "0.48.5"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows_aarch64_gnullvm]]
-version = "0.52.5"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows_aarch64_gnullvm]]
-version = "0.53.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows_aarch64_msvc]]
-version = "0.48.5"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows_aarch64_msvc]]
-version = "0.52.5"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows_aarch64_msvc]]
-version = "0.53.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows_i686_gnu]]
-version = "0.48.5"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows_i686_gnu]]
-version = "0.52.5"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows_i686_gnu]]
-version = "0.53.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.windows_i686_gnullvm]]
 version = "0.52.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows_i686_gnullvm]]
-version = "0.53.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows_i686_msvc]]
-version = "0.48.5"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows_i686_msvc]]
-version = "0.52.5"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows_i686_msvc]]
-version = "0.53.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows_x86_64_gnu]]
-version = "0.48.5"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows_x86_64_gnu]]
-version = "0.52.5"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows_x86_64_gnu]]
-version = "0.53.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows_x86_64_gnullvm]]
-version = "0.48.5"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows_x86_64_gnullvm]]
-version = "0.52.5"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows_x86_64_gnullvm]]
-version = "0.53.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows_x86_64_msvc]]
-version = "0.48.5"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows_x86_64_msvc]]
-version = "0.52.5"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows_x86_64_msvc]]
 version = "0.53.0"
 criteria = "safe-to-deploy"
 
