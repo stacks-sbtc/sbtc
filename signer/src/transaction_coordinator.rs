@@ -50,7 +50,6 @@ use crate::metrics::STACKS_BLOCKCHAIN;
 use crate::network;
 use crate::signature::TaprootSignature;
 use crate::stacks::api::FeePriority;
-use crate::stacks::api::RejectionReason;
 use crate::stacks::api::StacksEpochStatus;
 use crate::stacks::api::StacksInteract as _;
 use crate::stacks::api::SubmitTxResponse;
@@ -79,6 +78,10 @@ use wsts::net::SignatureType;
 use wsts::state_machine::OperationResult as WstsOperationResult;
 use wsts::state_machine::StateMachine as _;
 use wsts::state_machine::coordinator::State as WstsCoordinatorState;
+
+/// The rejection reason for a transaction that is rejected from the mempool
+/// because of a conflicting nonce.
+const REJECTION_REASON_CONFLICTING_NONCE_IN_MEMPOOL: &str = "ConflictingNonceInMempool";
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// # Transaction coordinator event loop
@@ -2645,10 +2648,8 @@ pub fn adjust_nonce(wallet: &SignerWallet, error: &Error) {
     match error {
         // For `ConflictingNonceInMempool` we don't want to decrement the nonce
         // to avoid failing also the following submissions
-        Error::StacksTxRejection(TxRejection {
-            reason: RejectionReason::ConflictingNonceInMempool,
-            ..
-        }) => (),
+        Error::StacksTxRejection(TxRejection { reason, .. })
+            if reason == REJECTION_REASON_CONFLICTING_NONCE_IN_MEMPOOL => {}
         _ => wallet.set_nonce(wallet.get_nonce().saturating_sub(1)),
     }
 }
