@@ -1,8 +1,8 @@
 sources:
   sbtc_signer_logs:
-    type: file
-    include:
-      - /logs/sbtc_signer.logs
+    type: docker_logs
+    include_containers:
+      - sbtc-signer
 
   sbtc_prometheus_metrics:
     type: prometheus_scrape
@@ -10,6 +10,19 @@ sources:
       - http://sbtc-signer:9184
 
 transforms:
+  # Parse the JSON log messages from the signer's stdout.
+  sbtc_signer_json:
+    type: remap
+    inputs:
+      - sbtc_signer_logs
+    drop_on_error: true
+    source: |-
+      parsed, err = parse_json(.message)
+      if err == null && is_object(parsed) {
+        . = merge(., object!(parsed))
+        del(.message)
+      }
+
   # This is required because Cloudwatch is picky about empty tags ("dimensions")
   # And our `build` metric has an empty revision.
   sbtc_prometheus_metrics_strip_empty_tags:
@@ -27,7 +40,7 @@ sinks:
     create_missing_group: false
     create_missing_stream: false
     inputs:
-      - sbtc_signer_logs
+      - sbtc_signer_json
     region: eu-west-1
     group_name: sbtc-mainnet-partner-signers
     stream_name: "${STREAM_NAME}"

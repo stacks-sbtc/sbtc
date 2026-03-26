@@ -74,7 +74,6 @@ services:
       TRUSTED_ROOT_PATH: trusted_root.jsonl
     volumes:
       - ./sbtc-signer/signer-config.toml.in:/signer-config.toml.in:ro
-      - ./logs:/logs
       - ${SIGNER_BUNDLE_PATH}:signer_bundle.jsonl:ro
       - ${TRUSTED_ROOT_PATH}:trusted_root.jsonl:ro
       - ./entrypoint.sh:/entrypoint.sh
@@ -108,7 +107,7 @@ services:
     container_name: vector
     image: timberio/vector:0.44.0-debian@sha256:e285e1543366ac306f3957c25d3aca4d2f86855ae274fa4de3522676d72fa0df
     volumes:
-      - ./logs:/logs
+      - /var/run/docker.sock:/var/run/docker.sock
       - ./vector/vector.yaml:/etc/vector/vector.yaml:ro
     environment:
       STREAM_NAME: *STREAM_NAME
