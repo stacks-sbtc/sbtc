@@ -1,4 +1,3 @@
-use reqwest;
 use testing_emily_client::apis::health_api;
 
 use crate::common::{clean_test_setup, new_test_setup};
