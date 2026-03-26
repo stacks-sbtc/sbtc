@@ -5,3 +5,4 @@ docker
 .gitmodules
 .gitworktrees
 node_modules
+.cargo/config.toml
