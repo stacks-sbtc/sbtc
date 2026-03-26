@@ -701,7 +701,7 @@ where
 
             if !transaction_package.is_empty()
                 || additional_retries_remaining == 0
-                || fee_rate == FEE_RATE_RETRY_MIN
+                || fee_rate <= FEE_RATE_RETRY_MIN
             {
                 break transaction_package;
             }
@@ -711,7 +711,6 @@ where
             if fee_rate < FEE_RATE_RETRY_MIN {
                 // Try the min fee as last retry if we are already below it
                 fee_rate = FEE_RATE_RETRY_MIN;
-                additional_retries_remaining = 1;
             }
             if !fee_rate.is_normal() {
                 break transaction_package;
