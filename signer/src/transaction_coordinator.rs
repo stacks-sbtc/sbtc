@@ -79,6 +79,10 @@ use wsts::state_machine::OperationResult as WstsOperationResult;
 use wsts::state_machine::StateMachine as _;
 use wsts::state_machine::coordinator::State as WstsCoordinatorState;
 
+/// The rejection reason for a transaction that is rejected from the mempool
+/// because of a conflicting nonce.
+const REJECTION_REASON_CONFLICTING_NONCE_IN_MEMPOOL: &str = "ConflictingNonceInMempool";
+
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// # Transaction coordinator event loop
 ///
@@ -2645,7 +2649,7 @@ pub fn adjust_nonce(wallet: &SignerWallet, error: &Error) {
         // For `ConflictingNonceInMempool` we don't want to decrement the nonce
         // to avoid failing also the following submissions
         Error::StacksTxRejection(TxRejection { reason, .. })
-            if reason == "ConflictingNonceInMempool" => {}
+            if reason == REJECTION_REASON_CONFLICTING_NONCE_IN_MEMPOOL => {}
         _ => wallet.set_nonce(wallet.get_nonce().saturating_sub(1)),
     }
 }
