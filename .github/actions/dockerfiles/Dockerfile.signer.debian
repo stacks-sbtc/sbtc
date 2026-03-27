@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM rust:1.94.0-slim-bookworm AS build
+FROM --platform=$BUILDPLATFORM rust:1.94.1-slim-trixie AS build
 
 ARG GIT_COMMIT
 ARG TARGETARCH
@@ -7,89 +7,64 @@ RUN test -n "$GIT_COMMIT" || (echo "GIT_COMMIT not set" && false)
 
 ARG CARGO_BUILD_ARGS="--release --locked"
 
-# 1. Setup Debian for Multi-Architecture
-# We enable arm64 so we can install ARM system libraries (OpenSSL, glibc)
-RUN dpkg --add-architecture arm64 && \
-    dpkg --add-architecture amd64 && \
-    apt-get update
-
-# 2. Install Host Dependencies (Tools needed to RUN the build on AMD64)
-RUN apt-get install -y --no-install-recommends \
+# Install host build dependencies.
+# Build scripts run on the glibc host, so dlopen (needed by bindgen) works.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    clang \
+    libclang-dev \
     git \
     pkg-config \
     make \
-    protobuf-compiler \
-    npm \
-    default-jre \
     g++ \
-    libssl-dev \
-    clang \
-    libclang-dev \
-    findutils
-
-# 3. Install Cross-Compilation Toolchains & Target Dependencies
-# These are the compilers and libraries for the TARGET (ARM64)
-RUN apt-get install -y --no-install-recommends \
-    gcc-aarch64-linux-gnu \
-    g++-aarch64-linux-gnu \
-    libc6-dev-arm64-cross \
-    libssl-dev:arm64 \
+    wget \
+    ca-certificates \
+    findutils \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-RUN npm install -g pnpm@9 && \
-    npm install -g @openapitools/openapi-generator-cli
+# Install musl cross-toolchains from musl.cc for both architectures.
+# This provides a complete musl-native gcc/g++/ar/libstdc++ for each target,
+# avoiding the glibc libstdc++ mismatch that occurs with Debian's g++.
+# Checksums pinned for supply-chain safety (GCC 11.2.1, 2021-11-23).
+RUN wget -qO /tmp/aarch64-musl.tgz "https://musl.cc/aarch64-linux-musl-cross.tgz" && \
+    echo "c909817856d6ceda86aa510894fa3527eac7989f0ef6e87b5721c58737a06c38  /tmp/aarch64-musl.tgz" | sha256sum -c && \
+    tar xz -C /opt -f /tmp/aarch64-musl.tgz && rm /tmp/aarch64-musl.tgz && \
+    ln -s /opt/aarch64-linux-musl-cross/bin/aarch64-linux-musl-gcc /usr/local/bin/ && \
+    ln -s /opt/aarch64-linux-musl-cross/bin/aarch64-linux-musl-g++ /usr/local/bin/ && \
+    ln -s /opt/aarch64-linux-musl-cross/bin/aarch64-linux-musl-ar /usr/local/bin/
+
+RUN wget -qO /tmp/x86_64-musl.tgz "https://musl.cc/x86_64-linux-musl-cross.tgz" && \
+    echo "c5d410d9f82a4f24c549fe5d24f988f85b2679b452413a9f7e5f7b956f2fe7ea  /tmp/x86_64-musl.tgz" | sha256sum -c && \
+    tar xz -C /opt -f /tmp/x86_64-musl.tgz && rm /tmp/x86_64-musl.tgz && \
+    ln -s /opt/x86_64-linux-musl-cross/bin/x86_64-linux-musl-gcc /usr/local/bin/ && \
+    ln -s /opt/x86_64-linux-musl-cross/bin/x86_64-linux-musl-g++ /usr/local/bin/ && \
+    ln -s /opt/x86_64-linux-musl-cross/bin/x86_64-linux-musl-ar /usr/local/bin/
+
+# Add both musl Rust targets.
+RUN rustup target add aarch64-unknown-linux-musl x86_64-unknown-linux-musl
 
 WORKDIR /code/sbtc
 COPY . .
 
-# Generate emily and blocklist clients
+# Build statically-linked musl binary.
+# .cargo/config.toml is in .dockerignore so the macOS defaults don't interfere.
+# Map Docker's TARGETARCH (arm64/amd64) to Rust target triples.
 RUN export LIBCLANG_PATH="$(find /usr/lib/llvm-* -name lib -type d | head -n 1)" && \
-    make install-pnpm && \
-    make blocklist-client-codegen emily-client-codegen contracts
-
-# Compile main binary
-RUN \
-    # Ensure Clang is found
-    export LIBCLANG_PATH="$(find /usr/lib/llvm-* -name lib -type d | head -n 1)" && \
     if [ "$TARGETARCH" = "arm64" ]; then \
-        echo "Building for ARM64..."; \
-        # Allow pkg-config to look for cross-compiled libraries
-        export PKG_CONFIG_ALLOW_CROSS=1 && \
-        rustup target add aarch64-unknown-linux-gnu; \
-        # Configure Linkers for ARM64
-        export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc; \
-        export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc; \
-        export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++; \
-        # Point pkg-config to the ARM64 OpenSSL libraries
-        export PKG_CONFIG_PATH="/usr/lib/aarch64-linux-gnu/pkgconfig"; \
-        # Build specifically for ARM64
-        cargo build --target aarch64-unknown-linux-gnu --bin signer ${CARGO_BUILD_ARGS}; \
-        # Normalize output path
-        mkdir -p /output && cp target/aarch64-unknown-linux-gnu/release/signer /output/signer; \
+        MUSL_TARGET="aarch64-unknown-linux-musl"; \
+        ARCH="aarch64"; \
     else \
-        echo "Building for AMD64..."; \
-        # Standard build (Host == Target)
-        cargo build --bin signer ${CARGO_BUILD_ARGS}; \
-        # Normalize output path
-        mkdir -p /output && cp target/release/signer /output/signer; \
-    fi
+        MUSL_TARGET="x86_64-unknown-linux-musl"; \
+        ARCH="x86_64"; \
+    fi && \
+    export "CC_${ARCH}_unknown_linux_musl=${ARCH}-linux-musl-gcc" && \
+    export "CXX_${ARCH}_unknown_linux_musl=${ARCH}-linux-musl-g++" && \
+    export "AR_${ARCH}_unknown_linux_musl=${ARCH}-linux-musl-ar" && \
+    export "CARGO_TARGET_$(echo "$MUSL_TARGET" | tr '[:lower:]-' '[:upper:]_')_LINKER=${ARCH}-linux-musl-gcc" && \
+    cargo build --target "$MUSL_TARGET" --bin signer ${CARGO_BUILD_ARGS} && \
+    mkdir -p /output && \
+    cp "target/$MUSL_TARGET/release/signer" /output/signer
 
-FROM debian:bookworm-slim AS signer
-
+# distroless/static includes ca-certificates at /etc/ssl/certs/ca-certificates.crt.
+FROM gcr.io/distroless/static-debian13 AS signer
 COPY --from=build /output/signer /usr/local/bin/signer
-
-RUN apt-get update && \
-    apt-get install -y curl && \
-    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
-    chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list && \
-    echo "Package: gh\nPin: origin cli.github.com\nPin-Priority: 1001" > /etc/apt/preferences.d/gh-cli && \
-    apt-get update && \
-    apt-get install -y gh
-
-# ca-certificates is required to establish TLS connections.
-# gettext provides envsubst
-RUN apt-get install -y ca-certificates gettext --no-install-recommends && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
-
-CMD ["/usr/local/bin/signer", "--config", "/signer-config.toml", "--migrate-db"]
+ENTRYPOINT ["/usr/local/bin/signer", "--config", "/signer-config.toml", "--migrate-db"]

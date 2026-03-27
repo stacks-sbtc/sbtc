@@ -1,4 +1,4 @@
-FROM rust:1.94.0-slim-trixie AS builder
+FROM rust:1.94.1-slim-trixie AS builder
 
 # Install host build dependencies.
 # Build scripts run on the glibc host, so dlopen (needed by bindgen) works.
