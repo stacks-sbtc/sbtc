@@ -32,7 +32,7 @@ cfg-if.workspace = true
 clap.workspace = true
 clarity.workspace = true
 config.workspace = true
-emily-client.workspace = true
+emily-client = { workspace = true, features = ["rustls"] }
 futures.workspace = true
 hex.workspace = true
 include_dir.workspace = true
@@ -66,7 +66,6 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 url.workspace = true
 wsts.workspace = true
-reqwest_012.workspace = true
 
 # Only for testing
 fake = { workspace = true, optional = true }
@@ -88,12 +87,11 @@ assert_matches.workspace = true
 bitcoincore-rpc.workspace = true
 mockito.workspace = true
 more-asserts.workspace = true
-reqwest_012.workspace = true
 ripemd.workspace = true
 tempfile.workspace = true
 test-case.workspace = true
 test-log.workspace = true
-testing-emily-client.workspace = true
+testing-emily-client = { workspace = true, features = ["rustls"] }
 toml_edit.workspace = true
 tower.workspace = true
 

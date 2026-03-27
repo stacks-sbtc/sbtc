@@ -72,7 +72,7 @@ Below is the output on a machine that is able to build and run all the sources a
 
 ```text
 --- sBTC tool versions ---
-cargo 1.91.0 (ea2d97820 2025-10-10)
+cargo 1.94.1 (29ea6fb6a 2026-03-24)
 cargo-lambda 1.6.2 (2025-01-17Z)
 pnpm 9.1.0
 GNU Make 3.81
