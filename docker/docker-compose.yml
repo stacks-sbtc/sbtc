@@ -187,6 +187,12 @@ services:
   sbtc-signer-1:
     <<: *sbtc-signer # Inherit all from the "sbtc-signer" service
     container_name: sbtc-signer-1
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: "localhost:24224"
+        fluentd-async: "true"
+        tag: "sbtc-signer-1"
     depends_on:
       - postgres-1
     environment:
@@ -208,6 +214,12 @@ services:
   sbtc-signer-2:
     <<: *sbtc-signer # Inherit all from the "sbtc-signer" service
     container_name: sbtc-signer-2
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: "localhost:24224"
+        fluentd-async: "true"
+        tag: "sbtc-signer-2"
     depends_on:
       - postgres-2
     environment:
@@ -229,6 +241,12 @@ services:
   sbtc-signer-3:
     <<: *sbtc-signer # Inherit all from the "sbtc-signer" service
     container_name: sbtc-signer-3
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: "localhost:24224"
+        fluentd-async: "true"
+        tag: "sbtc-signer-3"
     depends_on:
       - postgres-3
     environment:
@@ -673,10 +691,9 @@ services:
     restart: always
     ports:
       - "127.0.0.1:9598:9598"
+      - "127.0.0.1:24224:24224"
     volumes:
       - ./observability/vector.toml:/etc/vector/vector.toml:ro
-      # This is needed for vector to read logs from other containers
-      - /var/run/docker.sock:/var/run/docker.sock
     # This is needed for localhost networking
     extra_hosts:
       - "host.docker.internal:host-gateway"

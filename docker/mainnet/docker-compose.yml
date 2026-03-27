@@ -57,6 +57,12 @@ services:
       - "json"
     depends_on:
       - postgres
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: "localhost:24224"
+        fluentd-async: "true"
+        tag: "sbtc-signer"
     environment:
       RUST_LOG: info,signer=debug
       SIGNER_BITCOIN__RPC_ENDPOINTS: "http://${BITCOIN_RPC_USERNAME}:${BITCOIN_RPC_PASSWORD}@${BITCOIN_RPC_HOST}:${BITCOIN_RPC_PORT}"
@@ -64,7 +70,7 @@ services:
       SIGNER_SIGNER__PRIVATE_KEY: "${SIGNER_SIGNER__PRIVATE_KEY}"
       SIGNER_EMILY__ENDPOINTS: "https://${EMILY_API_KEY}@sbtc-emily.com"
       SIGNER_SIGNER__DB_ENDPOINT: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
-      TAG: *SIGNER_TAG  
+      TAG: *SIGNER_TAG
     volumes:
       - ./sbtc-signer/signer-config.toml.in:/signer-config.toml.in:ro
     ports:
@@ -89,8 +95,9 @@ services:
   vector:
     container_name: vector
     image: timberio/vector:0.44.0-debian@sha256:e285e1543366ac306f3957c25d3aca4d2f86855ae274fa4de3522676d72fa0df
+    ports:
+      - "127.0.0.1:24224:24224"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
       - ./vector/vector.yaml:/etc/vector/vector.yaml:ro
     environment:
       STREAM_NAME: *STREAM_NAME
