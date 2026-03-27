@@ -5,7 +5,10 @@ use std::collections::HashMap;
 use tracing::warn;
 
 use crate::{
-    common::{check_public_shares, Nonce, PolyCommitment, PublicNonce, Signature, SignatureShare},
+    common::{
+        check_public_shares, Nonce, PolyCommitment, PublicNonce, PublicPolynomial, Signature,
+        SignatureShare,
+    },
     compute,
     curve::{
         point::{Point, G},
@@ -72,17 +75,10 @@ impl Party {
         &self,
         rng: &mut RNG,
     ) -> Option<PolyCommitment> {
-        if let Some(poly) = &self.f {
-            Some(PolyCommitment {
-                id: ID::new(&self.id(), &poly.data()[0], rng),
-                poly: (0..poly.data().len())
-                    .map(|i| &poly.data()[i] * G)
-                    .collect(),
-            })
-        } else {
-            warn!("get_poly_commitment called with no polynomial");
-            None
-        }
+        let poly = self.f.as_ref()?;
+        let points: Vec<Point> = poly.data().iter().map(|c| c * G).collect();
+        let id = ID::new(&self.id(), poly.data().first()?, rng);
+        PolyCommitment::new(id, points).ok()
     }
 
     /// Get the shares of this party's private polynomial for all keys
@@ -118,7 +114,7 @@ impl Party {
             if !check_public_shares(comm, threshold) {
                 bad_ids.push(*i);
             } else {
-                self.group_key += comm.poly[0];
+                self.group_key += comm.constant_term();
             }
         }
         if !bad_ids.is_empty() {
@@ -149,7 +145,7 @@ impl Party {
             if let Some(shares) = private_shares.get(key_id) {
                 for (sender, s) in shares {
                     if let Some(comm) = public_shares.get(sender) {
-                        if s * G != compute::poly(&compute::id(*key_id), &comm.poly)? {
+                        if s * G != compute::poly(&compute::id(*key_id), comm.poly())? {
                             bad_shares.push(*sender);
                         }
                     } else {
@@ -257,8 +253,9 @@ pub struct Aggregator {
     pub num_keys: u32,
     /// The threshold of signing keys needed to construct a valid signature
     pub threshold: u32,
-    /// The aggregate group polynomial; poly[0] is the group public key
-    pub poly: Vec<Point>,
+    /// The aggregate group polynomial; the constant term of the
+    /// polynomial is the group public key.
+    pub poly: Option<PublicPolynomial>,
 }
 
 impl Aggregator {
@@ -267,23 +264,35 @@ impl Aggregator {
         Self {
             num_keys,
             threshold,
-            poly: Default::default(),
+            poly: None,
         }
     }
 
     /// Initialize the Aggregator polynomial
+    ///
+    /// This function is typically called after DKG has already
+    /// successfully completed and we want to sign something. So, the given
+    /// commitments should have already been validated, but we do so again
+    /// just in case.
     pub fn init(&mut self, comms: &HashMap<u32, PolyCommitment>) -> Result<(), AggregatorError> {
         let threshold: usize = self.threshold.try_into()?;
-        let mut poly = Vec::with_capacity(threshold);
+        let mut coefficients = vec![Point::zero(); threshold];
 
-        for i in 0..poly.capacity() {
-            poly.push(Point::zero());
-            for comm in comms.values() {
-                poly[i] += &comm.poly[i];
+        for comm in comms.values() {
+            if comm.num_coefficients() != threshold {
+                return Err(AggregatorError::BadPolynomialDegree {
+                    expected: threshold,
+                    received: comm.num_coefficients(),
+                });
             }
+
+            coefficients
+                .iter_mut()
+                .zip(comm.poly())
+                .for_each(|(c, p)| *c += p);
         }
 
-        self.poly = poly;
+        self.poly = Some(PublicPolynomial::new(coefficients)?);
 
         Ok(())
     }
@@ -309,19 +318,22 @@ impl Aggregator {
         let (_Rs, R) = compute::intermediate(msg, &party_ids, nonces);
         let mut z = Scalar::zero();
         let mut cx_sign = Scalar::one();
-        let aggregate_public_key = self.poly[0];
+        let Some(poly) = self.poly.as_ref() else {
+            return Err(AggregatorError::NotInitialized);
+        };
+        let aggregate_public_key = poly.constant_term();
         let tweaked_public_key = if let Some(t) = tweak {
             if t != Scalar::zero() {
-                let key = compute::tweaked_public_key_from_tweak(&aggregate_public_key, t);
+                let key = compute::tweaked_public_key_from_tweak(aggregate_public_key, t);
                 if !key.has_even_y() {
                     cx_sign = -cx_sign;
                 }
                 key
             } else {
-                aggregate_public_key
+                *aggregate_public_key
             }
         } else {
-            aggregate_public_key
+            *aggregate_public_key
         };
         let c = compute::challenge(&tweaked_public_key, &R, msg);
         // optimistically try to create the aggregate signature without checking for bad keys or sig shares
@@ -356,19 +368,24 @@ impl Aggregator {
             return AggregatorError::BadNonceLen(nonces.len(), sig_shares.len());
         }
 
+        let Some(poly) = self.poly.as_ref() else {
+            return AggregatorError::NotInitialized;
+        };
+
         let party_ids: Vec<u32> = sig_shares.iter().map(|ss| ss.id).collect();
         let (Rs, R) = compute::intermediate(msg, &party_ids, nonces);
+
         let mut bad_party_keys = Vec::new();
         let mut bad_party_sigs = Vec::new();
-        let aggregate_public_key = self.poly[0];
+        let aggregate_public_key = poly.constant_term();
         let tweaked_public_key = if let Some(t) = tweak {
             if t != Scalar::zero() {
-                compute::tweaked_public_key_from_tweak(&aggregate_public_key, t)
+                compute::tweaked_public_key_from_tweak(aggregate_public_key, t)
             } else {
-                aggregate_public_key
+                *aggregate_public_key
             }
         } else {
-            aggregate_public_key
+            *aggregate_public_key
         };
         let c = compute::challenge(&tweaked_public_key, &R, msg);
         let mut r_sign = Scalar::one();
@@ -386,16 +403,20 @@ impl Aggregator {
             }
         }
 
-        for i in 0..sig_shares.len() {
-            let z_i = sig_shares[i].z_i;
+        // compute::intermediate returns the Rs vector, and its length is
+        // always equal to the min length of party_ids and nonces. Given
+        // the first check above, we can follow the logic to see that Rs
+        // and sig_shares have the same length.
+        for (sig_share, rs_i) in sig_shares.iter().zip(Rs) {
+            let z_i = sig_share.z_i;
             let mut cx = Point::zero();
 
-            for key_id in &sig_shares[i].key_ids {
+            for key_id in &sig_share.key_ids {
                 let kid = compute::id(*key_id);
-                let public_key = match compute::poly(&kid, &self.poly) {
+                let public_key = match compute::poly(&kid, poly.coefficients()) {
                     Ok(p) => p,
                     Err(_) => {
-                        bad_party_keys.push(sig_shares[i].id);
+                        bad_party_keys.push(sig_share.id);
                         Point::zero()
                     }
                 };
@@ -403,8 +424,8 @@ impl Aggregator {
                 cx += compute::lambda(*key_id, key_ids) * c * public_key;
             }
 
-            if z_i * G != (r_sign * Rs[i] + cx_sign * cx) {
-                bad_party_sigs.push(sig_shares[i].id);
+            if z_i * G != (r_sign * rs_i + cx_sign * cx) {
+                bad_party_sigs.push(sig_share.id);
             }
         }
         if !bad_party_keys.is_empty() {
@@ -461,7 +482,10 @@ impl Aggregator {
         key_ids: &[u32],
         merkle_root: Option<[u8; 32]>,
     ) -> Result<SchnorrProof, AggregatorError> {
-        let tweak = compute::tweak(&self.poly[0], merkle_root);
+        let Some(poly) = self.poly.as_ref() else {
+            return Err(AggregatorError::NotInitialized);
+        };
+        let tweak = compute::tweak(poly.constant_term(), merkle_root);
         let (key, sig) = self.sign_with_tweak(msg, nonces, sig_shares, key_ids, Some(tweak))?;
         let proof = SchnorrProof::new(&sig);
 
@@ -476,10 +500,7 @@ impl Aggregator {
 impl Party {
     /// Load a Party from a SignerState
     pub fn load(state: &traits::SignerState) -> Self {
-        // v2 signer contains single party
-        assert_eq!(state.parties.len(), 1);
-
-        let party_state = &state.parties[0].1;
+        let party_state = &state.party_state;
 
         Self {
             party_id: state.id,
@@ -512,7 +533,7 @@ impl Party {
             num_parties: self.num_parties,
             threshold: self.threshold,
             group_key: self.group_key,
-            parties: vec![(self.party_id, party_state)],
+            party_state,
         }
     }
 
@@ -606,6 +627,7 @@ impl Party {
 }
 
 /// Helper functions for tests
+#[cfg(test)]
 pub mod test_helpers {
     use crate::common::{PolyCommitment, PublicNonce};
     use crate::errors::DkgError;
@@ -682,6 +704,8 @@ pub mod test_helpers {
 
 #[cfg(test)]
 mod tests {
+    use crate::common::PolyCommitment;
+    use crate::errors::AggregatorError;
     use crate::util::create_rng;
     use crate::{
         traits::{self, test_helpers::run_compute_secrets_missing_private_shares},
@@ -762,6 +786,70 @@ mod tests {
                 panic!("Aggregator sign failed: {:?}", e);
             }
         }
+    }
+
+    #[test]
+    fn aggregator_init_bad_degree() {
+        let mut rng = create_rng();
+
+        let n_k: u32 = 10;
+        let t: u32 = 7;
+        let party_key_ids: Vec<Vec<u32>> = [
+            [1, 2, 3].to_vec(),
+            [4, 5].to_vec(),
+            [6, 7, 8].to_vec(),
+            [9, 10].to_vec(),
+        ]
+        .to_vec();
+        let n_p = party_key_ids.len().try_into().unwrap();
+        let mut signers: Vec<v2::Party> = party_key_ids
+            .iter()
+            .enumerate()
+            .map(|(pid, pkids)| {
+                v2::Party::new(pid.try_into().unwrap(), pkids, n_p, n_k, t, &mut rng)
+            })
+            .collect();
+
+        let comms = match traits::test_helpers::dkg(&mut signers, &mut rng) {
+            Ok(comms) => comms,
+            Err(secret_errors) => {
+                panic!("Got secret errors from DKG: {:?}", secret_errors);
+            }
+        };
+
+        // Let's try the happy path first
+        let mut sig_agg = v2::Aggregator::new(n_k, t);
+        sig_agg.init(&comms).expect("aggregator init failed");
+
+        // Okay now let's try where one of the polynomial commitments has a
+        // greater than expected degree.
+        let mut sig_agg = v2::Aggregator::new(n_k, t);
+        let (id, mut coefficients) = comms.get(&0).cloned().unwrap().into_parts();
+        let scalar = p256k1::scalar::Scalar::random(&mut rng);
+        coefficients.push(scalar.into());
+        let comm = PolyCommitment::new(id, coefficients).unwrap();
+        let mut comms2 = comms.clone();
+        comms2.insert(0, comm);
+        let error = sig_agg.init(&comms2).unwrap_err();
+        assert!(
+            matches!(error, AggregatorError::BadPolynomialDegree { expected, received } 
+                    if expected == t as usize && received == t as usize + 1)
+        );
+
+        // And one more where the polynomial commitment has less than the
+        // expected degree.
+        let mut sig_agg = v2::Aggregator::new(n_k, t);
+        let (id, mut coefficients) = comms.get(&0).cloned().unwrap().into_parts();
+
+        coefficients.pop();
+        let comm = PolyCommitment::new(id, coefficients).unwrap();
+        let mut comms3 = comms.clone();
+        comms3.insert(0, comm);
+        let error = sig_agg.init(&comms3).unwrap_err();
+        assert!(
+            matches!(error, AggregatorError::BadPolynomialDegree { expected, received } 
+                    if expected == t as usize && received == t as usize - 1)
+        );
     }
 
     #[test]

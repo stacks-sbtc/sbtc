@@ -88,7 +88,7 @@ pub mod test_helpers {
         let polys: HashMap<u32, PolyCommitment> = signers
             .iter()
             .filter_map(|s| s.get_poly_commitment(rng))
-            .map(|comm| (comm.id.id.get_u32(), comm))
+            .map(|comm| (comm.id().id.get_u32(), comm))
             .collect();
 
         let mut private_shares = HashMap::new();
@@ -324,7 +324,8 @@ mod test {
         let key_ids = S.iter().flat_map(|s| s.get_key_ids()).collect::<Vec<u32>>();
         let mut sig_agg = v2::Aggregator::new(Nk, T);
         sig_agg.init(&polys).expect("aggregator init failed");
-        let tweaked_public_key = compute::tweaked_public_key(&sig_agg.poly[0], merkle_root);
+        let aggregate_public_key = sig_agg.poly.as_ref().map(|p| p.constant_term()).unwrap();
+        let tweaked_public_key = compute::tweaked_public_key(aggregate_public_key, merkle_root);
         let (nonces, sig_shares) = test_helpers::sign(msg, &mut S, &mut rng, merkle_root);
         let proof = match sig_agg.sign_taproot(msg, &nonces, &sig_shares, &key_ids, merkle_root) {
             Err(e) => panic!("Aggregator sign failed: {:?}", e),
