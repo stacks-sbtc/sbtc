@@ -164,7 +164,7 @@ pub enum Error {
 
     /// Error when creating an RPC client to bitcoin-core
     #[error("could not create RPC client to {1}: {0}")]
-    BitcoinCoreRpcClient(#[source] bitcoincore_rpc::Error, String),
+    BitcoinCoreRpcClient(#[source] jsonrpc::http::simple_http::Error, String),
 
     /// The bitcoin transaction was not found in the mempool or on the
     /// bitcoin blockchain. This is thrown when we expect the transaction
@@ -225,13 +225,6 @@ pub enum Error {
     /// This should never happen
     #[error("observed a tenure identified by a StacksBlockId with with no blocks")]
     EmptyStacksTenure,
-
-    /// This happens when StacksClient::get_tenure_headers_raw returns an
-    /// array of blocks which starts with a block with id {0}, while we
-    /// expect it to return an array of blocks starting with a block with
-    /// id {1}
-    #[error("get_tenure_headers_raw returned unexpected response: {0}. Expected: {1}")]
-    GetTenureRawMismatch(StacksBlockHash, StacksBlockHash),
 
     /// Received an error in call to estimatesmartfee RPC call
     #[error("failed to get fee estimate from bitcoin-core for target {1}. {0}")]
@@ -681,6 +674,11 @@ pub enum Error {
     #[error("the given block hash could not be found in the database: {0}")]
     UnknownBitcoinBlock(bitcoin::BlockHash),
 
+    /// The given block hash could not be found in the database before
+    /// doing a DbRead::set_canonical_bitcoin_blockchain call.
+    #[error("the given chain tip block hash could not be found in the database: {0}")]
+    UnknownBitcoinChainTip(BitcoinBlockHash),
+
     /// No stacks chain tip found.
     #[error("no stacks chain tip")]
     NoStacksChainTip,
@@ -709,6 +707,10 @@ pub enum Error {
     /// Could not parse hex txid.
     #[error("could not parse hex txid: {0}")]
     DecodeHexTxid(#[source] bitcoin::hex::HexToArrayError),
+
+    /// Could not create reqwest client
+    #[error("we received an error when creating the Emily's reqwest client: {0}")]
+    EmilyReqwestClientCreation(#[source] reqwest_012::Error),
 
     /// This happens during the validation of a stacks transaction when the
     /// current signer is not a member of the signer set indicated by the

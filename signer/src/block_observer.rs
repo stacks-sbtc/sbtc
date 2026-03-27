@@ -170,7 +170,7 @@ where
                     )
                     .increment(1);
 
-                    if let Err(error) = self.process_bitcoin_blocks_until(block_hash).await {
+                    if let Err(error) = self.process_bitcoin_chain_tip(block_hash).await {
                         tracing::warn!(%error, %block_hash, "could not process bitcoin blocks");
                     }
 
@@ -294,7 +294,8 @@ impl<C: Context, B> BlockObserver<C, B> {
     }
 
     /// Find the parent blocks from the given block that are also missing
-    /// from our database.
+    /// from our database. The results are returned from blocks with the
+    /// least height to the greatest height.
     ///
     /// # Notes
     ///
@@ -345,6 +346,35 @@ impl<C: Context, B> BlockObserver<C, B> {
         }
 
         Ok(headers.into())
+    }
+
+    /// Process the bitcoin chain tip by fetching all unknown block headers
+    /// from the given chain tip back until the nakamoto start height. Then
+    /// mark all blocks reachable from the chain tip as canonical in the
+    /// database.
+    ///
+    /// # Notes
+    ///
+    /// This function must only be called with the bitcoin chain tip since
+    /// it updates all blocks that are reachable from the given block hash
+    /// as canonical and may update blocks not reachable as non-canonical.
+    #[tracing::instrument(skip_all, fields(%chain_tip))]
+    async fn process_bitcoin_chain_tip(&self, chain_tip: BlockHash) -> Result<(), Error> {
+        self.process_bitcoin_blocks_until(chain_tip).await?;
+
+        let db = self.context.get_storage_mut();
+
+        tracing::info!("updating canonical bitcoin blockchain to chain tip");
+        let chain_tip: model::BitcoinBlockHash = chain_tip.into();
+
+        // This is a safeguard to prevent us from updating the is_canonical
+        // column of all blocks in the database if the given chain tip has
+        // not been written to the database.
+        if !db.is_known_bitcoin_block_hash(&chain_tip).await? {
+            tracing::error!("chain tip not found in database, not setting is_canonical column");
+            return Err(Error::UnknownBitcoinChainTip(chain_tip));
+        }
+        db.set_canonical_bitcoin_blockchain(&chain_tip).await
     }
 
     /// Process bitcoin blocks until we get caught up to the given
@@ -424,13 +454,11 @@ impl<C: Context, B> BlockObserver<C, B> {
         let db = self.context.get_storage_mut();
         let tenure_info = stacks_client.get_tenure_info().await?;
 
+        let consensus_hash = tenure_info.consensus_hash;
+
         tracing::debug!("fetching unknown ancestral blocks from stacks-core");
-        crate::stacks::api::update_db_with_unknown_ancestors(
-            &stacks_client,
-            &db,
-            &tenure_info.tip_block_id,
-        )
-        .await?;
+        crate::stacks::api::update_db_with_unknown_ancestors(&stacks_client, &db, consensus_hash)
+            .await?;
 
         tracing::debug!("finished processing stacks block");
         Ok(())
@@ -519,6 +547,19 @@ impl<C: Context, B> BlockObserver<C, B> {
         Ok(chain_tip)
     }
 
+    /// Set the `SignerState` object with current stacks chain tip.
+    async fn set_stacks_chain_tip(&self, chain_tip: BlockHash) -> Result<(), Error> {
+        let db = self.context.get_storage();
+        let chain_tip = db
+            .get_stacks_chain_tip(&chain_tip.into())
+            .await?
+            .map(model::StacksBlockRef::from)
+            .ok_or_else(|| Error::NoStacksChainTip)?;
+
+        self.context.state().set_stacks_chain_tip(chain_tip);
+        Ok(())
+    }
+
     /// Update the `SignerState` object with data that is unlikely to
     /// change until the arrival of the next bitcoin block.
     ///
@@ -528,6 +569,7 @@ impl<C: Context, B> BlockObserver<C, B> {
     /// * sBTC limits from Emily.
     /// * The current signer set.
     /// * The current aggregate key.
+    /// * The current stacks chain tip.
     /// * The current bitcoin chain tip.
     async fn update_signer_state(&self, chain_tip: BlockHash) -> Result<BitcoinBlockRef, Error> {
         tracing::info!("loading sbtc limits from Emily");
@@ -535,6 +577,9 @@ impl<C: Context, B> BlockObserver<C, B> {
 
         tracing::info!("updating the signer state with the current signer set");
         self.set_signer_set_info().await?;
+
+        tracing::info!("updating the signer state with the current stacks chain tip");
+        self.set_stacks_chain_tip(chain_tip).await?;
 
         tracing::info!("updating the signer state with the current bitcoin chain tip");
         self.set_bitcoin_chain_tip(chain_tip).await
@@ -759,8 +804,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::AtomicU16;
-
     use bitcoin::Amount;
     use bitcoin::BlockHash;
     use bitcoin::TxOut;
@@ -769,13 +812,13 @@ mod tests {
     use fake::Fake as _;
     use model::BitcoinTxId;
     use model::ScriptPubKey;
-    use test_log::test;
 
     use crate::bitcoin::rpc::GetTxResponse;
     use crate::context::SignerSignal;
     use crate::keys::PublicKey;
     use crate::keys::SignerScriptPubKey as _;
     use crate::storage;
+    use crate::storage::model::BitcoinBlockHash;
     use crate::storage::model::DkgSharesStatus;
     use crate::testing::block_observer::TestHarness;
     use crate::testing::context::*;
@@ -783,7 +826,7 @@ mod tests {
 
     use super::*;
 
-    #[test(tokio::test)]
+    #[test_log::test(tokio::test)]
     async fn should_be_able_to_extract_bitcoin_blocks_given_a_block_header_stream() {
         let mut rng = get_rng();
         let storage = storage::memory::Store::new_shared();
@@ -806,13 +849,31 @@ mod tests {
             bitcoin_block_source: test_harness.clone(),
         };
 
+        // Let's get the bitcoin chain tip so that we know when to stop
+        // waiting for the block observers signal.
+        let chain_tip: BitcoinBlockHash = test_harness
+            .bitcoin_blocks()
+            .iter()
+            .max_by_key(|block| block.height)
+            .unwrap()
+            .block_hash
+            .into();
+
         let handle = tokio::spawn(block_observer.run());
-        let counter = AtomicU16::new(test_harness.bitcoin_blocks().len() as u16);
+        // Because of how the test is setup, the first few observed bitcoin
+        // blocks end with the block observer failing to signal because we
+        // cannot get the stacks chain tip. This isn't a bug because the
+        // response from get_tenure_headers is always anchored to the chain
+        // tip, while the block stream send blocks in ascending order
+        // making the stacks blocks appear to not be part of the canonical
+        // chain, when in reality they are all just anchored to a block
+        // that is ahead of the bitcoin block being processed.
         ctx.wait_for_signal(Duration::from_secs(3), |signal| {
             matches!(
                 signal,
-                SignerSignal::Event(SignerEvent::BitcoinBlockObserved(_))
-            ) && counter.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) == 1
+                SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
+                    if block_ref.block_hash == chain_tip
+            )
         })
         .await
         .expect("block observer failed to complete within timeout");
@@ -846,7 +907,7 @@ mod tests {
             .map(|block| block.block_hash);
 
         let lock_time = 150;
-        let max_fee = 32000;
+        let max_fee = i64::MAX as u64;
         let amount = 500_000;
 
         // We're going to create two deposit requests, the first one valid
@@ -912,17 +973,45 @@ mod tests {
             reclaim_script: tx_setup2.reclaims.first().unwrap().reclaim_script(),
         };
 
+        // This deposit transaction is a fine deposit, it just hasn't been
+        // confirmed yet.
+        let max_fee = u64::MAX;
+        let tx_setup3 = sbtc::testing::deposits::tx_setup(400, max_fee, &[amount]);
+        let get_tx_resp3 = GetTxResponse {
+            tx: tx_setup3.tx.clone(),
+            block_hash,
+            confirmations: None,
+            block_time: None,
+        };
+
+        let deposit_request3 = CreateDepositRequest {
+            outpoint: bitcoin::OutPoint {
+                txid: tx_setup3.tx.compute_txid(),
+                vout: 0,
+            },
+            deposit_script: tx_setup3.deposits.first().unwrap().deposit_script(),
+            reclaim_script: tx_setup3.reclaims.first().unwrap().reclaim_script(),
+        };
+        let req3 = deposit_request3.clone();
+
         // Let's add the "responses" to the field that feeds the
         // response to the `BitcoinClient::get_tx` call.
         test_harness.add_deposits(&[
             (get_tx_resp0.tx.compute_txid(), get_tx_resp0),
             (get_tx_resp1.tx.compute_txid(), get_tx_resp1),
             (get_tx_resp2.tx.compute_txid(), get_tx_resp2),
+            (get_tx_resp3.tx.compute_txid(), get_tx_resp3),
         ]);
 
         // Add the deposit requests to the pending deposits which
         // would be returned by Emily.
-        test_harness.add_pending_deposits(&[deposit_request0, deposit_request1, deposit_request2]);
+        let requests = [
+            deposit_request0,
+            deposit_request1,
+            deposit_request2,
+            deposit_request3,
+        ];
+        test_harness.add_pending_deposits(&requests);
         let min_height = test_harness.min_block_height();
 
         // Now we finish setting up the block observer.
@@ -946,17 +1035,23 @@ mod tests {
         }
 
         block_observer.load_latest_deposit_requests().await.unwrap();
-        // Only the transaction from tx_setup0 was valid. Note that, since
-        // we are not using a real block hash stored in the database. Our
-        // DbRead function won't actually find it. And in prod we won't
-        // actually store the deposit request transaction.
-        let deposit = {
+        // Only the transactions from tx_setup0 and tx_setup3 were valid.
+        // Note that, since we are not using a real block hash stored in
+        // the database. Our DbRead function won't actually find it. And in
+        // prod we won't actually store the deposit request transaction.
+        let (deposit0, deposit3) = {
             let db = storage.lock().await;
-            assert_eq!(db.deposit_requests.len(), 1);
-            db.deposit_requests.values().next().cloned().unwrap()
+            assert_eq!(db.deposit_requests.len(), 2);
+            let mut values = db.deposit_requests.values().cloned().collect::<Vec<_>>();
+            values.sort_by_key(|req| req.max_fee);
+            values.reverse();
+            (values.pop().unwrap(), values.pop().unwrap())
         };
 
-        assert_eq!(deposit.outpoint(), req0.outpoint);
+        assert_eq!(deposit0.outpoint(), req0.outpoint);
+        assert_eq!(deposit0.max_fee, i64::MAX as u64);
+        assert_eq!(deposit3.outpoint(), req3.outpoint);
+        assert_eq!(deposit3.max_fee, u64::MAX);
     }
 
     /// Test that `BlockObserver::extract_deposit_requests` after

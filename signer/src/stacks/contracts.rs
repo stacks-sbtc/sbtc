@@ -44,7 +44,6 @@ use clarity::vm::types::TypeSignature;
 
 use crate::DEPOSIT_DUST_LIMIT;
 use crate::WITHDRAWAL_BLOCKS_EXPIRY;
-use crate::WITHDRAWAL_MIN_CONFIRMATIONS;
 use crate::bitcoin::BitcoinInteract as _;
 use crate::bitcoin::validation::WithdrawalRequestStatus;
 use crate::context::Context;
@@ -60,6 +59,7 @@ use crate::storage::model::DkgSharesStatus;
 use crate::storage::model::QualifiedRequestId;
 use crate::storage::model::StacksBlockHash;
 use crate::storage::model::ToLittleEndianOrder as _;
+use sbtc::WITHDRAWAL_MIN_CONFIRMATIONS;
 
 use super::api::StacksInteract;
 
@@ -417,7 +417,7 @@ impl CompleteDepositV1 {
     /// 5. That the recipients in the transaction matches that of the
     ///    deposit request.
     /// 6. That the amount to mint is above the dust amount.
-    /// 7. That the fee matches the expected assessed fee for the outpoint.
+    /// 7. That the proposed mint amount matches our expected mint amount.
     /// 8. That the fee is less than the specified max-fee.
     ///
     /// The `fee` input variable is our calculation of the assessed fee for
@@ -449,9 +449,10 @@ impl CompleteDepositV1 {
         if self.amount < DEPOSIT_DUST_LIMIT {
             return Err(DepositErrorMsg::AmountBelowDustLimit.into_error(req_ctx, self));
         }
-        // 7. That the fee matches the expected assessed fee for the outpoint.
-        if fee.to_sat() + self.amount != deposit_request.amount {
-            return Err(DepositErrorMsg::IncorrectFee.into_error(req_ctx, self));
+        // 7. That the proposed mint amount matches our expected mint
+        //    amount.
+        if Some(self.amount) != deposit_request.amount.checked_sub(fee.to_sat()) {
+            return Err(DepositErrorMsg::IncorrectMintAmount.into_error(req_ctx, self));
         }
         // 8. Check that the fee is less than the specified max-fee.
         //
@@ -587,9 +588,10 @@ pub enum DepositErrorMsg {
     /// The fee paid to the bitcoin miners exceeded the max fee.
     #[error("fee paid to the bitcoin miners exceeded the max fee")]
     FeeTooHigh,
-    /// The supplied fee does not match what is expected.
-    #[error("the supplied fee does not match what is expected")]
-    IncorrectFee,
+    /// The supplied amount does not match the original deposit amount less
+    /// the assessed fees.
+    #[error("the proposed mint amount does not match what is expected")]
+    IncorrectMintAmount,
     /// The deposit outpoint is missing from the indicated sweep
     /// transaction.
     #[error("deposit outpoint is missing from the indicated sweep transaction")]
@@ -1392,7 +1394,7 @@ impl AsContractCall for RotateKeysV1 {
         // 6. That there are no other rotate-keys contract calls with these same
         //    details already confirmed on the canonical Stacks blockchain.
         let key_rotation_exists_fut = db.key_rotation_exists(
-            &req_ctx.chain_tip.block_hash,
+            &req_ctx.stacks_chain_tip,
             &self.new_keys,
             &self.aggregate_key,
             self.signatures_required,

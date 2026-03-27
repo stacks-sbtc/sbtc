@@ -14,6 +14,7 @@ use axum::Router;
 use axum::extract::DefaultBodyLimit;
 use axum::routing::get;
 use axum::routing::post;
+use axum::routing::patch;
 
 use crate::api::handlers::chainstate;
 use crate::api::handlers::deposit;
@@ -23,7 +24,7 @@ use crate::api::handlers::new_block;
 #[cfg(feature = "testing")]
 use crate::api::handlers::testing;
 use crate::api::handlers::withdrawal;
-
+use crate::api::handlers::throttle;
 /// Maximum request body size for the event observer endpoint.
 ///
 /// Stacks blocks have a limit of 2 MB, which is enforced at the p2p level, but
@@ -87,6 +88,11 @@ pub fn routes_axum() -> Router<EmilyContext> {
         .route("/limits", post(limits::set_limits))
         .route("/limits/{account}", get(limits::get_limits_for_account))
         .route("/limits/{account}", post(limits::set_limits_for_account))
+        .route("/throttle", get(throttle::get_throttle_key))
+        .route("/throttle", post(throttle::add_throttle_key))
+        .route("/start_throttle", post(throttle::start_throttle))
+        .route("/throttle/activate", patch(throttle::activate_throttle_key))
+        .route("/throttle/deactivate", patch(throttle::deactivate_throttle_key))
         .route("/new_block", new_block);
 
     router
@@ -121,6 +127,9 @@ pub async fn inject_request_context(
     }
     if let Some(h) = get_header("x-context-version") {
         context.settings.version = h;
+    }
+    if let Some(h) = get_header("x-context-throttle") {
+        context.settings.throttle_table_name = h;
     }
 
     req.extensions_mut().insert(context);

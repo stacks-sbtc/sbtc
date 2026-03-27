@@ -154,7 +154,7 @@ fn make_rotate_key(setup: &TestRotateKeySetup) -> (RotateKeysV1, ReqContext) {
     let req_ctx = ReqContext {
         chain_tip: setup.chain_tip.clone().into(),
         // This is not used for rotate-key tests.
-        stacks_chain_tip: signer::storage::model::StacksBlockHash::from([0; 32]),
+        stacks_chain_tip: setup.block_hash,
         context_window: 10,
         origin: fake::Faker.fake_with_rng(&mut OsRng),
         aggregate_key: setup.aggregate_key(),
@@ -511,6 +511,7 @@ async fn rotate_key_validation_replay() {
     let mut req_ctx_fork = req_ctx;
     req_ctx_fork.chain_tip.block_hash = test_data.bitcoin_blocks[0].block_hash;
     req_ctx_fork.chain_tip.block_height = test_data.bitcoin_blocks[0].block_height;
+    req_ctx_fork.stacks_chain_tip = test_data.stacks_blocks.last().unwrap().block_hash;
 
     rotate_key_tx.validate(&ctx, &req_ctx_fork).await.unwrap();
 

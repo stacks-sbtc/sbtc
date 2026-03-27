@@ -29,7 +29,8 @@ use crate::storage::model::ConsensusHash;
 use crate::storage::model::{BitcoinTxId, StacksBlockHash};
 use crate::{
     bitcoin::{
-        BitcoinInteract, MockBitcoinInteract, rpc::GetTxResponse, utxo::UnsignedTransaction,
+        BitcoinInteract, MockBitcoinInteract, rpc::BitcoinCoreClientParams, rpc::GetTxResponse,
+        utxo::UnsignedTransaction,
     },
     config::Settings,
     context::{Context, SignerContext, SignerSignal, SignerState, TerminationHandle},
@@ -400,7 +401,6 @@ impl BitcoinInteract for WrappedMockBitcoinInteract {
     async fn get_transaction_fee(
         &self,
         _txid: &bitcoin::Txid,
-        _lookup_hint: Option<crate::bitcoin::TransactionLookupHint>,
     ) -> Result<GetTransactionFeeResult, Error> {
         unimplemented!()
     }
@@ -486,19 +486,15 @@ impl StacksInteract for WrappedMockStacksInteract {
         self.inner.lock().await.get_block(block_id).await
     }
 
-    async fn check_pre_nakamoto_block(&self, block_id: &StacksBlockHash) -> Result<(), Error> {
+    async fn get_tenure_headers(
+        &self,
+        consensus_hash: &ConsensusHash,
+    ) -> Result<TenureBlockHeaders, Error> {
         self.inner
             .lock()
             .await
-            .check_pre_nakamoto_block(block_id)
+            .get_tenure_headers(consensus_hash)
             .await
-    }
-
-    async fn get_tenure_headers(
-        &self,
-        block_id: &StacksBlockHash,
-    ) -> Result<TenureBlockHeaders, Error> {
-        self.inner.lock().await.get_tenure_headers(block_id).await
     }
 
     async fn get_tenure_info(&self) -> Result<GetTenureInfoResponse, Error> {
@@ -800,7 +796,13 @@ where
     ) -> ContextBuilder<Storage, crate::bitcoin::rpc::BitcoinCoreClient, Stacks, Emily> {
         let config = self.get_config();
         let url = config.settings.bitcoin.rpc_endpoints.first().unwrap();
-        let bitcoin_client = crate::bitcoin::rpc::BitcoinCoreClient::try_from(url).unwrap();
+        let timeout = config.settings.bitcoin.timeout;
+        let bitcoin_client =
+            crate::bitcoin::rpc::BitcoinCoreClient::try_from(&BitcoinCoreClientParams {
+                url: url.clone(),
+                timeout,
+            })
+            .unwrap();
         ContextBuilder {
             config: ContextConfig {
                 settings: config.settings,

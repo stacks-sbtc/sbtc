@@ -1,6 +1,7 @@
 //! Test utilities for the transaction signer
 
 use std::collections::BTreeSet;
+use std::collections::HashSet;
 use std::time::Duration;
 
 use crate::context::Context;
@@ -25,7 +26,6 @@ use crate::testing;
 use crate::testing::get_rng;
 use crate::testing::storage::model::TestData;
 
-use hashbrown::HashSet;
 use rand::SeedableRng as _;
 use tokio::sync::broadcast;
 use tokio::time::error::Elapsed;
@@ -177,14 +177,22 @@ where
         let test_data = self.generate_test_data(&mut rng, signer_set);
         Self::write_test_data(&handle.context.get_storage_mut(), &test_data).await;
 
-        let chain_tip_ref = handle
-            .context
-            .get_storage()
+        let db = handle.context.get_storage();
+        let chain_tip_ref = db
             .get_bitcoin_canonical_chain_tip_ref()
             .await
             .unwrap()
             .unwrap();
+        let stacks_chain_tip = db
+            .get_stacks_chain_tip(&chain_tip_ref.block_hash)
+            .await
+            .unwrap()
+            .unwrap();
         handle.context.state().set_bitcoin_chain_tip(chain_tip_ref);
+        handle
+            .context
+            .state()
+            .set_stacks_chain_tip(stacks_chain_tip.into());
 
         let group_key = PublicKey::combine_keys(signer_set).unwrap();
         store_dummy_dkg_shares(
@@ -274,14 +282,22 @@ where
         let test_data = self.generate_test_data(&mut rng, signer_set);
         Self::write_test_data(&handle.context.get_storage_mut(), &test_data).await;
 
-        let chain_tip_ref = handle
-            .context
-            .get_storage()
+        let db = handle.context.get_storage();
+        let chain_tip_ref = db
             .get_bitcoin_canonical_chain_tip_ref()
             .await
             .unwrap()
             .unwrap();
+        let stacks_chain_tip = db
+            .get_stacks_chain_tip(&chain_tip_ref.block_hash)
+            .await
+            .unwrap()
+            .unwrap();
         handle.context.state().set_bitcoin_chain_tip(chain_tip_ref);
+        handle
+            .context
+            .state()
+            .set_stacks_chain_tip(stacks_chain_tip.into());
 
         handle
             .context
@@ -373,14 +389,22 @@ where
         for handle in event_loop_handles.iter_mut() {
             test_data.write_to(&handle.context.get_storage_mut()).await;
 
-            let chain_tip_ref = handle
-                .context
-                .get_storage()
+            let db = handle.context.get_storage();
+            let chain_tip_ref = db
                 .get_bitcoin_canonical_chain_tip_ref()
                 .await
                 .unwrap()
                 .unwrap();
+            let stacks_chain_tip = db
+                .get_stacks_chain_tip(&chain_tip_ref.block_hash)
+                .await
+                .unwrap()
+                .unwrap();
             handle.context.state().set_bitcoin_chain_tip(chain_tip_ref);
+            handle
+                .context
+                .state()
+                .set_stacks_chain_tip(stacks_chain_tip.into());
 
             let group_key = PublicKey::combine_keys(signer_set).unwrap();
             store_dummy_dkg_shares(

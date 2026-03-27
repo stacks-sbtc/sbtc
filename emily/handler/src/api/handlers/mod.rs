@@ -15,5 +15,7 @@ pub mod new_block;
 /// Testing handlers.
 #[cfg(feature = "testing")]
 pub mod testing;
+/// Throttle handlers.
+pub mod throttle;
 /// Withdrawal handlers.
 pub mod withdrawal;

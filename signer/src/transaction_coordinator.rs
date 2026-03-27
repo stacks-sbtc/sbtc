@@ -6,6 +6,7 @@
 //! For more details, see the [`TxCoordinatorEventLoop`] documentation.
 
 use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::time::Duration;
 
@@ -18,9 +19,7 @@ use sha2::Digest as _;
 use crate::WITHDRAWAL_BLOCKS_EXPIRY;
 use crate::WITHDRAWAL_DUST_LIMIT;
 use crate::WITHDRAWAL_EXPIRY_BUFFER;
-use crate::WITHDRAWAL_MIN_CONFIRMATIONS;
 use crate::bitcoin::BitcoinInteract as _;
-use crate::bitcoin::TransactionLookupHint;
 use crate::bitcoin::utxo;
 use crate::bitcoin::utxo::Fees;
 use crate::bitcoin::utxo::UnsignedMockTransaction;
@@ -51,7 +50,6 @@ use crate::metrics::STACKS_BLOCKCHAIN;
 use crate::network;
 use crate::signature::TaprootSignature;
 use crate::stacks::api::FeePriority;
-use crate::stacks::api::RejectionReason;
 use crate::stacks::api::StacksEpochStatus;
 use crate::stacks::api::StacksInteract as _;
 use crate::stacks::api::SubmitTxResponse;
@@ -73,12 +71,17 @@ use crate::storage::model::StacksTxId;
 use crate::wsts_state_machine::FireCoordinator;
 use crate::wsts_state_machine::FrostCoordinator;
 use crate::wsts_state_machine::WstsCoordinator;
+use sbtc::WITHDRAWAL_MIN_CONFIRMATIONS;
 
 use bitcoin::hashes::Hash as _;
 use wsts::net::SignatureType;
 use wsts::state_machine::OperationResult as WstsOperationResult;
 use wsts::state_machine::StateMachine as _;
 use wsts::state_machine::coordinator::State as WstsCoordinatorState;
+
+/// The rejection reason for a transaction that is rejected from the mempool
+/// because of a conflicting nonce.
+const REJECTION_REASON_CONFLICTING_NONCE_IN_MEMPOOL: &str = "ConflictingNonceInMempool";
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// # Transaction coordinator event loop
@@ -159,8 +162,6 @@ pub struct TxCoordinatorEventLoop<Context, Network> {
     pub network: Network,
     /// Private key of the coordinator for network communication.
     pub private_key: PrivateKey,
-    /// the number of signatures required.
-    pub threshold: u16,
     /// How many bitcoin blocks back from the chain tip the signer will
     /// look for requests.
     pub context_window: u16,
@@ -241,7 +242,7 @@ where
                     }
                     tracing::trace!("sending tenure completed signal");
                     self.context
-                        .signal(TxCoordinatorEvent::TenureCompleted.into())?;
+                        .signal(TxCoordinatorEvent::TenureCompleted(chain_tip).into())?;
                 }
                 SignerSignal::Event(_) => {}
             }
@@ -552,6 +553,7 @@ where
 
         // Create a signal stream with the defined filter
         let signal_stream = self.context.as_signal_stream(presign_ack_filter);
+        let signature_threshold = self.context.config().signer.bootstrap_signatures_required;
 
         // Send the presign request message
         tracing::debug!(request = %sbtc_requests, "sending pre-sign request");
@@ -562,7 +564,7 @@ where
             let target_tip = *bitcoin_chain_tip;
             let mut acknowledged_signers = HashSet::new();
 
-            while acknowledged_signers.len() < self.threshold as usize {
+            while acknowledged_signers.len() < signature_threshold as usize {
                 match signal_stream.next().await {
                     None => {
                         tracing::warn!("signer signal stream closed unexpectedly, shutting down");
@@ -647,12 +649,11 @@ where
         aggregate_key: &PublicKey,
         signer_public_keys: &BTreeSet<PublicKey>,
     ) -> Result<(), Error> {
-        let storage = self.context.get_storage();
-
-        // Fetch the stacks chain tip from the database.
-        let stacks_chain_tip = storage
-            .get_stacks_chain_tip(&bitcoin_chain_tip.block_hash)
-            .await?
+        // Fetch the stacks chain tip from the signer state.
+        let stacks_chain_tip = self
+            .context
+            .state()
+            .stacks_chain_tip()
             .ok_or(Error::NoStacksChainTip)?;
 
         let span = tracing::Span::current();
@@ -789,8 +790,14 @@ where
         // on the blockchain identified by the chain tip, where an input is
         // the deposit UTXO.
 
+        let stacks_chain_tip = self
+            .context
+            .state()
+            .stacks_chain_tip()
+            .ok_or(Error::NoStacksChainTip)?
+            .block_hash;
         let swept_deposits = db
-            .get_swept_deposit_requests(chain_tip.as_ref(), self.context_window)
+            .get_swept_deposit_requests(chain_tip.as_ref(), &stacks_chain_tip, self.context_window)
             .await?;
 
         if swept_deposits.is_empty() {
@@ -875,11 +882,21 @@ where
         bitcoin_aggregate_key: &PublicKey,
     ) -> Result<(), Error> {
         let db = self.context.get_storage();
+        let stacks_chain_tip = self
+            .context
+            .state()
+            .stacks_chain_tip()
+            .ok_or(Error::NoStacksChainTip)?
+            .block_hash;
 
         // Fetch withdrawal requests from the database where there has been
         // a confirmed bitcoin transaction associated with the request.
         let swept_withdrawals = db
-            .get_swept_withdrawal_requests(&chain_tip.block_hash, self.context_window)
+            .get_swept_withdrawal_requests(
+                &chain_tip.block_hash,
+                &stacks_chain_tip,
+                self.context_window,
+            )
             .await
             .inspect_err(|error| tracing::error!(%error, "could not fetch swept withdrawals"))
             .unwrap_or_default();
@@ -887,7 +904,11 @@ where
         // Fetch withdrawal requests that have not been swept for quite
         // some time.
         let rejected_withdrawals = db
-            .get_pending_rejected_withdrawal_requests(chain_tip, self.context_window)
+            .get_pending_rejected_withdrawal_requests(
+                chain_tip,
+                &stacks_chain_tip,
+                self.context_window,
+            )
             .await
             .inspect_err(|error| tracing::error!(%error, "could not fetch rejected withdrawals"))
             .unwrap_or_default();
@@ -1654,10 +1675,11 @@ where
         let block_hash = chain_tip.block_hash;
         // Get the current signer set for running DKG.
         let signer_set = self.context.config().signer.bootstrap_signing_set.clone();
+        let threshold = self.context.config().signer.bootstrap_signatures_required;
 
         let block_height = chain_tip.block_height;
         let mut state_machine =
-            FireCoordinator::new(signer_set, self.threshold, self.private_key, block_height);
+            FireCoordinator::new(signer_set, threshold, self.private_key, block_height);
 
         // Okay let's move the coordinator state machine to the beginning
         // of the DKG phase.
@@ -1712,7 +1734,12 @@ where
         S: Stream<Item = Signed<SignerMessage>>,
         Coordinator: WstsCoordinator,
     {
-        let signer_set = self.context.config().signer.bootstrap_signing_set.clone();
+        // We only allow the coordinator to send us certain kinds of
+        // messages. So later, we need to check whether the sender is the
+        // coordinator, and for that we need to use the "coordinator signer
+        // set", which may differ from the set of signers sending us
+        // messages right now.
+        let signer_set = self.context.coordinator_signer_set();
         tokio::pin!(signal_stream);
 
         // Let's get the next message from the network or the
@@ -1780,7 +1807,7 @@ where
 
     fn authenticate_message(
         msg: &wsts::net::Message,
-        public_keys: &hashbrown::HashMap<u32, p256k1::point::Point>,
+        public_keys: &HashMap<u32, p256k1::point::Point>,
         public_key_point: p256k1::point::Point,
         sender_is_coordinator: bool,
     ) -> bool {
@@ -1841,15 +1868,15 @@ where
     /// Determine if this signer is the signer set's coordinator for the
     /// specified bitcoin block hash.
     ///
-    /// The coordinator is decided using the hash of the bitcoin chain tip.
-    /// We don't use the chain tip directly because it typically starts
-    /// with a lot of leading zeros.
+    /// The coordinator is decided using the hash of the bitcoin chain tip
+    /// and signer set info from the registry if present. We don't use the
+    /// chain tip directly because it typically starts with a lot of
+    /// leading zeros.
     pub fn is_coordinator(&self, bitcoin_chain_tip: &model::BitcoinBlockHash) -> bool {
-        given_key_is_coordinator(
-            self.signer_public_key(),
-            bitcoin_chain_tip,
-            &self.context.config().signer.bootstrap_signing_set,
-        )
+        let signer_public_keys = self.context.coordinator_signer_set();
+
+        let signer_public_key = self.signer_public_key();
+        given_key_is_coordinator(signer_public_key, bitcoin_chain_tip, &signer_public_keys)
     }
 
     /// Constructs a new [`utxo::SignerBtcState`] based on the current market
@@ -2147,13 +2174,14 @@ where
 
         // Get the current sBTC limits (caps).
         let sbtc_limits = self.context.state().get_current_limits();
+        let signature_threshold = config.signer.bootstrap_signatures_required;
 
         // Setup the parameters for fetching pending requests.
         let params = GetPendingRequestsParams {
             bitcoin_chain_tip,
             stacks_chain_tip,
             aggregate_key,
-            signature_threshold: self.threshold,
+            signature_threshold,
             sbtc_limits: &sbtc_limits,
         };
 
@@ -2196,7 +2224,7 @@ where
             deposits,
             withdrawals,
             signer_state,
-            accept_threshold: self.threshold,
+            accept_threshold: signature_threshold,
             num_signers,
             sbtc_limits,
             max_deposits_per_bitcoin_tx,
@@ -2390,7 +2418,7 @@ where
             let bitcoin_client = bitcoin_client.clone();
             async move {
                 bitcoin_client
-                    .get_transaction_fee(txid, Some(TransactionLookupHint::Mempool))
+                    .get_transaction_fee(txid)
                     .await
                     .map(|fee| (txid, fee))
             }
@@ -2420,11 +2448,7 @@ where
         // descendants then this will just result in an empty list.
         let descendant_fees = try_join_all(descendant_txids.iter().map(|txid| {
             let bitcoin_client = bitcoin_client.clone();
-            async move {
-                bitcoin_client
-                    .get_transaction_fee(txid, Some(TransactionLookupHint::Mempool))
-                    .await
-            }
+            async move { bitcoin_client.get_transaction_fee(txid).await }
         }))
         .await?;
 
@@ -2624,10 +2648,8 @@ pub fn adjust_nonce(wallet: &SignerWallet, error: &Error) {
     match error {
         // For `ConflictingNonceInMempool` we don't want to decrement the nonce
         // to avoid failing also the following submissions
-        Error::StacksTxRejection(TxRejection {
-            reason: RejectionReason::ConflictingNonceInMempool,
-            ..
-        }) => (),
+        Error::StacksTxRejection(TxRejection { reason, .. })
+            if reason == REJECTION_REASON_CONFLICTING_NONCE_IN_MEMPOOL => {}
         _ => wallet.set_nonce(wallet.get_nonce().saturating_sub(1)),
     }
 }
@@ -2677,6 +2699,9 @@ mod tests {
         let context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
+            .modify_settings(|settings| {
+                settings.signer.bootstrap_signatures_required = 3;
+            })
             .build();
 
         // TODO: fix tech debt #893 then raise threshold to 5
@@ -2758,7 +2783,6 @@ mod tests {
             private_key: ctx.config().signer.private_key,
             signing_round_max_duration: Duration::from_secs(10),
             bitcoin_presign_request_max_duration: Duration::from_secs(10),
-            threshold: ctx.config().signer.bootstrap_signatures_required,
             dkg_max_duration: Duration::from_secs(10),
             is_epoch3: true,
         };
@@ -2815,7 +2839,6 @@ mod tests {
             private_key: PrivateKey::new(&mut rng),
             signing_round_max_duration: Duration::from_secs(10),
             bitcoin_presign_request_max_duration: Duration::from_secs(10),
-            threshold: ctx.config().signer.bootstrap_signatures_required,
             dkg_max_duration: Duration::from_secs(10),
             is_epoch3: true,
         };
@@ -2835,6 +2858,66 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+    }
+
+    /// Check that is_coordinator uses the registry for figuring out who
+    /// the cooridnator is and falls back to the config if the registry has
+    /// no signer set info.
+    #[tokio::test]
+    async fn is_coordinator_uses_registry_for_coordinator() {
+        let mut rng = testing::get_rng();
+        let ctx = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .modify_settings(|settings| {
+                settings.signer.bootstrap_signatures_required = 1;
+                settings.signer.bootstrap_signing_set =
+                    std::iter::once(settings.signer.public_key()).collect();
+            })
+            .build();
+
+        let network = WanNetwork::default();
+        let net = network.connect(&ctx);
+
+        let ev = TxCoordinatorEventLoop {
+            network: net.spawn(),
+            context: ctx.clone(),
+            context_window: 10000,
+            private_key: ctx.config().signer.private_key,
+            signing_round_max_duration: Duration::from_secs(10),
+            bitcoin_presign_request_max_duration: Duration::from_secs(10),
+            dkg_max_duration: Duration::from_secs(10),
+            is_epoch3: true,
+        };
+
+        // We should always be the coordinator since the registry is unset
+        // and we're the only signer in the bootstrap signing set.
+        assert!(ev.context.state().registry_signer_set_info().is_none());
+
+        for _ in 0..100 {
+            let chain_tip1: BitcoinBlockRef = fake::Faker.fake_with_rng(&mut rng);
+            assert!(ev.is_coordinator(&chain_tip1.block_hash));
+        }
+
+        // Now let's set the signer set in the registry to some random
+        // signer set without our key. Now we should never be the
+        // coordinator.
+        let signer_set_info = crate::stacks::api::SignerSetInfo {
+            aggregate_key: Faker.fake_with_rng(&mut rng),
+            signer_set: std::iter::repeat_with(|| Faker.fake_with_rng(&mut rng))
+                .take(2)
+                .collect(),
+            signatures_required: 2,
+        };
+
+        ctx.state().update_registry_signer_set_info(signer_set_info);
+
+        // If we were part of the signing set, there is a 2^(-128) chance
+        // that this check would pass.
+        for _ in 0..128 {
+            let chain_tip1: BitcoinBlockRef = fake::Faker.fake_with_rng(&mut rng);
+            assert!(!ev.is_coordinator(&chain_tip1.block_hash));
+        }
     }
 
     #[tokio::test]

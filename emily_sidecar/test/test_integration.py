@@ -72,6 +72,8 @@ class IntegrationTests(unittest.TestCase):
     def setUp(self):
         # Wipe the state before each test
         requests.post(WIPE_URL, headers=headers)
+        # Show full diff between A and B if self.assertEqual(A, B) fails
+        self.maxDiff = None
         self.app = client
         self.app.testing = True
 
@@ -96,6 +98,7 @@ class IntegrationTests(unittest.TestCase):
                 "status": "pending",
                 "statusMessage": "Just received withdrawal",
                 "parameters": {"maxFee": 3000},
+                "expectedFulfillmentInfo": {"bitcoinBlockHeight": 144},
                 "txid": "25982fe028733fe0158fa3972b68fe93ade7f242fb51283c3bc18145d0248d9a",
             },
         )
@@ -160,6 +163,7 @@ class IntegrationTests(unittest.TestCase):
                 "status": "confirmed",
                 "statusMessage": "Included in block 0ce5807894c9da8cddcd7b00d15b916f067b1d53487ecc4cae98bc4b7e8fc253",
                 "parameters": {"maxFee": 3000},
+                "expectedFulfillmentInfo": {"bitcoinBlockHeight": 144},
                 "fulfillment": {
                     "BitcoinTxid": "0000000000000000000000000000000000000000000000000000000000000000",
                     "BitcoinTxIndex": 4294967295,
@@ -195,6 +199,7 @@ class IntegrationTests(unittest.TestCase):
                 "status": "failed",
                 "statusMessage": "Rejected",
                 "parameters": {"maxFee": 3000},
+                "expectedFulfillmentInfo": {"bitcoinBlockHeight": 144},
                 "txid": "25982fe028733fe0158fa3972b68fe93ade7f242fb51283c3bc18145d0248d9a",
             },
         )

@@ -1,21 +1,20 @@
 //! Accessors.
 
-use std::collections::HashMap;
+use argon2::{
+    Argon2,
+    password_hash::{PasswordHasher as _, SaltString},
+};
 
 use aws_sdk_dynamodb::types::AttributeValue;
 use aws_sdk_dynamodb::types::error::ConditionalCheckFailedException;
 use serde_dynamo::Item;
+use std::collections::HashMap;
 use strum::IntoEnumIterator as _;
 
 use tracing::{debug, warn};
 
 use crate::api::models::limits::{AccountLimits, Limits};
 use crate::common::error::{Error, Inconsistency};
-
-use crate::{
-    api::models::common::{DepositStatus, WithdrawalStatus},
-    context::EmilyContext,
-};
 
 use super::entries::deposit::{
     DepositInfoByRecipientEntry, DepositInfoByReclaimPubkeysEntry,
@@ -45,6 +44,26 @@ use super::entries::{
         WithdrawalTableSecondaryIndex, WithdrawalUpdatePackage,
     },
 };
+use crate::database::entries::throttle::{
+    ThrottleKeyEntry, ThrottleKeyEntryKey, ThrottleTablePrimaryIndex,
+};
+use crate::{
+    api::models::common::{DepositStatus, WithdrawalStatus},
+    context::EmilyContext,
+};
+
+use sha2::{Digest as _, Sha256};
+
+/// Converts a string to an argon2 salt.
+pub fn name_to_salt(name: &str) -> Result<SaltString, Error> {
+    let mut hasher = Sha256::new();
+    hasher.update(name);
+    let result = hasher.finalize();
+    let hash_string = format!("{:x}", result);
+    SaltString::from_b64(&hash_string)
+        .inspect_err(|error| tracing::error!(%error, "Failed to create salt string from name"))
+        .map_err(|_| Error::InternalServer)
+}
 
 // TODO: have different Table structs for each of the table types instead of
 // these individual wrappers.
@@ -857,6 +876,7 @@ pub async fn get_limits(context: &EmilyContext) -> Result<Limits, Error> {
         per_withdrawal_cap: default_global_cap.per_withdrawal_cap,
         rolling_withdrawal_blocks: default_global_cap.rolling_withdrawal_blocks,
         rolling_withdrawal_cap: default_global_cap.rolling_withdrawal_cap,
+        throttle_mode_initiator: default_global_cap.throttle_mode_initiator,
     };
 
     // Aggregate all the latest entries by account.
@@ -914,6 +934,7 @@ pub async fn get_limits(context: &EmilyContext) -> Result<Limits, Error> {
         rolling_withdrawal_blocks: global_cap.rolling_withdrawal_blocks,
         rolling_withdrawal_cap: global_cap.rolling_withdrawal_cap,
         account_caps,
+        throttle_mode_initiator: global_cap.throttle_mode_initiator,
     })
 }
 
@@ -946,6 +967,135 @@ pub async fn set_limit_for_account(
     put_entry::<LimitTablePrimaryIndex>(context, limit).await
 }
 
+// Throttle keys ---------------------------------------------------------------
+
+/// Get list of all throttle keys.
+pub async fn get_throttle_keys_list(
+    _context: &EmilyContext,
+) -> Result<Vec<ThrottleKeyEntry>, Error> {
+    todo!()
+}
+
+/// Get throttle key by key hash.
+pub async fn get_throttle_key(
+    context: &EmilyContext,
+    hash: &String,
+) -> Result<ThrottleKeyEntry, Error> {
+    let resp = query_with_partition_key::<ThrottleTablePrimaryIndex>(context, hash, None, None)
+        .await?
+        .0;
+    if resp.len() > 1 {
+        return Err(Error::TooManyThrottleEntries(hash.clone()));
+    }
+    if resp.is_empty() {
+        return Err(Error::NotFound);
+    }
+    Ok(resp[0].clone())
+}
+
+/// Add new throttle key
+pub async fn add_throttle_key(context: &EmilyContext, key: &ThrottleKeyEntry) -> Result<(), Error> {
+    let res = get_throttle_key(context, &key.key.hash).await;
+    if res.is_ok() {
+        tracing::warn!(
+            name = %key.name,
+            hash = %key.key.hash,
+            "Attempt to insert duplicate throttle key",
+        );
+        return Err(Error::Conflict);
+    }
+    put_entry::<ThrottleTablePrimaryIndex>(context, key).await
+}
+
+/// Set is_active parameter for throttle key
+async fn set_throttle_key_activity(
+    context: &EmilyContext,
+    hash: String,
+    is_active: bool,
+) -> Result<(), Error> {
+    // TODO: maybe we want to bail if key already active.
+    let timestamp = get_throttle_key(context, &hash).await?.key.created_at;
+
+    let table_name = context.settings.throttle_table_name.clone();
+    let partition_key_name = ThrottleKeyEntryKey::PARTITION_KEY_NAME;
+    let sort_key_name = ThrottleKeyEntryKey::SORT_KEY_NAME;
+    context
+        .dynamodb_client
+        .update_item()
+        .table_name(table_name)
+        .key(
+            partition_key_name,
+            aws_sdk_dynamodb::types::AttributeValue::S(hash),
+        )
+        .key(
+            sort_key_name,
+            aws_sdk_dynamodb::types::AttributeValue::N(timestamp.to_string()),
+        )
+        .update_expression("SET IsActive = :t")
+        .expression_attribute_values(
+            ":t",
+            aws_sdk_dynamodb::types::AttributeValue::Bool(is_active),
+        )
+        .send()
+        .await?;
+    Ok(())
+}
+
+/// Activate throttle key. Now it will be eligible to start throttle mode.
+pub async fn activate_throttle_key(context: &EmilyContext, hash: String) -> Result<(), Error> {
+    set_throttle_key_activity(context, hash, true).await
+}
+
+/// Deactivate throttle key. Now it will be unable to activate throttle mode.
+pub async fn deactivate_throttle_key(context: &EmilyContext, hash: String) -> Result<(), Error> {
+    set_throttle_key_activity(context, hash, false).await
+}
+
+/// Enum, representing if key is eligible to activate throttle mode
+pub enum KeyVerificationResult {
+    /// This key is eligible to start throttle mode
+    /// Internally contains name of the key initiated throttle mode
+    Eligible(String),
+    /// This key is known, but has been revoked.
+    Revoked,
+}
+
+impl KeyVerificationResult {
+    /// Returns true if the key is eligible to start throttle mode, and false otherwise.
+    pub fn is_eligible(&self) -> bool {
+        matches!(self, KeyVerificationResult::Eligible(_))
+    }
+}
+
+/// Verify if given key_name + secret eligible to start throttle mode
+pub async fn verify_throttle_key(
+    context: &EmilyContext,
+    name: &str,
+    secret: &String,
+) -> Result<KeyVerificationResult, Error> {
+    // We use name as salt. It is fine, because we choose names and
+    // we have a guarantee that they are unique, so we won't have a collision on the salt.
+    let argon2 = Argon2::default();
+    let salt = name_to_salt(name)?;
+    let hash = argon2
+        .hash_password(secret.as_bytes(), &salt)
+        .inspect_err(|error| {
+            warn!(
+                %error,
+                name = name,
+                "Failed to hash the secret for throttle key verification",
+            );
+        })
+        .map_err(|_| Error::InternalServer)?
+        .to_string();
+
+    let key = get_throttle_key(context, &hash).await?;
+    if !key.is_active {
+        return Ok(KeyVerificationResult::Revoked);
+    }
+    Ok(KeyVerificationResult::Eligible(key.name))
+}
+
 // Testing ---------------------------------------------------------------------
 
 /// Wipes all the tables.
@@ -956,7 +1106,14 @@ pub async fn wipe_all_tables(context: &EmilyContext) -> Result<(), Error> {
     wipe_withdrawal_table(context).await?;
     wipe_chainstate_table(context).await?;
     wipe_limit_table(context).await?;
+    wipe_throttle_table(context).await?;
     Ok(())
+}
+
+/// Wipes the throttle table.
+#[cfg(feature = "testing")]
+async fn wipe_throttle_table(context: &EmilyContext) -> Result<(), Error> {
+    wipe::<ThrottleTablePrimaryIndex>(context).await
 }
 
 /// Wipes the deposit table.

@@ -199,7 +199,8 @@ pub trait DbRead {
     /// they will sweep out the withdrawal funds and sweep transaction.
     fn get_pending_withdrawal_requests(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+        stacks_chain_tip: &model::StacksBlockHash,
         context_window: u16,
         signer_public_key: &PublicKey,
     ) -> impl Future<Output = Result<Vec<model::WithdrawalRequest>, Error>> + Send;
@@ -242,7 +243,8 @@ pub trait DbRead {
     /// rejected yet
     fn get_pending_rejected_withdrawal_requests(
         &self,
-        chain_tip: &model::BitcoinBlockRef,
+        bitcoin_chain_tip: &model::BitcoinBlockRef,
+        stacks_chain_tip: &model::StacksBlockHash,
         context_window: u16,
     ) -> impl Future<Output = Result<Vec<model::WithdrawalRequest>, Error>> + Send;
 
@@ -330,7 +332,7 @@ pub trait DbRead {
     /// Checks if a key rotation exists on the canonical chain
     fn key_rotation_exists(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
+        stacks_chain_tip: &model::StacksBlockHash,
         signer_set: &BTreeSet<PublicKey>,
         aggregate_key: &PublicKey,
         signatures_required: u16,
@@ -434,7 +436,8 @@ pub trait DbRead {
     /// before they are considered fulfilled.
     fn get_swept_deposit_requests(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+        stacks_chain_tip: &model::StacksBlockHash,
         context_window: u16,
     ) -> impl Future<Output = Result<Vec<model::SweptDepositRequest>, Error>> + Send;
 
@@ -446,7 +449,8 @@ pub trait DbRead {
     /// call before they are considered fulfilled.
     fn get_swept_withdrawal_requests(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+        stacks_chain_tip: &model::StacksBlockHash,
         context_window: u16,
     ) -> impl Future<Output = Result<Vec<model::SweptWithdrawalRequest>, Error>> + Send;
 
@@ -619,5 +623,21 @@ pub trait DbWrite {
         pub_key: &PublicKey,
         peer_id: &PeerId,
         address: Multiaddr,
+    ) -> impl Future<Output = Result<(), Error>> + Send;
+
+    /// Ensure that each and only blocks along the chain identified by the
+    /// given chain tip have their is_canonical set to TRUE.
+    ///
+    /// # Notes
+    ///
+    /// This function should mark all blocks that are reachable from the
+    /// given chain tip as canonical (is_canonical = TRUE), and no other
+    /// block should have is_canonical set to TRUE. That means that the
+    /// DbWrite::set_canonical_bitcoin_blockchain() function need not set
+    /// the is_canonical column to FALSE if it is a non-canonical block --
+    /// it can just leave the value of that column as NULL.
+    fn set_canonical_bitcoin_blockchain(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
     ) -> impl Future<Output = Result<(), Error>> + Send;
 }

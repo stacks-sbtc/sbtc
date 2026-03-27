@@ -6,6 +6,7 @@ use axum::http::Method;
 use axum::http::Request;
 use axum::http::header::CONTENT_TYPE;
 use emily_handler::context::EmilyContext;
+use lambda_http::Context as LambdaContext;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing::info;
@@ -16,11 +17,9 @@ use emily_handler::logging;
 #[tokio::main]
 async fn main() {
     // Setup logging.
-    // TODO(TBD): Make the logging configurable.
     logging::setup_logging("info,emily_handler=debug", false);
 
     // Setup context.
-    // TODO(389 + 358): Handle config pickup in a way that will only fail for the relevant call.
     let context: EmilyContext = EmilyContext::from_env()
         .await
         .unwrap_or_else(|e| panic!("{e}"));
@@ -37,10 +36,22 @@ async fn main() {
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(|request: &Request<_>| {
-                    tracing::info_span!("api-request",
+                    let request_id = request
+                        .extensions()
+                        .get::<LambdaContext>()
+                        .map(|c| c.request_id.as_str())
+                        .unwrap_or("unknown");
+                    let trace_id = request
+                        .headers()
+                        .get("x-amzn-trace-id")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("unknown");
+
+                    tracing::info_span!("request",
+                        request_id = %request_id,
+                        trace_id = %trace_id,
                         uri = %request.uri(),
                         method = %request.method(),
-                        id = tracing::field::Empty,
                     )
                 })
                 .on_response(api::routes::axum_log_response),

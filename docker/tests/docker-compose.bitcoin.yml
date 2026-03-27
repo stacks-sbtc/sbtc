@@ -1,8 +1,8 @@
 services:
-  bitcoind:
+  bitcoin:
     image: bitcoin/bitcoin:${BITCOIN_CORE_VERSION:-25.2}
     volumes:
-      - ../../signer/tests/service-configs/bitcoin.conf:/root/.bitcoin/bitcoin.conf:ro
+      - ../bitcoin/bitcoin.conf:/root/.bitcoin/bitcoin.conf:ro
     entrypoint:
       - /bin/bash
       - -c

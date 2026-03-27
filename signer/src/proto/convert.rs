@@ -7,6 +7,8 @@
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::HashMap;
+use std::collections::HashSet;
 
 use bitcoin::OutPoint;
 use clarity::codec::StacksMessageCodec as _;
@@ -727,32 +729,32 @@ impl TryFrom<proto::BadPrivateShare> for BadPrivateShare {
     }
 }
 
-impl From<hashbrown::HashMap<u32, BadPrivateShare>> for proto::BadPrivateShares {
-    fn from(value: hashbrown::HashMap<u32, BadPrivateShare>) -> Self {
+impl From<HashMap<u32, BadPrivateShare>> for proto::BadPrivateShares {
+    fn from(value: HashMap<u32, BadPrivateShare>) -> Self {
         proto::BadPrivateShares {
             shares: value.into_iter().map(|(k, v)| (k, v.into())).collect(),
         }
     }
 }
 
-impl TryFrom<proto::BadPrivateShares> for hashbrown::HashMap<u32, BadPrivateShare> {
+impl TryFrom<proto::BadPrivateShares> for HashMap<u32, BadPrivateShare> {
     type Error = Error;
     fn try_from(value: proto::BadPrivateShares) -> Result<Self, Self::Error> {
         value
             .shares
             .into_iter()
             .map(|(k, v)| Ok((k, v.try_into()?)))
-            .collect::<Result<hashbrown::HashMap<_, _>, Error>>()
+            .collect::<Result<HashMap<_, _>, Error>>()
     }
 }
 
-fn hashset_to_zst(set: hashbrown::HashSet<u32>) -> BTreeMap<u32, proto::SetValueZst> {
+fn hashset_to_zst(set: HashSet<u32>) -> BTreeMap<u32, proto::SetValueZst> {
     set.into_iter()
         .map(|v| (v, proto::SetValueZst {}))
         .collect()
 }
 
-fn zst_to_hashset(set: BTreeMap<u32, proto::SetValueZst>) -> hashbrown::HashSet<u32> {
+fn zst_to_hashset(set: BTreeMap<u32, proto::SetValueZst>) -> HashSet<u32> {
     set.into_keys().collect()
 }
 
@@ -1674,6 +1676,7 @@ impl codec::ProtoSerializable for BTreeMap<u32, DkgPublicShares> {
 #[cfg(test)]
 mod tests {
     use crate::testing::dummy::Unit;
+    use std::collections::HashMap;
 
     use super::*;
 
@@ -1768,7 +1771,7 @@ mod tests {
     #[test_case(PhantomData::<(DkgEndBegin, proto::DkgEndBegin)>; "DkgEndBegin")]
     #[test_case(PhantomData::<(TupleProof, proto::TupleProof)>; "TupleProof")]
     #[test_case(PhantomData::<(BadPrivateShare, proto::BadPrivateShare)>; "BadPrivateShare")]
-    #[test_case(PhantomData::<(hashbrown::HashMap<u32, BadPrivateShare>, proto::BadPrivateShares)>; "BadPrivateShares")]
+    #[test_case(PhantomData::<(HashMap<u32, BadPrivateShare>, proto::BadPrivateShares)>; "BadPrivateShares")]
     #[test_case(PhantomData::<(DkgStatus, proto::DkgStatus)>; "DkgStatus")]
     #[test_case(PhantomData::<(DkgEnd, proto::DkgEnd)>; "DkgEnd")]
     #[test_case(PhantomData::<(SignatureType, proto::SignatureType)>; "SignatureType")]

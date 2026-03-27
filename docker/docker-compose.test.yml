@@ -4,7 +4,7 @@ services:
     container_name: bitcoind
     image: lncm/bitcoind:v25.1
     volumes:
-      - ../signer/tests/service-configs/bitcoin.conf:/data/.bitcoin/bitcoin.conf:ro
+      - ./bitcoin/bitcoin.conf:/data/.bitcoin/bitcoin.conf:ro
     restart: on-failure
     # For some reason, the CMD in the original Dockerfile is set to publish
     # events on zeromq, and it seems to interfere with the events that we
