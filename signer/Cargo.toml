@@ -47,6 +47,7 @@ prost.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
 reqwest.workspace = true
+reqwest_012.workspace = true
 secp256k1.workspace = true
 serde.workspace = true
 serde_bytes.workspace = true
