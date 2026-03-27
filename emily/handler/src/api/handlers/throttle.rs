@@ -11,9 +11,10 @@ use crate::{
     },
 };
 use argon2::{Argon2, password_hash::PasswordHasher as _};
+use axum::Json;
+use axum::extract::Extension;
+use axum::http::StatusCode;
 use tracing::instrument;
-use warp::http::StatusCode;
-use warp::reply::{Reply, json, with_status};
 
 /// Get the throttle key details.
 #[utoipa::path(
@@ -31,24 +32,17 @@ use warp::reply::{Reply, json, with_status};
     security(("ApiGatewayKey" = []))
 )]
 #[instrument(skip(context))]
-pub async fn get_throttle_key(hash: String, context: EmilyContext) -> impl warp::reply::Reply {
-    // Internal handler so `?` can be used correctly while still returning a reply.
-    async fn handler(
-        hash: String,
-        context: EmilyContext,
-    ) -> Result<impl warp::reply::Reply, Error> {
-        let key = accessors::get_throttle_key(&context, &hash).await?;
-        let key = GetThrottleKeyResponse {
-            name: key.name,
-            hash: key.key.hash,
-            is_active: key.is_active,
-        };
-        Ok(with_status(json(&key), StatusCode::OK))
-    }
-    // Handle and respond.
-    handler(hash, context)
-        .await
-        .map_or_else(Reply::into_response, Reply::into_response)
+pub async fn get_throttle_key(
+    Extension(context): Extension<EmilyContext>,
+    Json(hash): Json<String>,
+) -> Result<(StatusCode, GetThrottleKeyResponse), Error> {
+    let key = accessors::get_throttle_key(&context, &hash).await?;
+    let key = GetThrottleKeyResponse {
+        name: key.name,
+        hash: key.key.hash,
+        is_active: key.is_active,
+    };
+    Ok((StatusCode::OK, key))
 }
 
 /// Rolling window size for throttle mode.
@@ -109,50 +103,45 @@ pub async fn calculate_throttle_mode_limits(
     fields(request.name = %request.name)
 )]
 pub async fn start_throttle(
-    request: ThrottleRequest,
-    context: EmilyContext,
-) -> impl warp::reply::Reply {
-    // Internal handler so `?` can be used correctly while still returning a reply.
-    async fn handler(
-        request: ThrottleRequest,
-        context: EmilyContext,
-    ) -> Result<impl warp::reply::Reply, Error> {
-        let verification_result =
-            accessors::verify_throttle_key(&context, &request.name, &request.secret).await?;
+    Extension(context): Extension<EmilyContext>,
+    Json(request): Json<ThrottleRequest>,
+) -> Result<(StatusCode, Limits), Error> {
+    let verification_result =
+        accessors::verify_throttle_key(&context, &request.name, &request.secret).await?;
 
-        match verification_result {
-            KeyVerificationResult::Revoked => {
-                tracing::warn!(
-                    key_name = %request.name,
-                    "Attempt to start throttle mode with revoked key",
-                );
-                Err(Error::Forbidden)
-            }
-            KeyVerificationResult::Eligible(initiator) => {
-                // TODO: we need an alarm on this error.
-                tracing::info!(
-                    key_name = %request.name,
-                    "Successfull request to start throttle mode. Starting throttle mode.",
-                );
-                let new_limits = calculate_throttle_mode_limits(&context, initiator).await?;
-                tracing::info!(?new_limits, "Calculated limits to use in throttle mode",);
-                let res = crate::api::handlers::limits::set_limits(new_limits.clone(), context)
-                    .await
-                    .into_response();
-                let is_success = res.status().is_success();
-                if is_success {
+    match verification_result {
+        KeyVerificationResult::Revoked => {
+            tracing::warn!(
+                key_name = %request.name,
+                "Attempt to start throttle mode with revoked key",
+            );
+            Err(Error::Forbidden)
+        }
+        KeyVerificationResult::Eligible(initiator) => {
+            // TODO: we need an alarm on this error.
+            tracing::info!(
+                key_name = %request.name,
+                "Successfull request to start throttle mode. Starting throttle mode.",
+            );
+            let new_limits = calculate_throttle_mode_limits(&context, initiator).await?;
+            tracing::info!(?new_limits, "Calculated limits to use in throttle mode",);
+            match crate::api::handlers::limits::set_limits(
+                Extension(context),
+                Json(new_limits.clone()),
+            )
+            .await
+            {
+                Ok((_, limits)) => {
                     tracing::info!("successfully started throttle mode.");
-                    return Ok(with_status(json(&new_limits), StatusCode::OK));
+                    Ok((StatusCode::OK, limits))
                 }
-                tracing::error!(?res, "Error setting throttle mode limits");
-                Err(Error::InternalServer)
+                Err(error) => {
+                    tracing::error!(?error, "Error setting throttle mode limits");
+                    Err(Error::InternalServer)
+                }
             }
         }
     }
-    // Handle and respond.
-    handler(request, context)
-        .await
-        .map_or_else(Reply::into_response, Reply::into_response)
 }
 
 /// Add throttle key handler.
@@ -175,15 +164,13 @@ pub async fn start_throttle(
     skip(key, context),
     fields(key.name = %key.name)
 )]
-pub async fn add_throttle_key(key: ThrottleKey, context: EmilyContext) -> impl warp::reply::Reply {
-    // Internal handler so `?` can be used correctly while still returning a reply.
-    async fn handler(
-        context: EmilyContext,
-        key: ThrottleKey,
-    ) -> Result<impl warp::reply::Reply, Error> {
-        let argon2 = Argon2::default();
-        let salt = accessors::name_to_salt(&key.name)?;
-        let hash = argon2
+pub async fn add_throttle_key(
+    Extension(context): Extension<EmilyContext>,
+    Json(key): Json<ThrottleKey>,
+) -> Result<(StatusCode, ()), Error> {
+    let argon2 = Argon2::default();
+    let salt = accessors::name_to_salt(&key.name)?;
+    let hash = argon2
             .hash_password(key.secret.as_bytes(), &salt)
             .inspect_err(|error| {
                 tracing::error!(
@@ -194,25 +181,20 @@ pub async fn add_throttle_key(key: ThrottleKey, context: EmilyContext) -> impl w
             })
             .map_err(|_| Error::Deserialization("Error hashing the secret. Usually happens due to failed conversion of name into salt".to_string()))?
             .to_string();
-        let entry = ThrottleKeyEntry {
-            key: ThrottleKeyEntryKey {
-                hash,
-                created_at: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    // It's impossible for this to fail.
-                    .expect("Error making timestamp during limit entry creation.")
-                    .as_secs(),
-            },
-            name: key.name.clone(),
-            is_active: true,
-        };
-        accessors::add_throttle_key(&context, &entry).await?;
-        Ok(with_status(warp::reply(), StatusCode::CREATED))
-    }
-    // Handle and respond.
-    handler(context, key)
-        .await
-        .map_or_else(Reply::into_response, Reply::into_response)
+    let entry = ThrottleKeyEntry {
+        key: ThrottleKeyEntryKey {
+            hash,
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                // It's impossible for this to fail.
+                .expect("Error making timestamp during limit entry creation.")
+                .as_secs(),
+        },
+        name: key.name.clone(),
+        is_active: true,
+    };
+    accessors::add_throttle_key(&context, &entry).await?;
+    Ok((StatusCode::CREATED, ()))
 }
 
 /// Deactivate existing throttle key
@@ -233,21 +215,11 @@ pub async fn add_throttle_key(key: ThrottleKey, context: EmilyContext) -> impl w
 )]
 #[instrument(skip(context))]
 pub async fn deactivate_throttle_key(
-    hash: String,
-    context: EmilyContext,
-) -> impl warp::reply::Reply {
-    // Internal handler so `?` can be used correctly while still returning a reply.
-    async fn handler(
-        context: EmilyContext,
-        hash: String,
-    ) -> Result<impl warp::reply::Reply, Error> {
-        accessors::deactivate_throttle_key(&context, hash).await?;
-        Ok(with_status(warp::reply(), StatusCode::NO_CONTENT))
-    }
-    // Handle and respond.
-    handler(context, hash)
-        .await
-        .map_or_else(Reply::into_response, Reply::into_response)
+    Extension(context): Extension<EmilyContext>,
+    Json(hash): Json<String>,
+) -> Result<(StatusCode, ()), Error> {
+    accessors::deactivate_throttle_key(&context, hash).await?;
+    Ok((StatusCode::NO_CONTENT, ()))
 }
 
 /// Activate existing (previously deactivated) throttle key
@@ -267,17 +239,10 @@ pub async fn deactivate_throttle_key(
     security(("ApiGatewayKey" = []))
 )]
 #[instrument(skip(context))]
-pub async fn activate_throttle_key(hash: String, context: EmilyContext) -> impl warp::reply::Reply {
-    // Internal handler so `?` can be used correctly while still returning a reply.
-    async fn handler(
-        context: EmilyContext,
-        hash: String,
-    ) -> Result<impl warp::reply::Reply, Error> {
-        accessors::activate_throttle_key(&context, hash).await?;
-        Ok(with_status(warp::reply(), StatusCode::NO_CONTENT))
-    }
-    // Handle and respond.
-    handler(context, hash)
-        .await
-        .map_or_else(Reply::into_response, Reply::into_response)
+pub async fn activate_throttle_key(
+    Extension(context): Extension<EmilyContext>,
+    Json(hash): Json<String>,
+) -> Result<(StatusCode, ()), Error> {
+    accessors::activate_throttle_key(&context, hash).await?;
+    Ok((StatusCode::NO_CONTENT, ()))
 }

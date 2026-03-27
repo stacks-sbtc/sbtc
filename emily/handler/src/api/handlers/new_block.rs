@@ -15,7 +15,6 @@ use sbtc::events::{
     WithdrawalRejectEvent,
 };
 
-use crate::api::models::new_block::NewBlockEventRaw;
 use crate::api::handlers::chainstate::set_chainstate;
 use crate::api::handlers::deposit::update_deposits_sidecar;
 use crate::api::handlers::withdrawal::{create_withdrawal, update_withdrawals_sidecar};
@@ -23,6 +22,7 @@ use crate::api::models::chainstate::Chainstate;
 use crate::api::models::common::Fulfillment;
 use crate::api::models::common::{DepositStatus, WithdrawalStatus};
 use crate::api::models::deposit::requests::{DepositUpdate, UpdateDepositsRequestBody};
+use crate::api::models::new_block::NewBlockEventRaw;
 use crate::api::models::withdrawal::WithdrawalParameters;
 use crate::api::models::withdrawal::requests::{
     CreateWithdrawalRequestBody, UpdateWithdrawalsRequestBody, WithdrawalUpdate,
