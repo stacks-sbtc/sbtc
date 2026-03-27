@@ -22,6 +22,11 @@ who = "djordon <dan.jordon@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.16.0 -> 0.16.1"
 
+[[audits.http-serde]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.1.3 -> 2.1.1"
+
 [[audits.httparse]]
 who = "djordon <dan.jordon@gmail.com>"
 criteria = "safe-to-deploy"
@@ -149,6 +154,11 @@ who = "djordon <dan.jordon@gmail.com>"
 criteria = "safe-to-deploy"
 version = "0.13.6"
 
+[[audits.query_map]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.5.0 -> 0.7.0"
+
 [[audits.quinn-proto]]
 who = "djordon <dan.jordon@gmail.com>"
 criteria = "safe-to-deploy"
@@ -206,6 +216,12 @@ who = "djordon <dan.jordon@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.13.3 -> 0.13.10"
 
+[[trusted.aws_lambda_events]]
+criteria = "safe-to-deploy"
+trusted-publisher = "github:aws/aws-lambda-rust-runtime"
+start = "2026-03-11"
+end = "2027-03-27"
+
 [[trusted.bytes]]
 criteria = "safe-to-deploy"
 user-id = 6741 # Alice Ryhl (Darksonn)
@@ -259,6 +275,24 @@ criteria = "safe-to-deploy"
 user-id = 1 # Alex Crichton (alexcrichton)
 start = "2019-03-04"
 end = "2027-03-26"
+
+[[trusted.lambda_http]]
+criteria = "safe-to-deploy"
+trusted-publisher = "github:aws/aws-lambda-rust-runtime"
+start = "2026-03-13"
+end = "2027-03-27"
+
+[[trusted.lambda_runtime]]
+criteria = "safe-to-deploy"
+trusted-publisher = "github:aws/aws-lambda-rust-runtime"
+start = "2026-03-13"
+end = "2027-03-27"
+
+[[trusted.lambda_runtime_api_client]]
+criteria = "safe-to-deploy"
+trusted-publisher = "github:aws/aws-lambda-rust-runtime"
+start = "2026-03-19"
+end = "2027-03-27"
 
 [[trusted.reqwest]]
 criteria = "safe-to-deploy"
