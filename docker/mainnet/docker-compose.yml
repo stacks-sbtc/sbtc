@@ -59,24 +59,14 @@ services:
       - postgres
     environment:
       RUST_LOG: info,signer=debug
-      # Bitcoin RPC
       SIGNER_BITCOIN__RPC_ENDPOINTS: "http://${BITCOIN_RPC_USERNAME}:${BITCOIN_RPC_PASSWORD}@${BITCOIN_RPC_HOST}:${BITCOIN_RPC_PORT}"
-      # Stacks RPC
       SIGNER_STACKS__ENDPOINTS: "http://${STACKS_RPC_HOST}:${STACKS_RPC_PORT}"
-      # Signer private key
       SIGNER_SIGNER__PRIVATE_KEY: "${SIGNER_SIGNER__PRIVATE_KEY}"
-      # Emily
       SIGNER_EMILY__ENDPOINTS: "https://${EMILY_API_KEY}@sbtc-emily.com"
-      # Postgres
       SIGNER_SIGNER__DB_ENDPOINT: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
       TAG: *SIGNER_TAG  
-      BUNDLE_PATH: signer_bundle.jsonl
-      TRUSTED_ROOT_PATH: trusted_root.jsonl
     volumes:
       - ./sbtc-signer/signer-config.toml.in:/signer-config.toml.in:ro
-      - ${SIGNER_BUNDLE_PATH}:signer_bundle.jsonl:ro
-      - ${TRUSTED_ROOT_PATH}:trusted_root.jsonl:ro
-      - ./entrypoint.sh:/entrypoint.sh
     ports:
       - "4122:4122" # P2P communication between sBTC signers
       - "9184:9184" # Prometheus metrics
@@ -87,7 +77,6 @@ services:
     container_name: blocklist-client
     # this version can be outdated, check the last image on: https://github.com/stacks-sbtc/sbtc/pkgs/container/sbtc
     image: ghcr.io/stacks-sbtc/sbtc:blocklist-client-v1.0.2@sha256:713a19fc6ad6f3538da7849d8c731f65b1bc0d9258f59947b487087c0c94d4be
-    entrypoint: "/entrypoint.sh"
     command: "/usr/local/bin/blocklist-client"
     environment:
       BLOCKLIST_CLIENT_RISK_ANALYSIS__API_KEY: *BLOCKLIST_CLIENT_RISK_ANALYSIS__API_KEY
@@ -96,12 +85,6 @@ services:
       BLOCKLIST_CLIENT_SERVER__HOST: "0.0.0.0"
       BLOCKLIST_CLIENT_SERVER__PORT: "3032"
       TAG: *BLOCKLIST_TAG  
-      BUNDLE_PATH: blocklist_bundle.jsonl
-      TRUSTED_ROOT_PATH: trusted_root.jsonl
-    volumes:
-      - ${BLOCKLIST_BUNDLE_PATH}:blocklist_bundle.jsonl:ro
-      - ${TRUSTED_ROOT_PATH}:trusted_root.jsonl:ro
-      - ./entrypoint.sh:/entrypoint.sh
 
   vector:
     container_name: vector
