@@ -1,424 +1,6 @@
 
 # cargo-vet imports lock
 
-[[publisher.bumpalo]]
-version = "3.16.0"
-when = "2024-04-08"
-user-id = 696
-user-login = "fitzgen"
-user-name = "Nick Fitzgerald"
-
-[[publisher.bytes]]
-version = "1.11.1"
-when = "2026-02-03"
-user-id = 6741
-user-login = "Darksonn"
-user-name = "Alice Ryhl"
-
-[[publisher.cexpr]]
-version = "0.6.0"
-when = "2021-10-11"
-user-id = 3788
-user-login = "emilio"
-user-name = "Emilio Cobos Álvarez"
-
-[[publisher.cmake]]
-version = "0.1.57"
-when = "2025-12-17"
-user-id = 55123
-user-login = "rust-lang-owner"
-
-[[publisher.core-foundation]]
-version = "0.9.3"
-when = "2022-02-07"
-user-id = 5946
-user-login = "jrmuizel"
-user-name = "Jeff Muizelaar"
-
-[[publisher.core-foundation-sys]]
-version = "0.8.4"
-when = "2023-04-03"
-user-id = 5946
-user-login = "jrmuizel"
-user-name = "Jeff Muizelaar"
-
-[[publisher.encoding_rs]]
-version = "0.8.34"
-when = "2024-04-10"
-user-id = 4484
-user-login = "hsivonen"
-user-name = "Henri Sivonen"
-
-[[publisher.http-body-util]]
-version = "0.1.3"
-when = "2025-03-11"
-user-id = 359
-user-login = "seanmonstar"
-user-name = "Sean McArthur"
-
-[[publisher.hyper-util]]
-version = "0.1.20"
-when = "2026-02-02"
-user-id = 359
-user-login = "seanmonstar"
-user-name = "Sean McArthur"
-
-[[publisher.itoa]]
-version = "1.0.18"
-when = "2026-03-20"
-user-id = 3618
-user-login = "dtolnay"
-user-name = "David Tolnay"
-
-[[publisher.jobserver]]
-version = "0.1.34"
-when = "2025-08-23"
-user-id = 55123
-user-login = "rust-lang-owner"
-
-[[publisher.reqwest]]
-version = "0.13.2"
-when = "2026-02-06"
-user-id = 359
-user-login = "seanmonstar"
-user-name = "Sean McArthur"
-
-[[publisher.ryu]]
-version = "1.0.23"
-when = "2026-02-08"
-user-id = 3618
-user-login = "dtolnay"
-user-name = "David Tolnay"
-
-[[publisher.tokio]]
-version = "1.50.0"
-when = "2026-03-03"
-user-id = 6741
-user-login = "Darksonn"
-user-name = "Alice Ryhl"
-
-[[publisher.tower-http]]
-version = "0.6.8"
-when = "2025-12-08"
-user-id = 359
-user-login = "seanmonstar"
-user-name = "Sean McArthur"
-
-[[publisher.unicode-normalization]]
-version = "0.1.23"
-when = "2024-02-20"
-user-id = 1139
-user-login = "Manishearth"
-user-name = "Manish Goregaokar"
-
-[[publisher.utf8_iter]]
-version = "1.0.4"
-when = "2023-12-01"
-user-id = 4484
-user-login = "hsivonen"
-user-name = "Henri Sivonen"
-
-[[publisher.wasip2]]
-version = "1.0.1+wasi-0.2.4"
-when = "2025-09-15"
-user-id = 1
-user-login = "alexcrichton"
-user-name = "Alex Crichton"
-
-[[publisher.windows-sys]]
-version = "0.45.0"
-when = "2023-01-21"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows-sys]]
-version = "0.48.0"
-when = "2023-03-31"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows-sys]]
-version = "0.52.0"
-when = "2023-11-15"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows-sys]]
-version = "0.60.2"
-when = "2025-06-12"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows-sys]]
-version = "0.61.2"
-when = "2025-10-06"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows-targets]]
-version = "0.42.2"
-when = "2023-03-13"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows-targets]]
-version = "0.48.5"
-when = "2023-08-18"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows-targets]]
-version = "0.52.5"
-when = "2024-04-12"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows-targets]]
-version = "0.53.5"
-when = "2025-10-06"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_aarch64_gnullvm]]
-version = "0.42.2"
-when = "2023-03-13"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_aarch64_gnullvm]]
-version = "0.48.5"
-when = "2023-08-18"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_aarch64_gnullvm]]
-version = "0.52.5"
-when = "2024-04-12"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_aarch64_gnullvm]]
-version = "0.53.1"
-when = "2025-10-06"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_aarch64_msvc]]
-version = "0.42.2"
-when = "2023-03-13"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_aarch64_msvc]]
-version = "0.48.5"
-when = "2023-08-18"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_aarch64_msvc]]
-version = "0.52.5"
-when = "2024-04-12"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_aarch64_msvc]]
-version = "0.53.1"
-when = "2025-10-06"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_i686_gnu]]
-version = "0.42.2"
-when = "2023-03-13"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_i686_gnu]]
-version = "0.48.5"
-when = "2023-08-18"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_i686_gnu]]
-version = "0.52.5"
-when = "2024-04-12"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_i686_gnu]]
-version = "0.53.1"
-when = "2025-10-06"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_i686_msvc]]
-version = "0.42.2"
-when = "2023-03-13"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_i686_msvc]]
-version = "0.48.5"
-when = "2023-08-18"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_i686_msvc]]
-version = "0.52.5"
-when = "2024-04-12"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_i686_msvc]]
-version = "0.53.1"
-when = "2025-10-06"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_x86_64_gnu]]
-version = "0.42.2"
-when = "2023-03-13"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_x86_64_gnu]]
-version = "0.48.5"
-when = "2023-08-18"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_x86_64_gnu]]
-version = "0.52.5"
-when = "2024-04-12"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_x86_64_gnu]]
-version = "0.53.1"
-when = "2025-10-06"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_x86_64_gnullvm]]
-version = "0.42.2"
-when = "2023-03-13"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_x86_64_gnullvm]]
-version = "0.48.5"
-when = "2023-08-18"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_x86_64_gnullvm]]
-version = "0.52.5"
-when = "2024-04-12"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_x86_64_gnullvm]]
-version = "0.53.1"
-when = "2025-10-06"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_x86_64_msvc]]
-version = "0.42.2"
-when = "2023-03-13"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_x86_64_msvc]]
-version = "0.48.5"
-when = "2023-08-18"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_x86_64_msvc]]
-version = "0.52.5"
-when = "2024-04-12"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_x86_64_msvc]]
-version = "0.53.1"
-when = "2025-10-06"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.wit-bindgen]]
-version = "0.43.0"
-when = "2025-06-24"
-user-id = 73222
-user-login = "wasmtime-publish"
-
-[[audits.bytecodealliance.wildcard-audits.bumpalo]]
-who = "Nick Fitzgerald <fitzgen@gmail.com>"
-criteria = "safe-to-deploy"
-user-id = 696 # Nick Fitzgerald (fitzgen)
-start = "2019-03-16"
-end = "2026-08-21"
-
-[[audits.bytecodealliance.wildcard-audits.wasip2]]
-who = "Alex Crichton <alex@alexcrichton.com>"
-criteria = "safe-to-deploy"
-user-id = 1 # Alex Crichton (alexcrichton)
-start = "2025-08-10"
-end = "2026-08-21"
-notes = """
-This is a Bytecode Alliance authored crate.
-"""
-
-[[audits.bytecodealliance.wildcard-audits.wit-bindgen]]
-who = "Alex Crichton <alex@alexcrichton.com>"
-criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
-start = "2023-01-01"
-end = "2026-06-03"
-notes = """
-The Bytecode Alliance uses the `wasmtime-publish` crates.io account to automate
-publication of this crate from CI. This repository requires all PRs are reviewed
-by a Bytecode Alliance maintainer and it owned by the Bytecode Alliance itself.
-"""
-
 [[audits.bytecodealliance.audits.arrayref]]
 who = "Nick Fitzgerald <fitzgen@gmail.com>"
 criteria = "safe-to-deploy"
@@ -1994,62 +1576,6 @@ who = "David Cook <dcook@divviup.org>"
 criteria = "safe-to-deploy"
 delta = "0.5.0 -> 0.5.1"
 
-[[audits.mozilla.wildcard-audits.cexpr]]
-who = "Emilio Cobos Álvarez <emilio@crisal.io>"
-criteria = "safe-to-deploy"
-user-id = 3788 # Emilio Cobos Álvarez (emilio)
-start = "2021-06-21"
-end = "2024-04-21"
-notes = "No unsafe code, rather straight-forward parser."
-aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
-
-[[audits.mozilla.wildcard-audits.core-foundation]]
-who = "Bobby Holley <bobbyholley@gmail.com>"
-criteria = "safe-to-deploy"
-user-id = 5946 # Jeff Muizelaar (jrmuizel)
-start = "2019-03-29"
-end = "2023-05-04"
-renew = false
-notes = "I've reviewed every source contribution that was neither authored nor reviewed by Mozilla."
-aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
-
-[[audits.mozilla.wildcard-audits.core-foundation-sys]]
-who = "Bobby Holley <bobbyholley@gmail.com>"
-criteria = "safe-to-deploy"
-user-id = 5946 # Jeff Muizelaar (jrmuizel)
-start = "2020-10-14"
-end = "2023-05-04"
-renew = false
-notes = "I've reviewed every source contribution that was neither authored nor reviewed by Mozilla."
-aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
-
-[[audits.mozilla.wildcard-audits.encoding_rs]]
-who = "Henri Sivonen <hsivonen@hsivonen.fi>"
-criteria = "safe-to-deploy"
-user-id = 4484 # Henri Sivonen (hsivonen)
-start = "2019-02-26"
-end = "2025-10-23"
-notes = "I, Henri Sivonen, wrote encoding_rs for Gecko and have reviewed contributions by others. There are two caveats to the certification: 1) The crate does things that are documented to be UB but that do not appear to actually be UB due to integer types differing from the general rule; https://github.com/hsivonen/encoding_rs/issues/79 . 2) It would be prudent to re-review the code that reinterprets buffers of integers as SIMD vectors; see https://github.com/hsivonen/encoding_rs/issues/87 ."
-aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
-
-[[audits.mozilla.wildcard-audits.unicode-normalization]]
-who = "Manish Goregaokar <manishsmail@gmail.com>"
-criteria = "safe-to-deploy"
-user-id = 1139 # Manish Goregaokar (Manishearth)
-start = "2019-11-06"
-end = "2026-02-01"
-notes = "All code written or reviewed by Manish"
-aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
-
-[[audits.mozilla.wildcard-audits.utf8_iter]]
-who = "Makoto Kato <m_kato@ga2.so-net.ne.jp>"
-criteria = "safe-to-deploy"
-user-id = 4484 # Henri Sivonen (hsivonen)
-start = "2022-04-19"
-end = "2024-06-16"
-notes = "Maintained by Henri Sivonen who works at Mozilla."
-aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
-
 [[audits.mozilla.audits.allocator-api2]]
 who = "Nicolas Silva <nical@fastmail.com>"
 criteria = "safe-to-deploy"
@@ -3207,6 +2733,12 @@ delta = "0.10.3 -> 0.10.4"
 notes = "Adds panics to prevent a block size of zero from causing unsoundness."
 aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
 
+[[audits.zcash.audits.bumpalo]]
+who = "Daira-Emma Hopwood <daira@jacaranda.org>"
+criteria = "safe-to-deploy"
+delta = "3.15.4 -> 3.16.0"
+aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
+
 [[audits.zcash.audits.dunce]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
@@ -3450,7 +2982,62 @@ delta = "0.2.0 -> 0.2.1"
 notes = "No code changes at all."
 aggregated-from = "https://raw.githubusercontent.com/zcash/librustzcash/main/supply-chain/audits.toml"
 
+[[audits.zcash.audits.windows-targets]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.53.0 -> 0.53.5"
+aggregated-from = "https://raw.githubusercontent.com/zcash/librustzcash/main/supply-chain/audits.toml"
+
+[[audits.zcash.audits.windows_aarch64_gnullvm]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.53.0 -> 0.53.1"
+notes = "No code changes at all."
+aggregated-from = "https://raw.githubusercontent.com/zcash/librustzcash/main/supply-chain/audits.toml"
+
+[[audits.zcash.audits.windows_aarch64_msvc]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.53.0 -> 0.53.1"
+notes = "No code changes at all."
+aggregated-from = "https://raw.githubusercontent.com/zcash/librustzcash/main/supply-chain/audits.toml"
+
+[[audits.zcash.audits.windows_i686_gnu]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.53.0 -> 0.53.1"
+notes = "No code changes at all."
+aggregated-from = "https://raw.githubusercontent.com/zcash/librustzcash/main/supply-chain/audits.toml"
+
 [[audits.zcash.audits.windows_i686_gnullvm]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.53.0 -> 0.53.1"
+notes = "No code changes at all."
+aggregated-from = "https://raw.githubusercontent.com/zcash/librustzcash/main/supply-chain/audits.toml"
+
+[[audits.zcash.audits.windows_i686_msvc]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.53.0 -> 0.53.1"
+notes = "No code changes at all."
+aggregated-from = "https://raw.githubusercontent.com/zcash/librustzcash/main/supply-chain/audits.toml"
+
+[[audits.zcash.audits.windows_x86_64_gnu]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.53.0 -> 0.53.1"
+notes = "No code changes at all."
+aggregated-from = "https://raw.githubusercontent.com/zcash/librustzcash/main/supply-chain/audits.toml"
+
+[[audits.zcash.audits.windows_x86_64_gnullvm]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.53.0 -> 0.53.1"
+notes = "No code changes at all."
+aggregated-from = "https://raw.githubusercontent.com/zcash/librustzcash/main/supply-chain/audits.toml"
+
+[[audits.zcash.audits.windows_x86_64_msvc]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.53.0 -> 0.53.1"
