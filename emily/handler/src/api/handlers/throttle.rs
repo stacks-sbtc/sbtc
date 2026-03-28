@@ -167,7 +167,7 @@ pub async fn start_throttle(
 pub async fn add_throttle_key(
     Extension(context): Extension<EmilyContext>,
     Json(key): Json<ThrottleKey>,
-) -> Result<(StatusCode, ()), Error> {
+) -> Result<StatusCode, Error> {
     let argon2 = Argon2::default();
     let salt = accessors::name_to_salt(&key.name)?;
     let hash = argon2
@@ -194,7 +194,9 @@ pub async fn add_throttle_key(
         is_active: true,
     };
     accessors::add_throttle_key(&context, &entry).await?;
-    Ok((StatusCode::CREATED, ()))
+    // This StatusCode gets transformed into a response with an empty body.
+    // <https://github.com/tokio-rs/axum/blob/axum-core-v0.5.0/axum-core/src/response/into_response.rs#L118-L130>
+    Ok(StatusCode::CREATED)
 }
 
 /// Deactivate existing throttle key
@@ -217,9 +219,9 @@ pub async fn add_throttle_key(
 pub async fn deactivate_throttle_key(
     Extension(context): Extension<EmilyContext>,
     Json(hash): Json<String>,
-) -> Result<(StatusCode, ()), Error> {
+) -> Result<StatusCode, Error> {
     accessors::deactivate_throttle_key(&context, hash).await?;
-    Ok((StatusCode::NO_CONTENT, ()))
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Activate existing (previously deactivated) throttle key
@@ -242,7 +244,7 @@ pub async fn deactivate_throttle_key(
 pub async fn activate_throttle_key(
     Extension(context): Extension<EmilyContext>,
     Json(hash): Json<String>,
-) -> Result<(StatusCode, ()), Error> {
+) -> Result<StatusCode, Error> {
     accessors::activate_throttle_key(&context, hash).await?;
-    Ok((StatusCode::NO_CONTENT, ()))
+    Ok(StatusCode::NO_CONTENT)
 }
