@@ -34,7 +34,6 @@ Class | Method | HTTP request | Description
 *CorsApi* | [**deposit_txid_index_options**](docs/CorsApi.md#deposit_txid_index_options) | **OPTIONS** /deposit/{txid}/{index} | CORS support
 *CorsApi* | [**deposit_txid_options**](docs/CorsApi.md#deposit_txid_options) | **OPTIONS** /deposit/{txid} | CORS support
 *CorsApi* | [**health_options**](docs/CorsApi.md#health_options) | **OPTIONS** /health | CORS support
-*CorsApi* | [**limits_account_options**](docs/CorsApi.md#limits_account_options) | **OPTIONS** /limits/{account} | CORS support
 *CorsApi* | [**limits_options**](docs/CorsApi.md#limits_options) | **OPTIONS** /limits | CORS support
 *CorsApi* | [**start_throttle_options**](docs/CorsApi.md#start_throttle_options) | **OPTIONS** /start_throttle | CORS support
 *CorsApi* | [**withdrawal_id_options**](docs/CorsApi.md#withdrawal_id_options) | **OPTIONS** /withdrawal/{id} | CORS support
@@ -52,7 +51,6 @@ Class | Method | HTTP request | Description
 *DepositApi* | [**update_deposits_signer**](docs/DepositApi.md#update_deposits_signer) | **PUT** /deposit | Update deposits handler.
 *HealthApi* | [**check_health**](docs/HealthApi.md#check_health) | **GET** /health | Get health handler.
 *LimitsApi* | [**get_limits**](docs/LimitsApi.md#get_limits) | **GET** /limits | Get the global limits.
-*LimitsApi* | [**get_limits_for_account**](docs/LimitsApi.md#get_limits_for_account) | **GET** /limits/{account} | Get limits for account handler.
 *ThrottleApi* | [**start_throttle**](docs/ThrottleApi.md#start_throttle) | **POST** /start_throttle | Try to turn on throttle mode
 *WithdrawalApi* | [**get_withdrawal**](docs/WithdrawalApi.md#get_withdrawal) | **GET** /withdrawal/{id} | Get withdrawal handler.
 *WithdrawalApi* | [**get_withdrawals**](docs/WithdrawalApi.md#get_withdrawals) | **GET** /withdrawal | Get withdrawals handler.
@@ -63,7 +61,6 @@ Class | Method | HTTP request | Description
 
 ## Documentation For Models
 
- - [AccountLimits](docs/AccountLimits.md)
  - [Chainstate](docs/Chainstate.md)
  - [CreateDepositRequestBody](docs/CreateDepositRequestBody.md)
  - [Deposit](docs/Deposit.md)

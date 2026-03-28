@@ -1,5 +1,3 @@
-pub mod account_limits;
-pub use self::account_limits::AccountLimits;
 pub mod chainstate;
 pub use self::chainstate::Chainstate;
 pub mod create_deposit_request_body;

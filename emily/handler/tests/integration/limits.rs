@@ -1,10 +1,7 @@
-use std::collections::HashMap;
-
 use test_case::test_case;
 
 use testing_emily_client::apis;
 use testing_emily_client::models;
-use testing_emily_client::models::AccountLimits;
 use testing_emily_client::models::Chainstate;
 use testing_emily_client::models::Limits;
 use testing_emily_client::models::{CreateWithdrawalRequestBody, WithdrawalParameters};
@@ -26,7 +23,6 @@ async fn empty_default_is_as_expected() {
         rolling_withdrawal_blocks: Some(None),
         rolling_withdrawal_cap: Some(None),
         throttle_mode_initiator: Some(None),
-        account_caps: HashMap::new(),
     };
 
     let limits = apis::limits_api::get_limits(&configuration)
@@ -34,364 +30,6 @@ async fn empty_default_is_as_expected() {
         .expect("Failed to get limits during empty default test.");
 
     assert_eq!(limits, expected_empty_default);
-
-    clean_test_setup(tables).await;
-}
-
-#[tokio::test]
-async fn adding_and_then_updating_single_accout_limit_works() {
-    let (configuration, tables) = new_test_setup().await;
-
-    // Arrange.
-    // --------
-    let limits_to_set = [
-        (
-            "test_account",
-            AccountLimits {
-                peg_cap: Some(Some(100)),
-                per_deposit_minimum: Some(Some(100)),
-                per_deposit_cap: Some(Some(100)),
-                per_withdrawal_cap: Some(Some(100)),
-                rolling_withdrawal_blocks: Some(Some(100)),
-                rolling_withdrawal_cap: Some(Some(100)),
-                throttle_mode_initiator: Some(None),
-            },
-        ),
-        (
-            "test_account_2",
-            AccountLimits {
-                peg_cap: Some(Some(1200)),
-                per_deposit_minimum: Some(Some(1200)),
-                per_deposit_cap: Some(Some(1200)),
-                per_withdrawal_cap: Some(Some(1200)),
-                rolling_withdrawal_blocks: Some(Some(1200)),
-                rolling_withdrawal_cap: Some(Some(1200)),
-                throttle_mode_initiator: Some(None),
-            },
-        ),
-        (
-            "test_account_2",
-            AccountLimits {
-                peg_cap: Some(Some(100)),
-                per_deposit_minimum: Some(Some(200)),
-                per_deposit_cap: Some(Some(300)),
-                per_withdrawal_cap: Some(Some(500)),
-                rolling_withdrawal_blocks: Some(Some(600)),
-                rolling_withdrawal_cap: Some(Some(700)),
-                throttle_mode_initiator: Some(None),
-            },
-        ),
-        (
-            "test_account_2",
-            AccountLimits {
-                peg_cap: Some(Some(200)),
-                per_deposit_minimum: Some(Some(200)),
-                per_deposit_cap: Some(Some(200)),
-                per_withdrawal_cap: Some(Some(200)),
-                rolling_withdrawal_blocks: Some(Some(200)),
-                rolling_withdrawal_cap: Some(Some(200)),
-                throttle_mode_initiator: Some(None),
-            },
-        ),
-        (
-            "test_account",
-            AccountLimits {
-                peg_cap: Some(Some(300)),
-                per_deposit_minimum: Some(Some(300)),
-                per_deposit_cap: Some(Some(300)),
-                per_withdrawal_cap: Some(Some(300)),
-                rolling_withdrawal_blocks: Some(Some(300)),
-                rolling_withdrawal_cap: Some(Some(300)),
-                throttle_mode_initiator: Some(None),
-            },
-        ),
-    ];
-
-    // Set the expected account caps at the end to be the most recently
-    // applied limits.
-    let expected_account_caps: HashMap<String, AccountLimits> = [
-        (
-            "test_account_2",
-            AccountLimits {
-                peg_cap: Some(Some(200)),
-                per_deposit_minimum: Some(Some(200)),
-                per_deposit_cap: Some(Some(200)),
-                per_withdrawal_cap: Some(Some(200)),
-                rolling_withdrawal_blocks: Some(Some(200)),
-                rolling_withdrawal_cap: Some(Some(200)),
-                throttle_mode_initiator: Some(None),
-            },
-        ),
-        (
-            "test_account",
-            AccountLimits {
-                peg_cap: Some(Some(300)),
-                per_deposit_minimum: Some(Some(300)),
-                per_deposit_cap: Some(Some(300)),
-                per_withdrawal_cap: Some(Some(300)),
-                rolling_withdrawal_blocks: Some(Some(300)),
-                rolling_withdrawal_cap: Some(Some(300)),
-                throttle_mode_initiator: Some(None),
-            },
-        ),
-    ]
-    .iter()
-    .map(|(account_name, limits)| (account_name.to_string(), limits.clone()))
-    .collect();
-
-    // The global limits should show the latest account caps.
-    let expected_limits = Limits {
-        available_to_withdraw: Some(None),
-        peg_cap: Some(None),
-        per_deposit_minimum: Some(None),
-        per_deposit_cap: Some(None),
-        per_withdrawal_cap: Some(None),
-        rolling_withdrawal_blocks: Some(None),
-        rolling_withdrawal_cap: Some(None),
-        account_caps: expected_account_caps.clone(),
-        throttle_mode_initiator: Some(None),
-    };
-
-    // Act.
-    // ----
-    for (account_name, limit_to_set) in limits_to_set {
-        apis::limits_api::set_limits_for_account(
-            &configuration,
-            account_name,
-            limit_to_set.clone(),
-        )
-        .await
-        .expect("Failed to set limit for an account during test.");
-    }
-
-    // Get the account limits for each account that we expect to have a value for
-    // individually to check the `get_limits_for_account` api.
-    let mut individually_retrieved_account_caps: HashMap<String, AccountLimits> = HashMap::new();
-    for (account_name, _) in expected_account_caps.clone() {
-        individually_retrieved_account_caps.insert(
-            account_name.clone(),
-            apis::limits_api::get_limits_for_account(&configuration, &account_name)
-                .await
-                .expect("Failed to get limit for a specific account during test."),
-        );
-    }
-
-    // Get the global limits.
-    let global_limits = apis::limits_api::get_limits(&configuration)
-        .await
-        .expect("Failed to get limits during test.");
-
-    // Assert.
-    // -------
-    assert_eq!(individually_retrieved_account_caps, expected_account_caps);
-    assert_eq!(global_limits, expected_limits);
-
-    clean_test_setup(tables).await;
-}
-
-#[tokio::test]
-async fn test_updating_account_limits_via_global_limit_works() {
-    let (configuration, tables) = new_test_setup().await;
-
-    // Arrange.
-    // --------
-    let account_limits_to_set_individually = [
-        (
-            "test_account_1",
-            AccountLimits {
-                peg_cap: Some(Some(100)),
-                per_deposit_minimum: Some(Some(100)),
-                per_deposit_cap: Some(Some(100)),
-                per_withdrawal_cap: Some(Some(100)),
-                rolling_withdrawal_blocks: Some(Some(100)),
-                rolling_withdrawal_cap: Some(Some(100)),
-                throttle_mode_initiator: Some(None),
-            },
-        ),
-        (
-            "test_account_2",
-            AccountLimits {
-                peg_cap: Some(Some(150)),
-                per_deposit_minimum: Some(Some(150)),
-                per_deposit_cap: Some(Some(150)),
-                per_withdrawal_cap: Some(Some(150)),
-                rolling_withdrawal_blocks: Some(Some(150)),
-                rolling_withdrawal_cap: Some(Some(150)),
-                throttle_mode_initiator: Some(None),
-            },
-        ),
-        (
-            "test_account_4",
-            AccountLimits {
-                peg_cap: Some(Some(150)),
-                per_deposit_minimum: Some(Some(150)),
-                per_deposit_cap: Some(Some(150)),
-                per_withdrawal_cap: Some(Some(150)),
-                rolling_withdrawal_blocks: Some(Some(150)),
-                rolling_withdrawal_cap: Some(Some(150)),
-                throttle_mode_initiator: Some(None),
-            },
-        ),
-    ];
-
-    // Set the expected account caps at the end to be the most recently
-    // applied limits.
-    let account_limits_to_set_globally: HashMap<String, AccountLimits> = [
-        (
-            "test_account_2",
-            AccountLimits {
-                peg_cap: Some(Some(200)),
-                per_deposit_minimum: Some(Some(200)),
-                per_deposit_cap: Some(Some(200)),
-                per_withdrawal_cap: Some(Some(200)),
-                rolling_withdrawal_blocks: Some(Some(200)),
-                rolling_withdrawal_cap: Some(Some(200)),
-                throttle_mode_initiator: Some(None),
-            },
-        ),
-        (
-            "test_account_3",
-            AccountLimits {
-                peg_cap: Some(Some(300)),
-                per_deposit_minimum: Some(Some(300)),
-                per_deposit_cap: Some(Some(300)),
-                per_withdrawal_cap: Some(Some(300)),
-                rolling_withdrawal_blocks: Some(Some(300)),
-                rolling_withdrawal_cap: Some(Some(300)),
-                throttle_mode_initiator: Some(None),
-            },
-        ),
-        // Set all the values to none so this account should no longer show up
-        // in any lists.
-        (
-            "test_account_4",
-            AccountLimits {
-                peg_cap: Some(None),
-                per_deposit_minimum: Some(None),
-                per_deposit_cap: Some(None),
-                per_withdrawal_cap: Some(None),
-                rolling_withdrawal_blocks: Some(None),
-                rolling_withdrawal_cap: Some(None),
-                throttle_mode_initiator: Some(None),
-            },
-        ),
-    ]
-    .iter()
-    .map(|(account_name, limits)| (account_name.to_string(), limits.clone()))
-    .collect();
-    let global_limits_to_set = Limits {
-        available_to_withdraw: Some(None),
-        peg_cap: Some(Some(123)),
-        per_deposit_minimum: Some(Some(654)),
-        per_deposit_cap: Some(Some(456)),
-        per_withdrawal_cap: Some(Some(789)),
-        rolling_withdrawal_blocks: Some(Some(101)),
-        rolling_withdrawal_cap: Some(Some(112)),
-        throttle_mode_initiator: Some(None),
-        account_caps: account_limits_to_set_globally.clone(),
-    };
-
-    // Set the expected account caps at the end to be the most recently
-    // applied limits.
-    let expected_global_account_limits: HashMap<String, AccountLimits> = [
-        (
-            "test_account_1",
-            AccountLimits {
-                peg_cap: Some(Some(100)),
-                per_deposit_minimum: Some(Some(100)),
-                per_deposit_cap: Some(Some(100)),
-                per_withdrawal_cap: Some(Some(100)),
-                rolling_withdrawal_blocks: Some(Some(100)),
-                rolling_withdrawal_cap: Some(Some(100)),
-                throttle_mode_initiator: Some(None),
-            },
-        ),
-        (
-            "test_account_2",
-            AccountLimits {
-                peg_cap: Some(Some(200)),
-                per_deposit_minimum: Some(Some(200)),
-                per_deposit_cap: Some(Some(200)),
-                per_withdrawal_cap: Some(Some(200)),
-                rolling_withdrawal_blocks: Some(Some(200)),
-                rolling_withdrawal_cap: Some(Some(200)),
-                throttle_mode_initiator: Some(None),
-            },
-        ),
-        (
-            "test_account_3",
-            AccountLimits {
-                peg_cap: Some(Some(300)),
-                per_deposit_minimum: Some(Some(300)),
-                per_deposit_cap: Some(Some(300)),
-                per_withdrawal_cap: Some(Some(300)),
-                rolling_withdrawal_blocks: Some(Some(300)),
-                rolling_withdrawal_cap: Some(Some(300)),
-                throttle_mode_initiator: Some(None),
-            },
-        ),
-    ]
-    .iter()
-    .map(|(account_name, limits)| (account_name.to_string(), limits.clone()))
-    .collect();
-    let expected_global_limits = Limits {
-        available_to_withdraw: Some(Some(112)),
-        peg_cap: Some(Some(123)),
-        per_deposit_minimum: Some(Some(654)),
-        per_deposit_cap: Some(Some(456)),
-        per_withdrawal_cap: Some(Some(789)),
-        rolling_withdrawal_blocks: Some(Some(101)),
-        rolling_withdrawal_cap: Some(Some(112)),
-        throttle_mode_initiator: Some(None),
-        account_caps: expected_global_account_limits.clone(),
-    };
-
-    let chainstates: Vec<Chainstate> = (0..103)
-        .map(|height| new_test_chainstate(height, height, 0))
-        .collect();
-    let _ = batch_set_chainstates(&configuration, chainstates).await;
-
-    // Act.
-    // ----
-    for (account_name, limit_to_set) in account_limits_to_set_individually {
-        apis::limits_api::set_limits_for_account(
-            &configuration,
-            account_name,
-            limit_to_set.clone(),
-        )
-        .await
-        .expect("Failed to set limit for an account during test.");
-    }
-    let global_limits_returned_on_set =
-        apis::limits_api::set_limits(&configuration, global_limits_to_set.clone())
-            .await
-            .expect("Failed to set global limits during test.");
-
-    // Get the account limits for each account that we expect to have a value for
-    // individually to check the `get_limits_for_account` api.
-    let mut individually_retrieved_account_caps: HashMap<String, AccountLimits> = HashMap::new();
-    for (account_name, _) in expected_global_account_limits.clone() {
-        individually_retrieved_account_caps.insert(
-            account_name.clone(),
-            apis::limits_api::get_limits_for_account(&configuration, &account_name)
-                .await
-                .expect("Failed to get limit for a specific account during test."),
-        );
-    }
-
-    // Get the global limits.
-    let global_limits = apis::limits_api::get_limits(&configuration)
-        .await
-        .expect("Failed to get limits during test.");
-
-    // Assert.
-    // -------
-    assert_eq!(
-        individually_retrieved_account_caps,
-        expected_global_account_limits
-    );
-    assert_eq!(global_limits_returned_on_set, expected_global_limits);
-    assert_eq!(global_limits, expected_global_limits);
 
     clean_test_setup(tables).await;
 }
@@ -415,7 +53,6 @@ async fn test_incomplete_rolling_withdrawal_limit_config_returns_error(
         rolling_withdrawal_blocks: Some(rolling_withdrawal_blocks),
         rolling_withdrawal_cap: Some(rolling_withdrawal_cap),
         throttle_mode_initiator: Some(None),
-        account_caps: HashMap::new(),
     };
 
     // Act.
@@ -448,7 +85,6 @@ async fn test_complete_rolling_withdrawal_limit_config_works(
         rolling_withdrawal_blocks: Some(rolling_withdrawal_blocks),
         rolling_withdrawal_cap: Some(rolling_withdrawal_cap),
         throttle_mode_initiator: Some(None),
-        account_caps: HashMap::new(),
     };
     if let Some(window_size) = rolling_withdrawal_blocks {
         // Set some chainstates to make set_limits work
@@ -484,7 +120,6 @@ async fn test_available_to_withdraw_no_chainstate_in_db_at_target_height() {
         rolling_withdrawal_blocks: Some(Some(100)),
         rolling_withdrawal_cap: Some(Some(10_000)),
         throttle_mode_initiator: Some(None),
-        account_caps: HashMap::new(),
     };
     // Set some chainstates to make set_limits work
     let chainstates: Vec<Chainstate> = (0..110)
@@ -543,7 +178,6 @@ async fn test_available_to_withdraw_success() {
         rolling_withdrawal_blocks: Some(Some(10)),
         rolling_withdrawal_cap: Some(Some(10_000)),
         throttle_mode_initiator: Some(None),
-        account_caps: HashMap::new(),
     };
     // Set some chainstates to make set_limits work
     let chainstates: Vec<Chainstate> = (0..12)

@@ -38,7 +38,6 @@ use super::CorsSupport;
         api::handlers::chainstate::get_chainstate_at_height,
         // Limits endpoints.
         api::handlers::limits::get_limits,
-        api::handlers::limits::get_limits_for_account,
         // Throttle endpoints.
         api::handlers::throttle::start_throttle,
     ),
@@ -75,7 +74,6 @@ use super::CorsSupport;
         api::models::common::Fulfillment,
         // Limits models
         api::models::limits::Limits,
-        api::models::limits::AccountLimits,
         // Throttle models
         api::models::throttle::ThrottleRequest,
         // Errors.

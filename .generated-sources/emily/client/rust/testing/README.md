@@ -35,7 +35,6 @@ Class | Method | HTTP request | Description
 *CorsApi* | [**deposit_txid_index_options**](docs/CorsApi.md#deposit_txid_index_options) | **OPTIONS** /deposit/{txid}/{index} | CORS support
 *CorsApi* | [**deposit_txid_options**](docs/CorsApi.md#deposit_txid_options) | **OPTIONS** /deposit/{txid} | CORS support
 *CorsApi* | [**health_options**](docs/CorsApi.md#health_options) | **OPTIONS** /health | CORS support
-*CorsApi* | [**limits_account_options**](docs/CorsApi.md#limits_account_options) | **OPTIONS** /limits/{account} | CORS support
 *CorsApi* | [**limits_options**](docs/CorsApi.md#limits_options) | **OPTIONS** /limits | CORS support
 *CorsApi* | [**new_block_options**](docs/CorsApi.md#new_block_options) | **OPTIONS** /new_block | CORS support
 *CorsApi* | [**start_throttle_options**](docs/CorsApi.md#start_throttle_options) | **OPTIONS** /start_throttle | CORS support
@@ -43,6 +42,7 @@ Class | Method | HTTP request | Description
 *CorsApi* | [**throttle_activate_options**](docs/CorsApi.md#throttle_activate_options) | **OPTIONS** /throttle/activate | CORS support
 *CorsApi* | [**throttle_deactivate_options**](docs/CorsApi.md#throttle_deactivate_options) | **OPTIONS** /throttle/deactivate | CORS support
 *CorsApi* | [**throttle_options**](docs/CorsApi.md#throttle_options) | **OPTIONS** /throttle | CORS support
+*CorsApi* | [**throttle_stop_options**](docs/CorsApi.md#throttle_stop_options) | **OPTIONS** /throttle/stop | CORS support
 *CorsApi* | [**withdrawal_id_options**](docs/CorsApi.md#withdrawal_id_options) | **OPTIONS** /withdrawal/{id} | CORS support
 *CorsApi* | [**withdrawal_options**](docs/CorsApi.md#withdrawal_options) | **OPTIONS** /withdrawal | CORS support
 *CorsApi* | [**withdrawal_private_options**](docs/CorsApi.md#withdrawal_private_options) | **OPTIONS** /withdrawal_private | CORS support
@@ -62,9 +62,7 @@ Class | Method | HTTP request | Description
 *DepositApi* | [**update_deposits_signer**](docs/DepositApi.md#update_deposits_signer) | **PUT** /deposit | Update deposits handler.
 *HealthApi* | [**check_health**](docs/HealthApi.md#check_health) | **GET** /health | Get health handler.
 *LimitsApi* | [**get_limits**](docs/LimitsApi.md#get_limits) | **GET** /limits | Get the global limits.
-*LimitsApi* | [**get_limits_for_account**](docs/LimitsApi.md#get_limits_for_account) | **GET** /limits/{account} | Get limits for account handler.
 *LimitsApi* | [**set_limits**](docs/LimitsApi.md#set_limits) | **POST** /limits | Set limits handler.
-*LimitsApi* | [**set_limits_for_account**](docs/LimitsApi.md#set_limits_for_account) | **POST** /limits/{account} | Set limits for account handler.
 *NewBlockApi* | [**new_block**](docs/NewBlockApi.md#new_block) | **POST** /new_block | Get limits handler.
 *TestingApi* | [**wipe_databases**](docs/TestingApi.md#wipe_databases) | **POST** /testing/wipe | Wipe databases handler.
 *ThrottleApi* | [**activate_throttle_key**](docs/ThrottleApi.md#activate_throttle_key) | **PATCH** /throttle/activate | Activate existing (previously deactivated) throttle key
@@ -72,6 +70,7 @@ Class | Method | HTTP request | Description
 *ThrottleApi* | [**deactivate_throttle_key**](docs/ThrottleApi.md#deactivate_throttle_key) | **PATCH** /throttle/deactivate | Deactivate existing throttle key
 *ThrottleApi* | [**get_throttle_key**](docs/ThrottleApi.md#get_throttle_key) | **GET** /throttle | Get the throttle key details.
 *ThrottleApi* | [**start_throttle**](docs/ThrottleApi.md#start_throttle) | **POST** /start_throttle | Try to turn on throttle mode
+*ThrottleApi* | [**stop_throttle**](docs/ThrottleApi.md#stop_throttle) | **POST** /throttle/stop | Stop throttle.
 *WithdrawalApi* | [**create_withdrawal**](docs/WithdrawalApi.md#create_withdrawal) | **POST** /withdrawal | Create withdrawal handler.
 *WithdrawalApi* | [**get_withdrawal**](docs/WithdrawalApi.md#get_withdrawal) | **GET** /withdrawal/{id} | Get withdrawal handler.
 *WithdrawalApi* | [**get_withdrawals**](docs/WithdrawalApi.md#get_withdrawals) | **GET** /withdrawal | Get withdrawals handler.
@@ -83,7 +82,6 @@ Class | Method | HTTP request | Description
 
 ## Documentation For Models
 
- - [AccountLimits](docs/AccountLimits.md)
  - [Chainstate](docs/Chainstate.md)
  - [CreateDepositRequestBody](docs/CreateDepositRequestBody.md)
  - [CreateWithdrawalRequestBody](docs/CreateWithdrawalRequestBody.md)

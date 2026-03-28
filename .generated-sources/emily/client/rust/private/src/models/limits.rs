@@ -14,9 +14,6 @@ use serde::{Deserialize, Serialize};
 /// Limits : Represents the current sBTC limits.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Limits {
-    /// Represents the individual limits for requests coming from different accounts.
-    #[serde(rename = "accountCaps")]
-    pub account_caps: std::collections::HashMap<String, models::AccountLimits>,
     /// Total amount sBTC still available for withdrawals in current window. All withdrawals except rejected counted here
     #[serde(
         rename = "availableToWithdraw",
@@ -85,9 +82,8 @@ pub struct Limits {
 
 impl Limits {
     /// Represents the current sBTC limits.
-    pub fn new(account_caps: std::collections::HashMap<String, models::AccountLimits>) -> Limits {
+    pub fn new() -> Limits {
         Limits {
-            account_caps,
             available_to_withdraw: None,
             peg_cap: None,
             per_deposit_cap: None,
