@@ -747,7 +747,7 @@ pub mod test {
 
     pub fn run_sign<Coordinator: CoordinatorTrait>(
         coordinators: &mut [Coordinator],
-        signers: &mut Vec<Signer>,
+        signers: &mut [Signer],
         msg: &[u8],
         signature_type: SignatureType,
     ) -> OperationResult {
@@ -784,13 +784,6 @@ pub mod test {
             .iter()
             .map(|c| Coordinator::load(&c.save()))
             .collect::<Vec<Coordinator>>();
-
-        let new_signers = signers
-            .iter()
-            .map(|s| Signer::load(&s.save()))
-            .collect::<Vec<Signer>>();
-
-        assert_eq!(signers, &new_signers);
 
         // Send the SignatureShareRequest message to all signers and share their responses with the coordinator and signers
         let (outbound_messages, operation_results) =
@@ -995,14 +988,28 @@ pub mod test {
         assert_eq!(signers, loaded_signers);
     }
 
-    /// Test if a signer will generate a new nonce after a signing round as a defense
-    /// against a malicious coordinator who requests multiple signing rounds
-    /// with no nonce round in between to generate a new nonce
+    /// Test that a signer will not sign twice with the same nonce. This is
+    /// a defense against a malicious coordinator who requests multiple
+    /// signing rounds with no nonce round in between to generate a new
+    /// nonce.
+    ///
+    /// So we test that:
+    /// * signers will not return a signature share unless they have
+    ///   received a nonce request first.
+    /// * signers will return at most one signature share after they have
+    ///   received a nonce request.
     pub fn gen_nonces<Coordinator: CoordinatorTrait>(num_signers: u32, keys_per_signer: u32) {
         let mut rng = OsRng;
 
         let (mut coordinators, mut signers) = run_dkg::<Coordinator>(num_signers, keys_per_signer);
 
+        let all_thresholds = coordinators
+            .iter()
+            .map(|c| c.get_config().threshold)
+            .collect::<std::collections::BTreeSet<u32>>();
+        let threshold = *all_thresholds.first().unwrap() as usize;
+
+        assert_eq!(all_thresholds.len(), 1);
         let msg = "It was many and many a year ago, in a kingdom by the sea"
             .as_bytes()
             .to_vec();
@@ -1020,10 +1027,13 @@ pub mod test {
             State::NonceGather(signature_type)
         );
 
-        // Send the NonceRequest to all signers and gather NonceResponses
-        // by sharing with all other signers and coordinator
+        // Send the NonceRequest to the first three signers and gather
+        // NonceResponses by sharing with all other signers and
+        // coordinator. Later we will send signature share requests to all
+        // signers, and the first three will sign exactly once, the last
+        // two will not.
         let (outbound_messages, operation_results) =
-            feedback_messages(&mut coordinators, &mut signers, &[message]);
+            feedback_messages(&mut coordinators, &mut signers[..threshold], &[message]);
         assert!(operation_results.is_empty());
         assert_eq!(
             coordinators.first_mut().unwrap().get_state(),
@@ -1040,35 +1050,63 @@ pub mod test {
             }
         }
 
-        // Pass the SignatureShareRequest to the first signer and get his SignatureShares
-        // which should use the nonce generated before sending out NonceResponse above
-        let messages1 = signers[0]
-            .process(&outbound_messages[0].msg, &mut rng)
-            .unwrap();
-
-        // Pass the SignatureShareRequest to the second signer and get his SignatureShares
-        // which should use the nonce generated just before sending out the previous SignatureShare
-        let messages2 = signers[0]
-            .process(&outbound_messages[0].msg, &mut rng)
-            .unwrap();
-
-        // iterate through the responses and collect the embedded shares
-        // if the signer didn't generate a nonce after sending the first signature shares
-        // then the shares should be the same, since the message and everything else is
-        for (message1, message2) in messages1.into_iter().zip(messages2) {
-            let share1 = if let Message::SignatureShareResponse(response) = message1 {
-                response.signature_shares[0].clone()
+        // The last signers haven't seen the nonce request yet, so they
+        // will return an error if given a signature share request where
+        // they think that they are part of the signing set. However, by
+        // default they won't think they are part of the signing set, so we
+        // need to modify the message a little.
+        signers.iter_mut().skip(threshold).for_each(|signer| {
+            let mut outbound_messages = outbound_messages.clone();
+            if let Message::SignatureShareRequest(ref mut request) = outbound_messages[0].msg {
+                request.nonce_responses[0].signer_id = signer.signer_id;
             } else {
-                panic!("Message should have been SignatureShareResponse");
-            };
-            let share2 = if let Message::SignatureShareResponse(response) = message2 {
-                response.signature_shares[0].clone()
-            } else {
-                panic!("Message should have been SignatureShareResponse");
-            };
+                panic!("failed to match message");
+            }
 
-            assert_ne!(share1.z_i, share2.z_i);
-        }
+            let response = signer
+                .process(&outbound_messages[0].msg, &mut rng)
+                .unwrap_err();
+
+            assert!(matches!(
+                response,
+                SignerError::Aggregator(AggregatorError::MissingNonce)
+            ));
+        });
+
+        // For the signers that are part of the signing set, they should
+        // successfully return a signature share. We check that the
+        // signature shares are distinct.
+        let z_is = signers
+            .iter_mut()
+            .take(threshold)
+            .map(|signer| {
+                let response = signer.process(&outbound_messages[0].msg, &mut rng).unwrap();
+
+                assert_eq!(response.len(), 1);
+
+                let Message::SignatureShareResponse(response) = &response[0] else {
+                    panic!("Message should have been SignatureShareResponse");
+                };
+                assert_eq!(response.signature_shares.len(), 1);
+                response.signature_shares[0].z_i
+            })
+            .collect::<HashSet<Scalar>>();
+
+        // Are they distinct?
+        assert_eq!(z_is.len(), threshold);
+
+        // Now if these signers get another signature share request, they
+        // should return an error.
+        signers.iter_mut().take(threshold).for_each(|signer| {
+            let response = signer
+                .process(&outbound_messages[0].msg, &mut rng)
+                .unwrap_err();
+
+            assert!(matches!(
+                response,
+                SignerError::Aggregator(AggregatorError::MissingNonce)
+            ));
+        });
     }
 
     pub fn bad_signature_share_request<Coordinator: CoordinatorTrait>(
