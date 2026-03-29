@@ -1742,9 +1742,8 @@ async fn pseudo_random_dkg() {
 
     // We create a tweak public key which is the generator of the secp256k1
     // elliptic curve. There is nothing special about the chosen tweak
-    // (TWEAKED_PK), we just need to make sure that it is not the adjusted
-    // aggregate key is neither equal to the original aggregate key nor its
-    // negation.
+    // (TWEAKED_PK), we just need to make sure that the adjusted aggregate
+    // key is neither equal to the original aggregate key nor its negation.
     let tweak_secret_key = secp256k1::SecretKey::from_slice(&secp256k1::constants::ONE).unwrap();
     let tweak_public_key = tweak_secret_key.public_key(SECP256K1);
     let adjusted_aggregate_key: PublicKey = original_shares
@@ -1798,7 +1797,7 @@ async fn pseudo_random_dkg() {
     let event = RequestDeciderEvent::NewRequestsHandled(chain_tip_ref);
     signers
         .iter()
-        .try_for_each(|(ctx, _, _, _)| ctx.signal(event.clone().into()))
+        .try_for_each(|(ctx, _, _, _)| ctx.signal(event.clone().into()).map_err(Box::new))
         .unwrap();
 
     wait_for_tenure_completed(&signers, chain_tip_ref.block_hash).await;

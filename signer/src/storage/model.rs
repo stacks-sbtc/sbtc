@@ -813,7 +813,7 @@ impl std::fmt::Display for BitcoinTxId {
 }
 
 /// Bitcoin block hash
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct BitcoinBlockHash(bitcoin::BlockHash);
 
@@ -1794,6 +1794,7 @@ impl StacksBlockHeight {
 )]
 #[serde(transparent)]
 pub struct BitcoinBlockHeight(u64);
+
 /// Stacks block height
 #[derive(
     Debug, Default, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,

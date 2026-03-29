@@ -255,8 +255,8 @@ mod serial {
         .unwrap();
         let resp = btc_client.estimate_fee_rate(1);
 
-        if resp.is_ok() {
-            assert!(resp.unwrap().sats_per_vbyte > 0.0);
+        if let Ok(res) = resp {
+            more_asserts::assert_gt!(res.sats_per_vbyte, 0.0);
         }
     }
 

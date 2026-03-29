@@ -21,7 +21,6 @@ num-traits.workspace = true
 p256k1.workspace = true
 polynomial.workspace = true
 rand_core.workspace = true
-serde.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
