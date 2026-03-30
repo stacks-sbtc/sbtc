@@ -229,7 +229,7 @@ async fn deposit_flow() {
                 .expect_estimate_fee_rate()
                 .once()
                 // Dummy value
-                .returning(|| Box::pin(async { Ok(1.3) }));
+                .returning(|_| Box::pin(async { Ok(1.3) }));
         })
         .await;
 

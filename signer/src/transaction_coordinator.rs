@@ -16,6 +16,7 @@ use futures::StreamExt as _;
 use futures::future::try_join_all;
 use sha2::Digest as _;
 
+use crate::DEPOSIT_LOCKTIME_BLOCK_BUFFER;
 use crate::WITHDRAWAL_BLOCKS_EXPIRY;
 use crate::WITHDRAWAL_DUST_LIMIT;
 use crate::WITHDRAWAL_EXPIRY_BUFFER;
@@ -671,7 +672,7 @@ where
 
         // If `get_pending_requests()` returns `Ok(None)` then there are no
         // eligible requests to service; we can exit early.
-        let Some(pending_requests) = pending_requests_fut.await? else {
+        let Some(mut pending_requests) = pending_requests_fut.await? else {
             tracing::debug!("no requests to handle on bitcoin");
             return Ok(());
         };
@@ -683,7 +684,49 @@ where
         );
 
         // Construct the transaction package and store it in the database.
-        let transaction_package = pending_requests.construct_transactions()?;
+        // We first try using the fee rate from Bitcoin (targeting 1 block
+        // confirmation), then if that's too high to construct any package we
+        // retry once with a lower fee rate to avoid wasting the tenure.
+        let mut transaction_package = pending_requests.construct_transactions()?;
+
+        if transaction_package.is_empty() {
+            let fallback_fee = self.context.config().bitcoin.fallback_fee;
+
+            let retry_fee_rate = match fallback_fee {
+                Some(fee) => fee.get() as f64,
+                None => {
+                    // Target a confirmation block that will not impact the
+                    // requests cancellation. This is a best effort approach,
+                    // it will not guarantee that the sweep we are constructing
+                    // will not be in the mempool when the requests expire.
+                    // If that happens, users will need to either pay more fees
+                    // to RBF our sweep (for deposits reclaim) or wait for a new
+                    // sweep from us. Note that this can happen regardless of
+                    // what fee we use to construct the sweep.
+                    //
+                    // `estimatesmartfee` RPC expect confirmation target in
+                    // blocks to be in [1, 1008]
+                    let target_blocks = DEPOSIT_LOCKTIME_BLOCK_BUFFER
+                        .min(WITHDRAWAL_EXPIRY_BUFFER.try_into().unwrap_or(u16::MAX))
+                        .clamp(1, 1008);
+
+                    self.context
+                        .get_bitcoin_client()
+                        .estimate_fee_rate(target_blocks)
+                        .await?
+                }
+            };
+
+            if retry_fee_rate < pending_requests.signer_state.fee_rate {
+                tracing::debug!(
+                    original_fee_rate = %pending_requests.signer_state.fee_rate,
+                    %retry_fee_rate,
+                    "empty request package, retrying with lower fee rate"
+                );
+                pending_requests.signer_state.fee_rate = retry_fee_rate;
+                transaction_package = pending_requests.construct_transactions()?;
+            }
+        }
 
         // Send the pre-sign request to the signers and wait for their
         // acknowledgments.
@@ -1888,7 +1931,8 @@ where
         aggregate_key: &PublicKey,
     ) -> Result<utxo::SignerBtcState, Error> {
         let bitcoin_client = self.context.get_bitcoin_client();
-        let fee_rate = bitcoin_client.estimate_fee_rate().await?;
+        // Target next block confirmation
+        let fee_rate = bitcoin_client.estimate_fee_rate(1).await?;
 
         // Retrieve the signer's current UTXO.
         let utxo = self
