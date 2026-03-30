@@ -11,7 +11,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libclang-dev \
     git \
     pkg-config \
-    make \
     g++ \
     wget \
     ca-certificates \
@@ -32,8 +31,13 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
     tar xz -C /opt -f /tmp/musl.tgz && rm /tmp/musl.tgz && \
     ln -s "/opt/${ARCH}-linux-musl-cross/bin/${ARCH}-linux-musl-gcc" /usr/local/bin/ && \
     ln -s "/opt/${ARCH}-linux-musl-cross/bin/${ARCH}-linux-musl-g++" /usr/local/bin/ && \
-    ln -s "/opt/${ARCH}-linux-musl-cross/bin/${ARCH}-linux-musl-ar" /usr/local/bin/ && \
-    rustup target add "${ARCH}-unknown-linux-musl"
+    ln -s "/opt/${ARCH}-linux-musl-cross/bin/${ARCH}-linux-musl-ar" /usr/local/bin/
+
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+        rustup target add aarch64-unknown-linux-musl; \
+    else \
+        rustup target add x86_64-unknown-linux-musl; \
+    fi
 
 WORKDIR /code/sbtc
 COPY . .

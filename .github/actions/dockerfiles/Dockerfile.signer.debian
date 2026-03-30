@@ -14,7 +14,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libclang-dev \
     git \
     pkg-config \
-    make \
     g++ \
     wget \
     ca-certificates \
