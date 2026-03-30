@@ -20,7 +20,7 @@ pub fn setup_logging(pretty: bool) {
 }
 
 fn setup_logging_json() {
-    let dirs = "info,blocklist-client=debug";
+    let dirs = "info,blocklist_client=debug";
 
     let main_layer = tracing_subscriber::fmt::layer()
         .json()
@@ -39,7 +39,7 @@ fn setup_logging_json() {
 }
 
 fn setup_logging_pretty() {
-    let dirs = "info,blocklist-client=debug";
+    let dirs = "info,blocklist_client=debug";
 
     let main_layer = tracing_subscriber::fmt::layer()
         .pretty()
