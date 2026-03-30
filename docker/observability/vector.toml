@@ -38,9 +38,9 @@ address = "0.0.0.0:9598"
 type = "fluent"
 address = "0.0.0.0:24224"
 
-# Parse JSON log messages from the signer.
-# The fluentd driver sends the log line in the "message" field (for stdout)
-# or "log" field. If it parses as JSON, merge it into the top-level event.
+# Parse JSON log messages from the signer. The fluentd driver sends the log
+# line in the "log" field. If it parses as JSON, merge it into the
+# top-level event.
 [transforms.json_messages]
 type = "remap"
 inputs = ["signer_logs"]
