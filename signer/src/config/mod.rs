@@ -145,6 +145,13 @@ pub struct BitcoinConfig {
     /// field.
     #[serde(deserialize_with = "duration_seconds_deserializer")]
     pub timeout: std::time::Duration,
+
+    /// An optional fallback fee rate in sats/vbyte to use when the initial
+    /// fee rate is too high to construct any transaction package. When set,
+    /// this value is used directly as the retry fee rate. When `None`, the
+    /// signer estimates a lower fee rate by targeting a longer confirmation
+    /// window.
+    pub fallback_fee: Option<NonZeroU64>,
 }
 
 impl Validatable for BitcoinConfig {
@@ -710,6 +717,7 @@ mod tests {
             Duration::from_secs(5)
         );
         assert_eq!(settings.bitcoin.timeout.as_secs(), 10);
+        assert_eq!(settings.bitcoin.fallback_fee, None);
         assert_eq!(
             settings.signer.event_observer.bind,
             "0.0.0.0:8801".parse::<SocketAddr>().unwrap()
@@ -1001,6 +1009,21 @@ mod tests {
         let timeout = settings.bitcoin.timeout.as_secs();
 
         assert_eq!(timeout, 12345);
+    }
+
+    #[test]
+    fn default_config_toml_loads_bitcoin_fallback_fee() {
+        clear_env();
+
+        let settings = Settings::new_from_default_config().unwrap();
+        assert_eq!(settings.bitcoin.fallback_fee, None);
+
+        set_var("SIGNER_BITCOIN__FALLBACK_FEE", "42");
+        let settings = Settings::new_from_default_config().unwrap();
+        assert_eq!(
+            settings.bitcoin.fallback_fee,
+            Some(NonZeroU64::new(42).unwrap())
+        );
     }
 
     #[test]
