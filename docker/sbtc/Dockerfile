@@ -18,8 +18,15 @@ RUN npm install -g pnpm@9
 # Install the musl cross-toolchain from musl.cc.
 # This provides a complete musl-native gcc/g++/ar/libstdc++ for the target,
 # avoiding the glibc libstdc++ mismatch that occurs with Debian's g++.
+# Checksums pinned for supply-chain safety (GCC 11.2.1, 2021-11-23).
 RUN ARCH="$(uname -m)" && \
-    wget -qO- "https://musl.cc/${ARCH}-linux-musl-cross.tgz" | tar xz -C /opt && \
+    wget -qO /tmp/musl.tgz "https://musl.cc/${ARCH}-linux-musl-cross.tgz" && \
+    if [ "$ARCH" = "aarch64" ]; then \
+        echo "c909817856d6ceda86aa510894fa3527eac7989f0ef6e87b5721c58737a06c38  /tmp/musl.tgz" | sha256sum -c; \
+    else \
+        echo "c5d410d9f82a4f24c549fe5d24f988f85b2679b452413a9f7e5f7b956f2fe7ea  /tmp/musl.tgz" | sha256sum -c; \
+    fi && \
+    tar xz -C /opt -f /tmp/musl.tgz && rm /tmp/musl.tgz && \
     ln -s "/opt/${ARCH}-linux-musl-cross/bin/${ARCH}-linux-musl-gcc" /usr/local/bin/ && \
     ln -s "/opt/${ARCH}-linux-musl-cross/bin/${ARCH}-linux-musl-g++" /usr/local/bin/ && \
     ln -s "/opt/${ARCH}-linux-musl-cross/bin/${ARCH}-linux-musl-ar" /usr/local/bin/
