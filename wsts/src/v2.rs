@@ -60,7 +60,7 @@ impl Party {
 
     /// Generate and store a private nonce for a signing round
     pub fn gen_nonce<RNG: RngCore + CryptoRng>(&mut self, rng: &mut RNG) -> PublicNonce {
-        let nonce = Nonce::random(rng);
+        let nonce = Nonce::new(rng);
         let public_nonce = PublicNonce::from(&nonce);
         self.nonce = Some(nonce);
         public_nonce

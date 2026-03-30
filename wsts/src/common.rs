@@ -53,25 +53,25 @@ pub struct Nonce {
 }
 
 impl Nonce {
-    /// Construct a random nonce that is valid.
+    /// Construct a new randomly generated nonce that is valid.
     ///
     /// # Notes
     ///
     /// If the random number generator always produces the same "special"
     /// but unknown values, then it is possible that this function will
     /// loop forever.
-    pub fn random<RNG: RngCore + CryptoRng>(rng: &mut RNG) -> Self {
-        let mut nonce = Self::new(rng);
+    pub fn new<RNG: RngCore + CryptoRng>(rng: &mut RNG) -> Self {
+        let mut nonce = Self::random(rng);
 
         while !nonce.is_valid() {
-            nonce = Self::new(rng);
+            nonce = Self::random(rng);
         }
 
         nonce
     }
 
     // Construct a random nonce.
-    fn new<R: RngCore + CryptoRng>(rng: &mut R) -> Self {
+    fn random<R: RngCore + CryptoRng>(rng: &mut R) -> Self {
         Self {
             d: Self::gen(rng),
             e: Self::gen(rng),
@@ -410,7 +410,7 @@ pub mod test {
             .collect::<Vec<Scalar>>();
 
         let mut rng = ChaCha8Rng::seed_from_u64(2);
-        let nonce = Nonce::random(&mut rng);
+        let nonce = Nonce::new(&mut rng);
 
         for scalar in test_scalars {
             assert_ne!(scalar, nonce.d);
