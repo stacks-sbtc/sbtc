@@ -28,7 +28,6 @@ use secp256k1::ecdsa::RecoverableSignature;
 use stacks_common::address::AddressHashMode;
 use stacks_common::address::C32_ADDRESS_VERSION_TESTNET_MULTISIG;
 use stacks_common::types::chainstate::StacksAddress;
-use wsts::common::Nonce;
 use wsts::common::PolyCommitment;
 use wsts::common::PublicNonce;
 use wsts::common::SignatureShare;
@@ -1074,15 +1073,6 @@ impl Dummy<Unit> for SignatureShareResponse {
                 .into_iter()
                 .map(|_| config.fake_with_rng(rng))
                 .collect(),
-        }
-    }
-}
-
-impl Dummy<Unit> for Nonce {
-    fn dummy_with_rng<R: rand::Rng + ?Sized>(config: &Unit, rng: &mut R) -> Self {
-        Nonce {
-            d: config.fake_with_rng(rng),
-            e: config.fake_with_rng(rng),
         }
     }
 }
