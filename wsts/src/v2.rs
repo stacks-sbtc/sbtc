@@ -5,7 +5,10 @@ use std::collections::HashMap;
 use tracing::warn;
 
 use crate::{
-    common::{check_public_shares, Nonce, PolyCommitment, PublicNonce, Signature, SignatureShare},
+    common::{
+        check_public_shares, Nonce, NonceD, NonceE, PolyCommitment, PublicNonce, Signature,
+        SignatureShare,
+    },
     compute,
     curve::{
         point::{Point, G},
@@ -64,11 +67,6 @@ impl Party {
         let public_nonce = PublicNonce::from(&nonce);
         self.nonce = Some(nonce);
         public_nonce
-    }
-
-    /// Remove any nonce, so that it is unset.
-    pub fn unset_nonce(&mut self) {
-        self.nonce = None;
     }
 
     /// Get a public commitment to the private polynomial
@@ -208,9 +206,13 @@ impl Party {
         nonces: &[PublicNonce],
         tweak: Option<Scalar>,
     ) -> Result<SignatureShare, AggregatorError> {
+        // In order to get access to the nonce values, we need to take the
+        // nonce which get's dropped after the call to Nonce::values().
         let Some(nonce) = self.nonce.take() else {
             return Err(AggregatorError::MissingNonce);
         };
+
+        let (NonceD(nonce_d), NonceE(nonce_e)) = nonce.values();
 
         // When using BIP-340 32-byte public keys, we have to invert the private key if the
         // public key is odd.  But if we're also using BIP-341 tweaked keys, we have to do
@@ -236,7 +238,7 @@ impl Party {
         };
         let (_, R) = compute::intermediate(msg, party_ids, nonces);
         let c = compute::challenge(&tweaked_public_key, &R, msg);
-        let mut r = &nonce.d + &nonce.e * compute::binding(&self.id(), nonces, msg);
+        let mut r = &nonce_d + &nonce_e * compute::binding(&self.id(), nonces, msg);
         if tweak.is_some() && !R.has_even_y() {
             r = -r;
         }

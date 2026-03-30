@@ -43,13 +43,28 @@ impl Display for PolyCommitment {
     }
 }
 
+/// A private nonce value that is paired up with a NonceE value and is used
+/// for constructing a signature share.
 #[derive(Clone, Debug, Eq, PartialEq)]
-/// A composite private nonce used as a random commitment in the protocol
+pub struct NonceD(pub Scalar);
+
+/// A private nonce value that is paired up with a NonceD value and is used
+/// for constructing a signature share.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NonceE(pub Scalar);
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+/// A composite private nonce pair used as a random commitment in the
+/// signing protocol.
+///
+/// This struct maintains the invariant that the nonce values can only be
+/// returned once and that the values themselves are not all zero or all
+/// one.
 pub struct Nonce {
     /// The first committed value
-    pub d: Scalar,
+    d: Scalar,
     /// The second committed value
-    pub e: Scalar,
+    e: Scalar,
 }
 
 impl Nonce {
@@ -92,6 +107,12 @@ impl Nonce {
         hasher.update(s.to_bytes());
 
         hash_to_scalar(&mut hasher)
+    }
+
+    /// Return the nonce values, dropping self so that the nonce values are
+    /// only returned once.
+    pub fn values(self) -> (NonceD, NonceE) {
+        (NonceD(self.d), NonceE(self.e))
     }
 
     /// Check that the nonce is not all-zero or all-one, as these values

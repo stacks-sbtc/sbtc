@@ -730,11 +730,6 @@ impl Signer {
                 }
             };
 
-            // The above self.signer.sign_* functions should already have
-            // unset the nonce, but we manually unset the nonce to be extra
-            // sure that we do not reuse a nonce.
-            self.signer.unset_nonce();
-
             let response = SignatureShareResponse {
                 dkg_id: sign_request.dkg_id,
                 sign_id: sign_request.sign_id,
