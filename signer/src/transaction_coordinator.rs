@@ -16,6 +16,7 @@ use futures::StreamExt as _;
 use futures::future::try_join_all;
 use sha2::Digest as _;
 
+use crate::DEPOSIT_LOCKTIME_BLOCK_BUFFER;
 use crate::WITHDRAWAL_BLOCKS_EXPIRY;
 use crate::WITHDRAWAL_DUST_LIMIT;
 use crate::WITHDRAWAL_EXPIRY_BUFFER;
@@ -82,16 +83,6 @@ use wsts::state_machine::coordinator::State as WstsCoordinatorState;
 /// The rejection reason for a transaction that is rejected from the mempool
 /// because of a conflicting nonce.
 const REJECTION_REASON_CONFLICTING_NONCE_IN_MEMPOOL: &str = "ConflictingNonceInMempool";
-
-/// The decaying factor for fee rates if no package can be built with the
-/// current fee.
-const FEE_RATE_RETRY_FACTOR: f64 = 0.5;
-/// The minimum fee rate to retry. We will always do the first try with Bitcoin
-/// suggested fee, even if it's lower than this value.
-const FEE_RATE_RETRY_MIN: f64 = 1.0;
-/// How many fee rates to retry when constructing Bitcoin transaction packages.
-/// A value of 0 will use only the Bitcoin proposed fee.
-const FEE_RATE_RETRY_COUNT: usize = 10;
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// # Transaction coordinator event loop
@@ -693,39 +684,49 @@ where
         );
 
         // Construct the transaction package and store it in the database.
-        // We first try using the transaction fee we got from Bitcoin, then if
-        // that's too high to construct any package we try lower fees instead of
-        // wasting a tenure.
-        let mut fee_rate = pending_requests.signer_state.fee_rate;
-        let mut additional_retries_remaining = FEE_RATE_RETRY_COUNT;
+        // We first try using the fee rate from Bitcoin (targeting 1 block
+        // confirmation), then if that's too high to construct any package we
+        // retry once with a lower fee rate to avoid wasting the tenure.
+        let mut transaction_package = pending_requests.construct_transactions()?;
 
-        let transaction_package = loop {
-            let transaction_package = pending_requests.construct_transactions()?;
+        if transaction_package.is_empty() {
+            let fallback_fee = self.context.config().bitcoin.fallback_fee;
 
-            if !transaction_package.is_empty()
-                || additional_retries_remaining == 0
-                || fee_rate <= FEE_RATE_RETRY_MIN
-            {
-                break transaction_package;
+            let retry_fee_rate = match fallback_fee {
+                Some(fee) => fee.get() as f64,
+                None => {
+                    // Target a confirmation block that will not impact the
+                    // requests cancellation. This is a best effort approach,
+                    // it will not guarantee that the sweep we are constructing
+                    // will not be in the mempool when the requests expire.
+                    // If that happens, users will need to either pay more fees
+                    // to RBF our sweep (for deposits reclaim) or wait for a new
+                    // sweep from us. Note that this can happen regardless of
+                    // what fee we use to construct the sweep.
+                    //
+                    // `estimatesmartfee` RPC expect confirmation target in
+                    // blocks to be in [1, 1008]
+                    let target_blocks = DEPOSIT_LOCKTIME_BLOCK_BUFFER
+                        .min(WITHDRAWAL_EXPIRY_BUFFER.try_into().unwrap_or(u16::MAX))
+                        .clamp(1, 1008);
+
+                    self.context
+                        .get_bitcoin_client()
+                        .estimate_fee_rate(target_blocks)
+                        .await?
+                }
+            };
+
+            if retry_fee_rate < pending_requests.signer_state.fee_rate {
+                tracing::debug!(
+                    original_fee_rate = %pending_requests.signer_state.fee_rate,
+                    %retry_fee_rate,
+                    "empty request package, retrying with lower fee rate"
+                );
+                pending_requests.signer_state.fee_rate = retry_fee_rate;
+                transaction_package = pending_requests.construct_transactions()?;
             }
-
-            fee_rate *= FEE_RATE_RETRY_FACTOR;
-
-            if fee_rate < FEE_RATE_RETRY_MIN {
-                // Try the min fee as last retry if we are already below it
-                fee_rate = FEE_RATE_RETRY_MIN;
-            }
-            if !fee_rate.is_normal() {
-                break transaction_package;
-            }
-
-            // Drop the borrow before mutating signer_state
-            drop(transaction_package);
-
-            pending_requests.signer_state.fee_rate = fee_rate;
-
-            additional_retries_remaining = additional_retries_remaining.saturating_sub(1);
-        };
+        }
 
         // Send the pre-sign request to the signers and wait for their
         // acknowledgments.
@@ -1930,7 +1931,8 @@ where
         aggregate_key: &PublicKey,
     ) -> Result<utxo::SignerBtcState, Error> {
         let bitcoin_client = self.context.get_bitcoin_client();
-        let fee_rate = bitcoin_client.estimate_fee_rate().await?;
+        // Target next block confirmation
+        let fee_rate = bitcoin_client.estimate_fee_rate(1).await?;
 
         // Retrieve the signer's current UTXO.
         let utxo = self
