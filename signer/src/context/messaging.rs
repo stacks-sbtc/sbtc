@@ -1,6 +1,7 @@
 //! This module contains types related to the application's internal
 //! messaging via the [`Context`].
 
+use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::BitcoinBlockRef;
 
 /// Signals that can be sent within the signer binary.
@@ -45,6 +46,8 @@ pub enum SignerEvent {
     TxSigner(TxSignerEvent),
     /// Transaction coordinator events
     TxCoordinator(TxCoordinatorEvent),
+    /// Bitcoin pruner events
+    BitcoinPruner(BitcoinPrunerEvent),
 }
 
 /// Events that can be triggered from the P2P network.
@@ -102,6 +105,22 @@ pub enum TxCoordinatorEvent {
     /// The coordinator is finished processing requests for the bitcoin
     /// block.
     TenureCompleted(BitcoinBlockRef),
+}
+
+/// Events that can be triggered from the bitcoin pruner.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BitcoinPrunerEvent {
+    /// Event which occurs when the bitcoin pruner has started its event
+    /// loop.
+    EventLoopStarted,
+    /// Event which occurs when the bitcoin pruner has pruned a block.
+    BlockPruned(BitcoinBlockHeight),
+}
+
+impl From<BitcoinPrunerEvent> for SignerSignal {
+    fn from(event: BitcoinPrunerEvent) -> Self {
+        SignerSignal::Event(SignerEvent::BitcoinPruner(event))
+    }
 }
 
 impl From<SignerCommand> for SignerSignal {

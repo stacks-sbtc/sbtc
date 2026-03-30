@@ -145,6 +145,10 @@ pub struct BitcoinConfig {
     /// field.
     #[serde(deserialize_with = "duration_seconds_deserializer")]
     pub timeout: std::time::Duration,
+
+    /// Whether to manually prune old bitcoin blocks from bitcoin-core if
+    /// it is configured to allow for manual pruning.
+    pub prune: Option<bool>,
 }
 
 impl Validatable for BitcoinConfig {

@@ -80,6 +80,15 @@ rpc_endpoints = [
 # Environment: SIGNER_BITCOIN__CHAIN_TIP_POLLING_INTERVAL
 # chain_tip_polling_interval = 5
 
+# Whether to prune old bitcoin blocks from bitcoin-core. If this is set to
+# true, and bitcoin-core is configured with prune=1, then the signer will
+# prune old blocks from bitcoin-core at the arrival of every bitcoin block.
+#
+# Default: false
+# Required: false
+# Environment: SIGNER_BITCOIN__PRUNE
+# prune = false
+
 # !! ==============================================================================
 # !! Stacks Node Configuration
 # !! ==============================================================================
