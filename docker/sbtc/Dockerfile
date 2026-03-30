@@ -27,14 +27,9 @@ RUN ARCH="$(uname -m)" && \
 # Add the musl Rust target.
 RUN rustup target add "$(uname -m)-unknown-linux-musl"
 
-# Download the sbtc code base so that the initial build is done with
-# an appropriate version of the code and the result can be cached.
-WORKDIR /code
-RUN git clone https://github.com/stacks-sbtc/sbtc.git
-WORKDIR /code/sbtc
-
 # Build the codebase from the local sources.
 # -------------------------------------------
+WORKDIR /code/sbtc
 COPY . /code/sbtc/
 
 # Build statically-linked musl binaries.
