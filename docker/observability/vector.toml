@@ -33,14 +33,15 @@ address = "0.0.0.0:9598"
 # Receives logs from Docker's fluentd logging driver over the Fluentd
 # forward protocol. This avoids mounting the Docker socket into the
 # vector container, or writing to a file.
-
+#
+# Vector docs on this are at https://vector.dev/docs/reference/configuration/sources/fluent/ 
 [sources.signer_logs]
 type = "fluent"
 address = "0.0.0.0:24224"
 
-# Parse JSON log messages from the signer. The fluentd driver sends the log
-# line in the "log" field. If it parses as JSON, merge it into the
-# top-level event.
+# Parse the JSON log messages from the signer's stdout. The fluentd driver
+# sends the log line in the "log" field. If it parses as JSON, merge it
+# into the top-level event.
 [transforms.json_messages]
 type = "remap"
 inputs = ["signer_logs"]
