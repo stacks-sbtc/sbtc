@@ -85,7 +85,7 @@ impl Nonce {
         nonce
     }
 
-    // Construct a random nonce.
+    /// Construct a random nonce.
     fn random<R: RngCore + CryptoRng>(rng: &mut R) -> Self {
         Self {
             d: Self::gen(rng),

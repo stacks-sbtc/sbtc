@@ -192,7 +192,7 @@ impl Party {
 
     /// Sign `msg` with this party's shares of the group private key, using
     /// the set of `party_ids`, `key_ids` and corresponding `nonces` with a
-    /// tweaked public key. The posible values for tweak are:
+    /// tweaked public key. The possible values for tweak are:
     ///
     /// None    - standard FROST signature
     /// Some(0) - BIP-340 schnorr signature using 32-byte private key adjustments
@@ -298,7 +298,7 @@ impl Aggregator {
         Ok(())
     }
 
-    /// Aggregate the party signatures using a tweak.  The posible values for tweak are
+    /// Aggregate the party signatures using a tweak. The possible values for tweak are:
     /// None    - standard FROST signature
     /// Some(0) - BIP-340 schnorr signature using 32-byte private key adjustments
     /// Some(t) - BIP-340 schnorr signature with BIP-341 tweaked keys, using 32-byte private key adjustments
@@ -349,7 +349,7 @@ impl Aggregator {
         Ok((tweaked_public_key, sig))
     }
 
-    /// Check the party signatures after a failed group signature. The posible values for tweak are
+    /// Check the party signatures after a failed group signature. The possible values for tweak are:
     /// None    - standard FROST signature
     /// Some(0) - BIP-340 schnorr signature using 32-byte private key adjustments
     /// Some(t) - BIP-340 schnorr signature with BIP-341 tweaked keys, using 32-byte private key adjustments
