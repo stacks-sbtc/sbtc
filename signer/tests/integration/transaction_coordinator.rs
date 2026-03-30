@@ -3936,7 +3936,7 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
             client
                 .expect_estimate_fee_rate()
                 .times(1)
-                .returning(|| Box::pin(async { Ok(1.3) }));
+                .returning(|_| Box::pin(async { Ok(1.3) }));
         })
         .await;
 
@@ -6552,11 +6552,11 @@ async fn generate_fee_data_works() {
     let faucet = &bitcoin.get_faucet();
     let client = bitcoin.get_client();
 
-    let fee_rate = BitcoinInteract::estimate_fee_rate(&client).await;
+    let fee_rate = BitcoinInteract::estimate_fee_rate(&client, 1).await;
     assert!(fee_rate.is_err());
 
     faucet.generate_fee_data();
 
-    let fee_rate = BitcoinInteract::estimate_fee_rate(&client).await;
+    let fee_rate = BitcoinInteract::estimate_fee_rate(&client, 1).await;
     assert!(fee_rate.is_ok());
 }

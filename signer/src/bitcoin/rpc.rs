@@ -578,17 +578,17 @@ impl BitcoinCoreClient {
     /// Modified from the bitcoin-core docs[1]:
     ///
     /// Bitcoin-core has two different modes for fee rate estimation,
-    /// "conservative" and "economical". We use the "conservative" estimate
-    /// because it is more likely to be sufficient for the desired target,
-    /// but is not as responsive to short term drops in the prevailing fee
-    /// market when compared to the "economical" fee rate. Also, the docs
-    /// mention the response is in BTC/kB, but from the comments in
-    /// bitcoin-core[2] this is really BTC/kvB (kvB is kilo-vbyte).
+    /// "conservative" and "economical". We use "economical" since we are fine
+    /// with an higher risk of confirmation delay in favour of general lower
+    /// fees.
+    ///
+    /// Also, the docs mention the response is in BTC/kB, but from the comments
+    /// in bitcoin-core[2] this is really BTC/kvB (kvB is kilo-vbyte).
     ///
     /// [^1]: https://developer.bitcoin.org/reference/rpc/estimatesmartfee.html
     /// [^2]: https://github.com/bitcoin/bitcoin/blob/d367a4e36f7357c4ebd018e8e1c9c5071db2e1c2/src/rpc/fees.cpp#L90-L91
     pub fn estimate_fee_rate(&self, num_blocks: u16) -> Result<FeeEstimate, Error> {
-        let estimate_mode = Some(EstimateMode::Conservative);
+        let estimate_mode = Some(EstimateMode::Economical);
         let resp = self
             .inner
             .estimate_smart_fee(num_blocks, estimate_mode)
@@ -672,11 +672,8 @@ impl BitcoinInteract for BitcoinCoreClient {
         self.get_tx_info(txid, block_hash)
     }
 
-    async fn estimate_fee_rate(&self) -> Result<f64, Error> {
-        // TODO(542): This function is supposed to incorporate other fee
-        // estimation methods, in particular the ones in the
-        // src/bitcoin/fees.rs module.
-        self.estimate_fee_rate(1)
+    async fn estimate_fee_rate(&self, num_blocks: u16) -> Result<f64, Error> {
+        self.estimate_fee_rate(num_blocks)
             .map(|estimate| estimate.sats_per_vbyte)
     }
 
