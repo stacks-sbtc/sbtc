@@ -712,17 +712,11 @@ fn validate_reclaim_pubkeys(reclaim_pubkeys: &str) -> Result<Vec<[u8; 32]>, Erro
         .map(|s| {
             hex::decode(s)
                 .map_err(|_| {
-                    Error::HttpRequest(
-                        reqwest::StatusCode::BAD_REQUEST,
-                        "invalid pubkey".to_string(),
-                    )
+                    Error::HttpRequest(StatusCode::BAD_REQUEST, "invalid pubkey".to_string())
                 })
                 .and_then(|bytes| {
                     bytes.try_into().map_err(|_| {
-                        Error::HttpRequest(
-                            reqwest::StatusCode::BAD_REQUEST,
-                            "invalid pubkey".to_string(),
-                        )
+                        Error::HttpRequest(StatusCode::BAD_REQUEST, "invalid pubkey".to_string())
                     })
                 })
         })
