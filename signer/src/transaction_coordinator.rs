@@ -704,8 +704,8 @@ where
                     // sweep from us. Note that this can happen regardless of
                     // what fee we use to construct the sweep.
                     //
-                    // `estimatesmartfee` RPC expect confirmation target in
-                    // blocks to be in [1, 1008]
+                    // `estimatesmartfee` RPC expects the confirmation target to
+                    // be within [1, 1008]
                     let target_blocks = DEPOSIT_LOCKTIME_BLOCK_BUFFER
                         .min(WITHDRAWAL_EXPIRY_BUFFER.try_into().unwrap_or(u16::MAX))
                         .clamp(1, 1008);

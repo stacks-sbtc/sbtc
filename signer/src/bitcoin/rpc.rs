@@ -579,7 +579,7 @@ impl BitcoinCoreClient {
     ///
     /// Bitcoin-core has two different modes for fee rate estimation,
     /// "conservative" and "economical". We use "economical" since we are fine
-    /// with an higher risk of confirmation delay in favour of general lower
+    /// with a higher risk of confirmation delay in favor of generally lower
     /// fees.
     ///
     /// Also, the docs mention the response is in BTC/kB, but from the comments
