@@ -206,8 +206,8 @@ impl Party {
         nonces: &[PublicNonce],
         tweak: Option<Scalar>,
     ) -> Result<SignatureShare, AggregatorError> {
-        // In order to get access to the nonce values, we need to take the
-        // nonce which get's dropped after the call to Nonce::values().
+        // We take() the nonce from self, then consume it with values() so
+        // the scalars are only used once.
         let Some(nonce) = self.nonce.take() else {
             return Err(AggregatorError::MissingNonce);
         };

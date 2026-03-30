@@ -53,13 +53,13 @@ pub struct NonceD(pub Scalar);
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NonceE(pub Scalar);
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 /// A composite private nonce pair used as a random commitment in the
 /// signing protocol.
 ///
 /// This struct maintains the invariant that the nonce values can only be
-/// returned once and that the values themselves are not all zero or all
-/// one.
+/// returned once and that the values themselves are neither all-zero nor
+/// all-one.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Nonce {
     /// The first committed value
     d: Scalar,
@@ -109,8 +109,8 @@ impl Nonce {
         hash_to_scalar(&mut hasher)
     }
 
-    /// Return the nonce values, dropping self so that the nonce values are
-    /// only returned once.
+    /// Returns (NonceD, NonceE) and consumes self so that the scalars can
+    /// only be extracted once.
     pub fn values(self) -> (NonceD, NonceE) {
         (NonceD(self.d), NonceE(self.e))
     }
