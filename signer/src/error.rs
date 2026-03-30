@@ -256,6 +256,11 @@ pub enum Error {
     #[error("bitcoin RPC error: {0}")]
     BitcoinCoreRpc(#[from] bitcoincore_rpc::Error),
 
+    /// This shouuld never happen, since this implies that the bitcoin-core
+    /// responded with an integer that was negative and not -1.
+    #[error("bitcoin pruneblockchain RPC responded with an unepected integer: {0}")]
+    BitcoinCorePruneResponse(i64),
+
     /// An error propagated from the sBTC library.
     #[error("sBTC lib error: {0}")]
     SbtcLib(#[from] sbtc::error::Error),

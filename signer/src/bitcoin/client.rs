@@ -19,6 +19,7 @@ use bitcoin::OutPoint;
 use bitcoin::Txid;
 use bitcoincore_rpc_json::GetTxOutResult;
 
+use crate::storage::model::BitcoinBlockHeight;
 use crate::{error::Error, util::ApiFallbackClient};
 
 use super::BitcoinInteract;
@@ -145,6 +146,14 @@ impl BitcoinInteract for ApiFallbackClient<BitcoinCoreClient> {
 
     async fn get_best_block_hash(&self) -> Result<BlockHash, Error> {
         self.exec(|client, _| async { client.get_best_block_hash() })
+            .await
+    }
+
+    async fn prune_blockchain(
+        &self,
+        height: BitcoinBlockHeight,
+    ) -> Result<Option<BitcoinBlockHeight>, Error> {
+        self.exec(|client, _| BitcoinInteract::prune_blockchain(client, height))
             .await
     }
 }

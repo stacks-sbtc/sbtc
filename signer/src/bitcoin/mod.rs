@@ -16,6 +16,7 @@ use rpc::GetTxResponse;
 
 use crate::bitcoin::rpc::OutPointSummary;
 use crate::error::Error;
+use crate::storage::model::BitcoinBlockHeight;
 
 pub mod client;
 pub mod packaging;
@@ -156,6 +157,21 @@ pub trait BitcoinInteract: Sync + Send {
 
     /// Gets the best (canonical, chain tip from chain with most work) block hash from the Bitcoin node.
     fn get_best_block_hash(&self) -> impl Future<Output = Result<BlockHash, Error>> + Send;
+
+    /// Prune the connected bitcoin-core node up to the given input height.
+    /// 
+    /// # Notes
+    ///
+    /// This method requires bitcoin-core to be configured to allow
+    /// pruning. If bitcoin-core is not configtured with pruning enabled,
+    /// then this RPC will return an error. If the blockchain is not long
+    /// enough to prune, then this RPC will return `Ok(None)`. The
+    /// documentation for the `pruneblockchain` RPC call can be found here:
+    /// <https://bitcoincore.org/en/doc/25.0.0/rpc/blockchain/pruneblockchain/>
+    fn prune_blockchain(
+        &self,
+        height: BitcoinBlockHeight,
+    ) -> impl Future<Output = Result<Option<BitcoinBlockHeight>, Error>> + Send;
 }
 
 /// A trait for providing a stream of block hashes to be used by the block observer.

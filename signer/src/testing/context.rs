@@ -27,6 +27,7 @@ use crate::stacks::api::StacksEpochStatus;
 use crate::stacks::api::TenureBlockHeaders;
 use crate::stacks::wallet::SignerWallet;
 use crate::storage::Transactable;
+use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::ConsensusHash;
 use crate::storage::model::{BitcoinTxId, StacksBlockHash};
 use crate::{
@@ -430,6 +431,13 @@ impl BitcoinInteract for WrappedMockBitcoinInteract {
 
     async fn get_best_block_hash(&self) -> Result<bitcoin::BlockHash, Error> {
         self.inner.lock().await.get_best_block_hash().await
+    }
+
+    async fn prune_blockchain(
+        &self,
+        height: BitcoinBlockHeight,
+    ) -> Result<Option<BitcoinBlockHeight>, Error> {
+        self.inner.lock().await.prune_blockchain(height).await
     }
 }
 

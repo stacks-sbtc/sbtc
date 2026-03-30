@@ -712,6 +712,31 @@ impl BitcoinCoreClient {
     pub fn get_network_info(&self) -> Result<GetNetworkInfoResult, Error> {
         self.inner.get_network_info().map_err(Error::BitcoinCoreRpc)
     }
+
+    /// Prunes the blockchain up to the given block height, returning the
+    /// height of the last pruned block.
+    ///
+    /// # Notes
+    ///
+    /// This method requires bitcoin-core to be configured to allow
+    /// pruning. If bitcoin-core is not configtured with pruning enabled,
+    /// then this RPC will return an error. If the blockchain is not long
+    /// enough to prune, then this RPC will return `Ok(None)`. The
+    /// documentation for the `pruneblockchain` RPC call can be found here:
+    /// <https://bitcoincore.org/en/doc/25.0.0/rpc/blockchain/pruneblockchain/>
+    pub fn prune_blockchain(&self, height: BitcoinBlockHeight) -> Result<Option<BitcoinBlockHeight>, Error> {
+        let args = [serde_json::to_value(height).map_err(Error::JsonSerialize)?];
+
+        match self.inner.call::<i64>("pruneblockchain", &args) {
+            // SAFETY: When an i64 is nonnegative, the bit representation
+            // of the number is the same as what would happen as a u64, so
+            // this as _ cast is safe.
+            Ok(height) if height >= 0 => Ok(Some(BitcoinBlockHeight::from(height as u64))),
+            Ok(height) if height == -1 => Ok(None),
+            Ok(height) => Err(Error::BitcoinCorePruneResponse(height)),
+            Err(err) => Err(Error::BitcoinCoreRpc(err)),
+        }
+    }
 }
 
 impl BitcoinInteract for BitcoinCoreClient {
@@ -813,6 +838,13 @@ impl BitcoinInteract for BitcoinCoreClient {
 
     async fn get_best_block_hash(&self) -> Result<BlockHash, Error> {
         self.get_best_block_hash()
+    }
+
+    async fn prune_blockchain(
+        &self,
+        height: BitcoinBlockHeight,
+    ) -> Result<Option<BitcoinBlockHeight>, Error> {
+        self.prune_blockchain(height)
     }
 }
 

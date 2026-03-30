@@ -337,6 +337,13 @@ impl BitcoinInteract for TestHarness {
     async fn get_best_block_hash(&self) -> Result<BlockHash, Error> {
         unimplemented!()
     }
+
+    async fn prune_blockchain(
+        &self,
+        _: BitcoinBlockHeight,
+    ) -> Result<Option<BitcoinBlockHeight>, Error> {
+        unimplemented!()
+    }
 }
 
 impl StacksInteract for TestHarness {
