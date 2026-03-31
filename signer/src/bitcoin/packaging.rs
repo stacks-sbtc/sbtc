@@ -588,7 +588,11 @@ mod tests {
     use std::sync::atomic::AtomicU64;
     use test_case::test_case;
 
+    use crate::bitcoin::utxo::DepositRequest;
     use crate::bitcoin::utxo::Fees;
+    use crate::bitcoin::utxo::RequestRef;
+    use crate::bitcoin::utxo::WithdrawalRequest;
+    use crate::bitcoin::validation::TxRequestIds;
     use crate::ecdsa::Signed;
     use crate::keys::PrivateKey;
     use crate::keys::PublicKey;
@@ -597,8 +601,10 @@ mod tests {
     use crate::message::SignerMessage;
     use crate::storage::model::BitcoinBlockHash;
     use crate::storage::model::QualifiedRequestId;
+    use crate::storage::model::ScriptPubKey;
     use crate::storage::model::StacksBlockHash;
     use crate::storage::model::StacksTxId;
+    use crate::storage::model::TaprootScriptHash;
     use crate::testing::dummy::Unit;
 
     impl<T> BestFitPackager<T>
@@ -1499,5 +1505,106 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// This test verifies that `compute_optimal_packages` produces
+    /// packages whose serialized `Signed<SignerMessage>` encoding fits
+    /// within [`GOSSIPSUB_MAX_TRANSMIT_SIZE`]. It does so by generating a
+    /// large number of deposit and withdrawal requests and then packaging
+    /// them using `compute_optimal_packages`.
+    #[test]
+    fn presign_request_fits_in_gossipsub_message() {
+        let mut rng = get_rng();
+
+        // Generate a large mix of random deposits and withdrawals.
+        // Use enough items to stress the packager and fill multiple bags.
+        let num_requests = 5000;
+        let secret_key = secp256k1::SecretKey::new(&mut rng);
+        let signers_public_key = secret_key.x_only_public_key(secp256k1::SECP256K1).0;
+
+        let deposits: Vec<DepositRequest> = (0..num_requests)
+            .map(|_| DepositRequest {
+                outpoint: Unit.fake_with_rng::<bitcoin::OutPoint, _>(&mut rng),
+                max_fee: 10_000,
+                signer_bitmap: BitArray::ZERO,
+                amount: 100_000,
+                deposit_script: bitcoin::ScriptBuf::new(),
+                reclaim_script_hash: TaprootScriptHash::zeros(),
+                signers_public_key,
+            })
+            .collect();
+
+        let withdrawals: Vec<WithdrawalRequest> = (0..num_requests)
+            .map(|request_id| WithdrawalRequest {
+                request_id,
+                txid: fake::Faker.fake_with_rng(&mut rng),
+                block_hash: fake::Faker.fake_with_rng(&mut rng),
+                amount: 50_000,
+                max_fee: 10_000,
+                script_pubkey: fake::Faker.fake_with_rng::<ScriptPubKey, _>(&mut rng),
+                signer_bitmap: BitArray::ZERO,
+            })
+            .collect();
+
+        let mut items: Vec<RequestRef> = deposits
+            .iter()
+            .map(RequestRef::Deposit)
+            .chain(withdrawals.iter().map(RequestRef::Withdrawal))
+            .collect();
+
+        // Let's shuffle so that deposits don't take up all of the vbyte
+        // space in the transaction package.
+        items.shuffle(&mut rng);
+
+        let max_votes_against = 3;
+        let max_needs_signature = crate::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
+
+        // One thing that is interesting is that this will return 18-20
+        // bags, usually running up against the network limits. 
+        let bags = compute_optimal_packages(items, max_votes_against, max_needs_signature);
+
+        // Build a BitcoinPreSignRequest from all bags, mimicking the code in
+        // SbtcRequests::construct_transactions.
+        let request_package: Vec<TxRequestIds> = bags
+            .map(|bag| {
+                let mut deposits = Vec::new();
+                let mut withdrawals = Vec::new();
+                for item in bag {
+                    match item {
+                        RequestRef::Deposit(d) => deposits.push(d.outpoint),
+                        RequestRef::Withdrawal(w) => withdrawals.push(w.qualified_id()),
+                    }
+                }
+                TxRequestIds { deposits, withdrawals }
+            })
+            .collect();
+
+        let presign = BitcoinPreSignRequest {
+            request_package,
+            fee_rate: 25.0,
+            last_fees: Some(Fees { total: 1_000_000, rate: 25.0 }),
+        };
+
+        // Wrap in Signed<SignerMessage>, exactly as the coordinator does.
+        let private_key = PrivateKey::new(&mut rng);
+        let digest: [u8; 32] = [0xff; 32];
+        let signature = private_key.sign_ecdsa(&secp256k1::Message::from_digest(digest));
+        let public_key = PublicKey::from_private_key(&private_key);
+        let chain_tip = BitcoinBlockHash::from([0xff; 32]);
+
+        let signed = Signed {
+            inner: SignerMessage {
+                bitcoin_chain_tip: chain_tip,
+                payload: Payload::BitcoinPreSignRequest(presign),
+            },
+            signature,
+            signer_public_key: public_key,
+        };
+
+        // The actual encoded limit is usually noticably less than the
+        // actual limits.
+        let encoded_size = dbg!(crate::proto::Signed::from(signed).encoded_len());
+
+        more_asserts::assert_le!(encoded_size, GOSSIPSUB_MAX_TRANSMIT_SIZE);
     }
 }

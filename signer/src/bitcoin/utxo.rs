@@ -30,6 +30,7 @@ use bitcoin::taproot::TaprootSpendInfo;
 use bitcoin::transaction::Version;
 use bitvec::array::BitArray;
 use bitvec::field::BitField as _;
+use prost::Message as _;
 use sbtc::idpack::BitmapSegmenter;
 use sbtc::idpack::Decodable as _;
 use sbtc::idpack::Encodable as _;
@@ -48,6 +49,7 @@ use crate::bitcoin::rpc::BitcoinTxInfo;
 use crate::context::SbtcLimits;
 use crate::error::Error;
 use crate::keys::SignerScriptPubKey as _;
+use crate::proto;
 use crate::storage::model;
 use crate::storage::model::BitcoinTxId;
 use crate::storage::model::QualifiedRequestId;
@@ -536,6 +538,9 @@ impl Weighted for DepositRequest {
             .segwit_weight()
             .to_vbytes_ceil()
     }
+    fn presign_weight(&self) -> usize {
+        proto::OutPoint::from(self.outpoint).encoded_len()
+    }
 }
 
 /// An accepted or pending withdrawal request.
@@ -607,6 +612,9 @@ impl Weighted for WithdrawalRequest {
     fn withdrawal_id(&self) -> Option<u64> {
         Some(self.request_id)
     }
+    fn presign_weight(&self) -> usize {
+        proto::QualifiedRequestId::from(self.qualified_id()).encoded_len()
+    }
 }
 
 /// A reference to either a deposit or withdraw request
@@ -665,6 +673,12 @@ impl Weighted for RequestRef<'_> {
     }
     fn withdrawal_id(&self) -> Option<u64> {
         self.as_withdrawal().map(|req| req.request_id)
+    }
+    fn presign_weight(&self) -> usize {
+        match self {
+            Self::Deposit(req) => req.presign_weight(),
+            Self::Withdrawal(req) => req.presign_weight(),
+        }
     }
 }
 
