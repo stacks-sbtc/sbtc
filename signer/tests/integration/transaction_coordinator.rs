@@ -6655,10 +6655,7 @@ async fn construct_and_sign_bitcoin_sbtc_transactions_fee_logic(
                 Box::pin(std::future::ready(match blocks {
                     1 => Ok(10.0),
                     3 => Ok(5.0),
-                    n => Err(Error::EstimateSmartFeeResponse(
-                        "this shouldn't happen".to_string(),
-                        n,
-                    )),
+                    _ => panic!("unexpected fee rate target block"),
                 }))
             });
         })
