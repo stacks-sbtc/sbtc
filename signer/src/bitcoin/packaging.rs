@@ -3,11 +3,57 @@
 use sbtc::idpack::BitmapSegmenter;
 use sbtc::idpack::Segmenter as _;
 
+use crate::GOSSIPSUB_MAX_TRANSMIT_SIZE;
 use crate::MAX_MEMPOOL_PACKAGE_SIZE;
 use crate::MAX_MEMPOOL_PACKAGE_TX_COUNT;
 
 use super::utxo::MAX_BASE_TX_VSIZE;
 use super::utxo::OP_RETURN_AVAILABLE_SIZE;
+
+/// Maximum bytes a deposit `OutPoint` identifier contributes to the serialized
+/// [`BitcoinPreSignRequest`](crate::message::BitcoinPreSignRequest).
+///
+/// This is the worst-case protobuf encoding size of an `OutPoint` (with all
+/// fields non-default) when embedded in a `TxRequestIds.deposits` repeated
+/// field. The value accounts for the field tag, length varint, and the full
+/// encoding of `BitcoinTxid(Uint256)` + `uint32 vout`.
+pub const DEPOSIT_PRESIGN_WEIGHT: usize = 48;
+
+/// Maximum bytes a withdrawal `QualifiedRequestId` identifier contributes to
+/// the serialized
+/// [`BitcoinPreSignRequest`](crate::message::BitcoinPreSignRequest).
+///
+/// This is the worst-case protobuf encoding size of a `QualifiedRequestId`
+/// (with all fields non-default, maximum varint lengths) when embedded in a
+/// `TxRequestIds.withdrawals` repeated field.
+pub const WITHDRAWAL_PRESIGN_WEIGHT: usize = 93;
+
+/// The protobuf overhead in bytes of wrapping a `BitcoinPreSignRequest`
+/// inside a `Signed<SignerMessage>`.
+///
+/// The gossipsub `max_transmit_size` check applies to the encoded
+/// `Signed<SignerMessage>` bytes (the `data` argument to
+/// `gossipsub::Behaviour::publish`), not the full gossipsub wire frame.
+/// So this overhead only accounts for the protobuf fields added by the
+/// `Signed` and `SignerMessage` wrappers: the ECDSA signature, signer
+/// public key, bitcoin chain tip, and protobuf framing (tags and length
+/// varints).
+///
+/// The overhead varies slightly with the inner payload size because
+/// protobuf length varints grow with the encoded length. With an empty
+/// `BitcoinPreSignRequest` the measured overhead is 162 bytes; with a
+/// near-maximum-size payload (~64 KiB) the length varints add at most
+/// 4 more bytes. This constant is intentionally conservative.
+const SIGNED_MESSAGE_OVERHEAD: usize = 512;
+
+/// Maximum serialized size of a `BitcoinPreSignRequest` message.
+///
+/// The gossipsub [`GOSSIPSUB_MAX_TRANSMIT_SIZE`] limits the total
+/// encoded `Signed<SignerMessage>` size. After subtracting the
+/// [`SIGNED_MESSAGE_OVERHEAD`] for the `Signed` and `SignerMessage`
+/// protobuf wrapper, this is the remaining budget for the
+/// `BitcoinPreSignRequest` payload.
+pub const MAX_PRESIGN_REQUEST_SIZE: usize = GOSSIPSUB_MAX_TRANSMIT_SIZE - SIGNED_MESSAGE_OVERHEAD;
 
 /// The maximum vsize of all items in a package.
 ///
@@ -134,6 +180,22 @@ pub trait Weighted {
     fn withdrawal_id(&self) -> Option<u64> {
         None
     }
+
+    /// The maximum number of bytes this item's request identifier would occupy
+    /// in the serialized `BitcoinPreSignRequest`.
+    ///
+    /// Deposits always require a signature and contribute a
+    /// `bitcoin::OutPoint`, while withdrawals never require a signature and
+    /// contribute a `QualifiedRequestId`. The returned size use the worst-case
+    /// protobuf encoding where all fields are non-default and varints use their
+    /// maximum length.
+    fn presign_weight(&self) -> usize {
+        if self.needs_signature() {
+            DEPOSIT_PRESIGN_WEIGHT
+        } else {
+            WITHDRAWAL_PRESIGN_WEIGHT
+        }
+    }
 }
 
 /// Configuration parameters for the bin packing algorithm.
@@ -164,6 +226,12 @@ struct PackagerConfig {
     /// Enforcement of this limit prevents transaction rejection due to
     /// oversized OP_RETURN outputs.
     max_op_return_size: usize,
+    /// Maximum total serialized size of request identifiers across all
+    /// bags, in bytes.
+    ///
+    /// This prevents the `BitcoinPreSignRequest` from exceeding the
+    /// gossipsub wire message size limit.
+    max_total_presign_size: usize,
 }
 
 impl PackagerConfig {
@@ -182,6 +250,7 @@ impl PackagerConfig {
             max_signatures,
             max_total_vsize: PACKAGE_MAX_VSIZE,
             max_op_return_size: OP_RETURN_AVAILABLE_SIZE,
+            max_total_presign_size: MAX_PRESIGN_REQUEST_SIZE,
         }
     }
 }
@@ -425,6 +494,9 @@ struct BestFitPackager<T> {
     config: PackagerConfig,
     /// Running total of virtual size across all bags
     total_vsize: u64,
+    /// Running total of of how many bytes the identifiers will take in a
+    /// serialized `BitcoinPreSignRequest`, across all bags.
+    total_presign_size: usize,
 }
 
 impl<T: Weighted> BestFitPackager<T> {
@@ -433,6 +505,7 @@ impl<T: Weighted> BestFitPackager<T> {
             bags: Vec::new(),
             config,
             total_vsize: 0,
+            total_presign_size: 0,
         }
     }
 
@@ -466,17 +539,22 @@ impl<T: Weighted> BestFitPackager<T> {
     ///   vsize).
     fn insert_item(&mut self, item: T) {
         let votes_against = item.votes().count_ones();
-        let total_package_vsize = self.total_vsize + item.vsize();
+        let total_package_vsize = self.total_vsize.saturating_add(item.vsize());
+        let total_presign_size = self
+            .total_presign_size
+            .saturating_add(item.presign_weight());
 
         // Early exits for items exceeding our bag-independent limits.
         if votes_against > self.config.max_votes_against
             || total_package_vsize > self.config.max_total_vsize
+            || total_presign_size > self.config.max_total_presign_size
         {
             return;
         }
 
-        // Add to total vsize
-        self.total_vsize += item.vsize();
+        // Add to totals
+        self.total_vsize = total_package_vsize;
+        self.total_presign_size = total_presign_size;
 
         // Use find_best_bag or create a new bag
         match self.find_best_bag(&item) {
@@ -499,13 +577,26 @@ impl<T: Weighted> BestFitPackager<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bitcoin::hashes::Hash as _;
     use bitvec::array::BitArray;
     use bitvec::field::BitField as _;
+    use prost::Message as _;
     use rand::Rng;
     use rand::prelude::SliceRandom as _;
     use signer::testing::get_rng;
     use std::sync::atomic::AtomicU64;
     use test_case::test_case;
+
+    use crate::ecdsa::Signed;
+    use crate::keys::PrivateKey;
+    use crate::keys::PublicKey;
+    use crate::message::BitcoinPreSignRequest;
+    use crate::message::Payload;
+    use crate::message::SignerMessage;
+    use crate::storage::model::BitcoinBlockHash;
+    use crate::storage::model::QualifiedRequestId;
+    use crate::storage::model::StacksBlockHash;
+    use crate::storage::model::StacksTxId;
 
     impl<T> BestFitPackager<T>
     where
@@ -1134,6 +1225,172 @@ mod tests {
         assert_eq!(packager.bags.len(), 2); // we should be really close to the limit (no change)
         packager.insert_item(RequestItem::with_votes(&[1, 2]).wid(10_000));
         assert_eq!(packager.bags.len(), 3); // +1
+    }
+
+    /// Tests that the presign size limit is enforced by the packager.
+    /// Items are silently ignored when adding them would exceed the
+    /// `MAX_PRESIGN_REQUEST_SIZE` limit.
+    #[test]
+    fn test_insert_item_respects_presign_size_limit() {
+        let config = PackagerConfig::new(5, 10000);
+        let mut packager = BestFitPackager::<RequestItem>::new(config);
+
+        // Each deposit has presign weight DEPOSIT_PRESIGN_WEIGHT (48 bytes).
+        // Fill up to just under the limit.
+        let max_deposits = MAX_PRESIGN_REQUEST_SIZE / DEPOSIT_PRESIGN_WEIGHT;
+        for _ in 0..max_deposits {
+            packager.insert_item(RequestItem::no_votes().sig_required());
+        }
+        assert_eq!(
+            packager.total_presign_size,
+            max_deposits * DEPOSIT_PRESIGN_WEIGHT
+        );
+
+        // The next deposit should be rejected because it would exceed the limit.
+        let before = packager.total_presign_size;
+        packager.insert_item(RequestItem::no_votes().sig_required());
+        assert_eq!(packager.total_presign_size, before);
+
+        // Verify that a withdrawal (93 bytes) is also rejected.
+        packager.insert_item(RequestItem::no_votes().wid(1));
+        assert_eq!(packager.total_presign_size, before);
+    }
+
+    /// Verify that [`DEPOSIT_PRESIGN_WEIGHT`] matches the actual
+    /// worst-case protobuf encoding size of a `bitcoin::OutPoint` when
+    /// added to a `TxRequestIds.deposits` repeated field inside a
+    /// `BitcoinPreSignRequest`.
+    #[test]
+    fn deposit_presign_weight_matches_proto_encoding() {
+        // Start with one empty TxRequestIds so we measure marginal cost.
+        let mut psr = crate::proto::BitcoinPreSignRequest {
+            request_package: vec![crate::proto::TxRequestIds::default()],
+            fee_rate: 25.0,
+            last_fees: None,
+        };
+        let base_size = psr.encoded_len();
+
+        // Use all-0xff bytes for the txid to guarantee every Uint256
+        // fixed64 field is non-zero (avoiding proto3 zero-value elision),
+        // and vout = u32::MAX for the worst-case varint encoding.
+        let outpoint = bitcoin::OutPoint {
+            txid: bitcoin::Txid::from_byte_array([0xff; 32]),
+            vout: u32::MAX,
+        };
+
+        psr.request_package[0]
+            .deposits
+            .push(crate::proto::OutPoint::from(outpoint));
+        let deposit_weight = psr.encoded_len() - base_size;
+
+        assert_eq!(deposit_weight, DEPOSIT_PRESIGN_WEIGHT);
+    }
+
+    /// Verify that [`WITHDRAWAL_PRESIGN_WEIGHT`] matches the actual
+    /// worst-case protobuf encoding size of a `QualifiedRequestId` when
+    /// added to a `TxRequestIds.withdrawals` repeated field inside a
+    /// `BitcoinPreSignRequest`.
+    #[test]
+    fn withdrawal_presign_weight_matches_proto_encoding() {
+        let mut psr = crate::proto::BitcoinPreSignRequest {
+            request_package: vec![crate::proto::TxRequestIds::default()],
+            fee_rate: 25.0,
+            last_fees: None,
+        };
+        let base_size = psr.encoded_len();
+
+        // Use all-0xff bytes so every Uint256 fixed64 field is non-zero
+        // (avoiding proto3 zero-value elision), and request_id = u64::MAX
+        // for the worst-case varint encoding (10 bytes).
+        let qrid = QualifiedRequestId {
+            request_id: u64::MAX,
+            txid: StacksTxId::from([0xff; 32]),
+            block_hash: StacksBlockHash::from([0xff; 32]),
+        };
+
+        psr.request_package[0]
+            .withdrawals
+            .push(crate::proto::QualifiedRequestId::from(qrid));
+        let withdrawal_weight = psr.encoded_len() - base_size;
+
+        assert_eq!(withdrawal_weight, WITHDRAWAL_PRESIGN_WEIGHT);
+    }
+
+    /// Verify that [`SIGNED_MESSAGE_OVERHEAD`] covers the protobuf
+    /// overhead of wrapping a `BitcoinPreSignRequest` inside a
+    /// `Signed<SignerMessage>`.
+    ///
+    /// The gossipsub `max_transmit_size` check is on the encoded
+    /// `Signed<SignerMessage>` bytes passed to
+    /// `gossipsub::Behaviour::publish`, not the gossipsub wire frame.
+    /// So the only overhead is the `Signed` and `SignerMessage` protobuf
+    /// wrapper fields.
+    ///
+    /// The overhead varies slightly with payload size because protobuf
+    /// length varints grow with the encoded length. This test measures
+    /// both extremes (empty and large payload) to show the maximum
+    /// possible overhead and that `SIGNED_MESSAGE_OVERHEAD` covers it.
+    #[test]
+    fn signed_message_overhead_covers_wrapper() {
+        let mut rng = get_rng();
+
+        let pk = PrivateKey::new(&mut rng);
+        let digest: [u8; 32] = [0xff; 32];
+        let signature = pk.sign_ecdsa(&secp256k1::Message::from_digest(digest));
+        let public_key = PublicKey::from_private_key(&pk);
+        let chain_tip = BitcoinBlockHash::from([0xff; 32]);
+
+        // Helper: measure overhead for a given BitcoinPreSignRequest.
+        let measure_overhead = |psr: BitcoinPreSignRequest| -> usize {
+            let psr_size = crate::proto::BitcoinPreSignRequest::from(psr.clone()).encoded_len();
+            let signed = Signed {
+                inner: SignerMessage {
+                    bitcoin_chain_tip: chain_tip,
+                    payload: Payload::BitcoinPreSignRequest(psr),
+                },
+                signature,
+                signer_public_key: public_key,
+            };
+            let signed_size = crate::proto::Signed::from(signed).encoded_len();
+            signed_size - psr_size
+        };
+
+        // With an empty PSR the length varints are minimal (1 byte each).
+        let empty_overhead = measure_overhead(BitcoinPreSignRequest {
+            request_package: Vec::new(),
+            fee_rate: 0.0,
+            last_fees: None,
+        });
+
+        // With a large PSR (~MAX_PRESIGN_REQUEST_SIZE bytes) the length
+        // varints are at their largest (3 bytes each for ~64 KiB values).
+        // We fill the request_package with enough deposits to reach the
+        // target size.
+        let deposits_needed = MAX_PRESIGN_REQUEST_SIZE / DEPOSIT_PRESIGN_WEIGHT;
+        let large_psr = BitcoinPreSignRequest {
+            request_package: vec![crate::bitcoin::validation::TxRequestIds {
+                deposits: std::iter::repeat_n(
+                    bitcoin::OutPoint {
+                        txid: bitcoin::Txid::from_byte_array([0xff; 32]),
+                        vout: u32::MAX,
+                    },
+                    deposits_needed,
+                )
+                .collect(),
+                withdrawals: Vec::new(),
+            }],
+            fee_rate: 25.0,
+            last_fees: None,
+        };
+        let large_overhead = measure_overhead(large_psr);
+
+        // The large-payload overhead is the worst case because the length
+        // varints are at their maximum. Assert the exact measured values
+        // so this test catches any proto schema changes that affect the
+        // overhead.
+        assert_eq!(empty_overhead, 162);
+        assert_eq!(large_overhead, 166);
+        more_asserts::assert_ge!(SIGNED_MESSAGE_OVERHEAD, large_overhead);
     }
 
     /// End-to-end test of withdrawal ID handling in the packaging algorithm,

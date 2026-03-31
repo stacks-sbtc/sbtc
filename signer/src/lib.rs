@@ -146,6 +146,15 @@ pub const MAX_SIGNER_STATE_MACHINES: u64 = MAX_MEMPOOL_PACKAGE_SIZE
 /// bitcoin.
 pub const MIN_BITCOIN_INPUT_VSIZE: u64 = 58;
 
+/// The default `max_transmit_size` used by libp2p-gossipsub. This is the
+/// maximum byte size of a single gossipsub RPC message on the wire, including
+/// framing, signatures, and the message payload.
+///
+/// The value here is the libp2p-gossipsub default.
+///
+/// <https://docs.rs/libp2p-gossipsub/latest/libp2p_gossipsub/struct.Config.html#method.max_transmit_size>
+pub const GOSSIPSUB_MAX_TRANSMIT_SIZE: usize = 65536;
+
 // These are all build info variables. Many of them are set in build.rs.
 
 /// The name of the binary that is being run,
