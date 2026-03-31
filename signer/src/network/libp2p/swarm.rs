@@ -2,8 +2,6 @@ use std::hash::{DefaultHasher, Hash as _, Hasher as _};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::context::Context;
-use crate::keys::PrivateKey;
 use libp2p::core::muxing::StreamMuxerBox;
 use libp2p::core::upgrade::Version;
 use libp2p::identity::Keypair;
@@ -22,6 +20,9 @@ use tokio::sync::Mutex;
 
 use super::errors::SignerSwarmError;
 use super::{bootstrap, event_loop};
+use crate::GOSSIPSUB_MAX_TRANSMIT_SIZE;
+use crate::context::Context;
+use crate::keys::PrivateKey;
 
 /// The maximum number of substreams _per connection_. This is used to limit
 /// the number of concurrent substreams that can be opened on a single
@@ -176,6 +177,7 @@ impl SignerBehavior {
         let gossipsub_config = gossipsub::ConfigBuilder::default()
             .heartbeat_interval(Duration::from_secs(1)) // Default is 1 second
             .validation_mode(gossipsub::ValidationMode::Strict)
+            .max_transmit_size(GOSSIPSUB_MAX_TRANSMIT_SIZE)
             .message_id_fn(message_id_fn)
             .build()
             .map_err(|e| SignerSwarmError::LibP2P(Box::new(e)))?;
