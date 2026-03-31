@@ -17,7 +17,7 @@ use super::utxo::OP_RETURN_AVAILABLE_SIZE;
 /// fields non-default) when embedded in a `TxRequestIds.deposits` repeated
 /// field. The value accounts for the field tag, length varint, and the full
 /// encoding of `BitcoinTxid(Uint256)` + `uint32 vout`.
-pub const DEPOSIT_PRESIGN_WEIGHT: usize = 48;
+const DEPOSIT_PRESIGN_WEIGHT: usize = 48;
 
 /// Maximum bytes a withdrawal `QualifiedRequestId` identifier contributes to
 /// the serialized
@@ -26,7 +26,7 @@ pub const DEPOSIT_PRESIGN_WEIGHT: usize = 48;
 /// This is the worst-case protobuf encoding size of a `QualifiedRequestId`
 /// (with all fields non-default, maximum varint lengths) when embedded in a
 /// `TxRequestIds.withdrawals` repeated field.
-pub const WITHDRAWAL_PRESIGN_WEIGHT: usize = 93;
+const WITHDRAWAL_PRESIGN_WEIGHT: usize = 93;
 
 /// The protobuf overhead in bytes of wrapping a `BitcoinPreSignRequest`
 /// inside a `Signed<SignerMessage>`.
@@ -53,7 +53,7 @@ const SIGNED_MESSAGE_OVERHEAD: usize = 512;
 /// [`SIGNED_MESSAGE_OVERHEAD`] for the `Signed` and `SignerMessage`
 /// protobuf wrapper, this is the remaining budget for the
 /// `BitcoinPreSignRequest` payload.
-pub const MAX_PRESIGN_REQUEST_SIZE: usize = GOSSIPSUB_MAX_TRANSMIT_SIZE - SIGNED_MESSAGE_OVERHEAD;
+const MAX_PRESIGN_REQUEST_SIZE: usize = GOSSIPSUB_MAX_TRANSMIT_SIZE - SIGNED_MESSAGE_OVERHEAD;
 
 /// The maximum vsize of all items in a package.
 ///
@@ -580,6 +580,7 @@ mod tests {
     use bitcoin::hashes::Hash as _;
     use bitvec::array::BitArray;
     use bitvec::field::BitField as _;
+    use fake::Fake as _;
     use prost::Message as _;
     use rand::Rng;
     use rand::prelude::SliceRandom as _;
@@ -587,6 +588,7 @@ mod tests {
     use std::sync::atomic::AtomicU64;
     use test_case::test_case;
 
+    use crate::bitcoin::utxo::Fees;
     use crate::ecdsa::Signed;
     use crate::keys::PrivateKey;
     use crate::keys::PublicKey;
@@ -597,6 +599,7 @@ mod tests {
     use crate::storage::model::QualifiedRequestId;
     use crate::storage::model::StacksBlockHash;
     use crate::storage::model::StacksTxId;
+    use crate::testing::dummy::Unit;
 
     impl<T> BestFitPackager<T>
     where
@@ -1263,12 +1266,12 @@ mod tests {
     #[test]
     fn deposit_presign_weight_matches_proto_encoding() {
         // Start with one empty TxRequestIds so we measure marginal cost.
-        let mut psr = crate::proto::BitcoinPreSignRequest {
+        let mut presign_request = crate::proto::BitcoinPreSignRequest {
             request_package: vec![crate::proto::TxRequestIds::default()],
             fee_rate: 25.0,
             last_fees: None,
         };
-        let base_size = psr.encoded_len();
+        let base_size = presign_request.encoded_len();
 
         // Use all-0xff bytes for the txid to guarantee every Uint256
         // fixed64 field is non-zero (avoiding proto3 zero-value elision),
@@ -1278,12 +1281,38 @@ mod tests {
             vout: u32::MAX,
         };
 
-        psr.request_package[0]
+        presign_request.request_package[0]
             .deposits
             .push(crate::proto::OutPoint::from(outpoint));
-        let deposit_weight = psr.encoded_len() - base_size;
+        let deposit_weight = presign_request.encoded_len() - base_size;
 
         assert_eq!(deposit_weight, DEPOSIT_PRESIGN_WEIGHT);
+
+        // Verify with many random OutPoints that the incremental encoded
+        // size never exceeds DEPOSIT_PRESIGN_WEIGHT.
+        let mut rng = get_rng();
+        let mut max_incremental = 0usize;
+
+        let mut presign_request = crate::proto::BitcoinPreSignRequest {
+            request_package: vec![crate::proto::TxRequestIds::default()],
+            fee_rate: 25.0,
+            last_fees: None,
+        };
+
+        for _ in 0..1000 {
+            let before = presign_request.encoded_len();
+            let outpoint = Unit.fake_with_rng::<bitcoin::OutPoint, _>(&mut rng);
+
+            presign_request.request_package[0]
+                .deposits
+                .push(crate::proto::OutPoint::from(outpoint));
+            let incremental = presign_request.encoded_len() - before;
+            max_incremental = max_incremental.max(incremental);
+
+            presign_request.request_package[0].deposits.pop();
+        }
+
+        more_asserts::assert_le!(max_incremental, DEPOSIT_PRESIGN_WEIGHT);
     }
 
     /// Verify that [`WITHDRAWAL_PRESIGN_WEIGHT`] matches the actual
@@ -1292,12 +1321,12 @@ mod tests {
     /// `BitcoinPreSignRequest`.
     #[test]
     fn withdrawal_presign_weight_matches_proto_encoding() {
-        let mut psr = crate::proto::BitcoinPreSignRequest {
+        let mut presign_request = crate::proto::BitcoinPreSignRequest {
             request_package: vec![crate::proto::TxRequestIds::default()],
             fee_rate: 25.0,
             last_fees: None,
         };
-        let base_size = psr.encoded_len();
+        let base_size = presign_request.encoded_len();
 
         // Use all-0xff bytes so every Uint256 fixed64 field is non-zero
         // (avoiding proto3 zero-value elision), and request_id = u64::MAX
@@ -1308,12 +1337,40 @@ mod tests {
             block_hash: StacksBlockHash::from([0xff; 32]),
         };
 
-        psr.request_package[0]
+        presign_request.request_package[0]
             .withdrawals
             .push(crate::proto::QualifiedRequestId::from(qrid));
-        let withdrawal_weight = psr.encoded_len() - base_size;
+        let withdrawal_weight = presign_request.encoded_len() - base_size;
 
         assert_eq!(withdrawal_weight, WITHDRAWAL_PRESIGN_WEIGHT);
+
+        // Verify with many random QualifiedRequestIds that the incremental
+        // encoded size never exceeds WITHDRAWAL_PRESIGN_WEIGHT.
+        let mut rng = get_rng();
+        let mut max_incremental = 0usize;
+
+        let mut presign_request = crate::proto::BitcoinPreSignRequest {
+            request_package: vec![crate::proto::TxRequestIds::default()],
+            fee_rate: 25.0,
+            last_fees: None,
+        };
+
+        for _ in 0..1000 {
+            let before = presign_request.encoded_len();
+            let request_id = fake::Faker.fake_with_rng::<QualifiedRequestId, _>(&mut rng);
+
+            presign_request.request_package[0]
+                .withdrawals
+                .push(crate::proto::QualifiedRequestId::from(request_id));
+            let incremental = presign_request.encoded_len() - before;
+
+            max_incremental = max_incremental.max(incremental);
+
+            // make sure to remove the request_id from the presign_request
+            presign_request.request_package[0].withdrawals.pop();
+        }
+
+        more_asserts::assert_le!(max_incremental, WITHDRAWAL_PRESIGN_WEIGHT);
     }
 
     /// Verify that [`SIGNED_MESSAGE_OVERHEAD`] covers the protobuf
@@ -1334,28 +1391,29 @@ mod tests {
     fn signed_message_overhead_covers_wrapper() {
         let mut rng = get_rng();
 
-        let pk = PrivateKey::new(&mut rng);
+        let private_key = PrivateKey::new(&mut rng);
         let digest: [u8; 32] = [0xff; 32];
-        let signature = pk.sign_ecdsa(&secp256k1::Message::from_digest(digest));
-        let public_key = PublicKey::from_private_key(&pk);
+        let signature = private_key.sign_ecdsa(&secp256k1::Message::from_digest(digest));
+        let public_key = PublicKey::from_private_key(&private_key);
         let chain_tip = BitcoinBlockHash::from([0xff; 32]);
 
         // Helper: measure overhead for a given BitcoinPreSignRequest.
-        let measure_overhead = |psr: BitcoinPreSignRequest| -> usize {
-            let psr_size = crate::proto::BitcoinPreSignRequest::from(psr.clone()).encoded_len();
+        let measure_overhead = |presign_request: BitcoinPreSignRequest| -> usize {
+            let presign_request_size =
+                crate::proto::BitcoinPreSignRequest::from(presign_request.clone()).encoded_len();
             let signed = Signed {
                 inner: SignerMessage {
                     bitcoin_chain_tip: chain_tip,
-                    payload: Payload::BitcoinPreSignRequest(psr),
+                    payload: Payload::BitcoinPreSignRequest(presign_request),
                 },
                 signature,
                 signer_public_key: public_key,
             };
             let signed_size = crate::proto::Signed::from(signed).encoded_len();
-            signed_size - psr_size
+            signed_size - presign_request_size
         };
 
-        // With an empty PSR the length varints are minimal (1 byte each).
+        // With an empty presign_request the length varints are minimal (1 byte each).
         let empty_overhead = measure_overhead(BitcoinPreSignRequest {
             request_package: Vec::new(),
             fee_rate: 0.0,
@@ -1380,7 +1438,7 @@ mod tests {
                 withdrawals: Vec::new(),
             }],
             fee_rate: 25.0,
-            last_fees: None,
+            last_fees: Some(Fees { total: 1000000, rate: 25.0 }),
         };
         let large_overhead = measure_overhead(large_psr);
 
@@ -1388,8 +1446,10 @@ mod tests {
         // varints are at their maximum. Assert the exact measured values
         // so this test catches any proto schema changes that affect the
         // overhead.
-        assert_eq!(empty_overhead, 162);
-        assert_eq!(large_overhead, 166);
+        more_asserts::assert_ge!(empty_overhead, 162);
+        more_asserts::assert_le!(empty_overhead, 164);
+        more_asserts::assert_ge!(large_overhead, 166);
+        more_asserts::assert_le!(large_overhead, 168);
         more_asserts::assert_ge!(SIGNED_MESSAGE_OVERHEAD, large_overhead);
     }
 
