@@ -520,41 +520,6 @@ pub async fn fill_signers_utxo<R: rand::RngCore + ?Sized>(
     .unwrap();
     db.write_tx_prevout(&utxo_input).await.unwrap();
     db.write_tx_output(&utxo_output).await.unwrap();
-    // Create a Bitcoin transaction simulating holding a simulated signer
-    // UTXO.
-    let mut signer_utxo_tx = signer::testing::dummy::tx(&Faker, &mut rng);
-    signer_utxo_tx.output.insert(
-        0,
-        bitcoin::TxOut {
-            value: bitcoin::Amount::from_btc(5.0).unwrap(),
-            script_pubkey: aggregate_key.signers_script_pubkey(),
-        },
-    );
-    let signer_utxo_txid = signer_utxo_tx.compute_txid();
-
-    let utxo_input = model::TxPrevout {
-        txid: signer_utxo_txid.into(),
-        prevout_type: model::TxPrevoutType::SignersInput,
-        ..Faker.fake_with_rng(&mut rng)
-    };
-
-    let utxo_output = model::TxOutput {
-        txid: signer_utxo_txid.into(),
-        output_type: model::TxOutputType::Donation,
-        script_pubkey: aggregate_key.signers_script_pubkey().into(),
-        ..Faker.fake_with_rng(&mut rng)
-    };
-
-    // Write the Bitcoin block and transaction to the database.
-    db.write_bitcoin_block(&bitcoin_block).await.unwrap();
-    db.write_bitcoin_transaction(&model::BitcoinTxRef {
-        block_hash: bitcoin_block.block_hash,
-        txid: signer_utxo_txid.into(),
-    })
-    .await
-    .unwrap();
-    db.write_tx_prevout(&utxo_input).await.unwrap();
-    db.write_tx_output(&utxo_output).await.unwrap();
 }
 
 type MockedStacksContext<S, B, E> = TestContext<S, B, WrappedMock<MockStacksInteract>, E>;
