@@ -1,6 +1,5 @@
 use std::collections::BTreeSet;
 use std::collections::HashSet;
-use std::num::NonZeroU64;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -6582,11 +6581,11 @@ struct ConstructBitcoinTxsTest {
 #[test_case(ConstructBitcoinTxsTest {
     deposit_fee_rates: vec![(11.0, true), (6.0, false), (2.0, false)],
     withdrawal_fee_rates: vec![(12.0, true), (7.0, false), (3.0, false)],
-}, Some(1); "ok 1-block fees, fallback 1")]
+}, Some(1.0); "ok 1-block fees, fallback 1")]
 #[test_case(ConstructBitcoinTxsTest {
     deposit_fee_rates: vec![(11.0, true), (6.0, false), (2.0, false)],
     withdrawal_fee_rates: vec![(12.0, true), (7.0, false), (3.0, false)],
-}, Some(100); "ok 1-block fees, fallback 100")]
+}, Some(100.0); "ok 1-block fees, fallback 100")]
 #[test_case(ConstructBitcoinTxsTest {
     deposit_fee_rates: vec![(6.0, true), (2.0, false)],
     withdrawal_fee_rates: vec![(7.0, true), (3.0, false)],
@@ -6594,11 +6593,11 @@ struct ConstructBitcoinTxsTest {
 #[test_case(ConstructBitcoinTxsTest {
     deposit_fee_rates: vec![(6.0, true), (2.0, true)],
     withdrawal_fee_rates: vec![(7.0, true), (3.0, true)],
-}, Some(1); "ok 3-block fees, fallback 1")]
+}, Some(1.0); "ok 3-block fees, fallback 1")]
 #[test_case(ConstructBitcoinTxsTest {
     deposit_fee_rates: vec![(6.0, false), (2.0, false)],
     withdrawal_fee_rates: vec![(7.0, false), (3.0, false)],
-}, Some(100); "ok 3-block fees, fallback 100")]
+}, Some(100.0); "ok 3-block fees, fallback 100")]
 #[test_case(ConstructBitcoinTxsTest {
     deposit_fee_rates: vec![(2.0, false)],
     withdrawal_fee_rates: vec![(3.0, false)],
@@ -6606,21 +6605,20 @@ struct ConstructBitcoinTxsTest {
 #[test_case(ConstructBitcoinTxsTest {
     deposit_fee_rates: vec![(2.0, true)],
     withdrawal_fee_rates: vec![(3.0, true)],
-}, Some(1); "no ok fees, fallback 1")]
+}, Some(1.0); "no ok fees, fallback 1")]
 #[test_case(ConstructBitcoinTxsTest {
     deposit_fee_rates: vec![(2.0, false)],
     withdrawal_fee_rates: vec![(3.0, false)],
-}, Some(100); "no ok fees, fallback 100")]
+}, Some(100.0); "no ok fees, fallback 100")]
 #[test_log::test(tokio::test)]
 async fn construct_and_sign_bitcoin_sbtc_transactions_fee_logic(
     scenario: ConstructBitcoinTxsTest,
-    fallback_fee: Option<u64>,
+    fallback_fee: Option<f64>,
 ) {
     let mut rng = get_rng();
     let db = testing::storage::new_test_database().await;
     let signer_info = testing::wsts::generate_signer_info(&mut rng, 1);
 
-    let fallback_fee = fallback_fee.map(|fee| NonZeroU64::new(fee).unwrap());
     let context = TestContext::builder()
         .with_storage(db.clone())
         .with_mocked_clients()

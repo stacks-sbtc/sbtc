@@ -84,6 +84,37 @@ use wsts::state_machine::coordinator::State as WstsCoordinatorState;
 /// because of a conflicting nonce.
 const REJECTION_REASON_CONFLICTING_NONCE_IN_MEMPOOL: &str = "ConflictingNonceInMempool";
 
+/// The target confirmation block used in case of package construction retry.
+///
+/// Target a confirmation block that will not impact the requests cancellation.
+/// This is a best effort approach, it will not guarantee that the sweep we are
+/// constructing will not be in the mempool when the requests expire.
+/// If that happens, users will need to either pay more fees to RBF our sweep
+/// (for deposits reclaim) or wait for a new sweep from us. Note that this can
+/// happen regardless of what fee we use to construct the sweep.
+///
+/// This const-computes min(WITHDRAWAL_EXPIRY_BUFFER, DEPOSIT_LOCKTIME_BLOCK_BUFFER).clamp(1, 1008)
+const FEE_RETRY_TARGET_BLOCKS: u16 = {
+    let expiry_buffer = if WITHDRAWAL_EXPIRY_BUFFER > u16::MAX as u64 {
+        u16::MAX
+    } else {
+        WITHDRAWAL_EXPIRY_BUFFER as u16
+    };
+    let min = if DEPOSIT_LOCKTIME_BLOCK_BUFFER < expiry_buffer {
+        DEPOSIT_LOCKTIME_BLOCK_BUFFER
+    } else {
+        expiry_buffer
+    };
+    // `estimatesmartfee` RPC expects the confirmation target to be within [1, 1008].
+    if min < 1 {
+        1
+    } else if min > 1008 {
+        1008
+    } else {
+        min
+    }
+};
+
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// # Transaction coordinator event loop
 ///
@@ -693,26 +724,11 @@ where
             let fallback_fee = self.context.config().bitcoin.fallback_fee;
 
             let retry_fee_rate = match fallback_fee {
-                Some(fee) => fee.get() as f64,
+                Some(fee) => fee,
                 None => {
-                    // Target a confirmation block that will not impact the
-                    // requests cancellation. This is a best effort approach,
-                    // it will not guarantee that the sweep we are constructing
-                    // will not be in the mempool when the requests expire.
-                    // If that happens, users will need to either pay more fees
-                    // to RBF our sweep (for deposits reclaim) or wait for a new
-                    // sweep from us. Note that this can happen regardless of
-                    // what fee we use to construct the sweep.
-                    //
-                    // `estimatesmartfee` RPC expects the confirmation target to
-                    // be within [1, 1008]
-                    let target_blocks = DEPOSIT_LOCKTIME_BLOCK_BUFFER
-                        .min(WITHDRAWAL_EXPIRY_BUFFER.try_into().unwrap_or(u16::MAX))
-                        .clamp(1, 1008);
-
                     self.context
                         .get_bitcoin_client()
-                        .estimate_fee_rate(target_blocks)
+                        .estimate_fee_rate(FEE_RETRY_TARGET_BLOCKS)
                         .await?
                 }
             };

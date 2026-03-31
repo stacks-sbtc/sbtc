@@ -62,6 +62,7 @@ rpc_endpoints = [
 # is too high to construct any transaction package. When set, this value is used
 # directly as the retry fee rate. When unset, the signer estimates a lower fee
 # rate by targeting a longer confirmation window.
+# This is for tests only, it fails validation in mainnet.
 #
 # Default: <none>
 # Required: false

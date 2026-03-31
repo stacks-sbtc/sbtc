@@ -146,16 +146,17 @@ pub struct BitcoinConfig {
     #[serde(deserialize_with = "duration_seconds_deserializer")]
     pub timeout: std::time::Duration,
 
-    /// An optional fallback fee rate in sats/vbyte to use when the initial
-    /// fee rate is too high to construct any transaction package. When set,
-    /// this value is used directly as the retry fee rate. When `None`, the
-    /// signer estimates a lower fee rate by targeting a longer confirmation
-    /// window.
-    pub fallback_fee: Option<NonZeroU64>,
+    /// A test-only optional fallback fee rate in sats/vbyte to use when the
+    /// initial fee rate is too high to construct any transaction package.
+    /// When set, this value is used directly as the retry fee rate.
+    /// When `None`, the signer estimates a lower fee rate by targeting a longer
+    /// confirmation window.
+    /// This is for tests only, it fails validation in mainnet.
+    pub fallback_fee: Option<f64>,
 }
 
 impl Validatable for BitcoinConfig {
-    fn validate(&self, _: &Settings) -> Result<(), ConfigError> {
+    fn validate(&self, cfg: &Settings) -> Result<(), ConfigError> {
         // At least one endpoint must be provided.
         if self.rpc_endpoints.is_empty() {
             return Err(ConfigError::Message(
@@ -194,6 +195,20 @@ impl Validatable for BitcoinConfig {
                 "[bitcoin.chain_tip_polling_interval] Maximum polling interval exceeded"
                     .to_string(),
             ));
+        }
+
+        if let Some(fee) = self.fallback_fee {
+            if cfg.signer.network.is_mainnet() {
+                return Err(ConfigError::Message(
+                    "[bitcoin.fallback_fee] Cannot set in mainnet".to_string(),
+                ));
+            }
+
+            if fee <= 0.0 || !fee.is_normal() {
+                return Err(ConfigError::Message(
+                    "[bitcoin.fallback_fee] Must be a positive normal number".to_string(),
+                ));
+            }
         }
 
         Ok(())
@@ -650,6 +665,7 @@ mod tests {
     use std::time::Duration;
 
     use assert_matches::assert_matches;
+    use more_asserts::assert_lt;
     use tempfile;
     use toml_edit::DocumentMut;
 
@@ -1018,12 +1034,54 @@ mod tests {
         let settings = Settings::new_from_default_config().unwrap();
         assert_eq!(settings.bitcoin.fallback_fee, None);
 
-        set_var("SIGNER_BITCOIN__FALLBACK_FEE", "42");
+        set_var("SIGNER_BITCOIN__FALLBACK_FEE", "42.123");
         let settings = Settings::new_from_default_config().unwrap();
-        assert_eq!(
-            settings.bitcoin.fallback_fee,
-            Some(NonZeroU64::new(42).unwrap())
-        );
+
+        let fallback_fee = settings.bitcoin.fallback_fee.expect("missing fallback_fee");
+        assert_lt!((fallback_fee - 42.123).abs(), 1e-10);
+    }
+
+    #[test_case::test_case("mainnet", "", true; "mainnet, empty")]
+    #[test_case::test_case("mainnet", "42", false; "mainnet, 42")]
+    #[test_case::test_case("testnet", "", true; "testnet, empty")]
+    #[test_case::test_case("testnet", "42", true; "testnet, 42")]
+    #[test_case::test_case("regtest", "", true; "regtest, empty")]
+    #[test_case::test_case("regtest", "42", true; "regtest, 42")]
+    fn bitcoin_fallback_fee_in_network(network: &str, fallback_fee: &str, is_valid: bool) {
+        clear_env();
+
+        set_var("SIGNER_SIGNER__NETWORK", network);
+        if !fallback_fee.is_empty() {
+            set_var("SIGNER_BITCOIN__FALLBACK_FEE", fallback_fee);
+        }
+
+        // For non regtest we need at least one seed peer
+        set_var("SIGNER_SIGNER__P2P__SEEDS", "tcp://seed-1:4122");
+        // The deployer address must match the network type
+        let address = StacksAddress::burn_address(network == "mainnet");
+        set_var("SIGNER_SIGNER__DEPLOYER", address.to_string());
+
+        let settings = Settings::new_from_default_config();
+
+        if is_valid {
+            settings.expect("should be valid");
+        } else {
+            assert_matches!(settings, Err(ConfigError::Message(m)) if m.contains("fallback_fee") && m.contains("mainnet"));
+        }
+    }
+
+    #[test_case::test_case("-0.1"; "-0.1")]
+    #[test_case::test_case("nan"; "nan")]
+    #[test_case::test_case("inf"; "inf")]
+    #[test_case::test_case("-inf"; "-inf")]
+    #[test_case::test_case("0"; "0")]
+    fn bitcoin_fallback_fee_bad_number(fee: &str) {
+        clear_env();
+
+        set_var("SIGNER_BITCOIN__FALLBACK_FEE", fee);
+        let settings = Settings::new_from_default_config();
+
+        assert_matches!(settings, Err(ConfigError::Message(m)) if m.contains("fallback_fee") && m.contains("number"));
     }
 
     #[test]
