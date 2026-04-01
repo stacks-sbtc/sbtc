@@ -174,14 +174,8 @@ pub trait Weighted {
         None
     }
 
-    /// The maximum number of bytes this item's request identifier would occupy
-    /// in the serialized `BitcoinPreSignRequest`.
-    ///
-    /// Deposits always require a signature and contribute a
-    /// `bitcoin::OutPoint`, while withdrawals never require a signature and
-    /// contribute a `QualifiedRequestId`. The returned size use the worst-case
-    /// protobuf encoding where all fields are non-default and varints use their
-    /// maximum length.
+    /// The number of bytes this item's request identifier would occupy in
+    /// the serialized `BitcoinPreSignRequest`.
     fn presign_weight(&self) -> usize;
 }
 
@@ -214,7 +208,7 @@ struct PackagerConfig {
     /// oversized OP_RETURN outputs.
     max_op_return_size: usize,
     /// Maximum total serialized size of request identifiers across all
-    /// bags, in bytes.
+    /// bags, in bytes if serialized in a `BitcoinPreSignRequest`.
     ///
     /// This prevents the `BitcoinPreSignRequest` from exceeding the
     /// gossipsub wire message size limit.
@@ -606,22 +600,22 @@ mod tests {
     use crate::storage::model::TaprootScriptHash;
     use crate::testing::dummy::Unit;
 
-    /// Maximum bytes a deposit `OutPoint` identifier contributes to the serialized
+    /// Maximum bytes an `OutPoint` identifier adds to the serialized
     /// [`BitcoinPreSignRequest`](crate::message::BitcoinPreSignRequest).
     ///
-    /// This is the worst-case protobuf encoding size of an `OutPoint` (with all
-    /// fields non-default) when embedded in a `TxRequestIds.deposits` repeated
-    /// field. The value accounts for the field tag, length varint, and the full
-    /// encoding of `BitcoinTxid(Uint256)` + `uint32 vout`.
+    /// This is the worst-case protobuf encoding size of an `OutPoint` when
+    ///  embedded in a `TxRequestIds.deposits` field. The value accounts
+    /// for the field tag, length varint, and the full encoding of
+    /// `BitcoinTxid(Uint256)` + `uint32 vout`.
     const DEPOSIT_PRESIGN_WEIGHT: usize = 48;
 
-    /// Maximum bytes a withdrawal `QualifiedRequestId` identifier contributes to
+    /// Maximum bytes a withdrawal `QualifiedRequestId` identifier adds to
     /// the serialized
     /// [`BitcoinPreSignRequest`](crate::message::BitcoinPreSignRequest).
     ///
-    /// This is the worst-case protobuf encoding size of a `QualifiedRequestId`
-    /// (with all fields non-default, maximum varint lengths) when embedded in a
-    /// `TxRequestIds.withdrawals` repeated field.
+    /// This is the worst-case protobuf encoding size of a
+    /// `QualifiedRequestId` when embedded in a `TxRequestIds.withdrawals`
+    /// field.
     const WITHDRAWAL_PRESIGN_WEIGHT: usize = 93;
 
     impl<T> BestFitPackager<T>
@@ -780,7 +774,11 @@ mod tests {
         }
 
         fn presign_weight(&self) -> usize {
-            if self.needs_signature() { DEPOSIT_PRESIGN_WEIGHT } else { WITHDRAWAL_PRESIGN_WEIGHT }
+            if self.needs_signature() {
+                DEPOSIT_PRESIGN_WEIGHT
+            } else {
+                WITHDRAWAL_PRESIGN_WEIGHT
+            }
         }
     }
 
@@ -1537,11 +1535,12 @@ mod tests {
         // going through the `compute_optimal_packages` function, so that
         // that we can set the max_total_vsize to a large value to make
         // sure that we stop producing bags because of the pre-sign request
-        // size.
+        // size. We also want to inspect the total_presign_size and check
+        // it against reality.
         let mut config = PackagerConfig::new(max_votes_against, max_needs_signature);
         // We want the max_total_vsize to be as large as possible to make
-        // sure that we stop producing bags because of the pre-sign request
-        // size.
+        // sure that we only stop adding items because of the pre-sign
+        // request size.
         config.max_total_vsize = u64::MAX;
         let mut packager = BestFitPackager::new(config);
 
@@ -1549,6 +1548,7 @@ mod tests {
             packager.insert_item(item);
         }
 
+        let estimated_size = packager.total_presign_size;
         let bags = packager.finalize();
 
         // Build a BitcoinPreSignRequest from all bags, mimicking the code in
@@ -1567,6 +1567,9 @@ mod tests {
             })
             .collect();
 
+        // The test author has only ever seen the number of bags to be
+        // between 18 and 20.
+        let num_bags = request_package.len();
         // The packager tries to respect the pre-sign request serialization
         // limits only in the case where 0.0 is the fee_rate and with no
         // last fees, so we construct on here when doing the check.
@@ -1577,12 +1580,30 @@ mod tests {
         };
 
         let proto_presign = crate::proto::BitcoinPreSignRequest::from(presign.clone());
-        more_asserts::assert_le!(proto_presign.encoded_len(), MAX_PRESIGN_REQUEST_SIZE);
+        let actual_size = proto_presign.encoded_len();
+
+        // Both the actual size and the estimated size mst be less than the
+        // MAX_PRESIGN_REQUEST_SIZE.
+        more_asserts::assert_le!(actual_size, MAX_PRESIGN_REQUEST_SIZE);
+        more_asserts::assert_le!(estimated_size, MAX_PRESIGN_REQUEST_SIZE);
+
+        // The estimated size can overestimate the actual size by one byte
+        // per transaction, or "bag", in the transaction package if each
+        // transaction services two or fewer requests. This happens because
+        // the length varint uses two bytes when the encoded length is
+        // greater than 128, which happens if there are 3 or more requests
+        // in a bag. So for this test, it is very likely the case that the
+        // estimate is exactly equal to the actual size.
+        more_asserts::assert_le!(estimated_size - num_bags, actual_size);
+        more_asserts::assert_le!(actual_size, estimated_size);
 
         // Now we add in the fee rate and some last fees to make the final
         // check more realistic.
         presign.fee_rate = 25.1234567;
-        presign.last_fees = Some(Fees { total: u64::MAX, rate: 25.1234567 });
+        presign.last_fees = Some(Fees {
+            total: u64::MAX,
+            rate: 25.1234567,
+        });
 
         // Wrap the presign request in a Signed<SignerMessage>, since the
         // signed message is what gets encoded and broadcast.
@@ -1601,6 +1622,8 @@ mod tests {
             signer_public_key: public_key,
         };
 
+        // Now let's make sure that the encoded size is less than the
+        // protocol limit.
         let encoded_size = crate::proto::Signed::from(signed).encoded_len();
 
         more_asserts::assert_le!(encoded_size, GOSSIPSUB_MAX_TRANSMIT_SIZE);
