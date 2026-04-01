@@ -16,13 +16,12 @@ members = [
 
 [workspace.dependencies]
 # Local Dependencies
-blocklist-api = { path = "./.generated-sources/blocklist-api", default-features = false, features = ["rustls"] }
+blocklist-api = { path = "./.generated-sources/blocklist-api" }
 blocklist-client = { path = "./blocklist-client" }
-emily-client = { path = "./.generated-sources/emily/client/rust/public", default-features = false, features = ["rustls"] }
+emily-client = { path = "./.generated-sources/emily/client/rust/public" }
 emily-handler = { path = "./emily/handler" }
-private-emily-client = { path = "./.generated-sources/emily/client/rust/private", default-features = false, features = ["rustls"] }
 sbtc = { path = "./sbtc" }
-testing-emily-client = { path = "./.generated-sources/emily/client/rust/testing", default-features = false, features = ["rustls"] }
+testing-emily-client = { path = "./.generated-sources/emily/client/rust/testing" }
 wsts = { path = "./wsts" }
 
 # Stacks-Core Dependencies
@@ -94,7 +93,6 @@ url = { version = "2.5.4", default-features = false }
 utoipa = { version = "4.2.3", default-features = false }
 warp = { version = "0.3.7", default-features = false }
 warp_lambda = { version = "0.1.4", default-features = false }
-yamux = { version = "0.13.10", default-features = false }
 
 # Crates used only for testing
 aws-smithy-http-client = { version = "1.1.12", default-features = false, features = ["default-client", "rustls-ring"] }

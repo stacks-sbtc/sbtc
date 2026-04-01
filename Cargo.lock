@@ -6244,7 +6244,6 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "wsts",
- "yamux 0.13.10",
 ]
 
 [[package]]

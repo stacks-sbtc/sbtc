@@ -385,10 +385,9 @@ user-login = "kennykerr"
 user-name = "Kenny Kerr"
 
 [[publisher.wit-bindgen]]
-version = "0.43.0"
-when = "2025-06-24"
-user-id = 73222
-user-login = "wasmtime-publish"
+version = "0.46.0"
+when = "2025-09-10"
+trusted-publisher = "github:bytecodealliance/wit-bindgen"
 
 [[audits.bytecodealliance.wildcard-audits.bumpalo]]
 who = "Nick Fitzgerald <fitzgen@gmail.com>"
@@ -410,14 +409,10 @@ This is a Bytecode Alliance authored crate.
 [[audits.bytecodealliance.wildcard-audits.wit-bindgen]]
 who = "Alex Crichton <alex@alexcrichton.com>"
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
-start = "2023-01-01"
-end = "2026-06-03"
-notes = """
-The Bytecode Alliance uses the `wasmtime-publish` crates.io account to automate
-publication of this crate from CI. This repository requires all PRs are reviewed
-by a Bytecode Alliance maintainer and it owned by the Bytecode Alliance itself.
-"""
+trusted-publisher = "github:bytecodealliance/wit-bindgen"
+start = "2025-08-13"
+end = "2027-01-08"
+notes = "The Bytecode Alliance is the author of this crate"
 
 [[audits.bytecodealliance.audits.arrayref]]
 who = "Nick Fitzgerald <fitzgen@gmail.com>"
@@ -910,24 +905,6 @@ who = "Pat Hickey <phickey@fastly.com>"
 criteria = "safe-to-deploy"
 version = "0.3.0"
 
-[[audits.bytecodealliance.audits.wit-bindgen]]
-who = "Alex Crichton <alex@alexcrichton.com>"
-criteria = "safe-to-deploy"
-delta = "0.43.0 -> 0.45.0"
-notes = "The Bytecode Alliance is the author of this crate"
-
-[[audits.bytecodealliance.audits.wit-bindgen]]
-who = "Alex Crichton <alex@alexcrichton.com>"
-criteria = "safe-to-deploy"
-delta = "0.45.0 -> 0.45.1"
-notes = "The Bytecode Alliance is the author of this crate"
-
-[[audits.bytecodealliance.audits.wit-bindgen]]
-who = "Alex Crichton <alex@alexcrichton.com>"
-criteria = "safe-to-deploy"
-delta = "0.45.1 -> 0.46.0"
-notes = "The Bytecode Alliance is the author of this crate"
-
 [[audits.bytecodealliance.audits.xattr]]
 who = "Andrew Brown <andrew.brown@intel.com>"
 criteria = "safe-to-deploy"
@@ -1339,8 +1316,8 @@ who = "Lukasz Anforowicz <lukasza@chromium.org>"
 criteria = "safe-to-deploy"
 version = "1.0.35"
 notes = """
-Grepped for \"unsafe\", \"crypt\", \"cipher\", \"fs\", \"net\" - there were no hits
-(except for benign \"net\" hit in tests and \"fs\" hit in README.md)
+Grepped for "unsafe", "crypt", "cipher", "fs", "net" - there were no hits
+(except for benign "net" hit in tests and "fs" hit in README.md)
 """
 aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
 
@@ -1395,7 +1372,7 @@ and there were no hits except for:
 * Using `unsafe` in a string:
 
     ```
-    src/constfn.rs:            \"unsafe\" => Qualifiers::Unsafe,
+    src/constfn.rs:            "unsafe" => Qualifiers::Unsafe,
     ```
 
 * Using `std::fs` in `build/build.rs` to write `${OUT_DIR}/version.expr`
@@ -1557,7 +1534,7 @@ aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_p
 who = "Lukasz Anforowicz <lukasza@chromium.org>"
 criteria = "safe-to-deploy"
 version = "1.0.197"
-notes = "Grepped for \"unsafe\", \"crypt\", \"cipher\", \"fs\", \"net\" - there were no hits"
+notes = 'Grepped for "unsafe", "crypt", "cipher", "fs", "net" - there were no hits'
 aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
 
 [[audits.google.audits.serde_derive]]
@@ -1576,7 +1553,7 @@ aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_p
 who = "Lukasz Anforowicz <lukasza@chromium.org>"
 criteria = "safe-to-deploy"
 delta = "1.0.202 -> 1.0.203"
-notes = "Grepped for \"unsafe\", \"crypt\", \"cipher\", \"fs\", \"net\" - there were no hits"
+notes = 'Grepped for "unsafe", "crypt", "cipher", "fs", "net" - there were no hits'
 aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
 
 [[audits.google.audits.serde_derive]]
@@ -3090,7 +3067,7 @@ aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-ch
 who = "Makoto Kato <m_kato@ga2.so-net.ne.jp>"
 criteria = "safe-to-deploy"
 version = "0.1.2"
-notes = "This crate is zero-copy version of \"From\". This has no unsafe code and uses no ambient capabilities."
+notes = 'This crate is zero-copy version of "From". This has no unsafe code and uses no ambient capabilities.'
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.zerofrom]]

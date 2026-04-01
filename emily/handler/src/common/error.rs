@@ -13,7 +13,6 @@ use aws_sdk_dynamodb::{
         query::QueryError, scan::ScanError, update_item::UpdateItemError,
     },
 };
-use reqwest::StatusCode as ReqwestStatusCode;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use warp::http::StatusCode;
@@ -94,7 +93,7 @@ pub enum Error {
     /// The request was unacceptable. This may refer to a missing or improperly formatted parameter
     /// or request body property, or non-valid JSON
     #[error("HTTP request failed with status code {0}: {1}")]
-    HttpRequest(ReqwestStatusCode, String),
+    HttpRequest(StatusCode, String),
 
     /// Network error
     #[error("Network error: {0}")]
@@ -269,9 +268,7 @@ impl Error {
     /// Provides the status code that corresponds to the error.
     pub fn status_code(&self) -> StatusCode {
         match self {
-            Error::HttpRequest(code, _) => {
-                StatusCode::from_u16(code.as_u16()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
-            }
+            Error::HttpRequest(code, _) => *code,
             Error::Network(_) => StatusCode::BAD_GATEWAY,
             Error::Forbidden => StatusCode::FORBIDDEN,
             Error::Unauthorized => StatusCode::UNAUTHORIZED,
@@ -354,7 +351,7 @@ impl Error {
 /// Implement from for API Errors.
 impl From<ValidationError> for Error {
     fn from(err: ValidationError) -> Self {
-        Error::HttpRequest(ReqwestStatusCode::BAD_REQUEST, err.to_string())
+        Error::HttpRequest(StatusCode::BAD_REQUEST, err.to_string())
     }
 }
 
