@@ -103,9 +103,13 @@ const OP_RETURN_HEADER_SIZE: usize = 3;
 /// The maximum total size of an OP_RETURN output
 const OP_RETURN_MAX_SIZE: usize = 80;
 
-/// The overhead of an outpoint or qualified request ID when encoded in a
-/// presign request. This overhead is due to 1 byte for the field tag, plus
-/// 1 byte for the length varint.
+/// Per-item protobuf overhead when an `OutPoint` or `QualifiedRequestId`
+/// is embedded as an element of a `repeated` field inside `TxRequestIds`.
+///
+/// Each element in a protobuf `repeated` message field incurs a 1-byte
+/// field tag and a length-delimiting varint. Both `OutPoint` and
+/// `QualifiedRequestId` encode to fewer than 128 bytes, so the length
+/// varint is always 1 byte, giving 2 bytes of overhead total.
 pub const PROTOBUF_ENCODED_SIZE_OVERHEAD: usize = 2;
 
 /// The available size for encoded withdrawal IDs in OP_RETURN

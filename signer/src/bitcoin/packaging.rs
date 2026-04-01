@@ -14,9 +14,10 @@ use super::utxo::OP_RETURN_AVAILABLE_SIZE;
 /// `BitcoinPreSignRequest.request_package` repeated field.
 ///
 /// Each `TxRequestIds` embedded in the `request_package` repeated field
-/// incurs a field-tag byte and a length-delimiting varint. For small bags
-/// (inner size < 128 bytes) this is 2 bytes; for larger bags the length
-/// varint grows to 2 bytes, giving 3 bytes total. We use the worst case.
+/// incurs a 1-byte field tag and a length-delimiting varint. For small
+/// bags (encoded inner size < 128 bytes) the length varint is 1 byte,
+/// giving 2 bytes total. For larger bags (≥ 128 bytes) the length varint
+/// grows to 2 bytes, giving 3 bytes total. We use the worst case.
 const BAG_OVERHEAD: usize = 3;
 
 /// The protobuf overhead in bytes of wrapping a `BitcoinPreSignRequest`
@@ -513,16 +514,15 @@ impl<T: Weighted> BestFitPackager<T> {
 
     /// Try to insert an item into the best-fit bag, or create a new one.
     ///
-    /// Items that exceed individual limits or would cause the total vsize to
-    /// exceed limits are silently ignored.
+    /// Items that exceed individual limits or would cause the total vsize
+    /// or encoded size to exceed the limits are silently ignored.
     ///
     /// ## Parameters
     /// - `item`: Item to insert
     ///
     /// ## Notes
-    /// - This method silently ignores items that exceed individual either
-    ///   individual or aggregate limits (i.e. votes-against or total package
-    ///   vsize).
+    /// - This method silently ignores items that exceed either individual
+    ///   or aggregate limits.
     fn insert_item(&mut self, item: T) {
         let votes_against = item.votes().count_ones();
         let total_package_vsize = self.total_vsize.saturating_add(item.vsize());
@@ -1307,7 +1307,10 @@ mod tests {
 
     /// Tests that the presign size limit is enforced by the packager.
     /// Items are silently ignored when adding them would exceed the
-    /// `MAX_PRESIGN_REQUEST_SIZE` limit.
+    /// [`MAX_PRESIGN_REQUEST_SIZE`] limit. The first item inserted also
+    /// creates a bag, which charges [`BAG_OVERHEAD`], so the effective
+    /// capacity for item weights is `MAX_PRESIGN_REQUEST_SIZE -
+    /// BAG_OVERHEAD`.
     #[test]
     fn test_insert_item_respects_presign_size_limit() {
         let config = PackagerConfig::new(5, 10000);
@@ -1335,10 +1338,11 @@ mod tests {
         assert_eq!(packager.total_presign_size, before);
     }
 
-    /// Verify that [`DEPOSIT_PRESIGN_WEIGHT`] matches the actual
-    /// worst-case protobuf encoding size of a `bitcoin::OutPoint` when
-    /// added to a `TxRequestIds.deposits` repeated field inside a
-    /// `BitcoinPreSignRequest`.
+    /// Verify that [`DepositRequest::presign_weight`] equals the standalone
+    /// protobuf `encoded_len()` of the `OutPoint` plus the
+    /// [`PROTOBUF_ENCODED_SIZE_OVERHEAD`] (field tag + length varint)
+    /// incurred when the item is embedded in a `TxRequestIds.deposits`
+    /// repeated field.
     #[test]
     fn deposit_presign_weight_matches_proto_encoding() {
         let mut rng = get_rng();
@@ -1365,10 +1369,11 @@ mod tests {
         }
     }
 
-    /// Verify that [`WITHDRAWAL_PRESIGN_WEIGHT`] matches the actual
-    /// worst-case protobuf encoding size of a `QualifiedRequestId` when
-    /// added to a `TxRequestIds.withdrawals` repeated field inside a
-    /// `BitcoinPreSignRequest`.
+    /// Verify that [`WithdrawalRequest::presign_weight`] equals the
+    /// standalone protobuf `encoded_len()` of the `QualifiedRequestId`
+    /// plus the [`PROTOBUF_ENCODED_SIZE_OVERHEAD`] (field tag + length
+    /// varint) incurred when the item is embedded in a
+    /// `TxRequestIds.withdrawals` repeated field.
     #[test]
     fn withdrawal_presign_weight_matches_proto_encoding() {
         let mut rng = get_rng();
@@ -1472,11 +1477,15 @@ mod tests {
         more_asserts::assert_ge!(SIGNED_MESSAGE_OVERHEAD, large_overhead);
     }
 
-    /// This test verifies that `compute_optimal_packages` produces
-    /// packages whose serialized `Signed<SignerMessage>` encoding fits
-    /// within [`GOSSIPSUB_MAX_TRANSMIT_SIZE`]. It does so by generating a
-    /// large number of deposit and withdrawal requests and then packaging
-    /// them using `compute_optimal_packages`.
+    /// End-to-end test that the BestFitPackager produces packages whose
+    /// serialized `Signed<SignerMessage>` encoding fits within
+    /// [`GOSSIPSUB_MAX_TRANSMIT_SIZE`].
+    ///
+    /// In this test we: generate many random deposit and withdrawal
+    /// requests, package them with [`BestFitPackager`], convert each bag
+    /// to [`TxRequestIds`], build a [`BitcoinPreSignRequest`], wrap it in
+    /// a `Signed<SignerMessage>`, and assert the final encoded size is
+    /// within limits.
     #[test]
     fn presign_request_fits_in_gossipsub_message() {
         let mut rng = get_rng();
@@ -1524,9 +1533,23 @@ mod tests {
         let max_votes_against = 3;
         let max_needs_signature = crate::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
 
-        // One thing that is interesting is that this will return 18-20
-        // bags, usually running up against the network limits.
-        let bags = compute_optimal_packages(items, max_votes_against, max_needs_signature);
+        // Time to package the above items. We do so manually, instead of
+        // going through the `compute_optimal_packages` function, so that
+        // that we can set the max_total_vsize to a large value to make
+        // sure that we stop producing bags because of the pre-sign request
+        // size.
+        let mut config = PackagerConfig::new(max_votes_against, max_needs_signature);
+        // We want the max_total_vsize to be as large as possible to make
+        // sure that we stop producing bags because of the pre-sign request
+        // size.
+        config.max_total_vsize = u64::MAX;
+        let mut packager = BestFitPackager::new(config);
+
+        for item in items {
+            packager.insert_item(item);
+        }
+
+        let bags = packager.finalize();
 
         // Build a BitcoinPreSignRequest from all bags, mimicking the code in
         // SbtcRequests::construct_transactions.
@@ -1544,7 +1567,10 @@ mod tests {
             })
             .collect();
 
-        let presign = BitcoinPreSignRequest {
+        // The packager tries to respect the pre-sign request serialization
+        // limits only in the case where 0.0 is the fee_rate and with no
+        // last fees, so we construct on here when doing the check.
+        let mut presign = BitcoinPreSignRequest {
             request_package,
             fee_rate: 0.0,
             last_fees: None,
@@ -1553,7 +1579,13 @@ mod tests {
         let proto_presign = crate::proto::BitcoinPreSignRequest::from(presign.clone());
         more_asserts::assert_le!(proto_presign.encoded_len(), MAX_PRESIGN_REQUEST_SIZE);
 
-        // Wrap in Signed<SignerMessage>, exactly as the coordinator does.
+        // Now we add in the fee rate and some last fees to make the final
+        // check more realistic.
+        presign.fee_rate = 25.1234567;
+        presign.last_fees = Some(Fees { total: u64::MAX, rate: 25.1234567 });
+
+        // Wrap the presign request in a Signed<SignerMessage>, since the
+        // signed message is what gets encoded and broadcast.
         let private_key = PrivateKey::new(&mut rng);
         let digest: [u8; 32] = [0xff; 32];
         let signature = private_key.sign_ecdsa(&secp256k1::Message::from_digest(digest));
@@ -1569,128 +1601,8 @@ mod tests {
             signer_public_key: public_key,
         };
 
-        // The actual encoded limit is usually noticably less than the
-        // actual limits.
-        let encoded_size = dbg!(crate::proto::Signed::from(signed).encoded_len());
+        let encoded_size = crate::proto::Signed::from(signed).encoded_len();
 
         more_asserts::assert_le!(encoded_size, GOSSIPSUB_MAX_TRANSMIT_SIZE);
-    }
-
-    /// Verify that the manual `presign_weight()` implementations on
-    /// [`DepositRequest`] and [`WithdrawalRequest`] (which return the
-    /// standalone `encoded_len()` of the proto message) are strictly less
-    /// than the actual incremental cost of adding that item to a
-    /// `BitcoinPreSignRequest`.
-    ///
-    /// When a proto message is embedded in a `repeated` field, each element
-    /// incurs an extra field-tag byte and a length-delimiting varint beyond
-    /// its own `encoded_len()`. The constants [`DEPOSIT_PRESIGN_WEIGHT`]
-    /// and [`WITHDRAWAL_PRESIGN_WEIGHT`] account for this overhead, but
-    /// the manual `presign_weight()` impls do not. This test quantifies
-    /// that gap and asserts that the constants always cover it.
-    #[test]
-    fn presign_weight_underestimates_actual_proto_cost() {
-        let mut rng = get_rng();
-        let secret_key = secp256k1::SecretKey::new(&mut rng);
-        let signers_public_key = secret_key.x_only_public_key(secp256k1::SECP256K1).0;
-
-        // We measure the incremental cost by adding a single item to a
-        // fresh `BitcoinPreSignRequest` with one empty `TxRequestIds`.
-        let fresh_psr = || crate::proto::BitcoinPreSignRequest {
-            request_package: vec![crate::proto::TxRequestIds::default()],
-            fee_rate: 25.0,
-            last_fees: None,
-        };
-
-        let mut max_deposit_gap: usize = 0;
-        let mut max_withdrawal_gap: usize = 0;
-
-        for _ in 0..1000 {
-            // --- Deposits ---
-            let deposit = DepositRequest {
-                outpoint: Unit.fake_with_rng::<bitcoin::OutPoint, _>(&mut rng),
-                max_fee: 10_000,
-                signer_bitmap: BitArray::ZERO,
-                amount: 100_000,
-                deposit_script: bitcoin::ScriptBuf::new(),
-                reclaim_script_hash: TaprootScriptHash::zeros(),
-                signers_public_key,
-            };
-
-            let manual_deposit_weight = deposit.presign_weight();
-
-            let mut psr = fresh_psr();
-            let before = psr.encoded_len();
-            psr.request_package[0]
-                .deposits
-                .push(crate::proto::OutPoint::from(deposit.outpoint));
-            let actual_deposit_cost = psr.encoded_len() - before;
-
-            // The manual weight must never exceed the actual cost.
-            more_asserts::assert_le!(
-                manual_deposit_weight,
-                actual_deposit_cost,
-                "manual deposit presign_weight ({manual_deposit_weight}) exceeds \
-                 actual incremental cost ({actual_deposit_cost})"
-            );
-            // And the constant must always cover the actual cost.
-            more_asserts::assert_le!(
-                actual_deposit_cost,
-                DEPOSIT_PRESIGN_WEIGHT,
-                "actual deposit cost ({actual_deposit_cost}) exceeds \
-                 DEPOSIT_PRESIGN_WEIGHT ({DEPOSIT_PRESIGN_WEIGHT})"
-            );
-
-            let gap = actual_deposit_cost - manual_deposit_weight;
-            max_deposit_gap = max_deposit_gap.max(gap);
-
-            // --- Withdrawals ---
-            let withdrawal = WithdrawalRequest {
-                request_id: rng.gen_range(0..=u64::MAX),
-                txid: fake::Faker.fake_with_rng(&mut rng),
-                block_hash: fake::Faker.fake_with_rng(&mut rng),
-                amount: 50_000,
-                max_fee: 10_000,
-                script_pubkey: fake::Faker.fake_with_rng::<ScriptPubKey, _>(&mut rng),
-                signer_bitmap: BitArray::ZERO,
-            };
-
-            let manual_withdrawal_weight = withdrawal.presign_weight();
-
-            let mut psr = fresh_psr();
-            let before = psr.encoded_len();
-            psr.request_package[0]
-                .withdrawals
-                .push(crate::proto::QualifiedRequestId::from(
-                    withdrawal.qualified_id(),
-                ));
-            let actual_withdrawal_cost = psr.encoded_len() - before;
-
-            more_asserts::assert_le!(
-                manual_withdrawal_weight,
-                actual_withdrawal_cost,
-                "manual withdrawal presign_weight ({manual_withdrawal_weight}) exceeds \
-                 actual incremental cost ({actual_withdrawal_cost})"
-            );
-            more_asserts::assert_le!(
-                actual_withdrawal_cost,
-                WITHDRAWAL_PRESIGN_WEIGHT,
-                "actual withdrawal cost ({actual_withdrawal_cost}) exceeds \
-                 WITHDRAWAL_PRESIGN_WEIGHT ({WITHDRAWAL_PRESIGN_WEIGHT})"
-            );
-
-            let gap = actual_withdrawal_cost - manual_withdrawal_weight;
-            max_withdrawal_gap = max_withdrawal_gap.max(gap);
-        }
-
-        // The per-item gap is zero because
-        // `PROTOBUF_ENCODED_SIZE_OVERHEAD` already accounts for the
-        // repeated-field tag + length varint when an item is embedded in
-        // a `TxRequestIds`. The remaining unaccounted overhead is the
-        // per-bag cost of embedding each `TxRequestIds` in the
-        // `BitcoinPreSignRequest.request_package` repeated field, which
-        // is handled by `BAG_OVERHEAD`.
-        assert_eq!(max_deposit_gap, 0);
-        assert_eq!(max_withdrawal_gap, 0);
     }
 }
