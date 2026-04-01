@@ -103,6 +103,11 @@ const OP_RETURN_HEADER_SIZE: usize = 3;
 /// The maximum total size of an OP_RETURN output
 const OP_RETURN_MAX_SIZE: usize = 80;
 
+/// The overhead of an outpoint or qualified request ID when encoded in a
+/// presign request. This overhead is due to 1 byte for the field tag, plus
+/// 1 byte for the length varint.
+pub const PROTOBUF_ENCODED_SIZE_OVERHEAD: usize = 2;
+
 /// The available size for encoded withdrawal IDs in OP_RETURN
 pub(super) const OP_RETURN_AVAILABLE_SIZE: usize = OP_RETURN_MAX_SIZE - OP_RETURN_HEADER_SIZE;
 
@@ -539,7 +544,9 @@ impl Weighted for DepositRequest {
             .to_vbytes_ceil()
     }
     fn presign_weight(&self) -> usize {
-        proto::OutPoint::from(self.outpoint).encoded_len()
+        proto::OutPoint::from(self.outpoint)
+            .encoded_len()
+            .saturating_add(PROTOBUF_ENCODED_SIZE_OVERHEAD)
     }
 }
 
@@ -613,7 +620,9 @@ impl Weighted for WithdrawalRequest {
         Some(self.request_id)
     }
     fn presign_weight(&self) -> usize {
-        proto::QualifiedRequestId::from(self.qualified_id()).encoded_len()
+        proto::QualifiedRequestId::from(self.qualified_id())
+            .encoded_len()
+            .saturating_add(PROTOBUF_ENCODED_SIZE_OVERHEAD)
     }
 }
 
