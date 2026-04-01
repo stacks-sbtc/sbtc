@@ -1,5 +1,7 @@
-# Defaults for musl cross-compilation from macOS (with brew install musl-cross).
-# This file is in .dockerignore so it does not affect Docker builds.
+# Defaults for musl cross-compilation from macOS. You can install the musl
+# toolchain with brew install FiloSottile/musl-cross/musl-cross --with-aarch64. 
+# This file is in .dockerignore so it does not affect
+# Docker builds.
 [target.aarch64-unknown-linux-musl]
 linker = "aarch64-linux-musl-gcc"
 
