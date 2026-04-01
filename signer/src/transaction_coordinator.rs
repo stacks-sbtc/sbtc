@@ -92,27 +92,19 @@ const REJECTION_REASON_CONFLICTING_NONCE_IN_MEMPOOL: &str = "ConflictingNonceInM
 /// If that happens, users will need to either pay more fees to RBF our sweep
 /// (for deposits reclaim) or wait for a new sweep from us. Note that this can
 /// happen regardless of what fee we use to construct the sweep.
-///
-/// This const-computes min(WITHDRAWAL_EXPIRY_BUFFER, DEPOSIT_LOCKTIME_BLOCK_BUFFER).clamp(1, 1008)
 const FEE_RETRY_TARGET_BLOCKS: u16 = {
-    let expiry_buffer = if WITHDRAWAL_EXPIRY_BUFFER > u16::MAX as u64 {
-        u16::MAX
-    } else {
+    let taget_block = if WITHDRAWAL_EXPIRY_BUFFER < DEPOSIT_LOCKTIME_BLOCK_BUFFER as u64 {
+        // This is safe, as DEPOSIT_LOCKTIME_BLOCK_BUFFER is a u16
         WITHDRAWAL_EXPIRY_BUFFER as u16
-    };
-    let min = if DEPOSIT_LOCKTIME_BLOCK_BUFFER < expiry_buffer {
+    } else {
         DEPOSIT_LOCKTIME_BLOCK_BUFFER
-    } else {
-        expiry_buffer
     };
+
     // `estimatesmartfee` RPC expects the confirmation target to be within [1, 1008].
-    if min < 1 {
-        1
-    } else if min > 1008 {
-        1008
-    } else {
-        min
-    }
+    assert!(taget_block >= 1);
+    assert!(taget_block <= 1008);
+
+    taget_block
 };
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
