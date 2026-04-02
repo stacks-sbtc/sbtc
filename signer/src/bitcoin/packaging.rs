@@ -10,39 +10,41 @@ use crate::MAX_MEMPOOL_PACKAGE_TX_COUNT;
 use super::utxo::MAX_BASE_TX_VSIZE;
 use super::utxo::OP_RETURN_AVAILABLE_SIZE;
 
-/// Protobuf overhead per bag (per `TxRequestIds` element) in the
-/// `BitcoinPreSignRequest.request_package` repeated field.
+/// Protobuf overhead per `TxRequestIds` element in the
+/// `BitcoinPreSignRequest.request_package` field. Here bag refers to a
+/// TxRequestIds.
 ///
-/// Each `TxRequestIds` embedded in the `request_package` repeated field
-/// incurs a 1-byte field tag and a length-delimiting varint. The varint
-/// size depends on the encoded size of the inner `TxRequestIds` message:
-/// - less than 128 bytes → 1-byte varint → 2 bytes total
-/// - less than 16384 bytes → 2-byte varint → 3 bytes total
-/// - less than 2097152 bytes → 3-byte varint → 4 bytes total
+/// Each `TxRequestIds` embedded in the `request_package` field incurs a
+/// 1-byte field tag and a length varint. The varint size depends on the
+/// encoded size of the inner `TxRequestIds` message:
 ///
-/// A single bag can exceed 16384 bytes because withdrawals are not limited
-/// by `max_needs_signature`; their only per-bag limit is the 77-byte
-/// OP_RETURN bitmap, which can hold 600 consecutive IDs. At 93 bytes
-/// presign weight each, that is ~55000 bytes of encoded `TxRequestIds`. We
-/// use the worst case of 4 bytes (1-byte tag + 3-byte varint).
+/// - a 1-byte varint when encoding less than 128 bytes
+/// - a 2-byte varint when encoding between 128 and 16383 bytes
+/// - a 3-byte varint when encoding between 16384 and 2097152 bytes
+///
+/// A single `TxRequestIds` can exceed 16383 bytes because withdrawals are
+/// mainly limited by the withdrawal ID OP_RETURN limit, which can hold 600
+/// consecutive IDs. At 93 bytes each, we can have a ~55000 byte
+/// `TxRequestIds`. So we use the worst case of 3-byte varint plus a 1-byte
+/// field tag.
 const BAG_OVERHEAD: usize = 4;
 
 /// The protobuf overhead in bytes of wrapping a `BitcoinPreSignRequest`
-/// inside a `Signed<SignerMessage>`.
+/// inside a `Signed<SignerMessage>` in libp2p gossipsub.
 ///
-/// The gossipsub `max_transmit_size` check applies to the encoded
-/// `Signed<SignerMessage>` bytes during publishing, and the full wire
-/// frame on receive. This overhead accounts for:
+/// Note that the gossipsub `max_transmit_size` check applies to the
+/// encoded `Signed<SignerMessage>` bytes during publishing, and the full
+/// wire frame on receive [1]. 
 ///
+/// This overhead accounts for:
 /// 1. The `fee_rate` and `last_fees` fields of the `BitcoinPreSignRequest`
 ///    message.
 /// 2. The protobuf fields added by the `Signed<SignerMessage>` wrappers,
 ///    which includes the ECDSA signature, signer public key, and bitcoin
 ///    chain tip block hash.
 /// 3. The protobuf fields added by libp2p-gossipsub. Each published
-///    message is wrapped in an `RPC { publish: [Message { … }] }` frame on
-///    the wire. The `Message` proto adds six fields around our payload
-///    [1]:
+///    message is wrapped in a Message protobuf. The `Message` proto adds
+///    five fields around our payload [2]:
 ///
 ///    ```proto
 ///    message Message {
@@ -54,29 +56,36 @@ const BAG_OVERHEAD: usize = 4;
 ///        optional bytes key = 6;
 ///    }
 ///    ```
-///    Fields populated in `build_raw_message` (the `Signing` variant) [2]:
+///
+///    These fields are populated in `build_raw_message` [3] in libp2p and
+///    have the following max sizes:
 ///    1. 75 bytes. The `from` field is a peer ID, which is a
 ///       Multihash<64>. It needs 73 bytes in Rust and maxes out at 75
 ///       bytes serialized.
-///    2. This is our Signed<SignerMessage> serialized message.
-///    3. 8 bytes. This is a u64 sequence number.
-///    4. 11 bytes. A topic string, and we use "sbtc-signer" as the topic.
-///    5. 73 bytes. The secp256k1 signature of the message, DER encoded.
-///    6. 33 bytes. The secp256k1 compressed public key of the signer.
+///    2. The `data` field contains our serialized `Signed<SignerMessage>`
+///       message.
+///    3. 8 bytes. The `seqno` field is a u64 number.
+///    4. 11 bytes. The `topic` field is our topic string, and we use
+///       "sbtc-signer" as the topic.
+///    5. 73 bytes. The `signature` field is the secp256k1 signature over
+///       the message, DER encoded.
+///    6. 33 bytes. The `key` field is the secp256k1 compressed public key
+///       of the signer.
 ///
-/// [1]: <https://github.com/libp2p/rust-libp2p/blob/84153a559bdbcb92a48413dd2a31035800cb882d/protocols/gossipsub/src/generated/rpc.proto#L16-L23>
-/// [2]: <https://github.com/libp2p/rust-libp2p/blob/84153a559bdbcb92a48413dd2a31035800cb882d/protocols/gossipsub/src/behaviour.rs#L2810-L2821>
+/// [1]: <https://github.com/libp2p/rust-libp2p/blob/84153a559bdbcb92a48413dd2a31035800cb882d/misc/quick-protobuf-codec/src/lib.rs#L74-L89>
+/// [2]: <https://github.com/libp2p/rust-libp2p/blob/84153a559bdbcb92a48413dd2a31035800cb882d/protocols/gossipsub/src/generated/rpc.proto#L16-L23>
+/// [3]: <https://github.com/libp2p/rust-libp2p/blob/84153a559bdbcb92a48413dd2a31035800cb882d/protocols/gossipsub/src/behaviour.rs#L2810-L2821>
 ///
-/// The overhead varies slightly with the inner payload size because
-/// protobuf length varints grow with the encoded length. A
+/// Note that this overhead varies slightly with the inner payload size
+/// because protobuf length varints grow with the encoded length. A
 /// Signed<SignerMessage> with an empty `BitcoinPreSignRequest` measures
 /// 162 bytes of overhead; and measures 168 bytes of overhead with a
-/// near-maximum-size `BitcoinPreSignRequest`. The libp2p gossipsub code
-/// adds a maximum 200 bytes of overhead.
+/// near-maximum-size `BitcoinPreSignRequest`. And as we can see from
+/// above, the libp2p gossipsub code adds around 200 bytes of overhead.
 const SIGNED_MESSAGE_OVERHEAD: usize = 512;
 
 /// Maximum serialized size of a `BitcoinPreSignRequest` message, assuming
-/// 0 as the `fee_rate` and no `last_fees`.
+/// 0 as the `fee_rate` and None for `last_fees`.
 ///
 /// The gossipsub [`GOSSIPSUB_MAX_TRANSMIT_SIZE`] limits the total
 /// encoded `Signed<SignerMessage>` size. After subtracting the
