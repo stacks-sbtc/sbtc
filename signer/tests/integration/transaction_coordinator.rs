@@ -64,6 +64,7 @@ use signer::context::P2PEvent;
 use signer::context::RequestDeciderEvent;
 use signer::context::SignerEvent;
 use signer::context::SignerSignal;
+use signer::emily_client::EmilyInteract;
 use signer::message::Payload;
 use signer::network::MessageTransfer as _;
 use signer::stacks::api::SignerSetInfo;
@@ -72,7 +73,6 @@ use signer::stacks::api::StacksEpochStatus;
 use signer::stacks::api::StacksInteract;
 use signer::stacks::wallet::SignerWallet;
 use signer::storage::model::BitcoinBlockHeight;
-use signer::storage::model::KeyRotationEvent;
 use signer::storage::model::StacksBlockRef;
 use signer::storage::model::WithdrawalTxOutput;
 use signer::testing::btc::build_emily_request;
@@ -130,7 +130,6 @@ use url::Url;
 
 use signer::block_observer::BlockObserver;
 use signer::context::Context;
-use signer::emily_client::EmilyClient;
 use signer::error::Error;
 use signer::keys;
 use signer::keys::PublicKey;
@@ -174,8 +173,8 @@ use crate::setup::set_deposit_incomplete;
 use crate::utxo_construction::generate_withdrawal;
 use crate::utxo_construction::make_deposit_request;
 
-pub type IntegrationTestContext<Stacks> =
-    TestContext<PgStore, BitcoinCoreClient, Stacks, EmilyClient>;
+pub type IntegrationTestContext<Stacks, Emily> =
+    TestContext<PgStore, BitcoinCoreClient, Stacks, Emily>;
 
 async fn run_dkg<Rng, C>(
     ctx: &C,
@@ -275,11 +274,12 @@ where
 /// Wait for all signers to finish their coordinator duties and do this
 /// concurrently so that we don't miss anything (not sure if we need to do
 /// it concurrently).
-pub async fn wait_for_tenure_completed<S, K>(
-    signers: &[(IntegrationTestContext<S>, PgStore, K, SignerNetwork)],
+pub async fn wait_for_tenure_completed<S, K, E>(
+    signers: &[(IntegrationTestContext<S, E>, PgStore, K, SignerNetwork)],
     block_hash: BitcoinBlockHash,
 ) where
     S: StacksInteract + Clone + Send + Sync + 'static,
+    E: EmilyInteract + Clone + Send + Sync + 'static,
 {
     let wait_duration = Duration::from_secs(15);
 
@@ -4634,14 +4634,17 @@ async fn test_conservative_initial_sbtc_limits() {
     //   coordinator)
     // =========================================================================
     let signers_key = setup.signers.signer_keys().iter().cloned().collect();
+    let mut chain_tip: BitcoinBlockHash;
     loop {
-        let chain_tip: BitcoinBlockHash = faucet.generate_blocks(1).pop().unwrap().into();
+        chain_tip = faucet.generate_block().into();
         if given_key_is_coordinator(signers[0].2.public_key().into(), &chain_tip, &signers_key) {
             break;
         }
     }
-    // Giving enough time to process the transaction
-    Sleep::for_secs(3).await;
+    // The other signers should not be able to be the coordinator, and
+    // probably will not send tenure completed signals.
+    let first_signer = &signers[..=0];
+    wait_for_tenure_completed(&first_signer, chain_tip).await;
 
     // =========================================================================
     // Check we did NOT process the deposit
@@ -4656,8 +4659,9 @@ async fn test_conservative_initial_sbtc_limits() {
     // =========================================================================
     enable_emily_limits.store(true, Ordering::SeqCst);
 
-    faucet.generate_block();
-    Sleep::for_secs(3).await;
+    let chain_tip = faucet.generate_block().into();
+    wait_for_tenure_completed(&first_signer, chain_tip).await;
+
     // =========================================================================
     // Check we did process the deposit now
     // =========================================================================
