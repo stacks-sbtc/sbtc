@@ -1620,9 +1620,11 @@ mod tests {
 
         // In local runs the bag count has been between 18 and 20.
         let num_bags = dbg!(request_package.len());
-        // The packager tries to respect the pre-sign request serialization
-        // limits only when `fee_rate` is 0.0 and there are no last fees,
-        // so we construct one here for this check.
+        // The packager enforces the presign serialization size limits
+        // using only request identifiers; it does not include `fee_rate`
+        // or `last_fees` in that estimate. For this check we build a
+        // `BitcoinPreSignRequest` with `fee_rate` 0.0 and `last_fees` None
+        // so the encoded size matches what the packager assumed.
         let mut presign = BitcoinPreSignRequest {
             request_package,
             fee_rate: 0.0,
