@@ -1605,17 +1605,7 @@ mod tests {
         // Build a BitcoinPreSignRequest from all bags, mimicking the code in
         // SbtcRequests::construct_transactions.
         let request_package: Vec<TxRequestIds> = bags
-            .map(|bag| {
-                let mut deposits = Vec::new();
-                let mut withdrawals = Vec::new();
-                for item in bag {
-                    match item {
-                        RequestRef::Deposit(d) => deposits.push(d.outpoint),
-                        RequestRef::Withdrawal(w) => withdrawals.push(w.qualified_id()),
-                    }
-                }
-                TxRequestIds { deposits, withdrawals }
-            })
+            .map(|bag| TxRequestIds::from(&crate::bitcoin::utxo::Requests::new(bag)))
             .collect();
 
         // In local runs the bag count has been between 18 and 20.
