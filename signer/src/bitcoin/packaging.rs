@@ -46,7 +46,7 @@ const BAG_OVERHEAD: usize = 4;
 ///    <https://github.com/libp2p/rust-libp2p/blob/84153a559bdbcb92a48413dd2a31035800cb882d/protocols/gossipsub/src/generated/rpc.proto#L16-L23>
 ///    ```proto
 ///    message Message {
-///        // peer ID, which is a Multihash<64>, which needs 73 bytes in Rust
+///        // peer ID, which is a Multihash<64>, which needs 73 bytes in Rust and 75 bytes when encoded.
 ///        optional bytes from      = 1;
 ///        // our Signed<SignerMessage> serialized message
 ///        optional bytes data      = 2;
@@ -54,9 +54,9 @@ const BAG_OVERHEAD: usize = 4;
 ///        optional bytes seqno     = 3;
 ///        // topic string "sbtc-signer" (11 bytes)
 ///        required string topic    = 4;
-///        // libp2p message signature on secp256r1 (~72 bytes)
+///        // libp2p message signature on secp256k1 (~72 bytes)
 ///        optional bytes signature = 5;
-///        // public key on secp256r1, ~91 bytes
+///        // public key on secp256k1, which is either 33 bytes
 ///        optional bytes key       = 6;
 ///    }
 ///    ```
