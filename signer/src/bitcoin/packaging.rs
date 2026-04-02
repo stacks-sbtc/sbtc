@@ -84,11 +84,11 @@ const BAG_OVERHEAD: usize = 4;
 /// above, the libp2p gossipsub code adds around 200 bytes of overhead.
 const SIGNED_MESSAGE_OVERHEAD: usize = 1024;
 
-/// Maximum serialized size of a `BitcoinPreSignRequest` message, assuming
-/// 0 as the `fee_rate` and None for `last_fees`.
+/// Maximum serialized size of a `BitcoinPreSignRequest` message, not
+/// accounting for the `fee_rate` and `last_fees` fields.
 ///
-/// The gossipsub [`GOSSIPSUB_MAX_TRANSMIT_SIZE`] limits the total
-/// encoded `Signed<SignerMessage>` size. After subtracting the
+/// The gossipsub [`GOSSIPSUB_MAX_TRANSMIT_SIZE`] limits the total encoded
+/// `Signed<SignerMessage>` size. After subtracting the
 /// [`SIGNED_MESSAGE_OVERHEAD`] for the `Signed` and `SignerMessage`
 /// protobuf wrapper, this is the remaining budget for the
 /// `BitcoinPreSignRequest` payload.
