@@ -1,43 +1,58 @@
-FROM rust:1.94.0-slim-bookworm AS builder
+FROM rust:1.94.1-slim-trixie AS builder
 
-# Install dependencies.
-RUN apt-get update
-RUN apt-get install -y \
+# Install host build dependencies.
+# Build scripts run on the glibc host, so dlopen (needed by bindgen) works.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    clang \
     libclang-dev \
     git \
-    pkg-config \
-    libssl-dev \
     make \
     protobuf-compiler \
     npm \
-    default-jre
+    default-jre \
+    wget \
+    ca-certificates \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 RUN npm install -g pnpm@9
 
-# Download the sbtc code base so that the initial build is done with
-# an appropriate version of the code and the result can be cached.
-WORKDIR /code
-RUN git clone https://github.com/stacks-sbtc/sbtc.git
-WORKDIR /code/sbtc
+# Install the musl cross-toolchain from musl.cc.
+# This provides a complete musl-native gcc/g++/ar/libstdc++ for the target,
+# avoiding the glibc libstdc++ mismatch that occurs with Debian's g++.
+# Checksums pinned for supply-chain safety (GCC 11.2.1, 2021-11-23).
+RUN ARCH="$(uname -m)" && \
+    wget -qO /tmp/musl.tgz "https://musl.cc/${ARCH}-linux-musl-cross.tgz" && \
+    if [ "$ARCH" = "aarch64" ]; then \
+        echo "c909817856d6ceda86aa510894fa3527eac7989f0ef6e87b5721c58737a06c38  /tmp/musl.tgz" | sha256sum -c; \
+    else \
+        echo "c5d410d9f82a4f24c549fe5d24f988f85b2679b452413a9f7e5f7b956f2fe7ea  /tmp/musl.tgz" | sha256sum -c; \
+    fi && \
+    tar xz -C /opt -f /tmp/musl.tgz && rm /tmp/musl.tgz && \
+    ln -s "/opt/${ARCH}-linux-musl-cross/bin/${ARCH}-linux-musl-gcc" /usr/local/bin/ && \
+    ln -s "/opt/${ARCH}-linux-musl-cross/bin/${ARCH}-linux-musl-g++" /usr/local/bin/ && \
+    ln -s "/opt/${ARCH}-linux-musl-cross/bin/${ARCH}-linux-musl-ar" /usr/local/bin/
 
-ARG GIT_BRANCH=main
-RUN git checkout $GIT_BRANCH
-
-# Run an install that we'll cache the result of and then build the code
-# only install pnpm dependencies because we don't need the python venvs.
-RUN make install-pnpm && make build
+# Add the musl Rust target.
+RUN rustup target add "$(uname -m)-unknown-linux-musl"
 
 # Build the codebase from the local sources.
 # -------------------------------------------
-# We first remove the existing sources so that the there is no conflict
-# when building from the sources copied over.
-RUN rm -rf sbtc signer emily emily_sidecar emily_cron blocklist-client blocklist-openapi-gen .generated-sources protobufs
+WORKDIR /code/sbtc
 COPY . /code/sbtc/
-RUN make install-pnpm && make build
 
-# Build Emily Server.
-# --------------------
-ARG EMILY_SERVER_BUILD_ARGS=""
-RUN cargo build --bin emily-server $EMILY_SERVER_BUILD_ARGS
+# Build statically-linked musl binaries.
+# .cargo/config.toml is in .dockerignore so the macOS defaults don't interfere.
+# The musl.cc toolchain provides the correct CC/CXX/AR/linker.
+RUN MUSL_TARGET="$(uname -m)-unknown-linux-musl" && \
+    ARCH="$(uname -m)" && \
+    export "CC_${ARCH}_unknown_linux_musl=${ARCH}-linux-musl-gcc" && \
+    export "CXX_${ARCH}_unknown_linux_musl=${ARCH}-linux-musl-g++" && \
+    export "AR_${ARCH}_unknown_linux_musl=${ARCH}-linux-musl-ar" && \
+    export "CARGO_TARGET_$(echo "$MUSL_TARGET" | tr '[:lower:]-' '[:upper:]_')_LINKER=${ARCH}-linux-musl-gcc" && \
+    cargo build --target "$MUSL_TARGET" --bin signer --bin blocklist-client --bin emily-server && \
+    mkdir -p /output && \
+    cp "target/$MUSL_TARGET/debug/signer" /output/signer && \
+    cp "target/$MUSL_TARGET/debug/blocklist-client" /output/blocklist-client && \
+    cp "target/$MUSL_TARGET/debug/emily-server" /output/emily-server
 
 # Build Emily AWS setup.
 # -----------------------
@@ -47,20 +62,16 @@ RUN make emily-cdk-synth
 
 # Create Docker image to run the signer.
 # ---------------------------------------
-FROM debian:bookworm-slim AS signer
-COPY --from=builder /code/sbtc/target/debug/signer /usr/local/bin/signer
-RUN apt-get update \
-    && apt-get install -y ca-certificates --no-install-recommends \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
-ENTRYPOINT ["/usr/local/bin/signer --config /signer-config.toml --migrate-db"]
+# distroless/static includes ca-certificates at /etc/ssl/certs/ca-certificates.crt.
+FROM gcr.io/distroless/static-debian13 AS signer
+COPY --from=builder /output/signer /usr/local/bin/signer
+ENTRYPOINT ["/usr/local/bin/signer", "--config", "/signer-config.toml", "--migrate-db"]
 
 # Create Docker image for the blocklist client.
 # ----------------------------------------------
-FROM debian:bookworm-slim AS blocklist-client
-COPY --from=builder /code/sbtc/target/debug/blocklist-client /usr/local/bin/blocklist-client
-RUN apt-get update \
-    && apt-get install -y ca-certificates --no-install-recommends \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+# distroless/static includes ca-certificates at /etc/ssl/certs/ca-certificates.crt.
+FROM gcr.io/distroless/static-debian13 AS blocklist-client
+COPY --from=builder /output/blocklist-client /usr/local/bin/blocklist-client
 ENTRYPOINT ["/usr/local/bin/blocklist-client"]
 
 # Create Docker image to setup the AWS resources for Emily.
@@ -81,10 +92,10 @@ ENTRYPOINT ["python3", "/code/initialize.py"]
 
 # Create Docker image to run the emily server.
 # ---------------------------------------------
-FROM debian:bookworm-slim AS emily-server
+FROM debian:trixie-slim AS emily-server
 WORKDIR /code
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=builder /code/sbtc/target/debug/emily-server /usr/local/bin/emily-server
+COPY --from=builder /output/emily-server /usr/local/bin/emily-server
 # Server configuration.
 ENV HOST=0.0.0.0
 ENV PORT=3030

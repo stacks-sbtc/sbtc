@@ -1,0 +1,20 @@
+# Defaults for musl cross-compilation from macOS. You can install the musl
+# toolchain with brew install FiloSottile/musl-cross/musl-cross --with-aarch64. 
+# This file is in .dockerignore so it does not affect
+# Docker builds.
+[target.aarch64-unknown-linux-musl]
+linker = "aarch64-linux-musl-gcc"
+
+[target.x86_64-unknown-linux-musl]
+linker = "musl-gcc"
+
+[env]
+CC_aarch64_unknown_linux_musl = { value = "aarch64-linux-musl-gcc", force = false }
+CXX_aarch64_unknown_linux_musl = { value = "aarch64-linux-musl-g++", force = false }
+AR_aarch64_unknown_linux_musl = { value = "aarch64-linux-musl-ar", force = false }
+CC_x86_64_unknown_linux_musl = { value = "musl-gcc", force = false }
+AR_x86_64_unknown_linux_musl = { value = "musl-ar", force = false }
+# BINDGEN_EXTRA_CLANG_ARGS_aarch64_unknown_linux_musl must be set per-machine.
+# On macOS with musl-cross installed via Homebrew:
+#   --sysroot=/opt/homebrew/opt/musl-cross/libexec/aarch64-linux-musl
+# On Linux, set this to point to your musl sysroot if bindgen cannot find headers.
