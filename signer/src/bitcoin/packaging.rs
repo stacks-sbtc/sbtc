@@ -1501,7 +1501,7 @@ mod tests {
                 withdrawals: Vec::new(),
             }],
             fee_rate: 25.0,
-            last_fees: Some(Fees { total: 1000000, rate: 25.0 }),
+            last_fees: Some(Fees { total: u64::MAX, rate: 25.0 }),
         };
         let large_overhead = measure_overhead(large_presign_request);
 
