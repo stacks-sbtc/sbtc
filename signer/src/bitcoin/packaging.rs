@@ -14,28 +14,70 @@ use super::utxo::OP_RETURN_AVAILABLE_SIZE;
 /// `BitcoinPreSignRequest.request_package` repeated field.
 ///
 /// Each `TxRequestIds` embedded in the `request_package` repeated field
-/// incurs a 1-byte field tag and a length-delimiting varint. For small
-/// bags (encoded inner size < 128 bytes) the length varint is 1 byte,
-/// giving 2 bytes total. For larger bags (≥ 128 bytes) the length varint
-/// grows to 2 bytes, giving 3 bytes total. We use the worst case.
-const BAG_OVERHEAD: usize = 3;
+/// incurs a 1-byte field tag and a length-delimiting varint. The varint
+/// size depends on the encoded size of the inner `TxRequestIds` message:
+/// - less than 128 bytes → 1-byte varint → 2 bytes total
+/// - less than 16384 bytes → 2-byte varint → 3 bytes total
+/// - less than 2097152 bytes → 3-byte varint → 4 bytes total
+///
+/// A single bag can exceed 16384 bytes because withdrawals are not limited
+/// by `max_needs_signature`; their only per-bag limit is the 77-byte
+/// OP_RETURN bitmap, which can hold 600 consecutive IDs. At 93 bytes
+/// presign weight each, that is ~55000 bytes of encoded `TxRequestIds`. We
+/// use the worst case of 4 bytes (1-byte tag + 3-byte varint).
+const BAG_OVERHEAD: usize = 4;
 
 /// The protobuf overhead in bytes of wrapping a `BitcoinPreSignRequest`
 /// inside a `Signed<SignerMessage>`.
 ///
 /// The gossipsub `max_transmit_size` check applies to the encoded
-/// `Signed<SignerMessage>` bytes (the `data` argument to
-/// `gossipsub::Behaviour::publish`), not the full gossipsub wire frame. So
-/// this overhead only accounts for the fee_rate and last_fees of the
-/// `BitcoinPreSignRequest` and the protobuf fields added by the `Signed`
-/// and `SignerMessage` wrappers: the ECDSA signature, signer public key,
-/// bitcoin chain tip, and protobuf framing (tags and length varints).
+/// `Signed<SignerMessage>` bytes during publishing, and the full wire
+/// frame on receive. This overhead accounts for:
+///
+/// 1. The `fee_rate` and `last_fees` fields of the `BitcoinPreSignRequest`
+///    message.
+/// 2. The protobuf fields added by the `Signed<SignerMessage>` wrappers,
+///    which includes the ECDSA signature, signer public key, and bitcoin
+///    chain tip block hash.
+/// 3. The protobuf fields added by libp2p-gossipsub. Each published
+///    message is wrapped in an `RPC { publish: [Message { … }] }` frame on
+///    the wire. The `Message` proto adds six fields around our payload:
+///
+///    <https://github.com/libp2p/rust-libp2p/blob/84153a559bdbcb92a48413dd2a31035800cb882d/protocols/gossipsub/src/generated/rpc.proto#L16-L23>
+///    ```proto
+///    message Message {
+///        // peer ID, which is a Multihash<64>, which needs 73 bytes in Rust
+///        optional bytes from      = 1;
+///        // our Signed<SignerMessage> serialized message
+///        optional bytes data      = 2;
+///        // a u64 sequence number, which is 8 bytes
+///        optional bytes seqno     = 3;
+///        // topic string "sbtc-signer" (11 bytes)
+///        required string topic    = 4;
+///        // libp2p message signature on secp256r1 (~72 bytes)
+///        optional bytes signature = 5;
+///        // public key on secp256r1, ~91 bytes
+///        optional bytes key       = 6;
+///    }
+///    ```
+///
+///    The `Message` is placed in `RPC.publish` (field tag 2):
+///    <https://github.com/libp2p/rust-libp2p/blob/84153a559bdbcb92a48413dd2a31035800cb882d/protocols/gossipsub/src/generated/rpc.proto#L5-L15>
+///
+///    Fields populated in `build_raw_message` (the `Signing` variant):
+///    <https://github.com/libp2p/rust-libp2p/blob/84153a559bdbcb92a48413dd2a31035800cb882d/protocols/gossipsub/src/behaviour.rs#L2810-L2821>
+///
+///    Converted to `proto::Message`:
+///    <https://github.com/libp2p/rust-libp2p/blob/84153a559bdbcb92a48413dd2a31035800cb882d/protocols/gossipsub/src/types.rs#L205-L216>
+///
+///    Wrapped into an `RPC` frame (one `Message` per `RPC`):
+///    <https://github.com/libp2p/rust-libp2p/blob/84153a559bdbcb92a48413dd2a31035800cb882d/protocols/gossipsub/src/types.rs#L345-L356>
 ///
 /// The overhead varies slightly with the inner payload size because
-/// protobuf length varints grow with the encoded length. With an empty
-/// `BitcoinPreSignRequest` the measured overhead is 162 bytes; with a
-/// near-maximum-size payload (~64 KiB) the length varints add at most 4
-/// more bytes. This constant is intentionally conservative.
+/// protobuf length varints grow with the encoded length. A
+/// Signed<SignerMessage> with an empty `BitcoinPreSignRequest` measures
+/// 162 bytes of overhead; with a near-maximum-size payload. The libp2p
+/// gossipsub implementation adds an additional 255 bytes of overhead.
 const SIGNED_MESSAGE_OVERHEAD: usize = 512;
 
 /// Maximum serialized size of a `BitcoinPreSignRequest` message, assuming
@@ -1484,17 +1526,23 @@ mod tests {
     /// to [`TxRequestIds`], build a [`BitcoinPreSignRequest`], wrap it in
     /// a `Signed<SignerMessage>`, and assert the final encoded size is
     /// within limits.
-    #[test]
-    fn presign_request_fits_in_gossipsub_message() {
+    #[test_case::test_case(true, 2000, 2000; "with-shuffling")]
+    #[test_case::test_case(false, 2000, 2000; "without-shuffling")]
+    #[test_case::test_case(false, 0, 2000; "without-shuffling-no-deposits")]
+    #[test_case::test_case(false, 2000, 0; "without-shuffling-no-withdrawals")]
+    fn presign_request_respects_gossipsub_limits(
+        shuffling: bool,
+        num_deposits: u64,
+        num_withdrawals: u64,
+    ) {
         let mut rng = get_rng();
 
         // Generate a large mix of random deposits and withdrawals.
         // Use enough items to stress the packager and fill multiple bags.
-        let num_requests = 2000;
         let secret_key = secp256k1::SecretKey::new(&mut rng);
         let signers_public_key = secret_key.x_only_public_key(secp256k1::SECP256K1).0;
 
-        let deposits: Vec<DepositRequest> = (0..num_requests)
+        let deposits: Vec<DepositRequest> = (0..num_deposits)
             .map(|_| DepositRequest {
                 outpoint: Unit.fake_with_rng::<bitcoin::OutPoint, _>(&mut rng),
                 max_fee: 10_000,
@@ -1506,7 +1554,7 @@ mod tests {
             })
             .collect();
 
-        let withdrawals: Vec<WithdrawalRequest> = (0..num_requests)
+        let withdrawals: Vec<WithdrawalRequest> = (0..num_withdrawals)
             .map(|request_id| WithdrawalRequest {
                 request_id,
                 txid: fake::Faker.fake_with_rng(&mut rng),
@@ -1524,9 +1572,13 @@ mod tests {
             .chain(withdrawals.iter().map(RequestRef::Withdrawal))
             .collect();
 
-        // Let's shuffle so that deposits don't take up all of the vbyte
-        // space in the transaction package.
-        items.shuffle(&mut rng);
+        if shuffling {
+            // Let's shuffle so that deposits don't take up all of the
+            // vbyte space in the transaction package. However, this limits
+            // the number of withdrawals that can fit because the OP_RETURN
+            // bitmap fills up more quickly.
+            items.shuffle(&mut rng);
+        }
 
         let max_votes_against = 3;
         let max_needs_signature = crate::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
@@ -1568,7 +1620,7 @@ mod tests {
             .collect();
 
         // In local runs the bag count has been between 18 and 20.
-        let num_bags = request_package.len();
+        let num_bags = dbg!(request_package.len());
         // The packager tries to respect the pre-sign request serialization
         // limits only when `fee_rate` is 0.0 and there are no last fees,
         // so we construct one here for this check.
@@ -1588,15 +1640,14 @@ mod tests {
 
         // `BAG_OVERHEAD` assumes the worst case for each nested
         // `TxRequestIds` in `request_package`: a 1-byte field tag plus a
-        // 2-byte length varint (3 bytes total). If a bag's encoded
-        // `TxRequestIds` is under 128 bytes, protobuf uses a 1-byte length
-        // varint instead, so the real overhead is only 2 bytes and our
-        // running total can be high by one byte for that bag. Once the
-        // nested message is large enough for a 2-byte length varint, the
-        // estimate matches. In this test we usually see `estimated_size ==
-        // actual_size`; the two asserts below still require `actual_size
-        // <= estimated_size` and allow at most one byte of slack per bag.
-        more_asserts::assert_le!(estimated_size - num_bags, actual_size);
+        // 3-byte length varint (4 bytes total). This worst case covers
+        // bags whose encoded `TxRequestIds` reaches >= 16384 bytes, such
+        // as a withdrawal-heavy bag. Smaller bags use fewer varint bytes,
+        // so the real overhead can be 2 or 3 bytes per bag, making our
+        // running total conservatively high. The two asserts below require
+        // `actual_size <= estimated_size` and allow at most two bytes of
+        // slack per bag make up for our potential overestimate.
+        more_asserts::assert_le!(estimated_size - num_bags * 2, actual_size);
         more_asserts::assert_le!(actual_size, estimated_size);
 
         // Now we add in the fee rate and some last fees to make the final
