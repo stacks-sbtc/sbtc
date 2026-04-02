@@ -13,9 +13,9 @@ use aws_sdk_dynamodb::{
         query::QueryError, scan::ScanError, update_item::UpdateItemError,
     },
 };
-use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
+use warp::http::StatusCode;
 use warp::{reject::Reject, reply::Reply};
 
 use crate::{
