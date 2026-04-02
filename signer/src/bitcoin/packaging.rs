@@ -41,43 +41,38 @@ const BAG_OVERHEAD: usize = 4;
 ///    chain tip block hash.
 /// 3. The protobuf fields added by libp2p-gossipsub. Each published
 ///    message is wrapped in an `RPC { publish: [Message { … }] }` frame on
-///    the wire. The `Message` proto adds six fields around our payload:
+///    the wire. The `Message` proto adds six fields around our payload
+///    [1]:
 ///
-///    <https://github.com/libp2p/rust-libp2p/blob/84153a559bdbcb92a48413dd2a31035800cb882d/protocols/gossipsub/src/generated/rpc.proto#L16-L23>
 ///    ```proto
 ///    message Message {
-///        // peer ID, which is a Multihash<64>, which needs 73 bytes in Rust and 75 bytes when encoded.
-///        optional bytes from      = 1;
-///        // our Signed<SignerMessage> serialized message
-///        optional bytes data      = 2;
-///        // a u64 sequence number, which is 8 bytes
-///        optional bytes seqno     = 3;
-///        // topic string "sbtc-signer" (11 bytes)
-///        required string topic    = 4;
-///        // libp2p message signature on secp256k1 (~72 bytes)
+///        optional bytes from = 1;
+///        optional bytes data = 2;
+///        optional bytes seqno = 3;
+///        required string topic = 4;
 ///        optional bytes signature = 5;
-///        // public key on secp256k1, which is either 33 bytes
-///        optional bytes key       = 6;
+///        optional bytes key = 6;
 ///    }
 ///    ```
+///    Fields populated in `build_raw_message` (the `Signing` variant) [2]:
+///    1. 75 bytes. The `from` field is a peer ID, which is a
+///       Multihash<64>. It needs 73 bytes in Rust and maxes out at 75
+///       bytes serialized.
+///    2. This is our Signed<SignerMessage> serialized message.
+///    3. 8 bytes. This is a u64 sequence number.
+///    4. 11 bytes. A topic string, and we use "sbtc-signer" as the topic.
+///    5. 73 bytes. The secp256k1 signature of the message, DER encoded.
+///    6. 33 bytes. The secp256k1 compressed public key of the signer.
 ///
-///    The `Message` is placed in `RPC.publish` (field tag 2):
-///    <https://github.com/libp2p/rust-libp2p/blob/84153a559bdbcb92a48413dd2a31035800cb882d/protocols/gossipsub/src/generated/rpc.proto#L5-L15>
-///
-///    Fields populated in `build_raw_message` (the `Signing` variant):
-///    <https://github.com/libp2p/rust-libp2p/blob/84153a559bdbcb92a48413dd2a31035800cb882d/protocols/gossipsub/src/behaviour.rs#L2810-L2821>
-///
-///    Converted to `proto::Message`:
-///    <https://github.com/libp2p/rust-libp2p/blob/84153a559bdbcb92a48413dd2a31035800cb882d/protocols/gossipsub/src/types.rs#L205-L216>
-///
-///    Wrapped into an `RPC` frame (one `Message` per `RPC`):
-///    <https://github.com/libp2p/rust-libp2p/blob/84153a559bdbcb92a48413dd2a31035800cb882d/protocols/gossipsub/src/types.rs#L345-L356>
+/// [1]: <https://github.com/libp2p/rust-libp2p/blob/84153a559bdbcb92a48413dd2a31035800cb882d/protocols/gossipsub/src/generated/rpc.proto#L16-L23>
+/// [2]: <https://github.com/libp2p/rust-libp2p/blob/84153a559bdbcb92a48413dd2a31035800cb882d/protocols/gossipsub/src/behaviour.rs#L2810-L2821>
 ///
 /// The overhead varies slightly with the inner payload size because
 /// protobuf length varints grow with the encoded length. A
 /// Signed<SignerMessage> with an empty `BitcoinPreSignRequest` measures
-/// 162 bytes of overhead; with a near-maximum-size payload. The libp2p
-/// gossipsub implementation adds an additional 255 bytes of overhead.
+/// 162 bytes of overhead; and measures 168 bytes of overhead with a
+/// near-maximum-size `BitcoinPreSignRequest`. The libp2p gossipsub code
+/// adds a maximum 200 bytes of overhead.
 const SIGNED_MESSAGE_OVERHEAD: usize = 512;
 
 /// Maximum serialized size of a `BitcoinPreSignRequest` message, assuming
@@ -1493,7 +1488,7 @@ mod tests {
         // We fill the request_package with enough deposits to reach the
         // target size.
         let deposits_needed = MAX_PRESIGN_REQUEST_SIZE / DEPOSIT_PRESIGN_WEIGHT;
-        let large_psr = BitcoinPreSignRequest {
+        let large_presign_request = BitcoinPreSignRequest {
             request_package: vec![crate::bitcoin::validation::TxRequestIds {
                 deposits: std::iter::repeat_n(
                     bitcoin::OutPoint {
@@ -1508,7 +1503,7 @@ mod tests {
             fee_rate: 25.0,
             last_fees: Some(Fees { total: 1000000, rate: 25.0 }),
         };
-        let large_overhead = measure_overhead(large_psr);
+        let large_overhead = measure_overhead(large_presign_request);
 
         // The large-payload overhead is the worst case because the length
         // varints are at their maximum. Assert the exact measured values
