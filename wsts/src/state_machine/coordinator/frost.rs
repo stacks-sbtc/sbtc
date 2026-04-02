@@ -402,8 +402,8 @@ impl Coordinator {
         // Calculate the aggregate public key
         let key = self
             .party_polynomials
-            .iter()
-            .fold(Point::default(), |s, (_, comm)| s + comm.poly[0]);
+            .values()
+            .fold(Point::default(), |s, comm| s + comm.constant_term());
 
         info!(
             %key,
@@ -844,7 +844,7 @@ impl CoordinatorTrait for Coordinator {
     ) -> Result<(), Error> {
         let computed_key = party_polynomials
             .iter()
-            .fold(Point::default(), |s, (_, comm)| s + comm.poly[0]);
+            .fold(Point::default(), |s, (_, comm)| s + comm.constant_term());
         if computed_key != aggregate_key {
             return Err(Error::AggregateKeyPolynomialMismatch(
                 computed_key,

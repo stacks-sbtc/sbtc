@@ -2,7 +2,7 @@ use core::num::TryFromIntError;
 use rand_core::{CryptoRng, RngCore};
 use std::collections::{BTreeMap, BTreeSet};
 use std::collections::{HashMap, HashSet};
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::errors::AggregatorError;
 use crate::{
@@ -93,6 +93,12 @@ pub enum Error {
     /// An aggregator error occurred
     #[error("Aggregator error: {0}")]
     Aggregator(#[from] AggregatorError),
+    /// This happens when either the signer's private polynomial is not
+    /// set, or the polynomial commitment could not constructed for this
+    /// signer becauuse the private polynomial was degenerate (it had no
+    /// coefficients).
+    #[error("no polynomial commitment could be constructed for this signer")]
+    NoPolynomialCommitment,
 }
 
 impl From<TryFromIntError> for Error {
@@ -784,7 +790,28 @@ impl Signer {
         };
 
         if let Some(poly) = self.signer.get_poly_commitment(rng) {
-            public_share.comms.push((poly.id.id.get_u32(), poly));
+            public_share.comms.push((poly.id().id.get_u32(), poly));
+        } else {
+            // There are two cases where this can happen:
+            // 1. The signer's private polynomial is not set. This should
+            //    never be the case, since v2::Party sets the private
+            //    polynomial when it is created and the private polynomial
+            //    is never cleared in production code.
+            // 2. The signers private polynomial is degenerate, leading to
+            //    a failure to construct a PolyCommitment. While a
+            //    degenerate private polynomial is allowed in the
+            //    `polynomial::Polynomial` type, we do not construct such
+            //    polynomials here.
+            //
+            // So with current code, this should never happen. A TODO is to
+            // change the code to make it a compile time guarantee.
+
+            error!(
+                signer_id = %self.signer_id,
+                dkg_id = %self.dkg_id,
+                "no polynomial commitment for this signer, programmer error!",
+            );
+            return Err(Error::NoPolynomialCommitment);
         }
 
         let public_share = Message::DkgPublicShares(public_share);
@@ -1037,7 +1064,7 @@ impl StateMachine<State, Error> for Signer {
 pub mod test {
     use crate::{
         common::PolyCommitment,
-        curve::{ecdsa, scalar::Scalar},
+        curve::{ecdsa, point::Point, scalar::Scalar},
         net::{DkgBegin, DkgEndBegin, DkgPrivateBegin, DkgPublicShares, DkgStatus, Message},
         schnorr::ID,
         state_machine::{
@@ -1209,7 +1236,7 @@ pub mod test {
         let mut signer =
             Signer::new(1, 1, 1, 1, 0, vec![1], private_key, public_keys, &mut rng).unwrap();
         let comms = if let Some(comm) = signer.signer.get_poly_commitment(&mut rng) {
-            vec![(comm.id.id.get_u32(), comm.clone())]
+            vec![(comm.id().id.get_u32(), comm.clone())]
         } else {
             vec![]
         };
@@ -1244,10 +1271,11 @@ pub mod test {
         signer.state = SignerState::DkgPublicGather;
         signer.commitments.insert(
             1,
-            PolyCommitment {
-                id: ID::new(&Scalar::new(), &Scalar::new(), &mut rng),
-                poly: vec![],
-            },
+            PolyCommitment::new(
+                ID::new(&Scalar::new(), &Scalar::new(), &mut rng),
+                vec![Point::new()],
+            )
+            .expect("test commitment has one point"),
         );
 
         // public_shares_done should be true

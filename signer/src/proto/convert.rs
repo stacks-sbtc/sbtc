@@ -1484,7 +1484,7 @@ impl From<SignerState> for proto::SignerState {
             num_parties: value.num_parties,
             threshold: value.threshold,
             group_key: Some(value.group_key.into()),
-            parties: value.parties.into_iter().map(|v| v.into()).collect(),
+            parties: vec![(value.id, value.party_state).into()],
         }
     }
 }
@@ -1492,6 +1492,18 @@ impl From<SignerState> for proto::SignerState {
 impl TryFrom<proto::SignerState> for SignerState {
     type Error = Error;
     fn try_from(value: proto::SignerState) -> Result<Self, Self::Error> {
+        // In previous versions of WSTS, the SignerState struct had a
+        // `parties` field of type Vec<(u32, PartyState)>. However, the
+        // v2::Party object, always populated the parties field with a
+        // vector of length 1. Since we only use the v2::Party object, this
+        // protobuf should only have a length of 1.
+        let [party_state] = value
+            .parties
+            .try_into()
+            .map_err(|_| Error::InvalidSignerState)?;
+
+        let (_, party_state) = party_state.try_into()?;
+
         Ok(SignerState {
             id: value.id,
             key_ids: value.key_ids,
@@ -1499,11 +1511,7 @@ impl TryFrom<proto::SignerState> for SignerState {
             num_parties: value.num_parties,
             threshold: value.threshold,
             group_key: value.group_key.required()?.try_into()?,
-            parties: value
-                .parties
-                .into_iter()
-                .map(|v| v.try_into())
-                .collect::<Result<Vec<_>, Error>>()?,
+            party_state,
         })
     }
 }
@@ -1531,9 +1539,10 @@ impl TryFrom<proto::ProofIdentifier> for wsts::schnorr::ID {
 
 impl From<PolyCommitment> for proto::PolyCommitment {
     fn from(value: PolyCommitment) -> Self {
+        let (id, poly) = value.into_parts();
         proto::PolyCommitment {
-            id: Some(value.id.into()),
-            poly: value.poly.into_iter().map(|v| v.into()).collect(),
+            id: Some(id.into()),
+            poly: poly.into_iter().map(|v| v.into()).collect(),
         }
     }
 }
@@ -1541,14 +1550,13 @@ impl From<PolyCommitment> for proto::PolyCommitment {
 impl TryFrom<proto::PolyCommitment> for PolyCommitment {
     type Error = Error;
     fn try_from(value: proto::PolyCommitment) -> Result<Self, Self::Error> {
-        Ok(PolyCommitment {
-            id: value.id.required()?.try_into()?,
-            poly: value
-                .poly
-                .into_iter()
-                .map(|v| v.try_into())
-                .collect::<Result<Vec<_>, Error>>()?,
-        })
+        let poly = value
+            .poly
+            .into_iter()
+            .map(|v| v.try_into())
+            .collect::<Result<Vec<_>, Error>>()?;
+        let id = value.id.required()?.try_into()?;
+        Ok(PolyCommitment::new(id, poly)?)
     }
 }
 

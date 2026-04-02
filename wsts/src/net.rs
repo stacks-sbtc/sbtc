@@ -153,7 +153,7 @@ impl Signable for DkgPublicShares {
         hasher.update(self.signer_id.to_be_bytes());
         for (party_id, comm) in &self.comms {
             hasher.update(party_id.to_be_bytes());
-            for a in &comm.poly {
+            for a in comm.poly() {
                 hasher.update(a.compress().as_bytes());
             }
         }
@@ -726,10 +726,11 @@ mod test {
             signer_id: 0,
             comms: vec![(
                 0,
-                PolyCommitment {
-                    id: ID::new(&Scalar::new(), &Scalar::new(), &mut rng),
-                    poly: vec![],
-                },
+                PolyCommitment::new(
+                    ID::new(&Scalar::new(), &Scalar::new(), &mut rng),
+                    vec![Point::new()],
+                )
+                .expect("test commitment has one point"),
             )],
         };
         let msg = Message::DkgPublicShares(public_shares.clone());
