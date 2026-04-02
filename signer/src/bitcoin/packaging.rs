@@ -34,7 +34,7 @@ const BAG_OVERHEAD: usize = 4;
 ///
 /// Note that the gossipsub `max_transmit_size` check applies to the
 /// encoded `Signed<SignerMessage>` bytes during publishing, and the full
-/// wire frame on receive [1]. 
+/// wire frame on receive [1].
 ///
 /// This overhead accounts for:
 /// 1. The `fee_rate` and `last_fees` fields of the `BitcoinPreSignRequest`
