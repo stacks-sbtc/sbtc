@@ -82,7 +82,7 @@ const BAG_OVERHEAD: usize = 4;
 /// 162 bytes of overhead; and measures 168 bytes of overhead with a
 /// near-maximum-size `BitcoinPreSignRequest`. And as we can see from
 /// above, the libp2p gossipsub code adds around 200 bytes of overhead.
-const SIGNED_MESSAGE_OVERHEAD: usize = 512;
+const SIGNED_MESSAGE_OVERHEAD: usize = 1024;
 
 /// Maximum serialized size of a `BitcoinPreSignRequest` message, assuming
 /// 0 as the `fee_rate` and None for `last_fees`.
