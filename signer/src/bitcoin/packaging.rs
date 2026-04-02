@@ -1353,13 +1353,17 @@ mod tests {
     /// BAG_OVERHEAD`.
     #[test]
     fn test_insert_item_respects_presign_size_limit() {
-        let config = PackagerConfig::new(5, 10000);
+        let max_signatures = 10000;
+        let config = PackagerConfig::new(5, max_signatures);
         let mut packager = BestFitPackager::<RequestItem>::new(config);
 
         // Each deposit has presign weight DEPOSIT_PRESIGN_WEIGHT (48 bytes).
         // The first item also creates a bag, which charges BAG_OVERHEAD.
         // Fill up to just under the limit.
         let max_deposits = (MAX_PRESIGN_REQUEST_SIZE - BAG_OVERHEAD) / DEPOSIT_PRESIGN_WEIGHT;
+        // Let's make sure that the max_signatures isn't limiting us;
+        more_asserts::assert_lt!(max_deposits, max_signatures as usize);
+
         for _ in 0..max_deposits {
             packager.insert_item(RequestItem::no_votes().sig_required());
         }
