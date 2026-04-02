@@ -113,18 +113,50 @@ impl Display for PolyCommitment {
     }
 }
 
+/// A private nonce value that is paired up with a NonceE value and is used
+/// for constructing a signature share.
 #[derive(Clone, Debug, Eq, PartialEq)]
-/// A composite private nonce used as a random commitment in the protocol
+pub struct NonceD(pub Scalar);
+
+/// A private nonce value that is paired up with a NonceD value and is used
+/// for constructing a signature share.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NonceE(pub Scalar);
+
+/// A composite private nonce pair used as a random commitment in the
+/// signing protocol.
+///
+/// This struct maintains the invariant that the nonce values can only be
+/// returned once and that the values themselves are neither all-zero nor
+/// all-one.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Nonce {
     /// The first committed value
-    pub d: Scalar,
+    d: Scalar,
     /// The second committed value
-    pub e: Scalar,
+    e: Scalar,
 }
 
 impl Nonce {
-    /// Construct a random nonce
-    pub fn random<RNG: RngCore + CryptoRng>(rng: &mut RNG) -> Self {
+    /// Construct a new randomly generated nonce that is valid.
+    ///
+    /// # Notes
+    ///
+    /// If the random number generator always produces the same "special"
+    /// but unknown values, then it is possible that this function will
+    /// loop forever.
+    pub fn new<RNG: RngCore + CryptoRng>(rng: &mut RNG) -> Self {
+        let mut nonce = Self::random(rng);
+
+        while !nonce.is_valid() {
+            nonce = Self::random(rng);
+        }
+
+        nonce
+    }
+
+    /// Construct a random nonce.
+    fn random<R: RngCore + CryptoRng>(rng: &mut R) -> Self {
         Self {
             d: Self::gen(rng),
             e: Self::gen(rng),
@@ -145,6 +177,12 @@ impl Nonce {
         hasher.update(s.to_bytes());
 
         hash_to_scalar(&mut hasher)
+    }
+
+    /// Returns (NonceD, NonceE) and consumes self so that the scalars can
+    /// only be extracted once.
+    pub fn values(self) -> (NonceD, NonceE) {
+        (NonceD(self.d), NonceE(self.e))
     }
 
     /// Check that the nonce is not all-zero or all-one, as these values
@@ -378,7 +416,7 @@ pub mod test {
             .collect::<Vec<Scalar>>();
 
         let mut rng = ChaCha8Rng::seed_from_u64(2);
-        let nonce = Nonce::random(&mut rng);
+        let nonce = Nonce::new(&mut rng);
 
         for scalar in test_scalars {
             assert_ne!(scalar, nonce.d);

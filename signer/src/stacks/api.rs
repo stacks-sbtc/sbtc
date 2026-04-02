@@ -11,6 +11,7 @@ use bitcoin::Amount;
 use bitcoin::OutPoint;
 use blockstack_lib::burnchains::Txid;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
+#[cfg(any(test, feature = "testing"))]
 use blockstack_lib::chainstate::nakamoto::NakamotoBlockHeader;
 use blockstack_lib::chainstate::stacks::StacksTransaction;
 use blockstack_lib::chainstate::stacks::TokenTransferMemo;
@@ -442,67 +443,6 @@ impl std::iter::IntoIterator for TenureBlockHeaders {
     }
 }
 
-/// These are the rejection reason codes for submitting a transaction
-///
-/// The official documentation specifies what to expect when there is a
-/// rejection, and that documentation can be found here:
-/// https://github.com/stacks-network/stacks-core/blob/2.5.0.0.5/docs/rpc-endpoints.md
-#[derive(Debug, Clone, Copy, serde::Deserialize, strum::IntoStaticStr)]
-#[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
-#[cfg_attr(feature = "testing", derive(serde::Serialize))]
-pub enum RejectionReason {
-    /// From MemPoolRejection::SerializationFailure
-    Serialization,
-    /// From MemPoolRejection::DeserializationFailure
-    Deserialization,
-    /// From MemPoolRejection::FailedToValidate
-    SignatureValidation,
-    /// From MemPoolRejection::FeeTooLow
-    FeeTooLow,
-    /// From MemPoolRejection::BadNonces
-    BadNonce,
-    /// From MemPoolRejection::NotEnoughFunds
-    NotEnoughFunds,
-    /// From MemPoolRejection::NoSuchContract
-    NoSuchContract,
-    /// From MemPoolRejection::NoSuchPublicFunction
-    NoSuchPublicFunction,
-    /// From MemPoolRejection::BadFunctionArgument
-    BadFunctionArgument,
-    /// From MemPoolRejection::ContractAlreadyExists
-    ContractAlreadyExists,
-    /// From MemPoolRejection::PoisonMicroblocksDoNotConflict
-    PoisonMicroblocksDoNotConflict,
-    /// From MemPoolRejection::NoAnchorBlockWithPubkeyHash
-    PoisonMicroblockHasUnknownPubKeyHash,
-    /// From MemPoolRejection::InvalidMicroblocks
-    PoisonMicroblockIsInvalid,
-    /// From MemPoolRejection::BadAddressVersionByte
-    BadAddressVersionByte,
-    /// From MemPoolRejection::NoCoinbaseViaMempool
-    NoCoinbaseViaMempool,
-    /// From MemPoolRejection::NoTenureChangeViaMempool
-    NoTenureChangeViaMempool,
-    /// From MemPoolRejection::NoSuchChainTip
-    ServerFailureNoSuchChainTip,
-    /// From MemPoolRejection::ConflictingNonceInMempool
-    ConflictingNonceInMempool,
-    /// From MemPoolRejection::TooMuchChaining
-    TooMuchChaining,
-    /// From MemPoolRejection::BadTransactionVersion
-    BadTransactionVersion,
-    /// From MemPoolRejection::TransferRecipientIsSender
-    TransferRecipientCannotEqualSender,
-    /// From MemPoolRejection::TransferAmountMustBePositive
-    TransferAmountMustBePositive,
-    /// From MemPoolRejection::DBError or MemPoolRejection::Other
-    ServerFailureDatabase,
-    /// From MemPoolRejection::EstimatorError
-    EstimatorError,
-    /// From MemPoolRejection::TemporarilyBlacklisted
-    TemporarilyBlacklisted,
-}
-
 /// A rejection response from the node.
 ///
 /// The official documentation specifies what to expect when there is a
@@ -515,7 +455,7 @@ pub struct TxRejection {
     /// rejection".
     pub error: String,
     /// The reason code for the rejection.
-    pub reason: RejectionReason,
+    pub reason: String,
     /// More details about the reason for the rejection.
     pub reason_data: Option<serde_json::Value>,
     /// The transaction ID of the rejected transaction.
@@ -524,7 +464,7 @@ pub struct TxRejection {
 
 impl std::fmt::Display for TxRejection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let reason_str: &'static str = self.reason.into();
+        let reason_str = &self.reason;
         write!(f, "transaction rejected from stacks mempool: {reason_str}")
     }
 }
@@ -682,7 +622,7 @@ struct PoxEpoch {
 /// Minimal response type for the `/v2/pox` endpoint, including only fields
 /// which we currently use.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-struct PoxResponse {
+pub struct PoxResponse {
     /// The current Bitcoin block height, as known by the Stacks node based on
     /// its current Stacks tenure. Note that if the Stacks node is behind, this
     /// may be lower than the actual current Bitcoin block height.

@@ -1,10 +1,7 @@
 use core::{cmp::PartialEq, fmt::Debug};
 use polynomial::Polynomial;
 
-use crate::{
-    common::Nonce,
-    curve::{point::Point, scalar::Scalar},
-};
+use crate::curve::{point::Point, scalar::Scalar};
 
 #[derive(Clone, Debug, PartialEq)]
 /// The saved state required to reconstruct a party
@@ -13,8 +10,6 @@ pub struct PartyState {
     pub polynomial: Option<Polynomial<Scalar>>,
     /// The key IDS and associate private keys for this party
     pub private_keys: Vec<(u32, Scalar)>,
-    /// The nonce being used by this party
-    pub nonce: Nonce,
 }
 
 #[derive(Clone, Debug, PartialEq)]

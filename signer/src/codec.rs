@@ -154,7 +154,6 @@ mod tests {
     use polynomial::Polynomial;
     use secp256k1::ecdsa::RecoverableSignature;
     use stacks_common::types::chainstate::StacksAddress;
-    use wsts::common::Nonce;
     use wsts::common::PolyCommitment;
     use wsts::common::PublicNonce;
     use wsts::common::SignatureShare;
@@ -305,7 +304,6 @@ mod tests {
     #[test_case(PhantomData::<(SignatureShareRequest, proto::SignatureShareRequest)>; "SignatureShareRequest")]
     #[test_case(PhantomData::<(SignatureShare, proto::SignatureShare)>; "SignatureShare")]
     #[test_case(PhantomData::<(SignatureShareResponse, proto::SignatureShareResponse)>; "SignatureShareResponse")]
-    #[test_case(PhantomData::<(Nonce, proto::PrivateNonce)>; "PrivateNonce")]
     #[test_case(PhantomData::<(wsts::schnorr::ID, proto::ProofIdentifier)>; "ProofIdentifier")]
     #[test_case(PhantomData::<(PolyCommitment, proto::PolyCommitment)>; "PolyCommitment")]
     #[test_case(PhantomData::<((u32, PolyCommitment), proto::PartyCommitment)>; "PartyCommitment")]

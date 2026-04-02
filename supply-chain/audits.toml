@@ -17,16 +17,116 @@ Note that this library does use C bindings and thus FFI and unsafe. There are pa
 This library is provided by the rust-bitcoin GH organization which also maintains the bitcoin and secp256k1 crates which we use extensively.
 """
 
+[[audits.hashbrown]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.16.0 -> 0.16.1"
+
+[[audits.httparse]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.8.0 -> 1.10.1"
+
+[[audits.hyper]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.5.1 -> 1.8.1"
+
+[[audits.libp2p-allow-block-list]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.5.0 -> 0.6.0"
+
+[[audits.libp2p-autonat]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.14.0 -> 0.15.0"
+
+[[audits.libp2p-connection-limits]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.5.0 -> 0.6.0"
+
+[[audits.libp2p-core]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.43.0 -> 0.43.2"
+
+[[audits.libp2p-identify]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.46.0 -> 0.47.0"
+
 [[audits.libp2p-identity]]
 who = "cylewitruk <cyle.witruk@outlook.com>"
 criteria = "safe-to-deploy"
 delta = "0.2.10 -> 0.2.12"
 notes = "This patch switches to k256 from libsecp256k1 for secp256k1 handling"
 
+[[audits.libp2p-identity]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.2.12 -> 0.2.13"
+
+[[audits.libp2p-metrics]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.16.0 -> 0.17.0"
+
+[[audits.libp2p-noise]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.46.0 -> 0.46.1"
+
+[[audits.libp2p-ping]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.46.0 -> 0.47.0"
+
+[[audits.libp2p-quic]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.12.0 -> 0.13.0"
+
+[[audits.libp2p-swarm]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.46.0 -> 0.47.1"
+
+[[audits.libp2p-swarm-derive]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.35.0 -> 0.35.1"
+
+[[audits.libp2p-tls]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.6.0 -> 0.6.2"
+
+[[audits.libp2p-upnp]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.4.0 -> 0.5.0"
+
 [[audits.libsecp256k1]]
 who = "cylewitruk <cyle.witruk@outlook.com>"
 criteria = "safe-to-deploy"
 delta = "0.7.1 -> 0.7.2"
+
+[[audits.metrics-exporter-prometheus]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.16.1 -> 0.18.1"
+
+[[audits.metrics-util]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.19.0 -> 0.20.1"
+
+[[audits.oid-registry]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.7.1 -> 0.8.1"
 
 [[audits.p256]]
 who = "djordon <dan.jordon@gmail.com>"
@@ -48,6 +148,16 @@ version = "0.5.0"
 who = "djordon <dan.jordon@gmail.com>"
 criteria = "safe-to-deploy"
 version = "0.13.6"
+
+[[audits.quinn-proto]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.11.9 -> 0.11.14"
+
+[[audits.rand_xoshiro]]
+who = "djordon <dan.jordon@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.6.0 -> 0.7.0"
 
 [[audits.serdect]]
 who = "djordon <dan.jordon@gmail.com>"
@@ -91,8 +201,163 @@ who = "xoloki <xoloki@gmail.com>"
 criteria = "safe-to-deploy"
 version = "14.0.0"
 
-[[audits.wsts]]
+[[audits.yamux]]
 who = "djordon <dan.jordon@gmail.com>"
 criteria = "safe-to-deploy"
-delta = "14.0.0 -> 14.0.0@git:11e2316aa0edf996f8e8f9ccbbbfd4bd2975ed1d"
-importable = false
+delta = "0.13.3 -> 0.13.10"
+
+[[trusted.bytes]]
+criteria = "safe-to-deploy"
+user-id = 6741 # Alice Ryhl (Darksonn)
+start = "2021-01-11"
+end = "2027-03-26"
+
+[[trusted.cc]]
+criteria = "safe-to-deploy"
+user-id = 55123 # rust-lang-owner
+start = "2022-10-29"
+end = "2027-03-26"
+
+[[trusted.cmake]]
+criteria = "safe-to-deploy"
+user-id = 55123 # rust-lang-owner
+start = "2022-10-29"
+end = "2027-03-26"
+
+[[trusted.find-msvc-tools]]
+criteria = "safe-to-deploy"
+user-id = 539
+start = "2025-08-29"
+end = "2027-03-26"
+
+[[trusted.http-body-util]]
+criteria = "safe-to-deploy"
+user-id = 359 # Sean McArthur (seanmonstar)
+start = "2022-10-25"
+end = "2027-03-26"
+
+[[trusted.hyper-util]]
+criteria = "safe-to-deploy"
+user-id = 359 # Sean McArthur (seanmonstar)
+start = "2022-01-15"
+end = "2027-03-26"
+
+[[trusted.itoa]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-05-02"
+end = "2027-03-26"
+
+[[trusted.jobserver]]
+criteria = "safe-to-deploy"
+user-id = 55123 # rust-lang-owner
+start = "2024-07-23"
+end = "2027-03-26"
+
+[[trusted.js-sys]]
+criteria = "safe-to-deploy"
+user-id = 1 # Alex Crichton (alexcrichton)
+start = "2019-03-04"
+end = "2027-03-26"
+
+[[trusted.reqwest]]
+criteria = "safe-to-deploy"
+user-id = 359 # Sean McArthur (seanmonstar)
+start = "2019-03-04"
+end = "2027-03-26"
+
+[[trusted.ryu]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-05-02"
+end = "2027-03-26"
+
+[[trusted.tokio]]
+criteria = "safe-to-deploy"
+user-id = 6741 # Alice Ryhl (Darksonn)
+start = "2020-12-25"
+end = "2027-03-26"
+
+[[trusted.tower-http]]
+criteria = "safe-to-deploy"
+user-id = 359 # Sean McArthur (seanmonstar)
+start = "2024-09-23"
+end = "2027-03-26"
+
+[[trusted.wasm-bindgen]]
+criteria = "safe-to-deploy"
+user-id = 1 # Alex Crichton (alexcrichton)
+start = "2019-03-04"
+end = "2027-03-26"
+
+[[trusted.wasm-bindgen-macro]]
+criteria = "safe-to-deploy"
+user-id = 1 # Alex Crichton (alexcrichton)
+start = "2019-03-04"
+end = "2027-03-26"
+
+[[trusted.wasm-bindgen-macro-support]]
+criteria = "safe-to-deploy"
+user-id = 1 # Alex Crichton (alexcrichton)
+start = "2019-03-04"
+end = "2027-03-26"
+
+[[trusted.wasm-bindgen-shared]]
+criteria = "safe-to-deploy"
+user-id = 1 # Alex Crichton (alexcrichton)
+start = "2019-03-04"
+end = "2027-03-26"
+
+[[trusted.windows-sys]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-11-15"
+end = "2027-03-26"
+
+[[trusted.windows-targets]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2022-09-09"
+end = "2027-03-26"
+
+[[trusted.windows_aarch64_gnullvm]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2022-09-01"
+end = "2027-03-26"
+
+[[trusted.windows_aarch64_msvc]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-11-05"
+end = "2027-03-26"
+
+[[trusted.windows_i686_gnu]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-10-28"
+end = "2027-03-26"
+
+[[trusted.windows_i686_msvc]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-10-27"
+end = "2027-03-26"
+
+[[trusted.windows_x86_64_gnu]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-10-28"
+end = "2027-03-26"
+
+[[trusted.windows_x86_64_gnullvm]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2022-09-01"
+end = "2027-03-26"
+
+[[trusted.windows_x86_64_msvc]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-10-27"
+end = "2027-03-26"
