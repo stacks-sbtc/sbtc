@@ -931,22 +931,25 @@ mod tests {
     }
 
     impl ConnectedSwarm {
-        /// Build two connected `Swarm<SignerBehavior>`s that are connected
-        /// over the in-memory transport.
-        async fn new(
+        /// Build two `Swarm<SignerBehavior>`s connected over in-memory
+        /// transport with the given `max_transmit_size` for each.
+        async fn new<R: rand::Rng + ?Sized>(
             publisher_max_transmit_size: usize,
             subscriber_max_transmit_size: usize,
+            rng: &mut R,
         ) -> Self {
             // Build two SignerSwarms via the builder, with memory transport and
             // all discovery protocols disabled so the test is self-contained.
-            let key1 = PrivateKey::from_slice(&[1; 32]).unwrap();
-            let key2 = PrivateKey::from_slice(&[2; 32]).unwrap();
+            let key1 = PrivateKey::new(rng);
+            let key2 = PrivateKey::new(rng);
 
-            let pub_addr = Multiaddr::memory(1);
-            let sub_addr = Multiaddr::memory(2);
+            // Use random memory addresses to avoid conflicts when other
+            // tests are running in parallel.
+            let pub_addr = Multiaddr::random_memory(rng);
+            let sub_addr = Multiaddr::random_memory(rng);
 
-            // The publisher will use the default max transmit size, or else
-            // publish call below will fail.
+            // The publisher's max_transmit_size gates whether publish()
+            // accepts or rejects the data.
             let publisher = SignerSwarmBuilder::new(&key1)
                 .enable_mdns(false)
                 .enable_kademlia(false)
@@ -1134,7 +1137,7 @@ mod tests {
         let max_transmit_size = data.len() - 1;
 
         let mut connected_swarm =
-            ConnectedSwarm::new(max_transmit_size, GOSSIPSUB_MAX_TRANSMIT_SIZE).await;
+            ConnectedSwarm::new(max_transmit_size, GOSSIPSUB_MAX_TRANSMIT_SIZE, &mut rng).await;
 
         // We know that the message is too large for the max_transmit_size
         // so this should fail.
@@ -1154,15 +1157,15 @@ mod tests {
         let data: Vec<u8> = signed_message.encode_to_vec();
         let message_size = data.len();
 
-        let mut connected_swarm = ConnectedSwarm::new(message_size, message_size).await;
+        let mut connected_swarm = ConnectedSwarm::new(message_size, message_size, &mut rng).await;
 
         // Only our message size is checked on publish in libp2p gossipsub,
         // not the full gossipsub protobuf message size.
         connected_swarm.publish(data).await.unwrap();
 
         // The subscriber will reject the message because it checks the
-        // full gossipsub protobuf message size. Which is larger than our
-        // message_size, which we set to be the `max_transmit_size`.
+        // full gossipsub protobuf message size, which is larger than our
+        // message_size that we set as the subscriber's `max_transmit_size`.
         connected_swarm
             .subscriber_receive(Duration::from_secs(3))
             .await
@@ -1183,7 +1186,8 @@ mod tests {
         let mut rng = get_rng();
 
         let max_transmit_size = GOSSIPSUB_MAX_TRANSMIT_SIZE;
-        let mut connected_swarm = ConnectedSwarm::new(max_transmit_size, max_transmit_size).await;
+        let mut connected_swarm =
+            ConnectedSwarm::new(max_transmit_size, max_transmit_size, &mut rng).await;
 
         let signed_message = construct_large_signer_message(&mut rng);
 
