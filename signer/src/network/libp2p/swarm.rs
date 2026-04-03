@@ -65,6 +65,7 @@ pub struct SignerSwarmConfig {
     pub seed_addresses: Vec<Multiaddr>,
     pub known_peers: Vec<(PeerId, Multiaddr)>,
     pub num_signers: u16,
+    pub max_transmit_size: usize,
 }
 
 impl SignerBehavior {
@@ -110,7 +111,7 @@ impl SignerBehavior {
         let bootstrap = bootstrap::Behavior::new(bootstrap_config);
 
         Ok(Self {
-            gossipsub: Self::gossipsub(&keypair)?,
+            gossipsub: Self::gossipsub(&keypair, config.max_transmit_size)?,
             mdns,
             kademlia,
             ping: Default::default(),
@@ -167,7 +168,10 @@ impl SignerBehavior {
     }
 
     /// Create a new gossipsub behavior.
-    fn gossipsub(keypair: &Keypair) -> Result<gossipsub::Behaviour, SignerSwarmError> {
+    fn gossipsub(
+        keypair: &Keypair,
+        max_transmit_size: usize,
+    ) -> Result<gossipsub::Behaviour, SignerSwarmError> {
         let message_id_fn = |message: &gossipsub::Message| {
             let mut hasher = DefaultHasher::new();
             message.data.hash(&mut hasher);
@@ -177,7 +181,7 @@ impl SignerBehavior {
         let gossipsub_config = gossipsub::ConfigBuilder::default()
             .heartbeat_interval(Duration::from_secs(1)) // Default is 1 second
             .validation_mode(gossipsub::ValidationMode::Strict)
-            .max_transmit_size(GOSSIPSUB_MAX_TRANSMIT_SIZE)
+            .max_transmit_size(max_transmit_size)
             .message_id_fn(message_id_fn)
             .build()
             .map_err(|e| SignerSwarmError::LibP2P(Box::new(e)))?;
@@ -215,6 +219,7 @@ pub struct SignerSwarmBuilder<'a> {
     enable_memory_transport: bool,
     initial_bootstrap_delay: Duration,
     num_signers: u16,
+    max_transmit_size: usize,
 }
 
 impl<'a> SignerSwarmBuilder<'a> {
@@ -233,6 +238,7 @@ impl<'a> SignerSwarmBuilder<'a> {
             enable_memory_transport: false,
             initial_bootstrap_delay: Duration::ZERO,
             num_signers: crate::MAX_KEYS,
+            max_transmit_size: GOSSIPSUB_MAX_TRANSMIT_SIZE,
         }
     }
 
@@ -345,6 +351,13 @@ impl<'a> SignerSwarmBuilder<'a> {
         self
     }
 
+    /// Set the maximum transmit size for gossipsub messages.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn with_max_transmit_size(mut self, max_transmit_size: usize) -> Self {
+        self.max_transmit_size = max_transmit_size;
+        self
+    }
+
     /// Build the [`SignerSwarm`], consuming the builder.
     pub fn build(self) -> Result<SignerSwarm, SignerSwarmError> {
         let keypair: Keypair = (*self.private_key).into();
@@ -356,6 +369,7 @@ impl<'a> SignerSwarmBuilder<'a> {
             seed_addresses: self.seed_addrs,
             known_peers: self.known_peers,
             num_signers: self.num_signers,
+            max_transmit_size: self.max_transmit_size,
         };
         let behavior = SignerBehavior::new(keypair.clone(), behavior_config)?;
 
@@ -915,8 +929,13 @@ mod tests {
     /// near-maximum-size `Signed<SignerMessage>` by constructing a large
     /// `BitcoinPreSignRequest` message, publish it, and verify that the
     /// subscriber receives it.
+    #[test_case::test_case(GOSSIPSUB_MAX_TRANSMIT_SIZE, false; "with default message limits")]
+    #[test_case::test_case(MAX_PRESIGN_REQUEST_SIZE, true; "with low message limits")]
     #[tokio::test]
-    async fn max_presign_request_fits_in_gossipsub_rpc_frame() {
+    async fn signer_messages_respect_gossipsub_transmit_limits(
+        max_transmit_size: usize,
+        times_out: bool,
+    ) {
         let mut rng = get_rng();
 
         // Build two SignerSwarms via the builder, with memory transport and
@@ -927,6 +946,8 @@ mod tests {
         let pub_addr = Multiaddr::random_memory(&mut rng);
         let sub_addr = Multiaddr::random_memory(&mut rng);
 
+        // The publisher will use the default max transmit size, or else
+        // publish call below will fail.
         let publisher = SignerSwarmBuilder::new(&key1)
             .enable_mdns(false)
             .enable_kademlia(false)
@@ -934,9 +955,11 @@ mod tests {
             .enable_memory_transport(true)
             .with_initial_bootstrap_delay(Duration::MAX)
             .add_listen_endpoint(pub_addr.clone())
+            .with_max_transmit_size(GOSSIPSUB_MAX_TRANSMIT_SIZE)
             .build()
             .unwrap();
 
+        // The subscriber will reject messages that are too large.
         let subscriber = SignerSwarmBuilder::new(&key2)
             .enable_mdns(false)
             .enable_kademlia(false)
@@ -944,6 +967,7 @@ mod tests {
             .enable_memory_transport(true)
             .with_initial_bootstrap_delay(Duration::MAX)
             .add_listen_endpoint(sub_addr.clone())
+            .with_max_transmit_size(max_transmit_size)
             .build()
             .unwrap();
 
@@ -1053,7 +1077,7 @@ mod tests {
         // in this test should be larger than that, because the inner
         // BitcoinPreSignRequest.request_package is near its maximum size.
         // Still the total size of the message must be less than the
-        // GOSSIPSUB_MAX_TRANSMIT_SIZE.
+        // MAX_TRANSMIT_SIZE.
         more_asserts::assert_le!(packager_presign_size, MAX_PRESIGN_REQUEST_SIZE);
         more_asserts::assert_le!(MAX_PRESIGN_REQUEST_SIZE, data_len);
         more_asserts::assert_lt!(data_len, GOSSIPSUB_MAX_TRANSMIT_SIZE);
@@ -1086,9 +1110,13 @@ mod tests {
                 }
             }
         })
-        .await
-        .unwrap();
+        .await;
 
-        assert_eq!(received.data, data);
+        if let Ok(message) = received {
+            assert_eq!(message.data, data);
+            assert!(!times_out);
+        } else {
+            assert!(times_out);
+        }
     }
 }
