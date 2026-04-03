@@ -500,13 +500,27 @@ impl SignerSwarm {
 
 #[cfg(test)]
 mod tests {
+    use fake::Fake as _;
+    use futures::StreamExt as _;
+    use libp2p::swarm::SwarmEvent;
+    use prost::Message as _;
     use rand::RngCore as _;
 
-    use crate::{
-        keys::PublicKey,
-        storage::DbRead as _,
-        testing::{context::*, get_rng, network::MultiaddrExt as _},
-    };
+    use crate::bitcoin::packaging::MAX_PRESIGN_REQUEST_SIZE;
+    use crate::bitcoin::packaging::compute_optimal_packages;
+    use crate::bitcoin::utxo::Fees;
+    use crate::bitcoin::utxo::WithdrawalRequest;
+    use crate::bitcoin::validation::TxRequestIds;
+    use crate::ecdsa::Signed;
+    use crate::keys::PrivateKey;
+    use crate::keys::PublicKey;
+    use crate::message::{BitcoinPreSignRequest, Payload, SignerMessage};
+    use crate::network::libp2p::TOPIC;
+    use crate::proto;
+    use crate::storage::DbRead as _;
+    use crate::storage::model::BitcoinBlockHash;
+    use crate::storage::model::ScriptPubKey;
+    use crate::testing::{context::*, get_rng, network::MultiaddrExt as _};
 
     use super::*;
 
@@ -891,5 +905,190 @@ mod tests {
         // Verify that context 2 has no peers stored, as it was not the dialer
         let p2p_peers_2a = context2.get_storage().get_p2p_peers().await.unwrap();
         assert!(p2p_peers_2a.is_empty());
+    }
+
+    /// Verify that a near-maximum-size wrapped `Signed<SignerMessage>`
+    /// message would be succesfully broadcast and received by libp2p.
+    ///
+    /// In this test we construct a publisher and subscriber
+    /// Swarm<SignerBehavior> objects and connect them. Then we construct a
+    /// near-maximum-size `Signed<SignerMessage>` by constructing a large
+    /// `BitcoinPreSignRequest` message, publish it, and verify that the
+    /// subscriber receives it.
+    #[tokio::test]
+    async fn max_presign_request_fits_in_gossipsub_rpc_frame() {
+        let mut rng = get_rng();
+
+        // Build two SignerSwarms via the builder, with memory transport and
+        // all discovery protocols disabled so the test is self-contained.
+        let key1 = PrivateKey::new(&mut rng);
+        let key2 = PrivateKey::new(&mut rng);
+
+        let pub_addr = Multiaddr::random_memory(&mut rng);
+        let sub_addr = Multiaddr::random_memory(&mut rng);
+
+        let publisher = SignerSwarmBuilder::new(&key1)
+            .enable_mdns(false)
+            .enable_kademlia(false)
+            .enable_autonat(false)
+            .enable_memory_transport(true)
+            .with_initial_bootstrap_delay(Duration::MAX)
+            .add_listen_endpoint(pub_addr.clone())
+            .build()
+            .unwrap();
+
+        let subscriber = SignerSwarmBuilder::new(&key2)
+            .enable_mdns(false)
+            .enable_kademlia(false)
+            .enable_autonat(false)
+            .enable_memory_transport(true)
+            .with_initial_bootstrap_delay(Duration::MAX)
+            .add_listen_endpoint(sub_addr.clone())
+            .build()
+            .unwrap();
+
+        // Unwrap the inner Swarm<SignerBehavior> from each SignerSwarm. We
+        // will drive them directly without using SignerSwarm::start() and
+        // the event loop.
+        let mut publisher = Arc::into_inner(publisher.swarm).unwrap().into_inner();
+        let mut subscriber = Arc::into_inner(subscriber.swarm).unwrap().into_inner();
+
+        // Listen and subscribe to the gossipsub topic.
+        publisher.listen_on(pub_addr.clone()).unwrap();
+        subscriber.listen_on(sub_addr.clone()).unwrap();
+        publisher
+            .behaviour_mut()
+            .gossipsub
+            .subscribe(&TOPIC)
+            .unwrap();
+        subscriber
+            .behaviour_mut()
+            .gossipsub
+            .subscribe(&TOPIC)
+            .unwrap();
+
+        // Connect them: subscriber dials publisher.
+        subscriber
+            .dial(DialOpts::unknown_peer_id().address(pub_addr).build())
+            .unwrap();
+
+        // Drive both swarms until the gossipsub mesh forms. The mesh
+        // requires at least one heartbeat interval for GRAFT.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+        while tokio::time::Instant::now() < deadline {
+            tokio::select! {
+                _ = publisher.next() => {}
+                _ = subscriber.next() => {}
+                _ = tokio::time::sleep(Duration::from_millis(50)) => {}
+            }
+        }
+
+        // --- Build a near-maximum-size payload ---
+        let script_pubkey = fake::Faker.fake_with_rng::<ScriptPubKey, _>(&mut rng);
+        // We use withdrawals here because the packager will construct
+        // fewer transactions (bags), which means the size estimate will be
+        // more accurate.
+        let withdrawals: Vec<WithdrawalRequest> = (0..2000)
+            .map(|request_id| WithdrawalRequest {
+                request_id,
+                txid: fake::Faker.fake_with_rng(&mut rng),
+                block_hash: fake::Faker.fake_with_rng(&mut rng),
+                amount: 50_000,
+                max_fee: 10_000,
+                script_pubkey: script_pubkey.clone(),
+                signer_bitmap: bitvec::array::BitArray::ZERO,
+            })
+            .collect();
+
+        let items: Vec<crate::bitcoin::utxo::RequestRef> = withdrawals
+            .iter()
+            .map(crate::bitcoin::utxo::RequestRef::Withdrawal)
+            .collect();
+
+        let max_votes_against = 3;
+        let max_needs_signature = crate::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
+        let bags = compute_optimal_packages(items, max_votes_against, max_needs_signature);
+        let request_package: Vec<TxRequestIds> = bags
+            .map(|bag| TxRequestIds::from(&crate::bitcoin::utxo::Requests::new(bag)))
+            .collect();
+
+        let packager_presign = BitcoinPreSignRequest {
+            request_package: request_package.clone(),
+            fee_rate: 0.0,
+            last_fees: None,
+        };
+
+        let packager_presign_size =
+            proto::BitcoinPreSignRequest::from(packager_presign).encoded_len();
+
+        let presign = BitcoinPreSignRequest {
+            request_package,
+            fee_rate: 25.1234567,
+            last_fees: Some(Fees {
+                total: u64::MAX,
+                rate: 25.1234567,
+            }),
+        };
+
+        let signer_private_key = PrivateKey::new(&mut rng);
+        let signer_public_key = PublicKey::from_private_key(&signer_private_key);
+        let digest: [u8; 32] = [0xff; 32];
+        let signature = signer_private_key.sign_ecdsa(&secp256k1::Message::from_digest(digest));
+
+        let signed = Signed {
+            inner: SignerMessage {
+                bitcoin_chain_tip: BitcoinBlockHash::from([0xff; 32]),
+                payload: Payload::BitcoinPreSignRequest(presign),
+            },
+            signature,
+            signer_public_key,
+        };
+
+        let data: Vec<u8> = proto::Signed::from(signed).encode_to_vec();
+        let data_len = data.len();
+
+        // The packager should make sure that the serialized size of
+        // BitcoinPreSignRequest.request_package is than or equal to
+        // MAX_PRESIGN_REQUEST_SIZE. However, the message that we publish
+        // in this test should be larger than that, because the inner
+        // BitcoinPreSignRequest.request_package is near its maximum size.
+        // Still the total size of the message must be less than the
+        // GOSSIPSUB_MAX_TRANSMIT_SIZE.
+        more_asserts::assert_le!(packager_presign_size, MAX_PRESIGN_REQUEST_SIZE);
+        more_asserts::assert_le!(MAX_PRESIGN_REQUEST_SIZE, data_len);
+        more_asserts::assert_lt!(data_len, GOSSIPSUB_MAX_TRANSMIT_SIZE);
+
+        // --- Try to publish our message and verify that libp2p receives it ---
+        publisher
+            .behaviour_mut()
+            .gossipsub
+            .publish(TOPIC.hash(), data.clone())
+            .unwrap();
+
+        // Wait for the subscriber to receive the message. If the message
+        // is too large the subscriber will reject it so the message would
+        // be dropped, with this loop timing out, leading to test failure.
+        let receive_timeout = Duration::from_secs(5);
+        let received = tokio::time::timeout(receive_timeout, async {
+            loop {
+                tokio::select! {
+                    event = subscriber.next() => {
+                        if let Some(SwarmEvent::Behaviour(
+                            SignerBehaviorEvent::Gossipsub(
+                                gossipsub::Event::Message { message, .. },
+                            ),
+                        )) = event {
+                            return message;
+                        }
+                    }
+                    // Keep driving the publisher so heartbeats / acks flow.
+                    _ = publisher.next() => {}
+                }
+            }
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(received.data, data);
     }
 }

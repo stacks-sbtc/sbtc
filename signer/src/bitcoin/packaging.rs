@@ -92,7 +92,7 @@ const SIGNED_MESSAGE_OVERHEAD: usize = 1024;
 /// [`SIGNED_MESSAGE_OVERHEAD`] for the `Signed` and `SignerMessage`
 /// protobuf wrapper, this is the remaining budget for the
 /// `BitcoinPreSignRequest` payload.
-const MAX_PRESIGN_REQUEST_SIZE: usize = GOSSIPSUB_MAX_TRANSMIT_SIZE - SIGNED_MESSAGE_OVERHEAD;
+pub const MAX_PRESIGN_REQUEST_SIZE: usize = GOSSIPSUB_MAX_TRANSMIT_SIZE - SIGNED_MESSAGE_OVERHEAD;
 
 /// The maximum vsize of all items in a package.
 ///
