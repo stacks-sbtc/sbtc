@@ -921,14 +921,17 @@ mod tests {
         assert!(p2p_peers_2a.is_empty());
     }
 
-    /// Verify that a near-maximum-size wrapped `Signed<SignerMessage>`
-    /// message would be succesfully broadcast and received by libp2p.
+    /// Verify that a near-maximum-size `Signed<SignerMessage>` is
+    /// successfully broadcast and received by libp2p gossipsub.
     ///
-    /// In this test we construct a publisher and subscriber
-    /// Swarm<SignerBehavior> objects and connect them. Then we construct a
-    /// near-maximum-size `Signed<SignerMessage>` by constructing a large
-    /// `BitcoinPreSignRequest` message, publish it, and verify that the
-    /// subscriber receives it.
+    /// This test builds two `Swarm<SignerBehavior>` instances and connects
+    /// them over in-memory transport. It then constructs a
+    /// near-maximum-size `Signed<SignerMessage>` containing a large
+    /// `BitcoinPreSignRequest`, publishes it from one swarm, and verifies
+    /// that the other receives it when the subscriber's `max_transmit_size`
+    /// is the system's default, and that the message is dropped when the
+    /// subscriber's `max_transmit_size` is too low to fit the full
+    /// gossipsub RPC frame.
     #[test_case::test_case(GOSSIPSUB_MAX_TRANSMIT_SIZE, false; "with default message limits")]
     #[test_case::test_case(MAX_PRESIGN_REQUEST_SIZE, true; "with low message limits")]
     #[tokio::test]
@@ -1090,9 +1093,9 @@ mod tests {
             .unwrap();
 
         // Wait for the subscriber to receive the message. If the message
-        // is too large the subscriber will reject it so the message would
-        // be dropped, with this loop timing out, leading to test failure
-        // when times_out is false.
+        // is too large, the subscriber will reject it and the message will
+        // be dropped, causing this loop to time out. That leads to a test
+        // failure when times_out is false.
         let receive_timeout = Duration::from_secs(5);
         let received = tokio::time::timeout(receive_timeout, async {
             loop {

@@ -650,7 +650,7 @@ mod tests {
     /// [`BitcoinPreSignRequest`](crate::message::BitcoinPreSignRequest).
     ///
     /// This is the worst-case protobuf encoding size of an `OutPoint` when
-    ///  embedded in a `TxRequestIds.deposits` field. The value accounts
+    /// embedded in a `TxRequestIds.deposits` field. The value accounts
     /// for the field tag, length varint, and the full encoding of
     /// `BitcoinTxid(Uint256)` + `uint32 vout`.
     const DEPOSIT_PRESIGN_WEIGHT: usize = 48;
@@ -1646,7 +1646,7 @@ mod tests {
         // so the real overhead can be 2 or 3 bytes per bag, making our
         // running total conservatively high. The two asserts below require
         // `actual_size <= estimated_size` and allow at most two bytes of
-        // slack per bag make up for our potential overestimate.
+        // slack per bag to make up for our potential overestimate.
         more_asserts::assert_le!(estimated_size - num_bags * 2, actual_size);
         more_asserts::assert_le!(actual_size, estimated_size);
 
