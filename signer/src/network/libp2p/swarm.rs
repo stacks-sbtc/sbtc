@@ -1077,7 +1077,7 @@ mod tests {
         // in this test should be larger than that, because the inner
         // BitcoinPreSignRequest.request_package is near its maximum size.
         // Still the total size of the message must be less than the
-        // MAX_TRANSMIT_SIZE.
+        // GOSSIPSUB_MAX_TRANSMIT_SIZE.
         more_asserts::assert_le!(packager_presign_size, MAX_PRESIGN_REQUEST_SIZE);
         more_asserts::assert_le!(MAX_PRESIGN_REQUEST_SIZE, data_len);
         more_asserts::assert_lt!(data_len, GOSSIPSUB_MAX_TRANSMIT_SIZE);
@@ -1091,7 +1091,8 @@ mod tests {
 
         // Wait for the subscriber to receive the message. If the message
         // is too large the subscriber will reject it so the message would
-        // be dropped, with this loop timing out, leading to test failure.
+        // be dropped, with this loop timing out, leading to test failure
+        // when times_out is false.
         let receive_timeout = Duration::from_secs(5);
         let received = tokio::time::timeout(receive_timeout, async {
             loop {
