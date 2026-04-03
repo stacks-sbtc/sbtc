@@ -1072,7 +1072,7 @@ mod tests {
         let data_len = data.len();
 
         // The packager should make sure that the serialized size of
-        // BitcoinPreSignRequest.request_package is than or equal to
+        // BitcoinPreSignRequest.request_package is less than or equal to
         // MAX_PRESIGN_REQUEST_SIZE. However, the message that we publish
         // in this test should be larger than that, because the inner
         // BitcoinPreSignRequest.request_package is near its maximum size.

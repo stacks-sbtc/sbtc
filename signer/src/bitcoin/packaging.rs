@@ -1618,7 +1618,7 @@ mod tests {
             .collect();
 
         // In local runs the bag count has been between 18 and 20.
-        let num_bags = dbg!(request_package.len());
+        let num_bags = request_package.len();
         // The packager enforces the presign serialization size limits
         // using only request identifiers; it does not include `fee_rate`
         // or `last_fees` in that estimate. For this check we build a
