@@ -64,6 +64,7 @@ use signer::context::P2PEvent;
 use signer::context::RequestDeciderEvent;
 use signer::context::SignerEvent;
 use signer::context::SignerSignal;
+use signer::emily_client::EmilyInteract;
 use signer::message::Payload;
 use signer::network::MessageTransfer as _;
 use signer::stacks::api::SignerSetInfo;
@@ -72,7 +73,6 @@ use signer::stacks::api::StacksEpochStatus;
 use signer::stacks::api::StacksInteract;
 use signer::stacks::wallet::SignerWallet;
 use signer::storage::model::BitcoinBlockHeight;
-use signer::storage::model::KeyRotationEvent;
 use signer::storage::model::StacksBlockRef;
 use signer::storage::model::WithdrawalTxOutput;
 use signer::testing::btc::build_emily_request;
@@ -130,7 +130,6 @@ use url::Url;
 
 use signer::block_observer::BlockObserver;
 use signer::context::Context;
-use signer::emily_client::EmilyClient;
 use signer::error::Error;
 use signer::keys;
 use signer::keys::PublicKey;
@@ -174,8 +173,8 @@ use crate::setup::set_deposit_incomplete;
 use crate::utxo_construction::generate_withdrawal;
 use crate::utxo_construction::make_deposit_request;
 
-pub type IntegrationTestContext<Stacks> =
-    TestContext<PgStore, BitcoinCoreClient, Stacks, EmilyClient>;
+pub type IntegrationTestContext<Stacks, Emily> =
+    TestContext<PgStore, BitcoinCoreClient, Stacks, Emily>;
 
 async fn run_dkg<Rng, C>(
     ctx: &C,
@@ -275,11 +274,12 @@ where
 /// Wait for all signers to finish their coordinator duties and do this
 /// concurrently so that we don't miss anything (not sure if we need to do
 /// it concurrently).
-pub async fn wait_for_tenure_completed<S, K>(
-    signers: &[(IntegrationTestContext<S>, PgStore, K, SignerNetwork)],
+pub async fn wait_for_tenure_completed<S, K, E>(
+    signers: &[(IntegrationTestContext<S, E>, PgStore, K, SignerNetwork)],
     block_hash: BitcoinBlockHash,
 ) where
     S: StacksInteract + Clone + Send + Sync + 'static,
+    E: EmilyInteract + Clone + Send + Sync + 'static,
 {
     let wait_duration = Duration::from_secs(15);
 
@@ -4634,14 +4634,17 @@ async fn test_conservative_initial_sbtc_limits() {
     //   coordinator)
     // =========================================================================
     let signers_key = setup.signers.signer_keys().iter().cloned().collect();
+    let mut chain_tip: BitcoinBlockHash;
     loop {
-        let chain_tip: BitcoinBlockHash = faucet.generate_blocks(1).pop().unwrap().into();
+        chain_tip = faucet.generate_block().into();
         if given_key_is_coordinator(signers[0].2.public_key().into(), &chain_tip, &signers_key) {
             break;
         }
     }
-    // Giving enough time to process the transaction
-    Sleep::for_secs(3).await;
+    // The other signers should not be able to be the coordinator, and
+    // probably will not send tenure completed signals.
+    let first_signer = &signers[..=0];
+    wait_for_tenure_completed(first_signer, chain_tip).await;
 
     // =========================================================================
     // Check we did NOT process the deposit
@@ -4656,8 +4659,9 @@ async fn test_conservative_initial_sbtc_limits() {
     // =========================================================================
     enable_emily_limits.store(true, Ordering::SeqCst);
 
-    faucet.generate_block();
-    Sleep::for_secs(3).await;
+    let chain_tip = faucet.generate_block().into();
+    wait_for_tenure_completed(first_signer, chain_tip).await;
+
     // =========================================================================
     // Check we did process the deposit now
     // =========================================================================
@@ -4711,8 +4715,6 @@ async fn sign_bitcoin_transaction_withdrawals() {
     let bitcoin = stack.bitcoin().await;
     let rpc = bitcoin.rpc();
     let faucet = &bitcoin.get_faucet();
-
-    let mut rng = get_rng();
 
     let (emily_client, emily_tables) = new_emily_setup().await;
     let emily_config = emily_client.config().as_testing();
@@ -4859,25 +4861,6 @@ async fn sign_bitcoin_transaction_withdrawals() {
     // notifications so that we are up-to-date with the chain tip.
     wait_for_tenure_completed(&signers, chain_tip).await;
 
-    // DKG and DKG verification should have finished successfully. We
-    // assume, for now, that the key rotation contract call was submitted.
-    // This assumption gets validated later, but we make the assumption now
-    // and populate the database with a key rotation event.
-    for (ctx, db, _, _) in signers.iter() {
-        let shares = db.get_latest_verified_dkg_shares().await.unwrap().unwrap();
-
-        let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
-        let event = KeyRotationEvent {
-            txid: fake::Faker.fake_with_rng(&mut rng),
-            block_hash: stacks_chain_tip.block_hash,
-            aggregate_key: shares.aggregate_key,
-            signer_set: shares.signer_set_public_keys.clone(),
-            signatures_required: shares.signature_share_threshold,
-            address: PrincipalData::from(ctx.config().signer.deployer.clone()).into(),
-        };
-        db.write_rotate_keys_transaction(&event).await.unwrap();
-    }
-
     let (_, db, _, _) = signers.first().unwrap();
     let shares = db.get_latest_encrypted_dkg_shares().await.unwrap().unwrap();
 
@@ -4932,7 +4915,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
         Chainstate {
             stacks_block_hash: stacks_chain_tip.to_string(),
             stacks_block_height: *stacks_tip_height,
-            bitcoin_block_height: Some(Some(0)), // TODO: maybe we will want to have here some sensible data.
+            bitcoin_block_height: Some(Some(*bitcoin_chain_tip.block_height)),
         },
     )
     .await
@@ -5008,6 +4991,12 @@ async fn sign_bitcoin_transaction_withdrawals() {
     wait_for_tenure_completed(&signers, chain_tip).await;
 
     let mut txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
+    if txids.is_empty() {
+        // Sometimes the transaction is not in the mempool yet, so we wait
+        // for it.
+        Sleep::for_secs(2).await;
+        txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
+    }
     assert_eq!(txids.len(), 1);
 
     let block_hash = faucet.generate_block().into();
