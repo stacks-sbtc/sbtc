@@ -258,13 +258,6 @@ pub struct SignatureShareResponse {
     pub signature_shares: Vec<SignatureShare>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-/// Network packets need to be signed so they can be verified
-pub struct Packet {
-    /// The message to sign
-    pub msg: Message,
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
