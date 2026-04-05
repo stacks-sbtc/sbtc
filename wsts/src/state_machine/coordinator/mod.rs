@@ -943,7 +943,6 @@ pub mod test {
                                         signer_id: response.signer_id,
                                         signature_shares: sshares,
                                     }),
-                                    sig: vec![],
                                 }
                             } else {
                                 packet.clone()
@@ -1370,7 +1369,6 @@ pub mod test {
                                 };
                                 Packet {
                                     msg: Message::DkgPublicShares(public_shares),
-                                    sig: vec![],
                                 }
                             } else {
                                 packet.clone()
@@ -1497,7 +1495,6 @@ pub mod test {
                                 };
                                 Packet {
                                     msg: Message::DkgPrivateShares(private_shares),
-                                    sig: vec![],
                                 }
                             } else {
                                 packet.clone()

@@ -119,7 +119,6 @@ impl FromMessage for Packet {
     fn from_message(message: &Message) -> Self {
         Packet {
             msg: message.clone(),
-            sig: Vec::new(),
         }
     }
 }

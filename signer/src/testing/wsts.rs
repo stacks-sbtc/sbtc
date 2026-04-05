@@ -198,7 +198,6 @@ impl Coordinator {
 
                 let packet = wsts::net::Packet {
                     msg: wsts_msg.inner,
-                    sig: Vec::new(),
                 };
 
                 let (outbound_packet, operation_result) = self
