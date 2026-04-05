@@ -258,29 +258,21 @@ pub struct SignatureShareResponse {
     pub signature_shares: Vec<SignatureShare>,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 /// Network packets need to be signed so they can be verified
 pub struct Packet {
     /// The message to sign
     pub msg: Message,
 }
 
-impl Debug for Packet {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Packet")
-            .field("msg", &self.msg)
-            .finish()
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::curve::ecdsa;
+    use crate::curve::scalar::Scalar;
+    use crate::state_machine::PublicKeys;
     use crate::util::create_rng;
     use rand_core::{CryptoRng, RngCore};
-    use crate::state_machine::PublicKeys;
-    use crate::curve::scalar::Scalar;
-    use crate::curve::ecdsa;
 
     #[derive(Clone, Debug)]
     #[allow(dead_code)]

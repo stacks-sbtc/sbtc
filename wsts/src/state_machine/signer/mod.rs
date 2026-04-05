@@ -358,9 +358,7 @@ impl Signer {
         for message in messages {
             let outbounds = self.process(&message.msg, rng)?;
             for out in outbounds {
-                let msg = Packet {
-                    msg: out,
-                };
+                let msg = Packet { msg: out };
                 responses.push(msg);
             }
         }

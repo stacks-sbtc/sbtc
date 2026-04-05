@@ -117,9 +117,7 @@ pub trait FromMessage {
 
 impl FromMessage for Packet {
     fn from_message(message: &Message) -> Self {
-        Packet {
-            msg: message.clone(),
-        }
+        Packet { msg: message.clone() }
     }
 }
 

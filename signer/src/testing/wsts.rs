@@ -196,9 +196,7 @@ impl Coordinator {
                     continue;
                 };
 
-                let packet = wsts::net::Packet {
-                    msg: wsts_msg.inner,
-                };
+                let packet = wsts::net::Packet { msg: wsts_msg.inner };
 
                 let (outbound_packet, operation_result) = self
                     .wsts_coordinator
