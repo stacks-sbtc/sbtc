@@ -1645,7 +1645,7 @@ where
             .as_signal_stream(signed_message_filter)
             .filter_map(Self::to_signed_message);
 
-        let msg = message::WstsMessage { id, inner: outbound.msg };
+        let msg = message::WstsMessage { id, inner: outbound };
         self.send_message(msg, bitcoin_chain_tip).await?;
 
         let max_duration = self.signing_round_max_duration;
@@ -1692,7 +1692,7 @@ where
             .map_err(Error::wsts_coordinator)?;
 
         let id = WstsMessageId::Dkg(chain_tip.block_hash.into_bytes());
-        let msg = message::WstsMessage { id, inner: outbound.msg };
+        let msg = message::WstsMessage { id, inner: outbound };
 
         // We create a signal stream before sending a message so that there
         // is no race condition with the steam and the getting a response.
@@ -1781,7 +1781,7 @@ where
                 continue;
             }
 
-            let (outbound_packet, operation_result) = match coordinator.process_message(&msg) {
+            let (outbound_message, operation_result) = match coordinator.process_message(&msg) {
                 Ok(val) => val,
                 Err(err) => {
                     tracing::warn!(?msg, reason = %err, "ignoring message");
@@ -1789,8 +1789,8 @@ where
                 }
             };
 
-            if let Some(packet) = outbound_packet {
-                let msg = message::WstsMessage { id, inner: packet.msg };
+            if let Some(message) = outbound_message {
+                let msg = message::WstsMessage { id, inner: message };
                 self.send_message(msg, bitcoin_chain_tip).await?;
             }
 
