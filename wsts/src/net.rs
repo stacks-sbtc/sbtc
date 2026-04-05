@@ -1,48 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 
-use sha2::{Digest, Sha256};
-use tracing::warn;
-
 use crate::{
     common::{MerkleRoot, PolyCommitment, PublicNonce, SignatureShare, TupleProof},
-    curve::{ecdsa, point::Point, scalar::Scalar},
-    state_machine::PublicKeys,
+    curve::point::Point,
 };
-
-/// Trait to encapsulate sign/verify, users only need to impl hash
-pub trait Signable {
-    /// Hash this object in a consistent way so it can be signed/verified
-    fn hash(&self, hasher: &mut Sha256);
-
-    /// Sign a hash of this object using the passed private key
-    fn sign(&self, private_key: &Scalar) -> Result<Vec<u8>, ecdsa::Error> {
-        let mut hasher = Sha256::new();
-
-        self.hash(&mut hasher);
-
-        let hash = hasher.finalize();
-        match ecdsa::Signature::new(hash.as_slice(), private_key) {
-            Ok(sig) => Ok(sig.to_bytes().to_vec()),
-            Err(e) => Err(e),
-        }
-    }
-
-    /// Verify a hash of this object using the passed public key
-    fn verify(&self, signature: &[u8], public_key: &ecdsa::PublicKey) -> bool {
-        let mut hasher = Sha256::new();
-
-        self.hash(&mut hasher);
-
-        let hash = hasher.finalize();
-        let sig = match ecdsa::Signature::try_from(signature) {
-            Ok(sig) => sig,
-            Err(_) => return false,
-        };
-
-        sig.verify(hash.as_slice(), public_key)
-    }
-}
 
 #[derive(Clone, Debug, PartialEq)]
 /// A bad private share
@@ -104,35 +66,11 @@ pub enum Message {
     SignatureShareResponse(SignatureShareResponse),
 }
 
-impl Signable for Message {
-    fn hash(&self, hasher: &mut Sha256) {
-        match self {
-            Message::DkgBegin(msg) => msg.hash(hasher),
-            Message::DkgPublicShares(msg) => msg.hash(hasher),
-            Message::DkgPrivateBegin(msg) => msg.hash(hasher),
-            Message::DkgPrivateShares(msg) => msg.hash(hasher),
-            Message::DkgEndBegin(msg) => msg.hash(hasher),
-            Message::DkgEnd(msg) => msg.hash(hasher),
-            Message::NonceRequest(msg) => msg.hash(hasher),
-            Message::NonceResponse(msg) => msg.hash(hasher),
-            Message::SignatureShareRequest(msg) => msg.hash(hasher),
-            Message::SignatureShareResponse(msg) => msg.hash(hasher),
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq)]
 /// DKG begin message from coordinator to signers
 pub struct DkgBegin {
     /// DKG round ID
     pub dkg_id: u64,
-}
-
-impl Signable for DkgBegin {
-    fn hash(&self, hasher: &mut Sha256) {
-        hasher.update("DKG_BEGIN".as_bytes());
-        hasher.update(self.dkg_id.to_be_bytes());
-    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -146,20 +84,6 @@ pub struct DkgPublicShares {
     pub comms: Vec<(u32, PolyCommitment)>,
 }
 
-impl Signable for DkgPublicShares {
-    fn hash(&self, hasher: &mut Sha256) {
-        hasher.update("DKG_PUBLIC_SHARES".as_bytes());
-        hasher.update(self.dkg_id.to_be_bytes());
-        hasher.update(self.signer_id.to_be_bytes());
-        for (party_id, comm) in &self.comms {
-            hasher.update(party_id.to_be_bytes());
-            for a in &comm.poly {
-                hasher.update(a.compress().as_bytes());
-            }
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq)]
 /// DKG private begin message from signer to all signers and coordinator
 pub struct DkgPrivateBegin {
@@ -169,19 +93,6 @@ pub struct DkgPrivateBegin {
     pub signer_ids: Vec<u32>,
     /// Key IDs who responded in time for this DKG round
     pub key_ids: Vec<u32>,
-}
-
-impl Signable for DkgPrivateBegin {
-    fn hash(&self, hasher: &mut Sha256) {
-        hasher.update("DKG_PRIVATE_BEGIN".as_bytes());
-        hasher.update(self.dkg_id.to_be_bytes());
-        for key_id in &self.key_ids {
-            hasher.update(key_id.to_be_bytes());
-        }
-        for signer_id in &self.signer_ids {
-            hasher.update(signer_id.to_be_bytes());
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -202,24 +113,6 @@ impl DkgPrivateShares {
     }
 }
 
-impl Signable for DkgPrivateShares {
-    fn hash(&self, hasher: &mut Sha256) {
-        hasher.update("DKG_PRIVATE_SHARES".as_bytes());
-        hasher.update(self.dkg_id.to_be_bytes());
-        hasher.update(self.signer_id.to_be_bytes());
-        // make sure we hash consistently by sorting the keys
-        for (src_id, share) in &self.shares {
-            hasher.update(src_id.to_be_bytes());
-            let mut dst_ids = share.keys().cloned().collect::<Vec<u32>>();
-            dst_ids.sort();
-            for dst_id in &dst_ids {
-                hasher.update(dst_id.to_be_bytes());
-                hasher.update(&share[dst_id]);
-            }
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq)]
 /// DKG end begin message from signer to all signers and coordinator
 pub struct DkgEndBegin {
@@ -231,19 +124,6 @@ pub struct DkgEndBegin {
     pub key_ids: Vec<u32>,
 }
 
-impl Signable for DkgEndBegin {
-    fn hash(&self, hasher: &mut Sha256) {
-        hasher.update("DKG_END_BEGIN".as_bytes());
-        hasher.update(self.dkg_id.to_be_bytes());
-        for key_id in &self.key_ids {
-            hasher.update(key_id.to_be_bytes());
-        }
-        for signer_id in &self.signer_ids {
-            hasher.update(signer_id.to_be_bytes());
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq)]
 /// DKG end message from signers to coordinator
 pub struct DkgEnd {
@@ -253,14 +133,6 @@ pub struct DkgEnd {
     pub signer_id: u32,
     /// DKG status for this Signer after receiving public/private shares
     pub status: DkgStatus,
-}
-
-impl Signable for DkgEnd {
-    fn hash(&self, hasher: &mut Sha256) {
-        hasher.update("DKG_END".as_bytes());
-        hasher.update(self.dkg_id.to_be_bytes());
-        hasher.update(self.signer_id.to_be_bytes());
-    }
 }
 
 #[derive(Clone, PartialEq)]
@@ -287,26 +159,6 @@ impl Debug for NonceRequest {
             .field("message", &hex::encode(&self.message))
             .field("signature_type", &self.signature_type)
             .finish()
-    }
-}
-
-impl Signable for NonceRequest {
-    fn hash(&self, hasher: &mut Sha256) {
-        hasher.update("NONCE_REQUEST".as_bytes());
-        hasher.update(self.dkg_id.to_be_bytes());
-        hasher.update(self.sign_id.to_be_bytes());
-        hasher.update(self.sign_iter_id.to_be_bytes());
-        hasher.update(self.message.as_slice());
-        match self.signature_type {
-            SignatureType::Frost => hasher.update("SIGNATURE_TYPE_FROST".as_bytes()),
-            SignatureType::Schnorr => hasher.update("SIGNATURE_TYPE_SCHNORR".as_bytes()),
-            SignatureType::Taproot(merkle_root) => {
-                hasher.update("SIGNATURE_TYPE_TAPROOT".as_bytes());
-                if let Some(merkle_root) = merkle_root {
-                    hasher.update(merkle_root);
-                }
-            }
-        }
     }
 }
 
@@ -347,27 +199,6 @@ impl Debug for NonceResponse {
             )
             .field("message", &hex::encode(&self.message))
             .finish()
-    }
-}
-
-impl Signable for NonceResponse {
-    fn hash(&self, hasher: &mut Sha256) {
-        hasher.update("NONCE_RESPONSE".as_bytes());
-        hasher.update(self.dkg_id.to_be_bytes());
-        hasher.update(self.sign_id.to_be_bytes());
-        hasher.update(self.sign_iter_id.to_be_bytes());
-        hasher.update(self.signer_id.to_be_bytes());
-
-        for key_id in &self.key_ids {
-            hasher.update(key_id.to_be_bytes());
-        }
-
-        for nonce in &self.nonces {
-            hasher.update(nonce.D.compress().as_bytes());
-            hasher.update(nonce.E.compress().as_bytes());
-        }
-
-        hasher.update(self.message.as_slice());
     }
 }
 
@@ -412,30 +243,6 @@ impl Debug for SignatureShareRequest {
     }
 }
 
-impl Signable for SignatureShareRequest {
-    fn hash(&self, hasher: &mut Sha256) {
-        hasher.update("SIGNATURE_SHARE_REQUEST".as_bytes());
-        hasher.update(self.dkg_id.to_be_bytes());
-        hasher.update(self.sign_id.to_be_bytes());
-
-        for nonce_response in &self.nonce_responses {
-            nonce_response.hash(hasher);
-        }
-
-        hasher.update(self.message.as_slice());
-        match self.signature_type {
-            SignatureType::Frost => hasher.update("SIGNATURE_TYPE_FROST".as_bytes()),
-            SignatureType::Schnorr => hasher.update("SIGNATURE_TYPE_SCHNORR".as_bytes()),
-            SignatureType::Taproot(merkle_root) => {
-                hasher.update("SIGNATURE_TYPE_TAPROOT".as_bytes());
-                if let Some(merkle_root) = merkle_root {
-                    hasher.update(merkle_root);
-                }
-            }
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq)]
 /// Signature share response message from signers to coordinator
 pub struct SignatureShareResponse {
@@ -449,23 +256,6 @@ pub struct SignatureShareResponse {
     pub signer_id: u32,
     /// Signature shares from this Signer
     pub signature_shares: Vec<SignatureShare>,
-}
-
-impl Signable for SignatureShareResponse {
-    fn hash(&self, hasher: &mut Sha256) {
-        hasher.update("SIGNATURE_SHARE_RESPONSE".as_bytes());
-        hasher.update(self.dkg_id.to_be_bytes());
-        hasher.update(self.sign_id.to_be_bytes());
-        hasher.update(self.signer_id.to_be_bytes());
-
-        for signature_share in &self.signature_shares {
-            hasher.update(signature_share.id.to_be_bytes());
-            hasher.update(signature_share.z_i.to_bytes());
-            for key_id in &signature_share.key_ids {
-                hasher.update(key_id.to_be_bytes());
-            }
-        }
-    }
 }
 
 #[derive(Clone, PartialEq)]
@@ -486,9 +276,11 @@ impl Debug for Packet {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::schnorr::ID;
     use crate::util::create_rng;
     use rand_core::{CryptoRng, RngCore};
+    use crate::state_machine::PublicKeys;
+    use crate::curve::scalar::Scalar;
+    use crate::curve::ecdsa;
 
     #[derive(Clone, Debug)]
     #[allow(dead_code)]
