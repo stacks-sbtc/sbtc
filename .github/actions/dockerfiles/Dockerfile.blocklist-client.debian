@@ -26,7 +26,7 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
         ARCH="x86_64"; \
         CHECKSUM="c5d410d9f82a4f24c549fe5d24f988f85b2679b452413a9f7e5f7b956f2fe7ea"; \
     fi && \
-    wget -qO /tmp/musl.tgz "https://musl.cc/${ARCH}-linux-musl-cross.tgz" && \
+    wget -O /tmp/musl.tgz "https://musl.cc/${ARCH}-linux-musl-cross.tgz" && \
     echo "${CHECKSUM}  /tmp/musl.tgz" | sha256sum -c && \
     tar xz -C /opt -f /tmp/musl.tgz && rm /tmp/musl.tgz && \
     ln -s "/opt/${ARCH}-linux-musl-cross/bin/${ARCH}-linux-musl-gcc" /usr/local/bin/ && \
