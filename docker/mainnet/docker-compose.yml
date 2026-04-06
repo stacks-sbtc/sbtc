@@ -65,7 +65,7 @@ services:
       SIGNER_EMILY__ENDPOINTS: "https://${EMILY_API_KEY}@sbtc-emily.com"
       SIGNER_SIGNER__DB_ENDPOINT: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
     volumes:
-      - ./sbtc-signer/signer-config.toml.in:/signer-config.toml:ro
+      - ./sbtc-signer/signer-config.toml:/signer-config.toml:ro
     ports:
       - "4122:4122" # P2P communication between sBTC signers
       - "9184:9184" # Prometheus metrics
