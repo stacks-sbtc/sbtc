@@ -1,5 +1,5 @@
 sources:
-  sbtc_signer_logs:
+  sbtc_signer_fluentd:
     type: fluent
     address: 0.0.0.0:24224
 
@@ -12,10 +12,10 @@ transforms:
   # Parse the JSON log messages from the signer's stdout.
   # The fluentd driver sends the log line in the "log" field.
   # If it parses as JSON, merge it into the top-level event.
-  sbtc_signer_json:
+  sbtc_signer_logs:
     type: remap
     inputs:
-      - sbtc_signer_logs
+      - sbtc_signer_fluentd
     drop_on_error: true
     source: |-
       .docker_container_id = del(.container_id)
@@ -47,7 +47,7 @@ sinks:
     create_missing_group: false
     create_missing_stream: false
     inputs:
-      - sbtc_signer_json
+      - sbtc_signer_logs
     region: eu-west-1
     group_name: sbtc-mainnet-partner-signers
     stream_name: "${STREAM_NAME}"
