@@ -4,63 +4,52 @@ FROM --platform=$BUILDPLATFORM rust:1.94.1-slim-trixie AS build
 ARG TARGETARCH
 ARG CARGO_BUILD_ARGS="--release --locked"
 
-# Install host build dependencies.
-# Build scripts run on the glibc host, so dlopen (needed by bindgen) works.
+# Install build dependencies.
+# clang/libclang-dev: needed by bindgen (used by p256k1).
+# Cross-compilers for both target architectures.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     clang \
     libclang-dev \
     git \
     pkg-config \
     g++ \
-    wget \
-    ca-certificates \
+    gcc-aarch64-linux-gnu \
+    g++-aarch64-linux-gnu \
+    gcc-x86-64-linux-gnu \
+    g++-x86-64-linux-gnu \
     findutils \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install the musl cross-toolchain from musl.cc for the target architecture.
-# Checksums pinned for supply-chain safety (GCC 11.2.1, 2021-11-23).
+# Add the Rust target for the target architecture.
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
-        ARCH="aarch64"; \
-        CHECKSUM="c909817856d6ceda86aa510894fa3527eac7989f0ef6e87b5721c58737a06c38"; \
+        rustup target add aarch64-unknown-linux-gnu; \
     else \
-        ARCH="x86_64"; \
-        CHECKSUM="c5d410d9f82a4f24c549fe5d24f988f85b2679b452413a9f7e5f7b956f2fe7ea"; \
-    fi && \
-    wget -O /tmp/musl.tgz "https://musl.cc/${ARCH}-linux-musl-cross.tgz" && \
-    echo "${CHECKSUM}  /tmp/musl.tgz" | sha256sum -c && \
-    tar xz -C /opt -f /tmp/musl.tgz && rm /tmp/musl.tgz && \
-    ln -s "/opt/${ARCH}-linux-musl-cross/bin/${ARCH}-linux-musl-gcc" /usr/local/bin/ && \
-    ln -s "/opt/${ARCH}-linux-musl-cross/bin/${ARCH}-linux-musl-g++" /usr/local/bin/ && \
-    ln -s "/opt/${ARCH}-linux-musl-cross/bin/${ARCH}-linux-musl-ar" /usr/local/bin/
-
-RUN if [ "$TARGETARCH" = "arm64" ]; then \
-        rustup target add aarch64-unknown-linux-musl; \
-    else \
-        rustup target add x86_64-unknown-linux-musl; \
+        rustup target add x86_64-unknown-linux-gnu; \
     fi
 
 WORKDIR /code/sbtc
 COPY . .
 
-# Build statically-linked musl binary.
-# .cargo/config.toml is in .dockerignore so the macOS defaults don't interfere.
+ENV CARGO_TARGET_DIR=/output
+# Build the blocklist-client binary, cross-compiling for the target architecture.
 RUN export LIBCLANG_PATH="$(find /usr/lib/llvm-* -name lib -type d | head -n 1)" && \
     if [ "$TARGETARCH" = "arm64" ]; then \
-        MUSL_TARGET="aarch64-unknown-linux-musl"; \
-        ARCH="aarch64"; \
+        TARGET="aarch64-unknown-linux-gnu" && \
+        export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc && \
+        export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++ && \
+        export AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar && \
+        export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc; \
     else \
-        MUSL_TARGET="x86_64-unknown-linux-musl"; \
-        ARCH="x86_64"; \
+        TARGET="x86_64-unknown-linux-gnu" && \
+        export CC_x86_64_unknown_linux_gnu=x86_64-linux-gnu-gcc && \
+        export CXX_x86_64_unknown_linux_gnu=x86_64-linux-gnu-g++ && \
+        export AR_x86_64_unknown_linux_gnu=x86_64-linux-gnu-ar && \
+        export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=x86_64-linux-gnu-gcc; \
     fi && \
-    export "CC_${ARCH}_unknown_linux_musl=${ARCH}-linux-musl-gcc" && \
-    export "CXX_${ARCH}_unknown_linux_musl=${ARCH}-linux-musl-g++" && \
-    export "AR_${ARCH}_unknown_linux_musl=${ARCH}-linux-musl-ar" && \
-    export "CARGO_TARGET_$(echo "$MUSL_TARGET" | tr '[:lower:]-' '[:upper:]_')_LINKER=${ARCH}-linux-musl-gcc" && \
-    cargo build --target "$MUSL_TARGET" --bin blocklist-client ${CARGO_BUILD_ARGS} && \
     mkdir -p /output && \
-    cp "target/$MUSL_TARGET/release/blocklist-client" /output/blocklist-client
+    cargo build --target "$TARGET" --bin blocklist-client ${CARGO_BUILD_ARGS}
 
-# distroless/static includes ca-certificates at /etc/ssl/certs/ca-certificates.crt.
-FROM gcr.io/distroless/static-debian13 AS blocklist-client
+# distroless/cc includes glibc, libgcc, libstdc++, ca-certificates.
+FROM gcr.io/distroless/cc-debian13 AS blocklist-client
 COPY --from=build /output/blocklist-client /usr/local/bin/blocklist-client
 ENTRYPOINT ["/usr/local/bin/blocklist-client"]
