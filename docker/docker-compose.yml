@@ -48,6 +48,12 @@ x-sbtc-signer: &sbtc-signer
     context: ../
     dockerfile: docker/sbtc/Dockerfile
     target: signer
+  logging:
+    driver: fluentd
+    options:
+      fluentd-address: "localhost:24224"
+      fluentd-async: "true"
+      tag: "{{.Name}}"
   entrypoint:
     - "/usr/local/bin/signer"
     - "--config"
@@ -187,12 +193,6 @@ services:
   sbtc-signer-1:
     <<: *sbtc-signer # Inherit all from the "sbtc-signer" service
     container_name: sbtc-signer-1
-    logging:
-      driver: fluentd
-      options:
-        fluentd-address: "localhost:24224"
-        fluentd-async: "true"
-        tag: "sbtc-signer-1"
     depends_on:
       - postgres-1
     environment:
@@ -214,12 +214,6 @@ services:
   sbtc-signer-2:
     <<: *sbtc-signer # Inherit all from the "sbtc-signer" service
     container_name: sbtc-signer-2
-    logging:
-      driver: fluentd
-      options:
-        fluentd-address: "localhost:24224"
-        fluentd-async: "true"
-        tag: "sbtc-signer-2"
     depends_on:
       - postgres-2
     environment:
@@ -241,12 +235,6 @@ services:
   sbtc-signer-3:
     <<: *sbtc-signer # Inherit all from the "sbtc-signer" service
     container_name: sbtc-signer-3
-    logging:
-      driver: fluentd
-      options:
-        fluentd-address: "localhost:24224"
-        fluentd-async: "true"
-        tag: "sbtc-signer-3"
     depends_on:
       - postgres-3
     environment:
