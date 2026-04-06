@@ -3,6 +3,7 @@
 use std::future::Future;
 
 use bitcoin::BlockHash;
+use bitcoin::OutPoint;
 use bitcoin::Txid;
 
 use bitcoincore_rpc_json::GetMempoolEntryResult;
@@ -10,8 +11,10 @@ use bitcoincore_rpc_json::GetTxOutResult;
 use rpc::BitcoinBlockHeader;
 use rpc::BitcoinBlockInfo;
 use rpc::BitcoinTxInfo;
+#[cfg(any(test, feature = "testing"))]
 use rpc::GetTxResponse;
 
+use crate::bitcoin::rpc::OutPointSummary;
 use crate::error::Error;
 
 pub mod client;
@@ -48,10 +51,26 @@ pub trait BitcoinInteract: Sync + Send {
     ) -> impl Future<Output = Result<Option<BitcoinBlockHeader>, Error>> + Send;
 
     /// get tx
+    #[cfg(any(test, feature = "testing"))]
     fn get_tx(
         &self,
         txid: &Txid,
     ) -> impl Future<Output = Result<Option<GetTxResponse>, Error>> + Send;
+
+    /// Get the confirmation summary of the UTXO identified by the given
+    /// outpoint.
+    ///
+    /// # Notes
+    ///
+    /// This method only works for unspent outputs that have been confirmed
+    /// in a block. If the output has been spent by a transaction that is
+    /// confirmed in a block then Ok(None) is returned. If the output has
+    /// been spent by a transaction that is in the mempool then Ok(Some(_))
+    /// is returned.
+    fn get_utxo_info(
+        &self,
+        outpoint: &OutPoint,
+    ) -> impl Future<Output = Result<Option<OutPointSummary>, Error>> + Send;
 
     /// Get a transaction with additional information about it.
     fn get_tx_info(
