@@ -5,8 +5,6 @@ ARG TARGETARCH
 
 RUN test -n "$GIT_COMMIT" || (echo "GIT_COMMIT not set" && false)
 
-ARG CARGO_BUILD_ARGS="--release --locked"
-
 # Install build dependencies.
 # clang/libclang-dev: needed by bindgen (used by p256k1).
 # Cross-compilers for both target architectures.
@@ -33,7 +31,6 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
 WORKDIR /code/sbtc
 COPY . .
 
-ENV CARGO_TARGET_DIR=/output
 # Build the signer binary, cross-compiling for the target architecture.
 RUN export LIBCLANG_PATH="$(find /usr/lib/llvm-* -name lib -type d | head -n 1)" && \
     if [ "$TARGETARCH" = "arm64" ]; then \
@@ -49,8 +46,9 @@ RUN export LIBCLANG_PATH="$(find /usr/lib/llvm-* -name lib -type d | head -n 1)"
         export AR_x86_64_unknown_linux_gnu=x86_64-linux-gnu-ar && \
         export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=x86_64-linux-gnu-gcc; \
     fi && \
+    cargo build --target "$TARGET" --bin signer --release --locked && \
     mkdir -p /output && \
-    cargo build --target "$TARGET" --bin signer ${CARGO_BUILD_ARGS}
+    cp "target/$TARGET/release/signer" /output/signer
 
 # distroless/cc includes glibc, libgcc, libstdc++, ca-certificates.
 FROM gcr.io/distroless/cc-debian13 AS signer
