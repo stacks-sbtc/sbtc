@@ -32,7 +32,7 @@ cfg-if.workspace = true
 clap.workspace = true
 clarity.workspace = true
 config.workspace = true
-emily-client = { workspace = true, features = ["rustls"] }
+emily-client.workspace = true
 futures.workspace = true
 hex.workspace = true
 include_dir.workspace = true
