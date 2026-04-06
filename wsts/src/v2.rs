@@ -5,7 +5,10 @@ use std::collections::HashMap;
 use tracing::warn;
 
 use crate::{
-    common::{check_public_shares, Nonce, PolyCommitment, PublicNonce, Signature, SignatureShare},
+    common::{
+        check_public_shares, Nonce, NonceD, NonceE, PolyCommitment, PublicNonce, Signature,
+        SignatureShare,
+    },
     compute,
     curve::{
         point::{Point, G},
@@ -32,7 +35,7 @@ pub struct Party {
     f: Option<Polynomial<Scalar>>,
     private_keys: HashMap<u32, Scalar>,
     group_key: Point,
-    nonce: Nonce,
+    nonce: Option<Nonce>,
 }
 
 impl Party {
@@ -54,17 +57,16 @@ impl Party {
             f: Some(VSS::random_poly(threshold - 1, rng)),
             private_keys: Default::default(),
             group_key: Point::zero(),
-            nonce: Nonce {
-                d: Scalar::from(0),
-                e: Scalar::from(0),
-            },
+            nonce: None,
         }
     }
 
     /// Generate and store a private nonce for a signing round
     pub fn gen_nonce<RNG: RngCore + CryptoRng>(&mut self, rng: &mut RNG) -> PublicNonce {
-        self.nonce = Nonce::random(rng);
-        PublicNonce::from(&self.nonce)
+        let nonce = Nonce::new(rng);
+        let public_nonce = PublicNonce::from(&nonce);
+        self.nonce = Some(nonce);
+        public_nonce
     }
 
     /// Get a public commitment to the private polynomial
@@ -190,20 +192,28 @@ impl Party {
 
     /// Sign `msg` with this party's shares of the group private key, using
     /// the set of `party_ids`, `key_ids` and corresponding `nonces` with a
-    /// tweaked public key. The posible values for tweak are:
+    /// tweaked public key. The possible values for tweak are:
     ///
     /// None    - standard FROST signature
     /// Some(0) - BIP-340 schnorr signature using 32-byte private key adjustments
     /// Some(t) - BIP-340 schnorr signature with BIP-341 tweaked keys, using 32-byte private key adjustments
     #[allow(non_snake_case)]
     pub fn sign_with_tweak(
-        &self,
+        &mut self,
         msg: &[u8],
         party_ids: &[u32],
         key_ids: &[u32],
         nonces: &[PublicNonce],
         tweak: Option<Scalar>,
-    ) -> SignatureShare {
+    ) -> Result<SignatureShare, AggregatorError> {
+        // We take() the nonce from self, then consume it with values() so
+        // the scalars are only used once.
+        let Some(nonce) = self.nonce.take() else {
+            return Err(AggregatorError::MissingNonce);
+        };
+
+        let (NonceD(nonce_d), NonceE(nonce_e)) = nonce.values();
+
         // When using BIP-340 32-byte public keys, we have to invert the private key if the
         // public key is odd.  But if we're also using BIP-341 tweaked keys, we have to do
         // the same thing if the tweaked public key is odd.  In that case, only invert the
@@ -228,7 +238,7 @@ impl Party {
         };
         let (_, R) = compute::intermediate(msg, party_ids, nonces);
         let c = compute::challenge(&tweaked_public_key, &R, msg);
-        let mut r = &self.nonce.d + &self.nonce.e * compute::binding(&self.id(), nonces, msg);
+        let mut r = &nonce_d + &nonce_e * compute::binding(&self.id(), nonces, msg);
         if tweak.is_some() && !R.has_even_y() {
             r = -r;
         }
@@ -242,11 +252,11 @@ impl Party {
 
         let z = r + cx;
 
-        SignatureShare {
+        Ok(SignatureShare {
             id: self.party_id,
             z_i: z,
             key_ids: self.key_ids.clone(),
-        }
+        })
     }
 }
 
@@ -288,7 +298,7 @@ impl Aggregator {
         Ok(())
     }
 
-    /// Aggregate the party signatures using a tweak.  The posible values for tweak are
+    /// Aggregate the party signatures using a tweak. The possible values for tweak are:
     /// None    - standard FROST signature
     /// Some(0) - BIP-340 schnorr signature using 32-byte private key adjustments
     /// Some(t) - BIP-340 schnorr signature with BIP-341 tweaked keys, using 32-byte private key adjustments
@@ -339,7 +349,7 @@ impl Aggregator {
         Ok((tweaked_public_key, sig))
     }
 
-    /// Check the party signatures after a failed group signature. The posible values for tweak are
+    /// Check the party signatures after a failed group signature. The possible values for tweak are:
     /// None    - standard FROST signature
     /// Some(0) - BIP-340 schnorr signature using 32-byte private key adjustments
     /// Some(t) - BIP-340 schnorr signature with BIP-341 tweaked keys, using 32-byte private key adjustments
@@ -494,7 +504,7 @@ impl Party {
                 .map(|(k, v)| (*k, *v))
                 .collect(),
             group_key: state.group_key,
-            nonce: party_state.nonce.clone(),
+            nonce: None,
         }
     }
 
@@ -503,7 +513,6 @@ impl Party {
         let party_state = traits::PartyState {
             polynomial: self.f.clone(),
             private_keys: self.private_keys.iter().map(|(k, v)| (*k, *v)).collect(),
-            nonce: self.nonce.clone(),
         };
         traits::SignerState {
             id: self.party_id,
@@ -582,24 +591,24 @@ impl Party {
 
     /// Sign a message using the Schnorr signature scheme.
     pub fn sign_schnorr(
-        &self,
+        &mut self,
         msg: &[u8],
         signer_ids: &[u32],
         key_ids: &[u32],
         nonces: &[PublicNonce],
-    ) -> SignatureShare {
+    ) -> Result<SignatureShare, AggregatorError> {
         self.sign_with_tweak(msg, signer_ids, key_ids, nonces, Some(Scalar::from(0)))
     }
 
     /// Sign a message using the Taproot signature scheme.
     pub fn sign_taproot(
-        &self,
+        &mut self,
         msg: &[u8],
         signer_ids: &[u32],
         key_ids: &[u32],
         nonces: &[PublicNonce],
         merkle_root: Option<[u8; 32]>,
-    ) -> SignatureShare {
+    ) -> Result<SignatureShare, AggregatorError> {
         let tweak = compute::tweak(&self.group_key, merkle_root);
         self.sign_with_tweak(msg, signer_ids, key_ids, nonces, Some(tweak))
     }
@@ -608,7 +617,7 @@ impl Party {
 /// Helper functions for tests
 pub mod test_helpers {
     use crate::common::{PolyCommitment, PublicNonce};
-    use crate::errors::DkgError;
+    use crate::errors::{AggregatorError, DkgError};
     use crate::v2;
     use crate::v2::SignatureShare;
 
@@ -672,9 +681,10 @@ pub mod test_helpers {
         let key_ids: Vec<u32> = signers.iter().flat_map(|s| s.key_ids.clone()).collect();
         let nonces: Vec<PublicNonce> = signers.iter_mut().map(|s| s.gen_nonce(rng)).collect();
         let shares = signers
-            .iter()
+            .iter_mut()
             .map(|s| s.sign_with_tweak(msg, &party_ids, &key_ids, &nonces, None))
-            .collect();
+            .collect::<Result<Vec<SignatureShare>, AggregatorError>>()
+            .unwrap();
 
         (nonces, shares, key_ids)
     }
