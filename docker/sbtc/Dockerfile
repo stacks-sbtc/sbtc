@@ -1,58 +1,28 @@
 FROM rust:1.94.1-slim-trixie AS builder
 
-# Install host build dependencies.
-# Build scripts run on the glibc host, so dlopen (needed by bindgen) works.
+# Install dependencies.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     clang \
     libclang-dev \
     git \
+    pkg-config \
+    libssl-dev \
     make \
     protobuf-compiler \
     npm \
     default-jre \
-    wget \
-    ca-certificates \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 RUN npm install -g pnpm@9
-
-# Install the musl cross-toolchain from musl.cc.
-# This provides a complete musl-native gcc/g++/ar/libstdc++ for the target,
-# avoiding the glibc libstdc++ mismatch that occurs with Debian's g++.
-# Checksums pinned for supply-chain safety (GCC 11.2.1, 2021-11-23).
-RUN ARCH="$(uname -m)" && \
-    wget -qO /tmp/musl.tgz "https://musl.cc/${ARCH}-linux-musl-cross.tgz" && \
-    if [ "$ARCH" = "aarch64" ]; then \
-        echo "c909817856d6ceda86aa510894fa3527eac7989f0ef6e87b5721c58737a06c38  /tmp/musl.tgz" | sha256sum -c; \
-    else \
-        echo "c5d410d9f82a4f24c549fe5d24f988f85b2679b452413a9f7e5f7b956f2fe7ea  /tmp/musl.tgz" | sha256sum -c; \
-    fi && \
-    tar xz -C /opt -f /tmp/musl.tgz && rm /tmp/musl.tgz && \
-    ln -s "/opt/${ARCH}-linux-musl-cross/bin/${ARCH}-linux-musl-gcc" /usr/local/bin/ && \
-    ln -s "/opt/${ARCH}-linux-musl-cross/bin/${ARCH}-linux-musl-g++" /usr/local/bin/ && \
-    ln -s "/opt/${ARCH}-linux-musl-cross/bin/${ARCH}-linux-musl-ar" /usr/local/bin/
-
-# Add the musl Rust target.
-RUN rustup target add "$(uname -m)-unknown-linux-musl"
 
 # Build the codebase from the local sources.
 # -------------------------------------------
 WORKDIR /code/sbtc
 COPY . /code/sbtc/
 
-# Build statically-linked musl binaries.
-# .cargo/config.toml is in .dockerignore so the macOS defaults don't interfere.
-# The musl.cc toolchain provides the correct CC/CXX/AR/linker.
-RUN MUSL_TARGET="$(uname -m)-unknown-linux-musl" && \
-    ARCH="$(uname -m)" && \
-    export "CC_${ARCH}_unknown_linux_musl=${ARCH}-linux-musl-gcc" && \
-    export "CXX_${ARCH}_unknown_linux_musl=${ARCH}-linux-musl-g++" && \
-    export "AR_${ARCH}_unknown_linux_musl=${ARCH}-linux-musl-ar" && \
-    export "CARGO_TARGET_$(echo "$MUSL_TARGET" | tr '[:lower:]-' '[:upper:]_')_LINKER=${ARCH}-linux-musl-gcc" && \
-    cargo build --target "$MUSL_TARGET" --bin signer --bin blocklist-client --bin emily-server && \
-    mkdir -p /output && \
-    cp "target/$MUSL_TARGET/debug/signer" /output/signer && \
-    cp "target/$MUSL_TARGET/debug/blocklist-client" /output/blocklist-client && \
-    cp "target/$MUSL_TARGET/debug/emily-server" /output/emily-server
+# Build Emily Server.
+# --------------------
+ARG EMILY_SERVER_BUILD_ARGS=""
+RUN cargo build --bin signer --bin blocklist-client --bin emily-server
 
 # Build Emily AWS setup.
 # -----------------------
@@ -62,16 +32,16 @@ RUN make emily-cdk-synth
 
 # Create Docker image to run the signer.
 # ---------------------------------------
-# distroless/static includes ca-certificates at /etc/ssl/certs/ca-certificates.crt.
-FROM gcr.io/distroless/static-debian13 AS signer
-COPY --from=builder /output/signer /usr/local/bin/signer
+# distroless/cc includes glibc, libgcc, libstdc++, ca-certificates.
+FROM gcr.io/distroless/cc-debian13 AS signer
+COPY --from=builder /code/sbtc/target/debug/signer /usr/local/bin/signer
 ENTRYPOINT ["/usr/local/bin/signer", "--config", "/signer-config.toml", "--migrate-db"]
 
 # Create Docker image for the blocklist client.
 # ----------------------------------------------
-# distroless/static includes ca-certificates at /etc/ssl/certs/ca-certificates.crt.
-FROM gcr.io/distroless/static-debian13 AS blocklist-client
-COPY --from=builder /output/blocklist-client /usr/local/bin/blocklist-client
+# distroless/cc includes glibc, libgcc, libstdc++, ca-certificates.
+FROM gcr.io/distroless/cc-debian13 AS blocklist-client
+COPY --from=builder /code/sbtc/target/debug/blocklist-client /usr/local/bin/blocklist-client
 ENTRYPOINT ["/usr/local/bin/blocklist-client"]
 
 # Create Docker image to setup the AWS resources for Emily.
@@ -95,7 +65,7 @@ ENTRYPOINT ["python3", "/code/initialize.py"]
 FROM debian:trixie-slim AS emily-server
 WORKDIR /code
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=builder /output/emily-server /usr/local/bin/emily-server
+COPY --from=builder /code/sbtc/target/debug/emily-server /usr/local/bin/emily-server
 # Server configuration.
 ENV HOST=0.0.0.0
 ENV PORT=3030
