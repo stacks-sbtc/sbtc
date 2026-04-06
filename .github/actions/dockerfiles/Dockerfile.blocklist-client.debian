@@ -5,7 +5,7 @@ ARG TARGETARCH
 
 # Install build dependencies.
 # clang/libclang-dev: needed by bindgen (used by p256k1).
-# gcc-aarch64-linux-gnu/g++-aarch64-linux-gnu: cross-compiler for arm64 targets.
+# Cross-compilers for both target architectures.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     clang \
     libclang-dev \
@@ -14,19 +14,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     g++ \
     gcc-aarch64-linux-gnu \
     g++-aarch64-linux-gnu \
+    gcc-x86-64-linux-gnu \
+    g++-x86-64-linux-gnu \
     findutils \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Add the Rust target for the target architecture.
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
         rustup target add aarch64-unknown-linux-gnu; \
+    else \
+        rustup target add x86_64-unknown-linux-gnu; \
     fi
 
 WORKDIR /code/sbtc
 COPY . .
 
-# Build the blocklist-client binary.
-# For arm64, cross-compile using Debian's aarch64-linux-gnu toolchain.
+# Build the blocklist-client binary, cross-compiling for the target architecture.
 RUN export LIBCLANG_PATH="$(find /usr/lib/llvm-* -name lib -type d | head -n 1)" && \
     if [ "$TARGETARCH" = "arm64" ]; then \
         TARGET="aarch64-unknown-linux-gnu" && \
@@ -35,7 +38,11 @@ RUN export LIBCLANG_PATH="$(find /usr/lib/llvm-* -name lib -type d | head -n 1)"
         export AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar && \
         export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc; \
     else \
-        TARGET="x86_64-unknown-linux-gnu"; \
+        TARGET="x86_64-unknown-linux-gnu" && \
+        export CC_x86_64_unknown_linux_gnu=x86_64-linux-gnu-gcc && \
+        export CXX_x86_64_unknown_linux_gnu=x86_64-linux-gnu-g++ && \
+        export AR_x86_64_unknown_linux_gnu=x86_64-linux-gnu-ar && \
+        export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=x86_64-linux-gnu-gcc; \
     fi && \
     cargo build --target "$TARGET" --bin blocklist-client --release --locked && \
     mkdir -p /output && \
