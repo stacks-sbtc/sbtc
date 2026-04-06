@@ -1,11 +1,3 @@
-x-common-vars:
-# Attestation
-- &SIGNER_TAG ${SIGNER_TAG:?} # Required
-- &BLOCKLIST_TAG ${BLOCKLIST_TAG:?} # Required
-- &SIGNER_BUNDLE_PATH ${SIGNER_BUNDLE_PATH:?} # Required
-- &BLOCKLIST_BUNDLE_PATH ${BLOCKLIST_BUNDLE_PATH:?} # Required
-- &TRUSTED_ROOT_PATH ${TRUSTED_ROOT_PATH:?} # Required
-
 services:
   postgres:
     image: postgres:16.6-bookworm@sha256:c965017e1d29eb03e18a11abc25f5e3cd78cb5ac799d495922264b8489d5a3a1
@@ -36,7 +28,6 @@ services:
         tag: "sbtc-signer"
     environment:
       RUST_LOG: info,signer=debug
-      TAG: *SIGNER_TAG
     volumes:
       - ./config/signer-config.toml:/signer-config.toml:ro
     ports:
@@ -53,7 +44,6 @@ services:
       BLOCKLIST_CLIENT_RISK_ANALYSIS__API_KEY: ${BLOCKLIST_CLIENT_RISK_ANALYSIS__API_KEY}
       BLOCKLIST_CLIENT_SERVER__HOST: "0.0.0.0"
       BLOCKLIST_CLIENT_SERVER__PORT: "3032"
-      TAG: *BLOCKLIST_TAG
 
   vector:
     container_name: vector
