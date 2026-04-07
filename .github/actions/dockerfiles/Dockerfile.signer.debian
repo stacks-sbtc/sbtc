@@ -11,6 +11,8 @@ RUN test -n "$GIT_COMMIT" || (echo "GIT_COMMIT not set" && false)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     clang \
     libclang-dev \
+    git \
+    pkg-config \
     g++ \
     gcc-aarch64-linux-gnu \
     g++-aarch64-linux-gnu \
@@ -30,19 +32,19 @@ WORKDIR /code/sbtc
 COPY . .
 
 # Build the signer binary, cross-compiling for the target architecture.
-RUN LIBCLANG_PATH="$(find /usr/lib/llvm-* -name lib -type d | head -n 1)" && \
+RUN export LIBCLANG_PATH="$(find /usr/lib/llvm-* -name lib -type d | head -n 1)" && \
     if [ "$TARGETARCH" = "arm64" ]; then \
-        TARGET="aarch64-unknown-linux-gnu" && \
-        CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc && \
-        CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++ && \
-        AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar && \
-        CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc; \
+        export TARGET="aarch64-unknown-linux-gnu" && \
+        export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc && \
+        export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++ && \
+        export AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar && \
+        export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc; \
     else \
-        TARGET="x86_64-unknown-linux-gnu" && \
-        CC_x86_64_unknown_linux_gnu=x86_64-linux-gnu-gcc && \
-        CXX_x86_64_unknown_linux_gnu=x86_64-linux-gnu-g++ && \
-        AR_x86_64_unknown_linux_gnu=x86_64-linux-gnu-ar && \
-        CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=x86_64-linux-gnu-gcc; \
+        export TARGET="x86_64-unknown-linux-gnu" && \
+        export CC_x86_64_unknown_linux_gnu=x86_64-linux-gnu-gcc && \
+        export CXX_x86_64_unknown_linux_gnu=x86_64-linux-gnu-g++ && \
+        export AR_x86_64_unknown_linux_gnu=x86_64-linux-gnu-ar && \
+        export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=x86_64-linux-gnu-gcc; \
     fi && \
     cargo build --target "$TARGET" --bin signer --release --locked && \
     mkdir -p /output && \
