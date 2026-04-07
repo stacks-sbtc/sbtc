@@ -4,13 +4,8 @@ FROM rust:1.94.1-slim-trixie AS builder
 RUN apt-get update && apt-get install -y --no-install-recommends \
     clang \
     libclang-dev \
-    git \
-    pkg-config \
-    libssl-dev \
     make \
-    protobuf-compiler \
     npm \
-    default-jre \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 RUN npm install -g pnpm@9
 
