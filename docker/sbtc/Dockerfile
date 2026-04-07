@@ -17,7 +17,7 @@ COPY . /code/sbtc/
 # Build Emily Server.
 # --------------------
 ARG EMILY_SERVER_BUILD_ARGS=""
-RUN cargo build --bin signer --bin blocklist-client --bin emily-server $EMILY_SERVER_BUILD_ARGS
+RUN cargo build --locked --bin signer --bin blocklist-client --bin emily-server $EMILY_SERVER_BUILD_ARGS
 
 # Build Emily AWS setup.
 # -----------------------
