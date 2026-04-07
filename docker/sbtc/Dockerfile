@@ -23,7 +23,7 @@ RUN cargo build --bin signer --bin blocklist-client --bin emily-server $EMILY_SE
 # -----------------------
 ARG AWS_STAGE=local
 ARG TABLES_ONLY=true
-RUN make emily-cdk-synth
+RUN make install-pnpm && make emily-cdk-synth
 
 # Create Docker image to run the signer.
 # ---------------------------------------
