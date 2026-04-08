@@ -1,10 +1,9 @@
 use crate::{
-    common::{PolyCommitment, Signature, SignatureShare},
+    common::PolyCommitment,
     curve::{point::Point, scalar::Scalar},
     errors::AggregatorError,
-    net::{DkgEnd, DkgPrivateShares, DkgPublicShares, NonceResponse, Packet, SignatureType},
+    net::{NonceResponse, Packet, SignatureType},
     state_machine::{DkgFailure, OperationResult, StateMachine},
-    taproot::SchnorrProof,
 };
 use core::{cmp::PartialEq, fmt::Debug};
 use std::collections::BTreeMap;
@@ -146,57 +145,10 @@ pub struct SignRoundInfo {
     pub sign_wait_signer_ids: HashSet<u32>,
 }
 
-/// The saved state required to reconstruct a coordinator
-#[derive(Default, Clone, Debug, PartialEq)]
-pub struct SavedState {
-    /// common config fields
-    pub config: Config,
-    /// current DKG round ID
-    pub current_dkg_id: u64,
-    /// current signing round ID
-    pub current_sign_id: u64,
-    /// current signing iteration ID
-    pub current_sign_iter_id: u64,
-    /// map of DkgPublicShares indexed by signer ID
-    pub dkg_public_shares: BTreeMap<u32, DkgPublicShares>,
-    /// map of DkgPrivateShares indexed by signer ID
-    pub dkg_private_shares: BTreeMap<u32, DkgPrivateShares>,
-    /// map of DkgEnd indexed by signer ID
-    pub dkg_end_messages: BTreeMap<u32, DkgEnd>,
-    /// the current view of a successful DKG's participants' commitments
-    pub party_polynomials: HashMap<u32, PolyCommitment>,
-    /// map of SignatureShare indexed by signer ID
-    pub signature_shares: BTreeMap<u32, Vec<SignatureShare>>,
-    /// map of SignRoundInfo indexed by message bytes
-    pub message_nonces: BTreeMap<Vec<u8>, SignRoundInfo>,
-    /// aggregate public key
-    pub aggregate_public_key: Option<Point>,
-    /// current Signature
-    pub signature: Option<Signature>,
-    /// current SchnorrProof
-    pub schnorr_proof: Option<SchnorrProof>,
-    /// which signers we're currently waiting on for DKG
-    pub dkg_wait_signer_ids: HashSet<u32>,
-    /// the bytes that we're signing
-    pub message: Vec<u8>,
-    /// current state of the state machine
-    pub state: State,
-    /// set of malicious signers during signing round
-    pub malicious_signer_ids: HashSet<u32>,
-    /// set of malicious signers during dkg round
-    pub malicious_dkg_signer_ids: HashSet<u32>,
-}
-
 /// Coordinator trait for handling the coordination of DKG and sign messages
 pub trait Coordinator: Clone + Debug + PartialEq + StateMachine<State, Error> {
     /// Create a new Coordinator
     fn new(config: Config) -> Self;
-
-    /// Load a coordinator from the previously saved `state`
-    fn load(state: &SavedState) -> Self;
-
-    /// Save the state required to reconstruct the coordinator
-    fn save(&self) -> SavedState;
 
     /// Retrieve the config
     fn get_config(&self) -> Config;
@@ -567,16 +519,6 @@ pub mod test {
             }
         }
 
-        // persist the state machines before continuing
-        let new_coordinators = coordinators
-            .iter()
-            .map(|c| Coordinator::load(&c.save()))
-            .collect::<Vec<Coordinator>>();
-
-        assert_eq!(coordinators, new_coordinators);
-
-        coordinators = new_coordinators;
-
         // Send the DKG Private Begin message to all signers and share their responses with the coordinator and signers
         let (outbound_messages, operation_results) =
             feedback_messages(&mut coordinators, &mut signers, &outbound_messages);
@@ -588,16 +530,6 @@ pub mod test {
                 panic!("Expected DkgEndBegin message");
             }
         }
-
-        // persist the state machines before continuing
-        let new_coordinators = coordinators
-            .iter()
-            .map(|c| Coordinator::load(&c.save()))
-            .collect::<Vec<Coordinator>>();
-
-        assert_eq!(coordinators, new_coordinators);
-
-        coordinators = new_coordinators;
 
         // Send the DkgEndBegin message to all signers and share their responses with the coordinator and signers
         let (outbound_messages, operation_results) =
@@ -619,16 +551,6 @@ pub mod test {
         for signer in &mut signers {
             signer.signer.clear_polys();
         }
-
-        // persist the state machines before continuing
-        let new_coordinators = coordinators
-            .iter()
-            .map(|c| Coordinator::load(&c.save()))
-            .collect::<Vec<Coordinator>>();
-
-        assert_eq!(coordinators, new_coordinators);
-
-        coordinators = new_coordinators;
 
         (coordinators, signers)
     }
@@ -666,12 +588,6 @@ pub mod test {
                 panic!("Expected SignatureShareRequest message");
             }
         }
-
-        // persist the coordinators before continuing
-        let _new_coordinators = coordinators
-            .iter()
-            .map(|c| Coordinator::load(&c.save()))
-            .collect::<Vec<Coordinator>>();
 
         // Send the SignatureShareRequest message to all signers and share their responses with the coordinator and signers
         let (outbound_messages, operation_results) =
@@ -853,20 +769,6 @@ pub mod test {
 	    }
             _ => panic!("Expected OperationResult::SignError(SignError::Coordinator(Error::Aggregator(AggregatorError::BadPartySigs(parties))))"),
         }
-    }
-
-    pub fn equal_after_save_load<Coordinator: CoordinatorTrait>(
-        num_signers: u32,
-        keys_per_signer: u32,
-    ) {
-        let (coordinators, _) = setup::<Coordinator>(num_signers, keys_per_signer);
-
-        let loaded_coordinators = coordinators
-            .iter()
-            .map(|c| Coordinator::load(&c.save()))
-            .collect::<Vec<Coordinator>>();
-
-        assert_eq!(coordinators, loaded_coordinators);
     }
 
     /// Test that a signer will not sign twice with the same nonce. This is

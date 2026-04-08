@@ -13,7 +13,7 @@ use crate::{
     },
     state_machine::{
         coordinator::{
-            Config, Coordinator as CoordinatorTrait, Error, SavedState, SignRoundInfo, State,
+            Config, Coordinator as CoordinatorTrait, Error, State,
         },
         DkgError, OperationResult, SignError, StateMachine,
     },
@@ -770,61 +770,6 @@ impl CoordinatorTrait for Coordinator {
         }
     }
 
-    fn load(state: &SavedState) -> Self {
-        Self {
-            aggregator: v2::Aggregator::new(state.config.num_keys, state.config.threshold),
-            config: state.config.clone(),
-            current_dkg_id: state.current_dkg_id,
-            current_sign_id: state.current_sign_id,
-            current_sign_iter_id: state.current_sign_iter_id,
-            dkg_public_shares: state.dkg_public_shares.clone(),
-            dkg_private_shares: state.dkg_private_shares.clone(),
-            dkg_end_messages: state.dkg_end_messages.clone(),
-            party_polynomials: state.party_polynomials.clone(),
-            public_nonces: state.message_nonces[&Vec::new()].public_nonces.clone(),
-            signature_shares: state.signature_shares.clone(),
-            aggregate_public_key: state.aggregate_public_key,
-            signature: state.signature.clone(),
-            schnorr_proof: state.schnorr_proof.clone(),
-            message: state.message.clone(),
-            ids_to_await: state.dkg_wait_signer_ids.clone(),
-            state: state.state.clone(),
-        }
-    }
-
-    fn save(&self) -> SavedState {
-        let round_info = SignRoundInfo {
-            public_nonces: self.public_nonces.clone(),
-            nonce_recv_key_ids: Default::default(),
-            sign_recv_key_ids: Default::default(),
-            sign_wait_signer_ids: Default::default(),
-        };
-        let mut message_nonces = BTreeMap::new();
-
-        message_nonces.insert(Vec::new(), round_info);
-
-        SavedState {
-            config: self.config.clone(),
-            current_dkg_id: self.current_dkg_id,
-            current_sign_id: self.current_sign_id,
-            current_sign_iter_id: self.current_sign_iter_id,
-            dkg_public_shares: self.dkg_public_shares.clone(),
-            dkg_private_shares: self.dkg_private_shares.clone(),
-            dkg_end_messages: self.dkg_end_messages.clone(),
-            party_polynomials: self.party_polynomials.clone(),
-            message_nonces,
-            signature_shares: self.signature_shares.clone(),
-            aggregate_public_key: self.aggregate_public_key,
-            signature: self.signature.clone(),
-            schnorr_proof: self.schnorr_proof.clone(),
-            message: self.message.clone(),
-            dkg_wait_signer_ids: self.ids_to_await.clone(),
-            state: self.state.clone(),
-            malicious_signer_ids: Default::default(),
-            malicious_dkg_signer_ids: Default::default(),
-        }
-    }
-
     /// Retrieve the config
     fn get_config(&self) -> Config {
         self.config.clone()
@@ -941,7 +886,7 @@ pub mod test {
             frost::Coordinator as FrostCoordinator,
             test::{
                 bad_signature_share_request, check_signature_shares, coordinator_state_machine,
-                empty_private_shares, empty_public_shares, equal_after_save_load, invalid_nonce,
+                empty_private_shares, empty_public_shares, invalid_nonce,
                 new_coordinator, run_dkg_sign, start_dkg_round,
             },
             Config, Coordinator as CoordinatorTrait, State,
@@ -952,11 +897,6 @@ pub mod test {
     #[test]
     fn new_coordinator_v2() {
         new_coordinator::<FrostCoordinator>();
-    }
-
-    #[test]
-    fn equal_after_save_load_v2() {
-        equal_after_save_load::<FrostCoordinator>(2, 2);
     }
 
     #[test]
