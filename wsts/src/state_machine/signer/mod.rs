@@ -654,8 +654,6 @@ impl Signer {
         self.reset(dkg_begin.dkg_id, rng);
         self.move_to(State::DkgPublicDistribute)?;
 
-        //let _party_state = self.signer.save();
-
         self.dkg_public_begin(rng)
     }
 

@@ -118,11 +118,6 @@ impl Coordinator {
             threshold,
             dkg_threshold,
             message_private_key: signer_info.signer_private_key.into(),
-            dkg_public_timeout: None,
-            dkg_private_timeout: None,
-            dkg_end_timeout: None,
-            nonce_timeout: None,
-            sign_timeout: None,
             signer_key_ids,
             signer_public_keys,
         };

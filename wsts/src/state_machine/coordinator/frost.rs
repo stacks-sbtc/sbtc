@@ -820,11 +820,6 @@ impl CoordinatorTrait for Coordinator {
             message: self.message.clone(),
             dkg_wait_signer_ids: self.ids_to_await.clone(),
             state: self.state.clone(),
-            dkg_public_start: Default::default(),
-            dkg_private_start: Default::default(),
-            dkg_end_start: Default::default(),
-            nonce_start: Default::default(),
-            sign_start: Default::default(),
             malicious_signer_ids: Default::default(),
             malicious_dkg_signer_ids: Default::default(),
         }

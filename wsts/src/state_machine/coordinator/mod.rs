@@ -7,11 +7,8 @@ use crate::{
     taproot::SchnorrProof,
 };
 use core::{cmp::PartialEq, fmt::Debug};
+use std::collections::BTreeMap;
 use std::collections::{HashMap, HashSet};
-use std::{
-    collections::BTreeMap,
-    time::{Duration, Instant},
-};
 
 #[derive(Clone, Default, Debug, PartialEq)]
 /// Coordinator states
@@ -110,16 +107,6 @@ pub struct Config {
     pub dkg_threshold: u32,
     /// private key used to sign network messages
     pub message_private_key: Scalar,
-    /// timeout to gather DkgPublicShares messages
-    pub dkg_public_timeout: Option<Duration>,
-    /// timeout to gather DkgPrivateShares messages
-    pub dkg_private_timeout: Option<Duration>,
-    /// timeout to gather DkgEnd messages
-    pub dkg_end_timeout: Option<Duration>,
-    /// timeout to gather nonces
-    pub nonce_timeout: Option<Duration>,
-    /// timeout to gather signature shares
-    pub sign_timeout: Option<Duration>,
     /// map of signer_id to controlled key_ids
     pub signer_key_ids: HashMap<u32, HashSet<u32>>,
     /// ECDSA public keys as Point objects indexed by signer_id
@@ -140,45 +127,8 @@ impl Config {
             threshold,
             dkg_threshold: num_keys,
             message_private_key,
-            dkg_public_timeout: None,
-            dkg_private_timeout: None,
-            dkg_end_timeout: None,
-            nonce_timeout: None,
-            sign_timeout: None,
             signer_key_ids: Default::default(),
             signer_public_keys: Default::default(),
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    /// Create a new config object with the passed timeouts
-    pub fn with_timeouts(
-        num_signers: u32,
-        num_keys: u32,
-        threshold: u32,
-        dkg_threshold: u32,
-        message_private_key: Scalar,
-        dkg_public_timeout: Option<Duration>,
-        dkg_private_timeout: Option<Duration>,
-        dkg_end_timeout: Option<Duration>,
-        nonce_timeout: Option<Duration>,
-        sign_timeout: Option<Duration>,
-        signer_key_ids: HashMap<u32, HashSet<u32>>,
-        signer_public_keys: HashMap<u32, Point>,
-    ) -> Self {
-        Config {
-            num_signers,
-            num_keys,
-            threshold,
-            dkg_threshold,
-            message_private_key,
-            dkg_public_timeout,
-            dkg_private_timeout,
-            dkg_end_timeout,
-            nonce_timeout,
-            sign_timeout,
-            signer_key_ids,
-            signer_public_keys,
         }
     }
 }
@@ -231,16 +181,6 @@ pub struct SavedState {
     pub message: Vec<u8>,
     /// current state of the state machine
     pub state: State,
-    /// start time for NonceRequest
-    pub nonce_start: Option<Instant>,
-    /// start time for DkgBegin
-    pub dkg_public_start: Option<Instant>,
-    /// start time for DkgPrivateBegin
-    pub dkg_private_start: Option<Instant>,
-    /// start time for DkgEndBegin
-    pub dkg_end_start: Option<Instant>,
-    /// start time for SignatureShareRequest
-    pub sign_start: Option<Instant>,
     /// set of malicious signers during signing round
     pub malicious_signer_ids: HashSet<u32>,
     /// set of malicious signers during dkg round
@@ -310,7 +250,7 @@ pub mod fire;
 pub mod test {
     use rand_core::OsRng;
     use std::collections::{HashMap, HashSet};
-    use std::{sync::Once, time::Duration};
+    use std::sync::Once;
     use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
     use crate::{
@@ -437,26 +377,6 @@ pub mod test {
         num_signers: u32,
         keys_per_signer: u32,
     ) -> (Vec<Coordinator>, Vec<Signer>) {
-        setup_with_timeouts::<Coordinator>(
-            num_signers,
-            keys_per_signer,
-            None,
-            None,
-            None,
-            None,
-            None,
-        )
-    }
-
-    pub fn setup_with_timeouts<Coordinator: CoordinatorTrait>(
-        num_signers: u32,
-        keys_per_signer: u32,
-        dkg_public_timeout: Option<Duration>,
-        dkg_private_timeout: Option<Duration>,
-        dkg_end_timeout: Option<Duration>,
-        nonce_timeout: Option<Duration>,
-        sign_timeout: Option<Duration>,
-    ) -> (Vec<Coordinator>, Vec<Signer>) {
         INIT.call_once(|| {
             tracing_subscriber::registry()
                 .with(fmt::layer())
@@ -522,20 +442,15 @@ pub mod test {
         let coordinators = key_pairs
             .into_iter()
             .map(|(private_key, _public_key)| {
-                let config = Config::with_timeouts(
+                let config = Config {
                     num_signers,
                     num_keys,
                     threshold,
                     dkg_threshold,
-                    private_key,
-                    dkg_public_timeout,
-                    dkg_private_timeout,
-                    dkg_end_timeout,
-                    nonce_timeout,
-                    sign_timeout,
-                    signer_key_ids_set.clone(),
-                    signer_public_keys.clone(),
-                );
+                    message_private_key: private_key,
+                    signer_key_ids: signer_key_ids_set.clone(),
+                    signer_public_keys: signer_public_keys.clone(),
+                };
                 Coordinator::new(config)
             })
             .collect::<Vec<Coordinator>>();

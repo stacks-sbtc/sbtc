@@ -1041,11 +1041,6 @@ impl CoordinatorTrait for Coordinator {
             message: self.message.clone(),
             dkg_wait_signer_ids: self.dkg_wait_signer_ids.clone(),
             state: self.state.clone(),
-            dkg_public_start: None,
-            dkg_private_start: None,
-            dkg_end_start: None,
-            nonce_start: None,
-            sign_start: None,
             malicious_signer_ids: self.malicious_signer_ids.clone(),
             malicious_dkg_signer_ids: self.malicious_dkg_signer_ids.clone(),
         }
@@ -1172,7 +1167,7 @@ pub mod test {
                     bad_signature_share_request, check_signature_shares, coordinator_state_machine,
                     empty_private_shares, empty_public_shares, equal_after_save_load,
                     feedback_messages, feedback_mutated_messages, gen_nonces, invalid_nonce,
-                    new_coordinator, run_dkg_sign, setup, setup_with_timeouts, start_dkg_round,
+                    new_coordinator, run_dkg_sign, setup, start_dkg_round,
                 },
                 Config, Coordinator as CoordinatorTrait, State,
             },
@@ -1180,9 +1175,9 @@ pub mod test {
             DkgError, OperationResult,
         },
         util::create_rng,
+        v2,
     };
     use std::collections::HashMap;
-    use std::time::Duration;
 
     #[test]
     fn new_coordinator_v2() {
@@ -1325,16 +1320,7 @@ pub mod test {
         num_signers: u32,
         keys_per_signer: u32,
     ) -> (Vec<FireCoordinator>, Vec<Signer>) {
-        let timeout = Duration::from_millis(1024);
-        let (mut coordinators, signers) = setup_with_timeouts::<FireCoordinator>(
-            num_signers,
-            keys_per_signer,
-            Some(timeout),
-            Some(timeout),
-            Some(timeout),
-            Some(timeout),
-            Some(timeout),
-        );
+        let (mut coordinators, signers) = setup::<FireCoordinator>(num_signers, keys_per_signer);
 
         // Start a DKG round where we will not allow all signers to recv DkgBegin, so they will not respond with DkgPublicShares
         let message = coordinators.first_mut().unwrap().start_dkg_round().unwrap();
@@ -1395,16 +1381,7 @@ pub mod test {
         num_signers: u32,
         keys_per_signer: u32,
     ) -> (Vec<FireCoordinator>, Vec<Signer>) {
-        let timeout = Duration::from_millis(1024);
-        let (mut coordinators, signers) = setup_with_timeouts::<FireCoordinator>(
-            num_signers,
-            keys_per_signer,
-            Some(timeout),
-            Some(timeout),
-            Some(timeout),
-            Some(timeout),
-            Some(timeout),
-        );
+        let (mut coordinators, signers) = setup::<FireCoordinator>(num_signers, keys_per_signer);
 
         // Start a DKG round where we will not allow all signers to recv DkgBegin, so they will not respond with DkgPublicShares
         let message = coordinators.first_mut().unwrap().start_dkg_round().unwrap();
@@ -2146,12 +2123,11 @@ pub mod test {
         let (mut coordinators, mut signers) = setup::<FireCoordinator>(10, 1);
 
         // persist one signer, change the threshold, reset polys
-        let mut state = signers[0].save();
+        let mut state = signers[0].signer.save();
 
         state.threshold -= 1;
-        state.signer.threshold -= 1;
-
-        signers[0] = Signer::load(&state);
+        signers[0].threshold -= 1;
+        signers[0].signer = v2::Party::load(&state);
 
         signers[0].signer.reset_polys(&mut rng);
 
