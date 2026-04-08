@@ -94,8 +94,8 @@ pub enum Error {
     #[error("Aggregator error: {0}")]
     Aggregator(#[from] AggregatorError),
     /// This happens when either the signer's private polynomial is not
-    /// set, or the polynomial commitment could not constructed for this
-    /// signer becauuse the private polynomial was degenerate (it had no
+    /// set, or the polynomial commitment could not be constructed for this
+    /// signer because the private polynomial was degenerate (it had no
     /// coefficients).
     #[error("no polynomial commitment could be constructed for this signer")]
     NoPolynomialCommitment,
