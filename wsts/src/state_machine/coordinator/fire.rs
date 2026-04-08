@@ -1180,7 +1180,6 @@ pub mod test {
             DkgError, OperationResult,
         },
         util::create_rng,
-        v2,
     };
     use std::collections::HashMap;
     use std::time::Duration;
@@ -2147,12 +2146,13 @@ pub mod test {
         let (mut coordinators, mut signers) = setup::<FireCoordinator>(10, 1);
 
         // persist one signer, change the threshold, reset polys
-        let mut state = signers[0].signer.save();
+        let mut state = signers[0].save();
 
         state.threshold -= 1;
-        signers[0].threshold -= 1;
+        state.signer.threshold -= 1;
 
-        signers[0].signer = v2::Party::load(&state);
+        signers[0] = Signer::load(&state);
+
         signers[0].signer.reset_polys(&mut rng);
 
         // We have started a dkg round
