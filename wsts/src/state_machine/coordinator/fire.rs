@@ -15,9 +15,7 @@ use crate::{
         SignatureShareRequest, SignatureType,
     },
     state_machine::{
-        coordinator::{
-            Config, Coordinator as CoordinatorTrait, Error, SignRoundInfo, State,
-        },
+        coordinator::{Config, Coordinator as CoordinatorTrait, Error, SignRoundInfo, State},
         DkgError, OperationResult, SignError, StateMachine,
     },
     taproot::SchnorrProof,
@@ -1118,9 +1116,9 @@ pub mod test {
                 fire::Coordinator as FireCoordinator,
                 test::{
                     bad_signature_share_request, check_signature_shares, coordinator_state_machine,
-                    empty_private_shares, empty_public_shares,
-                    feedback_messages, feedback_mutated_messages, gen_nonces, invalid_nonce,
-                    new_coordinator, run_dkg_sign, setup, start_dkg_round,
+                    empty_private_shares, empty_public_shares, feedback_messages,
+                    feedback_mutated_messages, gen_nonces, invalid_nonce, new_coordinator,
+                    run_dkg_sign, setup, start_dkg_round,
                 },
                 Config, Coordinator as CoordinatorTrait, State,
             },

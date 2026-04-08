@@ -12,9 +12,7 @@ use crate::{
         SignatureType,
     },
     state_machine::{
-        coordinator::{
-            Config, Coordinator as CoordinatorTrait, Error, State,
-        },
+        coordinator::{Config, Coordinator as CoordinatorTrait, Error, State},
         DkgError, OperationResult, SignError, StateMachine,
     },
     taproot::SchnorrProof,
@@ -886,8 +884,8 @@ pub mod test {
             frost::Coordinator as FrostCoordinator,
             test::{
                 bad_signature_share_request, check_signature_shares, coordinator_state_machine,
-                empty_private_shares, empty_public_shares, invalid_nonce,
-                new_coordinator, run_dkg_sign, start_dkg_round,
+                empty_private_shares, empty_public_shares, invalid_nonce, new_coordinator,
+                run_dkg_sign, start_dkg_round,
             },
             Config, Coordinator as CoordinatorTrait, State,
         },
