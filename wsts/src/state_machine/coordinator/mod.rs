@@ -662,15 +662,6 @@ pub mod test {
 
         coordinators = new_coordinators;
 
-        let new_signers = signers
-            .iter()
-            .map(|s| Signer::load(&s.save()))
-            .collect::<Vec<Signer>>();
-
-        assert_eq!(signers, new_signers);
-
-        signers = new_signers;
-
         // Send the DKG Private Begin message to all signers and share their responses with the coordinator and signers
         let (outbound_messages, operation_results) =
             feedback_messages(&mut coordinators, &mut signers, &outbound_messages);
@@ -692,15 +683,6 @@ pub mod test {
         assert_eq!(coordinators, new_coordinators);
 
         coordinators = new_coordinators;
-
-        let new_signers = signers
-            .iter()
-            .map(|s| Signer::load(&s.save()))
-            .collect::<Vec<Signer>>();
-
-        assert_eq!(signers, new_signers);
-
-        signers = new_signers;
 
         // Send the DkgEndBegin message to all signers and share their responses with the coordinator and signers
         let (outbound_messages, operation_results) =
@@ -732,15 +714,6 @@ pub mod test {
         assert_eq!(coordinators, new_coordinators);
 
         coordinators = new_coordinators;
-
-        let new_signers = signers
-            .iter()
-            .map(|s| Signer::load(&s.save()))
-            .collect::<Vec<Signer>>();
-
-        assert_eq!(signers, new_signers);
-
-        signers = new_signers;
 
         (coordinators, signers)
     }
@@ -971,7 +944,7 @@ pub mod test {
         num_signers: u32,
         keys_per_signer: u32,
     ) {
-        let (coordinators, signers) = setup::<Coordinator>(num_signers, keys_per_signer);
+        let (coordinators, _) = setup::<Coordinator>(num_signers, keys_per_signer);
 
         let loaded_coordinators = coordinators
             .iter()
@@ -979,13 +952,6 @@ pub mod test {
             .collect::<Vec<Coordinator>>();
 
         assert_eq!(coordinators, loaded_coordinators);
-
-        let loaded_signers = signers
-            .iter()
-            .map(|s| Signer::load(&s.save()))
-            .collect::<Vec<Signer>>();
-
-        assert_eq!(signers, loaded_signers);
     }
 
     /// Test that a signer will not sign twice with the same nonce. This is

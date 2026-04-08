@@ -21,7 +21,6 @@ use crate::{
         Signable, SignatureShareRequest, SignatureShareResponse, SignatureType,
     },
     state_machine::{PublicKeys, StateMachine},
-    traits::SignerState as SignerSavedState,
     util::{decrypt, encrypt, make_shared_secret},
     v2,
 };
@@ -99,57 +98,6 @@ impl From<TryFromIntError> for Error {
     fn from(_e: TryFromIntError) -> Self {
         Self::TryFromInt
     }
-}
-
-/// The saved state required to reconstruct a signer
-#[derive(Clone, Debug)]
-pub struct SavedState {
-    /// current DKG round ID
-    pub dkg_id: u64,
-    /// current signing round ID
-    pub sign_id: u64,
-    /// current signing iteration ID
-    pub sign_iter_id: u64,
-    /// the threshold of the keys needed for a valid signature
-    pub threshold: u32,
-    /// the threshold of the keys needed for a valid DKG
-    pub dkg_threshold: u32,
-    /// the total number of signers
-    pub total_signers: u32,
-    /// the total number of keys
-    pub total_keys: u32,
-    /// the Signer object
-    pub signer: SignerSavedState,
-    /// the Signer ID
-    pub signer_id: u32,
-    /// the current state
-    pub state: State,
-    /// map of polynomial commitments for each party
-    /// party_id => PolyCommitment
-    pub commitments: HashMap<u32, PolyCommitment>,
-    /// map of decrypted DKG private shares
-    /// src_party_id => (dst_key_id => private_share)
-    pub decrypted_shares: HashMap<u32, HashMap<u32, Scalar>>,
-    /// shared secrets used to decrypt private shares
-    /// src_party_id => (signer_id, dh shared key)
-    pub decryption_keys: HashMap<u32, (u32, Point)>,
-    /// invalid private shares
-    /// signer_id => {shared_key, tuple_proof}
-    pub invalid_private_shares: HashMap<u32, BadPrivateShare>,
-    /// public nonces for this signing round
-    pub public_nonces: Vec<PublicNonce>,
-    /// the private key used to sign messages sent over the network
-    pub network_private_key: Scalar,
-    /// the public keys for all signers and coordinator
-    pub public_keys: PublicKeys,
-    /// the DKG public shares received in this round
-    pub dkg_public_shares: BTreeMap<u32, DkgPublicShares>,
-    /// the DKG private shares received in this round
-    pub dkg_private_shares: BTreeMap<u32, DkgPrivateShares>,
-    /// the DKG private begin message received in this round
-    pub dkg_private_begin_msg: Option<DkgPrivateBegin>,
-    /// the DKG end begin message received in this round
-    pub dkg_end_begin_msg: Option<DkgEndBegin>,
 }
 
 /// A state machine for a signing round
@@ -276,60 +224,6 @@ impl Signer {
             dkg_private_begin_msg: Default::default(),
             dkg_end_begin_msg: Default::default(),
         })
-    }
-
-    /// Load a coordinator from the previously saved `state`
-    pub fn load(state: &SavedState) -> Self {
-        Self {
-            dkg_id: state.dkg_id,
-            sign_id: state.sign_id,
-            sign_iter_id: state.sign_iter_id,
-            threshold: state.threshold,
-            dkg_threshold: state.dkg_threshold,
-            total_signers: state.total_signers,
-            total_keys: state.total_keys,
-            signer: v2::Party::load(&state.signer),
-            signer_id: state.signer_id,
-            state: state.state.clone(),
-            commitments: state.commitments.clone(),
-            decrypted_shares: state.decrypted_shares.clone(),
-            decryption_keys: state.decryption_keys.clone(),
-            invalid_private_shares: state.invalid_private_shares.clone(),
-            public_nonces: state.public_nonces.clone(),
-            network_private_key: state.network_private_key,
-            public_keys: state.public_keys.clone(),
-            dkg_public_shares: state.dkg_public_shares.clone(),
-            dkg_private_shares: state.dkg_private_shares.clone(),
-            dkg_private_begin_msg: state.dkg_private_begin_msg.clone(),
-            dkg_end_begin_msg: state.dkg_end_begin_msg.clone(),
-        }
-    }
-
-    /// Save the state required to reconstruct the coordinator
-    pub fn save(&self) -> SavedState {
-        SavedState {
-            dkg_id: self.dkg_id,
-            sign_id: self.sign_id,
-            sign_iter_id: self.sign_iter_id,
-            threshold: self.threshold,
-            dkg_threshold: self.dkg_threshold,
-            total_signers: self.total_signers,
-            total_keys: self.total_keys,
-            signer: self.signer.save(),
-            signer_id: self.signer_id,
-            state: self.state.clone(),
-            commitments: self.commitments.clone(),
-            decrypted_shares: self.decrypted_shares.clone(),
-            decryption_keys: self.decryption_keys.clone(),
-            invalid_private_shares: self.invalid_private_shares.clone(),
-            public_nonces: self.public_nonces.clone(),
-            network_private_key: self.network_private_key,
-            public_keys: self.public_keys.clone(),
-            dkg_public_shares: self.dkg_public_shares.clone(),
-            dkg_private_shares: self.dkg_private_shares.clone(),
-            dkg_private_begin_msg: self.dkg_private_begin_msg.clone(),
-            dkg_end_begin_msg: self.dkg_end_begin_msg.clone(),
-        }
     }
 
     /// Reset internal state
