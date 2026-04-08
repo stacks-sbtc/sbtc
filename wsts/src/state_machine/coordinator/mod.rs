@@ -919,12 +919,12 @@ pub mod test {
             &mut coordinators,
             &mut signers,
             &outbound_messages,
-            |signer, packets| {
+            |signer, messages| {
                 if signer.signer_id == 0 {
-                    packets
+                    messages
                         .iter()
-                        .map(|packet| {
-                            if let Message::SignatureShareResponse(response) = &packet {
+                        .map(|message| {
+                            if let Message::SignatureShareResponse(response) = message {
                                 // mutate one of the shares
                                 let sshares: Vec<SignatureShare> = response
                                     .signature_shares
@@ -943,12 +943,12 @@ pub mod test {
                                     signature_shares: sshares,
                                 })
                             } else {
-                                packet.clone()
+                                message.clone()
                             }
                         })
                         .collect()
                 } else {
-                    packets.clone()
+                    messages.clone()
                 }
             },
         );

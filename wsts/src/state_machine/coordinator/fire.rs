@@ -65,7 +65,8 @@ pub struct Coordinator {
 }
 
 impl Coordinator {
-    /// Process the message inside the passed packet
+    /// Process coordinator timeouts and return any resulting message or
+    /// operation result
     pub fn process_timeout(&mut self) -> Result<(Option<Message>, Option<OperationResult>), Error> {
         let now = Instant::now();
         match self.state.clone() {
@@ -209,7 +210,8 @@ impl Coordinator {
         }
         Ok((None, None))
     }
-    /// Process the message inside the passed packet
+
+    /// Process the given message
     pub fn process_message(
         &mut self,
         message: &Message,
@@ -218,7 +220,7 @@ impl Coordinator {
             match self.state.clone() {
                 State::Idle => {
                     // Did we receive a coordinator message?
-                    if let Message::DkgBegin(dkg_begin) = &message {
+                    if let Message::DkgBegin(dkg_begin) = message {
                         if self.current_dkg_id >= dkg_begin.dkg_id {
                             // We have already processed this DKG round
                             return Ok((None, None));
@@ -229,7 +231,7 @@ impl Coordinator {
                         self.current_dkg_id = dkg_begin.dkg_id.wrapping_sub(1);
                         let message = self.start_dkg_round()?;
                         return Ok((Some(message), None));
-                    } else if let Message::NonceRequest(nonce_request) = &message {
+                    } else if let Message::NonceRequest(nonce_request) = message {
                         if self.current_sign_id >= nonce_request.sign_id {
                             // We have already processed this sign round
                             return Ok((None, None));

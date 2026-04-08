@@ -348,7 +348,7 @@ impl Signer {
         self.state = State::Idle;
     }
 
-    /// Process the slice of packets
+    /// Process the slice of messages
     pub fn process_inbound_messages<R: RngCore + CryptoRng>(
         &mut self,
         messages: &[Message],
