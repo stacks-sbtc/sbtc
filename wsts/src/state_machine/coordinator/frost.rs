@@ -259,7 +259,7 @@ impl Coordinator {
     }
 
     fn gather_public_shares(&mut self, message: &Message) -> Result<(), Error> {
-        if let Message::DkgPublicShares(dkg_public_shares) = &message {
+        if let Message::DkgPublicShares(dkg_public_shares) = message {
             if dkg_public_shares.dkg_id != self.current_dkg_id {
                 return Err(Error::BadDkgId(
                     dkg_public_shares.dkg_id,
@@ -296,7 +296,7 @@ impl Coordinator {
     }
 
     fn gather_private_shares(&mut self, message: &Message) -> Result<(), Error> {
-        if let Message::DkgPrivateShares(dkg_private_shares) = &message {
+        if let Message::DkgPrivateShares(dkg_private_shares) = message {
             if dkg_private_shares.dkg_id != self.current_dkg_id {
                 return Err(Error::BadDkgId(
                     dkg_private_shares.dkg_id,
@@ -334,7 +334,7 @@ impl Coordinator {
             waiting = ?self.ids_to_await,
             "Waiting for Dkg End from signers"
         );
-        if let Message::DkgEnd(dkg_end) = &message {
+        if let Message::DkgEnd(dkg_end) = message {
             if dkg_end.dkg_id != self.current_dkg_id {
                 return Err(Error::BadDkgId(dkg_end.dkg_id, self.current_dkg_id));
             }
@@ -420,7 +420,7 @@ impl Coordinator {
         message: &Message,
         signature_type: SignatureType,
     ) -> Result<(), Error> {
-        if let Message::NonceResponse(nonce_response) = &message {
+        if let Message::NonceResponse(nonce_response) = message {
             if nonce_response.dkg_id != self.current_dkg_id {
                 return Err(Error::BadDkgId(nonce_response.dkg_id, self.current_dkg_id));
             }
@@ -524,7 +524,7 @@ impl Coordinator {
         message: &Message,
         signature_type: SignatureType,
     ) -> Result<(), Error> {
-        if let Message::SignatureShareResponse(sig_share_response) = &message {
+        if let Message::SignatureShareResponse(sig_share_response) = message {
             if sig_share_response.dkg_id != self.current_dkg_id {
                 return Err(Error::BadDkgId(
                     sig_share_response.dkg_id,
