@@ -2,8 +2,6 @@ use std::hash::{DefaultHasher, Hash as _, Hasher as _};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::context::Context;
-use crate::keys::PrivateKey;
 use libp2p::core::muxing::StreamMuxerBox;
 use libp2p::core::upgrade::Version;
 use libp2p::identity::Keypair;
@@ -22,6 +20,9 @@ use tokio::sync::Mutex;
 
 use super::errors::SignerSwarmError;
 use super::{bootstrap, event_loop};
+use crate::GOSSIPSUB_MAX_TRANSMIT_SIZE;
+use crate::context::Context;
+use crate::keys::PrivateKey;
 
 /// The maximum number of substreams _per connection_. This is used to limit
 /// the number of concurrent substreams that can be opened on a single
@@ -64,6 +65,7 @@ pub struct SignerSwarmConfig {
     pub seed_addresses: Vec<Multiaddr>,
     pub known_peers: Vec<(PeerId, Multiaddr)>,
     pub num_signers: u16,
+    pub max_transmit_size: usize,
 }
 
 impl SignerBehavior {
@@ -109,7 +111,7 @@ impl SignerBehavior {
         let bootstrap = bootstrap::Behavior::new(bootstrap_config);
 
         Ok(Self {
-            gossipsub: Self::gossipsub(&keypair)?,
+            gossipsub: Self::gossipsub(&keypair, config.max_transmit_size)?,
             mdns,
             kademlia,
             ping: Default::default(),
@@ -166,7 +168,10 @@ impl SignerBehavior {
     }
 
     /// Create a new gossipsub behavior.
-    fn gossipsub(keypair: &Keypair) -> Result<gossipsub::Behaviour, SignerSwarmError> {
+    fn gossipsub(
+        keypair: &Keypair,
+        max_transmit_size: usize,
+    ) -> Result<gossipsub::Behaviour, SignerSwarmError> {
         let message_id_fn = |message: &gossipsub::Message| {
             let mut hasher = DefaultHasher::new();
             message.data.hash(&mut hasher);
@@ -176,6 +181,7 @@ impl SignerBehavior {
         let gossipsub_config = gossipsub::ConfigBuilder::default()
             .heartbeat_interval(Duration::from_secs(1)) // Default is 1 second
             .validation_mode(gossipsub::ValidationMode::Strict)
+            .max_transmit_size(max_transmit_size)
             .message_id_fn(message_id_fn)
             .build()
             .map_err(|e| SignerSwarmError::LibP2P(Box::new(e)))?;
@@ -213,6 +219,7 @@ pub struct SignerSwarmBuilder<'a> {
     enable_memory_transport: bool,
     initial_bootstrap_delay: Duration,
     num_signers: u16,
+    max_transmit_size: usize,
 }
 
 impl<'a> SignerSwarmBuilder<'a> {
@@ -231,6 +238,7 @@ impl<'a> SignerSwarmBuilder<'a> {
             enable_memory_transport: false,
             initial_bootstrap_delay: Duration::ZERO,
             num_signers: crate::MAX_KEYS,
+            max_transmit_size: GOSSIPSUB_MAX_TRANSMIT_SIZE,
         }
     }
 
@@ -343,6 +351,13 @@ impl<'a> SignerSwarmBuilder<'a> {
         self
     }
 
+    /// Set the maximum transmit size for gossipsub messages.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn with_max_transmit_size(mut self, max_transmit_size: usize) -> Self {
+        self.max_transmit_size = max_transmit_size;
+        self
+    }
+
     /// Build the [`SignerSwarm`], consuming the builder.
     pub fn build(self) -> Result<SignerSwarm, SignerSwarmError> {
         let keypair: Keypair = (*self.private_key).into();
@@ -354,6 +369,7 @@ impl<'a> SignerSwarmBuilder<'a> {
             seed_addresses: self.seed_addrs,
             known_peers: self.known_peers,
             num_signers: self.num_signers,
+            max_transmit_size: self.max_transmit_size,
         };
         let behavior = SignerBehavior::new(keypair.clone(), behavior_config)?;
 
@@ -498,13 +514,29 @@ impl SignerSwarm {
 
 #[cfg(test)]
 mod tests {
+    use fake::Fake as _;
+    use futures::StreamExt as _;
+    use libp2p::gossipsub::Message as GossipsubMessage;
+    use libp2p::swarm::SwarmEvent;
+    use prost::Message as _;
     use rand::RngCore as _;
+    use tokio::time::error::Elapsed;
 
-    use crate::{
-        keys::PublicKey,
-        storage::DbRead as _,
-        testing::{context::*, get_rng, network::MultiaddrExt as _},
-    };
+    use crate::bitcoin::packaging::MAX_PRESIGN_REQUEST_SIZE;
+    use crate::bitcoin::packaging::compute_optimal_packages;
+    use crate::bitcoin::utxo::Fees;
+    use crate::bitcoin::utxo::WithdrawalRequest;
+    use crate::bitcoin::validation::TxRequestIds;
+    use crate::ecdsa::SignEcdsa as _;
+    use crate::keys::PrivateKey;
+    use crate::keys::PublicKey;
+    use crate::message::{BitcoinPreSignRequest, Payload, SignerMessage};
+    use crate::network::libp2p::TOPIC;
+    use crate::proto;
+    use crate::storage::DbRead as _;
+    use crate::storage::model::BitcoinBlockHash;
+    use crate::storage::model::ScriptPubKey;
+    use crate::testing::{context::*, get_rng, network::MultiaddrExt as _};
 
     use super::*;
 
@@ -889,5 +921,288 @@ mod tests {
         // Verify that context 2 has no peers stored, as it was not the dialer
         let p2p_peers_2a = context2.get_storage().get_p2p_peers().await.unwrap();
         assert!(p2p_peers_2a.is_empty());
+    }
+
+    /// A pair of connected `Swarm<SignerBehavior>` instances for testing
+    /// gossipsub publish/receive without the full `SignerSwarm` event loop.
+    struct ConnectedSwarm {
+        publisher: Swarm<SignerBehavior>,
+        subscriber: Swarm<SignerBehavior>,
+    }
+
+    impl ConnectedSwarm {
+        /// Build two `Swarm<SignerBehavior>`s connected over in-memory
+        /// transport with the given `max_transmit_size` for each.
+        async fn new<R: rand::Rng + ?Sized>(
+            publisher_max_transmit_size: usize,
+            subscriber_max_transmit_size: usize,
+            rng: &mut R,
+        ) -> Self {
+            // Build two SignerSwarms via the builder, with memory transport and
+            // all discovery protocols disabled so the test is self-contained.
+            let key1 = PrivateKey::new(rng);
+            let key2 = PrivateKey::new(rng);
+
+            // Use random memory addresses to avoid conflicts when other
+            // tests are running in parallel.
+            let pub_addr = Multiaddr::random_memory(rng);
+            let sub_addr = Multiaddr::random_memory(rng);
+
+            // The publisher's max_transmit_size gates whether publish()
+            // accepts or rejects the data.
+            let publisher = SignerSwarmBuilder::new(&key1)
+                .enable_mdns(false)
+                .enable_kademlia(false)
+                .enable_autonat(false)
+                .enable_memory_transport(true)
+                .with_initial_bootstrap_delay(Duration::MAX)
+                .with_max_transmit_size(publisher_max_transmit_size)
+                .add_listen_endpoint(pub_addr.clone())
+                .build()
+                .unwrap();
+
+            // The subscriber will reject messages that are too large.
+            let subscriber = SignerSwarmBuilder::new(&key2)
+                .enable_mdns(false)
+                .enable_kademlia(false)
+                .enable_autonat(false)
+                .enable_memory_transport(true)
+                .with_initial_bootstrap_delay(Duration::MAX)
+                .with_max_transmit_size(subscriber_max_transmit_size)
+                .add_listen_endpoint(sub_addr.clone())
+                .build()
+                .unwrap();
+
+            // Unwrap the inner Swarm<SignerBehavior> from each SignerSwarm. We
+            // will drive them directly without using SignerSwarm::start() and
+            // the event loop.
+            let mut publisher = Arc::into_inner(publisher.swarm).unwrap().into_inner();
+            let mut subscriber = Arc::into_inner(subscriber.swarm).unwrap().into_inner();
+
+            // Listen and subscribe to the gossipsub topic.
+            publisher.listen_on(pub_addr.clone()).unwrap();
+            subscriber.listen_on(sub_addr.clone()).unwrap();
+            publisher
+                .behaviour_mut()
+                .gossipsub
+                .subscribe(&TOPIC)
+                .unwrap();
+            subscriber
+                .behaviour_mut()
+                .gossipsub
+                .subscribe(&TOPIC)
+                .unwrap();
+
+            // Connect them: subscriber dials publisher.
+            subscriber
+                .dial(DialOpts::unknown_peer_id().address(pub_addr).build())
+                .unwrap();
+
+            // Drive both swarms until the gossipsub mesh forms. The mesh
+            // requires at least one heartbeat interval for GRAFT.
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+            while tokio::time::Instant::now() < deadline {
+                tokio::select! {
+                    _ = publisher.next() => {}
+                    _ = subscriber.next() => {}
+                    _ = tokio::time::sleep(Duration::from_millis(50)) => {}
+                }
+            }
+
+            ConnectedSwarm { publisher, subscriber }
+        }
+
+        /// Publish `data` to the gossipsub topic on the publisher swarm.
+        async fn publish(&mut self, data: Vec<u8>) -> Result<(), gossipsub::PublishError> {
+            self.publisher
+                .behaviour_mut()
+                .gossipsub
+                .publish(TOPIC.hash(), data)
+                .map(|_| ())
+        }
+
+        /// Poll both swarms until the subscriber receives a gossipsub
+        /// message or `timeout` elapses.
+        async fn subscriber_receive(
+            &mut self,
+            timeout: Duration,
+        ) -> Result<GossipsubMessage, Elapsed> {
+            tokio::time::timeout(timeout, async {
+                loop {
+                    tokio::select! {
+                        event = self.subscriber.next() => {
+                            if let Some(SwarmEvent::Behaviour(
+                                SignerBehaviorEvent::Gossipsub(
+                                    gossipsub::Event::Message { message, .. },
+                                ),
+                            )) = event {
+                                return message;
+                            }
+                        }
+                        // Keep driving the publisher so heartbeats / acks flow.
+                        _ = self.publisher.next() => {}
+                    }
+                }
+            })
+            .await
+        }
+    }
+
+    /// Build a `Signed<SignerMessage>` whose encoded size is between
+    /// [`MAX_PRESIGN_REQUEST_SIZE`] and [`GOSSIPSUB_MAX_TRANSMIT_SIZE`].
+    ///
+    /// The inner `BitcoinPreSignRequest` is filled with withdrawal
+    /// requests via [`compute_optimal_packages`] so that its
+    /// `request_package` is near `MAX_PRESIGN_REQUEST_SIZE`.
+    fn construct_large_signer_message<R>(rng: &mut R) -> proto::Signed
+    where
+        R: rand::Rng,
+    {
+        let script_pubkey = fake::Faker.fake_with_rng::<ScriptPubKey, _>(rng);
+        // We use withdrawals here because the packager will construct
+        // fewer transactions (bags), which means the size estimate will be
+        // more accurate.
+        let withdrawals: Vec<WithdrawalRequest> = (0..2000)
+            .map(|request_id| WithdrawalRequest {
+                request_id,
+                txid: fake::Faker.fake_with_rng(rng),
+                block_hash: fake::Faker.fake_with_rng(rng),
+                amount: 50_000,
+                max_fee: 10_000,
+                script_pubkey: script_pubkey.clone(),
+                signer_bitmap: bitvec::array::BitArray::ZERO,
+            })
+            .collect();
+
+        let items: Vec<crate::bitcoin::utxo::RequestRef> = withdrawals
+            .iter()
+            .map(crate::bitcoin::utxo::RequestRef::Withdrawal)
+            .collect();
+
+        let max_votes_against = 3;
+        let max_needs_signature = crate::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
+        let bags = compute_optimal_packages(items, max_votes_against, max_needs_signature);
+        let request_package: Vec<TxRequestIds> = bags
+            .map(|bag| TxRequestIds::from(&crate::bitcoin::utxo::Requests::new(bag)))
+            .collect();
+
+        let packager_presign = BitcoinPreSignRequest {
+            request_package: request_package.clone(),
+            fee_rate: 0.0,
+            last_fees: None,
+        };
+        let packager_presign_size =
+            proto::BitcoinPreSignRequest::from(packager_presign).encoded_len();
+
+        // The packager should make sure that the serialized size of
+        // BitcoinPreSignRequest.request_package is less than or equal to
+        // MAX_PRESIGN_REQUEST_SIZE.
+        more_asserts::assert_le!(packager_presign_size, MAX_PRESIGN_REQUEST_SIZE);
+
+        let presign = BitcoinPreSignRequest {
+            request_package,
+            fee_rate: 25.1234567,
+            last_fees: Some(Fees {
+                total: u64::MAX,
+                rate: 25.1234567,
+            }),
+        };
+
+        let signed = SignerMessage {
+            bitcoin_chain_tip: BitcoinBlockHash::from([0xff; 32]),
+            payload: Payload::BitcoinPreSignRequest(presign),
+        }
+        .sign_ecdsa(&PrivateKey::new(rng));
+
+        let signed_proto = proto::Signed::from(signed);
+        let data_len = signed_proto.encoded_len();
+
+        // The full Signed<SignerMessage> is larger than
+        // MAX_PRESIGN_REQUEST_SIZE because of the wrapper overhead, but
+        // must still fit within GOSSIPSUB_MAX_TRANSMIT_SIZE.
+        more_asserts::assert_le!(MAX_PRESIGN_REQUEST_SIZE, data_len);
+        more_asserts::assert_lt!(data_len, GOSSIPSUB_MAX_TRANSMIT_SIZE);
+
+        signed_proto
+    }
+
+    /// Verify that libp2p gossipsub won't publish a message that is above
+    /// the max_transmit_size.
+    #[tokio::test]
+    async fn libp2p_gossipsub_wont_publish_large_messages() {
+        let mut rng = get_rng();
+        let signed_message = construct_large_signer_message(&mut rng);
+
+        let data: Vec<u8> = signed_message.encode_to_vec();
+        let max_transmit_size = data.len() - 1;
+
+        let mut connected_swarm =
+            ConnectedSwarm::new(max_transmit_size, GOSSIPSUB_MAX_TRANSMIT_SIZE, &mut rng).await;
+
+        // We know that the message is too large for the max_transmit_size
+        // so this should fail.
+        let result = connected_swarm.publish(data).await;
+
+        let Err(gossipsub::PublishError::MessageTooLarge) = result else {
+            panic!("expected MaxMessageSizeExceeded error");
+        };
+    }
+
+    /// Verify that the subscriber's codec rejects a message when its
+    /// `max_transmit_size` is too small for the full gossipsub RPC frame.
+    #[tokio::test]
+    async fn network_peers_wont_accept_large_messages() {
+        let mut rng = get_rng();
+        let signed_message = construct_large_signer_message(&mut rng);
+        let data: Vec<u8> = signed_message.encode_to_vec();
+        let message_size = data.len();
+
+        let mut connected_swarm = ConnectedSwarm::new(message_size, message_size, &mut rng).await;
+
+        // Only our message size is checked on publish in libp2p gossipsub,
+        // not the full gossipsub protobuf message size.
+        connected_swarm.publish(data).await.unwrap();
+
+        // The subscriber will reject the message because it checks the
+        // full gossipsub protobuf message size, which is larger than our
+        // message_size that we set as the subscriber's `max_transmit_size`.
+        connected_swarm
+            .subscriber_receive(Duration::from_secs(3))
+            .await
+            .unwrap_err();
+    }
+
+    /// Verify that a near-maximum-size `Signed<SignerMessage>` is
+    /// successfully broadcast and received by libp2p gossipsub.
+    ///
+    /// This test builds two `Swarm<SignerBehavior>` instances and connects
+    /// them over in-memory transport. It then constructs a
+    /// near-maximum-size `Signed<SignerMessage>` containing a large
+    /// `BitcoinPreSignRequest`, publishes it from one swarm, and verifies
+    /// that the other receives it when both the publisher and subscriber
+    /// have their `max_transmit_size` set to GOSSIPSUB_MAX_TRANSMIT_SIZE.
+    #[tokio::test]
+    async fn signer_messages_respect_gossipsub_transmit_limits() {
+        let mut rng = get_rng();
+
+        let max_transmit_size = GOSSIPSUB_MAX_TRANSMIT_SIZE;
+        let mut connected_swarm =
+            ConnectedSwarm::new(max_transmit_size, max_transmit_size, &mut rng).await;
+
+        let signed_message = construct_large_signer_message(&mut rng);
+
+        let data: Vec<u8> = signed_message.encode_to_vec();
+        connected_swarm.publish(data).await.unwrap();
+
+        // Wait for the subscriber to receive the message. If the message
+        // were too large, the subscriber would reject it and the message
+        // would be dropped, causing the receive call to time out.
+        let receive_timeout = Duration::from_secs(3);
+        let message = connected_swarm
+            .subscriber_receive(receive_timeout)
+            .await
+            .unwrap();
+
+        assert_eq!(message.data, signed_message.encode_to_vec());
     }
 }
