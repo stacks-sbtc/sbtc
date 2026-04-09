@@ -18,7 +18,7 @@ use crate::{
     net::{
         BadPrivateShare, DkgBegin, DkgEnd, DkgEndBegin, DkgFailure, DkgPrivateBegin,
         DkgPrivateShares, DkgPublicShares, DkgStatus, Message, NonceRequest, NonceResponse, Packet,
-        Signable, SignatureShareRequest, SignatureShareResponse, SignatureType,
+        SignatureShareRequest, SignatureShareResponse, SignatureType,
     },
     state_machine::{PublicKeys, StateMachine},
     traits::SignerState as SignerSavedState,
@@ -358,12 +358,7 @@ impl Signer {
         for message in messages {
             let outbounds = self.process(&message.msg, rng)?;
             for out in outbounds {
-                let msg = Packet {
-                    sig: out
-                        .sign(&self.network_private_key)
-                        .expect("Failed to sign message"),
-                    msg: out,
-                };
+                let msg = Packet { msg: out };
                 responses.push(msg);
             }
         }
