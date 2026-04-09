@@ -11,7 +11,7 @@ use crate::{
     },
     net::{
         DkgBegin, DkgEnd, DkgEndBegin, DkgFailure, DkgPrivateBegin, DkgPrivateShares,
-        DkgPublicShares, DkgStatus, Message, NonceRequest, NonceResponse, Packet, Signable,
+        DkgPublicShares, DkgStatus, Message, NonceRequest, NonceResponse, Packet,
         SignatureShareRequest, SignatureType,
     },
     state_machine::{
@@ -394,9 +394,6 @@ impl Coordinator {
         );
         let dkg_begin = DkgBegin { dkg_id: self.current_dkg_id };
         let dkg_begin_packet = Packet {
-            sig: dkg_begin
-                .sign(&self.config.message_private_key)
-                .expect("Failed to sign DkgBegin"),
             msg: Message::DkgBegin(dkg_begin),
         };
 
@@ -424,9 +421,6 @@ impl Coordinator {
             key_ids: vec![],
         };
         let dkg_private_begin_msg = Packet {
-            sig: dkg_begin
-                .sign(&self.config.message_private_key)
-                .expect("Failed to sign DkgPrivateBegin"),
             msg: Message::DkgPrivateBegin(dkg_begin),
         };
         self.move_to(State::DkgPrivateGather)?;
@@ -453,9 +447,6 @@ impl Coordinator {
             key_ids: vec![],
         };
         let dkg_end_begin_msg = Packet {
-            sig: dkg_end_begin
-                .sign(&self.config.message_private_key)
-                .expect("Failed to sign DkgPrivateBegin"),
             msg: Message::DkgEndBegin(dkg_end_begin),
         };
         self.move_to(State::DkgEndGather)?;
@@ -750,9 +741,6 @@ impl Coordinator {
             signature_type,
         };
         let nonce_request_msg = Packet {
-            sig: nonce_request
-                .sign(&self.config.message_private_key)
-                .expect("Failed to sign NonceRequest"),
             msg: Message::NonceRequest(nonce_request),
         };
         self.move_to(State::NonceGather(signature_type))?;
@@ -893,9 +881,6 @@ impl Coordinator {
             signature_type,
         };
         let sig_share_request_msg = Packet {
-            sig: sig_share_request
-                .sign(&self.config.message_private_key)
-                .expect("Failed to sign SignatureShareRequest"),
             msg: Message::SignatureShareRequest(sig_share_request),
         };
         self.move_to(State::SigShareGather(signature_type))?;
@@ -1934,7 +1919,6 @@ pub mod test {
                                         signer_id: shares.signer_id,
                                         shares: sshares.clone(),
                                     }),
-                                    sig: vec![],
                                 }
                             } else {
                                 packet.clone()
@@ -2030,7 +2014,6 @@ pub mod test {
                                         signer_id: shares.signer_id,
                                         comms,
                                     }),
-                                    sig: vec![],
                                 }
                             } else {
                                 packet.clone()
@@ -2651,7 +2634,6 @@ pub mod test {
             // Attempt to start an old DKG round
             let (packets, results) = coordinator
                 .process_inbound_messages(&[Packet {
-                    sig: vec![],
                     msg: Message::DkgBegin(DkgBegin { dkg_id: old_id }),
                 }])
                 .unwrap();
@@ -2663,7 +2645,6 @@ pub mod test {
             // Attempt to start the same DKG round
             let (packets, results) = coordinator
                 .process_inbound_messages(&[Packet {
-                    sig: vec![],
                     msg: Message::DkgBegin(DkgBegin { dkg_id: id }),
                 }])
                 .unwrap();
@@ -2675,7 +2656,6 @@ pub mod test {
             // Attempt to start an old Sign round
             let (packets, results) = coordinator
                 .process_inbound_messages(&[Packet {
-                    sig: vec![],
                     msg: Message::NonceRequest(NonceRequest {
                         dkg_id: id,
                         sign_id: old_id,
@@ -2693,7 +2673,6 @@ pub mod test {
             // Attempt to start the same Sign round
             let (packets, results) = coordinator
                 .process_inbound_messages(&[Packet {
-                    sig: vec![],
                     msg: Message::NonceRequest(NonceRequest {
                         dkg_id: id,
                         sign_id: id,

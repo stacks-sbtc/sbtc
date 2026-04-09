@@ -622,7 +622,7 @@ struct PoxEpoch {
 /// Minimal response type for the `/v2/pox` endpoint, including only fields
 /// which we currently use.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-struct PoxResponse {
+pub struct PoxResponse {
     /// The current Bitcoin block height, as known by the Stacks node based on
     /// its current Stacks tenure. Note that if the Stacks node is behind, this
     /// may be lower than the actual current Bitcoin block height.
