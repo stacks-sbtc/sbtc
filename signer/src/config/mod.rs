@@ -200,7 +200,7 @@ impl Validatable for BitcoinConfig {
         if let Some(fee) = self.fallback_fee {
             if cfg.signer.network.is_mainnet() {
                 return Err(ConfigError::Message(
-                    "[bitcoin.fallback_fee] Cannot set in mainnet".to_string(),
+                    "[bitcoin.fallback_fee] Cannot be used in mainnet".to_string(),
                 ));
             }
 
