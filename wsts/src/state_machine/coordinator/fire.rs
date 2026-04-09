@@ -419,7 +419,6 @@ impl Coordinator {
             signer_ids: self.dkg_public_shares.keys().cloned().collect(),
             key_ids: vec![],
         };
-
         self.move_to(State::DkgPrivateGather)?;
         self.dkg_private_start = Some(Instant::now());
         Ok(Message::DkgPrivateBegin(dkg_begin))

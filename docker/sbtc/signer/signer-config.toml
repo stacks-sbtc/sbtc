@@ -58,6 +58,17 @@ rpc_endpoints = [
     "http://devnet:devnet@bitcoin:18443",
 ]
 
+# An optional fallback fee rate in sats/vbyte to use when the initial fee rate
+# is too high to construct any transaction package. When set, this value is used
+# directly as the retry fee rate. When unset, the signer estimates a lower fee
+# rate by targeting a longer confirmation window.
+# This is for tests only, it fails validation in mainnet.
+#
+# Default: <none>
+# Required: false
+# Environment: SIGNER_BITCOIN__FALLBACK_FEE
+fallback_fee = 5
+
 # !! ==============================================================================
 # !! Stacks Node Configuration
 # !! ==============================================================================

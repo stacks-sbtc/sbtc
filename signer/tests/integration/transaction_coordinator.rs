@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -54,9 +55,11 @@ use secp256k1::SECP256K1;
 use signer::bitcoin::BitcoinInteract;
 use signer::bitcoin::poller::BitcoinChainTipPoller;
 use signer::bitcoin::rpc::BitcoinCoreClient;
+use signer::bitcoin::utxo::BASE_WITHDRAWAL_TX_VSIZE;
 use signer::bitcoin::utxo::BitcoinInputsOutputs as _;
 use signer::bitcoin::utxo::DepositRequest;
 use signer::bitcoin::utxo::Fees;
+use signer::bitcoin::utxo::SOLO_DEPOSIT_TX_VSIZE;
 use signer::bitcoin::utxo::TxDeconstructor as _;
 use signer::bitcoin::validation::WithdrawalValidationResult;
 use signer::block_observer;
@@ -168,6 +171,7 @@ use crate::setup::WithdrawalTriple;
 use crate::setup::backfill_bitcoin_blocks;
 use crate::setup::clean_emily_setup;
 use crate::setup::fetch_canonical_bitcoin_blockchain;
+use crate::setup::fill_signers_utxo;
 use crate::setup::new_emily_setup;
 use crate::setup::set_deposit_completed;
 use crate::setup::set_deposit_incomplete;
@@ -3936,7 +3940,7 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
             client
                 .expect_estimate_fee_rate()
                 .times(1)
-                .returning(|| Box::pin(async { Ok(1.3) }));
+                .returning(|_| Box::pin(async { Ok(1.3) }));
         })
         .await;
 
@@ -6552,11 +6556,309 @@ async fn generate_fee_data_works() {
     let faucet = &bitcoin.get_faucet();
     let client = bitcoin.get_client();
 
-    let fee_rate = BitcoinInteract::estimate_fee_rate(&client).await;
+    let fee_rate = BitcoinInteract::estimate_fee_rate(&client, 1).await;
     assert!(fee_rate.is_err());
 
     faucet.generate_fee_data();
 
-    let fee_rate = BitcoinInteract::estimate_fee_rate(&client).await;
+    let fee_rate = BitcoinInteract::estimate_fee_rate(&client, 1).await;
     assert!(fee_rate.is_ok());
+}
+
+struct ConstructBitcoinTxsTest {
+    pub deposit_fee_rates: Vec<(f64, bool)>,
+    pub withdrawal_fee_rates: Vec<(f64, bool)>,
+}
+
+/// Tests the construct_and_sign_bitcoin_sbtc_transactions fee rate logic.
+/// Each deposit/withdrawal is the max fee rate and a bool indicating if it
+/// should end up in the computed package or not.
+/// In this test the 1-block fee is 10.0, the 3-blocks one is 5.0.
+#[test_case(ConstructBitcoinTxsTest {
+    deposit_fee_rates: vec![(11.0, true), (6.0, false), (2.0, false)],
+    withdrawal_fee_rates: vec![(12.0, true), (7.0, false), (3.0, false)],
+}, None; "ok 1-block fees, no fallback")]
+#[test_case(ConstructBitcoinTxsTest {
+    deposit_fee_rates: vec![(11.0, true), (6.0, false), (2.0, false)],
+    withdrawal_fee_rates: vec![(12.0, true), (7.0, false), (3.0, false)],
+}, Some(1.0); "ok 1-block fees, fallback 1")]
+#[test_case(ConstructBitcoinTxsTest {
+    deposit_fee_rates: vec![(11.0, true), (6.0, false), (2.0, false)],
+    withdrawal_fee_rates: vec![(12.0, true), (7.0, false), (3.0, false)],
+}, Some(100.0); "ok 1-block fees, fallback 100")]
+#[test_case(ConstructBitcoinTxsTest {
+    deposit_fee_rates: vec![(6.0, true), (2.0, false)],
+    withdrawal_fee_rates: vec![(7.0, true), (3.0, false)],
+}, None; "ok 3-block fees, no fallback")]
+#[test_case(ConstructBitcoinTxsTest {
+    deposit_fee_rates: vec![(6.0, true), (2.0, true)],
+    withdrawal_fee_rates: vec![(7.0, true), (3.0, true)],
+}, Some(1.0); "ok 3-block fees, fallback 1")]
+#[test_case(ConstructBitcoinTxsTest {
+    deposit_fee_rates: vec![(6.0, false), (2.0, false)],
+    withdrawal_fee_rates: vec![(7.0, false), (3.0, false)],
+}, Some(100.0); "ok 3-block fees, fallback 100")]
+#[test_case(ConstructBitcoinTxsTest {
+    deposit_fee_rates: vec![(2.0, false)],
+    withdrawal_fee_rates: vec![(3.0, false)],
+}, None; "no ok fees, no fallback")]
+#[test_case(ConstructBitcoinTxsTest {
+    deposit_fee_rates: vec![(2.0, true)],
+    withdrawal_fee_rates: vec![(3.0, true)],
+}, Some(1.0); "no ok fees, fallback 1")]
+#[test_case(ConstructBitcoinTxsTest {
+    deposit_fee_rates: vec![(2.0, false)],
+    withdrawal_fee_rates: vec![(3.0, false)],
+}, Some(100.0); "no ok fees, fallback 100")]
+#[test_log::test(tokio::test)]
+async fn construct_and_sign_bitcoin_sbtc_transactions_fee_logic(
+    scenario: ConstructBitcoinTxsTest,
+    fallback_fee: Option<f64>,
+) {
+    let mut rng = get_rng();
+    let db = testing::storage::new_test_database().await;
+    let signer_info = testing::wsts::generate_signer_info(&mut rng, 1);
+
+    let context = TestContext::builder()
+        .with_storage(db.clone())
+        .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.bootstrap_signatures_required = 1;
+            settings.signer.private_key = signer_info[0].signer_private_key;
+            settings.signer.bootstrap_signing_set = signer_info[0].signer_public_keys.clone();
+            settings.bitcoin.fallback_fee = fallback_fee;
+        })
+        .build();
+
+    // Mock required stacks client functions
+    context
+        .with_stacks_client(|client| {
+            client.expect_get_account().once().returning(move |_| {
+                Box::pin(async move {
+                    Ok(AccountInfo {
+                        balance: 0,
+                        locked: 0,
+                        unlock_height: 0u64.into(),
+                        nonce: 1,
+                    })
+                })
+            });
+        })
+        .await;
+
+    // In this test the 1-block fee is 10.0, the 3-blocks one is 5.0
+    context
+        .with_bitcoin_client(|client| {
+            client.expect_estimate_fee_rate().returning(|blocks| {
+                Box::pin(std::future::ready(match blocks {
+                    1 => Ok(10.0),
+                    3 => Ok(5.0),
+                    _ => panic!("unexpected fee rate target block"),
+                }))
+            });
+        })
+        .await;
+
+    let storage = context.get_storage_mut();
+
+    // Create a bitcoin block to serve as chain tip
+    let bitcoin_block: model::BitcoinBlock = Faker.fake_with_rng(&mut rng);
+    storage.write_bitcoin_block(&bitcoin_block).await.unwrap();
+
+    // Ensure a stacks tip exists
+    let stacks_block = model::StacksBlock {
+        block_hash: Faker.fake_with_rng(&mut rng),
+        block_height: Faker.fake_with_rng(&mut rng),
+        parent_hash: Faker.fake_with_rng(&mut rng),
+        bitcoin_anchor: bitcoin_block.block_hash,
+    };
+    db.write_stacks_block(&stacks_block).await.unwrap();
+
+    // Perform DKG (with a single participant)
+    let network = network::in_memory::InMemoryNetwork::new();
+    let mut testing_signer_set =
+        testing::wsts::SignerSet::new(&signer_info, 1, || network.connect());
+    let (aggregate_key, _) = run_dkg(&context, &mut rng, &mut testing_signer_set).await;
+
+    // Ensure we have a signers UTXO
+    fill_signers_utxo(&db, bitcoin_block.clone(), &aggregate_key, &mut rng).await;
+
+    // We do not want the coordinator to think that we need to run DKG
+    // because it "detects" that the signer set has changed.
+    let signer_set_public_keys: BTreeSet<PublicKey> =
+        testing_signer_set.signer_keys().into_iter().collect();
+    let state = context.state();
+    let signer_set_info = SignerSetInfo {
+        aggregate_key,
+        signer_set: signer_set_public_keys.clone(),
+        signatures_required: 1,
+    };
+    state.update_registry_signer_set_info(signer_set_info.clone());
+    state.update_current_signer_set(signer_set_public_keys);
+    state.set_stacks_chain_tip(stacks_block.clone().into());
+    state.set_sbtc_contracts_deployed();
+    state.update_current_limits(SbtcLimits::unlimited());
+
+    let signer_public_key = signer_info[0].signer_public_keys.iter().next().unwrap();
+
+    let mut expected_deposits = HashSet::new();
+    for (max_fee_rate, expected) in &scenario.deposit_fee_rates {
+        let deposit_request = model::DepositRequest {
+            amount: 100_000_000,
+            max_fee: (SOLO_DEPOSIT_TX_VSIZE * max_fee_rate) as u64,
+            lock_time: 150,
+            signers_public_key: aggregate_key.into(),
+            ..fake::Faker.fake_with_rng(&mut rng)
+        };
+        storage
+            .write_deposit_request(&deposit_request)
+            .await
+            .unwrap();
+
+        storage
+            .write_bitcoin_transaction(&model::BitcoinTxRef {
+                block_hash: bitcoin_block.block_hash,
+                txid: deposit_request.txid,
+            })
+            .await
+            .unwrap();
+
+        let decision = model::DepositSigner {
+            txid: deposit_request.txid,
+            output_index: deposit_request.output_index,
+            signer_pub_key: *signer_public_key,
+            can_accept: true,
+            can_sign: true,
+        };
+        storage
+            .write_deposit_signer_decision(&decision)
+            .await
+            .unwrap();
+
+        if *expected {
+            expected_deposits.insert(deposit_request.txid);
+        }
+    }
+
+    let mut expected_withdrawals = HashSet::new();
+    // Withdrawal size also need to account for amount + recipient (fake p2wpkh + varint len)
+    let withdrawal_overhead = (8 + 22 + 1) as f64;
+    for (i, (max_fee_rate, expected)) in scenario.withdrawal_fee_rates.iter().enumerate() {
+        let withdrawal_request = WithdrawalRequest {
+            request_id: i as u64 + 1,
+            bitcoin_block_height: bitcoin_block.block_height,
+            block_hash: stacks_block.block_hash,
+            amount: 100_000_000,
+            max_fee: ((BASE_WITHDRAWAL_TX_VSIZE + withdrawal_overhead) * max_fee_rate) as u64,
+            ..fake::Faker.fake_with_rng(&mut rng)
+        };
+        storage
+            .write_withdrawal_request(&withdrawal_request)
+            .await
+            .unwrap();
+
+        let decision = model::WithdrawalSigner {
+            request_id: withdrawal_request.request_id,
+            txid: withdrawal_request.txid,
+            block_hash: withdrawal_request.block_hash,
+            signer_pub_key: *signer_public_key,
+            is_accepted: true,
+        };
+        storage
+            .write_withdrawal_signer_decision(&decision)
+            .await
+            .unwrap();
+
+        if *expected {
+            expected_withdrawals.insert(withdrawal_request.request_id);
+        }
+    }
+
+    // Create more bitcoin blocks to ensure the withdrawals are considered valid
+    let mut bitcoin_chain_tip = bitcoin_block;
+    for _ in 0..WITHDRAWAL_MIN_CONFIRMATIONS {
+        bitcoin_chain_tip = model::BitcoinBlock {
+            block_height: bitcoin_chain_tip.block_height + 1,
+            parent_hash: bitcoin_chain_tip.block_hash,
+            ..Faker.fake_with_rng(&mut rng)
+        };
+        storage
+            .write_bitcoin_block(&bitcoin_chain_tip)
+            .await
+            .unwrap();
+    }
+    let bitcoin_chain_tip: model::BitcoinBlockRef = bitcoin_chain_tip.into();
+    state.set_bitcoin_chain_tip(bitcoin_chain_tip);
+
+    // Create our coordinator
+    let network = network::in_memory::InMemoryNetwork::new();
+    let mut coordinator = TxCoordinatorEventLoop {
+        context: context.clone(),
+        network: network.connect(),
+        private_key: context.config().signer.private_key,
+        context_window: 100,
+        signing_round_max_duration: Duration::from_millis(100),
+        bitcoin_presign_request_max_duration: Duration::from_millis(100),
+        dkg_max_duration: Duration::from_secs(10),
+        is_epoch3: true,
+    };
+
+    // Coordinator should be the current signer, since the bootstrap
+    // signing set has only the current signer in it.
+    assert!(coordinator.is_coordinator(&bitcoin_chain_tip.block_hash));
+
+    // Ensure all the created requests are pending and accepted
+    let requests = coordinator
+        .get_pending_requests(
+            &bitcoin_chain_tip,
+            &stacks_block.block_hash,
+            &aggregate_key,
+            &context.config().signer.bootstrap_signing_set,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(requests.deposits.len(), scenario.deposit_fee_rates.len());
+    assert_eq!(
+        requests.withdrawals.len(),
+        scenario.withdrawal_fee_rates.len()
+    );
+
+    let get_presign = |mut handle: network::in_memory::MpmcBroadcaster| async move {
+        let signed_message = handle.receive().await.unwrap();
+        let Payload::BitcoinPreSignRequest(response) = signed_message.inner.payload else {
+            panic!("unexpected payload");
+        };
+        response
+    };
+    let handle = network.connect();
+
+    coordinator
+        .process_new_blocks(bitcoin_chain_tip)
+        .await
+        .expect("process_new_blocks should complete successfully");
+
+    // The tenure should complete successfully (with a timeout after waiting for
+    // presign acks, if we have a non empty package).
+    let presign_result = tokio::time::timeout(Duration::from_secs(2), get_presign(handle)).await;
+
+    if let Ok(presign) = presign_result {
+        let presign_deposits: HashSet<_> = presign
+            .request_package
+            .iter()
+            .flat_map(|p| p.deposits.iter().map(|outpoint| outpoint.txid.into()))
+            .collect();
+        assert_eq!(presign_deposits, expected_deposits);
+
+        let presign_withdrawals: HashSet<_> = presign
+            .request_package
+            .iter()
+            .flat_map(|p| p.withdrawals.iter().map(|request| request.request_id))
+            .collect();
+        assert_eq!(presign_withdrawals, expected_withdrawals);
+    } else {
+        assert_eq!(expected_deposits.len() + expected_withdrawals.len(), 0);
+    }
+
+    testing::storage::drop_db(db).await;
 }
