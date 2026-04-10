@@ -139,3 +139,46 @@ Large companies name their APIs after something loosely related but ambiguous en
 #### Why Write the Handler in Rust?
 
 We chose to write the handler in rust to restrict the codebase to as few languages as possible, and to utilize the same rust crate that extracts data about the bitcoin transactions in the signer within the API. This code is hard to get right, and not worth duplicating in multiple languages.
+
+
+## Security Considerations
+
+### CORS Configuration
+
+The Emily API CORS policy is configurable via the `ALLOWED_ORIGINS` environment
+variable (comma-separated list of allowed origins). In production deployments,
+this **must** be set to only allow trusted origins. The default production
+configuration restricts origins to `sbtc-emily.com`, `beta.sbtc-emily.com`,
+and `bridge.sbtc.io`.
+
+> **Warning:** Previous versions used `allow_any_origin()` which permitted
+> cross-origin requests from any domain. This has been replaced with an
+> explicit allowlist to prevent potential cross-site request abuse on
+> unauthenticated endpoints.
+
+### Development vs. Production Stages
+
+The CDK stack distinguishes between development and production stages via
+`isDevelopmentStack()`. Development stages (`dev`, `local`, `unit-test`,
+`temp`) deploy additional testing endpoints (including `/testing/wipe`) and
+set DynamoDB tables to be deleted on stack removal.
+
+> **Warning:** The `private-mainnet` stage is **not** classified as a
+> development stack and will not deploy testing endpoints. Previous versions
+> incorrectly included `private-mainnet` in the development stage list,
+> which would have exposed destructive testing endpoints on a mainnet-adjacent
+> deployment.
+
+### Application-Level Authentication
+
+The Emily API relies on AWS API Gateway for request authentication via API keys.
+The Warp application layer does not implement its own authentication middleware.
+Operators should ensure that:
+
+1. API Gateway is properly configured with usage plans and API key requirements
+   on all state-modifying endpoints
+2. The `private` API Gateway instance is restricted to known IP ranges or
+   deployed within a VPC
+3. API keys are rotated regularly and never embedded in client-side code
+4. All state-modifying endpoints (`/limits`, `/chainstate`, `/throttle`,
+   `/new_block`) are protected by API key requirements in the OpenAPI spec

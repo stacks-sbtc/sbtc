@@ -18,9 +18,16 @@ async fn main() {
         .unwrap_or_else(|e| panic!("{e}"));
     info!(lambdaContext = ?context);
 
-    // Create CORS configuration
+    // Create CORS configuration.
+    // SECURITY: Restrict cross-origin requests to known trusted origins.
+    // Set ALLOWED_ORIGINS env var to a comma-separated list, or defaults
+    // to production domains.
+    let default_origins = "https://sbtc-emily.com,https://beta.sbtc-emily.com,https://bridge.sbtc.io";
+    let allowed_origins_str = std::env::var("ALLOWED_ORIGINS")
+        .unwrap_or_else(|_| default_origins.to_string());
+    let allowed_origins: Vec<&str> = allowed_origins_str.split(',').map(|s| s.trim()).collect();
     let cors = warp::cors()
-        .allow_any_origin()
+        .allow_origins(allowed_origins)
         .allow_methods(vec!["GET", "POST", "OPTIONS"])
         .allow_headers(vec!["content-type", "x-api-key"])
         .build();

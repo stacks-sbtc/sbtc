@@ -80,9 +80,15 @@ async fn main() {
         .unwrap();
     info!(lambdaContext = ?context);
 
-    // Create CORS configuration
+    // Create CORS configuration.
+    // For local development, set ALLOWED_ORIGINS=http://localhost:3000
+    // or any comma-separated list of origins you need.
+    let default_origins = "http://localhost:3000,http://localhost:3031,http://127.0.0.1:3000";
+    let allowed_origins_str = std::env::var("ALLOWED_ORIGINS")
+        .unwrap_or_else(|_| default_origins.to_string());
+    let allowed_origins: Vec<&str> = allowed_origins_str.split(',').map(|s| s.trim()).collect();
     let cors = warp::cors()
-        .allow_any_origin()
+        .allow_origins(allowed_origins)
         .allow_methods(vec!["GET", "POST", "OPTIONS"])
         .allow_headers(vec!["content-type", "x-api-key"])
         .build();
