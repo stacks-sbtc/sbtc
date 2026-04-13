@@ -173,15 +173,15 @@ where
                     .increment(1);
 
                     if let Err(error) = self.process_bitcoin_chain_tip(block_hash).await {
-                        tracing::warn!(%error, %block_hash, "could not process bitcoin blocks");
+                        tracing::error!(%error, "could not process bitcoin blocks");
                     }
 
                     if let Err(error) = self.process_stacks_blocks().await {
-                        tracing::warn!(%error, "could not process stacks blocks");
+                        tracing::error!(%error, "could not process stacks blocks");
                     }
 
                     if let Err(error) = self.check_pending_dkg_shares(block_hash).await {
-                        tracing::warn!(%error, "could not check pending dkg shares");
+                        tracing::error!(%error, "could not check pending dkg shares");
                         continue;
                     }
 
@@ -189,21 +189,21 @@ where
                     let chain_tip = match self.update_signer_state(block_hash).await {
                         Ok(chain_tip) => chain_tip,
                         Err(error) => {
-                            tracing::warn!(%error, "could not update the signer state");
+                            tracing::error!(%error, "could not update the signer state");
                             continue;
                         }
                     };
 
                     tracing::info!("loading latest deposit requests from Emily");
                     if let Err(error) = self.load_latest_deposit_requests().await {
-                        tracing::warn!(%error, "could not load latest deposit requests from Emily");
+                        tracing::error!(%error, "could not load latest deposit requests from Emily");
                     }
 
                     self.context
                         .signal(SignerEvent::BitcoinBlockObserved(chain_tip).into())?;
                 }
                 Ok(Some(Err(error))) => {
-                    tracing::warn!(%error, "error decoding new bitcoin block hash from stream");
+                    tracing::error!(%error, "error decoding new bitcoin block hash from stream");
                     continue;
                 }
                 _ => continue,
