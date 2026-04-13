@@ -146,8 +146,9 @@ where
     }
 
     /// Run the block observer
-    #[tracing::instrument(skip_all, name = "block-observer")]
+    #[tracing::instrument(skip_all, name = "block-observer", fields(bitcoin_tip_hash = tracing::field::Empty))]
     pub async fn run(self) -> Result<(), Error> {
+        let span = tracing::Span::current();
         let term = self.context.get_termination_handle();
         let mut bitcoin_blocks = self.bitcoin_block_source.get_block_hash_stream();
 
@@ -165,7 +166,9 @@ where
 
             match poll.await {
                 Ok(Some(Ok(block_hash))) => {
-                    tracing::info!(%block_hash, "observed new bitcoin block from stream");
+                    span.record("bitcoin_tip_hash", tracing::field::display(block_hash));
+
+                    tracing::info!("observed new bitcoin block from stream");
                     metrics::counter!(
                         Metrics::BlocksObservedTotal,
                         "blockchain" => BITCOIN_BLOCKCHAIN,
@@ -360,7 +363,7 @@ impl<C: Context, B> BlockObserver<C, B> {
     /// This function must only be called with the bitcoin chain tip since
     /// it updates all blocks that are reachable from the given block hash
     /// as canonical and may update blocks not reachable as non-canonical.
-    #[tracing::instrument(skip_all, fields(%chain_tip))]
+    #[tracing::instrument(skip_all)]
     async fn process_bitcoin_chain_tip(&self, chain_tip: BlockHash) -> Result<(), Error> {
         self.process_bitcoin_blocks_until(chain_tip).await?;
 
