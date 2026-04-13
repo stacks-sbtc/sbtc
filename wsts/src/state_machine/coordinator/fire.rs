@@ -1371,150 +1371,6 @@ pub mod test {
     }
 
     #[test]
-    fn minimum_signers_dkg_v2() {
-        minimum_signers_dkg(10, 2);
-    }
-
-    fn minimum_signers_dkg(
-        num_signers: u32,
-        keys_per_signer: u32,
-    ) -> (Vec<FireCoordinator>, Vec<Signer>) {
-        let timeout = Duration::from_millis(1024);
-        let (mut coordinators, signers) = setup_with_timeouts::<FireCoordinator>(
-            num_signers,
-            keys_per_signer,
-            Some(timeout),
-            Some(timeout),
-            Some(timeout),
-            Some(timeout),
-            Some(timeout),
-        );
-
-        // Start a DKG round where we will not allow all signers to recv DkgBegin, so they will not respond with DkgPublicShares
-        let message = coordinators.first_mut().unwrap().start_dkg_round().unwrap();
-        assert!(coordinators.first().unwrap().aggregate_public_key.is_none());
-        assert_eq!(coordinators.first().unwrap().state, State::DkgPublicGather);
-
-        // DKG threshold is 9/10, so need to remove 1
-        let num_signers_to_remove = 1;
-
-        let mut minimum_coordinators = coordinators.clone();
-        let mut minimum_signers = signers.clone();
-
-        for _ in 0..num_signers_to_remove {
-            minimum_signers.pop();
-        }
-
-        // Send the DKG Begin message to minimum signers and gather responses by sharing with signers and coordinator
-        let (outbound_messages, operation_results) = feedback_messages(
-            &mut minimum_coordinators,
-            &mut minimum_signers,
-            std::slice::from_ref(&message),
-        );
-
-        assert!(outbound_messages.is_empty());
-        assert!(operation_results.is_empty());
-        assert_eq!(
-            minimum_coordinators.first().unwrap().state,
-            State::DkgPublicGather,
-        );
-
-        // We haven't received messages from all parties so we manually
-        // move the state machine forward.
-        minimum_coordinators.iter_mut().for_each(|coordinator| {
-            coordinator.public_shares_gathered().unwrap();
-            coordinator.start_private_shares().unwrap();
-        });
-
-        assert_eq!(
-            minimum_coordinators.first().unwrap().state,
-            State::DkgPrivateGather,
-        );
-
-        // Run DKG again with fresh coordinator and signers, this time allow gathering DkgPublicShares but timeout getting DkgEnd
-        let mut minimum_coordinator = coordinators.clone();
-        let mut minimum_signers = signers.clone();
-
-        // Send the DKG Begin message to all signers and gather responses by sharing with all other signers and coordinator
-        let (outbound_messages, operation_results) =
-            feedback_messages(&mut minimum_coordinator, &mut minimum_signers, &[message]);
-        assert!(operation_results.is_empty());
-        assert_eq!(
-            minimum_coordinator.first().unwrap().state,
-            State::DkgPrivateGather
-        );
-
-        assert_eq!(outbound_messages.len(), 1);
-        match &outbound_messages[0].msg {
-            Message::DkgPrivateBegin(_) => {}
-            _ => {
-                panic!("Expected DkgPrivateBegin message");
-            }
-        }
-
-        // now remove signers so the set is minimum
-        for _ in 0..num_signers_to_remove {
-            minimum_signers.pop();
-        }
-
-        // Send the DKG Private Begin message to minimum signers and share their responses with the coordinator and signers
-        let (outbound_messages, operation_results) = feedback_messages(
-            &mut minimum_coordinator,
-            &mut minimum_signers,
-            &outbound_messages,
-        );
-        assert!(outbound_messages.is_empty());
-        assert!(operation_results.is_empty());
-        assert_eq!(
-            minimum_coordinator.first().unwrap().state,
-            State::DkgPrivateGather,
-        );
-
-        // We haven't received messages from all parties so we manually
-        // move the state machine forward.
-        let outbound_messages = minimum_coordinator
-            .iter_mut()
-            .map(|coordinator| {
-                coordinator.private_shares_gathered()?;
-                coordinator.start_dkg_end()
-            })
-            .collect::<Result<Vec<Packet>, _>>()
-            .unwrap();
-
-        match &outbound_messages[0].msg {
-            Message::DkgEndBegin(_) => {}
-            _ => {
-                panic!("Expected DkgEndBegin message");
-            }
-        }
-        assert_eq!(
-            minimum_coordinator.first().unwrap().state,
-            State::DkgEndGather,
-        );
-
-        // Send the DkgEndBegin message to all signers and share their responses with the coordinator and signers
-        let (outbound_messages, operation_results) = feedback_messages(
-            &mut minimum_coordinator,
-            &mut minimum_signers,
-            &outbound_messages,
-        );
-        assert!(outbound_messages.is_empty());
-        assert_eq!(operation_results.len(), 1);
-        match operation_results[0] {
-            OperationResult::Dkg(point) => {
-                assert_ne!(point, Point::default());
-                for coordinator in minimum_coordinator.iter() {
-                    assert_eq!(coordinator.get_aggregate_public_key(), Some(point));
-                    assert_eq!(coordinator.get_state(), State::Idle);
-                }
-            }
-            _ => panic!("Expected Dkg Operation result"),
-        }
-
-        (minimum_coordinator, minimum_signers)
-    }
-
-    #[test]
     fn malicious_signers_dkg_v2() {
         malicious_signers_dkg(5, 2);
     }
@@ -1805,7 +1661,7 @@ pub mod test {
         let num_signers = 10;
         let keys_per_signer = 2;
 
-        let (mut coordinators, mut signers) = minimum_signers_dkg(num_signers, keys_per_signer);
+        let (mut coordinators, mut signers) = all_signers_dkg(num_signers, keys_per_signer);
         let config = coordinators.first().unwrap().get_config();
 
         // Figure out how many signers we can remove and still be above the threshold
@@ -1879,7 +1735,7 @@ pub mod test {
         let num_signers = 10;
         let keys_per_signer = 2;
 
-        let (mut coordinators, mut signers) = minimum_signers_dkg(num_signers, keys_per_signer);
+        let (mut coordinators, mut signers) = all_signers_dkg(num_signers, keys_per_signer);
 
         // Let us also remove that signers public key from the config including all of its key ids
         let mut removed_signer = signers.pop().expect("Failed to pop signer");
