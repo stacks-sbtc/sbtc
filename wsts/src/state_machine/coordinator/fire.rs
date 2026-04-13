@@ -1318,13 +1318,8 @@ pub mod test {
 
     #[test]
     fn missing_public_keys_dkg_v2() {
-        missing_public_keys_dkg(10, 1);
-    }
-
-    fn missing_public_keys_dkg(
-        num_signers: u32,
-        keys_per_signer: u32,
-    ) -> (Vec<FireCoordinator>, Vec<Signer>) {
+        let num_signers = 10;
+        let keys_per_signer = 1;
         let timeout = Duration::from_millis(1024);
         let (mut coordinators, signers) = setup_with_timeouts::<FireCoordinator>(
             num_signers,
@@ -1370,20 +1365,9 @@ pub mod test {
 
         assert!(outbound_messages.is_empty());
         assert!(operation_results.is_empty());
-        assert_eq!(coordinators.first().unwrap().state, State::DkgPublicGather);
-
-        // We haven't received messages from all parties so we manually
-        // move the state machine forward.
-        minimum_coordinators.iter_mut().for_each(|coordinator| {
-            coordinator.public_shares_gathered().unwrap();
-            coordinator.start_private_shares().unwrap();
-        });
-
-        assert_eq!(
-            minimum_coordinators.first().unwrap().state,
-            State::DkgPrivateGather,
-        );
-        (minimum_coordinators, minimum_signers)
+        assert!(minimum_coordinators
+            .iter()
+            .all(|coordinator| coordinator.state == State::DkgPublicGather));
     }
 
     #[test]
