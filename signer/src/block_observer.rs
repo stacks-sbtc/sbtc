@@ -81,7 +81,7 @@ impl DepositRequestValidator for CreateDepositRequest {
     where
         C: BitcoinInteract,
     {
-        // Fetch the transaction from either a block or from the mempool
+        // Fetch the UTXO info for a confirmed outpoint
         let Some(response) = client.get_utxo_info(&self.outpoint).await? else {
             return Ok(None);
         };
