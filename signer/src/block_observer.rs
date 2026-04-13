@@ -82,20 +82,22 @@ impl DepositRequestValidator for CreateDepositRequest {
         C: BitcoinInteract,
     {
         // Fetch the transaction from either a block or from the mempool
-        let Some(response) = client.get_tx(&self.outpoint.txid).await? else {
+        let Some(response) = client.get_utxo_info(&self.outpoint).await? else {
             return Ok(None);
         };
 
-        // If the transaction has not been confirmed yet, then the block
-        // hash will be None. The transaction has not failed validation,
-        // let's try again when it gets confirmed.
-        let Some(block_hash) = response.block_hash else {
-            return Ok(None);
-        };
-
-        if response.tx.is_coinbase() {
+        if response.is_coinbase {
             return Err(Error::BitcoinTxCoinbase(self.outpoint.txid));
         }
+
+        // This is usually the block hash confirming the transaction
+        // associated with the outpoint. However, it can be incorrect if
+        // our bitcoin node detects a reorg in the middle of the above
+        // function call and the reorg affects the outpoint in question.
+        // The call below to get_tx_info will detect this and we will
+        // either return Ok(None) or an error, which is fine, it will get
+        // sorted out at the arrival of the next bitcoin block.
+        let block_hash = response.block_hash;
 
         // The `get_tx_info` call here should not return None, we know that
         // it has been included in a block.
