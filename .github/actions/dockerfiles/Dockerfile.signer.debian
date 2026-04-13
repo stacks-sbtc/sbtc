@@ -51,6 +51,7 @@ RUN export LIBCLANG_PATH="$(find /usr/lib/llvm-* -name lib -type d | head -n 1)"
     cp "target/$TARGET/release/signer" /output/signer
 
 # distroless/cc includes glibc, libgcc, libstdc++, ca-certificates.
-FROM gcr.io/distroless/cc-debian13 AS signer
+FROM debian:trixie-slim AS signer
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /output/signer /usr/local/bin/signer
 ENTRYPOINT ["/usr/local/bin/signer", "--config", "/signer-config.toml", "--migrate-db"]

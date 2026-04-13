@@ -27,15 +27,15 @@ RUN make install-pnpm && make emily-cdk-synth
 
 # Create Docker image to run the signer.
 # ---------------------------------------
-# distroless/cc includes glibc, libgcc, libstdc++, ca-certificates.
-FROM gcr.io/distroless/cc-debian13 AS signer
+FROM debian:trixie-slim AS signer
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=builder /code/sbtc/target/debug/signer /usr/local/bin/signer
 ENTRYPOINT ["/usr/local/bin/signer", "--config", "/signer-config.toml", "--migrate-db"]
 
 # Create Docker image for the blocklist client.
 # ----------------------------------------------
-# distroless/cc includes glibc, libgcc, libstdc++, ca-certificates.
-FROM gcr.io/distroless/cc-debian13 AS blocklist-client
+FROM debian:trixie-slim AS blocklist-client
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=builder /code/sbtc/target/debug/blocklist-client /usr/local/bin/blocklist-client
 ENTRYPOINT ["/usr/local/bin/blocklist-client"]
 

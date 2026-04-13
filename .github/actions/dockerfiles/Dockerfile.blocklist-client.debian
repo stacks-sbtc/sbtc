@@ -49,6 +49,7 @@ RUN export LIBCLANG_PATH="$(find /usr/lib/llvm-* -name lib -type d | head -n 1)"
     cp "target/$TARGET/release/blocklist-client" /output/blocklist-client
 
 # distroless/cc includes glibc, libgcc, libstdc++, ca-certificates.
-FROM gcr.io/distroless/cc-debian13 AS blocklist-client
+FROM debian:trixie-slim AS blocklist-client
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /output/blocklist-client /usr/local/bin/blocklist-client
 ENTRYPOINT ["/usr/local/bin/blocklist-client"]
