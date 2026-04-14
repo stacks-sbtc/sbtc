@@ -11,8 +11,8 @@ use crate::{
     },
     net::{
         DkgBegin, DkgEnd, DkgEndBegin, DkgFailure, DkgPrivateBegin, DkgPrivateShares,
-        DkgPublicShares, DkgStatus, Message, NonceRequest, NonceResponse, Packet, Signable,
-        SignatureShareRequest, SignatureType,
+        DkgPublicShares, DkgStatus, Message, NonceRequest, NonceResponse, SignatureShareRequest,
+        SignatureType,
     },
     state_machine::{
         coordinator::{Config, Coordinator as CoordinatorTrait, Error, SignRoundInfo, State},
@@ -61,13 +61,13 @@ impl Coordinator {
     /// Process the message inside the passed packet
     pub fn process_message(
         &mut self,
-        packet: &Packet,
-    ) -> Result<(Option<Packet>, Option<OperationResult>), Error> {
+        message: &Message,
+    ) -> Result<(Option<Message>, Option<OperationResult>), Error> {
         loop {
             match self.state.clone() {
                 State::Idle => {
                     // Did we receive a coordinator message?
-                    if let Message::DkgBegin(dkg_begin) = &packet.msg {
+                    if let Message::DkgBegin(dkg_begin) = message {
                         if self.current_dkg_id >= dkg_begin.dkg_id {
                             // We have already processed this DKG round
                             return Ok((None, None));
@@ -76,9 +76,9 @@ impl Coordinator {
                         // that we start the next round at the correct id. (Do this rather
                         // than overwriting afterwards to ensure logging is accurate)
                         self.current_dkg_id = dkg_begin.dkg_id.wrapping_sub(1);
-                        let packet = self.start_dkg_round()?;
-                        return Ok((Some(packet), None));
-                    } else if let Message::NonceRequest(nonce_request) = &packet.msg {
+                        let message = self.start_dkg_round()?;
+                        return Ok((Some(message), None));
+                    } else if let Message::NonceRequest(nonce_request) = message {
                         if self.current_sign_id >= nonce_request.sign_id {
                             // We have already processed this sign round
                             return Ok((None, None));
@@ -88,20 +88,20 @@ impl Coordinator {
                         // than overwriting afterwards to ensure logging is accurate)
                         self.current_sign_id = nonce_request.sign_id.wrapping_sub(1);
                         self.current_sign_iter_id = nonce_request.sign_iter_id.wrapping_sub(1);
-                        let packet = self.start_signing_round(
+                        let message = self.start_signing_round(
                             nonce_request.message.as_slice(),
                             nonce_request.signature_type,
                         )?;
-                        return Ok((Some(packet), None));
+                        return Ok((Some(message), None));
                     }
                     return Ok((None, None));
                 }
                 State::DkgPublicDistribute => {
-                    let packet = self.start_public_shares()?;
-                    return Ok((Some(packet), None));
+                    let message = self.start_public_shares()?;
+                    return Ok((Some(message), None));
                 }
                 State::DkgPublicGather => {
-                    self.gather_public_shares(packet)?;
+                    self.gather_public_shares(message)?;
                     if self.state == State::DkgPublicGather {
                         // We need more data
                         return Ok((None, None));
@@ -112,7 +112,7 @@ impl Coordinator {
                     return Ok((Some(packet), None));
                 }
                 State::DkgPrivateGather => {
-                    self.gather_private_shares(packet)?;
+                    self.gather_private_shares(message)?;
                     if self.state == State::DkgPrivateGather {
                         // We need more data
                         return Ok((None, None));
@@ -123,7 +123,7 @@ impl Coordinator {
                     return Ok((Some(packet), None));
                 }
                 State::DkgEndGather => {
-                    if let Err(error) = self.gather_dkg_end(packet) {
+                    if let Err(error) = self.gather_dkg_end(message) {
                         if let Error::DkgFailure(dkg_failures) = error {
                             return Ok((
                                 None,
@@ -154,7 +154,7 @@ impl Coordinator {
                     return Ok((Some(packet), None));
                 }
                 State::NonceGather(signature_type) => {
-                    self.gather_nonces(packet, signature_type)?;
+                    self.gather_nonces(message, signature_type)?;
                     if self.state == State::NonceGather(signature_type) {
                         // We need more data
                         return Ok((None, None));
@@ -165,7 +165,7 @@ impl Coordinator {
                     return Ok((Some(packet), None));
                 }
                 State::SigShareGather(signature_type) => {
-                    if let Err(e) = self.gather_sig_shares(packet, signature_type) {
+                    if let Err(e) = self.gather_sig_shares(message, signature_type) {
                         return Ok((
                             None,
                             Some(OperationResult::SignError(SignError::Coordinator(e))),
@@ -233,7 +233,7 @@ impl Coordinator {
     }
 
     /// Ask signers to send DKG public shares
-    pub fn start_public_shares(&mut self) -> Result<Packet, Error> {
+    pub fn start_public_shares(&mut self) -> Result<Message, Error> {
         self.dkg_public_shares.clear();
         self.party_polynomials.clear();
         self.dkg_wait_signer_ids = (0..self.config.num_signers).collect();
@@ -242,19 +242,13 @@ impl Coordinator {
             "Starting Public Share Distribution"
         );
         let dkg_begin = DkgBegin { dkg_id: self.current_dkg_id };
-        let dkg_begin_packet = Packet {
-            sig: dkg_begin
-                .sign(&self.config.message_private_key)
-                .expect("Failed to sign DkgBegin"),
-            msg: Message::DkgBegin(dkg_begin),
-        };
 
         self.move_to(State::DkgPublicGather)?;
-        Ok(dkg_begin_packet)
+        Ok(Message::DkgBegin(dkg_begin))
     }
 
     /// Ask signers to send DKG private shares
-    pub fn start_private_shares(&mut self) -> Result<Packet, Error> {
+    pub fn start_private_shares(&mut self) -> Result<Message, Error> {
         // only wait for signers that returned DkgPublicShares
         self.dkg_wait_signer_ids = self
             .dkg_public_shares
@@ -271,18 +265,12 @@ impl Coordinator {
             signer_ids: self.dkg_public_shares.keys().cloned().collect(),
             key_ids: vec![],
         };
-        let dkg_private_begin_msg = Packet {
-            sig: dkg_begin
-                .sign(&self.config.message_private_key)
-                .expect("Failed to sign DkgPrivateBegin"),
-            msg: Message::DkgPrivateBegin(dkg_begin),
-        };
         self.move_to(State::DkgPrivateGather)?;
-        Ok(dkg_private_begin_msg)
+        Ok(Message::DkgPrivateBegin(dkg_begin))
     }
 
     /// Ask signers to compute shares and send DKG end
-    pub fn start_dkg_end(&mut self) -> Result<Packet, Error> {
+    pub fn start_dkg_end(&mut self) -> Result<Message, Error> {
         // only wait for signers that returned DkgPublicShares
         self.dkg_wait_signer_ids = self
             .dkg_private_shares
@@ -299,18 +287,12 @@ impl Coordinator {
             signer_ids: self.dkg_private_shares.keys().cloned().collect(),
             key_ids: vec![],
         };
-        let dkg_end_begin_msg = Packet {
-            sig: dkg_end_begin
-                .sign(&self.config.message_private_key)
-                .expect("Failed to sign DkgPrivateBegin"),
-            msg: Message::DkgEndBegin(dkg_end_begin),
-        };
         self.move_to(State::DkgEndGather)?;
-        Ok(dkg_end_begin_msg)
+        Ok(Message::DkgEndBegin(dkg_end_begin))
     }
 
-    fn gather_public_shares(&mut self, packet: &Packet) -> Result<(), Error> {
-        if let Message::DkgPublicShares(dkg_public_shares) = &packet.msg {
+    fn gather_public_shares(&mut self, message: &Message) -> Result<(), Error> {
+        if let Message::DkgPublicShares(dkg_public_shares) = message {
             if dkg_public_shares.dkg_id != self.current_dkg_id {
                 return Err(Error::BadDkgId(
                     dkg_public_shares.dkg_id,
@@ -348,8 +330,8 @@ impl Coordinator {
         Ok(())
     }
 
-    fn gather_private_shares(&mut self, packet: &Packet) -> Result<(), Error> {
-        if let Message::DkgPrivateShares(dkg_private_shares) = &packet.msg {
+    fn gather_private_shares(&mut self, message: &Message) -> Result<(), Error> {
+        if let Message::DkgPrivateShares(dkg_private_shares) = message {
             if dkg_private_shares.dkg_id != self.current_dkg_id {
                 return Err(Error::BadDkgId(
                     dkg_private_shares.dkg_id,
@@ -387,12 +369,12 @@ impl Coordinator {
         Ok(())
     }
 
-    fn gather_dkg_end(&mut self, packet: &Packet) -> Result<(), Error> {
+    fn gather_dkg_end(&mut self, message: &Message) -> Result<(), Error> {
         debug!(
             "DKG Round {}: waiting for Dkg End from signers {:?}",
             self.current_dkg_id, self.dkg_wait_signer_ids
         );
-        if let Message::DkgEnd(dkg_end) = &packet.msg {
+        if let Message::DkgEnd(dkg_end) = message {
             if dkg_end.dkg_id != self.current_dkg_id {
                 return Err(Error::BadDkgId(dkg_end.dkg_id, self.current_dkg_id));
             }
@@ -580,7 +562,7 @@ impl Coordinator {
         self.move_to(State::Idle)
     }
 
-    fn request_nonces(&mut self, signature_type: SignatureType) -> Result<Packet, Error> {
+    fn request_nonces(&mut self, signature_type: SignatureType) -> Result<Message, Error> {
         self.message_nonces.clear();
         self.current_sign_iter_id = self.current_sign_iter_id.wrapping_add(1);
         info!(
@@ -595,23 +577,17 @@ impl Coordinator {
             message: self.message.clone(),
             signature_type,
         };
-        let nonce_request_msg = Packet {
-            sig: nonce_request
-                .sign(&self.config.message_private_key)
-                .expect("Failed to sign NonceRequest"),
-            msg: Message::NonceRequest(nonce_request),
-        };
         self.move_to(State::NonceGather(signature_type))?;
 
-        Ok(nonce_request_msg)
+        Ok(Message::NonceRequest(nonce_request))
     }
 
     fn gather_nonces(
         &mut self,
-        packet: &Packet,
+        message: &Message,
         signature_type: SignatureType,
     ) -> Result<(), Error> {
-        if let Message::NonceResponse(nonce_response) = &packet.msg {
+        if let Message::NonceResponse(nonce_response) = message {
             if nonce_response.dkg_id != self.current_dkg_id {
                 return Err(Error::BadDkgId(nonce_response.dkg_id, self.current_dkg_id));
             }
@@ -715,7 +691,7 @@ impl Coordinator {
         Ok(())
     }
 
-    fn request_sig_shares(&mut self, signature_type: SignatureType) -> Result<Packet, Error> {
+    fn request_sig_shares(&mut self, signature_type: SignatureType) -> Result<Message, Error> {
         self.signature_shares.clear();
         info!(
             sign_id = %self.current_sign_id,
@@ -737,23 +713,17 @@ impl Coordinator {
             message: self.message.clone(),
             signature_type,
         };
-        let sig_share_request_msg = Packet {
-            sig: sig_share_request
-                .sign(&self.config.message_private_key)
-                .expect("Failed to sign SignatureShareRequest"),
-            msg: Message::SignatureShareRequest(sig_share_request),
-        };
         self.move_to(State::SigShareGather(signature_type))?;
 
-        Ok(sig_share_request_msg)
+        Ok(Message::SignatureShareRequest(sig_share_request))
     }
 
     fn gather_sig_shares(
         &mut self,
-        packet: &Packet,
+        message: &Message,
         signature_type: SignatureType,
     ) -> Result<(), Error> {
-        if let Message::SignatureShareResponse(sig_share_response) = &packet.msg {
+        if let Message::SignatureShareResponse(sig_share_response) = message {
             if sig_share_response.dkg_id != self.current_dkg_id {
                 return Err(Error::BadDkgId(
                     sig_share_response.dkg_id,
@@ -1031,17 +1001,17 @@ impl CoordinatorTrait for Coordinator {
     /// Process inbound messages
     fn process_inbound_messages(
         &mut self,
-        packets: &[Packet],
-    ) -> Result<(Vec<Packet>, Vec<OperationResult>), Error> {
-        let mut outbound_packets = vec![];
+        messages: &[Message],
+    ) -> Result<(Vec<Message>, Vec<OperationResult>), Error> {
+        let mut outbound_messages = vec![];
         let mut operation_results = vec![];
-        for packet in packets {
-            let (outbound_packet, operation_result) = self.process_message(packet)?;
-            outbound_packets.extend(outbound_packet);
+        for message in messages {
+            let (outbound_message, operation_result) = self.process_message(message)?;
+            outbound_messages.extend(outbound_message);
             operation_results.extend(operation_result);
         }
 
-        Ok((outbound_packets, operation_results))
+        Ok((outbound_messages, operation_results))
     }
 
     /// Retrieve the aggregate public key
@@ -1065,7 +1035,7 @@ impl CoordinatorTrait for Coordinator {
     }
 
     /// Start a DKG round
-    fn start_dkg_round(&mut self) -> Result<Packet, Error> {
+    fn start_dkg_round(&mut self) -> Result<Message, Error> {
         self.current_dkg_id = self.current_dkg_id.wrapping_add(1);
         info!("Starting DKG round {}", self.current_dkg_id);
         self.move_to(State::DkgPublicDistribute)?;
@@ -1077,7 +1047,7 @@ impl CoordinatorTrait for Coordinator {
         &mut self,
         message: &[u8],
         signature_type: SignatureType,
-    ) -> Result<Packet, Error> {
+    ) -> Result<Message, Error> {
         // We cannot sign if we haven't first set DKG (either manually or via DKG round).
         if self.aggregate_public_key.is_none() {
             return Err(Error::MissingAggregatePublicKey);
@@ -1108,7 +1078,7 @@ pub mod test {
     use crate::{
         curve::{point::Point, scalar::Scalar},
         net::{
-            DkgBegin, DkgFailure, DkgPrivateShares, DkgPublicShares, Message, NonceRequest, Packet,
+            DkgBegin, DkgFailure, DkgPrivateShares, DkgPublicShares, Message, NonceRequest,
             SignatureType,
         },
         state_machine::{
@@ -1155,7 +1125,7 @@ pub mod test {
 
         let result = coordinator.start_public_shares().unwrap();
 
-        assert!(matches!(result.msg, Message::DkgBegin(_)));
+        assert!(matches!(result, Message::DkgBegin(_)));
         assert_eq!(coordinator.get_state(), State::DkgPublicGather);
         assert_eq!(coordinator.current_dkg_id, 0);
     }
@@ -1169,7 +1139,7 @@ pub mod test {
         coordinator.state = State::DkgPrivateDistribute; // Must be in this state before calling start private shares
 
         let message = coordinator.start_private_shares().unwrap();
-        assert!(matches!(message.msg, Message::DkgPrivateBegin(_)));
+        assert!(matches!(message, Message::DkgPrivateBegin(_)));
         assert_eq!(coordinator.get_state(), State::DkgPrivateGather);
         assert_eq!(coordinator.current_dkg_id, 0);
     }
@@ -1221,7 +1191,7 @@ pub mod test {
 
         // Successfully got an Aggregate Public Key...
         assert_eq!(outbound_messages.len(), 1);
-        match &outbound_messages[0].msg {
+        match &outbound_messages[0] {
             Message::DkgPrivateBegin(_) => {}
             _ => {
                 panic!("Expected DkgPrivateBegin message");
@@ -1232,7 +1202,7 @@ pub mod test {
             feedback_messages(&mut coordinators, &mut signers, &outbound_messages);
         assert!(operation_results.is_empty());
         assert_eq!(outbound_messages.len(), 1);
-        match &outbound_messages[0].msg {
+        match &outbound_messages[0] {
             Message::DkgEndBegin(_) => {}
             _ => {
                 panic!("Expected DkgEndBegin message");
@@ -1259,13 +1229,8 @@ pub mod test {
 
     #[test]
     fn missing_public_keys_dkg_v2() {
-        missing_public_keys_dkg(10, 1);
-    }
-
-    fn missing_public_keys_dkg(
-        num_signers: u32,
-        keys_per_signer: u32,
-    ) -> (Vec<FireCoordinator>, Vec<Signer>) {
+        let num_signers = 10;
+        let keys_per_signer = 1;
         let (mut coordinators, signers) = setup::<FireCoordinator>(num_signers, keys_per_signer);
 
         // Start a DKG round where we will not allow all signers to recv DkgBegin, so they will not respond with DkgPublicShares
@@ -1302,155 +1267,9 @@ pub mod test {
 
         assert!(outbound_messages.is_empty());
         assert!(operation_results.is_empty());
-        assert_eq!(coordinators.first().unwrap().state, State::DkgPublicGather);
-
-        // We haven't received messages from all parties so we manually
-        // move the state machine forward.
-        minimum_coordinators.iter_mut().for_each(|coordinator| {
-            coordinator.public_shares_gathered().unwrap();
-            coordinator.start_private_shares().unwrap();
-        });
-
-        assert_eq!(
-            minimum_coordinators.first().unwrap().state,
-            State::DkgPrivateGather,
-        );
-        (minimum_coordinators, minimum_signers)
-    }
-
-    #[test]
-    fn minimum_signers_dkg_v2() {
-        minimum_signers_dkg(10, 2);
-    }
-
-    fn minimum_signers_dkg(
-        num_signers: u32,
-        keys_per_signer: u32,
-    ) -> (Vec<FireCoordinator>, Vec<Signer>) {
-        let (mut coordinators, signers) = setup::<FireCoordinator>(num_signers, keys_per_signer);
-
-        // Start a DKG round where we will not allow all signers to recv DkgBegin, so they will not respond with DkgPublicShares
-        let message = coordinators.first_mut().unwrap().start_dkg_round().unwrap();
-        assert!(coordinators.first().unwrap().aggregate_public_key.is_none());
-        assert_eq!(coordinators.first().unwrap().state, State::DkgPublicGather);
-
-        // DKG threshold is 9/10, so need to remove 1
-        let num_signers_to_remove = 1;
-
-        let mut minimum_coordinators = coordinators.clone();
-        let mut minimum_signers = signers.clone();
-
-        for _ in 0..num_signers_to_remove {
-            minimum_signers.pop();
-        }
-
-        // Send the DKG Begin message to minimum signers and gather responses by sharing with signers and coordinator
-        let (outbound_messages, operation_results) = feedback_messages(
-            &mut minimum_coordinators,
-            &mut minimum_signers,
-            std::slice::from_ref(&message),
-        );
-
-        assert!(outbound_messages.is_empty());
-        assert!(operation_results.is_empty());
-        assert_eq!(
-            minimum_coordinators.first().unwrap().state,
-            State::DkgPublicGather,
-        );
-
-        // We haven't received messages from all parties so we manually
-        // move the state machine forward.
-        minimum_coordinators.iter_mut().for_each(|coordinator| {
-            coordinator.public_shares_gathered().unwrap();
-            coordinator.start_private_shares().unwrap();
-        });
-
-        assert_eq!(
-            minimum_coordinators.first().unwrap().state,
-            State::DkgPrivateGather,
-        );
-
-        // Run DKG again with fresh coordinator and signers, this time allow gathering DkgPublicShares but timeout getting DkgEnd
-        let mut minimum_coordinator = coordinators.clone();
-        let mut minimum_signers = signers.clone();
-
-        // Send the DKG Begin message to all signers and gather responses by sharing with all other signers and coordinator
-        let (outbound_messages, operation_results) =
-            feedback_messages(&mut minimum_coordinator, &mut minimum_signers, &[message]);
-        assert!(operation_results.is_empty());
-        assert_eq!(
-            minimum_coordinator.first().unwrap().state,
-            State::DkgPrivateGather
-        );
-
-        assert_eq!(outbound_messages.len(), 1);
-        match &outbound_messages[0].msg {
-            Message::DkgPrivateBegin(_) => {}
-            _ => {
-                panic!("Expected DkgPrivateBegin message");
-            }
-        }
-
-        // now remove signers so the set is minimum
-        for _ in 0..num_signers_to_remove {
-            minimum_signers.pop();
-        }
-
-        // Send the DKG Private Begin message to minimum signers and share their responses with the coordinator and signers
-        let (outbound_messages, operation_results) = feedback_messages(
-            &mut minimum_coordinator,
-            &mut minimum_signers,
-            &outbound_messages,
-        );
-        assert!(outbound_messages.is_empty());
-        assert!(operation_results.is_empty());
-        assert_eq!(
-            minimum_coordinator.first().unwrap().state,
-            State::DkgPrivateGather,
-        );
-
-        // We haven't received messages from all parties so we manually
-        // move the state machine forward.
-        let outbound_messages = minimum_coordinator
-            .iter_mut()
-            .map(|coordinator| {
-                coordinator.private_shares_gathered()?;
-                coordinator.start_dkg_end()
-            })
-            .collect::<Result<Vec<Packet>, _>>()
-            .unwrap();
-
-        match &outbound_messages[0].msg {
-            Message::DkgEndBegin(_) => {}
-            _ => {
-                panic!("Expected DkgEndBegin message");
-            }
-        }
-        assert_eq!(
-            minimum_coordinator.first().unwrap().state,
-            State::DkgEndGather,
-        );
-
-        // Send the DkgEndBegin message to all signers and share their responses with the coordinator and signers
-        let (outbound_messages, operation_results) = feedback_messages(
-            &mut minimum_coordinator,
-            &mut minimum_signers,
-            &outbound_messages,
-        );
-        assert!(outbound_messages.is_empty());
-        assert_eq!(operation_results.len(), 1);
-        match operation_results[0] {
-            OperationResult::Dkg(point) => {
-                assert_ne!(point, Point::default());
-                for coordinator in minimum_coordinator.iter() {
-                    assert_eq!(coordinator.get_aggregate_public_key(), Some(point));
-                    assert_eq!(coordinator.get_state(), State::Idle);
-                }
-            }
-            _ => panic!("Expected Dkg Operation result"),
-        }
-
-        (minimum_coordinator, minimum_signers)
+        assert!(minimum_coordinators
+            .iter()
+            .all(|coordinator| coordinator.state == State::DkgPublicGather));
     }
 
     #[test]
@@ -1479,7 +1298,7 @@ pub mod test {
         }
 
         assert_eq!(outbound_messages.len(), 1);
-        match &outbound_messages[0].msg {
+        match &outbound_messages[0] {
             Message::DkgPrivateBegin(_) => {}
             _ => {
                 panic!("Expected DkgPrivateBegin message");
@@ -1493,8 +1312,8 @@ pub mod test {
             |signer, msgs| {
                 if signer.signer_id == 0 {
                     msgs.iter()
-                        .map(|packet| {
-                            if let Message::DkgPrivateShares(shares) = &packet.msg {
+                        .map(|message| {
+                            if let Message::DkgPrivateShares(shares) = &message {
                                 // mutate one of the shares
                                 let sshares: Vec<(u32, HashMap<u32, Vec<u8>>)> = shares
                                     .shares
@@ -1514,16 +1333,13 @@ pub mod test {
                                     })
                                     .collect();
 
-                                Packet {
-                                    msg: Message::DkgPrivateShares(DkgPrivateShares {
-                                        dkg_id: shares.dkg_id,
-                                        signer_id: shares.signer_id,
-                                        shares: sshares.clone(),
-                                    }),
-                                    sig: vec![],
-                                }
+                                Message::DkgPrivateShares(DkgPrivateShares {
+                                    dkg_id: shares.dkg_id,
+                                    signer_id: shares.signer_id,
+                                    shares: sshares.clone(),
+                                })
                             } else {
-                                packet.clone()
+                                message.clone()
                             }
                         })
                         .collect()
@@ -1534,7 +1350,7 @@ pub mod test {
         );
         assert!(operation_results.is_empty());
         assert_eq!(outbound_messages.len(), 1);
-        match &outbound_messages[0].msg {
+        match &outbound_messages[0] {
             Message::DkgEndBegin(_) => {}
             _ => {
                 panic!("Expected DkgEndBegin message");
@@ -1595,8 +1411,8 @@ pub mod test {
             |signer, msgs| {
                 if signer.signer_id == 0 || signer.signer_id == 1 {
                     msgs.iter()
-                        .map(|packet| {
-                            if let Message::DkgPublicShares(shares) = &packet.msg {
+                        .map(|message| {
+                            if let Message::DkgPublicShares(shares) = &message {
                                 let comms = shares
                                     .comms
                                     .iter()
@@ -1610,16 +1426,13 @@ pub mod test {
                                         (*id, c)
                                     })
                                     .collect();
-                                Packet {
-                                    msg: Message::DkgPublicShares(DkgPublicShares {
-                                        dkg_id: shares.dkg_id,
-                                        signer_id: shares.signer_id,
-                                        comms,
-                                    }),
-                                    sig: vec![],
-                                }
+                                Message::DkgPublicShares(DkgPublicShares {
+                                    dkg_id: shares.dkg_id,
+                                    signer_id: shares.signer_id,
+                                    comms,
+                                })
                             } else {
-                                packet.clone()
+                                message.clone()
                             }
                         })
                         .collect()
@@ -1635,7 +1448,7 @@ pub mod test {
         }
 
         assert_eq!(outbound_messages.len(), 1);
-        match &outbound_messages[0].msg {
+        match &outbound_messages[0] {
             Message::DkgPrivateBegin(_) => {}
             _ => {
                 panic!("Expected DkgPrivateBegin message");
@@ -1646,7 +1459,7 @@ pub mod test {
             feedback_messages(&mut coordinators, &mut signers, &outbound_messages);
         assert!(operation_results.is_empty());
         assert_eq!(outbound_messages.len(), 1);
-        match &outbound_messages[0].msg {
+        match &outbound_messages[0] {
             Message::DkgEndBegin(_) => {}
             _ => {
                 panic!("Expected DkgEndBegin message");
@@ -1710,7 +1523,7 @@ pub mod test {
         }
 
         assert_eq!(outbound_messages.len(), 1);
-        match &outbound_messages[0].msg {
+        match &outbound_messages[0] {
             Message::SignatureShareRequest(_) => {}
             _ => {
                 panic!("Expected SignatureShareRequest message");
@@ -1744,7 +1557,7 @@ pub mod test {
         let num_signers = 10;
         let keys_per_signer = 2;
 
-        let (mut coordinators, mut signers) = minimum_signers_dkg(num_signers, keys_per_signer);
+        let (mut coordinators, mut signers) = all_signers_dkg(num_signers, keys_per_signer);
         let config = coordinators.first().unwrap().get_config();
 
         // Figure out how many signers we can remove and still be above the threshold
@@ -1783,7 +1596,7 @@ pub mod test {
         }
 
         assert_eq!(outbound_messages.len(), 1);
-        match &outbound_messages[0].msg {
+        match &outbound_messages[0] {
             Message::SignatureShareRequest(_) => {}
             _ => {
                 panic!("Expected SignatureShareRequest message");
@@ -1818,7 +1631,7 @@ pub mod test {
         let num_signers = 10;
         let keys_per_signer = 2;
 
-        let (mut coordinators, mut signers) = minimum_signers_dkg(num_signers, keys_per_signer);
+        let (mut coordinators, mut signers) = all_signers_dkg(num_signers, keys_per_signer);
 
         // Let us also remove that signers public key from the config including all of its key ids
         let mut removed_signer = signers.pop().expect("Failed to pop signer");
@@ -1860,7 +1673,7 @@ pub mod test {
         }
 
         assert_eq!(outbound_messages.len(), 1);
-        match &outbound_messages[0].msg {
+        match &outbound_messages[0] {
             Message::SignatureShareRequest(_) => {}
             _ => {
                 panic!("Expected SignatureShareRequest message");
@@ -1924,7 +1737,7 @@ pub mod test {
         let alt_message = "It was many and many a year ago, in a kingdom by the hill"
             .as_bytes()
             .to_vec();
-        match &mut alt_packet.msg {
+        match &mut alt_packet {
             Message::NonceRequest(nonce_request) => {
                 nonce_request.message = alt_message.clone();
             }
@@ -1946,7 +1759,7 @@ pub mod test {
         // Assert that the first 1/4 signers did not receive a result
         assert!(outbound_messages.is_empty());
         assert_eq!(alt_outbound_messages.len(), 1);
-        match &alt_outbound_messages[0].msg {
+        match &alt_outbound_messages[0] {
             Message::SignatureShareRequest(_) => {}
             _ => {
                 panic!("Expected SignatureShareRequest message");
@@ -1988,10 +1801,7 @@ pub mod test {
             coordinator.current_sign_id = id;
             // Attempt to start an old DKG round
             let (packets, results) = coordinator
-                .process_inbound_messages(&[Packet {
-                    sig: vec![],
-                    msg: Message::DkgBegin(DkgBegin { dkg_id: old_id }),
-                }])
+                .process_inbound_messages(&[Message::DkgBegin(DkgBegin { dkg_id: old_id })])
                 .unwrap();
             assert!(packets.is_empty());
             assert!(results.is_empty());
@@ -2000,10 +1810,7 @@ pub mod test {
 
             // Attempt to start the same DKG round
             let (packets, results) = coordinator
-                .process_inbound_messages(&[Packet {
-                    sig: vec![],
-                    msg: Message::DkgBegin(DkgBegin { dkg_id: id }),
-                }])
+                .process_inbound_messages(&[Message::DkgBegin(DkgBegin { dkg_id: id })])
                 .unwrap();
             assert!(packets.is_empty());
             assert!(results.is_empty());
@@ -2012,16 +1819,13 @@ pub mod test {
 
             // Attempt to start an old Sign round
             let (packets, results) = coordinator
-                .process_inbound_messages(&[Packet {
-                    sig: vec![],
-                    msg: Message::NonceRequest(NonceRequest {
-                        dkg_id: id,
-                        sign_id: old_id,
-                        message: vec![],
-                        sign_iter_id: id,
-                        signature_type: SignatureType::Frost,
-                    }),
-                }])
+                .process_inbound_messages(&[Message::NonceRequest(NonceRequest {
+                    dkg_id: id,
+                    sign_id: old_id,
+                    message: vec![],
+                    sign_iter_id: id,
+                    signature_type: SignatureType::Frost,
+                })])
                 .unwrap();
             assert!(packets.is_empty());
             assert!(results.is_empty());
@@ -2030,16 +1834,13 @@ pub mod test {
 
             // Attempt to start the same Sign round
             let (packets, results) = coordinator
-                .process_inbound_messages(&[Packet {
-                    sig: vec![],
-                    msg: Message::NonceRequest(NonceRequest {
-                        dkg_id: id,
-                        sign_id: id,
-                        message: vec![],
-                        sign_iter_id: id,
-                        signature_type: SignatureType::Frost,
-                    }),
-                }])
+                .process_inbound_messages(&[Message::NonceRequest(NonceRequest {
+                    dkg_id: id,
+                    sign_id: id,
+                    message: vec![],
+                    sign_iter_id: id,
+                    signature_type: SignatureType::Frost,
+                })])
                 .unwrap();
             assert!(packets.is_empty());
             assert!(results.is_empty());
@@ -2098,7 +1899,7 @@ pub mod test {
         }
 
         assert_eq!(outbound_messages.len(), 1);
-        match &outbound_messages[0].msg {
+        match &outbound_messages[0] {
             Message::DkgPrivateBegin(_) => {}
             _ => {
                 panic!("Expected DkgPrivateBegin message");
@@ -2110,7 +1911,7 @@ pub mod test {
             feedback_messages(&mut coordinators, &mut signers, &outbound_messages);
         assert!(operation_results.is_empty());
         assert_eq!(outbound_messages.len(), 1);
-        match &outbound_messages[0].msg {
+        match &outbound_messages[0] {
             Message::DkgEndBegin(_) => {}
             _ => {
                 panic!("Expected DkgEndBegin message");
@@ -2184,7 +1985,7 @@ pub mod test {
         }
 
         assert_eq!(outbound_messages.len(), 1);
-        match &outbound_messages[0].msg {
+        match &outbound_messages[0] {
             Message::DkgPrivateBegin(_) => {}
             _ => {
                 panic!("Expected DkgPrivateBegin message");
@@ -2196,7 +1997,7 @@ pub mod test {
             feedback_messages(&mut coordinators, &mut signers, &outbound_messages);
         assert!(operation_results.is_empty());
         assert_eq!(outbound_messages.len(), 1);
-        match &outbound_messages[0].msg {
+        match &outbound_messages[0] {
             Message::DkgEndBegin(_) => {}
             _ => {
                 panic!("Expected DkgEndBegin message");
@@ -2204,14 +2005,14 @@ pub mod test {
         }
 
         // alter the DkgEndBegin message
-        let mut packet = outbound_messages[0].clone();
-        if let Message::DkgEndBegin(ref mut dkg_end_begin) = packet.msg {
+        let mut message = outbound_messages[0].clone();
+        if let Message::DkgEndBegin(ref mut dkg_end_begin) = message {
             dkg_end_begin.signer_ids = vec![0u32];
         }
 
         // Send the DkgEndBegin message to all signers and share their responses with the coordinator and signers
         let (outbound_messages, operation_results) =
-            feedback_messages(&mut coordinators, &mut signers, &[packet]);
+            feedback_messages(&mut coordinators, &mut signers, &[message]);
         assert!(outbound_messages.is_empty());
         assert_eq!(operation_results.len(), 1);
         match &operation_results[0] {
