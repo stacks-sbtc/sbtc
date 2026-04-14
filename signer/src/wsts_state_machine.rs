@@ -241,11 +241,6 @@ impl WstsCoordinator for FireCoordinator {
             threshold: threshold as u32,
             dkg_threshold: num_signers,
             message_private_key: message_private_key.into(),
-            dkg_public_timeout: None,
-            dkg_private_timeout: None,
-            dkg_end_timeout: None,
-            nonce_timeout: None,
-            sign_timeout: None,
             signer_key_ids,
             signer_public_keys,
         };
@@ -360,11 +355,6 @@ impl WstsCoordinator for FrostCoordinator {
             threshold: threshold as u32,
             dkg_threshold: num_signers,
             message_private_key: message_private_key.into(),
-            dkg_public_timeout: None,
-            dkg_private_timeout: None,
-            dkg_end_timeout: None,
-            nonce_timeout: None,
-            sign_timeout: None,
             signer_key_ids,
             signer_public_keys,
         };
