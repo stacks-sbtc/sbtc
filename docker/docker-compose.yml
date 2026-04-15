@@ -286,6 +286,8 @@ services:
   # --------------------
   bitcoin:
     image: bitcoin/bitcoin:25.2
+    ports:
+      - "127.0.0.1:18442:18443"
     volumes:
       - ./bitcoin/bitcoin-mempool.conf:/root/.bitcoin/bitcoin.conf
     entrypoint:
@@ -302,6 +304,7 @@ services:
     profiles:
       - default
       - bitcoin-mempool
+      - bitcoin
 
   bitcoin-pruned:
     image: bitcoin/bitcoin:25.2
@@ -326,6 +329,7 @@ services:
     profiles:
       - default
       - bitcoin-mempool
+      - bitcoin
 
   bitcoin-miner:
     image: bitcoin/bitcoin:25.2
@@ -568,7 +572,7 @@ services:
           --cookie "devnet:devnet" \
           --http-addr="0.0.0.0:3002" \
           --electrum-rpc-addr="0.0.0.0:60401" \
-          --daemon-rpc-addr="bitcoin-mempool:$${BITCOIN_RPC_PORT}" \
+          --daemon-rpc-addr="bitcoin:$${BITCOIN_RPC_PORT}" \
           --electrum-txs-limit=2048 \
           --utxos-limit=2048 \
           --db-dir="/opt" \
