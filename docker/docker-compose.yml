@@ -183,6 +183,7 @@ services:
     container_name: sbtc-signer-1
     depends_on:
       - postgres-1
+      - bitcoin-pruned
     environment:
       <<: *sbtc-signer-environment
       SIGNER_SIGNER__DB_ENDPOINT: postgresql://postgres:postgres@postgres-1:5432/signer
@@ -204,6 +205,7 @@ services:
     container_name: sbtc-signer-2
     depends_on:
       - postgres-2
+      - bitcoin-pruned
     environment:
       <<: *sbtc-signer-environment
       SIGNER_SIGNER__DB_ENDPOINT: postgresql://postgres:postgres@postgres-2:5432/signer
@@ -225,6 +227,7 @@ services:
     container_name: sbtc-signer-3
     depends_on:
       - postgres-3
+      - bitcoin-pruned
     environment:
       <<: *sbtc-signer-environment
       SIGNER_SIGNER__DB_ENDPOINT: postgresql://postgres:postgres@postgres-3:5432/signer
@@ -283,10 +286,8 @@ services:
   # --------------------
   bitcoin:
     image: bitcoin/bitcoin:25.2
-    ports:
-      - "127.0.0.1:18443:18443"
     volumes:
-      - ./bitcoin/bitcoin-pruned.conf:/root/.bitcoin/bitcoin.conf
+      - ./bitcoin/bitcoin-mempool.conf:/root/.bitcoin/bitcoin.conf
     entrypoint:
       - /bin/bash
       - -c
@@ -302,13 +303,15 @@ services:
       - default
       - bitcoin-mempool
 
-  bitcoin-mempool:
+  bitcoin-pruned:
     image: bitcoin/bitcoin:25.2
+    ports:
+      - "127.0.0.1:18443:18443"
     depends_on:
       bitcoin:
         condition: service_healthy
     volumes:
-      - ./bitcoin/bitcoin-mempool.conf:/root/.bitcoin/bitcoin.conf
+      - ./bitcoin/bitcoin-pruned.conf:/root/.bitcoin/bitcoin.conf
     entrypoint:
       - /bin/bash
       - -c
@@ -321,6 +324,7 @@ services:
       timeout: 1s
       retries: 3
     profiles:
+      - default
       - bitcoin-mempool
 
   bitcoin-miner:
@@ -549,7 +553,7 @@ services:
       - "127.0.0.1:60401:60401"
       - "127.0.0.1:3002:3002"
     depends_on:
-      bitcoin-mempool:
+      bitcoin:
         condition: service_healthy
       bitcoin-miner:
         condition: service_started
@@ -622,7 +626,7 @@ services:
       ELECTRUM_PORT: "60401"
       ELECTRUM_TLS_ENABLED: "false"
       # Connect to bitcoin rpc
-      CORE_RPC_HOST: "bitcoin-mempool"
+      CORE_RPC_HOST: "bitcoin"
       CORE_RPC_PORT: "18443"
       CORE_RPC_USERNAME: "devnet"
       CORE_RPC_PASSWORD: "devnet"
