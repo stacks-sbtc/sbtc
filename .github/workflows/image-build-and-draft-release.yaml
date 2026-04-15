@@ -147,6 +147,29 @@ jobs:
         id: set_env
         run: echo "TAG_NAME=${{ github.event.client_payload.tag_name }}" >> "$GITHUB_ENV"
 
+      # Resolve the GHCR package-version page URL for each image by matching
+      # the pushed SHA256 digest against the `name` field returned by the
+      # GitHub Packages API. See: https://cli.github.com/manual/gh_api
+      - name: Look up GHCR package version URLs
+        id: lookup_pkg_urls
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SIGNER_DIGEST: ${{ needs.image.outputs.signer }}
+          BLOCKLIST_DIGEST: ${{ needs.image.outputs.blocklist-client }}
+          API_PATH: /orgs/${{ github.repository_owner }}/packages/container/sbtc/versions
+          FALLBACK_URL: https://github.com/${{ github.repository }}/pkgs/container/sbtc
+        run: |
+          SIGNER=$(gh api --paginate "$API_PATH" \
+            --jq ".[] | select(.name == \"$SIGNER_DIGEST\") | .html_url" \
+            | head -n 1)
+
+          BLOCKLIST=$(gh api --paginate "$API_PATH" \
+            --jq ".[] | select(.name == \"$BLOCKLIST_DIGEST\") | .html_url" \
+            | head -n 1)
+
+          echo "SIGNER_URL=${SIGNER:-$FALLBACK_URL}" >> "$GITHUB_ENV"
+          echo "BLOCKLIST_CLIENT_URL=${BLOCKLIST:-$FALLBACK_URL}" >> "$GITHUB_ENV"
+
       - name: Generate Release Notes
         id: generate_release_notes
         run: |
@@ -170,12 +193,12 @@ jobs:
           > We publish our images on [GitHub Container Registry](https://github.com/${{ github.repository_owner }}/sbtc/pkgs/container/sbtc).
 
           ### sBTC Signer
-          [\`ghcr.io/${{ github.repository_owner }}/sbtc:signer-${{ env.TAG_NAME }}@${{ needs.image.outputs.signer }}\`](https://github.com/${{ github.repository }}/pkgs/container/sbtc/signer-${{ env.TAG_NAME }})
+          [\`ghcr.io/${{ github.repository_owner }}/sbtc:signer-${{ env.TAG_NAME }}@${{ needs.image.outputs.signer }}\`](${{ env.SIGNER_URL }})
           - 🏷️ \`${{ github.repository_owner }}/sbtc:signer-${{ env.TAG_NAME }}\`
           - 🔒 \`${{ needs.image.outputs.signer }}\`
 
           ### Blocklist Client
-          [\`ghcr.io/${{ github.repository_owner }}/sbtc:blocklist-client-${{ env.TAG_NAME }}@${{ needs.image.outputs.blocklist-client }}\`](https://github.com/${{ github.repository }}/pkgs/container/sbtc/blocklist-client-${{ env.TAG_NAME }})
+          [\`ghcr.io/${{ github.repository_owner }}/sbtc:blocklist-client-${{ env.TAG_NAME }}@${{ needs.image.outputs.blocklist-client }}\`](${{ env.BLOCKLIST_CLIENT_URL }})
           - 🏷️ \`${{ github.repository_owner }}/sbtc:blocklist-client-${{ env.TAG_NAME }}\`
           - 🔒 \`${{ needs.image.outputs.blocklist-client }}\`
 
