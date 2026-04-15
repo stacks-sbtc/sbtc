@@ -276,16 +276,6 @@ impl TestSweepSetup {
         }
     }
 
-    /// Return the expected deposit request that our internal EmilyClient
-    /// should return for the deposit here.
-    pub fn emily_deposit_request(&self) -> CreateDepositRequest {
-        CreateDepositRequest {
-            outpoint: self.deposit_info.outpoint,
-            reclaim_script: self.deposit_info.reclaim_script.clone(),
-            deposit_script: self.deposit_info.deposit_script.clone(),
-        }
-    }
-
     /// Store a stacks genesis block that is on the canonical Stacks
     /// blockchain identified by the sweep chain tip.
     pub async fn store_stacks_genesis_block(&self, db: &PgStore) {
@@ -825,6 +815,19 @@ impl TestSweepSetup2 {
             signatures_required: 2,
             client,
         }
+    }
+
+    /// Return the expected deposit request that our internal EmilyClient
+    /// should return for the deposit here.
+    pub fn emily_deposit_requests(&self) -> Vec<CreateDepositRequest> {
+        self.deposits
+            .iter()
+            .map(|(info, _, _)| CreateDepositRequest {
+                outpoint: info.outpoint,
+                reclaim_script: info.reclaim_script.clone(),
+                deposit_script: info.deposit_script.clone(),
+            })
+            .collect()
     }
 
     pub fn deposit_outpoints(&self) -> Vec<OutPoint> {

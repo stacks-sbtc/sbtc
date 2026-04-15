@@ -286,7 +286,7 @@ services:
     ports:
       - "127.0.0.1:18443:18443"
     volumes:
-      - ./bitcoin/bitcoin.conf:/root/.bitcoin/bitcoin.conf
+      - ./bitcoin/bitcoin-pruned.conf:/root/.bitcoin/bitcoin.conf
     entrypoint:
       - /bin/bash
       - -c
@@ -300,6 +300,27 @@ services:
       retries: 3
     profiles:
       - default
+      - bitcoin-mempool
+
+  bitcoin-mempool:
+    image: bitcoin/bitcoin:25.2
+    depends_on:
+      bitcoin:
+        condition: service_healthy
+    volumes:
+      - ./bitcoin/bitcoin-mempool.conf:/root/.bitcoin/bitcoin.conf
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        set -e
+        bitcoind
+    healthcheck:
+      test: [ "CMD-SHELL", "bitcoin-cli -rpcwait getblockcount" ]
+      interval: 5s
+      timeout: 1s
+      retries: 3
+    profiles:
       - bitcoin-mempool
 
   bitcoin-miner:
@@ -528,8 +549,10 @@ services:
       - "127.0.0.1:60401:60401"
       - "127.0.0.1:3002:3002"
     depends_on:
-      - bitcoin
-      - bitcoin-miner
+      bitcoin-mempool:
+        condition: service_healthy
+      bitcoin-miner:
+        condition: service_started
     environment:
       BITCOIN_RPC_PORT: *BITCOIN_RPC_PORT
     entrypoint:
@@ -541,7 +564,7 @@ services:
           --cookie "devnet:devnet" \
           --http-addr="0.0.0.0:3002" \
           --electrum-rpc-addr="0.0.0.0:60401" \
-          --daemon-rpc-addr="bitcoin:$${BITCOIN_RPC_PORT}" \
+          --daemon-rpc-addr="bitcoin-mempool:$${BITCOIN_RPC_PORT}" \
           --electrum-txs-limit=2048 \
           --utxos-limit=2048 \
           --db-dir="/opt" \
@@ -599,7 +622,7 @@ services:
       ELECTRUM_PORT: "60401"
       ELECTRUM_TLS_ENABLED: "false"
       # Connect to bitcoin rpc
-      CORE_RPC_HOST: "bitcoin"
+      CORE_RPC_HOST: "bitcoin-mempool"
       CORE_RPC_PORT: "18443"
       CORE_RPC_USERNAME: "devnet"
       CORE_RPC_PASSWORD: "devnet"
