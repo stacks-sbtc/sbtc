@@ -14,10 +14,14 @@ RUN npm install -g pnpm@9
 WORKDIR /code/sbtc
 COPY . /code/sbtc/
 
+# Build signer and blocklist client.
+# -------------------------------------
+RUN cargo build --locked --bin signer --bin blocklist-client
+
 # Build Emily Server.
 # --------------------
 ARG EMILY_SERVER_BUILD_ARGS=""
-RUN cargo build --locked --bin signer --bin blocklist-client --bin emily-server $EMILY_SERVER_BUILD_ARGS
+RUN cargo build --locked --bin emily-server $EMILY_SERVER_BUILD_ARGS
 
 # Build Emily AWS setup.
 # -----------------------
