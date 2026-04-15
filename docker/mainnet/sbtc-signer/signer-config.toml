@@ -80,7 +80,6 @@ endpoint = "http://blocklist-client:3032"
 # Format: "<hex-encoded-private-key>" (64 or 66 hex-characters)
 # Required: true
 # Environment: SIGNER_SIGNER__PRIVATE_KEY
-# NOTE: Set through Environment: SIGNER_SIGNER__PRIVATE_KEY
 # private_key = "0000000000000000000000000000000000000000000000000000000000000001"
 
 # Specifies which network to use when constructing and sending transactions
