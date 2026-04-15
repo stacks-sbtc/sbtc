@@ -295,8 +295,22 @@ where
                 SignerSignal::Event(event) => match event {
                     SignerEvent::TxCoordinator(TxCoordinatorEvent::MessageGenerated(msg))
                     | SignerEvent::P2P(P2PEvent::MessageReceived(msg)) => {
-                        if let Err(error) = self.handle_signer_message(&msg).await {
-                            tracing::error!(%error, "error processing signer message");
+                        match self.handle_signer_message(&msg).await {
+                            Ok(()) => {}
+                            // These errors can happen when libp2p broadcasts a message that has
+                            // already been processed, leading to a harmless rejection of the
+                            // message. It's nice to know when it happens, but it isn't a problem
+                            // that requires action, like some of our other errors.
+                            Err(
+                                error @ (Error::InvalidPresignRequest(_)
+                                | Error::StacksRequestAlreadySigned(..)
+                                | Error::MissingStateMachine(_)),
+                            ) => {
+                                tracing::warn!(%error, "minor error processing signer message");
+                            }
+                            Err(error) => {
+                                tracing::error!(%error, "error processing signer message");
+                            }
                         }
                     }
                     _ => {}
